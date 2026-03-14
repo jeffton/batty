@@ -196,6 +196,18 @@ onBeforeUnmount(() => {
   font-size: 0.84rem;
 }
 
+.composer__chip,
+.composer__plus,
+.composer__send,
+.composer__steer,
+.composer__input {
+  outline: none;
+  transition:
+    border-color 0.14s ease,
+    background-color 0.14s ease,
+    box-shadow 0.14s ease;
+}
+
 .composer__chip {
   padding: 0.25rem 0.45rem;
 }
@@ -210,11 +222,25 @@ onBeforeUnmount(() => {
   resize: none;
   min-height: 3.5rem;
   border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.45rem;
   background: rgba(13, 17, 23, 0.72);
   color: inherit;
   padding: 0.6rem 0.65rem;
   font-size: 0.88rem;
   line-height: 1.45;
+}
+
+.composer__chip:focus-visible,
+.composer__plus:focus-visible,
+.composer__send:focus-visible,
+.composer__steer:focus-visible,
+.composer__input:focus-visible {
+  border-color: rgba(147, 197, 253, 0.38);
+  box-shadow: 0 0 0 2px rgba(147, 197, 253, 0.14);
+}
+
+.composer__input:focus-visible {
+  background: rgba(13, 17, 23, 0.84);
 }
 
 .composer__actions {

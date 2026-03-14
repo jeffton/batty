@@ -1,10 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+
 export interface UploadedFile {
   filename: string;
   data: Buffer;
 }
+
 import {
   AuthStorage,
   createAgentSession,
@@ -37,6 +39,7 @@ type PiModel = {
   provider: string;
   reasoning?: boolean;
   input: string[];
+  contextWindow?: number;
 };
 
 interface WebSession {
@@ -178,6 +181,8 @@ export class PiService {
 
   getState(sessionId: string): SessionState {
     const webSession = this.requireSession(sessionId);
+    const contextUsage = webSession.session.getContextUsage();
+
     return createSessionState({
       id: webSession.id,
       sessionId: webSession.session.sessionId,
@@ -190,6 +195,9 @@ export class PiService {
       thinkingLevel: webSession.session.thinkingLevel,
       isStreaming: webSession.session.isStreaming,
       pendingMessageCount: webSession.session.pendingMessageCount,
+      contextTokens: contextUsage?.tokens ?? null,
+      contextWindow: contextUsage?.contextWindow ?? webSession.session.model?.contextWindow ?? null,
+      contextPercent: contextUsage?.percent ?? null,
       messages: webSession.session.messages,
       activeAssistant: webSession.activeAssistant,
       activeTools: [...webSession.activeTools.values()],

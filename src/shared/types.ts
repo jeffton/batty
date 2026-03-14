@@ -86,6 +86,9 @@ export interface SessionState {
   thinkingLevel: string;
   isStreaming: boolean;
   pendingMessageCount: number;
+  contextTokens: number | null;
+  contextWindow: number | null;
+  contextPercent: number | null;
   messages: UiMessage[];
   activeAssistant?: Extract<UiMessage, { role: "assistant" }>;
   activeTools: ActiveToolRun[];

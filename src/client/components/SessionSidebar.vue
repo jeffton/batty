@@ -163,8 +163,8 @@ onMounted(() => {
 }
 
 .sidebar__workspace,
-.sidebar__session,
-.sidebar__action {
+.sidebar__action,
+.sidebar__session {
   width: 100%;
   text-align: left;
   border-radius: 0.45rem;
@@ -173,8 +173,18 @@ onMounted(() => {
   color: inherit;
   padding: 0.55rem 0.6rem;
   display: grid;
+}
+
+.sidebar__workspace,
+.sidebar__action {
   gap: 0.15rem;
   font-size: 0.84rem;
+}
+
+.sidebar__session {
+  gap: 0.22rem;
+  font-size: 0.9rem;
+  align-content: start;
 }
 
 .sidebar__workspace strong,
@@ -193,12 +203,17 @@ onMounted(() => {
   white-space: nowrap;
 }
 
+.sidebar__session span {
+  font-size: 0.82rem;
+}
+
 .sidebar__session-list {
   min-height: 0;
   overflow: auto;
   display: grid;
   gap: 0.4rem;
   padding-right: 0.1rem;
+  align-content: start;
 }
 
 .is-active {

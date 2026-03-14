@@ -27,3 +27,19 @@ export function formatShortTime(timestamp: number): string {
 export function formatShortDateTime(timestamp: number): string {
   return dateTimeFormatter.format(new Date(timestamp));
 }
+
+export function formatTokenCount(count: number): string {
+  if (count < 1_000) {
+    return count.toString();
+  }
+  if (count < 10_000) {
+    return `${(count / 1_000).toFixed(1)}k`;
+  }
+  if (count < 1_000_000) {
+    return `${Math.round(count / 1_000)}k`;
+  }
+  if (count < 10_000_000) {
+    return `${(count / 1_000_000).toFixed(1)}M`;
+  }
+  return `${Math.round(count / 1_000_000)}M`;
+}

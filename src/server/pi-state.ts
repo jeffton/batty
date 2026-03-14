@@ -177,6 +177,9 @@ export interface SessionStateInput {
   thinkingLevel: string;
   isStreaming: boolean;
   pendingMessageCount: number;
+  contextTokens: number | null;
+  contextWindow: number | null;
+  contextPercent: number | null;
   messages: AgentMessage[];
   activeAssistant?: AgentMessage;
   title?: string;
@@ -201,6 +204,9 @@ export function createSessionState(input: SessionStateInput): SessionState {
     thinkingLevel: input.thinkingLevel,
     isStreaming: input.isStreaming,
     pendingMessageCount: input.pendingMessageCount,
+    contextTokens: input.contextTokens,
+    contextWindow: input.contextWindow,
+    contextPercent: input.contextPercent,
     messages: normalizeMessages(input.messages),
     activeAssistant,
     activeTools: input.activeTools,

@@ -4,10 +4,12 @@ import ChatMessage from "@/client/components/ChatMessage.vue";
 import MessageComposer from "@/client/components/MessageComposer.vue";
 import SessionSidebar from "@/client/components/SessionSidebar.vue";
 import ToolRunCard from "@/client/components/ToolRunCard.vue";
+import { formatTokenCount } from "@/client/lib/formatting";
 import { useAppStore } from "@/client/stores/app";
 
 const store = useAppStore();
 const transcript = ref<HTMLElement>();
+const isTranscriptPinnedToBottom = ref(true);
 const modelId = computed({
   get: () => store.activeSession?.model ?? "",
   set: (value: string) => {
@@ -23,17 +25,54 @@ const visibleMessages = computed(() =>
   ),
 );
 const connectionClass = computed(() => `status-${store.connectionState}`);
+const contextUsageLabel = computed(() => {
+  const session = store.activeSession;
+  if (!session) {
+    return "ctx --";
+  }
+
+  const tokens = session.contextTokens;
+  const window = session.contextWindow;
+  const percent = session.contextPercent;
+  const tokensLabel = tokens == null ? "?" : formatTokenCount(tokens);
+  const windowLabel = window == null ? "?" : formatTokenCount(window);
+  const percentLabel = percent == null ? "?" : `${percent.toFixed(1)}%`;
+
+  return `ctx ${tokensLabel}/${windowLabel} · ${percentLabel}`;
+});
+
+function updateTranscriptPinnedState(): void {
+  const element = transcript.value;
+  if (!element) {
+    isTranscriptPinnedToBottom.value = true;
+    return;
+  }
+
+  const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+  isTranscriptPinnedToBottom.value = distanceFromBottom <= 24;
+}
 
 async function scrollToBottom(behavior: ScrollBehavior = "auto"): Promise<void> {
   await nextTick();
   transcript.value?.scrollTo({ top: transcript.value.scrollHeight, behavior });
+  updateTranscriptPinnedState();
 }
 
 watch(
   () => store.activeSession,
   (current, previous) => {
     const openedSession = current?.id !== previous?.id;
-    void scrollToBottom(openedSession ? "auto" : current?.isStreaming ? "auto" : "smooth");
+    if (openedSession) {
+      isTranscriptPinnedToBottom.value = true;
+      void scrollToBottom("auto");
+      return;
+    }
+
+    if (!isTranscriptPinnedToBottom.value) {
+      return;
+    }
+
+    void scrollToBottom(current?.isStreaming ? "auto" : "smooth");
   },
   { deep: true },
 );
@@ -53,6 +92,7 @@ watch(
         </div>
         <div class="chat-main__toolbar">
           <span :class="['pill', connectionClass]">{{ store.connectionState }}</span>
+          <span class="pill chat-main__context-pill">{{ contextUsageLabel }}</span>
           <select v-model="modelId" class="chat-main__select" :disabled="!store.activeSession">
             <option value="">Select model</option>
             <option v-for="model in store.models" :key="model.id" :value="model.id">
@@ -72,7 +112,11 @@ watch(
       </div>
 
       <template v-else>
-        <section ref="transcript" class="chat-main__transcript panel">
+        <section
+          ref="transcript"
+          class="chat-main__transcript panel"
+          @scroll="updateTranscriptPinnedState"
+        >
           <ChatMessage v-for="message in visibleMessages" :key="message.id" :message="message" />
           <ToolRunCard
             v-for="tool in store.activeSession.activeTools"
@@ -165,6 +209,10 @@ watch(
   color: inherit;
   padding: 0.42rem 0.6rem;
   font-size: 0.84rem;
+}
+
+.chat-main__context-pill {
+  white-space: nowrap;
 }
 
 .chat-main__logout {

@@ -13,6 +13,9 @@ const state: SessionState = {
   thinkingLevel: "medium",
   isStreaming: true,
   pendingMessageCount: 1,
+  contextTokens: 12345,
+  contextWindow: 200000,
+  contextPercent: 6.2,
   messages: [],
   activeAssistant: {
     id: "assistant-1",

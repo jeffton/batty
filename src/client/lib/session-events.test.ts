@@ -12,6 +12,9 @@ const baseState: SessionState = {
   thinkingLevel: "medium",
   isStreaming: true,
   pendingMessageCount: 0,
+  contextTokens: 12345,
+  contextWindow: 200000,
+  contextPercent: 6.2,
   messages: [],
   activeTools: [],
 };

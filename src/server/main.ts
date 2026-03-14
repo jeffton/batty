@@ -30,12 +30,22 @@ if (hasBuiltClient) {
   await app.register(staticFiles, {
     root: config.publicDir,
     prefix: "/",
-    wildcard: false,
   });
 }
 
 function isAuthenticated(token?: string): boolean {
   return verifyAuthToken(config.authSecret, token);
+}
+
+function shouldServeClientApp(url: string): boolean {
+  const pathname = url.split("?", 1)[0]?.split("#", 1)[0] ?? "/";
+  if (pathname.startsWith("/api")) {
+    return false;
+  }
+  if (pathname === "/") {
+    return true;
+  }
+  return path.extname(pathname) === "";
 }
 
 app.decorateRequest("auth", false);
@@ -185,7 +195,7 @@ app.get<{ Params: { sessionId: string } }>(
 app.get("/healthz", async () => ({ ok: true }));
 
 app.setNotFoundHandler((request, reply) => {
-  if (hasBuiltClient && !request.url.startsWith("/api")) {
+  if (hasBuiltClient && shouldServeClientApp(request.url)) {
     return reply.sendFile("index.html");
   }
 

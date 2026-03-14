@@ -166,6 +166,11 @@ app.post<{ Params: { sessionId: string } }>(
   },
 );
 
+app.post<{ Params: { sessionId: string } }>("/api/sessions/:sessionId/abort", async (request) => {
+  await service.abort(request.params.sessionId);
+  return { ok: true };
+});
+
 app.get<{ Params: { sessionId: string } }>(
   "/api/sessions/:sessionId/events",
   async (request, reply) => {

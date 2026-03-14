@@ -127,6 +127,13 @@ watch(
             v-if="store.activeSession.activeAssistant"
             :message="store.activeSession.activeAssistant"
           />
+          <div v-if="store.activeSession.isStreaming" class="chat-main__working">
+            <div class="chat-main__working-status">
+              <span class="spinner chat-main__working-spinner" />
+              <span>Working…</span>
+            </div>
+            <button class="chat-main__stop" @click="store.stopActiveSession">Stop</button>
+          </div>
         </section>
 
         <MessageComposer
@@ -255,6 +262,36 @@ watch(
   box-shadow: none;
   backdrop-filter: none;
   background: rgba(16, 20, 27, 0.98);
+}
+
+.chat-main__working {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.2rem 0;
+}
+
+.chat-main__working-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #c5ced8;
+}
+
+.chat-main__working-spinner {
+  width: 1rem;
+  height: 1rem;
+  border-width: 2px;
+}
+
+.chat-main__stop {
+  border-radius: 0.45rem;
+  border: 1px solid rgba(248, 113, 113, 0.22);
+  background: rgba(127, 29, 29, 0.18);
+  color: inherit;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.88rem;
 }
 
 @media (max-width: 900px) {

@@ -230,6 +230,12 @@ export class PiService {
     });
   }
 
+  async abort(sessionId: string): Promise<void> {
+    const webSession = this.requireSession(sessionId);
+    await webSession.session.abort();
+    this.publish(webSession, { type: "state", state: this.getState(sessionId) });
+  }
+
   private attachSession(
     workspace: WorkspaceInfo,
     session: AgentSession,

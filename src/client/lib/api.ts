@@ -90,3 +90,9 @@ export async function sendPrompt(
     body: formData,
   });
 }
+
+export function abortSession(sessionId: string): Promise<{ ok: true }> {
+  return request(`/api/sessions/${sessionId}/abort`, {
+    method: "POST",
+  });
+}

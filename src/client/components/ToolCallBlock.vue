@@ -24,10 +24,20 @@ const commandValue = computed(() => readString("command"));
 const contentValue = computed(() => readString("content"));
 const oldTextValue = computed(() => readString("oldText"));
 const newTextValue = computed(() => readString("newText"));
+const timeoutValue = computed(() => {
+  const value = props.arguments.timeout;
+  if (typeof value === "number") {
+    return `${value}s`;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.endsWith("s") ? value : `${value}s`;
+  }
+  return undefined;
+});
 const codeLanguage = computed(() => languageFromPath(pathValue.value));
 
 const genericEntries = computed(() => {
-  const hiddenKeys = new Set(["path", "command", "content", "oldText", "newText"]);
+  const hiddenKeys = new Set(["path", "command", "content", "oldText", "newText", "timeout"]);
   return Object.entries(props.arguments)
     .filter(([key]) => !hiddenKeys.has(key))
     .map(([key, value]) => ({ key, value: formatValue(value) }))
@@ -39,6 +49,9 @@ const genericEntries = computed(() => {
   <section :class="['tool-call', props.compact ? 'tool-call--compact' : '']">
     <header class="tool-call__header">
       <strong class="tool-call__name">{{ props.name }}</strong>
+      <span v-if="props.name === 'bash' && timeoutValue" class="tool-call__timeout">
+        {{ timeoutValue }}
+      </span>
       <code v-if="pathValue" class="tool-call__path">{{ pathValue }}</code>
     </header>
 
@@ -100,13 +113,19 @@ const genericEntries = computed(() => {
 }
 
 .tool-call__header {
-  display: grid;
-  justify-items: start;
-  gap: 0.18rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
 }
 
 .tool-call__name {
   color: #dbe4ee;
+}
+
+.tool-call__timeout {
+  color: #93a0ad;
+  font-size: 0.78rem;
 }
 
 .tool-call__path,
@@ -117,6 +136,10 @@ const genericEntries = computed(() => {
   background: rgba(15, 23, 42, 0.65);
   border-radius: 0.2rem;
   padding: 0.12rem 0.35rem;
+}
+
+.tool-call__path {
+  margin-left: auto;
 }
 
 .tool-call__diff,
@@ -156,5 +179,12 @@ const genericEntries = computed(() => {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: #93a0ad;
+}
+
+@media (max-width: 720px) {
+  .tool-call__path {
+    margin-left: 0;
+    width: 100%;
+  }
 }
 </style>

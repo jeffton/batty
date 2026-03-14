@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import {
+  abortSession,
   createSession,
   getBootstrap,
   getSession,
@@ -210,6 +211,14 @@ export const useAppStore = defineStore("app", {
       const session = await setSessionModel(this.activeSession.id, modelId);
       this.activeSession = session;
       await writeCachedSession(session);
+    },
+
+    async stopActiveSession(): Promise<void> {
+      if (!this.activeSession) {
+        return;
+      }
+      await abortSession(this.activeSession.id);
+      await this.refreshActiveSession();
     },
 
     markOffline(): void {

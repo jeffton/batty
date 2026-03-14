@@ -69,21 +69,21 @@ function formatTime(timestamp: number): string {
 <style scoped>
 .message {
   display: grid;
-  gap: 0.6rem;
-  padding: 1rem;
-  border-radius: 1rem;
-  border: 1px solid rgba(148, 163, 184, 0.12);
+  gap: 0.5rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 0.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .message--assistant,
 .message--toolResult,
 .message--bashExecution,
 .message--custom {
-  background: rgba(15, 23, 42, 0.72);
+  background: rgba(22, 27, 34, 0.82);
 }
 
 .message--user {
-  background: rgba(30, 41, 59, 0.9);
+  background: rgba(33, 38, 45, 0.95);
   margin-left: auto;
 }
 
@@ -96,27 +96,27 @@ function formatTime(timestamp: number): string {
 
 .message__body {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.65rem;
 }
 
 pre {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  padding: 0.8rem 0.95rem;
-  border-radius: 0.9rem;
-  background: rgba(2, 6, 23, 0.65);
-  border: 1px solid rgba(148, 163, 184, 0.1);
+  padding: 0.7rem 0.8rem;
+  border-radius: 0.55rem;
+  background: rgba(13, 17, 23, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 img {
   max-width: min(100%, 32rem);
-  border-radius: 0.95rem;
+  border-radius: 0.6rem;
 }
 
 .thinking-block summary {
   cursor: pointer;
-  color: #93c5fd;
-  margin-bottom: 0.5rem;
+  color: #d1d5db;
+  margin-bottom: 0.45rem;
 }
 </style>

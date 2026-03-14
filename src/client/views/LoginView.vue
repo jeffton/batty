@@ -45,7 +45,8 @@ async function submit(): Promise<void> {
 
 <style scoped>
 .login-view {
-  min-height: 100vh;
+  width: 100%;
+  height: 100%;
   display: grid;
   place-items: center;
   padding: 1.5rem;
@@ -53,13 +54,13 @@ async function submit(): Promise<void> {
 
 .login-card {
   width: min(100%, 28rem);
-  padding: 1.5rem;
+  padding: 1.35rem;
   display: grid;
-  gap: 1rem;
+  gap: 0.9rem;
 }
 
 .login-card h1 {
-  margin: 0.75rem 0 0.35rem;
+  margin: 0.65rem 0 0.35rem;
   font-size: clamp(2rem, 8vw, 3rem);
 }
 
@@ -69,19 +70,19 @@ async function submit(): Promise<void> {
 }
 
 .login-card__field input {
-  border-radius: 0.85rem;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(2, 6, 23, 0.7);
+  border-radius: 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(13, 17, 23, 0.78);
   color: inherit;
-  padding: 0.9rem 1rem;
+  padding: 0.8rem 0.9rem;
 }
 
 .login-card__submit {
-  border: 0;
-  border-radius: 0.85rem;
-  padding: 0.95rem 1rem;
-  color: white;
-  background: linear-gradient(135deg, #2563eb, #0ea5e9);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.6rem;
+  padding: 0.85rem 1rem;
+  color: inherit;
+  background: rgba(46, 160, 67, 0.16);
 }
 
 .login-card__error {

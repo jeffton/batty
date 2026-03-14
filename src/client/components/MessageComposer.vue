@@ -79,7 +79,7 @@ function onDrop(event: DragEvent): void {
       <textarea
         v-model="text"
         class="composer__input"
-        rows="4"
+        rows="3"
         placeholder="Ask Pi to code, read files, run tests, or mutate reality a tiny bit."
         :disabled="props.disabled"
         @keydown.enter.exact.prevent="submit"
@@ -119,76 +119,81 @@ function onDrop(event: DragEvent): void {
 
 <style scoped>
 .composer {
-  padding: 0.85rem;
+  padding: 0.7rem 0.75rem;
   display: grid;
-  gap: 0.75rem;
+  gap: 0.65rem;
 }
 
 .is-dragging {
-  border-color: rgba(96, 165, 250, 0.8);
-  background: rgba(30, 41, 59, 0.95);
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(33, 38, 45, 0.98);
 }
 
 .composer__row {
   display: grid;
   grid-template-columns: auto 1fr auto;
-  gap: 0.75rem;
+  gap: 0.65rem;
   align-items: stretch;
 }
 
 .composer__attachments {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.45rem;
 }
 
 .composer__chip,
 .composer__plus,
 .composer__send,
 .composer__steer {
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(22, 27, 34, 0.95);
   color: inherit;
-  border-radius: 0.85rem;
+  border-radius: 0.55rem;
 }
 
 .composer__chip {
-  padding: 0.35rem 0.6rem;
+  padding: 0.3rem 0.55rem;
 }
 
 .composer__plus {
-  width: 3rem;
-  font-size: 1.35rem;
+  width: 2.5rem;
+  font-size: 1.1rem;
 }
 
 .composer__input {
   width: 100%;
   resize: vertical;
-  min-height: 7rem;
-  border-radius: 0.95rem;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  background: rgba(2, 6, 23, 0.7);
+  min-height: 5rem;
+  max-height: 14rem;
+  border-radius: 0.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(13, 17, 23, 0.78);
   color: inherit;
-  padding: 0.85rem;
+  padding: 0.7rem 0.75rem;
 }
 
 .composer__actions {
   display: grid;
-  gap: 0.5rem;
+  gap: 0.45rem;
   align-content: start;
 }
 
 .composer__send,
 .composer__steer {
-  padding: 0.75rem 1rem;
+  padding: 0.65rem 0.85rem;
 }
 
 .composer__send {
-  background: rgba(37, 99, 235, 0.32);
+  background: rgba(46, 160, 67, 0.16);
 }
 
 .composer__steer {
-  background: rgba(14, 116, 144, 0.3);
+  background: rgba(251, 191, 36, 0.12);
+}
+
+.composer__hint {
+  font-size: 0.82rem;
 }
 
 @media (max-width: 720px) {
@@ -202,7 +207,7 @@ function onDrop(event: DragEvent): void {
 
   .composer__plus {
     width: 100%;
-    min-height: 2.75rem;
+    min-height: 2.5rem;
   }
 }
 </style>

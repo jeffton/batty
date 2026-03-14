@@ -36,9 +36,9 @@ function imageUrl(block: Extract<UiContentBlock, { type: "image" }>): string {
 
 <style scoped>
 .tool-card {
-  padding: 0.85rem;
+  padding: 0.75rem;
   display: grid;
-  gap: 0.65rem;
+  gap: 0.55rem;
 }
 
 .tool-card__header {
@@ -52,19 +52,20 @@ function imageUrl(block: Extract<UiContentBlock, { type: "image" }>): string {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  color: #cbd5e1;
-  background: rgba(2, 6, 23, 0.75);
-  border-radius: 0.85rem;
-  padding: 0.75rem;
+  color: #d1d5db;
+  background: rgba(13, 17, 23, 0.75);
+  border-radius: 0.55rem;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .tool-card__block img {
   width: min(100%, 28rem);
-  border-radius: 0.85rem;
+  border-radius: 0.55rem;
 }
 
 .tool-ok {
-  color: #60a5fa;
+  color: #86efac;
 }
 
 .tool-error {

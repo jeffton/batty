@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import ChatMessage from "@/client/components/ChatMessage.vue";
 import MessageComposer from "@/client/components/MessageComposer.vue";
 import SessionSidebar from "@/client/components/SessionSidebar.vue";
@@ -19,21 +19,16 @@ const modelId = computed({
 
 const connectionClass = computed(() => `status-${store.connectionState}`);
 
-async function scrollToBottom(): Promise<void> {
+async function scrollToBottom(behavior: ScrollBehavior = "auto"): Promise<void> {
   await nextTick();
-  transcript.value?.scrollTo({ top: transcript.value.scrollHeight, behavior: "smooth" });
+  transcript.value?.scrollTo({ top: transcript.value.scrollHeight, behavior });
 }
-
-onMounted(async () => {
-  if (store.selectedWorkspaceId) {
-    await store.loadWorkspaceSessions(store.selectedWorkspaceId);
-  }
-});
 
 watch(
   () => store.activeSession,
-  () => {
-    void scrollToBottom();
+  (current, previous) => {
+    const openedSession = current?.id !== previous?.id;
+    void scrollToBottom(openedSession ? "auto" : current?.isStreaming ? "auto" : "smooth");
   },
   { deep: true },
 );
@@ -45,7 +40,7 @@ watch(
     <section class="chat-main">
       <header class="chat-main__header panel">
         <button class="chat-main__menu" @click="store.mobileSidebarOpen = true">☰</button>
-        <div>
+        <div class="chat-main__heading">
           <h2>{{ store.selectedWorkspace?.label || "Choose a workspace" }}</h2>
           <p class="muted">
             {{ store.activeSession?.cwd || "Pick a folder and start a session." }}
@@ -101,37 +96,61 @@ watch(
 
 <style scoped>
 .chat-view {
-  min-height: 100vh;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 1rem;
-  padding: 1rem;
+  grid-template-columns: minmax(17rem, 19rem) minmax(0, 1fr);
+  gap: 0.75rem;
+  padding: 0.75rem;
+  overflow: hidden;
 }
 
 .chat-main {
   min-width: 0;
+  min-height: 0;
   display: grid;
-  gap: 1rem;
-  grid-template-rows: auto 1fr auto;
+  gap: 0.75rem;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
 }
 
 .chat-main__header {
-  padding: 1rem;
+  min-width: 0;
+  padding: 0.75rem 0.9rem;
   display: flex;
-  gap: 1rem;
+  gap: 0.75rem;
   align-items: center;
   justify-content: space-between;
 }
 
+.chat-main__heading {
+  min-width: 0;
+  display: grid;
+  gap: 0.15rem;
+}
+
 .chat-main__header h2,
-.chat-main__header p {
+.chat-main__header p,
+.chat-main__empty h3,
+.chat-main__empty p {
   margin: 0;
+}
+
+.chat-main__header h2 {
+  font-size: 1rem;
+}
+
+.chat-main__heading p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-main__toolbar {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.5rem;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -139,15 +158,15 @@ watch(
 .chat-main__select,
 .chat-main__logout,
 .chat-main__menu {
-  border-radius: 0.85rem;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  background: rgba(15, 23, 42, 0.9);
+  border-radius: 0.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(22, 27, 34, 0.95);
   color: inherit;
-  padding: 0.75rem 0.9rem;
+  padding: 0.55rem 0.75rem;
 }
 
 .chat-main__logout {
-  background: rgba(127, 29, 29, 0.28);
+  background: rgba(127, 29, 29, 0.18);
 }
 
 .chat-main__menu {
@@ -155,21 +174,27 @@ watch(
 }
 
 .chat-main__empty {
-  padding: 1.5rem;
+  min-height: 0;
+  padding: 1.25rem;
+  display: grid;
+  align-content: center;
+  gap: 0.5rem;
 }
 
 .chat-main__transcript {
   min-height: 0;
   overflow: auto;
-  padding: 1rem;
+  padding: 0.85rem;
   display: grid;
-  gap: 1rem;
+  gap: 0.75rem;
   align-content: start;
+  scroll-padding-bottom: 0.75rem;
 }
 
 @media (max-width: 900px) {
   .chat-view {
     grid-template-columns: 1fr;
+    padding: 0.5rem;
   }
 
   .chat-main__header {
@@ -181,6 +206,10 @@ watch(
     display: inline-flex;
     align-items: center;
     justify-content: center;
+  }
+
+  .chat-main__toolbar {
+    width: 100%;
   }
 }
 </style>

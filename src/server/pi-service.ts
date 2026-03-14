@@ -25,6 +25,7 @@ import type {
 } from "@/shared/types";
 import type { AppConfig } from "./config";
 import { createSessionState, normalizeBlocks } from "./pi-state";
+import { sanitizeTerminalBlocks } from "./terminal-output";
 
 interface SessionSubscriber {
   (event: ServerEvent): void;
@@ -277,7 +278,8 @@ export class PiService {
       case "tool_execution_update": {
         const current = webSession.activeTools.get(event.toolCallId);
         if (current) {
-          current.blocks = normalizeBlocks(event.partialResult.content ?? []);
+          const blocks = normalizeBlocks(event.partialResult.content ?? []);
+          current.blocks = current.toolName === "bash" ? sanitizeTerminalBlocks(blocks) : blocks;
           webSession.activeTools.set(event.toolCallId, current);
           this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
         }
@@ -286,7 +288,8 @@ export class PiService {
       case "tool_execution_end": {
         const current = webSession.activeTools.get(event.toolCallId);
         if (current) {
-          current.blocks = normalizeBlocks(event.result.content ?? []);
+          const blocks = normalizeBlocks(event.result.content ?? []);
+          current.blocks = current.toolName === "bash" ? sanitizeTerminalBlocks(blocks) : blocks;
           current.isError = event.isError;
           this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
           webSession.activeTools.delete(event.toolCallId);

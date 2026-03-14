@@ -1,6 +1,7 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
 import type { SessionState, UiContentBlock, UiMessage } from "@/shared/types";
+import { sanitizeTerminalBlocks, stripTerminalFormatting } from "./terminal-output";
 
 interface AssistantLikeMessage {
   role: "assistant";
@@ -113,13 +114,14 @@ export function normalizeMessage(message: AgentMessage, index: number): UiMessag
 
   if (message.role === "toolResult") {
     const toolResult = message as ToolResultLikeMessage;
+    const blocks = normalizeBlocks(toolResult.content);
     return {
       id: messageId("tool", toolResult.timestamp, index),
       role: "toolResult",
       timestamp: toolResult.timestamp,
       toolCallId: toolResult.toolCallId,
       toolName: toolResult.toolName,
-      blocks: normalizeBlocks(toolResult.content),
+      blocks: toolResult.toolName === "bash" ? sanitizeTerminalBlocks(blocks) : blocks,
       isError: toolResult.isError,
     };
   }
@@ -131,7 +133,7 @@ export function normalizeMessage(message: AgentMessage, index: number): UiMessag
       role: "bashExecution",
       timestamp: bashExecution.timestamp,
       command: bashExecution.command,
-      output: bashExecution.output,
+      output: stripTerminalFormatting(bashExecution.output),
       exitCode: bashExecution.exitCode ?? null,
       cancelled: bashExecution.cancelled,
       truncated: bashExecution.truncated,

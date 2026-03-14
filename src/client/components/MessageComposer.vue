@@ -64,7 +64,7 @@ function onDrop(event: DragEvent): void {
     @dragleave.prevent="dragging = false"
     @drop="onDrop"
   >
-    <div class="composer__attachments" v-if="files.length > 0">
+    <div v-if="files.length > 0" class="composer__attachments">
       <button
         v-for="(file, index) in files"
         :key="`${file.name}-${index}`"
@@ -119,27 +119,27 @@ function onDrop(event: DragEvent): void {
 
 <style scoped>
 .composer {
-  padding: 0.7rem 0.75rem;
+  padding: 0.55rem 0.65rem;
   display: grid;
-  gap: 0.65rem;
+  gap: 0.5rem;
 }
 
 .is-dragging {
   border-color: rgba(255, 255, 255, 0.18);
-  background: rgba(33, 38, 45, 0.98);
+  background: rgba(33, 38, 45, 0.9);
 }
 
 .composer__row {
   display: grid;
   grid-template-columns: auto 1fr auto;
-  gap: 0.65rem;
+  gap: 0.5rem;
   align-items: stretch;
 }
 
 .composer__attachments {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.45rem;
+  gap: 0.35rem;
 }
 
 .composer__chip,
@@ -147,41 +147,43 @@ function onDrop(event: DragEvent): void {
 .composer__send,
 .composer__steer {
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(22, 27, 34, 0.95);
+  background: rgba(22, 27, 34, 0.9);
   color: inherit;
-  border-radius: 0.55rem;
+  border-radius: 0.45rem;
+  font-size: 0.84rem;
 }
 
 .composer__chip {
-  padding: 0.3rem 0.55rem;
+  padding: 0.25rem 0.45rem;
 }
 
 .composer__plus {
-  width: 2.5rem;
-  font-size: 1.1rem;
+  width: 2.15rem;
+  font-size: 1rem;
 }
 
 .composer__input {
   width: 100%;
   resize: vertical;
-  min-height: 5rem;
-  max-height: 14rem;
-  border-radius: 0.55rem;
+  min-height: 4.2rem;
+  max-height: 12rem;
+  border-radius: 0.45rem;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(13, 17, 23, 0.78);
+  background: rgba(13, 17, 23, 0.62);
   color: inherit;
-  padding: 0.7rem 0.75rem;
+  padding: 0.6rem 0.65rem;
+  font-size: 0.88rem;
 }
 
 .composer__actions {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.35rem;
   align-content: start;
 }
 
 .composer__send,
 .composer__steer {
-  padding: 0.65rem 0.85rem;
+  padding: 0.55rem 0.7rem;
 }
 
 .composer__send {
@@ -193,7 +195,7 @@ function onDrop(event: DragEvent): void {
 }
 
 .composer__hint {
-  font-size: 0.82rem;
+  font-size: 0.76rem;
 }
 
 @media (max-width: 720px) {
@@ -207,7 +209,7 @@ function onDrop(event: DragEvent): void {
 
   .composer__plus {
     width: 100%;
-    min-height: 2.5rem;
+    min-height: 2.15rem;
   }
 }
 </style>

@@ -17,6 +17,11 @@ const modelId = computed({
   },
 });
 
+const visibleMessages = computed(() =>
+  (store.activeSession?.messages ?? []).filter(
+    (message) => message.role !== "toolResult" || message.isError,
+  ),
+);
 const connectionClass = computed(() => `status-${store.connectionState}`);
 
 async function scrollToBottom(behavior: ScrollBehavior = "auto"): Promise<void> {
@@ -68,11 +73,7 @@ watch(
 
       <template v-else>
         <section ref="transcript" class="chat-main__transcript panel">
-          <ChatMessage
-            v-for="message in store.activeSession.messages"
-            :key="message.id"
-            :message="message"
-          />
+          <ChatMessage v-for="message in visibleMessages" :key="message.id" :message="message" />
           <ToolRunCard
             v-for="tool in store.activeSession.activeTools"
             :key="tool.toolCallId"
@@ -100,9 +101,9 @@ watch(
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(17rem, 19rem) minmax(0, 1fr);
-  gap: 0.75rem;
-  padding: 0.75rem;
+  grid-template-columns: minmax(15rem, 17rem) minmax(0, 1fr);
+  gap: 0.55rem;
+  padding: 0.55rem;
   overflow: hidden;
 }
 
@@ -110,16 +111,16 @@ watch(
   min-width: 0;
   min-height: 0;
   display: grid;
-  gap: 0.75rem;
+  gap: 0.55rem;
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
 }
 
 .chat-main__header {
   min-width: 0;
-  padding: 0.75rem 0.9rem;
+  padding: 0.6rem 0.75rem;
   display: flex;
-  gap: 0.75rem;
+  gap: 0.65rem;
   align-items: center;
   justify-content: space-between;
 }
@@ -127,7 +128,7 @@ watch(
 .chat-main__heading {
   min-width: 0;
   display: grid;
-  gap: 0.15rem;
+  gap: 0.1rem;
 }
 
 .chat-main__header h2,
@@ -138,7 +139,7 @@ watch(
 }
 
 .chat-main__header h2 {
-  font-size: 1rem;
+  font-size: 0.96rem;
 }
 
 .chat-main__heading p {
@@ -150,7 +151,7 @@ watch(
 .chat-main__toolbar {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -158,11 +159,12 @@ watch(
 .chat-main__select,
 .chat-main__logout,
 .chat-main__menu {
-  border-radius: 0.55rem;
+  border-radius: 0.45rem;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(22, 27, 34, 0.95);
   color: inherit;
-  padding: 0.55rem 0.75rem;
+  padding: 0.42rem 0.6rem;
+  font-size: 0.84rem;
 }
 
 .chat-main__logout {
@@ -175,26 +177,26 @@ watch(
 
 .chat-main__empty {
   min-height: 0;
-  padding: 1.25rem;
+  padding: 1rem;
   display: grid;
   align-content: center;
-  gap: 0.5rem;
+  gap: 0.45rem;
 }
 
 .chat-main__transcript {
   min-height: 0;
   overflow: auto;
-  padding: 0.85rem;
+  padding: 0.6rem 0.7rem;
   display: grid;
-  gap: 0.75rem;
+  gap: 0.5rem;
   align-content: start;
-  scroll-padding-bottom: 0.75rem;
+  scroll-padding-bottom: 0.6rem;
 }
 
 @media (max-width: 900px) {
   .chat-view {
     grid-template-columns: 1fr;
-    padding: 0.5rem;
+    padding: 0.45rem;
   }
 
   .chat-main__header {

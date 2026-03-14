@@ -21,7 +21,7 @@ const html = computed(() => DOMPurify.sanitize(marked.parse(props.text) as strin
 
 <style scoped>
 .markdown-body :deep(p) {
-  margin: 0 0 0.75rem;
+  margin: 0 0 0.55rem;
 }
 
 .markdown-body :deep(p:last-child) {
@@ -29,18 +29,18 @@ const html = computed(() => DOMPurify.sanitize(marked.parse(props.text) as strin
 }
 
 .markdown-body :deep(pre) {
-  margin: 0.75rem 0;
-  padding: 0.85rem 1rem;
+  margin: 0.55rem 0;
+  padding: 0.7rem 0.8rem;
   overflow-x: auto;
-  border-radius: 0.85rem;
-  background: rgba(2, 6, 23, 0.85);
-  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 0.5rem;
+  background: rgba(2, 6, 23, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.1);
 }
 
 .markdown-body :deep(code) {
-  padding: 0.1rem 0.3rem;
-  border-radius: 0.4rem;
-  background: rgba(15, 23, 42, 0.85);
+  padding: 0.08rem 0.24rem;
+  border-radius: 0.28rem;
+  background: rgba(15, 23, 42, 0.72);
 }
 
 .markdown-body :deep(pre code) {
@@ -49,20 +49,20 @@ const html = computed(() => DOMPurify.sanitize(marked.parse(props.text) as strin
 }
 
 .markdown-body :deep(blockquote) {
-  margin: 0.75rem 0;
-  padding-left: 1rem;
-  border-left: 3px solid rgba(96, 165, 250, 0.65);
+  margin: 0.55rem 0;
+  padding-left: 0.8rem;
+  border-left: 2px solid rgba(96, 165, 250, 0.5);
   color: #b8c7db;
 }
 
 .markdown-body :deep(ul),
 .markdown-body :deep(ol) {
-  margin: 0.5rem 0 0.75rem 1.15rem;
+  margin: 0.4rem 0 0.55rem 1rem;
   padding: 0;
 }
 
 .markdown-body :deep(img) {
   max-width: 100%;
-  border-radius: 0.85rem;
+  border-radius: 0.5rem;
 }
 </style>

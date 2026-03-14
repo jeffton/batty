@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ToolCallBlock from "@/client/components/ToolCallBlock.vue";
 import type { ActiveToolRun, UiContentBlock } from "@/shared/types";
 
 const props = defineProps<{
@@ -11,57 +12,71 @@ function imageUrl(block: Extract<UiContentBlock, { type: "image" }>): string {
 </script>
 
 <template>
-  <div class="tool-card panel">
+  <div class="tool-card">
     <div class="tool-card__header">
       <strong>{{ props.tool.toolName }}</strong>
       <span :class="props.tool.isError ? 'tool-error' : 'tool-ok'">{{
         props.tool.isError ? "error" : "running"
       }}</span>
     </div>
-    <pre class="tool-card__args">{{ JSON.stringify(props.tool.args, null, 2) }}</pre>
+
+    <ToolCallBlock :name="props.tool.toolName" :arguments="props.tool.args" compact />
+
     <div
       v-for="(block, index) in props.tool.blocks"
       :key="`${props.tool.toolCallId}-${index}`"
       class="tool-card__block"
     >
-      <pre v-if="block.type === 'text'">{{ block.text }}</pre>
+      <div v-if="block.type === 'text'" class="tool-card__text">{{ block.text }}</div>
       <img v-else-if="block.type === 'image'" :src="imageUrl(block)" alt="Tool output" />
-      <pre v-else-if="block.type === 'thinking'">{{ block.thinking }}</pre>
-      <pre v-else-if="block.type === 'toolCall'"
-        >{{ block.name }} {{ JSON.stringify(block.arguments, null, 2) }}</pre
-      >
+      <div v-else-if="block.type === 'thinking'" class="tool-card__thinking">
+        {{ block.thinking }}
+      </div>
+      <ToolCallBlock
+        v-else-if="block.type === 'toolCall'"
+        :name="block.name"
+        :arguments="block.arguments"
+        compact
+      />
     </div>
   </div>
 </template>
 
 <style scoped>
 .tool-card {
-  padding: 0.75rem;
+  padding: 0.5rem 0.65rem;
   display: grid;
-  gap: 0.55rem;
+  gap: 0.45rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(22, 27, 34, 0.36);
 }
 
 .tool-card__header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 0.75rem;
+  font-size: 0.78rem;
 }
 
-.tool-card__args,
-.tool-card__block pre {
+.tool-card__text,
+.tool-card__thinking {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  color: #d1d5db;
-  background: rgba(13, 17, 23, 0.75);
-  border-radius: 0.55rem;
-  padding: 0.7rem 0.75rem;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: #cbd5e1;
+  line-height: 1.45;
 }
 
-.tool-card__block img {
+.tool-card__thinking {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.tool-card img {
   width: min(100%, 28rem);
-  border-radius: 0.55rem;
+  border-radius: 0.45rem;
 }
 
 .tool-ok {

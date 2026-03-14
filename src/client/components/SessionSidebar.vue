@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { formatShortDateTime } from "@/client/lib/formatting";
 import type { SessionSummary } from "@/shared/types";
 import { useAppStore } from "@/client/stores/app";
 
@@ -96,7 +97,7 @@ onMounted(() => {
           @click="store.resumeSession(session.workspaceId, session.path || session.id)"
         >
           <strong class="sidebar__session-title">{{ sessionLabel(session) }}</strong>
-          <span class="muted">{{ new Date(session.updatedAt).toLocaleString() }}</span>
+          <span class="muted">{{ formatShortDateTime(session.updatedAt) }}</span>
         </button>
         <div v-if="sessions.length === 0" class="muted">No sessions yet.</div>
       </div>
@@ -106,12 +107,12 @@ onMounted(() => {
 
 <style scoped>
 .sidebar {
-  width: min(100vw, 19rem);
+  width: min(100vw, 17rem);
   height: 100%;
   min-height: 0;
-  padding: 0.75rem;
+  padding: 0.6rem;
   display: grid;
-  gap: 0.75rem;
+  gap: 0.6rem;
   grid-template-rows: auto auto minmax(0, 1fr);
   overflow: hidden;
 }
@@ -119,7 +120,7 @@ onMounted(() => {
 .sidebar__header {
   display: flex;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: 0.6rem;
 }
 
 .sidebar__header h1,
@@ -128,11 +129,12 @@ onMounted(() => {
 }
 
 .sidebar__header h1 {
-  font-size: 1.1rem;
+  font-size: 1rem;
 }
 
 .sidebar__header p {
-  margin-top: 0.25rem;
+  margin-top: 0.2rem;
+  font-size: 0.82rem;
 }
 
 .sidebar__close {
@@ -140,12 +142,12 @@ onMounted(() => {
   border: 0;
   background: transparent;
   color: #e5e7eb;
-  font-size: 1.1rem;
+  font-size: 1rem;
 }
 
 .sidebar__section {
   display: grid;
-  gap: 0.5rem;
+  gap: 0.4rem;
 }
 
 .sidebar__section--sessions {
@@ -154,7 +156,7 @@ onMounted(() => {
 }
 
 .sidebar__section-title {
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: #98a2ad;
@@ -165,13 +167,14 @@ onMounted(() => {
 .sidebar__action {
   width: 100%;
   text-align: left;
-  border-radius: 0.6rem;
+  border-radius: 0.45rem;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(22, 27, 34, 0.92);
+  background: rgba(22, 27, 34, 0.72);
   color: inherit;
-  padding: 0.7rem 0.75rem;
+  padding: 0.55rem 0.6rem;
   display: grid;
-  gap: 0.2rem;
+  gap: 0.15rem;
+  font-size: 0.84rem;
 }
 
 .sidebar__workspace strong,
@@ -194,13 +197,13 @@ onMounted(() => {
   min-height: 0;
   overflow: auto;
   display: grid;
-  gap: 0.5rem;
-  padding-right: 0.15rem;
+  gap: 0.4rem;
+  padding-right: 0.1rem;
 }
 
 .is-active {
-  border-color: rgba(255, 255, 255, 0.18);
-  background: rgba(33, 38, 45, 0.98);
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(33, 38, 45, 0.86);
 }
 
 .sidebar__action {
@@ -211,10 +214,10 @@ onMounted(() => {
   .sidebar {
     position: fixed;
     z-index: 20;
-    inset: 0.5rem auto 0.5rem 0.5rem;
-    transform: translateX(calc(-100% - 0.75rem));
+    inset: 0.45rem auto 0.45rem 0.45rem;
+    transform: translateX(calc(-100% - 0.6rem));
     transition: transform 0.2s ease;
-    max-width: min(19rem, calc(100vw - 1rem));
+    max-width: min(17rem, calc(100vw - 0.9rem));
     height: auto;
   }
 

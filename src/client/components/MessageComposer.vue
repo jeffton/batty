@@ -226,7 +226,7 @@ onBeforeUnmount(() => {
   background: rgba(13, 17, 23, 0.72);
   color: inherit;
   padding: 0.6rem 0.65rem;
-  font-size: 0.88rem;
+  font-size: 0.84rem;
   line-height: 1.45;
 }
 

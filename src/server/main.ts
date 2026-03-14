@@ -7,7 +7,7 @@ import staticFiles from "@fastify/static";
 import { createAuthToken, verifyAuthToken } from "./auth";
 import { loadConfig } from "./config";
 import { PiService, type UploadedFile } from "./pi-service";
-import { listWorkspaces, resolveWorkspace } from "./workspaces";
+import { createWorkspace, listWorkspaces, resolveWorkspace } from "./workspaces";
 
 const config = loadConfig();
 const service = new PiService(config);
@@ -102,6 +102,10 @@ app.get("/api/workspaces", async () => {
   return listWorkspaces(config);
 });
 
+app.post<{ Body: { name?: string } }>("/api/workspaces", async (request) => {
+  return createWorkspace(config, request.body?.name ?? "");
+});
+
 app.get<{ Params: { workspaceId: string } }>(
   "/api/workspaces/:workspaceId/sessions",
   async (request) => {
@@ -134,6 +138,13 @@ app.post<{ Params: { sessionId: string }; Body: { modelId: string } }>(
   "/api/sessions/:sessionId/model",
   async (request) => {
     return service.setModel(request.params.sessionId, request.body.modelId);
+  },
+);
+
+app.post<{ Params: { sessionId: string }; Body: { thinkingLevel: string } }>(
+  "/api/sessions/:sessionId/thinking",
+  async (request) => {
+    return service.setThinkingLevel(request.params.sessionId, request.body.thinkingLevel);
   },
 );
 

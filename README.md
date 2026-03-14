@@ -11,6 +11,7 @@ A browser UI for [Pi Coding Agent](https://pi.dev) that keeps Pi's session/model
 - Image rendering for message and tool output blocks
 - Model selection powered by Pi's model registry
 - Workspace picker for folders directly under a configured root, plus a dedicated `pi-face` self-workspace
+- Create new workspaces directly under the configured root from the sidebar
 - Session listing + resume per workspace using Pi session files
 - Offline-friendly client shell via PWA + IndexedDB snapshot caching
 - TypeScript Fastify server using Pi's SDK/session APIs

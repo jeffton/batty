@@ -12,6 +12,7 @@
     "build:server": "vp pack",
     "start": "node dist/server/main.mjs",
     "test": "vp test --run",
+    "test:e2e": "pnpm build && playwright test",
     "check": "vp check",
     "check:fix": "vp check --fix"
   },
@@ -34,6 +35,7 @@
     "workbox-window": "7.4.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.58.2",
     "@types/node": "25.5.0",
     "@vitejs/plugin-vue": "6.0.5",
     "@vue/test-utils": "2.4.6",

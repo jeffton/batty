@@ -81,11 +81,14 @@ export interface SessionState {
   sessionId: string;
   workspaceId: string;
   cwd: string;
+  path?: string;
   model?: string;
   modelLabel?: string;
   thinkingLevel: string;
+  availableThinkingLevels: string[];
   isStreaming: boolean;
   pendingMessageCount: number;
+  updatedAt: number;
   contextTokens: number | null;
   contextWindow: number | null;
   contextPercent: number | null;

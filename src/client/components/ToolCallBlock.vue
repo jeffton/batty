@@ -138,10 +138,6 @@ const genericEntries = computed(() => {
   padding: 0.12rem 0.35rem;
 }
 
-.tool-call__path {
-  margin-left: auto;
-}
-
 .tool-call__diff,
 .tool-call__meta {
   display: grid;

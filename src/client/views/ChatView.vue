@@ -4,6 +4,7 @@ import ChatMessage from "@/client/components/ChatMessage.vue";
 import MessageComposer from "@/client/components/MessageComposer.vue";
 import SessionSidebar from "@/client/components/SessionSidebar.vue";
 import ToolRunCard from "@/client/components/ToolRunCard.vue";
+import { withoutActiveToolCalls } from "@/client/lib/active-assistant";
 import { formatTokenCount } from "@/client/lib/formatting";
 import { useAppStore } from "@/client/stores/app";
 
@@ -18,10 +19,35 @@ const modelId = computed({
     }
   },
 });
+const thinkingLevel = computed({
+  get: () => store.activeSession?.thinkingLevel ?? "",
+  set: (value: string) => {
+    if (value) {
+      void store.setThinkingLevel(value);
+    }
+  },
+});
+const thinkingOptions = computed(() => {
+  const session = store.activeSession;
+  if (!session) {
+    return [];
+  }
+
+  const availableThinkingLevels = Array.isArray(session.availableThinkingLevels)
+    ? session.availableThinkingLevels
+    : [];
+  return [...new Set([session.thinkingLevel, ...availableThinkingLevels].filter(Boolean))];
+});
 
 const visibleMessages = computed(() =>
   (store.activeSession?.messages ?? []).filter(
     (message) => message.role !== "toolResult" || message.isError,
+  ),
+);
+const activeAssistantMessage = computed(() =>
+  withoutActiveToolCalls(
+    store.activeSession?.activeAssistant,
+    store.activeSession?.activeTools ?? [],
   ),
 );
 const connectionClass = computed(() => `status-${store.connectionState}`);
@@ -40,6 +66,10 @@ const contextUsageLabel = computed(() => {
 
   return `ctx ${tokensLabel}/${windowLabel} · ${percentLabel}`;
 });
+
+function thinkingLabel(value: string): string {
+  return value === "xhigh" ? "XHigh" : value.charAt(0).toUpperCase() + value.slice(1);
+}
 
 function updateTranscriptPinnedState(): void {
   const element = transcript.value;
@@ -99,6 +129,16 @@ watch(
               {{ model.label }}
             </option>
           </select>
+          <select
+            v-model="thinkingLevel"
+            class="chat-main__select"
+            :disabled="!store.activeSession || thinkingOptions.length === 0"
+          >
+            <option value="">Thinking</option>
+            <option v-for="option in thinkingOptions" :key="option" :value="option">
+              {{ thinkingLabel(option) }}
+            </option>
+          </select>
           <button class="chat-main__logout" @click="store.logout">Logout</button>
         </div>
       </header>
@@ -123,10 +163,7 @@ watch(
             :key="tool.toolCallId"
             :tool="tool"
           />
-          <ChatMessage
-            v-if="store.activeSession.activeAssistant"
-            :message="store.activeSession.activeAssistant"
-          />
+          <ChatMessage v-if="activeAssistantMessage" :message="activeAssistantMessage" />
           <div v-if="store.activeSession.isStreaming" class="chat-main__working">
             <div class="chat-main__working-status">
               <span class="spinner chat-main__working-spinner" />

@@ -172,11 +172,14 @@ export interface SessionStateInput {
   sessionId: string;
   workspaceId: string;
   cwd: string;
+  path?: string;
   model?: string;
   modelLabel?: string;
   thinkingLevel: string;
+  availableThinkingLevels: string[];
   isStreaming: boolean;
   pendingMessageCount: number;
+  updatedAt: number;
   contextTokens: number | null;
   contextWindow: number | null;
   contextPercent: number | null;
@@ -199,11 +202,14 @@ export function createSessionState(input: SessionStateInput): SessionState {
     sessionId: input.sessionId,
     workspaceId: input.workspaceId,
     cwd: input.cwd,
+    path: input.path,
     model: input.model,
     modelLabel: input.modelLabel,
     thinkingLevel: input.thinkingLevel,
+    availableThinkingLevels: input.availableThinkingLevels,
     isStreaming: input.isStreaming,
     pendingMessageCount: input.pendingMessageCount,
+    updatedAt: input.updatedAt,
     contextTokens: input.contextTokens,
     contextWindow: input.contextWindow,
     contextPercent: input.contextPercent,

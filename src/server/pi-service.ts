@@ -49,6 +49,7 @@ interface WebSession {
   subscribers: Set<SessionSubscriber>;
   activeAssistant?: AgentSession["state"]["streamMessage"];
   activeTools: Map<string, ActiveToolRun>;
+  openedAt: number;
   modelFallbackMessage?: string;
 }
 
@@ -99,6 +100,11 @@ async function processUploadedFiles(
   }
 
   return { text, images };
+}
+
+function sessionUpdatedAt(session: AgentSession, openedAt: number): number {
+  const lastMessage = [...session.messages].reverse().find((message) => "timestamp" in message);
+  return typeof lastMessage?.timestamp === "number" ? lastMessage.timestamp : openedAt;
 }
 
 export class PiService {
@@ -188,13 +194,16 @@ export class PiService {
       sessionId: webSession.session.sessionId,
       workspaceId: webSession.workspace.id,
       cwd: webSession.workspace.path,
+      path: webSession.session.sessionFile,
       model: webSession.session.model ? modelKey(webSession.session.model) : undefined,
       modelLabel: webSession.session.model
         ? `${webSession.session.model.name} · ${webSession.session.model.provider}`
         : undefined,
       thinkingLevel: webSession.session.thinkingLevel,
+      availableThinkingLevels: webSession.session.getAvailableThinkingLevels(),
       isStreaming: webSession.session.isStreaming,
       pendingMessageCount: webSession.session.pendingMessageCount,
+      updatedAt: sessionUpdatedAt(webSession.session, webSession.openedAt),
       contextTokens: contextUsage?.tokens ?? null,
       contextWindow: contextUsage?.contextWindow ?? webSession.session.model?.contextWindow ?? null,
       contextPercent: contextUsage?.percent ?? null,
@@ -209,6 +218,13 @@ export class PiService {
     const webSession = this.requireSession(sessionId);
     const model = await this.resolveModel(modelId);
     await webSession.session.setModel(model);
+    this.publish(webSession, { type: "state", state: this.getState(sessionId) });
+    return this.getState(sessionId);
+  }
+
+  setThinkingLevel(sessionId: string, thinkingLevel: string): SessionState {
+    const webSession = this.requireSession(sessionId);
+    webSession.session.setThinkingLevel(thinkingLevel as AgentSession["thinkingLevel"]);
     this.publish(webSession, { type: "state", state: this.getState(sessionId) });
     return this.getState(sessionId);
   }
@@ -247,6 +263,7 @@ export class PiService {
       session,
       subscribers: new Set(),
       activeTools: new Map(),
+      openedAt: Date.now(),
       modelFallbackMessage,
     };
 

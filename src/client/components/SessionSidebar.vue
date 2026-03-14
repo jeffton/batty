@@ -1,36 +1,88 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 import { formatShortDateTime } from "@/client/lib/formatting";
+import { sessionRoutePath, workspaceRoutePath } from "@/client/lib/routes";
 import type { SessionSummary } from "@/shared/types";
 import { useAppStore } from "@/client/stores/app";
 
 const store = useAppStore();
+const router = useRouter();
 const workspaces = computed(() => store.workspaces);
 const sessions = computed(() => store.workspaceSessions);
 const sessionList = ref<HTMLElement>();
+const createWorkspaceInput = ref<HTMLInputElement>();
+const createWorkspaceOpen = ref(false);
+const createWorkspaceName = ref("");
+const createWorkspaceError = ref("");
+const creatingWorkspace = ref(false);
 
 function sessionLabel(session: SessionSummary): string {
   return (session.name || session.firstMessage || "Untitled session").replace(/\s+/g, " ").trim();
 }
 
-async function scrollSessionsToBottom(): Promise<void> {
+function resetCreateWorkspaceForm(): void {
+  createWorkspaceOpen.value = false;
+  createWorkspaceName.value = "";
+  createWorkspaceError.value = "";
+}
+
+async function openCreateWorkspaceForm(): Promise<void> {
+  createWorkspaceOpen.value = true;
+  createWorkspaceError.value = "";
+  await nextTick();
+  createWorkspaceInput.value?.focus();
+}
+
+async function submitCreateWorkspace(): Promise<void> {
+  const name = createWorkspaceName.value.trim();
+
+  if (!name) {
+    createWorkspaceError.value = "Workspace name is required";
+    await nextTick();
+    createWorkspaceInput.value?.focus();
+    return;
+  }
+
+  creatingWorkspace.value = true;
+  createWorkspaceError.value = "";
+
+  try {
+    const workspace = await store.createWorkspace(name);
+    await router.push(workspaceRoutePath(workspace.id));
+    resetCreateWorkspaceForm();
+  } catch (error) {
+    createWorkspaceError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    creatingWorkspace.value = false;
+  }
+}
+
+async function scrollSessionsToTop(): Promise<void> {
   await nextTick();
   const element = sessionList.value;
   if (!element) {
     return;
   }
-  element.scrollTo({ top: element.scrollHeight, behavior: "auto" });
+  element.scrollTo({ top: 0, behavior: "auto" });
 }
 
-watch(
-  () => store.selectedWorkspaceId,
-  async (workspaceId) => {
-    if (workspaceId) {
-      await store.loadWorkspaceSessions(workspaceId);
-    }
-  },
-  { immediate: true },
-);
+async function openWorkspace(workspaceId: string): Promise<void> {
+  await router.push(workspaceRoutePath(workspaceId));
+}
+
+async function startSession(): Promise<void> {
+  if (!store.selectedWorkspaceId) {
+    return;
+  }
+
+  const session = await store.startSession(store.selectedWorkspaceId);
+  await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
+}
+
+async function openSession(session: SessionSummary): Promise<void> {
+  await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
+}
 
 watch(
   () => ({
@@ -41,13 +93,13 @@ watch(
     sidebarOpen: store.mobileSidebarOpen,
   }),
   () => {
-    void scrollSessionsToBottom();
+    void scrollSessionsToTop();
   },
   { immediate: true },
 );
 
 onMounted(() => {
-  void scrollSessionsToBottom();
+  void scrollSessionsToTop();
 });
 </script>
 
@@ -70,18 +122,53 @@ onMounted(() => {
           'sidebar__workspace',
           workspace.id === store.selectedWorkspaceId ? 'is-active' : '',
         ]"
-        @click="store.selectWorkspace(workspace.id)"
+        @click="openWorkspace(workspace.id)"
       >
         <strong>{{ workspace.label }}</strong>
         <span class="muted">{{ workspace.kind === "self" ? "self" : workspace.path }}</span>
       </button>
-      <button
-        v-if="store.selectedWorkspaceId"
-        class="sidebar__action"
-        @click="store.startSession(store.selectedWorkspaceId)"
+
+      <form
+        v-if="createWorkspaceOpen"
+        class="sidebar__workspace-form"
+        @submit.prevent="submitCreateWorkspace"
       >
-        + New session
-      </button>
+        <input
+          ref="createWorkspaceInput"
+          v-model="createWorkspaceName"
+          class="sidebar__workspace-input"
+          type="text"
+          placeholder="workspace-name"
+          :disabled="creatingWorkspace"
+        />
+        <div class="sidebar__workspace-form-actions">
+          <button class="sidebar__action" type="submit" :disabled="creatingWorkspace">
+            {{ creatingWorkspace ? "Creating…" : "Create workspace" }}
+          </button>
+          <button
+            class="sidebar__action sidebar__action--secondary"
+            type="button"
+            :disabled="creatingWorkspace"
+            @click="resetCreateWorkspaceForm"
+          >
+            Cancel
+          </button>
+        </div>
+        <p v-if="createWorkspaceError" class="sidebar__error">{{ createWorkspaceError }}</p>
+      </form>
+
+      <div class="sidebar__actions">
+        <button
+          v-if="!createWorkspaceOpen"
+          class="sidebar__action sidebar__action--secondary"
+          @click="openCreateWorkspaceForm"
+        >
+          + New workspace
+        </button>
+        <button v-if="store.selectedWorkspaceId" class="sidebar__action" @click="startSession">
+          + New session
+        </button>
+      </div>
     </section>
 
     <section class="sidebar__section sidebar__section--sessions">
@@ -94,7 +181,7 @@ onMounted(() => {
             'sidebar__session',
             session.sessionId === store.activeSession?.sessionId ? 'is-active' : '',
           ]"
-          @click="store.resumeSession(session.workspaceId, session.path || session.id)"
+          @click="openSession(session)"
         >
           <strong class="sidebar__session-title">{{ sessionLabel(session) }}</strong>
           <span class="muted">{{ formatShortDateTime(session.updatedAt) }}</span>
@@ -180,6 +267,13 @@ onMounted(() => {
   border-left: 2px solid transparent;
 }
 
+.sidebar__actions,
+.sidebar__workspace-form,
+.sidebar__workspace-form-actions {
+  display: grid;
+  gap: 0.25rem;
+}
+
 .sidebar__action {
   width: 100%;
   text-align: left;
@@ -191,6 +285,26 @@ onMounted(() => {
   display: grid;
   gap: 0.1rem;
   font-size: 0.88rem;
+}
+
+.sidebar__action--secondary {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.sidebar__workspace-input {
+  width: 100%;
+  border-radius: 0.45rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(22, 27, 34, 0.95);
+  color: inherit;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.88rem;
+}
+
+.sidebar__error {
+  margin: 0;
+  color: #fca5a5;
+  font-size: 0.78rem;
 }
 
 .sidebar__workspace {

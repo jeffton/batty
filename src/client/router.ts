@@ -5,7 +5,13 @@ import LoginView from "@/client/views/LoginView.vue";
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: "/", name: "chat", component: ChatView },
+    { path: "/", name: "home", component: ChatView },
+    { path: "/workspaces/:workspaceId", name: "workspace", component: ChatView },
+    {
+      path: "/workspaces/:workspaceId/sessions/:sessionId",
+      name: "session",
+      component: ChatView,
+    },
     { path: "/login", name: "login", component: LoginView },
   ],
 });

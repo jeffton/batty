@@ -20,12 +20,16 @@ const dateTimeFormatter = new Intl.DateTimeFormat(clientLocales, {
   timeStyle: "short",
 });
 
+function isValidTimestamp(timestamp: number): boolean {
+  return Number.isFinite(timestamp) && !Number.isNaN(new Date(timestamp).getTime());
+}
+
 export function formatShortTime(timestamp: number): string {
-  return timeFormatter.format(new Date(timestamp));
+  return isValidTimestamp(timestamp) ? timeFormatter.format(new Date(timestamp)) : "--:--";
 }
 
 export function formatShortDateTime(timestamp: number): string {
-  return dateTimeFormatter.format(new Date(timestamp));
+  return isValidTimestamp(timestamp) ? dateTimeFormatter.format(new Date(timestamp)) : "--";
 }
 
 export function formatTokenCount(count: number): string {

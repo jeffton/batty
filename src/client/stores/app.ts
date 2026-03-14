@@ -2,14 +2,17 @@ import { defineStore } from "pinia";
 import {
   abortSession,
   createSession,
+  createWorkspace as createWorkspaceRequest,
   getBootstrap,
   getSession,
   listWorkspaceSessions,
+  listWorkspaces as listWorkspacesRequest,
   login as loginRequest,
   logout as logoutRequest,
   openSession,
   sendPrompt,
   setSessionModel,
+  setSessionThinkingLevel,
 } from "@/client/lib/api";
 import {
   readCachedBootstrap,
@@ -18,6 +21,8 @@ import {
   writeCachedSession,
 } from "@/client/lib/cache";
 import { applyServerEvent } from "@/client/lib/session-events";
+import { normalizeSessionState } from "@/client/lib/session-state";
+import { mergeSessionSummaries, toSessionSummary } from "@/client/lib/session-summary";
 import type {
   BootstrapPayload,
   ModelOption,
@@ -51,7 +56,14 @@ export const useAppStore = defineStore("app", {
       if (!state.selectedWorkspaceId) {
         return [];
       }
-      return state.sessionsByWorkspace[state.selectedWorkspaceId] ?? [];
+
+      const sessions = state.sessionsByWorkspace[state.selectedWorkspaceId] ?? [];
+      const activeSession =
+        state.activeSession?.workspaceId === state.selectedWorkspaceId && state.activeSession.path
+          ? [toSessionSummary(state.activeSession)]
+          : [];
+
+      return mergeSessionSummaries(sessions, activeSession);
     },
   },
   actions: {
@@ -113,9 +125,15 @@ export const useAppStore = defineStore("app", {
 
     async loadWorkspaceSessions(workspaceId: string): Promise<void> {
       const sessions = await listWorkspaceSessions(workspaceId);
+      const existing = this.sessionsByWorkspace[workspaceId] ?? [];
+      const activeSession =
+        this.activeSession?.workspaceId === workspaceId && this.activeSession.path
+          ? [toSessionSummary(this.activeSession)]
+          : [];
+
       this.sessionsByWorkspace = {
         ...this.sessionsByWorkspace,
-        [workspaceId]: sessions,
+        [workspaceId]: mergeSessionSummaries(sessions, existing, activeSession),
       };
     },
 
@@ -124,16 +142,50 @@ export const useAppStore = defineStore("app", {
       this.mobileSidebarOpen = false;
     },
 
-    async startSession(workspaceId: string): Promise<void> {
-      const session = await createSession(workspaceId);
-      await this.selectSession(session);
-      await this.loadWorkspaceSessions(workspaceId);
+    updateSessionSummary(session: SessionState): void {
+      if (!session.path) {
+        return;
+      }
+
+      const workspaceSessions = this.sessionsByWorkspace[session.workspaceId] ?? [];
+      this.sessionsByWorkspace = {
+        ...this.sessionsByWorkspace,
+        [session.workspaceId]: mergeSessionSummaries(workspaceSessions, [
+          toSessionSummary(session),
+        ]),
+      };
     },
 
-    async resumeSession(workspaceId: string, sessionPath: string): Promise<void> {
+    async createWorkspace(name: string): Promise<WorkspaceInfo> {
+      const workspace = await createWorkspaceRequest(name);
+      this.workspaces = await listWorkspacesRequest();
+      this.sessionsByWorkspace = {
+        ...this.sessionsByWorkspace,
+        [workspace.id]: [],
+      };
+      this.selectWorkspace(workspace.id);
+      await this.loadWorkspaceSessions(workspace.id);
+      return workspace;
+    },
+
+    async startSession(workspaceId: string): Promise<SessionState> {
+      const session = normalizeSessionState(await createSession(workspaceId));
+      if (!session) {
+        throw new Error("Failed to create session");
+      }
+      await this.selectSession(session);
+      await this.loadWorkspaceSessions(workspaceId);
+      return session;
+    },
+
+    async resumeSession(workspaceId: string, sessionPath: string): Promise<SessionState> {
       try {
-        const session = await openSession(workspaceId, sessionPath);
+        const session = normalizeSessionState(await openSession(workspaceId, sessionPath));
+        if (!session) {
+          throw new Error("Failed to open session");
+        }
         await this.selectSession(session);
+        return session;
       } catch (error) {
         const cached = this.activeSession?.sessionId
           ? await readCachedSession(this.activeSession.sessionId)
@@ -148,8 +200,15 @@ export const useAppStore = defineStore("app", {
     async selectSession(session: SessionState): Promise<void> {
       this.activeSession = session;
       this.selectedWorkspaceId = session.workspaceId;
+      this.updateSessionSummary(session);
       await writeCachedSession(session);
       this.openStream(session.id);
+      this.mobileSidebarOpen = false;
+    },
+
+    clearActiveSession(): void {
+      this.closeStream();
+      this.activeSession = undefined;
       this.mobileSidebarOpen = false;
     },
 
@@ -161,6 +220,7 @@ export const useAppStore = defineStore("app", {
         const event = JSON.parse(message.data) as ServerEvent;
         this.activeSession = applyServerEvent(this.activeSession, event);
         if (this.activeSession) {
+          this.updateSessionSummary(this.activeSession);
           await writeCachedSession(this.activeSession);
         }
         this.connectionState = "online";
@@ -180,8 +240,12 @@ export const useAppStore = defineStore("app", {
       if (!this.activeSession) {
         return;
       }
-      const session = await getSession(this.activeSession.id);
+      const session = normalizeSessionState(await getSession(this.activeSession.id));
+      if (!session) {
+        throw new Error("Failed to refresh session");
+      }
       this.activeSession = session;
+      this.updateSessionSummary(session);
       await writeCachedSession(session);
     },
 
@@ -208,8 +272,27 @@ export const useAppStore = defineStore("app", {
       if (!this.activeSession) {
         return;
       }
-      const session = await setSessionModel(this.activeSession.id, modelId);
+      const session = normalizeSessionState(await setSessionModel(this.activeSession.id, modelId));
+      if (!session) {
+        throw new Error("Failed to update model");
+      }
       this.activeSession = session;
+      this.updateSessionSummary(session);
+      await writeCachedSession(session);
+    },
+
+    async setThinkingLevel(thinkingLevel: string): Promise<void> {
+      if (!this.activeSession) {
+        return;
+      }
+      const session = normalizeSessionState(
+        await setSessionThinkingLevel(this.activeSession.id, thinkingLevel),
+      );
+      if (!session) {
+        throw new Error("Failed to update thinking level");
+      }
+      this.activeSession = session;
+      this.updateSessionSummary(session);
       await writeCachedSession(session);
     },
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { workspaceRoutePath } from "@/client/lib/routes";
 import { useAppStore } from "@/client/stores/app";
 
 const store = useAppStore();
@@ -9,6 +10,90 @@ const router = useRouter();
 
 const handleOffline = () => store.markOffline();
 const handleOnline = () => store.markOnline();
+let syncVersion = 0;
+
+function fallbackWorkspaceRoute(): string | undefined {
+  const workspaceId = store.selectedWorkspaceId ?? store.workspaces[0]?.id;
+  return workspaceId ? workspaceRoutePath(workspaceId) : undefined;
+}
+
+async function syncRouteToStore(): Promise<void> {
+  const version = ++syncVersion;
+
+  if (!store.bootstrapped) {
+    return;
+  }
+
+  if (!store.authenticated) {
+    if (route.path !== "/login") {
+      await router.replace("/login");
+    }
+    return;
+  }
+
+  if (route.path === "/login") {
+    const fallback = fallbackWorkspaceRoute();
+    if (fallback) {
+      await router.replace(fallback);
+    }
+    return;
+  }
+
+  const workspaceId =
+    typeof route.params.workspaceId === "string" ? route.params.workspaceId : undefined;
+  if (!workspaceId) {
+    const fallback = fallbackWorkspaceRoute();
+    if (fallback) {
+      await router.replace(fallback);
+    }
+    return;
+  }
+
+  if (!store.workspaces.some((workspace) => workspace.id === workspaceId)) {
+    const fallback = fallbackWorkspaceRoute();
+    if (fallback) {
+      await router.replace(fallback);
+    }
+    return;
+  }
+
+  if (store.selectedWorkspaceId !== workspaceId) {
+    store.selectWorkspace(workspaceId);
+  }
+
+  await store.loadWorkspaceSessions(workspaceId);
+  if (version !== syncVersion) {
+    return;
+  }
+
+  const sessionId = typeof route.params.sessionId === "string" ? route.params.sessionId : undefined;
+  if (!sessionId) {
+    if (store.activeSession) {
+      store.clearActiveSession();
+    }
+    return;
+  }
+
+  const activeSessionMatches =
+    store.activeSession?.workspaceId === workspaceId && store.activeSession.sessionId === sessionId;
+  if (activeSessionMatches) {
+    return;
+  }
+
+  const session = (store.sessionsByWorkspace[workspaceId] ?? []).find(
+    (candidate) => candidate.sessionId === sessionId,
+  );
+  if (!session?.path) {
+    await router.replace(workspaceRoutePath(workspaceId));
+    return;
+  }
+
+  try {
+    await store.resumeSession(workspaceId, session.path);
+  } catch {
+    await router.replace(workspaceRoutePath(workspaceId));
+  }
+}
 
 onMounted(async () => {
   window.addEventListener("offline", handleOffline);
@@ -25,18 +110,10 @@ watch(
   () => ({
     bootstrapped: store.bootstrapped,
     authenticated: store.authenticated,
-    path: route.path,
+    path: route.fullPath,
   }),
-  ({ bootstrapped, authenticated, path }) => {
-    if (!bootstrapped) {
-      return;
-    }
-    if (!authenticated && path !== "/login") {
-      router.replace("/login");
-    }
-    if (authenticated && path === "/login") {
-      router.replace("/");
-    }
+  () => {
+    void syncRouteToStore();
   },
   { immediate: true },
 );

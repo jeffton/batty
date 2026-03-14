@@ -1,4 +1,5 @@
 import { get, set } from "idb-keyval";
+import { normalizeSessionState } from "@/client/lib/session-state";
 import type { BootstrapPayload, SessionState } from "@/shared/types";
 
 const BOOTSTRAP_KEY = "pi-face:bootstrap";
@@ -16,9 +17,9 @@ export async function writeCachedBootstrap(payload: BootstrapPayload): Promise<v
 }
 
 export async function readCachedSession(sessionId: string): Promise<SessionState | undefined> {
-  return (await get<SessionState>(`pi-face:session:${sessionId}`)) ?? undefined;
+  return normalizeSessionState(await get<SessionState>(`pi-face:session:${sessionId}`));
 }
 
 export async function writeCachedSession(session: SessionState): Promise<void> {
-  await set(`pi-face:session:${session.sessionId}`, cloneForCache(session));
+  await set(`pi-face:session:${session.sessionId}`, cloneForCache(normalizeSessionState(session)));
 }

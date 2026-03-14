@@ -38,6 +38,14 @@ export function listWorkspaces(): Promise<WorkspaceInfo[]> {
   return request("/api/workspaces");
 }
 
+export function createWorkspace(name: string): Promise<WorkspaceInfo> {
+  return request("/api/workspaces", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+}
+
 export function listWorkspaceSessions(workspaceId: string): Promise<SessionSummary[]> {
   return request(`/api/workspaces/${workspaceId}/sessions`);
 }
@@ -67,6 +75,17 @@ export function setSessionModel(sessionId: string, modelId: string): Promise<Ses
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ modelId }),
+  });
+}
+
+export function setSessionThinkingLevel(
+  sessionId: string,
+  thinkingLevel: string,
+): Promise<SessionState> {
+  return request(`/api/sessions/${sessionId}/thinking`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ thinkingLevel }),
   });
 }
 

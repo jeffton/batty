@@ -1,0 +1,46 @@
+{
+  "name": "pi-face",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n client,server \"vp dev\" \"tsx watch src/server/main.ts\"",
+    "dev:client": "vp dev",
+    "dev:server": "tsx watch src/server/main.ts",
+    "build": "vp build && vp pack",
+    "build:client": "vp build",
+    "build:server": "vp pack",
+    "start": "node dist/server/main.mjs",
+    "test": "vp test --run",
+    "check": "vp check",
+    "check:fix": "vp check --fix"
+  },
+  "dependencies": {
+    "@fastify/cookie": "11.0.2",
+    "@fastify/multipart": "9.4.0",
+    "@fastify/static": "9.0.0",
+    "@mariozechner/pi-coding-agent": "0.58.1",
+    "dompurify": "3.3.3",
+    "fastify": "5.8.2",
+    "idb-keyval": "6.2.2",
+    "marked": "17.0.4",
+    "mime-types": "3.0.2",
+    "pinia": "3.0.4",
+    "pinia-plugin-persistedstate": "4.7.1",
+    "vue": "3.5.30",
+    "vue-router": "5.0.3",
+    "workbox-window": "7.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "25.5.0",
+    "@vitejs/plugin-vue": "6.0.5",
+    "@vue/test-utils": "2.4.6",
+    "concurrently": "9.2.1",
+    "happy-dom": "20.8.4",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "vite-plugin-pwa": "1.2.0",
+    "vite-plus": "0.1.11"
+  },
+  "packageManager": "pnpm@10.32.1"
+}

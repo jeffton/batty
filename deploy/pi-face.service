@@ -1,0 +1,15 @@
+[Unit]
+Description=pi-face web UI
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/github/pi-face
+Environment=PI_FACE_HOST=127.0.0.1
+Environment=PI_FACE_PORT=3147
+ExecStart=/usr/bin/env pnpm start
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

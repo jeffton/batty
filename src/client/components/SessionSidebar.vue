@@ -152,7 +152,7 @@ onMounted(() => {
 
 .sidebar__section {
   display: grid;
-  gap: 0.4rem;
+  gap: 0.25rem;
 }
 
 .sidebar__section--sessions {
@@ -161,34 +161,46 @@ onMounted(() => {
 }
 
 .sidebar__section-title {
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: #98a2ad;
 }
 
 .sidebar__workspace,
-.sidebar__action,
 .sidebar__session {
   width: 100%;
   text-align: left;
   border: 0;
   border-radius: 0;
-  background: rgba(27, 33, 42, 0.96);
+  background: transparent;
   color: inherit;
-  padding: 0.55rem 0.6rem;
+  padding: 0.35rem 0 0.35rem 0.55rem;
   display: grid;
+  border-left: 2px solid transparent;
 }
 
-.sidebar__workspace,
 .sidebar__action {
-  gap: 0.15rem;
-  font-size: 0.84rem;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 0.45rem;
+  background: rgba(30, 66, 38, 0.92);
+  color: inherit;
+  padding: 0.5rem 0.65rem;
+  display: grid;
+  gap: 0.1rem;
+  font-size: 0.88rem;
+}
+
+.sidebar__workspace {
+  gap: 0.1rem;
+  font-size: 0.88rem;
 }
 
 .sidebar__session {
-  gap: 0.22rem;
-  font-size: 0.9rem;
+  gap: 0.12rem;
+  font-size: 0.88rem;
   align-content: start;
 }
 
@@ -216,17 +228,15 @@ onMounted(() => {
   min-height: 0;
   overflow: auto;
   display: grid;
-  gap: 0.4rem;
-  padding-right: 0.1rem;
+  gap: 0;
+  padding-right: 0;
   align-content: start;
 }
 
 .is-active {
-  background: rgba(39, 47, 58, 0.98);
-}
-
-.sidebar__action {
-  background: rgba(30, 66, 38, 0.92);
+  background: transparent;
+  border-left-color: rgba(201, 209, 217, 0.7);
+  color: #f8fafc;
 }
 
 @media (max-width: 900px) {

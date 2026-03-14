@@ -188,7 +188,7 @@ watch(
 }
 
 .chat-main__header h2 {
-  font-size: 0.96rem;
+  font-size: 1rem;
 }
 
 .chat-main__heading p {
@@ -205,6 +205,13 @@ watch(
   justify-content: flex-end;
 }
 
+.chat-main__toolbar .pill,
+.chat-main__select,
+.chat-main__logout,
+.chat-main__menu {
+  font-size: 0.88rem;
+}
+
 .chat-main__select,
 .chat-main__logout,
 .chat-main__menu {
@@ -213,7 +220,6 @@ watch(
   background: rgba(22, 27, 34, 0.95);
   color: inherit;
   padding: 0.42rem 0.6rem;
-  font-size: 0.84rem;
 }
 
 .chat-main__context-pill {

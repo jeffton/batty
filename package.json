@@ -19,7 +19,7 @@
     "@fastify/cookie": "11.0.2",
     "@fastify/multipart": "9.4.0",
     "@fastify/static": "9.0.0",
-    "@fontsource/manrope": "5.2.8",
+    "@fontsource/atkinson-hyperlegible-next": "5.2.7",
     "@mariozechner/pi-coding-agent": "0.58.1",
     "dompurify": "3.3.3",
     "fastify": "5.8.2",

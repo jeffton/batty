@@ -4,10 +4,9 @@ import fastify from "fastify";
 import cookie from "@fastify/cookie";
 import multipart from "@fastify/multipart";
 import staticFiles from "@fastify/static";
-import type { MultipartFile } from "@fastify/multipart";
 import { createAuthToken, verifyAuthToken } from "./auth";
 import { loadConfig } from "./config";
-import { PiService } from "./pi-service";
+import { PiService, type UploadedFile } from "./pi-service";
 import { listWorkspaces, resolveWorkspace } from "./workspaces";
 
 const config = loadConfig();
@@ -131,14 +130,17 @@ app.post<{ Params: { sessionId: string }; Body: { modelId: string } }>(
 app.post<{ Params: { sessionId: string } }>(
   "/api/sessions/:sessionId/prompt",
   async (request, reply) => {
-    const files: MultipartFile[] = [];
+    const files: UploadedFile[] = [];
     let text = "";
     let streamingBehavior: "steer" | "followUp" | undefined;
 
     const parts = request.parts();
     for await (const part of parts) {
       if (part.type === "file") {
-        files.push(part);
+        files.push({
+          filename: part.filename,
+          data: await part.toBuffer(),
+        });
       } else if (part.fieldname === "text") {
         text = String(part.value ?? "");
       } else if (part.fieldname === "streamingBehavior") {

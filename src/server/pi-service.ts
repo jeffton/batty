@@ -1,9 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { pipeline } from "node:stream/promises";
-import { createWriteStream } from "node:fs";
-import type { MultipartFile } from "@fastify/multipart";
+export interface UploadedFile {
+  filename: string;
+  data: Buffer;
+}
 import {
   AuthStorage,
   createAgentSession,
@@ -206,7 +207,7 @@ export class PiService {
   async prompt(
     sessionId: string,
     text: string,
-    files: MultipartFile[],
+    files: UploadedFile[],
     streamingBehavior?: "steer" | "followUp",
   ): Promise<void> {
     const webSession = this.requireSession(sessionId);
@@ -332,7 +333,7 @@ export class PiService {
 
   private async preparePromptFiles(
     sessionId: string,
-    files: MultipartFile[],
+    files: UploadedFile[],
   ): Promise<{ text: string; images: Array<{ type: "image"; mimeType: string; data: string }> }> {
     if (files.length === 0) {
       return { text: "", images: [] };
@@ -344,7 +345,7 @@ export class PiService {
     const savedPaths: string[] = [];
     for (const file of files) {
       const targetPath = path.join(sessionDir, sanitizeFileName(file.filename || "attachment.bin"));
-      await pipeline(file.file, createWriteStream(targetPath));
+      await fs.writeFile(targetPath, file.data);
       savedPaths.push(targetPath);
     }
 

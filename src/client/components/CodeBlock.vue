@@ -32,8 +32,8 @@ const highlighted = computed(() => highlightCode(props.code, props.language));
   overflow-wrap: anywhere;
   padding: 0.7rem 0.8rem;
   border-radius: 0.45rem;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(2, 6, 23, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(17, 21, 28, 0.92);
   color: #dbe4ee;
   line-height: 1.45;
 }

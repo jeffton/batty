@@ -119,7 +119,7 @@ onMounted(() => {
   border-radius: 0;
   box-shadow: none;
   backdrop-filter: none;
-  background: rgba(19, 24, 32, 0.98);
+  background: rgba(25, 30, 39, 0.98);
 }
 
 .sidebar__header {

@@ -17,6 +17,9 @@ importers:
       '@fastify/static':
         specifier: 9.0.0
         version: 9.0.0
+      '@fontsource/manrope':
+        specifier: 5.2.8
+        version: 5.2.8
       '@mariozechner/pi-coding-agent':
         specifier: 0.58.1
         version: 0.58.1(ws@8.19.0)(zod@4.3.6)
@@ -924,6 +927,9 @@ packages:
 
   '@fastify/static@9.0.0':
     resolution: {integrity: sha512-r64H8Woe/vfilg5RTy7lwWlE8ZZcTrc3kebYFMEUBrMqlydhQyoiExQXdYAy2REVpST/G35+stAM8WYp1WGmMA==}
+
+  '@fontsource/manrope@5.2.8':
+    resolution: {integrity: sha512-gJHJmcuUk7qWcNCfcAri/DJQtXtBYqi9yKratr4jXhSo0I3xUtNNKI+igQIcw5c+m95g0vounk8ZnX/kb8o0TA==}
 
   '@google/genai@1.45.0':
     resolution: {integrity: sha512-+sNRWhKiRibVgc4OKi7aBJJ0A7RcoVD8tGG+eFkqxAWRjASDW+ktS9lLwTDnAxZICzCVoeAdu8dYLJVTX60N9w==}
@@ -5221,6 +5227,8 @@ snapshots:
       fastify-plugin: 5.1.0
       fastq: 1.20.1
       glob: 13.0.6
+
+  '@fontsource/manrope@5.2.8': {}
 
   '@google/genai@1.45.0':
     dependencies:

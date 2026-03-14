@@ -91,8 +91,8 @@ const genericEntries = computed(() => {
   gap: 0.45rem;
   padding: 0.45rem 0.55rem;
   border-radius: 0.45rem;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(36, 41, 51, 0.72);
 }
 
 .tool-call--compact {

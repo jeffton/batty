@@ -58,8 +58,8 @@ function imageUrl(block: Extract<UiContentBlock, { type: "image" }>): string {
   display: grid;
   gap: 0.45rem;
   border-radius: 0.5rem;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  background: rgba(22, 27, 34, 0.36);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(31, 36, 45, 0.82);
 }
 
 .tool-card__header {

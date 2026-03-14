@@ -171,7 +171,7 @@ watch(
   border-radius: 0;
   box-shadow: none;
   backdrop-filter: none;
-  background: rgba(20, 25, 33, 0.96);
+  background: rgba(26, 31, 40, 0.98);
 }
 
 .chat-main__heading {

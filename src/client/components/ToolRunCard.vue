@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import CodeBlock from "@/client/components/CodeBlock.vue";
+import MarkdownBlock from "@/client/components/MarkdownBlock.vue";
 import ToolCallBlock from "@/client/components/ToolCallBlock.vue";
 import type { ActiveToolRun, UiContentBlock } from "@/shared/types";
 
@@ -27,11 +29,19 @@ function imageUrl(block: Extract<UiContentBlock, { type: "image" }>): string {
       :key="`${props.tool.toolCallId}-${index}`"
       class="tool-card__block"
     >
-      <div v-if="block.type === 'text'" class="tool-card__text">{{ block.text }}</div>
+      <CodeBlock
+        v-if="block.type === 'text' && props.tool.toolName === 'bash'"
+        :code="block.text"
+        language="bash"
+        compact
+      />
+      <div v-else-if="block.type === 'text'" class="tool-card__text">{{ block.text }}</div>
       <img v-else-if="block.type === 'image'" :src="imageUrl(block)" alt="Tool output" />
-      <div v-else-if="block.type === 'thinking'" class="tool-card__thinking">
-        {{ block.thinking }}
-      </div>
+      <MarkdownBlock
+        v-else-if="block.type === 'thinking'"
+        :text="block.thinking"
+        variant="thinking"
+      />
       <ToolCallBlock
         v-else-if="block.type === 'toolCall'"
         :name="block.name"
@@ -60,18 +70,12 @@ function imageUrl(block: Extract<UiContentBlock, { type: "image" }>): string {
   font-size: 0.78rem;
 }
 
-.tool-card__text,
-.tool-card__thinking {
+.tool-card__text {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: #cbd5e1;
   line-height: 1.45;
-}
-
-.tool-card__thinking {
-  color: #94a3b8;
-  font-style: italic;
 }
 
 .tool-card img {

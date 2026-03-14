@@ -3,9 +3,15 @@ import { computed } from "vue";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 
-const props = defineProps<{
-  text: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    text: string;
+    variant?: "default" | "thinking";
+  }>(),
+  {
+    variant: "default",
+  },
+);
 
 marked.setOptions({
   breaks: true,
@@ -16,10 +22,14 @@ const html = computed(() => DOMPurify.sanitize(marked.parse(props.text) as strin
 </script>
 
 <template>
-  <div class="markdown-body" v-html="html" />
+  <div :class="['markdown-body', `markdown-body--${props.variant}`]" v-html="html" />
 </template>
 
 <style scoped>
+.markdown-body {
+  min-width: 0;
+}
+
 .markdown-body :deep(p) {
   margin: 0 0 0.55rem;
 }
@@ -64,5 +74,18 @@ const html = computed(() => DOMPurify.sanitize(marked.parse(props.text) as strin
 .markdown-body :deep(img) {
   max-width: 100%;
   border-radius: 0.5rem;
+}
+
+.markdown-body--thinking {
+  color: #94a3b8;
+  opacity: 0.94;
+}
+
+.markdown-body--thinking :deep(em) {
+  font-style: normal;
+}
+
+.markdown-body--thinking :deep(strong) {
+  color: #c6d2df;
 }
 </style>

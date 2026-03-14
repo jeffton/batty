@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 const props = defineProps<{
   disabled?: boolean;
@@ -13,8 +13,10 @@ const emit = defineEmits<{
 
 const text = ref("");
 const fileInput = ref<HTMLInputElement>();
+const textarea = ref<HTMLTextAreaElement>();
 const files = ref<File[]>([]);
 const dragging = ref(false);
+const maxInputHeight = ref(240);
 
 const hasPayload = computed(() => text.value.trim().length > 0 || files.value.length > 0);
 
@@ -26,9 +28,32 @@ function removeFile(index: number): void {
   files.value.splice(index, 1);
 }
 
+function syncTextareaHeight(): void {
+  const element = textarea.value;
+  if (!element) {
+    return;
+  }
+
+  element.style.height = "auto";
+  const nextHeight = Math.min(element.scrollHeight, maxInputHeight.value);
+  element.style.height = `${Math.max(nextHeight, 56)}px`;
+  element.style.overflowY = element.scrollHeight > maxInputHeight.value ? "auto" : "hidden";
+}
+
+function updateMaxInputHeight(): void {
+  if (typeof window === "undefined") {
+    maxInputHeight.value = 240;
+    return;
+  }
+
+  maxInputHeight.value = Math.min(Math.max(Math.round(window.innerHeight * 0.34), 160), 320);
+  syncTextareaHeight();
+}
+
 function clear(): void {
   text.value = "";
   files.value = [];
+  void nextTick(syncTextareaHeight);
 }
 
 function submit(): void {
@@ -54,6 +79,19 @@ function onDrop(event: DragEvent): void {
     addFiles(event.dataTransfer.files);
   }
 }
+
+watch(text, () => {
+  void nextTick(syncTextareaHeight);
+});
+
+onMounted(() => {
+  updateMaxInputHeight();
+  window.addEventListener("resize", updateMaxInputHeight);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", updateMaxInputHeight);
+});
 </script>
 
 <template>
@@ -77,11 +115,13 @@ function onDrop(event: DragEvent): void {
     <div class="composer__row">
       <button class="composer__plus" type="button" @click="fileInput?.click()">+</button>
       <textarea
+        ref="textarea"
         v-model="text"
         class="composer__input"
-        rows="3"
+        rows="1"
         placeholder="Ask Pi to code, read files, run tests, or mutate reality a tiny bit."
         :disabled="props.disabled"
+        @input="syncTextareaHeight"
         @keydown.enter.exact.prevent="submit"
       />
       <div class="composer__actions">
@@ -122,11 +162,15 @@ function onDrop(event: DragEvent): void {
   padding: 0.55rem 0.65rem;
   display: grid;
   gap: 0.5rem;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  background: rgba(18, 22, 29, 0.96);
 }
 
 .is-dragging {
-  border-color: rgba(255, 255, 255, 0.18);
-  background: rgba(33, 38, 45, 0.9);
+  background: rgba(33, 38, 45, 0.96);
 }
 
 .composer__row {
@@ -149,7 +193,6 @@ function onDrop(event: DragEvent): void {
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(22, 27, 34, 0.9);
   color: inherit;
-  border-radius: 0.45rem;
   font-size: 0.84rem;
 }
 
@@ -164,15 +207,14 @@ function onDrop(event: DragEvent): void {
 
 .composer__input {
   width: 100%;
-  resize: vertical;
-  min-height: 4.2rem;
-  max-height: 12rem;
-  border-radius: 0.45rem;
+  resize: none;
+  min-height: 3.5rem;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(13, 17, 23, 0.62);
+  background: rgba(13, 17, 23, 0.72);
   color: inherit;
   padding: 0.6rem 0.65rem;
   font-size: 0.88rem;
+  line-height: 1.45;
 }
 
 .composer__actions {

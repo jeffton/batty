@@ -100,11 +100,9 @@ const genericEntries = computed(() => {
 }
 
 .tool-call__header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.6rem;
-  flex-wrap: wrap;
+  display: grid;
+  justify-items: start;
+  gap: 0.18rem;
 }
 
 .tool-call__name {
@@ -117,7 +115,7 @@ const genericEntries = computed(() => {
   overflow-wrap: anywhere;
   color: #9fc7ff;
   background: rgba(15, 23, 42, 0.65);
-  border-radius: 0.35rem;
+  border-radius: 0.2rem;
   padding: 0.12rem 0.35rem;
 }
 

@@ -54,9 +54,23 @@ function messageLabel(message: UiMessage): string {
           v-if="block.type === 'text' && props.message.role === 'assistant'"
           :text="block.text"
         />
+        <CodeBlock
+          v-else-if="
+            block.type === 'text' &&
+            props.message.role === 'toolResult' &&
+            props.message.toolName === 'bash'
+          "
+          :code="block.text"
+          language="bash"
+          compact
+        />
         <div v-else-if="block.type === 'text'" class="message__text">{{ block.text }}</div>
         <img v-else-if="block.type === 'image'" :src="imageUrl(block)" alt="Message attachment" />
-        <div v-else-if="block.type === 'thinking'" class="thinking-block">{{ block.thinking }}</div>
+        <MarkdownBlock
+          v-else-if="block.type === 'thinking'"
+          :text="block.thinking"
+          variant="thinking"
+        />
         <ToolCallBlock
           v-else-if="block.type === 'toolCall'"
           :name="block.name"
@@ -107,24 +121,14 @@ function messageLabel(message: UiMessage): string {
   min-width: 0;
 }
 
-.message__text,
-.thinking-block {
+.message__text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-
-.message__text {
   line-height: 1.45;
 }
 
 img {
   max-width: min(100%, 32rem);
   border-radius: 0.45rem;
-}
-
-.thinking-block {
-  color: #94a3b8;
-  font-style: italic;
-  opacity: 0.9;
 }
 </style>

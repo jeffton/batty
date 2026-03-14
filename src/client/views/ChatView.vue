@@ -167,6 +167,11 @@ watch(
   gap: 0.65rem;
   align-items: center;
   justify-content: space-between;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  background: rgba(20, 25, 33, 0.96);
 }
 
 .chat-main__heading {
@@ -239,6 +244,11 @@ watch(
   gap: 0.5rem;
   align-content: start;
   scroll-padding-bottom: 0.6rem;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  background: rgba(16, 20, 27, 0.98);
 }
 
 @media (max-width: 900px) {

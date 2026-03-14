@@ -115,6 +115,11 @@ onMounted(() => {
   gap: 0.6rem;
   grid-template-rows: auto auto minmax(0, 1fr);
   overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  background: rgba(19, 24, 32, 0.98);
 }
 
 .sidebar__header {
@@ -167,9 +172,9 @@ onMounted(() => {
 .sidebar__session {
   width: 100%;
   text-align: left;
-  border-radius: 0.45rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(22, 27, 34, 0.72);
+  border: 0;
+  border-radius: 0;
+  background: rgba(27, 33, 42, 0.96);
   color: inherit;
   padding: 0.55rem 0.6rem;
   display: grid;
@@ -217,12 +222,11 @@ onMounted(() => {
 }
 
 .is-active {
-  border-color: rgba(255, 255, 255, 0.16);
-  background: rgba(33, 38, 45, 0.86);
+  background: rgba(39, 47, 58, 0.98);
 }
 
 .sidebar__action {
-  background: rgba(46, 160, 67, 0.12);
+  background: rgba(30, 66, 38, 0.92);
 }
 
 @media (max-width: 900px) {

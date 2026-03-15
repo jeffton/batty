@@ -31,6 +31,7 @@ let syncVersion = 0;
 let versionTimer: ReturnType<typeof window.setInterval> | undefined;
 let visualViewport: VisualViewport | null = null;
 let viewportListener: (() => void) | null = null;
+let windowScrollListener: (() => void) | null = null;
 
 function isIOSDevice(): boolean {
   const ua = navigator.userAgent;
@@ -49,16 +50,26 @@ function updateIOSViewportHeight(): void {
 
   const viewportHeight = Math.round(visualViewport.height);
   const fullHeight = Math.round(window.innerHeight);
-  const keyboardOpen = fullHeight - viewportHeight > IOS_KEYBOARD_THRESHOLD_PX;
+  const pageScroll = Math.max(
+    0,
+    Math.round(window.scrollY),
+    Math.round(document.documentElement.scrollTop),
+    Math.round(document.body?.scrollTop ?? 0),
+  );
+  const nextHeight = Math.max(0, Math.min(viewportHeight, fullHeight - pageScroll));
+  const keyboardOpen = pageScroll > 0 || fullHeight - nextHeight > IOS_KEYBOARD_THRESHOLD_PX;
 
-  if (Math.abs(fullHeight - viewportHeight) < 2) {
+  if (Math.abs(fullHeight - nextHeight) < 2) {
     document.documentElement.style.removeProperty("--app-height");
   } else {
-    document.documentElement.style.setProperty("--app-height", `${viewportHeight}px`);
+    document.documentElement.style.setProperty("--app-height", `${nextHeight}px`);
   }
 
   document.documentElement.classList.toggle("ios-keyboard-open", keyboardOpen);
-  window.scrollTo(0, 0);
+
+  if (pageScroll > 0) {
+    window.scrollTo(0, 0);
+  }
 }
 
 function fallbackWorkspaceRoute(): string | undefined {
@@ -154,9 +165,13 @@ onMounted(async () => {
     viewportListener = () => {
       updateIOSViewportHeight();
     };
+    windowScrollListener = () => {
+      updateIOSViewportHeight();
+    };
 
     visualViewport.addEventListener("resize", viewportListener);
     visualViewport.addEventListener("scroll", viewportListener);
+    window.addEventListener("scroll", windowScrollListener, { passive: true });
     updateIOSViewportHeight();
   }
 
@@ -176,6 +191,9 @@ onUnmounted(() => {
   if (visualViewport && viewportListener) {
     visualViewport.removeEventListener("resize", viewportListener);
     visualViewport.removeEventListener("scroll", viewportListener);
+  }
+  if (windowScrollListener) {
+    window.removeEventListener("scroll", windowScrollListener);
   }
 
   document.documentElement.style.removeProperty("--app-height");

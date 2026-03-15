@@ -167,13 +167,10 @@ textarea {
 
 .app-shell {
   width: 100%;
-  height: var(--app-height, 100%);
-  min-height: var(--app-height, 100dvh);
+  height: 100vh;
+  height: var(--app-height, 100dvh);
+  overflow: hidden;
   background: var(--color-bg-app);
-}
-
-.ios-keyboard-open .chat-main__header {
-  display: none;
 }
 
 .center-panel {

@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd /root/github/pi-face
 
-delay_seconds="${1:-5}"
+delay_seconds="${1:-20}"
 unit="pi-face-reload-$(date +%s)"
 
 systemd-run \

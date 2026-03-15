@@ -117,6 +117,7 @@ export interface ModelOption {
 
 export interface BootstrapPayload {
   authenticated: boolean;
+  buildId: string;
   workspaces: WorkspaceInfo[];
   models: ModelOption[];
   activeSession?: SessionState;

@@ -8,9 +8,26 @@ const store = useAppStore();
 const route = useRoute();
 const router = useRouter();
 
+const VERSION_CHECK_INTERVAL_MS = 15000;
+
 const handleOffline = () => store.markOffline();
-const handleOnline = () => store.markOnline();
+const handleOnline = async () => {
+  store.markOnline();
+  await store.checkForClientUpdate();
+};
+const handleVisibilityChange = async () => {
+  if (document.visibilityState === "visible" && navigator.onLine) {
+    await store.checkForClientUpdate();
+  }
+};
+const onOnline = () => {
+  void handleOnline();
+};
+const onVisibilityChange = () => {
+  void handleVisibilityChange();
+};
 let syncVersion = 0;
+let versionTimer: ReturnType<typeof window.setInterval> | undefined;
 
 function fallbackWorkspaceRoute(): string | undefined {
   const workspaceId = store.selectedWorkspaceId ?? store.workspaces[0]?.id;
@@ -97,13 +114,23 @@ async function syncRouteToStore(): Promise<void> {
 
 onMounted(async () => {
   window.addEventListener("offline", handleOffline);
-  window.addEventListener("online", handleOnline);
+  window.addEventListener("online", onOnline);
+  document.addEventListener("visibilitychange", onVisibilityChange);
   await store.bootstrap();
+  versionTimer = window.setInterval(() => {
+    if (navigator.onLine) {
+      void store.checkForClientUpdate();
+    }
+  }, VERSION_CHECK_INTERVAL_MS);
 });
 
 onUnmounted(() => {
   window.removeEventListener("offline", handleOffline);
-  window.removeEventListener("online", handleOnline);
+  window.removeEventListener("online", onOnline);
+  document.removeEventListener("visibilitychange", onVisibilityChange);
+  if (versionTimer) {
+    window.clearInterval(versionTimer);
+  }
 });
 
 watch(

@@ -7,7 +7,12 @@ import App from "@/client/App.vue";
 import { router } from "@/client/router";
 import "@/client/styles.css";
 
-registerSW({ immediate: true });
+const updateSW = registerSW({
+  immediate: true,
+  onNeedRefresh() {
+    void updateSW(true);
+  },
+});
 
 if (!("anchorName" in document.documentElement.style)) {
   await polyfillAnchorPositioning();

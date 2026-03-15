@@ -20,6 +20,10 @@ export function getBootstrap(): Promise<BootstrapPayload> {
   return request("/api/bootstrap");
 }
 
+export function getVersion(): Promise<{ buildId: string }> {
+  return request("/api/version");
+}
+
 export function login(password: string): Promise<{ ok: true }> {
   return request("/api/login", {
     method: "POST",

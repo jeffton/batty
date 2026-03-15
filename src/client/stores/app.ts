@@ -5,6 +5,7 @@ import {
   createWorkspace as createWorkspaceRequest,
   getBootstrap,
   getSession,
+  getVersion,
   listWorkspaceSessions,
   listWorkspaces as listWorkspacesRequest,
   login as loginRequest,
@@ -39,6 +40,7 @@ export const useAppStore = defineStore("app", {
   state: () => ({
     authenticated: false,
     bootstrapped: false,
+    buildId: undefined as string | undefined,
     connectionState: "online" as "online" | "offline" | "connecting",
     workspaces: [] as WorkspaceInfo[],
     models: [] as ModelOption[],
@@ -90,6 +92,7 @@ export const useAppStore = defineStore("app", {
 
     applyBootstrap(payload: BootstrapPayload): void {
       this.authenticated = payload.authenticated;
+      this.buildId = payload.buildId;
       this.workspaces = payload.workspaces;
       this.models = payload.models;
       this.selectedWorkspaceId = this.selectedWorkspaceId ?? payload.workspaces[0]?.id;
@@ -314,6 +317,19 @@ export const useAppStore = defineStore("app", {
       }
       await abortSession(this.activeSession.id);
       await this.refreshActiveSession();
+    },
+
+    async checkForClientUpdate(): Promise<void> {
+      if (!this.bootstrapped) {
+        return;
+      }
+
+      const currentBuildId = this.buildId;
+      const { buildId } = await getVersion();
+      this.buildId = buildId;
+      if (currentBuildId && currentBuildId !== buildId) {
+        window.location.reload();
+      }
     },
 
     markOffline(): void {

@@ -5,6 +5,7 @@ import cookie from "@fastify/cookie";
 import multipart from "@fastify/multipart";
 import staticFiles from "@fastify/static";
 import { createAuthToken, verifyAuthToken } from "./auth";
+import { readBuildId } from "./build-id";
 import { loadConfig } from "./config";
 import { PiService, type UploadedFile } from "./pi-service";
 import { createWorkspace, listWorkspaces, resolveWorkspace } from "./workspaces";
@@ -25,6 +26,7 @@ const hasBuiltClient = await fs
   .access(path.join(config.publicDir, "index.html"))
   .then(() => true)
   .catch(() => false);
+const buildId = await readBuildId(config.publicDir);
 
 if (hasBuiltClient) {
   await app.register(staticFiles, {
@@ -60,7 +62,7 @@ app.addHook("onRequest", async (request, reply) => {
   request.auth = isAuthenticated(request.cookies[config.cookieName]);
 
   if (request.url.startsWith("/api") && request.url !== "/api/login" && !request.auth) {
-    if (request.url === "/api/bootstrap") {
+    if (request.url === "/api/bootstrap" || request.url === "/api/version") {
       return;
     }
     reply.code(401).send({ error: "Authentication required" });
@@ -93,10 +95,13 @@ app.get("/api/bootstrap", async (request) => {
   const authenticated = request.auth;
   return {
     authenticated,
+    buildId,
     workspaces: authenticated ? await listWorkspaces(config) : [],
     models: authenticated ? await service.listModels() : [],
   };
 });
+
+app.get("/api/version", async () => ({ buildId }));
 
 app.get("/api/workspaces", async () => {
   return listWorkspaces(config);

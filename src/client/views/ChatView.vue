@@ -189,14 +189,27 @@ async function waitForTranscriptLayout(): Promise<void> {
 }
 
 async function scrollToBottom(behavior: ScrollBehavior = "auto"): Promise<void> {
-  const handle = transcript.value;
   const lastIndex = transcriptEntries.value.length - 1;
-  if (!handle || lastIndex < 0) {
+  if (lastIndex < 0) {
     return;
   }
 
   await waitForTranscriptLayout();
-  transcript.value?.scrollToIndex(lastIndex, {
+
+  let handle = transcript.value;
+  if (!handle) {
+    return;
+  }
+
+  for (let attempts = 0; attempts < 4 && handle.viewportSize === 0; attempts += 1) {
+    await nextAnimationFrame();
+    handle = transcript.value;
+    if (!handle) {
+      return;
+    }
+  }
+
+  handle.scrollToIndex(lastIndex, {
     align: "end",
     smooth: behavior === "smooth",
   });
@@ -258,6 +271,7 @@ watch(
 
     void scrollToBottom(store.activeSession?.isStreaming ? "auto" : "smooth");
   },
+  { flush: "post" },
 );
 </script>
 

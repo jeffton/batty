@@ -38,6 +38,10 @@ interface PushNotificationPayload {
   };
 }
 
+function isBase64Url(value: string): boolean {
+  return /^[A-Za-z0-9_-]+$/.test(value);
+}
+
 function isSubscription(candidate: unknown): candidate is StoredPushSubscription {
   if (!candidate || typeof candidate !== "object") {
     return false;
@@ -48,6 +52,8 @@ function isSubscription(candidate: unknown): candidate is StoredPushSubscription
     typeof subscription.endpoint === "string" &&
     typeof subscription.keys?.p256dh === "string" &&
     typeof subscription.keys?.auth === "string" &&
+    isBase64Url(subscription.keys.p256dh) &&
+    isBase64Url(subscription.keys.auth) &&
     (typeof subscription.expirationTime === "number" || subscription.expirationTime === null) &&
     typeof subscription.createdAt === "number" &&
     typeof subscription.updatedAt === "number"
@@ -78,7 +84,9 @@ function toStoredPushSubscription(
   if (
     typeof subscription.endpoint !== "string" ||
     typeof subscription.keys?.p256dh !== "string" ||
-    typeof subscription.keys?.auth !== "string"
+    typeof subscription.keys?.auth !== "string" ||
+    !isBase64Url(subscription.keys.p256dh) ||
+    !isBase64Url(subscription.keys.auth)
   ) {
     throw new Error("Invalid push subscription");
   }
@@ -102,6 +110,10 @@ function toWebPushSubscription(subscription: StoredPushSubscription): webpush.Pu
     expirationTime: subscription.expirationTime,
     keys: subscription.keys,
   };
+}
+
+function isInvalidSubscriptionError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("Unsupported characters set");
 }
 
 function sessionUrl(session: SessionState): string {
@@ -194,7 +206,7 @@ export class WebPushService {
             typeof error === "object" && error && "statusCode" in error
               ? Number((error as { statusCode?: unknown }).statusCode)
               : undefined;
-          if (statusCode === 404 || statusCode === 410) {
+          if (statusCode === 404 || statusCode === 410 || isInvalidSubscriptionError(error)) {
             staleEndpoints.add(subscription.endpoint);
             return;
           }

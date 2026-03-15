@@ -359,7 +359,11 @@ export class PiService {
         const state = this.getState(webSession.id);
         this.publish(webSession, { type: "state", state });
         if (event.type === "agent_end") {
-          await this.onAgentCompleted?.(state);
+          try {
+            await this.onAgentCompleted?.(state);
+          } catch (error) {
+            console.error("Failed to run agent completion hook", error);
+          }
         }
         break;
       }

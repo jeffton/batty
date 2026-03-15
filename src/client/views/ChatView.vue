@@ -49,11 +49,21 @@ const activeAssistantMessage = computed(() =>
 const activeAssistantToolStates = computed(() =>
   toolStatesForMessage(activeAssistantMessage.value, toolStateLookup.value.toolStatesByCallId),
 );
-const connectionClass = computed(() => `status-${store.connectionState}`);
+const connectionLabel = computed(() => store.connectionState);
+const connectionDescription = computed(() => {
+  switch (store.connectionState) {
+    case "online":
+      return "Connected";
+    case "connecting":
+      return "Connecting";
+    default:
+      return "Offline";
+  }
+});
 const contextUsageLabel = computed(() => {
   const session = store.activeSession;
   if (!session) {
-    return "ctx --";
+    return "ctx ?/? · ?";
   }
 
   const tokens = session.contextTokens;
@@ -64,6 +74,31 @@ const contextUsageLabel = computed(() => {
   const percentLabel = percent == null ? "?" : `${percent.toFixed(1)}%`;
 
   return `ctx ${tokensLabel}/${windowLabel} · ${percentLabel}`;
+});
+const contextPercentValue = computed(() => {
+  const percent = store.activeSession?.contextPercent;
+  if (typeof percent !== "number" || !Number.isFinite(percent)) {
+    return 0;
+  }
+  return Math.min(100, Math.max(0, percent));
+});
+const contextArcStyle = computed(() => {
+  const radius = 15.9155;
+  const circumference = 2 * Math.PI * radius;
+  const progress = circumference * (contextPercentValue.value / 100);
+
+  return {
+    strokeDasharray: `${progress} ${circumference}`,
+  };
+});
+const contextArcClass = computed(() => {
+  if (contextPercentValue.value >= 90) {
+    return "chat-main__context-arc--danger";
+  }
+  if (contextPercentValue.value >= 70) {
+    return "chat-main__context-arc--warn";
+  }
+  return "chat-main__context-arc--good";
 });
 
 function thinkingLabel(value: string): string {
@@ -120,8 +155,34 @@ watch(
           </p>
         </div>
         <div class="chat-main__toolbar">
-          <span :class="['pill', connectionClass]">{{ store.connectionState }}</span>
-          <span class="pill chat-main__context-pill">{{ contextUsageLabel }}</span>
+          <span class="chat-main__status" :aria-label="connectionDescription">
+            <span
+              :class="['chat-main__status-dot', `chat-main__status-dot--${store.connectionState}`]"
+            />
+            <span class="chat-main__status-label">{{ connectionLabel }}</span>
+          </span>
+          <div
+            class="chat-main__context"
+            :aria-label="contextUsageLabel"
+            :title="contextUsageLabel"
+          >
+            <svg class="chat-main__context-chart" viewBox="0 0 36 36" aria-hidden="true">
+              <path
+                class="chat-main__context-track"
+                d="M18 2.0845
+                  a 15.9155 15.9155 0 0 1 0 31.831
+                  a 15.9155 15.9155 0 0 1 0 -31.831"
+              />
+              <path
+                :class="['chat-main__context-arc', contextArcClass]"
+                :style="contextArcStyle"
+                d="M18 2.0845
+                  a 15.9155 15.9155 0 0 1 0 31.831
+                  a 15.9155 15.9155 0 0 1 0 -31.831"
+              />
+            </svg>
+            <span class="chat-main__context-label">{{ contextUsageLabel }}</span>
+          </div>
           <select v-model="modelId" class="chat-main__select" :disabled="!store.activeSession">
             <option value="">Select model</option>
             <option v-for="model in store.models" :key="model.id" :value="model.id">
@@ -240,14 +301,15 @@ watch(
 .chat-main__toolbar {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.55rem;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
 
-.chat-main__toolbar .pill,
 .chat-main__select,
-.chat-main__menu {
+.chat-main__menu,
+.chat-main__status,
+.chat-main__context {
   font-size: 0.88rem;
 }
 
@@ -260,12 +322,89 @@ watch(
   padding: 0.42rem 0.6rem;
 }
 
-.chat-main__context-pill {
-  white-space: nowrap;
-}
-
 .chat-main__menu {
   display: none;
+}
+
+.chat-main__status,
+.chat-main__context {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  color: #c5ced8;
+}
+
+.chat-main__status {
+  text-transform: lowercase;
+}
+
+.chat-main__status-dot {
+  width: 0.62rem;
+  height: 0.62rem;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 0 12px currentColor;
+}
+
+.chat-main__status-dot--online {
+  color: #22c55e;
+  background: #22c55e;
+}
+
+.chat-main__status-dot--connecting {
+  color: #a3a3a3;
+  background: #a3a3a3;
+}
+
+.chat-main__status-dot--offline {
+  color: #f59e0b;
+  background: #f59e0b;
+}
+
+.chat-main__context {
+  min-width: 0;
+}
+
+.chat-main__context-chart {
+  width: 1.2rem;
+  height: 1.2rem;
+  flex: 0 0 auto;
+  transform: rotate(-90deg);
+}
+
+.chat-main__context-track,
+.chat-main__context-arc {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.chat-main__context-track {
+  stroke: rgba(255, 255, 255, 0.12);
+}
+
+.chat-main__context-arc {
+  transition:
+    stroke-dasharray 180ms ease,
+    stroke 180ms ease;
+}
+
+.chat-main__context-arc--good {
+  stroke: #22c55e;
+}
+
+.chat-main__context-arc--warn {
+  stroke: #f59e0b;
+}
+
+.chat-main__context-arc--danger {
+  stroke: #ef4444;
+}
+
+.chat-main__context-label {
+  white-space: nowrap;
 }
 
 .chat-main__empty {
@@ -332,8 +471,9 @@ watch(
     min-width: 0;
   }
 
-  .chat-main__toolbar .pill,
-  .chat-main__select {
+  .chat-main__select,
+  .chat-main__context,
+  .chat-main__status {
     width: 100%;
   }
 }

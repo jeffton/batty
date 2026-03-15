@@ -80,7 +80,11 @@ const visibleResultBlocks = computed(() => {
   }
 
   if (props.name === "bash") {
-    return props.resultBlocks.filter((block) => block.type !== "text");
+    if (commandValue.value) {
+      return props.resultBlocks.filter((block) => block.type !== "text");
+    }
+
+    return props.resultBlocks;
   }
 
   return props.resultBlocks;
@@ -91,7 +95,7 @@ const showResultSection = computed(() => {
   }
 
   if (props.name === "bash") {
-    return visibleResultBlocks.value.length > 0;
+    return !bashDisplay.value ? hasResultContent.value : visibleResultBlocks.value.length > 0;
   }
 
   return props.status === "error" || hasResultContent.value;
@@ -152,7 +156,13 @@ const genericEntries = computed(() => {
 
     <div v-if="showResultSection" class="tool-call__result">
       <template v-for="(block, index) in visibleResultBlocks" :key="`${props.name}-${index}`">
-        <div v-if="block.type === 'text'" class="tool-call__text">{{ block.text }}</div>
+        <CodeBlock
+          v-if="block.type === 'text' && props.name === 'bash'"
+          :code="block.text"
+          language="bash"
+          :compact="props.compact"
+        />
+        <div v-else-if="block.type === 'text'" class="tool-call__text">{{ block.text }}</div>
         <img v-else-if="block.type === 'image'" :src="imageUrl(block)" alt="Tool output" />
         <MarkdownBlock
           v-else-if="block.type === 'thinking'"

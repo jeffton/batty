@@ -32,10 +32,10 @@ const highlighted = computed(() => highlightCode(props.code, props.language));
   overflow-wrap: anywhere;
   word-break: break-word;
   overflow-x: hidden;
-  padding: 0.7rem 0.8rem;
-  border-radius: 0.45rem;
-  border: 1px solid var(--color-code-border);
-  background: var(--color-code-bg);
+  padding: 0;
+  border-radius: 0;
+  border: 0;
+  background: transparent;
   color: var(--color-code-text);
   line-height: 1.45;
 }
@@ -46,12 +46,10 @@ const highlighted = computed(() => highlightCode(props.code, props.language));
 
 .code-block--insert {
   background: color-mix(in srgb, var(--color-success) 16%, transparent);
-  border-color: color-mix(in srgb, var(--color-success) 22%, transparent);
 }
 
 .code-block--delete {
   background: color-mix(in srgb, var(--color-error) 16%, transparent);
-  border-color: color-mix(in srgb, var(--color-error) 20%, transparent);
 }
 
 .code-block :deep(.hljs-comment),

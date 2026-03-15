@@ -58,10 +58,10 @@ const lineNumberWidth = computed(() =>
 <style scoped>
 .diff-block {
   margin: 0;
-  padding: 0.7rem 0.8rem;
-  border-radius: 0.45rem;
-  border: 1px solid var(--color-code-border);
-  background: var(--color-code-bg);
+  padding: 0;
+  border-radius: 0;
+  border: 0;
+  background: transparent;
   color: var(--color-code-text);
   overflow-x: hidden;
   overflow-y: auto;

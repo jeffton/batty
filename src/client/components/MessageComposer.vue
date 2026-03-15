@@ -117,22 +117,6 @@ onBeforeUnmount(() => {
     @dragleave.prevent="dragging = false"
     @drop="onDrop"
   >
-    <div v-if="props.streaming" class="composer__banner">
-      <div class="composer__banner-status">
-        <span class="spinner composer__banner-spinner" />
-        <span>Working…</span>
-      </div>
-      <button
-        class="composer__stop"
-        type="button"
-        aria-label="Stop"
-        title="Stop"
-        @click="emit('stop')"
-      >
-        <Square :size="16" />
-      </button>
-    </div>
-
     <div v-if="files.length > 0" class="composer__attachments">
       <button
         v-for="(file, index) in files"
@@ -164,6 +148,19 @@ onBeforeUnmount(() => {
       >
         <Paperclip :size="18" />
       </button>
+
+      <div v-if="props.streaming" class="composer__stream-actions" aria-label="Working controls">
+        <span class="spinner composer__stream-spinner" aria-hidden="true" />
+        <button
+          class="composer__stop"
+          type="button"
+          aria-label="Stop"
+          title="Stop"
+          @click="emit('stop')"
+        >
+          <Square :size="16" />
+        </button>
+      </div>
 
       <div class="composer__send-actions">
         <button
@@ -215,28 +212,6 @@ onBeforeUnmount(() => {
 
 .is-dragging {
   background: rgba(33, 38, 45, 0.96);
-}
-
-.composer__banner {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.1rem 0;
-}
-
-.composer__banner-status {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.45rem;
-  color: #c5ced8;
-}
-
-.composer__banner-spinner {
-  width: 1rem;
-  height: 1rem;
-  border-width: 2px;
 }
 
 .composer__attachments {
@@ -314,16 +289,29 @@ onBeforeUnmount(() => {
 .composer__actions-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 0.5rem;
 }
 
+.composer__stream-actions,
 .composer__send-actions {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
   gap: 0.5rem;
+}
+
+.composer__stream-actions {
+  margin-inline: auto;
+}
+
+.composer__send-actions {
+  justify-content: flex-end;
   margin-left: auto;
+}
+
+.composer__stream-spinner {
+  width: 1rem;
+  height: 1rem;
+  border-width: 2px;
 }
 
 .composer__send {
@@ -348,8 +336,8 @@ onBeforeUnmount(() => {
     padding: 0.5rem 0.55rem;
   }
 
-  .composer__banner,
   .composer__actions-row,
+  .composer__stream-actions,
   .composer__send-actions {
     gap: 0.4rem;
   }

@@ -4,6 +4,7 @@ import { computed } from "vue";
 
 const props = defineProps<{
   popoverId: string;
+  anchorName: string;
   models: ModelOption[];
   currentModelId?: string;
   currentThinkingLevel: string;
@@ -45,7 +46,12 @@ function thinkingLabel(value: string): string {
 </script>
 
 <template>
-  <div :id="props.popoverId" class="model-config-popover" popover="auto">
+  <div
+    :id="props.popoverId"
+    class="model-config-popover"
+    :style="{ 'position-anchor': props.anchorName }"
+    popover="auto"
+  >
     <div class="model-config-popover__scroll">
       <section class="model-config-popover__section">
         <div class="model-config-popover__title">Model</div>
@@ -102,6 +108,10 @@ function thinkingLabel(value: string): string {
 }
 
 .model-config-popover:popover-open {
+  position: absolute;
+  top: calc(anchor(bottom) + 0.35rem);
+  right: anchor(right);
+  left: auto;
   width: min(28rem, calc(100vw - 2rem));
   max-height: min(36rem, calc(100dvh - 2rem));
   display: grid;

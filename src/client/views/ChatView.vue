@@ -16,6 +16,7 @@ import {
 import { useAppStore } from "@/client/stores/app";
 
 const MODEL_POPOVER_ID = "chat-main-model-popover";
+const MODEL_POPOVER_ANCHOR = "--chat-main-model-anchor";
 
 const store = useAppStore();
 const transcript = ref<HTMLElement>();
@@ -215,6 +216,7 @@ watch(
           <button
             class="chat-main__config-button"
             type="button"
+            :style="{ 'anchor-name': MODEL_POPOVER_ANCHOR }"
             :disabled="!store.activeSession"
             :popovertarget="MODEL_POPOVER_ID"
           >
@@ -222,6 +224,7 @@ watch(
           </button>
           <ModelConfigPopover
             :popover-id="MODEL_POPOVER_ID"
+            :anchor-name="MODEL_POPOVER_ANCHOR"
             :models="store.models"
             :current-model-id="store.activeSession?.model"
             :current-thinking-level="store.activeSession?.thinkingLevel ?? 'off'"

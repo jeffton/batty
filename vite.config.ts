@@ -8,7 +8,7 @@ export default defineConfig({
     vue(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["favicon.svg"],
+      includeAssets: ["favicon.png", "apple-touch-icon.png"],
       manifest: {
         name: "pi-face",
         short_name: "pi-face",

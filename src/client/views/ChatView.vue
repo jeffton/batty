@@ -3,6 +3,7 @@ import { LoaderCircle, Wifi, WifiOff } from "lucide-vue-next";
 import { computed, nextTick, ref, watch } from "vue";
 import ChatMessage from "@/client/components/ChatMessage.vue";
 import MessageComposer from "@/client/components/MessageComposer.vue";
+import ModelConfigPopover from "@/client/components/ModelConfigPopover.vue";
 import SessionSidebar from "@/client/components/SessionSidebar.vue";
 import { withoutRenderedToolCalls } from "@/client/lib/active-assistant";
 import { formatTokenCount } from "@/client/lib/formatting";
@@ -12,7 +13,6 @@ import {
   buildTranscriptMessages,
   toolStatesForMessage,
 } from "@/client/lib/transcript";
-import type { ModelOption } from "@/shared/types";
 import { useAppStore } from "@/client/stores/app";
 
 const MODEL_POPOVER_ID = "chat-main-model-popover";
@@ -96,26 +96,7 @@ const modelThinkingButtonLabel = computed(() => {
   const levelLabel = thinkingLabel(store.activeSession?.thinkingLevel ?? "off");
   return `${modelLabel} · ${levelLabel}`;
 });
-const modelGroups = computed(() => {
-  const groups = new Map<string, ModelOption[]>();
-
-  for (const model of store.models) {
-    const existing = groups.get(model.provider) ?? [];
-    existing.push(model);
-    groups.set(model.provider, existing);
-  }
-
-  return [...groups.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([provider, models]) => ({
-      provider,
-      models: [...models].sort((left, right) =>
-        shortModelLabel(left).localeCompare(shortModelLabel(right)),
-      ),
-    }));
-});
-
-function shortModelLabel(model: Pick<ModelOption, "label">): string {
+function shortModelLabel(model: { label: string }): string {
   return model.label.split(" · ", 1)[0] ?? model.label;
 }
 
@@ -239,53 +220,16 @@ watch(
           >
             {{ modelThinkingButtonLabel }}
           </button>
-          <div :id="MODEL_POPOVER_ID" class="chat-main__popover" popover>
-            <section class="chat-main__popover-section">
-              <div class="chat-main__popover-title">Model</div>
-              <details
-                v-for="group in modelGroups"
-                :key="group.provider"
-                class="chat-main__provider-group"
-                :open="group.models.some((model) => model.id === store.activeSession?.model)"
-              >
-                <summary class="chat-main__provider-summary">{{ group.provider }}</summary>
-                <div class="chat-main__provider-models">
-                  <button
-                    v-for="model in group.models"
-                    :key="model.id"
-                    type="button"
-                    :class="[
-                      'chat-main__popover-option',
-                      model.id === store.activeSession?.model ? 'is-active' : '',
-                    ]"
-                    @click="setModel(model.id)"
-                  >
-                    {{ shortModelLabel(model) }}
-                  </button>
-                </div>
-              </details>
-            </section>
-            <section class="chat-main__popover-section">
-              <div class="chat-main__popover-title">Thinking</div>
-              <div class="chat-main__thinking-options">
-                <button
-                  v-for="option in thinkingOptions"
-                  :key="option"
-                  type="button"
-                  :class="[
-                    'chat-main__popover-option',
-                    option === store.activeSession?.thinkingLevel ? 'is-active' : '',
-                  ]"
-                  @click="setThinkingLevel(option)"
-                >
-                  {{ thinkingLabel(option) }}
-                </button>
-              </div>
-            </section>
-            <button class="chat-main__popover-close" type="button" @click="closeModelPopover">
-              Done
-            </button>
-          </div>
+          <ModelConfigPopover
+            :popover-id="MODEL_POPOVER_ID"
+            :models="store.models"
+            :current-model-id="store.activeSession?.model"
+            :current-thinking-level="store.activeSession?.thinkingLevel ?? 'off'"
+            :thinking-options="thinkingOptions"
+            @set-model="setModel"
+            @set-thinking-level="setThinkingLevel"
+            @close="closeModelPopover"
+          />
         </div>
       </header>
 
@@ -487,91 +431,6 @@ watch(
   text-overflow: ellipsis;
 }
 
-.chat-main__popover {
-  width: min(28rem, calc(100vw - 2rem));
-  max-height: min(36rem, calc(100dvh - 2rem));
-  overflow: auto;
-  overscroll-behavior: contain;
-  margin: 0;
-  padding: 0.7rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 0.65rem;
-  background: rgba(22, 27, 34, 0.98);
-  color: inherit;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.38);
-}
-
-.chat-main__popover::backdrop {
-  background: rgba(0, 0, 0, 0.18);
-}
-
-.chat-main__popover-section {
-  display: grid;
-  gap: 0.45rem;
-}
-
-.chat-main__popover-section + .chat-main__popover-section {
-  margin-top: 0.75rem;
-}
-
-.chat-main__popover-title {
-  font-size: 0.76rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #93a0ad;
-}
-
-.chat-main__provider-group {
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 0.45rem;
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.chat-main__provider-summary {
-  cursor: pointer;
-  list-style: none;
-  padding: 0.5rem 0.6rem;
-  font-weight: 600;
-  text-transform: capitalize;
-}
-
-.chat-main__provider-summary::-webkit-details-marker {
-  display: none;
-}
-
-.chat-main__provider-models,
-.chat-main__thinking-options {
-  display: grid;
-  gap: 0.3rem;
-  padding: 0 0.4rem 0.4rem;
-}
-
-.chat-main__popover-option {
-  width: 100%;
-  text-align: left;
-  border-radius: 0.4rem;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.04);
-  color: inherit;
-  padding: 0.42rem 0.55rem;
-}
-
-.chat-main__popover-option.is-active {
-  border-color: rgba(96, 165, 250, 0.45);
-  background: rgba(37, 99, 235, 0.18);
-  color: #dbeafe;
-}
-
-.chat-main__popover-close {
-  margin-top: 0.8rem;
-  width: 100%;
-  border-radius: 0.45rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.06);
-  color: inherit;
-  padding: 0.45rem 0.6rem;
-}
-
 .chat-main__empty {
   min-height: 0;
   padding: 1rem;
@@ -669,12 +528,6 @@ watch(
     width: 9.5rem;
     padding-inline: 0.42rem;
     font-size: 0.84rem;
-  }
-
-  .chat-main__popover {
-    width: min(26rem, calc(100vw - 1rem));
-    max-height: calc(100dvh - 1rem);
-    padding: 0.6rem;
   }
 }
 </style>

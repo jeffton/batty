@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Compass, ListOrdered, Paperclip, SendHorizontal } from "lucide-vue-next";
+import { Compass, ListOrdered, Paperclip, SendHorizontal, Square } from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 const props = defineProps<{
@@ -122,7 +122,15 @@ onBeforeUnmount(() => {
         <span class="spinner composer__banner-spinner" />
         <span>Working…</span>
       </div>
-      <button class="composer__stop" type="button" @click="emit('stop')">Stop</button>
+      <button
+        class="composer__stop"
+        type="button"
+        aria-label="Stop"
+        title="Stop"
+        @click="emit('stop')"
+      >
+        <Square :size="16" />
+      </button>
     </div>
 
     <div v-if="files.length > 0" class="composer__attachments">
@@ -135,50 +143,54 @@ onBeforeUnmount(() => {
         {{ file.name }} ×
       </button>
     </div>
-    <div class="composer__row">
+
+    <textarea
+      ref="textarea"
+      v-model="text"
+      class="composer__input"
+      rows="1"
+      :disabled="props.disabled"
+      @input="syncTextareaHeight"
+      @keydown="onTextareaKeydown"
+    />
+
+    <div class="composer__actions-row">
       <button
-        class="composer__plus"
+        class="composer__icon-button composer__attach"
         type="button"
         aria-label="Add files"
         title="Add files"
         @click="fileInput?.click()"
       >
-        <Paperclip :size="16" />
+        <Paperclip :size="18" />
       </button>
-      <textarea
-        ref="textarea"
-        v-model="text"
-        class="composer__input"
-        rows="1"
-        :disabled="props.disabled"
-        @input="syncTextareaHeight"
-        @keydown="onTextareaKeydown"
-      />
-      <div class="composer__actions">
-        <button
-          class="composer__send"
-          type="button"
-          :aria-label="props.streaming ? 'Queue prompt' : 'Send prompt'"
-          :title="props.streaming ? 'Queue prompt' : 'Send prompt'"
-          :disabled="!hasPayload || props.disabled"
-          @click="submit"
-        >
-          <ListOrdered v-if="props.streaming" :size="16" />
-          <SendHorizontal v-else :size="16" />
-        </button>
+
+      <div class="composer__send-actions">
         <button
           v-if="props.streaming"
-          class="composer__steer"
+          class="composer__icon-button composer__steer"
           type="button"
           aria-label="Steer prompt"
           title="Steer prompt"
           :disabled="!hasPayload || props.disabled"
           @click="steer"
         >
-          <Compass :size="16" />
+          <Compass :size="18" />
+        </button>
+        <button
+          class="composer__icon-button composer__send"
+          type="button"
+          :aria-label="props.streaming ? 'Queue prompt' : 'Send prompt'"
+          :title="props.streaming ? 'Queue prompt' : 'Send prompt'"
+          :disabled="!hasPayload || props.disabled"
+          @click="submit"
+        >
+          <ListOrdered v-if="props.streaming" :size="18" />
+          <SendHorizontal v-else :size="18" />
         </button>
       </div>
     </div>
+
     <input
       ref="fileInput"
       hidden
@@ -205,24 +217,18 @@ onBeforeUnmount(() => {
   background: rgba(33, 38, 45, 0.96);
 }
 
-.composer__row {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 0.5rem;
-  align-items: start;
-}
-
 .composer__banner {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
+  justify-content: center;
+  gap: 0.5rem;
   padding: 0.1rem 0;
 }
 
 .composer__banner-status {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.45rem;
   color: #c5ced8;
 }
@@ -240,41 +246,32 @@ onBeforeUnmount(() => {
 }
 
 .composer__chip,
-.composer__plus,
-.composer__send,
-.composer__steer,
+.composer__icon-button,
 .composer__stop {
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(22, 27, 34, 0.9);
   color: inherit;
-  font-size: 0.84rem;
+  font-size: 0.9rem;
 }
 
-.composer__plus,
-.composer__send,
-.composer__steer {
-  width: 2.25rem;
-  height: 2.25rem;
+.composer__icon-button,
+.composer__stop {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
   padding: 0;
-  border-radius: 999px;
+  border-radius: 0.7rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  align-self: start;
-  flex-shrink: 0;
 }
 
 .composer__stop {
-  border-radius: 0.45rem;
-  padding: 0.35rem 0.6rem;
   background: rgba(127, 29, 29, 0.18);
   border-color: rgba(248, 113, 113, 0.22);
 }
 
 .composer__chip,
-.composer__plus,
-.composer__send,
-.composer__steer,
+.composer__icon-button,
 .composer__stop,
 .composer__input {
   outline: none;
@@ -285,30 +282,25 @@ onBeforeUnmount(() => {
 }
 
 .composer__chip {
-  padding: 0.25rem 0.45rem;
-}
-
-.composer__plus {
-  font-size: 1rem;
+  padding: 0.35rem 0.55rem;
+  border-radius: 999px;
 }
 
 .composer__input {
   width: 100%;
   resize: none;
-  min-height: 3.5rem;
+  min-height: 3.75rem;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 0.45rem;
+  border-radius: 0.7rem;
   background: rgba(13, 17, 23, 0.72);
   color: inherit;
-  padding: 0.6rem 0.65rem;
+  padding: 0.75rem 0.8rem;
   font-size: 16px;
   line-height: 1.45;
 }
 
 .composer__chip:focus-visible,
-.composer__plus:focus-visible,
-.composer__send:focus-visible,
-.composer__steer:focus-visible,
+.composer__icon-button:focus-visible,
 .composer__stop:focus-visible,
 .composer__input:focus-visible {
   border-color: rgba(147, 197, 253, 0.38);
@@ -319,11 +311,19 @@ onBeforeUnmount(() => {
   background: rgba(13, 17, 23, 0.84);
 }
 
-.composer__actions {
-  display: grid;
-  gap: 0.35rem;
-  align-content: start;
-  justify-items: start;
+.composer__actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.composer__send-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-left: auto;
 }
 
 .composer__send {
@@ -334,9 +334,24 @@ onBeforeUnmount(() => {
   background: rgba(251, 191, 36, 0.12);
 }
 
-.composer__plus :deep(svg),
-.composer__send :deep(svg),
-.composer__steer :deep(svg) {
+.composer__icon-button:disabled,
+.composer__stop:disabled {
+  opacity: 0.55;
+}
+
+.composer__icon-button :deep(svg) {
   display: block;
+}
+
+@media (max-width: 720px) {
+  .composer {
+    padding: 0.5rem 0.55rem;
+  }
+
+  .composer__banner,
+  .composer__actions-row,
+  .composer__send-actions {
+    gap: 0.4rem;
+  }
 }
 </style>

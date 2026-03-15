@@ -18,21 +18,15 @@ async function submit(): Promise<void> {
 
 <template>
   <main class="login-view">
-    <form class="login-card panel" @submit.prevent="submit">
-      <div>
-        <div class="pill">pi.dev, but with more pixels</div>
-        <h1>pi-face</h1>
-        <p class="muted">
-          Hardcoded password auth for now. Fancy later, pirate mode maybe never 🏴‍☠️
-        </p>
-      </div>
+    <form class="login-card" @submit.prevent="submit">
+      <img src="/favicon.png" alt="pi-face" class="login-card__icon" />
+      <h1>pi-face</h1>
       <label class="login-card__field">
-        <span>Password</span>
         <input
           v-model="password"
           type="password"
           autocomplete="current-password"
-          placeholder="Enter the random password"
+          placeholder="Password"
         />
       </label>
       <button class="login-card__submit" :disabled="pending">
@@ -49,45 +43,71 @@ async function submit(): Promise<void> {
   height: 100%;
   display: grid;
   place-items: center;
-  padding: calc(var(--safe-area-top) + 1.5rem) calc(var(--safe-area-right) + 1.5rem)
-    calc(var(--safe-area-bottom) + 1.5rem) calc(var(--safe-area-left) + 1.5rem);
+  padding: 1.5rem;
 }
 
 .login-card {
-  width: min(100%, 28rem);
-  padding: 1.35rem;
-  display: grid;
-  gap: 0.9rem;
+  width: min(100%, 22rem);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.login-card__icon {
+  width: 4rem;
+  height: 4rem;
+  border-radius: 1rem;
 }
 
 .login-card h1 {
-  margin: 0.65rem 0 0.35rem;
-  font-size: clamp(2rem, 8vw, 3rem);
+  margin: 0;
+  font-size: 1.8rem;
+  color: var(--color-text-strong);
 }
 
 .login-card__field {
-  display: grid;
-  gap: 0.4rem;
+  width: 100%;
 }
 
 .login-card__field input {
+  width: 100%;
   border-radius: 0.6rem;
   border: 1px solid var(--color-border-strong);
-  background: var(--color-bg-panel-soft);
+  background: var(--color-bg-panel);
   color: inherit;
-  padding: 0.8rem 0.9rem;
+  padding: 0.7rem 0.8rem;
+  text-align: center;
+  font-size: 0.95rem;
+}
+
+.login-card__field input:focus {
+  outline: none;
+  border-color: var(--color-accent);
 }
 
 .login-card__submit {
-  border: 1px solid var(--color-border-strong);
+  width: 100%;
+  border: 0;
   border-radius: 0.6rem;
-  padding: 0.85rem 1rem;
-  color: inherit;
-  background: var(--color-success-soft);
+  padding: 0.7rem 1rem;
+  color: white;
+  background: var(--color-accent);
+  font-weight: 600;
+  transition: background 80ms ease;
+}
+
+.login-card__submit:hover:not(:disabled) {
+  background: var(--color-accent-strong);
+}
+
+.login-card__submit:disabled {
+  opacity: 0.6;
 }
 
 .login-card__error {
   margin: 0;
   color: var(--color-error);
+  font-size: 0.88rem;
 }
 </style>

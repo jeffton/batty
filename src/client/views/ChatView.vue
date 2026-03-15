@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { LoaderCircle, Menu, Wifi, WifiOff } from "lucide-vue-next";
+import { ChevronDown, Wifi, WifiOff, LoaderCircle } from "lucide-vue-next";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { VList } from "virtua/vue";
 import ChatMessage from "@/client/components/ChatMessage.vue";
 import MessageComposer from "@/client/components/MessageComposer.vue";
 import ModelConfigPopover from "@/client/components/ModelConfigPopover.vue";
-import SessionSidebar from "@/client/components/SessionSidebar.vue";
+import WorkspacePopover from "@/client/components/WorkspacePopover.vue";
 import { withoutRenderedToolCalls } from "@/client/lib/active-assistant";
 import { formatTokenCount } from "@/client/lib/formatting";
 import { resolveThinkingOptions } from "@/client/lib/thinking-levels";
@@ -17,6 +17,8 @@ import {
 import { useAppStore } from "@/client/stores/app";
 import type { UiContentBlock } from "@/shared/types";
 
+const WS_POPOVER_ID = "ws-popover";
+const WS_POPOVER_ANCHOR = "--ws-anchor";
 const MODEL_POPOVER_ID = "chat-main-model-popover";
 const MODEL_POPOVER_ANCHOR = "--chat-main-model-anchor";
 const TRANSCRIPT_BOTTOM_THRESHOLD = 24;
@@ -131,12 +133,12 @@ const contextArcStyle = computed(() => {
 });
 const contextArcClass = computed(() => {
   if (contextPercentValue.value >= 90) {
-    return "chat-main__context-arc--danger";
+    return "header__context-arc--danger";
   }
   if (contextPercentValue.value >= 70) {
-    return "chat-main__context-arc--warn";
+    return "header__context-arc--warn";
   }
-  return "chat-main__context-arc--good";
+  return "header__context-arc--good";
 });
 const currentModelOption = computed(() =>
   store.models.find((model) => model.id === store.activeSession?.model),
@@ -226,6 +228,11 @@ function closeModelPopover(): void {
   element?.hidePopover?.();
 }
 
+function closeWsPopover(): void {
+  const element = document.getElementById(WS_POPOVER_ID) as HTMLElement | null;
+  element?.hidePopover?.();
+}
+
 function setModel(modelId: string): void {
   if (!modelId) {
     return;
@@ -277,119 +284,123 @@ watch(
 
 <template>
   <main class="chat-view">
-    <SessionSidebar />
-    <section class="chat-main">
-      <header class="chat-main__header panel">
-        <button
-          class="chat-main__menu"
-          type="button"
-          aria-label="Open sidebar"
-          title="Open sidebar"
-          @click="store.mobileSidebarOpen = true"
-        >
-          <Menu :size="18" aria-hidden="true" />
-        </button>
-        <div class="chat-main__heading">
-          <h2>{{ store.selectedWorkspace?.label || "Choose a workspace" }}</h2>
-          <p class="muted">
-            {{ store.activeSession?.cwd || "Pick a folder and start a session." }}
-          </p>
+    <header class="header">
+      <button
+        class="header__ws-btn"
+        type="button"
+        :style="{ 'anchor-name': WS_POPOVER_ANCHOR }"
+        :popovertarget="WS_POPOVER_ID"
+      >
+        <img src="/favicon.png" alt="" class="header__icon" />
+        <div class="header__ws-info">
+          <span class="header__ws-name">{{ store.selectedWorkspace?.label || "pi-face" }}</span>
+          <span class="header__ws-path">{{ store.activeSession?.cwd || "Select workspace" }}</span>
         </div>
-        <div class="chat-main__toolbar">
-          <span
-            class="chat-main__status"
-            :aria-label="connectionDescription"
-            :title="connectionDescription"
-          >
-            <Wifi
-              v-if="store.connectionState === 'online'"
-              :size="16"
-              class="chat-main__status-icon chat-main__status-icon--online"
-            />
-            <LoaderCircle
-              v-else-if="store.connectionState === 'connecting'"
-              :size="16"
-              class="chat-main__status-icon chat-main__status-icon--connecting chat-main__status-icon--spin"
-            />
-            <WifiOff
-              v-else
-              :size="16"
-              class="chat-main__status-icon chat-main__status-icon--offline"
-            />
-          </span>
-          <div
-            class="chat-main__context"
-            :aria-label="contextUsageLabel"
-            :title="contextUsageLabel"
-          >
-            <svg class="chat-main__context-chart" viewBox="0 0 36 36" aria-hidden="true">
-              <circle class="chat-main__context-track" cx="18" cy="18" r="15.9155" />
-              <circle
-                :class="['chat-main__context-arc', contextArcClass]"
-                :style="contextArcStyle"
-                cx="18"
-                cy="18"
-                r="15.9155"
-              />
-            </svg>
-          </div>
-          <button
-            class="chat-main__config-button"
-            type="button"
-            :style="{ 'anchor-name': MODEL_POPOVER_ANCHOR }"
-            :disabled="!store.activeSession"
-            :popovertarget="MODEL_POPOVER_ID"
-          >
-            {{ modelThinkingButtonLabel }}
-          </button>
-          <ModelConfigPopover
-            :popover-id="MODEL_POPOVER_ID"
-            :anchor-name="MODEL_POPOVER_ANCHOR"
-            :models="store.models"
-            :current-model-id="store.activeSession?.model"
-            :current-thinking-level="store.activeSession?.thinkingLevel ?? 'off'"
-            :thinking-options="thinkingOptions"
-            @set-model="setModel"
-            @set-thinking-level="setThinkingLevel"
-            @close="closeModelPopover"
-          />
-        </div>
-      </header>
+        <ChevronDown :size="14" class="header__chevron" />
+      </button>
 
-      <div v-if="!store.activeSession" class="chat-main__empty panel">
-        <h3>No active session yet</h3>
-        <p class="muted">
-          Pick a workspace on the left, then start a fresh session or resume one of the recent
-          sessions.
-        </p>
+      <WorkspacePopover
+        :popover-id="WS_POPOVER_ID"
+        :anchor-name="WS_POPOVER_ANCHOR"
+        @close="closeWsPopover"
+      />
+
+      <button
+        class="header__model-btn"
+        type="button"
+        :style="{ 'anchor-name': MODEL_POPOVER_ANCHOR }"
+        :disabled="!store.activeSession"
+        :popovertarget="MODEL_POPOVER_ID"
+      >
+        {{ modelThinkingButtonLabel }}
+        <ChevronDown :size="14" class="header__chevron" />
+      </button>
+
+      <ModelConfigPopover
+        :popover-id="MODEL_POPOVER_ID"
+        :anchor-name="MODEL_POPOVER_ANCHOR"
+        :models="store.models"
+        :current-model-id="store.activeSession?.model"
+        :current-thinking-level="store.activeSession?.thinkingLevel ?? 'off'"
+        :thinking-options="thinkingOptions"
+        @set-model="setModel"
+        @set-thinking-level="setThinkingLevel"
+        @close="closeModelPopover"
+      />
+
+      <div class="header__spacer" />
+
+      <div
+        class="header__context"
+        :aria-label="contextUsageLabel"
+        :title="contextUsageLabel"
+      >
+        <svg class="header__context-chart" viewBox="0 0 36 36" aria-hidden="true">
+          <circle class="header__context-track" cx="18" cy="18" r="15.9155" />
+          <circle
+            :class="['header__context-arc', contextArcClass]"
+            :style="contextArcStyle"
+            cx="18"
+            cy="18"
+            r="15.9155"
+          />
+        </svg>
       </div>
 
-      <template v-else>
-        <VList
-          ref="transcript"
-          class="chat-main__transcript panel"
-          :data="transcriptEntries"
-          :keep-mounted="keptTranscriptIndexes"
-          @scroll="handleTranscriptScroll"
-        >
-          <template #default="{ item: entry }">
-            <div :key="entry.message.id" class="chat-main__transcript-item">
-              <ChatMessage
-                :message="entry.message"
-                :tool-states-by-call-id="entry.toolStatesByCallId"
-              />
-            </div>
-          </template>
-        </VList>
-
-        <MessageComposer
-          :streaming="store.activeSession.isStreaming"
-          @submit="(text, files) => store.sendPrompt(text, files)"
-          @steer="(text, files) => store.steerPrompt(text, files)"
-          @stop="store.stopActiveSession"
+      <span
+        class="header__status"
+        :aria-label="connectionDescription"
+        :title="connectionDescription"
+      >
+        <Wifi
+          v-if="store.connectionState === 'online'"
+          :size="15"
+          class="header__status-icon header__status-icon--online"
         />
-      </template>
-    </section>
+        <LoaderCircle
+          v-else-if="store.connectionState === 'connecting'"
+          :size="15"
+          class="header__status-icon header__status-icon--connecting header__status-icon--spin"
+        />
+        <WifiOff
+          v-else
+          :size="15"
+          class="header__status-icon header__status-icon--offline"
+        />
+      </span>
+    </header>
+
+    <div v-if="!store.activeSession" class="chat-empty">
+      <img src="/favicon.png" alt="pi-face" class="chat-empty__icon" />
+      <h3>No active session</h3>
+      <p class="muted">Pick a workspace and start a session.</p>
+    </div>
+
+    <template v-else>
+      <VList
+        ref="transcript"
+        class="transcript"
+        :data="transcriptEntries"
+        :keep-mounted="keptTranscriptIndexes"
+        @scroll="handleTranscriptScroll"
+      >
+        <template #default="{ item: entry }">
+          <div :key="entry.message.id" class="transcript__item">
+            <ChatMessage
+              :message="entry.message"
+              :tool-states-by-call-id="entry.toolStatesByCallId"
+            />
+          </div>
+        </template>
+      </VList>
+
+      <MessageComposer
+        :streaming="store.activeSession.isStreaming"
+        @submit="(text, files) => store.sendPrompt(text, files)"
+        @steer="(text, files) => store.steerPrompt(text, files)"
+        @stop="store.stopActiveSession"
+      />
+    </template>
   </main>
 </template>
 
@@ -399,273 +410,220 @@ watch(
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(15rem, 17rem) minmax(0, 1fr);
-  gap: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
   background: var(--color-bg-app);
 }
 
-.chat-main {
-  min-width: 0;
-  min-height: 0;
-  display: grid;
-  gap: 0;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  overflow: hidden;
-}
-
-.chat-main__header {
-  min-width: 0;
-  padding: calc(var(--safe-area-top) + 0.42rem) calc(var(--safe-area-right) + 0.7rem) 0.42rem 0.7rem;
+.header {
   display: flex;
-  gap: 0.45rem;
   align-items: center;
-  justify-content: space-between;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-  backdrop-filter: none;
+  gap: 0.35rem;
+  padding: calc(var(--safe-area-top) + 0.4rem) calc(var(--safe-area-right) + 0.6rem) 0.4rem
+    calc(var(--safe-area-left) + 0.6rem);
+  background: var(--color-bg-panel);
   border-bottom: 1px solid var(--color-border-soft);
-  background: var(--color-bg-overlay);
 }
 
-.chat-main__heading {
+.header__icon {
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 0.35rem;
+  flex-shrink: 0;
+}
+
+.header__ws-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: inherit;
+  padding: 0.3rem 0.45rem;
   min-width: 0;
-  display: grid;
-  gap: 0;
+  transition: background 80ms ease;
 }
 
-.chat-main__header h2,
-.chat-main__header p,
-.chat-main__empty h3,
-.chat-main__empty p {
-  margin: 0;
+.header__ws-btn:hover {
+  background: var(--color-bg-elevated);
 }
 
-.chat-main__header h2 {
-  font-size: 1rem;
+.header__ws-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
 }
 
-.chat-main__heading p {
+.header__ws-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text-strong);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chat-main__toolbar {
-  position: relative;
+.header__ws-path {
+  font-size: 0.75rem;
+  color: var(--color-text-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header__chevron {
+  color: var(--color-text-subtle);
+  flex-shrink: 0;
+}
+
+.header__model-btn {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
-  flex-wrap: nowrap;
-  justify-content: flex-end;
+  gap: 0.3rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--color-text-muted);
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  min-width: 0;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 80ms ease;
 }
 
-.chat-main__menu,
-.chat-main__status,
-.chat-main__context,
-.chat-main__config-button {
-  font-size: 0.88rem;
-}
-
-.chat-main__menu,
-.chat-main__config-button {
-  border-radius: 0.4rem;
-  border: 1px solid var(--color-border-strong);
+.header__model-btn:hover:not(:disabled) {
   background: var(--color-bg-elevated);
-  color: inherit;
-  padding: 0.34rem 0.48rem;
+  color: var(--color-text);
 }
 
-.chat-main__menu {
-  display: none;
+.header__model-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
-.chat-main__status,
-.chat-main__context {
+.header__spacer {
+  flex: 1;
+}
+
+.header__context {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.8rem;
-  height: 1.8rem;
-  border-radius: 999px;
-  border: 1px solid var(--color-border-soft);
-  background: var(--color-bg-panel);
-  color: var(--color-text-muted);
-  flex: 0 0 auto;
+  width: 1.6rem;
+  height: 1.6rem;
+  flex-shrink: 0;
 }
 
-.chat-main__status-icon--online {
-  color: var(--color-success);
-}
-
-.chat-main__status-icon--connecting {
-  color: var(--color-text-subtle);
-}
-
-.chat-main__status-icon--offline {
-  color: var(--color-warning);
-}
-
-.chat-main__status-icon--spin {
-  animation: chat-main-spin 0.9s linear infinite;
-}
-
-.chat-main__context-chart {
-  width: 1rem;
-  height: 1rem;
+.header__context-chart {
+  width: 1.15rem;
+  height: 1.15rem;
   transform: rotate(-90deg);
 }
 
-.chat-main__context-track,
-.chat-main__context-arc {
+.header__context-track,
+.header__context-arc {
   fill: none;
   stroke-width: 3.2;
 }
 
-.chat-main__context-track {
-  stroke: var(--color-border-strong);
+.header__context-track {
+  stroke: var(--color-border-soft);
 }
 
-.chat-main__context-arc {
+.header__context-arc {
   stroke-linecap: round;
   transition:
     stroke-dasharray 180ms ease,
     stroke 180ms ease;
 }
 
-.chat-main__context-arc--good {
+.header__context-arc--good {
   stroke: var(--color-success);
 }
 
-.chat-main__context-arc--warn {
+.header__context-arc--warn {
   stroke: var(--color-warning);
 }
 
-.chat-main__context-arc--danger {
+.header__context-arc--danger {
   stroke: var(--color-error);
 }
 
-.chat-main__config-button {
-  min-width: 0;
-  max-width: min(16rem, 38vw);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.header__status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  flex-shrink: 0;
 }
 
-.chat-main__empty {
-  min-height: 0;
-  padding: 1rem calc(var(--safe-area-right) + 1rem) 1rem 1rem;
-  display: grid;
-  align-content: center;
-  gap: 0.45rem;
+.header__status-icon--online {
+  color: var(--color-success);
 }
 
-.chat-main__transcript {
-  min-height: 0;
-  min-width: 0;
-  overflow: auto;
-  padding: 0.6rem calc(var(--safe-area-right) + 0.7rem) 0.1rem 0.7rem;
-  scroll-padding-right: calc(var(--safe-area-right) + 0.7rem);
-  scroll-padding-bottom: 0.6rem;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-  backdrop-filter: none;
-  background: var(--color-bg-panel-soft);
+.header__status-icon--connecting {
+  color: var(--color-text-subtle);
 }
 
-.chat-main__transcript-item {
-  min-width: 0;
-  padding-bottom: 0.5rem;
+.header__status-icon--offline {
+  color: var(--color-warning);
 }
 
-@keyframes chat-main-spin {
+.header__status-icon--spin {
+  animation: header-spin 0.9s linear infinite;
+}
+
+@keyframes header-spin {
   to {
     transform: rotate(360deg);
   }
 }
 
-@media (max-width: 900px) {
-  .chat-view {
-    grid-template-columns: 1fr;
-  }
+.chat-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 2rem;
+  text-align: center;
+}
 
-  .chat-main__header {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    gap: 0.35rem 0.45rem;
-    align-items: center;
-    padding: calc(var(--safe-area-top) + 0.38rem) calc(var(--safe-area-right) + 0.45rem) 0.38rem
-      calc(var(--safe-area-left) + 0.45rem);
-  }
+.chat-empty__icon {
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 0.75rem;
+  opacity: 0.6;
+}
 
-  .chat-main__heading {
-    min-width: 0;
-    grid-column: 2;
-    grid-row: 1 / span 2;
-    gap: 0.02rem;
-  }
+.chat-empty h3 {
+  margin: 0;
+  color: var(--color-text-strong);
+}
 
-  .chat-main__header h2 {
-    font-size: 0.96rem;
-  }
+.chat-empty p {
+  margin: 0;
+}
 
-  .chat-main__heading p {
-    white-space: nowrap;
-    word-break: normal;
-    font-size: 0.84rem;
-  }
+.transcript {
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  padding: 0.6rem calc(var(--safe-area-right) + 0.8rem) 0.2rem
+    calc(var(--safe-area-left) + 0.8rem);
+  background: var(--color-bg-app);
+}
 
-  .chat-main__menu {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    grid-column: 1;
-    grid-row: 1 / span 2;
-    width: 2.5rem;
-    height: 2.5rem;
-    padding: 0;
-  }
-
-  .chat-main__toolbar {
-    grid-column: 3;
-    grid-row: 1 / span 2;
-    width: auto;
-    display: grid;
-    grid-template-columns: auto auto minmax(0, 9.5rem);
-    align-items: center;
-    justify-content: end;
-    gap: 0.22rem;
-  }
-
-  .chat-main__toolbar > * {
-    min-width: 0;
-  }
-
-  .chat-main__empty {
-    padding: 1rem calc(var(--safe-area-right) + 1rem) calc(var(--safe-area-bottom) + 1rem)
-      calc(var(--safe-area-left) + 1rem);
-  }
-
-  .chat-main__transcript {
-    padding: 0.6rem calc(var(--safe-area-right) + 0.7rem) 0.1rem
-      calc(var(--safe-area-left) + 0.7rem);
-    scroll-padding-left: calc(var(--safe-area-left) + 0.7rem);
-  }
-
-  .chat-main__status,
-  .chat-main__context {
-    width: 1.7rem;
-    height: 1.7rem;
-  }
-
-  .chat-main__config-button {
-    max-width: 9.5rem;
-    width: 9.5rem;
-    padding-inline: 0.42rem;
-    font-size: 0.84rem;
-  }
+.transcript__item {
+  min-width: 0;
+  padding-bottom: 0.5rem;
+  max-width: 56rem;
+  margin: 0 auto;
 }
 </style>

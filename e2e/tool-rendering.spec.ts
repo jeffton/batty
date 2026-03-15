@@ -124,7 +124,7 @@ test.describe("tool rendering", () => {
 
     await page.goto(`/workspaces/${workspace.id}/sessions/${summary.sessionId}`);
 
-    await expect(page.locator(".chat-main__transcript")).toBeVisible();
+    await expect(page.locator(".transcript")).toBeVisible();
     await expect(page.locator(".tool-call .code-block")).toContainText(
       "M src/client/components/ToolCallBlock.vue",
     );
@@ -134,7 +134,7 @@ test.describe("tool rendering", () => {
     await installMocks(page, createSession({ messages: [] }));
 
     await page.goto(`/workspaces/${workspace.id}/sessions/${summary.sessionId}`);
-    await expect(page.locator(".chat-main__transcript")).toBeVisible();
+    await expect(page.locator(".transcript")).toBeVisible();
 
     await page.evaluate(() => {
       window.__emitSse({
@@ -180,7 +180,7 @@ test.describe("tool rendering", () => {
     await installMocks(page, createSession({ messages: [] }));
 
     await page.goto(`/workspaces/${workspace.id}/sessions/${summary.sessionId}`);
-    await expect(page.locator(".chat-main__transcript")).toBeVisible();
+    await expect(page.locator(".transcript")).toBeVisible();
 
     await page.evaluate(() => {
       window.__emitSse({
@@ -270,7 +270,7 @@ test.describe("tool rendering", () => {
     await installMocks(page, createSession({ messages: [] }));
 
     await page.goto(`/workspaces/${workspace.id}/sessions/${summary.sessionId}`);
-    await expect(page.locator(".chat-main__transcript")).toBeVisible();
+    await expect(page.locator(".transcript")).toBeVisible();
 
     await page.evaluate(() => {
       window.__emitSse({

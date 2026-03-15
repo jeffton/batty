@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ModelOption } from "@/shared/types";
-import { X } from "lucide-vue-next";
-import { computed } from "vue";
+import { Search } from "lucide-vue-next";
+import { computed, ref, watch } from "vue";
 
 const props = defineProps<{
   popoverId: string;
@@ -18,23 +18,24 @@ const emit = defineEmits<{
   close: [];
 }>();
 
-const modelGroups = computed(() => {
-  const groups = new Map<string, ModelOption[]>();
+const modelFilter = ref("");
 
-  for (const model of props.models) {
-    const existing = groups.get(model.provider) ?? [];
-    existing.push(model);
-    groups.set(model.provider, existing);
-  }
+const filteredModels = computed(() => {
+  const query = modelFilter.value.toLowerCase().trim();
+  const models = query
+    ? props.models.filter(
+        (m) =>
+          m.label.toLowerCase().includes(query) ||
+          m.provider.toLowerCase().includes(query) ||
+          m.id.toLowerCase().includes(query),
+      )
+    : props.models;
 
-  return [...groups.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([provider, models]) => ({
-      provider,
-      models: [...models].sort((left, right) =>
-        shortModelLabel(left).localeCompare(shortModelLabel(right)),
-      ),
-    }));
+  return [...models].sort((a, b) => {
+    const providerCmp = a.provider.localeCompare(b.provider);
+    if (providerCmp !== 0) return providerCmp;
+    return shortModelLabel(a).localeCompare(shortModelLabel(b));
+  });
 });
 
 function shortModelLabel(model: Pick<ModelOption, "label">): string {
@@ -44,254 +45,199 @@ function shortModelLabel(model: Pick<ModelOption, "label">): string {
 function thinkingLabel(value: string): string {
   return value === "xhigh" ? "XHigh" : value.charAt(0).toUpperCase() + value.slice(1);
 }
+
+// Reset filter when popover opens
+watch(
+  () => document.getElementById(props.popoverId)?.matches(":popover-open"),
+  (open) => {
+    if (open) modelFilter.value = "";
+  },
+);
 </script>
 
 <template>
   <div
     :id="props.popoverId"
-    class="model-config-popover"
+    class="mc-popover"
     :style="{ 'position-anchor': props.anchorName }"
     popover="auto"
   >
-    <button
-      class="model-config-popover__close"
-      type="button"
-      aria-label="Close model selector"
-      title="Close"
-      @click="emit('close')"
-    >
-      <X :size="16" />
-    </button>
+    <div class="mc-popover__thinking">
+      <button
+        v-for="option in props.thinkingOptions"
+        :key="option"
+        type="button"
+        :class="[
+          'mc-popover__thinking-btn',
+          option === props.currentThinkingLevel ? 'is-active' : '',
+        ]"
+        @click="emit('setThinkingLevel', option)"
+      >
+        {{ thinkingLabel(option) }}
+      </button>
+    </div>
 
-    <div class="model-config-popover__scroll">
-      <section class="model-config-popover__section">
-        <div class="model-config-popover__title">Model</div>
-        <details
-          v-for="group in modelGroups"
-          :key="group.provider"
-          class="model-config-popover__provider-group"
-          :open="group.models.some((model) => model.id === props.currentModelId)"
-        >
-          <summary class="model-config-popover__provider-summary">{{ group.provider }}</summary>
-          <div class="model-config-popover__provider-models">
-            <button
-              v-for="model in group.models"
-              :key="model.id"
-              type="button"
-              :class="[
-                'model-config-popover__option',
-                model.id === props.currentModelId ? 'is-active' : '',
-              ]"
-              @click="emit('setModel', model.id)"
-            >
-              {{ shortModelLabel(model) }}
-            </button>
-          </div>
-        </details>
-      </section>
+    <div class="mc-popover__search-row">
+      <Search :size="14" class="mc-popover__search-icon" />
+      <input
+        v-model="modelFilter"
+        class="mc-popover__search"
+        type="text"
+        placeholder="Filter models…"
+      />
+    </div>
 
-      <section class="model-config-popover__section">
-        <div class="model-config-popover__title">Thinking</div>
-        <div class="model-config-popover__thinking-options">
-          <button
-            v-for="option in props.thinkingOptions"
-            :key="option"
-            type="button"
-            :class="[
-              'model-config-popover__option',
-              option === props.currentThinkingLevel ? 'is-active' : '',
-            ]"
-            @click="emit('setThinkingLevel', option)"
-          >
-            {{ thinkingLabel(option) }}
-          </button>
-        </div>
-      </section>
+    <div class="mc-popover__models">
+      <button
+        v-for="model in filteredModels"
+        :key="model.id"
+        type="button"
+        :class="['mc-popover__model', model.id === props.currentModelId ? 'is-active' : '']"
+        @click="emit('setModel', model.id)"
+      >
+        <span class="mc-popover__model-name">{{ shortModelLabel(model) }}</span>
+        <span class="mc-popover__model-provider">{{ model.provider }}</span>
+      </button>
+      <div v-if="filteredModels.length === 0" class="mc-popover__empty">No models match.</div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.model-config-popover {
-  position: relative;
+.mc-popover {
   display: none;
 }
 
-.model-config-popover:popover-open {
+.mc-popover:popover-open {
   position: absolute;
-  top: calc(anchor(bottom) + 0.35rem);
-  right: anchor(right);
-  left: auto;
-  width: min(28rem, calc(100vw - 2rem));
-  max-height: min(36rem, calc(100dvh - 2rem));
-  display: block;
-  overscroll-behavior: contain;
+  top: calc(anchor(bottom) + 0.3rem);
+  right: auto;
+  left: anchor(left);
+  width: min(22rem, calc(100vw - 1.5rem));
+  max-height: min(28rem, calc(100dvh - 4rem));
+  display: flex;
+  flex-direction: column;
   margin: 0;
-  padding: 0.7rem;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 0.65rem;
+  padding: 0.5rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.75rem;
   background: var(--color-bg-overlay);
   color: inherit;
   box-shadow: var(--color-shadow-popover);
+  gap: 0.35rem;
 }
 
-.model-config-popover::backdrop {
+.mc-popover::backdrop {
   background: var(--color-backdrop);
 }
 
-.model-config-popover__scroll {
-  min-height: 0;
-  max-height: calc(min(36rem, calc(100dvh - 2rem)) - 1.4rem);
-  overflow: auto;
-  overscroll-behavior: contain;
-  padding-top: 1.35rem;
-  padding-right: 0.1rem;
-}
-
-.model-config-popover__close {
-  position: absolute;
-  top: 0.55rem;
-  right: 0.55rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 999px;
-  border: 1px solid var(--color-border-strong);
-  background: var(--color-bg-elevated-soft);
-  color: var(--color-text);
-  cursor: pointer;
-  z-index: 1;
-  transition:
-    background-color 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease,
-    transform 140ms ease;
-}
-
-.model-config-popover__close:hover {
+.mc-popover__thinking {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.15rem;
   background: var(--color-bg-elevated);
+  border-radius: 0.45rem;
 }
 
-.model-config-popover__close:active {
-  transform: translateY(1px);
-}
-
-.model-config-popover__close:focus-visible,
-.model-config-popover__provider-summary:focus-visible,
-.model-config-popover__option:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--color-info) 70%, transparent);
-  outline-offset: 2px;
-}
-
-.model-config-popover__section {
-  display: grid;
-  gap: 0.45rem;
-}
-
-.model-config-popover__section + .model-config-popover__section {
-  margin-top: 0.75rem;
-}
-
-.model-config-popover__title,
-.model-config-popover__provider-summary::before {
-  color: var(--color-text-subtle);
-}
-
-.model-config-popover__title {
-  font-size: 0.76rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.model-config-popover__provider-group {
+.mc-popover__thinking-btn {
+  flex: 1;
   border: 0;
-  border-radius: 0;
+  border-radius: 0.35rem;
   background: transparent;
+  color: var(--color-text-muted);
+  padding: 0.3rem 0.4rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  transition: background 80ms ease, color 80ms ease;
 }
 
-.model-config-popover__provider-summary {
-  cursor: pointer;
-  list-style: none;
-  padding: 0.4rem 0;
-  font-weight: 600;
-  text-transform: capitalize;
+.mc-popover__thinking-btn:hover {
+  color: var(--color-text);
+  background: var(--color-bg-panel);
+}
+
+.mc-popover__thinking-btn.is-active {
+  background: var(--color-bg-panel);
+  color: var(--color-text-strong);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.mc-popover__search-row {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 0.55rem;
-  transition:
-    background-color 140ms ease,
-    color 140ms ease,
-    transform 140ms ease;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--color-bg-elevated);
+  border-radius: 0.5rem;
 }
 
-.model-config-popover__provider-summary:hover {
-  color: var(--color-text-strong);
+.mc-popover__search-icon {
+  color: var(--color-text-subtle);
+  flex-shrink: 0;
 }
 
-.model-config-popover__provider-summary:active,
-.model-config-popover__option:active {
-  transform: translateY(1px);
-}
-
-.model-config-popover__provider-summary::-webkit-details-marker {
-  display: none;
-}
-
-.model-config-popover__provider-summary::marker {
-  content: "";
-}
-
-.model-config-popover__provider-summary::before {
-  content: "▾";
-  font-size: 1.15rem;
-  line-height: 1;
-  width: 1rem;
-  flex: 0 0 1rem;
-  text-align: center;
-  transition: transform 0.16s ease;
-}
-
-.model-config-popover__provider-group:not([open]) .model-config-popover__provider-summary::before {
-  transform: rotate(-90deg);
-}
-
-.model-config-popover__provider-models,
-.model-config-popover__thinking-options {
-  display: grid;
-  gap: 0.3rem;
-  padding: 0 0 0.35rem;
-}
-
-.model-config-popover__option {
-  width: 100%;
-  cursor: pointer;
-  text-align: left;
-  border-radius: 0.4rem;
-  border: 1px solid var(--color-border-soft);
-  background: var(--color-bg-elevated-soft);
+.mc-popover__search {
+  flex: 1;
+  border: 0;
+  background: transparent;
   color: inherit;
-  padding: 0.42rem 0.55rem;
-  transition:
-    background-color 140ms ease,
-    border-color 140ms ease,
-    color 140ms ease,
-    transform 140ms ease;
+  font-size: 0.88rem;
+  outline: none;
+  padding: 0;
 }
 
-.model-config-popover__option:hover {
+.mc-popover__models {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.mc-popover__model {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: inherit;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.88rem;
+  transition: background 80ms ease;
+}
+
+.mc-popover__model:hover {
   background: var(--color-bg-elevated);
 }
 
-.model-config-popover__option.is-active {
-  border-color: color-mix(in srgb, var(--color-info) 45%, transparent);
-  background: var(--color-info-soft);
+.mc-popover__model.is-active {
+  background: var(--color-bg-selection);
   color: var(--color-text-strong);
+  font-weight: 600;
 }
 
-.model-config-popover__option.is-active:hover {
-  background: var(--color-info-soft-strong);
+.mc-popover__model-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mc-popover__model-provider {
+  font-size: 0.78rem;
+  color: var(--color-text-subtle);
+  text-transform: capitalize;
+  flex-shrink: 0;
+}
+
+.mc-popover__empty {
+  padding: 0.6rem 0.5rem;
+  color: var(--color-text-subtle);
+  font-size: 0.85rem;
 }
 </style>

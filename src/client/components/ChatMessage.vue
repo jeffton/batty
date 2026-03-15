@@ -84,14 +84,13 @@ function toolStateFor(toolCallId: string): ToolDisplayState | undefined {
 .message--bashExecution,
 .message--custom {
   padding: 0;
-  border: 0;
   background: transparent;
 }
 
 .message--user {
-  padding: 0.55rem 0.7rem;
+  padding: 0.5rem 0.65rem;
   border-radius: 0.5rem;
-  background: var(--color-bg-elevated-soft);
+  background: var(--color-accent-soft);
   margin-left: auto;
 }
 
@@ -104,7 +103,7 @@ function toolStateFor(toolCallId: string): ToolDisplayState | undefined {
 .message__text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
 img {

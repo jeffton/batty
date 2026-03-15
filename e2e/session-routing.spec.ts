@@ -41,34 +41,42 @@ test("opening a session keeps the main pane healthy and survives reload", async 
   await page.goto("/");
   if (
     await page
-      .getByLabel("Password")
+      .locator('input[type="password"]')
       .isVisible()
       .catch(() => false)
   ) {
-    await page.getByLabel("Password").fill(PASSWORD);
+    await page.locator('input[type="password"]').fill(PASSWORD);
     await page.getByRole("button", { name: "Unlock" }).click();
   }
 
   await expect(page).toHaveURL(/\/workspaces\/pi-face$/);
-  await expect(page.locator(".chat-main__heading h2")).toHaveText("pi-face");
+  await expect(page.locator(".header__ws-name")).toHaveText("pi-face");
 
+  // Open workspace popover and click the session
+  await page.click(".header__ws-btn");
+  await page.waitForTimeout(300);
   await page.getByRole("button", { name: label }).click();
   await expect(page).toHaveURL(new RegExp(`/workspaces/pi-face/sessions/${sessionId}$`));
-  await expect(page.locator(".chat-main__transcript")).toBeVisible();
+  await expect(page.locator(".transcript")).toBeVisible();
 
   const sessionUrl = page.url();
 
-  await page.getByRole("button", { name: /^pi-face self$/ }).click();
+  // Navigate back to workspace root
+  await page.goto("/workspaces/pi-face");
   await expect(page).toHaveURL(/\/workspaces\/pi-face$/);
-  await expect(page.getByText("No active session yet")).toBeVisible();
+  await expect(page.getByText("No active session")).toBeVisible();
 
+  // Re-open session via popover
+  await page.click(".header__ws-btn");
+  await page.waitForTimeout(300);
   await page.getByRole("button", { name: label }).click();
   await expect(page).toHaveURL(sessionUrl);
-  await expect(page.locator(".chat-main__transcript")).toBeVisible();
+  await expect(page.locator(".transcript")).toBeVisible();
 
+  // Reload survives
   await page.reload();
   await expect(page).toHaveURL(sessionUrl);
-  await expect(page.locator(".chat-main__transcript")).toBeVisible();
+  await expect(page.locator(".transcript")).toBeVisible();
 
   const relevantErrors = errors.filter((message) =>
     /availableThinkingLevels|Invalid time value|TypeError|RangeError/.test(message),

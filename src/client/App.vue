@@ -32,10 +32,8 @@ let versionTimer: ReturnType<typeof window.setInterval> | undefined;
 let visualViewport: VisualViewport | null = null;
 let viewportListener: (() => void) | null = null;
 let windowScrollListener: (() => void) | null = null;
-let focusInListener: ((event: FocusEvent) => void) | null = null;
-let focusOutListener: (() => void) | null = null;
 let keyboardOffset = 0;
-let keyboardFocused = false;
+let scrollResetPending = false;
 
 function isIOSDevice(): boolean {
   const ua = navigator.userAgent;
@@ -59,6 +57,18 @@ function isEditableTarget(target: EventTarget | null): boolean {
   );
 }
 
+function scheduleIOSScrollReset(): void {
+  if (scrollResetPending) {
+    return;
+  }
+
+  scrollResetPending = true;
+  requestAnimationFrame(() => {
+    scrollResetPending = false;
+    window.scrollTo(0, 0);
+  });
+}
+
 function applyIOSKeyboardOffset(): void {
   const fullHeight = Math.round(window.innerHeight);
   const nextHeight = Math.max(0, fullHeight - keyboardOffset);
@@ -80,18 +90,22 @@ function updateIOSViewportHeight(): void {
     Math.round(document.documentElement.scrollTop),
     Math.round(document.body?.scrollTop ?? 0),
   );
+  const editableFocused = isEditableTarget(document.activeElement);
 
   if (pageScroll >= IOS_KEYBOARD_SCROLL_THRESHOLD_PX) {
     keyboardOffset = pageScroll;
-  } else if (!keyboardFocused) {
-    keyboardOffset = 0;
+    applyIOSKeyboardOffset();
+    scheduleIOSScrollReset();
+    return;
   }
 
+  if (editableFocused && keyboardOffset >= IOS_KEYBOARD_SCROLL_THRESHOLD_PX) {
+    applyIOSKeyboardOffset();
+    return;
+  }
+
+  keyboardOffset = 0;
   applyIOSKeyboardOffset();
-
-  if (pageScroll > 0) {
-    window.scrollTo(0, 0);
-  }
 }
 
 function fallbackWorkspaceRoute(): string | undefined {
@@ -190,25 +204,10 @@ onMounted(async () => {
     windowScrollListener = () => {
       updateIOSViewportHeight();
     };
-    focusInListener = (event: FocusEvent) => {
-      keyboardFocused = isEditableTarget(event.target);
-      updateIOSViewportHeight();
-    };
-    focusOutListener = () => {
-      requestAnimationFrame(() => {
-        keyboardFocused = isEditableTarget(document.activeElement);
-        if (!keyboardFocused) {
-          keyboardOffset = 0;
-        }
-        applyIOSKeyboardOffset();
-      });
-    };
 
     visualViewport.addEventListener("resize", viewportListener);
     visualViewport.addEventListener("scroll", viewportListener);
     window.addEventListener("scroll", windowScrollListener, { passive: true });
-    document.addEventListener("focusin", focusInListener, true);
-    document.addEventListener("focusout", focusOutListener, true);
     updateIOSViewportHeight();
   }
 
@@ -232,15 +231,9 @@ onUnmounted(() => {
   if (windowScrollListener) {
     window.removeEventListener("scroll", windowScrollListener);
   }
-  if (focusInListener) {
-    document.removeEventListener("focusin", focusInListener, true);
-  }
-  if (focusOutListener) {
-    document.removeEventListener("focusout", focusOutListener, true);
-  }
 
   keyboardOffset = 0;
-  keyboardFocused = false;
+  scrollResetPending = false;
   document.documentElement.style.removeProperty("--app-height");
   document.documentElement.classList.remove("ios-keyboard-open");
 

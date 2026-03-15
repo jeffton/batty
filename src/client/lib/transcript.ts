@@ -45,23 +45,24 @@ export function buildToolStateLookup(
 
   const toolStatesByCallId = new Map<string, ToolDisplayState>();
 
-  for (const tool of activeTools) {
-    toolStatesByCallId.set(tool.toolCallId, {
-      status: tool.status,
-      resultBlocks: tool.blocks,
-      resultDetails: tool.details,
-    });
-  }
-
   for (const [toolCallId, result] of toolResultsByCallId) {
-    if (toolStatesByCallId.has(toolCallId)) {
-      continue;
-    }
-
     toolStatesByCallId.set(toolCallId, {
       status: result.isError ? "error" : "success",
       resultBlocks: result.blocks,
       resultDetails: result.details,
+    });
+  }
+
+  for (const tool of activeTools) {
+    const persistedToolState = toolStatesByCallId.get(tool.toolCallId);
+    if (persistedToolState && tool.status !== "running") {
+      continue;
+    }
+
+    toolStatesByCallId.set(tool.toolCallId, {
+      status: tool.status,
+      resultBlocks: tool.blocks,
+      resultDetails: tool.details,
     });
   }
 

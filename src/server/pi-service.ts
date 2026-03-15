@@ -332,19 +332,21 @@ export class PiService {
           current.status = event.isError ? "error" : "success";
           current.isError = event.isError;
           current.details = normalizeToolDetails(event.result.details);
+          webSession.activeTools.set(event.toolCallId, current);
           this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
-          webSession.activeTools.delete(event.toolCallId);
         }
         break;
       }
       case "agent_start":
+        webSession.activeTools.clear();
+        this.publish(webSession, { type: "state", state: this.getState(webSession.id) });
+        break;
       case "agent_end":
       case "turn_end":
       case "auto_compaction_end":
       case "auto_retry_end":
         if (event.type === "agent_end") {
           webSession.activeAssistant = undefined;
-          webSession.activeTools.clear();
         }
         this.publish(webSession, { type: "state", state: this.getState(webSession.id) });
         break;

@@ -9,7 +9,7 @@ const route = useRoute();
 const router = useRouter();
 
 const VERSION_CHECK_INTERVAL_MS = 15000;
-const IOS_KEYBOARD_THRESHOLD_PX = 120;
+const IOS_KEYBOARD_SCROLL_THRESHOLD_PX = 4;
 
 const handleOffline = () => store.markOffline();
 const handleOnline = async () => {
@@ -32,6 +32,10 @@ let versionTimer: ReturnType<typeof window.setInterval> | undefined;
 let visualViewport: VisualViewport | null = null;
 let viewportListener: (() => void) | null = null;
 let windowScrollListener: (() => void) | null = null;
+let focusInListener: ((event: FocusEvent) => void) | null = null;
+let focusOutListener: (() => void) | null = null;
+let keyboardOffset = 0;
+let keyboardFocused = false;
 
 function isIOSDevice(): boolean {
   const ua = navigator.userAgent;
@@ -43,29 +47,47 @@ function isIOSDevice(): boolean {
   return iosByUa || ipadOsDesktopUa;
 }
 
-function updateIOSViewportHeight(): void {
-  if (!visualViewport) {
-    return;
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
   }
 
-  const viewportHeight = Math.round(visualViewport.height);
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target.isContentEditable
+  );
+}
+
+function applyIOSKeyboardOffset(): void {
   const fullHeight = Math.round(window.innerHeight);
+  const nextHeight = Math.max(0, fullHeight - keyboardOffset);
+  const keyboardOpen = keyboardOffset >= IOS_KEYBOARD_SCROLL_THRESHOLD_PX;
+
+  if (keyboardOpen) {
+    document.documentElement.style.setProperty("--app-height", `${nextHeight}px`);
+  } else {
+    document.documentElement.style.removeProperty("--app-height");
+  }
+
+  document.documentElement.classList.toggle("ios-keyboard-open", keyboardOpen);
+}
+
+function updateIOSViewportHeight(): void {
   const pageScroll = Math.max(
     0,
     Math.round(window.scrollY),
     Math.round(document.documentElement.scrollTop),
     Math.round(document.body?.scrollTop ?? 0),
   );
-  const nextHeight = Math.max(0, Math.min(viewportHeight, fullHeight - pageScroll));
-  const keyboardOpen = pageScroll > 0 || fullHeight - nextHeight > IOS_KEYBOARD_THRESHOLD_PX;
 
-  if (Math.abs(fullHeight - nextHeight) < 2) {
-    document.documentElement.style.removeProperty("--app-height");
-  } else {
-    document.documentElement.style.setProperty("--app-height", `${nextHeight}px`);
+  if (pageScroll >= IOS_KEYBOARD_SCROLL_THRESHOLD_PX) {
+    keyboardOffset = pageScroll;
+  } else if (!keyboardFocused) {
+    keyboardOffset = 0;
   }
 
-  document.documentElement.classList.toggle("ios-keyboard-open", keyboardOpen);
+  applyIOSKeyboardOffset();
 
   if (pageScroll > 0) {
     window.scrollTo(0, 0);
@@ -168,10 +190,25 @@ onMounted(async () => {
     windowScrollListener = () => {
       updateIOSViewportHeight();
     };
+    focusInListener = (event: FocusEvent) => {
+      keyboardFocused = isEditableTarget(event.target);
+      updateIOSViewportHeight();
+    };
+    focusOutListener = () => {
+      requestAnimationFrame(() => {
+        keyboardFocused = isEditableTarget(document.activeElement);
+        if (!keyboardFocused) {
+          keyboardOffset = 0;
+        }
+        applyIOSKeyboardOffset();
+      });
+    };
 
     visualViewport.addEventListener("resize", viewportListener);
     visualViewport.addEventListener("scroll", viewportListener);
     window.addEventListener("scroll", windowScrollListener, { passive: true });
+    document.addEventListener("focusin", focusInListener, true);
+    document.addEventListener("focusout", focusOutListener, true);
     updateIOSViewportHeight();
   }
 
@@ -195,7 +232,15 @@ onUnmounted(() => {
   if (windowScrollListener) {
     window.removeEventListener("scroll", windowScrollListener);
   }
+  if (focusInListener) {
+    document.removeEventListener("focusin", focusInListener, true);
+  }
+  if (focusOutListener) {
+    document.removeEventListener("focusout", focusOutListener, true);
+  }
 
+  keyboardOffset = 0;
+  keyboardFocused = false;
   document.documentElement.style.removeProperty("--app-height");
   document.documentElement.classList.remove("ios-keyboard-open");
 

@@ -45,7 +45,7 @@ function thinkingLabel(value: string): string {
 </script>
 
 <template>
-  <div :id="props.popoverId" class="model-config-popover" popover>
+  <div :id="props.popoverId" class="model-config-popover" popover="auto">
     <div class="model-config-popover__scroll">
       <section class="model-config-popover__section">
         <div class="model-config-popover__title">Model</div>
@@ -98,6 +98,10 @@ function thinkingLabel(value: string): string {
 
 <style scoped>
 .model-config-popover {
+  display: none;
+}
+
+.model-config-popover:popover-open {
   width: min(28rem, calc(100vw - 2rem));
   max-height: min(36rem, calc(100dvh - 2rem));
   display: grid;
@@ -207,7 +211,7 @@ function thinkingLabel(value: string): string {
 }
 
 @media (max-width: 900px) {
-  .model-config-popover {
+  .model-config-popover:popover-open {
     width: min(26rem, calc(100vw - 1rem));
     max-height: calc(100dvh - 1rem);
     padding: 0.6rem;

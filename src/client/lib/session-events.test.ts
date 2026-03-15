@@ -31,6 +31,44 @@ describe("applyServerEvent", () => {
     expect(next?.pendingMessageCount).toBe(2);
   });
 
+  it("retains cached tool output when a state snapshot arrives without active tools", () => {
+    const previous: SessionState = {
+      ...baseState,
+      messages: [
+        {
+          id: "assistant-1",
+          role: "assistant",
+          timestamp: 1,
+          blocks: [
+            {
+              type: "toolCall",
+              id: "call-1",
+              name: "bash",
+              arguments: { command: "sudo ./scripts/deploy.sh" },
+            },
+          ],
+        },
+      ],
+      activeTools: [
+        {
+          toolCallId: "call-1",
+          toolName: "bash",
+          args: { command: "sudo ./scripts/deploy.sh" },
+          blocks: [{ type: "text", text: "==> Building app" }],
+          status: "running",
+          isError: false,
+        },
+      ],
+    };
+
+    const next = applyServerEvent(previous, {
+      type: "state",
+      state: { ...previous, isStreaming: false, activeTools: [] },
+    });
+
+    expect(next?.activeTools).toEqual(previous.activeTools);
+  });
+
   it("updates the active assistant during streaming", () => {
     const next = applyServerEvent(baseState, {
       type: "assistant",

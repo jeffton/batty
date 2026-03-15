@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { normalizeSessionState } from "@/client/lib/session-state";
+import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
 import type { SessionState } from "@/shared/types";
 
 describe("normalizeSessionState", () => {
@@ -67,5 +67,120 @@ describe("normalizeSessionState", () => {
       activeTools: [],
     });
     expect(normalized?.updatedAt).toBeTypeOf("number");
+  });
+
+  it("retains cached tool output when a refreshed session loses in-flight tools", () => {
+    const previous: SessionState = {
+      id: "web-1",
+      sessionId: "session-1",
+      workspaceId: "pi-face",
+      cwd: "/tmp/pi-face",
+      thinkingLevel: "medium",
+      availableThinkingLevels: ["medium"],
+      isStreaming: true,
+      pendingMessageCount: 0,
+      updatedAt: 200,
+      contextTokens: null,
+      contextWindow: null,
+      contextPercent: null,
+      messages: [
+        {
+          id: "assistant-1",
+          role: "assistant",
+          timestamp: 100,
+          blocks: [
+            { type: "text", text: "Deploying" },
+            {
+              type: "toolCall",
+              id: "call-1",
+              name: "bash",
+              arguments: { command: "sudo ./scripts/deploy.sh" },
+            },
+          ],
+        },
+      ],
+      activeTools: [
+        {
+          toolCallId: "call-1",
+          toolName: "bash",
+          args: { command: "sudo ./scripts/deploy.sh" },
+          blocks: [{ type: "text", text: "==> Building app\n==> Reloading services" }],
+          status: "running",
+          isError: false,
+        },
+      ],
+    };
+
+    const incoming: SessionState = {
+      ...previous,
+      isStreaming: false,
+      updatedAt: 300,
+      activeTools: [],
+    };
+
+    expect(mergeSessionState(incoming, previous)?.activeTools).toEqual(previous.activeTools);
+  });
+
+  it("drops cached tool output once the final tool result exists", () => {
+    const previous: SessionState = {
+      id: "web-1",
+      sessionId: "session-1",
+      workspaceId: "pi-face",
+      cwd: "/tmp/pi-face",
+      thinkingLevel: "medium",
+      availableThinkingLevels: ["medium"],
+      isStreaming: true,
+      pendingMessageCount: 0,
+      updatedAt: 200,
+      contextTokens: null,
+      contextWindow: null,
+      contextPercent: null,
+      messages: [
+        {
+          id: "assistant-1",
+          role: "assistant",
+          timestamp: 100,
+          blocks: [
+            {
+              type: "toolCall",
+              id: "call-1",
+              name: "bash",
+              arguments: { command: "sudo ./scripts/deploy.sh" },
+            },
+          ],
+        },
+      ],
+      activeTools: [
+        {
+          toolCallId: "call-1",
+          toolName: "bash",
+          args: { command: "sudo ./scripts/deploy.sh" },
+          blocks: [{ type: "text", text: "==> Reloading services" }],
+          status: "running",
+          isError: false,
+        },
+      ],
+    };
+
+    const incoming: SessionState = {
+      ...previous,
+      isStreaming: false,
+      updatedAt: 300,
+      activeTools: [],
+      messages: [
+        ...previous.messages,
+        {
+          id: "tool-1",
+          role: "toolResult",
+          timestamp: 250,
+          toolCallId: "call-1",
+          toolName: "bash",
+          blocks: [{ type: "text", text: "Deployed successfully" }],
+          isError: false,
+        },
+      ],
+    };
+
+    expect(mergeSessionState(incoming, previous)?.activeTools).toEqual([]);
   });
 });

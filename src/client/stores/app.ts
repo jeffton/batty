@@ -21,7 +21,7 @@ import {
   writeCachedSession,
 } from "@/client/lib/cache";
 import { applyServerEvent } from "@/client/lib/session-events";
-import { normalizeSessionState } from "@/client/lib/session-state";
+import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
 import { mergeSessionSummaries, toSessionSummary } from "@/client/lib/session-summary";
 import type {
   BootstrapPayload,
@@ -180,7 +180,12 @@ export const useAppStore = defineStore("app", {
 
     async resumeSession(workspaceId: string, sessionPath: string): Promise<SessionState> {
       try {
-        const session = normalizeSessionState(await openSession(workspaceId, sessionPath));
+        const openedSession = normalizeSessionState(await openSession(workspaceId, sessionPath));
+        if (!openedSession) {
+          throw new Error("Failed to open session");
+        }
+        const cached = await readCachedSession(openedSession.sessionId);
+        const session = mergeSessionState(openedSession, cached);
         if (!session) {
           throw new Error("Failed to open session");
         }
@@ -240,7 +245,10 @@ export const useAppStore = defineStore("app", {
       if (!this.activeSession) {
         return;
       }
-      const session = normalizeSessionState(await getSession(this.activeSession.id));
+      const session = mergeSessionState(
+        normalizeSessionState(await getSession(this.activeSession.id)),
+        this.activeSession,
+      );
       if (!session) {
         throw new Error("Failed to refresh session");
       }

@@ -1,4 +1,4 @@
-import { normalizeSessionState } from "@/client/lib/session-state";
+import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
 import type { ActiveToolRun, ServerEvent, SessionState } from "@/shared/types";
 
 function mergeTools(previous: ActiveToolRun[], incoming: ActiveToolRun[]): ActiveToolRun[] {
@@ -19,7 +19,7 @@ export function applyServerEvent(
 ): SessionState | undefined {
   switch (event.type) {
     case "state":
-      return normalizeSessionState(event.state);
+      return mergeSessionState(event.state, state);
     case "assistant":
       if (!state) {
         return state;

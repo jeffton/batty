@@ -1,8 +1,49 @@
-import type { SessionState, UiMessage } from "@/shared/types";
+import type { ActiveToolRun, SessionState, UiMessage } from "@/shared/types";
 
 function lastMessageTimestamp(messages: UiMessage[]): number | undefined {
   const lastMessage = messages.at(-1);
   return typeof lastMessage?.timestamp === "number" ? lastMessage.timestamp : undefined;
+}
+
+function hasToolCall(message: UiMessage | undefined, toolCallId: string): boolean {
+  return Boolean(
+    message &&
+    "blocks" in message &&
+    message.blocks.some((block) => block.type === "toolCall" && block.id === toolCallId),
+  );
+}
+
+function hasToolResult(messages: UiMessage[], toolCallId: string): boolean {
+  return messages.some(
+    (message) => message.role === "toolResult" && message.toolCallId === toolCallId,
+  );
+}
+
+function mergeRetainedActiveTools(
+  incoming: SessionState,
+  previous?: SessionState,
+): ActiveToolRun[] {
+  if (!previous || previous.sessionId !== incoming.sessionId || previous.activeTools.length === 0) {
+    return incoming.activeTools;
+  }
+
+  const incomingToolIds = new Set(incoming.activeTools.map((tool) => tool.toolCallId));
+  const retained = previous.activeTools.filter((tool) => {
+    if (incomingToolIds.has(tool.toolCallId)) {
+      return false;
+    }
+
+    if (hasToolResult(incoming.messages, tool.toolCallId)) {
+      return false;
+    }
+
+    return (
+      incoming.messages.some((message) => hasToolCall(message, tool.toolCallId)) ||
+      hasToolCall(incoming.activeAssistant, tool.toolCallId)
+    );
+  });
+
+  return [...incoming.activeTools, ...retained];
 }
 
 export function normalizeSessionState(session: SessionState | undefined): SessionState | undefined {
@@ -62,4 +103,24 @@ export function normalizeSessionState(session: SessionState | undefined): Sessio
     messages,
     activeTools: Array.isArray(session.activeTools) ? session.activeTools : [],
   };
+}
+
+export function mergeSessionState(
+  incoming: SessionState | undefined,
+  previous?: SessionState,
+): SessionState | undefined {
+  const normalizedIncoming = normalizeSessionState(incoming);
+  if (!normalizedIncoming) {
+    return undefined;
+  }
+
+  const normalizedPrevious = normalizeSessionState(previous);
+  if (!normalizedPrevious) {
+    return normalizedIncoming;
+  }
+
+  return normalizeSessionState({
+    ...normalizedIncoming,
+    activeTools: mergeRetainedActiveTools(normalizedIncoming, normalizedPrevious),
+  });
 }

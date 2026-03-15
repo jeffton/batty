@@ -287,7 +287,8 @@ onBeforeUnmount(() => {
 }
 
 .composer__actions-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 0.5rem;
 }
@@ -300,12 +301,12 @@ onBeforeUnmount(() => {
 }
 
 .composer__stream-actions {
-  margin-inline: auto;
+  justify-self: center;
 }
 
 .composer__send-actions {
   justify-content: flex-end;
-  margin-left: auto;
+  justify-self: end;
 }
 
 .composer__stream-spinner {

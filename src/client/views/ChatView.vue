@@ -281,23 +281,23 @@ watch(
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(15rem, 17rem) minmax(0, 1fr);
-  gap: 0.55rem;
-  padding: 0.55rem;
+  gap: 0;
   overflow: hidden;
+  background: #0d1117;
 }
 
 .chat-main {
   min-width: 0;
   min-height: 0;
   display: grid;
-  gap: 0.55rem;
+  gap: 0;
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
 }
 
 .chat-main__header {
   min-width: 0;
-  padding: 0.42rem 0.55rem;
+  padding: calc(var(--safe-area-top) + 0.42rem) calc(var(--safe-area-right) + 0.7rem) 0.42rem 0.7rem;
   display: flex;
   gap: 0.45rem;
   align-items: center;
@@ -306,6 +306,7 @@ watch(
   border-radius: 0;
   box-shadow: none;
   backdrop-filter: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   background: rgba(26, 31, 40, 0.98);
 }
 
@@ -436,7 +437,7 @@ watch(
 
 .chat-main__empty {
   min-height: 0;
-  padding: 1rem;
+  padding: 1rem calc(var(--safe-area-right) + 1rem) 1rem 1rem;
   display: grid;
   align-content: center;
   gap: 0.45rem;
@@ -445,10 +446,11 @@ watch(
 .chat-main__transcript {
   min-height: 0;
   overflow: auto;
-  padding: 0.6rem 0.7rem;
+  padding: 0.6rem calc(var(--safe-area-right) + 0.7rem) 0.6rem 0.7rem;
   display: grid;
   gap: 0.5rem;
   align-content: start;
+  scroll-padding-right: calc(var(--safe-area-right) + 0.7rem);
   scroll-padding-bottom: 0.6rem;
   border: 0;
   border-radius: 0;
@@ -466,7 +468,6 @@ watch(
 @media (max-width: 900px) {
   .chat-view {
     grid-template-columns: 1fr;
-    padding: 0.45rem;
   }
 
   .chat-main__header {
@@ -474,7 +475,8 @@ watch(
     grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 0.35rem 0.45rem;
     align-items: center;
-    padding: 0.38rem 0.45rem;
+    padding: calc(var(--safe-area-top) + 0.38rem) calc(var(--safe-area-right) + 0.45rem) 0.38rem
+      calc(var(--safe-area-left) + 0.45rem);
   }
 
   .chat-main__heading {
@@ -518,6 +520,17 @@ watch(
 
   .chat-main__toolbar > * {
     min-width: 0;
+  }
+
+  .chat-main__empty {
+    padding: 1rem calc(var(--safe-area-right) + 1rem) calc(var(--safe-area-bottom) + 1rem)
+      calc(var(--safe-area-left) + 1rem);
+  }
+
+  .chat-main__transcript {
+    padding: 0.6rem calc(var(--safe-area-right) + 0.7rem) 0.6rem
+      calc(var(--safe-area-left) + 0.7rem);
+    scroll-padding-left: calc(var(--safe-area-left) + 0.7rem);
   }
 
   .chat-main__status,

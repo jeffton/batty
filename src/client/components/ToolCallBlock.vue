@@ -105,17 +105,24 @@ const visibleResultBlocks = computed(() => {
 
   return props.resultBlocks;
 });
+const showEditDiff = computed(() => {
+  if (props.name !== "edit") {
+    return false;
+  }
+
+  if (typeof props.resultDetails?.diff === "string") {
+    return true;
+  }
+
+  return typeof oldTextValue.value === "string" || typeof newTextValue.value === "string";
+});
 const showResultSection = computed(() => {
   if (props.name === "read") {
     return props.status === "error" && visibleResultBlocks.value.length > 0;
   }
 
   if (props.name === "edit") {
-    return (
-      props.status === "error" ||
-      typeof props.resultDetails?.diff === "string" ||
-      visibleResultBlocks.value.length > 0
-    );
+    return props.status === "error" || visibleResultBlocks.value.length > 0 || showEditDiff.value;
   }
 
   if (props.name === "bash") {
@@ -198,8 +205,10 @@ const genericEntries = computed(() => {
       </template>
 
       <DiffBlock
-        v-if="props.name === 'edit' && typeof props.resultDetails?.diff === 'string'"
-        :diff="props.resultDetails.diff"
+        v-if="props.name === 'edit' && showEditDiff"
+        :diff="props.resultDetails?.diff"
+        :old-text="typeof props.resultDetails?.diff === 'string' ? undefined : oldTextValue"
+        :new-text="typeof props.resultDetails?.diff === 'string' ? undefined : newTextValue"
         :compact="props.compact"
       />
     </div>

@@ -319,6 +319,9 @@ test.describe("tool rendering", () => {
     await expect(page.locator(".tool-call__result")).toContainText(
       "Replacing text in src/client/components/ToolCallBlock.vue",
     );
+    await expect(page.locator(".diff-block")).toContainText("before");
+    await expect(page.locator(".diff-block")).toContainText("after");
+    await expect(page.locator(".diff-block")).toContainText("1");
 
     await page.evaluate(() => {
       window.__emitSse({

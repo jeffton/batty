@@ -206,7 +206,8 @@ onMounted(() => {
   width: min(100vw, 17rem);
   height: 100%;
   min-height: 0;
-  padding: 0.6rem;
+  padding: calc(var(--safe-area-top) + 0.6rem) 0.6rem calc(var(--safe-area-bottom) + 0.6rem)
+    calc(var(--safe-area-left) + 0.6rem);
   display: grid;
   gap: 0.6rem;
   grid-template-rows: auto auto auto minmax(0, 1fr);
@@ -215,6 +216,7 @@ onMounted(() => {
   border-radius: 0;
   box-shadow: none;
   backdrop-filter: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
   background: rgba(25, 30, 39, 0.98);
 }
 
@@ -374,11 +376,13 @@ onMounted(() => {
   .sidebar {
     position: fixed;
     z-index: 20;
-    inset: 0.45rem auto 0.45rem 0.45rem;
+    inset: var(--safe-area-top) auto var(--safe-area-bottom) var(--safe-area-left);
     transform: translateX(calc(-100% - 0.6rem));
     transition: transform 0.2s ease;
-    max-width: min(17rem, calc(100vw - 0.9rem));
+    max-width: min(17rem, calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 0.6rem));
     height: auto;
+    border-right: 0;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.38);
   }
 
   .sidebar--open {

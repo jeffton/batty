@@ -49,7 +49,8 @@ async function submit(): Promise<void> {
   height: 100%;
   display: grid;
   place-items: center;
-  padding: 1.5rem;
+  padding: calc(var(--safe-area-top) + 1.5rem) calc(var(--safe-area-right) + 1.5rem)
+    calc(var(--safe-area-bottom) + 1.5rem) calc(var(--safe-area-left) + 1.5rem);
 }
 
 .login-card {

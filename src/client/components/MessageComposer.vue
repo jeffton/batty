@@ -18,6 +18,7 @@ const fileInput = ref<HTMLInputElement>();
 const textarea = ref<HTMLTextAreaElement>();
 const files = ref<File[]>([]);
 const dragging = ref(false);
+const isInputFocused = ref(false);
 const maxInputHeight = ref(240);
 
 const hasPayload = computed(() => text.value.trim().length > 0 || files.value.length > 0);
@@ -111,7 +112,11 @@ onBeforeUnmount(() => {
 
 <template>
   <div
-    :class="['composer panel', dragging ? 'is-dragging' : '']"
+    :class="[
+      'composer panel',
+      dragging ? 'is-dragging' : '',
+      isInputFocused ? 'composer--input-focused' : '',
+    ]"
     @dragenter.prevent="dragging = true"
     @dragover.prevent
     @dragleave.prevent="dragging = false"
@@ -134,6 +139,8 @@ onBeforeUnmount(() => {
       class="composer__input"
       rows="1"
       :disabled="props.disabled"
+      @focus="isInputFocused = true"
+      @blur="isInputFocused = false"
       @input="syncTextareaHeight"
       @keydown="onTextareaKeydown"
     />
@@ -200,13 +207,15 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .composer {
-  padding: 0.55rem 0.65rem;
+  padding: 0.55rem calc(var(--safe-area-right) + 0.65rem) calc(var(--safe-area-bottom) + 0.55rem)
+    0.65rem;
   display: grid;
   gap: 0.5rem;
   border: 0;
   border-radius: 0;
   box-shadow: none;
   backdrop-filter: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
   background: rgba(18, 22, 29, 0.96);
 }
 
@@ -330,5 +339,15 @@ onBeforeUnmount(() => {
 
 .composer__icon-button :deep(svg) {
   display: block;
+}
+
+@media (max-width: 900px) {
+  .composer {
+    padding-left: calc(var(--safe-area-left) + 0.65rem);
+  }
+
+  .composer--input-focused {
+    padding-bottom: 0.55rem;
+  }
 }
 </style>

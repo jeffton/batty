@@ -6,6 +6,7 @@ import SessionSidebar from "@/client/components/SessionSidebar.vue";
 import ToolRunCard from "@/client/components/ToolRunCard.vue";
 import { withoutActiveToolCalls } from "@/client/lib/active-assistant";
 import { formatTokenCount } from "@/client/lib/formatting";
+import { resolveThinkingOptions } from "@/client/lib/thinking-levels";
 import { useAppStore } from "@/client/stores/app";
 
 const store = useAppStore();
@@ -27,21 +28,14 @@ const thinkingLevel = computed({
     }
   },
 });
-const thinkingOptions = computed(() => {
-  const session = store.activeSession;
-  if (!session) {
-    return [];
-  }
-
-  const availableThinkingLevels = Array.isArray(session.availableThinkingLevels)
-    ? session.availableThinkingLevels
-    : [];
-  return [...new Set([session.thinkingLevel, ...availableThinkingLevels].filter(Boolean))];
-});
+const thinkingOptions = computed(() => resolveThinkingOptions(store.activeSession, store.models));
 
 const visibleMessages = computed(() =>
   (store.activeSession?.messages ?? []).filter(
-    (message) => message.role !== "toolResult" || message.isError,
+    (message) =>
+      message.role !== "toolResult" ||
+      message.isError ||
+      (message.toolName === "edit" && typeof message.details?.diff === "string"),
   ),
 );
 const activeAssistantMessage = computed(() =>

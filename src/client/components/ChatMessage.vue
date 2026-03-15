@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import CodeBlock from "@/client/components/CodeBlock.vue";
+import DiffBlock from "@/client/components/DiffBlock.vue";
 import MarkdownBlock from "@/client/components/MarkdownBlock.vue";
 import ToolCallBlock from "@/client/components/ToolCallBlock.vue";
 import type { UiContentBlock, UiMessage } from "@/shared/types";
@@ -55,6 +56,15 @@ function imageUrl(block: Extract<UiContentBlock, { type: "image" }>): string {
           :arguments="block.arguments"
         />
       </template>
+
+      <DiffBlock
+        v-if="
+          props.message.role === 'toolResult' &&
+          props.message.toolName === 'edit' &&
+          typeof props.message.details?.diff === 'string'
+        "
+        :diff="props.message.details.diff"
+      />
     </div>
   </article>
 </template>

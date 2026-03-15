@@ -39,4 +39,27 @@ describe("normalizeMessage", () => {
       text: "pass: all good",
     });
   });
+
+  it("preserves tool execution details for edit results", () => {
+    const message = {
+      role: "toolResult",
+      toolCallId: "call-2",
+      toolName: "edit",
+      content: [{ type: "text", text: "Successfully replaced text in src/app.ts." }],
+      details: {
+        diff: " 1 const before = true;\n-2 const value = 1;\n+2 const value = 2;",
+        firstChangedLine: 2,
+      },
+      isError: false,
+      timestamp: 3,
+    } as unknown as AgentMessage;
+
+    const normalized = normalizeMessage(message, 0);
+
+    expect(normalized?.role).toBe("toolResult");
+    expect(normalized && "details" in normalized ? normalized.details : undefined).toEqual({
+      diff: " 1 const before = true;\n-2 const value = 1;\n+2 const value = 2;",
+      firstChangedLine: 2,
+    });
+  });
 });

@@ -115,18 +115,6 @@ onMounted(() => {
 
     <section class="sidebar__section">
       <div class="sidebar__section-title">Workspaces</div>
-      <button
-        v-for="workspace in workspaces"
-        :key="workspace.id"
-        :class="[
-          'sidebar__workspace',
-          workspace.id === store.selectedWorkspaceId ? 'is-active' : '',
-        ]"
-        @click="openWorkspace(workspace.id)"
-      >
-        <strong>{{ workspace.label }}</strong>
-        <span class="muted">{{ workspace.kind === "self" ? "self" : workspace.path }}</span>
-      </button>
 
       <form
         v-if="createWorkspaceOpen"
@@ -165,14 +153,31 @@ onMounted(() => {
         >
           + New workspace
         </button>
+      </div>
+
+      <button
+        v-for="workspace in workspaces"
+        :key="workspace.id"
+        :class="[
+          'sidebar__workspace',
+          workspace.id === store.selectedWorkspaceId ? 'is-active' : '',
+        ]"
+        @click="openWorkspace(workspace.id)"
+      >
+        <strong>{{ workspace.label }}</strong>
+        <span class="muted">{{ workspace.kind === "self" ? "self" : workspace.path }}</span>
+      </button>
+    </section>
+
+    <section class="sidebar__section sidebar__section--sessions">
+      <div class="sidebar__section-title">Sessions</div>
+
+      <div class="sidebar__actions">
         <button v-if="store.selectedWorkspaceId" class="sidebar__action" @click="startSession">
           + New session
         </button>
       </div>
-    </section>
 
-    <section class="sidebar__section sidebar__section--sessions">
-      <div class="sidebar__section-title">Recent sessions</div>
       <div ref="sessionList" class="sidebar__session-list">
         <button
           v-for="session in sessions"
@@ -244,7 +249,7 @@ onMounted(() => {
 
 .sidebar__section--sessions {
   min-height: 0;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
 }
 
 .sidebar__section-title {

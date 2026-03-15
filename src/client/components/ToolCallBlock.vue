@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
+import DiffBlock from "@/client/components/DiffBlock.vue";
 import { formatValue, languageFromPath } from "@/client/lib/code-format";
 
 const props = withDefaults(
@@ -67,26 +68,7 @@ const genericEntries = computed(() => {
     </template>
 
     <template v-else-if="props.name === 'edit' && (oldTextValue || newTextValue)">
-      <div class="tool-call__diff">
-        <div v-if="oldTextValue" class="tool-call__section">
-          <span class="tool-call__label tool-call__label--delete">delete</span>
-          <CodeBlock
-            :code="oldTextValue"
-            :language="codeLanguage"
-            tone="delete"
-            :compact="props.compact"
-          />
-        </div>
-        <div v-if="newTextValue" class="tool-call__section">
-          <span class="tool-call__label tool-call__label--insert">insert</span>
-          <CodeBlock
-            :code="newTextValue"
-            :language="codeLanguage"
-            tone="insert"
-            :compact="props.compact"
-          />
-        </div>
-      </div>
+      <DiffBlock :old-text="oldTextValue" :new-text="newTextValue" :compact="props.compact" />
     </template>
 
     <div v-if="genericEntries.length > 0" class="tool-call__meta">
@@ -142,25 +124,6 @@ const genericEntries = computed(() => {
 .tool-call__meta {
   display: grid;
   gap: 0.4rem;
-}
-
-.tool-call__section {
-  display: grid;
-  gap: 0.25rem;
-}
-
-.tool-call__label {
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.tool-call__label--insert {
-  color: #86efac;
-}
-
-.tool-call__label--delete {
-  color: #fca5a5;
 }
 
 .tool-call__meta-row {

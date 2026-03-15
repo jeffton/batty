@@ -23,6 +23,7 @@ import type {
   ServerEvent,
   SessionState,
   SessionSummary,
+  ToolExecutionDetails,
   WorkspaceInfo,
 } from "@/shared/types";
 import type { AppConfig } from "./config";
@@ -105,6 +106,10 @@ async function processUploadedFiles(
 function sessionUpdatedAt(session: AgentSession, openedAt: number): number {
   const lastMessage = [...session.messages].reverse().find((message) => "timestamp" in message);
   return typeof lastMessage?.timestamp === "number" ? lastMessage.timestamp : openedAt;
+}
+
+function normalizeToolDetails(details: unknown): ToolExecutionDetails | undefined {
+  return details && typeof details === "object" ? (details as ToolExecutionDetails) : undefined;
 }
 
 export class PiService {
@@ -303,6 +308,7 @@ export class PiService {
           args: event.args as Record<string, unknown>,
           blocks: [],
           isError: false,
+          details: undefined,
         });
         this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
         break;
@@ -311,6 +317,7 @@ export class PiService {
         if (current) {
           const blocks = normalizeBlocks(event.partialResult.content ?? []);
           current.blocks = current.toolName === "bash" ? sanitizeTerminalBlocks(blocks) : blocks;
+          current.details = normalizeToolDetails(event.partialResult.details);
           webSession.activeTools.set(event.toolCallId, current);
           this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
         }
@@ -322,6 +329,7 @@ export class PiService {
           const blocks = normalizeBlocks(event.result.content ?? []);
           current.blocks = current.toolName === "bash" ? sanitizeTerminalBlocks(blocks) : blocks;
           current.isError = event.isError;
+          current.details = normalizeToolDetails(event.result.details);
           this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
           webSession.activeTools.delete(event.toolCallId);
         }

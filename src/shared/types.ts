@@ -4,6 +4,12 @@ export type UiContentBlock =
   | { type: "thinking"; thinking: string }
   | { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> };
 
+export interface ToolExecutionDetails {
+  diff?: string;
+  firstChangedLine?: number;
+  [key: string]: unknown;
+}
+
 export type UiMessage =
   | {
       id: string;
@@ -29,6 +35,7 @@ export type UiMessage =
       toolName: string;
       blocks: UiContentBlock[];
       isError: boolean;
+      details?: ToolExecutionDetails;
     }
   | {
       id: string;
@@ -55,6 +62,7 @@ export interface ActiveToolRun {
   args: Record<string, unknown>;
   blocks: UiContentBlock[];
   isError: boolean;
+  details?: ToolExecutionDetails;
 }
 
 export interface WorkspaceInfo {

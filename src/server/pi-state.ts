@@ -1,6 +1,6 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
-import type { SessionState, UiContentBlock, UiMessage } from "@/shared/types";
+import type { SessionState, ToolExecutionDetails, UiContentBlock, UiMessage } from "@/shared/types";
 import { sanitizeTerminalBlocks, stripTerminalFormatting } from "./terminal-output";
 
 interface AssistantLikeMessage {
@@ -18,6 +18,7 @@ interface ToolResultLikeMessage {
   toolCallId: string;
   toolName: string;
   content: unknown;
+  details?: ToolExecutionDetails;
   isError: boolean;
   timestamp: number;
 }
@@ -38,6 +39,10 @@ interface CustomLikeMessage {
   customType: string;
   content: string | (TextContent | ImageContent)[];
   timestamp: number;
+}
+
+function normalizeToolDetails(details: unknown): ToolExecutionDetails | undefined {
+  return details && typeof details === "object" ? (details as ToolExecutionDetails) : undefined;
 }
 
 export function normalizeBlocks(content: unknown): UiContentBlock[] {
@@ -123,6 +128,7 @@ export function normalizeMessage(message: AgentMessage, index: number): UiMessag
       toolName: toolResult.toolName,
       blocks: toolResult.toolName === "bash" ? sanitizeTerminalBlocks(blocks) : blocks,
       isError: toolResult.isError,
+      details: normalizeToolDetails(toolResult.details),
     };
   }
 

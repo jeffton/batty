@@ -215,12 +215,12 @@ onBeforeUnmount(() => {
   border-radius: 0;
   box-shadow: none;
   backdrop-filter: none;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-  background: rgba(18, 22, 29, 0.96);
+  border-top: 1px solid var(--color-border-soft);
+  background: var(--color-bg-overlay);
 }
 
 .is-dragging {
-  background: rgba(33, 38, 45, 0.96);
+  background: var(--color-bg-elevated-soft);
 }
 
 .composer__attachments {
@@ -232,8 +232,8 @@ onBeforeUnmount(() => {
 .composer__chip,
 .composer__icon-button,
 .composer__stop {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(22, 27, 34, 0.9);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-elevated);
   color: inherit;
   font-size: 0.9rem;
 }
@@ -250,8 +250,8 @@ onBeforeUnmount(() => {
 }
 
 .composer__stop {
-  background: rgba(127, 29, 29, 0.18);
-  border-color: rgba(248, 113, 113, 0.22);
+  background: var(--color-error-soft-strong);
+  border-color: color-mix(in srgb, var(--color-error) 22%, transparent);
 }
 
 .composer__chip,
@@ -274,9 +274,9 @@ onBeforeUnmount(() => {
   width: 100%;
   resize: none;
   min-height: 3.75rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border-strong);
   border-radius: 0.7rem;
-  background: rgba(13, 17, 23, 0.72);
+  background: var(--color-bg-panel-soft);
   color: inherit;
   padding: 0.75rem 0.8rem;
   font-size: 16px;
@@ -287,12 +287,12 @@ onBeforeUnmount(() => {
 .composer__icon-button:focus-visible,
 .composer__stop:focus-visible,
 .composer__input:focus-visible {
-  border-color: rgba(147, 197, 253, 0.38);
-  box-shadow: 0 0 0 2px rgba(147, 197, 253, 0.14);
+  border-color: var(--color-border-accent);
+  box-shadow: 0 0 0 2px var(--color-bg-selection);
 }
 
 .composer__input:focus-visible {
-  background: rgba(13, 17, 23, 0.84);
+  background: var(--color-bg-elevated-soft);
 }
 
 .composer__actions-row {
@@ -325,11 +325,11 @@ onBeforeUnmount(() => {
 }
 
 .composer__send {
-  background: rgba(46, 160, 67, 0.16);
+  background: var(--color-success-soft);
 }
 
 .composer__steer {
-  background: rgba(251, 191, 36, 0.12);
+  background: var(--color-warning-soft);
 }
 
 .composer__icon-button:disabled,

@@ -60,9 +60,9 @@ const lineNumberWidth = computed(() =>
   margin: 0;
   padding: 0.7rem 0.8rem;
   border-radius: 0.45rem;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  background: rgba(17, 21, 28, 0.92);
-  color: #dbe4ee;
+  border: 1px solid var(--color-code-border);
+  background: var(--color-code-bg);
+  color: var(--color-code-text);
   overflow-x: hidden;
   overflow-y: auto;
 }
@@ -91,7 +91,7 @@ const lineNumberWidth = computed(() =>
 
 .diff-block__line-number,
 .diff-block__prefix {
-  color: rgba(148, 163, 184, 0.78);
+  color: color-mix(in srgb, var(--color-text-subtle) 78%, transparent);
   text-align: right;
   user-select: none;
 }
@@ -105,34 +105,31 @@ const lineNumberWidth = computed(() =>
 
 .diff-block__line--context .diff-block__content,
 .diff-block__line--meta .diff-block__content,
-.diff-block__line--ellipsis .diff-block__content {
-  color: #94a3b8;
+.diff-block__line--ellipsis .diff-block__content,
+.diff-block__line--ellipsis .diff-block__prefix {
+  color: var(--color-text-subtle);
 }
 
 .diff-block__line--add {
-  background: rgba(34, 197, 94, 0.08);
+  background: color-mix(in srgb, var(--color-success) 8%, transparent);
 }
 
 .diff-block__line--add .diff-block__prefix,
 .diff-block__line--add .diff-block__content {
-  color: #86efac;
+  color: var(--color-success-contrast);
 }
 
 .diff-block__line--remove {
-  background: rgba(248, 113, 113, 0.08);
+  background: color-mix(in srgb, var(--color-error) 8%, transparent);
 }
 
 .diff-block__line--remove .diff-block__prefix,
 .diff-block__line--remove .diff-block__content {
-  color: #fca5a5;
-}
-
-.diff-block__line--ellipsis .diff-block__prefix {
-  color: #94a3b8;
+  color: var(--color-error);
 }
 
 .diff-block__content :deep(.diff-block__inline-change) {
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--color-code-inline-change);
   border-radius: 0.2rem;
 }
 </style>

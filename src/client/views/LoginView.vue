@@ -72,22 +72,22 @@ async function submit(): Promise<void> {
 
 .login-card__field input {
   border-radius: 0.6rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(13, 17, 23, 0.78);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-panel-soft);
   color: inherit;
   padding: 0.8rem 0.9rem;
 }
 
 .login-card__submit {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border-strong);
   border-radius: 0.6rem;
   padding: 0.85rem 1rem;
   color: inherit;
-  background: rgba(46, 160, 67, 0.16);
+  background: var(--color-success-soft);
 }
 
 .login-card__error {
   margin: 0;
-  color: #fca5a5;
+  color: var(--color-error);
 }
 </style>

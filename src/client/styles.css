@@ -8,6 +8,55 @@
   --safe-area-right: env(safe-area-inset-right, 0px);
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
   --safe-area-left: env(safe-area-inset-left, 0px);
+
+  --color-text: #1f2937;
+  --color-text-muted: #66758a;
+  --color-text-subtle: #7a8798;
+  --color-text-strong: #0f172a;
+  --color-link: #7c3aed;
+
+  --color-bg-app: #f5f7fb;
+  --color-bg-panel: rgba(255, 255, 255, 0.82);
+  --color-bg-panel-strong: rgba(255, 255, 255, 0.94);
+  --color-bg-panel-soft: rgba(248, 250, 252, 0.9);
+  --color-bg-elevated: rgba(255, 255, 255, 0.92);
+  --color-bg-elevated-soft: rgba(241, 245, 249, 0.92);
+  --color-bg-overlay: rgba(255, 255, 255, 0.96);
+  --color-bg-inline-code: rgba(226, 232, 240, 0.7);
+  --color-bg-selection: rgba(59, 130, 246, 0.14);
+
+  --color-border-soft: rgba(15, 23, 42, 0.08);
+  --color-border-strong: rgba(15, 23, 42, 0.12);
+  --color-border-accent: rgba(59, 130, 246, 0.38);
+  --color-shadow-panel: 0 6px 18px rgba(15, 23, 42, 0.08);
+  --color-shadow-popover: 0 16px 40px rgba(15, 23, 42, 0.18);
+  --color-shadow-mobile: 0 18px 40px rgba(15, 23, 42, 0.18);
+  --color-backdrop: rgba(15, 23, 42, 0.12);
+
+  --color-success: #16a34a;
+  --color-success-soft: rgba(34, 197, 94, 0.12);
+  --color-success-soft-strong: rgba(34, 197, 94, 0.18);
+  --color-success-contrast: #166534;
+  --color-warning: #d97706;
+  --color-warning-soft: rgba(245, 158, 11, 0.14);
+  --color-error: #dc2626;
+  --color-error-soft: rgba(239, 68, 68, 0.12);
+  --color-error-soft-strong: rgba(239, 68, 68, 0.16);
+  --color-info: #2563eb;
+  --color-info-soft: rgba(37, 99, 235, 0.14);
+  --color-info-soft-strong: rgba(37, 99, 235, 0.2);
+
+  --color-code-bg: rgba(248, 250, 252, 0.95);
+  --color-code-border: rgba(148, 163, 184, 0.22);
+  --color-code-text: #0f172a;
+  --color-code-comment: #64748b;
+  --color-code-keyword: #7c3aed;
+  --color-code-string: #0369a1;
+  --color-code-number: #b45309;
+  --color-code-title: #15803d;
+  --color-code-tag: #0284c7;
+  --color-code-inline-change: rgba(15, 23, 42, 0.08);
+
   font-family:
     "Source Sans 3",
     ui-sans-serif,
@@ -17,11 +66,65 @@
     "Segoe UI",
     sans-serif;
   font-size: 15px;
-  color: #e6edf3;
-  background: #0d1117;
+  color: var(--color-text);
+  background: var(--color-bg-app);
   line-height: 1.45;
   font-weight: 400;
-  color-scheme: dark;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-text: #e6edf3;
+    --color-text-muted: #9aa4af;
+    --color-text-subtle: #93a0ad;
+    --color-text-strong: #f8fafc;
+    --color-link: #d2a8ff;
+
+    --color-bg-app: #0d1117;
+    --color-bg-panel: rgba(22, 27, 34, 0.72);
+    --color-bg-panel-strong: rgba(22, 27, 34, 0.95);
+    --color-bg-panel-soft: rgba(17, 21, 28, 0.92);
+    --color-bg-elevated: rgba(22, 27, 34, 0.95);
+    --color-bg-elevated-soft: rgba(36, 41, 51, 0.72);
+    --color-bg-overlay: rgba(22, 27, 34, 0.98);
+    --color-bg-inline-code: rgba(15, 23, 42, 0.72);
+    --color-bg-selection: rgba(147, 197, 253, 0.14);
+
+    --color-border-soft: rgba(255, 255, 255, 0.06);
+    --color-border-strong: rgba(255, 255, 255, 0.08);
+    --color-border-accent: rgba(147, 197, 253, 0.38);
+    --color-shadow-panel: 0 6px 18px rgba(0, 0, 0, 0.18);
+    --color-shadow-popover: 0 16px 40px rgba(0, 0, 0, 0.38);
+    --color-shadow-mobile: 0 18px 40px rgba(0, 0, 0, 0.38);
+    --color-backdrop: rgba(0, 0, 0, 0.18);
+
+    --color-success: #22c55e;
+    --color-success-soft: rgba(46, 160, 67, 0.16);
+    --color-success-soft-strong: rgba(30, 66, 38, 0.92);
+    --color-success-contrast: #86efac;
+    --color-warning: #f59e0b;
+    --color-warning-soft: rgba(251, 191, 36, 0.12);
+    --color-error: #f87171;
+    --color-error-soft: rgba(248, 113, 113, 0.08);
+    --color-error-soft-strong: rgba(127, 29, 29, 0.18);
+    --color-info: #93c5fd;
+    --color-info-soft: rgba(37, 99, 235, 0.18);
+    --color-info-soft-strong: rgba(37, 99, 235, 0.24);
+
+    --color-code-bg: rgba(17, 21, 28, 0.92);
+    --color-code-border: rgba(255, 255, 255, 0.07);
+    --color-code-text: #dbe4ee;
+    --color-code-comment: #7f8ea3;
+    --color-code-keyword: #d2a8ff;
+    --color-code-string: #a5d6ff;
+    --color-code-number: #f9c97c;
+    --color-code-title: #86efac;
+    --color-code-tag: #7dd3fc;
+    --color-code-inline-change: rgba(255, 255, 255, 0.14);
+
+    color-scheme: dark;
+  }
 }
 
 * {
@@ -35,7 +138,7 @@ body,
   height: 100%;
   min-height: 100%;
   margin: 0;
-  background: #0d1117;
+  background: var(--color-bg-app);
 }
 
 body {
@@ -66,7 +169,7 @@ textarea {
   width: 100%;
   height: 100%;
   min-height: 100dvh;
-  background: #0d1117;
+  background: var(--color-bg-app);
 }
 
 .center-panel {
@@ -75,14 +178,14 @@ textarea {
   display: grid;
   place-items: center;
   gap: 0.75rem;
-  color: #c5ced8;
+  color: var(--color-text-muted);
 }
 
 .spinner {
   width: 2rem;
   height: 2rem;
-  border: 3px solid rgba(255, 255, 255, 0.1);
-  border-top-color: #9ca3af;
+  border: 3px solid var(--color-border-soft);
+  border-top-color: var(--color-text-subtle);
   border-radius: 999px;
   animation: spin 0.85s linear infinite;
 }
@@ -94,10 +197,10 @@ textarea {
 }
 
 .panel {
-  background: rgba(22, 27, 34, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border-soft);
   border-radius: 0.55rem;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--color-shadow-panel);
   backdrop-filter: blur(10px);
 }
 
@@ -106,29 +209,29 @@ textarea {
   align-items: center;
   gap: 0.35rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border-strong);
   padding: 0.12rem 0.45rem;
-  background: rgba(13, 17, 23, 0.78);
-  color: #c5ced8;
+  background: var(--color-bg-panel-soft);
+  color: var(--color-text-muted);
   font-size: 0.8rem;
 }
 
 .muted {
-  color: #9aa4af;
+  color: var(--color-text-muted);
 }
 
 .status-online {
-  color: #86efac;
+  color: var(--color-success-contrast);
 }
 
 .status-offline {
-  color: #fbbf24;
+  color: var(--color-warning);
 }
 
 .status-connecting {
-  color: #d1d5db;
+  color: var(--color-text-subtle);
 }
 
 a {
-  color: #d2a8ff;
+  color: var(--color-link);
 }

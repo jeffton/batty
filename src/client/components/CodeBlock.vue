@@ -34,9 +34,9 @@ const highlighted = computed(() => highlightCode(props.code, props.language));
   overflow-x: hidden;
   padding: 0.7rem 0.8rem;
   border-radius: 0.45rem;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  background: rgba(17, 21, 28, 0.92);
-  color: #dbe4ee;
+  border: 1px solid var(--color-code-border);
+  background: var(--color-code-bg);
+  color: var(--color-code-text);
   line-height: 1.45;
 }
 
@@ -45,18 +45,18 @@ const highlighted = computed(() => highlightCode(props.code, props.language));
 }
 
 .code-block--insert {
-  background: rgba(22, 101, 52, 0.22);
-  border-color: rgba(74, 222, 128, 0.22);
+  background: color-mix(in srgb, var(--color-success) 16%, transparent);
+  border-color: color-mix(in srgb, var(--color-success) 22%, transparent);
 }
 
 .code-block--delete {
-  background: rgba(127, 29, 29, 0.22);
-  border-color: rgba(248, 113, 113, 0.2);
+  background: color-mix(in srgb, var(--color-error) 16%, transparent);
+  border-color: color-mix(in srgb, var(--color-error) 20%, transparent);
 }
 
 .code-block :deep(.hljs-comment),
 .code-block :deep(.hljs-quote) {
-  color: #7f8ea3;
+  color: var(--color-code-comment);
 }
 
 .code-block :deep(.hljs-keyword),
@@ -64,14 +64,14 @@ const highlighted = computed(() => highlightCode(props.code, props.language));
 .code-block :deep(.hljs-literal),
 .code-block :deep(.hljs-section),
 .code-block :deep(.hljs-link) {
-  color: #d2a8ff;
+  color: var(--color-code-keyword);
 }
 
 .code-block :deep(.hljs-string),
 .code-block :deep(.hljs-attr),
 .code-block :deep(.hljs-template-tag),
 .code-block :deep(.hljs-template-variable) {
-  color: #a5d6ff;
+  color: var(--color-code-string);
 }
 
 .code-block :deep(.hljs-number),
@@ -79,13 +79,13 @@ const highlighted = computed(() => highlightCode(props.code, props.language));
 .code-block :deep(.hljs-bullet),
 .code-block :deep(.hljs-variable),
 .code-block :deep(.hljs-literal) {
-  color: #f9c97c;
+  color: var(--color-code-number);
 }
 
 .code-block :deep(.hljs-title),
 .code-block :deep(.hljs-title.class_),
 .code-block :deep(.hljs-title.function_) {
-  color: #86efac;
+  color: var(--color-code-title);
 }
 
 .code-block :deep(code),
@@ -99,6 +99,6 @@ const highlighted = computed(() => highlightCode(props.code, props.language));
 .code-block :deep(.hljs-name),
 .code-block :deep(.hljs-selector-id),
 .code-block :deep(.hljs-selector-class) {
-  color: #7dd3fc;
+  color: var(--color-code-tag);
 }
 </style>

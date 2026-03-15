@@ -128,15 +128,15 @@ function thinkingLabel(value: string): string {
   overscroll-behavior: contain;
   margin: 0;
   padding: 0.7rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border-strong);
   border-radius: 0.65rem;
-  background: rgba(22, 27, 34, 0.98);
+  background: var(--color-bg-overlay);
   color: inherit;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.38);
+  box-shadow: var(--color-shadow-popover);
 }
 
 .model-config-popover::backdrop {
-  background: rgba(0, 0, 0, 0.18);
+  background: var(--color-backdrop);
 }
 
 .model-config-popover__scroll {
@@ -158,9 +158,9 @@ function thinkingLabel(value: string): string {
   width: 2rem;
   height: 2rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  color: #cfd8e3;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-elevated-soft);
+  color: var(--color-text);
   cursor: pointer;
   z-index: 1;
   transition:
@@ -171,7 +171,7 @@ function thinkingLabel(value: string): string {
 }
 
 .model-config-popover__close:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-elevated);
 }
 
 .model-config-popover__close:active {
@@ -181,7 +181,7 @@ function thinkingLabel(value: string): string {
 .model-config-popover__close:focus-visible,
 .model-config-popover__provider-summary:focus-visible,
 .model-config-popover__option:focus-visible {
-  outline: 2px solid rgba(96, 165, 250, 0.7);
+  outline: 2px solid color-mix(in srgb, var(--color-info) 70%, transparent);
   outline-offset: 2px;
 }
 
@@ -194,11 +194,15 @@ function thinkingLabel(value: string): string {
   margin-top: 0.75rem;
 }
 
+.model-config-popover__title,
+.model-config-popover__provider-summary::before {
+  color: var(--color-text-subtle);
+}
+
 .model-config-popover__title {
   font-size: 0.76rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #93a0ad;
 }
 
 .model-config-popover__provider-group {
@@ -224,7 +228,7 @@ function thinkingLabel(value: string): string {
 }
 
 .model-config-popover__provider-summary:hover {
-  color: #dbe3ee;
+  color: var(--color-text-strong);
 }
 
 .model-config-popover__provider-summary:active,
@@ -242,7 +246,6 @@ function thinkingLabel(value: string): string {
 
 .model-config-popover__provider-summary::before {
   content: "▾";
-  color: #93a0ad;
   font-size: 1.15rem;
   line-height: 1;
   width: 1rem;
@@ -267,8 +270,8 @@ function thinkingLabel(value: string): string {
   cursor: pointer;
   text-align: left;
   border-radius: 0.4rem;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--color-border-soft);
+  background: var(--color-bg-elevated-soft);
   color: inherit;
   padding: 0.42rem 0.55rem;
   transition:
@@ -279,16 +282,16 @@ function thinkingLabel(value: string): string {
 }
 
 .model-config-popover__option:hover {
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--color-bg-elevated);
 }
 
 .model-config-popover__option.is-active {
-  border-color: rgba(96, 165, 250, 0.45);
-  background: rgba(37, 99, 235, 0.18);
-  color: #dbeafe;
+  border-color: color-mix(in srgb, var(--color-info) 45%, transparent);
+  background: var(--color-info-soft);
+  color: var(--color-text-strong);
 }
 
 .model-config-popover__option.is-active:hover {
-  background: rgba(37, 99, 235, 0.24);
+  background: var(--color-info-soft-strong);
 }
 </style>

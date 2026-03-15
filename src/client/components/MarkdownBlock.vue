@@ -43,14 +43,14 @@ const html = computed(() => DOMPurify.sanitize(marked.parse(props.text) as strin
   padding: 0.7rem 0.8rem;
   overflow-x: auto;
   border-radius: 0.5rem;
-  background: rgba(2, 6, 23, 0.72);
-  border: 1px solid rgba(148, 163, 184, 0.1);
+  background: var(--color-code-bg);
+  border: 1px solid var(--color-code-border);
 }
 
 .markdown-body :deep(code) {
   padding: 0.08rem 0.24rem;
   border-radius: 0.28rem;
-  background: rgba(15, 23, 42, 0.72);
+  background: var(--color-bg-inline-code);
 }
 
 .markdown-body :deep(pre code) {
@@ -61,8 +61,8 @@ const html = computed(() => DOMPurify.sanitize(marked.parse(props.text) as strin
 .markdown-body :deep(blockquote) {
   margin: 0.55rem 0;
   padding-left: 0.8rem;
-  border-left: 2px solid rgba(96, 165, 250, 0.5);
-  color: #b8c7db;
+  border-left: 2px solid var(--color-border-accent);
+  color: var(--color-text-muted);
 }
 
 .markdown-body :deep(ul),
@@ -77,7 +77,7 @@ const html = computed(() => DOMPurify.sanitize(marked.parse(props.text) as strin
 }
 
 .markdown-body--thinking {
-  color: #94a3b8;
+  color: var(--color-text-subtle);
   opacity: 0.94;
 }
 
@@ -86,6 +86,6 @@ const html = computed(() => DOMPurify.sanitize(marked.parse(props.text) as strin
 }
 
 .markdown-body--thinking :deep(strong) {
-  color: #c6d2df;
+  color: var(--color-text);
 }
 </style>

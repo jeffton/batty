@@ -91,7 +91,7 @@ function toolStateFor(toolCallId: string): ToolDisplayState | undefined {
 .message--user {
   padding: 0.55rem 0.7rem;
   border-radius: 0.5rem;
-  background: rgba(33, 38, 45, 0.9);
+  background: var(--color-bg-elevated-soft);
   margin-left: auto;
 }
 

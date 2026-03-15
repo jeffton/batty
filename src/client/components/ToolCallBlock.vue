@@ -95,6 +95,14 @@ const visibleResultBlocks = computed(() => {
     return props.resultBlocks;
   }
 
+  if (props.name === "write") {
+    if (props.status === "error") {
+      return props.resultBlocks;
+    }
+
+    return props.resultBlocks.filter((block) => block.type !== "text");
+  }
+
   if (props.name === "bash") {
     if (commandValue.value) {
       return props.resultBlocks.filter((block) => block.type !== "text");
@@ -123,6 +131,10 @@ const showResultSection = computed(() => {
 
   if (props.name === "edit") {
     return props.status === "error" || visibleResultBlocks.value.length > 0 || showEditDiff.value;
+  }
+
+  if (props.name === "write") {
+    return props.status === "error" ? visibleResultBlocks.value.length > 0 : false;
   }
 
   if (props.name === "bash") {
@@ -221,8 +233,8 @@ const genericEntries = computed(() => {
   gap: 0.45rem;
   padding: 0.45rem 0.55rem;
   border-radius: 0.45rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(36, 41, 51, 0.72);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-elevated-soft);
 }
 
 .tool-call--compact {
@@ -237,11 +249,15 @@ const genericEntries = computed(() => {
 }
 
 .tool-call__name {
-  color: #dbe4ee;
+  color: var(--color-text-strong);
+}
+
+.tool-call__timeout,
+.tool-call__meta-key {
+  color: var(--color-text-subtle);
 }
 
 .tool-call__timeout {
-  color: #93a0ad;
   font-size: 0.78rem;
 }
 
@@ -253,15 +269,15 @@ const genericEntries = computed(() => {
 }
 
 .tool-call__status--success {
-  color: #86efac;
+  color: var(--color-success-contrast);
 }
 
 .tool-call__status--error {
-  color: #fca5a5;
+  color: var(--color-error);
 }
 
 .tool-call__status--running {
-  color: #93c5fd;
+  color: var(--color-info);
 }
 
 .tool-call__status-icon {
@@ -274,8 +290,8 @@ const genericEntries = computed(() => {
 
 .tool-call__path,
 .tool-call__meta-value {
-  color: #9fc7ff;
-  background: rgba(15, 23, 42, 0.65);
+  color: var(--color-info);
+  background: var(--color-bg-inline-code);
   border-radius: 0.2rem;
   padding: 0.12rem 0.35rem;
 }
@@ -309,13 +325,12 @@ const genericEntries = computed(() => {
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #93a0ad;
 }
 
 .tool-call__text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  color: #cbd5e1;
+  color: var(--color-text);
   line-height: 1.45;
 }
 

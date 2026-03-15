@@ -283,7 +283,7 @@ watch(
   grid-template-columns: minmax(15rem, 17rem) minmax(0, 1fr);
   gap: 0;
   overflow: hidden;
-  background: #0d1117;
+  background: var(--color-bg-app);
 }
 
 .chat-main {
@@ -306,8 +306,8 @@ watch(
   border-radius: 0;
   box-shadow: none;
   backdrop-filter: none;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  background: rgba(26, 31, 40, 0.98);
+  border-bottom: 1px solid var(--color-border-soft);
+  background: var(--color-bg-overlay);
 }
 
 .chat-main__heading {
@@ -352,8 +352,8 @@ watch(
 .chat-main__menu,
 .chat-main__config-button {
   border-radius: 0.4rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(22, 27, 34, 0.95);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-elevated);
   color: inherit;
   padding: 0.34rem 0.48rem;
 }
@@ -370,22 +370,22 @@ watch(
   width: 1.8rem;
   height: 1.8rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  background: rgba(22, 27, 34, 0.75);
-  color: #c5ced8;
+  border: 1px solid var(--color-border-soft);
+  background: var(--color-bg-panel);
+  color: var(--color-text-muted);
   flex: 0 0 auto;
 }
 
 .chat-main__status-icon--online {
-  color: #22c55e;
+  color: var(--color-success);
 }
 
 .chat-main__status-icon--connecting {
-  color: #d1d5db;
+  color: var(--color-text-subtle);
 }
 
 .chat-main__status-icon--offline {
-  color: #f59e0b;
+  color: var(--color-warning);
 }
 
 .chat-main__status-icon--spin {
@@ -405,7 +405,7 @@ watch(
 }
 
 .chat-main__context-track {
-  stroke: rgba(255, 255, 255, 0.12);
+  stroke: var(--color-border-strong);
 }
 
 .chat-main__context-arc {
@@ -416,15 +416,15 @@ watch(
 }
 
 .chat-main__context-arc--good {
-  stroke: #22c55e;
+  stroke: var(--color-success);
 }
 
 .chat-main__context-arc--warn {
-  stroke: #f59e0b;
+  stroke: var(--color-warning);
 }
 
 .chat-main__context-arc--danger {
-  stroke: #ef4444;
+  stroke: var(--color-error);
 }
 
 .chat-main__config-button {
@@ -456,7 +456,7 @@ watch(
   border-radius: 0;
   box-shadow: none;
   backdrop-filter: none;
-  background: rgba(16, 20, 27, 0.98);
+  background: var(--color-bg-panel-soft);
 }
 
 @keyframes chat-main-spin {

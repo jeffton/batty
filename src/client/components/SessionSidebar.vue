@@ -216,8 +216,8 @@ onMounted(() => {
   border-radius: 0;
   box-shadow: none;
   backdrop-filter: none;
-  border-right: 1px solid rgba(255, 255, 255, 0.05);
-  background: rgba(25, 30, 39, 0.98);
+  border-right: 1px solid var(--color-border-soft);
+  background: var(--color-bg-overlay);
 }
 
 .sidebar__header {
@@ -244,7 +244,7 @@ onMounted(() => {
   display: none;
   border: 0;
   background: transparent;
-  color: #e5e7eb;
+  color: var(--color-text-strong);
   font-size: 1rem;
 }
 
@@ -262,7 +262,7 @@ onMounted(() => {
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #98a2ad;
+  color: var(--color-text-subtle);
 }
 
 .sidebar__workspace,
@@ -294,7 +294,7 @@ onMounted(() => {
   text-align: left;
   border: 0;
   border-radius: 0.45rem;
-  background: rgba(30, 66, 38, 0.92);
+  background: var(--color-success-soft-strong);
   color: inherit;
   padding: 0.5rem 0.65rem;
   display: grid;
@@ -303,18 +303,18 @@ onMounted(() => {
 }
 
 .sidebar__action--secondary {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--color-bg-elevated-soft);
 }
 
 .sidebar__action--logout {
-  background: rgba(127, 29, 29, 0.18);
+  background: var(--color-error-soft-strong);
 }
 
 .sidebar__workspace-input {
   width: 100%;
   border-radius: 0.45rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(22, 27, 34, 0.95);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-elevated);
   color: inherit;
   padding: 0.5rem 0.65rem;
   font-size: 0.88rem;
@@ -322,7 +322,7 @@ onMounted(() => {
 
 .sidebar__error {
   margin: 0;
-  color: #fca5a5;
+  color: var(--color-error);
   font-size: 0.78rem;
 }
 
@@ -368,8 +368,8 @@ onMounted(() => {
 
 .is-active {
   background: transparent;
-  border-left-color: rgba(201, 209, 217, 0.7);
-  color: #f8fafc;
+  border-left-color: var(--color-border-accent);
+  color: var(--color-text-strong);
 }
 
 @media (max-width: 900px) {
@@ -382,7 +382,7 @@ onMounted(() => {
     max-width: min(17rem, calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 0.6rem));
     height: auto;
     border-right: 0;
-    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.38);
+    box-shadow: var(--color-shadow-mobile);
   }
 
   .sidebar--open {

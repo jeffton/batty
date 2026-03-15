@@ -1,23 +1,37 @@
 <script setup lang="ts">
+import { Check, CircleAlert, LoaderCircle } from "lucide-vue-next";
 import { computed } from "vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
 import DiffBlock from "@/client/components/DiffBlock.vue";
+import MarkdownBlock from "@/client/components/MarkdownBlock.vue";
 import { formatValue, languageFromPath } from "@/client/lib/code-format";
+import { hasToolResultContent } from "@/client/lib/transcript";
+import type { ToolExecutionDetails, UiContentBlock } from "@/shared/types";
 
 const props = withDefaults(
   defineProps<{
     name: string;
     arguments: Record<string, unknown>;
     compact?: boolean;
+    status?: "running" | "success" | "error";
+    resultBlocks?: UiContentBlock[];
+    resultDetails?: ToolExecutionDetails;
   }>(),
   {
     compact: false,
+    status: undefined,
+    resultBlocks: () => [],
+    resultDetails: undefined,
   },
 );
 
 function readString(key: string): string | undefined {
   const value = props.arguments[key];
   return typeof value === "string" ? value : undefined;
+}
+
+function imageUrl(block: Extract<UiContentBlock, { type: "image" }>): string {
+  return `data:${block.mimeType};base64,${block.data}`;
 }
 
 const pathValue = computed(() => readString("path"));
@@ -36,6 +50,9 @@ const timeoutValue = computed(() => {
   return undefined;
 });
 const codeLanguage = computed(() => languageFromPath(pathValue.value));
+const hasResultContent = computed(() =>
+  hasToolResultContent(props.resultBlocks, props.resultDetails),
+);
 
 const genericEntries = computed(() => {
   const hiddenKeys = new Set(["path", "command", "content", "oldText", "newText", "timeout"]);
@@ -54,6 +71,18 @@ const genericEntries = computed(() => {
         {{ timeoutValue }}
       </span>
       <code v-if="pathValue" class="tool-call__path">{{ pathValue }}</code>
+      <span
+        v-if="props.status"
+        :class="['tool-call__status', `tool-call__status--${props.status}`]"
+      >
+        <LoaderCircle
+          v-if="props.status === 'running'"
+          :size="14"
+          class="tool-call__status-icon tool-call__status-icon--spin"
+        />
+        <Check v-else-if="props.status === 'success'" :size="14" class="tool-call__status-icon" />
+        <CircleAlert v-else :size="14" class="tool-call__status-icon" />
+      </span>
     </header>
 
     <CodeBlock
@@ -76,6 +105,36 @@ const genericEntries = computed(() => {
         <span class="tool-call__meta-key">{{ entry.key }}</span>
         <code class="tool-call__meta-value">{{ entry.value }}</code>
       </div>
+    </div>
+
+    <div v-if="props.status === 'error' || hasResultContent" class="tool-call__result">
+      <template v-for="(block, index) in props.resultBlocks" :key="`${props.name}-${index}`">
+        <CodeBlock
+          v-if="block.type === 'text' && props.name === 'bash'"
+          :code="block.text"
+          language="bash"
+          :compact="props.compact"
+        />
+        <div v-else-if="block.type === 'text'" class="tool-call__text">{{ block.text }}</div>
+        <img v-else-if="block.type === 'image'" :src="imageUrl(block)" alt="Tool output" />
+        <MarkdownBlock
+          v-else-if="block.type === 'thinking'"
+          :text="block.thinking"
+          variant="thinking"
+        />
+        <ToolCallBlock
+          v-else-if="block.type === 'toolCall'"
+          :name="block.name"
+          :arguments="block.arguments"
+          :compact="props.compact"
+        />
+      </template>
+
+      <DiffBlock
+        v-if="props.name === 'edit' && typeof props.resultDetails?.diff === 'string'"
+        :diff="props.resultDetails.diff"
+        :compact="props.compact"
+      />
     </div>
   </section>
 </template>
@@ -110,6 +169,33 @@ const genericEntries = computed(() => {
   font-size: 0.78rem;
 }
 
+.tool-call__status {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tool-call__status--success {
+  color: #86efac;
+}
+
+.tool-call__status--error {
+  color: #fca5a5;
+}
+
+.tool-call__status--running {
+  color: #93c5fd;
+}
+
+.tool-call__status-icon {
+  display: block;
+}
+
+.tool-call__status-icon--spin {
+  animation: tool-call-spin 0.9s linear infinite;
+}
+
 .tool-call__path,
 .tool-call__meta-value {
   white-space: pre-wrap;
@@ -120,8 +206,8 @@ const genericEntries = computed(() => {
   padding: 0.12rem 0.35rem;
 }
 
-.tool-call__diff,
-.tool-call__meta {
+.tool-call__meta,
+.tool-call__result {
   display: grid;
   gap: 0.4rem;
 }
@@ -138,6 +224,24 @@ const genericEntries = computed(() => {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: #93a0ad;
+}
+
+.tool-call__text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #cbd5e1;
+  line-height: 1.45;
+}
+
+.tool-call img {
+  width: min(100%, 28rem);
+  border-radius: 0.45rem;
+}
+
+@keyframes tool-call-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 720px) {

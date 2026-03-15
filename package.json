@@ -26,6 +26,7 @@
     "fastify": "5.8.2",
     "highlight.js": "11.11.1",
     "idb-keyval": "6.2.2",
+    "lucide-vue-next": "0.577.0",
     "marked": "17.0.4",
     "mime-types": "3.0.2",
     "pinia": "3.0.4",

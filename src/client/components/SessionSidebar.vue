@@ -113,6 +113,10 @@ onMounted(() => {
       <button class="sidebar__close" @click="store.mobileSidebarOpen = false">✕</button>
     </div>
 
+    <div class="sidebar__actions sidebar__actions--top">
+      <button class="sidebar__action sidebar__action--logout" @click="store.logout">Logout</button>
+    </div>
+
     <section class="sidebar__section">
       <div class="sidebar__section-title">Workspaces</div>
 
@@ -205,7 +209,7 @@ onMounted(() => {
   padding: 0.6rem;
   display: grid;
   gap: 0.6rem;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   overflow: hidden;
   border: 0;
   border-radius: 0;
@@ -279,6 +283,10 @@ onMounted(() => {
   gap: 0.25rem;
 }
 
+.sidebar__actions--top {
+  margin-top: -0.1rem;
+}
+
 .sidebar__action {
   width: 100%;
   text-align: left;
@@ -294,6 +302,10 @@ onMounted(() => {
 
 .sidebar__action--secondary {
   background: rgba(255, 255, 255, 0.08);
+}
+
+.sidebar__action--logout {
+  background: rgba(127, 29, 29, 0.18);
 }
 
 .sidebar__workspace-input {

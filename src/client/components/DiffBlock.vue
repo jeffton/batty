@@ -63,7 +63,8 @@ const lineNumberWidth = computed(() =>
   border: 1px solid rgba(255, 255, 255, 0.07);
   background: rgba(17, 21, 28, 0.92);
   color: #dbe4ee;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .diff-block--compact {
@@ -86,7 +87,6 @@ const lineNumberWidth = computed(() =>
     );
   align-items: start;
   column-gap: 0.75rem;
-  white-space: pre;
 }
 
 .diff-block__line-number,
@@ -98,6 +98,9 @@ const lineNumberWidth = computed(() =>
 
 .diff-block__content {
   min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .diff-block__line--context .diff-block__content,

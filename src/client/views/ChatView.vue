@@ -7,6 +7,7 @@ import ToolRunCard from "@/client/components/ToolRunCard.vue";
 import { withoutActiveToolCalls } from "@/client/lib/active-assistant";
 import { formatTokenCount } from "@/client/lib/formatting";
 import { resolveThinkingOptions } from "@/client/lib/thinking-levels";
+import { buildTranscriptMessages } from "@/client/lib/transcript";
 import { useAppStore } from "@/client/stores/app";
 
 const store = useAppStore();
@@ -30,13 +31,8 @@ const thinkingLevel = computed({
 });
 const thinkingOptions = computed(() => resolveThinkingOptions(store.activeSession, store.models));
 
-const visibleMessages = computed(() =>
-  (store.activeSession?.messages ?? []).filter(
-    (message) =>
-      message.role !== "toolResult" ||
-      message.isError ||
-      (message.toolName === "edit" && typeof message.details?.diff === "string"),
-  ),
+const transcriptMessages = computed(() =>
+  buildTranscriptMessages(store.activeSession?.messages ?? []),
 );
 const activeAssistantMessage = computed(() =>
   withoutActiveToolCalls(
@@ -133,7 +129,6 @@ watch(
               {{ thinkingLabel(option) }}
             </option>
           </select>
-          <button class="chat-main__logout" @click="store.logout">Logout</button>
         </div>
       </header>
 
@@ -151,26 +146,25 @@ watch(
           class="chat-main__transcript panel"
           @scroll="updateTranscriptPinnedState"
         >
-          <ChatMessage v-for="message in visibleMessages" :key="message.id" :message="message" />
+          <ChatMessage
+            v-for="entry in transcriptMessages"
+            :key="entry.message.id"
+            :message="entry.message"
+            :tool-results-by-call-id="entry.toolResultsByCallId"
+          />
           <ToolRunCard
             v-for="tool in store.activeSession.activeTools"
             :key="tool.toolCallId"
             :tool="tool"
           />
           <ChatMessage v-if="activeAssistantMessage" :message="activeAssistantMessage" />
-          <div v-if="store.activeSession.isStreaming" class="chat-main__working">
-            <div class="chat-main__working-status">
-              <span class="spinner chat-main__working-spinner" />
-              <span>Working…</span>
-            </div>
-            <button class="chat-main__stop" @click="store.stopActiveSession">Stop</button>
-          </div>
         </section>
 
         <MessageComposer
           :streaming="store.activeSession.isStreaming"
           @submit="(text, files) => store.sendPrompt(text, files)"
           @steer="(text, files) => store.steerPrompt(text, files)"
+          @stop="store.stopActiveSession"
         />
       </template>
     </section>
@@ -245,13 +239,11 @@ watch(
 
 .chat-main__toolbar .pill,
 .chat-main__select,
-.chat-main__logout,
 .chat-main__menu {
   font-size: 0.88rem;
 }
 
 .chat-main__select,
-.chat-main__logout,
 .chat-main__menu {
   border-radius: 0.45rem;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -262,10 +254,6 @@ watch(
 
 .chat-main__context-pill {
   white-space: nowrap;
-}
-
-.chat-main__logout {
-  background: rgba(127, 29, 29, 0.18);
 }
 
 .chat-main__menu {
@@ -295,36 +283,6 @@ watch(
   background: rgba(16, 20, 27, 0.98);
 }
 
-.chat-main__working {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.2rem 0;
-}
-
-.chat-main__working-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  color: #c5ced8;
-}
-
-.chat-main__working-spinner {
-  width: 1rem;
-  height: 1rem;
-  border-width: 2px;
-}
-
-.chat-main__stop {
-  border-radius: 0.45rem;
-  border: 1px solid rgba(248, 113, 113, 0.22);
-  background: rgba(127, 29, 29, 0.18);
-  color: inherit;
-  padding: 0.35rem 0.6rem;
-  font-size: 0.88rem;
-}
-
 @media (max-width: 900px) {
   .chat-view {
     grid-template-columns: 1fr;
@@ -332,17 +290,42 @@ watch(
   }
 
   .chat-main__header {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
     align-items: start;
-    flex-wrap: wrap;
+  }
+
+  .chat-main__heading {
+    min-width: 0;
+  }
+
+  .chat-main__heading p {
+    white-space: normal;
+    word-break: break-word;
   }
 
   .chat-main__menu {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    grid-row: 1;
+    grid-column: 1;
   }
 
   .chat-main__toolbar {
+    grid-column: 1 / -1;
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-content: stretch;
+  }
+
+  .chat-main__toolbar > * {
+    min-width: 0;
+  }
+
+  .chat-main__toolbar .pill,
+  .chat-main__select {
     width: 100%;
   }
 }

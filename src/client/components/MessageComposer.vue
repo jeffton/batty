@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Compass, ListOrdered, Paperclip, SendHorizontal } from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 const props = defineProps<{
@@ -9,6 +10,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   submit: [text: string, files: File[]];
   steer: [text: string, files: File[]];
+  stop: [];
 }>();
 
 const text = ref("");
@@ -80,6 +82,19 @@ function onDrop(event: DragEvent): void {
   }
 }
 
+function onTextareaKeydown(event: KeyboardEvent): void {
+  if (event.key !== "Enter") {
+    return;
+  }
+
+  if (!(event.metaKey || event.ctrlKey)) {
+    return;
+  }
+
+  event.preventDefault();
+  submit();
+}
+
 watch(text, () => {
   void nextTick(syncTextareaHeight);
 });
@@ -102,6 +117,14 @@ onBeforeUnmount(() => {
     @dragleave.prevent="dragging = false"
     @drop="onDrop"
   >
+    <div v-if="props.streaming" class="composer__banner">
+      <div class="composer__banner-status">
+        <span class="spinner composer__banner-spinner" />
+        <span>Working…</span>
+      </div>
+      <button class="composer__stop" type="button" @click="emit('stop')">Stop</button>
+    </div>
+
     <div v-if="files.length > 0" class="composer__attachments">
       <button
         v-for="(file, index) in files"
@@ -113,34 +136,46 @@ onBeforeUnmount(() => {
       </button>
     </div>
     <div class="composer__row">
-      <button class="composer__plus" type="button" @click="fileInput?.click()">+</button>
+      <button
+        class="composer__plus"
+        type="button"
+        aria-label="Add files"
+        title="Add files"
+        @click="fileInput?.click()"
+      >
+        <Paperclip :size="16" />
+      </button>
       <textarea
         ref="textarea"
         v-model="text"
         class="composer__input"
         rows="1"
-        placeholder="Ask Pi to code, read files, run tests, or mutate reality a tiny bit."
         :disabled="props.disabled"
         @input="syncTextareaHeight"
-        @keydown.enter.exact.prevent="submit"
+        @keydown="onTextareaKeydown"
       />
       <div class="composer__actions">
         <button
           class="composer__send"
           type="button"
+          :aria-label="props.streaming ? 'Queue prompt' : 'Send prompt'"
+          :title="props.streaming ? 'Queue prompt' : 'Send prompt'"
           :disabled="!hasPayload || props.disabled"
           @click="submit"
         >
-          {{ props.streaming ? "Queue" : "Send" }}
+          <ListOrdered v-if="props.streaming" :size="16" />
+          <SendHorizontal v-else :size="16" />
         </button>
         <button
           v-if="props.streaming"
           class="composer__steer"
           type="button"
+          aria-label="Steer prompt"
+          title="Steer prompt"
           :disabled="!hasPayload || props.disabled"
           @click="steer"
         >
-          Steer
+          <Compass :size="16" />
         </button>
       </div>
     </div>
@@ -151,9 +186,6 @@ onBeforeUnmount(() => {
       multiple
       @change="addFiles(($event.target as HTMLInputElement).files || [])"
     />
-    <div class="composer__hint muted">
-      Shift+Enter for newline, Enter to send, drag & drop files or screenshots anywhere in here.
-    </div>
   </div>
 </template>
 
@@ -177,7 +209,28 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: auto 1fr auto;
   gap: 0.5rem;
-  align-items: stretch;
+  align-items: start;
+}
+
+.composer__banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.1rem 0;
+}
+
+.composer__banner-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #c5ced8;
+}
+
+.composer__banner-spinner {
+  width: 1rem;
+  height: 1rem;
+  border-width: 2px;
 }
 
 .composer__attachments {
@@ -189,17 +242,40 @@ onBeforeUnmount(() => {
 .composer__chip,
 .composer__plus,
 .composer__send,
-.composer__steer {
+.composer__steer,
+.composer__stop {
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(22, 27, 34, 0.9);
   color: inherit;
   font-size: 0.84rem;
 }
 
+.composer__plus,
+.composer__send,
+.composer__steer {
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: start;
+  flex-shrink: 0;
+}
+
+.composer__stop {
+  border-radius: 0.45rem;
+  padding: 0.35rem 0.6rem;
+  background: rgba(127, 29, 29, 0.18);
+  border-color: rgba(248, 113, 113, 0.22);
+}
+
 .composer__chip,
 .composer__plus,
 .composer__send,
 .composer__steer,
+.composer__stop,
 .composer__input {
   outline: none;
   transition:
@@ -213,7 +289,6 @@ onBeforeUnmount(() => {
 }
 
 .composer__plus {
-  width: 2.15rem;
   font-size: 1rem;
 }
 
@@ -226,7 +301,7 @@ onBeforeUnmount(() => {
   background: rgba(13, 17, 23, 0.72);
   color: inherit;
   padding: 0.6rem 0.65rem;
-  font-size: 0.84rem;
+  font-size: 16px;
   line-height: 1.45;
 }
 
@@ -234,6 +309,7 @@ onBeforeUnmount(() => {
 .composer__plus:focus-visible,
 .composer__send:focus-visible,
 .composer__steer:focus-visible,
+.composer__stop:focus-visible,
 .composer__input:focus-visible {
   border-color: rgba(147, 197, 253, 0.38);
   box-shadow: 0 0 0 2px rgba(147, 197, 253, 0.14);
@@ -247,11 +323,7 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 0.35rem;
   align-content: start;
-}
-
-.composer__send,
-.composer__steer {
-  padding: 0.55rem 0.7rem;
+  justify-items: start;
 }
 
 .composer__send {
@@ -262,22 +334,9 @@ onBeforeUnmount(() => {
   background: rgba(251, 191, 36, 0.12);
 }
 
-.composer__hint {
-  font-size: 0.76rem;
-}
-
-@media (max-width: 720px) {
-  .composer__row {
-    grid-template-columns: 1fr;
-  }
-
-  .composer__actions {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .composer__plus {
-    width: 100%;
-    min-height: 2.15rem;
-  }
+.composer__plus :deep(svg),
+.composer__send :deep(svg),
+.composer__steer :deep(svg) {
+  display: block;
 }
 </style>

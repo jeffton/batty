@@ -30,6 +30,8 @@ const highlighted = computed(() => highlightCode(props.code, props.language));
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow-x: hidden;
   padding: 0.7rem 0.8rem;
   border-radius: 0.45rem;
   border: 1px solid rgba(255, 255, 255, 0.07);
@@ -84,6 +86,13 @@ const highlighted = computed(() => highlightCode(props.code, props.language));
 .code-block :deep(.hljs-title.class_),
 .code-block :deep(.hljs-title.function_) {
   color: #86efac;
+}
+
+.code-block :deep(code),
+.code-block :deep(.hljs) {
+  white-space: inherit;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .code-block :deep(.hljs-tag),

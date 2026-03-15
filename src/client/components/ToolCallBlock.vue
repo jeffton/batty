@@ -79,6 +79,10 @@ const visibleResultBlocks = computed(() => {
     return [];
   }
 
+  if (props.name === "edit" && props.status !== "error") {
+    return props.resultBlocks.filter((block) => block.type !== "text");
+  }
+
   if (props.name === "bash") {
     if (commandValue.value) {
       return props.resultBlocks.filter((block) => block.type !== "text");
@@ -92,6 +96,14 @@ const visibleResultBlocks = computed(() => {
 const showResultSection = computed(() => {
   if (props.name === "read") {
     return props.status === "error" && visibleResultBlocks.value.length > 0;
+  }
+
+  if (props.name === "edit") {
+    return (
+      props.status === "error" ||
+      typeof props.resultDetails?.diff === "string" ||
+      visibleResultBlocks.value.length > 0
+    );
   }
 
   if (props.name === "bash") {
@@ -141,10 +153,6 @@ const genericEntries = computed(() => {
 
     <template v-else-if="props.name === 'write' && contentValue">
       <CodeBlock :code="contentValue" :language="codeLanguage" :compact="props.compact" />
-    </template>
-
-    <template v-else-if="props.name === 'edit' && (oldTextValue || newTextValue)">
-      <DiffBlock :old-text="oldTextValue" :new-text="newTextValue" :compact="props.compact" />
     </template>
 
     <div v-if="genericEntries.length > 0" class="tool-call__meta">

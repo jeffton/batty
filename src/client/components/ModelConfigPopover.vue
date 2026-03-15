@@ -219,16 +219,4 @@ function thinkingLabel(value: string): string {
   padding: 0.45rem 0.6rem;
   flex: 0 0 auto;
 }
-
-@media (max-width: 900px) {
-  .model-config-popover:popover-open {
-    width: min(26rem, calc(100vw - 1rem));
-    max-height: calc(100dvh - 1rem);
-    padding: 0.6rem;
-  }
-
-  .model-config-popover__scroll {
-    padding-right: 0;
-  }
-}
 </style>

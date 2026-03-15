@@ -330,16 +330,4 @@ onBeforeUnmount(() => {
 .composer__icon-button :deep(svg) {
   display: block;
 }
-
-@media (max-width: 720px) {
-  .composer {
-    padding: 0.5rem 0.55rem;
-  }
-
-  .composer__actions-row,
-  .composer__stream-actions,
-  .composer__send-actions {
-    gap: 0.4rem;
-  }
-}
 </style>

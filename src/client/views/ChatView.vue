@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { LoaderCircle, Menu, Wifi, WifiOff } from "lucide-vue-next";
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { VList } from "virtua/vue";
 import ChatMessage from "@/client/components/ChatMessage.vue";
 import MessageComposer from "@/client/components/MessageComposer.vue";
 import ModelConfigPopover from "@/client/components/ModelConfigPopover.vue";
@@ -14,12 +15,16 @@ import {
   toolStatesForMessage,
 } from "@/client/lib/transcript";
 import { useAppStore } from "@/client/stores/app";
+import type { UiContentBlock } from "@/shared/types";
 
 const MODEL_POPOVER_ID = "chat-main-model-popover";
 const MODEL_POPOVER_ANCHOR = "--chat-main-model-anchor";
+const TRANSCRIPT_BOTTOM_THRESHOLD = 24;
+
+type TranscriptHandle = InstanceType<typeof VList>;
 
 const store = useAppStore();
-const transcript = ref<HTMLElement>();
+const transcript = ref<TranscriptHandle | null>(null);
 const isTranscriptPinnedToBottom = ref(true);
 const thinkingOptions = computed(() => resolveThinkingOptions(store.activeSession, store.models));
 
@@ -37,6 +42,50 @@ const activeAssistantMessage = computed(() =>
 );
 const activeAssistantToolStates = computed(() =>
   toolStatesForMessage(activeAssistantMessage.value, toolStateLookup.value.toolStatesByCallId),
+);
+const transcriptEntries = computed(() => {
+  const entries = [...transcriptMessages.value];
+
+  if (activeAssistantMessage.value) {
+    entries.push({
+      message: activeAssistantMessage.value,
+      toolStatesByCallId: activeAssistantToolStates.value,
+    });
+  }
+
+  return entries;
+});
+const keptTranscriptIndexes = computed(() => {
+  const lastIndex = transcriptEntries.value.length - 1;
+  return lastIndex >= 0 ? [lastIndex] : [];
+});
+const transcriptTailSignature = computed(() => {
+  const lastMessage = transcriptEntries.value.at(-1)?.message;
+  return lastMessage
+    ? `${transcriptEntries.value.length}:${lastMessage.id}:${lastMessage.timestamp}`
+    : "0";
+});
+const activeAssistantSignature = computed(() => {
+  const assistant = activeAssistantMessage.value;
+  if (!assistant) {
+    return "";
+  }
+
+  return `${assistant.id}:${assistant.timestamp}:${assistant.blocks.reduce(
+    (total, block) => total + blockContentSize(block),
+    0,
+  )}`;
+});
+const activeToolsSignature = computed(() =>
+  (store.activeSession?.activeTools ?? [])
+    .map(
+      (tool) =>
+        `${tool.toolCallId}:${tool.status}:${tool.blocks.length}:${tool.blocks.reduce(
+          (total, block) => total + blockContentSize(block),
+          0,
+        )}`,
+    )
+    .join("|"),
 );
 const connectionDescription = computed(() => {
   switch (store.connectionState) {
@@ -97,6 +146,7 @@ const modelThinkingButtonLabel = computed(() => {
   const levelLabel = thinkingLabel(store.activeSession?.thinkingLevel ?? "off");
   return `${modelLabel} · ${levelLabel}`;
 });
+
 function shortModelLabel(model: { label: string }): string {
   return model.label.split(" · ", 1)[0] ?? model.label;
 }
@@ -105,20 +155,56 @@ function thinkingLabel(value: string): string {
   return value === "xhigh" ? "XHigh" : value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+function blockContentSize(block: UiContentBlock): number {
+  switch (block.type) {
+    case "text":
+      return block.text.length;
+    case "thinking":
+      return block.thinking.length;
+    case "image":
+      return block.data.length;
+    case "toolCall":
+      return block.id.length + block.name.length;
+  }
+}
+
 function updateTranscriptPinnedState(): void {
-  const element = transcript.value;
-  if (!element) {
+  const handle = transcript.value;
+  if (!handle) {
     isTranscriptPinnedToBottom.value = true;
     return;
   }
 
-  const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
-  isTranscriptPinnedToBottom.value = distanceFromBottom <= 24;
+  const distanceFromBottom = handle.scrollSize - handle.scrollOffset - handle.viewportSize;
+  isTranscriptPinnedToBottom.value = distanceFromBottom <= TRANSCRIPT_BOTTOM_THRESHOLD;
+}
+
+function nextAnimationFrame(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+async function waitForTranscriptLayout(): Promise<void> {
+  await nextTick();
+  await nextAnimationFrame();
 }
 
 async function scrollToBottom(behavior: ScrollBehavior = "auto"): Promise<void> {
-  await nextTick();
-  transcript.value?.scrollTo({ top: transcript.value.scrollHeight, behavior });
+  const handle = transcript.value;
+  const lastIndex = transcriptEntries.value.length - 1;
+  if (!handle || lastIndex < 0) {
+    return;
+  }
+
+  await waitForTranscriptLayout();
+  transcript.value?.scrollToIndex(lastIndex, {
+    align: "end",
+    smooth: behavior === "smooth",
+  });
+  await nextAnimationFrame();
+  updateTranscriptPinnedState();
+}
+
+function handleTranscriptScroll(): void {
   updateTranscriptPinnedState();
 }
 
@@ -143,10 +229,23 @@ function setThinkingLevel(level: string): void {
   void store.setThinkingLevel(level);
 }
 
+onMounted(() => {
+  window.addEventListener("resize", updateTranscriptPinnedState);
+});
+
+onUnmounted(() => {
+  window.removeEventListener("resize", updateTranscriptPinnedState);
+});
+
 watch(
-  () => store.activeSession,
-  (current, previous) => {
-    const openedSession = current?.id !== previous?.id;
+  [
+    () => store.activeSession?.id,
+    transcriptTailSignature,
+    activeAssistantSignature,
+    activeToolsSignature,
+  ],
+  ([sessionId], [previousSessionId]) => {
+    const openedSession = sessionId !== previousSessionId;
     if (openedSession) {
       isTranscriptPinnedToBottom.value = true;
       void scrollToBottom("auto");
@@ -157,9 +256,8 @@ watch(
       return;
     }
 
-    void scrollToBottom(current?.isStreaming ? "auto" : "smooth");
+    void scrollToBottom(store.activeSession?.isStreaming ? "auto" : "smooth");
   },
-  { deep: true },
 );
 </script>
 
@@ -253,23 +351,22 @@ watch(
       </div>
 
       <template v-else>
-        <section
+        <VList
           ref="transcript"
           class="chat-main__transcript panel"
-          @scroll="updateTranscriptPinnedState"
+          :data="transcriptEntries"
+          :keep-mounted="keptTranscriptIndexes"
+          @scroll="handleTranscriptScroll"
         >
-          <ChatMessage
-            v-for="entry in transcriptMessages"
-            :key="entry.message.id"
-            :message="entry.message"
-            :tool-states-by-call-id="entry.toolStatesByCallId"
-          />
-          <ChatMessage
-            v-if="activeAssistantMessage"
-            :message="activeAssistantMessage"
-            :tool-states-by-call-id="activeAssistantToolStates"
-          />
-        </section>
+          <template #default="{ item: entry }">
+            <div :key="entry.message.id" class="chat-main__transcript-item">
+              <ChatMessage
+                :message="entry.message"
+                :tool-states-by-call-id="entry.toolStatesByCallId"
+              />
+            </div>
+          </template>
+        </VList>
 
         <MessageComposer
           :streaming="store.activeSession.isStreaming"
@@ -453,11 +550,9 @@ watch(
 
 .chat-main__transcript {
   min-height: 0;
+  min-width: 0;
   overflow: auto;
-  padding: 0.6rem calc(var(--safe-area-right) + 0.7rem) 0.6rem 0.7rem;
-  display: grid;
-  gap: 0.5rem;
-  align-content: start;
+  padding: 0.6rem calc(var(--safe-area-right) + 0.7rem) 0.1rem 0.7rem;
   scroll-padding-right: calc(var(--safe-area-right) + 0.7rem);
   scroll-padding-bottom: 0.6rem;
   border: 0;
@@ -465,6 +560,11 @@ watch(
   box-shadow: none;
   backdrop-filter: none;
   background: var(--color-bg-panel-soft);
+}
+
+.chat-main__transcript-item {
+  min-width: 0;
+  padding-bottom: 0.5rem;
 }
 
 @keyframes chat-main-spin {
@@ -536,7 +636,7 @@ watch(
   }
 
   .chat-main__transcript {
-    padding: 0.6rem calc(var(--safe-area-right) + 0.7rem) 0.6rem
+    padding: 0.6rem calc(var(--safe-area-right) + 0.7rem) 0.1rem
       calc(var(--safe-area-left) + 0.7rem);
     scroll-padding-left: calc(var(--safe-area-left) + 0.7rem);
   }

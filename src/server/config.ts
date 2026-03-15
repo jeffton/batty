@@ -8,6 +8,8 @@ export interface AppConfig {
   selfPath: string;
   uploadsDir: string;
   publicDir: string;
+  webPushDir: string;
+  webPushSubject: string;
   cookieName: string;
   authPassword: string;
   authSecret: string;
@@ -27,6 +29,8 @@ export function loadConfig(): AppConfig {
     selfPath,
     uploadsDir: process.env.PI_FACE_UPLOADS_DIR ?? path.join(selfPath, ".data", "uploads"),
     publicDir: path.join(selfPath, "dist", "client"),
+    webPushDir: process.env.PI_FACE_WEB_PUSH_DIR ?? path.join(selfPath, ".data", "web-push"),
+    webPushSubject: process.env.PI_FACE_WEB_PUSH_SUBJECT ?? "mailto:pi-face@localhost",
     cookieName: "pi-face-auth",
     authPassword: process.env.PI_FACE_PASSWORD ?? DEFAULT_PASSWORD,
     authSecret: process.env.PI_FACE_SECRET ?? DEFAULT_SECRET,

@@ -24,6 +24,26 @@ export function getVersion(): Promise<{ buildId: string }> {
   return request("/api/version");
 }
 
+export function getPushPublicKey(): Promise<{ publicKey: string }> {
+  return request("/api/push/public-key");
+}
+
+export function savePushSubscription(subscription: PushSubscriptionJSON): Promise<{ ok: true }> {
+  return request("/api/push/subscriptions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subscription }),
+  });
+}
+
+export function deletePushSubscription(endpoint: string): Promise<{ ok: true }> {
+  return request("/api/push/subscriptions/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ endpoint }),
+  });
+}
+
 export function login(password: string): Promise<{ ok: true }> {
   return request("/api/login", {
     method: "POST",

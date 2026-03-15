@@ -8,10 +8,15 @@ import { createAuthToken, verifyAuthToken } from "./auth";
 import { readBuildId } from "./build-id";
 import { loadConfig } from "./config";
 import { PiService, type UploadedFile } from "./pi-service";
+import { WebPushService } from "./web-push";
 import { createWorkspace, listWorkspaces, resolveWorkspace } from "./workspaces";
 
 const config = loadConfig();
-const service = new PiService(config);
+const webPush = new WebPushService(config);
+await webPush.initialize();
+const service = new PiService(config, async (session) => {
+  await webPush.notifyAgentCompleted(session);
+});
 
 const app = fastify({
   logger: true,
@@ -102,6 +107,29 @@ app.get("/api/bootstrap", async (request) => {
 });
 
 app.get("/api/version", async () => ({ buildId }));
+
+app.get("/api/push/public-key", async () => ({ publicKey: webPush.getPublicKey() }));
+
+app.post<{ Body: { subscription?: PushSubscriptionJSON } }>(
+  "/api/push/subscriptions",
+  async (request) => {
+    if (!request.body?.subscription) {
+      throw new Error("Missing push subscription");
+    }
+
+    await webPush.upsertSubscription(request.body.subscription);
+    return { ok: true };
+  },
+);
+
+app.post<{ Body: { endpoint?: string } }>("/api/push/subscriptions/delete", async (request) => {
+  if (!request.body?.endpoint) {
+    throw new Error("Missing push subscription endpoint");
+  }
+
+  await webPush.removeSubscription(request.body.endpoint);
+  return { ok: true };
+});
 
 app.get("/api/workspaces", async () => {
   return listWorkspaces(config);

@@ -7,6 +7,9 @@ export default defineConfig({
   plugins: [
     vue(),
     VitePWA({
+      strategies: "injectManifest",
+      srcDir: "src/client",
+      filename: "sw.ts",
       registerType: "autoUpdate",
       includeAssets: ["favicon.png", "apple-touch-icon.png"],
       manifest: {
@@ -30,27 +33,12 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
+      injectManifest: {
         globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
-        runtimeCaching: [
-          {
-            urlPattern: ({ request }) => request.mode === "navigate",
-            handler: "NetworkFirst",
-            options: {
-              cacheName: "app-pages",
-            },
-          },
-          {
-            urlPattern: ({ url }) => url.pathname.startsWith("/assets/"),
-            handler: "StaleWhileRevalidate",
-            options: {
-              cacheName: "static-assets",
-            },
-          },
-        ],
       },
       devOptions: {
         enabled: true,
+        type: "module",
       },
     }),
   ],

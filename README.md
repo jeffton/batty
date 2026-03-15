@@ -14,6 +14,7 @@ A browser UI for [Pi Coding Agent](https://pi.dev) that keeps Pi's session/model
 - Create new workspaces directly under the configured root from the sidebar
 - Session listing + resume per workspace using Pi session files
 - Offline-friendly client shell via PWA + IndexedDB snapshot caching
+- Native Web Push notifications when agent runs finish in the background, including iOS Home Screen installs
 - TypeScript Fastify server using Pi's SDK/session APIs
 - Tests for auth, workspace discovery, and client session-event reduction
 
@@ -67,6 +68,10 @@ Environment variables:
 - `PI_FACE_PASSWORD` - overrides the hardcoded password
 - `PI_FACE_SECRET` - cookie signing secret
 - `PI_FACE_UPLOADS_DIR` - attachment staging directory
+- `PI_FACE_WEB_PUSH_DIR` - persistent storage for VAPID keys and push subscriptions
+- `PI_FACE_WEB_PUSH_SUBJECT` - VAPID contact subject, default `mailto:pi-face@localhost`
+- `PI_FACE_WEB_PUSH_PUBLIC_KEY` - optional explicit VAPID public key override
+- `PI_FACE_WEB_PUSH_PRIVATE_KEY` - optional explicit VAPID private key override
 
 Pi resources are loaded from the regular `~/.pi` setup through Pi's SDK:
 

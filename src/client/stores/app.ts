@@ -21,6 +21,8 @@ import {
   writeCachedBootstrap,
   writeCachedSession,
 } from "@/client/lib/cache";
+import { primeAgentNotifications } from "@/client/lib/agent-notifications";
+import { syncPushSubscription } from "@/client/lib/push-notifications";
 import { applyServerEvent } from "@/client/lib/session-events";
 import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
 import { sessionEventsPath } from "@/client/lib/session-stream";
@@ -76,6 +78,9 @@ export const useAppStore = defineStore("app", {
         const payload = await getBootstrap();
         this.applyBootstrap(payload);
         await writeCachedBootstrap(payload);
+        if (payload.authenticated) {
+          void syncPushSubscription(false);
+        }
       } catch (error) {
         const cached = await readCachedBootstrap();
         if (cached) {
@@ -268,6 +273,11 @@ export const useAppStore = defineStore("app", {
       if (!this.activeSession) {
         return;
       }
+      void primeAgentNotifications().then((granted) => {
+        if (granted) {
+          void syncPushSubscription(false);
+        }
+      });
       await sendPrompt(
         this.activeSession.id,
         text,
@@ -280,6 +290,11 @@ export const useAppStore = defineStore("app", {
       if (!this.activeSession) {
         return;
       }
+      void primeAgentNotifications().then((granted) => {
+        if (granted) {
+          void syncPushSubscription(false);
+        }
+      });
       await sendPrompt(this.activeSession.id, text, files, "steer");
     },
 

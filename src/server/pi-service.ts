@@ -117,9 +117,11 @@ export class PiService {
   private readonly authStorage: AuthStorage;
   private readonly modelRegistry: ModelRegistry;
   private readonly sessions = new Map<string, WebSession>();
+  private readonly onAgentCompleted?: (session: SessionState) => Promise<void>;
 
-  constructor(config: AppConfig) {
+  constructor(config: AppConfig, onAgentCompleted?: (session: SessionState) => Promise<void>) {
     this.config = config;
+    this.onAgentCompleted = onAgentCompleted;
     this.authStorage = AuthStorage.create(path.join(getAgentDir(), "auth.json"));
     this.modelRegistry = new ModelRegistry(
       this.authStorage,
@@ -276,7 +278,9 @@ export class PiService {
       modelFallbackMessage,
     };
 
-    session.subscribe((event) => this.handleAgentEvent(webSession, event));
+    session.subscribe((event) => {
+      void this.handleAgentEvent(webSession, event);
+    });
     this.sessions.set(webSession.id, webSession);
     return webSession;
   }
@@ -287,7 +291,7 @@ export class PiService {
     }
   }
 
-  private handleAgentEvent(webSession: WebSession, event: AgentSessionEvent): void {
+  private async handleAgentEvent(webSession: WebSession, event: AgentSessionEvent): Promise<void> {
     switch (event.type) {
       case "message_start":
       case "message_update":
@@ -348,12 +352,17 @@ export class PiService {
       case "agent_end":
       case "turn_end":
       case "auto_compaction_end":
-      case "auto_retry_end":
+      case "auto_retry_end": {
         if (event.type === "agent_end") {
           webSession.activeAssistant = undefined;
         }
-        this.publish(webSession, { type: "state", state: this.getState(webSession.id) });
+        const state = this.getState(webSession.id);
+        this.publish(webSession, { type: "state", state });
+        if (event.type === "agent_end") {
+          await this.onAgentCompleted?.(state);
+        }
         break;
+      }
       default:
         break;
     }

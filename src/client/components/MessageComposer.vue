@@ -21,6 +21,12 @@ const dragging = ref(false);
 const maxInputHeight = ref(240);
 
 const hasPayload = computed(() => text.value.trim().length > 0 || files.value.length > 0);
+const keyboardOpen = ref(false);
+
+function updateKeyboardState(): void {
+  if (!window.visualViewport) return;
+  keyboardOpen.value = window.visualViewport.height < window.innerHeight * 0.85;
+}
 
 function addFiles(next: FileList | File[]): void {
   files.value = [...files.value, ...Array.from(next)];
@@ -102,16 +108,18 @@ watch(text, () => {
 onMounted(() => {
   updateMaxInputHeight();
   window.addEventListener("resize", updateMaxInputHeight);
+  window.visualViewport?.addEventListener("resize", updateKeyboardState);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", updateMaxInputHeight);
+  window.visualViewport?.removeEventListener("resize", updateKeyboardState);
 });
 </script>
 
 <template>
   <div
-    :class="['composer', dragging ? 'is-dragging' : '']"
+    :class="['composer', dragging ? 'is-dragging' : '', keyboardOpen ? 'composer--kbd' : '']"
     @dragenter.prevent="dragging = true"
     @dragover.prevent
     @dragleave.prevent="dragging = false"
@@ -206,6 +214,10 @@ onBeforeUnmount(() => {
     calc(var(--safe-area-left) + 0.8rem);
   background: var(--color-bg-panel);
   border-top: 1px solid var(--color-border-soft);
+}
+
+.composer--kbd {
+  padding-bottom: 0.5rem;
 }
 
 .is-dragging {

@@ -21,12 +21,7 @@ const dragging = ref(false);
 const maxInputHeight = ref(240);
 
 const hasPayload = computed(() => text.value.trim().length > 0 || files.value.length > 0);
-const keyboardOpen = ref(false);
-
-function updateKeyboardState(): void {
-  if (!window.visualViewport) return;
-  keyboardOpen.value = window.visualViewport.height < window.innerHeight * 0.85;
-}
+const inputFocused = ref(false);
 
 function addFiles(next: FileList | File[]): void {
   files.value = [...files.value, ...Array.from(next)];
@@ -108,18 +103,16 @@ watch(text, () => {
 onMounted(() => {
   updateMaxInputHeight();
   window.addEventListener("resize", updateMaxInputHeight);
-  window.visualViewport?.addEventListener("resize", updateKeyboardState);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", updateMaxInputHeight);
-  window.visualViewport?.removeEventListener("resize", updateKeyboardState);
 });
 </script>
 
 <template>
   <div
-    :class="['composer', dragging ? 'is-dragging' : '', keyboardOpen ? 'composer--kbd' : '']"
+    :class="['composer', dragging ? 'is-dragging' : '', inputFocused ? 'composer--kbd' : '']"
     @dragenter.prevent="dragging = true"
     @dragover.prevent
     @dragleave.prevent="dragging = false"
@@ -143,6 +136,8 @@ onBeforeUnmount(() => {
         class="composer__input"
         rows="1"
         :disabled="props.disabled"
+        @focus="inputFocused = true"
+        @blur="inputFocused = false"
         @input="syncTextareaHeight"
         @keydown="onTextareaKeydown"
       />

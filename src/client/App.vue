@@ -9,6 +9,7 @@ const route = useRoute();
 const router = useRouter();
 
 const VERSION_CHECK_INTERVAL_MS = 15000;
+const IOS_KEYBOARD_THRESHOLD_PX = 120;
 
 const handleOffline = () => store.markOffline();
 const handleOnline = async () => {
@@ -28,6 +29,37 @@ const onVisibilityChange = () => {
 };
 let syncVersion = 0;
 let versionTimer: ReturnType<typeof window.setInterval> | undefined;
+let visualViewport: VisualViewport | null = null;
+let viewportListener: (() => void) | null = null;
+
+function isIOSDevice(): boolean {
+  const ua = navigator.userAgent;
+  const platform = navigator.platform;
+
+  const iosByUa = /iPad|iPhone|iPod/.test(ua);
+  const ipadOsDesktopUa = platform === "MacIntel" && navigator.maxTouchPoints > 1;
+
+  return iosByUa || ipadOsDesktopUa;
+}
+
+function updateIOSViewportHeight(): void {
+  if (!visualViewport) {
+    return;
+  }
+
+  const viewportHeight = Math.round(visualViewport.height);
+  const fullHeight = Math.round(window.innerHeight);
+  const keyboardOpen = fullHeight - viewportHeight > IOS_KEYBOARD_THRESHOLD_PX;
+
+  if (Math.abs(fullHeight - viewportHeight) < 2) {
+    document.documentElement.style.removeProperty("--app-height");
+  } else {
+    document.documentElement.style.setProperty("--app-height", `${viewportHeight}px`);
+  }
+
+  document.documentElement.classList.toggle("ios-keyboard-open", keyboardOpen);
+  window.scrollTo(0, 0);
+}
 
 function fallbackWorkspaceRoute(): string | undefined {
   const workspaceId = store.selectedWorkspaceId ?? store.workspaces[0]?.id;
@@ -116,6 +148,18 @@ onMounted(async () => {
   window.addEventListener("offline", handleOffline);
   window.addEventListener("online", onOnline);
   document.addEventListener("visibilitychange", onVisibilityChange);
+
+  if (isIOSDevice() && window.visualViewport) {
+    visualViewport = window.visualViewport;
+    viewportListener = () => {
+      updateIOSViewportHeight();
+    };
+
+    visualViewport.addEventListener("resize", viewportListener);
+    visualViewport.addEventListener("scroll", viewportListener);
+    updateIOSViewportHeight();
+  }
+
   await store.bootstrap();
   versionTimer = window.setInterval(() => {
     if (navigator.onLine) {
@@ -128,6 +172,15 @@ onUnmounted(() => {
   window.removeEventListener("offline", handleOffline);
   window.removeEventListener("online", onOnline);
   document.removeEventListener("visibilitychange", onVisibilityChange);
+
+  if (visualViewport && viewportListener) {
+    visualViewport.removeEventListener("resize", viewportListener);
+    visualViewport.removeEventListener("scroll", viewportListener);
+  }
+
+  document.documentElement.style.removeProperty("--app-height");
+  document.documentElement.classList.remove("ios-keyboard-open");
+
   if (versionTimer) {
     window.clearInterval(versionTimer);
   }

@@ -283,10 +283,6 @@ watch(
 </template>
 
 <style scoped>
-:global(.ios-keyboard-open) .chat-main__header {
-  display: none !important;
-}
-
 .chat-view {
   width: 100%;
   height: 100%;

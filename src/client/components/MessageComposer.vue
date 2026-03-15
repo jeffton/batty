@@ -279,7 +279,7 @@ onBeforeUnmount(() => {
   background: var(--color-bg-panel-soft);
   color: inherit;
   padding: 0.75rem 0.8rem;
-  font-size: 16px;
+  font-size: 0.95rem;
   line-height: 1.45;
 }
 

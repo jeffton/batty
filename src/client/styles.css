@@ -167,10 +167,16 @@ textarea {
 
 .app-shell {
   width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   height: 100vh;
   height: var(--app-height, 100dvh);
   overflow: hidden;
   background: var(--color-bg-app);
+}
+
+.ios-keyboard-open .composer {
+  padding-bottom: 0;
 }
 
 .center-panel {

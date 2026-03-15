@@ -9,7 +9,6 @@ const route = useRoute();
 const router = useRouter();
 
 const VERSION_CHECK_INTERVAL_MS = 15000;
-const IOS_KEYBOARD_SCROLL_THRESHOLD_PX = 4;
 
 const handleOffline = () => store.markOffline();
 const handleOnline = async () => {
@@ -47,27 +46,18 @@ function updateIOSViewportHeight(): void {
     return;
   }
 
+  const viewportHeight = Math.round(visualViewport.height);
   const fullHeight = Math.round(window.innerHeight);
-  const pageScroll = Math.max(
-    0,
-    Math.round(window.scrollY),
-    Math.round(document.documentElement.scrollTop),
-    Math.round(document.body?.scrollTop ?? 0),
-  );
-  const nextHeight = Math.max(0, fullHeight - pageScroll);
-  const keyboardOpen = pageScroll >= IOS_KEYBOARD_SCROLL_THRESHOLD_PX;
+  const keyboardOpen = fullHeight - viewportHeight > 120;
 
-  if (keyboardOpen) {
-    document.documentElement.style.setProperty("--app-height", `${nextHeight}px`);
-  } else {
+  if (Math.abs(fullHeight - viewportHeight) < 2) {
     document.documentElement.style.removeProperty("--app-height");
+  } else {
+    document.documentElement.style.setProperty("--app-height", `${viewportHeight}px`);
   }
 
   document.documentElement.classList.toggle("ios-keyboard-open", keyboardOpen);
-
-  if (pageScroll > 0) {
-    window.scrollTo(0, 0);
-  }
+  window.scrollTo(0, 0);
 }
 
 function fallbackWorkspaceRoute(): string | undefined {

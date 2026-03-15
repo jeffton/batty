@@ -3,61 +3,83 @@
 @import "@fontsource/source-sans-3/latin-600.css";
 @import "@fontsource/source-sans-3/latin-700.css";
 
+/*
+  Color system built on OKLCH.
+  Base hue: 175 (teal, from the app icon).
+  Neutral hue: 250 (cool slate, low chroma).
+  Surfaces use perceptually uniform lightness steps.
+*/
+
 :root {
   --safe-area-top: env(safe-area-inset-top, 0px);
   --safe-area-right: env(safe-area-inset-right, 0px);
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
   --safe-area-left: env(safe-area-inset-left, 0px);
 
-  --color-text: #374151;
-  --color-text-muted: #6b7280;
-  --color-text-subtle: #9ca3af;
-  --color-text-strong: #111827;
-  --color-link: #0d9488;
+  /* --- text --- */
+  --color-text: oklch(0.35 0.015 250);
+  --color-text-muted: oklch(0.52 0.015 250);
+  --color-text-subtle: oklch(0.62 0.01 250);
+  --color-text-strong: oklch(0.2 0.02 250);
+  --color-link: oklch(0.55 0.14 175);
 
-  --color-bg-app: #f9fafa;
-  --color-bg-panel: #f0f3f4;
-  --color-bg-panel-strong: #ffffff;
-  --color-bg-panel-soft: #f9fafb;
-  --color-bg-elevated: #e9ecee;
-  --color-bg-elevated-soft: #f0f2f4;
-  --color-bg-overlay: #ffffff;
-  --color-bg-inline-code: #f1f5f9;
-  --color-bg-selection: rgba(13, 148, 136, 0.1);
+  /* --- surfaces ---
+     Light mode surface stack (L values):
+       app bg:      0.97  (lightest, chat area)
+       elevated:    0.95  (tool call blocks)
+       panel:       0.92  (header, footer — clearly distinct)
+       elevated-ui: 0.90  (hover states, inputs)
+       overlay:     0.99  (popovers, dropdowns)
+  */
+  --color-bg-app: oklch(0.97 0.005 250);
+  --color-bg-panel: oklch(0.88 0.01 250);
+  --color-bg-panel-strong: oklch(0.99 0.002 250);
+  --color-bg-panel-soft: oklch(0.96 0.005 250);
+  --color-bg-elevated: oklch(0.85 0.012 250);
+  --color-bg-elevated-soft: oklch(0.94 0.006 250);
+  --color-bg-overlay: oklch(0.99 0.003 250);
+  --color-bg-inline-code: oklch(0.93 0.008 250);
+  --color-bg-selection: oklch(0.94 0.015 175);
 
-  --color-border-soft: #e5e7eb;
-  --color-border-strong: #d1d5db;
-  --color-border-accent: #2dd4bf;
-  --color-shadow-popover: 0 8px 30px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
-  --color-backdrop: rgba(0, 0, 0, 0.2);
+  /* --- borders --- */
+  --color-border-soft: oklch(0.88 0.006 250);
+  --color-border-strong: oklch(0.82 0.01 250);
+  --color-border-accent: oklch(0.72 0.14 175);
 
-  --color-accent: #14b8a6;
-  --color-accent-soft: rgba(20, 184, 166, 0.1);
-  --color-accent-strong: #0d9488;
+  /* --- shadows --- */
+  --color-shadow-popover: 0 8px 30px oklch(0.2 0.02 250 / 0.12), 0 2px 8px oklch(0.2 0.02 250 / 0.06);
+  --color-backdrop: oklch(0.2 0.02 250 / 0.2);
 
-  --color-success: #10b981;
-  --color-success-soft: rgba(16, 185, 129, 0.1);
-  --color-success-soft-strong: rgba(16, 185, 129, 0.15);
-  --color-success-contrast: #059669;
-  --color-warning: #f59e0b;
-  --color-warning-soft: rgba(245, 158, 11, 0.1);
-  --color-error: #ef4444;
-  --color-error-soft: rgba(239, 68, 68, 0.08);
-  --color-error-soft-strong: rgba(239, 68, 68, 0.12);
-  --color-info: #0ea5e9;
-  --color-info-soft: rgba(14, 165, 233, 0.1);
-  --color-info-soft-strong: rgba(14, 165, 233, 0.15);
+  /* --- accent (teal) --- */
+  --color-accent: oklch(0.65 0.16 175);
+  --color-accent-soft: oklch(0.94 0.015 175);
+  --color-accent-strong: oklch(0.55 0.14 175);
 
-  --color-code-bg: #f8fafc;
-  --color-code-border: #e2e8f0;
-  --color-code-text: #1e293b;
-  --color-code-comment: #64748b;
-  --color-code-keyword: #7c3aed;
-  --color-code-string: #0369a1;
-  --color-code-number: #b45309;
-  --color-code-title: #059669;
-  --color-code-tag: #0284c7;
-  --color-code-inline-change: rgba(0, 0, 0, 0.05);
+  /* --- semantic --- */
+  --color-success: oklch(0.62 0.17 155);
+  --color-success-soft: oklch(0.95 0.04 155);
+  --color-success-soft-strong: oklch(0.92 0.05 155);
+  --color-success-contrast: oklch(0.52 0.14 155);
+  --color-warning: oklch(0.72 0.16 75);
+  --color-warning-soft: oklch(0.95 0.04 75);
+  --color-error: oklch(0.58 0.2 25);
+  --color-error-soft: oklch(0.95 0.03 25);
+  --color-error-soft-strong: oklch(0.92 0.04 25);
+  --color-info: oklch(0.62 0.16 240);
+  --color-info-soft: oklch(0.95 0.03 240);
+  --color-info-soft-strong: oklch(0.92 0.04 240);
+
+  /* --- code --- */
+  --color-code-bg: oklch(0.96 0.005 250);
+  --color-code-border: oklch(0.88 0.008 250);
+  --color-code-text: oklch(0.25 0.02 250);
+  --color-code-comment: oklch(0.55 0.01 250);
+  --color-code-keyword: oklch(0.55 0.2 300);
+  --color-code-string: oklch(0.52 0.12 230);
+  --color-code-number: oklch(0.58 0.14 65);
+  --color-code-title: oklch(0.55 0.14 155);
+  --color-code-tag: oklch(0.55 0.13 230);
+  --color-code-inline-change: oklch(0.5 0 0 / 0.06);
 
   font-family:
     "Source Sans 3",
@@ -77,55 +99,70 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-text: #d1d5db;
-    --color-text-muted: #9ca3af;
-    --color-text-subtle: #6b7280;
-    --color-text-strong: #f3f4f6;
-    --color-link: #5eead4;
+    /* --- text --- */
+    --color-text: oklch(0.78 0.01 250);
+    --color-text-muted: oklch(0.65 0.01 250);
+    --color-text-subtle: oklch(0.52 0.01 250);
+    --color-text-strong: oklch(0.92 0.005 250);
+    --color-link: oklch(0.78 0.12 175);
 
-    --color-bg-app: #13151b;
-    --color-bg-panel: #1e2128;
-    --color-bg-panel-strong: #22252d;
-    --color-bg-panel-soft: #15171d;
-    --color-bg-elevated: #282c35;
-    --color-bg-elevated-soft: #1a1d24;
-    --color-bg-overlay: #1a1d24;
-    --color-bg-inline-code: #1e293b;
-    --color-bg-selection: rgba(45, 212, 191, 0.12);
+    /* --- surfaces ---
+       Dark mode surface stack (L values):
+         app bg:      0.20  (darkest, chat area)
+         elevated:    0.24  (tool call blocks)
+         panel:       0.27  (header, footer)
+         elevated-ui: 0.30  (hover states, inputs)
+         overlay:     0.25  (popovers)
+    */
+    --color-bg-app: oklch(0.20 0.008 250);
+    --color-bg-panel: oklch(0.30 0.012 250);
+    --color-bg-panel-strong: oklch(0.34 0.012 250);
+    --color-bg-panel-soft: oklch(0.22 0.008 250);
+    --color-bg-elevated: oklch(0.34 0.012 250);
+    --color-bg-elevated-soft: oklch(0.24 0.01 250);
+    --color-bg-overlay: oklch(0.28 0.012 250);
+    --color-bg-inline-code: oklch(0.24 0.012 250);
+    --color-bg-selection: oklch(0.26 0.02 175);
 
-    --color-border-soft: #2a2d35;
-    --color-border-strong: #374151;
-    --color-border-accent: #2dd4bf;
-    --color-shadow-popover: 0 8px 30px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2);
-    --color-backdrop: rgba(0, 0, 0, 0.4);
+    /* --- borders --- */
+    --color-border-soft: oklch(0.30 0.008 250);
+    --color-border-strong: oklch(0.38 0.01 250);
+    --color-border-accent: oklch(0.72 0.14 175);
 
-    --color-accent: #2dd4bf;
-    --color-accent-soft: rgba(45, 212, 191, 0.12);
-    --color-accent-strong: #5eead4;
+    /* --- shadows --- */
+    --color-shadow-popover: 0 8px 30px oklch(0 0 0 / 0.4), 0 2px 8px oklch(0 0 0 / 0.2);
+    --color-backdrop: oklch(0 0 0 / 0.4);
 
-    --color-success: #34d399;
-    --color-success-soft: rgba(52, 211, 153, 0.12);
-    --color-success-soft-strong: rgba(52, 211, 153, 0.18);
-    --color-success-contrast: #6ee7b7;
-    --color-warning: #fbbf24;
-    --color-warning-soft: rgba(251, 191, 36, 0.1);
-    --color-error: #f87171;
-    --color-error-soft: rgba(248, 113, 113, 0.08);
-    --color-error-soft-strong: rgba(248, 113, 113, 0.14);
-    --color-info: #38bdf8;
-    --color-info-soft: rgba(56, 189, 248, 0.12);
-    --color-info-soft-strong: rgba(56, 189, 248, 0.18);
+    /* --- accent (teal) --- */
+    --color-accent: oklch(0.78 0.14 175);
+    --color-accent-soft: oklch(0.26 0.02 175);
+    --color-accent-strong: oklch(0.82 0.12 175);
 
-    --color-code-bg: #15171d;
-    --color-code-border: #2a2d35;
-    --color-code-text: #e2e8f0;
-    --color-code-comment: #64748b;
-    --color-code-keyword: #c4b5fd;
-    --color-code-string: #7dd3fc;
-    --color-code-number: #fcd34d;
-    --color-code-title: #6ee7b7;
-    --color-code-tag: #7dd3fc;
-    --color-code-inline-change: rgba(255, 255, 255, 0.08);
+    /* --- semantic --- */
+    --color-success: oklch(0.72 0.16 155);
+    --color-success-soft: oklch(0.28 0.04 155);
+    --color-success-soft-strong: oklch(0.32 0.05 155);
+    --color-success-contrast: oklch(0.78 0.12 155);
+    --color-warning: oklch(0.78 0.14 75);
+    --color-warning-soft: oklch(0.28 0.04 75);
+    --color-error: oklch(0.68 0.18 25);
+    --color-error-soft: oklch(0.25 0.04 25);
+    --color-error-soft-strong: oklch(0.30 0.05 25);
+    --color-info: oklch(0.72 0.12 240);
+    --color-info-soft: oklch(0.25 0.04 240);
+    --color-info-soft-strong: oklch(0.30 0.05 240);
+
+    /* --- code --- */
+    --color-code-bg: oklch(0.22 0.008 250);
+    --color-code-border: oklch(0.30 0.01 250);
+    --color-code-text: oklch(0.88 0.008 250);
+    --color-code-comment: oklch(0.55 0.01 250);
+    --color-code-keyword: oklch(0.78 0.14 300);
+    --color-code-string: oklch(0.78 0.1 210);
+    --color-code-number: oklch(0.82 0.1 85);
+    --color-code-title: oklch(0.78 0.12 155);
+    --color-code-tag: oklch(0.78 0.1 210);
+    --color-code-inline-change: oklch(1 0 0 / 0.08);
 
     color-scheme: dark;
   }

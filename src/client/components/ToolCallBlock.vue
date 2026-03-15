@@ -79,8 +79,20 @@ const visibleResultBlocks = computed(() => {
     return [];
   }
 
-  if (props.name === "edit" && props.status !== "error") {
-    return props.resultBlocks.filter((block) => block.type !== "text");
+  if (props.name === "edit") {
+    if (props.status === "running") {
+      return props.resultBlocks;
+    }
+
+    if (props.status === "error") {
+      return props.resultBlocks;
+    }
+
+    if (typeof props.resultDetails?.diff === "string") {
+      return props.resultBlocks.filter((block) => block.type !== "text");
+    }
+
+    return props.resultBlocks;
   }
 
   if (props.name === "bash") {

@@ -265,4 +265,126 @@ test.describe("tool rendering", () => {
       "M src/client/views/ChatView.vue",
     );
   });
+
+  test("streams edit output, then replaces it with the final diff", async ({ page }) => {
+    await installMocks(page, createSession({ messages: [] }));
+
+    await page.goto(`/workspaces/${workspace.id}/sessions/${summary.sessionId}`);
+    await expect(page.locator(".chat-main__transcript")).toBeVisible();
+
+    await page.evaluate(() => {
+      window.__emitSse({
+        type: "assistant",
+        assistant: {
+          id: "assistant-1",
+          role: "assistant",
+          timestamp: 3,
+          blocks: [
+            { type: "text", text: "Editing file" },
+            {
+              type: "toolCall",
+              id: "call-1",
+              name: "edit",
+              arguments: {
+                path: "src/client/components/ToolCallBlock.vue",
+                oldText: "before",
+                newText: "after",
+              },
+            },
+          ],
+        },
+      });
+      window.__emitSse({
+        type: "tools",
+        tools: [
+          {
+            toolCallId: "call-1",
+            toolName: "edit",
+            args: {
+              path: "src/client/components/ToolCallBlock.vue",
+              oldText: "before",
+              newText: "after",
+            },
+            blocks: [
+              { type: "text", text: "Replacing text in src/client/components/ToolCallBlock.vue" },
+            ],
+            status: "running",
+            isError: false,
+          },
+        ],
+      });
+    });
+
+    await expect(page.locator(".tool-call")).toHaveCount(1);
+    await expect(page.locator(".tool-call__result")).toContainText(
+      "Replacing text in src/client/components/ToolCallBlock.vue",
+    );
+
+    await page.evaluate(() => {
+      window.__emitSse({
+        type: "state",
+        state: {
+          id: "web-1",
+          sessionId: "session-1",
+          workspaceId: "pi-face",
+          cwd: "/root/github/pi-face",
+          path: "/tmp/session-1.jsonl",
+          thinkingLevel: "medium",
+          availableThinkingLevels: ["off", "low", "medium", "high"],
+          isStreaming: false,
+          pendingMessageCount: 0,
+          updatedAt: 4,
+          contextTokens: 100,
+          contextWindow: 1000,
+          contextPercent: 10,
+          messages: [
+            {
+              id: "assistant-1",
+              role: "assistant",
+              timestamp: 3,
+              blocks: [
+                { type: "text", text: "Editing file" },
+                {
+                  type: "toolCall",
+                  id: "call-1",
+                  name: "edit",
+                  arguments: {
+                    path: "src/client/components/ToolCallBlock.vue",
+                    oldText: "before",
+                    newText: "after",
+                  },
+                },
+              ],
+            },
+            {
+              id: "tool-1",
+              role: "toolResult",
+              timestamp: 4,
+              toolCallId: "call-1",
+              toolName: "edit",
+              blocks: [
+                {
+                  type: "text",
+                  text: "Successfully replaced text in src/client/components/ToolCallBlock.vue.",
+                },
+              ],
+              details: {
+                diff: "  81   old line\n- 82 before\n+ 82 after\n  83   next line",
+                firstChangedLine: 82,
+              },
+              isError: false,
+            },
+          ],
+          activeTools: [],
+        },
+      });
+    });
+
+    await expect(page.locator(".tool-call__result")).not.toContainText(
+      "Replacing text in src/client/components/ToolCallBlock.vue",
+    );
+    await expect(page.locator(".diff-block")).toContainText("82");
+    await expect(page.locator(".diff-block")).toContainText("before");
+    await expect(page.locator(".diff-block")).toContainText("after");
+  });
 });

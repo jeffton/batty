@@ -32,6 +32,7 @@ const state: SessionState = {
       toolName: "bash",
       args: { command: "ls" },
       blocks: [{ type: "text", text: "partial" }],
+      status: "running",
       isError: false,
     },
   ],

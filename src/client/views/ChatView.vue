@@ -3,11 +3,14 @@ import { computed, nextTick, ref, watch } from "vue";
 import ChatMessage from "@/client/components/ChatMessage.vue";
 import MessageComposer from "@/client/components/MessageComposer.vue";
 import SessionSidebar from "@/client/components/SessionSidebar.vue";
-import ToolRunCard from "@/client/components/ToolRunCard.vue";
-import { withoutActiveToolCalls } from "@/client/lib/active-assistant";
+import { withoutRenderedToolCalls } from "@/client/lib/active-assistant";
 import { formatTokenCount } from "@/client/lib/formatting";
 import { resolveThinkingOptions } from "@/client/lib/thinking-levels";
-import { buildTranscriptMessages } from "@/client/lib/transcript";
+import {
+  buildToolStateLookup,
+  buildTranscriptMessages,
+  toolStatesForMessage,
+} from "@/client/lib/transcript";
 import { useAppStore } from "@/client/stores/app";
 
 const store = useAppStore();
@@ -31,14 +34,20 @@ const thinkingLevel = computed({
 });
 const thinkingOptions = computed(() => resolveThinkingOptions(store.activeSession, store.models));
 
+const toolStateLookup = computed(() =>
+  buildToolStateLookup(store.activeSession?.messages ?? [], store.activeSession?.activeTools ?? []),
+);
 const transcriptMessages = computed(() =>
-  buildTranscriptMessages(store.activeSession?.messages ?? []),
+  buildTranscriptMessages(store.activeSession?.messages ?? [], toolStateLookup.value),
 );
 const activeAssistantMessage = computed(() =>
-  withoutActiveToolCalls(
+  withoutRenderedToolCalls(
     store.activeSession?.activeAssistant,
-    store.activeSession?.activeTools ?? [],
+    toolStateLookup.value.referencedToolCallIds,
   ),
+);
+const activeAssistantToolStates = computed(() =>
+  toolStatesForMessage(activeAssistantMessage.value, toolStateLookup.value.toolStatesByCallId),
 );
 const connectionClass = computed(() => `status-${store.connectionState}`);
 const contextUsageLabel = computed(() => {
@@ -150,14 +159,13 @@ watch(
             v-for="entry in transcriptMessages"
             :key="entry.message.id"
             :message="entry.message"
-            :tool-results-by-call-id="entry.toolResultsByCallId"
+            :tool-states-by-call-id="entry.toolStatesByCallId"
           />
-          <ToolRunCard
-            v-for="tool in store.activeSession.activeTools"
-            :key="tool.toolCallId"
-            :tool="tool"
+          <ChatMessage
+            v-if="activeAssistantMessage"
+            :message="activeAssistantMessage"
+            :tool-states-by-call-id="activeAssistantToolStates"
           />
-          <ChatMessage v-if="activeAssistantMessage" :message="activeAssistantMessage" />
         </section>
 
         <MessageComposer

@@ -307,6 +307,7 @@ export class PiService {
           toolName: event.toolName,
           args: event.args as Record<string, unknown>,
           blocks: [],
+          status: "running",
           isError: false,
           details: undefined,
         });
@@ -328,6 +329,7 @@ export class PiService {
         if (current) {
           const blocks = normalizeBlocks(event.result.content ?? []);
           current.blocks = current.toolName === "bash" ? sanitizeTerminalBlocks(blocks) : blocks;
+          current.status = event.isError ? "error" : "success";
           current.isError = event.isError;
           current.details = normalizeToolDetails(event.result.details);
           this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });

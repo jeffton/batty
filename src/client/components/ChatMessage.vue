@@ -2,15 +2,16 @@
 import CodeBlock from "@/client/components/CodeBlock.vue";
 import MarkdownBlock from "@/client/components/MarkdownBlock.vue";
 import ToolCallBlock from "@/client/components/ToolCallBlock.vue";
+import type { ToolDisplayState } from "@/client/lib/transcript";
 import type { UiContentBlock, UiMessage } from "@/shared/types";
 
 const props = withDefaults(
   defineProps<{
     message: UiMessage;
-    toolResultsByCallId?: Map<string, Extract<UiMessage, { role: "toolResult" }>>;
+    toolStatesByCallId?: Map<string, ToolDisplayState>;
   }>(),
   {
-    toolResultsByCallId: () => new Map(),
+    toolStatesByCallId: () => new Map(),
   },
 );
 
@@ -18,17 +19,8 @@ function imageUrl(block: Extract<UiContentBlock, { type: "image" }>): string {
   return `data:${block.mimeType};base64,${block.data}`;
 }
 
-function toolResultFor(toolCallId: string): Extract<UiMessage, { role: "toolResult" }> | undefined {
-  return props.toolResultsByCallId.get(toolCallId);
-}
-
-function toolStatusFor(toolCallId: string): "success" | "error" | undefined {
-  const result = toolResultFor(toolCallId);
-  if (!result) {
-    return undefined;
-  }
-
-  return result.isError ? "error" : "success";
+function toolStateFor(toolCallId: string): ToolDisplayState | undefined {
+  return props.toolStatesByCallId.get(toolCallId);
 }
 </script>
 
@@ -72,9 +64,9 @@ function toolStatusFor(toolCallId: string): "success" | "error" | undefined {
           v-else-if="block.type === 'toolCall'"
           :name="block.name"
           :arguments="block.arguments"
-          :result-blocks="toolResultFor(block.id)?.blocks ?? []"
-          :result-details="toolResultFor(block.id)?.details"
-          :status="toolStatusFor(block.id)"
+          :result-blocks="toolStateFor(block.id)?.resultBlocks ?? []"
+          :result-details="toolStateFor(block.id)?.resultDetails"
+          :status="toolStateFor(block.id)?.status"
         />
       </template>
     </div>

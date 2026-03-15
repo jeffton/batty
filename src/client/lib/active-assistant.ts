@@ -1,16 +1,15 @@
-import type { ActiveToolRun, UiMessage } from "@/shared/types";
+import type { UiMessage } from "@/shared/types";
 
-export function withoutActiveToolCalls(
+export function withoutRenderedToolCalls(
   assistant: Extract<UiMessage, { role: "assistant" }> | undefined,
-  activeTools: ActiveToolRun[],
+  renderedToolCallIds: Set<string>,
 ): Extract<UiMessage, { role: "assistant" }> | undefined {
-  if (!assistant || activeTools.length === 0) {
+  if (!assistant || renderedToolCallIds.size === 0) {
     return assistant;
   }
 
-  const activeToolIds = new Set(activeTools.map((tool) => tool.toolCallId));
   const blocks = assistant.blocks.filter(
-    (block) => block.type !== "toolCall" || !activeToolIds.has(block.id),
+    (block) => block.type !== "toolCall" || !renderedToolCallIds.has(block.id),
   );
 
   if (blocks.length === assistant.blocks.length) {

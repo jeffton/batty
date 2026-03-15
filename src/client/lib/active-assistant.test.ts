@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
-import { withoutActiveToolCalls } from "@/client/lib/active-assistant";
-import type { ActiveToolRun, UiMessage } from "@/shared/types";
+import { withoutRenderedToolCalls } from "@/client/lib/active-assistant";
+import type { UiMessage } from "@/shared/types";
 
 function createAssistant(
   blocks: Extract<UiMessage, { role: "assistant" }>["blocks"],
@@ -13,16 +13,8 @@ function createAssistant(
   };
 }
 
-const activeBashTool: ActiveToolRun = {
-  toolCallId: "call-1",
-  toolName: "bash",
-  args: { command: "./scripts/reload-self.sh", timeout: 1800 },
-  blocks: [],
-  isError: false,
-};
-
-describe("withoutActiveToolCalls", () => {
-  it("hides active tool call blocks that are already shown in the running tool card", () => {
+describe("withoutRenderedToolCalls", () => {
+  it("hides tool call blocks that are already rendered in the transcript", () => {
     const assistant = createAssistant([
       { type: "text", text: "Working on it" },
       {
@@ -33,12 +25,12 @@ describe("withoutActiveToolCalls", () => {
       },
     ]);
 
-    expect(withoutActiveToolCalls(assistant, [activeBashTool])).toEqual(
+    expect(withoutRenderedToolCalls(assistant, new Set(["call-1"]))).toEqual(
       createAssistant([{ type: "text", text: "Working on it" }]),
     );
   });
 
-  it("returns undefined when the assistant only contains duplicated active tool calls", () => {
+  it("returns undefined when the assistant only contains duplicated tool calls", () => {
     const assistant = createAssistant([
       {
         type: "toolCall",
@@ -48,6 +40,6 @@ describe("withoutActiveToolCalls", () => {
       },
     ]);
 
-    expect(withoutActiveToolCalls(assistant, [activeBashTool])).toBeUndefined();
+    expect(withoutRenderedToolCalls(assistant, new Set(["call-1"]))).toBeUndefined();
   });
 });

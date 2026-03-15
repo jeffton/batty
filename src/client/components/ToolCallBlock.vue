@@ -53,6 +53,49 @@ const codeLanguage = computed(() => languageFromPath(pathValue.value));
 const hasResultContent = computed(() =>
   hasToolResultContent(props.resultBlocks, props.resultDetails),
 );
+const bashTextOutput = computed(() =>
+  props.name !== "bash"
+    ? ""
+    : props.resultBlocks
+        .filter(
+          (block): block is Extract<UiContentBlock, { type: "text" }> => block.type === "text",
+        )
+        .map((block) => block.text)
+        .join("\n"),
+);
+const bashDisplay = computed(() => {
+  if (props.name !== "bash" || !commandValue.value) {
+    return undefined;
+  }
+
+  const lines = [`$ ${commandValue.value}`];
+  if (bashTextOutput.value.trim().length > 0) {
+    lines.push(bashTextOutput.value);
+  }
+  return lines.join("\n");
+});
+const visibleResultBlocks = computed(() => {
+  if (props.name === "read" && props.status !== "error") {
+    return [];
+  }
+
+  if (props.name === "bash") {
+    return props.resultBlocks.filter((block) => block.type !== "text");
+  }
+
+  return props.resultBlocks;
+});
+const showResultSection = computed(() => {
+  if (props.name === "read") {
+    return props.status === "error" && visibleResultBlocks.value.length > 0;
+  }
+
+  if (props.name === "bash") {
+    return visibleResultBlocks.value.length > 0;
+  }
+
+  return props.status === "error" || hasResultContent.value;
+});
 
 const genericEntries = computed(() => {
   const hiddenKeys = new Set(["path", "command", "content", "oldText", "newText", "timeout"]);
@@ -86,8 +129,8 @@ const genericEntries = computed(() => {
     </header>
 
     <CodeBlock
-      v-if="props.name === 'bash' && commandValue"
-      :code="commandValue"
+      v-if="props.name === 'bash' && bashDisplay"
+      :code="bashDisplay"
       language="bash"
       :compact="props.compact"
     />
@@ -107,15 +150,9 @@ const genericEntries = computed(() => {
       </div>
     </div>
 
-    <div v-if="props.status === 'error' || hasResultContent" class="tool-call__result">
-      <template v-for="(block, index) in props.resultBlocks" :key="`${props.name}-${index}`">
-        <CodeBlock
-          v-if="block.type === 'text' && props.name === 'bash'"
-          :code="block.text"
-          language="bash"
-          :compact="props.compact"
-        />
-        <div v-else-if="block.type === 'text'" class="tool-call__text">{{ block.text }}</div>
+    <div v-if="showResultSection" class="tool-call__result">
+      <template v-for="(block, index) in visibleResultBlocks" :key="`${props.name}-${index}`">
+        <div v-if="block.type === 'text'" class="tool-call__text">{{ block.text }}</div>
         <img v-else-if="block.type === 'image'" :src="imageUrl(block)" alt="Tool output" />
         <MarkdownBlock
           v-else-if="block.type === 'thinking'"

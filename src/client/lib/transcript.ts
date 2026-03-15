@@ -1,13 +1,32 @@
-import type { UiContentBlock, UiMessage } from "@/shared/types";
+import type {
+  ActiveToolRun,
+  ToolExecutionDetails,
+  UiContentBlock,
+  UiMessage,
+} from "@/shared/types";
+
+export interface ToolDisplayState {
+  status?: "running" | "success" | "error";
+  resultBlocks: UiContentBlock[];
+  resultDetails?: ToolExecutionDetails;
+}
+
+export interface ToolStateLookup {
+  referencedToolCallIds: Set<string>;
+  toolStatesByCallId: Map<string, ToolDisplayState>;
+}
 
 export interface TranscriptMessageView {
   message: UiMessage;
-  toolResultsByCallId: Map<string, Extract<UiMessage, { role: "toolResult" }>>;
+  toolStatesByCallId: Map<string, ToolDisplayState>;
 }
 
-export function buildTranscriptMessages(messages: UiMessage[]): TranscriptMessageView[] {
-  const toolResultsByCallId = new Map<string, Extract<UiMessage, { role: "toolResult" }>>();
+export function buildToolStateLookup(
+  messages: UiMessage[],
+  activeTools: ActiveToolRun[],
+): ToolStateLookup {
   const referencedToolCallIds = new Set<string>();
+  const toolResultsByCallId = new Map<string, Extract<UiMessage, { role: "toolResult" }>>();
 
   for (const message of messages) {
     if (message.role === "assistant") {
@@ -24,29 +43,76 @@ export function buildTranscriptMessages(messages: UiMessage[]): TranscriptMessag
     }
   }
 
+  const toolStatesByCallId = new Map<string, ToolDisplayState>();
+
+  for (const tool of activeTools) {
+    toolStatesByCallId.set(tool.toolCallId, {
+      status: tool.status,
+      resultBlocks: tool.blocks,
+      resultDetails: tool.details,
+    });
+  }
+
+  for (const [toolCallId, result] of toolResultsByCallId) {
+    if (toolStatesByCallId.has(toolCallId)) {
+      continue;
+    }
+
+    toolStatesByCallId.set(toolCallId, {
+      status: result.isError ? "error" : "success",
+      resultBlocks: result.blocks,
+      resultDetails: result.details,
+    });
+  }
+
+  return {
+    referencedToolCallIds,
+    toolStatesByCallId,
+  };
+}
+
+export function toolStatesForMessage(
+  message: UiMessage | undefined,
+  toolStatesByCallId: Map<string, ToolDisplayState>,
+): Map<string, ToolDisplayState> {
+  const result = new Map<string, ToolDisplayState>();
+
+  if (!message || !("blocks" in message)) {
+    return result;
+  }
+
+  for (const block of message.blocks) {
+    if (block.type !== "toolCall") {
+      continue;
+    }
+
+    const toolState = toolStatesByCallId.get(block.id);
+    if (toolState) {
+      result.set(block.id, toolState);
+    }
+  }
+
+  return result;
+}
+
+export function buildTranscriptMessages(
+  messages: UiMessage[],
+  toolStateLookup: ToolStateLookup,
+): TranscriptMessageView[] {
   return messages.flatMap((message) => {
-    if (message.role === "toolResult" && referencedToolCallIds.has(message.toolCallId)) {
+    if (
+      message.role === "toolResult" &&
+      toolStateLookup.referencedToolCallIds.has(message.toolCallId)
+    ) {
       return [];
     }
 
-    if (message.role === "assistant") {
-      const resultMap = new Map<string, Extract<UiMessage, { role: "toolResult" }>>();
-
-      for (const block of message.blocks) {
-        if (block.type !== "toolCall") {
-          continue;
-        }
-
-        const result = toolResultsByCallId.get(block.id);
-        if (result) {
-          resultMap.set(block.id, result);
-        }
-      }
-
-      return [{ message, toolResultsByCallId: resultMap }];
-    }
-
-    return [{ message, toolResultsByCallId: new Map() }];
+    return [
+      {
+        message,
+        toolStatesByCallId: toolStatesForMessage(message, toolStateLookup.toolStatesByCallId),
+      },
+    ];
   });
 }
 

@@ -61,6 +61,7 @@ export interface ActiveToolRun {
   toolName: string;
   args: Record<string, unknown>;
   blocks: UiContentBlock[];
+  status: "running" | "success" | "error";
   isError: boolean;
   details?: ToolExecutionDetails;
 }

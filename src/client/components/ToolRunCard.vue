@@ -13,7 +13,7 @@ const props = defineProps<{
     :arguments="props.tool.args"
     :result-blocks="props.tool.blocks"
     :result-details="props.tool.details"
-    :status="props.tool.isError ? 'error' : 'running'"
+    :status="props.tool.status"
     compact
   />
 </template>

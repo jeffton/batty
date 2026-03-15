@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ModelOption } from "@/shared/types";
+import { X } from "lucide-vue-next";
 import { computed } from "vue";
 
 const props = defineProps<{
@@ -52,6 +53,16 @@ function thinkingLabel(value: string): string {
     :style="{ 'position-anchor': props.anchorName }"
     popover="auto"
   >
+    <button
+      class="model-config-popover__close"
+      type="button"
+      aria-label="Close model selector"
+      title="Close"
+      @click="emit('close')"
+    >
+      <X :size="16" />
+    </button>
+
     <div class="model-config-popover__scroll">
       <section class="model-config-popover__section">
         <div class="model-config-popover__title">Model</div>
@@ -97,13 +108,12 @@ function thinkingLabel(value: string): string {
         </div>
       </section>
     </div>
-
-    <button class="model-config-popover__close" type="button" @click="emit('close')">Done</button>
   </div>
 </template>
 
 <style scoped>
 .model-config-popover {
+  position: relative;
   display: none;
 }
 
@@ -114,8 +124,7 @@ function thinkingLabel(value: string): string {
   left: auto;
   width: min(28rem, calc(100vw - 2rem));
   max-height: min(36rem, calc(100dvh - 2rem));
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  display: block;
   overscroll-behavior: contain;
   margin: 0;
   padding: 0.7rem;
@@ -132,9 +141,48 @@ function thinkingLabel(value: string): string {
 
 .model-config-popover__scroll {
   min-height: 0;
+  max-height: calc(min(36rem, calc(100dvh - 2rem)) - 1.4rem);
   overflow: auto;
   overscroll-behavior: contain;
+  padding-top: 1.35rem;
   padding-right: 0.1rem;
+}
+
+.model-config-popover__close {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.55rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: #cfd8e3;
+  cursor: pointer;
+  z-index: 1;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
+}
+
+.model-config-popover__close:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.model-config-popover__close:active {
+  transform: translateY(1px);
+}
+
+.model-config-popover__close:focus-visible,
+.model-config-popover__provider-summary:focus-visible,
+.model-config-popover__option:focus-visible {
+  outline: 2px solid rgba(96, 165, 250, 0.7);
+  outline-offset: 2px;
 }
 
 .model-config-popover__section {
@@ -167,23 +215,44 @@ function thinkingLabel(value: string): string {
   text-transform: capitalize;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.6rem;
+  justify-content: flex-start;
+  gap: 0.55rem;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
 }
 
-.model-config-popover__provider-summary::after {
-  content: "▾";
-  color: #93a0ad;
-  font-size: 0.85rem;
-  transition: transform 0.16s ease;
+.model-config-popover__provider-summary:hover {
+  color: #dbe3ee;
 }
 
-.model-config-popover__provider-group:not([open]) .model-config-popover__provider-summary::after {
-  transform: rotate(-90deg);
+.model-config-popover__provider-summary:active,
+.model-config-popover__option:active {
+  transform: translateY(1px);
 }
 
 .model-config-popover__provider-summary::-webkit-details-marker {
   display: none;
+}
+
+.model-config-popover__provider-summary::marker {
+  content: "";
+}
+
+.model-config-popover__provider-summary::before {
+  content: "▾";
+  color: #93a0ad;
+  font-size: 1.15rem;
+  line-height: 1;
+  width: 1rem;
+  flex: 0 0 1rem;
+  text-align: center;
+  transition: transform 0.16s ease;
+}
+
+.model-config-popover__provider-group:not([open]) .model-config-popover__provider-summary::before {
+  transform: rotate(-90deg);
 }
 
 .model-config-popover__provider-models,
@@ -195,12 +264,22 @@ function thinkingLabel(value: string): string {
 
 .model-config-popover__option {
   width: 100%;
+  cursor: pointer;
   text-align: left;
   border-radius: 0.4rem;
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.04);
   color: inherit;
   padding: 0.42rem 0.55rem;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
+}
+
+.model-config-popover__option:hover {
+  background: rgba(255, 255, 255, 0.07);
 }
 
 .model-config-popover__option.is-active {
@@ -209,14 +288,7 @@ function thinkingLabel(value: string): string {
   color: #dbeafe;
 }
 
-.model-config-popover__close {
-  margin-top: 0.8rem;
-  width: 100%;
-  border-radius: 0.45rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.06);
-  color: inherit;
-  padding: 0.45rem 0.6rem;
-  flex: 0 0 auto;
+.model-config-popover__option.is-active:hover {
+  background: rgba(37, 99, 235, 0.24);
 }
 </style>

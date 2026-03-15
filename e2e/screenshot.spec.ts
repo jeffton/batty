@@ -9,17 +9,15 @@ test("screenshots", async ({ page }) => {
   await page.click('button:has-text("Unlock")');
   await page.waitForTimeout(1500);
 
-  // Light workspace popover
+  // Start a session so model btn is active
   await page.click('.header__ws-btn');
-  await page.waitForTimeout(400);
-  await page.screenshot({ path: "screenshots/ws-light.png" });
-  await page.keyboard.press("Escape");
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(300);
+  await page.locator('.ws-popover__new-session').click();
+  await page.waitForTimeout(1500);
 
-  // Dark mode
+  await page.screenshot({ path: "screenshots/header-light.png" });
+
   await page.emulateMedia({ colorScheme: "dark" });
   await page.waitForTimeout(300);
-  await page.click('.header__ws-btn');
-  await page.waitForTimeout(400);
-  await page.screenshot({ path: "screenshots/ws-dark.png" });
+  await page.screenshot({ path: "screenshots/header-dark.png" });
 });

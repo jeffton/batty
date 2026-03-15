@@ -213,8 +213,6 @@ onBeforeUnmount(() => {
 }
 
 .composer__inner {
-  max-width: 56rem;
-  margin: 0 auto;
   display: grid;
   gap: 0.4rem;
 }

@@ -143,11 +143,12 @@ const contextArcClass = computed(() => {
 const currentModelOption = computed(() =>
   store.models.find((model) => model.id === store.activeSession?.model),
 );
-const modelThinkingButtonLabel = computed(() => {
-  const modelLabel = currentModelOption.value ? shortModelLabel(currentModelOption.value) : "Model";
-  const levelLabel = thinkingLabel(store.activeSession?.thinkingLevel ?? "off");
-  return `${modelLabel} · ${levelLabel}`;
-});
+const modelButtonLabel = computed(() =>
+  currentModelOption.value ? shortModelLabel(currentModelOption.value) : "Model",
+);
+const thinkingButtonLabel = computed(() =>
+  thinkingLabel(store.activeSession?.thinkingLevel ?? "off"),
+);
 
 function shortModelLabel(model: { label: string }): string {
   return model.label.split(" · ", 1)[0] ?? model.label;
@@ -312,7 +313,10 @@ watch(
         :disabled="!store.activeSession"
         :popovertarget="MODEL_POPOVER_ID"
       >
-        {{ modelThinkingButtonLabel }}
+        <div class="header__model-info">
+          <span class="header__model-name">{{ modelButtonLabel }}</span>
+          <span class="header__model-effort">{{ thinkingButtonLabel }}</span>
+        </div>
         <ChevronDown :size="14" class="header__chevron" />
       </button>
 
@@ -442,6 +446,7 @@ watch(
   color: inherit;
   padding: 0.3rem 0.45rem;
   min-width: 0;
+  text-align: left;
   transition: background 80ms ease;
 }
 
@@ -454,6 +459,7 @@ watch(
   flex-direction: column;
   min-width: 0;
   line-height: 1.25;
+  text-align: left;
 }
 
 .header__ws-name {
@@ -481,29 +487,45 @@ watch(
 .header__model-btn {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.4rem;
   border: 0;
   border-radius: 0.5rem;
   background: transparent;
-  color: var(--color-text-muted);
-  padding: 0.35rem 0.5rem;
-  font-size: 0.85rem;
-  white-space: nowrap;
+  color: inherit;
+  padding: 0.3rem 0.45rem;
   min-width: 0;
-  max-width: 16rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
   transition: background 80ms ease;
 }
 
 .header__model-btn:hover:not(:disabled) {
   background: var(--color-bg-elevated);
-  color: var(--color-text);
 }
 
 .header__model-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.header__model-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+  text-align: left;
+}
+
+.header__model-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header__model-effort {
+  font-size: 0.75rem;
+  color: var(--color-text-subtle);
 }
 
 .header__spacer {
@@ -623,7 +645,5 @@ watch(
 .transcript__item {
   min-width: 0;
   padding-bottom: 0.5rem;
-  max-width: 56rem;
-  margin: 0 auto;
 }
 </style>

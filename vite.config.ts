@@ -16,8 +16,8 @@ export default defineConfig({
         name: "pi-face",
         short_name: "pi-face",
         description: "Browser UI for Pi Coding Agent",
-        theme_color: "#f5f7fb",
-        background_color: "#f5f7fb",
+        theme_color: "#ffffff",
+        background_color: "#ffffff",
         display: "standalone",
         start_url: "/",
         icons: [

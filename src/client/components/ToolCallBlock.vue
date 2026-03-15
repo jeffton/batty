@@ -231,12 +231,13 @@ const genericEntries = computed(() => {
 .tool-call {
   display: grid;
   gap: 0.45rem;
-  padding: 0.45rem 0 0.45rem 0.6rem;
-  border-left: 2px solid var(--color-border-soft);
+  padding: 0.55rem calc(var(--safe-area-right) + 0.8rem) 0.55rem calc(var(--safe-area-left) + 0.8rem);
+  margin: 0.35rem calc(-1 * (var(--safe-area-right) + 0.8rem)) 0.35rem calc(-1 * (var(--safe-area-left) + 0.8rem));
+  background: var(--color-bg-elevated-soft);
 }
 
 .tool-call--compact {
-  padding: 0.35rem 0.45rem;
+  padding: 0.4rem calc(var(--safe-area-right) + 0.8rem) 0.4rem calc(var(--safe-area-left) + 0.8rem);
 }
 
 .tool-call__header {

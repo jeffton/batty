@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LoaderCircle, Wifi, WifiOff } from "lucide-vue-next";
+import { LoaderCircle, Menu, Wifi, WifiOff } from "lucide-vue-next";
 import { computed, nextTick, ref, watch } from "vue";
 import ChatMessage from "@/client/components/ChatMessage.vue";
 import MessageComposer from "@/client/components/MessageComposer.vue";
@@ -168,7 +168,15 @@ watch(
     <SessionSidebar />
     <section class="chat-main">
       <header class="chat-main__header panel">
-        <button class="chat-main__menu" @click="store.mobileSidebarOpen = true">☰</button>
+        <button
+          class="chat-main__menu"
+          type="button"
+          aria-label="Open sidebar"
+          title="Open sidebar"
+          @click="store.mobileSidebarOpen = true"
+        >
+          <Menu :size="18" aria-hidden="true" />
+        </button>
         <div class="chat-main__heading">
           <h2>{{ store.selectedWorkspace?.label || "Choose a workspace" }}</h2>
           <p class="muted">

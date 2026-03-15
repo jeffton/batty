@@ -29,14 +29,7 @@ ln -snf /etc/nginx/sites-available/pi-face /etc/nginx/sites-enabled/pi-face
 step "Validating nginx config"
 nginx -t
 
-step "Reloading services"
-systemctl daemon-reload
-systemctl enable pi-face.service >/dev/null
-systemctl restart pi-face.service
-systemctl reload nginx
-
-step "Verifying deployment"
-systemctl is-active --quiet pi-face.service
-curl --fail --silent --show-error --head --max-time 10 http://127.0.0.1/ >/dev/null
+step "Handing off service reload"
+./scripts/handoff-restart.sh
 
 printf '\nDeployed %s successfully\n' "$(git rev-parse --short HEAD)"

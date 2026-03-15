@@ -22,6 +22,7 @@ import {
 } from "@/client/lib/cache";
 import { applyServerEvent } from "@/client/lib/session-events";
 import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
+import { sessionEventsPath } from "@/client/lib/session-stream";
 import { mergeSessionSummaries, toSessionSummary } from "@/client/lib/session-summary";
 import type {
   BootstrapPayload,
@@ -207,7 +208,7 @@ export const useAppStore = defineStore("app", {
       this.selectedWorkspaceId = session.workspaceId;
       this.updateSessionSummary(session);
       await writeCachedSession(session);
-      this.openStream(session.id);
+      this.openStream(session);
       this.mobileSidebarOpen = false;
     },
 
@@ -217,10 +218,13 @@ export const useAppStore = defineStore("app", {
       this.mobileSidebarOpen = false;
     },
 
-    openStream(sessionId: string): void {
+    openStream(session: Pick<SessionState, "id" | "sessionId" | "workspaceId" | "path">): void {
       this.closeStream();
       this.connectionState = "connecting";
-      eventSource = new EventSource(`/api/sessions/${sessionId}/events`);
+      eventSource = new EventSource(sessionEventsPath(session));
+      eventSource.onopen = () => {
+        this.connectionState = "online";
+      };
       eventSource.onmessage = async (message) => {
         const event = JSON.parse(message.data) as ServerEvent;
         this.activeSession = applyServerEvent(this.activeSession, event);

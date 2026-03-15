@@ -182,31 +182,47 @@ app.post<{ Params: { sessionId: string } }>("/api/sessions/:sessionId/abort", as
   return { ok: true };
 });
 
-app.get<{ Params: { sessionId: string } }>(
-  "/api/sessions/:sessionId/events",
-  async (request, reply) => {
-    reply.raw.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-    });
+app.get<{
+  Params: { sessionId: string };
+  Querystring: { workspaceId?: string; sessionPath?: string };
+}>("/api/sessions/:sessionId/events", async (request, reply) => {
+  if (!service.hasSession(request.params.sessionId)) {
+    const { workspaceId, sessionPath } = request.query;
+    if (!workspaceId || !sessionPath) {
+      reply.code(404).send({ error: `Unknown session: ${request.params.sessionId}` });
+      return;
+    }
 
-    const send = (payload: unknown) => {
-      reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
-    };
+    const workspaces = await listWorkspaces(config);
+    const workspace = resolveWorkspace(workspaces, workspaceId);
+    const restoredSession = await service.openSession(workspace, sessionPath);
+    if (restoredSession.sessionId !== request.params.sessionId) {
+      reply.code(409).send({ error: `Session id mismatch: ${request.params.sessionId}` });
+      return;
+    }
+  }
 
-    const unsubscribe = service.subscribe(request.params.sessionId, send);
-    const heartbeat = setInterval(() => {
-      reply.raw.write(": keep-alive\n\n");
-    }, 15000);
+  reply.raw.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+  });
 
-    request.raw.on("close", () => {
-      clearInterval(heartbeat);
-      unsubscribe();
-      reply.raw.end();
-    });
-  },
-);
+  const send = (payload: unknown) => {
+    reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+  };
+
+  const unsubscribe = service.subscribe(request.params.sessionId, send);
+  const heartbeat = setInterval(() => {
+    reply.raw.write(": keep-alive\n\n");
+  }, 15000);
+
+  request.raw.on("close", () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+    reply.raw.end();
+  });
+});
 
 app.get("/healthz", async () => ({ ok: true }));
 

@@ -181,6 +181,10 @@ export class PiService {
     return this.getState(webSession.id);
   }
 
+  hasSession(sessionId: string): boolean {
+    return this.sessions.has(sessionId);
+  }
+
   subscribe(sessionId: string, subscriber: SessionSubscriber): () => void {
     const webSession = this.requireSession(sessionId);
     webSession.subscribers.add(subscriber);

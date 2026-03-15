@@ -12,27 +12,14 @@ import {
   buildTranscriptMessages,
   toolStatesForMessage,
 } from "@/client/lib/transcript";
+import type { ModelOption } from "@/shared/types";
 import { useAppStore } from "@/client/stores/app";
+
+const MODEL_POPOVER_ID = "chat-main-model-popover";
 
 const store = useAppStore();
 const transcript = ref<HTMLElement>();
 const isTranscriptPinnedToBottom = ref(true);
-const modelId = computed({
-  get: () => store.activeSession?.model ?? "",
-  set: (value: string) => {
-    if (value) {
-      void store.setModel(value);
-    }
-  },
-});
-const thinkingLevel = computed({
-  get: () => store.activeSession?.thinkingLevel ?? "",
-  set: (value: string) => {
-    if (value) {
-      void store.setThinkingLevel(value);
-    }
-  },
-});
 const thinkingOptions = computed(() => resolveThinkingOptions(store.activeSession, store.models));
 
 const toolStateLookup = computed(() =>
@@ -101,6 +88,36 @@ const contextArcClass = computed(() => {
   }
   return "chat-main__context-arc--good";
 });
+const currentModelOption = computed(() =>
+  store.models.find((model) => model.id === store.activeSession?.model),
+);
+const modelThinkingButtonLabel = computed(() => {
+  const modelLabel = currentModelOption.value ? shortModelLabel(currentModelOption.value) : "Model";
+  const levelLabel = thinkingLabel(store.activeSession?.thinkingLevel ?? "off");
+  return `${modelLabel} · ${levelLabel}`;
+});
+const modelGroups = computed(() => {
+  const groups = new Map<string, ModelOption[]>();
+
+  for (const model of store.models) {
+    const existing = groups.get(model.provider) ?? [];
+    existing.push(model);
+    groups.set(model.provider, existing);
+  }
+
+  return [...groups.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([provider, models]) => ({
+      provider,
+      models: [...models].sort((left, right) =>
+        shortModelLabel(left).localeCompare(shortModelLabel(right)),
+      ),
+    }));
+});
+
+function shortModelLabel(model: Pick<ModelOption, "label">): string {
+  return model.label.split(" · ", 1)[0] ?? model.label;
+}
 
 function thinkingLabel(value: string): string {
   return value === "xhigh" ? "XHigh" : value.charAt(0).toUpperCase() + value.slice(1);
@@ -121,6 +138,27 @@ async function scrollToBottom(behavior: ScrollBehavior = "auto"): Promise<void> 
   await nextTick();
   transcript.value?.scrollTo({ top: transcript.value.scrollHeight, behavior });
   updateTranscriptPinnedState();
+}
+
+function closeModelPopover(): void {
+  const element = document.getElementById(MODEL_POPOVER_ID) as HTMLElement | null;
+  element?.hidePopover?.();
+}
+
+function setModel(modelId: string): void {
+  if (!modelId) {
+    return;
+  }
+
+  void store.setModel(modelId);
+}
+
+function setThinkingLevel(level: string): void {
+  if (!level) {
+    return;
+  }
+
+  void store.setThinkingLevel(level);
 }
 
 watch(
@@ -193,22 +231,61 @@ watch(
               />
             </svg>
           </div>
-          <select v-model="modelId" class="chat-main__select" :disabled="!store.activeSession">
-            <option value="">Select model</option>
-            <option v-for="model in store.models" :key="model.id" :value="model.id">
-              {{ model.label }}
-            </option>
-          </select>
-          <select
-            v-model="thinkingLevel"
-            class="chat-main__select"
-            :disabled="!store.activeSession || thinkingOptions.length === 0"
+          <button
+            class="chat-main__config-button"
+            type="button"
+            :disabled="!store.activeSession"
+            :popovertarget="MODEL_POPOVER_ID"
           >
-            <option value="">Thinking</option>
-            <option v-for="option in thinkingOptions" :key="option" :value="option">
-              {{ thinkingLabel(option) }}
-            </option>
-          </select>
+            {{ modelThinkingButtonLabel }}
+          </button>
+          <div :id="MODEL_POPOVER_ID" class="chat-main__popover" popover>
+            <section class="chat-main__popover-section">
+              <div class="chat-main__popover-title">Model</div>
+              <details
+                v-for="group in modelGroups"
+                :key="group.provider"
+                class="chat-main__provider-group"
+                :open="group.models.some((model) => model.id === store.activeSession?.model)"
+              >
+                <summary class="chat-main__provider-summary">{{ group.provider }}</summary>
+                <div class="chat-main__provider-models">
+                  <button
+                    v-for="model in group.models"
+                    :key="model.id"
+                    type="button"
+                    :class="[
+                      'chat-main__popover-option',
+                      model.id === store.activeSession?.model ? 'is-active' : '',
+                    ]"
+                    @click="setModel(model.id)"
+                  >
+                    {{ shortModelLabel(model) }}
+                  </button>
+                </div>
+              </details>
+            </section>
+            <section class="chat-main__popover-section">
+              <div class="chat-main__popover-title">Thinking</div>
+              <div class="chat-main__thinking-options">
+                <button
+                  v-for="option in thinkingOptions"
+                  :key="option"
+                  type="button"
+                  :class="[
+                    'chat-main__popover-option',
+                    option === store.activeSession?.thinkingLevel ? 'is-active' : '',
+                  ]"
+                  @click="setThinkingLevel(option)"
+                >
+                  {{ thinkingLabel(option) }}
+                </button>
+              </div>
+            </section>
+            <button class="chat-main__popover-close" type="button" @click="closeModelPopover">
+              Done
+            </button>
+          </div>
         </div>
       </header>
 
@@ -309,6 +386,7 @@ watch(
 }
 
 .chat-main__toolbar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.32rem;
@@ -316,15 +394,15 @@ watch(
   justify-content: flex-end;
 }
 
-.chat-main__select,
 .chat-main__menu,
 .chat-main__status,
-.chat-main__context {
+.chat-main__context,
+.chat-main__config-button {
   font-size: 0.88rem;
 }
 
-.chat-main__select,
-.chat-main__menu {
+.chat-main__menu,
+.chat-main__config-button {
   border-radius: 0.4rem;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(22, 27, 34, 0.95);
@@ -401,6 +479,96 @@ watch(
   stroke: #ef4444;
 }
 
+.chat-main__config-button {
+  min-width: 0;
+  max-width: min(18rem, 42vw);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-main__popover {
+  width: min(28rem, calc(100vw - 2rem));
+  margin: 0;
+  padding: 0.7rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.65rem;
+  background: rgba(22, 27, 34, 0.98);
+  color: inherit;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.38);
+}
+
+.chat-main__popover::backdrop {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.chat-main__popover-section {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.chat-main__popover-section + .chat-main__popover-section {
+  margin-top: 0.75rem;
+}
+
+.chat-main__popover-title {
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #93a0ad;
+}
+
+.chat-main__provider-group {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 0.45rem;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.chat-main__provider-summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 0.5rem 0.6rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.chat-main__provider-summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-main__provider-models,
+.chat-main__thinking-options {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0 0.4rem 0.4rem;
+}
+
+.chat-main__popover-option {
+  width: 100%;
+  text-align: left;
+  border-radius: 0.4rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  padding: 0.42rem 0.55rem;
+}
+
+.chat-main__popover-option.is-active {
+  border-color: rgba(96, 165, 250, 0.45);
+  background: rgba(37, 99, 235, 0.18);
+  color: #dbeafe;
+}
+
+.chat-main__popover-close {
+  margin-top: 0.8rem;
+  width: 100%;
+  border-radius: 0.45rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  padding: 0.45rem 0.6rem;
+}
+
 .chat-main__empty {
   min-height: 0;
   padding: 1rem;
@@ -463,7 +631,7 @@ watch(
     grid-column: 1 / -1;
     width: 100%;
     display: grid;
-    grid-template-columns: auto auto minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: auto auto minmax(0, 1fr);
     justify-content: stretch;
   }
 
@@ -471,7 +639,8 @@ watch(
     min-width: 0;
   }
 
-  .chat-main__select {
+  .chat-main__config-button {
+    max-width: none;
     width: 100%;
   }
 }

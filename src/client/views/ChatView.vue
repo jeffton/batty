@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { LoaderCircle, Wifi, WifiOff } from "lucide-vue-next";
 import { computed, nextTick, ref, watch } from "vue";
 import ChatMessage from "@/client/components/ChatMessage.vue";
 import MessageComposer from "@/client/components/MessageComposer.vue";
@@ -49,7 +50,6 @@ const activeAssistantMessage = computed(() =>
 const activeAssistantToolStates = computed(() =>
   toolStatesForMessage(activeAssistantMessage.value, toolStateLookup.value.toolStatesByCallId),
 );
-const connectionLabel = computed(() => store.connectionState);
 const connectionDescription = computed(() => {
   switch (store.connectionState) {
     case "online":
@@ -89,6 +89,7 @@ const contextArcStyle = computed(() => {
 
   return {
     strokeDasharray: `${progress} ${circumference}`,
+    strokeDashoffset: "0",
   };
 });
 const contextArcClass = computed(() => {
@@ -155,11 +156,26 @@ watch(
           </p>
         </div>
         <div class="chat-main__toolbar">
-          <span class="chat-main__status" :aria-label="connectionDescription">
-            <span
-              :class="['chat-main__status-dot', `chat-main__status-dot--${store.connectionState}`]"
+          <span
+            class="chat-main__status"
+            :aria-label="connectionDescription"
+            :title="connectionDescription"
+          >
+            <Wifi
+              v-if="store.connectionState === 'online'"
+              :size="16"
+              class="chat-main__status-icon chat-main__status-icon--online"
             />
-            <span class="chat-main__status-label">{{ connectionLabel }}</span>
+            <LoaderCircle
+              v-else-if="store.connectionState === 'connecting'"
+              :size="16"
+              class="chat-main__status-icon chat-main__status-icon--connecting chat-main__status-icon--spin"
+            />
+            <WifiOff
+              v-else
+              :size="16"
+              class="chat-main__status-icon chat-main__status-icon--offline"
+            />
           </span>
           <div
             class="chat-main__context"
@@ -167,21 +183,15 @@ watch(
             :title="contextUsageLabel"
           >
             <svg class="chat-main__context-chart" viewBox="0 0 36 36" aria-hidden="true">
-              <path
-                class="chat-main__context-track"
-                d="M18 2.0845
-                  a 15.9155 15.9155 0 0 1 0 31.831
-                  a 15.9155 15.9155 0 0 1 0 -31.831"
-              />
-              <path
+              <circle class="chat-main__context-track" cx="18" cy="18" r="15.9155" />
+              <circle
                 :class="['chat-main__context-arc', contextArcClass]"
                 :style="contextArcStyle"
-                d="M18 2.0845
-                  a 15.9155 15.9155 0 0 1 0 31.831
-                  a 15.9155 15.9155 0 0 1 0 -31.831"
+                cx="18"
+                cy="18"
+                r="15.9155"
               />
             </svg>
-            <span class="chat-main__context-label">{{ contextUsageLabel }}</span>
           </div>
           <select v-model="modelId" class="chat-main__select" :disabled="!store.activeSession">
             <option value="">Select model</option>
@@ -263,9 +273,9 @@ watch(
 
 .chat-main__header {
   min-width: 0;
-  padding: 0.6rem 0.75rem;
+  padding: 0.5rem 0.65rem;
   display: flex;
-  gap: 0.65rem;
+  gap: 0.55rem;
   align-items: center;
   justify-content: space-between;
   border: 0;
@@ -278,7 +288,7 @@ watch(
 .chat-main__heading {
   min-width: 0;
   display: grid;
-  gap: 0.1rem;
+  gap: 0.05rem;
 }
 
 .chat-main__header h2,
@@ -301,7 +311,7 @@ watch(
 .chat-main__toolbar {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.32rem;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -315,11 +325,11 @@ watch(
 
 .chat-main__select,
 .chat-main__menu {
-  border-radius: 0.45rem;
+  border-radius: 0.4rem;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(22, 27, 34, 0.95);
   color: inherit;
-  padding: 0.42rem 0.6rem;
+  padding: 0.36rem 0.5rem;
 }
 
 .chat-main__menu {
@@ -330,55 +340,42 @@ watch(
 .chat-main__context {
   display: inline-flex;
   align-items: center;
-  gap: 0.42rem;
-  color: #c5ced8;
-}
-
-.chat-main__status {
-  text-transform: lowercase;
-}
-
-.chat-main__status-dot {
-  width: 0.62rem;
-  height: 0.62rem;
+  justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
   border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(22, 27, 34, 0.75);
+  color: #c5ced8;
   flex: 0 0 auto;
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.06),
-    0 0 12px currentColor;
 }
 
-.chat-main__status-dot--online {
+.chat-main__status-icon--online {
   color: #22c55e;
-  background: #22c55e;
 }
 
-.chat-main__status-dot--connecting {
-  color: #a3a3a3;
-  background: #a3a3a3;
+.chat-main__status-icon--connecting {
+  color: #d1d5db;
 }
 
-.chat-main__status-dot--offline {
+.chat-main__status-icon--offline {
   color: #f59e0b;
-  background: #f59e0b;
 }
 
-.chat-main__context {
-  min-width: 0;
+.chat-main__status-icon--spin {
+  animation: chat-main-spin 0.9s linear infinite;
 }
 
 .chat-main__context-chart {
-  width: 1.2rem;
-  height: 1.2rem;
-  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
   transform: rotate(-90deg);
 }
 
 .chat-main__context-track,
 .chat-main__context-arc {
   fill: none;
-  stroke-width: 3;
-  stroke-linecap: round;
+  stroke-width: 3.2;
 }
 
 .chat-main__context-track {
@@ -386,6 +383,7 @@ watch(
 }
 
 .chat-main__context-arc {
+  stroke-linecap: round;
   transition:
     stroke-dasharray 180ms ease,
     stroke 180ms ease;
@@ -401,10 +399,6 @@ watch(
 
 .chat-main__context-arc--danger {
   stroke: #ef4444;
-}
-
-.chat-main__context-label {
-  white-space: nowrap;
 }
 
 .chat-main__empty {
@@ -428,6 +422,12 @@ watch(
   box-shadow: none;
   backdrop-filter: none;
   background: rgba(16, 20, 27, 0.98);
+}
+
+@keyframes chat-main-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 900px) {
@@ -463,7 +463,7 @@ watch(
     grid-column: 1 / -1;
     width: 100%;
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: auto auto minmax(0, 1fr) minmax(0, 1fr);
     justify-content: stretch;
   }
 
@@ -471,9 +471,7 @@ watch(
     min-width: 0;
   }
 
-  .chat-main__select,
-  .chat-main__context,
-  .chat-main__status {
+  .chat-main__select {
     width: 100%;
   }
 }

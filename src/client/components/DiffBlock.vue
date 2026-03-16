@@ -129,7 +129,7 @@ const lineNumberWidth = computed(() =>
 }
 
 .diff-block__content :deep(.diff-block__inline-change) {
-  background: var(--color-code-inline-change);
+  background: var(--color-diff-inline);
   border-radius: 0.2rem;
 }
 </style>

@@ -114,6 +114,7 @@ watch(
   right: auto;
   left: anchor(left);
   width: min(22rem, calc(100vw - 1.5rem));
+  max-width: calc(100vw - 1rem);
   max-height: min(28rem, calc(100dvh - 4rem));
   display: flex;
   flex-direction: column;
@@ -125,6 +126,14 @@ watch(
   color: inherit;
   box-shadow: var(--color-shadow-popover);
   gap: 0.35rem;
+}
+
+@media (max-width: 30rem) {
+  .mc-popover:popover-open {
+    left: 0.5rem;
+    right: 0.5rem;
+    width: auto;
+  }
 }
 
 .mc-popover::backdrop {
@@ -159,8 +168,9 @@ watch(
 }
 
 .mc-popover__thinking-btn.is-active {
-  background: var(--color-bg-panel);
-  color: var(--color-text-strong);
+  background: var(--color-user-bg);
+  color: var(--color-user-text);
+  font-weight: 600;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 

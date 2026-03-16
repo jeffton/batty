@@ -19,6 +19,7 @@ const emit = defineEmits<{
 const store = useAppStore();
 const router = useRouter();
 const workspaceFilter = ref("");
+const sessionFilter = ref("");
 const createWorkspaceOpen = ref(false);
 const createWorkspaceName = ref("");
 const createWorkspaceError = ref("");
@@ -32,6 +33,12 @@ const filteredWorkspaces = computed(() => {
 });
 
 const sessions = computed(() => store.workspaceSessions);
+
+const filteredSessions = computed(() => {
+  const query = sessionFilter.value.toLowerCase().trim();
+  if (!query) return sessions.value;
+  return sessions.value.filter((s) => sessionLabel(s).toLowerCase().includes(query));
+});
 
 function sessionLabel(session: SessionSummary): string {
   return (session.name || session.firstMessage || "Untitled session").replace(/\s+/g, " ").trim();
@@ -92,6 +99,7 @@ watch(
   () => store.selectedWorkspaceId,
   () => {
     workspaceFilter.value = "";
+    sessionFilter.value = "";
   },
 );
 </script>
@@ -105,6 +113,8 @@ watch(
   >
     <div class="ws-popover__cols">
       <div class="ws-popover__left">
+        <div class="ws-popover__section-label">Workspaces</div>
+
         <div class="ws-popover__search-row">
           <Search :size="14" class="ws-popover__search-icon" />
           <input
@@ -114,6 +124,46 @@ watch(
             placeholder="Filter workspaces…"
           />
         </div>
+
+        <form
+          v-if="createWorkspaceOpen"
+          class="ws-popover__create-form"
+          @submit.prevent="submitCreateWorkspace"
+        >
+          <input
+            ref="createWorkspaceInput"
+            v-model="createWorkspaceName"
+            class="ws-popover__search"
+            type="text"
+            placeholder="workspace-name"
+            :disabled="creatingWorkspace"
+          />
+          <div class="ws-popover__create-btns">
+            <button
+              class="ws-popover__btn ws-popover__btn--primary"
+              type="submit"
+              :disabled="creatingWorkspace"
+            >
+              {{ creatingWorkspace ? "Creating…" : "Create" }}
+            </button>
+            <button
+              class="ws-popover__btn"
+              type="button"
+              :disabled="creatingWorkspace"
+              @click="resetCreateWorkspaceForm"
+            >
+              Cancel
+            </button>
+          </div>
+          <p v-if="createWorkspaceError" class="ws-popover__error">{{ createWorkspaceError }}</p>
+        </form>
+        <button
+          v-else
+          class="ws-popover__btn ws-popover__btn--primary"
+          @click="openCreateWorkspaceForm"
+        >
+          <Plus :size="14" /> New workspace
+        </button>
 
         <div class="ws-popover__list">
           <button
@@ -136,47 +186,23 @@ watch(
           </div>
         </div>
 
-        <div class="ws-popover__actions">
-          <form
-            v-if="createWorkspaceOpen"
-            class="ws-popover__create-form"
-            @submit.prevent="submitCreateWorkspace"
-          >
-            <input
-              ref="createWorkspaceInput"
-              v-model="createWorkspaceName"
-              class="ws-popover__search"
-              type="text"
-              placeholder="workspace-name"
-              :disabled="creatingWorkspace"
-            />
-            <div class="ws-popover__create-btns">
-              <button
-                class="ws-popover__btn ws-popover__btn--primary"
-                type="submit"
-                :disabled="creatingWorkspace"
-              >
-                {{ creatingWorkspace ? "Creating…" : "Create" }}
-              </button>
-              <button
-                class="ws-popover__btn"
-                type="button"
-                :disabled="creatingWorkspace"
-                @click="resetCreateWorkspaceForm"
-              >
-                Cancel
-              </button>
-            </div>
-            <p v-if="createWorkspaceError" class="ws-popover__error">{{ createWorkspaceError }}</p>
-          </form>
-          <button v-else class="ws-popover__btn" @click="openCreateWorkspaceForm">
-            <Plus :size="14" /> New workspace
-          </button>
-        </div>
+        <button class="ws-popover__logout" @click="store.logout">
+          <LogOut :size="14" /> Log out
+        </button>
       </div>
 
       <div class="ws-popover__right">
         <div class="ws-popover__section-label">Sessions</div>
+
+        <div class="ws-popover__search-row">
+          <Search :size="14" class="ws-popover__search-icon" />
+          <input
+            v-model="sessionFilter"
+            class="ws-popover__search"
+            type="text"
+            placeholder="Filter sessions…"
+          />
+        </div>
 
         <button
           v-if="store.selectedWorkspaceId"
@@ -188,7 +214,7 @@ watch(
 
         <div class="ws-popover__sessions">
           <button
-            v-for="session in sessions"
+            v-for="session in filteredSessions"
             :key="session.id"
             :class="[
               'ws-popover__item',
@@ -199,12 +225,8 @@ watch(
             <span class="ws-popover__item-label">{{ sessionLabel(session) }}</span>
             <span class="ws-popover__item-meta">{{ formatShortDateTime(session.updatedAt) }}</span>
           </button>
-          <div v-if="sessions.length === 0" class="ws-popover__empty">No sessions yet.</div>
+          <div v-if="filteredSessions.length === 0" class="ws-popover__empty">No sessions yet.</div>
         </div>
-
-        <button class="ws-popover__logout" @click="store.logout">
-          <LogOut :size="14" /> Log out
-        </button>
       </div>
     </div>
   </div>
@@ -239,9 +261,9 @@ watch(
 
 .ws-popover__cols {
   display: grid;
-  grid-template-columns: 11rem minmax(0, 1fr);
-  max-height: min(32rem, calc(100dvh - 4rem));
-  min-height: 16rem;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: minmax(16rem, 1fr);
+  height: min(32rem, calc(100dvh - 4rem));
 }
 
 .ws-popover__left,
@@ -249,8 +271,10 @@ watch(
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   padding: 0.5rem;
   gap: 0.35rem;
+  overflow: hidden;
 }
 
 .ws-popover__left {
@@ -342,10 +366,6 @@ watch(
   letter-spacing: 0.06em;
   color: var(--color-text-subtle);
   padding: 0.2rem 0.5rem;
-}
-
-.ws-popover__actions {
-  padding-top: 0.2rem;
 }
 
 .ws-popover__create-form {

@@ -115,6 +115,7 @@ watch(
   left: anchor(left);
   width: min(22rem, calc(100vw - 1.5rem));
   max-width: calc(100vw - 1rem);
+  height: auto;
   max-height: min(28rem, calc(100dvh - 4rem));
   display: flex;
   flex-direction: column;

@@ -334,11 +334,7 @@ watch(
 
       <div class="header__spacer" />
 
-      <div
-        class="header__context"
-        :aria-label="contextUsageLabel"
-        :title="contextUsageLabel"
-      >
+      <div class="header__context" :aria-label="contextUsageLabel" :title="contextUsageLabel">
         <svg class="header__context-chart" viewBox="0 0 36 36" aria-hidden="true">
           <circle class="header__context-track" cx="18" cy="18" r="15.9155" />
           <circle
@@ -366,11 +362,7 @@ watch(
           :size="15"
           class="header__status-icon header__status-icon--connecting header__status-icon--spin"
         />
-        <WifiOff
-          v-else
-          :size="15"
-          class="header__status-icon header__status-icon--offline"
-        />
+        <WifiOff v-else :size="15" class="header__status-icon header__status-icon--offline" />
       </span>
     </header>
 
@@ -637,8 +629,7 @@ watch(
   min-height: 0;
   min-width: 0;
   overflow: auto;
-  padding: 0.6rem calc(var(--safe-area-right) + 0.8rem) 0.2rem
-    calc(var(--safe-area-left) + 0.8rem);
+  padding: 0.6rem calc(var(--safe-area-right) + 0.8rem) 0.2rem calc(var(--safe-area-left) + 0.8rem);
   background: var(--color-bg-app);
 }
 

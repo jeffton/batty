@@ -281,7 +281,9 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: background 80ms ease, color 80ms ease;
+  transition:
+    background 80ms ease,
+    color 80ms ease;
 }
 
 .composer__icon-button:hover:not(:disabled) {

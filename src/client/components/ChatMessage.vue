@@ -93,7 +93,8 @@ function toolStateFor(toolCallId: string): ToolDisplayState | undefined {
   background: var(--color-user-bg);
   color: var(--color-user-text);
   margin-left: auto;
-  font-family: "JetBrains Mono", "SFMono-Regular", ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-family:
+    "JetBrains Mono", "SFMono-Regular", ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 0.92em;
 }
 

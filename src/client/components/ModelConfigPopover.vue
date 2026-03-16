@@ -148,7 +148,9 @@ watch(
   padding: 0.3rem 0.4rem;
   font-size: 0.82rem;
   font-weight: 500;
-  transition: background 80ms ease, color 80ms ease;
+  transition:
+    background 80ms ease,
+    color 80ms ease;
 }
 
 .mc-popover__thinking-btn:hover {

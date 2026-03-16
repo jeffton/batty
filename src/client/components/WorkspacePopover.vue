@@ -126,7 +126,9 @@ watch(
             @click="openWorkspace(workspace.id)"
           >
             <span class="ws-popover__item-label">{{ workspace.label }}</span>
-            <span class="ws-popover__item-meta">{{ workspace.kind === "self" ? "self" : workspace.path }}</span>
+            <span class="ws-popover__item-meta">{{
+              workspace.kind === "self" ? "self" : workspace.path
+            }}</span>
           </button>
 
           <div v-if="filteredWorkspaces.length === 0" class="ws-popover__empty">
@@ -149,10 +151,19 @@ watch(
               :disabled="creatingWorkspace"
             />
             <div class="ws-popover__create-btns">
-              <button class="ws-popover__btn ws-popover__btn--primary" type="submit" :disabled="creatingWorkspace">
+              <button
+                class="ws-popover__btn ws-popover__btn--primary"
+                type="submit"
+                :disabled="creatingWorkspace"
+              >
                 {{ creatingWorkspace ? "Creating…" : "Create" }}
               </button>
-              <button class="ws-popover__btn" type="button" :disabled="creatingWorkspace" @click="resetCreateWorkspaceForm">
+              <button
+                class="ws-popover__btn"
+                type="button"
+                :disabled="creatingWorkspace"
+                @click="resetCreateWorkspaceForm"
+              >
                 Cancel
               </button>
             </div>
@@ -405,7 +416,9 @@ watch(
   padding: 0.4rem 0.5rem;
   font-size: 0.82rem;
   margin-top: auto;
-  transition: background 80ms ease, color 80ms ease;
+  transition:
+    background 80ms ease,
+    color 80ms ease;
 }
 
 .ws-popover__logout:hover {

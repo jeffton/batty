@@ -10,9 +10,9 @@ test("screenshots", async ({ page }) => {
   await page.waitForTimeout(1500);
 
   // Start a session so model btn is active
-  await page.click('.header__ws-btn');
+  await page.click(".header__ws-btn");
   await page.waitForTimeout(300);
-  await page.locator('.ws-popover__new-session').click();
+  await page.locator(".ws-popover__new-session").click();
   await page.waitForTimeout(1500);
 
   await page.screenshot({ path: "screenshots/header-light.png" });

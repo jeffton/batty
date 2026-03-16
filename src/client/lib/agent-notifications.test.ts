@@ -48,7 +48,7 @@ describe("buildAgentCompletionNotification", () => {
   it("uses the latest assistant message as the notification body", () => {
     expect(buildAgentCompletionNotification(baseSession)).toEqual(
       expect.objectContaining({
-        title: "Pi is done · pi-face",
+        title: "pi-face",
         body: "Done shipping the feature.",
         tag: "session-complete:session-1",
       }),

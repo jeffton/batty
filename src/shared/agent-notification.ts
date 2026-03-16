@@ -63,7 +63,7 @@ export function buildAgentCompletionNotificationContent(
   const workspaceLabel = workspaceLabelFromCwd(session.cwd);
 
   return {
-    title: `Pi is done · ${workspaceLabel}`,
+    title: workspaceLabel,
     body,
     tag: `session-complete:${session.sessionId}`,
     icon: NOTIFICATION_ICON,

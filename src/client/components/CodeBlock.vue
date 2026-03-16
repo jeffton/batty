@@ -45,11 +45,13 @@ const highlighted = computed(() => highlightCode(props.code, props.language));
 }
 
 .code-block--insert {
-  background: color-mix(in srgb, var(--color-success) 16%, transparent);
+  background: var(--color-diff-add-bg);
+  color: var(--color-diff-add-text);
 }
 
 .code-block--delete {
-  background: color-mix(in srgb, var(--color-error) 16%, transparent);
+  background: var(--color-diff-remove-bg);
+  color: var(--color-diff-remove-text);
 }
 
 .code-block :deep(.hljs-comment),

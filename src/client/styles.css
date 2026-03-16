@@ -6,8 +6,8 @@
 /*
   Color system built on OKLCH.
   Base hue: 175 (teal, from the app icon).
-  Neutral hue: 250 (cool slate, low chroma).
-  Surfaces use perceptually uniform lightness steps.
+  Neutral hue: 230 (cool blue-gray, slight teal lean).
+  Surfaces carry a hint of the accent hue for warmth.
 */
 
 :root {
@@ -17,69 +17,77 @@
   --safe-area-left: env(safe-area-inset-left, 0px);
 
   /* --- text --- */
-  --color-text: oklch(0.35 0.015 250);
-  --color-text-muted: oklch(0.52 0.015 250);
-  --color-text-subtle: oklch(0.62 0.01 250);
-  --color-text-strong: oklch(0.2 0.02 250);
-  --color-link: oklch(0.55 0.14 175);
+  --color-text: oklch(0.33 0.02 230);
+  --color-text-muted: oklch(0.50 0.02 230);
+  --color-text-subtle: oklch(0.60 0.015 230);
+  --color-text-strong: oklch(0.18 0.025 230);
+  --color-link: oklch(0.52 0.15 175);
 
   /* --- surfaces ---
-     Light mode surface stack (L values):
-       app bg:      0.97  (lightest, chat area)
-       elevated:    0.95  (tool call blocks)
-       panel:       0.92  (header, footer — clearly distinct)
-       elevated-ui: 0.90  (hover states, inputs)
-       overlay:     0.99  (popovers, dropdowns)
+     Light mode surface stack (L steps of ~0.04-0.06):
+       overlay:     0.98  (popovers)
+       app bg:      0.96  (chat area)
+       elevated-s:  0.93  (tool call blocks)
+       panel:       0.87  (header, footer — big step down)
+       elevated:    0.84  (hover, inputs)
   */
-  --color-bg-app: oklch(0.97 0.005 250);
-  --color-bg-panel: oklch(0.88 0.01 250);
-  --color-bg-panel-strong: oklch(0.99 0.002 250);
-  --color-bg-panel-soft: oklch(0.96 0.005 250);
-  --color-bg-elevated: oklch(0.85 0.012 250);
-  --color-bg-elevated-soft: oklch(0.94 0.006 250);
-  --color-bg-overlay: oklch(0.99 0.003 250);
-  --color-bg-inline-code: oklch(0.93 0.008 250);
-  --color-bg-selection: oklch(0.94 0.015 175);
+  --color-bg-app: oklch(0.96 0.008 210);
+  --color-bg-panel: oklch(0.87 0.015 210);
+  --color-bg-panel-strong: oklch(0.98 0.004 210);
+  --color-bg-panel-soft: oklch(0.95 0.008 210);
+  --color-bg-elevated: oklch(0.84 0.015 210);
+  --color-bg-elevated-soft: oklch(0.93 0.01 210);
+  --color-bg-overlay: oklch(0.98 0.005 210);
+  --color-bg-inline-code: oklch(0.92 0.012 210);
+  --color-bg-selection: oklch(0.88 0.06 175);
 
   /* --- borders --- */
-  --color-border-soft: oklch(0.88 0.006 250);
-  --color-border-strong: oklch(0.82 0.01 250);
-  --color-border-accent: oklch(0.72 0.14 175);
+  --color-border-soft: oklch(0.85 0.01 210);
+  --color-border-strong: oklch(0.78 0.015 210);
+  --color-border-accent: oklch(0.65 0.16 175);
 
   /* --- shadows --- */
-  --color-shadow-popover: 0 8px 30px oklch(0.2 0.02 250 / 0.12), 0 2px 8px oklch(0.2 0.02 250 / 0.06);
-  --color-backdrop: oklch(0.2 0.02 250 / 0.2);
+  --color-shadow-popover: 0 8px 30px oklch(0.15 0.03 230 / 0.15), 0 2px 8px oklch(0.15 0.03 230 / 0.08);
+  --color-backdrop: oklch(0.15 0.03 230 / 0.25);
 
   /* --- accent (teal) --- */
-  --color-accent: oklch(0.65 0.16 175);
-  --color-accent-soft: oklch(0.94 0.015 175);
-  --color-accent-strong: oklch(0.55 0.14 175);
+  --color-accent: oklch(0.62 0.17 175);
+  --color-accent-soft: oklch(0.88 0.06 175);
+  --color-accent-strong: oklch(0.50 0.15 175);
+
+  /* --- user message / active selection --- */
+  --color-user-bg: oklch(0.88 0.07 175);
+  --color-user-text: oklch(0.22 0.04 175);
 
   /* --- semantic --- */
-  --color-success: oklch(0.62 0.17 155);
-  --color-success-soft: oklch(0.95 0.04 155);
-  --color-success-soft-strong: oklch(0.92 0.05 155);
-  --color-success-contrast: oklch(0.52 0.14 155);
-  --color-warning: oklch(0.72 0.16 75);
-  --color-warning-soft: oklch(0.95 0.04 75);
-  --color-error: oklch(0.58 0.2 25);
-  --color-error-soft: oklch(0.95 0.03 25);
-  --color-error-soft-strong: oklch(0.92 0.04 25);
-  --color-info: oklch(0.62 0.16 240);
-  --color-info-soft: oklch(0.95 0.03 240);
-  --color-info-soft-strong: oklch(0.92 0.04 240);
+  --color-success: oklch(0.60 0.18 155);
+  --color-success-soft: oklch(0.93 0.05 155);
+  --color-success-soft-strong: oklch(0.90 0.07 155);
+  --color-success-contrast: oklch(0.48 0.14 155);
+  --color-warning: oklch(0.70 0.17 75);
+  --color-warning-soft: oklch(0.93 0.05 75);
+  --color-error: oklch(0.55 0.22 27);
+  --color-error-soft: oklch(0.93 0.04 27);
+  --color-error-soft-strong: oklch(0.90 0.06 27);
+  --color-info: oklch(0.58 0.18 245);
+  --color-info-soft: oklch(0.93 0.04 245);
+  --color-info-soft-strong: oklch(0.90 0.06 245);
+
+  /* --- diff --- */
+  --color-diff-add-bg: oklch(0.92 0.08 150);
+  --color-diff-add-text: oklch(0.38 0.12 150);
+  --color-diff-remove-bg: oklch(0.92 0.06 25);
+  --color-diff-remove-text: oklch(0.42 0.16 25);
 
   /* --- code --- */
-  --color-code-bg: oklch(0.96 0.005 250);
-  --color-code-border: oklch(0.88 0.008 250);
-  --color-code-text: oklch(0.25 0.02 250);
-  --color-code-comment: oklch(0.55 0.01 250);
-  --color-code-keyword: oklch(0.55 0.2 300);
-  --color-code-string: oklch(0.52 0.12 230);
-  --color-code-number: oklch(0.58 0.14 65);
-  --color-code-title: oklch(0.55 0.14 155);
-  --color-code-tag: oklch(0.55 0.13 230);
-  --color-code-inline-change: oklch(0.5 0 0 / 0.06);
+  --color-code-text: oklch(0.25 0.02 230);
+  --color-code-comment: oklch(0.52 0.02 230);
+  --color-code-keyword: oklch(0.48 0.22 305);
+  --color-code-string: oklch(0.48 0.14 235);
+  --color-code-number: oklch(0.52 0.16 55);
+  --color-code-title: oklch(0.48 0.16 155);
+  --color-code-tag: oklch(0.50 0.15 235);
+  --color-code-inline-change: oklch(0.5 0 0 / 0.08);
 
   font-family:
     "Source Sans 3",
@@ -100,69 +108,77 @@
 @media (prefers-color-scheme: dark) {
   :root {
     /* --- text --- */
-    --color-text: oklch(0.78 0.01 250);
-    --color-text-muted: oklch(0.65 0.01 250);
-    --color-text-subtle: oklch(0.52 0.01 250);
-    --color-text-strong: oklch(0.92 0.005 250);
-    --color-link: oklch(0.78 0.12 175);
+    --color-text: oklch(0.80 0.012 210);
+    --color-text-muted: oklch(0.65 0.012 210);
+    --color-text-subtle: oklch(0.50 0.012 210);
+    --color-text-strong: oklch(0.93 0.006 210);
+    --color-link: oklch(0.75 0.14 175);
 
     /* --- surfaces ---
-       Dark mode surface stack (L values):
-         app bg:      0.20  (darkest, chat area)
-         elevated:    0.24  (tool call blocks)
-         panel:       0.27  (header, footer)
-         elevated-ui: 0.30  (hover states, inputs)
-         overlay:     0.25  (popovers)
+       Dark mode surface stack (L steps of ~0.04-0.06):
+         app bg:      0.18  (chat area)
+         elevated-s:  0.22  (tool call blocks)
+         overlay:     0.24  (popovers)
+         panel:       0.28  (header, footer)
+         elevated:    0.32  (hover, inputs)
     */
-    --color-bg-app: oklch(0.20 0.008 250);
-    --color-bg-panel: oklch(0.30 0.012 250);
-    --color-bg-panel-strong: oklch(0.34 0.012 250);
-    --color-bg-panel-soft: oklch(0.22 0.008 250);
-    --color-bg-elevated: oklch(0.34 0.012 250);
-    --color-bg-elevated-soft: oklch(0.24 0.01 250);
-    --color-bg-overlay: oklch(0.28 0.012 250);
-    --color-bg-inline-code: oklch(0.24 0.012 250);
-    --color-bg-selection: oklch(0.26 0.02 175);
+    --color-bg-app: oklch(0.18 0.012 210);
+    --color-bg-panel: oklch(0.28 0.015 210);
+    --color-bg-panel-strong: oklch(0.32 0.015 210);
+    --color-bg-panel-soft: oklch(0.20 0.012 210);
+    --color-bg-elevated: oklch(0.32 0.015 210);
+    --color-bg-elevated-soft: oklch(0.22 0.014 210);
+    --color-bg-overlay: oklch(0.24 0.015 210);
+    --color-bg-inline-code: oklch(0.22 0.015 210);
+    --color-bg-selection: oklch(0.30 0.06 175);
 
     /* --- borders --- */
-    --color-border-soft: oklch(0.30 0.008 250);
-    --color-border-strong: oklch(0.38 0.01 250);
-    --color-border-accent: oklch(0.72 0.14 175);
+    --color-border-soft: oklch(0.28 0.012 210);
+    --color-border-strong: oklch(0.38 0.015 210);
+    --color-border-accent: oklch(0.68 0.16 175);
 
     /* --- shadows --- */
-    --color-shadow-popover: 0 8px 30px oklch(0 0 0 / 0.4), 0 2px 8px oklch(0 0 0 / 0.2);
-    --color-backdrop: oklch(0 0 0 / 0.4);
+    --color-shadow-popover: 0 8px 30px oklch(0 0 0 / 0.45), 0 2px 8px oklch(0 0 0 / 0.25);
+    --color-backdrop: oklch(0 0 0 / 0.45);
 
     /* --- accent (teal) --- */
-    --color-accent: oklch(0.78 0.14 175);
-    --color-accent-soft: oklch(0.26 0.02 175);
-    --color-accent-strong: oklch(0.82 0.12 175);
+    --color-accent: oklch(0.75 0.15 175);
+    --color-accent-soft: oklch(0.30 0.06 175);
+    --color-accent-strong: oklch(0.82 0.13 175);
+
+    /* --- user message / active selection --- */
+    --color-user-bg: oklch(0.72 0.14 175);
+    --color-user-text: oklch(0.18 0.04 175);
 
     /* --- semantic --- */
-    --color-success: oklch(0.72 0.16 155);
-    --color-success-soft: oklch(0.28 0.04 155);
-    --color-success-soft-strong: oklch(0.32 0.05 155);
-    --color-success-contrast: oklch(0.78 0.12 155);
-    --color-warning: oklch(0.78 0.14 75);
-    --color-warning-soft: oklch(0.28 0.04 75);
-    --color-error: oklch(0.68 0.18 25);
-    --color-error-soft: oklch(0.25 0.04 25);
-    --color-error-soft-strong: oklch(0.30 0.05 25);
-    --color-info: oklch(0.72 0.12 240);
-    --color-info-soft: oklch(0.25 0.04 240);
-    --color-info-soft-strong: oklch(0.30 0.05 240);
+    --color-success: oklch(0.72 0.17 155);
+    --color-success-soft: oklch(0.26 0.05 155);
+    --color-success-soft-strong: oklch(0.30 0.06 155);
+    --color-success-contrast: oklch(0.80 0.13 155);
+    --color-warning: oklch(0.78 0.15 75);
+    --color-warning-soft: oklch(0.26 0.05 75);
+    --color-error: oklch(0.68 0.19 27);
+    --color-error-soft: oklch(0.24 0.05 27);
+    --color-error-soft-strong: oklch(0.28 0.06 27);
+    --color-info: oklch(0.72 0.14 245);
+    --color-info-soft: oklch(0.24 0.05 245);
+    --color-info-soft-strong: oklch(0.28 0.06 245);
+
+    /* --- diff --- */
+    --color-diff-add-bg: oklch(0.26 0.06 155);
+    --color-diff-add-text: oklch(0.80 0.13 155);
+    --color-diff-remove-bg: oklch(0.24 0.06 27);
+    --color-diff-remove-text: oklch(0.75 0.15 27);
 
     /* --- code --- */
-    --color-code-bg: oklch(0.22 0.008 250);
-    --color-code-border: oklch(0.30 0.01 250);
-    --color-code-text: oklch(0.88 0.008 250);
-    --color-code-comment: oklch(0.55 0.01 250);
-    --color-code-keyword: oklch(0.78 0.14 300);
+    --color-code-text: oklch(0.88 0.01 210);
+    --color-code-comment: oklch(0.55 0.012 210);
+    --color-code-keyword: oklch(0.78 0.15 305);
     --color-code-string: oklch(0.78 0.1 210);
-    --color-code-number: oklch(0.82 0.1 85);
-    --color-code-title: oklch(0.78 0.12 155);
+    --color-code-number: oklch(0.82 0.12 85);
+    --color-code-title: oklch(0.78 0.13 155);
     --color-code-tag: oklch(0.78 0.1 210);
-    --color-code-inline-change: oklch(1 0 0 / 0.08);
+    --color-code-inline-change: oklch(1 0 0 / 0.1);
 
     color-scheme: dark;
   }

@@ -90,8 +90,11 @@ function toolStateFor(toolCallId: string): ToolDisplayState | undefined {
 .message--user {
   padding: 0.5rem 0.65rem;
   border-radius: 0.5rem;
-  background: var(--color-accent-soft);
+  background: var(--color-user-bg);
+  color: var(--color-user-text);
   margin-left: auto;
+  font-family: "JetBrains Mono", "SFMono-Regular", ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.92em;
 }
 
 .message__body {

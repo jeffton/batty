@@ -300,8 +300,8 @@ watch(
 }
 
 .ws-popover__item.is-active {
-  background: var(--color-bg-selection);
-  color: var(--color-text-strong);
+  background: var(--color-user-bg);
+  color: var(--color-user-text);
 }
 
 .ws-popover__item-label {
@@ -317,6 +317,11 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ws-popover__item.is-active .ws-popover__item-meta {
+  color: var(--color-user-text);
+  opacity: 0.7;
 }
 
 .ws-popover__section-label {

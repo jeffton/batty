@@ -111,21 +111,21 @@ const lineNumberWidth = computed(() =>
 }
 
 .diff-block__line--add {
-  background: color-mix(in srgb, var(--color-success) 8%, transparent);
+  background: var(--color-diff-add-bg);
 }
 
 .diff-block__line--add .diff-block__prefix,
 .diff-block__line--add .diff-block__content {
-  color: var(--color-success-contrast);
+  color: var(--color-diff-add-text);
 }
 
 .diff-block__line--remove {
-  background: color-mix(in srgb, var(--color-error) 8%, transparent);
+  background: var(--color-diff-remove-bg);
 }
 
 .diff-block__line--remove .diff-block__prefix,
 .diff-block__line--remove .diff-block__content {
-  color: var(--color-error);
+  color: var(--color-diff-remove-text);
 }
 
 .diff-block__content :deep(.diff-block__inline-change) {

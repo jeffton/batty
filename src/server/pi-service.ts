@@ -279,7 +279,9 @@ export class PiService {
     };
 
     session.subscribe((event) => {
-      void this.handleAgentEvent(webSession, event);
+      void this.handleAgentEvent(webSession, event).catch((error) => {
+        console.error("Failed to handle agent event", error);
+      });
     });
     this.sessions.set(webSession.id, webSession);
     return webSession;

@@ -30,7 +30,7 @@ export function loadConfig(): AppConfig {
     uploadsDir: process.env.PI_FACE_UPLOADS_DIR ?? path.join(selfPath, ".data", "uploads"),
     publicDir: path.join(selfPath, "dist", "client"),
     webPushDir: process.env.PI_FACE_WEB_PUSH_DIR ?? path.join(selfPath, ".data", "web-push"),
-    webPushSubject: process.env.PI_FACE_WEB_PUSH_SUBJECT ?? "mailto:pi-face@localhost",
+    webPushSubject: process.env.PI_FACE_WEB_PUSH_SUBJECT ?? "https://pi.roybot.se",
     cookieName: "pi-face-auth",
     authPassword: process.env.PI_FACE_PASSWORD ?? DEFAULT_PASSWORD,
     authSecret: process.env.PI_FACE_SECRET ?? DEFAULT_SECRET,

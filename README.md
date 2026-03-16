@@ -69,7 +69,7 @@ Environment variables:
 - `PI_FACE_SECRET` - cookie signing secret
 - `PI_FACE_UPLOADS_DIR` - attachment staging directory
 - `PI_FACE_WEB_PUSH_DIR` - persistent storage for VAPID keys and push subscriptions
-- `PI_FACE_WEB_PUSH_SUBJECT` - VAPID contact subject, default `mailto:pi-face@localhost`
+- `PI_FACE_WEB_PUSH_SUBJECT` - VAPID subject, must be a real `https:` origin or valid `mailto:` URI; default `https://pi.roybot.se`
 - `PI_FACE_WEB_PUSH_PUBLIC_KEY` - optional explicit VAPID public key override
 - `PI_FACE_WEB_PUSH_PRIVATE_KEY` - optional explicit VAPID private key override
 

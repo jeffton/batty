@@ -198,9 +198,13 @@ export class WebPushService {
             {
               TTL: 60,
               urgency: "high",
-              topic: payload.tag,
             },
           );
+          console.info("Sent web push notification", {
+            endpoint: subscription.endpoint,
+            tag: payload.tag,
+            sessionId: session.sessionId,
+          });
         } catch (error) {
           const statusCode =
             typeof error === "object" && error && "statusCode" in error

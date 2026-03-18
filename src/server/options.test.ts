@@ -11,8 +11,10 @@ afterEach(async () => {
 });
 
 async function createProjectRoot(): Promise<string> {
-  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-face-options-"));
-  tempDirs.push(projectRoot);
+  const sandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-face-options-"));
+  const projectRoot = path.join(sandboxRoot, "pi-face");
+  await fs.mkdir(projectRoot, { recursive: true });
+  tempDirs.push(sandboxRoot);
   return projectRoot;
 }
 

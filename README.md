@@ -87,7 +87,7 @@ Runtime env vars are intentionally minimal:
 - `PI_FACE_HOST` - server bind host, default `127.0.0.1`
 - `PI_FACE_PORT` - server port, default `3147`
 
-Persisted server options live in `.pi-face/options.json`:
+Persisted server options live in `../.pi-face/options.json`:
 
 - `username` - required login username
 - `password` - required login password
@@ -133,5 +133,9 @@ sudo certbot --nginx -d pi.roybot.se
 - Attachments are staged on disk before being handed to Pi.
 - Non-image files are injected into the prompt as `<file>` blocks; image files are sent as model image inputs.
   are sent as model image inputs.
+  sent as model image inputs.
+  sent as model image inputs.
+  model image inputs.
+  e sent as model image inputs.
   sent as model image inputs.
   sent as model image inputs.

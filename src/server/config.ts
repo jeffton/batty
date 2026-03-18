@@ -21,12 +21,6 @@ export async function loadConfig(): Promise<AppConfig> {
   const stateDir = stateDirPath(selfPath);
   const options = await ensureOptionsFile(selfPath);
 
-  if (!options.password) {
-    throw new Error(
-      `Missing password in ${path.join(".pi-face", "options.json")}. Set "password" before starting pi-face.`,
-    );
-  }
-
   return {
     host: process.env.PI_FACE_HOST ?? "127.0.0.1",
     port: Number(process.env.PI_FACE_PORT ?? "3147"),

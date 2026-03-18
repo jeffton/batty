@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 
 export interface StoredAppOptions {
@@ -13,14 +12,13 @@ export interface StoredAppOptions {
 
 export interface AppOptions {
   username: string;
-  password?: string;
+  password: string;
   authSecret: string;
   workspacesRoot: string;
   webPushSubject: string;
 }
 
-export const DEFAULT_USERNAME = "pi-face";
-export const DEFAULT_WEB_PUSH_SUBJECT = "https://pi.roybot.se";
+const REQUIRED_OPTION_KEYS = ["username", "password", "workspacesRoot", "webPushSubject"] as const;
 
 export function stateDirPath(projectRoot: string): string {
   return path.join(projectRoot, ".pi-face");
@@ -38,29 +36,26 @@ function createAuthSecret(): string {
   return crypto.randomBytes(32).toString("base64url");
 }
 
-function normalizeOptions(options: StoredAppOptions | undefined): AppOptions {
+function normalizeStoredOptions(options: StoredAppOptions | undefined): StoredAppOptions {
   return {
-    username:
-      typeof options?.username === "string" && options.username.trim().length > 0
-        ? options.username.trim()
-        : DEFAULT_USERNAME,
-    password:
-      typeof options?.password === "string" && options.password.length > 0
-        ? options.password
-        : undefined,
+    username: typeof options?.username === "string" ? options.username.trim() : "",
+    password: typeof options?.password === "string" ? options.password : "",
     authSecret:
       typeof options?.authSecret === "string" && options.authSecret.trim().length > 0
-        ? options.authSecret
+        ? options.authSecret.trim()
         : createAuthSecret(),
     workspacesRoot:
-      typeof options?.workspacesRoot === "string" && options.workspacesRoot.trim().length > 0
-        ? options.workspacesRoot
-        : path.join(os.homedir(), "github"),
+      typeof options?.workspacesRoot === "string" ? options.workspacesRoot.trim() : "",
     webPushSubject:
-      typeof options?.webPushSubject === "string" && options.webPushSubject.trim().length > 0
-        ? options.webPushSubject.trim()
-        : DEFAULT_WEB_PUSH_SUBJECT,
+      typeof options?.webPushSubject === "string" ? options.webPushSubject.trim() : "",
   };
+}
+
+function missingRequiredOptions(options: StoredAppOptions): string[] {
+  return REQUIRED_OPTION_KEYS.filter((key) => {
+    const value = options[key];
+    return typeof value !== "string" || value.length === 0;
+  });
 }
 
 async function readStoredOptions(projectRoot: string): Promise<StoredAppOptions | undefined> {
@@ -75,20 +70,27 @@ async function readStoredOptions(projectRoot: string): Promise<StoredAppOptions 
   }
 }
 
-async function writeStoredOptions(projectRoot: string, options: AppOptions): Promise<void> {
+async function writeStoredOptions(projectRoot: string, options: StoredAppOptions): Promise<void> {
   await fs.mkdir(stateDirPath(projectRoot), { recursive: true });
   await fs.writeFile(optionsFilePath(projectRoot), `${JSON.stringify(options, null, 2)}\n`, "utf8");
 }
 
 export async function ensureOptionsFile(projectRoot: string): Promise<AppOptions> {
   const stored = await readStoredOptions(projectRoot);
-  const normalized = normalizeOptions(stored);
+  const normalized = normalizeStoredOptions(stored);
 
   if (JSON.stringify(stored) !== JSON.stringify(normalized)) {
     await writeStoredOptions(projectRoot, normalized);
   }
 
-  return normalized;
+  const missing = missingRequiredOptions(normalized);
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required options in ${optionsFilePath(projectRoot)}: ${missing.join(", ")}.`,
+    );
+  }
+
+  return normalized as AppOptions;
 }
 
 export async function migrateLegacyStateDirectory(projectRoot: string): Promise<void> {

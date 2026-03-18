@@ -30,18 +30,20 @@ A browser UI for [Pi Coding Agent](https://pi.dev) that keeps Pi's session/model
 
 ## Auth
 
-pi-face now reads its persisted server config from `.pi-face/options.json`.
+pi-face reads its persisted server config from `.pi-face/options.json`.
 
+- `username` is required
 - `password` is required
-- `authSecret` is generated automatically on first run and persisted
-- `username` is used by the login form and checked on login
+- `workspacesRoot` is required
+- `webPushSubject` is required
+- `authSecret` is generated automatically if missing, then persisted
 - `/api/login` is rate-limited in memory to roughly 5 failed attempts per minute per client IP
 
 Example:
 
 ```json
 {
-  "username": "pi-face",
+  "username": "david",
   "password": "set-a-real-password-here",
   "authSecret": "generated-on-first-run",
   "workspacesRoot": "/root/github",
@@ -68,7 +70,7 @@ App UI: `http://127.0.0.1:5173`
 
 API server: `http://127.0.0.1:3147`
 
-On a fresh checkout, `scripts/migrate-state.ts` will create `.pi-face/options.json` and generate `authSecret` if needed. Set `password` before starting the server.
+On a fresh checkout, `scripts/migrate-state.ts` will create `.pi-face/options.json` if needed, generate `authSecret`, and then fail until the required fields are filled in.
 
 ## Useful commands
 
@@ -88,11 +90,11 @@ Runtime env vars are intentionally minimal:
 
 Persisted server options live in `.pi-face/options.json`:
 
-- `username` - login username
+- `username` - required login username
 - `password` - required login password
 - `authSecret` - cookie signing secret, generated if missing
-- `workspacesRoot` - root directory containing workspace folders, default `~/github`
-- `webPushSubject` - VAPID subject, must be a real `https:` origin or valid `mailto:` URI; default `https://pi.roybot.se`
+- `workspacesRoot` - required root directory containing workspace folders
+- `webPushSubject` - required VAPID subject; use a real `https:` origin or valid `mailto:` URI
 
 Pi resources are loaded from the regular `~/.pi` setup through Pi's SDK:
 

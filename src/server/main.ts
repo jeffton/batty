@@ -6,13 +6,13 @@ import multipart from "@fastify/multipart";
 import staticFiles from "@fastify/static";
 import { createAuthToken, verifyAuthToken } from "./auth";
 import { readBuildId } from "./build-id";
-import { loadConfig } from "./config";
+import { loadConfig, resolvePiFaceDir } from "./config";
 import { createLoginRateLimiter } from "./login-rate-limit";
 import { PiService, type UploadedFile } from "./pi-service";
 import { WebPushService } from "./web-push";
 import { createWorkspace, listWorkspaces, resolveWorkspace } from "./workspaces";
 
-const config = await loadConfig();
+const config = await loadConfig(resolvePiFaceDir());
 const webPush = new WebPushService(config);
 await webPush.initialize();
 const service = new PiService(config, async (session) => {

@@ -30,7 +30,7 @@ A browser UI for [Pi Coding Agent](https://pi.dev) that keeps Pi's session/model
 
 ## Auth
 
-pi-face reads its persisted server config from `.pi-face/options.json`.
+pi-face reads its persisted server config from `<pi-face-dir>/.pi-face/options.json`, where `<pi-face-dir>` is passed as a command line argument when starting the server. On this server that path is `/root/github/.pi-face/options.json`.
 
 - `username` is required
 - `password` is required
@@ -51,7 +51,7 @@ Example:
 }
 ```
 
-`.pi-face/` is ignored by git and is intended to hold local state such as:
+That `<pi-face-dir>/.pi-face/` directory is ignored by git and is intended to hold local state such as:
 
 - `options.json`
 - `uploads/`
@@ -62,14 +62,14 @@ Example:
 
 ```bash
 pnpm install
-pnpm dev
+pnpm dev -- /path/to/pi-face-root
 ```
 
 App UI: `http://127.0.0.1:5173`
 
 API server: `http://127.0.0.1:3147`
 
-On a fresh checkout, create `.pi-face/options.json` with the required fields before starting the server.
+On a fresh checkout, create `/path/to/pi-face-root/.pi-face/options.json` with the required fields before starting the server.
 
 ## Useful commands
 
@@ -77,7 +77,7 @@ On a fresh checkout, create `.pi-face/options.json` with the required fields bef
 pnpm check
 pnpm test
 pnpm build
-pnpm start
+pnpm start -- /path/to/pi-face-root
 ```
 
 ## Configuration
@@ -87,7 +87,7 @@ Runtime env vars are intentionally minimal:
 - `PI_FACE_HOST` - server bind host, default `127.0.0.1`
 - `PI_FACE_PORT` - server port, default `3147`
 
-Persisted server options live in `../.pi-face/options.json`:
+Persisted server options live in `<pi-face-dir>/.pi-face/options.json`:
 
 - `username` - required login username
 - `password` - required login password
@@ -118,7 +118,7 @@ Repo includes:
 
 - `deploy/pi-face.service` - systemd unit
 - `deploy/pi-face.nginx.conf` - nginx reverse proxy for `pi.roybot.se`
-- `scripts/deploy.sh` - install/build/restart helper
+- `scripts/deploy.sh` - install/build/restart helper; the bundled systemd unit starts the server with `/root/github` as the pi-face dir on this server
 
 Deploy on the server:
 
@@ -132,10 +132,3 @@ sudo certbot --nginx -d pi.roybot.se
 - This is intentionally not backwards-compatible with older Pi/Vite stacks.
 - Attachments are staged on disk before being handed to Pi.
 - Non-image files are injected into the prompt as `<file>` blocks; image files are sent as model image inputs.
-  are sent as model image inputs.
-  sent as model image inputs.
-  sent as model image inputs.
-  model image inputs.
-  e sent as model image inputs.
-  sent as model image inputs.
-  sent as model image inputs.

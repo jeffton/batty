@@ -10,23 +10,21 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
-async function createProjectRoot(): Promise<string> {
-  const sandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pi-face-options-"));
-  const projectRoot = path.join(sandboxRoot, "pi-face");
-  await fs.mkdir(projectRoot, { recursive: true });
-  tempDirs.push(sandboxRoot);
-  return projectRoot;
+async function createPiFaceDir(): Promise<string> {
+  const piFaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-face-root-"));
+  tempDirs.push(piFaceDir);
+  return piFaceDir;
 }
 
 describe("ensureOptionsFile", () => {
-  it("creates options.json, generates authSecret, and rejects missing required options", async () => {
-    const projectRoot = await createProjectRoot();
+  it("creates options.json inside <pi-face-dir>/.pi-face and rejects missing required options", async () => {
+    const piFaceDir = await createPiFaceDir();
 
-    await expect(ensureOptionsFile(projectRoot)).rejects.toThrow(
-      `Missing required options in ${optionsFilePath(projectRoot)}: username, password, workspacesRoot, webPushSubject.`,
+    await expect(ensureOptionsFile(piFaceDir)).rejects.toThrow(
+      `Missing required options in ${optionsFilePath(piFaceDir)}: username, password, workspacesRoot, webPushSubject.`,
     );
 
-    const persisted = JSON.parse(await fs.readFile(optionsFilePath(projectRoot), "utf8")) as {
+    const persisted = JSON.parse(await fs.readFile(optionsFilePath(piFaceDir), "utf8")) as {
       username: string;
       password: string;
       authSecret: string;
@@ -42,11 +40,11 @@ describe("ensureOptionsFile", () => {
   });
 
   it("preserves configured values and fills in a missing authSecret", async () => {
-    const projectRoot = await createProjectRoot();
+    const piFaceDir = await createPiFaceDir();
 
-    await fs.mkdir(path.dirname(optionsFilePath(projectRoot)), { recursive: true });
+    await fs.mkdir(path.dirname(optionsFilePath(piFaceDir)), { recursive: true });
     await fs.writeFile(
-      optionsFilePath(projectRoot),
+      optionsFilePath(piFaceDir),
       `${JSON.stringify(
         {
           username: "david",
@@ -60,7 +58,7 @@ describe("ensureOptionsFile", () => {
       "utf8",
     );
 
-    const options = await ensureOptionsFile(projectRoot);
+    const options = await ensureOptionsFile(piFaceDir);
 
     expect(options.username).toBe("david");
     expect(options.password).toBe("configured-password");

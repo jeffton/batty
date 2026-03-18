@@ -24,10 +24,6 @@ export function stateDirPath(projectRoot: string): string {
   return path.join(projectRoot, ".pi-face");
 }
 
-export function legacyStateDirPath(projectRoot: string): string {
-  return path.join(projectRoot, ".data");
-}
-
 export function optionsFilePath(projectRoot: string): string {
   return path.join(stateDirPath(projectRoot), "options.json");
 }
@@ -91,37 +87,4 @@ export async function ensureOptionsFile(projectRoot: string): Promise<AppOptions
   }
 
   return normalized as AppOptions;
-}
-
-export async function migrateLegacyStateDirectory(projectRoot: string): Promise<void> {
-  const legacyDir = legacyStateDirPath(projectRoot);
-  const stateDir = stateDirPath(projectRoot);
-
-  try {
-    await fs.access(legacyDir);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return;
-    }
-    throw error;
-  }
-
-  try {
-    await fs.access(stateDir);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      await fs.rename(legacyDir, stateDir);
-      return;
-    }
-    throw error;
-  }
-
-  const entries = await fs.readdir(legacyDir, { withFileTypes: true });
-  for (const entry of entries) {
-    const sourcePath = path.join(legacyDir, entry.name);
-    const targetPath = path.join(stateDir, entry.name);
-    await fs.cp(sourcePath, targetPath, { force: true, recursive: entry.isDirectory() });
-  }
-
-  await fs.rm(legacyDir, { recursive: true, force: true });
 }

@@ -62,7 +62,6 @@ Example:
 
 ```bash
 pnpm install
-pnpm exec tsx scripts/migrate-state.ts
 pnpm dev
 ```
 
@@ -70,7 +69,7 @@ App UI: `http://127.0.0.1:5173`
 
 API server: `http://127.0.0.1:3147`
 
-On a fresh checkout, `scripts/migrate-state.ts` will create `.pi-face/options.json` if needed, generate `authSecret`, and then fail until the required fields are filled in.
+On a fresh checkout, create `.pi-face/options.json` with the required fields before starting the server.
 
 ## Useful commands
 
@@ -111,8 +110,6 @@ When you open a session in the `pi-face` workspace, the agent can modify this re
 scripts/reload-self.sh
 ```
 
-That script also runs the one-time state migration from `.data/` to `.pi-face/` before rebuilding.
-
 Pi session state is persisted in Pi's session files, and the web app also caches the latest session snapshot in IndexedDB, so reconnecting after a rebuild/restart is cheap.
 
 ## Deployment
@@ -135,3 +132,6 @@ sudo certbot --nginx -d pi.roybot.se
 - This is intentionally not backwards-compatible with older Pi/Vite stacks.
 - Attachments are staged on disk before being handed to Pi.
 - Non-image files are injected into the prompt as `<file>` blocks; image files are sent as model image inputs.
+  are sent as model image inputs.
+  sent as model image inputs.
+  sent as model image inputs.

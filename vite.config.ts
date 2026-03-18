@@ -69,7 +69,7 @@ export default defineConfig({
     },
   },
   lint: {
-    ignorePatterns: ["dist/**", "node_modules/**", ".pi-face/**", ".data/**"],
+    ignorePatterns: ["dist/**", "node_modules/**", ".pi-face/**"],
   },
   pack: {
     entry: ["src/server/main.ts"],

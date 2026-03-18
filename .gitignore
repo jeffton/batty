@@ -2,7 +2,6 @@ node_modules/
 dist/
 coverage/
 .pi-face/
-.data/
 .vite/
 playwright-report/
 test-results/

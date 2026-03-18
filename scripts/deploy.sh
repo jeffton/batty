@@ -10,9 +10,6 @@ cd /root/github/pi-face
 step "Installing dependencies"
 pnpm install
 
-step "Migrating persisted state"
-pnpm exec tsx scripts/migrate-state.ts
-
 step "Running checks"
 pnpm check
 

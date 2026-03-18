@@ -43,6 +43,7 @@ export const useAppStore = defineStore("app", {
     authenticated: false,
     bootstrapped: false,
     buildId: undefined as string | undefined,
+    authUsername: "" as string,
     connectionState: "online" as "online" | "offline" | "connecting",
     workspaces: [] as WorkspaceInfo[],
     models: [] as ModelOption[],
@@ -97,6 +98,7 @@ export const useAppStore = defineStore("app", {
 
     applyBootstrap(payload: BootstrapPayload): void {
       this.authenticated = payload.authenticated;
+      this.authUsername = payload.authUsername;
       this.buildId = payload.buildId;
       this.workspaces = payload.workspaces;
       this.models = payload.models;
@@ -108,10 +110,10 @@ export const useAppStore = defineStore("app", {
       }
     },
 
-    async login(password: string): Promise<void> {
+    async login(username: string, password: string): Promise<void> {
       this.authError = undefined;
       try {
-        await loginRequest(password);
+        await loginRequest(username, password);
         await this.bootstrap();
       } catch (error) {
         this.authError = error instanceof Error ? error.message : String(error);

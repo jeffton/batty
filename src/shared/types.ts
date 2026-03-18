@@ -117,6 +117,7 @@ export interface ModelOption {
 
 export interface BootstrapPayload {
   authenticated: boolean;
+  authUsername: string;
   buildId: string;
   workspaces: WorkspaceInfo[];
   models: ModelOption[];

@@ -7,19 +7,23 @@ import staticFiles from "@fastify/static";
 import { createAuthToken, verifyAuthToken } from "./auth";
 import { readBuildId } from "./build-id";
 import { loadConfig } from "./config";
+import { createLoginRateLimiter } from "./login-rate-limit";
 import { PiService, type UploadedFile } from "./pi-service";
 import { WebPushService } from "./web-push";
 import { createWorkspace, listWorkspaces, resolveWorkspace } from "./workspaces";
 
-const config = loadConfig();
+const config = await loadConfig();
 const webPush = new WebPushService(config);
 await webPush.initialize();
 const service = new PiService(config, async (session) => {
   await webPush.notifyAgentCompleted(session);
 });
 
+const loginRateLimiter = createLoginRateLimiter();
+
 const app = fastify({
   logger: true,
+  trustProxy: true,
   bodyLimit: 1024 * 1024 * 100,
 });
 
@@ -74,22 +78,33 @@ app.addHook("onRequest", async (request, reply) => {
   }
 });
 
-app.post<{ Body: { password?: string } }>("/api/login", async (request, reply) => {
-  if (request.body?.password !== config.authPassword) {
-    reply.code(401).send({ error: "Wrong password" });
-    return;
-  }
+app.post<{ Body: { username?: string; password?: string } }>(
+  "/api/login",
+  async (request, reply) => {
+    const rateLimitKey = request.ip;
+    if (loginRateLimiter.isLimited(rateLimitKey)) {
+      reply.code(429).send({ error: "Too many login attempts. Try again in a minute." });
+      return;
+    }
 
-  reply.setCookie(config.cookieName, createAuthToken(config.authSecret), {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    secure: false,
-    maxAge: 60 * 60 * 24 * 30,
-  });
+    if (request.body?.username !== config.username || request.body?.password !== config.password) {
+      loginRateLimiter.recordFailure(rateLimitKey);
+      reply.code(401).send({ error: "Wrong username or password" });
+      return;
+    }
 
-  reply.send({ ok: true });
-});
+    loginRateLimiter.reset(rateLimitKey);
+    reply.setCookie(config.cookieName, createAuthToken(config.authSecret), {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      secure: request.protocol === "https",
+      maxAge: 60 * 60 * 24 * 30,
+    });
+
+    reply.send({ ok: true });
+  },
+);
 
 app.post("/api/logout", async (_request, reply) => {
   reply.clearCookie(config.cookieName, { path: "/" });
@@ -100,6 +115,7 @@ app.get("/api/bootstrap", async (request) => {
   const authenticated = request.auth;
   return {
     authenticated,
+    authUsername: config.username,
     buildId,
     workspaces: authenticated ? await listWorkspaces(config) : [],
     models: authenticated ? await service.listModels() : [],

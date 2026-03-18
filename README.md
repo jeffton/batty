@@ -25,29 +25,50 @@ A browser UI for [Pi Coding Agent](https://pi.dev) that keeps Pi's session/model
 - Vue Router `5.0.3`
 - Pinia `3.0.4`
 - TypeScript `5.9.3`
-- Pi Coding Agent `0.58.1`
+- Pi Coding Agent `0.60.0`
 - Fastify `5.8.2`
 
 ## Auth
 
-For now auth is a hardcoded password in `src/server/config.ts`:
+pi-face now reads its persisted server config from `.pi-face/options.json`.
 
-```txt
-pi-face-d3mQm4Hc-9rY2Qv7-7nLk
+- `password` is required
+- `authSecret` is generated automatically on first run and persisted
+- `username` is used by the login form and checked on login
+- `/api/login` is rate-limited in memory to roughly 5 failed attempts per minute per client IP
+
+Example:
+
+```json
+{
+  "username": "pi-face",
+  "password": "set-a-real-password-here",
+  "authSecret": "generated-on-first-run",
+  "workspacesRoot": "/root/github",
+  "webPushSubject": "https://pi.roybot.se"
+}
 ```
 
-Set `PI_FACE_PASSWORD` to override it in production.
+`.pi-face/` is ignored by git and is intended to hold local state such as:
+
+- `options.json`
+- `uploads/`
+- `web-push/vapid-keys.json`
+- `web-push/subscriptions.json`
 
 ## Local development
 
 ```bash
 pnpm install
+pnpm exec tsx scripts/migrate-state.ts
 pnpm dev
 ```
 
 App UI: `http://127.0.0.1:5173`
 
 API server: `http://127.0.0.1:3147`
+
+On a fresh checkout, `scripts/migrate-state.ts` will create `.pi-face/options.json` and generate `authSecret` if needed. Set `password` before starting the server.
 
 ## Useful commands
 
@@ -60,18 +81,18 @@ pnpm start
 
 ## Configuration
 
-Environment variables:
+Runtime env vars are intentionally minimal:
 
 - `PI_FACE_HOST` - server bind host, default `127.0.0.1`
 - `PI_FACE_PORT` - server port, default `3147`
-- `PI_FACE_WORKSPACES_DIR` - root directory containing workspace folders, default `~/github`
-- `PI_FACE_PASSWORD` - overrides the hardcoded password
-- `PI_FACE_SECRET` - cookie signing secret
-- `PI_FACE_UPLOADS_DIR` - attachment staging directory
-- `PI_FACE_WEB_PUSH_DIR` - persistent storage for VAPID keys and push subscriptions
-- `PI_FACE_WEB_PUSH_SUBJECT` - VAPID subject, must be a real `https:` origin or valid `mailto:` URI; default `https://pi.roybot.se`
-- `PI_FACE_WEB_PUSH_PUBLIC_KEY` - optional explicit VAPID public key override
-- `PI_FACE_WEB_PUSH_PRIVATE_KEY` - optional explicit VAPID private key override
+
+Persisted server options live in `.pi-face/options.json`:
+
+- `username` - login username
+- `password` - required login password
+- `authSecret` - cookie signing secret, generated if missing
+- `workspacesRoot` - root directory containing workspace folders, default `~/github`
+- `webPushSubject` - VAPID subject, must be a real `https:` origin or valid `mailto:` URI; default `https://pi.roybot.se`
 
 Pi resources are loaded from the regular `~/.pi` setup through Pi's SDK:
 
@@ -87,6 +108,8 @@ When you open a session in the `pi-face` workspace, the agent can modify this re
 ```bash
 scripts/reload-self.sh
 ```
+
+That script also runs the one-time state migration from `.data/` to `.pi-face/` before rebuilding.
 
 Pi session state is persisted in Pi's session files, and the web app also caches the latest session snapshot in IndexedDB, so reconnecting after a rebuild/restart is cheap.
 

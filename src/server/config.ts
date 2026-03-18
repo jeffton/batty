@@ -1,5 +1,5 @@
-import os from "node:os";
 import path from "node:path";
+import { ensureOptionsFile, stateDirPath } from "./options";
 
 export interface AppConfig {
   host: string;
@@ -11,28 +11,34 @@ export interface AppConfig {
   webPushDir: string;
   webPushSubject: string;
   cookieName: string;
-  authPassword: string;
+  username: string;
+  password: string;
   authSecret: string;
 }
 
-const DEFAULT_PASSWORD = "pi-face-d3mQm4Hc-9rY2Qv7-7nLk";
-const DEFAULT_SECRET = "pi-face-session-3e5db1f1-96df-4da5-8a08-0d56930a9252";
-
-export function loadConfig(): AppConfig {
+export async function loadConfig(): Promise<AppConfig> {
   const selfPath = process.cwd();
-  const workspacesRoot = process.env.PI_FACE_WORKSPACES_DIR ?? path.join(os.homedir(), "github");
+  const stateDir = stateDirPath(selfPath);
+  const options = await ensureOptionsFile(selfPath);
+
+  if (!options.password) {
+    throw new Error(
+      `Missing password in ${path.join(".pi-face", "options.json")}. Set "password" before starting pi-face.`,
+    );
+  }
 
   return {
     host: process.env.PI_FACE_HOST ?? "127.0.0.1",
     port: Number(process.env.PI_FACE_PORT ?? "3147"),
-    workspacesRoot,
+    workspacesRoot: options.workspacesRoot,
     selfPath,
-    uploadsDir: process.env.PI_FACE_UPLOADS_DIR ?? path.join(selfPath, ".data", "uploads"),
+    uploadsDir: path.join(stateDir, "uploads"),
     publicDir: path.join(selfPath, "dist", "client"),
-    webPushDir: process.env.PI_FACE_WEB_PUSH_DIR ?? path.join(selfPath, ".data", "web-push"),
-    webPushSubject: process.env.PI_FACE_WEB_PUSH_SUBJECT ?? "https://pi.roybot.se",
+    webPushDir: path.join(stateDir, "web-push"),
+    webPushSubject: options.webPushSubject,
     cookieName: "pi-face-auth",
-    authPassword: process.env.PI_FACE_PASSWORD ?? DEFAULT_PASSWORD,
-    authSecret: process.env.PI_FACE_SECRET ?? DEFAULT_SECRET,
+    username: options.username,
+    password: options.password,
+    authSecret: options.authSecret,
   };
 }

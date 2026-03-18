@@ -227,15 +227,6 @@ export class WebPushService {
   }
 
   private async loadVapidKeys(): Promise<VapidKeys> {
-    const envPublicKey = process.env.PI_FACE_WEB_PUSH_PUBLIC_KEY;
-    const envPrivateKey = process.env.PI_FACE_WEB_PUSH_PRIVATE_KEY;
-    if (envPublicKey && envPrivateKey) {
-      return {
-        publicKey: envPublicKey,
-        privateKey: envPrivateKey,
-      };
-    }
-
     const existing = await readJsonFile<VapidKeys | undefined>(this.vapidKeysPath, undefined);
     if (existing?.publicKey && existing?.privateKey) {
       return existing;

@@ -1,7 +1,6 @@
 import { SessionManager } from "@mariozechner/pi-coding-agent";
 import { expect, test } from "@playwright/test";
-
-const PASSWORD = "pi-face-d3mQm4Hc-9rY2Qv7-7nLk";
+import { readE2eCredentials } from "./auth";
 
 function createSeedSession() {
   const session = SessionManager.create(process.cwd());
@@ -26,6 +25,7 @@ function createSeedSession() {
 }
 
 test("opening a session keeps the main pane healthy and survives reload", async ({ page }) => {
+  const { username, password } = await readE2eCredentials();
   const { label, sessionId } = createSeedSession();
   const errors: string[] = [];
 
@@ -41,12 +41,13 @@ test("opening a session keeps the main pane healthy and survives reload", async 
   await page.goto("/");
   if (
     await page
-      .locator('input[type="password"]')
+      .getByLabel("Password")
       .isVisible()
       .catch(() => false)
   ) {
-    await page.locator('input[type="password"]').fill(PASSWORD);
-    await page.getByRole("button", { name: "Unlock" }).click();
+    await page.getByLabel("Username").fill(username);
+    await page.getByLabel("Password").fill(password);
+    await page.getByRole("button", { name: "Sign in" }).click();
   }
 
   await expect(page).toHaveURL(/\/workspaces\/pi-face$/);

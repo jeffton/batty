@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -30,8 +31,9 @@ function createConfig(webPushDir: string): AppConfig {
     webPushDir,
     webPushSubject: "mailto:test@example.com",
     cookieName: "pi-face-auth",
-    authPassword: "secret",
-    authSecret: "secret",
+    username: "test-user",
+    password: crypto.randomUUID(),
+    authSecret: crypto.randomUUID(),
   };
 }
 

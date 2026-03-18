@@ -1,12 +1,14 @@
 import { test } from "@playwright/test";
-
-const PASSWORD = "pi-face-d3mQm4Hc-9rY2Qv7-7nLk";
+import { readE2eCredentials } from "./auth";
 
 test("screenshots", async ({ page }) => {
+  const { username, password } = await readE2eCredentials();
+
   await page.goto("/");
   await page.waitForTimeout(800);
-  await page.fill('input[type="password"]', PASSWORD);
-  await page.click('button:has-text("Unlock")');
+  await page.getByLabel("Username").fill(username);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
   await page.waitForTimeout(1500);
 
   // Start a session so model btn is active

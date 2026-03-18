@@ -44,11 +44,11 @@ export function deletePushSubscription(endpoint: string): Promise<{ ok: true }> 
   });
 }
 
-export function login(password: string): Promise<{ ok: true }> {
+export function login(username: string, password: string): Promise<{ ok: true }> {
   return request("/api/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({ username, password }),
   });
 }
 

@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -22,9 +23,12 @@ async function createConfig(): Promise<AppConfig> {
     selfPath: path.join(root, "self-project"),
     uploadsDir: path.join(root, "uploads"),
     publicDir: path.join(root, "public"),
+    webPushDir: path.join(root, "web-push"),
+    webPushSubject: "mailto:test@example.com",
     cookieName: "test",
-    authPassword: "secret",
-    authSecret: "secret",
+    username: "test-user",
+    password: crypto.randomUUID(),
+    authSecret: crypto.randomUUID(),
   };
 }
 

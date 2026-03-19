@@ -7,7 +7,7 @@ describe("normalizeMessage", () => {
     const message = {
       role: "bashExecution",
       command: "vp test --run",
-      output: "[1m [34mRUN [39m [90m/root/github/pi-face[39m\n\u001b[32m4 passed\u001b[39m",
+      output: "[1m [34mRUN [39m [90m/root/github/batty[39m\n\u001b[32m4 passed\u001b[39m",
       cancelled: false,
       truncated: false,
       timestamp: 1,
@@ -17,7 +17,7 @@ describe("normalizeMessage", () => {
 
     expect(normalized?.role).toBe("bashExecution");
     expect(normalized && "output" in normalized ? normalized.output : "").toBe(
-      " RUN  /root/github/pi-face\n4 passed",
+      " RUN  /root/github/batty\n4 passed",
     );
   });
 

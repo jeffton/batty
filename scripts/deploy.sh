@@ -5,7 +5,7 @@ step() {
   printf '\n==> %s\n' "$1"
 }
 
-cd /root/github/pi-face
+cd /root/github/batty
 
 step "Installing dependencies"
 pnpm install

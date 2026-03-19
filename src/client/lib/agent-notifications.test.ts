@@ -8,9 +8,9 @@ import type { SessionState } from "@/shared/types";
 const baseSession: SessionState = {
   id: "web-1",
   sessionId: "session-1",
-  workspaceId: "pi-face",
-  cwd: "/root/github/pi-face",
-  path: "/root/github/pi-face/.pi/session.jsonl",
+  workspaceId: "batty",
+  cwd: "/root/github/batty",
+  path: "/root/github/batty/.pi/session.jsonl",
   model: "anthropic/claude-sonnet-4",
   modelLabel: "Claude Sonnet 4 · anthropic",
   thinkingLevel: "medium",
@@ -48,7 +48,7 @@ describe("buildAgentCompletionNotification", () => {
   it("uses the latest assistant message as the notification body", () => {
     expect(buildAgentCompletionNotification(baseSession)).toEqual(
       expect.objectContaining({
-        title: "pi-face",
+        title: "batty",
         body: "Done shipping the feature.",
         tag: "session-complete:session-1",
       }),

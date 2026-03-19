@@ -215,6 +215,11 @@ export class PasskeyAuthService {
       return undefined;
     }
 
+    const existingSetupCode = await this.readSetupCode();
+    if (existingSetupCode) {
+      return undefined;
+    }
+
     return this.issueSetupCode("bootstrap");
   }
 

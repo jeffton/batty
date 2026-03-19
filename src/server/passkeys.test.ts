@@ -81,6 +81,34 @@ describe("PasskeyAuthService", () => {
     });
   });
 
+  it("reuses an existing valid setup code during startup", async () => {
+    const battyDir = await createBattyDir();
+    await fs.mkdir(path.dirname(setupCodeFilePath(battyDir)), { recursive: true });
+    await fs.writeFile(
+      setupCodeFilePath(battyDir),
+      `${JSON.stringify(
+        {
+          codeHash: "existing",
+          issuedAt: Date.now() - 1_000,
+          expiresAt: Date.now() + 60_000,
+          reason: "test",
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const passkeys = new PasskeyAuthService(battyDir, "test-secret");
+    const setup = await passkeys.initialize();
+    const persisted = JSON.parse(await fs.readFile(setupCodeFilePath(battyDir), "utf8")) as {
+      codeHash: string;
+    };
+
+    expect(setup).toBeUndefined();
+    expect(persisted.codeHash).toBe("existing");
+  });
+
   it("drops expired setup codes from disk", async () => {
     const battyDir = await createBattyDir();
     await fs.mkdir(path.dirname(setupCodeFilePath(battyDir)), { recursive: true });

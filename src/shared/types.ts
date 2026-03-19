@@ -115,9 +115,16 @@ export interface ModelOption {
   supportsImages: boolean;
 }
 
+export interface AuthStatus {
+  passkeyCount: number;
+  passkeyLoginAvailable: boolean;
+  registrationOpen: boolean;
+  setupRequired: boolean;
+}
+
 export interface BootstrapPayload {
   authenticated: boolean;
-  authUsername: string;
+  auth: AuthStatus;
   buildId: string;
   workspaces: WorkspaceInfo[];
   models: ModelOption[];

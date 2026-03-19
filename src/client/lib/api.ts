@@ -1,3 +1,9 @@
+import type {
+  AuthenticationResponseJSON,
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+  RegistrationResponseJSON,
+} from "@simplewebauthn/types";
 import type { BootstrapPayload, SessionState, SessionSummary, WorkspaceInfo } from "@/shared/types";
 
 async function request<T>(input: string, init?: RequestInit): Promise<T> {
@@ -44,11 +50,45 @@ export function deletePushSubscription(endpoint: string): Promise<{ ok: true }> 
   });
 }
 
-export function login(username: string, password: string): Promise<{ ok: true }> {
-  return request("/api/login", {
+export function beginPasskeyLogin(): Promise<{
+  requestId: string;
+  optionsJSON: PublicKeyCredentialRequestOptionsJSON;
+}> {
+  return request("/api/auth/login/options", {
+    method: "POST",
+  });
+}
+
+export function finishPasskeyLogin(
+  requestId: string,
+  response: AuthenticationResponseJSON,
+): Promise<{ ok: true }> {
+  return request("/api/auth/login/verify", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ requestId, response }),
+  });
+}
+
+export function beginPasskeyRegistration(setupCode: string): Promise<{
+  requestId: string;
+  optionsJSON: PublicKeyCredentialCreationOptionsJSON;
+}> {
+  return request("/api/auth/register/options", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ setupCode }),
+  });
+}
+
+export function finishPasskeyRegistration(
+  requestId: string,
+  response: RegistrationResponseJSON,
+): Promise<{ ok: true }> {
+  return request("/api/auth/register/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ requestId, response }),
   });
 }
 

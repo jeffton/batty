@@ -30,21 +30,28 @@ A browser UI for [Pi Coding Agent](https://pi.dev) that keeps Pi's session/model
 
 ## Auth
 
+Batty now uses passkeys for passwordless auth on a single-user system. Passwords are gone.
+
+Flow:
+
+1. On first start with no registered passkeys, the server prints a one-time setup code in the terminal.
+2. Open Batty in the browser, enter the setup code, and register a passkey with Face ID / Touch ID / Windows Hello.
+3. Later logins use the passkey directly.
+4. To add another device, print a fresh one-time setup code with `pnpm add-user -- /path/to/batty-root`.
+
 Batty reads its persisted server config from `<batty-dir>/.batty/options.json`, where `<batty-dir>` is passed as a command line argument when starting the server. On this server that path is `/root/github/.batty/options.json`.
 
-- `username` is required
-- `password` is required
 - `workspacesRoot` is required
 - `webPushSubject` is required
 - `authSecret` is generated automatically if missing, then persisted
-- `/api/login` is rate-limited in memory to roughly 5 failed attempts per minute per client IP
+- registered passkeys are stored in `<batty-dir>/.batty/passkeys.json`
+- active one-time setup codes are stored in `<batty-dir>/.batty/setup-code.json`
+- sign-in and setup-code verification are rate-limited in memory to roughly 5 failed attempts per minute per client IP
 
 Example:
 
 ```json
 {
-  "username": "david",
-  "password": "set-a-real-password-here",
   "authSecret": "generated-on-first-run",
   "workspacesRoot": "/root/github",
   "webPushSubject": "https://batty.roybot.se"
@@ -69,7 +76,7 @@ App UI: `http://127.0.0.1:5173`
 
 API server: `http://127.0.0.1:3147`
 
-On a fresh checkout, create `/path/to/batty-root/.batty/options.json` with the required fields before starting the server.
+On a fresh checkout, create `/path/to/batty-root/.batty/options.json` with the required fields before starting the server. On first boot the server will print a setup code for registering the first passkey.
 
 ## Useful commands
 
@@ -78,6 +85,7 @@ pnpm check
 pnpm test
 pnpm build
 pnpm start -- /path/to/batty-root
+pnpm add-user -- /path/to/batty-root
 ```
 
 ## Configuration
@@ -89,8 +97,6 @@ Runtime env vars are intentionally minimal:
 
 Persisted server options live in `<batty-dir>/.batty/options.json`:
 
-- `username` - required login username
-- `password` - required login password
 - `authSecret` - cookie signing secret, generated if missing
 - `workspacesRoot` - required root directory containing workspace folders
 - `webPushSubject` - required VAPID subject; use a real `https:` origin or valid `mailto:` URI

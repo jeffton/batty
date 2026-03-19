@@ -1,70 +1,106 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { startAuthentication, startRegistration } from "@simplewebauthn/browser";
+import { ref } from "vue";
+import {
+  beginPasskeyLogin,
+  beginPasskeyRegistration,
+  finishPasskeyLogin,
+  finishPasskeyRegistration,
+} from "@/client/lib/api";
 import { useAppStore } from "@/client/stores/app";
 
 const store = useAppStore();
-const username = ref("");
-const password = ref("");
-const pending = ref(false);
+const setupCode = ref("");
+const pending = ref<"login" | "register" | undefined>();
 
-watch(
-  () => store.authUsername,
-  (value) => {
-    if (!username.value) {
-      username.value = value;
-    }
-  },
-  { immediate: true },
-);
-
-async function submit(): Promise<void> {
-  pending.value = true;
+async function signIn(): Promise<void> {
+  pending.value = "login";
+  store.authError = undefined;
   try {
-    await store.login(username.value, password.value);
+    const { requestId, optionsJSON } = await beginPasskeyLogin();
+    const response = await startAuthentication({ optionsJSON });
+    await finishPasskeyLogin(requestId, response);
+    await store.bootstrap();
+  } catch (error) {
+    store.setAuthError(error);
   } finally {
-    pending.value = false;
+    pending.value = undefined;
+  }
+}
+
+async function register(): Promise<void> {
+  pending.value = "register";
+  store.authError = undefined;
+  try {
+    const { requestId, optionsJSON } = await beginPasskeyRegistration(setupCode.value);
+    const response = await startRegistration({ optionsJSON });
+    await finishPasskeyRegistration(requestId, response);
+    setupCode.value = "";
+    await store.bootstrap();
+  } catch (error) {
+    store.setAuthError(error);
+  } finally {
+    pending.value = undefined;
   }
 }
 </script>
 
 <template>
   <main class="login-view">
-    <form class="login-card" @submit.prevent="submit">
+    <section class="login-card">
       <img src="/favicon.png" alt="Batty" class="login-card__icon" />
       <div class="login-card__header">
         <h1>Batty</h1>
-        <p>Sign in to continue.</p>
+        <p v-if="store.auth.passkeyLoginAvailable">
+          Sign in with the passkey saved on this device.
+        </p>
+        <p v-else-if="store.auth.setupRequired">
+          Register the first passkey with the setup code from the server terminal.
+        </p>
+        <p v-else>Waiting for a fresh setup code from the server terminal.</p>
       </div>
 
-      <label class="login-card__field">
-        <span>Username</span>
-        <input
-          v-model="username"
-          name="username"
-          type="text"
-          autocomplete="username"
-          placeholder="Username"
-          :disabled="pending"
-        />
-      </label>
-
-      <label class="login-card__field">
-        <span>Password</span>
-        <input
-          v-model="password"
-          name="password"
-          type="password"
-          autocomplete="current-password"
-          placeholder="Password"
-          :disabled="pending"
-        />
-      </label>
-
-      <button class="login-card__submit" :disabled="pending">
-        {{ pending ? "Signing in…" : "Sign in" }}
+      <button
+        v-if="store.auth.passkeyLoginAvailable"
+        class="login-card__submit"
+        :disabled="Boolean(pending)"
+        @click="signIn"
+      >
+        {{ pending === "login" ? "Waiting for passkey…" : "Sign in with passkey" }}
       </button>
+
+      <div
+        v-if="store.auth.registrationOpen || store.auth.setupRequired"
+        class="login-card__register"
+      >
+        <label class="login-card__field">
+          <span>Setup code</span>
+          <input
+            v-model="setupCode"
+            name="setup-code"
+            type="text"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            placeholder="847291"
+            :disabled="Boolean(pending)"
+          />
+        </label>
+
+        <button
+          class="login-card__submit login-card__submit--secondary"
+          :disabled="Boolean(pending) || setupCode.trim().length === 0"
+          @click="register"
+        >
+          {{ pending === "register" ? "Registering passkey…" : "Register passkey" }}
+        </button>
+      </div>
+
+      <p v-else class="login-card__hint">
+        Run <code>pnpm add-user -- /path/to/batty-root</code> on the server to print a new setup
+        code.
+      </p>
       <p v-if="store.authError" class="login-card__error">{{ store.authError }}</p>
-    </form>
+    </section>
   </main>
 </template>
 
@@ -78,7 +114,7 @@ async function submit(): Promise<void> {
 }
 
 .login-card {
-  width: min(100%, 24rem);
+  width: min(100%, 25rem);
   display: flex;
   flex-direction: column;
   gap: 1rem;
@@ -109,9 +145,16 @@ async function submit(): Promise<void> {
   color: var(--color-text-strong);
 }
 
-.login-card__header p {
+.login-card__header p,
+.login-card__hint {
   margin: 0;
   color: var(--color-text-muted);
+}
+
+.login-card__register {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 .login-card__field {
@@ -159,6 +202,19 @@ async function submit(): Promise<void> {
 
 .login-card__submit:disabled {
   opacity: 0.6;
+}
+
+.login-card__submit--secondary {
+  background: color-mix(in srgb, var(--color-accent) 82%, black);
+}
+
+.login-card__submit--secondary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-accent-strong) 82%, black);
+}
+
+.login-card__hint code {
+  font-family: var(--font-family-mono);
+  font-size: 0.85em;
 }
 
 .login-card__error {

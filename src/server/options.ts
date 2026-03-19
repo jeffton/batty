@@ -3,22 +3,18 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 export interface StoredAppOptions {
-  username?: string;
-  password?: string;
   authSecret?: string;
   workspacesRoot?: string;
   webPushSubject?: string;
 }
 
 export interface AppOptions {
-  username: string;
-  password: string;
   authSecret: string;
   workspacesRoot: string;
   webPushSubject: string;
 }
 
-const REQUIRED_OPTION_KEYS = ["username", "password", "workspacesRoot", "webPushSubject"] as const;
+const REQUIRED_OPTION_KEYS = ["workspacesRoot", "webPushSubject"] as const;
 
 export function stateDirPath(battyDir: string): string {
   return path.join(battyDir, ".batty");
@@ -34,8 +30,6 @@ function createAuthSecret(): string {
 
 function normalizeStoredOptions(options: StoredAppOptions | undefined): StoredAppOptions {
   return {
-    username: typeof options?.username === "string" ? options.username.trim() : "",
-    password: typeof options?.password === "string" ? options.password : "",
     authSecret:
       typeof options?.authSecret === "string" && options.authSecret.trim().length > 0
         ? options.authSecret.trim()

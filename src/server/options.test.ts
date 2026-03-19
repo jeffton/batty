@@ -21,25 +21,21 @@ describe("ensureOptionsFile", () => {
     const battyDir = await createBattyDir();
 
     await expect(ensureOptionsFile(battyDir)).rejects.toThrow(
-      `Missing required options in ${optionsFilePath(battyDir)}: username, password, workspacesRoot, webPushSubject.`,
+      `Missing required options in ${optionsFilePath(battyDir)}: workspacesRoot, webPushSubject.`,
     );
 
     const persisted = JSON.parse(await fs.readFile(optionsFilePath(battyDir), "utf8")) as {
-      username: string;
-      password: string;
       authSecret: string;
       workspacesRoot: string;
       webPushSubject: string;
     };
 
-    expect(persisted.username).toBe("");
-    expect(persisted.password).toBe("");
     expect(persisted.authSecret.length).toBeGreaterThan(0);
     expect(persisted.workspacesRoot).toBe("");
     expect(persisted.webPushSubject).toBe("");
   });
 
-  it("preserves configured values and fills in a missing authSecret", async () => {
+  it("drops legacy password auth fields and preserves the rest", async () => {
     const battyDir = await createBattyDir();
 
     await fs.mkdir(path.dirname(optionsFilePath(battyDir)), { recursive: true });
@@ -49,6 +45,7 @@ describe("ensureOptionsFile", () => {
         {
           username: "david",
           password: "configured-password",
+          authSecret: "existing-secret",
           workspacesRoot: "/root/github",
           webPushSubject: "https://batty.roybot.se",
         },
@@ -59,11 +56,15 @@ describe("ensureOptionsFile", () => {
     );
 
     const options = await ensureOptionsFile(battyDir);
+    const persisted = JSON.parse(await fs.readFile(optionsFilePath(battyDir), "utf8")) as Record<
+      string,
+      unknown
+    >;
 
-    expect(options.username).toBe("david");
-    expect(options.password).toBe("configured-password");
+    expect(options.authSecret).toBe("existing-secret");
     expect(options.workspacesRoot).toBe("/root/github");
     expect(options.webPushSubject).toBe("https://batty.roybot.se");
-    expect(options.authSecret.length).toBeGreaterThan(0);
+    expect(persisted.username).toBeUndefined();
+    expect(persisted.password).toBeUndefined();
   });
 });

@@ -12,8 +12,6 @@ export interface AppConfig {
   webPushDir: string;
   webPushSubject: string;
   cookieName: string;
-  username: string;
-  password: string;
   authSecret: string;
 }
 
@@ -42,8 +40,6 @@ export async function loadConfig(battyDir: string): Promise<AppConfig> {
     webPushDir: path.join(stateDir, "web-push"),
     webPushSubject: options.webPushSubject,
     cookieName: "batty-auth",
-    username: options.username,
-    password: options.password,
     authSecret: options.authSecret,
   };
 }

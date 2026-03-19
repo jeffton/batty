@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import fastify from "fastify";
+import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/types";
+import fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import cookie from "@fastify/cookie";
 import multipart from "@fastify/multipart";
 import staticFiles from "@fastify/static";
@@ -8,24 +9,32 @@ import { createAuthToken, verifyAuthToken } from "./auth";
 import { readBuildId } from "./build-id";
 import { loadConfig, resolveBattyDir } from "./config";
 import { createLoginRateLimiter } from "./login-rate-limit";
+import { PasskeyAuthService } from "./passkeys";
 import { PiService, type UploadedFile } from "./pi-service";
 import { WebPushService } from "./web-push";
 import { createWorkspace, listWorkspaces, resolveWorkspace } from "./workspaces";
 
 const config = await loadConfig(resolveBattyDir());
+const passkeys = new PasskeyAuthService(config.battyDir, config.authSecret);
+const bootstrapSetupCode = await passkeys.initialize();
 const webPush = new WebPushService(config);
 await webPush.initialize();
 const service = new PiService(config, async (session) => {
   await webPush.notifyAgentCompleted(session);
 });
 
-const loginRateLimiter = createLoginRateLimiter();
+const authAttemptLimiter = createLoginRateLimiter();
 
 const app = fastify({
   logger: true,
   trustProxy: true,
   bodyLimit: 1024 * 1024 * 100,
 });
+
+if (bootstrapSetupCode) {
+  console.log(`Setup code: ${bootstrapSetupCode.code}`);
+  console.log(`Expires at: ${new Date(bootstrapSetupCode.expiresAt).toISOString()}`);
+}
 
 await fs.mkdir(config.uploadsDir, { recursive: true });
 
@@ -59,6 +68,41 @@ function shouldServeClientApp(url: string): boolean {
   return path.extname(pathname) === "";
 }
 
+function allowUnauthenticatedApi(pathname: string): boolean {
+  return (
+    pathname === "/api/bootstrap" ||
+    pathname === "/api/version" ||
+    pathname === "/api/logout" ||
+    pathname === "/api/auth/login/options" ||
+    pathname === "/api/auth/login/verify" ||
+    pathname === "/api/auth/register/options" ||
+    pathname === "/api/auth/register/verify"
+  );
+}
+
+function requestOrigin(request: FastifyRequest): string {
+  const header = request.headers["x-forwarded-host"] ?? request.headers.host;
+  const host = (Array.isArray(header) ? header[0] : header)?.split(",", 1)[0]?.trim();
+  if (!host) {
+    throw new Error("Missing host header");
+  }
+  return new URL(`${request.protocol}://${host}`).origin;
+}
+
+function requestRpId(request: FastifyRequest): string {
+  return new URL(requestOrigin(request)).hostname;
+}
+
+function setAuthCookie(request: FastifyRequest, reply: FastifyReply): void {
+  reply.setCookie(config.cookieName, createAuthToken(config.authSecret), {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    secure: request.protocol === "https",
+    maxAge: 60 * 60 * 24 * 30,
+  });
+}
+
 app.decorateRequest("auth", false);
 
 declare module "fastify" {
@@ -70,38 +114,96 @@ declare module "fastify" {
 app.addHook("onRequest", async (request, reply) => {
   request.auth = isAuthenticated(request.cookies[config.cookieName]);
 
-  if (request.url.startsWith("/api") && request.url !== "/api/login" && !request.auth) {
-    if (request.url === "/api/bootstrap" || request.url === "/api/version") {
-      return;
-    }
+  if (request.url.startsWith("/api") && !allowUnauthenticatedApi(request.url) && !request.auth) {
     reply.code(401).send({ error: "Authentication required" });
   }
 });
 
-app.post<{ Body: { username?: string; password?: string } }>(
-  "/api/login",
+app.post("/api/auth/login/options", async (request) => {
+  return passkeys.beginAuthentication(requestOrigin(request), requestRpId(request));
+});
+
+app.post<{ Body: { requestId?: string; response?: AuthenticationResponseJSON } }>(
+  "/api/auth/login/verify",
   async (request, reply) => {
-    const rateLimitKey = request.ip;
-    if (loginRateLimiter.isLimited(rateLimitKey)) {
-      reply.code(429).send({ error: "Too many login attempts. Try again in a minute." });
+    const rateLimitKey = `${request.ip}:login`;
+    if (authAttemptLimiter.isLimited(rateLimitKey)) {
+      reply.code(429).send({ error: "Too many sign-in attempts. Try again in a minute." });
+      return;
+    }
+    if (!request.body?.requestId || !request.body.response) {
+      reply.code(400).send({ error: "Missing passkey sign-in response" });
       return;
     }
 
-    if (request.body?.username !== config.username || request.body?.password !== config.password) {
-      loginRateLimiter.recordFailure(rateLimitKey);
-      reply.code(401).send({ error: "Wrong username or password" });
+    try {
+      await passkeys.finishAuthentication(
+        request.body.requestId,
+        request.body.response,
+        requestOrigin(request),
+        requestRpId(request),
+      );
+    } catch (error) {
+      authAttemptLimiter.recordFailure(rateLimitKey);
+      throw error;
+    }
+
+    authAttemptLimiter.reset(rateLimitKey);
+    setAuthCookie(request, reply);
+    reply.send({ ok: true });
+  },
+);
+
+app.post<{ Body: { setupCode?: string } }>("/api/auth/register/options", async (request, reply) => {
+  const rateLimitKey = `${request.ip}:register`;
+  if (authAttemptLimiter.isLimited(rateLimitKey)) {
+    reply.code(429).send({ error: "Too many setup code attempts. Try again in a minute." });
+    return;
+  }
+  if (!request.body?.setupCode) {
+    reply.code(400).send({ error: "Missing setup code" });
+    return;
+  }
+
+  try {
+    return await passkeys.beginRegistration(
+      request.body.setupCode,
+      requestOrigin(request),
+      requestRpId(request),
+    );
+  } catch (error) {
+    authAttemptLimiter.recordFailure(rateLimitKey);
+    throw error;
+  }
+});
+
+app.post<{ Body: { requestId?: string; response?: RegistrationResponseJSON } }>(
+  "/api/auth/register/verify",
+  async (request, reply) => {
+    const rateLimitKey = `${request.ip}:register`;
+    if (authAttemptLimiter.isLimited(rateLimitKey)) {
+      reply.code(429).send({ error: "Too many setup code attempts. Try again in a minute." });
+      return;
+    }
+    if (!request.body?.requestId || !request.body.response) {
+      reply.code(400).send({ error: "Missing passkey registration response" });
       return;
     }
 
-    loginRateLimiter.reset(rateLimitKey);
-    reply.setCookie(config.cookieName, createAuthToken(config.authSecret), {
-      httpOnly: true,
-      sameSite: "lax",
-      path: "/",
-      secure: request.protocol === "https",
-      maxAge: 60 * 60 * 24 * 30,
-    });
+    try {
+      await passkeys.finishRegistration(
+        request.body.requestId,
+        request.body.response,
+        requestOrigin(request),
+        requestRpId(request),
+      );
+    } catch (error) {
+      authAttemptLimiter.recordFailure(rateLimitKey);
+      throw error;
+    }
 
+    authAttemptLimiter.reset(rateLimitKey);
+    setAuthCookie(request, reply);
     reply.send({ ok: true });
   },
 );
@@ -115,7 +217,7 @@ app.get("/api/bootstrap", async (request) => {
   const authenticated = request.auth;
   return {
     authenticated,
-    authUsername: config.username,
+    auth: await passkeys.getStatus(),
     buildId,
     workspaces: authenticated ? await listWorkspaces(config) : [],
     models: authenticated ? await service.listModels() : [],

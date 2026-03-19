@@ -8,7 +8,6 @@ import {
   getVersion,
   listWorkspaceSessions,
   listWorkspaces as listWorkspacesRequest,
-  login as loginRequest,
   logout as logoutRequest,
   openSession,
   sendPrompt,
@@ -29,6 +28,7 @@ import { sessionEventsPath } from "@/client/lib/session-stream";
 import { mergeSessionSummaries, toSessionSummary } from "@/client/lib/session-summary";
 import { uniqueWorkspaces } from "@/client/lib/workspaces";
 import type {
+  AuthStatus,
   BootstrapPayload,
   ModelOption,
   ServerEvent,
@@ -39,12 +39,19 @@ import type {
 
 let eventSource: EventSource | undefined;
 
+const defaultAuthStatus: AuthStatus = {
+  passkeyCount: 0,
+  passkeyLoginAvailable: false,
+  registrationOpen: false,
+  setupRequired: false,
+};
+
 export const useAppStore = defineStore("app", {
   state: () => ({
     authenticated: false,
     bootstrapped: false,
     buildId: undefined as string | undefined,
-    authUsername: "" as string,
+    auth: defaultAuthStatus as AuthStatus,
     connectionState: "online" as "online" | "offline" | "connecting",
     workspaces: [] as WorkspaceInfo[],
     models: [] as ModelOption[],
@@ -101,7 +108,7 @@ export const useAppStore = defineStore("app", {
       const workspaces = uniqueWorkspaces(payload.workspaces);
 
       this.authenticated = payload.authenticated;
-      this.authUsername = payload.authUsername;
+      this.auth = payload.auth;
       this.buildId = payload.buildId;
       this.workspaces = workspaces;
       this.models = payload.models;
@@ -110,22 +117,17 @@ export const useAppStore = defineStore("app", {
         workspaces.some((workspace) => workspace.id === this.selectedWorkspaceId)
           ? this.selectedWorkspaceId
           : workspaces[0]?.id;
-      if (!payload.authenticated) {
+      if (payload.authenticated) {
+        this.authError = undefined;
+      } else {
         this.activeSession = undefined;
         this.sessionsByWorkspace = {};
         this.closeStream();
       }
     },
 
-    async login(username: string, password: string): Promise<void> {
-      this.authError = undefined;
-      try {
-        await loginRequest(username, password);
-        await this.bootstrap();
-      } catch (error) {
-        this.authError = error instanceof Error ? error.message : String(error);
-        throw error;
-      }
+    setAuthError(error: unknown): void {
+      this.authError = error instanceof Error ? error.message : String(error);
     },
 
     async logout(): Promise<void> {

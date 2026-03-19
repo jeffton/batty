@@ -59,8 +59,8 @@ export async function listWorkspaces(config: AppConfig): Promise<WorkspaceInfo[]
   const entries = await fs.readdir(config.workspacesRoot, { withFileTypes: true }).catch(() => []);
 
   const selfWorkspace: WorkspaceInfo = {
-    id: "pi-face",
-    label: "pi-face",
+    id: "batty",
+    label: "Batty",
     path: config.selfPath,
     kind: "self",
   };
@@ -79,7 +79,7 @@ export async function createWorkspace(config: AppConfig, name: string): Promise<
   const workspacePath = resolveWorkspacePath(config.workspacesRoot, normalized);
 
   if (workspacePath === path.resolve(config.selfPath)) {
-    throw createHttpError(409, "Workspace already exists: pi-face");
+    throw createHttpError(409, "Workspace already exists: batty");
   }
 
   await fs.mkdir(config.workspacesRoot, { recursive: true });

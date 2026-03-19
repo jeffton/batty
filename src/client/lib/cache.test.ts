@@ -6,9 +6,9 @@ import type { SessionState } from "@/shared/types";
 const state: SessionState = {
   id: "web-1",
   sessionId: "session-1",
-  workspaceId: "pi-face",
-  cwd: "/tmp/pi-face",
-  path: "/tmp/pi-face/.session.jsonl",
+  workspaceId: "batty",
+  cwd: "/tmp/batty",
+  path: "/tmp/batty/.session.jsonl",
   model: "anthropic/claude-sonnet-4",
   modelLabel: "Claude Sonnet 4 · anthropic",
   thinkingLevel: "medium",

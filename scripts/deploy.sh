@@ -20,11 +20,11 @@ step "Building app"
 pnpm build
 
 step "Installing systemd unit"
-install -m 644 deploy/pi-face.service /etc/systemd/system/pi-face.service
+install -m 644 deploy/batty.service /etc/systemd/system/batty.service
 
 step "Installing nginx config"
-install -m 644 deploy/pi-face.nginx.conf /etc/nginx/sites-available/pi-face
-ln -snf /etc/nginx/sites-available/pi-face /etc/nginx/sites-enabled/pi-face
+install -m 644 deploy/batty.nginx.conf /etc/nginx/sites-available/batty
+ln -snf /etc/nginx/sites-available/batty /etc/nginx/sites-enabled/batty
 
 step "Validating nginx config"
 nginx -t

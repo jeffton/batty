@@ -5,8 +5,8 @@ import type { SessionState, SessionSummary } from "@/shared/types";
 const baseSession: SessionState = {
   id: "web-1",
   sessionId: "session-1",
-  workspaceId: "pi-face",
-  cwd: "/tmp/pi-face",
+  workspaceId: "batty",
+  cwd: "/tmp/batty",
   model: "anthropic/claude-sonnet-4",
   modelLabel: "Claude Sonnet 4 · anthropic",
   thinkingLevel: "medium",
@@ -32,33 +32,33 @@ describe("session-summary", () => {
   it("creates a resumable summary from session state when a path exists", () => {
     const summary = toSessionSummary({
       ...baseSession,
-      path: "/tmp/pi-face/.pi/session.jsonl",
+      path: "/tmp/batty/.pi/session.jsonl",
       title: "Fresh session",
     });
 
     expect(summary).toEqual({
-      id: "/tmp/pi-face/.pi/session.jsonl",
+      id: "/tmp/batty/.pi/session.jsonl",
       sessionId: "session-1",
       name: "Fresh session",
-      path: "/tmp/pi-face/.pi/session.jsonl",
+      path: "/tmp/batty/.pi/session.jsonl",
       firstMessage: "hello from the new session",
       updatedAt: 200,
       messageCount: 1,
-      workspaceId: "pi-face",
+      workspaceId: "batty",
       model: "anthropic/claude-sonnet-4",
     });
   });
 
   it("merges server and local summaries by session id", () => {
     const persisted: SessionSummary = {
-      id: "/tmp/pi-face/.pi/session.jsonl",
+      id: "/tmp/batty/.pi/session.jsonl",
       sessionId: "session-1",
-      path: "/tmp/pi-face/.pi/session.jsonl",
+      path: "/tmp/batty/.pi/session.jsonl",
       name: "Persisted session",
       firstMessage: "older title",
       updatedAt: 100,
       messageCount: 1,
-      workspaceId: "pi-face",
+      workspaceId: "batty",
       model: "anthropic/claude-sonnet-4",
     };
 
@@ -66,14 +66,14 @@ describe("session-summary", () => {
 
     expect(merged).toEqual([
       {
-        id: "/tmp/pi-face/.pi/session.jsonl",
+        id: "/tmp/batty/.pi/session.jsonl",
         sessionId: "session-1",
-        path: "/tmp/pi-face/.pi/session.jsonl",
+        path: "/tmp/batty/.pi/session.jsonl",
         name: "Persisted session",
         firstMessage: "hello from the new session",
         updatedAt: 200,
         messageCount: 1,
-        workspaceId: "pi-face",
+        workspaceId: "batty",
         model: "anthropic/claude-sonnet-4",
       },
     ]);
@@ -86,7 +86,7 @@ describe("session-summary", () => {
       firstMessage: "older",
       updatedAt: 100,
       messageCount: 1,
-      workspaceId: "pi-face",
+      workspaceId: "batty",
     };
 
     const newer: SessionSummary = {
@@ -95,7 +95,7 @@ describe("session-summary", () => {
       firstMessage: "newer",
       updatedAt: 300,
       messageCount: 1,
-      workspaceId: "pi-face",
+      workspaceId: "batty",
     };
 
     expect(mergeSessionSummaries([older], [newer]).map((session) => session.sessionId)).toEqual([

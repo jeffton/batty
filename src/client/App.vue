@@ -150,7 +150,7 @@ watch(
   <div class="app-shell">
     <div v-if="!store.bootstrapped" class="center-panel">
       <div class="spinner" />
-      <p>Booting pi-face…</p>
+      <p>Booting Batty…</p>
     </div>
     <RouterView v-else />
   </div>

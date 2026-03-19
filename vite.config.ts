@@ -13,8 +13,8 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["favicon.png", "apple-touch-icon.png"],
       manifest: {
-        name: "pi-face",
-        short_name: "pi-face",
+        name: "Batty",
+        short_name: "Batty",
         description: "Browser UI for Pi Coding Agent",
         theme_color: "#dfe6eb",
         background_color: "#dfe6eb",
@@ -69,7 +69,7 @@ export default defineConfig({
     },
   },
   lint: {
-    ignorePatterns: ["dist/**", "node_modules/**", ".pi-face/**"],
+    ignorePatterns: ["dist/**", "node_modules/**", ".batty/**"],
   },
   pack: {
     entry: ["src/server/main.ts"],

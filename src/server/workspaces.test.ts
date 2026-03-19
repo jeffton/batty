@@ -13,7 +13,7 @@ afterEach(async () => {
 });
 
 async function createConfig(): Promise<AppConfig> {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "pi-face-workspaces-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-workspaces-"));
   tempDirs.push(root);
 
   return {
@@ -33,16 +33,16 @@ async function createConfig(): Promise<AppConfig> {
 }
 
 describe("workspaces", () => {
-  it("includes pi-face itself and discovered visible child folders", async () => {
+  it("includes Batty itself and discovered visible child folders", async () => {
     const config = await createConfig();
     await fs.mkdir(path.join(config.workspacesRoot, "alpha"));
     await fs.mkdir(path.join(config.workspacesRoot, "beta"));
-    await fs.mkdir(path.join(config.workspacesRoot, ".pi-face"));
+    await fs.mkdir(path.join(config.workspacesRoot, ".batty"));
 
     const workspaces = await listWorkspaces(config);
 
-    expect(workspaces[0]?.id).toBe("pi-face");
-    expect(workspaces.map((workspace) => workspace.label)).toEqual(["pi-face", "alpha", "beta"]);
+    expect(workspaces[0]?.id).toBe("batty");
+    expect(workspaces.map((workspace) => workspace.label)).toEqual(["Batty", "alpha", "beta"]);
   });
 
   it("uses folder names as workspace ids", async () => {

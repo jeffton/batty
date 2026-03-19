@@ -10,21 +10,21 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
-async function createPiFaceDir(): Promise<string> {
-  const piFaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-face-root-"));
-  tempDirs.push(piFaceDir);
-  return piFaceDir;
+async function createBattyDir(): Promise<string> {
+  const battyDir = await fs.mkdtemp(path.join(os.tmpdir(), "batty-root-"));
+  tempDirs.push(battyDir);
+  return battyDir;
 }
 
 describe("ensureOptionsFile", () => {
-  it("creates options.json inside <pi-face-dir>/.pi-face and rejects missing required options", async () => {
-    const piFaceDir = await createPiFaceDir();
+  it("creates options.json inside <batty-dir>/.batty and rejects missing required options", async () => {
+    const battyDir = await createBattyDir();
 
-    await expect(ensureOptionsFile(piFaceDir)).rejects.toThrow(
-      `Missing required options in ${optionsFilePath(piFaceDir)}: username, password, workspacesRoot, webPushSubject.`,
+    await expect(ensureOptionsFile(battyDir)).rejects.toThrow(
+      `Missing required options in ${optionsFilePath(battyDir)}: username, password, workspacesRoot, webPushSubject.`,
     );
 
-    const persisted = JSON.parse(await fs.readFile(optionsFilePath(piFaceDir), "utf8")) as {
+    const persisted = JSON.parse(await fs.readFile(optionsFilePath(battyDir), "utf8")) as {
       username: string;
       password: string;
       authSecret: string;
@@ -40,11 +40,11 @@ describe("ensureOptionsFile", () => {
   });
 
   it("preserves configured values and fills in a missing authSecret", async () => {
-    const piFaceDir = await createPiFaceDir();
+    const battyDir = await createBattyDir();
 
-    await fs.mkdir(path.dirname(optionsFilePath(piFaceDir)), { recursive: true });
+    await fs.mkdir(path.dirname(optionsFilePath(battyDir)), { recursive: true });
     await fs.writeFile(
-      optionsFilePath(piFaceDir),
+      optionsFilePath(battyDir),
       `${JSON.stringify(
         {
           username: "david",
@@ -58,7 +58,7 @@ describe("ensureOptionsFile", () => {
       "utf8",
     );
 
-    const options = await ensureOptionsFile(piFaceDir);
+    const options = await ensureOptionsFile(battyDir);
 
     expect(options.username).toBe("david");
     expect(options.password).toBe("configured-password");

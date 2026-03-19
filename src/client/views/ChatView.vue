@@ -294,7 +294,7 @@ watch(
       >
         <img src="/favicon.png" alt="" class="header__icon" />
         <div class="header__ws-info">
-          <span class="header__ws-name">{{ store.selectedWorkspace?.label || "pi-face" }}</span>
+          <span class="header__ws-name">{{ store.selectedWorkspace?.label || "Batty" }}</span>
           <span class="header__ws-path">{{ store.activeSession?.cwd || "Select workspace" }}</span>
         </div>
         <ChevronDown :size="14" class="header__chevron" />
@@ -367,7 +367,7 @@ watch(
     </header>
 
     <div v-if="!store.activeSession" class="chat-empty">
-      <img src="/favicon.png" alt="pi-face" class="chat-empty__icon" />
+      <img src="/favicon.png" alt="Batty" class="chat-empty__icon" />
       <h3>No active session</h3>
       <p class="muted">Pick a workspace and start a session.</p>
     </div>

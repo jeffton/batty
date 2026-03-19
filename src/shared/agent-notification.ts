@@ -15,9 +15,15 @@ function truncate(value: string, maxLength: number): string {
   return `${value.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
-export function workspaceLabelFromCwd(cwd: string): string {
-  const segments = cwd.split(/[\\/]/).filter(Boolean);
-  return segments.at(-1) ?? cwd;
+export function workspaceLabelFromSession(
+  session: Pick<SessionState, "workspaceId" | "cwd">,
+): string {
+  if (session.workspaceId === "batty") {
+    return "Batty";
+  }
+
+  const segments = session.cwd.split(/[\\/]/).filter(Boolean);
+  return segments.at(-1) ?? session.cwd;
 }
 
 function textFromBlocks(blocks: UiContentBlock[]): string {
@@ -60,7 +66,7 @@ export function buildAgentCompletionNotificationContent(
     assistantText || stopReason || "Pi finished responding.",
     MAX_NOTIFICATION_BODY_LENGTH,
   );
-  const workspaceLabel = workspaceLabelFromCwd(session.cwd);
+  const workspaceLabel = workspaceLabelFromSession(session);
 
   return {
     title: workspaceLabel,

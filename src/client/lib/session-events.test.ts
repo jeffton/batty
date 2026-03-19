@@ -5,9 +5,9 @@ import type { SessionState } from "@/shared/types";
 const baseState: SessionState = {
   id: "web-1",
   sessionId: "session-1",
-  workspaceId: "pi-face",
-  cwd: "/tmp/pi-face",
-  path: "/tmp/pi-face/.session.jsonl",
+  workspaceId: "batty",
+  cwd: "/tmp/batty",
+  path: "/tmp/batty/.session.jsonl",
   model: "anthropic/claude-sonnet-4",
   modelLabel: "Claude Sonnet 4 · anthropic",
   thinkingLevel: "medium",
@@ -76,10 +76,10 @@ describe("applyServerEvent", () => {
         id: "assistant-1",
         role: "assistant",
         timestamp: 1,
-        blocks: [{ type: "text", text: "hello from pi-face" }],
+        blocks: [{ type: "text", text: "hello from batty" }],
       },
     });
-    expect(next?.activeAssistant?.blocks[0]).toEqual({ type: "text", text: "hello from pi-face" });
+    expect(next?.activeAssistant?.blocks[0]).toEqual({ type: "text", text: "hello from batty" });
   });
 
   it("merges tool updates by tool call id", () => {

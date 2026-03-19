@@ -25,12 +25,12 @@ function createConfig(webPushDir: string): AppConfig {
     host: "127.0.0.1",
     port: 3147,
     workspacesRoot: "/tmp/workspaces",
-    selfPath: "/tmp/pi-face",
+    selfPath: "/tmp/batty",
     uploadsDir: "/tmp/uploads",
     publicDir: "/tmp/public",
     webPushDir,
     webPushSubject: "mailto:test@example.com",
-    cookieName: "pi-face-auth",
+    cookieName: "batty-auth",
     username: "test-user",
     password: crypto.randomUUID(),
     authSecret: crypto.randomUUID(),
@@ -60,7 +60,7 @@ describe("WebPushService", () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pi-face-web-push-"));
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "batty-web-push-"));
     webPushMocks.sendNotification.mockReset();
     webPushMocks.setVapidDetails.mockReset();
     webPushMocks.generateVAPIDKeys.mockClear();

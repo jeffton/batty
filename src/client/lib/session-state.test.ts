@@ -7,8 +7,8 @@ describe("normalizeSessionState", () => {
     const legacy = {
       id: "web-1",
       sessionId: "session-1",
-      workspaceId: "pi-face",
-      cwd: "/tmp/pi-face",
+      workspaceId: "batty",
+      cwd: "/tmp/batty",
       thinkingLevel: "medium",
       messages: [
         {
@@ -43,8 +43,8 @@ describe("normalizeSessionState", () => {
     const normalized = normalizeSessionState({
       id: "web-1",
       sessionId: "session-1",
-      workspaceId: "pi-face",
-      cwd: "/tmp/pi-face",
+      workspaceId: "batty",
+      cwd: "/tmp/batty",
       thinkingLevel: "",
       availableThinkingLevels: ["", "high", "high"] as unknown as string[],
       isStreaming: true,
@@ -73,8 +73,8 @@ describe("normalizeSessionState", () => {
     const previous: SessionState = {
       id: "web-1",
       sessionId: "session-1",
-      workspaceId: "pi-face",
-      cwd: "/tmp/pi-face",
+      workspaceId: "batty",
+      cwd: "/tmp/batty",
       thinkingLevel: "medium",
       availableThinkingLevels: ["medium"],
       isStreaming: true,
@@ -125,8 +125,8 @@ describe("normalizeSessionState", () => {
     const previous: SessionState = {
       id: "web-1",
       sessionId: "session-1",
-      workspaceId: "pi-face",
-      cwd: "/tmp/pi-face",
+      workspaceId: "batty",
+      cwd: "/tmp/batty",
       thinkingLevel: "medium",
       availableThinkingLevels: ["medium"],
       isStreaming: true,

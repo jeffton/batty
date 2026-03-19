@@ -7,7 +7,7 @@ interface OptionsFile {
 }
 
 export async function readE2eCredentials(): Promise<{ username: string; password: string }> {
-  const optionsPath = path.join(process.cwd(), ".pi-face", "options.json");
+  const optionsPath = path.join(process.cwd(), ".batty", "options.json");
   const options = JSON.parse(await fs.readFile(optionsPath, "utf8")) as OptionsFile;
 
   if (!options.username || !options.password) {

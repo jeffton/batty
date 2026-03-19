@@ -6,11 +6,11 @@ describe("session-stream", () => {
     expect(
       sessionEventsPath({
         id: "session/123",
-        workspaceId: "pi-face",
+        workspaceId: "batty",
         path: "/root/github/pi-face/.pi/sessions/demo session.jsonl",
       }),
     ).toBe(
-      "/api/sessions/session%2F123/events?workspaceId=pi-face&sessionPath=%2Froot%2Fgithub%2Fpi-face%2F.pi%2Fsessions%2Fdemo+session.jsonl",
+      "/api/sessions/session%2F123/events?workspaceId=batty&sessionPath=%2Froot%2Fgithub%2Fpi-face%2F.pi%2Fsessions%2Fdemo+session.jsonl",
     );
   });
 
@@ -18,9 +18,9 @@ describe("session-stream", () => {
     expect(
       sessionEventsPath({
         id: "session-123",
-        workspaceId: "pi-face",
+        workspaceId: "batty",
         path: undefined,
       }),
-    ).toBe("/api/sessions/session-123/events?workspaceId=pi-face");
+    ).toBe("/api/sessions/session-123/events?workspaceId=batty");
   });
 });

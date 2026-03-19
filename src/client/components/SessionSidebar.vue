@@ -107,7 +107,7 @@ onMounted(() => {
   <aside :class="['sidebar panel', store.mobileSidebarOpen ? 'sidebar--open' : '']">
     <div class="sidebar__header">
       <div>
-        <h1>pi-face</h1>
+        <h1>Batty</h1>
         <p class="muted">Pi Coding Agent, but browser-y.</p>
       </div>
       <button class="sidebar__close" @click="store.mobileSidebarOpen = false">✕</button>

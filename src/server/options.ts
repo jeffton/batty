@@ -20,8 +20,8 @@ export interface AppOptions {
 
 const REQUIRED_OPTION_KEYS = ["username", "password", "workspacesRoot", "webPushSubject"] as const;
 
-export function stateDirPath(piFaceDir: string): string {
-  return path.join(piFaceDir, ".pi-face");
+export function stateDirPath(battyDir: string): string {
+  return path.join(battyDir, ".batty");
 }
 
 export function optionsFilePath(projectRoot: string): string {

@@ -4,7 +4,7 @@ set -euo pipefail
 cd /root/github/pi-face
 
 delay_seconds="${1:-20}"
-unit="pi-face-reload-$(date +%s)"
+unit="batty-reload-$(date +%s)"
 
 systemd-run \
   --quiet \

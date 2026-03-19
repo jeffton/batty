@@ -3,12 +3,12 @@ import { sessionRoutePath, workspaceRoutePath } from "@/client/lib/routes";
 
 describe("routes", () => {
   it("builds workspace routes", () => {
-    expect(workspaceRoutePath("pi-face")).toBe("/workspaces/pi-face");
+    expect(workspaceRoutePath("batty")).toBe("/workspaces/batty");
   });
 
   it("builds session routes with encoded ids", () => {
-    expect(sessionRoutePath("pi-face", "session/123")).toBe(
-      "/workspaces/pi-face/sessions/session%2F123",
+    expect(sessionRoutePath("batty", "session/123")).toBe(
+      "/workspaces/batty/sessions/session%2F123",
     );
   });
 });

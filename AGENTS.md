@@ -1,21 +1,21 @@
 # AGENTS.md
 
-## Deploying pi-face from inside pi-face
+## Deploying Batty from inside Batty
 
-When you are running inside the pi-face session and need to deploy or reload pi-face itself, use the project scripts exactly as they are intended:
+When you are running inside the Batty session and need to deploy or reload Batty itself, use the project scripts exactly as they are intended:
 
 - Full deploy: `./scripts/deploy.sh`
 - Fast self-reload after a local build: `./scripts/reload-self.sh`
 
 Do not replace these with direct inline restarts like:
 
-- `systemctl restart pi-face.service`
-- `systemctl restart pi-face.service && curl ...`
+- `systemctl restart batty.service`
+- `systemctl restart batty.service && curl ...`
 - any equivalent one-liner that restarts the service in the same foreground tool call
 
 ## Why
 
-pi-face is often used to deploy pi-face.
+Batty is often used to deploy Batty.
 
 A direct restart kills the currently running server process and can interrupt the active agent turn before it finishes writing its final summary. That used to leave the browser stuck in a reconnecting state and could also lose the assistant's post-deploy summary.
 

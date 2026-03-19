@@ -22,8 +22,8 @@ function session(overrides: Partial<SessionState>): SessionState {
   return {
     id: "web-1",
     sessionId: "session-1",
-    workspaceId: "pi-face",
-    cwd: "/tmp/pi-face",
+    workspaceId: "batty",
+    cwd: "/tmp/batty",
     thinkingLevel: "off",
     availableThinkingLevels: [],
     isStreaming: false,

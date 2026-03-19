@@ -6,7 +6,7 @@ export interface AppConfig {
   port: number;
   workspacesRoot: string;
   selfPath: string;
-  piFaceDir: string;
+  battyDir: string;
   uploadsDir: string;
   publicDir: string;
   webPushDir: string;
@@ -17,33 +17,31 @@ export interface AppConfig {
   authSecret: string;
 }
 
-export function resolvePiFaceDir(argv = process.argv.slice(2)): string {
-  const piFaceDir = argv[0]?.trim();
-  if (!piFaceDir) {
-    throw new Error(
-      "Missing pi-face directory argument. Pass the deployment root path as argv[2].",
-    );
+export function resolveBattyDir(argv = process.argv.slice(2)): string {
+  const battyDir = argv[0]?.trim();
+  if (!battyDir) {
+    throw new Error("Missing batty directory argument. Pass the deployment root path as argv[2].");
   }
 
-  return path.resolve(piFaceDir);
+  return path.resolve(battyDir);
 }
 
-export async function loadConfig(piFaceDir: string): Promise<AppConfig> {
+export async function loadConfig(battyDir: string): Promise<AppConfig> {
   const selfPath = process.cwd();
-  const stateDir = stateDirPath(piFaceDir);
-  const options = await ensureOptionsFile(piFaceDir);
+  const stateDir = stateDirPath(battyDir);
+  const options = await ensureOptionsFile(battyDir);
 
   return {
-    host: process.env.PI_FACE_HOST ?? "127.0.0.1",
-    port: Number(process.env.PI_FACE_PORT ?? "3147"),
+    host: process.env.BATTY_HOST ?? "127.0.0.1",
+    port: Number(process.env.BATTY_PORT ?? "3147"),
     workspacesRoot: options.workspacesRoot,
     selfPath,
-    piFaceDir,
+    battyDir,
     uploadsDir: path.join(stateDir, "uploads"),
     publicDir: path.join(selfPath, "dist", "client"),
     webPushDir: path.join(stateDir, "web-push"),
     webPushSubject: options.webPushSubject,
-    cookieName: "pi-face-auth",
+    cookieName: "batty-auth",
     username: options.username,
     password: options.password,
     authSecret: options.authSecret,

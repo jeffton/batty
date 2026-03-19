@@ -30,9 +30,9 @@ async function submit(): Promise<void> {
 <template>
   <main class="login-view">
     <form class="login-card" @submit.prevent="submit">
-      <img src="/favicon.png" alt="pi-face" class="login-card__icon" />
+      <img src="/favicon.png" alt="Batty" class="login-card__icon" />
       <div class="login-card__header">
-        <h1>pi-face</h1>
+        <h1>Batty</h1>
         <p>Sign in to continue.</p>
       </div>
 

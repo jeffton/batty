@@ -1,4 +1,4 @@
-# pi-face
+# Batty
 
 A browser UI for [Pi Coding Agent](https://pi.dev) that keeps Pi's session/model/skill/config behavior, but moves the chat experience into a responsive web app.
 
@@ -10,7 +10,7 @@ A browser UI for [Pi Coding Agent](https://pi.dev) that keeps Pi's session/model
 - Monospace multiline composer with drag/drop and `+` attachment picker
 - Image rendering for message and tool output blocks
 - Model selection powered by Pi's model registry
-- Workspace picker for folders directly under a configured root, plus a dedicated `pi-face` self-workspace
+- Workspace picker for folders directly under a configured root, plus a dedicated `Batty` self-workspace
 - Create new workspaces directly under the configured root from the sidebar
 - Session listing + resume per workspace using Pi session files
 - Offline-friendly client shell via PWA + IndexedDB snapshot caching
@@ -30,7 +30,7 @@ A browser UI for [Pi Coding Agent](https://pi.dev) that keeps Pi's session/model
 
 ## Auth
 
-pi-face reads its persisted server config from `<pi-face-dir>/.pi-face/options.json`, where `<pi-face-dir>` is passed as a command line argument when starting the server. On this server that path is `/root/github/.pi-face/options.json`.
+Batty reads its persisted server config from `<batty-dir>/.batty/options.json`, where `<batty-dir>` is passed as a command line argument when starting the server. On this server that path is `/root/github/.batty/options.json`.
 
 - `username` is required
 - `password` is required
@@ -51,7 +51,7 @@ Example:
 }
 ```
 
-That `<pi-face-dir>/.pi-face/` directory is ignored by git and is intended to hold local state such as:
+That `<batty-dir>/.batty/` directory is ignored by git and is intended to hold local state such as:
 
 - `options.json`
 - `uploads/`
@@ -62,14 +62,14 @@ That `<pi-face-dir>/.pi-face/` directory is ignored by git and is intended to ho
 
 ```bash
 pnpm install
-pnpm dev -- /path/to/pi-face-root
+pnpm dev -- /path/to/batty-root
 ```
 
 App UI: `http://127.0.0.1:5173`
 
 API server: `http://127.0.0.1:3147`
 
-On a fresh checkout, create `/path/to/pi-face-root/.pi-face/options.json` with the required fields before starting the server.
+On a fresh checkout, create `/path/to/batty-root/.batty/options.json` with the required fields before starting the server.
 
 ## Useful commands
 
@@ -77,17 +77,17 @@ On a fresh checkout, create `/path/to/pi-face-root/.pi-face/options.json` with t
 pnpm check
 pnpm test
 pnpm build
-pnpm start -- /path/to/pi-face-root
+pnpm start -- /path/to/batty-root
 ```
 
 ## Configuration
 
 Runtime env vars are intentionally minimal:
 
-- `PI_FACE_HOST` - server bind host, default `127.0.0.1`
-- `PI_FACE_PORT` - server port, default `3147`
+- `BATTY_HOST` - server bind host, default `127.0.0.1`
+- `BATTY_PORT` - server port, default `3147`
 
-Persisted server options live in `<pi-face-dir>/.pi-face/options.json`:
+Persisted server options live in `<batty-dir>/.batty/options.json`:
 
 - `username` - required login username
 - `password` - required login password
@@ -102,9 +102,9 @@ Pi resources are loaded from the regular `~/.pi` setup through Pi's SDK:
 - settings: `~/.pi/agent/settings.json`
 - AGENTS.md: `~/.pi/agent/AGENTS.md` plus project `AGENTS.md`
 
-## Hot reloading pi-face itself
+## Hot reloading Batty itself
 
-When you open a session in the `pi-face` workspace, the agent can modify this repo directly and restart the deployed app with:
+When you open a session in the `Batty` workspace, the agent can modify this repo directly and restart the deployed app with:
 
 ```bash
 scripts/reload-self.sh
@@ -116,9 +116,9 @@ Pi session state is persisted in Pi's session files, and the web app also caches
 
 Repo includes:
 
-- `deploy/pi-face.service` - systemd unit
-- `deploy/pi-face.nginx.conf` - nginx reverse proxy for `pi.roybot.se`
-- `scripts/deploy.sh` - install/build/restart helper; the bundled systemd unit starts the server with `/root/github` as the pi-face dir on this server
+- `deploy/batty.service` - systemd unit
+- `deploy/batty.nginx.conf` - nginx reverse proxy for `pi.roybot.se`
+- `scripts/deploy.sh` - install/build/restart helper; the bundled systemd unit starts the server with `/root/github` as the Batty state root on this server
 
 Deploy on the server:
 

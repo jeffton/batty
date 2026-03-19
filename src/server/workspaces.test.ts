@@ -45,6 +45,17 @@ describe("workspaces", () => {
     expect(workspaces.map((workspace) => workspace.label)).toEqual(["pi-face", "alpha", "beta"]);
   });
 
+  it("uses folder names as workspace ids", async () => {
+    const config = await createConfig();
+    await fs.mkdir(path.join(config.workspacesRoot, "my workspace"));
+
+    const workspaces = await listWorkspaces(config);
+
+    expect(workspaces.find((workspace) => workspace.label === "my workspace")?.id).toBe(
+      "my workspace",
+    );
+  });
+
   it("creates a workspace directly under the configured root", async () => {
     const config = await createConfig();
 
@@ -60,7 +71,7 @@ describe("workspaces", () => {
     expect(stats.isDirectory()).toBe(true);
   });
 
-  it("rejects nested paths, path traversal, hidden folders, and reserved ids", async () => {
+  it("rejects nested paths, path traversal, and hidden folders", async () => {
     const config = await createConfig();
 
     await expect(createWorkspace(config, "nested/child")).rejects.toMatchObject({
@@ -76,11 +87,6 @@ describe("workspaces", () => {
     await expect(createWorkspace(config, ".hidden")).rejects.toMatchObject({
       message: "Workspace name cannot start with a dot",
       statusCode: 400,
-    });
-
-    await expect(createWorkspace(config, "pi face")).rejects.toMatchObject({
-      message: "Workspace already exists: pi-face",
-      statusCode: 409,
     });
   });
 });

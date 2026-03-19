@@ -3,20 +3,13 @@ import path from "node:path";
 import type { WorkspaceInfo } from "@/shared/types";
 import type { AppConfig } from "./config";
 
-function toWorkspaceId(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
 function createHttpError(statusCode: number, message: string): Error & { statusCode: number } {
   return Object.assign(new Error(message), { statusCode });
 }
 
 function toWorkspaceInfo(workspacesRoot: string, name: string): WorkspaceInfo {
   return {
-    id: toWorkspaceId(name),
+    id: name,
     label: name,
     path: path.join(workspacesRoot, name),
     kind: "workspace",
@@ -40,10 +33,6 @@ function normalizeWorkspaceName(name: string): string {
 
   if (/[\\/]/.test(normalized)) {
     throw createHttpError(400, "Workspace name cannot contain path separators");
-  }
-
-  if (!toWorkspaceId(normalized)) {
-    throw createHttpError(400, "Workspace name must include letters or numbers");
   }
 
   return normalized;
@@ -76,18 +65,10 @@ export async function listWorkspaces(config: AppConfig): Promise<WorkspaceInfo[]
     kind: "self",
   };
 
-  const seenIds = new Set([selfWorkspace.id]);
   const discovered = entries
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
     .map<WorkspaceInfo>((entry) => toWorkspaceInfo(config.workspacesRoot, entry.name))
     .filter((workspace) => workspace.path !== config.selfPath)
-    .filter((workspace) => {
-      if (seenIds.has(workspace.id)) {
-        return false;
-      }
-      seenIds.add(workspace.id);
-      return true;
-    })
     .sort((a, b) => a.label.localeCompare(b.label));
 
   return [selfWorkspace, ...discovered];
@@ -95,10 +76,9 @@ export async function listWorkspaces(config: AppConfig): Promise<WorkspaceInfo[]
 
 export async function createWorkspace(config: AppConfig, name: string): Promise<WorkspaceInfo> {
   const normalized = normalizeWorkspaceName(name);
-  const workspaceId = toWorkspaceId(normalized);
   const workspacePath = resolveWorkspacePath(config.workspacesRoot, normalized);
 
-  if (workspaceId === "pi-face" || workspacePath === path.resolve(config.selfPath)) {
+  if (workspacePath === path.resolve(config.selfPath)) {
     throw createHttpError(409, "Workspace already exists: pi-face");
   }
 

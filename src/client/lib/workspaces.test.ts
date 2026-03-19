@@ -3,13 +3,12 @@ import { uniqueWorkspaces } from "@/client/lib/workspaces";
 import type { WorkspaceInfo } from "@/shared/types";
 
 describe("uniqueWorkspaces", () => {
-  it("keeps the first workspace for duplicate ids or paths", () => {
+  it("keeps the first workspace for duplicate paths", () => {
     const workspaces: WorkspaceInfo[] = [
       { id: "pi-face", label: "pi-face", path: "/root/github/pi-face", kind: "self" },
-      { id: "pi-face", label: ".pi-face", path: "/root/github/.pi-face", kind: "workspace" },
       { id: "babyface", label: "babyface", path: "/root/github/babyface", kind: "workspace" },
       {
-        id: "babyface-copy",
+        id: "babyface copy",
         label: "babyface duplicate path",
         path: "/root/github/babyface",
         kind: "workspace",

@@ -27,6 +27,7 @@ import { applyServerEvent } from "@/client/lib/session-events";
 import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
 import { sessionEventsPath } from "@/client/lib/session-stream";
 import { mergeSessionSummaries, toSessionSummary } from "@/client/lib/session-summary";
+import { uniqueWorkspaces } from "@/client/lib/workspaces";
 import type {
   BootstrapPayload,
   ModelOption,
@@ -97,12 +98,18 @@ export const useAppStore = defineStore("app", {
     },
 
     applyBootstrap(payload: BootstrapPayload): void {
+      const workspaces = uniqueWorkspaces(payload.workspaces);
+
       this.authenticated = payload.authenticated;
       this.authUsername = payload.authUsername;
       this.buildId = payload.buildId;
-      this.workspaces = payload.workspaces;
+      this.workspaces = workspaces;
       this.models = payload.models;
-      this.selectedWorkspaceId = this.selectedWorkspaceId ?? payload.workspaces[0]?.id;
+      this.selectedWorkspaceId =
+        this.selectedWorkspaceId &&
+        workspaces.some((workspace) => workspace.id === this.selectedWorkspaceId)
+          ? this.selectedWorkspaceId
+          : workspaces[0]?.id;
       if (!payload.authenticated) {
         this.activeSession = undefined;
         this.sessionsByWorkspace = {};

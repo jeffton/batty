@@ -69,11 +69,6 @@ function resolveWorkspacePath(workspacesRoot: string, name: string): string {
 export async function listWorkspaces(config: AppConfig): Promise<WorkspaceInfo[]> {
   const entries = await fs.readdir(config.workspacesRoot, { withFileTypes: true }).catch(() => []);
 
-  const discovered = entries
-    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-    .map<WorkspaceInfo>((entry) => toWorkspaceInfo(config.workspacesRoot, entry.name))
-    .sort((a, b) => a.label.localeCompare(b.label));
-
   const selfWorkspace: WorkspaceInfo = {
     id: "pi-face",
     label: "pi-face",
@@ -81,14 +76,29 @@ export async function listWorkspaces(config: AppConfig): Promise<WorkspaceInfo[]
     kind: "self",
   };
 
-  return [selfWorkspace, ...discovered.filter((workspace) => workspace.path !== config.selfPath)];
+  const seenIds = new Set([selfWorkspace.id]);
+  const discovered = entries
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .map<WorkspaceInfo>((entry) => toWorkspaceInfo(config.workspacesRoot, entry.name))
+    .filter((workspace) => workspace.path !== config.selfPath)
+    .filter((workspace) => {
+      if (seenIds.has(workspace.id)) {
+        return false;
+      }
+      seenIds.add(workspace.id);
+      return true;
+    })
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  return [selfWorkspace, ...discovered];
 }
 
 export async function createWorkspace(config: AppConfig, name: string): Promise<WorkspaceInfo> {
   const normalized = normalizeWorkspaceName(name);
+  const workspaceId = toWorkspaceId(normalized);
   const workspacePath = resolveWorkspacePath(config.workspacesRoot, normalized);
 
-  if (workspacePath === path.resolve(config.selfPath)) {
+  if (workspaceId === "pi-face" || workspacePath === path.resolve(config.selfPath)) {
     throw createHttpError(409, "Workspace already exists: pi-face");
   }
 

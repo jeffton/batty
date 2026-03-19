@@ -60,7 +60,7 @@ describe("workspaces", () => {
     expect(stats.isDirectory()).toBe(true);
   });
 
-  it("rejects nested paths, path traversal, and hidden folders", async () => {
+  it("rejects nested paths, path traversal, hidden folders, and reserved ids", async () => {
     const config = await createConfig();
 
     await expect(createWorkspace(config, "nested/child")).rejects.toMatchObject({
@@ -76,6 +76,11 @@ describe("workspaces", () => {
     await expect(createWorkspace(config, ".hidden")).rejects.toMatchObject({
       message: "Workspace name cannot start with a dot",
       statusCode: 400,
+    });
+
+    await expect(createWorkspace(config, "pi face")).rejects.toMatchObject({
+      message: "Workspace already exists: pi-face",
+      statusCode: 409,
     });
   });
 });

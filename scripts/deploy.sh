@@ -25,8 +25,6 @@ install -m 644 deploy/batty.service /etc/systemd/system/batty.service
 step "Installing nginx config"
 install -m 644 deploy/batty.nginx.conf /etc/nginx/sites-available/batty
 ln -snf /etc/nginx/sites-available/batty /etc/nginx/sites-enabled/batty
-rm -f /etc/nginx/sites-enabled/pi-face
-rm -f /etc/nginx/sites-available/pi-face
 
 step "Validating nginx config"
 nginx -t

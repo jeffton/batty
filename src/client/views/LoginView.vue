@@ -81,7 +81,6 @@ async function register(): Promise<void> {
             type="text"
             inputmode="numeric"
             autocomplete="one-time-code"
-            placeholder="847291"
             :disabled="Boolean(pending)"
           />
         </label>

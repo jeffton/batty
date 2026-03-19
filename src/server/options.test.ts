@@ -50,7 +50,7 @@ describe("ensureOptionsFile", () => {
           username: "david",
           password: "configured-password",
           workspacesRoot: "/root/github",
-          webPushSubject: "https://pi.roybot.se",
+          webPushSubject: "https://batty.roybot.se",
         },
         null,
         2,
@@ -63,7 +63,7 @@ describe("ensureOptionsFile", () => {
     expect(options.username).toBe("david");
     expect(options.password).toBe("configured-password");
     expect(options.workspacesRoot).toBe("/root/github");
-    expect(options.webPushSubject).toBe("https://pi.roybot.se");
+    expect(options.webPushSubject).toBe("https://batty.roybot.se");
     expect(options.authSecret.length).toBeGreaterThan(0);
   });
 });

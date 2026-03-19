@@ -47,7 +47,7 @@ Example:
   "password": "set-a-real-password-here",
   "authSecret": "generated-on-first-run",
   "workspacesRoot": "/root/github",
-  "webPushSubject": "https://pi.roybot.se"
+  "webPushSubject": "https://batty.roybot.se"
 }
 ```
 
@@ -117,14 +117,14 @@ Pi session state is persisted in Pi's session files, and the web app also caches
 Repo includes:
 
 - `deploy/batty.service` - systemd unit
-- `deploy/batty.nginx.conf` - nginx reverse proxy for `pi.roybot.se`
+- `deploy/batty.nginx.conf` - nginx reverse proxy for `batty.roybot.se`
 - `scripts/deploy.sh` - install/build/restart helper; the bundled systemd unit starts the server with `/root/github` as the Batty state root on this server
 
 Deploy on the server:
 
 ```bash
+sudo certbot certonly --webroot -w /var/www/default -d batty.roybot.se
 sudo ./scripts/deploy.sh
-sudo certbot --nginx -d pi.roybot.se
 ```
 
 ## Notes

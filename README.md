@@ -34,7 +34,7 @@ Batty now uses passkeys for passwordless auth on a single-user system. Passwords
 
 Flow:
 
-1. On first start with no registered passkeys, the server prints a one-time setup code in the terminal.
+1. On first start with no registered passkeys, the server prints a one-time 8-character setup code in the terminal, shown as `abcd ef12`.
 2. Open Batty in the browser, enter the setup code, and register a passkey with Face ID / Touch ID / Windows Hello.
 3. Later logins use the passkey directly.
 4. To add another device, print a fresh one-time setup code with `pnpm add-user -- /path/to/batty-root`.
@@ -46,7 +46,7 @@ Batty reads its persisted server config from `<batty-dir>/.batty/options.json`, 
 - `authSecret` is generated automatically if missing, then persisted
 - registered passkeys are stored in `<batty-dir>/.batty/passkeys.json`
 - active one-time setup codes are stored in `<batty-dir>/.batty/setup-code.json`
-- sign-in and setup-code verification are rate-limited in memory to roughly 5 failed attempts per minute per client IP
+- sign-in and setup-code verification are rate-limited in memory to roughly 5 failed attempts per minute globally
 
 Example:
 

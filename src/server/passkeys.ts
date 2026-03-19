@@ -99,11 +99,38 @@ function createUserId(): string {
 }
 
 function createSetupCode(): string {
-  return crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
+  let code = "";
+  while (code.length < 8) {
+    code += crypto
+      .randomBytes(8)
+      .toString("base64url")
+      .replace(/[^a-z0-9]/g, "");
+  }
+  return code.slice(0, 8);
+}
+
+function normalizeSetupCodeInput(code: string): string {
+  return code
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+export function formatSetupCode(code: string): string {
+  const normalized = normalizeSetupCodeInput(code);
+  if (normalized.length !== 8) {
+    return normalized;
+  }
+  return `${normalized.slice(0, 4)} ${normalized.slice(4)}`;
 }
 
 function hashSetupCode(secret: string, code: string): string {
-  return crypto.createHash("sha256").update(secret).update(":").update(code).digest("base64url");
+  return crypto
+    .createHash("sha256")
+    .update(secret)
+    .update(":")
+    .update(normalizeSetupCodeInput(code))
+    .digest("base64url");
 }
 
 function sameValue(left: string, right: string): boolean {
@@ -202,7 +229,7 @@ async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
 
 export class PasskeyAuthService {
   private readonly pendingRegistrations = new Map<string, PendingRegistration>();
-  private readonly pendingAuthentications = new Map<string, PendingAuthentication>();
+  private pendingAuthentication?: PendingAuthentication;
 
   constructor(
     private readonly battyDir: string,
@@ -359,13 +386,13 @@ export class PasskeyAuthService {
     });
 
     const requestId = crypto.randomUUID();
-    this.pendingAuthentications.set(requestId, {
+    this.pendingAuthentication = {
       requestId,
       challenge: optionsJSON.challenge,
       origin,
       rpID,
       expiresAt: Date.now() + REQUEST_TTL_MS,
-    });
+    };
 
     return { requestId, optionsJSON };
   }
@@ -377,20 +404,20 @@ export class PasskeyAuthService {
     rpID: string,
   ): Promise<void> {
     this.prunePendingRequests();
-    const pending = this.pendingAuthentications.get(requestId);
-    if (!pending || pending.expiresAt <= Date.now()) {
-      this.pendingAuthentications.delete(requestId);
+    const pending = this.pendingAuthentication;
+    if (!pending || pending.requestId !== requestId || pending.expiresAt <= Date.now()) {
+      this.pendingAuthentication = undefined;
       throw new Error("Passkey sign-in expired. Start again.");
     }
     if (pending.origin !== origin || pending.rpID !== rpID) {
-      this.pendingAuthentications.delete(requestId);
+      this.pendingAuthentication = undefined;
       throw new Error("Passkey sign-in origin changed. Start again.");
     }
 
     const state = await this.readState();
     const matchedCredential = state.credentials.find((credential) => credential.id === response.id);
     if (!matchedCredential) {
-      this.pendingAuthentications.delete(requestId);
+      this.pendingAuthentication = undefined;
       throw new Error("Unknown passkey");
     }
 
@@ -402,7 +429,7 @@ export class PasskeyAuthService {
       requireUserVerification: true,
       credential: this.toWebAuthnCredential(matchedCredential),
     });
-    this.pendingAuthentications.delete(requestId);
+    this.pendingAuthentication = undefined;
 
     if (!verification.verified) {
       throw new Error("Passkey sign-in failed");
@@ -485,10 +512,8 @@ export class PasskeyAuthService {
         this.pendingRegistrations.delete(requestId);
       }
     }
-    for (const [requestId, pending] of this.pendingAuthentications) {
-      if (pending.expiresAt <= now) {
-        this.pendingAuthentications.delete(requestId);
-      }
+    if (this.pendingAuthentication && this.pendingAuthentication.expiresAt <= now) {
+      this.pendingAuthentication = undefined;
     }
   }
 

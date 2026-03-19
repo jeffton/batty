@@ -9,7 +9,7 @@ import { createAuthToken, verifyAuthToken } from "./auth";
 import { readBuildId } from "./build-id";
 import { loadConfig, resolveBattyDir } from "./config";
 import { createLoginRateLimiter } from "./login-rate-limit";
-import { PasskeyAuthService } from "./passkeys";
+import { formatSetupCode, PasskeyAuthService } from "./passkeys";
 import { PiService, type UploadedFile } from "./pi-service";
 import { WebPushService } from "./web-push";
 import { createWorkspace, listWorkspaces, resolveWorkspace } from "./workspaces";
@@ -32,7 +32,7 @@ const app = fastify({
 });
 
 if (bootstrapSetupCode) {
-  console.log(`Setup code: ${bootstrapSetupCode.code}`);
+  console.log(`Setup code: ${formatSetupCode(bootstrapSetupCode.code)}`);
   console.log(`Expires at: ${new Date(bootstrapSetupCode.expiresAt).toISOString()}`);
 }
 
@@ -103,6 +103,15 @@ function setAuthCookie(request: FastifyRequest, reply: FastifyReply): void {
   });
 }
 
+function unauthenticatedAuthStatus() {
+  return {
+    passkeyCount: 0,
+    passkeyLoginAvailable: false,
+    registrationOpen: false,
+    setupRequired: false,
+  };
+}
+
 app.decorateRequest("auth", false);
 
 declare module "fastify" {
@@ -126,7 +135,7 @@ app.post("/api/auth/login/options", async (request) => {
 app.post<{ Body: { requestId?: string; response?: AuthenticationResponseJSON } }>(
   "/api/auth/login/verify",
   async (request, reply) => {
-    const rateLimitKey = `${request.ip}:login`;
+    const rateLimitKey = "login";
     if (authAttemptLimiter.isLimited(rateLimitKey)) {
       reply.code(429).send({ error: "Too many sign-in attempts. Try again in a minute." });
       return;
@@ -155,7 +164,7 @@ app.post<{ Body: { requestId?: string; response?: AuthenticationResponseJSON } }
 );
 
 app.post<{ Body: { setupCode?: string } }>("/api/auth/register/options", async (request, reply) => {
-  const rateLimitKey = `${request.ip}:register`;
+  const rateLimitKey = "register";
   if (authAttemptLimiter.isLimited(rateLimitKey)) {
     reply.code(429).send({ error: "Too many setup code attempts. Try again in a minute." });
     return;
@@ -180,7 +189,7 @@ app.post<{ Body: { setupCode?: string } }>("/api/auth/register/options", async (
 app.post<{ Body: { requestId?: string; response?: RegistrationResponseJSON } }>(
   "/api/auth/register/verify",
   async (request, reply) => {
-    const rateLimitKey = `${request.ip}:register`;
+    const rateLimitKey = "register";
     if (authAttemptLimiter.isLimited(rateLimitKey)) {
       reply.code(429).send({ error: "Too many setup code attempts. Try again in a minute." });
       return;
@@ -217,7 +226,7 @@ app.get("/api/bootstrap", async (request) => {
   const authenticated = request.auth;
   return {
     authenticated,
-    auth: await passkeys.getStatus(),
+    auth: authenticated ? await passkeys.getStatus() : unauthenticatedAuthStatus(),
     buildId,
     workspaces: authenticated ? await listWorkspaces(config) : [],
     models: authenticated ? await service.listModels() : [],

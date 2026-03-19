@@ -13,6 +13,10 @@ const store = useAppStore();
 const setupCode = ref("");
 const pending = ref<"login" | "register" | undefined>();
 
+function updateSetupCode(value: string): void {
+  setupCode.value = value.toLowerCase();
+}
+
 async function signIn(): Promise<void> {
   pending.value = "login";
   store.authError = undefined;
@@ -51,37 +55,27 @@ async function register(): Promise<void> {
       <img src="/favicon.png" alt="Batty" class="login-card__icon" />
       <div class="login-card__header">
         <h1>Batty</h1>
-        <p v-if="store.auth.passkeyLoginAvailable">
-          Sign in with the passkey saved on this device.
-        </p>
-        <p v-else-if="store.auth.setupRequired">
-          Register the first passkey with the setup code from the server terminal.
-        </p>
-        <p v-else>Waiting for a fresh setup code from the server terminal.</p>
+        <p>Sign in with your passkey, or enter a setup code from the server terminal.</p>
       </div>
 
-      <button
-        v-if="store.auth.passkeyLoginAvailable"
-        class="login-card__submit"
-        :disabled="Boolean(pending)"
-        @click="signIn"
-      >
+      <button class="login-card__submit" :disabled="Boolean(pending)" @click="signIn">
         {{ pending === "login" ? "Waiting for passkey…" : "Sign in with passkey" }}
       </button>
 
-      <div
-        v-if="store.auth.registrationOpen || store.auth.setupRequired"
-        class="login-card__register"
-      >
+      <div class="login-card__register">
         <label class="login-card__field">
           <span>Setup code</span>
           <input
-            v-model="setupCode"
+            :value="setupCode"
             name="setup-code"
             type="text"
-            inputmode="numeric"
+            inputmode="text"
             autocomplete="one-time-code"
+            autocapitalize="off"
+            spellcheck="false"
+            placeholder="abcd ef12"
             :disabled="Boolean(pending)"
+            @input="updateSetupCode(($event.target as HTMLInputElement).value)"
           />
         </label>
 
@@ -94,9 +88,8 @@ async function register(): Promise<void> {
         </button>
       </div>
 
-      <p v-else class="login-card__hint">
-        Run <code>pnpm add-user -- /path/to/batty-root</code> on the server to print a new setup
-        code.
+      <p class="login-card__hint">
+        Need a new setup code? Run <code>pnpm add-user -- /path/to/batty-root</code> on the server.
       </p>
       <p v-if="store.authError" class="login-card__error">{{ store.authError }}</p>
     </section>
@@ -176,6 +169,7 @@ async function register(): Promise<void> {
   color: inherit;
   padding: 0.8rem 0.9rem;
   font-size: 0.95rem;
+  text-transform: lowercase;
 }
 
 .login-card__field input:focus {

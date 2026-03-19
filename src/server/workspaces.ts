@@ -34,6 +34,10 @@ function normalizeWorkspaceName(name: string): string {
     throw createHttpError(400, "Workspace name must be a direct child folder");
   }
 
+  if (normalized.startsWith(".")) {
+    throw createHttpError(400, "Workspace name cannot start with a dot");
+  }
+
   if (/[\\/]/.test(normalized)) {
     throw createHttpError(400, "Workspace name cannot contain path separators");
   }
@@ -66,7 +70,7 @@ export async function listWorkspaces(config: AppConfig): Promise<WorkspaceInfo[]
   const entries = await fs.readdir(config.workspacesRoot, { withFileTypes: true }).catch(() => []);
 
   const discovered = entries
-    .filter((entry) => entry.isDirectory())
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
     .map<WorkspaceInfo>((entry) => toWorkspaceInfo(config.workspacesRoot, entry.name))
     .sort((a, b) => a.label.localeCompare(b.label));
 

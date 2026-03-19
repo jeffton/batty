@@ -33,10 +33,11 @@ async function createConfig(): Promise<AppConfig> {
 }
 
 describe("workspaces", () => {
-  it("includes pi-face itself and discovered child folders", async () => {
+  it("includes pi-face itself and discovered visible child folders", async () => {
     const config = await createConfig();
     await fs.mkdir(path.join(config.workspacesRoot, "alpha"));
     await fs.mkdir(path.join(config.workspacesRoot, "beta"));
+    await fs.mkdir(path.join(config.workspacesRoot, ".pi-face"));
 
     const workspaces = await listWorkspaces(config);
 
@@ -59,7 +60,7 @@ describe("workspaces", () => {
     expect(stats.isDirectory()).toBe(true);
   });
 
-  it("rejects nested paths and path traversal", async () => {
+  it("rejects nested paths, path traversal, and hidden folders", async () => {
     const config = await createConfig();
 
     await expect(createWorkspace(config, "nested/child")).rejects.toMatchObject({
@@ -68,7 +69,12 @@ describe("workspaces", () => {
     });
 
     await expect(createWorkspace(config, "../escape")).rejects.toMatchObject({
-      message: "Workspace name cannot contain path separators",
+      message: "Workspace name cannot start with a dot",
+      statusCode: 400,
+    });
+
+    await expect(createWorkspace(config, ".hidden")).rejects.toMatchObject({
+      message: "Workspace name cannot start with a dot",
       statusCode: 400,
     });
   });

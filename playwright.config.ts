@@ -11,7 +11,7 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: "pnpm start",
+    command: "pnpm start -- .",
     url: "http://127.0.0.1:3147/healthz",
     reuseExistingServer: true,
     timeout: 120_000,

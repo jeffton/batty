@@ -1,6 +1,6 @@
 import { SessionManager } from "@mariozechner/pi-coding-agent";
 import { expect, test } from "@playwright/test";
-import { readE2eCredentials } from "./auth";
+import { authenticate } from "./auth";
 
 function createSeedSession() {
   const session = SessionManager.create(process.cwd());
@@ -25,7 +25,6 @@ function createSeedSession() {
 }
 
 test("opening a session keeps the main pane healthy and survives reload", async ({ page }) => {
-  const { username, password } = await readE2eCredentials();
   const { label, sessionId } = createSeedSession();
   const errors: string[] = [];
 
@@ -38,17 +37,8 @@ test("opening a session keeps the main pane healthy and survives reload", async 
     }
   });
 
+  await authenticate(page);
   await page.goto("/");
-  if (
-    await page
-      .getByLabel("Password")
-      .isVisible()
-      .catch(() => false)
-  ) {
-    await page.getByLabel("Username").fill(username);
-    await page.getByLabel("Password").fill(password);
-    await page.getByRole("button", { name: "Sign in" }).click();
-  }
 
   await expect(page).toHaveURL(/\/workspaces\/batty$/);
   await expect(page.locator(".header__ws-name")).toHaveText("batty");

@@ -1,14 +1,9 @@
 import { test } from "@playwright/test";
-import { readE2eCredentials } from "./auth";
+import { authenticate } from "./auth";
 
 test("screenshots", async ({ page }) => {
-  const { username, password } = await readE2eCredentials();
-
+  await authenticate(page);
   await page.goto("/");
-  await page.waitForTimeout(800);
-  await page.getByLabel("Username").fill(username);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
   await page.waitForTimeout(1500);
 
   // Start a session so model btn is active

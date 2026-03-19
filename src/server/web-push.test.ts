@@ -31,8 +31,6 @@ function createConfig(webPushDir: string): AppConfig {
     webPushDir,
     webPushSubject: "mailto:test@example.com",
     cookieName: "batty-auth",
-    username: "test-user",
-    password: crypto.randomUUID(),
     authSecret: crypto.randomUUID(),
   };
 }

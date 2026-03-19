@@ -26,8 +26,6 @@ async function createConfig(): Promise<AppConfig> {
     webPushDir: path.join(root, "web-push"),
     webPushSubject: "mailto:test@example.com",
     cookieName: "test",
-    username: "test-user",
-    password: crypto.randomUUID(),
     authSecret: crypto.randomUUID(),
   };
 }

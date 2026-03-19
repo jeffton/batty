@@ -58,29 +58,15 @@ function resolveWorkspacePath(workspacesRoot: string, name: string): string {
 export async function listWorkspaces(config: AppConfig): Promise<WorkspaceInfo[]> {
   const entries = await fs.readdir(config.workspacesRoot, { withFileTypes: true }).catch(() => []);
 
-  const selfWorkspace: WorkspaceInfo = {
-    id: "batty",
-    label: "Batty",
-    path: config.selfPath,
-    kind: "self",
-  };
-
-  const discovered = entries
+  return entries
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
     .map<WorkspaceInfo>((entry) => toWorkspaceInfo(config.workspacesRoot, entry.name))
-    .filter((workspace) => workspace.path !== config.selfPath)
     .sort((a, b) => a.label.localeCompare(b.label));
-
-  return [selfWorkspace, ...discovered];
 }
 
 export async function createWorkspace(config: AppConfig, name: string): Promise<WorkspaceInfo> {
   const normalized = normalizeWorkspaceName(name);
   const workspacePath = resolveWorkspacePath(config.workspacesRoot, normalized);
-
-  if (workspacePath === path.resolve(config.selfPath)) {
-    throw createHttpError(409, "Workspace already exists: batty");
-  }
 
   await fs.mkdir(config.workspacesRoot, { recursive: true });
 

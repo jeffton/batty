@@ -169,7 +169,7 @@ onMounted(() => {
         @click="openWorkspace(workspace.id)"
       >
         <strong>{{ workspace.label }}</strong>
-        <span class="muted">{{ workspace.kind === "self" ? "self" : workspace.path }}</span>
+        <span class="muted">{{ workspace.path }}</span>
       </button>
     </section>
 

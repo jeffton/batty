@@ -176,9 +176,7 @@ watch(
             @click="openWorkspace(workspace.id)"
           >
             <span class="ws-popover__item-label">{{ workspace.label }}</span>
-            <span class="ws-popover__item-meta">{{
-              workspace.kind === "self" ? "self" : workspace.path
-            }}</span>
+            <span class="ws-popover__item-meta">{{ workspace.path }}</span>
           </button>
 
           <div v-if="filteredWorkspaces.length === 0" class="ws-popover__empty">

@@ -15,13 +15,7 @@ function truncate(value: string, maxLength: number): string {
   return `${value.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
-export function workspaceLabelFromSession(
-  session: Pick<SessionState, "workspaceId" | "cwd">,
-): string {
-  if (session.workspaceId === "batty") {
-    return "Batty";
-  }
-
+export function workspaceLabelFromSession(session: Pick<SessionState, "cwd">): string {
   const segments = session.cwd.split(/[\\/]/).filter(Boolean);
   return segments.at(-1) ?? session.cwd;
 }

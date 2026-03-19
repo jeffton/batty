@@ -8,10 +8,10 @@ declare global {
 }
 
 const workspace: WorkspaceInfo = {
-  id: "batty",
-  label: "Batty",
+  id: "pi-face",
+  label: "pi-face",
   path: "/root/github/pi-face",
-  kind: "self",
+  kind: "workspace",
 };
 
 const summary: SessionSummary = {
@@ -218,7 +218,7 @@ test.describe("tool rendering", () => {
         state: {
           id: "web-1",
           sessionId: "session-1",
-          workspaceId: "batty",
+          workspaceId: "pi-face",
           cwd: "/root/github/pi-face",
           path: "/tmp/session-1.jsonl",
           thinkingLevel: "medium",
@@ -329,7 +329,7 @@ test.describe("tool rendering", () => {
         state: {
           id: "web-1",
           sessionId: "session-1",
-          workspaceId: "batty",
+          workspaceId: "pi-face",
           cwd: "/root/github/pi-face",
           path: "/tmp/session-1.jsonl",
           thinkingLevel: "medium",

@@ -50,21 +50,21 @@ test("opening a session keeps the main pane healthy and survives reload", async 
     await page.getByRole("button", { name: "Sign in" }).click();
   }
 
-  await expect(page).toHaveURL(/\/workspaces\/batty$/);
-  await expect(page.locator(".header__ws-name")).toHaveText("Batty");
+  await expect(page).toHaveURL(/\/workspaces\/pi-face$/);
+  await expect(page.locator(".header__ws-name")).toHaveText("pi-face");
 
   // Open workspace popover and click the session
   await page.click(".header__ws-btn");
   await page.waitForTimeout(300);
   await page.getByRole("button", { name: label }).click();
-  await expect(page).toHaveURL(new RegExp(`/workspaces/batty/sessions/${sessionId}$`));
+  await expect(page).toHaveURL(new RegExp(`/workspaces/pi-face/sessions/${sessionId}$`));
   await expect(page.locator(".transcript")).toBeVisible();
 
   const sessionUrl = page.url();
 
   // Navigate back to workspace root
-  await page.goto("/workspaces/batty");
-  await expect(page).toHaveURL(/\/workspaces\/batty$/);
+  await page.goto("/workspaces/pi-face");
+  await expect(page).toHaveURL(/\/workspaces\/pi-face$/);
   await expect(page.getByText("No active session")).toBeVisible();
 
   // Re-open session via popover

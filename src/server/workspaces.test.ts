@@ -33,7 +33,7 @@ async function createConfig(): Promise<AppConfig> {
 }
 
 describe("workspaces", () => {
-  it("includes Batty itself and discovered visible child folders", async () => {
+  it("includes discovered visible child folders", async () => {
     const config = await createConfig();
     await fs.mkdir(path.join(config.workspacesRoot, "alpha"));
     await fs.mkdir(path.join(config.workspacesRoot, "beta"));
@@ -41,8 +41,7 @@ describe("workspaces", () => {
 
     const workspaces = await listWorkspaces(config);
 
-    expect(workspaces[0]?.id).toBe("batty");
-    expect(workspaces.map((workspace) => workspace.label)).toEqual(["Batty", "alpha", "beta"]);
+    expect(workspaces.map((workspace) => workspace.label)).toEqual(["alpha", "beta"]);
   });
 
   it("uses folder names as workspace ids", async () => {

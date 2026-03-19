@@ -70,7 +70,7 @@ export interface WorkspaceInfo {
   id: string;
   label: string;
   path: string;
-  kind: "workspace" | "self";
+  kind: "workspace";
 }
 
 export interface SessionSummary {

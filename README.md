@@ -10,7 +10,7 @@ A browser UI for [Pi Coding Agent](https://pi.dev) that keeps Pi's session/model
 - Monospace multiline composer with drag/drop and `+` attachment picker
 - Image rendering for message and tool output blocks
 - Model selection powered by Pi's model registry
-- Workspace picker for folders directly under a configured root, plus a dedicated `Batty` self-workspace
+- Workspace picker for folders directly under a configured root
 - Create new workspaces directly under the configured root from the sidebar
 - Session listing + resume per workspace using Pi session files
 - Offline-friendly client shell via PWA + IndexedDB snapshot caching
@@ -104,7 +104,7 @@ Pi resources are loaded from the regular `~/.pi` setup through Pi's SDK:
 
 ## Hot reloading Batty itself
 
-When you open a session in the `Batty` workspace, the agent can modify this repo directly and restart the deployed app with:
+When you open a session in this repo's workspace, the agent can modify this repo directly and restart the deployed app with:
 
 ```bash
 scripts/reload-self.sh

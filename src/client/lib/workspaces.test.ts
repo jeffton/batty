@@ -5,7 +5,7 @@ import type { WorkspaceInfo } from "@/shared/types";
 describe("uniqueWorkspaces", () => {
   it("keeps the first workspace for duplicate paths", () => {
     const workspaces: WorkspaceInfo[] = [
-      { id: "batty", label: "Batty", path: "/root/github/pi-face", kind: "self" },
+      { id: "pi-face", label: "pi-face", path: "/root/github/pi-face", kind: "workspace" },
       { id: "babyface", label: "babyface", path: "/root/github/babyface", kind: "workspace" },
       {
         id: "babyface copy",
@@ -16,7 +16,7 @@ describe("uniqueWorkspaces", () => {
     ];
 
     expect(uniqueWorkspaces(workspaces)).toEqual([
-      { id: "batty", label: "Batty", path: "/root/github/pi-face", kind: "self" },
+      { id: "pi-face", label: "pi-face", path: "/root/github/pi-face", kind: "workspace" },
       { id: "babyface", label: "babyface", path: "/root/github/babyface", kind: "workspace" },
     ]);
   });

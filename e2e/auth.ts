@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Page } from "@playwright/test";
+import { E2E_BASE_URL } from "./env";
 
 interface OptionsFile {
   authSecret?: string;
@@ -38,7 +39,7 @@ export async function authenticate(page: Page): Promise<void> {
     {
       name: "batty-auth",
       value: createAuthToken(authSecret),
-      url: "http://127.0.0.1:3147",
+      url: E2E_BASE_URL,
       httpOnly: true,
       sameSite: "Lax",
     },

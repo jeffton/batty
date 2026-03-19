@@ -1,9 +1,10 @@
 import { SessionManager } from "@mariozechner/pi-coding-agent";
 import { expect, test } from "@playwright/test";
 import { authenticate } from "./auth";
+import { E2E_WORKSPACE_ROOT } from "./env";
 
 function createSeedSession() {
-  const session = SessionManager.create(process.cwd());
+  const session = SessionManager.create(E2E_WORKSPACE_ROOT);
   const label = `playwright seed ${Date.now()}`;
   const now = Date.now();
 

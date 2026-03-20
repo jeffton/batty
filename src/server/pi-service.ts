@@ -257,15 +257,9 @@ export class PiService {
     const session = await this.createSession(job.workspace, {
       modelId: job.model,
       thinkingLevel: job.thinkingLevel,
-      ephemeral: true,
     });
 
-    try {
-      await this.prompt(session.id, job.prompt, []);
-    } catch (error) {
-      this.sessions.delete(session.id);
-      throw error;
-    }
+    await this.prompt(session.id, job.prompt, []);
 
     return { sessionId: session.sessionId };
   }

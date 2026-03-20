@@ -11,9 +11,11 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import {
   AuthStorage,
   createAgentSession,
+  DefaultResourceLoader,
   getAgentDir,
   ModelRegistry,
   SessionManager,
+  SettingsManager,
   type AgentSession,
   type AgentSessionEvent,
   type ToolDefinition,
@@ -32,6 +34,11 @@ import type {
   WorkspaceInfo,
 } from "@/shared/types";
 import type { AppConfig } from "./config";
+import {
+  buildBattySystemPromptSnapshot,
+  BATTY_SYSTEM_PROMPT_CUSTOM_TYPE,
+  findBattySystemPromptSnapshot,
+} from "./batty-system-prompt";
 import { buildCronJobSummary, type CronService } from "./cron";
 import { createSessionState, normalizeBlocks } from "./pi-state";
 import { sanitizeTerminalBlocks } from "./terminal-output";
@@ -317,6 +324,7 @@ export class PiService {
     const webSession = this.requireSession(sessionId);
     const model = await this.resolveModel(modelId);
     await webSession.session.setModel(model);
+    await this.refreshBattySystemPrompt(webSession);
     this.publish(webSession, { type: "state", state: this.getState(sessionId) });
     return this.getState(sessionId);
   }
@@ -357,17 +365,60 @@ export class PiService {
     options?: { modelId?: string; thinkingLevel?: string },
   ): Promise<Awaited<ReturnType<typeof createAgentSession>>> {
     const model = options?.modelId ? await this.resolveModel(options.modelId) : undefined;
-
-    return createAgentSession({
+    const agentDir = getAgentDir();
+    const settingsManager = SettingsManager.create(workspace.path, agentDir);
+    const persistedPrompt = findBattySystemPromptSnapshot(sessionManager.getEntries());
+    const resourceLoader = new DefaultResourceLoader({
       cwd: workspace.path,
-      agentDir: getAgentDir(),
+      agentDir,
+      settingsManager,
+      appendSystemPromptOverride: (base) => {
+        const appendedBattyPrompt = findBattySystemPromptSnapshot(
+          sessionManager.getEntries(),
+        )?.appendedPrompt;
+        return appendedBattyPrompt ? [...base, appendedBattyPrompt] : base;
+      },
+    });
+    await resourceLoader.reload();
+
+    const result = await createAgentSession({
+      cwd: workspace.path,
+      agentDir,
       authStorage: this.authStorage,
       modelRegistry: this.modelRegistry,
       sessionManager,
+      settingsManager,
+      resourceLoader,
       model,
       thinkingLevel: options?.thinkingLevel as AgentSession["thinkingLevel"] | undefined,
       customTools: [this.createCronTool(workspace)],
     });
+
+    if (!persistedPrompt) {
+      const restoredContext = sessionManager.buildSessionContext();
+      const selectedModel =
+        result.session.model != null
+          ? modelKey(result.session.model as PiModel)
+          : restoredContext.model != null
+            ? `${restoredContext.model.provider}/${restoredContext.model.modelId}`
+            : (options?.modelId ?? "unknown");
+      const selectedThinkingLevel =
+        result.session.thinkingLevel ||
+        restoredContext.thinkingLevel ||
+        options?.thinkingLevel ||
+        "off";
+      const snapshot = buildBattySystemPromptSnapshot(
+        workspace,
+        selectedModel,
+        selectedThinkingLevel,
+      );
+
+      sessionManager.appendCustomEntry(BATTY_SYSTEM_PROMPT_CUSTOM_TYPE, snapshot);
+      await resourceLoader.reload();
+      result.session.setActiveToolsByName(result.session.getActiveToolNames());
+    }
+
+    return result;
   }
 
   private attachSession(
@@ -499,15 +550,32 @@ export class PiService {
     await this.onWorkspaceUpdated?.(workspaceId);
   }
 
+  private async refreshBattySystemPrompt(webSession: WebSession): Promise<void> {
+    const model = webSession.session.model
+      ? modelKey(webSession.session.model as PiModel)
+      : "unknown";
+    const snapshot = buildBattySystemPromptSnapshot(
+      webSession.workspace,
+      model,
+      webSession.session.thinkingLevel,
+    );
+
+    webSession.session.sessionManager.appendCustomEntry(BATTY_SYSTEM_PROMPT_CUSTOM_TYPE, snapshot);
+    await webSession.session.resourceLoader.reload();
+    webSession.session.setActiveToolsByName(webSession.session.getActiveToolNames());
+  }
+
   private createCronTool(workspace: WorkspaceInfo): ToolDefinition<typeof CronToolSchema> {
     return {
       name: "cron",
       label: "Cron",
       description:
         "Create, list, update, and remove scheduled Batty jobs that run future agent turns in workspaces.",
-      promptSnippet: "Create and manage scheduled agent turns for Batty workspaces.",
+      promptSnippet:
+        "Create and manage scheduled agent turns for Batty workspaces. Prefer reusing the current session model unless the user explicitly asks for a different one.",
       promptGuidelines: [
         "When scheduling a cron job, always provide the full prompt the future agent turn should run.",
+        "Prefer omitting model so the cron job reuses the current session model. Only set model explicitly if the user asks for a different model.",
         'Use schedule.kind="at" with schedule.in for relative times like 10m or 2h.',
         'Use schedule.kind="cron" with a standard cron expression and optional timezone for recurring schedules.',
         'Use schedule.kind="every" with durations like 15m, 2h, or 1d for interval schedules.',

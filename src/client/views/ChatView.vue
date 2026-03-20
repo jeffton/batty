@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ChevronDown, Wifi, WifiOff, LoaderCircle } from "lucide-vue-next";
+import { ChevronDown, Wifi, WifiOff, LoaderCircle, Clock3 } from "lucide-vue-next";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { VList } from "virtua/vue";
 import ChatMessage from "@/client/components/ChatMessage.vue";
+import CronPopover from "@/client/components/CronPopover.vue";
 import MessageComposer from "@/client/components/MessageComposer.vue";
 import ModelConfigPopover from "@/client/components/ModelConfigPopover.vue";
 import WorkspacePopover from "@/client/components/WorkspacePopover.vue";
@@ -21,6 +22,8 @@ const WS_POPOVER_ID = "ws-popover";
 const WS_POPOVER_ANCHOR = "--ws-anchor";
 const MODEL_POPOVER_ID = "chat-main-model-popover";
 const MODEL_POPOVER_ANCHOR = "--chat-main-model-anchor";
+const CRON_POPOVER_ID = "chat-main-cron-popover";
+const CRON_POPOVER_ANCHOR = "--chat-main-cron-anchor";
 const TRANSCRIPT_BOTTOM_THRESHOLD = 24;
 
 type TranscriptHandle = InstanceType<typeof VList>;
@@ -332,6 +335,20 @@ watch(
         @close="closeModelPopover"
       />
 
+      <button
+        class="header__icon-btn"
+        type="button"
+        :style="{ 'anchor-name': CRON_POPOVER_ANCHOR }"
+        :disabled="!store.selectedWorkspaceId"
+        :popovertarget="CRON_POPOVER_ID"
+        aria-label="Cron jobs"
+        title="Cron jobs"
+      >
+        <Clock3 :size="15" />
+      </button>
+
+      <CronPopover :popover-id="CRON_POPOVER_ID" :anchor-name="CRON_POPOVER_ANCHOR" />
+
       <div class="header__spacer" />
 
       <div class="header__context" :aria-label="contextUsageLabel" :title="contextUsageLabel">
@@ -504,6 +521,28 @@ watch(
   min-width: 0;
   line-height: 1.25;
   text-align: left;
+}
+
+.header__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--color-text-subtle);
+  transition: background 80ms ease;
+}
+
+.header__icon-btn:hover:not(:disabled) {
+  background: var(--color-bg-elevated);
+}
+
+.header__icon-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .header__model-name {

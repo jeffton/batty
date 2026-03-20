@@ -85,6 +85,75 @@ export interface SessionSummary {
   model?: string;
 }
 
+export type CronJobSchedule =
+  | {
+      kind: "at";
+      at: string;
+    }
+  | {
+      kind: "every";
+      every: string;
+    }
+  | {
+      kind: "cron";
+      expression: string;
+      timezone?: string;
+    };
+
+export type CronJobScheduleInput =
+  | {
+      kind: "at";
+      at?: string;
+      in?: string;
+    }
+  | {
+      kind: "every";
+      every: string;
+    }
+  | {
+      kind: "cron";
+      expression: string;
+      timezone?: string;
+    };
+
+export interface CronJobState {
+  nextRunAtMs?: number;
+  lastRunAtMs?: number;
+  lastDurationMs?: number;
+  lastStatus?: "ok" | "error";
+  lastError?: string;
+  lastSessionId?: string;
+}
+
+export interface CronJob {
+  id: string;
+  workspaceId: string;
+  prompt: string;
+  model: string;
+  thinkingLevel: string;
+  createdAt: number;
+  updatedAt: number;
+  schedule: CronJobSchedule;
+  scheduleLabel: string;
+  state: CronJobState;
+}
+
+export interface CreateCronJobInput {
+  workspaceId: string;
+  prompt: string;
+  model: string;
+  thinkingLevel: string;
+  schedule: CronJobScheduleInput;
+}
+
+export interface UpdateCronJobInput {
+  workspaceId?: string;
+  prompt?: string;
+  model?: string;
+  thinkingLevel?: string;
+  schedule?: CronJobScheduleInput;
+}
+
 export interface SessionState {
   id: string;
   sessionId: string;
@@ -129,6 +198,12 @@ export interface BootstrapPayload {
   workspaces: WorkspaceInfo[];
   models: ModelOption[];
   activeSession?: SessionState;
+}
+
+export interface WorkspaceSnapshot {
+  workspaceId: string;
+  sessions: SessionSummary[];
+  cronJobs: CronJob[];
 }
 
 export type ServerEvent =

@@ -22,6 +22,15 @@ pnpm build
 step "Installing systemd unit"
 install -m 644 deploy/batty.service /etc/systemd/system/batty.service
 
+step "Installing batty CLI"
+cat > /usr/local/bin/batty <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+cd /root/github/batty
+exec node dist/server/cli.mjs "$@"
+EOF
+chmod 755 /usr/local/bin/batty
+
 step "Installing nginx config"
 install -m 644 deploy/batty.nginx.conf /etc/nginx/sites-available/batty
 ln -snf /etc/nginx/sites-available/batty /etc/nginx/sites-enabled/batty

@@ -4,7 +4,15 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
   RegistrationResponseJSON,
 } from "@simplewebauthn/types";
-import type { BootstrapPayload, SessionState, SessionSummary, WorkspaceInfo } from "@/shared/types";
+import type {
+  BootstrapPayload,
+  CreateCronJobInput,
+  CronJob,
+  SessionState,
+  SessionSummary,
+  UpdateCronJobInput,
+  WorkspaceInfo,
+} from "@/shared/types";
 
 async function request<T>(input: string, init?: RequestInit): Promise<T> {
   const response = await fetch(input, {
@@ -112,6 +120,32 @@ export function createWorkspace(name: string): Promise<WorkspaceInfo> {
 
 export function listWorkspaceSessions(workspaceId: string): Promise<SessionSummary[]> {
   return request(`/api/workspaces/${workspaceId}/sessions`);
+}
+
+export function listWorkspaceCronJobs(workspaceId: string): Promise<CronJob[]> {
+  return request(`/api/workspaces/${workspaceId}/cron-jobs`);
+}
+
+export function createCronJob(input: CreateCronJobInput): Promise<CronJob> {
+  return request("/api/cron-jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateCronJob(jobId: string, patch: UpdateCronJobInput): Promise<CronJob> {
+  return request(`/api/cron-jobs/${jobId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+}
+
+export function deleteCronJob(jobId: string): Promise<CronJob> {
+  return request(`/api/cron-jobs/${jobId}`, {
+    method: "DELETE",
+  });
 }
 
 export function createSession(workspaceId: string): Promise<SessionState> {

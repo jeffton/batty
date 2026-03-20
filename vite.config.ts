@@ -72,7 +72,7 @@ export default defineConfig({
     ignorePatterns: ["dist/**", "node_modules/**", ".batty/**"],
   },
   pack: {
-    entry: ["src/server/main.ts", "src/server/add-user.ts"],
+    entry: ["src/server/main.ts", "src/server/add-user.ts", "src/server/cli.ts"],
     outDir: "dist/server",
     format: ["esm"],
     target: "node24",

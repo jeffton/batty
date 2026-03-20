@@ -20,6 +20,9 @@ importers:
       '@fontsource/source-sans-3':
         specifier: 5.2.9
         version: 5.2.9
+      '@mariozechner/pi-ai':
+        specifier: 0.61.0
+        version: 0.61.0(ws@8.19.0)(zod@4.3.6)
       '@mariozechner/pi-coding-agent':
         specifier: 0.61.0
         version: 0.61.0(ws@8.19.0)(zod@4.3.6)
@@ -35,6 +38,12 @@ importers:
       '@simplewebauthn/types':
         specifier: 12.0.0
         version: 12.0.0
+      '@sinclair/typebox':
+        specifier: 0.34.48
+        version: 0.34.48
+      croner:
+        specifier: 10.0.1
+        version: 10.0.1
       dompurify:
         specifier: 3.3.3
         version: 3.3.3
@@ -2391,6 +2400,10 @@ packages:
 
   core-js-compat@3.48.0:
     resolution: {integrity: sha512-OM4cAF3D6VtH/WkLtWvyNC56EZVXsZdU3iqaMG2B4WvYrlqU831pc4UtG5yp0sE9z8Y02wVN7PjW5Zf9Gt0f1Q==}
+
+  croner@10.0.1:
+    resolution: {integrity: sha512-ixNtAJndqh173VQ4KodSdJEI6nuioBWI0V1ITNKhZZsO0pEMoDxz539T4FTTbSZ/xIOSuDnzxLVRqBVSvPNE2g==}
+    engines: {node: '>=18.0'}
 
   cross-spawn@7.0.6:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
@@ -6857,6 +6870,8 @@ snapshots:
   core-js-compat@3.48.0:
     dependencies:
       browserslist: 4.28.1
+
+  croner@10.0.1: {}
 
   cross-spawn@7.0.6:
     dependencies:

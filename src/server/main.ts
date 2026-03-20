@@ -10,6 +10,8 @@ import { readBuildId } from "./build-id";
 import { loadConfig, resolveBattyDir } from "./config";
 import { createLoginRateLimiter } from "./login-rate-limit";
 import { formatSetupCode, PasskeyAuthService } from "./passkeys";
+import type { WorkspaceSnapshot } from "@/shared/types";
+import { CronService } from "./cron";
 import { PiService, type UploadedFile } from "./pi-service";
 import { WebPushService } from "./web-push";
 import { createWorkspace, listWorkspaces, resolveWorkspace } from "./workspaces";
@@ -19,9 +21,61 @@ const passkeys = new PasskeyAuthService(config.battyDir, config.authSecret);
 const bootstrapSetupCode = await passkeys.initialize();
 const webPush = new WebPushService(config);
 await webPush.initialize();
-const service = new PiService(config, async (session) => {
-  await webPush.notifyAgentCompleted(session);
+const cronService = new CronService(config);
+const workspaceSubscribers = new Map<string, Set<(snapshot: WorkspaceSnapshot) => void>>();
+
+async function workspaceSnapshot(workspaceId: string): Promise<WorkspaceSnapshot> {
+  const workspaces = await listWorkspaces(config);
+  const workspace = resolveWorkspace(workspaces, workspaceId);
+  return {
+    workspaceId,
+    sessions: await service.listSessionSummaries(workspace),
+    cronJobs: cronService.listJobs(workspaceId),
+  };
+}
+
+async function publishWorkspace(workspaceId: string): Promise<void> {
+  const subscribers = workspaceSubscribers.get(workspaceId);
+  if (!subscribers || subscribers.size === 0) {
+    return;
+  }
+
+  const snapshot = await workspaceSnapshot(workspaceId);
+  for (const subscriber of subscribers) {
+    subscriber(snapshot);
+  }
+}
+
+const service = new PiService(
+  config,
+  cronService,
+  async (session) => {
+    await webPush.notifyAgentCompleted(session);
+  },
+  async (workspaceId) => {
+    await publishWorkspace(workspaceId);
+  },
+);
+cronService.subscribe((workspaceIds) => {
+  for (const workspaceId of workspaceIds) {
+    void publishWorkspace(workspaceId).catch((error) => {
+      console.error("Failed to publish workspace update", { workspaceId, error });
+    });
+  }
 });
+cronService.setRunner({
+  run: async (job) => {
+    const workspaces = await listWorkspaces(config);
+    const workspace = resolveWorkspace(workspaces, job.workspaceId);
+    return service.runCronJobSession({
+      workspace,
+      prompt: job.prompt,
+      model: job.model,
+      thinkingLevel: job.thinkingLevel,
+    });
+  },
+});
+await cronService.initialize();
 
 const authAttemptLimiter = createLoginRateLimiter();
 
@@ -274,6 +328,106 @@ app.get<{ Params: { workspaceId: string } }>(
     return service.listSessionSummaries(workspace);
   },
 );
+
+app.get<{ Params: { workspaceId: string } }>(
+  "/api/workspaces/:workspaceId/events",
+  async (request, reply) => {
+    const snapshot = await workspaceSnapshot(request.params.workspaceId);
+
+    reply.raw.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    });
+
+    const send = (payload: WorkspaceSnapshot) => {
+      reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    const subscribers = workspaceSubscribers.get(request.params.workspaceId) ?? new Set();
+    subscribers.add(send);
+    workspaceSubscribers.set(request.params.workspaceId, subscribers);
+    send(snapshot);
+
+    const heartbeat = setInterval(() => {
+      reply.raw.write(": keep-alive\n\n");
+    }, 15000);
+
+    request.raw.on("close", () => {
+      clearInterval(heartbeat);
+      const current = workspaceSubscribers.get(request.params.workspaceId);
+      current?.delete(send);
+      if (current && current.size === 0) {
+        workspaceSubscribers.delete(request.params.workspaceId);
+      }
+      reply.raw.end();
+    });
+  },
+);
+
+app.get<{ Params: { workspaceId: string } }>(
+  "/api/workspaces/:workspaceId/cron-jobs",
+  async (request) => {
+    const workspaces = await listWorkspaces(config);
+    const workspace = resolveWorkspace(workspaces, request.params.workspaceId);
+    return cronService.listJobs(workspace.id);
+  },
+);
+
+app.post<{
+  Body: {
+    workspaceId?: string;
+    prompt?: string;
+    model?: string;
+    thinkingLevel?: string;
+    schedule?: {
+      kind?: string;
+      at?: string;
+      in?: string;
+      every?: string;
+      expression?: string;
+      timezone?: string;
+    };
+  };
+}>("/api/cron-jobs", async (request) => {
+  return cronService.createJob({
+    workspaceId: request.body?.workspaceId ?? "",
+    prompt: request.body?.prompt ?? "",
+    model: request.body?.model ?? "",
+    thinkingLevel: request.body?.thinkingLevel ?? "",
+    schedule: (request.body?.schedule ?? {}) as never,
+  });
+});
+
+app.patch<{
+  Params: { jobId: string };
+  Body: {
+    workspaceId?: string;
+    prompt?: string;
+    model?: string;
+    thinkingLevel?: string;
+    schedule?: {
+      kind?: string;
+      at?: string;
+      in?: string;
+      every?: string;
+      expression?: string;
+      timezone?: string;
+    };
+  };
+}>("/api/cron-jobs/:jobId", async (request) => {
+  return cronService.updateJob(request.params.jobId, {
+    workspaceId: request.body?.workspaceId,
+    prompt: request.body?.prompt,
+    model: request.body?.model,
+    thinkingLevel: request.body?.thinkingLevel,
+    schedule: request.body?.schedule as never,
+  });
+});
+
+app.delete<{ Params: { jobId: string } }>("/api/cron-jobs/:jobId", async (request) => {
+  return cronService.deleteJob(request.params.jobId);
+});
 
 app.post<{ Body: { workspaceId: string } }>("/api/sessions", async (request) => {
   const workspaces = await listWorkspaces(config);

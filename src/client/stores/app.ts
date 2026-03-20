@@ -3,9 +3,11 @@ import {
   abortSession,
   createSession,
   createWorkspace as createWorkspaceRequest,
+  deleteCronJob as deleteCronJobRequest,
   getBootstrap,
   getSession,
   getVersion,
+  listWorkspaceCronJobs,
   listWorkspaceSessions,
   listWorkspaces as listWorkspacesRequest,
   logout as logoutRequest,
@@ -13,6 +15,7 @@ import {
   sendPrompt,
   setSessionModel,
   setSessionThinkingLevel,
+  updateCronJob as updateCronJobRequest,
 } from "@/client/lib/api";
 import {
   readCachedBootstrap,
@@ -26,18 +29,23 @@ import { applyServerEvent } from "@/client/lib/session-events";
 import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
 import { sessionEventsPath } from "@/client/lib/session-stream";
 import { mergeSessionSummaries, toSessionSummary } from "@/client/lib/session-summary";
+import { workspaceEventsPath } from "@/client/lib/workspace-stream";
 import { uniqueWorkspaces } from "@/client/lib/workspaces";
 import type {
   AuthStatus,
   BootstrapPayload,
+  CronJob,
   ModelOption,
   ServerEvent,
   SessionState,
   SessionSummary,
+  UpdateCronJobInput,
   WorkspaceInfo,
+  WorkspaceSnapshot,
 } from "@/shared/types";
 
 let eventSource: EventSource | undefined;
+let workspaceEventSource: EventSource | undefined;
 
 const defaultAuthStatus: AuthStatus = {
   passkeyCount: 0,
@@ -45,6 +53,19 @@ const defaultAuthStatus: AuthStatus = {
   registrationOpen: false,
   setupRequired: false,
 };
+
+function compareCronJobsByNextRun(left: CronJob, right: CronJob): number {
+  if (left.state.nextRunAtMs == null && right.state.nextRunAtMs == null) {
+    return left.createdAt - right.createdAt;
+  }
+  if (left.state.nextRunAtMs == null) {
+    return 1;
+  }
+  if (right.state.nextRunAtMs == null) {
+    return -1;
+  }
+  return left.state.nextRunAtMs - right.state.nextRunAtMs;
+}
 
 export const useAppStore = defineStore("app", {
   state: () => ({
@@ -56,6 +77,7 @@ export const useAppStore = defineStore("app", {
     workspaces: [] as WorkspaceInfo[],
     models: [] as ModelOption[],
     sessionsByWorkspace: {} as Record<string, SessionSummary[]>,
+    cronJobsByWorkspace: {} as Record<string, CronJob[]>,
     activeSession: undefined as SessionState | undefined,
     selectedWorkspaceId: undefined as string | undefined,
     authError: undefined as string | undefined,
@@ -78,6 +100,13 @@ export const useAppStore = defineStore("app", {
           : [];
 
       return mergeSessionSummaries(sessions, activeSession);
+    },
+    workspaceCronJobs(state): CronJob[] {
+      if (!state.selectedWorkspaceId) {
+        return [];
+      }
+
+      return state.cronJobsByWorkspace[state.selectedWorkspaceId] ?? [];
     },
   },
   actions: {
@@ -119,10 +148,15 @@ export const useAppStore = defineStore("app", {
           : workspaces[0]?.id;
       if (payload.authenticated) {
         this.authError = undefined;
+        if (this.selectedWorkspaceId) {
+          this.openWorkspaceStream(this.selectedWorkspaceId);
+        }
       } else {
         this.activeSession = undefined;
         this.sessionsByWorkspace = {};
+        this.cronJobsByWorkspace = {};
         this.closeStream();
+        this.closeWorkspaceStream();
       }
     },
 
@@ -133,14 +167,21 @@ export const useAppStore = defineStore("app", {
     async logout(): Promise<void> {
       await logoutRequest();
       this.closeStream();
+      this.closeWorkspaceStream();
       this.authenticated = false;
       this.activeSession = undefined;
       this.sessionsByWorkspace = {};
+      this.cronJobsByWorkspace = {};
     },
 
     closeStream(): void {
       eventSource?.close();
       eventSource = undefined;
+    },
+
+    closeWorkspaceStream(): void {
+      workspaceEventSource?.close();
+      workspaceEventSource = undefined;
     },
 
     async loadWorkspaceSessions(workspaceId: string): Promise<void> {
@@ -157,8 +198,17 @@ export const useAppStore = defineStore("app", {
       };
     },
 
+    async loadWorkspaceCronJobs(workspaceId: string): Promise<void> {
+      const jobs = await listWorkspaceCronJobs(workspaceId);
+      this.cronJobsByWorkspace = {
+        ...this.cronJobsByWorkspace,
+        [workspaceId]: jobs,
+      };
+    },
+
     selectWorkspace(workspaceId: string): void {
       this.selectedWorkspaceId = workspaceId;
+      this.openWorkspaceStream(workspaceId);
       this.mobileSidebarOpen = false;
     },
 
@@ -183,8 +233,13 @@ export const useAppStore = defineStore("app", {
         ...this.sessionsByWorkspace,
         [workspace.id]: [],
       };
+      this.cronJobsByWorkspace = {
+        ...this.cronJobsByWorkspace,
+        [workspace.id]: [],
+      };
       this.selectWorkspace(workspace.id);
       await this.loadWorkspaceSessions(workspace.id);
+      await this.loadWorkspaceCronJobs(workspace.id);
       return workspace;
     },
 
@@ -243,6 +298,7 @@ export const useAppStore = defineStore("app", {
       eventSource = new EventSource(sessionEventsPath(session));
       eventSource.onopen = () => {
         this.connectionState = "online";
+        void this.checkForClientUpdate();
       };
       eventSource.onmessage = async (message) => {
         const event = JSON.parse(message.data) as ServerEvent;
@@ -260,6 +316,35 @@ export const useAppStore = defineStore("app", {
           if (cached) {
             this.activeSession = cached;
           }
+        }
+      };
+    },
+
+    openWorkspaceStream(workspaceId: string): void {
+      if (!workspaceId) {
+        this.closeWorkspaceStream();
+        return;
+      }
+
+      this.closeWorkspaceStream();
+      workspaceEventSource = new EventSource(workspaceEventsPath(workspaceId));
+      workspaceEventSource.onopen = () => {
+        void this.checkForClientUpdate();
+      };
+      workspaceEventSource.onmessage = (message) => {
+        const snapshot = JSON.parse(message.data) as WorkspaceSnapshot;
+        this.sessionsByWorkspace = {
+          ...this.sessionsByWorkspace,
+          [snapshot.workspaceId]: snapshot.sessions,
+        };
+        this.cronJobsByWorkspace = {
+          ...this.cronJobsByWorkspace,
+          [snapshot.workspaceId]: snapshot.cronJobs,
+        };
+      };
+      workspaceEventSource.onerror = () => {
+        if (!navigator.onLine) {
+          this.closeWorkspaceStream();
         }
       };
     },
@@ -335,6 +420,29 @@ export const useAppStore = defineStore("app", {
       this.activeSession = session;
       this.updateSessionSummary(session);
       await writeCachedSession(session);
+    },
+
+    async updateCronJob(jobId: string, patch: UpdateCronJobInput): Promise<CronJob> {
+      const job = await updateCronJobRequest(jobId, patch);
+      const workspaceJobs = this.cronJobsByWorkspace[job.workspaceId] ?? [];
+      this.cronJobsByWorkspace = {
+        ...this.cronJobsByWorkspace,
+        [job.workspaceId]: [
+          job,
+          ...workspaceJobs.filter((candidate) => candidate.id !== job.id),
+        ].sort(compareCronJobsByNextRun),
+      };
+      return job;
+    },
+
+    async deleteCronJob(jobId: string): Promise<CronJob> {
+      const job = await deleteCronJobRequest(jobId);
+      const workspaceJobs = this.cronJobsByWorkspace[job.workspaceId] ?? [];
+      this.cronJobsByWorkspace = {
+        ...this.cronJobsByWorkspace,
+        [job.workspaceId]: workspaceJobs.filter((candidate) => candidate.id !== job.id),
+      };
+      return job;
     },
 
     async stopActiveSession(): Promise<void> {

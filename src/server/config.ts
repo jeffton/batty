@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 import { ensureOptionsFile, stateDirPath } from "./options";
 
@@ -24,7 +25,29 @@ export function resolveBattyDir(argv = process.argv.slice(2)): string {
   return path.resolve(battyDir);
 }
 
+export function environmentFilePath(battyDir: string): string {
+  return path.join(stateDirPath(battyDir), "environment.json");
+}
+
+async function loadEnvironmentFile(battyDir: string): Promise<void> {
+  try {
+    const content = await fs.readFile(environmentFilePath(battyDir), "utf8");
+    const environment = JSON.parse(content) as Record<string, string>;
+
+    for (const [key, value] of Object.entries(environment)) {
+      process.env[key] = value;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+}
+
 export async function loadConfig(battyDir: string): Promise<AppConfig> {
+  await loadEnvironmentFile(battyDir);
+
   const selfPath = process.cwd();
   const stateDir = stateDirPath(battyDir);
   const options = await ensureOptionsFile(battyDir);

@@ -161,6 +161,20 @@ function clear(): void {
   void nextTick(syncTextareaHeight);
 }
 
+function restore(textValue: string, nextFiles: File[]): void {
+  clearDraftSaveTimeout();
+  queuedDraftSessionKey = undefined;
+  queuedDraftText = "";
+  text.value = textValue;
+  files.value = [...nextFiles];
+  resetFileInput();
+  if (props.sessionKey) {
+    writeSessionDraft(props.sessionKey, textValue);
+    lastDraftSavedAt = Date.now();
+  }
+  void nextTick(syncTextareaHeight);
+}
+
 function submit(): void {
   if (!hasPayload.value || actionsDisabled.value) {
     return;
@@ -238,7 +252,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", updateMaxInputHeight);
 });
 
-defineExpose({ clear });
+defineExpose({ clear, restore });
 </script>
 
 <template>

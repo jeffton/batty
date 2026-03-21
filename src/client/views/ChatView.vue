@@ -27,7 +27,10 @@ const CRON_POPOVER_ANCHOR = "--chat-main-cron-anchor";
 const TRANSCRIPT_BOTTOM_THRESHOLD = 24;
 
 type TranscriptHandle = InstanceType<typeof VList>;
-type ComposerHandle = InstanceType<typeof MessageComposer>;
+type ComposerHandle = InstanceType<typeof MessageComposer> & {
+  clear: () => void;
+  restore: (text: string, files: File[]) => void;
+};
 
 const store = useAppStore();
 const composer = ref<ComposerHandle | null>(null);
@@ -277,10 +280,13 @@ async function sendPrompt(text: string, files: File[]): Promise<void> {
     return;
   }
 
+  composer.value?.clear();
   promptActionPending.value = true;
   try {
     await store.sendPrompt(text, files);
-    composer.value?.clear();
+  } catch (error) {
+    composer.value?.restore(text, files);
+    throw error;
   } finally {
     promptActionPending.value = false;
   }
@@ -291,10 +297,13 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
     return;
   }
 
+  composer.value?.clear();
   promptActionPending.value = true;
   try {
     await store.steerPrompt(text, files);
-    composer.value?.clear();
+  } catch (error) {
+    composer.value?.restore(text, files);
+    throw error;
   } finally {
     promptActionPending.value = false;
   }

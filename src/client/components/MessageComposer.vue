@@ -272,7 +272,6 @@ defineExpose({ clear });
         class="composer__input"
         rows="1"
         :disabled="props.disabled"
-        :placeholder="props.offline ? 'Offline — your draft is safe here.' : 'Message Batty…'"
         @focus="inputFocused = true"
         @blur="inputFocused = false"
         @input="syncTextareaHeight"

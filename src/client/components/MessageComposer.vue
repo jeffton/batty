@@ -264,9 +264,7 @@ defineExpose({ clear, restore });
     @drop="onDrop"
   >
     <div class="composer__inner">
-      <p v-if="props.offline" class="composer__notice muted">
-        Offline — sending, queueing, and attachments are disabled. Draft saved locally.
-      </p>
+      <p v-if="props.offline" class="composer__notice">Offline. Draft saved locally</p>
 
       <div v-if="files.length > 0" class="composer__attachments">
         <button
@@ -380,6 +378,10 @@ defineExpose({ clear, restore });
 
 .composer__notice {
   margin: 0;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.45rem;
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
   font-size: 0.82rem;
 }
 

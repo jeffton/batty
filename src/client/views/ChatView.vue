@@ -27,8 +27,10 @@ const CRON_POPOVER_ANCHOR = "--chat-main-cron-anchor";
 const TRANSCRIPT_BOTTOM_THRESHOLD = 24;
 
 type TranscriptHandle = InstanceType<typeof VList>;
+type ComposerHandle = InstanceType<typeof MessageComposer>;
 
 const store = useAppStore();
+const composer = ref<ComposerHandle | null>(null);
 const transcript = ref<TranscriptHandle | null>(null);
 const isTranscriptPinnedToBottom = ref(true);
 const thinkingOptions = computed(() => resolveThinkingOptions(store.activeSession, store.models));
@@ -91,6 +93,23 @@ const activeToolsSignature = computed(() =>
         )}`,
     )
     .join("|"),
+);
+const promptActionPending = ref(false);
+const isOffline = computed(() => store.connectionState === "offline");
+const selectedWorkspaceLoading = computed(() => {
+  const workspaceId = store.selectedWorkspaceId;
+  if (!workspaceId) {
+    return false;
+  }
+
+  return Boolean(
+    store.loadingWorkspaceSessions[workspaceId] || store.loadingWorkspaceCronJobs[workspaceId],
+  );
+});
+const workspaceSwitcherLoading = computed(() =>
+  Boolean(
+    store.routeLoadingWorkspaceId || store.routeLoadingSessionId || selectedWorkspaceLoading.value,
+  ),
 );
 const connectionDescription = computed(() => {
   switch (store.connectionState) {
@@ -253,6 +272,34 @@ function setThinkingLevel(level: string): void {
   void store.setThinkingLevel(level);
 }
 
+async function sendPrompt(text: string, files: File[]): Promise<void> {
+  if (promptActionPending.value) {
+    return;
+  }
+
+  promptActionPending.value = true;
+  try {
+    await store.sendPrompt(text, files);
+    composer.value?.clear();
+  } finally {
+    promptActionPending.value = false;
+  }
+}
+
+async function steerPrompt(text: string, files: File[]): Promise<void> {
+  if (promptActionPending.value) {
+    return;
+  }
+
+  promptActionPending.value = true;
+  try {
+    await store.steerPrompt(text, files);
+    composer.value?.clear();
+  } finally {
+    promptActionPending.value = false;
+  }
+}
+
 onMounted(() => {
   window.addEventListener("resize", updateTranscriptPinnedState);
 });
@@ -300,7 +347,12 @@ watch(
           <span class="header__ws-name">{{ store.selectedWorkspace?.label || "Batty" }}</span>
           <span class="header__ws-path">{{ store.activeSession?.cwd || "Select workspace" }}</span>
         </div>
-        <ChevronDown :size="14" class="header__chevron" />
+        <LoaderCircle
+          v-if="workspaceSwitcherLoading"
+          :size="14"
+          class="header__chevron header__status-icon--spin"
+        />
+        <ChevronDown v-else :size="14" class="header__chevron" />
       </button>
 
       <WorkspacePopover
@@ -408,9 +460,14 @@ watch(
       </VList>
 
       <MessageComposer
+        ref="composer"
         :streaming="store.activeSession.isStreaming"
-        @submit="(text, files) => store.sendPrompt(text, files)"
-        @steer="(text, files) => store.steerPrompt(text, files)"
+        :session-key="store.activeSession.sessionId"
+        :offline="isOffline"
+        :actions-disabled="isOffline"
+        :action-pending="promptActionPending"
+        @submit="sendPrompt"
+        @steer="steerPrompt"
         @stop="store.stopActiveSession"
       />
     </template>

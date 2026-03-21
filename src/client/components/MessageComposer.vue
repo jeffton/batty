@@ -1,10 +1,24 @@
 <script setup lang="ts">
-import { Compass, ListOrdered, Paperclip, SendHorizontal, Square } from "lucide-vue-next";
+import {
+  Compass,
+  ListOrdered,
+  LoaderCircle,
+  Paperclip,
+  SendHorizontal,
+  Square,
+} from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { clearSessionDraft, readSessionDraft, writeSessionDraft } from "@/client/lib/session-draft";
+
+const DRAFT_SAVE_INTERVAL_MS = 400;
 
 const props = defineProps<{
   disabled?: boolean;
+  actionsDisabled?: boolean;
+  actionPending?: boolean;
   streaming?: boolean;
+  offline?: boolean;
+  sessionKey?: string;
 }>();
 
 const emit = defineEmits<{
@@ -19,12 +33,82 @@ const textarea = ref<HTMLTextAreaElement>();
 const files = ref<File[]>([]);
 const dragging = ref(false);
 const maxInputHeight = ref(240);
-
-const hasPayload = computed(() => text.value.trim().length > 0 || files.value.length > 0);
 const inputFocused = ref(false);
+const actionsDisabled = computed(() =>
+  Boolean(props.disabled || props.actionsDisabled || props.actionPending),
+);
+const hasPayload = computed(() => text.value.trim().length > 0 || files.value.length > 0);
+
+let draftSaveTimeout: number | undefined;
+let queuedDraftSessionKey: string | undefined;
+let queuedDraftText = "";
+let lastDraftSavedAt = 0;
+let hydratingDraft = false;
+
+function clearDraftSaveTimeout(): void {
+  if (draftSaveTimeout == null) {
+    return;
+  }
+
+  window.clearTimeout(draftSaveTimeout);
+  draftSaveTimeout = undefined;
+}
+
+function persistDraft(sessionKey: string, draftText: string): void {
+  clearDraftSaveTimeout();
+  queuedDraftSessionKey = undefined;
+  queuedDraftText = "";
+  writeSessionDraft(sessionKey, draftText);
+  lastDraftSavedAt = Date.now();
+}
+
+function flushDraftSave(): void {
+  if (!queuedDraftSessionKey) {
+    clearDraftSaveTimeout();
+    return;
+  }
+
+  persistDraft(queuedDraftSessionKey, queuedDraftText);
+}
+
+function scheduleDraftSave(): void {
+  const sessionKey = props.sessionKey;
+  if (!sessionKey) {
+    return;
+  }
+
+  const draftText = text.value;
+  const now = Date.now();
+  const elapsed = now - lastDraftSavedAt;
+
+  if (elapsed >= DRAFT_SAVE_INTERVAL_MS) {
+    persistDraft(sessionKey, draftText);
+    return;
+  }
+
+  queuedDraftSessionKey = sessionKey;
+  queuedDraftText = draftText;
+  clearDraftSaveTimeout();
+  draftSaveTimeout = window.setTimeout(() => {
+    if (queuedDraftSessionKey) {
+      persistDraft(queuedDraftSessionKey, queuedDraftText);
+    }
+  }, DRAFT_SAVE_INTERVAL_MS - elapsed);
+}
+
+function resetFileInput(): void {
+  if (fileInput.value) {
+    fileInput.value.value = "";
+  }
+}
 
 function addFiles(next: FileList | File[]): void {
+  if (actionsDisabled.value) {
+    return;
+  }
+
   files.value = [...files.value, ...Array.from(next)];
+  resetFileInput();
 }
 
 function removeFile(index: number): void {
@@ -53,34 +137,54 @@ function updateMaxInputHeight(): void {
   syncTextareaHeight();
 }
 
+function loadDraft(sessionKey?: string): void {
+  hydratingDraft = true;
+  text.value = sessionKey ? readSessionDraft(sessionKey) : "";
+  files.value = [];
+  resetFileInput();
+  void nextTick(() => {
+    hydratingDraft = false;
+    syncTextareaHeight();
+  });
+}
+
 function clear(): void {
+  clearDraftSaveTimeout();
+  queuedDraftSessionKey = undefined;
+  queuedDraftText = "";
+  if (props.sessionKey) {
+    clearSessionDraft(props.sessionKey);
+  }
   text.value = "";
   files.value = [];
+  resetFileInput();
   void nextTick(syncTextareaHeight);
 }
 
 function submit(): void {
-  if (!hasPayload.value || props.disabled) {
+  if (!hasPayload.value || actionsDisabled.value) {
     return;
   }
-  emit("submit", text.value, files.value);
-  clear();
+
+  emit("submit", text.value, [...files.value]);
 }
 
 function steer(): void {
-  if (!hasPayload.value || props.disabled) {
+  if (!hasPayload.value || actionsDisabled.value) {
     return;
   }
-  emit("steer", text.value, files.value);
-  clear();
+
+  emit("steer", text.value, [...files.value]);
 }
 
 function onDrop(event: DragEvent): void {
   event.preventDefault();
   dragging.value = false;
-  if (event.dataTransfer?.files?.length) {
-    addFiles(event.dataTransfer.files);
+  if (actionsDisabled.value || !event.dataTransfer?.files?.length) {
+    return;
   }
+
+  addFiles(event.dataTransfer.files);
 }
 
 function onTextareaKeydown(event: KeyboardEvent): void {
@@ -96,7 +200,31 @@ function onTextareaKeydown(event: KeyboardEvent): void {
   submit();
 }
 
+function openFilePicker(): void {
+  if (actionsDisabled.value) {
+    return;
+  }
+
+  fileInput.value?.click();
+}
+
+function onFileInputChange(event: Event): void {
+  addFiles((event.target as HTMLInputElement).files || []);
+}
+
+watch(
+  () => props.sessionKey,
+  (sessionKey) => {
+    flushDraftSave();
+    loadDraft(sessionKey);
+  },
+  { immediate: true },
+);
+
 watch(text, () => {
+  if (!hydratingDraft) {
+    scheduleDraftSave();
+  }
   void nextTick(syncTextareaHeight);
 });
 
@@ -106,8 +234,11 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  flushDraftSave();
   window.removeEventListener("resize", updateMaxInputHeight);
 });
+
+defineExpose({ clear });
 </script>
 
 <template>
@@ -119,11 +250,16 @@ onBeforeUnmount(() => {
     @drop="onDrop"
   >
     <div class="composer__inner">
+      <p v-if="props.offline" class="composer__notice muted">
+        Offline — sending, queueing, and attachments are disabled. Draft saved locally.
+      </p>
+
       <div v-if="files.length > 0" class="composer__attachments">
         <button
           v-for="(file, index) in files"
           :key="`${file.name}-${index}`"
           class="composer__chip"
+          :disabled="props.disabled || props.actionPending"
           @click="removeFile(index)"
         >
           {{ file.name }} ×
@@ -136,6 +272,7 @@ onBeforeUnmount(() => {
         class="composer__input"
         rows="1"
         :disabled="props.disabled"
+        :placeholder="props.offline ? 'Offline — your draft is safe here.' : 'Message Batty…'"
         @focus="inputFocused = true"
         @blur="inputFocused = false"
         @input="syncTextareaHeight"
@@ -148,7 +285,8 @@ onBeforeUnmount(() => {
           type="button"
           aria-label="Add files"
           title="Add files"
-          @click="fileInput?.click()"
+          :disabled="actionsDisabled"
+          @click="openFilePicker"
         >
           <Paperclip :size="18" />
         </button>
@@ -173,20 +311,22 @@ onBeforeUnmount(() => {
             type="button"
             aria-label="Steer prompt"
             title="Steer prompt"
-            :disabled="!hasPayload || props.disabled"
+            :disabled="!hasPayload || actionsDisabled"
             @click="steer"
           >
-            <Compass :size="18" />
+            <LoaderCircle v-if="props.actionPending" :size="18" class="composer__spin-icon" />
+            <Compass v-else :size="18" />
           </button>
           <button
             class="composer__icon-button composer__send"
             type="button"
             :aria-label="props.streaming ? 'Queue prompt' : 'Send prompt'"
             :title="props.streaming ? 'Queue prompt' : 'Send prompt'"
-            :disabled="!hasPayload || props.disabled"
+            :disabled="!hasPayload || actionsDisabled"
             @click="submit"
           >
-            <ListOrdered v-if="props.streaming" :size="18" />
+            <LoaderCircle v-if="props.actionPending" :size="18" class="composer__spin-icon" />
+            <ListOrdered v-else-if="props.streaming" :size="18" />
             <SendHorizontal v-else :size="18" />
           </button>
         </div>
@@ -198,7 +338,8 @@ onBeforeUnmount(() => {
       hidden
       type="file"
       multiple
-      @change="addFiles(($event.target as HTMLInputElement).files || [])"
+      :disabled="actionsDisabled"
+      @change="onFileInputChange"
     />
   </div>
 </template>
@@ -224,6 +365,11 @@ onBeforeUnmount(() => {
   gap: 0.4rem;
 }
 
+.composer__notice {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
 .composer__attachments {
   display: flex;
   flex-wrap: wrap;
@@ -240,8 +386,12 @@ onBeforeUnmount(() => {
   transition: background 80ms ease;
 }
 
-.composer__chip:hover {
+.composer__chip:hover:not(:disabled) {
   background: var(--color-border-soft);
+}
+
+.composer__chip:disabled {
+  opacity: 0.5;
 }
 
 .composer__input {
@@ -331,5 +481,15 @@ onBeforeUnmount(() => {
   width: 1rem;
   height: 1rem;
   border-width: 2px;
+}
+
+.composer__spin-icon {
+  animation: composer-spin 0.85s linear infinite;
+}
+
+@keyframes composer-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

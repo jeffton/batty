@@ -83,6 +83,10 @@ export const useAppStore = defineStore("app", {
     authError: undefined as string | undefined,
     lastError: undefined as string | undefined,
     mobileSidebarOpen: false,
+    routeLoadingWorkspaceId: undefined as string | undefined,
+    routeLoadingSessionId: undefined as string | undefined,
+    loadingWorkspaceSessions: {} as Record<string, boolean>,
+    loadingWorkspaceCronJobs: {} as Record<string, boolean>,
   }),
   getters: {
     selectedWorkspace(state): WorkspaceInfo | undefined {
@@ -122,8 +126,9 @@ export const useAppStore = defineStore("app", {
       } catch (error) {
         const cached = await readCachedBootstrap();
         if (cached) {
-          this.applyBootstrap(cached);
           this.connectionState = "offline";
+          this.applyBootstrap(cached);
+          this.closeWorkspaceStream();
           this.lastError = error instanceof Error ? error.message : String(error);
         } else {
           throw error;
@@ -148,7 +153,7 @@ export const useAppStore = defineStore("app", {
           : workspaces[0]?.id;
       if (payload.authenticated) {
         this.authError = undefined;
-        if (this.selectedWorkspaceId) {
+        if (this.selectedWorkspaceId && this.connectionState !== "offline") {
           this.openWorkspaceStream(this.selectedWorkspaceId);
         }
       } else {
@@ -185,30 +190,58 @@ export const useAppStore = defineStore("app", {
     },
 
     async loadWorkspaceSessions(workspaceId: string): Promise<void> {
-      const sessions = await listWorkspaceSessions(workspaceId);
-      const existing = this.sessionsByWorkspace[workspaceId] ?? [];
-      const activeSession =
-        this.activeSession?.workspaceId === workspaceId && this.activeSession.path
-          ? [toSessionSummary(this.activeSession)]
-          : [];
-
-      this.sessionsByWorkspace = {
-        ...this.sessionsByWorkspace,
-        [workspaceId]: mergeSessionSummaries(sessions, existing, activeSession),
+      this.loadingWorkspaceSessions = {
+        ...this.loadingWorkspaceSessions,
+        [workspaceId]: true,
       };
+
+      try {
+        const sessions = await listWorkspaceSessions(workspaceId);
+        const existing = this.sessionsByWorkspace[workspaceId] ?? [];
+        const activeSession =
+          this.activeSession?.workspaceId === workspaceId && this.activeSession.path
+            ? [toSessionSummary(this.activeSession)]
+            : [];
+
+        this.sessionsByWorkspace = {
+          ...this.sessionsByWorkspace,
+          [workspaceId]: mergeSessionSummaries(sessions, existing, activeSession),
+        };
+      } finally {
+        this.loadingWorkspaceSessions = {
+          ...this.loadingWorkspaceSessions,
+          [workspaceId]: false,
+        };
+      }
     },
 
     async loadWorkspaceCronJobs(workspaceId: string): Promise<void> {
-      const jobs = await listWorkspaceCronJobs(workspaceId);
-      this.cronJobsByWorkspace = {
-        ...this.cronJobsByWorkspace,
-        [workspaceId]: jobs,
+      this.loadingWorkspaceCronJobs = {
+        ...this.loadingWorkspaceCronJobs,
+        [workspaceId]: true,
       };
+
+      try {
+        const jobs = await listWorkspaceCronJobs(workspaceId);
+        this.cronJobsByWorkspace = {
+          ...this.cronJobsByWorkspace,
+          [workspaceId]: jobs,
+        };
+      } finally {
+        this.loadingWorkspaceCronJobs = {
+          ...this.loadingWorkspaceCronJobs,
+          [workspaceId]: false,
+        };
+      }
     },
 
     selectWorkspace(workspaceId: string): void {
       this.selectedWorkspaceId = workspaceId;
-      this.openWorkspaceStream(workspaceId);
+      if (this.connectionState === "offline") {
+        this.closeWorkspaceStream();
+      } else {
+        this.openWorkspaceStream(workspaceId);
+      }
       this.mobileSidebarOpen = false;
     },
 
@@ -277,12 +310,21 @@ export const useAppStore = defineStore("app", {
       }
     },
 
-    async selectSession(session: SessionState): Promise<void> {
+    async selectSession(
+      session: SessionState,
+      options: { openStream?: boolean } = {},
+    ): Promise<void> {
+      const { openStream = true } = options;
+
       this.activeSession = session;
       this.selectedWorkspaceId = session.workspaceId;
       this.updateSessionSummary(session);
       await writeCachedSession(session);
-      this.openStream(session);
+      if (openStream) {
+        this.openStream(session);
+      } else {
+        this.closeStream();
+      }
       this.mobileSidebarOpen = false;
     },
 
@@ -290,6 +332,16 @@ export const useAppStore = defineStore("app", {
       this.closeStream();
       this.activeSession = undefined;
       this.mobileSidebarOpen = false;
+    },
+
+    setRouteLoading(workspaceId?: string, sessionId?: string): void {
+      this.routeLoadingWorkspaceId = workspaceId;
+      this.routeLoadingSessionId = sessionId;
+    },
+
+    clearRouteLoading(): void {
+      this.routeLoadingWorkspaceId = undefined;
+      this.routeLoadingSessionId = undefined;
     },
 
     openStream(session: Pick<SessionState, "id" | "sessionId" | "workspaceId" | "path">): void {
@@ -472,6 +524,12 @@ export const useAppStore = defineStore("app", {
 
     markOnline(): void {
       this.connectionState = "online";
+      if (this.selectedWorkspaceId) {
+        this.openWorkspaceStream(this.selectedWorkspaceId);
+      }
+      if (this.activeSession) {
+        this.openStream(this.activeSession);
+      }
     },
   },
 });

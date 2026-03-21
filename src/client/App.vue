@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { readCachedSession } from "@/client/lib/cache";
 import { workspaceRoutePath } from "@/client/lib/routes";
 import { useAppStore } from "@/client/stores/app";
 
@@ -32,6 +33,30 @@ function fallbackWorkspaceRoute(): string | undefined {
   return workspaceId ? workspaceRoutePath(workspaceId) : undefined;
 }
 
+async function hydrateRouteFromCache(workspaceId: string, sessionId?: string): Promise<boolean> {
+  if (!sessionId) {
+    if (store.activeSession) {
+      store.clearActiveSession();
+    }
+    return true;
+  }
+
+  const activeSessionMatches =
+    store.activeSession?.workspaceId === workspaceId && store.activeSession.sessionId === sessionId;
+  if (activeSessionMatches) {
+    return true;
+  }
+
+  const cached = await readCachedSession(sessionId);
+  if (!cached || cached.workspaceId !== workspaceId) {
+    store.clearActiveSession();
+    return false;
+  }
+
+  await store.selectSession(cached, { openStream: false });
+  return true;
+}
+
 async function syncRouteToStore(): Promise<void> {
   const version = ++syncVersion;
 
@@ -40,6 +65,7 @@ async function syncRouteToStore(): Promise<void> {
   }
 
   if (!store.authenticated) {
+    store.clearRouteLoading();
     if (route.path !== "/login") {
       await router.replace("/login");
     }
@@ -47,6 +73,7 @@ async function syncRouteToStore(): Promise<void> {
   }
 
   if (route.path === "/login") {
+    store.clearRouteLoading();
     const fallback = fallbackWorkspaceRoute();
     if (fallback) {
       await router.replace(fallback);
@@ -57,6 +84,7 @@ async function syncRouteToStore(): Promise<void> {
   const workspaceId =
     typeof route.params.workspaceId === "string" ? route.params.workspaceId : undefined;
   if (!workspaceId) {
+    store.clearRouteLoading();
     const fallback = fallbackWorkspaceRoute();
     if (fallback) {
       await router.replace(fallback);
@@ -65,6 +93,7 @@ async function syncRouteToStore(): Promise<void> {
   }
 
   if (!store.workspaces.some((workspace) => workspace.id === workspaceId)) {
+    store.clearRouteLoading();
     const fallback = fallbackWorkspaceRoute();
     if (fallback) {
       await router.replace(fallback);
@@ -72,44 +101,81 @@ async function syncRouteToStore(): Promise<void> {
     return;
   }
 
-  if (store.selectedWorkspaceId !== workspaceId) {
-    store.selectWorkspace(workspaceId);
-  }
-
-  await Promise.all([
-    store.loadWorkspaceSessions(workspaceId),
-    store.loadWorkspaceCronJobs(workspaceId),
-  ]);
-  if (version !== syncVersion) {
-    return;
-  }
-
   const sessionId = typeof route.params.sessionId === "string" ? route.params.sessionId : undefined;
-  if (!sessionId) {
-    if (store.activeSession) {
-      store.clearActiveSession();
-    }
-    return;
-  }
-
-  const activeSessionMatches =
-    store.activeSession?.workspaceId === workspaceId && store.activeSession.sessionId === sessionId;
-  if (activeSessionMatches) {
-    return;
-  }
-
-  const session = (store.sessionsByWorkspace[workspaceId] ?? []).find(
-    (candidate) => candidate.sessionId === sessionId,
-  );
-  if (!session?.path) {
-    await router.replace(workspaceRoutePath(workspaceId));
-    return;
-  }
+  store.setRouteLoading(workspaceId, sessionId);
 
   try {
-    await store.resumeSession(workspaceId, session.path);
-  } catch {
-    await router.replace(workspaceRoutePath(workspaceId));
+    if (store.selectedWorkspaceId !== workspaceId) {
+      store.selectWorkspace(workspaceId);
+    }
+
+    if (store.connectionState === "offline") {
+      const hydrated = await hydrateRouteFromCache(workspaceId, sessionId);
+      if (!hydrated) {
+        await router.replace(workspaceRoutePath(workspaceId));
+      }
+      return;
+    }
+
+    try {
+      await Promise.all([
+        store.loadWorkspaceSessions(workspaceId),
+        store.loadWorkspaceCronJobs(workspaceId),
+      ]);
+    } catch (error) {
+      if (!navigator.onLine || store.connectionState === "offline") {
+        store.markOffline();
+        const hydrated = await hydrateRouteFromCache(workspaceId, sessionId);
+        if (!hydrated) {
+          await router.replace(workspaceRoutePath(workspaceId));
+        }
+        return;
+      }
+
+      throw error;
+    }
+
+    if (version !== syncVersion) {
+      return;
+    }
+
+    if (!sessionId) {
+      if (store.activeSession) {
+        store.clearActiveSession();
+      }
+      return;
+    }
+
+    const activeSessionMatches =
+      store.activeSession?.workspaceId === workspaceId &&
+      store.activeSession.sessionId === sessionId;
+    if (activeSessionMatches) {
+      return;
+    }
+
+    const session = (store.sessionsByWorkspace[workspaceId] ?? []).find(
+      (candidate) => candidate.sessionId === sessionId,
+    );
+    if (!session?.path) {
+      const hydrated = await hydrateRouteFromCache(workspaceId, sessionId);
+      if (!hydrated) {
+        await router.replace(workspaceRoutePath(workspaceId));
+      }
+      return;
+    }
+
+    try {
+      await store.resumeSession(workspaceId, session.path);
+    } catch {
+      const hydrated = await hydrateRouteFromCache(workspaceId, sessionId);
+      if (!hydrated) {
+        await router.replace(workspaceRoutePath(workspaceId));
+      }
+    }
+  } finally {
+    if (version === syncVersion) {
+      store.clearRouteLoading();
+    }
   }
 }
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { LoaderCircle } from "lucide-vue-next";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { formatShortDateTime } from "@/client/lib/formatting";
@@ -16,6 +17,10 @@ const createWorkspaceOpen = ref(false);
 const createWorkspaceName = ref("");
 const createWorkspaceError = ref("");
 const creatingWorkspace = ref(false);
+const switchingWorkspaceId = ref<string>();
+const startingSession = ref(false);
+const openingSessionId = ref<string>();
+const isOffline = computed(() => store.connectionState === "offline");
 
 function sessionLabel(session: SessionSummary): string {
   return (session.name || session.firstMessage || "Untitled session").replace(/\s+/g, " ").trim();
@@ -28,6 +33,10 @@ function resetCreateWorkspaceForm(): void {
 }
 
 async function openCreateWorkspaceForm(): Promise<void> {
+  if (isOffline.value) {
+    return;
+  }
+
   createWorkspaceOpen.value = true;
   createWorkspaceError.value = "";
   await nextTick();
@@ -35,6 +44,10 @@ async function openCreateWorkspaceForm(): Promise<void> {
 }
 
 async function submitCreateWorkspace(): Promise<void> {
+  if (isOffline.value) {
+    return;
+  }
+
   const name = createWorkspaceName.value.trim();
 
   if (!name) {
@@ -68,20 +81,43 @@ async function scrollSessionsToTop(): Promise<void> {
 }
 
 async function openWorkspace(workspaceId: string): Promise<void> {
-  await router.push(workspaceRoutePath(workspaceId));
-}
-
-async function startSession(): Promise<void> {
-  if (!store.selectedWorkspaceId) {
+  if (isOffline.value || switchingWorkspaceId.value === workspaceId) {
     return;
   }
 
-  const session = await store.startSession(store.selectedWorkspaceId);
-  await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
+  switchingWorkspaceId.value = workspaceId;
+  try {
+    await router.push(workspaceRoutePath(workspaceId));
+  } finally {
+    switchingWorkspaceId.value = undefined;
+  }
+}
+
+async function startSession(): Promise<void> {
+  if (!store.selectedWorkspaceId || isOffline.value || startingSession.value) {
+    return;
+  }
+
+  startingSession.value = true;
+  try {
+    const session = await store.startSession(store.selectedWorkspaceId);
+    await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
+  } finally {
+    startingSession.value = false;
+  }
 }
 
 async function openSession(session: SessionSummary): Promise<void> {
-  await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
+  if (isOffline.value || openingSessionId.value === session.sessionId) {
+    return;
+  }
+
+  openingSessionId.value = session.sessionId;
+  try {
+    await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
+  } finally {
+    openingSessionId.value = undefined;
+  }
 }
 
 watch(
@@ -117,6 +153,10 @@ onMounted(() => {
       <button class="sidebar__action sidebar__action--logout" @click="store.logout">Logout</button>
     </div>
 
+    <p v-if="isOffline" class="sidebar__notice">
+      Offline — workspace and session actions are disabled.
+    </p>
+
     <section class="sidebar__section">
       <div class="sidebar__section-title">Workspaces</div>
 
@@ -131,10 +171,11 @@ onMounted(() => {
           class="sidebar__workspace-input"
           type="text"
           placeholder="workspace-name"
-          :disabled="creatingWorkspace"
+          :disabled="creatingWorkspace || isOffline"
         />
         <div class="sidebar__workspace-form-actions">
-          <button class="sidebar__action" type="submit" :disabled="creatingWorkspace">
+          <button class="sidebar__action" type="submit" :disabled="creatingWorkspace || isOffline">
+            <LoaderCircle v-if="creatingWorkspace" :size="14" class="sidebar__spinner" />
             {{ creatingWorkspace ? "Creating…" : "Create workspace" }}
           </button>
           <button
@@ -153,6 +194,7 @@ onMounted(() => {
         <button
           v-if="!createWorkspaceOpen"
           class="sidebar__action sidebar__action--secondary"
+          :disabled="isOffline"
           @click="openCreateWorkspaceForm"
         >
           + New workspace
@@ -166,9 +208,20 @@ onMounted(() => {
           'sidebar__workspace',
           workspace.id === store.selectedWorkspaceId ? 'is-active' : '',
         ]"
+        :disabled="isOffline"
         @click="openWorkspace(workspace.id)"
       >
-        <strong>{{ workspace.label }}</strong>
+        <strong class="sidebar__item-title">
+          <span>{{ workspace.label }}</span>
+          <LoaderCircle
+            v-if="
+              switchingWorkspaceId === workspace.id ||
+              store.routeLoadingWorkspaceId === workspace.id
+            "
+            :size="14"
+            class="sidebar__spinner"
+          />
+        </strong>
         <span class="muted">{{ workspace.path }}</span>
       </button>
     </section>
@@ -177,8 +230,14 @@ onMounted(() => {
       <div class="sidebar__section-title">Sessions</div>
 
       <div class="sidebar__actions">
-        <button v-if="store.selectedWorkspaceId" class="sidebar__action" @click="startSession">
-          + New session
+        <button
+          v-if="store.selectedWorkspaceId"
+          class="sidebar__action"
+          :disabled="isOffline || startingSession"
+          @click="startSession"
+        >
+          <LoaderCircle v-if="startingSession" :size="14" class="sidebar__spinner" />
+          {{ startingSession ? "Starting…" : "+ New session" }}
         </button>
       </div>
 
@@ -190,9 +249,20 @@ onMounted(() => {
             'sidebar__session',
             session.sessionId === store.activeSession?.sessionId ? 'is-active' : '',
           ]"
+          :disabled="isOffline"
           @click="openSession(session)"
         >
-          <strong class="sidebar__session-title">{{ sessionLabel(session) }}</strong>
+          <strong class="sidebar__session-title sidebar__item-title">
+            <span>{{ sessionLabel(session) }}</span>
+            <LoaderCircle
+              v-if="
+                openingSessionId === session.sessionId ||
+                store.routeLoadingSessionId === session.sessionId
+              "
+              :size="14"
+              class="sidebar__spinner"
+            />
+          </strong>
           <span class="muted">{{ formatShortDateTime(session.updatedAt) }}</span>
         </button>
         <div v-if="sessions.length === 0" class="muted">No sessions yet.</div>
@@ -246,6 +316,15 @@ onMounted(() => {
   background: transparent;
   color: var(--color-text-strong);
   font-size: 1rem;
+}
+
+.sidebar__notice {
+  margin: 0;
+  padding: 0.55rem 0.65rem;
+  border-radius: 0.45rem;
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+  font-size: 0.82rem;
 }
 
 .sidebar__section {
@@ -302,6 +381,13 @@ onMounted(() => {
   font-size: 0.88rem;
 }
 
+.sidebar__action:disabled,
+.sidebar__workspace:disabled,
+.sidebar__session:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .sidebar__action--secondary {
   background: var(--color-bg-elevated-soft);
 }
@@ -346,6 +432,13 @@ onMounted(() => {
   white-space: nowrap;
 }
 
+.sidebar__item-title {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
 .sidebar__workspace span,
 .sidebar__session span {
   overflow: hidden;
@@ -370,6 +463,17 @@ onMounted(() => {
   background: transparent;
   border-left-color: var(--color-border-accent);
   color: var(--color-text-strong);
+}
+
+.sidebar__spinner {
+  flex-shrink: 0;
+  animation: sidebar-spin 0.85s linear infinite;
+}
+
+@keyframes sidebar-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 900px) {

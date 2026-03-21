@@ -109,6 +109,14 @@ async function syncRouteToStore(): Promise<void> {
       store.selectWorkspace(workspaceId);
     }
 
+    const activeSessionMatchesTarget =
+      sessionId != null &&
+      store.activeSession?.workspaceId === workspaceId &&
+      store.activeSession.sessionId === sessionId;
+    if (sessionId && !activeSessionMatchesTarget && store.activeSession) {
+      store.clearActiveSession();
+    }
+
     if (store.connectionState === "offline") {
       const hydrated = await hydrateRouteFromCache(workspaceId, sessionId);
       if (!hydrated) {

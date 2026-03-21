@@ -110,10 +110,9 @@ const selectedWorkspaceLoading = computed(() => {
   );
 });
 const workspaceSwitcherLoading = computed(() =>
-  Boolean(
-    store.routeLoadingWorkspaceId || store.routeLoadingSessionId || selectedWorkspaceLoading.value,
-  ),
+  Boolean(store.routeLoadingWorkspaceId || selectedWorkspaceLoading.value),
 );
+const sessionLoading = computed(() => Boolean(store.routeLoadingSessionId));
 const connectionDescription = computed(() => {
   switch (store.connectionState) {
     case "online":
@@ -444,7 +443,12 @@ watch(
       </span>
     </header>
 
-    <div v-if="!store.activeSession" class="chat-empty">
+    <div v-if="!store.activeSession && sessionLoading" class="chat-loading">
+      <div class="spinner" />
+      <p class="muted">Loading session…</p>
+    </div>
+
+    <div v-else-if="!store.activeSession" class="chat-empty">
       <img src="/favicon.png" alt="Batty" class="chat-empty__icon" />
       <h3>No active session</h3>
       <p class="muted">Pick a workspace and start a session.</p>
@@ -704,6 +708,7 @@ watch(
   }
 }
 
+.chat-loading,
 .chat-empty {
   display: flex;
   flex-direction: column;

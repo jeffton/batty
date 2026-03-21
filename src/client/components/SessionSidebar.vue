@@ -252,17 +252,7 @@ onMounted(() => {
           :disabled="isOffline"
           @click="openSession(session)"
         >
-          <strong class="sidebar__session-title sidebar__item-title">
-            <span>{{ sessionLabel(session) }}</span>
-            <LoaderCircle
-              v-if="
-                openingSessionId === session.sessionId ||
-                store.routeLoadingSessionId === session.sessionId
-              "
-              :size="14"
-              class="sidebar__spinner"
-            />
-          </strong>
+          <strong class="sidebar__session-title">{{ sessionLabel(session) }}</strong>
           <span class="muted">{{ formatShortDateTime(session.updatedAt) }}</span>
         </button>
         <div v-if="sessions.length === 0" class="muted">No sessions yet.</div>

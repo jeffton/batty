@@ -281,17 +281,7 @@ watch(
             :disabled="isOffline"
             @click="openSession(session)"
           >
-            <span class="ws-popover__item-main">
-              <span class="ws-popover__item-label">{{ sessionLabel(session) }}</span>
-              <LoaderCircle
-                v-if="
-                  openingSessionId === session.sessionId ||
-                  store.routeLoadingSessionId === session.sessionId
-                "
-                :size="14"
-                class="ws-popover__spinner"
-              />
-            </span>
+            <span class="ws-popover__item-label">{{ sessionLabel(session) }}</span>
             <span class="ws-popover__item-meta">{{ formatShortDateTime(session.updatedAt) }}</span>
           </button>
           <div v-if="filteredSessions.length === 0" class="ws-popover__empty">No sessions yet.</div>

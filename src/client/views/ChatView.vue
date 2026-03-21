@@ -478,7 +478,6 @@ watch(
         :session-key="store.activeSession.sessionId"
         :offline="isOffline"
         :actions-disabled="isOffline"
-        :action-pending="promptActionPending"
         @submit="sendPrompt"
         @steer="steerPrompt"
         @stop="store.stopActiveSession"

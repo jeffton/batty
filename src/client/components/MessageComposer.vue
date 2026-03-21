@@ -1,12 +1,5 @@
 <script setup lang="ts">
-import {
-  Compass,
-  ListOrdered,
-  LoaderCircle,
-  Paperclip,
-  SendHorizontal,
-  Square,
-} from "lucide-vue-next";
+import { Compass, ListOrdered, Paperclip, SendHorizontal, Square } from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { clearSessionDraft, readSessionDraft, writeSessionDraft } from "@/client/lib/session-draft";
 
@@ -15,7 +8,6 @@ const DRAFT_SAVE_INTERVAL_MS = 400;
 const props = defineProps<{
   disabled?: boolean;
   actionsDisabled?: boolean;
-  actionPending?: boolean;
   streaming?: boolean;
   offline?: boolean;
   sessionKey?: string;
@@ -33,10 +25,7 @@ const textarea = ref<HTMLTextAreaElement>();
 const files = ref<File[]>([]);
 const dragging = ref(false);
 const maxInputHeight = ref(240);
-const inputFocused = ref(false);
-const actionsDisabled = computed(() =>
-  Boolean(props.disabled || props.actionsDisabled || props.actionPending),
-);
+const actionsDisabled = computed(() => Boolean(props.disabled || props.actionsDisabled));
 const hasPayload = computed(() => text.value.trim().length > 0 || files.value.length > 0);
 
 let draftSaveTimeout: number | undefined;
@@ -127,6 +116,13 @@ function syncTextareaHeight(): void {
   element.style.overflowY = element.scrollHeight > maxInputHeight.value ? "auto" : "hidden";
 }
 
+let lastEarlyAction:
+  | {
+      kind: "submit" | "steer" | "stop";
+      at: number;
+    }
+  | undefined;
+
 function updateMaxInputHeight(): void {
   if (typeof window === "undefined") {
     maxInputHeight.value = 240;
@@ -189,6 +185,47 @@ function steer(): void {
   }
 
   emit("steer", text.value, [...files.value]);
+}
+
+function stop(): void {
+  if (actionsDisabled.value) {
+    return;
+  }
+
+  emit("stop");
+}
+
+function runAction(kind: "submit" | "steer" | "stop"): void {
+  if (kind === "submit") {
+    submit();
+    return;
+  }
+
+  if (kind === "steer") {
+    steer();
+    return;
+  }
+
+  stop();
+}
+
+function triggerActionEarly(kind: "submit" | "steer" | "stop", event: PointerEvent): void {
+  if (event.pointerType === "mouse") {
+    return;
+  }
+
+  event.preventDefault();
+  lastEarlyAction = { kind, at: Date.now() };
+  runAction(kind);
+}
+
+function triggerActionClick(kind: "submit" | "steer" | "stop"): void {
+  if (lastEarlyAction?.kind === kind && Date.now() - lastEarlyAction.at < 1000) {
+    lastEarlyAction = undefined;
+    return;
+  }
+
+  runAction(kind);
 }
 
 function onDrop(event: DragEvent): void {
@@ -257,7 +294,7 @@ defineExpose({ clear, restore });
 
 <template>
   <div
-    :class="['composer', dragging ? 'is-dragging' : '', inputFocused ? 'composer--kbd' : '']"
+    :class="['composer', dragging ? 'is-dragging' : '']"
     @dragenter.prevent="dragging = true"
     @dragover.prevent
     @dragleave.prevent="dragging = false"
@@ -271,7 +308,7 @@ defineExpose({ clear, restore });
           v-for="(file, index) in files"
           :key="`${file.name}-${index}`"
           class="composer__chip"
-          :disabled="props.disabled || props.actionPending"
+          :disabled="props.disabled"
           @click="removeFile(index)"
         >
           {{ file.name }} ×
@@ -284,8 +321,6 @@ defineExpose({ clear, restore });
         class="composer__input"
         rows="1"
         :disabled="props.disabled"
-        @focus="inputFocused = true"
-        @blur="inputFocused = false"
         @input="syncTextareaHeight"
         @keydown="onTextareaKeydown"
       />
@@ -309,7 +344,8 @@ defineExpose({ clear, restore });
             type="button"
             aria-label="Stop"
             title="Stop"
-            @click="emit('stop')"
+            @pointerdown="triggerActionEarly('stop', $event)"
+            @click="triggerActionClick('stop')"
           >
             <Square :size="16" />
           </button>
@@ -323,10 +359,10 @@ defineExpose({ clear, restore });
             aria-label="Steer prompt"
             title="Steer prompt"
             :disabled="!hasPayload || actionsDisabled"
-            @click="steer"
+            @pointerdown="triggerActionEarly('steer', $event)"
+            @click="triggerActionClick('steer')"
           >
-            <LoaderCircle v-if="props.actionPending" :size="18" class="composer__spin-icon" />
-            <Compass v-else :size="18" />
+            <Compass :size="18" />
           </button>
           <button
             class="composer__icon-button composer__send"
@@ -334,10 +370,10 @@ defineExpose({ clear, restore });
             :aria-label="props.streaming ? 'Queue prompt' : 'Send prompt'"
             :title="props.streaming ? 'Queue prompt' : 'Send prompt'"
             :disabled="!hasPayload || actionsDisabled"
-            @click="submit"
+            @pointerdown="triggerActionEarly('submit', $event)"
+            @click="triggerActionClick('submit')"
           >
-            <LoaderCircle v-if="props.actionPending" :size="18" class="composer__spin-icon" />
-            <ListOrdered v-else-if="props.streaming" :size="18" />
+            <ListOrdered v-if="props.streaming" :size="18" />
             <SendHorizontal v-else :size="18" />
           </button>
         </div>
@@ -361,10 +397,6 @@ defineExpose({ clear, restore });
     calc(var(--safe-area-left) + 0.8rem);
   background: var(--color-bg-panel);
   border-top: 1px solid var(--color-border-soft);
-}
-
-.composer--kbd {
-  padding-bottom: 0.5rem;
 }
 
 .is-dragging {
@@ -496,15 +528,5 @@ defineExpose({ clear, restore });
   width: 1rem;
   height: 1rem;
   border-width: 2px;
-}
-
-.composer__spin-icon {
-  animation: composer-spin 0.85s linear infinite;
-}
-
-@keyframes composer-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 </style>

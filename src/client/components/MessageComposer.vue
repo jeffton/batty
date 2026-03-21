@@ -25,6 +25,7 @@ const textarea = ref<HTMLTextAreaElement>();
 const files = ref<File[]>([]);
 const dragging = ref(false);
 const maxInputHeight = ref(240);
+const inputFocused = ref(false);
 const actionsDisabled = computed(() => Boolean(props.disabled || props.actionsDisabled));
 const hasPayload = computed(() => text.value.trim().length > 0 || files.value.length > 0);
 
@@ -294,7 +295,7 @@ defineExpose({ clear, restore });
 
 <template>
   <div
-    :class="['composer', dragging ? 'is-dragging' : '']"
+    :class="['composer', dragging ? 'is-dragging' : '', inputFocused ? 'composer--kbd' : '']"
     @dragenter.prevent="dragging = true"
     @dragover.prevent
     @dragleave.prevent="dragging = false"
@@ -321,6 +322,8 @@ defineExpose({ clear, restore });
         class="composer__input"
         rows="1"
         :disabled="props.disabled"
+        @focus="inputFocused = true"
+        @blur="inputFocused = false"
         @input="syncTextareaHeight"
         @keydown="onTextareaKeydown"
       />
@@ -397,6 +400,10 @@ defineExpose({ clear, restore });
     calc(var(--safe-area-left) + 0.8rem);
   background: var(--color-bg-panel);
   border-top: 1px solid var(--color-border-soft);
+}
+
+.composer--kbd {
+  padding-bottom: 0.5rem;
 }
 
 .is-dragging {

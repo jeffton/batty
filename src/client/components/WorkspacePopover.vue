@@ -100,7 +100,6 @@ async function openWorkspace(workspaceId: string): Promise<void> {
   switchingWorkspaceId.value = workspaceId;
   try {
     await router.push(workspaceRoutePath(workspaceId));
-    emit("close");
   } finally {
     switchingWorkspaceId.value = undefined;
   }

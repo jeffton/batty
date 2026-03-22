@@ -14,7 +14,7 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
   WebAuthnCredential,
   RegistrationResponseJSON,
-} from "@simplewebauthn/types";
+} from "@simplewebauthn/server";
 import { stateDirPath } from "./options";
 
 export interface StoredPasskeyCredential {

@@ -31,17 +31,17 @@
     "@sinclair/typebox": "0.34.48",
     "croner": "10.0.1",
     "dompurify": "3.3.3",
-    "fastify": "5.8.2",
+    "fastify": "5.8.4",
     "highlight.js": "11.11.1",
     "idb-keyval": "6.2.2",
     "lucide-vue-next": "0.577.0",
-    "marked": "17.0.4",
+    "marked": "17.0.5",
     "mime-types": "3.0.2",
     "pinia": "3.0.4",
     "pinia-plugin-persistedstate": "4.7.1",
     "virtua": "0.48.8",
     "vue": "3.5.30",
-    "vue-router": "5.0.3",
+    "vue-router": "5.0.4",
     "web-push": "3.6.7",
     "workbox-core": "7.4.0",
     "workbox-precaching": "7.4.0",
@@ -60,7 +60,7 @@
     "tsx": "4.21.0",
     "typescript": "5.9.3",
     "vite-plugin-pwa": "1.2.0",
-    "vite-plus": "0.1.11"
+    "vite-plus": "0.1.13"
   },
   "packageManager": "pnpm@10.32.1"
 }

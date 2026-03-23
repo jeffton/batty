@@ -274,7 +274,55 @@ function setThinkingLevel(level: string): void {
   void store.setThinkingLevel(level);
 }
 
+function shouldRestoreComposerAfterPromptError(
+  before:
+    | {
+        sessionId: string;
+        isStreaming: boolean;
+        pendingMessageCount: number;
+        updatedAt: number;
+        messageCount: number;
+      }
+    | undefined,
+): boolean {
+  if (!before) {
+    return true;
+  }
+
+  const after = store.activeSession;
+  if (!after || after.sessionId !== before.sessionId) {
+    return true;
+  }
+
+  if (!before.isStreaming && after.isStreaming) {
+    return false;
+  }
+
+  if (after.pendingMessageCount > before.pendingMessageCount) {
+    return false;
+  }
+
+  if (after.updatedAt > before.updatedAt) {
+    return false;
+  }
+
+  if (after.messages.length > before.messageCount) {
+    return false;
+  }
+
+  return true;
+}
+
 async function sendPrompt(text: string, files: File[]): Promise<void> {
+  const before = store.activeSession
+    ? {
+        sessionId: store.activeSession.sessionId,
+        isStreaming: store.activeSession.isStreaming,
+        pendingMessageCount: store.activeSession.pendingMessageCount,
+        updatedAt: store.activeSession.updatedAt,
+        messageCount: store.activeSession.messages.length,
+      }
+    : undefined;
   const gateWhileIdle = !store.activeSession?.isStreaming;
   if (gateWhileIdle && promptActionPending.value) {
     return;
@@ -287,7 +335,9 @@ async function sendPrompt(text: string, files: File[]): Promise<void> {
   try {
     await store.sendPrompt(text, files);
   } catch (error) {
-    composer.value?.restore(text, files);
+    if (shouldRestoreComposerAfterPromptError(before)) {
+      composer.value?.restore(text, files);
+    }
     throw error;
   } finally {
     if (gateWhileIdle) {
@@ -297,6 +347,15 @@ async function sendPrompt(text: string, files: File[]): Promise<void> {
 }
 
 async function steerPrompt(text: string, files: File[]): Promise<void> {
+  const before = store.activeSession
+    ? {
+        sessionId: store.activeSession.sessionId,
+        isStreaming: store.activeSession.isStreaming,
+        pendingMessageCount: store.activeSession.pendingMessageCount,
+        updatedAt: store.activeSession.updatedAt,
+        messageCount: store.activeSession.messages.length,
+      }
+    : undefined;
   const gateWhileIdle = !store.activeSession?.isStreaming;
   if (gateWhileIdle && promptActionPending.value) {
     return;
@@ -309,7 +368,9 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
   try {
     await store.steerPrompt(text, files);
   } catch (error) {
-    composer.value?.restore(text, files);
+    if (shouldRestoreComposerAfterPromptError(before)) {
+      composer.value?.restore(text, files);
+    }
     throw error;
   } finally {
     if (gateWhileIdle) {

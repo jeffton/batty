@@ -109,14 +109,16 @@ watch(
 }
 
 .mc-popover:popover-open {
-  position: absolute;
-  top: calc(anchor(bottom) + 0.3rem);
-  right: auto;
-  left: anchor(left);
-  width: min(22rem, calc(100vw - 1.5rem));
-  max-width: calc(100vw - 1rem);
+  position: fixed;
+  position-area: block-end span-inline-start;
+  position-try-fallbacks:
+    block-end span-inline-end,
+    block-start span-inline-start,
+    block-start span-inline-end;
+  width: min(22rem, calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 1rem));
+  max-width: calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 1rem);
   height: auto;
-  max-height: min(28rem, calc(100dvh - 4rem));
+  max-height: min(28rem, calc(100dvh - var(--safe-area-top) - var(--safe-area-bottom) - 4rem));
   display: flex;
   flex-direction: column;
   margin: 0;
@@ -127,14 +129,6 @@ watch(
   color: inherit;
   box-shadow: var(--color-shadow-popover);
   gap: 0.35rem;
-}
-
-@media (max-width: 30rem) {
-  .mc-popover:popover-open {
-    left: 0.5rem;
-    right: 0.5rem;
-    width: auto;
-  }
 }
 
 .mc-popover::backdrop {

@@ -296,12 +296,15 @@ watch(
 }
 
 .ws-popover:popover-open {
-  position: absolute;
-  top: calc(anchor(bottom) + 0.3rem);
-  left: anchor(left);
-  right: auto;
-  width: min(38rem, calc(100vw - 1.5rem));
-  max-height: min(32rem, calc(100dvh - 4rem));
+  position: fixed;
+  position-area: block-end span-inline-start;
+  position-try-fallbacks:
+    block-end span-inline-end,
+    block-start span-inline-start,
+    block-start span-inline-end;
+  width: min(38rem, calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 1rem));
+  max-width: calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 1rem);
+  max-height: min(32rem, calc(100dvh - var(--safe-area-top) - var(--safe-area-bottom) - 4rem));
   display: block;
   margin: 0;
   padding: 0;

@@ -200,6 +200,10 @@ textarea {
   font: inherit;
 }
 
+[popover] {
+  margin: 0;
+}
+
 button {
   cursor: pointer;
 }

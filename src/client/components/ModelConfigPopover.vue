@@ -118,7 +118,7 @@ watch(
   width: min(22rem, calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 1rem));
   max-width: calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 1rem);
   height: auto;
-  max-height: min(28rem, calc(100dvh - var(--safe-area-top) - var(--safe-area-bottom) - 4rem));
+  max-height: min(32rem, calc(100dvh - var(--safe-area-top) - var(--safe-area-bottom) - 4rem));
   display: flex;
   flex-direction: column;
   margin: 0;
@@ -194,8 +194,9 @@ watch(
 }
 
 .mc-popover__models {
-  flex: 1;
-  min-height: 0;
+  flex: 0 1 auto;
+  min-height: min(14rem, calc(100dvh - var(--safe-area-top) - var(--safe-area-bottom) - 12rem));
+  max-height: min(22rem, calc(100dvh - var(--safe-area-top) - var(--safe-area-bottom) - 12rem));
   overflow-y: auto;
   display: flex;
   flex-direction: column;

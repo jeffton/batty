@@ -275,36 +275,46 @@ function setThinkingLevel(level: string): void {
 }
 
 async function sendPrompt(text: string, files: File[]): Promise<void> {
-  if (promptActionPending.value) {
+  const gateWhileIdle = !store.activeSession?.isStreaming;
+  if (gateWhileIdle && promptActionPending.value) {
     return;
   }
 
   composer.value?.clear();
-  promptActionPending.value = true;
+  if (gateWhileIdle) {
+    promptActionPending.value = true;
+  }
   try {
     await store.sendPrompt(text, files);
   } catch (error) {
     composer.value?.restore(text, files);
     throw error;
   } finally {
-    promptActionPending.value = false;
+    if (gateWhileIdle) {
+      promptActionPending.value = false;
+    }
   }
 }
 
 async function steerPrompt(text: string, files: File[]): Promise<void> {
-  if (promptActionPending.value) {
+  const gateWhileIdle = !store.activeSession?.isStreaming;
+  if (gateWhileIdle && promptActionPending.value) {
     return;
   }
 
   composer.value?.clear();
-  promptActionPending.value = true;
+  if (gateWhileIdle) {
+    promptActionPending.value = true;
+  }
   try {
     await store.steerPrompt(text, files);
   } catch (error) {
     composer.value?.restore(text, files);
     throw error;
   } finally {
-    promptActionPending.value = false;
+    if (gateWhileIdle) {
+      promptActionPending.value = false;
+    }
   }
 }
 

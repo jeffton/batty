@@ -302,7 +302,9 @@ defineExpose({ clear, restore });
     @drop="onDrop"
   >
     <div class="composer__inner">
-      <p v-if="props.offline" class="composer__notice">Offline. Draft saved locally</p>
+      <p v-if="props.offline" class="composer__notice">
+        Offline or reconnecting. Draft saved locally
+      </p>
 
       <div v-if="files.length > 0" class="composer__attachments">
         <button

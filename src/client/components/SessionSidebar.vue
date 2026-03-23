@@ -20,7 +20,7 @@ const creatingWorkspace = ref(false);
 const switchingWorkspaceId = ref<string>();
 const startingSession = ref(false);
 const openingSessionId = ref<string>();
-const isOffline = computed(() => store.connectionState === "offline");
+const actionsDisabled = computed(() => store.connectionState !== "online");
 
 function sessionLabel(session: SessionSummary): string {
   return (session.name || session.firstMessage || "Untitled session").replace(/\s+/g, " ").trim();
@@ -33,7 +33,7 @@ function resetCreateWorkspaceForm(): void {
 }
 
 async function openCreateWorkspaceForm(): Promise<void> {
-  if (isOffline.value) {
+  if (actionsDisabled.value) {
     return;
   }
 
@@ -44,7 +44,7 @@ async function openCreateWorkspaceForm(): Promise<void> {
 }
 
 async function submitCreateWorkspace(): Promise<void> {
-  if (isOffline.value) {
+  if (actionsDisabled.value) {
     return;
   }
 
@@ -81,7 +81,7 @@ async function scrollSessionsToTop(): Promise<void> {
 }
 
 async function openWorkspace(workspaceId: string): Promise<void> {
-  if (isOffline.value || switchingWorkspaceId.value === workspaceId) {
+  if (actionsDisabled.value || switchingWorkspaceId.value === workspaceId) {
     return;
   }
 
@@ -94,7 +94,7 @@ async function openWorkspace(workspaceId: string): Promise<void> {
 }
 
 async function startSession(): Promise<void> {
-  if (!store.selectedWorkspaceId || isOffline.value || startingSession.value) {
+  if (!store.selectedWorkspaceId || actionsDisabled.value || startingSession.value) {
     return;
   }
 
@@ -108,7 +108,7 @@ async function startSession(): Promise<void> {
 }
 
 async function openSession(session: SessionSummary): Promise<void> {
-  if (isOffline.value || openingSessionId.value === session.sessionId) {
+  if (actionsDisabled.value || openingSessionId.value === session.sessionId) {
     return;
   }
 
@@ -153,8 +153,8 @@ onMounted(() => {
       <button class="sidebar__action sidebar__action--logout" @click="store.logout">Logout</button>
     </div>
 
-    <p v-if="isOffline" class="sidebar__notice">
-      Offline — workspace and session actions are disabled.
+    <p v-if="actionsDisabled" class="sidebar__notice">
+      Offline or reconnecting — workspace and session actions are disabled.
     </p>
 
     <section class="sidebar__section">
@@ -171,10 +171,14 @@ onMounted(() => {
           class="sidebar__workspace-input"
           type="text"
           placeholder="workspace-name"
-          :disabled="creatingWorkspace || isOffline"
+          :disabled="creatingWorkspace || actionsDisabled"
         />
         <div class="sidebar__workspace-form-actions">
-          <button class="sidebar__action" type="submit" :disabled="creatingWorkspace || isOffline">
+          <button
+            class="sidebar__action"
+            type="submit"
+            :disabled="creatingWorkspace || actionsDisabled"
+          >
             <LoaderCircle v-if="creatingWorkspace" :size="14" class="sidebar__spinner" />
             {{ creatingWorkspace ? "Creating…" : "Create workspace" }}
           </button>
@@ -194,7 +198,7 @@ onMounted(() => {
         <button
           v-if="!createWorkspaceOpen"
           class="sidebar__action sidebar__action--secondary"
-          :disabled="isOffline"
+          :disabled="actionsDisabled"
           @click="openCreateWorkspaceForm"
         >
           + New workspace
@@ -208,7 +212,7 @@ onMounted(() => {
           'sidebar__workspace',
           workspace.id === store.selectedWorkspaceId ? 'is-active' : '',
         ]"
-        :disabled="isOffline"
+        :disabled="actionsDisabled"
         @click="openWorkspace(workspace.id)"
       >
         <strong class="sidebar__item-title">
@@ -233,7 +237,7 @@ onMounted(() => {
         <button
           v-if="store.selectedWorkspaceId"
           class="sidebar__action"
-          :disabled="isOffline || startingSession"
+          :disabled="actionsDisabled || startingSession"
           @click="startSession"
         >
           <LoaderCircle v-if="startingSession" :size="14" class="sidebar__spinner" />
@@ -249,7 +253,7 @@ onMounted(() => {
             'sidebar__session',
             session.sessionId === store.activeSession?.sessionId ? 'is-active' : '',
           ]"
-          :disabled="isOffline"
+          :disabled="actionsDisabled"
           @click="openSession(session)"
         >
           <strong class="sidebar__session-title">{{ sessionLabel(session) }}</strong>

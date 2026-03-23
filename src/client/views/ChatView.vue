@@ -98,7 +98,7 @@ const activeToolsSignature = computed(() =>
     .join("|"),
 );
 const promptActionPending = ref(false);
-const isOffline = computed(() => store.connectionState === "offline");
+const isUnavailable = computed(() => store.connectionState !== "online");
 const selectedWorkspaceLoading = computed(() => {
   const workspaceId = store.selectedWorkspaceId;
   if (!workspaceId) {
@@ -486,8 +486,8 @@ watch(
         ref="composer"
         :streaming="store.activeSession.isStreaming"
         :session-key="store.activeSession.sessionId"
-        :offline="isOffline"
-        :actions-disabled="isOffline"
+        :offline="isUnavailable"
+        :actions-disabled="isUnavailable"
         @submit="sendPrompt"
         @steer="steerPrompt"
         @stop="store.stopActiveSession"

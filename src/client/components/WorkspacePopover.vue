@@ -28,7 +28,7 @@ const switchingWorkspaceId = ref<string>();
 const startingSession = ref(false);
 const openingSessionId = ref<string>();
 const createWorkspaceInput = ref<HTMLInputElement>();
-const isOffline = computed(() => store.connectionState === "offline");
+const actionsDisabled = computed(() => store.connectionState !== "online");
 
 const filteredWorkspaces = computed(() => {
   const query = workspaceFilter.value.toLowerCase().trim();
@@ -55,7 +55,7 @@ function resetCreateWorkspaceForm(): void {
 }
 
 async function openCreateWorkspaceForm(): Promise<void> {
-  if (isOffline.value) {
+  if (actionsDisabled.value) {
     return;
   }
 
@@ -66,7 +66,7 @@ async function openCreateWorkspaceForm(): Promise<void> {
 }
 
 async function submitCreateWorkspace(): Promise<void> {
-  if (isOffline.value) {
+  if (actionsDisabled.value) {
     return;
   }
 
@@ -93,7 +93,7 @@ async function submitCreateWorkspace(): Promise<void> {
 }
 
 async function openWorkspace(workspaceId: string): Promise<void> {
-  if (isOffline.value || switchingWorkspaceId.value === workspaceId) {
+  if (actionsDisabled.value || switchingWorkspaceId.value === workspaceId) {
     return;
   }
 
@@ -106,7 +106,7 @@ async function openWorkspace(workspaceId: string): Promise<void> {
 }
 
 async function startSession(): Promise<void> {
-  if (!store.selectedWorkspaceId || isOffline.value || startingSession.value) {
+  if (!store.selectedWorkspaceId || actionsDisabled.value || startingSession.value) {
     return;
   }
 
@@ -121,7 +121,7 @@ async function startSession(): Promise<void> {
 }
 
 async function openSession(session: SessionSummary): Promise<void> {
-  if (isOffline.value || openingSessionId.value === session.sessionId) {
+  if (actionsDisabled.value || openingSessionId.value === session.sessionId) {
     return;
   }
 
@@ -150,8 +150,8 @@ watch(
     :style="{ 'position-anchor': props.anchorName }"
     popover="auto"
   >
-    <div v-if="isOffline" class="ws-popover__notice">
-      Offline — workspace and session actions are disabled.
+    <div v-if="actionsDisabled" class="ws-popover__notice">
+      Offline or reconnecting — workspace and session actions are disabled.
     </div>
 
     <div class="ws-popover__cols">
@@ -179,13 +179,13 @@ watch(
             class="ws-popover__search"
             type="text"
             placeholder="workspace-name"
-            :disabled="creatingWorkspace || isOffline"
+            :disabled="creatingWorkspace || actionsDisabled"
           />
           <div class="ws-popover__create-btns">
             <button
               class="ws-popover__btn ws-popover__btn--primary"
               type="submit"
-              :disabled="creatingWorkspace || isOffline"
+              :disabled="creatingWorkspace || actionsDisabled"
             >
               <LoaderCircle v-if="creatingWorkspace" :size="14" class="ws-popover__spinner" />
               <span>{{ creatingWorkspace ? "Creating…" : "Create" }}</span>
@@ -204,7 +204,7 @@ watch(
         <button
           v-else
           class="ws-popover__btn ws-popover__btn--primary"
-          :disabled="isOffline"
+          :disabled="actionsDisabled"
           @click="openCreateWorkspaceForm"
         >
           <Plus :size="14" /> New workspace
@@ -218,7 +218,7 @@ watch(
               'ws-popover__item',
               workspace.id === store.selectedWorkspaceId ? 'is-active' : '',
             ]"
-            :disabled="isOffline"
+            :disabled="actionsDisabled"
             @click="openWorkspace(workspace.id)"
           >
             <span class="ws-popover__item-main">
@@ -261,7 +261,7 @@ watch(
         <button
           v-if="store.selectedWorkspaceId"
           class="ws-popover__btn ws-popover__btn--primary ws-popover__new-session"
-          :disabled="isOffline || startingSession"
+          :disabled="actionsDisabled || startingSession"
           @click="startSession"
         >
           <LoaderCircle v-if="startingSession" :size="14" class="ws-popover__spinner" />
@@ -277,7 +277,7 @@ watch(
               'ws-popover__item',
               session.sessionId === store.activeSession?.sessionId ? 'is-active' : '',
             ]"
-            :disabled="isOffline"
+            :disabled="actionsDisabled"
             @click="openSession(session)"
           >
             <span class="ws-popover__item-label">{{ sessionLabel(session) }}</span>

@@ -81,8 +81,8 @@ async function submitCreateWorkspace(): Promise<void> {
   creatingWorkspace.value = true;
   createWorkspaceError.value = "";
   try {
-    const workspace = await store.createWorkspace(name);
-    await router.push(workspaceRoutePath(workspace.id));
+    const session = await store.createWorkspace(name);
+    await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
     resetCreateWorkspaceForm();
     emit("close");
   } catch (error) {

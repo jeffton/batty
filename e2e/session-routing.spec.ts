@@ -75,3 +75,20 @@ test("opening a session keeps the main pane healthy and survives reload", async 
   );
   expect(relevantErrors).toEqual([]);
 });
+
+test("creating a workspace from the popover immediately opens a new session", async ({ page }) => {
+  const workspaceName = `playwright-workspace-${Date.now()}`;
+
+  await authenticate(page);
+  await page.goto("/");
+
+  await page.click(".header__ws-btn");
+  await page.waitForTimeout(300);
+  await page.getByRole("button", { name: /new workspace/i }).click();
+  await page.getByPlaceholder("workspace-name").fill(workspaceName);
+  await page.getByRole("button", { name: "Create" }).click();
+
+  await expect(page).toHaveURL(new RegExp(`/workspaces/${workspaceName}/sessions/[^/]+$`));
+  await expect(page.getByRole("heading", { name: "No active session" })).toHaveCount(0);
+  await expect(page.locator(".header__ws-name")).toHaveText(workspaceName);
+});

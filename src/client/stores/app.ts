@@ -82,7 +82,6 @@ export const useAppStore = defineStore("app", {
     selectedWorkspaceId: undefined as string | undefined,
     authError: undefined as string | undefined,
     lastError: undefined as string | undefined,
-    mobileSidebarOpen: false,
     routeLoadingWorkspaceId: undefined as string | undefined,
     routeLoadingSessionId: undefined as string | undefined,
     loadingWorkspaceSessions: {} as Record<string, boolean>,
@@ -242,7 +241,6 @@ export const useAppStore = defineStore("app", {
       } else {
         this.openWorkspaceStream(workspaceId);
       }
-      this.mobileSidebarOpen = false;
     },
 
     updateSessionSummary(session: SessionState): void {
@@ -259,7 +257,7 @@ export const useAppStore = defineStore("app", {
       };
     },
 
-    async createWorkspace(name: string): Promise<WorkspaceInfo> {
+    async createWorkspace(name: string): Promise<SessionState> {
       const workspace = await createWorkspaceRequest(name);
       this.workspaces = await listWorkspacesRequest();
       this.sessionsByWorkspace = {
@@ -271,9 +269,8 @@ export const useAppStore = defineStore("app", {
         [workspace.id]: [],
       };
       this.selectWorkspace(workspace.id);
-      await this.loadWorkspaceSessions(workspace.id);
       await this.loadWorkspaceCronJobs(workspace.id);
-      return workspace;
+      return this.startSession(workspace.id);
     },
 
     async startSession(workspaceId: string): Promise<SessionState> {
@@ -325,13 +322,11 @@ export const useAppStore = defineStore("app", {
       } else {
         this.closeStream();
       }
-      this.mobileSidebarOpen = false;
     },
 
     clearActiveSession(): void {
       this.closeStream();
       this.activeSession = undefined;
-      this.mobileSidebarOpen = false;
     },
 
     setRouteLoading(workspaceId?: string, sessionId?: string): void {

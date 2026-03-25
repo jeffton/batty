@@ -1,0 +1,1 @@
+export const RECENT_SESSION_MESSAGE_WINDOW = 50;

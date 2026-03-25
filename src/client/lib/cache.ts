@@ -1,9 +1,9 @@
 import { get, set } from "idb-keyval";
 import { normalizeSessionState } from "@/client/lib/session-state";
+import { RECENT_SESSION_MESSAGE_WINDOW } from "@/shared/session-history";
 import type { BootstrapPayload, SessionState } from "@/shared/types";
 
 const BOOTSTRAP_KEY = "batty:bootstrap";
-const CACHED_SESSION_MESSAGE_LIMIT = 50;
 
 export function cloneForCache<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -11,7 +11,7 @@ export function cloneForCache<T>(value: T): T {
 
 export function trimSessionForCache(session: SessionState): SessionState {
   const messageCount = session.messages.length;
-  const keepCount = Math.min(CACHED_SESSION_MESSAGE_LIMIT, messageCount);
+  const keepCount = Math.min(RECENT_SESSION_MESSAGE_WINDOW, messageCount);
   const messages = session.messages.slice(messageCount - keepCount);
   const totalMessageCount = Math.max(session.totalMessageCount, messageCount);
 

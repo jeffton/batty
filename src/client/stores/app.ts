@@ -36,6 +36,7 @@ import { sessionEventsPath } from "@/client/lib/session-stream";
 import { mergeSessionSummaries, toSessionSummary } from "@/client/lib/session-summary";
 import { workspaceEventsPath } from "@/client/lib/workspace-stream";
 import { uniqueWorkspaces } from "@/client/lib/workspaces";
+import { RECENT_SESSION_MESSAGE_WINDOW } from "@/shared/session-history";
 import type {
   AuthStatus,
   BootstrapPayload,
@@ -58,8 +59,6 @@ const defaultAuthStatus: AuthStatus = {
   registrationOpen: false,
   setupRequired: false,
 };
-
-const MESSAGE_PAGE_SIZE = 50;
 
 function compareCronJobsByNextRun(left: CronJob, right: CronJob): number {
   if (left.state.nextRunAtMs == null && right.state.nextRunAtMs == null) {
@@ -449,7 +448,7 @@ export const useAppStore = defineStore("app", {
       try {
         const page = await getSessionMessages(session, {
           before: session.messages[0]?.id,
-          limit: MESSAGE_PAGE_SIZE,
+          limit: RECENT_SESSION_MESSAGE_WINDOW,
         });
         const nextSession = normalizeSessionState({
           ...session,

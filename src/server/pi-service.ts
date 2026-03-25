@@ -22,6 +22,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import mime from "mime-types";
+import { RECENT_SESSION_MESSAGE_WINDOW } from "@/shared/session-history";
 import type {
   ActiveToolRun,
   CreateCronJobInput,
@@ -128,7 +129,7 @@ function normalizeToolDetails(details: unknown): ToolExecutionDetails | undefine
   return details && typeof details === "object" ? (details as ToolExecutionDetails) : undefined;
 }
 
-const DEFAULT_MESSAGE_PAGE_SIZE = 50;
+const DEFAULT_MESSAGE_PAGE_SIZE = RECENT_SESSION_MESSAGE_WINDOW;
 const MAX_MESSAGE_PAGE_SIZE = 200;
 
 function clampMessagePageSize(limit?: number): number {

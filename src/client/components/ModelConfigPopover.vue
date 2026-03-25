@@ -157,9 +157,9 @@ watch(
     color 80ms ease;
 }
 
-.mc-popover__thinking-btn:hover {
+.mc-popover__thinking-btn:hover:not(.is-active) {
   color: var(--color-text);
-  background: var(--color-bg-panel);
+  background: var(--color-bg-hover);
 }
 
 .mc-popover__thinking-btn.is-active {
@@ -219,8 +219,8 @@ watch(
   transition: background 80ms ease;
 }
 
-.mc-popover__model:hover {
-  background: var(--color-bg-elevated);
+.mc-popover__model:hover:not(.is-active) {
+  background: var(--color-bg-hover);
 }
 
 .mc-popover__model.is-active {

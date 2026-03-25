@@ -32,6 +32,7 @@
   --color-bg-elevated: oklch(0.9 0.01 240);
   --color-bg-elevated-soft: oklch(0.95 0.008 240);
   --color-bg-overlay: oklch(1 0 0);
+  --color-bg-hover: oklch(0.9 0.01 240);
   --color-bg-inline-code: oklch(0.92 0.01 240);
   --color-bg-selection: oklch(0.92 0.04 175);
 
@@ -118,6 +119,7 @@
     --color-bg-elevated: oklch(0.24 0.02 240);
     --color-bg-elevated-soft: oklch(0.18 0.02 240);
     --color-bg-overlay: oklch(0.24 0.02 240);
+    --color-bg-hover: oklch(0.28 0.02 240);
     --color-bg-inline-code: oklch(0.22 0.02 240);
     --color-bg-selection: oklch(0.25 0.05 175);
 

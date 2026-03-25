@@ -44,6 +44,19 @@ const filteredSessions = computed(() => {
   return sessions.value.filter((s) => sessionLabel(s).toLowerCase().includes(query));
 });
 
+const sessionListLoading = computed(() => {
+  const workspaceId = store.selectedWorkspaceId;
+  if (!workspaceId) {
+    return false;
+  }
+
+  return Boolean(
+    switchingWorkspaceId.value === workspaceId ||
+    store.routeLoadingWorkspaceId === workspaceId ||
+    store.loadingWorkspaceSessions[workspaceId],
+  );
+});
+
 function sessionLabel(session: SessionSummary): string {
   return (session.name || session.firstMessage || "Untitled session").replace(/\s+/g, " ").trim();
 }
@@ -223,14 +236,6 @@ watch(
           >
             <span class="ws-popover__item-main">
               <span class="ws-popover__item-label">{{ workspace.label }}</span>
-              <LoaderCircle
-                v-if="
-                  switchingWorkspaceId === workspace.id ||
-                  store.routeLoadingWorkspaceId === workspace.id
-                "
-                :size="14"
-                class="ws-popover__spinner"
-              />
             </span>
             <span class="ws-popover__item-meta">{{ workspace.path }}</span>
           </button>
@@ -270,20 +275,31 @@ watch(
         </button>
 
         <div class="ws-popover__sessions">
-          <button
-            v-for="session in filteredSessions"
-            :key="session.id"
-            :class="[
-              'ws-popover__item',
-              session.sessionId === store.activeSession?.sessionId ? 'is-active' : '',
-            ]"
-            :disabled="actionsDisabled"
-            @click="openSession(session)"
-          >
-            <span class="ws-popover__item-label">{{ sessionLabel(session) }}</span>
-            <span class="ws-popover__item-meta">{{ formatShortDateTime(session.updatedAt) }}</span>
-          </button>
-          <div v-if="filteredSessions.length === 0" class="ws-popover__empty">No sessions yet.</div>
+          <template v-if="sessionListLoading">
+            <div class="ws-popover__empty ws-popover__empty--loading">
+              <LoaderCircle :size="18" class="ws-popover__spinner" />
+            </div>
+          </template>
+          <template v-else>
+            <button
+              v-for="session in filteredSessions"
+              :key="session.id"
+              :class="[
+                'ws-popover__item',
+                session.sessionId === store.activeSession?.sessionId ? 'is-active' : '',
+              ]"
+              :disabled="actionsDisabled"
+              @click="openSession(session)"
+            >
+              <span class="ws-popover__item-label">{{ sessionLabel(session) }}</span>
+              <span class="ws-popover__item-meta">{{
+                formatShortDateTime(session.updatedAt)
+              }}</span>
+            </button>
+            <div v-if="filteredSessions.length === 0" class="ws-popover__empty">
+              No sessions yet.
+            </div>
+          </template>
         </div>
       </div>
     </div>
@@ -399,8 +415,8 @@ watch(
   transition: background 80ms ease;
 }
 
-.ws-popover__item:hover:not(:disabled) {
-  background: var(--color-bg-elevated);
+.ws-popover__item:hover:not(:disabled):not(.is-active) {
+  background: var(--color-bg-hover);
 }
 
 .ws-popover__item:disabled {
@@ -509,6 +525,13 @@ watch(
   padding: 0.6rem 0.5rem;
   color: var(--color-text-subtle);
   font-size: 0.85rem;
+}
+
+.ws-popover__empty--loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .ws-popover__logout {

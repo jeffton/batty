@@ -27,7 +27,9 @@ import type {
   CreateCronJobInput,
   ModelOption,
   ServerEvent,
+  SessionMessagesPage,
   SessionState,
+  SessionStateMetadata,
   SessionSummary,
   ToolExecutionDetails,
   UpdateCronJobInput,
@@ -124,6 +126,31 @@ function sessionUpdatedAt(session: AgentSession, openedAt: number): number {
 
 function normalizeToolDetails(details: unknown): ToolExecutionDetails | undefined {
   return details && typeof details === "object" ? (details as ToolExecutionDetails) : undefined;
+}
+
+const DEFAULT_MESSAGE_PAGE_SIZE = 50;
+const MAX_MESSAGE_PAGE_SIZE = 200;
+
+function clampMessagePageSize(limit?: number): number {
+  if (typeof limit !== "number" || !Number.isFinite(limit)) {
+    return DEFAULT_MESSAGE_PAGE_SIZE;
+  }
+
+  return Math.max(1, Math.min(MAX_MESSAGE_PAGE_SIZE, Math.floor(limit)));
+}
+
+function messageIndexFromId(messageId: string | undefined): number | undefined {
+  if (!messageId) {
+    return undefined;
+  }
+
+  const separator = messageId.lastIndexOf("-");
+  if (separator === -1) {
+    return undefined;
+  }
+
+  const index = Number.parseInt(messageId.slice(separator + 1), 10);
+  return Number.isFinite(index) && index >= 0 ? index : undefined;
 }
 
 const CronScheduleSchema = Type.Object(
@@ -278,7 +305,7 @@ export class PiService {
   subscribe(sessionId: string, subscriber: SessionSubscriber): () => void {
     const webSession = this.requireSession(sessionId);
     webSession.subscribers.add(subscriber);
-    subscriber({ type: "state", state: this.getState(sessionId) });
+    subscriber({ type: "reset", state: this.getState(sessionId) });
     return () => {
       webSession.subscribers.delete(subscriber);
       if (
@@ -291,9 +318,13 @@ export class PiService {
     };
   }
 
-  getState(sessionId: string): SessionState {
+  getState(
+    sessionId: string,
+    options?: { beforeMessageId?: string; limit?: number },
+  ): SessionState {
     const webSession = this.requireSession(sessionId);
     const contextUsage = webSession.session.getContextUsage();
+    const messagePage = this.getMessagePage(webSession, options);
 
     return createSessionState({
       id: webSession.id,
@@ -313,11 +344,47 @@ export class PiService {
       contextTokens: contextUsage?.tokens ?? null,
       contextWindow: contextUsage?.contextWindow ?? webSession.session.model?.contextWindow ?? null,
       contextPercent: contextUsage?.percent ?? null,
-      messages: webSession.session.messages,
+      totalMessageCount: messagePage.totalMessageCount,
+      hasMoreMessages: messagePage.hasMoreMessages,
+      messages: messagePage.messages,
       activeAssistant: webSession.activeAssistant,
       activeTools: [...webSession.activeTools.values()],
       title: webSession.session.sessionName,
     });
+  }
+
+  getSessionMessages(
+    sessionId: string,
+    options?: { beforeMessageId?: string; limit?: number },
+  ): SessionMessagesPage {
+    const webSession = this.requireSession(sessionId);
+    const page = this.getMessagePage(webSession, options);
+    return {
+      messages: createSessionState({
+        id: webSession.id,
+        sessionId: webSession.session.sessionId,
+        workspaceId: webSession.workspace.id,
+        cwd: webSession.workspace.path,
+        path: webSession.session.sessionFile,
+        model: undefined,
+        modelLabel: undefined,
+        thinkingLevel: webSession.session.thinkingLevel,
+        availableThinkingLevels: webSession.session.getAvailableThinkingLevels(),
+        isStreaming: webSession.session.isStreaming,
+        pendingMessageCount: webSession.session.pendingMessageCount,
+        updatedAt: sessionUpdatedAt(webSession.session, webSession.openedAt),
+        contextTokens: null,
+        contextWindow: null,
+        contextPercent: null,
+        totalMessageCount: page.totalMessageCount,
+        hasMoreMessages: page.hasMoreMessages,
+        messages: page.messages,
+        activeTools: [],
+        title: undefined,
+      }).messages,
+      totalMessageCount: page.totalMessageCount,
+      hasMoreMessages: page.hasMoreMessages,
+    };
   }
 
   async setModel(sessionId: string, modelId: string): Promise<SessionState> {
@@ -325,14 +392,14 @@ export class PiService {
     const model = await this.resolveModel(modelId);
     await webSession.session.setModel(model);
     await this.refreshBattySystemPrompt(webSession);
-    this.publish(webSession, { type: "state", state: this.getState(sessionId) });
+    this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
     return this.getState(sessionId);
   }
 
   setThinkingLevel(sessionId: string, thinkingLevel: string): SessionState {
     const webSession = this.requireSession(sessionId);
     webSession.session.setThinkingLevel(thinkingLevel as AgentSession["thinkingLevel"]);
-    this.publish(webSession, { type: "state", state: this.getState(sessionId) });
+    this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
     return this.getState(sessionId);
   }
 
@@ -356,7 +423,7 @@ export class PiService {
   async abort(sessionId: string): Promise<void> {
     const webSession = this.requireSession(sessionId);
     await webSession.session.abort();
-    this.publish(webSession, { type: "state", state: this.getState(sessionId) });
+    this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
   }
 
   private async createPiAgentSession(
@@ -453,6 +520,38 @@ export class PiService {
     }
   }
 
+  private getMessagePage(
+    webSession: WebSession,
+    options?: { beforeMessageId?: string; limit?: number },
+  ): { messages: AgentSession["messages"]; totalMessageCount: number; hasMoreMessages: boolean } {
+    const allMessages = webSession.session.messages;
+    const totalMessageCount = allMessages.length;
+    const limit = clampMessagePageSize(options?.limit);
+    const beforeIndex = messageIndexFromId(options?.beforeMessageId);
+    const end =
+      typeof beforeIndex === "number" && beforeIndex >= 0
+        ? Math.min(beforeIndex, totalMessageCount)
+        : totalMessageCount;
+    const start = Math.max(0, end - limit);
+
+    return {
+      messages: allMessages.slice(start, end),
+      totalMessageCount,
+      hasMoreMessages: start > 0,
+    };
+  }
+
+  private getStateMetadata(webSession: WebSession): SessionStateMetadata {
+    const state = this.getState(webSession.id, { limit: 1 });
+    const {
+      messages: _messages,
+      activeAssistant: _activeAssistant,
+      activeTools: _activeTools,
+      ...rest
+    } = state;
+    return rest;
+  }
+
   private async handleAgentEvent(webSession: WebSession, event: AgentSessionEvent): Promise<void> {
     switch (event.type) {
       case "message_start":
@@ -469,7 +568,7 @@ export class PiService {
         if (event.message.role === "assistant") {
           webSession.activeAssistant = undefined;
         }
-        this.publish(webSession, { type: "state", state: this.getState(webSession.id) });
+        this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
         break;
       case "tool_execution_start":
         webSession.activeTools.set(event.toolCallId, {
@@ -509,7 +608,8 @@ export class PiService {
       }
       case "agent_start":
         webSession.activeTools.clear();
-        this.publish(webSession, { type: "state", state: this.getState(webSession.id) });
+        this.publish(webSession, { type: "tools", tools: [] });
+        this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
         break;
       case "agent_end":
       case "turn_end":
@@ -519,7 +619,7 @@ export class PiService {
           webSession.activeAssistant = undefined;
         }
         const state = this.getState(webSession.id);
-        this.publish(webSession, { type: "state", state });
+        this.publish(webSession, { type: "reset", state });
         if (event.type === "agent_end") {
           try {
             console.info("Running agent completion hook", {

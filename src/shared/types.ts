@@ -170,10 +170,23 @@ export interface SessionState {
   contextTokens: number | null;
   contextWindow: number | null;
   contextPercent: number | null;
+  totalMessageCount: number;
+  hasMoreMessages: boolean;
   messages: UiMessage[];
   activeAssistant?: Extract<UiMessage, { role: "assistant" }>;
   activeTools: ActiveToolRun[];
   title?: string;
+}
+
+export type SessionStateMetadata = Omit<
+  SessionState,
+  "messages" | "activeAssistant" | "activeTools"
+>;
+
+export interface SessionMessagesPage {
+  messages: UiMessage[];
+  totalMessageCount: number;
+  hasMoreMessages: boolean;
 }
 
 export interface ModelOption {
@@ -207,7 +220,8 @@ export interface WorkspaceSnapshot {
 }
 
 export type ServerEvent =
-  | { type: "state"; state: SessionState }
+  | { type: "reset"; state: SessionState }
+  | { type: "state"; state: SessionStateMetadata }
   | { type: "assistant"; assistant?: Extract<UiMessage, { role: "assistant" }> }
   | { type: "tools"; tools: ActiveToolRun[] }
   | { type: "status"; isStreaming: boolean; pendingMessageCount: number }

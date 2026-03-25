@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
-import { applyServerEvent } from "@/client/lib/session-events";
+import {
+  applyServerEvent,
+  shouldUpdateSessionSummary,
+  shouldWriteSessionCache,
+} from "@/client/lib/session-events";
 import type { SessionState } from "@/shared/types";
 
 const baseState: SessionState = {
@@ -18,20 +22,125 @@ const baseState: SessionState = {
   contextTokens: 12345,
   contextWindow: 200000,
   contextPercent: 6.2,
+  totalMessageCount: 0,
+  hasMoreMessages: false,
   messages: [],
   activeTools: [],
 };
 
+describe("session event policies", () => {
+  it("only persists snapshot-like events to cache", () => {
+    expect(shouldWriteSessionCache({ type: "reset", state: baseState })).toBe(true);
+    expect(
+      shouldWriteSessionCache({
+        type: "state",
+        state: {
+          id: baseState.id,
+          sessionId: baseState.sessionId,
+          workspaceId: baseState.workspaceId,
+          cwd: baseState.cwd,
+          path: baseState.path,
+          model: baseState.model,
+          modelLabel: baseState.modelLabel,
+          thinkingLevel: baseState.thinkingLevel,
+          availableThinkingLevels: baseState.availableThinkingLevels,
+          isStreaming: baseState.isStreaming,
+          pendingMessageCount: baseState.pendingMessageCount,
+          updatedAt: baseState.updatedAt,
+          contextTokens: baseState.contextTokens,
+          contextWindow: baseState.contextWindow,
+          contextPercent: baseState.contextPercent,
+          totalMessageCount: baseState.totalMessageCount,
+          hasMoreMessages: baseState.hasMoreMessages,
+          title: baseState.title,
+        },
+      }),
+    ).toBe(true);
+    expect(shouldWriteSessionCache({ type: "assistant", assistant: undefined })).toBe(false);
+    expect(shouldWriteSessionCache({ type: "tools", tools: [] })).toBe(false);
+  });
+
+  it("only refreshes session summaries for reset and metadata state events", () => {
+    expect(shouldUpdateSessionSummary({ type: "reset", state: baseState })).toBe(true);
+    expect(
+      shouldUpdateSessionSummary({
+        type: "state",
+        state: {
+          id: baseState.id,
+          sessionId: baseState.sessionId,
+          workspaceId: baseState.workspaceId,
+          cwd: baseState.cwd,
+          path: baseState.path,
+          model: baseState.model,
+          modelLabel: baseState.modelLabel,
+          thinkingLevel: baseState.thinkingLevel,
+          availableThinkingLevels: baseState.availableThinkingLevels,
+          isStreaming: baseState.isStreaming,
+          pendingMessageCount: baseState.pendingMessageCount,
+          updatedAt: baseState.updatedAt,
+          contextTokens: baseState.contextTokens,
+          contextWindow: baseState.contextWindow,
+          contextPercent: baseState.contextPercent,
+          totalMessageCount: baseState.totalMessageCount,
+          hasMoreMessages: baseState.hasMoreMessages,
+          title: baseState.title,
+        },
+      }),
+    ).toBe(true);
+    expect(shouldUpdateSessionSummary({ type: "assistant", assistant: undefined })).toBe(false);
+  });
+});
+
 describe("applyServerEvent", () => {
-  it("replaces state snapshots", () => {
-    const next = applyServerEvent(baseState, {
+  it("applies metadata-only state updates without dropping loaded messages", () => {
+    const previous: SessionState = {
+      ...baseState,
+      messages: [
+        {
+          id: "user-1",
+          role: "user",
+          timestamp: 1,
+          blocks: [{ type: "text", text: "hello" }],
+        },
+      ],
+    };
+
+    const next = applyServerEvent(previous, {
       type: "state",
+      state: {
+        id: previous.id,
+        sessionId: previous.sessionId,
+        workspaceId: previous.workspaceId,
+        cwd: previous.cwd,
+        path: previous.path,
+        model: previous.model,
+        modelLabel: previous.modelLabel,
+        thinkingLevel: previous.thinkingLevel,
+        availableThinkingLevels: previous.availableThinkingLevels,
+        isStreaming: false,
+        pendingMessageCount: 2,
+        updatedAt: 200,
+        contextTokens: previous.contextTokens,
+        contextWindow: previous.contextWindow,
+        contextPercent: previous.contextPercent,
+        title: previous.title,
+      },
+    } as unknown as Parameters<typeof applyServerEvent>[1]);
+
+    expect(next?.pendingMessageCount).toBe(2);
+    expect(next?.isStreaming).toBe(false);
+    expect(next?.messages).toEqual(previous.messages);
+  });
+
+  it("replaces reset snapshots", () => {
+    const next = applyServerEvent(baseState, {
+      type: "reset",
       state: { ...baseState, pendingMessageCount: 2 },
-    });
+    } as unknown as Parameters<typeof applyServerEvent>[1]);
     expect(next?.pendingMessageCount).toBe(2);
   });
 
-  it("retains cached tool output when a state snapshot arrives without active tools", () => {
+  it("retains cached tool output when a reset snapshot arrives without active tools", () => {
     const previous: SessionState = {
       ...baseState,
       messages: [
@@ -62,9 +171,9 @@ describe("applyServerEvent", () => {
     };
 
     const next = applyServerEvent(previous, {
-      type: "state",
+      type: "reset",
       state: { ...previous, isStreaming: false, activeTools: [] },
-    });
+    } as unknown as Parameters<typeof applyServerEvent>[1]);
 
     expect(next?.activeTools).toEqual(previous.activeTools);
   });

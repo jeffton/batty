@@ -25,6 +25,7 @@ const MODEL_POPOVER_ANCHOR = "--chat-main-model-anchor";
 const CRON_POPOVER_ID = "chat-main-cron-popover";
 const CRON_POPOVER_ANCHOR = "--chat-main-cron-anchor";
 const TRANSCRIPT_BOTTOM_THRESHOLD = 24;
+const TRANSCRIPT_LOAD_OLDER_THRESHOLD = 80;
 
 type TranscriptHandle = InstanceType<typeof VList>;
 type ComposerHandle = InstanceType<typeof MessageComposer> & {
@@ -244,8 +245,46 @@ async function scrollToBottom(behavior: ScrollBehavior = "auto"): Promise<void> 
   updateTranscriptPinnedState();
 }
 
+async function maybeLoadOlderMessages(): Promise<void> {
+  const handle = transcript.value;
+  const session = store.activeSession;
+  if (
+    !handle ||
+    !session ||
+    store.loadingOlderMessages ||
+    !session.hasMoreMessages ||
+    handle.scrollOffset > TRANSCRIPT_LOAD_OLDER_THRESHOLD
+  ) {
+    return;
+  }
+
+  const previousScrollOffset = handle.scrollOffset;
+  const previousScrollSize = handle.scrollSize;
+  await store.loadOlderMessages();
+  await waitForTranscriptLayout();
+
+  const nextHandle = transcript.value;
+  if (!nextHandle) {
+    return;
+  }
+
+  const addedSize = nextHandle.scrollSize - previousScrollSize;
+  if (addedSize > 0) {
+    nextHandle.scrollTo(previousScrollOffset + addedSize);
+  }
+  updateTranscriptPinnedState();
+
+  if (
+    nextHandle.scrollSize <= nextHandle.viewportSize + TRANSCRIPT_LOAD_OLDER_THRESHOLD &&
+    store.activeSession?.hasMoreMessages
+  ) {
+    await maybeLoadOlderMessages();
+  }
+}
+
 function handleTranscriptScroll(): void {
   updateTranscriptPinnedState();
+  void maybeLoadOlderMessages();
 }
 
 function closeModelPopover(): void {
@@ -398,7 +437,7 @@ watch(
     const openedSession = sessionId !== previousSessionId;
     if (openedSession) {
       isTranscriptPinnedToBottom.value = true;
-      void scrollToBottom("auto");
+      void scrollToBottom("auto").then(() => maybeLoadOlderMessages());
       return;
     }
 

@@ -37,7 +37,7 @@ export function toSessionSummary(session: SessionState): SessionSummary {
     path: session.path,
     firstMessage,
     updatedAt,
-    messageCount: session.messages.length,
+    messageCount: session.totalMessageCount,
     workspaceId: session.workspaceId,
     model: session.model,
   };

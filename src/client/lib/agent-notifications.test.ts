@@ -21,6 +21,8 @@ const baseSession: SessionState = {
   contextTokens: null,
   contextWindow: null,
   contextPercent: null,
+  totalMessageCount: 1,
+  hasMoreMessages: false,
   messages: [
     {
       id: "assistant-1",

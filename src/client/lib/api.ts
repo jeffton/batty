@@ -8,6 +8,7 @@ import type {
   BootstrapPayload,
   CreateCronJobInput,
   CronJob,
+  SessionMessagesPage,
   SessionState,
   SessionSummary,
   UpdateCronJobInput,
@@ -166,6 +167,25 @@ export function openSession(workspaceId: string, sessionPath: string): Promise<S
 
 export function getSession(sessionId: string): Promise<SessionState> {
   return request(`/api/sessions/${sessionId}`);
+}
+
+export function getSessionMessages(
+  session: Pick<SessionState, "id" | "workspaceId" | "path">,
+  options: { before?: string; limit?: number } = {},
+): Promise<SessionMessagesPage> {
+  const params = new URLSearchParams();
+  params.set("workspaceId", session.workspaceId);
+  if (session.path) {
+    params.set("sessionPath", session.path);
+  }
+  if (options.before) {
+    params.set("before", options.before);
+  }
+  if (typeof options.limit === "number" && Number.isFinite(options.limit)) {
+    params.set("limit", String(Math.floor(options.limit)));
+  }
+
+  return request(`/api/sessions/${session.id}/messages?${params.toString()}`);
 }
 
 export function setSessionModel(sessionId: string, modelId: string): Promise<SessionState> {

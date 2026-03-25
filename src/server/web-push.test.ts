@@ -49,6 +49,8 @@ function createSession(): SessionState {
     contextTokens: null,
     contextWindow: null,
     contextPercent: null,
+    totalMessageCount: 0,
+    hasMoreMessages: false,
     messages: [],
     activeTools: [],
   };

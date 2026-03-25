@@ -32,6 +32,8 @@ function session(overrides: Partial<SessionState>): SessionState {
     contextTokens: null,
     contextWindow: null,
     contextPercent: null,
+    totalMessageCount: 0,
+    hasMoreMessages: false,
     messages: [],
     activeTools: [],
     ...overrides,

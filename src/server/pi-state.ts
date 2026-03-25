@@ -189,6 +189,8 @@ export interface SessionStateInput {
   contextTokens: number | null;
   contextWindow: number | null;
   contextPercent: number | null;
+  totalMessageCount: number;
+  hasMoreMessages: boolean;
   messages: AgentMessage[];
   activeAssistant?: AgentMessage;
   title?: string;
@@ -219,6 +221,8 @@ export function createSessionState(input: SessionStateInput): SessionState {
     contextTokens: input.contextTokens,
     contextWindow: input.contextWindow,
     contextPercent: input.contextPercent,
+    totalMessageCount: input.totalMessageCount,
+    hasMoreMessages: input.hasMoreMessages,
     messages: normalizeMessages(input.messages),
     activeAssistant,
     activeTools: input.activeTools,

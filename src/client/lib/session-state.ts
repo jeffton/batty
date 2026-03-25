@@ -46,6 +46,32 @@ function mergeRetainedActiveTools(
   return [...incoming.activeTools, ...retained];
 }
 
+function mergeSessionMessages(incoming: SessionState, previous?: SessionState): UiMessage[] {
+  if (!previous || previous.sessionId !== incoming.sessionId || previous.messages.length === 0) {
+    return incoming.messages;
+  }
+
+  if (incoming.messages.length === 0) {
+    return incoming.totalMessageCount === 0 ? [] : previous.messages;
+  }
+
+  const previousIds = previous.messages.map((message) => message.id);
+  const incomingIds = incoming.messages.map((message) => message.id);
+  const overlapStart = previousIds.indexOf(incomingIds[0] ?? "");
+  if (overlapStart === -1) {
+    return incoming.messages;
+  }
+
+  const overlapLength = Math.min(previousIds.length - overlapStart, incomingIds.length);
+  for (let index = 0; index < overlapLength; index += 1) {
+    if (previousIds[overlapStart + index] !== incomingIds[index]) {
+      return incoming.messages;
+    }
+  }
+
+  return [...previous.messages.slice(0, overlapStart), ...incoming.messages];
+}
+
 export function normalizeSessionState(session: SessionState | undefined): SessionState | undefined {
   if (!session) {
     return undefined;
@@ -68,6 +94,10 @@ export function normalizeSessionState(session: SessionState | undefined): Sessio
       ? session.activeAssistant.timestamp
       : undefined,
   ].filter((candidate): candidate is number => Number.isFinite(candidate));
+  const totalMessageCount =
+    typeof session.totalMessageCount === "number" && Number.isFinite(session.totalMessageCount)
+      ? Math.max(0, session.totalMessageCount)
+      : messages.length;
 
   return {
     ...session,
@@ -100,6 +130,8 @@ export function normalizeSessionState(session: SessionState | undefined): Sessio
       typeof session.contextPercent === "number" && Number.isFinite(session.contextPercent)
         ? session.contextPercent
         : null,
+    totalMessageCount,
+    hasMoreMessages: Boolean(session.hasMoreMessages) || totalMessageCount > messages.length,
     messages,
     activeTools: Array.isArray(session.activeTools) ? session.activeTools : [],
   };
@@ -121,6 +153,7 @@ export function mergeSessionState(
 
   return normalizeSessionState({
     ...normalizedIncoming,
+    messages: mergeSessionMessages(normalizedIncoming, normalizedPrevious),
     activeTools: mergeRetainedActiveTools(normalizedIncoming, normalizedPrevious),
   });
 }

@@ -17,6 +17,8 @@ const baseSession: SessionState = {
   contextTokens: null,
   contextWindow: null,
   contextPercent: null,
+  totalMessageCount: 1,
+  hasMoreMessages: false,
   messages: [
     {
       id: "user-1",
@@ -47,6 +49,17 @@ describe("session-summary", () => {
       workspaceId: "batty",
       model: "anthropic/claude-sonnet-4",
     });
+  });
+
+  it("uses the total message count when only the recent window is loaded", () => {
+    const summary = toSessionSummary({
+      ...baseSession,
+      messages: [baseSession.messages[0]],
+      totalMessageCount: 120,
+      hasMoreMessages: true,
+    } as unknown as SessionState);
+
+    expect(summary.messageCount).toBe(120);
   });
 
   it("merges server and local summaries by session id", () => {

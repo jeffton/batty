@@ -3,9 +3,24 @@ import { normalizeSessionState } from "@/client/lib/session-state";
 import type { BootstrapPayload, SessionState } from "@/shared/types";
 
 const BOOTSTRAP_KEY = "batty:bootstrap";
+const CACHED_SESSION_MESSAGE_LIMIT = 50;
 
 export function cloneForCache<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+export function trimSessionForCache(session: SessionState): SessionState {
+  const messageCount = session.messages.length;
+  const keepCount = Math.min(CACHED_SESSION_MESSAGE_LIMIT, messageCount);
+  const messages = session.messages.slice(messageCount - keepCount);
+  const totalMessageCount = Math.max(session.totalMessageCount, messageCount);
+
+  return {
+    ...session,
+    messages,
+    totalMessageCount,
+    hasMoreMessages: session.hasMoreMessages || totalMessageCount > messages.length,
+  };
 }
 
 export async function readCachedBootstrap(): Promise<BootstrapPayload | undefined> {
@@ -21,5 +36,10 @@ export async function readCachedSession(sessionId: string): Promise<SessionState
 }
 
 export async function writeCachedSession(session: SessionState): Promise<void> {
-  await set(`batty:session:${session.sessionId}`, cloneForCache(normalizeSessionState(session)));
+  const normalized = normalizeSessionState(session);
+  if (!normalized) {
+    return;
+  }
+
+  await set(`batty:session:${session.sessionId}`, cloneForCache(trimSessionForCache(normalized)));
 }

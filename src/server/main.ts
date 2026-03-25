@@ -429,6 +429,28 @@ app.delete<{ Params: { jobId: string } }>("/api/cron-jobs/:jobId", async (reques
   return cronService.deleteJob(request.params.jobId);
 });
 
+async function ensureSessionLoaded(
+  sessionId: string,
+  options?: { workspaceId?: string; sessionPath?: string },
+): Promise<void> {
+  if (service.hasSession(sessionId)) {
+    return;
+  }
+
+  const workspaceId = options?.workspaceId;
+  const sessionPath = options?.sessionPath;
+  if (!workspaceId || !sessionPath) {
+    throw Object.assign(new Error(`Unknown session: ${sessionId}`), { statusCode: 404 });
+  }
+
+  const workspaces = await listWorkspaces(config);
+  const workspace = resolveWorkspace(workspaces, workspaceId);
+  const restoredSession = await service.openSession(workspace, sessionPath);
+  if (restoredSession.sessionId !== sessionId) {
+    throw Object.assign(new Error(`Session id mismatch: ${sessionId}`), { statusCode: 409 });
+  }
+}
+
 app.post<{ Body: { workspaceId: string } }>("/api/sessions", async (request) => {
   const workspaces = await listWorkspaces(config);
   const workspace = resolveWorkspace(workspaces, request.body.workspaceId);
@@ -446,6 +468,22 @@ app.post<{ Body: { workspaceId: string; sessionPath: string } }>(
 
 app.get<{ Params: { sessionId: string } }>("/api/sessions/:sessionId", async (request) => {
   return service.getState(request.params.sessionId);
+});
+
+app.get<{
+  Params: { sessionId: string };
+  Querystring: { before?: string; limit?: string; workspaceId?: string; sessionPath?: string };
+}>("/api/sessions/:sessionId/messages", async (request) => {
+  await ensureSessionLoaded(request.params.sessionId, {
+    workspaceId: request.query.workspaceId,
+    sessionPath: request.query.sessionPath,
+  });
+
+  const parsedLimit = Number.parseInt(request.query.limit ?? "", 10);
+  return service.getSessionMessages(request.params.sessionId, {
+    beforeMessageId: request.query.before,
+    limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+  });
 });
 
 app.post<{ Params: { sessionId: string }; Body: { modelId: string } }>(
@@ -500,21 +538,10 @@ app.get<{
   Params: { sessionId: string };
   Querystring: { workspaceId?: string; sessionPath?: string };
 }>("/api/sessions/:sessionId/events", async (request, reply) => {
-  if (!service.hasSession(request.params.sessionId)) {
-    const { workspaceId, sessionPath } = request.query;
-    if (!workspaceId || !sessionPath) {
-      reply.code(404).send({ error: `Unknown session: ${request.params.sessionId}` });
-      return;
-    }
-
-    const workspaces = await listWorkspaces(config);
-    const workspace = resolveWorkspace(workspaces, workspaceId);
-    const restoredSession = await service.openSession(workspace, sessionPath);
-    if (restoredSession.sessionId !== request.params.sessionId) {
-      reply.code(409).send({ error: `Session id mismatch: ${request.params.sessionId}` });
-      return;
-    }
-  }
+  await ensureSessionLoaded(request.params.sessionId, {
+    workspaceId: request.query.workspaceId,
+    sessionPath: request.query.sessionPath,
+  });
 
   reply.raw.writeHead(200, {
     "Content-Type": "text/event-stream",

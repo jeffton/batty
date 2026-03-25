@@ -1,6 +1,14 @@
 import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
 import type { ActiveToolRun, ServerEvent, SessionState } from "@/shared/types";
 
+export function shouldUpdateSessionSummary(event: ServerEvent): boolean {
+  return event.type === "reset" || event.type === "state";
+}
+
+export function shouldWriteSessionCache(event: ServerEvent): boolean {
+  return event.type === "reset" || event.type === "state";
+}
+
 function mergeTools(previous: ActiveToolRun[], incoming: ActiveToolRun[]): ActiveToolRun[] {
   if (incoming.length === 0) {
     return [];
@@ -18,8 +26,16 @@ export function applyServerEvent(
   event: ServerEvent,
 ): SessionState | undefined {
   switch (event.type) {
-    case "state":
+    case "reset":
       return mergeSessionState(event.state, state);
+    case "state":
+      if (!state) {
+        return state;
+      }
+      return normalizeSessionState({
+        ...state,
+        ...event.state,
+      });
     case "assistant":
       if (!state) {
         return state;

@@ -6,6 +6,7 @@ import {
   deleteCronJob as deleteCronJobRequest,
   getBootstrap,
   getSession,
+  getSessionMessages,
   getVersion,
   listWorkspaceCronJobs,
   listWorkspaceSessions,
@@ -25,7 +26,11 @@ import {
 } from "@/client/lib/cache";
 import { primeAgentNotifications } from "@/client/lib/agent-notifications";
 import { syncPushSubscription } from "@/client/lib/push-notifications";
-import { applyServerEvent } from "@/client/lib/session-events";
+import {
+  applyServerEvent,
+  shouldUpdateSessionSummary,
+  shouldWriteSessionCache,
+} from "@/client/lib/session-events";
 import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
 import { sessionEventsPath } from "@/client/lib/session-stream";
 import { mergeSessionSummaries, toSessionSummary } from "@/client/lib/session-summary";
@@ -54,6 +59,8 @@ const defaultAuthStatus: AuthStatus = {
   setupRequired: false,
 };
 
+const MESSAGE_PAGE_SIZE = 50;
+
 function compareCronJobsByNextRun(left: CronJob, right: CronJob): number {
   if (left.state.nextRunAtMs == null && right.state.nextRunAtMs == null) {
     return left.createdAt - right.createdAt;
@@ -65,6 +72,18 @@ function compareCronJobsByNextRun(left: CronJob, right: CronJob): number {
     return -1;
   }
   return left.state.nextRunAtMs - right.state.nextRunAtMs;
+}
+
+function prependUniqueMessages(
+  existing: SessionState["messages"],
+  older: SessionState["messages"],
+): SessionState["messages"] {
+  if (older.length === 0) {
+    return existing;
+  }
+
+  const existingIds = new Set(existing.map((message) => message.id));
+  return [...older.filter((message) => !existingIds.has(message.id)), ...existing];
 }
 
 export const useAppStore = defineStore("app", {
@@ -86,6 +105,7 @@ export const useAppStore = defineStore("app", {
     routeLoadingSessionId: undefined as string | undefined,
     loadingWorkspaceSessions: {} as Record<string, boolean>,
     loadingWorkspaceCronJobs: {} as Record<string, boolean>,
+    loadingOlderMessages: false,
   }),
   getters: {
     selectedWorkspace(state): WorkspaceInfo | undefined {
@@ -350,8 +370,10 @@ export const useAppStore = defineStore("app", {
       eventSource.onmessage = async (message) => {
         const event = JSON.parse(message.data) as ServerEvent;
         this.activeSession = applyServerEvent(this.activeSession, event);
-        if (this.activeSession) {
+        if (this.activeSession && shouldUpdateSessionSummary(event)) {
           this.updateSessionSummary(this.activeSession);
+        }
+        if (this.activeSession && shouldWriteSessionCache(event)) {
           await writeCachedSession(this.activeSession);
         }
         this.connectionState = "online";
@@ -410,6 +432,41 @@ export const useAppStore = defineStore("app", {
       this.activeSession = session;
       this.updateSessionSummary(session);
       await writeCachedSession(session);
+    },
+
+    async loadOlderMessages(): Promise<void> {
+      const session = this.activeSession;
+      if (
+        !session ||
+        this.loadingOlderMessages ||
+        !session.hasMoreMessages ||
+        session.messages.length === 0
+      ) {
+        return;
+      }
+
+      this.loadingOlderMessages = true;
+      try {
+        const page = await getSessionMessages(session, {
+          before: session.messages[0]?.id,
+          limit: MESSAGE_PAGE_SIZE,
+        });
+        const nextSession = normalizeSessionState({
+          ...session,
+          messages: prependUniqueMessages(session.messages, page.messages),
+          totalMessageCount: page.totalMessageCount,
+          hasMoreMessages: page.hasMoreMessages,
+        });
+        if (!nextSession) {
+          throw new Error("Failed to load older messages");
+        }
+
+        this.activeSession = nextSession;
+        this.updateSessionSummary(nextSession);
+        await writeCachedSession(nextSession);
+      } finally {
+        this.loadingOlderMessages = false;
+      }
     },
 
     async sendPrompt(text: string, files: File[]): Promise<void> {

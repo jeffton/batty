@@ -26,7 +26,7 @@ const summary: SessionSummary = {
 };
 
 function createSession(partial: Partial<SessionState>): SessionState {
-  return {
+  const session = {
     id: "web-1",
     sessionId: summary.sessionId,
     workspaceId: workspace.id,
@@ -40,9 +40,16 @@ function createSession(partial: Partial<SessionState>): SessionState {
     contextTokens: 100,
     contextWindow: 1000,
     contextPercent: 10,
+    totalMessageCount: 0,
+    hasMoreMessages: false,
     messages: [],
     activeTools: [],
     ...partial,
+  };
+
+  return {
+    ...session,
+    totalMessageCount: partial.totalMessageCount ?? session.messages.length,
   };
 }
 
@@ -95,6 +102,13 @@ async function installMocks(page: Page, session: SessionState): Promise<void> {
     });
   });
 
+  await page.route(`**/api/workspaces/${workspace.id}/cron-jobs`, async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify([]),
+    });
+  });
+
   await page.route("**/api/sessions/open", async (route) => {
     await route.fulfill({
       contentType: "application/json",
@@ -104,6 +118,53 @@ async function installMocks(page: Page, session: SessionState): Promise<void> {
 }
 
 test.describe("tool rendering", () => {
+  test("loads older messages when the initial transcript is paginated", async ({ page }) => {
+    await page.route("**/api/sessions/web-1/messages**", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          messages: [
+            {
+              id: "user-1",
+              role: "user",
+              timestamp: 1,
+              blocks: [{ type: "text", text: "oldest prompt" }],
+            },
+          ],
+          totalMessageCount: 3,
+          hasMoreMessages: false,
+        }),
+      });
+    });
+
+    await installMocks(
+      page,
+      createSession({
+        totalMessageCount: 3,
+        hasMoreMessages: true,
+        messages: [
+          {
+            id: "assistant-2",
+            role: "assistant",
+            timestamp: 2,
+            blocks: [{ type: "text", text: "middle reply" }],
+          },
+          {
+            id: "assistant-3",
+            role: "assistant",
+            timestamp: 3,
+            blocks: [{ type: "text", text: "latest reply" }],
+          },
+        ],
+      }),
+    );
+
+    await page.goto(`/workspaces/${workspace.id}/sessions/${summary.sessionId}`);
+
+    await expect(page.locator(".transcript")).toBeVisible();
+    await expect(page.locator(".message")).toContainText(["oldest prompt", "latest reply"]);
+  });
+
   test("renders standalone bash tool results", async ({ page }) => {
     await installMocks(
       page,

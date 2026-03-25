@@ -1,6 +1,44 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import { normalizeMessage } from "./pi-state";
+import { createSessionState, normalizeMessage } from "./pi-state";
+
+describe("createSessionState", () => {
+  it("uses stable global message indexes for paginated windows", () => {
+    const state = createSessionState({
+      id: "web-1",
+      sessionId: "session-1",
+      workspaceId: "batty",
+      cwd: "/tmp/batty",
+      thinkingLevel: "medium",
+      availableThinkingLevels: ["medium"],
+      isStreaming: false,
+      pendingMessageCount: 0,
+      updatedAt: 2,
+      contextTokens: null,
+      contextWindow: null,
+      contextPercent: null,
+      totalMessageCount: 3,
+      hasMoreMessages: true,
+      messageIndexOffset: 1,
+      messages: [
+        {
+          role: "assistant",
+          content: "middle",
+          timestamp: 2,
+        },
+        {
+          role: "assistant",
+          content: "latest",
+          timestamp: 3,
+        },
+      ] as AgentMessage[],
+      activeTools: [],
+      title: undefined,
+    });
+
+    expect(state.messages.map((message) => message.id)).toEqual(["assistant-2-1", "assistant-3-2"]);
+  });
+});
 
 describe("normalizeMessage", () => {
   it("strips terminal formatting from bash execution output", () => {

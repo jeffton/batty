@@ -169,8 +169,10 @@ export function normalizeMessage(message: AgentMessage, index: number): UiMessag
   return undefined;
 }
 
-export function normalizeMessages(messages: AgentMessage[]): UiMessage[] {
-  return messages.map(normalizeMessage).filter((message): message is UiMessage => Boolean(message));
+export function normalizeMessages(messages: AgentMessage[], offset = 0): UiMessage[] {
+  return messages
+    .map((message, index) => normalizeMessage(message, index + offset))
+    .filter((message): message is UiMessage => Boolean(message));
 }
 
 export interface SessionStateInput {
@@ -191,6 +193,7 @@ export interface SessionStateInput {
   contextPercent: number | null;
   totalMessageCount: number;
   hasMoreMessages: boolean;
+  messageIndexOffset?: number;
   messages: AgentMessage[];
   activeAssistant?: AgentMessage;
   title?: string;
@@ -223,7 +226,7 @@ export function createSessionState(input: SessionStateInput): SessionState {
     contextPercent: input.contextPercent,
     totalMessageCount: input.totalMessageCount,
     hasMoreMessages: input.hasMoreMessages,
-    messages: normalizeMessages(input.messages),
+    messages: normalizeMessages(input.messages, input.messageIndexOffset ?? 0),
     activeAssistant,
     activeTools: input.activeTools,
     title: input.title,

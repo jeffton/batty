@@ -347,6 +347,7 @@ export class PiService {
       contextPercent: contextUsage?.percent ?? null,
       totalMessageCount: messagePage.totalMessageCount,
       hasMoreMessages: messagePage.hasMoreMessages,
+      messageIndexOffset: messagePage.messageIndexOffset,
       messages: messagePage.messages,
       activeAssistant: webSession.activeAssistant,
       activeTools: [...webSession.activeTools.values()],
@@ -379,6 +380,7 @@ export class PiService {
         contextPercent: null,
         totalMessageCount: page.totalMessageCount,
         hasMoreMessages: page.hasMoreMessages,
+        messageIndexOffset: page.messageIndexOffset,
         messages: page.messages,
         activeTools: [],
         title: undefined,
@@ -524,7 +526,12 @@ export class PiService {
   private getMessagePage(
     webSession: WebSession,
     options?: { beforeMessageId?: string; limit?: number },
-  ): { messages: AgentSession["messages"]; totalMessageCount: number; hasMoreMessages: boolean } {
+  ): {
+    messages: AgentSession["messages"];
+    totalMessageCount: number;
+    hasMoreMessages: boolean;
+    messageIndexOffset: number;
+  } {
     const allMessages = webSession.session.messages;
     const totalMessageCount = allMessages.length;
     const limit = clampMessagePageSize(options?.limit);
@@ -539,6 +546,7 @@ export class PiService {
       messages: allMessages.slice(start, end),
       totalMessageCount,
       hasMoreMessages: start > 0,
+      messageIndexOffset: start,
     };
   }
 

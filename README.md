@@ -1,6 +1,6 @@
 # Batty
 
-Batty is a web UI for [Pi Coding Agent](https://pi.dev). It keeps Pi's workspace, session, model, skill, and `AGENTS.md` behavior, but gives you a fast browser app for chatting, resuming sessions, and managing scheduled agent runs.
+Batty is a web UI for [Pi Coding Agent](https://pi.dev). It keeps Pi's workspace, session, model, skill, and `AGENTS.md` behavior, but gives you a fast browser app for chatting, resuming sessions, and managing cron jobs.
 
 ## What Batty does
 
@@ -35,7 +35,7 @@ Batty adds a browser-native layer on top:
 - streaming transcript UI
 - local caching and drafts
 - push notifications
-- scheduled runs
+- cron
 - passkey login
 
 ## Quick start
@@ -107,7 +107,7 @@ pnpm batty -- --root /path/to/batty-root auth code
 
 ## Batty CLI
 
-Batty includes a small CLI for auth and scheduled jobs.
+Batty includes a small CLI for auth and cron jobs.
 
 Run it from the repo with:
 
@@ -136,9 +136,9 @@ pnpm batty -- --root /path/to/batty-root cron edit <jobId> --prompt "Updated pro
 pnpm batty -- --root /path/to/batty-root cron rm <jobId>
 ```
 
-The same scheduled-job functionality is also available to the agent through Batty's built-in `cron` tool.
+The same cron functionality is also available to the agent through Batty's built-in `cron` tool.
 
-## Scheduled runs
+## Cron
 
 Batty can run future agent turns in any workspace.
 

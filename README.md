@@ -93,23 +93,23 @@ First device setup:
 
 After that, sign-in uses the passkey directly.
 
-To enroll another device later, print a fresh setup code:
+To enroll another device later, generate a fresh setup code with the Batty CLI:
 
 ```bash
-pnpm add-user -- /path/to/batty-root
-```
-
-You can also generate setup codes through the Batty CLI:
-
-```bash
-pnpm batty -- --root /path/to/batty-root auth code
+batty --root /path/to/batty-root auth code
 ```
 
 ## Batty CLI
 
 Batty includes a small CLI for auth and cron jobs.
 
-Run it from the repo with:
+After deployment, `./scripts/deploy.sh` installs it as:
+
+```bash
+batty --root /path/to/batty-root <command>
+```
+
+For local repo usage before deployment, the equivalent command is:
 
 ```bash
 pnpm batty -- --root /path/to/batty-root <command>
@@ -128,12 +128,12 @@ batty cron rm <jobId>
 ### Examples
 
 ```bash
-pnpm batty -- --root /path/to/batty-root auth code
-pnpm batty -- --root /path/to/batty-root cron list --workspace batty
-pnpm batty -- --root /path/to/batty-root cron add --workspace batty --prompt "Check CI and summarize failures" --thinking medium --every 1h
-pnpm batty -- --root /path/to/batty-root cron add --workspace batty --prompt "Morning summary" --thinking low --cron "0 8 * * 1-5" --tz Europe/Copenhagen
-pnpm batty -- --root /path/to/batty-root cron edit <jobId> --prompt "Updated prompt"
-pnpm batty -- --root /path/to/batty-root cron rm <jobId>
+batty --root /path/to/batty-root auth code
+batty --root /path/to/batty-root cron list --workspace batty
+batty --root /path/to/batty-root cron add --workspace batty --prompt "Check CI and summarize failures" --thinking medium --every 1h
+batty --root /path/to/batty-root cron add --workspace batty --prompt "Morning summary" --thinking low --cron "0 8 * * 1-5" --tz Europe/Copenhagen
+batty --root /path/to/batty-root cron edit <jobId> --prompt "Updated prompt"
+batty --root /path/to/batty-root cron rm <jobId>
 ```
 
 The same cron functionality is also available to the agent through Batty's built-in `cron` tool.
@@ -166,8 +166,7 @@ pnpm check
 pnpm test
 pnpm build
 pnpm start -- /path/to/batty-root
-pnpm add-user -- /path/to/batty-root
-pnpm batty -- --root /path/to/batty-root auth code
+batty --root /path/to/batty-root auth code
 ```
 
 ## Configuration

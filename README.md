@@ -1,82 +1,163 @@
 # Batty
 
-A browser UI for [Pi Coding Agent](https://pi.dev) that keeps Pi's session/model/skill/config behavior, but moves the chat experience into a responsive web app.
+Batty is a web UI for [Pi Coding Agent](https://pi.dev). It keeps Pi's workspace, session, model, skill, and `AGENTS.md` behavior, but gives you a fast browser app for chatting, resuming sessions, and managing scheduled agent runs.
 
-## What ships
+## What Batty does
 
-- Responsive Vue 3 UI with mobile sidebar
-- Markdown rendering for assistant replies
-- SSE streaming for live assistant output and tool activity
-- Monospace multiline composer with drag/drop and `+` attachment picker
-- Image rendering for message and tool output blocks
-- Model selection powered by Pi's model registry
-- Workspace picker for folders directly under a configured root
-- Create new workspaces directly under the configured root from the sidebar
-- Session listing + resume per workspace using Pi session files
-- Offline-friendly client shell via PWA + IndexedDB snapshot caching
-- Native Web Push notifications when agent runs finish in the background, including iOS Home Screen installs
-- TypeScript Fastify server using Pi's SDK/session APIs
-- Tests for auth, workspace discovery, and client session-event reduction
+- Responsive chat UI for desktop and mobile
+- Live streaming over SSE for assistant output and tool activity
+- Workspace picker with filtering and one-click workspace creation
+- Session list per workspace, including resume and infinite scroll for older messages
+- Model and thinking-level switching from the chat header
+- Attachment support with drag and drop, file picker, and image rendering
+- Local draft saving while you type, including offline/reconnecting states
+- Queue follow-up prompts while a run is streaming, or send steer prompts mid-run
+- Rich tool rendering, including inline diffs for edits and readable bash output
+- Built-in cron jobs for scheduled agent turns
+- Passkey auth with one-time setup codes for enrolling devices
+- Web Push notifications when background runs finish
+- PWA install support with offline-friendly cached session snapshots
+- Auto-reconnect after server restarts and auto-refresh when a new client build is deployed
 
-## Stack
+## How it works
 
-- Vite+ `0.1.11`
-- Vue `3.5.30`
-- Vue Router `5.0.3`
-- Pinia `3.0.4`
-- TypeScript `5.9.3`
-- Pi Coding Agent `0.60.0`
-- Fastify `5.8.2`
+Batty runs a Fastify server and a Vue client, while Pi still owns the actual agent behavior:
 
-## Auth
+- models come from Pi's model registry
+- skills come from `~/.pi/agent/skills`
+- settings come from `~/.pi/agent/settings.json`
+- instructions come from global and project `AGENTS.md`
+- session history is stored in Pi session files inside each workspace
 
-Batty now uses passkeys for passwordless auth on a single-user system. Passwords are gone.
+Batty adds a browser-native layer on top:
 
-Flow:
+- workspace and session browsing
+- streaming transcript UI
+- local caching and drafts
+- push notifications
+- scheduled runs
+- passkey login
 
-1. On first start with no registered passkeys, the server prints a one-time 8-character setup code in the terminal, shown as `abcd ef12`.
-2. Open Batty in the browser, enter the setup code, and register a passkey with Face ID / Touch ID / Windows Hello.
-3. Later logins use the passkey directly.
-4. To add another device, print a fresh one-time setup code with `pnpm add-user -- /path/to/batty-root`.
+## Quick start
 
-Batty reads its persisted server config from `<batty-dir>/.batty/options.json`, where `<batty-dir>` is passed as a command line argument when starting the server. On this server that path is `/root/github/.batty/options.json`.
+Create a Batty root directory. Batty stores its own state in `<batty-root>/.batty/` and lists workspaces from the configured `workspacesRoot`.
 
-- `workspacesRoot` is required
-- `webPushSubject` is required
-- `authSecret` is generated automatically if missing, then persisted
-- registered passkeys are stored in `<batty-dir>/.batty/passkeys.json`
-- active one-time setup codes are stored in `<batty-dir>/.batty/setup-code.json`
-- sign-in and setup-code verification are rate-limited in memory to roughly 5 failed attempts per minute globally
+Example options file:
 
-Example:
+`<batty-root>/.batty/options.json`
 
 ```json
 {
   "authSecret": "generated-on-first-run",
-  "workspacesRoot": "/root/github",
-  "webPushSubject": "https://batty.roybot.se"
+  "workspacesRoot": "/path/to/workspaces",
+  "webPushSubject": "https://your-batty-host"
 }
 ```
 
-That `<batty-dir>/.batty/` directory is ignored by git and is intended to hold local state such as:
+Required fields:
 
-- `options.json`
-- `uploads/`
-- `web-push/vapid-keys.json`
-- `web-push/subscriptions.json`
+- `workspacesRoot`
+- `webPushSubject`
 
-## Local development
+`authSecret` is generated automatically if missing.
+
+### Local development
 
 ```bash
 pnpm install
 pnpm dev -- /path/to/batty-root
 ```
 
-App UI: `http://127.0.0.1:5173`
+- client: `http://127.0.0.1:5173`
+- server: `http://127.0.0.1:3147`
 
-API server: `http://127.0.0.1:3147`
+### Production-style run
 
-On a fresh checkout, create `/path/to/batty-root/.batty/options.json` with the required fields before starting the server. On first boot the server will print a setup code for registering the first passkey.
+```bash
+pnpm build
+pnpm start -- /path/to/batty-root
+```
+
+On first boot with no registered passkeys, Batty prints a one-time setup code in the server terminal.
+
+## Authentication
+
+Batty uses passkeys for passwordless login.
+
+First device setup:
+
+1. Start Batty.
+2. Copy the setup code printed in the server terminal.
+3. Open Batty in the browser.
+4. Enter the setup code and register a passkey.
+
+After that, sign-in uses the passkey directly.
+
+To enroll another device later, print a fresh setup code:
+
+```bash
+pnpm add-user -- /path/to/batty-root
+```
+
+You can also generate setup codes through the Batty CLI:
+
+```bash
+pnpm batty -- --root /path/to/batty-root auth code
+```
+
+## Batty CLI
+
+Batty includes a small CLI for auth and scheduled jobs.
+
+Run it from the repo with:
+
+```bash
+pnpm batty -- --root /path/to/batty-root <command>
+```
+
+### Commands
+
+```text
+batty auth code
+batty cron list [--workspace ID] [--json]
+batty cron add --workspace ID --prompt TEXT --thinking LEVEL (--in DUR | --at ISO | --every DUR | --cron EXPR) [--model ID] [--tz IANA]
+batty cron edit <jobId> [--workspace ID] [--prompt TEXT] [--model ID] [--thinking LEVEL] [--in DUR | --at ISO | --every DUR | --cron EXPR] [--tz IANA]
+batty cron rm <jobId>
+```
+
+### Examples
+
+```bash
+pnpm batty -- --root /path/to/batty-root auth code
+pnpm batty -- --root /path/to/batty-root cron list --workspace batty
+pnpm batty -- --root /path/to/batty-root cron add --workspace batty --prompt "Check CI and summarize failures" --thinking medium --every 1h
+pnpm batty -- --root /path/to/batty-root cron add --workspace batty --prompt "Morning summary" --thinking low --cron "0 8 * * 1-5" --tz Europe/Copenhagen
+pnpm batty -- --root /path/to/batty-root cron edit <jobId> --prompt "Updated prompt"
+pnpm batty -- --root /path/to/batty-root cron rm <jobId>
+```
+
+The same scheduled-job functionality is also available to the agent through Batty's built-in `cron` tool.
+
+## Scheduled runs
+
+Batty can run future agent turns in any workspace.
+
+Schedules supported by both the CLI and the built-in tool:
+
+- one-shot at a specific time
+- one-shot after a relative duration like `10m` or `2h`
+- repeating interval schedules like `1h` or `1d`
+- cron expressions with an optional timezone
+
+Cron job state includes:
+
+- next scheduled run
+- last run time
+- last status
+- last error
+- last session id
+
+The chat header also includes a cron popover for browsing, editing prompt/model/thinking level, and deleting existing jobs.
 
 ## Useful commands
 
@@ -86,55 +167,78 @@ pnpm test
 pnpm build
 pnpm start -- /path/to/batty-root
 pnpm add-user -- /path/to/batty-root
+pnpm batty -- --root /path/to/batty-root auth code
 ```
 
 ## Configuration
 
-Runtime env vars are intentionally minimal:
+### Runtime environment variables
 
-- `BATTY_HOST` - server bind host, default `127.0.0.1`
-- `BATTY_PORT` - server port, default `3147`
+- `BATTY_HOST` — bind host, defaults to `127.0.0.1`
+- `BATTY_PORT` — bind port, defaults to `3147`
 
-Persisted server options live in `<batty-dir>/.batty/options.json`:
+### Persisted options
 
-- `authSecret` - cookie signing secret, generated if missing
-- `workspacesRoot` - required root directory containing workspace folders
-- `webPushSubject` - required VAPID subject; use a real `https:` origin or valid `mailto:` URI
+Batty reads persisted server options from:
 
-Pi resources are loaded from the regular `~/.pi` setup through Pi's SDK:
+`<batty-root>/.batty/options.json`
 
-- models: `~/.pi/agent/models.json`
-- skills: `~/.pi/agent/skills`
-- settings: `~/.pi/agent/settings.json`
-- AGENTS.md: `~/.pi/agent/AGENTS.md` plus project `AGENTS.md`
+Fields:
+
+- `authSecret` — cookie signing secret, generated if missing
+- `workspacesRoot` — required root containing workspace folders
+- `webPushSubject` — required VAPID subject; use a real `https:` origin or valid `mailto:` URI
+
+### Loaded environment file
+
+If present, Batty also loads:
+
+`<batty-root>/.batty/environment.json`
+
+This file can provide environment variables before the server starts.
+
+### State directory contents
+
+Batty stores local state in `<batty-root>/.batty/`, including:
+
+- `options.json`
+- `environment.json`
+- `passkeys.json`
+- `setup-code.json`
+- `uploads/`
+- `cron/jobs.json`
+- `web-push/vapid-keys.json`
+- `web-push/subscriptions.json`
+
+## Notes on files and sessions
+
+- Workspaces are direct child directories under `workspacesRoot`.
+- New workspaces created in the UI are created directly under that root.
+- Uploaded files are staged on disk before being handed to Pi.
+- Non-image attachments are injected into the prompt as `<file>` blocks.
+- Image attachments are sent as image inputs and also referenced as file placeholders.
+- Session state is kept in Pi's session files, with Batty caching recent snapshots locally in the browser.
 
 ## Hot reloading Batty itself
 
-When you open a session in this repo's workspace, the agent can modify this repo directly and restart the deployed app with:
+When working inside the Batty repo, use:
 
 ```bash
-scripts/reload-self.sh
+./scripts/reload-self.sh
 ```
 
-Pi session state is persisted in Pi's session files, and the web app also caches the latest session snapshot in IndexedDB, so reconnecting after a rebuild/restart is cheap.
+That flow is designed to let the current agent turn finish cleanly before the service reload happens.
 
 ## Deployment
 
 Repo includes:
 
-- `deploy/batty.service` - systemd unit
-- `deploy/batty.nginx.conf` - nginx reverse proxy for `batty.roybot.se`
-- `scripts/deploy.sh` - install/build/restart helper; the bundled systemd unit starts the server with `/root/github` as the Batty state root on this server
+- `deploy/batty.service` — systemd unit
+- `deploy/batty.nginx.conf` — nginx example
+- `scripts/deploy.sh` — install, build, and reload helper
 
-Deploy on the server:
+Deploy on the server with the project script:
 
 ```bash
-sudo certbot certonly --webroot -w /var/www/default -d batty.roybot.se
 sudo ./scripts/deploy.sh
 ```
-
-## Notes
-
-- This is intentionally not backwards-compatible with older Pi/Vite stacks.
-- Attachments are staged on disk before being handed to Pi.
-- Non-image files are injected into the prompt as `<file>` blocks; image files are sent as model image inputs.

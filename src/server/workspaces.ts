@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { SessionManager } from "@mariozechner/pi-coding-agent";
 import type { WorkspaceInfo } from "@/shared/types";
 import type { AppConfig } from "./config";
 
@@ -55,13 +56,46 @@ function resolveWorkspacePath(workspacesRoot: string, name: string): string {
   return workspacePath;
 }
 
+async function workspaceLastSessionUpdatedAt(
+  workspace: WorkspaceInfo,
+): Promise<number | undefined> {
+  const sessions = await SessionManager.list(workspace.path).catch(() => []);
+  return sessions.reduce<number | undefined>((latest, session) => {
+    const updatedAt = session.modified.getTime();
+    return latest == null || updatedAt > latest ? updatedAt : latest;
+  }, undefined);
+}
+
 export async function listWorkspaces(config: AppConfig): Promise<WorkspaceInfo[]> {
   const entries = await fs.readdir(config.workspacesRoot, { withFileTypes: true }).catch(() => []);
-
-  return entries
+  const workspaces = entries
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-    .map<WorkspaceInfo>((entry) => toWorkspaceInfo(config.workspacesRoot, entry.name))
-    .sort((a, b) => a.label.localeCompare(b.label));
+    .map<WorkspaceInfo>((entry) => toWorkspaceInfo(config.workspacesRoot, entry.name));
+
+  const workspacesWithActivity = await Promise.all(
+    workspaces.map(async (workspace) => ({
+      workspace,
+      lastSessionUpdatedAt: await workspaceLastSessionUpdatedAt(workspace),
+    })),
+  );
+
+  return workspacesWithActivity
+    .sort((left, right) => {
+      if (left.lastSessionUpdatedAt == null && right.lastSessionUpdatedAt == null) {
+        return left.workspace.label.localeCompare(right.workspace.label);
+      }
+      if (left.lastSessionUpdatedAt == null) {
+        return 1;
+      }
+      if (right.lastSessionUpdatedAt == null) {
+        return -1;
+      }
+      if (left.lastSessionUpdatedAt !== right.lastSessionUpdatedAt) {
+        return right.lastSessionUpdatedAt - left.lastSessionUpdatedAt;
+      }
+      return left.workspace.label.localeCompare(right.workspace.label);
+    })
+    .map(({ workspace }) => workspace);
 }
 
 export async function createWorkspace(config: AppConfig, name: string): Promise<WorkspaceInfo> {

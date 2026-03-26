@@ -35,7 +35,7 @@ import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-s
 import { sessionEventsPath } from "@/client/lib/session-stream";
 import { mergeSessionSummaries, toSessionSummary } from "@/client/lib/session-summary";
 import { workspaceEventsPath } from "@/client/lib/workspace-stream";
-import { uniqueWorkspaces } from "@/client/lib/workspaces";
+import { sortWorkspacesByRecentSession, uniqueWorkspaces } from "@/client/lib/workspaces";
 import { RECENT_SESSION_MESSAGE_WINDOW } from "@/shared/session-history";
 import type {
   AuthStatus,
@@ -97,6 +97,7 @@ export const useAppStore = defineStore("app", {
     sessionsByWorkspace: {} as Record<string, SessionSummary[]>,
     cronJobsByWorkspace: {} as Record<string, CronJob[]>,
     activeSession: undefined as SessionState | undefined,
+    recentSessionSummary: undefined as SessionSummary | undefined,
     selectedWorkspaceId: undefined as string | undefined,
     authError: undefined as string | undefined,
     lastError: undefined as string | undefined,
@@ -130,8 +131,37 @@ export const useAppStore = defineStore("app", {
 
       return state.cronJobsByWorkspace[state.selectedWorkspaceId] ?? [];
     },
+    mostRecentSessionSummary(state): SessionSummary | undefined {
+      let mostRecent = state.recentSessionSummary;
+
+      for (const sessions of Object.values(state.sessionsByWorkspace)) {
+        const candidate = sessions[0];
+        if (!candidate) {
+          continue;
+        }
+        if (!mostRecent || candidate.updatedAt > mostRecent.updatedAt) {
+          mostRecent = candidate;
+        }
+      }
+
+      if (state.activeSession?.path) {
+        const activeSessionSummary = toSessionSummary(state.activeSession);
+        if (!mostRecent || activeSessionSummary.updatedAt > mostRecent.updatedAt) {
+          mostRecent = activeSessionSummary;
+        }
+      }
+
+      return mostRecent;
+    },
   },
   actions: {
+    sortWorkspaces(): void {
+      this.workspaces = sortWorkspacesByRecentSession(
+        uniqueWorkspaces(this.workspaces),
+        this.sessionsByWorkspace,
+        this.activeSession,
+      );
+    },
     async bootstrap(): Promise<void> {
       this.connectionState = navigator.onLine ? "online" : "offline";
       try {
@@ -162,13 +192,18 @@ export const useAppStore = defineStore("app", {
       this.authenticated = payload.authenticated;
       this.auth = payload.auth;
       this.buildId = payload.buildId;
-      this.workspaces = workspaces;
+      this.recentSessionSummary = payload.recentSession;
+      this.workspaces = sortWorkspacesByRecentSession(
+        workspaces,
+        this.sessionsByWorkspace,
+        this.activeSession,
+      );
       this.models = payload.models;
       this.selectedWorkspaceId =
         this.selectedWorkspaceId &&
-        workspaces.some((workspace) => workspace.id === this.selectedWorkspaceId)
+        this.workspaces.some((workspace) => workspace.id === this.selectedWorkspaceId)
           ? this.selectedWorkspaceId
-          : workspaces[0]?.id;
+          : this.workspaces[0]?.id;
       if (payload.authenticated) {
         this.authError = undefined;
         if (this.selectedWorkspaceId && this.connectionState !== "offline") {
@@ -176,6 +211,7 @@ export const useAppStore = defineStore("app", {
         }
       } else {
         this.activeSession = undefined;
+        this.recentSessionSummary = undefined;
         this.sessionsByWorkspace = {};
         this.cronJobsByWorkspace = {};
         this.closeStream();
@@ -193,6 +229,7 @@ export const useAppStore = defineStore("app", {
       this.closeWorkspaceStream();
       this.authenticated = false;
       this.activeSession = undefined;
+      this.recentSessionSummary = undefined;
       this.sessionsByWorkspace = {};
       this.cronJobsByWorkspace = {};
     },
@@ -225,6 +262,7 @@ export const useAppStore = defineStore("app", {
           ...this.sessionsByWorkspace,
           [workspaceId]: mergeSessionSummaries(sessions, existing, activeSession),
         };
+        this.sortWorkspaces();
       } finally {
         this.loadingWorkspaceSessions = {
           ...this.loadingWorkspaceSessions,
@@ -274,11 +312,12 @@ export const useAppStore = defineStore("app", {
           toSessionSummary(session),
         ]),
       };
+      this.sortWorkspaces();
     },
 
     async createWorkspace(name: string): Promise<SessionState> {
       const workspace = await createWorkspaceRequest(name);
-      this.workspaces = await listWorkspacesRequest();
+      this.workspaces = uniqueWorkspaces(await listWorkspacesRequest());
       this.sessionsByWorkspace = {
         ...this.sessionsByWorkspace,
         [workspace.id]: [],
@@ -287,6 +326,7 @@ export const useAppStore = defineStore("app", {
         ...this.cronJobsByWorkspace,
         [workspace.id]: [],
       };
+      this.sortWorkspaces();
       this.selectWorkspace(workspace.id);
       await this.loadWorkspaceCronJobs(workspace.id);
       return this.startSession(workspace.id);
@@ -409,6 +449,7 @@ export const useAppStore = defineStore("app", {
           ...this.cronJobsByWorkspace,
           [snapshot.workspaceId]: snapshot.cronJobs,
         };
+        this.sortWorkspaces();
       };
       workspaceEventSource.onerror = () => {
         if (!navigator.onLine) {

@@ -2,7 +2,7 @@
 import { onMounted, onUnmounted, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { readCachedSession } from "@/client/lib/cache";
-import { workspaceRoutePath } from "@/client/lib/routes";
+import { sessionRoutePath, workspaceRoutePath } from "@/client/lib/routes";
 import { useAppStore } from "@/client/stores/app";
 
 const store = useAppStore();
@@ -29,6 +29,14 @@ const onVisibilityChange = () => {
 let syncVersion = 0;
 
 function fallbackWorkspaceRoute(): string | undefined {
+  const recentSession = store.mostRecentSessionSummary;
+  if (
+    recentSession &&
+    store.workspaces.some((workspace) => workspace.id === recentSession.workspaceId)
+  ) {
+    return sessionRoutePath(recentSession.workspaceId, recentSession.sessionId);
+  }
+
   const workspaceId = store.selectedWorkspaceId ?? store.workspaces[0]?.id;
   return workspaceId ? workspaceRoutePath(workspaceId) : undefined;
 }

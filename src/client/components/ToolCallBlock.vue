@@ -9,7 +9,7 @@ import { createTailView } from "@/client/lib/tool-output";
 import { hasToolResultContent } from "@/client/lib/transcript";
 import type { ToolExecutionDetails, UiContentBlock } from "@/shared/types";
 
-const OUTPUT_TAIL_LINE_COUNT = 25;
+const OUTPUT_TAIL_LINE_COUNT = 20;
 
 const props = withDefaults(
   defineProps<{

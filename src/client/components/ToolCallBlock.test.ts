@@ -66,8 +66,8 @@ describe("ToolCallBlock", () => {
     const blocks = wrapper.findAll("pre.code-block");
     expect(blocks[0]?.text()).toContain("$ pnpm test");
     expect(blocks[1]?.text()).toContain("line-30");
-    expect(blocks[1]?.text()).toContain("line-6");
-    expect(blocks[1]?.text()).not.toContain("line-5");
+    expect(blocks[1]?.text()).toContain("line-11");
+    expect(blocks[1]?.text()).not.toContain("line-10");
     expect(wrapper.text()).toContain("Show full output");
 
     await wrapper.get(".tool-call__expand-btn").trigger("click");
@@ -90,8 +90,8 @@ describe("ToolCallBlock", () => {
     });
 
     expect(wrapper.find("pre.code-block").text()).toContain("line-30");
-    expect(wrapper.find("pre.code-block").text()).toContain("line-6");
-    expect(wrapper.find("pre.code-block").text()).not.toContain("line-5");
+    expect(wrapper.find("pre.code-block").text()).toContain("line-11");
+    expect(wrapper.find("pre.code-block").text()).not.toContain("line-10");
 
     await wrapper.get(".tool-call__expand-btn").trigger("click");
 

@@ -24,7 +24,7 @@ const MODEL_POPOVER_ID = "chat-main-model-popover";
 const MODEL_POPOVER_ANCHOR = "--chat-main-model-anchor";
 const CRON_POPOVER_ID = "chat-main-cron-popover";
 const CRON_POPOVER_ANCHOR = "--chat-main-cron-anchor";
-const TRANSCRIPT_BOTTOM_THRESHOLD = 24;
+const TRANSCRIPT_BOTTOM_THRESHOLD = 48;
 const TRANSCRIPT_LOAD_OLDER_THRESHOLD = 80;
 
 type TranscriptHandle = InstanceType<typeof VList>;
@@ -37,6 +37,8 @@ const store = useAppStore();
 const composer = ref<ComposerHandle | null>(null);
 const transcript = ref<TranscriptHandle | null>(null);
 const isTranscriptPinnedToBottom = ref(true);
+let transcriptScrollElement: HTMLElement | null = null;
+let followTranscriptToken = 0;
 const thinkingOptions = computed(() => resolveThinkingOptions(store.activeSession, store.models));
 
 const toolStateLookup = computed(() =>
@@ -197,6 +199,13 @@ function blockContentSize(block: UiContentBlock): number {
 }
 
 function updateTranscriptPinnedState(): void {
+  const element = transcriptRootElement();
+  if (element) {
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    isTranscriptPinnedToBottom.value = distanceFromBottom <= TRANSCRIPT_BOTTOM_THRESHOLD;
+    return;
+  }
+
   const handle = transcript.value;
   if (!handle) {
     isTranscriptPinnedToBottom.value = true;
@@ -205,6 +214,41 @@ function updateTranscriptPinnedState(): void {
 
   const distanceFromBottom = handle.scrollSize - handle.scrollOffset - handle.viewportSize;
   isTranscriptPinnedToBottom.value = distanceFromBottom <= TRANSCRIPT_BOTTOM_THRESHOLD;
+}
+
+function transcriptRootElement(): HTMLElement | null {
+  return ((transcript.value as (TranscriptHandle & { $el?: Element | null }) | null)?.$el ??
+    null) as HTMLElement | null;
+}
+
+function stopFollowingTranscript(): void {
+  followTranscriptToken += 1;
+}
+
+async function followTranscriptWhilePinned(): Promise<void> {
+  const token = ++followTranscriptToken;
+
+  while (token === followTranscriptToken) {
+    await nextAnimationFrame();
+
+    if (!store.activeSession?.isStreaming || !isTranscriptPinnedToBottom.value) {
+      return;
+    }
+
+    const element = transcriptRootElement();
+    if (!element) {
+      return;
+    }
+
+    const bottomOffset = Math.max(0, element.scrollHeight - element.clientHeight);
+    element.scrollTop = bottomOffset;
+  }
+}
+
+function bindTranscriptScrollListener(): void {
+  transcriptScrollElement?.removeEventListener("scroll", handleTranscriptScroll);
+  transcriptScrollElement = transcriptRootElement();
+  transcriptScrollElement?.addEventListener("scroll", handleTranscriptScroll, { passive: true });
 }
 
 function nextAnimationFrame(): Promise<void> {
@@ -217,31 +261,45 @@ async function waitForTranscriptLayout(): Promise<void> {
 }
 
 async function scrollToBottom(behavior: ScrollBehavior = "auto"): Promise<void> {
-  const lastIndex = transcriptEntries.value.length - 1;
-  if (lastIndex < 0) {
+  if (transcriptEntries.value.length === 0) {
     return;
   }
 
   await waitForTranscriptLayout();
 
-  let handle = transcript.value;
-  if (!handle) {
-    return;
-  }
-
-  for (let attempts = 0; attempts < 4 && handle.viewportSize === 0; attempts += 1) {
-    await nextAnimationFrame();
-    handle = transcript.value;
+  let element = transcriptRootElement();
+  if (!element) {
+    let handle = transcript.value;
     if (!handle) {
       return;
     }
+
+    for (let attempts = 0; attempts < 4 && handle.viewportSize === 0; attempts += 1) {
+      await nextAnimationFrame();
+      handle = transcript.value;
+      if (!handle) {
+        return;
+      }
+    }
+
+    handle.scrollTo(Math.max(0, handle.scrollSize - handle.viewportSize));
   }
 
-  handle.scrollToIndex(lastIndex, {
-    align: "end",
-    smooth: behavior === "smooth",
-  });
-  await nextAnimationFrame();
+  for (let attempts = 0; attempts < 4; attempts += 1) {
+    await nextAnimationFrame();
+    element = transcriptRootElement();
+    if (!element) {
+      return;
+    }
+
+    const bottomOffset = Math.max(0, element.scrollHeight - element.clientHeight);
+    element.scrollTo({ top: bottomOffset, behavior });
+
+    if (Math.abs(bottomOffset - element.scrollTop) <= 1) {
+      break;
+    }
+  }
+
   updateTranscriptPinnedState();
 }
 
@@ -282,8 +340,11 @@ async function maybeLoadOlderMessages(): Promise<void> {
   }
 }
 
-function handleTranscriptScroll(): void {
+function handleTranscriptScroll(event?: Event): void {
   updateTranscriptPinnedState();
+  if (!isTranscriptPinnedToBottom.value && event?.isTrusted) {
+    stopFollowingTranscript();
+  }
   void maybeLoadOlderMessages();
 }
 
@@ -420,10 +481,19 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
 
 onMounted(() => {
   window.addEventListener("resize", updateTranscriptPinnedState);
+  bindTranscriptScrollListener();
 });
 
 onUnmounted(() => {
   window.removeEventListener("resize", updateTranscriptPinnedState);
+  transcriptScrollElement?.removeEventListener("scroll", handleTranscriptScroll);
+  transcriptScrollElement = null;
+  stopFollowingTranscript();
+});
+
+watch(transcript, () => {
+  bindTranscriptScrollListener();
+  updateTranscriptPinnedState();
 });
 
 watch(
@@ -437,15 +507,25 @@ watch(
     const openedSession = sessionId !== previousSessionId;
     if (openedSession) {
       isTranscriptPinnedToBottom.value = true;
-      void scrollToBottom("auto").then(() => maybeLoadOlderMessages());
+      void scrollToBottom("auto").then(() => {
+        if (store.activeSession?.isStreaming) {
+          void followTranscriptWhilePinned();
+        }
+        return maybeLoadOlderMessages();
+      });
       return;
     }
 
     if (!isTranscriptPinnedToBottom.value) {
+      stopFollowingTranscript();
       return;
     }
 
-    void scrollToBottom(store.activeSession?.isStreaming ? "auto" : "smooth");
+    void scrollToBottom(store.activeSession?.isStreaming ? "auto" : "smooth").then(() => {
+      if (store.activeSession?.isStreaming) {
+        void followTranscriptWhilePinned();
+      }
+    });
   },
   { flush: "post" },
 );
@@ -570,7 +650,6 @@ watch(
         class="transcript"
         :data="transcriptEntries"
         :keep-mounted="keptTranscriptIndexes"
-        @scroll="handleTranscriptScroll"
       >
         <template #default="{ item: entry }">
           <div :key="entry.message.id" class="transcript__item">

@@ -117,6 +117,15 @@ async function installMocks(page: Page, session: SessionState): Promise<void> {
   });
 }
 
+function createMessages(count: number): SessionState["messages"] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `assistant-${index + 1}`,
+    role: "assistant" as const,
+    timestamp: index + 1,
+    blocks: [{ type: "text", text: `message-${index + 1}` }],
+  }));
+}
+
 test.describe("tool rendering", () => {
   test("loads older messages when the initial transcript is paginated", async ({ page }) => {
     await page.route("**/api/sessions/web-1/messages**", async (route) => {
@@ -231,8 +240,10 @@ test.describe("tool rendering", () => {
     });
 
     await expect(page.locator(".tool-call")).toHaveCount(1);
-    await expect(page.locator(".tool-call .code-block")).toContainText("$ git status --short");
-    await expect(page.locator(".tool-call .code-block")).toContainText(
+    await expect(page.locator(".tool-call .code-block").first()).toContainText(
+      "$ git status --short",
+    );
+    await expect(page.locator(".tool-call .code-block").last()).toContainText(
       "M src/client/views/ChatView.vue",
     );
   });
@@ -321,10 +332,167 @@ test.describe("tool rendering", () => {
     });
 
     await expect(page.locator(".tool-call")).toHaveCount(1);
-    await expect(page.locator(".tool-call .code-block")).toContainText("$ git status --short");
-    await expect(page.locator(".tool-call .code-block")).toContainText(
+    await expect(page.locator(".tool-call .code-block").first()).toContainText(
+      "$ git status --short",
+    );
+    await expect(page.locator(".tool-call .code-block").last()).toContainText(
       "M src/client/views/ChatView.vue",
     );
+  });
+
+  test("keeps following streaming output while already pinned to the bottom", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await installMocks(
+      page,
+      createSession({
+        messages: createMessages(30),
+      }),
+    );
+
+    await page.goto(`/workspaces/${workspace.id}/sessions/${summary.sessionId}`);
+    await expect(page.locator(".transcript")).toBeVisible();
+
+    await expect
+      .poll(async () => {
+        return page.locator(".transcript").evaluate((element) => {
+          return element.scrollHeight - element.scrollTop - element.clientHeight;
+        });
+      })
+      .toBeLessThanOrEqual(48);
+
+    await page.evaluate(() => {
+      window.__emitSse({
+        type: "status",
+        isStreaming: true,
+        pendingMessageCount: 0,
+      });
+      window.__emitSse({
+        type: "assistant",
+        assistant: {
+          id: "assistant-stream",
+          role: "assistant",
+          timestamp: 31,
+          blocks: [
+            { type: "text", text: "Running command" },
+            {
+              type: "toolCall",
+              id: "call-stream",
+              name: "bash",
+              arguments: { command: "pnpm test" },
+            },
+          ],
+        },
+      });
+      window.__emitSse({
+        type: "tools",
+        tools: [
+          {
+            toolCallId: "call-stream",
+            toolName: "bash",
+            args: { command: "pnpm test" },
+            blocks: [{ type: "text", text: "line-1" }],
+            status: "running",
+            isError: false,
+          },
+        ],
+      });
+    });
+
+    for (let index = 2; index <= 60; index += 1) {
+      const output = Array.from({ length: index }, (_, lineIndex) => `line-${lineIndex + 1}`).join(
+        "\n",
+      );
+      await page.evaluate((text) => {
+        window.__emitSse({
+          type: "tools",
+          tools: [
+            {
+              toolCallId: "call-stream",
+              toolName: "bash",
+              args: { command: "pnpm test" },
+              blocks: [{ type: "text", text }],
+              status: "running",
+              isError: false,
+            },
+          ],
+        });
+      }, output);
+    }
+
+    await expect
+      .poll(async () => {
+        return page.locator(".transcript").evaluate((element) => {
+          return element.scrollHeight - element.scrollTop - element.clientHeight;
+        });
+      })
+      .toBeLessThanOrEqual(48);
+  });
+
+  test("does not surprise-scroll when the user has scrolled up", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await installMocks(
+      page,
+      createSession({
+        messages: createMessages(30),
+      }),
+    );
+
+    await page.goto(`/workspaces/${workspace.id}/sessions/${summary.sessionId}`);
+    await expect(page.locator(".transcript")).toBeVisible();
+
+    await page.locator(".transcript").hover();
+    await page.mouse.wheel(0, -300);
+
+    const before = await page.locator(".transcript").evaluate((element) => element.scrollTop);
+
+    await page.evaluate(() => {
+      window.__emitSse({
+        type: "status",
+        isStreaming: true,
+        pendingMessageCount: 0,
+      });
+      window.__emitSse({
+        type: "assistant",
+        assistant: {
+          id: "assistant-stream-2",
+          role: "assistant",
+          timestamp: 31,
+          blocks: [
+            { type: "text", text: "Running command" },
+            {
+              type: "toolCall",
+              id: "call-stream-2",
+              name: "bash",
+              arguments: { command: "pnpm test" },
+            },
+          ],
+        },
+      });
+    });
+
+    for (let index = 1; index <= 40; index += 1) {
+      const output = Array.from({ length: index }, (_, lineIndex) => `line-${lineIndex + 1}`).join(
+        "\n",
+      );
+      await page.evaluate((text) => {
+        window.__emitSse({
+          type: "tools",
+          tools: [
+            {
+              toolCallId: "call-stream-2",
+              toolName: "bash",
+              args: { command: "pnpm test" },
+              blocks: [{ type: "text", text }],
+              status: "running",
+              isError: false,
+            },
+          ],
+        });
+      }, output);
+    }
+
+    const after = await page.locator(".transcript").evaluate((element) => element.scrollTop);
+    expect(Math.abs(after - before)).toBeLessThanOrEqual(8);
   });
 
   test("streams edit output, then replaces it with the final diff", async ({ page }) => {

@@ -440,9 +440,10 @@ const genericEntries = computed(() => {
 
 .tool-call__expand-btn {
   border: 1px solid color-mix(in srgb, var(--color-info) 30%, transparent);
-  padding: 0.16rem 0.5rem;
+  padding: 0.22rem 0.65rem;
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.88rem;
+  font-weight: 600;
   cursor: pointer;
 }
 

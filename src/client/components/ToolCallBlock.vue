@@ -177,6 +177,10 @@ const readEntries = computed(() => {
 });
 
 const genericEntries = computed(() => {
+  if (props.name === "edit") {
+    return [];
+  }
+
   const hiddenKeys = new Set([
     "path",
     "command",

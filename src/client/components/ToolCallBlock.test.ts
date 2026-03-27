@@ -25,6 +25,32 @@ describe("ToolCallBlock", () => {
     expect(wrapper.findAll(".tool-call__meta-row")).toHaveLength(0);
   });
 
+  it("hides edit arguments when a diff is available", () => {
+    const wrapper = mount(ToolCallBlock, {
+      props: {
+        name: "edit",
+        arguments: {
+          path: "src/client/components/ToolCallBlock.test.ts",
+          edits: [
+            {
+              oldText: "before",
+              newText: "after",
+            },
+          ],
+        },
+        resultDetails: {
+          diff: "@@ -1 +1 @@\n- before\n+ after",
+        },
+        status: "success",
+      },
+    });
+
+    expect(wrapper.find(".tool-call__meta").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("oldText");
+    expect(wrapper.text()).not.toContain("newText");
+    expect(wrapper.text()).toContain("src/client/components/ToolCallBlock.test.ts");
+  });
+
   it("tails bash output and expands to the full output on demand", async () => {
     const wrapper = mount(ToolCallBlock, {
       props: {

@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { Check, CircleAlert, LoaderCircle } from "lucide-vue-next";
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
 import DiffBlock from "@/client/components/DiffBlock.vue";
 import MarkdownBlock from "@/client/components/MarkdownBlock.vue";
 import { formatValue, languageFromPath } from "@/client/lib/code-format";
+import { createTailView } from "@/client/lib/tool-output";
 import { hasToolResultContent } from "@/client/lib/transcript";
 import type { ToolExecutionDetails, UiContentBlock } from "@/shared/types";
+
+const OUTPUT_TAIL_LINE_COUNT = 25;
 
 const props = withDefaults(
   defineProps<{
@@ -24,6 +27,8 @@ const props = withDefaults(
     resultDetails: undefined,
   },
 );
+
+const isExpanded = ref(false);
 
 function readString(key: string): string | undefined {
   const value = props.arguments[key];
@@ -63,17 +68,30 @@ const bashTextOutput = computed(() =>
         .map((block) => block.text)
         .join("\n"),
 );
-const bashDisplay = computed(() => {
-  if (props.name !== "bash" || !commandValue.value) {
+const bashTailView = computed(() => createTailView(bashTextOutput.value, OUTPUT_TAIL_LINE_COUNT));
+const writeTailView = computed(() =>
+  createTailView(contentValue.value ?? "", OUTPUT_TAIL_LINE_COUNT),
+);
+const canExpandOutput = computed(
+  () =>
+    (props.name === "bash" && bashTailView.value.isTrimmed) ||
+    (props.name === "write" && writeTailView.value.isTrimmed),
+);
+const expandButtonLabel = computed(() => {
+  if (!canExpandOutput.value) {
+    return "";
+  }
+  return isExpanded.value ? "Collapse output" : "Show full output";
+});
+const visibleWriteContent = computed(() => {
+  if (!contentValue.value) {
     return undefined;
   }
-
-  const lines = [`$ ${commandValue.value}`];
-  if (bashTextOutput.value.trim().length > 0) {
-    lines.push(bashTextOutput.value);
-  }
-  return lines.join("\n");
+  return isExpanded.value ? contentValue.value : writeTailView.value.text;
 });
+const visibleBashOutput = computed(() =>
+  isExpanded.value ? bashTextOutput.value : bashTailView.value.text,
+);
 const visibleResultBlocks = computed(() => {
   if (props.name === "read" && props.status !== "error") {
     return [];
@@ -138,14 +156,36 @@ const showResultSection = computed(() => {
   }
 
   if (props.name === "bash") {
-    return !bashDisplay.value ? hasResultContent.value : visibleResultBlocks.value.length > 0;
+    return !commandValue.value ? hasResultContent.value : visibleResultBlocks.value.length > 0;
   }
 
   return props.status === "error" || hasResultContent.value;
 });
 
+const readEntries = computed(() => {
+  if (props.name !== "read") {
+    return [];
+  }
+
+  return ["offset", "limit"]
+    .map((key) => {
+      const value = props.arguments[key];
+      const formatted = formatValue(value);
+      return formatted.trim().length > 0 ? { key, value: formatted } : undefined;
+    })
+    .filter((entry): entry is { key: string; value: string } => Boolean(entry));
+});
+
 const genericEntries = computed(() => {
-  const hiddenKeys = new Set(["path", "command", "content", "oldText", "newText", "timeout"]);
+  const hiddenKeys = new Set([
+    "path",
+    "command",
+    "content",
+    "oldText",
+    "newText",
+    "timeout",
+    ...(props.name === "read" ? ["offset", "limit"] : []),
+  ]);
   return Object.entries(props.arguments)
     .filter(([key]) => !hiddenKeys.has(key))
     .map(([key, value]) => ({ key, value: formatValue(value) }))
@@ -175,15 +215,37 @@ const genericEntries = computed(() => {
       </span>
     </header>
 
-    <CodeBlock
-      v-if="props.name === 'bash' && bashDisplay"
-      :code="bashDisplay"
-      language="bash"
-      :compact="props.compact"
-    />
+    <div v-if="readEntries.length > 0" class="tool-call__meta tool-call__meta--read">
+      <div v-for="entry in readEntries" :key="entry.key" class="tool-call__meta-chip">
+        <span class="tool-call__meta-key">{{ entry.key }}</span>
+        <code class="tool-call__meta-value">{{ entry.value }}</code>
+      </div>
+    </div>
 
-    <template v-else-if="props.name === 'write' && contentValue">
-      <CodeBlock :code="contentValue" :language="codeLanguage" :compact="props.compact" />
+    <div v-if="props.name === 'bash' && commandValue" class="tool-call__bash">
+      <CodeBlock :code="`$ ${commandValue}`" language="bash" :compact="props.compact" />
+      <div v-if="canExpandOutput" class="tool-call__expand-row">
+        <button type="button" class="tool-call__expand-btn" @click="isExpanded = !isExpanded">
+          {{ expandButtonLabel }}
+        </button>
+      </div>
+      <CodeBlock
+        v-if="visibleBashOutput.trim().length > 0"
+        :code="visibleBashOutput"
+        language="bash"
+        :compact="props.compact"
+      />
+    </div>
+
+    <template v-else-if="props.name === 'write' && visibleWriteContent">
+      <div class="tool-call__overlay-output">
+        <div v-if="canExpandOutput" class="tool-call__overlay-control">
+          <button type="button" class="tool-call__expand-btn" @click="isExpanded = !isExpanded">
+            {{ expandButtonLabel }}
+          </button>
+        </div>
+        <CodeBlock :code="visibleWriteContent" :language="codeLanguage" :compact="props.compact" />
+      </div>
     </template>
 
     <div v-if="genericEntries.length > 0" class="tool-call__meta">
@@ -290,10 +352,15 @@ const genericEntries = computed(() => {
 }
 
 .tool-call__path,
-.tool-call__meta-value {
+.tool-call__meta-value,
+.tool-call__expand-btn {
   color: var(--color-info);
   background: var(--color-bg-inline-code);
   border-radius: 0.2rem;
+}
+
+.tool-call__path,
+.tool-call__meta-value {
   padding: 0.12rem 0.35rem;
 }
 
@@ -310,12 +377,21 @@ const genericEntries = computed(() => {
 }
 
 .tool-call__meta,
-.tool-call__result {
+.tool-call__result,
+.tool-call__bash {
   display: grid;
   gap: 0.4rem;
 }
 
-.tool-call__meta-row {
+.tool-call__meta--read {
+  display: flex;
+  gap: 0.6rem 1rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.tool-call__meta-row,
+.tool-call__meta-chip {
   display: flex;
   align-items: baseline;
   gap: 0.45rem;
@@ -333,6 +409,41 @@ const genericEntries = computed(() => {
   overflow-wrap: anywhere;
   color: var(--color-text);
   line-height: 1.45;
+}
+
+.tool-call__overlay-output {
+  position: relative;
+  padding-top: 0.4rem;
+}
+
+.tool-call__overlay-control,
+.tool-call__expand-row {
+  display: flex;
+  justify-content: center;
+  z-index: 1;
+}
+
+.tool-call__overlay-control {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+.tool-call__expand-row {
+  margin: -0.05rem 0;
+}
+
+.tool-call__expand-btn {
+  border: 1px solid color-mix(in srgb, var(--color-info) 30%, transparent);
+  padding: 0.16rem 0.5rem;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.tool-call__expand-btn:hover {
+  background: color-mix(in srgb, var(--color-bg-inline-code) 78%, var(--color-info));
 }
 
 .tool-call img {

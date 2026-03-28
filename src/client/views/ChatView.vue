@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDown, Wifi, WifiOff, LoaderCircle, Clock3 } from "lucide-vue-next";
+import { ChevronDown, Wifi, WifiOff, LoaderCircle, Clock3, ArrowDown } from "lucide-vue-next";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { Virtualizer } from "virtua/vue";
 import ChatMessage from "@/client/components/ChatMessage.vue";
@@ -782,12 +782,14 @@ watch(
         </div>
 
         <button
-          v-if="!isTranscriptPinnedToBottom"
+          v-if="store.activeSession.isStreaming && !isTranscriptPinnedToBottom"
           type="button"
           class="transcript__jump-btn"
+          aria-label="Jump to latest"
+          title="Jump to latest"
           @click="jumpToLatest"
         >
-          Jump to latest
+          <ArrowDown :size="18" />
         </button>
       </div>
 
@@ -1089,22 +1091,31 @@ watch(
   bottom: 0.9rem;
   transform: translateX(-50%);
   z-index: 2;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 999px;
-  background: color-mix(in oklab, var(--color-bg-elevated) 92%, transparent);
-  color: var(--color-text-strong);
-  padding: 0.45rem 0.85rem;
+  min-width: 2.5rem;
+  min-height: 2.5rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--color-info) 30%, transparent);
+  border-radius: 0.5rem;
+  background: var(--color-bg-inline-code);
+  color: var(--color-info);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
-  backdrop-filter: blur(8px);
   transition:
     background 80ms ease,
     border-color 80ms ease,
-    transform 120ms ease;
+    transform 120ms ease,
+    color 80ms ease;
 }
 
 .transcript__jump-btn:hover {
-  background: var(--color-bg-panel);
-  border-color: var(--color-border-strong);
+  background: color-mix(in srgb, var(--color-bg-inline-code) 78%, var(--color-info));
+  border-color: color-mix(in srgb, var(--color-info) 30%, transparent);
   transform: translateX(-50%) translateY(-1px);
+}
+
+.transcript__jump-btn :deep(svg) {
+  display: block;
 }
 </style>

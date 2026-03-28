@@ -431,7 +431,6 @@ test.describe("tool rendering", () => {
 
     await page.locator(".transcript").hover();
     await page.mouse.wheel(0, -300);
-    await expect(page.locator(".transcript__jump-btn")).toBeVisible();
 
     const before = await page.locator(".transcript").evaluate((element) => element.scrollTop);
 
@@ -459,6 +458,8 @@ test.describe("tool rendering", () => {
         },
       });
     });
+
+    await expect(page.getByRole("button", { name: "Jump to latest" })).toBeVisible();
 
     for (let index = 1; index <= 40; index += 1) {
       const output = Array.from({ length: index }, (_, lineIndex) => `line-${lineIndex + 1}`).join(

@@ -81,7 +81,16 @@ const expandButtonLabel = computed(() => {
   if (!canExpandOutput.value) {
     return "";
   }
-  return isExpanded.value ? "Collapse output" : "Show full output";
+
+  if (isExpanded.value) {
+    return "Collapse output";
+  }
+
+  const hiddenLineCount =
+    props.name === "bash"
+      ? bashTailView.value.hiddenLineCount
+      : writeTailView.value.hiddenLineCount;
+  return `Show full output (+${hiddenLineCount} lines)`;
 });
 const visibleWriteContent = computed(() => {
   if (!contentValue.value) {

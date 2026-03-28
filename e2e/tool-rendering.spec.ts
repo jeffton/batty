@@ -431,6 +431,7 @@ test.describe("tool rendering", () => {
 
     await page.locator(".transcript").hover();
     await page.mouse.wheel(0, -300);
+    await expect(page.locator(".transcript__jump-btn")).toBeVisible();
 
     const before = await page.locator(".transcript").evaluate((element) => element.scrollTop);
 

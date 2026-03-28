@@ -1085,21 +1085,26 @@ watch(
 
 .transcript__jump-btn {
   position: absolute;
-  right: calc(var(--safe-area-right) + 0.8rem);
+  left: 50%;
   bottom: 0.9rem;
+  transform: translateX(-50%);
+  z-index: 2;
   border: 1px solid var(--color-border-soft);
   border-radius: 999px;
-  background: var(--color-bg-elevated);
+  background: color-mix(in oklab, var(--color-bg-elevated) 92%, transparent);
   color: var(--color-text-strong);
-  padding: 0.4rem 0.75rem;
+  padding: 0.45rem 0.85rem;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(8px);
   transition:
     background 80ms ease,
-    border-color 80ms ease;
+    border-color 80ms ease,
+    transform 120ms ease;
 }
 
 .transcript__jump-btn:hover {
   background: var(--color-bg-panel);
   border-color: var(--color-border-strong);
+  transform: translateX(-50%) translateY(-1px);
 }
 </style>

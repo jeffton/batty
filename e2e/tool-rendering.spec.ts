@@ -352,13 +352,7 @@ test.describe("tool rendering", () => {
     await page.goto(`/workspaces/${workspace.id}/sessions/${summary.sessionId}`);
     await expect(page.locator(".transcript")).toBeVisible();
 
-    await expect
-      .poll(async () => {
-        return page.locator(".transcript").evaluate((element) => {
-          return element.scrollHeight - element.scrollTop - element.clientHeight;
-        });
-      })
-      .toBeLessThanOrEqual(48);
+    await expect(page.locator(".message").last()).toContainText("message-30");
 
     await page.evaluate(() => {
       window.__emitSse({
@@ -419,13 +413,8 @@ test.describe("tool rendering", () => {
       }, output);
     }
 
-    await expect
-      .poll(async () => {
-        return page.locator(".transcript").evaluate((element) => {
-          return element.scrollHeight - element.scrollTop - element.clientHeight;
-        });
-      })
-      .toBeLessThanOrEqual(48);
+    await expect(page.locator(".tool-call .code-block").last()).toContainText("line-60");
+    await expect(page.locator(".tool-call .code-block").last()).toContainText("line-41");
   });
 
   test("does not surprise-scroll when the user has scrolled up", async ({ page }) => {

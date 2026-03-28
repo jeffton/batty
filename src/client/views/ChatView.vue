@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ChevronDown, Wifi, WifiOff, LoaderCircle, Clock3 } from "lucide-vue-next";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import { VList } from "virtua/vue";
+import { Virtualizer } from "virtua/vue";
 import ChatMessage from "@/client/components/ChatMessage.vue";
 import CronPopover from "@/client/components/CronPopover.vue";
 import MessageComposer from "@/client/components/MessageComposer.vue";
@@ -10,6 +10,7 @@ import WorkspacePopover from "@/client/components/WorkspacePopover.vue";
 import { withoutRenderedToolCalls } from "@/client/lib/active-assistant";
 import { formatTokenCount } from "@/client/lib/formatting";
 import { resolveThinkingOptions } from "@/client/lib/thinking-levels";
+import { splitHistoryAndTail } from "@/client/lib/transcript-tail";
 import {
   buildToolStateLookup,
   buildTranscriptMessages,
@@ -26,19 +27,28 @@ const CRON_POPOVER_ID = "chat-main-cron-popover";
 const CRON_POPOVER_ANCHOR = "--chat-main-cron-anchor";
 const TRANSCRIPT_BOTTOM_THRESHOLD = 48;
 const TRANSCRIPT_LOAD_OLDER_THRESHOLD = 80;
+const TRANSCRIPT_TAIL_COUNT = 25;
+const USER_SCROLL_INTENT_WINDOW_MS = 1000;
 
-type TranscriptHandle = InstanceType<typeof VList>;
 type ComposerHandle = InstanceType<typeof MessageComposer> & {
   clear: () => void;
   restore: (text: string, files: File[]) => void;
 };
 
+type TranscriptHistoryHandle = InstanceType<typeof Virtualizer>;
+
 const store = useAppStore();
 const composer = ref<ComposerHandle | null>(null);
-const transcript = ref<TranscriptHandle | null>(null);
+const transcript = ref<HTMLElement | null>(null);
+const transcriptHistory = ref<TranscriptHistoryHandle | null>(null);
+const transcriptTail = ref<HTMLElement | null>(null);
+const transcriptBottom = ref<HTMLElement | null>(null);
 const isTranscriptPinnedToBottom = ref(true);
 let transcriptScrollElement: HTMLElement | null = null;
+let transcriptTailObserver: ResizeObserver | null = null;
+let transcriptViewportObserver: ResizeObserver | null = null;
 let followTranscriptToken = 0;
+let lastUserScrollIntentAt = 0;
 const thinkingOptions = computed(() => resolveThinkingOptions(store.activeSession, store.models));
 
 const toolStateLookup = computed(() =>
@@ -68,15 +78,23 @@ const transcriptEntries = computed(() => {
 
   return entries;
 });
-const keptTranscriptIndexes = computed(() => {
-  const lastIndex = transcriptEntries.value.length - 1;
+const transcriptSplit = computed(() =>
+  splitHistoryAndTail(transcriptEntries.value, TRANSCRIPT_TAIL_COUNT),
+);
+const historyEntries = computed(() => transcriptSplit.value.historyEntries);
+const tailEntries = computed(() => transcriptSplit.value.tailEntries);
+const keptHistoryIndexes = computed(() => {
+  const lastIndex = historyEntries.value.length - 1;
   return lastIndex >= 0 ? [lastIndex] : [];
 });
 const transcriptTailSignature = computed(() => {
-  const lastMessage = transcriptEntries.value.at(-1)?.message;
-  return lastMessage
-    ? `${transcriptEntries.value.length}:${lastMessage.id}:${lastMessage.timestamp}`
-    : "0";
+  if (tailEntries.value.length === 0) {
+    return "0";
+  }
+
+  return tailEntries.value
+    .map((entry) => `${entry.message.id}:${entry.message.timestamp}`)
+    .join("|");
 });
 const activeAssistantSignature = computed(() => {
   const assistant = activeAssistantMessage.value;
@@ -198,57 +216,104 @@ function blockContentSize(block: UiContentBlock): number {
   }
 }
 
-function updateTranscriptPinnedState(): void {
+function transcriptRootElement(): HTMLElement | null {
+  return transcript.value;
+}
+
+function transcriptDistanceFromBottom(): number | null {
   const element = transcriptRootElement();
-  if (element) {
-    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
-    isTranscriptPinnedToBottom.value = distanceFromBottom <= TRANSCRIPT_BOTTOM_THRESHOLD;
-    return;
+  if (!element) {
+    return null;
   }
 
-  const handle = transcript.value;
-  if (!handle) {
+  return element.scrollHeight - element.scrollTop - element.clientHeight;
+}
+
+function updateTranscriptPinnedState(): void {
+  const distanceFromBottom = transcriptDistanceFromBottom();
+  if (distanceFromBottom == null) {
     isTranscriptPinnedToBottom.value = true;
     return;
   }
 
-  const distanceFromBottom = handle.scrollSize - handle.scrollOffset - handle.viewportSize;
-  isTranscriptPinnedToBottom.value = distanceFromBottom <= TRANSCRIPT_BOTTOM_THRESHOLD;
-}
+  if (distanceFromBottom <= TRANSCRIPT_BOTTOM_THRESHOLD) {
+    isTranscriptPinnedToBottom.value = true;
+    return;
+  }
 
-function transcriptRootElement(): HTMLElement | null {
-  return ((transcript.value as (TranscriptHandle & { $el?: Element | null }) | null)?.$el ??
-    null) as HTMLElement | null;
+  if (hasRecentUserScrollIntent()) {
+    isTranscriptPinnedToBottom.value = false;
+  }
 }
 
 function stopFollowingTranscript(): void {
   followTranscriptToken += 1;
 }
 
-async function followTranscriptWhilePinned(): Promise<void> {
-  const token = ++followTranscriptToken;
+function markUserScrollIntent(): void {
+  lastUserScrollIntentAt = performance.now();
+}
 
-  while (token === followTranscriptToken) {
-    await nextAnimationFrame();
-
-    if (!store.activeSession?.isStreaming || !isTranscriptPinnedToBottom.value) {
-      return;
-    }
-
-    const element = transcriptRootElement();
-    if (!element) {
-      return;
-    }
-
-    const bottomOffset = Math.max(0, element.scrollHeight - element.clientHeight);
-    element.scrollTop = bottomOffset;
-  }
+function hasRecentUserScrollIntent(): boolean {
+  return (
+    lastUserScrollIntentAt > 0 &&
+    performance.now() - lastUserScrollIntentAt <= USER_SCROLL_INTENT_WINDOW_MS
+  );
 }
 
 function bindTranscriptScrollListener(): void {
+  const nextElement = transcriptRootElement();
+  if (transcriptScrollElement === nextElement) {
+    return;
+  }
+
   transcriptScrollElement?.removeEventListener("scroll", handleTranscriptScroll);
-  transcriptScrollElement = transcriptRootElement();
+  transcriptScrollElement?.removeEventListener("wheel", markUserScrollIntent);
+
+  transcriptScrollElement = nextElement;
   transcriptScrollElement?.addEventListener("scroll", handleTranscriptScroll, { passive: true });
+  transcriptScrollElement?.addEventListener("wheel", markUserScrollIntent, { passive: true });
+}
+
+function bindTranscriptObservers(): void {
+  transcriptViewportObserver?.disconnect();
+  transcriptViewportObserver = null;
+
+  const transcriptElement = transcript.value;
+  if (transcriptElement && typeof ResizeObserver !== "undefined") {
+    transcriptViewportObserver = new ResizeObserver(() => {
+      if (isTranscriptPinnedToBottom.value) {
+        if (store.activeSession?.isStreaming) {
+          void followTranscriptWhilePinned("auto");
+        } else {
+          void scrollToBottom("auto");
+        }
+        return;
+      }
+
+      updateTranscriptPinnedState();
+    });
+    transcriptViewportObserver.observe(transcriptElement);
+  }
+
+  transcriptTailObserver?.disconnect();
+  transcriptTailObserver = null;
+
+  const transcriptTailElement = transcriptTail.value;
+  if (transcriptTailElement && typeof ResizeObserver !== "undefined") {
+    transcriptTailObserver = new ResizeObserver(() => {
+      if (!isTranscriptPinnedToBottom.value) {
+        return;
+      }
+
+      if (store.activeSession?.isStreaming) {
+        void followTranscriptWhilePinned("auto");
+      } else {
+        void scrollToBottom("auto");
+      }
+    });
+    transcriptTailObserver.observe(transcriptTailElement);
+  }
 }
 
 function nextAnimationFrame(): Promise<void> {
@@ -267,85 +332,119 @@ async function scrollToBottom(behavior: ScrollBehavior = "auto"): Promise<void> 
 
   await waitForTranscriptLayout();
 
-  let element = transcriptRootElement();
+  const element = transcriptRootElement();
   if (!element) {
-    let handle = transcript.value;
-    if (!handle) {
-      return;
-    }
+    return;
+  }
 
-    for (let attempts = 0; attempts < 4 && handle.viewportSize === 0; attempts += 1) {
-      await nextAnimationFrame();
-      handle = transcript.value;
-      if (!handle) {
-        return;
+  for (let attempts = 0; attempts < 3; attempts += 1) {
+    const scrollBehavior = attempts === 0 ? behavior : "auto";
+    const bottomOffset = Math.max(0, element.scrollHeight - element.clientHeight);
+    element.scrollTo({ top: bottomOffset, behavior: scrollBehavior });
+
+    await nextAnimationFrame();
+
+    if (transcriptBottom.value) {
+      const transcriptRect = element.getBoundingClientRect();
+      const sentinelRect = transcriptBottom.value.getBoundingClientRect();
+      const sentinelDistanceFromBottom = transcriptRect.bottom - sentinelRect.bottom;
+      if (sentinelDistanceFromBottom < 0) {
+        element.scrollBy({ top: -sentinelDistanceFromBottom, behavior: "auto" });
+        await nextAnimationFrame();
       }
     }
 
-    handle.scrollTo(Math.max(0, handle.scrollSize - handle.viewportSize));
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    if (distanceFromBottom <= 1) {
+      break;
+    }
   }
 
-  for (let attempts = 0; attempts < 4; attempts += 1) {
+  isTranscriptPinnedToBottom.value = true;
+}
+
+async function followTranscriptWhilePinned(behavior: ScrollBehavior = "auto"): Promise<void> {
+  if (!isTranscriptPinnedToBottom.value) {
+    return;
+  }
+
+  const token = ++followTranscriptToken;
+  await scrollToBottom(behavior);
+
+  while (token === followTranscriptToken) {
     await nextAnimationFrame();
-    element = transcriptRootElement();
+
+    if (!store.activeSession?.isStreaming || !isTranscriptPinnedToBottom.value) {
+      return;
+    }
+
+    const element = transcriptRootElement();
     if (!element) {
       return;
     }
 
     const bottomOffset = Math.max(0, element.scrollHeight - element.clientHeight);
-    element.scrollTo({ top: bottomOffset, behavior });
+    element.scrollTop = bottomOffset;
 
-    if (Math.abs(bottomOffset - element.scrollTop) <= 1) {
-      break;
+    if (transcriptBottom.value) {
+      const transcriptRect = element.getBoundingClientRect();
+      const sentinelRect = transcriptBottom.value.getBoundingClientRect();
+      const sentinelDistanceFromBottom = transcriptRect.bottom - sentinelRect.bottom;
+      if (sentinelDistanceFromBottom < 0) {
+        element.scrollTop += -sentinelDistanceFromBottom;
+      }
     }
   }
-
-  updateTranscriptPinnedState();
 }
 
 async function maybeLoadOlderMessages(): Promise<void> {
-  const handle = transcript.value;
+  const element = transcriptRootElement();
   const session = store.activeSession;
   if (
-    !handle ||
+    !element ||
     !session ||
     store.loadingOlderMessages ||
     !session.hasMoreMessages ||
-    handle.scrollOffset > TRANSCRIPT_LOAD_OLDER_THRESHOLD
+    element.scrollTop > TRANSCRIPT_LOAD_OLDER_THRESHOLD
   ) {
     return;
   }
 
-  const previousScrollOffset = handle.scrollOffset;
-  const previousScrollSize = handle.scrollSize;
+  const previousScrollTop = element.scrollTop;
+  const previousScrollHeight = element.scrollHeight;
   await store.loadOlderMessages();
   await waitForTranscriptLayout();
 
-  const nextHandle = transcript.value;
-  if (!nextHandle) {
+  const nextElement = transcriptRootElement();
+  if (!nextElement) {
     return;
   }
 
-  const addedSize = nextHandle.scrollSize - previousScrollSize;
-  if (addedSize > 0) {
-    nextHandle.scrollTo(previousScrollOffset + addedSize);
+  const addedHeight = nextElement.scrollHeight - previousScrollHeight;
+  if (addedHeight > 0) {
+    nextElement.scrollTop = previousScrollTop + addedHeight;
   }
   updateTranscriptPinnedState();
 
   if (
-    nextHandle.scrollSize <= nextHandle.viewportSize + TRANSCRIPT_LOAD_OLDER_THRESHOLD &&
+    nextElement.scrollHeight <= nextElement.clientHeight + TRANSCRIPT_LOAD_OLDER_THRESHOLD &&
     store.activeSession?.hasMoreMessages
   ) {
     await maybeLoadOlderMessages();
   }
 }
 
-function handleTranscriptScroll(event?: Event): void {
+function handleTranscriptScroll(): void {
   updateTranscriptPinnedState();
-  if (!isTranscriptPinnedToBottom.value && event?.isTrusted) {
+  if (!isTranscriptPinnedToBottom.value && hasRecentUserScrollIntent()) {
     stopFollowingTranscript();
   }
   void maybeLoadOlderMessages();
+}
+
+async function jumpToLatest(): Promise<void> {
+  isTranscriptPinnedToBottom.value = true;
+  await scrollToBottom("smooth");
 }
 
 function closeModelPopover(): void {
@@ -480,20 +579,28 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
 }
 
 onMounted(() => {
-  window.addEventListener("resize", updateTranscriptPinnedState);
   bindTranscriptScrollListener();
+  bindTranscriptObservers();
+  updateTranscriptPinnedState();
 });
 
 onUnmounted(() => {
-  window.removeEventListener("resize", updateTranscriptPinnedState);
-  transcriptScrollElement?.removeEventListener("scroll", handleTranscriptScroll);
-  transcriptScrollElement = null;
   stopFollowingTranscript();
+  transcriptScrollElement?.removeEventListener("scroll", handleTranscriptScroll);
+  transcriptScrollElement?.removeEventListener("wheel", markUserScrollIntent);
+  transcriptScrollElement = null;
+  transcriptViewportObserver?.disconnect();
+  transcriptTailObserver?.disconnect();
 });
 
 watch(transcript, () => {
   bindTranscriptScrollListener();
+  bindTranscriptObservers();
   updateTranscriptPinnedState();
+});
+
+watch(transcriptTail, () => {
+  bindTranscriptObservers();
 });
 
 watch(
@@ -507,12 +614,10 @@ watch(
     const openedSession = sessionId !== previousSessionId;
     if (openedSession) {
       isTranscriptPinnedToBottom.value = true;
-      void scrollToBottom("auto").then(() => {
-        if (store.activeSession?.isStreaming) {
-          void followTranscriptWhilePinned();
-        }
-        return maybeLoadOlderMessages();
-      });
+      const followOnOpen = store.activeSession?.isStreaming
+        ? followTranscriptWhilePinned("auto")
+        : scrollToBottom("auto");
+      void followOnOpen.then(() => maybeLoadOlderMessages());
       return;
     }
 
@@ -521,11 +626,11 @@ watch(
       return;
     }
 
-    void scrollToBottom(store.activeSession?.isStreaming ? "auto" : "smooth").then(() => {
-      if (store.activeSession?.isStreaming) {
-        void followTranscriptWhilePinned();
-      }
-    });
+    if (store.activeSession?.isStreaming) {
+      void followTranscriptWhilePinned("auto");
+    } else {
+      void scrollToBottom("smooth");
+    }
   },
   { flush: "post" },
 );
@@ -645,21 +750,46 @@ watch(
     </div>
 
     <template v-else>
-      <VList
-        ref="transcript"
-        class="transcript"
-        :data="transcriptEntries"
-        :keep-mounted="keptTranscriptIndexes"
-      >
-        <template #default="{ item: entry }">
-          <div :key="entry.message.id" class="transcript__item">
-            <ChatMessage
-              :message="entry.message"
-              :tool-states-by-call-id="entry.toolStatesByCallId"
-            />
+      <div class="transcript-shell">
+        <div ref="transcript" class="transcript">
+          <Virtualizer
+            v-if="historyEntries.length > 0"
+            ref="transcriptHistory"
+            class="transcript__history"
+            :data="historyEntries"
+            :keep-mounted="keptHistoryIndexes"
+            :scroll-ref="transcript"
+          >
+            <template #default="{ item: entry }">
+              <div :key="entry.message.id" class="transcript__item">
+                <ChatMessage
+                  :message="entry.message"
+                  :tool-states-by-call-id="entry.toolStatesByCallId"
+                />
+              </div>
+            </template>
+          </Virtualizer>
+
+          <div ref="transcriptTail" class="transcript__tail">
+            <div v-for="entry in tailEntries" :key="entry.message.id" class="transcript__item">
+              <ChatMessage
+                :message="entry.message"
+                :tool-states-by-call-id="entry.toolStatesByCallId"
+              />
+            </div>
+            <div ref="transcriptBottom" class="transcript__bottom" aria-hidden="true" />
           </div>
-        </template>
-      </VList>
+        </div>
+
+        <button
+          v-if="!isTranscriptPinnedToBottom"
+          type="button"
+          class="transcript__jump-btn"
+          @click="jumpToLatest"
+        >
+          Jump to latest
+        </button>
+      </div>
 
       <MessageComposer
         ref="composer"
@@ -923,16 +1053,53 @@ watch(
   margin: 0;
 }
 
+.transcript-shell {
+  position: relative;
+  min-height: 0;
+}
+
 .transcript {
   min-height: 0;
   min-width: 0;
+  height: 100%;
   overflow: auto;
+  overflow-anchor: none;
   padding: 0.6rem calc(var(--safe-area-right) + 0.8rem) 0.2rem calc(var(--safe-area-left) + 0.8rem);
   background: var(--color-bg-app);
+}
+
+.transcript__history,
+.transcript__tail {
+  min-width: 0;
 }
 
 .transcript__item {
   min-width: 0;
   padding-bottom: 0.5rem;
+}
+
+.transcript__bottom {
+  width: 100%;
+  height: 1px;
+}
+
+.transcript__jump-btn {
+  position: absolute;
+  right: calc(var(--safe-area-right) + 0.8rem);
+  bottom: 0.9rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 999px;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-strong);
+  padding: 0.4rem 0.75rem;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+  transition:
+    background 80ms ease,
+    border-color 80ms ease;
+}
+
+.transcript__jump-btn:hover {
+  background: var(--color-bg-panel);
+  border-color: var(--color-border-strong);
 }
 </style>

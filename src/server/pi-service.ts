@@ -220,7 +220,7 @@ export class PiService {
     this.onAgentCompleted = onAgentCompleted;
     this.onWorkspaceUpdated = onWorkspaceUpdated;
     this.authStorage = AuthStorage.create(path.join(getAgentDir(), "auth.json"));
-    this.modelRegistry = new ModelRegistry(
+    this.modelRegistry = ModelRegistry.create(
       this.authStorage,
       path.join(getAgentDir(), "models.json"),
     );

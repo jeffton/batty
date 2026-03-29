@@ -19,7 +19,7 @@ describe("normalizeSessionState", () => {
         },
       ],
       activeTools: [],
-    } as SessionState;
+    } as unknown as SessionState;
 
     expect(normalizeSessionState(legacy)).toEqual({
       ...legacy,
@@ -57,7 +57,7 @@ describe("normalizeSessionState", () => {
       contextPercent: Number.NaN,
       messages: [],
       activeTools: undefined as unknown as SessionState["activeTools"],
-    } as SessionState);
+    } as unknown as SessionState);
 
     expect(normalized).toMatchObject({
       thinkingLevel: "off",

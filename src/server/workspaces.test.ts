@@ -22,6 +22,7 @@ async function createConfig(): Promise<AppConfig> {
     port: 3147,
     workspacesRoot: root,
     selfPath: path.join(root, "self-project"),
+    battyDir: root,
     uploadsDir: path.join(root, "uploads"),
     publicDir: path.join(root, "public"),
     webPushDir: path.join(root, "web-push"),

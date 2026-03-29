@@ -21,7 +21,7 @@ export interface StoredPasskeyCredential {
   id: string;
   publicKey: string;
   counter: number;
-  transports?: AuthenticatorTransportFuture[];
+  transports?: AuthenticatorTransportFuture[] | undefined;
   deviceType: "singleDevice" | "multiDevice";
   backedUp: boolean;
   createdAt: number;
@@ -229,7 +229,7 @@ async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
 
 export class PasskeyAuthService {
   private readonly pendingRegistrations = new Map<string, PendingRegistration>();
-  private pendingAuthentication?: PendingAuthentication;
+  private pendingAuthentication: PendingAuthentication | undefined;
 
   constructor(
     private readonly battyDir: string,
@@ -290,7 +290,7 @@ export class PasskeyAuthService {
       attestationType: "none",
       excludeCredentials: state.credentials.map((credential) => ({
         id: credential.id,
-        transports: credential.transports,
+        ...(credential.transports ? { transports: credential.transports } : {}),
       })),
       authenticatorSelection: {
         residentKey: "required",
@@ -380,7 +380,7 @@ export class PasskeyAuthService {
       rpID,
       allowCredentials: state.credentials.map((credential) => ({
         id: credential.id,
-        transports: credential.transports,
+        ...(credential.transports ? { transports: credential.transports } : {}),
       })),
       userVerification: "required",
     });
@@ -522,7 +522,7 @@ export class PasskeyAuthService {
       id: credential.id,
       publicKey: Buffer.from(credential.publicKey, "base64url"),
       counter: credential.counter,
-      transports: credential.transports,
+      ...(credential.transports ? { transports: credential.transports } : {}),
     };
   }
 }

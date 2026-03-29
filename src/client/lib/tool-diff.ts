@@ -1,8 +1,8 @@
 export interface DiffLineView {
   kind: "context" | "add" | "remove" | "ellipsis" | "meta";
   prefix: string;
-  oldNumber?: string;
-  newNumber?: string;
+  oldNumber?: string | undefined;
+  newNumber?: string | undefined;
   html: string;
 }
 
@@ -80,10 +80,13 @@ function buildLineDiff(oldLines: string[], newLines: string[]): LineOp[] {
 
   for (let oldIndex = rows - 1; oldIndex >= 0; oldIndex -= 1) {
     for (let newIndex = cols - 1; newIndex >= 0; newIndex -= 1) {
-      dp[oldIndex][newIndex] =
+      const nextDiagonal = dp[oldIndex + 1]?.[newIndex + 1] ?? 0;
+      const nextRow = dp[oldIndex + 1]?.[newIndex] ?? 0;
+      const nextCol = dp[oldIndex]?.[newIndex + 1] ?? 0;
+      dp[oldIndex]![newIndex] =
         oldLines[oldIndex] === newLines[newIndex]
-          ? dp[oldIndex + 1][newIndex + 1] + 1
-          : Math.max(dp[oldIndex + 1][newIndex], dp[oldIndex][newIndex + 1]);
+          ? nextDiagonal + 1
+          : Math.max(nextRow, nextCol);
     }
   }
 
@@ -94,10 +97,12 @@ function buildLineDiff(oldLines: string[], newLines: string[]): LineOp[] {
   let newNumber = 1;
 
   while (oldIndex < rows && newIndex < cols) {
-    if (oldLines[oldIndex] === newLines[newIndex]) {
+    const oldLine = oldLines[oldIndex]!;
+    const newLine = newLines[newIndex]!;
+    if (oldLine === newLine) {
       operations.push({
         kind: "context",
-        text: oldLines[oldIndex],
+        text: oldLine,
         oldNumber,
         newNumber,
       });
@@ -108,26 +113,28 @@ function buildLineDiff(oldLines: string[], newLines: string[]): LineOp[] {
       continue;
     }
 
-    if (dp[oldIndex + 1][newIndex] >= dp[oldIndex][newIndex + 1]) {
-      operations.push({ kind: "remove", text: oldLines[oldIndex], oldNumber });
+    const nextRow = dp[oldIndex + 1]?.[newIndex] ?? 0;
+    const nextCol = dp[oldIndex]?.[newIndex + 1] ?? 0;
+    if (nextRow >= nextCol) {
+      operations.push({ kind: "remove", text: oldLine, oldNumber });
       oldIndex += 1;
       oldNumber += 1;
       continue;
     }
 
-    operations.push({ kind: "add", text: newLines[newIndex], newNumber });
+    operations.push({ kind: "add", text: newLine, newNumber });
     newIndex += 1;
     newNumber += 1;
   }
 
   while (oldIndex < rows) {
-    operations.push({ kind: "remove", text: oldLines[oldIndex], oldNumber });
+    operations.push({ kind: "remove", text: oldLines[oldIndex]!, oldNumber });
     oldIndex += 1;
     oldNumber += 1;
   }
 
   while (newIndex < cols) {
-    operations.push({ kind: "add", text: newLines[newIndex], newNumber });
+    operations.push({ kind: "add", text: newLines[newIndex]!, newNumber });
     newIndex += 1;
     newNumber += 1;
   }
@@ -141,6 +148,9 @@ function collapseContext(operations: LineOp[], contextLines: number): LineOp[] {
 
   while (index < operations.length) {
     const current = operations[index];
+    if (!current) {
+      break;
+    }
     if (current.kind !== "context") {
       collapsed.push(current);
       index += 1;
@@ -235,7 +245,9 @@ function enhanceInlinePairsFromText(lines: DiffLineView[]): DiffLineView[] {
       continue;
     }
 
-    enhanced.push(current);
+    if (current) {
+      enhanced.push(current);
+    }
   }
 
   return enhanced;
@@ -255,16 +267,16 @@ export function createEditPreviewLines(
 
 function parseDiffLine(
   line: string,
-): { prefix: "+" | "-" | " "; lineNumber?: string; text: string } | undefined {
+): { prefix: "+" | "-" | " "; lineNumber?: string | undefined; text: string } | undefined {
   const match = line.match(/^([+\- ])(\s*\d*)\s(.*)$/);
   if (!match) {
     return undefined;
   }
 
   return {
-    prefix: match[1] as "+" | "-" | " ",
-    lineNumber: match[2].trim() || undefined,
-    text: match[3],
+    prefix: match[1]! as "+" | "-" | " ",
+    lineNumber: match[2]?.trim() || undefined,
+    text: match[3] ?? "",
   };
 }
 

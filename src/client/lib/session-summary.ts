@@ -12,7 +12,7 @@ function blockText(block: UiContentBlock): string {
 }
 
 function messageText(message: UiMessage | undefined): string {
-  if (!message) {
+  if (!message || !("blocks" in message)) {
     return "";
   }
 

@@ -6,9 +6,9 @@ import type {
 } from "@/shared/types";
 
 export interface ToolDisplayState {
-  status?: "running" | "success" | "error";
+  status?: "running" | "success" | "error" | undefined;
   resultBlocks: UiContentBlock[];
-  resultDetails?: ToolExecutionDetails;
+  resultDetails?: ToolExecutionDetails | undefined;
 }
 
 export interface ToolStateLookup {

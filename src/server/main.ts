@@ -496,14 +496,14 @@ app.get<{
   Querystring: { before?: string; limit?: string; workspaceId?: string; sessionPath?: string };
 }>("/api/sessions/:sessionId/messages", async (request) => {
   await ensureSessionLoaded(request.params.sessionId, {
-    workspaceId: request.query.workspaceId,
-    sessionPath: request.query.sessionPath,
+    ...(request.query.workspaceId ? { workspaceId: request.query.workspaceId } : {}),
+    ...(request.query.sessionPath ? { sessionPath: request.query.sessionPath } : {}),
   });
 
   const parsedLimit = Number.parseInt(request.query.limit ?? "", 10);
   return service.getSessionMessages(request.params.sessionId, {
-    beforeMessageId: request.query.before,
-    limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+    ...(request.query.before ? { beforeMessageId: request.query.before } : {}),
+    ...(Number.isFinite(parsedLimit) ? { limit: parsedLimit } : {}),
   });
 });
 
@@ -560,8 +560,8 @@ app.get<{
   Querystring: { workspaceId?: string; sessionPath?: string };
 }>("/api/sessions/:sessionId/events", async (request, reply) => {
   await ensureSessionLoaded(request.params.sessionId, {
-    workspaceId: request.query.workspaceId,
-    sessionPath: request.query.sessionPath,
+    ...(request.query.workspaceId ? { workspaceId: request.query.workspaceId } : {}),
+    ...(request.query.sessionPath ? { sessionPath: request.query.sessionPath } : {}),
   });
 
   reply.raw.writeHead(200, {
@@ -598,9 +598,9 @@ app.setNotFoundHandler((request, reply) => {
 
 app.setErrorHandler((error, request, reply) => {
   request.log.error(error);
-  const statusCode =
-    "statusCode" in error && typeof error.statusCode === "number" ? error.statusCode : 500;
-  reply.code(statusCode).send({ error: error.message });
+  const errorWithStatus = error as Error & { statusCode?: number };
+  const statusCode = typeof errorWithStatus.statusCode === "number" ? errorWithStatus.statusCode : 500;
+  reply.code(statusCode).send({ error: errorWithStatus.message });
 });
 
 await app.listen({ host: config.host, port: config.port });

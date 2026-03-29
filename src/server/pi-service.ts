@@ -64,10 +64,10 @@ interface WebSession {
   workspace: WorkspaceInfo;
   session: AgentSession;
   subscribers: Set<SessionSubscriber>;
-  activeAssistant?: AgentSession["state"]["streamMessage"];
+  activeAssistant?: AgentSession["messages"][number] | undefined;
   activeTools: Map<string, ActiveToolRun>;
   openedAt: number;
-  modelFallbackMessage?: string;
+  modelFallbackMessage?: string | undefined;
   ephemeral: boolean;
 }
 
@@ -205,8 +205,8 @@ export class PiService {
   private readonly authStorage: AuthStorage;
   private readonly modelRegistry: ModelRegistry;
   private readonly sessions = new Map<string, WebSession>();
-  private readonly onAgentCompleted?: (session: SessionState) => Promise<void>;
-  private readonly onWorkspaceUpdated?: (workspaceId: string) => Promise<void>;
+  private readonly onAgentCompleted: ((session: SessionState) => Promise<void>) | undefined;
+  private readonly onWorkspaceUpdated: ((workspaceId: string) => Promise<void>) | undefined;
   private readonly cronService: CronService;
 
   constructor(
@@ -251,13 +251,14 @@ export class PiService {
     workspace: WorkspaceInfo,
     options?: { modelId?: string; thinkingLevel?: string; ephemeral?: boolean },
   ): Promise<SessionState> {
+    const sessionOptions = {
+      ...(options?.modelId ? { modelId: options.modelId } : {}),
+      ...(options?.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
+    };
     const result = await this.createPiAgentSession(
       workspace,
       SessionManager.create(workspace.path),
-      {
-        modelId: options?.modelId,
-        thinkingLevel: options?.thinkingLevel,
-      },
+      sessionOptions,
     );
 
     const webSession = this.attachSession(
@@ -349,7 +350,7 @@ export class PiService {
       hasMoreMessages: messagePage.hasMoreMessages,
       messageIndexOffset: messagePage.messageIndexOffset,
       messages: messagePage.messages,
-      activeAssistant: webSession.activeAssistant,
+      activeAssistant: webSession.activeAssistant ?? undefined,
       activeTools: [...webSession.activeTools.values()],
       title: webSession.session.sessionName,
     });
@@ -393,7 +394,7 @@ export class PiService {
   async setModel(sessionId: string, modelId: string): Promise<SessionState> {
     const webSession = this.requireSession(sessionId);
     const model = await this.resolveModel(modelId);
-    await webSession.session.setModel(model);
+    await webSession.session.setModel(model as never);
     await this.refreshBattySystemPrompt(webSession);
     this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
     return this.getState(sessionId);
@@ -419,7 +420,7 @@ export class PiService {
 
     await webSession.session.prompt(promptText, {
       images: prepared.images,
-      streamingBehavior,
+      ...(streamingBehavior ? { streamingBehavior } : {}),
     });
   }
 
@@ -459,9 +460,11 @@ export class PiService {
       sessionManager,
       settingsManager,
       resourceLoader,
-      model,
-      thinkingLevel: options?.thinkingLevel as AgentSession["thinkingLevel"] | undefined,
-      customTools: [this.createCronTool(workspace)],
+      ...(model ? { model: model as never } : {}),
+      ...(options?.thinkingLevel
+        ? { thinkingLevel: options.thinkingLevel as AgentSession["thinkingLevel"] }
+        : {}),
+      customTools: [this.createCronTool(workspace) as never],
     });
 
     if (!persistedPrompt) {
@@ -622,7 +625,7 @@ export class PiService {
         break;
       case "agent_end":
       case "turn_end":
-      case "auto_compaction_end":
+      case "compaction_end":
       case "auto_retry_end": {
         if (event.type === "agent_end") {
           webSession.activeAssistant = undefined;

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import { createSessionState, normalizeMessage } from "./pi-state";
+
+type AgentMessage = AgentSession["messages"][number];
 
 describe("createSessionState", () => {
   it("uses stable global message indexes for paginated windows", () => {
@@ -31,7 +33,7 @@ describe("createSessionState", () => {
           content: "latest",
           timestamp: 3,
         },
-      ] as AgentMessage[],
+      ] as unknown as AgentMessage[],
       activeTools: [],
       title: undefined,
     });

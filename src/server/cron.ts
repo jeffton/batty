@@ -446,7 +446,7 @@ export class CronStore {
       throw createHttpError(404, `Unknown cron job: ${jobId}`);
     }
 
-    const current = jobs[index];
+    const current = jobs[index]!;
     const workspaceId =
       typeof patch.workspaceId === "string"
         ? normalizeNonEmptyString(patch.workspaceId, "Workspace")
@@ -491,7 +491,7 @@ export class CronStore {
       return undefined;
     }
 
-    const current = jobs[index];
+    const current = jobs[index]!;
     const next: StoredCronJob = {
       ...current,
       updatedAt: Date.now(),
@@ -547,6 +547,7 @@ function createEveryHandle(job: StoredCronJob, onTrigger: () => void): Scheduled
     throw new Error(`Expected every schedule for job ${job.id}`);
   }
 
+  const everySchedule = job.schedule;
   let timer: NodeJS.Timeout | undefined;
   let stopped = false;
 
@@ -555,7 +556,7 @@ function createEveryHandle(job: StoredCronJob, onTrigger: () => void): Scheduled
       return;
     }
 
-    const nextAtMs = nextEveryRunAtMs(job.schedule);
+    const nextAtMs = nextEveryRunAtMs(everySchedule);
     const delayMs = Math.max(0, nextAtMs - Date.now());
 
     timer = setTimeout(() => {
@@ -588,9 +589,9 @@ export class CronService {
   private readonly jobs = new Map<string, StoredCronJob>();
   private readonly runningJobs = new Set<string>();
   private readonly changeListeners = new Set<(workspaceIds: string[]) => void>();
-  private runner?: CronJobRunner;
-  private watcher?: FSWatcher;
-  private reloadTimer?: NodeJS.Timeout;
+  private runner: CronJobRunner | undefined;
+  private watcher: FSWatcher | undefined;
+  private reloadTimer: NodeJS.Timeout | undefined;
   private ignoreWatchEventsUntil = 0;
 
   constructor(config: AppConfig) {

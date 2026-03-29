@@ -1,10 +1,11 @@
 import { deletePushSubscription, getPushPublicKey, savePushSubscription } from "@/client/lib/api";
 
-function decodeBase64Url(value: string): Uint8Array {
+function decodeBase64Url(value: string): ArrayBuffer {
   const padding = "=".repeat((4 - (value.length % 4 || 4)) % 4);
   const base64 = `${value}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
   const binary = window.atob(base64);
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 }
 
 export function supportsWebPush(): boolean {

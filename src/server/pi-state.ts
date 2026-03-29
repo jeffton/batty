@@ -1,16 +1,18 @@
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
+import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { SessionState, ToolExecutionDetails, UiContentBlock, UiMessage } from "@/shared/types";
 import { sanitizeTerminalBlocks, stripTerminalFormatting } from "./terminal-output";
+
+type AgentMessage = AgentSession["messages"][number];
 
 interface AssistantLikeMessage {
   role: "assistant";
   content: unknown;
   timestamp: number;
-  model?: string;
-  provider?: string;
-  stopReason?: string;
-  errorMessage?: string;
+  model?: string | undefined;
+  provider?: string | undefined;
+  stopReason?: string | undefined;
+  errorMessage?: string | undefined;
 }
 
 interface ToolResultLikeMessage {
@@ -18,7 +20,7 @@ interface ToolResultLikeMessage {
   toolCallId: string;
   toolName: string;
   content: unknown;
-  details?: ToolExecutionDetails;
+  details?: ToolExecutionDetails | undefined;
   isError: boolean;
   timestamp: number;
 }
@@ -27,10 +29,10 @@ interface BashExecutionLikeMessage {
   role: "bashExecution";
   command: string;
   output: string;
-  exitCode?: number;
+  exitCode?: number | undefined;
   cancelled: boolean;
   truncated: boolean;
-  fullOutputPath?: string;
+  fullOutputPath?: string | undefined;
   timestamp: number;
 }
 
@@ -180,9 +182,9 @@ export interface SessionStateInput {
   sessionId: string;
   workspaceId: string;
   cwd: string;
-  path?: string;
-  model?: string;
-  modelLabel?: string;
+  path?: string | undefined;
+  model?: string | undefined;
+  modelLabel?: string | undefined;
   thinkingLevel: string;
   availableThinkingLevels: string[];
   isStreaming: boolean;
@@ -193,10 +195,10 @@ export interface SessionStateInput {
   contextPercent: number | null;
   totalMessageCount: number;
   hasMoreMessages: boolean;
-  messageIndexOffset?: number;
+  messageIndexOffset?: number | undefined;
   messages: AgentMessage[];
-  activeAssistant?: AgentMessage;
-  title?: string;
+  activeAssistant?: AgentMessage | undefined;
+  title?: string | undefined;
   activeTools: SessionState["activeTools"];
 }
 

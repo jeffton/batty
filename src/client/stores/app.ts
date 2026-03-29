@@ -487,8 +487,9 @@ export const useAppStore = defineStore("app", {
 
       this.loadingOlderMessages = true;
       try {
+        const before = session.messages[0]?.id;
         const page = await getSessionMessages(session, {
-          before: session.messages[0]?.id,
+          ...(before ? { before } : {}),
           limit: RECENT_SESSION_MESSAGE_WINDOW,
         });
         const nextSession = normalizeSessionState({

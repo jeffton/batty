@@ -84,9 +84,7 @@ function buildLineDiff(oldLines: string[], newLines: string[]): LineOp[] {
       const nextRow = dp[oldIndex + 1]?.[newIndex] ?? 0;
       const nextCol = dp[oldIndex]?.[newIndex + 1] ?? 0;
       dp[oldIndex]![newIndex] =
-        oldLines[oldIndex] === newLines[newIndex]
-          ? nextDiagonal + 1
-          : Math.max(nextRow, nextCol);
+        oldLines[oldIndex] === newLines[newIndex] ? nextDiagonal + 1 : Math.max(nextRow, nextCol);
     }
   }
 

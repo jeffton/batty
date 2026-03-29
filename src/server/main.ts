@@ -599,7 +599,8 @@ app.setNotFoundHandler((request, reply) => {
 app.setErrorHandler((error, request, reply) => {
   request.log.error(error);
   const errorWithStatus = error as Error & { statusCode?: number };
-  const statusCode = typeof errorWithStatus.statusCode === "number" ? errorWithStatus.statusCode : 500;
+  const statusCode =
+    typeof errorWithStatus.statusCode === "number" ? errorWithStatus.statusCode : 500;
   reply.code(statusCode).send({ error: errorWithStatus.message });
 });
 

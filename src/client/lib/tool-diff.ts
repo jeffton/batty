@@ -1,8 +1,8 @@
 export interface DiffLineView {
   kind: "context" | "add" | "remove" | "ellipsis" | "meta";
   prefix: string;
-  oldNumber?: string | undefined;
-  newNumber?: string | undefined;
+  oldNumber?: string;
+  newNumber?: string;
   html: string;
 }
 
@@ -267,7 +267,7 @@ export function createEditPreviewLines(
 
 function parseDiffLine(
   line: string,
-): { prefix: "+" | "-" | " "; lineNumber?: string | undefined; text: string } | undefined {
+): { prefix: "+" | "-" | " "; lineNumber?: string; text: string } | undefined {
   const match = line.match(/^([+\- ])(\s*\d*)\s(.*)$/);
   if (!match) {
     return undefined;

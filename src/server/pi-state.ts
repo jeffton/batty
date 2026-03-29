@@ -9,10 +9,10 @@ interface AssistantLikeMessage {
   role: "assistant";
   content: unknown;
   timestamp: number;
-  model?: string | undefined;
-  provider?: string | undefined;
-  stopReason?: string | undefined;
-  errorMessage?: string | undefined;
+  model?: string;
+  provider?: string;
+  stopReason?: string;
+  errorMessage?: string;
 }
 
 interface ToolResultLikeMessage {
@@ -20,7 +20,7 @@ interface ToolResultLikeMessage {
   toolCallId: string;
   toolName: string;
   content: unknown;
-  details?: ToolExecutionDetails | undefined;
+  details?: ToolExecutionDetails;
   isError: boolean;
   timestamp: number;
 }
@@ -29,10 +29,10 @@ interface BashExecutionLikeMessage {
   role: "bashExecution";
   command: string;
   output: string;
-  exitCode?: number | undefined;
+  exitCode?: number;
   cancelled: boolean;
   truncated: boolean;
-  fullOutputPath?: string | undefined;
+  fullOutputPath?: string;
   timestamp: number;
 }
 
@@ -182,9 +182,9 @@ export interface SessionStateInput {
   sessionId: string;
   workspaceId: string;
   cwd: string;
-  path?: string | undefined;
-  model?: string | undefined;
-  modelLabel?: string | undefined;
+  path?: string;
+  model?: string;
+  modelLabel?: string;
   thinkingLevel: string;
   availableThinkingLevels: string[];
   isStreaming: boolean;
@@ -195,10 +195,10 @@ export interface SessionStateInput {
   contextPercent: number | null;
   totalMessageCount: number;
   hasMoreMessages: boolean;
-  messageIndexOffset?: number | undefined;
+  messageIndexOffset?: number;
   messages: AgentMessage[];
-  activeAssistant?: AgentMessage | undefined;
-  title?: string | undefined;
+  activeAssistant?: AgentMessage;
+  title?: string;
   activeTools: SessionState["activeTools"];
 }
 

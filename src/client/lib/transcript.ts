@@ -6,9 +6,9 @@ import type {
 } from "@/shared/types";
 
 export interface ToolDisplayState {
-  status?: "running" | "success" | "error" | undefined;
+  status?: "running" | "success" | "error";
   resultBlocks: UiContentBlock[];
-  resultDetails?: ToolExecutionDetails | undefined;
+  resultDetails?: ToolExecutionDetails;
 }
 
 export interface ToolStateLookup {
@@ -119,7 +119,7 @@ export function buildTranscriptMessages(
 
 export function hasToolResultContent(
   blocks: UiContentBlock[],
-  details?: { diff?: string } | undefined,
+  details?: { diff?: string },
 ): boolean {
   return blocks.length > 0 || typeof details?.diff === "string";
 }

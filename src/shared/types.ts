@@ -22,10 +22,10 @@ export type UiMessage =
       role: "assistant";
       timestamp: number;
       blocks: UiContentBlock[];
-      model?: string | undefined;
-      provider?: string | undefined;
-      stopReason?: string | undefined;
-      errorMessage?: string | undefined;
+      model?: string;
+      provider?: string;
+      stopReason?: string;
+      errorMessage?: string;
     }
   | {
       id: string;
@@ -35,7 +35,7 @@ export type UiMessage =
       toolName: string;
       blocks: UiContentBlock[];
       isError: boolean;
-      details?: ToolExecutionDetails | undefined;
+      details?: ToolExecutionDetails;
     }
   | {
       id: string;
@@ -46,7 +46,7 @@ export type UiMessage =
       exitCode: number | null;
       cancelled: boolean;
       truncated: boolean;
-      fullOutputPath?: string | undefined;
+      fullOutputPath?: string;
     }
   | {
       id: string;
@@ -63,7 +63,7 @@ export interface ActiveToolRun {
   blocks: UiContentBlock[];
   status: "running" | "success" | "error";
   isError: boolean;
-  details?: ToolExecutionDetails | undefined;
+  details?: ToolExecutionDetails;
 }
 
 export interface WorkspaceInfo {
@@ -76,13 +76,13 @@ export interface WorkspaceInfo {
 export interface SessionSummary {
   id: string;
   sessionId: string;
-  name?: string | undefined;
-  path?: string | undefined;
+  name?: string;
+  path?: string;
   firstMessage: string;
   updatedAt: number;
   messageCount: number;
   workspaceId: string;
-  model?: string | undefined;
+  model?: string;
 }
 
 export type CronJobSchedule =
@@ -97,14 +97,14 @@ export type CronJobSchedule =
   | {
       kind: "cron";
       expression: string;
-      timezone?: string | undefined;
+      timezone?: string;
     };
 
 export type CronJobScheduleInput =
   | {
       kind: "at";
-      at?: string | undefined;
-      in?: string | undefined;
+      at?: string;
+      in?: string;
     }
   | {
       kind: "every";
@@ -113,16 +113,16 @@ export type CronJobScheduleInput =
   | {
       kind: "cron";
       expression: string;
-      timezone?: string | undefined;
+      timezone?: string;
     };
 
 export interface CronJobState {
-  nextRunAtMs?: number | undefined;
-  lastRunAtMs?: number | undefined;
-  lastDurationMs?: number | undefined;
-  lastStatus?: "ok" | "error" | undefined;
-  lastError?: string | undefined;
-  lastSessionId?: string | undefined;
+  nextRunAtMs?: number;
+  lastRunAtMs?: number;
+  lastDurationMs?: number;
+  lastStatus?: "ok" | "error";
+  lastError?: string;
+  lastSessionId?: string;
 }
 
 export interface CronJob {
@@ -147,11 +147,11 @@ export interface CreateCronJobInput {
 }
 
 export interface UpdateCronJobInput {
-  workspaceId?: string | undefined;
-  prompt?: string | undefined;
-  model?: string | undefined;
-  thinkingLevel?: string | undefined;
-  schedule?: CronJobScheduleInput | undefined;
+  workspaceId?: string;
+  prompt?: string;
+  model?: string;
+  thinkingLevel?: string;
+  schedule?: CronJobScheduleInput;
 }
 
 export interface SessionState {
@@ -159,9 +159,9 @@ export interface SessionState {
   sessionId: string;
   workspaceId: string;
   cwd: string;
-  path?: string | undefined;
-  model?: string | undefined;
-  modelLabel?: string | undefined;
+  path?: string;
+  model?: string;
+  modelLabel?: string;
   thinkingLevel: string;
   availableThinkingLevels: string[];
   isStreaming: boolean;
@@ -173,9 +173,9 @@ export interface SessionState {
   totalMessageCount: number;
   hasMoreMessages: boolean;
   messages: UiMessage[];
-  activeAssistant?: Extract<UiMessage, { role: "assistant" }> | undefined;
+  activeAssistant?: Extract<UiMessage, { role: "assistant" }>;
   activeTools: ActiveToolRun[];
-  title?: string | undefined;
+  title?: string;
 }
 
 export type SessionStateMetadata = Omit<
@@ -210,8 +210,8 @@ export interface BootstrapPayload {
   buildId: string;
   workspaces: WorkspaceInfo[];
   models: ModelOption[];
-  recentSession?: SessionSummary | undefined;
-  activeSession?: SessionState | undefined;
+  recentSession?: SessionSummary;
+  activeSession?: SessionState;
 }
 
 export interface WorkspaceSnapshot {
@@ -223,7 +223,7 @@ export interface WorkspaceSnapshot {
 export type ServerEvent =
   | { type: "reset"; state: SessionState }
   | { type: "state"; state: SessionStateMetadata }
-  | { type: "assistant"; assistant?: Extract<UiMessage, { role: "assistant" }> | undefined }
+  | { type: "assistant"; assistant?: Extract<UiMessage, { role: "assistant" }> }
   | { type: "tools"; tools: ActiveToolRun[] }
   | { type: "status"; isStreaming: boolean; pendingMessageCount: number }
   | { type: "error"; message: string };

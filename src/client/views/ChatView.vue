@@ -254,6 +254,17 @@ function markUserScrollIntent(): void {
   lastUserScrollIntentAt = performance.now();
 }
 
+function handleTranscriptTouchStart(): void {
+  markUserScrollIntent();
+  stopFollowingTranscript();
+}
+
+function handleTranscriptTouchMove(): void {
+  markUserScrollIntent();
+  isTranscriptPinnedToBottom.value = false;
+  stopFollowingTranscript();
+}
+
 function hasRecentUserScrollIntent(): boolean {
   return (
     lastUserScrollIntentAt > 0 &&
@@ -269,10 +280,18 @@ function bindTranscriptScrollListener(): void {
 
   transcriptScrollElement?.removeEventListener("scroll", handleTranscriptScroll);
   transcriptScrollElement?.removeEventListener("wheel", markUserScrollIntent);
+  transcriptScrollElement?.removeEventListener("touchstart", handleTranscriptTouchStart);
+  transcriptScrollElement?.removeEventListener("touchmove", handleTranscriptTouchMove);
 
   transcriptScrollElement = nextElement;
   transcriptScrollElement?.addEventListener("scroll", handleTranscriptScroll, { passive: true });
   transcriptScrollElement?.addEventListener("wheel", markUserScrollIntent, { passive: true });
+  transcriptScrollElement?.addEventListener("touchstart", handleTranscriptTouchStart, {
+    passive: true,
+  });
+  transcriptScrollElement?.addEventListener("touchmove", handleTranscriptTouchMove, {
+    passive: true,
+  });
 }
 
 function bindTranscriptObservers(): void {
@@ -374,7 +393,11 @@ async function followTranscriptWhilePinned(behavior: ScrollBehavior = "auto"): P
   while (token === followTranscriptToken) {
     await nextAnimationFrame();
 
-    if (!store.activeSession?.isStreaming || !isTranscriptPinnedToBottom.value) {
+    if (
+      !store.activeSession?.isStreaming ||
+      !isTranscriptPinnedToBottom.value ||
+      hasRecentUserScrollIntent()
+    ) {
       return;
     }
 
@@ -588,6 +611,8 @@ onUnmounted(() => {
   stopFollowingTranscript();
   transcriptScrollElement?.removeEventListener("scroll", handleTranscriptScroll);
   transcriptScrollElement?.removeEventListener("wheel", markUserScrollIntent);
+  transcriptScrollElement?.removeEventListener("touchstart", handleTranscriptTouchStart);
+  transcriptScrollElement?.removeEventListener("touchmove", handleTranscriptTouchMove);
   transcriptScrollElement = null;
   transcriptViewportObserver?.disconnect();
   transcriptTailObserver?.disconnect();
@@ -822,6 +847,7 @@ watch(
   display: flex;
   align-items: center;
   gap: 0.35rem;
+  min-width: 0;
   padding: calc(var(--safe-area-top) + 0.4rem) calc(var(--safe-area-right) + 0.6rem) 0.4rem
     calc(var(--safe-area-left) + 0.6rem);
   background: var(--color-bg-panel);
@@ -839,6 +865,8 @@ watch(
   display: flex;
   align-items: center;
   gap: 0.4rem;
+  flex: 1.2 1 auto;
+  overflow: hidden;
   border: 0;
   border-radius: 0.5rem;
   background: transparent;
@@ -887,6 +915,8 @@ watch(
   display: flex;
   align-items: center;
   gap: 0.4rem;
+  flex: 1 1 auto;
+  overflow: hidden;
   border: 0;
   border-radius: 0.5rem;
   background: transparent;
@@ -947,10 +977,14 @@ watch(
 .header__model-effort {
   font-size: 0.75rem;
   color: var(--color-text-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .header__spacer {
-  flex: 1;
+  flex: 0 1 0;
+  min-width: 0;
 }
 
 .header__context {

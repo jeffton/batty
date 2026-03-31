@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 
+import { NOTIFICATION_NAVIGATION_MESSAGE_TYPE } from "@/client/lib/notification-navigation";
 import { clientsClaim } from "workbox-core";
 import { NavigationRoute, registerRoute } from "workbox-routing";
 import { StaleWhileRevalidate } from "workbox-strategies";
@@ -22,6 +23,35 @@ type PushNotificationPayload = NotificationOptions & {
     [key: string]: unknown;
   };
 };
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function navigateClient(client: WindowClient, targetUrl: string): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await client.navigate(targetUrl);
+      return;
+    } catch {
+      await sleep(200);
+    }
+  }
+}
+
+function notifyClient(client: WindowClient, targetUrl: string): void {
+  client.postMessage({
+    type: NOTIFICATION_NAVIGATION_MESSAGE_TYPE,
+    url: targetUrl,
+  });
+}
+
+async function routeClient(client: WindowClient, targetUrl: string): Promise<void> {
+  notifyClient(client, targetUrl);
+  await navigateClient(client, targetUrl);
+  await client.focus();
+  notifyClient(client, targetUrl);
+}
 
 self.skipWaiting();
 clientsClaim();
@@ -47,27 +77,37 @@ self.addEventListener("push", (event) => {
 });
 
 self.addEventListener("notificationclick", (event) => {
+  event.preventDefault();
   event.notification.close();
-  const targetUrl =
+  const targetUrl = new URL(
     typeof event.notification.data?.url === "string" && event.notification.data.url.length > 0
       ? event.notification.data.url
-      : "/";
+      : "/",
+    self.location.origin,
+  ).href;
 
   event.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
-      for (const client of clients) {
-        if (!("focus" in client) || !("navigate" in client)) {
-          continue;
-        }
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(async (clients) => {
+      const sameOriginClients = clients.filter(
+        (client): client is WindowClient => new URL(client.url).origin === self.location.origin,
+      );
 
-        if (new URL(client.url).origin !== self.location.origin) {
-          continue;
-        }
-
-        return client.focus().then(() => client.navigate(targetUrl));
+      for (const client of sameOriginClients) {
+        notifyClient(client, targetUrl);
       }
 
-      return self.clients.openWindow(targetUrl);
+      const existingClient = sameOriginClients.find(
+        (client) => "navigate" in client && "focus" in client,
+      );
+      if (existingClient) {
+        await routeClient(existingClient, targetUrl);
+        return;
+      }
+
+      const opened = await self.clients.openWindow(targetUrl);
+      if (opened && "focus" in opened && "navigate" in opened) {
+        await routeClient(opened, targetUrl);
+      }
     }),
   );
 });

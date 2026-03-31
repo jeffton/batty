@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import {
+  NOTIFICATION_NAVIGATION_MESSAGE_TYPE,
+  notificationPathFromUrl,
+} from "@/client/lib/notification-navigation";
 import { readCachedSession } from "@/client/lib/cache";
 import { sessionRoutePath, workspaceRoutePath } from "@/client/lib/routes";
 import { useAppStore } from "@/client/stores/app";
@@ -25,8 +29,29 @@ const onOnline = () => {
 const onVisibilityChange = () => {
   void handleVisibilityChange();
 };
+const onServiceWorkerMessage = (event: MessageEvent<unknown>) => {
+  if (
+    !event.data ||
+    typeof event.data !== "object" ||
+    !("type" in event.data) ||
+    !("url" in event.data) ||
+    event.data.type !== NOTIFICATION_NAVIGATION_MESSAGE_TYPE ||
+    typeof event.data.url !== "string"
+  ) {
+    return;
+  }
+
+  const targetPath = notificationPathFromUrl(event.data.url);
+  if (!targetPath) {
+    return;
+  }
+
+  pendingNotificationPath = targetPath;
+  void syncRouteToStore();
+};
 
 let syncVersion = 0;
+let pendingNotificationPath: string | undefined;
 
 function fallbackWorkspaceRoute(): string | undefined {
   const recentSession = store.mostRecentSessionSummary;
@@ -77,6 +102,14 @@ async function syncRouteToStore(): Promise<void> {
     if (route.path !== "/login") {
       await router.replace("/login");
     }
+    return;
+  }
+
+  if (pendingNotificationPath && route.fullPath !== pendingNotificationPath) {
+    store.clearRouteLoading();
+    const targetPath = pendingNotificationPath;
+    pendingNotificationPath = undefined;
+    await router.replace(targetPath);
     return;
   }
 
@@ -199,6 +232,7 @@ onMounted(async () => {
   window.addEventListener("offline", handleOffline);
   window.addEventListener("online", onOnline);
   document.addEventListener("visibilitychange", onVisibilityChange);
+  navigator.serviceWorker?.addEventListener("message", onServiceWorkerMessage);
   await store.bootstrap();
 });
 
@@ -206,6 +240,7 @@ onUnmounted(() => {
   window.removeEventListener("offline", handleOffline);
   window.removeEventListener("online", onOnline);
   document.removeEventListener("visibilitychange", onVisibilityChange);
+  navigator.serviceWorker?.removeEventListener("message", onServiceWorkerMessage);
 });
 
 watch(

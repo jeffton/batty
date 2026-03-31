@@ -76,7 +76,6 @@ function isBattySystemPromptSnapshot(value: unknown): value is BattySystemPrompt
 
 function toIsoDate(date: Date): string {
   return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "UTC",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -84,9 +83,9 @@ function toIsoDate(date: Date): string {
 }
 
 function getIsoWeekNumber(date: Date): number {
-  const utcDate = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-  const day = utcDate.getUTCDay() || 7;
-  utcDate.setUTCDate(utcDate.getUTCDate() + 4 - day);
-  const yearStart = new Date(Date.UTC(utcDate.getUTCFullYear(), 0, 1));
-  return Math.ceil(((utcDate.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  const localDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const day = localDate.getDay() || 7;
+  localDate.setDate(localDate.getDate() + 4 - day);
+  const yearStart = new Date(localDate.getFullYear(), 0, 1);
+  return Math.ceil(((localDate.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
 }

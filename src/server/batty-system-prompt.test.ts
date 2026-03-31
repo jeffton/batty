@@ -30,6 +30,19 @@ describe("batty system prompt", () => {
     expect(snapshot.appendedPrompt).toContain("Current date: 2026-03-20 (ISO week 12)");
   });
 
+  it("uses local time instead of UTC for date boundaries", () => {
+    const snapshot = buildBattySystemPromptSnapshot(
+      { id: "batty", path: "/root/github/batty" },
+      "openai/gpt-5",
+      "medium",
+      new Date("2026-03-30T22:30:00Z"),
+    );
+
+    expect(snapshot.date).toBe("2026-03-31");
+    expect(snapshot.isoWeek).toBe(14);
+    expect(snapshot.appendedPrompt).toContain("Current date: 2026-03-31 (ISO week 14)");
+  });
+
   it("finds the latest persisted Batty prompt snapshot", () => {
     const older = buildBattySystemPromptSnapshot(
       { id: "batty", path: "/root/github/batty" },

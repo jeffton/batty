@@ -861,7 +861,7 @@ watch(
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  flex: 1.2 1 auto;
+  flex: 0 1 auto;
   overflow: hidden;
   border: 0;
   border-radius: 0.5rem;
@@ -911,7 +911,7 @@ watch(
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   overflow: hidden;
   border: 0;
   border-radius: 0.5rem;
@@ -979,7 +979,7 @@ watch(
 }
 
 .header__spacer {
-  flex: 0 1 0;
+  flex: 1 1 auto;
   min-width: 0;
 }
 

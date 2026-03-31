@@ -393,11 +393,7 @@ async function followTranscriptWhilePinned(behavior: ScrollBehavior = "auto"): P
   while (token === followTranscriptToken) {
     await nextAnimationFrame();
 
-    if (
-      !store.activeSession?.isStreaming ||
-      !isTranscriptPinnedToBottom.value ||
-      hasRecentUserScrollIntent()
-    ) {
+    if (!store.activeSession?.isStreaming || !isTranscriptPinnedToBottom.value) {
       return;
     }
 

@@ -32,6 +32,7 @@ async function createBattyDir(): Promise<string> {
         authSecret: "test-secret",
         workspacesRoot: "/tmp/workspaces",
         webPushSubject: "https://batty.test",
+        cronDailySessionStartTime: "04:00",
       },
       null,
       2,
@@ -76,6 +77,7 @@ describe("loadConfig", () => {
 
     expect(config.host).toBe("0.0.0.0");
     expect(config.port).toBe(4242);
+    expect(config.cronDailySessionStartTime).toBe("04:00");
     expect(process.env.BRAVE_API_KEY).toBe("brave-test-key");
   });
 });

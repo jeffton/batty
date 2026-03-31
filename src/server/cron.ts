@@ -8,6 +8,7 @@ import type {
   CronJob,
   CronJobSchedule,
   CronJobScheduleInput,
+  CronJobSession,
   CronJobState,
   UpdateCronJobInput,
 } from "@/shared/types";
@@ -43,12 +44,15 @@ type StoredCronJobSchedule =
   | StoredCronJobEverySchedule
   | StoredCronJobCronSchedule;
 
+type StoredCronJobSession = CronJobSession;
+
 interface StoredCronJob {
   id: string;
   workspaceId: string;
   prompt: string;
   model: string;
   thinkingLevel: string;
+  session: StoredCronJobSession;
   createdAt: number;
   updatedAt: number;
   schedule: StoredCronJobSchedule;
@@ -65,7 +69,7 @@ interface ScheduledHandle {
 }
 
 export interface CronJobRunner {
-  run(job: CronJob): Promise<{ sessionId: string }>;
+  run(job: CronJob): Promise<{ sessionId: string; sessionPath: string }>;
 }
 
 function createHttpError(statusCode: number, message: string): Error & { statusCode: number } {
@@ -89,6 +93,24 @@ function normalizeThinkingLevel(value: string | undefined): string {
     );
   }
   return thinkingLevel;
+}
+
+function normalizeSession(value: CronJobSession | undefined): StoredCronJobSession {
+  if (!value) {
+    return { kind: "new" };
+  }
+
+  switch (value.kind) {
+    case "new":
+      return { kind: "new" };
+    case "daily":
+      return { kind: "daily" };
+    default:
+      throw createHttpError(
+        400,
+        `Invalid cron session kind: ${String((value as { kind?: unknown }).kind)}`,
+      );
+  }
 }
 
 function isDurationString(value: string): boolean {
@@ -231,6 +253,15 @@ function formatScheduleLabel(schedule: StoredCronJobSchedule): string {
   }
 }
 
+function formatSessionLabel(session: StoredCronJobSession): string {
+  switch (session.kind) {
+    case "new":
+      return "New per run";
+    case "daily":
+      return "Daily";
+  }
+}
+
 function nextEveryRunAtMs(schedule: StoredCronJobEverySchedule, now = Date.now()): number {
   if (schedule.anchorAtMs > now) {
     return schedule.anchorAtMs;
@@ -267,6 +298,7 @@ function toCronJob(job: StoredCronJob): CronJob {
     prompt: job.prompt,
     model: job.model,
     thinkingLevel: job.thinkingLevel,
+    session: normalizeSession(job.session),
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     schedule: toPublicSchedule(job.schedule),
@@ -317,6 +349,10 @@ function normalizeState(value: unknown): CronJobState {
     lastSessionId:
       typeof candidate.lastSessionId === "string" && candidate.lastSessionId.length > 0
         ? candidate.lastSessionId
+        : undefined,
+    lastSessionPath:
+      typeof candidate.lastSessionPath === "string" && candidate.lastSessionPath.length > 0
+        ? candidate.lastSessionPath
         : undefined,
   };
 }
@@ -379,6 +415,7 @@ function normalizeStoredJob(value: unknown): StoredCronJob {
     prompt: normalizeNonEmptyString(job.prompt, "Prompt"),
     model: normalizeNonEmptyString(job.model, "Model"),
     thinkingLevel: normalizeThinkingLevel(job.thinkingLevel),
+    session: normalizeSession(job.session),
     createdAt:
       typeof job.createdAt === "number" && Number.isFinite(job.createdAt)
         ? job.createdAt
@@ -427,6 +464,7 @@ export class CronStore {
       prompt: normalizeNonEmptyString(input.prompt, "Prompt"),
       model: normalizeNonEmptyString(input.model, "Model"),
       thinkingLevel: normalizeThinkingLevel(input.thinkingLevel),
+      session: normalizeSession(input.session),
       createdAt: now,
       updatedAt: now,
       schedule: normalizeSchedule(input.schedule, now),
@@ -464,6 +502,7 @@ export class CronStore {
         patch.thinkingLevel == null
           ? current.thinkingLevel
           : normalizeThinkingLevel(patch.thinkingLevel),
+      session: patch.session == null ? current.session : normalizeSession(patch.session),
       updatedAt,
       schedule: patch.schedule ? normalizeSchedule(patch.schedule, updatedAt) : current.schedule,
     };
@@ -793,6 +832,7 @@ export class CronService {
           lastStatus: "ok",
           lastError: undefined,
           lastSessionId: result.sessionId,
+          lastSessionPath: result.sessionPath,
         });
         await this.reloadFromDisk();
       }
@@ -819,6 +859,7 @@ export function buildCronJobSummary(job: CronJob): string {
     `Job: ${job.id}`,
     `Workspace: ${job.workspaceId}`,
     `Schedule: ${job.scheduleLabel}`,
+    `Session: ${formatSessionLabel(job.session)}`,
     `Model: ${job.model}`,
     `Thinking: ${job.thinkingLevel}`,
     `Prompt: ${job.prompt}`,

@@ -90,6 +90,7 @@ cronService.setRunner({
       prompt: job.prompt,
       model: job.model,
       thinkingLevel: job.thinkingLevel,
+      session: job.session,
     });
   },
 });
@@ -401,6 +402,9 @@ app.post<{
     prompt?: string;
     model?: string;
     thinkingLevel?: string;
+    session?: {
+      kind?: string;
+    };
     schedule?: {
       kind?: string;
       at?: string;
@@ -416,6 +420,7 @@ app.post<{
     prompt: request.body?.prompt ?? "",
     model: request.body?.model ?? "",
     thinkingLevel: request.body?.thinkingLevel ?? "",
+    session: request.body?.session as never,
     schedule: (request.body?.schedule ?? {}) as never,
   });
 });
@@ -427,6 +432,9 @@ app.patch<{
     prompt?: string;
     model?: string;
     thinkingLevel?: string;
+    session?: {
+      kind?: string;
+    };
     schedule?: {
       kind?: string;
       at?: string;
@@ -442,6 +450,7 @@ app.patch<{
     prompt: request.body?.prompt,
     model: request.body?.model,
     thinkingLevel: request.body?.thinkingLevel,
+    session: request.body?.session as never,
     schedule: request.body?.schedule as never,
   });
 });

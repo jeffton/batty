@@ -27,6 +27,7 @@ async function createConfig(): Promise<AppConfig> {
     publicDir: path.join(root, "public"),
     webPushDir: path.join(root, "web-push"),
     webPushSubject: "mailto:test@example.com",
+    cronDailySessionStartTime: "04:00",
     cookieName: "test",
     authSecret: crypto.randomUUID(),
   };

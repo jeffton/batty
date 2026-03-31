@@ -116,6 +116,14 @@ export type CronJobScheduleInput =
       timezone?: string;
     };
 
+export type CronJobSession =
+  | {
+      kind: "new";
+    }
+  | {
+      kind: "daily";
+    };
+
 export interface CronJobState {
   nextRunAtMs?: number;
   lastRunAtMs?: number;
@@ -123,6 +131,7 @@ export interface CronJobState {
   lastStatus?: "ok" | "error";
   lastError?: string;
   lastSessionId?: string;
+  lastSessionPath?: string;
 }
 
 export interface CronJob {
@@ -131,6 +140,7 @@ export interface CronJob {
   prompt: string;
   model: string;
   thinkingLevel: string;
+  session: CronJobSession;
   createdAt: number;
   updatedAt: number;
   schedule: CronJobSchedule;
@@ -143,6 +153,7 @@ export interface CreateCronJobInput {
   prompt: string;
   model: string;
   thinkingLevel: string;
+  session?: CronJobSession;
   schedule: CronJobScheduleInput;
 }
 
@@ -151,6 +162,7 @@ export interface UpdateCronJobInput {
   prompt?: string;
   model?: string;
   thinkingLevel?: string;
+  session?: CronJobSession;
   schedule?: CronJobScheduleInput;
 }
 

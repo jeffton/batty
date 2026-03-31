@@ -31,6 +31,7 @@ function createConfig(webPushDir: string): AppConfig {
     publicDir: "/tmp/public",
     webPushDir,
     webPushSubject: "mailto:test@example.com",
+    cronDailySessionStartTime: "04:00",
     cookieName: "batty-auth",
     authSecret: crypto.randomUUID(),
   };

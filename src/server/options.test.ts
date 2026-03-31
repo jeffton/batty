@@ -28,11 +28,13 @@ describe("ensureOptionsFile", () => {
       authSecret: string;
       workspacesRoot: string;
       webPushSubject: string;
+      cronDailySessionStartTime: string;
     };
 
     expect(persisted.authSecret.length).toBeGreaterThan(0);
     expect(persisted.workspacesRoot).toBe("");
     expect(persisted.webPushSubject).toBe("");
+    expect(persisted.cronDailySessionStartTime).toBe("04:00");
   });
 
   it("drops legacy password auth fields and preserves the rest", async () => {
@@ -48,6 +50,7 @@ describe("ensureOptionsFile", () => {
           authSecret: "existing-secret",
           workspacesRoot: "/root/github",
           webPushSubject: "https://batty.roybot.se",
+          cronDailySessionStartTime: "4:00",
         },
         null,
         2,
@@ -64,7 +67,32 @@ describe("ensureOptionsFile", () => {
     expect(options.authSecret).toBe("existing-secret");
     expect(options.workspacesRoot).toBe("/root/github");
     expect(options.webPushSubject).toBe("https://batty.roybot.se");
+    expect(options.cronDailySessionStartTime).toBe("04:00");
     expect(persisted.username).toBeUndefined();
     expect(persisted.password).toBeUndefined();
+  });
+
+  it("rejects invalid cronDailySessionStartTime values", async () => {
+    const battyDir = await createBattyDir();
+
+    await fs.mkdir(path.dirname(optionsFilePath(battyDir)), { recursive: true });
+    await fs.writeFile(
+      optionsFilePath(battyDir),
+      `${JSON.stringify(
+        {
+          authSecret: "existing-secret",
+          workspacesRoot: "/root/github",
+          webPushSubject: "https://batty.roybot.se",
+          cronDailySessionStartTime: "25:00",
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    await expect(ensureOptionsFile(battyDir)).rejects.toThrow(
+      "Invalid cronDailySessionStartTime in options.json: 25:00. Expected HH:MM.",
+    );
   });
 });

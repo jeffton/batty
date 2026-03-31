@@ -6,13 +6,17 @@ export interface StoredAppOptions {
   authSecret?: string;
   workspacesRoot?: string;
   webPushSubject?: string;
+  cronDailySessionStartTime?: string;
 }
 
 export interface AppOptions {
   authSecret: string;
   workspacesRoot: string;
   webPushSubject: string;
+  cronDailySessionStartTime: string;
 }
+
+const DEFAULT_CRON_DAILY_SESSION_START_TIME = "04:00";
 
 const REQUIRED_OPTION_KEYS = ["workspacesRoot", "webPushSubject"] as const;
 
@@ -28,6 +32,42 @@ function createAuthSecret(): string {
   return crypto.randomBytes(32).toString("base64url");
 }
 
+function normalizeDailySessionStartTime(value: unknown): string {
+  if (value == null) {
+    return DEFAULT_CRON_DAILY_SESSION_START_TIME;
+  }
+  if (typeof value !== "string") {
+    throw new Error(
+      `Invalid cronDailySessionStartTime in options.json: ${String(value)}. Expected HH:MM.`,
+    );
+  }
+
+  const trimmed = value.trim();
+  const match = /^(\d{1,2}):(\d{2})$/.exec(trimmed);
+  if (!match) {
+    throw new Error(
+      `Invalid cronDailySessionStartTime in options.json: ${trimmed}. Expected HH:MM.`,
+    );
+  }
+
+  const hours = Number.parseInt(match[1] ?? "", 10);
+  const minutes = Number.parseInt(match[2] ?? "", 10);
+  if (
+    !Number.isInteger(hours) ||
+    !Number.isInteger(minutes) ||
+    hours < 0 ||
+    hours > 23 ||
+    minutes < 0 ||
+    minutes > 59
+  ) {
+    throw new Error(
+      `Invalid cronDailySessionStartTime in options.json: ${trimmed}. Expected HH:MM.`,
+    );
+  }
+
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
 function normalizeStoredOptions(options: StoredAppOptions | undefined): StoredAppOptions {
   return {
     authSecret:
@@ -38,6 +78,7 @@ function normalizeStoredOptions(options: StoredAppOptions | undefined): StoredAp
       typeof options?.workspacesRoot === "string" ? options.workspacesRoot.trim() : "",
     webPushSubject:
       typeof options?.webPushSubject === "string" ? options.webPushSubject.trim() : "",
+    cronDailySessionStartTime: normalizeDailySessionStartTime(options?.cronDailySessionStartTime),
   };
 }
 

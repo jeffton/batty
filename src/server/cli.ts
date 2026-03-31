@@ -3,7 +3,12 @@ import path from "node:path";
 import { loadConfig, resolveBattyDir } from "./config";
 import { buildCronJobSummary, CronStore } from "./cron";
 import { formatSetupCode, PasskeyAuthService } from "./passkeys";
-import type { CreateCronJobInput, CronJobScheduleInput, UpdateCronJobInput } from "@/shared/types";
+import type {
+  CreateCronJobInput,
+  CronJobScheduleInput,
+  CronJobSession,
+  UpdateCronJobInput,
+} from "@/shared/types";
 
 interface ParsedArgs {
   positionals: string[];
@@ -82,14 +87,14 @@ function usage(): string {
     "Commands:",
     "  auth code                  Print a fresh one-time 8 char auth code",
     "  cron list [--workspace ID] [--json]",
-    "  cron add --workspace ID --prompt TEXT --model ID --thinking LEVEL (--in DUR | --at ISO | --every DUR | --cron EXPR) [--tz IANA]",
-    "  cron edit <jobId> [fields...]",
+    "  cron add --workspace ID --prompt TEXT --model ID --thinking LEVEL (--in DUR | --at ISO | --every DUR | --cron EXPR) [--tz IANA] [--session new|daily]",
+    "  cron edit <jobId> [fields...] [--session new|daily]",
     "  cron rm <jobId>",
     "",
     "Examples:",
     "  batty --root /root/github auth code",
-    '  batty --root /root/github cron add --workspace batty --prompt "Check CI" --model openai/gpt-5 --thinking medium --every 1h',
-    '  batty --root /root/github cron add --workspace batty --prompt "Morning summary" --model anthropic/claude-sonnet-4 --thinking low --cron "0 8 * * 1-5" --tz Europe/Copenhagen',
+    '  batty --root /root/github cron add --workspace batty --prompt "Check CI" --model openai/gpt-5 --thinking medium --every 1h --session daily',
+    '  batty --root /root/github cron add --workspace batty --prompt "Morning summary" --model anthropic/claude-sonnet-4 --thinking low --cron "0 8 * * 1-5" --tz Europe/Copenhagen --session daily',
     '  batty --root /root/github cron edit abc123 --prompt "Updated prompt" --thinking high',
   ].join("\n");
 }
@@ -150,6 +155,22 @@ function buildSchedule(flags: Record<string, string | boolean>): CronJobSchedule
   };
 }
 
+function buildSession(flags: Record<string, string | boolean>): CronJobSession | undefined {
+  const session = stringFlag(flags, "session");
+  if (!session) {
+    return undefined;
+  }
+
+  switch (session) {
+    case "new":
+      return { kind: "new" };
+    case "daily":
+      return { kind: "daily" };
+    default:
+      throw new Error(`Invalid --session value: ${session}. Expected new or daily.`);
+  }
+}
+
 async function handleAuthCode(root: string): Promise<void> {
   const config = await loadConfig(root);
   const passkeys = new PasskeyAuthService(config.battyDir, config.authSecret);
@@ -185,6 +206,7 @@ async function handleCronAdd(root: string, parsed: ParsedArgs): Promise<void> {
     prompt: requireString(stringFlag(parsed.flags, "prompt"), "--prompt"),
     model: requireString(stringFlag(parsed.flags, "model"), "--model"),
     thinkingLevel: requireString(stringFlag(parsed.flags, "thinking"), "--thinking"),
+    session: buildSession(parsed.flags),
     schedule:
       buildSchedule(parsed.flags) ??
       (() => {
@@ -206,6 +228,7 @@ async function handleCronEdit(root: string, parsed: ParsedArgs): Promise<void> {
     prompt: stringFlag(parsed.flags, "prompt"),
     model: stringFlag(parsed.flags, "model"),
     thinkingLevel: stringFlag(parsed.flags, "thinking"),
+    session: buildSession(parsed.flags),
     schedule,
   };
 
@@ -214,6 +237,7 @@ async function handleCronEdit(root: string, parsed: ParsedArgs): Promise<void> {
     patch.prompt == null &&
     patch.model == null &&
     patch.thinkingLevel == null &&
+    patch.session == null &&
     patch.schedule == null
   ) {
     throw new Error("No changes provided for cron edit");

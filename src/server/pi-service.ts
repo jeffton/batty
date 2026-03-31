@@ -26,6 +26,7 @@ import { RECENT_SESSION_MESSAGE_WINDOW } from "@/shared/session-history";
 import type {
   ActiveToolRun,
   CreateCronJobInput,
+  CronJobSession,
   ModelOption,
   ServerEvent,
   SessionMessagesPage,
@@ -43,6 +44,13 @@ import {
   findBattySystemPromptSnapshot,
 } from "./batty-system-prompt";
 import { buildCronJobSummary, type CronService } from "./cron";
+import {
+  buildDailyCronSessionBinding,
+  CRON_SESSION_CUSTOM_TYPE,
+  findDailyCronSessionBinding,
+  localDayStartMs,
+  toLocalIsoDate,
+} from "./cron-session";
 import { createSessionState, normalizeBlocks } from "./pi-state";
 import { sanitizeTerminalBlocks } from "./terminal-output";
 
@@ -172,6 +180,19 @@ const CronScheduleSchema = Type.Object(
   },
 );
 
+const CronSessionSchema = Type.Object(
+  {
+    kind: StringEnum(["new", "daily"] as const, {
+      description: "Session strategy for cron runs.",
+    }),
+  },
+  {
+    additionalProperties: false,
+    description:
+      'Use {kind:"new"} for a fresh session each run or {kind:"daily"} to reuse one workspace cron session per local day.',
+  },
+);
+
 const CronToolSchema = Type.Object(
   {
     action: StringEnum(["list", "add", "update", "remove"] as const, {
@@ -193,6 +214,7 @@ const CronToolSchema = Type.Object(
           "Thinking level for the scheduled job: off, minimal, low, medium, high, xhigh.",
       }),
     ),
+    session: Type.Optional(CronSessionSchema),
     schedule: Type.Optional(CronScheduleSchema),
   },
   {
@@ -205,6 +227,7 @@ export class PiService {
   private readonly authStorage: AuthStorage;
   private readonly modelRegistry: ModelRegistry;
   private readonly sessions = new Map<string, WebSession>();
+  private readonly cronSessionResolutions = new Map<string, Promise<SessionState>>();
   private readonly onAgentCompleted: ((session: SessionState) => Promise<void>) | undefined;
   private readonly onWorkspaceUpdated: ((workspaceId: string) => Promise<void>) | undefined;
   private readonly cronService: CronService;
@@ -289,15 +312,100 @@ export class PiService {
     prompt: string;
     model: string;
     thinkingLevel: string;
-  }): Promise<{ sessionId: string }> {
-    const session = await this.createSession(job.workspace, {
-      modelId: job.model,
-      thinkingLevel: job.thinkingLevel,
-    });
+    session: CronJobSession;
+  }): Promise<{ sessionId: string; sessionPath: string }> {
+    const session =
+      job.session.kind === "daily"
+        ? await this.resolveOrCreateDailyCronSession(job.workspace, job.model, job.thinkingLevel)
+        : await this.createSession(job.workspace, {
+            modelId: job.model,
+            thinkingLevel: job.thinkingLevel,
+          });
 
-    await this.prompt(session.id, job.prompt, []);
+    if (job.session.kind === "daily") {
+      this.setThinkingLevel(session.id, job.thinkingLevel);
+      await this.setModel(session.id, job.model);
+    }
 
-    return { sessionId: session.sessionId };
+    const current = this.getState(session.id);
+    await this.prompt(current.id, job.prompt, [], current.isStreaming ? "followUp" : undefined);
+
+    return {
+      sessionId: current.sessionId,
+      sessionPath: this.requireSessionPath(current.id),
+    };
+  }
+
+  private async resolveOrCreateDailyCronSession(
+    workspace: WorkspaceInfo,
+    model: string,
+    thinkingLevel: string,
+  ): Promise<SessionState> {
+    const now = new Date();
+    const date = toLocalIsoDate(now, this.config.cronDailySessionStartTime);
+    const key = `${workspace.id}:daily:${date}`;
+    const inFlight = this.cronSessionResolutions.get(key);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    let resolution: Promise<SessionState>;
+    resolution = (async () => {
+      const todayStartMs = localDayStartMs(now, this.config.cronDailySessionStartTime);
+      const candidates = (await this.listSessionSummaries(workspace)).filter(
+        (candidate) =>
+          typeof candidate.path === "string" &&
+          candidate.path.length > 0 &&
+          candidate.updatedAt >= todayStartMs,
+      );
+
+      for (const candidate of candidates) {
+        const sessionPath = candidate.path;
+        if (!sessionPath) {
+          continue;
+        }
+
+        const loaded = [...this.sessions.values()].find(
+          (session) =>
+            session.workspace.id === workspace.id && session.session.sessionFile === sessionPath,
+        );
+        const entries = loaded
+          ? loaded.session.sessionManager.getEntries()
+          : SessionManager.open(sessionPath).getEntries();
+        if (findDailyCronSessionBinding(entries, date)) {
+          return this.openSession(workspace, sessionPath);
+        }
+      }
+
+      const session = await this.createSession(workspace, {
+        modelId: model,
+        thinkingLevel,
+      });
+      const webSession = this.requireSession(session.id);
+      webSession.session.sessionManager.appendCustomEntry(
+        CRON_SESSION_CUSTOM_TYPE,
+        buildDailyCronSessionBinding(now, this.config.cronDailySessionStartTime),
+      );
+      await this.notifyWorkspaceUpdated(workspace.id);
+      return this.getState(webSession.id);
+    })();
+
+    this.cronSessionResolutions.set(key, resolution);
+    try {
+      return await resolution;
+    } finally {
+      if (this.cronSessionResolutions.get(key) === resolution) {
+        this.cronSessionResolutions.delete(key);
+      }
+    }
+  }
+
+  private requireSessionPath(sessionId: string): string {
+    const sessionPath = this.requireSession(sessionId).session.sessionFile;
+    if (!sessionPath) {
+      throw new Error(`Session ${sessionId} is not persisted`);
+    }
+    return sessionPath;
   }
 
   hasSession(sessionId: string): boolean {
@@ -688,6 +796,7 @@ export class PiService {
       promptGuidelines: [
         "When scheduling a cron job, always provide the full prompt the future agent turn should run.",
         "Prefer omitting model so the cron job reuses the current session model. Only set model explicitly if the user asks for a different model.",
+        'Use session.kind="daily" to reuse one workspace cron conversation per local day.',
         'Use schedule.kind="at" with schedule.in for relative times like 10m or 2h.',
         'Use schedule.kind="cron" with a standard cron expression and optional timezone for recurring schedules.',
         'Use schedule.kind="every" with durations like 15m, 2h, or 1d for interval schedules.',
@@ -725,6 +834,10 @@ export class PiService {
                 typeof params.thinkingLevel === "string" && params.thinkingLevel.trim().length > 0
                   ? params.thinkingLevel.trim()
                   : "medium",
+              session:
+                params.session && typeof params.session === "object"
+                  ? (params.session as CreateCronJobInput["session"])
+                  : undefined,
               schedule: (params.schedule ?? {}) as CreateCronJobInput["schedule"],
             };
             const job = await this.cronService.createJob(input);
@@ -745,6 +858,10 @@ export class PiService {
               model: typeof params.model === "string" ? params.model : undefined,
               thinkingLevel:
                 typeof params.thinkingLevel === "string" ? params.thinkingLevel : undefined,
+              session:
+                params.session && typeof params.session === "object"
+                  ? (params.session as UpdateCronJobInput["session"])
+                  : undefined,
               schedule:
                 params.schedule && typeof params.schedule === "object"
                   ? (params.schedule as UpdateCronJobInput["schedule"])

@@ -120,8 +120,8 @@ pnpm batty -- --root /path/to/batty-root <command>
 ```text
 batty auth code
 batty cron list [--workspace ID] [--json]
-batty cron add --workspace ID --prompt TEXT --thinking LEVEL (--in DUR | --at ISO | --every DUR | --cron EXPR) [--model ID] [--tz IANA]
-batty cron edit <jobId> [--workspace ID] [--prompt TEXT] [--model ID] [--thinking LEVEL] [--in DUR | --at ISO | --every DUR | --cron EXPR] [--tz IANA]
+batty cron add --workspace ID --prompt TEXT --thinking LEVEL (--in DUR | --at ISO | --every DUR | --cron EXPR) [--model ID] [--tz IANA] [--session new|daily]
+batty cron edit <jobId> [--workspace ID] [--prompt TEXT] [--model ID] [--thinking LEVEL] [--in DUR | --at ISO | --every DUR | --cron EXPR] [--tz IANA] [--session new|daily]
 batty cron rm <jobId>
 ```
 
@@ -130,8 +130,8 @@ batty cron rm <jobId>
 ```bash
 batty --root /path/to/batty-root auth code
 batty --root /path/to/batty-root cron list --workspace batty
-batty --root /path/to/batty-root cron add --workspace batty --prompt "Check CI and summarize failures" --thinking medium --every 1h
-batty --root /path/to/batty-root cron add --workspace batty --prompt "Morning summary" --thinking low --cron "0 8 * * 1-5" --tz Europe/Copenhagen
+batty --root /path/to/batty-root cron add --workspace batty --prompt "Check CI and summarize failures" --thinking medium --every 1h --session daily
+batty --root /path/to/batty-root cron add --workspace batty --prompt "Morning summary" --thinking low --cron "0 8 * * 1-5" --tz Europe/Copenhagen --session daily
 batty --root /path/to/batty-root cron edit <jobId> --prompt "Updated prompt"
 batty --root /path/to/batty-root cron rm <jobId>
 ```
@@ -148,6 +148,11 @@ Schedules supported by both the CLI and the built-in tool:
 - one-shot after a relative duration like `10m` or `2h`
 - repeating interval schedules like `1h` or `1d`
 - cron expressions with an optional timezone
+- session mode `new` or `daily`
+
+If `--tz` / `timezone` is omitted for a cron expression, Batty uses the server's local timezone.
+
+Daily session reuse keeps one cron conversation per workspace day. The day rollover defaults to `04:00` local time and can be changed in `options.json`.
 
 Cron job state includes:
 
@@ -187,6 +192,7 @@ Fields:
 - `authSecret` — cookie signing secret, generated if missing
 - `workspacesRoot` — required root containing workspace folders
 - `webPushSubject` — required VAPID subject; use a real `https:` origin or valid `mailto:` URI
+- `cronDailySessionStartTime` — local rollover time for daily cron session reuse, formatted as `HH:MM`; defaults to `04:00`
 
 ### Loaded environment file
 

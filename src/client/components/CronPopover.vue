@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ThinkingLevelPicker from "@/client/components/ThinkingLevelPicker.vue";
 import { Save, Trash2 } from "lucide-vue-next";
 import { computed, reactive, watch } from "vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
@@ -15,6 +16,7 @@ interface CronDraft {
   prompt: string;
   model: string;
   thinkingLevel: string;
+  sessionKind: CronJob["session"]["kind"];
   saving: boolean;
   deleting: boolean;
   error: string;
@@ -34,6 +36,7 @@ function ensureDraft(job: CronJob): CronDraft {
     prompt: job.prompt,
     model: job.model,
     thinkingLevel: job.thinkingLevel,
+    sessionKind: job.session.kind,
     saving: false,
     deleting: false,
     error: "",
@@ -50,6 +53,7 @@ function syncDrafts(nextJobs: CronJob[]): void {
       draft.prompt = job.prompt;
       draft.model = job.model;
       draft.thinkingLevel = job.thinkingLevel;
+      draft.sessionKind = job.session.kind;
       draft.error = "";
     }
   }
@@ -67,14 +71,11 @@ function draftFor(job: CronJob): CronDraft {
 
 function thinkingOptions(job: CronJob): string[] {
   const draft = draftFor(job);
-  return resolveThinkingOptions(
-    {
-      model: draft.model,
-      thinkingLevel: draft.thinkingLevel,
-      availableThinkingLevels: [],
-    },
-    store.models,
-  );
+  if (store.activeSession?.model !== draft.model) {
+    return [];
+  }
+
+  return resolveThinkingOptions(store.activeSession);
 }
 
 function isDirty(job: CronJob): boolean {
@@ -82,7 +83,8 @@ function isDirty(job: CronJob): boolean {
   return (
     draft.prompt !== job.prompt ||
     draft.model !== job.model ||
-    draft.thinkingLevel !== job.thinkingLevel
+    draft.thinkingLevel !== job.thinkingLevel ||
+    draft.sessionKind !== job.session.kind
   );
 }
 
@@ -95,10 +97,12 @@ async function saveJob(job: CronJob): Promise<void> {
       prompt: draft.prompt,
       model: draft.model,
       thinkingLevel: draft.thinkingLevel,
+      session: { kind: draft.sessionKind },
     });
     draft.prompt = updated.prompt;
     draft.model = updated.model;
     draft.thinkingLevel = updated.thinkingLevel;
+    draft.sessionKind = updated.session.kind;
   } catch (error) {
     draft.error = error instanceof Error ? error.message : String(error);
   } finally {
@@ -161,9 +165,13 @@ watch(
             <span v-if="job.state.nextRunAtMs"
               >Next: {{ formatShortDateTime(job.state.nextRunAtMs) }}</span
             >
-            <span v-if="job.state.lastRunAtMs">
+            <span>Session: {{ job.session.kind }}</span>
+            <span v-if="job.state.lastRunAtMs && job.state.lastStatus">
               Last: {{ formatShortDateTime(job.state.lastRunAtMs) }} ·
-              {{ job.state.lastStatus || "?" }}
+              {{ job.state.lastStatus }}
+            </span>
+            <span v-else-if="job.state.lastRunAtMs">
+              Last: {{ formatShortDateTime(job.state.lastRunAtMs) }}
             </span>
           </div>
           <button
@@ -194,14 +202,23 @@ watch(
             </option>
           </select>
 
+          <ThinkingLevelPicker
+            v-if="thinkingOptions(job).length > 0"
+            class="cron-popover__thinking-picker"
+            :options="thinkingOptions(job)"
+            :current="draftFor(job).thinkingLevel"
+            :disabled="draftFor(job).saving || draftFor(job).deleting"
+            @change="draftFor(job).thinkingLevel = $event"
+          />
+          <div v-else class="cron-popover__thinking-unavailable">Effort unavailable</div>
+
           <select
-            v-model="draftFor(job).thinkingLevel"
-            class="cron-popover__select cron-popover__select--thinking"
+            v-model="draftFor(job).sessionKind"
+            class="cron-popover__select cron-popover__select--session"
             :disabled="draftFor(job).saving || draftFor(job).deleting"
           >
-            <option v-for="level in thinkingOptions(job)" :key="level" :value="level">
-              {{ level }}
-            </option>
+            <option value="new">new session</option>
+            <option value="daily">daily session</option>
           </select>
 
           <button
@@ -332,30 +349,55 @@ watch(
 .cron-popover__select {
   width: 100%;
   border: 1px solid var(--color-border-soft);
-  border-radius: 0.5rem;
-  background: var(--color-bg-elevated);
+  border-radius: 0.6rem;
+  background: var(--color-bg-app);
   color: inherit;
   font: inherit;
+  outline: none;
+  transition: border-color 80ms ease;
 }
 
 .cron-popover__prompt {
   min-height: 6rem;
   resize: vertical;
-  padding: 0.55rem 0.65rem;
+  padding: 0.65rem 0.75rem;
+  font-family: var(--font-family-mono);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.cron-popover__prompt:focus,
+.cron-popover__select:focus {
+  border-color: var(--color-accent);
 }
 
 .cron-popover__controls {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto minmax(12rem, auto) auto;
   gap: 0.4rem;
+  align-items: center;
 }
 
 .cron-popover__select {
-  padding: 0.45rem 0.55rem;
+  padding: 0.55rem 0.65rem;
 }
 
-.cron-popover__select--thinking {
-  min-width: 6rem;
+.cron-popover__thinking-picker {
+  min-width: 12rem;
+}
+
+.cron-popover__thinking-unavailable {
+  min-width: 12rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px dashed var(--color-border-soft);
+  border-radius: 0.6rem;
+  color: var(--color-text-subtle);
+  font-size: 0.82rem;
+  text-align: center;
+}
+
+.cron-popover__select--session {
+  min-width: 7rem;
 }
 
 .cron-popover__save,
@@ -403,7 +445,7 @@ watch(
 }
 
 .cron-popover__empty code {
-  font-family: var(--font-mono);
+  font-family: var(--font-family-mono);
 }
 
 @media (max-width: 30rem) {

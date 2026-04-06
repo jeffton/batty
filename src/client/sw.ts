@@ -70,9 +70,16 @@ registerRoute(
 );
 
 self.addEventListener("push", (event) => {
-  const payload = (event.data?.json() ?? {}) as PushNotificationPayload;
-  const title = payload.title ?? "Pi is done";
-  const { title: _title, ...options } = payload;
+  const payload = event.data?.json() as PushNotificationPayload | undefined;
+  if (!payload) {
+    throw new Error("Missing push payload");
+  }
+
+  const { title, ...options } = payload;
+  if (typeof title !== "string") {
+    throw new Error("Missing push title");
+  }
+
   event.waitUntil(self.registration.showNotification(title, options));
 });
 

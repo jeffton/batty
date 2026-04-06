@@ -58,7 +58,7 @@ const sessionListLoading = computed(() => {
 });
 
 function sessionLabel(session: SessionSummary): string {
-  return (session.name || session.firstMessage || "Untitled session").replace(/\s+/g, " ").trim();
+  return (session.name || session.firstMessage).replace(/\s+/g, " ").trim();
 }
 
 function resetCreateWorkspaceForm(): void {

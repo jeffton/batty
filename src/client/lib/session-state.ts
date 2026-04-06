@@ -109,8 +109,7 @@ export function normalizeSessionState(session: SessionState | undefined): Sessio
         ? session.modelLabel
         : undefined,
     thinkingLevel,
-    availableThinkingLevels:
-      availableThinkingLevels.length > 0 ? [...new Set(availableThinkingLevels)] : [thinkingLevel],
+    availableThinkingLevels: [...new Set(availableThinkingLevels)],
     isStreaming: Boolean(session.isStreaming),
     pendingMessageCount:
       typeof session.pendingMessageCount === "number" &&

@@ -56,10 +56,7 @@ export function buildAgentCompletionNotificationContent(
   const assistant = latestAssistantMessage(session);
   const assistantText = assistant ? textFromBlocks(assistant.blocks) : "";
   const stopReason = assistant?.errorMessage || assistant?.stopReason;
-  const body = truncate(
-    assistantText || stopReason || "Pi finished responding.",
-    MAX_NOTIFICATION_BODY_LENGTH,
-  );
+  const body = truncate(assistantText || stopReason || "", MAX_NOTIFICATION_BODY_LENGTH);
   const workspaceLabel = workspaceLabelFromSession(session);
 
   return {

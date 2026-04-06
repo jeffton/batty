@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ModelOption } from "@/shared/types";
+import ThinkingLevelPicker from "@/client/components/ThinkingLevelPicker.vue";
 import { Search } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 
@@ -42,10 +43,6 @@ function shortModelLabel(model: Pick<ModelOption, "label">): string {
   return model.label.split(" · ", 1)[0] ?? model.label;
 }
 
-function thinkingLabel(value: string): string {
-  return value === "xhigh" ? "XHigh" : value.charAt(0).toUpperCase() + value.slice(1);
-}
-
 // Reset filter when popover opens
 watch(
   () => document.getElementById(props.popoverId)?.matches(":popover-open"),
@@ -62,20 +59,12 @@ watch(
     :style="{ 'position-anchor': props.anchorName }"
     popover="auto"
   >
-    <div class="mc-popover__thinking">
-      <button
-        v-for="option in props.thinkingOptions"
-        :key="option"
-        type="button"
-        :class="[
-          'mc-popover__thinking-btn',
-          option === props.currentThinkingLevel ? 'is-active' : '',
-        ]"
-        @click="emit('setThinkingLevel', option)"
-      >
-        {{ thinkingLabel(option) }}
-      </button>
-    </div>
+    <ThinkingLevelPicker
+      v-if="props.thinkingOptions.length > 0"
+      :options="props.thinkingOptions"
+      :current="props.currentThinkingLevel"
+      @change="emit('setThinkingLevel', $event)"
+    />
 
     <div class="mc-popover__search-row">
       <Search :size="14" class="mc-popover__search-icon" />
@@ -133,40 +122,6 @@ watch(
 
 .mc-popover::backdrop {
   background: var(--color-backdrop);
-}
-
-.mc-popover__thinking {
-  display: flex;
-  gap: 0.25rem;
-  padding: 0.15rem;
-  background: var(--color-bg-elevated);
-  border-radius: 0.45rem;
-}
-
-.mc-popover__thinking-btn {
-  flex: 1;
-  border: 0;
-  border-radius: 0.35rem;
-  background: transparent;
-  color: var(--color-text-muted);
-  padding: 0.3rem 0.4rem;
-  font-size: 0.82rem;
-  font-weight: 500;
-  transition:
-    background 80ms ease,
-    color 80ms ease;
-}
-
-.mc-popover__thinking-btn:hover:not(.is-active) {
-  color: var(--color-text);
-  background: var(--color-bg-hover);
-}
-
-.mc-popover__thinking-btn.is-active {
-  background: var(--color-user-bg);
-  color: var(--color-user-text);
-  font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
 .mc-popover__search-row {

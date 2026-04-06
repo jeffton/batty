@@ -1,22 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import { resolveThinkingOptions } from "@/client/lib/thinking-levels";
-import type { ModelOption, SessionState } from "@/shared/types";
-
-const reasoningModel: ModelOption = {
-  id: "anthropic/claude-sonnet-4",
-  label: "Claude Sonnet 4 · anthropic",
-  provider: "anthropic",
-  reasoning: true,
-  supportsImages: true,
-};
-
-const nonReasoningModel: ModelOption = {
-  id: "openai/gpt-4.1-mini",
-  label: "GPT-4.1 Mini · openai",
-  provider: "openai",
-  reasoning: false,
-  supportsImages: true,
-};
+import type { SessionState } from "@/shared/types";
 
 function session(overrides: Partial<SessionState>): SessionState {
   return {
@@ -45,51 +29,32 @@ describe("resolveThinkingOptions", () => {
     expect(
       resolveThinkingOptions(
         session({
-          model: reasoningModel.id,
           thinkingLevel: "medium",
           availableThinkingLevels: ["off", "minimal", "low", "medium", "high"],
         }),
-        [reasoningModel],
       ),
     ).toEqual(["off", "minimal", "low", "medium", "high"]);
   });
 
-  it("falls back to Pi's default reasoning levels for reasoning models", () => {
+  it("returns no options without server-provided levels", () => {
     expect(
       resolveThinkingOptions(
         session({
-          model: reasoningModel.id,
           thinkingLevel: "high",
           availableThinkingLevels: [],
         }),
-        [reasoningModel],
       ),
-    ).toEqual(["off", "minimal", "low", "medium", "high"]);
+    ).toEqual([]);
   });
 
-  it("treats single current-level caches as legacy fallbacks", () => {
+  it("deduplicates explicit levels without inventing new ones", () => {
     expect(
       resolveThinkingOptions(
         session({
-          model: reasoningModel.id,
           thinkingLevel: "high",
-          availableThinkingLevels: ["high"],
+          availableThinkingLevels: ["high", "xhigh", "high"],
         }),
-        [reasoningModel],
       ),
-    ).toEqual(["off", "minimal", "low", "medium", "high"]);
-  });
-
-  it("keeps non-reasoning models on off", () => {
-    expect(
-      resolveThinkingOptions(
-        session({
-          model: nonReasoningModel.id,
-          thinkingLevel: "off",
-          availableThinkingLevels: [],
-        }),
-        [nonReasoningModel],
-      ),
-    ).toEqual(["off"]);
+    ).toEqual(["high", "xhigh"]);
   });
 });

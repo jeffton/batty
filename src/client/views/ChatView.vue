@@ -49,7 +49,7 @@ let transcriptTailObserver: ResizeObserver | null = null;
 let transcriptViewportObserver: ResizeObserver | null = null;
 let followTranscriptToken = 0;
 let lastUserScrollIntentAt = 0;
-const thinkingOptions = computed(() => resolveThinkingOptions(store.activeSession, store.models));
+const thinkingOptions = computed(() => resolveThinkingOptions(store.activeSession));
 
 const toolStateLookup = computed(() =>
   buildToolStateLookup(store.activeSession?.messages ?? [], store.activeSession?.activeTools ?? []),
@@ -189,10 +189,10 @@ const currentModelOption = computed(() =>
   store.models.find((model) => model.id === store.activeSession?.model),
 );
 const modelButtonLabel = computed(() =>
-  currentModelOption.value ? shortModelLabel(currentModelOption.value) : "Model",
+  currentModelOption.value ? shortModelLabel(currentModelOption.value) : "",
 );
 const thinkingButtonLabel = computed(() =>
-  thinkingLabel(store.activeSession?.thinkingLevel ?? "off"),
+  store.activeSession ? thinkingLabel(store.activeSession.thinkingLevel) : "",
 );
 
 function shortModelLabel(model: { label: string }): string {
@@ -668,8 +668,8 @@ watch(
       >
         <img src="/favicon.png" alt="" class="header__icon" />
         <div class="header__ws-info">
-          <span class="header__ws-name">{{ store.selectedWorkspace?.label || "Batty" }}</span>
-          <span class="header__ws-path">{{ store.activeSession?.cwd || "Select workspace" }}</span>
+          <span class="header__ws-name">{{ store.selectedWorkspace?.label }}</span>
+          <span class="header__ws-path">{{ store.activeSession?.cwd }}</span>
         </div>
         <LoaderCircle
           v-if="workspaceSwitcherLoading"

@@ -27,7 +27,7 @@ describe("normalizeSessionState", () => {
       model: undefined,
       modelLabel: undefined,
       thinkingLevel: "medium",
-      availableThinkingLevels: ["medium"],
+      availableThinkingLevels: [],
       isStreaming: false,
       pendingMessageCount: 0,
       updatedAt: 123,

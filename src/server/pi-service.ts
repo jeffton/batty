@@ -739,19 +739,28 @@ export class PiService {
           webSession.activeAssistant = undefined;
         }
         const state = this.getState(webSession.id);
-        this.publish(webSession, { type: "reset", state });
+        const publishedState =
+          event.type === "agent_end"
+            ? {
+                ...state,
+                isStreaming: false,
+                pendingMessageCount: 0,
+                activeAssistant: undefined,
+              }
+            : state;
+        this.publish(webSession, { type: "reset", state: publishedState });
         if (event.type === "agent_end") {
           try {
             console.info("Running agent completion hook", {
-              sessionId: state.sessionId,
-              workspaceId: state.workspaceId,
+              sessionId: publishedState.sessionId,
+              workspaceId: publishedState.workspaceId,
             });
-            await this.onAgentCompleted?.(state);
+            await this.onAgentCompleted?.(publishedState);
           } catch (error) {
             console.error("Failed to run agent completion hook", error);
           }
           try {
-            await this.notifyWorkspaceUpdated(state.workspaceId);
+            await this.notifyWorkspaceUpdated(publishedState.workspaceId);
           } catch (error) {
             console.error("Failed to publish workspace update", error);
           }

@@ -78,14 +78,11 @@ const html = computed(() => DOMPurify.sanitize(marked.parse(props.text) as strin
 
 .markdown-body--thinking {
   color: var(--color-text-subtle);
+  font-style: italic;
   opacity: 0.94;
 }
 
 .markdown-body--thinking :deep(em) {
   font-style: normal;
-}
-
-.markdown-body--thinking :deep(strong) {
-  color: var(--color-text);
 }
 </style>

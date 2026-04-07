@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
 import MarkdownBlock from "@/client/components/MarkdownBlock.vue";
 import ToolCallBlock from "@/client/components/ToolCallBlock.vue";
@@ -22,10 +23,22 @@ function imageUrl(block: Extract<UiContentBlock, { type: "image" }>): string {
 function toolStateFor(toolCallId: string): ToolDisplayState | undefined {
   return props.toolStatesByCallId.get(toolCallId);
 }
+
+const isPureAssistantMessage = computed(
+  () =>
+    props.message.role === "assistant" &&
+    props.message.blocks.every((block) => block.type !== "toolCall"),
+);
 </script>
 
 <template>
-  <article :class="['message', `message--${props.message.role}`]">
+  <article
+    :class="[
+      'message',
+      `message--${props.message.role}`,
+      { 'message--assistant-bubble': isPureAssistantMessage },
+    ]"
+  >
     <div v-if="props.message.role === 'bashExecution'" class="message__body">
       <CodeBlock :code="`$ ${props.message.command}\n${props.message.output}`" language="bash" />
     </div>
@@ -79,7 +92,7 @@ function toolStateFor(toolCallId: string): ToolDisplayState | undefined {
   min-width: 0;
 }
 
-.message--assistant {
+.message--assistant-bubble {
   padding: 0.5rem 0.65rem;
   border-radius: 0.5rem;
   background: var(--color-bg-panel);

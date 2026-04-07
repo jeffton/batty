@@ -67,8 +67,8 @@ const html = computed(() => DOMPurify.sanitize(marked.parse(props.text) as strin
 
 .markdown-body :deep(ul),
 .markdown-body :deep(ol) {
-  margin: 0.4rem 0 0.55rem 1rem;
-  padding: 0;
+  margin: 0.4rem 0 0.55rem;
+  padding-left: 1.25rem;
 }
 
 .markdown-body :deep(img) {

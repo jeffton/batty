@@ -79,7 +79,13 @@ function toolStateFor(toolCallId: string): ToolDisplayState | undefined {
   min-width: 0;
 }
 
-.message--assistant,
+.message--assistant {
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.5rem;
+  background: var(--color-bg-panel);
+  color: var(--color-text);
+}
+
 .message--toolResult,
 .message--bashExecution,
 .message--custom {

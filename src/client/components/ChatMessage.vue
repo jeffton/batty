@@ -27,6 +27,7 @@ function toolStateFor(toolCallId: string): ToolDisplayState | undefined {
 const isPureAssistantMessage = computed(
   () =>
     props.message.role === "assistant" &&
+    props.message.blocks.length > 0 &&
     props.message.blocks.every((block) => block.type !== "toolCall"),
 );
 </script>

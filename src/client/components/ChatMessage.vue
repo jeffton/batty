@@ -6,6 +6,11 @@ import ToolCallBlock from "@/client/components/ToolCallBlock.vue";
 import type { ToolDisplayState } from "@/client/lib/transcript";
 import type { UiContentBlock, UiMessage } from "@/shared/types";
 
+type AssistantSegment = {
+  kind: "bubble" | "plain";
+  blocks: UiContentBlock[];
+};
+
 const props = withDefaults(
   defineProps<{
     message: UiMessage;
@@ -24,22 +29,41 @@ function toolStateFor(toolCallId: string): ToolDisplayState | undefined {
   return props.toolStatesByCallId.get(toolCallId);
 }
 
-const isPureAssistantMessage = computed(
-  () =>
-    props.message.role === "assistant" &&
-    props.message.blocks.length > 0 &&
-    props.message.blocks.every((block) => block.type !== "toolCall"),
-);
+function isBubbleBlock(block: UiContentBlock): boolean {
+  return block.type === "text" || block.type === "image";
+}
+
+const assistantSegments = computed<AssistantSegment[]>(() => {
+  if (props.message.role !== "assistant" || props.message.blocks.length === 0) {
+    return [];
+  }
+
+  let trailingBubbleStart = props.message.blocks.length;
+
+  while (
+    trailingBubbleStart > 0 &&
+    isBubbleBlock(props.message.blocks[trailingBubbleStart - 1] as UiContentBlock)
+  ) {
+    trailingBubbleStart -= 1;
+  }
+
+  if (trailingBubbleStart === 0) {
+    return [{ kind: "bubble", blocks: [...props.message.blocks] }];
+  }
+
+  if (trailingBubbleStart === props.message.blocks.length) {
+    return [{ kind: "plain", blocks: [...props.message.blocks] }];
+  }
+
+  return [
+    { kind: "plain", blocks: props.message.blocks.slice(0, trailingBubbleStart) },
+    { kind: "bubble", blocks: props.message.blocks.slice(trailingBubbleStart) },
+  ];
+});
 </script>
 
 <template>
-  <article
-    :class="[
-      'message',
-      `message--${props.message.role}`,
-      { 'message--assistant-bubble': isPureAssistantMessage },
-    ]"
-  >
+  <article :class="['message', `message--${props.message.role}`]">
     <div v-if="props.message.role === 'bashExecution'" class="message__body">
       <CodeBlock :code="`$ ${props.message.command}\n${props.message.output}`" language="bash" />
     </div>
@@ -58,16 +82,41 @@ const isPureAssistantMessage = computed(
       />
     </div>
 
+    <div v-else-if="props.message.role === 'assistant'" class="message__body">
+      <div
+        v-for="(segment, segmentIndex) in assistantSegments"
+        :key="`${props.message.id}-segment-${segmentIndex}`"
+        :class="['message__segment', { 'message__segment--bubble': segment.kind === 'bubble' }]"
+      >
+        <template
+          v-for="(block, blockIndex) in segment.blocks"
+          :key="`${segmentIndex}-${blockIndex}`"
+        >
+          <MarkdownBlock v-if="block.type === 'text'" :text="block.text" />
+          <img v-else-if="block.type === 'image'" :src="imageUrl(block)" alt="Message attachment" />
+          <MarkdownBlock
+            v-else-if="block.type === 'thinking'"
+            :text="block.thinking"
+            variant="thinking"
+          />
+          <ToolCallBlock
+            v-else-if="block.type === 'toolCall'"
+            :name="block.name"
+            :arguments="block.arguments"
+            :result-blocks="toolStateFor(block.id)?.resultBlocks ?? []"
+            :result-details="toolStateFor(block.id)?.resultDetails"
+            :status="toolStateFor(block.id)?.status"
+          />
+        </template>
+      </div>
+    </div>
+
     <div v-else class="message__body">
       <template
         v-for="(block, index) in props.message.blocks"
         :key="`${props.message.id}-${index}`"
       >
-        <MarkdownBlock
-          v-if="block.type === 'text' && props.message.role === 'assistant'"
-          :text="block.text"
-        />
-        <div v-else-if="block.type === 'text'" class="message__text">{{ block.text }}</div>
+        <div v-if="block.type === 'text'" class="message__text">{{ block.text }}</div>
         <img v-else-if="block.type === 'image'" :src="imageUrl(block)" alt="Message attachment" />
         <MarkdownBlock
           v-else-if="block.type === 'thinking'"
@@ -93,13 +142,6 @@ const isPureAssistantMessage = computed(
   min-width: 0;
 }
 
-.message--assistant-bubble {
-  padding: 0.5rem 0.65rem;
-  border-radius: 0.5rem;
-  background: var(--color-bg-panel);
-  color: var(--color-text);
-}
-
 .message--toolResult,
 .message--bashExecution,
 .message--custom {
@@ -122,6 +164,19 @@ const isPureAssistantMessage = computed(
   display: grid;
   gap: 0.45rem;
   min-width: 0;
+}
+
+.message__segment {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.message__segment--bubble {
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.5rem;
+  background: var(--color-bg-panel);
+  color: var(--color-text);
 }
 
 .message__text {

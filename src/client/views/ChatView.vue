@@ -1,12 +1,8 @@
 <script setup lang="ts">
-import { ChevronDown, Wifi, WifiOff, LoaderCircle, Clock3, ArrowDown } from "lucide-vue-next";
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import { Virtualizer } from "virtua/vue";
-import ChatMessage from "@/client/components/ChatMessage.vue";
-import CronPopover from "@/client/components/CronPopover.vue";
+import ChatHeader from "@/client/components/ChatHeader.vue";
+import ChatTranscript from "@/client/components/ChatTranscript.vue";
 import MessageComposer from "@/client/components/MessageComposer.vue";
-import ModelConfigPopover from "@/client/components/ModelConfigPopover.vue";
-import WorkspacePopover from "@/client/components/WorkspacePopover.vue";
 import { withoutRenderedToolCalls } from "@/client/lib/active-assistant";
 import { formatTokenCount } from "@/client/lib/formatting";
 import { resolveThinkingOptions } from "@/client/lib/thinking-levels";
@@ -35,14 +31,15 @@ type ComposerHandle = InstanceType<typeof MessageComposer> & {
   restore: (text: string, files: File[]) => void;
 };
 
-type TranscriptHistoryHandle = InstanceType<typeof Virtualizer>;
+type ChatTranscriptHandle = InstanceType<typeof ChatTranscript> & {
+  rootElement: () => HTMLElement | null;
+  tailElement: () => HTMLElement | null;
+  bottomElement: () => HTMLElement | null;
+};
 
 const store = useAppStore();
 const composer = ref<ComposerHandle | null>(null);
-const transcript = ref<HTMLElement | null>(null);
-const transcriptHistory = ref<TranscriptHistoryHandle | null>(null);
-const transcriptTail = ref<HTMLElement | null>(null);
-const transcriptBottom = ref<HTMLElement | null>(null);
+const transcriptPane = ref<ChatTranscriptHandle | null>(null);
 const isTranscriptPinnedToBottom = ref(true);
 let transcriptScrollElement: HTMLElement | null = null;
 let transcriptTailObserver: ResizeObserver | null = null;
@@ -217,7 +214,15 @@ function blockContentSize(block: UiContentBlock): number {
 }
 
 function transcriptRootElement(): HTMLElement | null {
-  return transcript.value;
+  return transcriptPane.value?.rootElement() ?? null;
+}
+
+function transcriptTailElement(): HTMLElement | null {
+  return transcriptPane.value?.tailElement() ?? null;
+}
+
+function transcriptBottomElement(): HTMLElement | null {
+  return transcriptPane.value?.bottomElement() ?? null;
 }
 
 function transcriptDistanceFromBottom(): number | null {
@@ -318,8 +323,8 @@ function bindTranscriptObservers(): void {
   transcriptTailObserver?.disconnect();
   transcriptTailObserver = null;
 
-  const transcriptTailElement = transcriptTail.value;
-  if (transcriptTailElement && typeof ResizeObserver !== "undefined") {
+  const tailElement = transcriptTailElement();
+  if (tailElement && typeof ResizeObserver !== "undefined") {
     transcriptTailObserver = new ResizeObserver(() => {
       if (!isTranscriptPinnedToBottom.value) {
         return;
@@ -331,7 +336,7 @@ function bindTranscriptObservers(): void {
         void scrollToBottom("auto");
       }
     });
-    transcriptTailObserver.observe(transcriptTailElement);
+    transcriptTailObserver.observe(tailElement);
   }
 }
 
@@ -363,9 +368,10 @@ async function scrollToBottom(behavior: ScrollBehavior = "auto"): Promise<void> 
 
     await nextAnimationFrame();
 
-    if (transcriptBottom.value) {
+    const bottomElement = transcriptBottomElement();
+    if (bottomElement) {
       const transcriptRect = element.getBoundingClientRect();
-      const sentinelRect = transcriptBottom.value.getBoundingClientRect();
+      const sentinelRect = bottomElement.getBoundingClientRect();
       const sentinelDistanceFromBottom = transcriptRect.bottom - sentinelRect.bottom;
       if (sentinelDistanceFromBottom < 0) {
         element.scrollBy({ top: -sentinelDistanceFromBottom, behavior: "auto" });
@@ -405,9 +411,10 @@ async function followTranscriptWhilePinned(behavior: ScrollBehavior = "auto"): P
     const bottomOffset = Math.max(0, element.scrollHeight - element.clientHeight);
     element.scrollTop = bottomOffset;
 
-    if (transcriptBottom.value) {
+    const bottomElement = transcriptBottomElement();
+    if (bottomElement) {
       const transcriptRect = element.getBoundingClientRect();
-      const sentinelRect = transcriptBottom.value.getBoundingClientRect();
+      const sentinelRect = bottomElement.getBoundingClientRect();
       const sentinelDistanceFromBottom = transcriptRect.bottom - sentinelRect.bottom;
       if (sentinelDistanceFromBottom < 0) {
         element.scrollTop += -sentinelDistanceFromBottom;
@@ -464,16 +471,6 @@ function handleTranscriptScroll(): void {
 async function jumpToLatest(): Promise<void> {
   isTranscriptPinnedToBottom.value = true;
   await scrollToBottom("smooth");
-}
-
-function closeModelPopover(): void {
-  const element = document.getElementById(MODEL_POPOVER_ID) as HTMLElement | null;
-  element?.hidePopover?.();
-}
-
-function closeWsPopover(): void {
-  const element = document.getElementById(WS_POPOVER_ID) as HTMLElement | null;
-  element?.hidePopover?.();
 }
 
 function setModel(modelId: string): void {
@@ -614,14 +611,10 @@ onUnmounted(() => {
   transcriptTailObserver?.disconnect();
 });
 
-watch(transcript, () => {
+watch(transcriptPane, () => {
   bindTranscriptScrollListener();
   bindTranscriptObservers();
   updateTranscriptPinnedState();
-});
-
-watch(transcriptTail, () => {
-  bindTranscriptObservers();
 });
 
 watch(
@@ -659,105 +652,32 @@ watch(
 
 <template>
   <main class="chat-view">
-    <header class="header">
-      <button
-        class="header__ws-btn"
-        type="button"
-        :style="{ 'anchor-name': WS_POPOVER_ANCHOR }"
-        :popovertarget="WS_POPOVER_ID"
-      >
-        <img src="/favicon.png" alt="" class="header__icon" />
-        <div class="header__ws-info">
-          <span class="header__ws-name">{{ store.selectedWorkspace?.label }}</span>
-          <span class="header__ws-path">{{ store.activeSession?.cwd }}</span>
-        </div>
-        <LoaderCircle
-          v-if="workspaceSwitcherLoading"
-          :size="14"
-          class="header__chevron header__status-icon--spin"
-        />
-        <ChevronDown v-else :size="14" class="header__chevron" />
-      </button>
-
-      <WorkspacePopover
-        :popover-id="WS_POPOVER_ID"
-        :anchor-name="WS_POPOVER_ANCHOR"
-        @close="closeWsPopover"
-      />
-
-      <button
-        class="header__model-btn"
-        type="button"
-        :style="{ 'anchor-name': MODEL_POPOVER_ANCHOR }"
-        :disabled="!store.activeSession"
-        :popovertarget="MODEL_POPOVER_ID"
-      >
-        <div class="header__model-info">
-          <span class="header__model-name">{{ modelButtonLabel }}</span>
-          <span class="header__model-effort">{{ thinkingButtonLabel }}</span>
-        </div>
-        <ChevronDown :size="14" class="header__chevron" />
-      </button>
-
-      <ModelConfigPopover
-        :popover-id="MODEL_POPOVER_ID"
-        :anchor-name="MODEL_POPOVER_ANCHOR"
-        :models="store.models"
-        :current-model-id="store.activeSession?.model"
-        :current-thinking-level="store.activeSession?.thinkingLevel ?? 'off'"
-        :thinking-options="thinkingOptions"
-        @set-model="setModel"
-        @set-thinking-level="setThinkingLevel"
-        @close="closeModelPopover"
-      />
-
-      <button
-        class="header__icon-btn"
-        type="button"
-        :style="{ 'anchor-name': CRON_POPOVER_ANCHOR }"
-        :disabled="!store.selectedWorkspaceId"
-        :popovertarget="CRON_POPOVER_ID"
-        aria-label="Cron jobs"
-        title="Cron jobs"
-      >
-        <Clock3 :size="15" />
-      </button>
-
-      <CronPopover :popover-id="CRON_POPOVER_ID" :anchor-name="CRON_POPOVER_ANCHOR" />
-
-      <div class="header__spacer" />
-
-      <div class="header__context" :aria-label="contextUsageLabel" :title="contextUsageLabel">
-        <svg class="header__context-chart" viewBox="0 0 36 36" aria-hidden="true">
-          <circle class="header__context-track" cx="18" cy="18" r="15.9155" />
-          <circle
-            :class="['header__context-arc', contextArcClass]"
-            :style="contextArcStyle"
-            cx="18"
-            cy="18"
-            r="15.9155"
-          />
-        </svg>
-      </div>
-
-      <span
-        class="header__status"
-        :aria-label="connectionDescription"
-        :title="connectionDescription"
-      >
-        <Wifi
-          v-if="store.connectionState === 'online'"
-          :size="15"
-          class="header__status-icon header__status-icon--online"
-        />
-        <LoaderCircle
-          v-else-if="store.connectionState === 'connecting'"
-          :size="15"
-          class="header__status-icon header__status-icon--connecting header__status-icon--spin"
-        />
-        <WifiOff v-else :size="15" class="header__status-icon header__status-icon--offline" />
-      </span>
-    </header>
+    <ChatHeader
+      :workspace-popover-id="WS_POPOVER_ID"
+      :workspace-popover-anchor="WS_POPOVER_ANCHOR"
+      :model-popover-id="MODEL_POPOVER_ID"
+      :model-popover-anchor="MODEL_POPOVER_ANCHOR"
+      :cron-popover-id="CRON_POPOVER_ID"
+      :cron-popover-anchor="CRON_POPOVER_ANCHOR"
+      :workspace-label="store.selectedWorkspace?.label"
+      :cwd="store.activeSession?.cwd"
+      :workspace-switcher-loading="workspaceSwitcherLoading"
+      :active-session="Boolean(store.activeSession)"
+      :models="store.models"
+      :current-model-id="store.activeSession?.model"
+      :current-thinking-level="store.activeSession?.thinkingLevel ?? 'off'"
+      :thinking-options="thinkingOptions"
+      :model-button-label="modelButtonLabel"
+      :thinking-button-label="thinkingButtonLabel"
+      :selected-workspace-id="store.selectedWorkspaceId"
+      :context-usage-label="contextUsageLabel"
+      :context-arc-class="contextArcClass"
+      :context-arc-style="contextArcStyle"
+      :connection-state="store.connectionState"
+      :connection-description="connectionDescription"
+      @set-model="setModel"
+      @set-thinking-level="setThinkingLevel"
+    />
 
     <div v-if="!store.activeSession && sessionLoading" class="chat-loading">
       <div class="spinner" />
@@ -771,48 +691,15 @@ watch(
     </div>
 
     <template v-else>
-      <div class="transcript-shell">
-        <div ref="transcript" class="transcript">
-          <Virtualizer
-            v-if="historyEntries.length > 0"
-            ref="transcriptHistory"
-            class="transcript__history"
-            :data="historyEntries"
-            :keep-mounted="keptHistoryIndexes"
-            :scroll-ref="transcript"
-          >
-            <template #default="{ item: entry }">
-              <div :key="entry.message.id" class="transcript__item">
-                <ChatMessage
-                  :message="entry.message"
-                  :tool-states-by-call-id="entry.toolStatesByCallId"
-                />
-              </div>
-            </template>
-          </Virtualizer>
-
-          <div ref="transcriptTail" class="transcript__tail">
-            <div v-for="entry in tailEntries" :key="entry.message.id" class="transcript__item">
-              <ChatMessage
-                :message="entry.message"
-                :tool-states-by-call-id="entry.toolStatesByCallId"
-              />
-            </div>
-            <div ref="transcriptBottom" class="transcript__bottom" aria-hidden="true" />
-          </div>
-        </div>
-
-        <button
-          v-if="store.activeSession.isStreaming && !isTranscriptPinnedToBottom"
-          type="button"
-          class="transcript__jump-btn"
-          aria-label="Jump to latest"
-          title="Jump to latest"
-          @click="jumpToLatest"
-        >
-          <ArrowDown :size="18" />
-        </button>
-      </div>
+      <ChatTranscript
+        ref="transcriptPane"
+        :history-entries="historyEntries"
+        :tail-entries="tailEntries"
+        :kept-history-indexes="keptHistoryIndexes"
+        :is-streaming="store.activeSession.isStreaming"
+        :is-pinned-to-bottom="isTranscriptPinnedToBottom"
+        @jump-to-latest="jumpToLatest"
+      />
 
       <MessageComposer
         ref="composer"
@@ -837,225 +724,6 @@ watch(
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
   background: var(--color-bg-app);
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  min-width: 0;
-  padding: calc(var(--safe-area-top) + 0.4rem) calc(var(--safe-area-right) + 0.6rem) 0.4rem
-    calc(var(--safe-area-left) + 0.6rem);
-  background: var(--color-bg-panel);
-  border-bottom: 1px solid var(--color-border-soft);
-}
-
-.header__icon {
-  width: 1.6rem;
-  height: 1.6rem;
-  border-radius: 0.35rem;
-  flex-shrink: 0;
-}
-
-.header__ws-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  flex: 0 1 auto;
-  overflow: hidden;
-  border: 0;
-  border-radius: 0.5rem;
-  background: transparent;
-  color: inherit;
-  padding: 0.3rem 0.45rem;
-  min-width: 0;
-  text-align: left;
-  transition: background 80ms ease;
-}
-
-.header__ws-btn:hover {
-  background: var(--color-bg-elevated);
-}
-
-.header__ws-info {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  line-height: 1.25;
-  text-align: left;
-}
-
-.header__ws-name {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--color-text-strong);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.header__ws-path {
-  font-size: 0.75rem;
-  color: var(--color-text-subtle);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.header__chevron {
-  color: var(--color-text-subtle);
-  flex-shrink: 0;
-}
-
-.header__model-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  flex: 0 1 auto;
-  overflow: hidden;
-  border: 0;
-  border-radius: 0.5rem;
-  background: transparent;
-  color: inherit;
-  padding: 0.3rem 0.45rem;
-  min-width: 0;
-  transition: background 80ms ease;
-}
-
-.header__model-btn:hover:not(:disabled) {
-  background: var(--color-bg-elevated);
-}
-
-.header__model-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.header__model-info {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  line-height: 1.25;
-  text-align: left;
-}
-
-.header__icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  border: 0;
-  border-radius: 0.5rem;
-  background: transparent;
-  color: var(--color-text-subtle);
-  transition: background 80ms ease;
-}
-
-.header__icon-btn:hover:not(:disabled) {
-  background: var(--color-bg-elevated);
-}
-
-.header__icon-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.header__model-name {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--color-text-strong);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.header__model-effort {
-  font-size: 0.75rem;
-  color: var(--color-text-subtle);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.header__spacer {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.header__context {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.6rem;
-  height: 1.6rem;
-  flex-shrink: 0;
-}
-
-.header__context-chart {
-  width: 1.15rem;
-  height: 1.15rem;
-  transform: rotate(-90deg);
-}
-
-.header__context-track,
-.header__context-arc {
-  fill: none;
-  stroke-width: 3.2;
-}
-
-.header__context-track {
-  stroke: var(--color-border-soft);
-}
-
-.header__context-arc {
-  stroke-linecap: round;
-  transition:
-    stroke-dasharray 180ms ease,
-    stroke 180ms ease;
-}
-
-.header__context-arc--good {
-  stroke: var(--color-success);
-}
-
-.header__context-arc--warn {
-  stroke: var(--color-warning);
-}
-
-.header__context-arc--danger {
-  stroke: var(--color-error);
-}
-
-.header__status {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.6rem;
-  height: 1.6rem;
-  flex-shrink: 0;
-}
-
-.header__status-icon--online {
-  color: var(--color-success);
-}
-
-.header__status-icon--connecting {
-  color: var(--color-text-subtle);
-}
-
-.header__status-icon--offline {
-  color: var(--color-warning);
-}
-
-.header__status-icon--spin {
-  animation: header-spin 0.9s linear infinite;
-}
-
-@keyframes header-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .chat-loading,
@@ -1083,69 +751,5 @@ watch(
 
 .chat-empty p {
   margin: 0;
-}
-
-.transcript-shell {
-  position: relative;
-  min-height: 0;
-}
-
-.transcript {
-  min-height: 0;
-  min-width: 0;
-  height: 100%;
-  overflow: auto;
-  overflow-anchor: none;
-  padding: 0.6rem calc(var(--safe-area-right) + 0.8rem) 0.2rem calc(var(--safe-area-left) + 0.8rem);
-  background: var(--color-bg-app);
-}
-
-.transcript__history,
-.transcript__tail {
-  min-width: 0;
-}
-
-.transcript__item {
-  min-width: 0;
-  padding-bottom: 0.8rem;
-}
-
-.transcript__bottom {
-  width: 100%;
-  height: 1px;
-}
-
-.transcript__jump-btn {
-  position: absolute;
-  left: 50%;
-  bottom: 0.9rem;
-  transform: translateX(-50%);
-  z-index: 2;
-  min-width: 2.5rem;
-  min-height: 2.5rem;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid color-mix(in srgb, var(--color-info) 30%, transparent);
-  border-radius: 0.5rem;
-  background: var(--color-bg-inline-code);
-  color: var(--color-info);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
-  transition:
-    background 80ms ease,
-    border-color 80ms ease,
-    transform 120ms ease,
-    color 80ms ease;
-}
-
-.transcript__jump-btn:hover {
-  background: color-mix(in srgb, var(--color-bg-inline-code) 78%, var(--color-info));
-  border-color: color-mix(in srgb, var(--color-info) 30%, transparent);
-  transform: translateX(-50%) translateY(-1px);
-}
-
-.transcript__jump-btn :deep(svg) {
-  display: block;
 }
 </style>

@@ -1107,7 +1107,7 @@ watch(
 
 .transcript__item {
   min-width: 0;
-  padding-bottom: 0.5rem;
+  padding-bottom: 0.8rem;
 }
 
 .transcript__bottom {

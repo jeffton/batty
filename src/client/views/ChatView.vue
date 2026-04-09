@@ -303,7 +303,7 @@ function bindTranscriptObservers(): void {
   transcriptViewportObserver?.disconnect();
   transcriptViewportObserver = null;
 
-  const transcriptElement = transcript.value;
+  const transcriptElement = transcriptRootElement();
   if (transcriptElement && typeof ResizeObserver !== "undefined") {
     transcriptViewportObserver = new ResizeObserver(() => {
       if (isTranscriptPinnedToBottom.value) {

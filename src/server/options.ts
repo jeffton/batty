@@ -7,6 +7,7 @@ export interface StoredAppOptions {
   workspacesRoot?: string;
   webPushSubject?: string;
   cronDailySessionStartTime?: string;
+  braveSearchKey?: string;
 }
 
 export interface AppOptions {
@@ -14,6 +15,7 @@ export interface AppOptions {
   workspacesRoot: string;
   webPushSubject: string;
   cronDailySessionStartTime: string;
+  braveSearchKey?: string;
 }
 
 const DEFAULT_CRON_DAILY_SESSION_START_TIME = "04:00";
@@ -79,6 +81,10 @@ function normalizeStoredOptions(options: StoredAppOptions | undefined): StoredAp
     webPushSubject:
       typeof options?.webPushSubject === "string" ? options.webPushSubject.trim() : "",
     cronDailySessionStartTime: normalizeDailySessionStartTime(options?.cronDailySessionStartTime),
+    braveSearchKey:
+      typeof options?.braveSearchKey === "string" && options.braveSearchKey.trim().length > 0
+        ? options.braveSearchKey.trim()
+        : undefined,
   };
 }
 

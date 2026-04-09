@@ -14,6 +14,7 @@ Batty is a web UI for [Pi Coding Agent](https://pi.dev). It keeps Pi's workspace
 - Queue follow-up prompts while a run is streaming, or send steer prompts mid-run
 - Rich tool rendering, including inline diffs for edits and readable bash output
 - Built-in cron jobs for scheduled agent turns
+- Built-in `web-search` tool powered by Brave Search
 - Passkey auth with one-time setup codes for enrolling devices
 - Web Push notifications when background runs finish
 - PWA install support with offline-friendly cached session snapshots
@@ -36,6 +37,7 @@ Batty adds a browser-native layer on top:
 - local caching and drafts
 - push notifications
 - cron
+- web search
 - passkey login
 
 ## Quick start
@@ -50,7 +52,8 @@ Example options file:
 {
   "authSecret": "generated-on-first-run",
   "workspacesRoot": "/path/to/workspaces",
-  "webPushSubject": "https://your-batty-host"
+  "webPushSubject": "https://your-batty-host",
+  "braveSearchKey": "optional-brave-search-api-key"
 }
 ```
 
@@ -202,6 +205,7 @@ Fields:
 - `workspacesRoot` — required root containing workspace folders
 - `webPushSubject` — required VAPID subject; use a real `https:` origin or valid `mailto:` URI
 - `cronDailySessionStartTime` — local rollover time for daily cron session reuse, formatted as `HH:MM`; defaults to `04:00`
+- `braveSearchKey` — optional Brave Search API key used by Batty's built-in `web-search` tool
 
 ### Loaded environment file
 

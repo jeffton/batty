@@ -589,6 +589,8 @@ export class PiService {
       "APPEND_SYSTEM.md",
     );
     const workspaceBattyPath = workspaceBattyDir(workspace.path);
+    const workspaceRoot = path.resolve(workspace.path);
+    const globalAgentsPath = path.resolve(path.join(agentDir, "AGENTS.md"));
     const resourceLoader = new DefaultResourceLoader({
       cwd: workspace.path,
       agentDir,
@@ -597,6 +599,12 @@ export class PiService {
       additionalSkillPaths: [path.join(workspaceBattyPath, "skills")],
       additionalPromptTemplatePaths: [path.join(workspaceBattyPath, "prompts")],
       additionalThemePaths: [path.join(workspaceBattyPath, "themes")],
+      agentsFilesOverride: (base) => ({
+        agentsFiles: base.agentsFiles.filter((file) => {
+          const resolved = path.resolve(file.path);
+          return resolved === globalAgentsPath || resolved === path.join(workspaceRoot, "AGENTS.md");
+        }),
+      }),
       systemPromptOverride: () => systemPrompt,
       appendSystemPromptOverride: () => {
         const base = appendSystemPrompt ? [appendSystemPrompt] : [];

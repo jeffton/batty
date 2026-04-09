@@ -1,8 +1,18 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { Settings } from "@mariozechner/pi-coding-agent";
 import type { AppConfig } from "./config";
 import { stateDirPath } from "./options";
+
+export interface BattyAgentSettings {
+  theme?: string;
+  extensions?: string[];
+  skills?: string[];
+  prompts?: string[];
+  themes?: string[];
+  sessionDir?: string;
+  compaction?: Record<string, unknown>;
+  [key: string]: unknown;
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -46,7 +56,7 @@ function resolveResourcePath(value: string, baseDir: string): string {
 function normalizeSettingsPaths(
   settings: Record<string, unknown> | undefined,
   baseDir: string,
-): Partial<Settings> {
+): Partial<BattyAgentSettings> {
   if (!settings) {
     return {};
   }
@@ -65,7 +75,7 @@ function normalizeSettingsPaths(
     normalized.sessionDir = resolveResourcePath(normalized.sessionDir, baseDir);
   }
 
-  return normalized as Partial<Settings>;
+  return normalized as Partial<BattyAgentSettings>;
 }
 
 export function battyAgentDir(config: Pick<AppConfig, "battyDir">): string {
@@ -83,7 +93,7 @@ export function workspaceSessionDir(workspacePath: string): string {
 export async function loadBattySettings(
   config: Pick<AppConfig, "battyDir">,
   workspacePath: string,
-): Promise<Partial<Settings>> {
+): Promise<Partial<BattyAgentSettings>> {
   const globalDir = battyAgentDir(config);
   const projectDir = workspaceBattyDir(workspacePath);
   const globalSettings = normalizeSettingsPaths(
@@ -95,7 +105,7 @@ export async function loadBattySettings(
     projectDir,
   );
 
-  return mergeSettingsValue(globalSettings, projectSettings) as Partial<Settings>;
+  return mergeSettingsValue(globalSettings, projectSettings) as Partial<BattyAgentSettings>;
 }
 
 export async function loadBattyPromptFile(

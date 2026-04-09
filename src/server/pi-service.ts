@@ -603,16 +603,24 @@ export class PiService {
         path.join(agentDir, "extensions"),
         path.join(workspaceBattyPath, "extensions"),
       ],
-      additionalSkillPaths: [path.join(agentDir, "skills"), path.join(workspaceBattyPath, "skills")],
+      additionalSkillPaths: [
+        path.join(agentDir, "skills"),
+        path.join(workspaceBattyPath, "skills"),
+      ],
       additionalPromptTemplatePaths: [
         path.join(agentDir, "prompts"),
         path.join(workspaceBattyPath, "prompts"),
       ],
-      additionalThemePaths: [path.join(agentDir, "themes"), path.join(workspaceBattyPath, "themes")],
+      additionalThemePaths: [
+        path.join(agentDir, "themes"),
+        path.join(workspaceBattyPath, "themes"),
+      ],
       agentsFilesOverride: (base) => ({
         agentsFiles: base.agentsFiles.filter((file) => {
           const resolved = path.resolve(file.path);
-          return resolved === globalAgentsPath || resolved === path.join(workspaceRoot, "AGENTS.md");
+          return (
+            resolved === globalAgentsPath || resolved === path.join(workspaceRoot, "AGENTS.md")
+          );
         }),
       }),
       systemPromptOverride: () => systemPrompt,

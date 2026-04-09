@@ -284,7 +284,14 @@ const genericEntries = computed(() => {
       </div>
     </template>
 
-    <template v-else-if="props.name === 'web-search' && visibleWebSearchOutput.trim().length > 0">
+    <div v-if="genericEntries.length > 0" class="tool-call__meta">
+      <div v-for="entry in genericEntries" :key="entry.key" class="tool-call__meta-row">
+        <span class="tool-call__meta-key">{{ entry.key }}</span>
+        <code class="tool-call__meta-value">{{ entry.value }}</code>
+      </div>
+    </div>
+
+    <template v-if="props.name === 'web-search' && visibleWebSearchOutput.trim().length > 0">
       <div class="tool-call__bash">
         <CodeBlock :code="visibleWebSearchOutput" language="markdown" :compact="props.compact" />
         <div v-if="canExpandOutput" class="tool-call__expand-row">
@@ -294,13 +301,6 @@ const genericEntries = computed(() => {
         </div>
       </div>
     </template>
-
-    <div v-if="genericEntries.length > 0" class="tool-call__meta">
-      <div v-for="entry in genericEntries" :key="entry.key" class="tool-call__meta-row">
-        <span class="tool-call__meta-key">{{ entry.key }}</span>
-        <code class="tool-call__meta-value">{{ entry.value }}</code>
-      </div>
-    </div>
 
     <div v-if="showResultSection" class="tool-call__result">
       <template v-for="(block, index) in visibleResultBlocks" :key="`${props.name}-${index}`">

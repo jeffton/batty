@@ -98,7 +98,7 @@ describe("ToolCallBlock", () => {
     expect(wrapper.find("pre.code-block").text()).toContain("line-1");
   });
 
-  it("shows the top of web-search output and expands to the full output on demand", async () => {
+  it("shows web-search arguments before output and expands to the full output on demand", async () => {
     const wrapper = mount(ToolCallBlock, {
       props: {
         name: "web-search",
@@ -112,6 +112,8 @@ describe("ToolCallBlock", () => {
       },
     });
 
+    const text = wrapper.text();
+    expect(text.indexOf("ACTION")).toBeLessThan(text.indexOf("line-1"));
     expect(wrapper.find("pre.code-block").text()).toContain("line-1");
     expect(wrapper.find("pre.code-block").text()).toContain("line-20");
     expect(wrapper.find("pre.code-block").text()).not.toContain("line-21");

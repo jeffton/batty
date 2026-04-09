@@ -97,4 +97,29 @@ describe("ToolCallBlock", () => {
 
     expect(wrapper.find("pre.code-block").text()).toContain("line-1");
   });
+
+  it("shows the top of web-search output and expands to the full output on demand", async () => {
+    const wrapper = mount(ToolCallBlock, {
+      props: {
+        name: "web-search",
+        arguments: {
+          action: "search",
+          query: "batty",
+          count: 10,
+        },
+        resultBlocks: [{ type: "text", text: lines(30) }],
+        status: "success",
+      },
+    });
+
+    expect(wrapper.find("pre.code-block").text()).toContain("line-1");
+    expect(wrapper.find("pre.code-block").text()).toContain("line-20");
+    expect(wrapper.find("pre.code-block").text()).not.toContain("line-21");
+    expect(wrapper.text()).toContain("Show full output");
+
+    await wrapper.get(".tool-call__expand-btn").trigger("click");
+
+    expect(wrapper.find("pre.code-block").text()).toContain("line-30");
+    expect(wrapper.text()).toContain("Collapse output");
+  });
 });

@@ -5,7 +5,7 @@ import CodeBlock from "@/client/components/CodeBlock.vue";
 import DiffBlock from "@/client/components/DiffBlock.vue";
 import MarkdownBlock from "@/client/components/MarkdownBlock.vue";
 import { formatValue, languageFromPath } from "@/client/lib/code-format";
-import { createTailView } from "@/client/lib/tool-output";
+import { createHeadView, createTailView } from "@/client/lib/tool-output";
 import { hasToolResultContent } from "@/client/lib/transcript";
 import type { ToolExecutionDetails, UiContentBlock } from "@/shared/types";
 
@@ -72,10 +72,24 @@ const bashTailView = computed(() => createTailView(bashTextOutput.value, OUTPUT_
 const writeTailView = computed(() =>
   createTailView(contentValue.value ?? "", OUTPUT_TAIL_LINE_COUNT),
 );
+const webSearchTextOutput = computed(() =>
+  props.name !== "web-search"
+    ? ""
+    : props.resultBlocks
+        .filter(
+          (block): block is Extract<UiContentBlock, { type: "text" }> => block.type === "text",
+        )
+        .map((block) => block.text)
+        .join("\n"),
+);
+const webSearchHeadView = computed(() =>
+  createHeadView(webSearchTextOutput.value, OUTPUT_TAIL_LINE_COUNT),
+);
 const canExpandOutput = computed(
   () =>
     (props.name === "bash" && bashTailView.value.isTrimmed) ||
-    (props.name === "write" && writeTailView.value.isTrimmed),
+    (props.name === "write" && writeTailView.value.isTrimmed) ||
+    (props.name === "web-search" && webSearchHeadView.value.isTrimmed),
 );
 const expandButtonLabel = computed(() => {
   if (!canExpandOutput.value) {
@@ -89,7 +103,9 @@ const expandButtonLabel = computed(() => {
   const hiddenLineCount =
     props.name === "bash"
       ? bashTailView.value.hiddenLineCount
-      : writeTailView.value.hiddenLineCount;
+      : props.name === "write"
+        ? writeTailView.value.hiddenLineCount
+        : webSearchHeadView.value.hiddenLineCount;
   return `Show full output (+${hiddenLineCount} lines)`;
 });
 const visibleWriteContent = computed(() => {
@@ -100,6 +116,9 @@ const visibleWriteContent = computed(() => {
 });
 const visibleBashOutput = computed(() =>
   isExpanded.value ? bashTextOutput.value : bashTailView.value.text,
+);
+const visibleWebSearchOutput = computed(() =>
+  isExpanded.value ? webSearchTextOutput.value : webSearchHeadView.value.text,
 );
 const visibleResultBlocks = computed(() => {
   if (props.name === "read" && props.status !== "error") {
@@ -136,6 +155,10 @@ const visibleResultBlocks = computed(() => {
     }
 
     return props.resultBlocks;
+  }
+
+  if (props.name === "web-search") {
+    return props.resultBlocks.filter((block) => block.type !== "text");
   }
 
   return props.resultBlocks;
@@ -258,6 +281,17 @@ const genericEntries = computed(() => {
           </button>
         </div>
         <CodeBlock :code="visibleWriteContent" :language="codeLanguage" :compact="props.compact" />
+      </div>
+    </template>
+
+    <template v-else-if="props.name === 'web-search' && visibleWebSearchOutput.trim().length > 0">
+      <div class="tool-call__bash">
+        <CodeBlock :code="visibleWebSearchOutput" language="markdown" :compact="props.compact" />
+        <div v-if="canExpandOutput" class="tool-call__expand-row">
+          <button type="button" class="tool-call__expand-btn" @click="isExpanded = !isExpanded">
+            {{ expandButtonLabel }}
+          </button>
+        </div>
       </div>
     </template>
 

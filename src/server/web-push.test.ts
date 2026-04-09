@@ -187,4 +187,38 @@ describe("WebPushService", () => {
 
     expect(webPushMocks.sendNotification).not.toHaveBeenCalled();
   });
+
+  it("still sends a push notification when an older assistant message was NO_REPLY", async () => {
+    const service = new WebPushService(createConfig(tempDir));
+    await service.initialize();
+
+    await service.upsertSubscription({
+      endpoint: "https://push.example/subscription",
+      expirationTime: null,
+      keys: {
+        p256dh: "p256dh_key",
+        auth: "auth-key",
+      },
+    });
+
+    const session = createSession();
+    session.messages = [
+      {
+        id: "assistant-1",
+        role: "assistant",
+        timestamp: Date.now(),
+        blocks: [{ type: "text", text: "NO_REPLY" }],
+      },
+      {
+        id: "user-1",
+        role: "user",
+        timestamp: Date.now() + 1,
+        blocks: [{ type: "text", text: "Please run another check." }],
+      },
+    ];
+
+    await service.notifyAgentCompleted(session);
+
+    expect(webPushMocks.sendNotification).toHaveBeenCalledTimes(1);
+  });
 });

@@ -81,7 +81,12 @@ export function assistantNotificationText(
 }
 
 export function suppressAgentCompletionNotification(session: SessionState): boolean {
-  return assistantNotificationText(latestAssistantMessage(session)) === NO_REPLY_SENTINEL;
+  const latestMessage = session.messages.at(-1);
+  if (latestMessage?.role !== "assistant") {
+    return false;
+  }
+
+  return assistantNotificationText(latestMessage) === NO_REPLY_SENTINEL;
 }
 
 export { markdownToNotificationText };

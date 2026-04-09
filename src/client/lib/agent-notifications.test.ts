@@ -10,7 +10,7 @@ const baseSession: SessionState = {
   sessionId: "session-1",
   workspaceId: "batty",
   cwd: "/root/github/batty",
-  path: "/root/github/batty/.pi/session.jsonl",
+  path: "/root/github/batty/.batty/sessions/session.jsonl",
   model: "anthropic/claude-sonnet-4",
   modelLabel: "Claude Sonnet 4 · anthropic",
   thinkingLevel: "medium",

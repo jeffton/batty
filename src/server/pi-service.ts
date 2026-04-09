@@ -12,7 +12,6 @@ import {
   AuthStorage,
   createAgentSession,
   DefaultResourceLoader,
-  getAgentDir,
   ModelRegistry,
   SessionManager,
   SettingsManager,
@@ -53,6 +52,13 @@ import {
   toLocalIsoDate,
 } from "./cron-session";
 import { createSessionState, normalizeBlocks } from "./pi-state";
+import {
+  battyAgentDir,
+  loadBattyPromptFile,
+  loadBattySettings,
+  workspaceBattyDir,
+  workspaceSessionDir,
+} from "./pi-paths";
 import { sanitizeTerminalBlocks } from "./terminal-output";
 
 interface SessionSubscriber {
@@ -269,11 +275,9 @@ export class PiService {
     this.cronService = cronService;
     this.onAgentCompleted = onAgentCompleted;
     this.onWorkspaceUpdated = onWorkspaceUpdated;
-    this.authStorage = AuthStorage.create(path.join(getAgentDir(), "auth.json"));
-    this.modelRegistry = ModelRegistry.create(
-      this.authStorage,
-      path.join(getAgentDir(), "models.json"),
-    );
+    const agentDir = battyAgentDir(config);
+    this.authStorage = AuthStorage.create(path.join(agentDir, "auth.json"));
+    this.modelRegistry = ModelRegistry.create(this.authStorage, path.join(agentDir, "models.json"));
   }
 
   async listModels(): Promise<ModelOption[]> {
@@ -282,7 +286,7 @@ export class PiService {
   }
 
   async listSessionSummaries(workspace: WorkspaceInfo): Promise<SessionSummary[]> {
-    const infos = await SessionManager.list(workspace.path);
+    const infos = await SessionManager.list(workspace.path, workspaceSessionDir(workspace.path));
     return infos
       .map((info) => ({
         id: info.path,
@@ -307,7 +311,7 @@ export class PiService {
     };
     const result = await this.createPiAgentSession(
       workspace,
-      SessionManager.create(workspace.path),
+      SessionManager.create(workspace.path, workspaceSessionDir(workspace.path)),
       sessionOptions,
     );
 
@@ -571,14 +575,57 @@ export class PiService {
     options?: { modelId?: string; thinkingLevel?: string },
   ): Promise<Awaited<ReturnType<typeof createAgentSession>>> {
     const model = options?.modelId ? await this.resolveModel(options.modelId) : undefined;
-    const agentDir = getAgentDir();
-    const settingsManager = SettingsManager.create(workspace.path, agentDir);
+    const agentDir = battyAgentDir(this.config);
+    const settings = await loadBattySettings(this.config, workspace.path);
+    const settingsManager = SettingsManager.inMemory({
+      ...settings,
+      sessionDir: workspaceSessionDir(workspace.path),
+    });
     const persistedPrompt = findBattySystemPromptSnapshot(sessionManager.getEntries());
+    const systemPrompt = await loadBattyPromptFile(workspace.path, agentDir, "SYSTEM.md");
+    const appendSystemPrompt = await loadBattyPromptFile(
+      workspace.path,
+      agentDir,
+      "APPEND_SYSTEM.md",
+    );
+    const workspaceBattyPath = workspaceBattyDir(workspace.path);
+    const workspaceRoot = path.resolve(workspace.path);
+    const globalAgentsPath = path.resolve(path.join(agentDir, "AGENTS.md"));
     const resourceLoader = new DefaultResourceLoader({
       cwd: workspace.path,
       agentDir,
       settingsManager,
-      appendSystemPromptOverride: (base) => {
+      noExtensions: true,
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      additionalExtensionPaths: [
+        path.join(agentDir, "extensions"),
+        path.join(workspaceBattyPath, "extensions"),
+      ],
+      additionalSkillPaths: [
+        path.join(agentDir, "skills"),
+        path.join(workspaceBattyPath, "skills"),
+      ],
+      additionalPromptTemplatePaths: [
+        path.join(agentDir, "prompts"),
+        path.join(workspaceBattyPath, "prompts"),
+      ],
+      additionalThemePaths: [
+        path.join(agentDir, "themes"),
+        path.join(workspaceBattyPath, "themes"),
+      ],
+      agentsFilesOverride: (base) => ({
+        agentsFiles: base.agentsFiles.filter((file) => {
+          const resolved = path.resolve(file.path);
+          return (
+            resolved === globalAgentsPath || resolved === path.join(workspaceRoot, "AGENTS.md")
+          );
+        }),
+      }),
+      systemPromptOverride: () => systemPrompt,
+      appendSystemPromptOverride: () => {
+        const base = appendSystemPrompt ? [appendSystemPrompt] : [];
         const appendedBattyPrompt = findBattySystemPromptSnapshot(
           sessionManager.getEntries(),
         )?.appendedPrompt;

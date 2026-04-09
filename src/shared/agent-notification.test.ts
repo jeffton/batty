@@ -12,7 +12,7 @@ function createSession(markdown: string): SessionState {
     sessionId: "session-1",
     workspaceId: "batty",
     cwd: "/root/github/batty",
-    path: "/root/github/batty/.pi/session.jsonl",
+    path: "/root/github/batty/.batty/sessions/session.jsonl",
     model: "openai-codex/gpt-5.4",
     modelLabel: "GPT-5.4 · OpenAI",
     thinkingLevel: "medium",
@@ -75,5 +75,17 @@ describe("suppressAgentCompletionNotification", () => {
     expect(suppressAgentCompletionNotification(createSession("Done shipping the feature."))).toBe(
       false,
     );
+  });
+
+  it("does not suppress when NO_REPLY is not the latest message", () => {
+    const session = createSession("NO_REPLY");
+    session.messages.push({
+      id: "user-1",
+      role: "user",
+      timestamp: 101,
+      blocks: [{ type: "text", text: "Thanks" }],
+    });
+
+    expect(suppressAgentCompletionNotification(session)).toBe(false);
   });
 });

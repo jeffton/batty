@@ -25,10 +25,10 @@ Batty is a web UI for [Pi Coding Agent](https://pi.dev). It keeps Pi's workspace
 Batty runs a Fastify server and a Vue client, while Pi still owns the actual agent behavior:
 
 - models come from Pi's model registry
-- skills come from `~/.pi/agent/skills`
-- settings come from `~/.pi/agent/settings.json`
-- instructions come from global and project `AGENTS.md`
-- session history is stored in Pi session files inside each workspace
+- global agent resources come from `<batty-root>/.batty/`
+- workspace agent resources come from `<workspace>/.batty/`
+- instructions come from `<batty-root>/.batty/AGENTS.md` plus project `AGENTS.md`
+- session history is stored in `<workspace>/.batty/sessions/`
 
 Batty adds a browser-native layer on top:
 

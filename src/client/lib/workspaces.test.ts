@@ -34,7 +34,7 @@ describe("sortWorkspacesByRecentSession", () => {
         {
           id: "beta-session",
           sessionId: "beta-session",
-          path: "/root/github/beta/.pi/sessions/beta.jsonl",
+          path: "/root/github/beta/.batty/sessions/beta.jsonl",
           firstMessage: "beta",
           updatedAt: 200,
           messageCount: 1,
@@ -45,7 +45,7 @@ describe("sortWorkspacesByRecentSession", () => {
         {
           id: "zeta-session",
           sessionId: "zeta-session",
-          path: "/root/github/zeta/.pi/sessions/zeta.jsonl",
+          path: "/root/github/zeta/.batty/sessions/zeta.jsonl",
           firstMessage: "zeta",
           updatedAt: 100,
           messageCount: 1,

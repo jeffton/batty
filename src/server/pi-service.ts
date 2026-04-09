@@ -592,6 +592,8 @@ export class PiService {
         workspace,
         selectedModel,
         selectedThinkingLevel,
+        new Date(),
+        path.join(this.config.selfPath, "README.md"),
       );
 
       sessionManager.appendCustomEntry(BATTY_SYSTEM_PROMPT_CUSTOM_TYPE, snapshot);
@@ -787,6 +789,8 @@ export class PiService {
       webSession.workspace,
       model,
       webSession.session.thinkingLevel,
+      new Date(),
+      path.join(this.config.selfPath, "README.md"),
     );
 
     webSession.session.sessionManager.appendCustomEntry(BATTY_SYSTEM_PROMPT_CUSTOM_TYPE, snapshot);

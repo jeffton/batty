@@ -12,6 +12,7 @@ describe("batty system prompt", () => {
       "openai/gpt-5",
       "medium",
       new Date("2026-03-20T12:00:00Z"),
+      "/root/github/batty/README.md",
     );
 
     expect(snapshot).toMatchObject({
@@ -24,6 +25,7 @@ describe("batty system prompt", () => {
       isoWeek: 12,
     });
     expect(snapshot.appendedPrompt).toContain("you are running inside Batty");
+    expect(snapshot.appendedPrompt).toContain("Batty README: /root/github/batty/README.md");
     expect(snapshot.appendedPrompt).toContain("Current workspace: batty (/root/github/batty)");
     expect(snapshot.appendedPrompt).toContain("Current model: openai/gpt-5");
     expect(snapshot.appendedPrompt).toContain("Current thinking level: medium");

@@ -18,6 +18,7 @@ export function buildBattySystemPromptSnapshot(
   model: string,
   thinkingLevel: string,
   now = new Date(),
+  battyReadmePath?: string,
 ): BattySystemPromptSnapshot {
   const date = toIsoDate(now);
   const isoWeek = getIsoWeekNumber(now);
@@ -27,6 +28,7 @@ export function buildBattySystemPromptSnapshot(
     appendedPrompt: [
       "## Batty session context",
       "Short note: you are running inside Batty.",
+      ...(battyReadmePath ? [`Batty README: ${battyReadmePath}`] : []),
       `Current workspace: ${workspace.id} (${workspace.path})`,
       `Current model: ${model}`,
       `Current thinking level: ${thinkingLevel}`,

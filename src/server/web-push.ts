@@ -1,7 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import webpush from "web-push";
-import { buildAgentCompletionNotificationContent } from "@/shared/agent-notification";
+import {
+  buildAgentCompletionNotificationContent,
+  suppressAgentCompletionNotification,
+} from "@/shared/agent-notification";
 import type { SessionState } from "@/shared/types";
 import type { AppConfig } from "./config";
 
@@ -173,6 +176,14 @@ export class WebPushService {
   }
 
   async notifyAgentCompleted(session: SessionState): Promise<void> {
+    if (suppressAgentCompletionNotification(session)) {
+      console.info("Skipping web push notification for NO_REPLY completion", {
+        sessionId: session.sessionId,
+        workspaceId: session.workspaceId,
+      });
+      return;
+    }
+
     const subscriptions = await this.readSubscriptions();
     if (subscriptions.length === 0) {
       return;

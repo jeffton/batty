@@ -3,7 +3,7 @@ import type { WorkspaceInfo } from "@/shared/types";
 export const BATTY_SYSTEM_PROMPT_CUSTOM_TYPE = "batty-system-prompt";
 
 export interface BattySystemPromptSnapshot {
-  version: 1;
+  version: 2;
   appendedPrompt: string;
   workspaceId: string;
   workspacePath: string;
@@ -24,10 +24,11 @@ export function buildBattySystemPromptSnapshot(
   const isoWeek = getIsoWeekNumber(now);
 
   return {
-    version: 1,
+    version: 2,
     appendedPrompt: [
       "## Batty session context",
       "Short note: you are running inside Batty.",
+      "If your final reply would not add anything useful for the user, reply with exactly NO_REPLY. Batty will still display that in the transcript, but it will not send a push notification for it.",
       ...(battyReadmePath ? [`Batty README: ${battyReadmePath}`] : []),
       `Current workspace: ${workspace.id} (${workspace.path})`,
       `Current model: ${model}`,
@@ -65,7 +66,7 @@ function isBattySystemPromptSnapshot(value: unknown): value is BattySystemPrompt
 
   const snapshot = value as Partial<BattySystemPromptSnapshot>;
   return (
-    snapshot.version === 1 &&
+    snapshot.version === 2 &&
     typeof snapshot.appendedPrompt === "string" &&
     typeof snapshot.workspaceId === "string" &&
     typeof snapshot.workspacePath === "string" &&

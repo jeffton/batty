@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildAgentCompletionNotificationContent,
   markdownToNotificationText,
+  suppressAgentCompletionNotification,
 } from "@/shared/agent-notification";
 import type { SessionState } from "@/shared/types";
 
@@ -61,6 +62,18 @@ describe("buildAgentCompletionNotificationContent", () => {
         body: "Done shipping the feature.",
         tag: "session-complete:session-1",
       }),
+    );
+  });
+});
+
+describe("suppressAgentCompletionNotification", () => {
+  it("suppresses notifications for exact NO_REPLY assistant messages", () => {
+    expect(suppressAgentCompletionNotification(createSession(" NO_REPLY\n"))).toBe(true);
+  });
+
+  it("does not suppress normal assistant replies", () => {
+    expect(suppressAgentCompletionNotification(createSession("Done shipping the feature."))).toBe(
+      false,
     );
   });
 });

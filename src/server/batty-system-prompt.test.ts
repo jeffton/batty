@@ -16,7 +16,7 @@ describe("batty system prompt", () => {
     );
 
     expect(snapshot).toMatchObject({
-      version: 1,
+      version: 2,
       workspaceId: "batty",
       workspacePath: "/root/github/batty",
       model: "openai/gpt-5",
@@ -25,6 +25,7 @@ describe("batty system prompt", () => {
       isoWeek: 12,
     });
     expect(snapshot.appendedPrompt).toContain("you are running inside Batty");
+    expect(snapshot.appendedPrompt).toContain("reply with exactly NO_REPLY");
     expect(snapshot.appendedPrompt).toContain("Batty README: /root/github/batty/README.md");
     expect(snapshot.appendedPrompt).toContain("Current workspace: batty (/root/github/batty)");
     expect(snapshot.appendedPrompt).toContain("Current model: openai/gpt-5");

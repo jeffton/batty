@@ -1,5 +1,7 @@
 import type { SessionState, UiContentBlock, UiMessage } from "@/shared/types";
 
+export const NO_REPLY_SENTINEL = "NO_REPLY";
+
 const NOTIFICATION_ICON = "/pwa-192.png";
 const MAX_NOTIFICATION_BODY_LENGTH = 180;
 
@@ -72,6 +74,16 @@ export function latestAssistantMessage(
   return undefined;
 }
 
+export function assistantNotificationText(
+  assistant: Pick<Extract<UiMessage, { role: "assistant" }>, "blocks"> | undefined,
+): string {
+  return assistant ? textFromBlocks(assistant.blocks) : "";
+}
+
+export function suppressAgentCompletionNotification(session: SessionState): boolean {
+  return assistantNotificationText(latestAssistantMessage(session)) === NO_REPLY_SENTINEL;
+}
+
 export { markdownToNotificationText };
 
 export interface AgentCompletionNotificationContent {
@@ -86,7 +98,7 @@ export function buildAgentCompletionNotificationContent(
   session: SessionState,
 ): AgentCompletionNotificationContent {
   const assistant = latestAssistantMessage(session);
-  const assistantText = assistant ? textFromBlocks(assistant.blocks) : "";
+  const assistantText = assistantNotificationText(assistant);
   const stopReason = assistant?.errorMessage || assistant?.stopReason;
   const body = truncate(assistantText || stopReason || "", MAX_NOTIFICATION_BODY_LENGTH);
   const workspaceLabel = workspaceLabelFromSession(session);

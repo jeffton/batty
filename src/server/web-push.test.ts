@@ -159,4 +159,32 @@ describe("WebPushService", () => {
     ) as { subscriptions: Array<{ endpoint: string }> };
     expect(persisted.subscriptions).toEqual([]);
   });
+
+  it("does not send a push notification for NO_REPLY completions", async () => {
+    const service = new WebPushService(createConfig(tempDir));
+    await service.initialize();
+
+    await service.upsertSubscription({
+      endpoint: "https://push.example/subscription",
+      expirationTime: null,
+      keys: {
+        p256dh: "p256dh_key",
+        auth: "auth-key",
+      },
+    });
+
+    const session = createSession();
+    session.messages = [
+      {
+        id: "assistant-1",
+        role: "assistant",
+        timestamp: Date.now(),
+        blocks: [{ type: "text", text: "NO_REPLY" }],
+      },
+    ];
+
+    await service.notifyAgentCompleted(session);
+
+    expect(webPushMocks.sendNotification).not.toHaveBeenCalled();
+  });
 });

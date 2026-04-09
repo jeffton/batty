@@ -60,9 +60,10 @@ function resolveWorkspacePath(workspacesRoot: string, name: string): string {
 async function workspaceLastSessionUpdatedAt(
   workspace: WorkspaceInfo,
 ): Promise<number | undefined> {
-  const sessions = await SessionManager.list(workspace.path, workspaceSessionDir(workspace.path)).catch(
-    () => [],
-  );
+  const sessions = await SessionManager.list(
+    workspace.path,
+    workspaceSessionDir(workspace.path),
+  ).catch(() => []);
   return sessions.reduce<number | undefined>((latest, session) => {
     const updatedAt = session.modified.getTime();
     return latest == null || updatedAt > latest ? updatedAt : latest;

@@ -76,4 +76,16 @@ describe("suppressAgentCompletionNotification", () => {
       false,
     );
   });
+
+  it("does not suppress when NO_REPLY is not the latest message", () => {
+    const session = createSession("NO_REPLY");
+    session.messages.push({
+      id: "user-1",
+      role: "user",
+      timestamp: 101,
+      blocks: [{ type: "text", text: "Thanks" }],
+    });
+
+    expect(suppressAgentCompletionNotification(session)).toBe(false);
+  });
 });

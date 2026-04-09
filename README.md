@@ -80,6 +80,13 @@ pnpm start -- /path/to/batty-root
 
 On first boot with no registered passkeys, Batty prints a one-time setup code in the server terminal.
 
+The production build output lives in `dist/`, but the deployment flow packages a self-contained install directory that includes:
+
+- `dist/client`
+- `dist/server`
+- `README.md`
+- `package.json`
+
 ## Authentication
 
 Batty uses passkeys for passwordless login.
@@ -240,10 +247,20 @@ Repo includes:
 
 - `deploy/batty.service` — systemd unit
 - `deploy/batty.nginx.conf` — nginx example
-- `scripts/deploy.sh` — install, build, and reload helper
+- `scripts/deploy.sh` — build, package, install, and reload helper
 
 Deploy on the server with the project script:
 
 ```bash
 sudo ./scripts/deploy.sh
 ```
+
+The deploy script installs Batty to `/opt/batty`:
+
+- versioned releases under `/opt/batty/releases/<git-sha>`
+- current install symlink at `/opt/batty/current`
+- systemd `WorkingDirectory=/opt/batty/current`
+- service entrypoint `/opt/batty/current/dist/server/main.mjs`
+- CLI entrypoint `/opt/batty/current/dist/server/cli.mjs`
+
+That means the running service no longer depends on the repo checkout being available at runtime.

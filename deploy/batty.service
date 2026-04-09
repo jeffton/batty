@@ -4,10 +4,11 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/root/github/batty
+WorkingDirectory=/opt/batty/current
 Environment=BATTY_HOST=127.0.0.1
 Environment=BATTY_PORT=3147
-ExecStart=/usr/bin/env pnpm start -- /root/github
+Environment=BATTY_SELF_PATH=/opt/batty/current
+ExecStart=/usr/bin/env node /opt/batty/current/dist/server/main.mjs /root/github
 Restart=always
 RestartSec=2
 

@@ -6,7 +6,7 @@ import { environmentFilePath, loadConfig, resolveBattyDir } from "@/server/confi
 import { optionsFilePath } from "@/server/options";
 
 const tempDirs: string[] = [];
-const envKeys = ["BATTY_HOST", "BATTY_PORT", "BRAVE_API_KEY"] as const;
+const envKeys = ["BATTY_HOST", "BATTY_PORT", "BATTY_SELF_PATH", "BRAVE_API_KEY"] as const;
 const originalEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
 
 afterEach(async () => {
@@ -79,5 +79,15 @@ describe("loadConfig", () => {
     expect(config.port).toBe(4242);
     expect(config.cronDailySessionStartTime).toBe("04:00");
     expect(process.env.BRAVE_API_KEY).toBe("brave-test-key");
+  });
+
+  it("prefers BATTY_SELF_PATH over the current working directory", async () => {
+    const battyDir = await createBattyDir();
+    process.env.BATTY_SELF_PATH = "/opt/batty/current";
+
+    const config = await loadConfig(battyDir);
+
+    expect(config.selfPath).toBe("/opt/batty/current");
+    expect(config.publicDir).toBe("/opt/batty/current/dist/client");
   });
 });

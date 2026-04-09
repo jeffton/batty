@@ -49,7 +49,7 @@ async function loadEnvironmentFile(battyDir: string): Promise<void> {
 export async function loadConfig(battyDir: string): Promise<AppConfig> {
   await loadEnvironmentFile(battyDir);
 
-  const selfPath = process.cwd();
+  const selfPath = process.env.BATTY_SELF_PATH?.trim() || process.cwd();
   const stateDir = stateDirPath(battyDir);
   const options = await ensureOptionsFile(battyDir);
 

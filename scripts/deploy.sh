@@ -5,7 +5,12 @@ step() {
   printf '\n==> %s\n' "$1"
 }
 
-cd /root/github/batty
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_dir="$(cd -- "${script_dir}/.." && pwd)"
+install_root="${BATTY_INSTALL_ROOT:-/opt/batty}"
+release_name="$(git -C "$repo_dir" rev-parse --short HEAD)"
+
+cd "$repo_dir"
 
 step "Installing dependencies"
 pnpm install
@@ -19,15 +24,17 @@ pnpm test
 step "Building app"
 pnpm build
 
+step "Packaging release"
+"$repo_dir/scripts/install-release.sh" "$release_name"
+
 step "Installing systemd unit"
 install -m 644 deploy/batty.service /etc/systemd/system/batty.service
 
 step "Installing batty CLI"
-cat > /usr/local/bin/batty <<'EOF'
+cat > /usr/local/bin/batty <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-cd /root/github/batty
-exec node dist/server/cli.mjs "$@"
+exec node ${install_root}/current/dist/server/cli.mjs "\$@"
 EOF
 chmod 755 /usr/local/bin/batty
 
@@ -39,6 +46,6 @@ step "Validating nginx config"
 nginx -t
 
 step "Handing off service reload"
-./scripts/handoff-restart.sh
+"$repo_dir/scripts/handoff-restart.sh"
 
-printf '\nDeployed %s successfully\n' "$(git rev-parse --short HEAD)"
+printf '\nDeployed %s successfully\n' "$release_name"

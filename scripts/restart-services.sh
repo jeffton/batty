@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /root/github/batty
-
 systemctl daemon-reload
 systemctl enable batty.service >/dev/null
 systemctl restart batty.service

@@ -84,8 +84,10 @@ The production build output lives in `dist/`, but the deployment flow packages a
 
 - `dist/client`
 - `dist/server`
+- `node_modules`
 - `README.md`
 - `package.json`
+- `pnpm-lock.yaml`
 
 ## Authentication
 

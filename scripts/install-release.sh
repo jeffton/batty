@@ -21,8 +21,14 @@ mkdir -p "$tmp_dir/dist"
 
 cp "$repo_dir/README.md" "$tmp_dir/README.md"
 cp "$repo_dir/package.json" "$tmp_dir/package.json"
+cp "$repo_dir/pnpm-lock.yaml" "$tmp_dir/pnpm-lock.yaml"
 cp -R "$repo_dir/dist/client" "$tmp_dir/dist/client"
 cp -R "$repo_dir/dist/server" "$tmp_dir/dist/server"
+
+(
+  cd "$tmp_dir"
+  pnpm install --prod --frozen-lockfile --ignore-scripts
+)
 
 mv "$tmp_dir" "$release_dir"
 ln -sfn "$release_dir" "${install_root}/current"

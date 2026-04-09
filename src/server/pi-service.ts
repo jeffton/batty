@@ -595,10 +595,20 @@ export class PiService {
       cwd: workspace.path,
       agentDir,
       settingsManager,
-      additionalExtensionPaths: [path.join(workspaceBattyPath, "extensions")],
-      additionalSkillPaths: [path.join(workspaceBattyPath, "skills")],
-      additionalPromptTemplatePaths: [path.join(workspaceBattyPath, "prompts")],
-      additionalThemePaths: [path.join(workspaceBattyPath, "themes")],
+      noExtensions: true,
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      additionalExtensionPaths: [
+        path.join(agentDir, "extensions"),
+        path.join(workspaceBattyPath, "extensions"),
+      ],
+      additionalSkillPaths: [path.join(agentDir, "skills"), path.join(workspaceBattyPath, "skills")],
+      additionalPromptTemplatePaths: [
+        path.join(agentDir, "prompts"),
+        path.join(workspaceBattyPath, "prompts"),
+      ],
+      additionalThemePaths: [path.join(agentDir, "themes"), path.join(workspaceBattyPath, "themes")],
       agentsFilesOverride: (base) => ({
         agentsFiles: base.agentsFiles.filter((file) => {
           const resolved = path.resolve(file.path);

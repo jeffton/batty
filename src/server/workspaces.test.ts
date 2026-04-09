@@ -4,8 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { SessionManager } from "@mariozechner/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vite-plus/test";
-import { createWorkspace, listWorkspaces } from "@/server/workspaces";
 import type { AppConfig } from "@/server/config";
+import { workspaceSessionDir } from "@/server/pi-paths";
+import { createWorkspace, listWorkspaces } from "@/server/workspaces";
 
 const tempDirs: string[] = [];
 
@@ -34,7 +35,7 @@ async function createConfig(): Promise<AppConfig> {
 }
 
 async function createSession(workspacePath: string, updatedAt: Date): Promise<void> {
-  const session = SessionManager.create(workspacePath);
+  const session = SessionManager.create(workspacePath, workspaceSessionDir(workspacePath));
   const sessionFile = session.getSessionFile();
   if (!sessionFile) {
     throw new Error("Expected persisted session file");

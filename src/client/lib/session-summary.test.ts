@@ -34,15 +34,15 @@ describe("session-summary", () => {
   it("creates a resumable summary from session state when a path exists", () => {
     const summary = toSessionSummary({
       ...baseSession,
-      path: "/tmp/batty/.pi/session.jsonl",
+      path: "/tmp/batty/.batty/sessions/session.jsonl",
       title: "Fresh session",
     });
 
     expect(summary).toEqual({
-      id: "/tmp/batty/.pi/session.jsonl",
+      id: "/tmp/batty/.batty/sessions/session.jsonl",
       sessionId: "session-1",
       name: "Fresh session",
-      path: "/tmp/batty/.pi/session.jsonl",
+      path: "/tmp/batty/.batty/sessions/session.jsonl",
       firstMessage: "hello from the new session",
       updatedAt: 200,
       messageCount: 1,
@@ -64,9 +64,9 @@ describe("session-summary", () => {
 
   it("merges server and local summaries by session id", () => {
     const persisted: SessionSummary = {
-      id: "/tmp/batty/.pi/session.jsonl",
+      id: "/tmp/batty/.batty/sessions/session.jsonl",
       sessionId: "session-1",
-      path: "/tmp/batty/.pi/session.jsonl",
+      path: "/tmp/batty/.batty/sessions/session.jsonl",
       name: "Persisted session",
       firstMessage: "older title",
       updatedAt: 100,
@@ -79,9 +79,9 @@ describe("session-summary", () => {
 
     expect(merged).toEqual([
       {
-        id: "/tmp/batty/.pi/session.jsonl",
+        id: "/tmp/batty/.batty/sessions/session.jsonl",
         sessionId: "session-1",
-        path: "/tmp/batty/.pi/session.jsonl",
+        path: "/tmp/batty/.batty/sessions/session.jsonl",
         name: "Persisted session",
         firstMessage: "hello from the new session",
         updatedAt: 200,

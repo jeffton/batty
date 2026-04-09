@@ -3,6 +3,7 @@ import path from "node:path";
 import { SessionManager } from "@mariozechner/pi-coding-agent";
 import type { WorkspaceInfo } from "@/shared/types";
 import type { AppConfig } from "./config";
+import { workspaceSessionDir } from "./pi-paths";
 
 function createHttpError(statusCode: number, message: string): Error & { statusCode: number } {
   return Object.assign(new Error(message), { statusCode });
@@ -59,7 +60,9 @@ function resolveWorkspacePath(workspacesRoot: string, name: string): string {
 async function workspaceLastSessionUpdatedAt(
   workspace: WorkspaceInfo,
 ): Promise<number | undefined> {
-  const sessions = await SessionManager.list(workspace.path).catch(() => []);
+  const sessions = await SessionManager.list(workspace.path, workspaceSessionDir(workspace.path)).catch(
+    () => [],
+  );
   return sessions.reduce<number | undefined>((latest, session) => {
     const updatedAt = session.modified.getTime();
     return latest == null || updatedAt > latest ? updatedAt : latest;

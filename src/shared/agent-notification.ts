@@ -7,6 +7,35 @@ function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function normalizeNotificationText(value: string): string {
+  return value
+    .split("\n")
+    .map((line) => normalizeWhitespace(line))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function markdownToNotificationText(value: string): string {
+  return normalizeNotificationText(
+    value
+      .replace(/```(?:[^\n`]*)\n([\s\S]*?)```/g, "$1")
+      .replace(/`([^`]+)`/g, "$1")
+      .replace(/^#{1,6}\s+/gm, "")
+      .replace(/^>\s?/gm, "")
+      .replace(/^[-*+]\s+/gm, "• ")
+      .replace(/^(\d+)\.\s+/gm, "$1. ")
+      .replace(/^---+$/gm, "")
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+      .replace(/\*\*([^*]+)\*\*/g, "$1")
+      .replace(/__([^_]+)__/g, "$1")
+      .replace(/~~([^~]+)~~/g, "$1")
+      .replace(/(^|[^*])\*([^*]+)\*(?=[^*]|$)/g, "$1$2")
+      .replace(/(^|[^_])_([^_]+)_(?=[^_]|$)/g, "$1$2"),
+  );
+}
+
 function truncate(value: string, maxLength: number): string {
   if (value.length <= maxLength) {
     return value;
@@ -21,11 +50,12 @@ export function workspaceLabelFromSession(session: Pick<SessionState, "cwd">): s
 }
 
 function textFromBlocks(blocks: UiContentBlock[]): string {
-  return normalizeWhitespace(
+  return normalizeNotificationText(
     blocks
       .filter((block): block is Extract<UiContentBlock, { type: "text" }> => block.type === "text")
-      .map((block) => block.text)
-      .join("\n"),
+      .map((block) => markdownToNotificationText(block.text))
+      .filter(Boolean)
+      .join("\n\n"),
   );
 }
 
@@ -41,6 +71,8 @@ export function latestAssistantMessage(
 
   return undefined;
 }
+
+export { markdownToNotificationText };
 
 export interface AgentCompletionNotificationContent {
   title: string;

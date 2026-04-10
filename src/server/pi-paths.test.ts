@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import {
+  battyResourcePaths,
   battySessionRootDir,
   loadBattyPromptFile,
   loadBattySettings,
@@ -33,6 +34,7 @@ describe("pi-paths", () => {
         {
           theme: "dark",
           extensions: ["./extensions"],
+          skills: ["./global-skills"],
           compaction: { enabled: true, reserveTokens: 16384 },
         },
         null,
@@ -44,6 +46,7 @@ describe("pi-paths", () => {
       JSON.stringify(
         {
           theme: "light",
+          skills: ["../skills"],
           prompts: ["./prompts"],
           compaction: { reserveTokens: 8192 },
         },
@@ -58,10 +61,43 @@ describe("pi-paths", () => {
       expect.objectContaining({
         theme: "light",
         extensions: [path.join(root, ".batty", "extensions")],
+        skills: [path.join(workspace, "skills")],
         prompts: [path.join(workspace, ".batty", "prompts")],
         compaction: { enabled: true, reserveTokens: 8192 },
       }),
     );
+  });
+
+  it("includes settings-defined resource paths alongside default .batty resource directories", async () => {
+    const { root, workspace } = await createLayout();
+    await fs.writeFile(
+      path.join(workspace, ".batty", "settings.json"),
+      JSON.stringify(
+        {
+          skills: ["../skills"],
+          prompts: ["./prompts"],
+        },
+        null,
+        2,
+      ),
+    );
+
+    const settings = await loadBattySettings({ battyDir: root }, workspace);
+    const resources = battyResourcePaths({ battyDir: root }, workspace, settings);
+
+    expect(resources).toEqual({
+      extensions: [
+        path.join(root, ".batty", "extensions"),
+        path.join(workspace, ".batty", "extensions"),
+      ],
+      skills: [
+        path.join(workspace, "skills"),
+        path.join(root, ".batty", "skills"),
+        path.join(workspace, ".batty", "skills"),
+      ],
+      prompts: [path.join(workspace, ".batty", "prompts"), path.join(root, ".batty", "prompts")],
+      themes: [path.join(root, ".batty", "themes"), path.join(workspace, ".batty", "themes")],
+    });
   });
 
   it("prefers workspace .batty prompt files over batty-root .batty prompt files", async () => {

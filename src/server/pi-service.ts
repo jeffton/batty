@@ -54,9 +54,9 @@ import {
 import { createSessionState, normalizeBlocks } from "./pi-state";
 import {
   battyAgentDir,
+  battyResourcePaths,
   loadBattyPromptFile,
   loadBattySettings,
-  workspaceBattyDir,
   workspaceSessionDir,
 } from "./pi-paths";
 import { sanitizeTerminalBlocks } from "./terminal-output";
@@ -591,9 +591,9 @@ export class PiService {
       agentDir,
       "APPEND_SYSTEM.md",
     );
-    const workspaceBattyPath = workspaceBattyDir(workspace.path);
     const workspaceRoot = path.resolve(workspace.path);
     const globalAgentsPath = path.resolve(path.join(agentDir, "AGENTS.md"));
+    const resourcePaths = battyResourcePaths(this.config, workspace.path, settings);
     const resourceLoader = new DefaultResourceLoader({
       cwd: workspace.path,
       agentDir,
@@ -602,22 +602,10 @@ export class PiService {
       noSkills: true,
       noPromptTemplates: true,
       noThemes: true,
-      additionalExtensionPaths: [
-        path.join(agentDir, "extensions"),
-        path.join(workspaceBattyPath, "extensions"),
-      ],
-      additionalSkillPaths: [
-        path.join(agentDir, "skills"),
-        path.join(workspaceBattyPath, "skills"),
-      ],
-      additionalPromptTemplatePaths: [
-        path.join(agentDir, "prompts"),
-        path.join(workspaceBattyPath, "prompts"),
-      ],
-      additionalThemePaths: [
-        path.join(agentDir, "themes"),
-        path.join(workspaceBattyPath, "themes"),
-      ],
+      additionalExtensionPaths: resourcePaths.extensions,
+      additionalSkillPaths: resourcePaths.skills,
+      additionalPromptTemplatePaths: resourcePaths.prompts,
+      additionalThemePaths: resourcePaths.themes,
       agentsFilesOverride: (base) => ({
         agentsFiles: base.agentsFiles.filter((file) => {
           const resolved = path.resolve(file.path);

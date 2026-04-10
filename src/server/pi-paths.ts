@@ -97,6 +97,57 @@ export function workspaceSessionDir(
   return path.join(battySessionRootDir(config), workspaceId);
 }
 
+function getResourcePaths(
+  settings: Partial<BattyAgentSettings>,
+  key: "extensions" | "skills" | "prompts" | "themes",
+): string[] {
+  const value = settings[key];
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+}
+
+function uniquePaths(paths: string[]): string[] {
+  return [...new Set(paths)];
+}
+
+export function battyResourcePaths(
+  config: Pick<AppConfig, "battyDir">,
+  workspacePath: string,
+  settings: Partial<BattyAgentSettings>,
+): {
+  extensions: string[];
+  skills: string[];
+  prompts: string[];
+  themes: string[];
+} {
+  const agentDir = battyAgentDir(config);
+  const projectDir = workspaceBattyDir(workspacePath);
+
+  return {
+    extensions: uniquePaths([
+      ...getResourcePaths(settings, "extensions"),
+      path.join(agentDir, "extensions"),
+      path.join(projectDir, "extensions"),
+    ]),
+    skills: uniquePaths([
+      ...getResourcePaths(settings, "skills"),
+      path.join(agentDir, "skills"),
+      path.join(projectDir, "skills"),
+    ]),
+    prompts: uniquePaths([
+      ...getResourcePaths(settings, "prompts"),
+      path.join(agentDir, "prompts"),
+      path.join(projectDir, "prompts"),
+    ]),
+    themes: uniquePaths([
+      ...getResourcePaths(settings, "themes"),
+      path.join(agentDir, "themes"),
+      path.join(projectDir, "themes"),
+    ]),
+  };
+}
+
 export async function loadBattySettings(
   config: Pick<AppConfig, "battyDir">,
   workspacePath: string,

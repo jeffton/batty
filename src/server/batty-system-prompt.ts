@@ -2,7 +2,7 @@ import type { WorkspaceInfo } from "@/shared/types";
 
 export const BATTY_SYSTEM_PROMPT_CUSTOM_TYPE = "batty-system-prompt";
 
-export interface BattySystemPromptSnapshot {
+interface BattySystemPromptSnapshotV2 {
   version: 2;
   appendedPrompt: string;
   workspaceId: string;
@@ -13,6 +13,20 @@ export interface BattySystemPromptSnapshot {
   isoWeek: number;
 }
 
+export interface BattySystemPromptSnapshot {
+  version: 3;
+  appendedPrompt: string;
+  workspaceId: string;
+  workspacePath: string;
+  model: string;
+  thinkingLevel: string;
+  date: string;
+  dayOfWeek: string;
+  isoWeek: number;
+}
+
+type PersistedBattySystemPromptSnapshot = BattySystemPromptSnapshotV2 | BattySystemPromptSnapshot;
+
 export function buildBattySystemPromptSnapshot(
   workspace: Pick<WorkspaceInfo, "id" | "path">,
   model: string,
@@ -21,10 +35,11 @@ export function buildBattySystemPromptSnapshot(
   battyReadmePath?: string,
 ): BattySystemPromptSnapshot {
   const date = toIsoDate(now);
+  const dayOfWeek = getDayOfWeek(now);
   const isoWeek = getIsoWeekNumber(now);
 
   return {
-    version: 2,
+    version: 3,
     appendedPrompt: [
       "## Batty session context",
       "Short note: you are running inside Batty.",
@@ -33,20 +48,21 @@ export function buildBattySystemPromptSnapshot(
       `Current workspace: ${workspace.id} (${workspace.path})`,
       `Current model: ${model}`,
       `Current thinking level: ${thinkingLevel}`,
-      `Current date: ${date} (ISO week ${isoWeek})`,
+      `Current date: ${date} (${dayOfWeek}, ISO week ${isoWeek})`,
     ].join("\n"),
     workspaceId: workspace.id,
     workspacePath: workspace.path,
     model,
     thinkingLevel,
     date,
+    dayOfWeek,
     isoWeek,
   };
 }
 
 export function findBattySystemPromptSnapshot(
   entries: Array<{ type: string; customType?: string; data?: unknown }>,
-): BattySystemPromptSnapshot | undefined {
+): PersistedBattySystemPromptSnapshot | undefined {
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index];
     if (entry?.type !== "custom" || entry.customType !== BATTY_SYSTEM_PROMPT_CUSTOM_TYPE) {
@@ -59,20 +75,23 @@ export function findBattySystemPromptSnapshot(
   return undefined;
 }
 
-function isBattySystemPromptSnapshot(value: unknown): value is BattySystemPromptSnapshot {
+function isBattySystemPromptSnapshot(value: unknown): value is PersistedBattySystemPromptSnapshot {
   if (!value || typeof value !== "object") {
     return false;
   }
 
-  const snapshot = value as Partial<BattySystemPromptSnapshot>;
+  const snapshot = value as Partial<PersistedBattySystemPromptSnapshot> & {
+    dayOfWeek?: unknown;
+  };
   return (
-    snapshot.version === 2 &&
+    (snapshot.version === 2 || snapshot.version === 3) &&
     typeof snapshot.appendedPrompt === "string" &&
     typeof snapshot.workspaceId === "string" &&
     typeof snapshot.workspacePath === "string" &&
     typeof snapshot.model === "string" &&
     typeof snapshot.thinkingLevel === "string" &&
     typeof snapshot.date === "string" &&
+    (snapshot.version === 2 || typeof snapshot.dayOfWeek === "string") &&
     typeof snapshot.isoWeek === "number"
   );
 }
@@ -82,6 +101,12 @@ function toIsoDate(date: Date): string {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
+  }).format(date);
+}
+
+function getDayOfWeek(date: Date): string {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
   }).format(date);
 }
 

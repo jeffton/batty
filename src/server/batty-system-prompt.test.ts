@@ -16,12 +16,13 @@ describe("batty system prompt", () => {
     );
 
     expect(snapshot).toMatchObject({
-      version: 2,
+      version: 3,
       workspaceId: "batty",
       workspacePath: "/root/github/batty",
       model: "openai/gpt-5",
       thinkingLevel: "medium",
       date: "2026-03-20",
+      dayOfWeek: "Friday",
       isoWeek: 12,
     });
     expect(snapshot.appendedPrompt).toContain("you are running inside Batty");
@@ -30,7 +31,7 @@ describe("batty system prompt", () => {
     expect(snapshot.appendedPrompt).toContain("Current workspace: batty (/root/github/batty)");
     expect(snapshot.appendedPrompt).toContain("Current model: openai/gpt-5");
     expect(snapshot.appendedPrompt).toContain("Current thinking level: medium");
-    expect(snapshot.appendedPrompt).toContain("Current date: 2026-03-20 (ISO week 12)");
+    expect(snapshot.appendedPrompt).toContain("Current date: 2026-03-20 (Friday, ISO week 12)");
   });
 
   it("uses local time instead of UTC for date boundaries", () => {
@@ -42,8 +43,9 @@ describe("batty system prompt", () => {
     );
 
     expect(snapshot.date).toBe("2026-03-31");
+    expect(snapshot.dayOfWeek).toBe("Tuesday");
     expect(snapshot.isoWeek).toBe(14);
-    expect(snapshot.appendedPrompt).toContain("Current date: 2026-03-31 (ISO week 14)");
+    expect(snapshot.appendedPrompt).toContain("Current date: 2026-03-31 (Tuesday, ISO week 14)");
   });
 
   it("finds the latest persisted Batty prompt snapshot", () => {

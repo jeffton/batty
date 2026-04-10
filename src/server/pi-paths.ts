@@ -86,8 +86,15 @@ export function workspaceBattyDir(workspacePath: string): string {
   return path.join(workspacePath, ".batty");
 }
 
-export function workspaceSessionDir(workspacePath: string): string {
-  return path.join(workspaceBattyDir(workspacePath), "sessions");
+export function battySessionRootDir(config: Pick<AppConfig, "battyDir">): string {
+  return path.join(stateDirPath(config.battyDir), "sessions");
+}
+
+export function workspaceSessionDir(
+  config: Pick<AppConfig, "battyDir">,
+  workspaceId: string,
+): string {
+  return path.join(battySessionRootDir(config), workspaceId);
 }
 
 export async function loadBattySettings(

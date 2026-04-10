@@ -2,7 +2,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
-import { loadBattyPromptFile, loadBattySettings, workspaceSessionDir } from "@/server/pi-paths";
+import {
+  battySessionRootDir,
+  loadBattyPromptFile,
+  loadBattySettings,
+  workspaceSessionDir,
+} from "@/server/pi-paths";
 
 const tempDirs: string[] = [];
 
@@ -69,7 +74,10 @@ describe("pi-paths", () => {
     ).resolves.toBe("workspace prompt\n");
   });
 
-  it("stores sessions under <workspace>/.batty/sessions", () => {
-    expect(workspaceSessionDir("/tmp/demo")).toBe("/tmp/demo/.batty/sessions");
+  it("stores sessions under <batty-root>/.batty/sessions/<workspace>", () => {
+    expect(battySessionRootDir({ battyDir: "/tmp/root" })).toBe("/tmp/root/.batty/sessions");
+    expect(workspaceSessionDir({ battyDir: "/tmp/root" }, "demo")).toBe(
+      "/tmp/root/.batty/sessions/demo",
+    );
   });
 });

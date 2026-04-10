@@ -58,11 +58,12 @@ function resolveWorkspacePath(workspacesRoot: string, name: string): string {
 }
 
 async function workspaceLastSessionUpdatedAt(
+  config: AppConfig,
   workspace: WorkspaceInfo,
 ): Promise<number | undefined> {
   const sessions = await SessionManager.list(
     workspace.path,
-    workspaceSessionDir(workspace.path),
+    workspaceSessionDir(config, workspace.id),
   ).catch(() => []);
   return sessions.reduce<number | undefined>((latest, session) => {
     const updatedAt = session.modified.getTime();
@@ -79,7 +80,7 @@ export async function listWorkspaces(config: AppConfig): Promise<WorkspaceInfo[]
   const workspacesWithActivity = await Promise.all(
     workspaces.map(async (workspace) => ({
       workspace,
-      lastSessionUpdatedAt: await workspaceLastSessionUpdatedAt(workspace),
+      lastSessionUpdatedAt: await workspaceLastSessionUpdatedAt(config, workspace),
     })),
   );
 

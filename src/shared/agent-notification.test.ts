@@ -12,7 +12,7 @@ function createSession(markdown: string): SessionState {
     sessionId: "session-1",
     workspaceId: "batty",
     cwd: "/root/github/batty",
-    path: "/root/github/batty/.batty/sessions/session.jsonl",
+    path: "/root/github/.batty/sessions/batty/session.jsonl",
     model: "openai-codex/gpt-5.4",
     modelLabel: "GPT-5.4 · OpenAI",
     thinkingLevel: "medium",

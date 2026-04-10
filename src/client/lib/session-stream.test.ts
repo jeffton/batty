@@ -7,10 +7,10 @@ describe("session-stream", () => {
       sessionEventsPath({
         id: "session/123",
         workspaceId: "batty",
-        path: "/root/github/batty/.batty/sessions/demo session.jsonl",
+        path: "/root/github/.batty/sessions/batty/demo session.jsonl",
       }),
     ).toBe(
-      "/api/sessions/session%2F123/events?workspaceId=batty&sessionPath=%2Froot%2Fgithub%2Fbatty%2F.batty%2Fsessions%2Fdemo+session.jsonl",
+      "/api/sessions/session%2F123/events?workspaceId=batty&sessionPath=%2Froot%2Fgithub%2F.batty%2Fsessions%2Fbatty%2Fdemo+session.jsonl",
     );
   });
 

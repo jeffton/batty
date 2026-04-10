@@ -34,8 +34,15 @@ async function createConfig(): Promise<AppConfig> {
   };
 }
 
-async function createSession(workspacePath: string, updatedAt: Date): Promise<void> {
-  const session = SessionManager.create(workspacePath, workspaceSessionDir(workspacePath));
+async function createSession(
+  config: AppConfig,
+  workspacePath: string,
+  updatedAt: Date,
+): Promise<void> {
+  const session = SessionManager.create(
+    workspacePath,
+    workspaceSessionDir(config, path.basename(workspacePath)),
+  );
   const sessionFile = session.getSessionFile();
   if (!sessionFile) {
     throw new Error("Expected persisted session file");
@@ -85,8 +92,8 @@ describe("workspaces", () => {
     await fs.mkdir(alphaPath);
     await fs.mkdir(betaPath);
     await fs.mkdir(gammaPath);
-    await createSession(betaPath, new Date("2026-03-25T12:00:00Z"));
-    await createSession(alphaPath, new Date("2026-03-24T12:00:00Z"));
+    await createSession(config, betaPath, new Date("2026-03-25T12:00:00Z"));
+    await createSession(config, alphaPath, new Date("2026-03-24T12:00:00Z"));
 
     const workspaces = await listWorkspaces(config);
 

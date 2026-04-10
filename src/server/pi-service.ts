@@ -286,7 +286,10 @@ export class PiService {
   }
 
   async listSessionSummaries(workspace: WorkspaceInfo): Promise<SessionSummary[]> {
-    const infos = await SessionManager.list(workspace.path, workspaceSessionDir(workspace.path));
+    const infos = await SessionManager.list(
+      workspace.path,
+      workspaceSessionDir(this.config, workspace.id),
+    );
     return infos
       .map((info) => ({
         id: info.path,
@@ -311,7 +314,7 @@ export class PiService {
     };
     const result = await this.createPiAgentSession(
       workspace,
-      SessionManager.create(workspace.path, workspaceSessionDir(workspace.path)),
+      SessionManager.create(workspace.path, workspaceSessionDir(this.config, workspace.id)),
       sessionOptions,
     );
 
@@ -579,7 +582,7 @@ export class PiService {
     const settings = await loadBattySettings(this.config, workspace.path);
     const settingsManager = SettingsManager.inMemory({
       ...settings,
-      sessionDir: workspaceSessionDir(workspace.path),
+      sessionDir: workspaceSessionDir(this.config, workspace.id),
     });
     const persistedPrompt = findBattySystemPromptSnapshot(sessionManager.getEntries());
     const systemPrompt = await loadBattyPromptFile(workspace.path, agentDir, "SYSTEM.md");

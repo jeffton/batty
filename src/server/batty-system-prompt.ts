@@ -2,30 +2,15 @@ import type { WorkspaceInfo } from "@/shared/types";
 
 export const BATTY_SYSTEM_PROMPT_CUSTOM_TYPE = "batty-system-prompt";
 
-interface BattySystemPromptSnapshotV2 {
-  version: 2;
-  appendedPrompt: string;
-  workspaceId: string;
-  workspacePath: string;
-  model: string;
-  thinkingLevel: string;
-  date: string;
-  isoWeek: number;
-}
-
 export interface BattySystemPromptSnapshot {
-  version: 3;
   appendedPrompt: string;
   workspaceId: string;
   workspacePath: string;
   model: string;
   thinkingLevel: string;
   date: string;
-  dayOfWeek: string;
   isoWeek: number;
 }
-
-type PersistedBattySystemPromptSnapshot = BattySystemPromptSnapshotV2 | BattySystemPromptSnapshot;
 
 export function buildBattySystemPromptSnapshot(
   workspace: Pick<WorkspaceInfo, "id" | "path">,
@@ -39,7 +24,6 @@ export function buildBattySystemPromptSnapshot(
   const isoWeek = getIsoWeekNumber(now);
 
   return {
-    version: 3,
     appendedPrompt: [
       "## Batty session context",
       "Short note: you are running inside Batty.",
@@ -55,14 +39,13 @@ export function buildBattySystemPromptSnapshot(
     model,
     thinkingLevel,
     date,
-    dayOfWeek,
     isoWeek,
   };
 }
 
 export function findBattySystemPromptSnapshot(
   entries: Array<{ type: string; customType?: string; data?: unknown }>,
-): PersistedBattySystemPromptSnapshot | undefined {
+): BattySystemPromptSnapshot | undefined {
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index];
     if (entry?.type !== "custom" || entry.customType !== BATTY_SYSTEM_PROMPT_CUSTOM_TYPE) {
@@ -75,23 +58,19 @@ export function findBattySystemPromptSnapshot(
   return undefined;
 }
 
-function isBattySystemPromptSnapshot(value: unknown): value is PersistedBattySystemPromptSnapshot {
+function isBattySystemPromptSnapshot(value: unknown): value is BattySystemPromptSnapshot {
   if (!value || typeof value !== "object") {
     return false;
   }
 
-  const snapshot = value as Partial<PersistedBattySystemPromptSnapshot> & {
-    dayOfWeek?: unknown;
-  };
+  const snapshot = value as Partial<BattySystemPromptSnapshot>;
   return (
-    (snapshot.version === 2 || snapshot.version === 3) &&
     typeof snapshot.appendedPrompt === "string" &&
     typeof snapshot.workspaceId === "string" &&
     typeof snapshot.workspacePath === "string" &&
     typeof snapshot.model === "string" &&
     typeof snapshot.thinkingLevel === "string" &&
     typeof snapshot.date === "string" &&
-    (snapshot.version === 2 || typeof snapshot.dayOfWeek === "string") &&
     typeof snapshot.isoWeek === "number"
   );
 }

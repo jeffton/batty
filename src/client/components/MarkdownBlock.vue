@@ -28,6 +28,8 @@ const html = computed(() => DOMPurify.sanitize(marked.parse(props.text) as strin
 <style scoped>
 .markdown-body {
   min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .markdown-body :deep(p) {
@@ -40,8 +42,12 @@ const html = computed(() => DOMPurify.sanitize(marked.parse(props.text) as strin
 
 .markdown-body :deep(pre) {
   margin: 0.55rem 0;
+  max-width: 100%;
   padding: 0.7rem 0.8rem;
-  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow-x: hidden;
   border-radius: 0.5rem;
   background: var(--color-code-bg);
   border: 1px solid var(--color-code-border);
@@ -51,11 +57,14 @@ const html = computed(() => DOMPurify.sanitize(marked.parse(props.text) as strin
   padding: 0.08rem 0.24rem;
   border-radius: 0.28rem;
   background: var(--color-bg-inline-code);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .markdown-body :deep(pre code) {
   padding: 0;
   background: transparent;
+  white-space: inherit;
 }
 
 .markdown-body :deep(blockquote) {
@@ -74,6 +83,12 @@ const html = computed(() => DOMPurify.sanitize(marked.parse(props.text) as strin
 .markdown-body :deep(img) {
   max-width: 100%;
   border-radius: 0.5rem;
+}
+
+.markdown-body :deep(table) {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .markdown-body--thinking {

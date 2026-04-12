@@ -1,9 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { SessionManager } from "@mariozechner/pi-coding-agent";
 import type { WorkspaceInfo } from "@/shared/types";
 import type { AppConfig } from "./config";
-import { workspaceSessionDir } from "./pi-paths";
+import { latestSessionUpdatedAt } from "./session-summaries";
 
 function createHttpError(statusCode: number, message: string): Error & { statusCode: number } {
   return Object.assign(new Error(message), { statusCode });
@@ -61,14 +60,7 @@ async function workspaceLastSessionUpdatedAt(
   config: AppConfig,
   workspace: WorkspaceInfo,
 ): Promise<number | undefined> {
-  const sessions = await SessionManager.list(
-    workspace.path,
-    workspaceSessionDir(config, workspace.id),
-  ).catch(() => []);
-  return sessions.reduce<number | undefined>((latest, session) => {
-    const updatedAt = session.modified.getTime();
-    return latest == null || updatedAt > latest ? updatedAt : latest;
-  }, undefined);
+  return latestSessionUpdatedAt(config, workspace.id);
 }
 
 export async function listWorkspaces(config: AppConfig): Promise<WorkspaceInfo[]> {

@@ -65,7 +65,7 @@ const connectionDescription = computed(() => {
 });
 
 function sessionLabel(session: SessionSummary): string {
-  return (session.name || session.firstMessage).replace(/\s+/g, " ").trim();
+  return (session.firstMessage || "(no messages)").replace(/\s+/g, " ").trim();
 }
 
 function resetCreateWorkspaceForm(): void {

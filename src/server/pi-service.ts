@@ -59,6 +59,7 @@ import {
   loadBattySettings,
   workspaceSessionDir,
 } from "./pi-paths";
+import { listSessionSummaries as listFastSessionSummaries } from "./session-summaries";
 import { sanitizeTerminalBlocks } from "./terminal-output";
 
 interface SessionSubscriber {
@@ -286,22 +287,7 @@ export class PiService {
   }
 
   async listSessionSummaries(workspace: WorkspaceInfo): Promise<SessionSummary[]> {
-    const infos = await SessionManager.list(
-      workspace.path,
-      workspaceSessionDir(this.config, workspace.id),
-    );
-    return infos
-      .map((info) => ({
-        id: info.path,
-        sessionId: info.id,
-        name: info.name,
-        path: info.path,
-        firstMessage: info.firstMessage,
-        updatedAt: info.modified.getTime(),
-        messageCount: info.messageCount,
-        workspaceId: workspace.id,
-      }))
-      .sort((a, b) => b.updatedAt - a.updatedAt);
+    return listFastSessionSummaries(this.config, workspace);
   }
 
   async createSession(

@@ -51,7 +51,7 @@ function closePopover(id: string): void {
       <img src="/favicon.png" alt="" class="header__icon" />
       <div class="header__ws-info">
         <span class="header__ws-name">{{ props.workspaceLabel || "Workspaces & sessions" }}</span>
-        <span class="header__ws-path">{{ props.cwd || "Back to workspace browser" }}</span>
+        <span v-if="props.cwd" class="header__ws-path">{{ props.cwd }}</span>
       </div>
       <LoaderCircle
         v-if="props.workspaceSwitcherLoading"

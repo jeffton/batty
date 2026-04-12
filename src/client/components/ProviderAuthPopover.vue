@@ -272,7 +272,8 @@ watch(
           <input
             v-model="apiKeyInputs[provider.id as 'google' | 'openrouter']"
             class="provider-auth-popover__api-key-input"
-            type="password"
+            type="text"
+            autocomplete="off"
             :placeholder="apiKeyPlaceholder(provider.id as 'google' | 'openrouter')"
             :disabled="apiKeySaving[provider.id]"
           />

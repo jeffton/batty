@@ -73,11 +73,7 @@ async function readSessionHeaderAndFirstUserMessage(
         sessionId = candidate.id;
       }
 
-      if (
-        candidate.type === "message" &&
-        candidate.message?.role === "user" &&
-        !firstMessage
-      ) {
+      if (candidate.type === "message" && candidate.message?.role === "user" && !firstMessage) {
         firstMessage = extractMessageText(candidate.message.content);
       }
 
@@ -133,9 +129,9 @@ export async function listSessionSummaries(
     .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
     .map((entry) => path.join(sessionDir, entry.name));
 
-  const sessions = (await Promise.all(
-    sessionFiles.map((filePath) => buildSessionSummary(filePath, workspace.id)),
-  )).filter((session): session is SessionSummary => Boolean(session));
+  const sessions = (
+    await Promise.all(sessionFiles.map((filePath) => buildSessionSummary(filePath, workspace.id)))
+  ).filter((session): session is SessionSummary => Boolean(session));
 
   sessions.sort((a, b) => b.updatedAt - a.updatedAt);
   return sessions;

@@ -82,23 +82,17 @@ describe("session summaries", () => {
         },
       ],
     );
-    await writeSession(
-      config,
-      workspace.id,
-      "newer.jsonl",
-      "2026-03-25T12:00:00Z",
-      [
-        { type: "session", version: 3, id: "newer-id", timestamp: "2026-01-01T00:00:00Z" },
-        {
-          type: "message",
-          id: "newer-1",
-          message: {
-            role: "user",
-            content: "newer first message",
-          },
+    await writeSession(config, workspace.id, "newer.jsonl", "2026-03-25T12:00:00Z", [
+      { type: "session", version: 3, id: "newer-id", timestamp: "2026-01-01T00:00:00Z" },
+      {
+        type: "message",
+        id: "newer-1",
+        message: {
+          role: "user",
+          content: "newer first message",
         },
-      ],
-    );
+      },
+    ]);
 
     const sessions = await listSessionSummaries(config, workspace);
 

@@ -301,7 +301,11 @@ const genericEntries = computed(() => {
             showCollapsedWriteWindow ? 'tool-call__output-window--collapsed' : '',
           ]"
         >
-          <CodeBlock :code="visibleWriteContent" :language="codeLanguage" :compact="props.compact" />
+          <CodeBlock
+            :code="visibleWriteContent"
+            :language="codeLanguage"
+            :compact="props.compact"
+          />
         </div>
       </div>
     </template>

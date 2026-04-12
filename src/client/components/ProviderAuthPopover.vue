@@ -437,6 +437,7 @@ watch(
   color: inherit;
   padding: 0.55rem 0.65rem;
   font: inherit;
+  font-family: var(--font-family-mono);
 }
 
 .provider-auth-popover__input {

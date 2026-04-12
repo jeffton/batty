@@ -8,6 +8,8 @@ import type {
   BootstrapPayload,
   CreateCronJobInput,
   CronJob,
+  ProviderAuthStartResponse,
+  ProviderAuthStatus,
   SessionMessagesPage,
   SessionState,
   SessionSummary,
@@ -37,6 +39,27 @@ export function getBootstrap(): Promise<BootstrapPayload> {
 
 export function getVersion(): Promise<{ buildId: string }> {
   return request("/api/version");
+}
+
+export function getProviderAuthStatus(): Promise<ProviderAuthStatus> {
+  return request("/api/provider-auth/status");
+}
+
+export function startOpenAICodexProviderAuth(): Promise<ProviderAuthStartResponse> {
+  return request("/api/provider-auth/openai-codex/start", {
+    method: "POST",
+  });
+}
+
+export function completeOpenAICodexProviderAuth(
+  attemptId: string,
+  callbackUrlOrCode: string,
+): Promise<ProviderAuthStatus> {
+  return request("/api/provider-auth/openai-codex/complete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ attemptId, callbackUrlOrCode }),
+  });
 }
 
 export function getPushPublicKey(): Promise<{ publicKey: string }> {

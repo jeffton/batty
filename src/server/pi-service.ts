@@ -27,6 +27,8 @@ import type {
   CreateCronJobInput,
   CronJobSession,
   ModelOption,
+  ProviderAuthStartResponse,
+  ProviderAuthStatus,
   ServerEvent,
   SessionMessagesPage,
   SessionState,
@@ -61,6 +63,7 @@ import {
 } from "./pi-paths";
 import { listSessionSummaries as listFastSessionSummaries } from "./session-summaries";
 import { sanitizeTerminalBlocks } from "./terminal-output";
+import { ProviderAuthService } from "./provider-auth";
 
 interface SessionSubscriber {
   (event: ServerEvent): void;
@@ -260,6 +263,7 @@ export class PiService {
   private readonly config: AppConfig;
   private readonly authStorage: AuthStorage;
   private readonly modelRegistry: ModelRegistry;
+  private readonly providerAuthService: ProviderAuthService;
   private readonly sessions = new Map<string, WebSession>();
   private readonly cronSessionResolutions = new Map<string, Promise<SessionState>>();
   private readonly onAgentCompleted: ((session: SessionState) => Promise<void>) | undefined;
@@ -279,6 +283,23 @@ export class PiService {
     const agentDir = battyAgentDir(config);
     this.authStorage = AuthStorage.create(path.join(agentDir, "auth.json"));
     this.modelRegistry = ModelRegistry.create(this.authStorage, path.join(agentDir, "models.json"));
+    this.providerAuthService = new ProviderAuthService(this.authStorage);
+  }
+
+  getProviderAuthStatus(): ProviderAuthStatus {
+    return this.providerAuthService.getStatus();
+  }
+
+  async startProviderAuth(providerId: "openai-codex"): Promise<ProviderAuthStartResponse> {
+    return this.providerAuthService.start(providerId);
+  }
+
+  async completeProviderAuth(
+    attemptId: string,
+    callbackUrlOrCode: string,
+  ): Promise<ProviderAuthStatus> {
+    await this.providerAuthService.complete(attemptId, callbackUrlOrCode);
+    return this.providerAuthService.getStatus();
   }
 
   async listModels(): Promise<ModelOption[]> {

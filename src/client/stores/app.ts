@@ -1,10 +1,12 @@
 import { defineStore } from "pinia";
 import {
   abortSession,
+  completeOpenAICodexProviderAuth,
   createSession,
   createWorkspace as createWorkspaceRequest,
   deleteCronJob as deleteCronJobRequest,
   getBootstrap,
+  getProviderAuthStatus,
   getSession,
   getSessionMessages,
   getVersion,
@@ -16,6 +18,7 @@ import {
   sendPrompt,
   setSessionModel,
   setSessionThinkingLevel,
+  startOpenAICodexProviderAuth,
   updateCronJob as updateCronJobRequest,
 } from "@/client/lib/api";
 import {
@@ -42,6 +45,7 @@ import type {
   BootstrapPayload,
   CronJob,
   ModelOption,
+  ProviderAuthStatus,
   ServerEvent,
   SessionState,
   SessionSummary,
@@ -58,6 +62,10 @@ const defaultAuthStatus: AuthStatus = {
   passkeyLoginAvailable: false,
   registrationOpen: false,
   setupRequired: false,
+};
+
+const defaultProviderAuthStatus: ProviderAuthStatus = {
+  providers: [],
 };
 
 function compareCronJobsByNextRun(left: CronJob, right: CronJob): number {
@@ -91,6 +99,7 @@ export const useAppStore = defineStore("app", {
     bootstrapped: false,
     buildId: undefined as string | undefined,
     auth: defaultAuthStatus as AuthStatus,
+    providerAuth: defaultProviderAuthStatus as ProviderAuthStatus,
     connectionState: "online" as "online" | "offline" | "connecting",
     workspaces: [] as WorkspaceInfo[],
     models: [] as ModelOption[],
@@ -192,6 +201,7 @@ export const useAppStore = defineStore("app", {
       this.authenticated = payload.authenticated;
       this.auth = payload.auth;
       this.buildId = payload.buildId;
+      this.providerAuth = payload.providerAuth ?? defaultProviderAuthStatus;
       this.recentSessionSummary = payload.recentSession;
       this.workspaces = sortWorkspacesByRecentSession(
         workspaces,
@@ -211,6 +221,7 @@ export const useAppStore = defineStore("app", {
         }
       } else {
         this.activeSession = undefined;
+        this.providerAuth = defaultProviderAuthStatus;
         this.recentSessionSummary = undefined;
         this.sessionsByWorkspace = {};
         this.cronJobsByWorkspace = {};
@@ -228,6 +239,7 @@ export const useAppStore = defineStore("app", {
       this.closeStream();
       this.closeWorkspaceStream();
       this.authenticated = false;
+      this.providerAuth = defaultProviderAuthStatus;
       this.activeSession = undefined;
       this.recentSessionSummary = undefined;
       this.sessionsByWorkspace = {};
@@ -565,6 +577,22 @@ export const useAppStore = defineStore("app", {
       this.activeSession = session;
       this.updateSessionSummary(session);
       await writeCachedSession(session);
+    },
+
+    async refreshProviderAuthStatus(): Promise<void> {
+      this.providerAuth = await getProviderAuthStatus();
+    },
+
+    async startOpenAICodexProviderAuth() {
+      return startOpenAICodexProviderAuth();
+    },
+
+    async completeOpenAICodexProviderAuth(
+      attemptId: string,
+      callbackUrlOrCode: string,
+    ): Promise<void> {
+      this.providerAuth = await completeOpenAICodexProviderAuth(attemptId, callbackUrlOrCode);
+      await this.bootstrap();
     },
 
     async updateCronJob(jobId: string, patch: UpdateCronJobInput): Promise<CronJob> {

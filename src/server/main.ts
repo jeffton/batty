@@ -10,7 +10,7 @@ import { readBuildId } from "./build-id";
 import { loadConfig, resolveBattyDir } from "./config";
 import { createLoginRateLimiter } from "./login-rate-limit";
 import { formatSetupCode, PasskeyAuthService } from "./passkeys";
-import type { SessionSummary, WorkspaceSnapshot } from "@/shared/types";
+import type { ProviderAuthStatus, SessionSummary, WorkspaceSnapshot } from "@/shared/types";
 import { CronService } from "./cron";
 import { PiService, type UploadedFile } from "./pi-service";
 import { WebPushService } from "./web-push";
@@ -185,6 +185,10 @@ function unauthenticatedAuthStatus() {
   };
 }
 
+function unauthenticatedProviderAuthStatus(): ProviderAuthStatus {
+  return { providers: [] };
+}
+
 app.decorateRequest("auth", false);
 
 declare module "fastify" {
@@ -302,6 +306,9 @@ app.get("/api/bootstrap", async (request) => {
   return {
     authenticated,
     auth: authenticated ? await passkeys.getStatus() : unauthenticatedAuthStatus(),
+    providerAuth: authenticated
+      ? service.getProviderAuthStatus()
+      : unauthenticatedProviderAuthStatus(),
     buildId,
     workspaces,
     models: authenticated ? await service.listModels() : [],
@@ -310,6 +317,28 @@ app.get("/api/bootstrap", async (request) => {
 });
 
 app.get("/api/version", async () => ({ buildId }));
+
+app.get("/api/provider-auth/status", async () => {
+  return service.getProviderAuthStatus();
+});
+
+app.post("/api/provider-auth/openai-codex/start", async () => {
+  return service.startProviderAuth("openai-codex");
+});
+
+app.post<{ Body: { attemptId?: string; callbackUrlOrCode?: string } }>(
+  "/api/provider-auth/openai-codex/complete",
+  async (request) => {
+    if (!request.body?.attemptId) {
+      throw new Error("Missing auth attempt id");
+    }
+    if (!request.body?.callbackUrlOrCode) {
+      throw new Error("Missing callback URL or authorization code");
+    }
+
+    return service.completeProviderAuth(request.body.attemptId, request.body.callbackUrlOrCode);
+  },
+);
 
 app.get("/api/push/public-key", async () => ({ publicKey: webPush.getPublicKey() }));
 

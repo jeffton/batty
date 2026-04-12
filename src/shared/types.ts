@@ -216,9 +216,28 @@ export interface AuthStatus {
   setupRequired: boolean;
 }
 
+export interface ProviderAuthProviderStatus {
+  id: string;
+  name: string;
+  connected: boolean;
+}
+
+export interface ProviderAuthStatus {
+  providers: ProviderAuthProviderStatus[];
+}
+
+export interface ProviderAuthStartResponse {
+  attemptId: string;
+  providerId: string;
+  authUrl: string;
+  instructions?: string;
+  expiresAt: number;
+}
+
 export interface BootstrapPayload {
   authenticated: boolean;
   auth: AuthStatus;
+  providerAuth: ProviderAuthStatus;
   buildId: string;
   workspaces: WorkspaceInfo[];
   models: ModelOption[];

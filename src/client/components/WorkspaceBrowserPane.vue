@@ -170,13 +170,6 @@ watch(
         <img src="/favicon.png" alt="Batty" class="workspace-browser-pane__brand-icon" />
         <div class="workspace-browser-pane__brand-copy">
           <h1>Batty</h1>
-          <p>
-            {{
-              store.selectedWorkspace
-                ? `Workspace: ${store.selectedWorkspace.label}`
-                : "Workspaces & sessions"
-            }}
-          </p>
         </div>
       </div>
 
@@ -396,22 +389,11 @@ watch(
   min-width: 0;
 }
 
-.workspace-browser-pane__brand-copy h1,
-.workspace-browser-pane__brand-copy p {
-  margin: 0;
-}
-
 .workspace-browser-pane__brand-copy h1 {
+  margin: 0;
   font-size: 1.2rem;
   line-height: 1.1;
   color: var(--color-text-strong);
-}
-
-.workspace-browser-pane__brand-copy p {
-  color: var(--color-text-subtle);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .workspace-browser-pane__header-actions {

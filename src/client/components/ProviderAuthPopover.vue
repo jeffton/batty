@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ExternalLink, ShieldCheck } from "lucide-vue-next";
+import { ExternalLink, KeyRound } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
 import { useAppStore } from "@/client/stores/app";
@@ -110,7 +110,7 @@ watch(
             : 'provider-auth-popover__badge--disconnected',
         ]"
       >
-        <ShieldCheck v-if="openAICodexStatus?.connected" :size="13" />
+        <KeyRound v-if="openAICodexStatus?.connected" :size="13" />
         {{ openAICodexStatus?.connected ? "Connected" : "Not connected" }}
       </span>
     </div>

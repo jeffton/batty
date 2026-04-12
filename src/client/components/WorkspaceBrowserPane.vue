@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Search, Plus, LogOut, LoaderCircle, Wifi, WifiOff, ShieldCheck } from "lucide-vue-next";
+import { Search, Plus, LogOut, LoaderCircle, Wifi, WifiOff, KeyRound } from "lucide-vue-next";
 import ProviderAuthPopover from "@/client/components/ProviderAuthPopover.vue";
 import { computed, nextTick, ref, watch } from "vue";
 import { useRouter } from "vue-router";
@@ -206,7 +206,7 @@ watch(
           :style="{ 'anchor-name': PROVIDER_AUTH_POPOVER_ANCHOR }"
           :popovertarget="PROVIDER_AUTH_POPOVER_ID"
         >
-          <ShieldCheck :size="14" /> Codex auth
+          <KeyRound :size="14" /> Codex auth
         </button>
 
         <ProviderAuthPopover

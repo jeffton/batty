@@ -1,21 +1,8 @@
 <script setup lang="ts">
-import {
-  ChevronLeft,
-  Wifi,
-  WifiOff,
-  LoaderCircle,
-  Clock3,
-  LogOut,
-  ShieldCheck,
-} from "lucide-vue-next";
+import { ChevronLeft, Wifi, WifiOff, LoaderCircle, Clock3 } from "lucide-vue-next";
 import CronPopover from "@/client/components/CronPopover.vue";
 import ModelConfigPopover from "@/client/components/ModelConfigPopover.vue";
-import ProviderAuthPopover from "@/client/components/ProviderAuthPopover.vue";
 import type { ModelOption } from "@/shared/types";
-import { useAppStore } from "@/client/stores/app";
-
-const PROVIDER_AUTH_POPOVER_ID = "chat-provider-auth-popover";
-const PROVIDER_AUTH_POPOVER_ANCHOR = "--chat-provider-auth-anchor";
 
 const props = defineProps<{
   modelPopoverId: string;
@@ -45,8 +32,6 @@ const emit = defineEmits<{
   setModel: [modelId: string];
   setThinkingLevel: [thinkingLevel: string];
 }>();
-
-const store = useAppStore();
 
 function closePopover(id: string): void {
   const element = document.getElementById(id) as HTMLElement | null;
@@ -116,32 +101,6 @@ function closePopover(id: string): void {
     <CronPopover :popover-id="props.cronPopoverId" :anchor-name="props.cronPopoverAnchor" />
 
     <div class="header__spacer" />
-
-    <button
-      class="header__icon-btn header__action-btn"
-      type="button"
-      :style="{ 'anchor-name': PROVIDER_AUTH_POPOVER_ANCHOR }"
-      :popovertarget="PROVIDER_AUTH_POPOVER_ID"
-      aria-label="Codex auth"
-      title="Codex auth"
-    >
-      <ShieldCheck :size="15" />
-      <span class="header__action-label">Codex auth</span>
-    </button>
-
-    <ProviderAuthPopover
-      :popover-id="PROVIDER_AUTH_POPOVER_ID"
-      :anchor-name="PROVIDER_AUTH_POPOVER_ANCHOR"
-    />
-
-    <button
-      class="header__icon-btn header__action-btn header__logout-btn"
-      type="button"
-      @click="store.logout"
-    >
-      <LogOut :size="15" />
-      <span class="header__action-label">Log out</span>
-    </button>
 
     <div
       class="header__context"
@@ -301,23 +260,8 @@ function closePopover(id: string): void {
   transition: background 80ms ease;
 }
 
-.header__action-btn {
-  width: auto;
-  padding: 0.4rem 0.55rem;
-  gap: 0.35rem;
-}
-
-.header__action-label {
-  font-size: 0.8rem;
-}
-
 .header__icon-btn:hover:not(:disabled) {
   background: var(--color-bg-elevated);
-}
-
-.header__logout-btn:hover:not(:disabled) {
-  background: var(--color-error-soft);
-  color: var(--color-error);
 }
 
 .header__model-name {

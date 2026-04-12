@@ -62,12 +62,19 @@ function statusForProvider(
 ): ProviderAuthProviderStatus {
   const credential = authStorage.get(providerId);
   const payload = credential?.type === "oauth" ? decodeJwtPayload(credential.access) : undefined;
+  const profile =
+    payload?.["https://api.openai.com/profile"] &&
+    typeof payload["https://api.openai.com/profile"] === "object"
+      ? (payload["https://api.openai.com/profile"] as Record<string, unknown>)
+      : undefined;
   const connectedEmail =
-    typeof payload?.email === "string"
-      ? payload.email
-      : typeof payload?.preferred_username === "string"
-        ? payload.preferred_username
-        : undefined;
+    typeof profile?.email === "string"
+      ? profile.email
+      : typeof payload?.email === "string"
+        ? payload.email
+        : typeof payload?.preferred_username === "string"
+          ? payload.preferred_username
+          : undefined;
 
   return {
     id: providerId,

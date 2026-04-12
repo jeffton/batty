@@ -1,66 +1,21 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from "vue";
+import { computed, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import ChatSessionPane from "@/client/components/ChatSessionPane.vue";
 import WorkspaceBrowserPane from "@/client/components/WorkspaceBrowserPane.vue";
+import { usePaneTransition } from "@/client/lib/pane-transition";
 import { workspaceRoutePath } from "@/client/lib/routes";
 import { useAppStore } from "@/client/stores/app";
-
-type PaneRoute = "browser" | "session" | undefined;
-type PaneTransition = "" | "slide-from-right" | "slide-from-left";
 
 const store = useAppStore();
 const route = useRoute();
 const router = useRouter();
-const transitionName = ref<PaneTransition>("");
+const { paneTransitionName, setPaneTransition, clearPaneTransitionSoon } = usePaneTransition();
 
 const isWorkspaceBrowserRoute = computed(() => route.name !== "session");
 
-function paneForRouteName(name: unknown): PaneRoute {
-  if (name === "session") {
-    return "session";
-  }
-
-  if (name === "home" || name === "workspace") {
-    return "browser";
-  }
-
-  return undefined;
-}
-
-function transitionForNavigation(toName: unknown, fromName: unknown): PaneTransition {
-  const toPane = paneForRouteName(toName);
-  const fromPane = paneForRouteName(fromName);
-
-  if (!toPane || !fromPane || toPane === fromPane) {
-    return "";
-  }
-
-  if (fromPane === "browser" && toPane === "session") {
-    return "slide-from-right";
-  }
-
-  if (fromPane === "session" && toPane === "browser") {
-    return "slide-from-left";
-  }
-
-  return "";
-}
-
-function clearTransitionSoon(): void {
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      transitionName.value = "";
-    });
-  });
-}
-
-const removeBeforeEach = router.beforeEach((to, from) => {
-  transitionName.value = transitionForNavigation(to.name, from.name);
-});
-
 const removeAfterEach = router.afterEach(() => {
-  clearTransitionSoon();
+  clearPaneTransitionSoon();
 });
 
 function normalizedHistoryPath(path: string | undefined): string {
@@ -87,23 +42,22 @@ async function goBackToWorkspaceBrowser(): Promise<void> {
     return;
   }
 
-  transitionName.value = "slide-from-left";
+  setPaneTransition("slide-from-left");
   await router.push(targetPath);
 }
 
 onUnmounted(() => {
-  removeBeforeEach();
   removeAfterEach();
 });
 </script>
 
 <template>
   <main class="chat-shell">
-    <Transition :name="transitionName">
+    <Transition :name="paneTransitionName">
       <WorkspaceBrowserPane v-show="isWorkspaceBrowserRoute" class="chat-shell__pane" />
     </Transition>
 
-    <Transition :name="transitionName">
+    <Transition :name="paneTransitionName">
       <ChatSessionPane
         v-show="!isWorkspaceBrowserRoute"
         class="chat-shell__pane"

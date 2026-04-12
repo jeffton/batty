@@ -3,6 +3,7 @@ import { Search, Plus, LogOut, LoaderCircle, Wifi, WifiOff } from "lucide-vue-ne
 import { computed, nextTick, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { formatShortDateTime } from "@/client/lib/formatting";
+import { usePaneTransition } from "@/client/lib/pane-transition";
 import { sessionRoutePath, workspaceRoutePath } from "@/client/lib/routes";
 import type { SessionSummary } from "@/shared/types";
 import { useAppStore } from "@/client/stores/app";
@@ -20,6 +21,7 @@ const startingSession = ref(false);
 const openingSessionId = ref<string>();
 const createWorkspaceInput = ref<HTMLInputElement>();
 const actionsDisabled = computed(() => store.connectionState !== "online");
+const { setPaneTransition } = usePaneTransition();
 
 const filteredWorkspaces = computed(() => {
   const query = workspaceFilter.value.toLowerCase().trim();
@@ -100,6 +102,7 @@ async function submitCreateWorkspace(): Promise<void> {
   createWorkspaceError.value = "";
   try {
     const session = await store.createWorkspace(name);
+    setPaneTransition("slide-from-right");
     await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
     resetCreateWorkspaceForm();
   } catch (error) {
@@ -130,6 +133,7 @@ async function startSession(): Promise<void> {
   startingSession.value = true;
   try {
     const session = await store.startSession(store.selectedWorkspaceId);
+    setPaneTransition("slide-from-right");
     await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
   } finally {
     startingSession.value = false;
@@ -143,6 +147,7 @@ async function openSession(session: SessionSummary): Promise<void> {
 
   openingSessionId.value = session.sessionId;
   try {
+    setPaneTransition("slide-from-right");
     await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
   } finally {
     openingSessionId.value = undefined;

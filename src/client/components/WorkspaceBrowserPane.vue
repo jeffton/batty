@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Search, Plus, LogOut, LoaderCircle, Wifi, WifiOff } from "lucide-vue-next";
+import { Search, Plus, LogOut, LoaderCircle, Wifi, WifiOff, ShieldCheck } from "lucide-vue-next";
+import ProviderAuthPopover from "@/client/components/ProviderAuthPopover.vue";
 import { computed, nextTick, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { formatShortDateTime } from "@/client/lib/formatting";
@@ -7,6 +8,9 @@ import { usePaneTransition } from "@/client/lib/pane-transition";
 import { sessionRoutePath, workspaceRoutePath } from "@/client/lib/routes";
 import type { SessionSummary } from "@/shared/types";
 import { useAppStore } from "@/client/stores/app";
+
+const PROVIDER_AUTH_POPOVER_ID = "workspace-provider-auth-popover";
+const PROVIDER_AUTH_POPOVER_ANCHOR = "--workspace-provider-auth-anchor";
 
 const store = useAppStore();
 const router = useRouter();
@@ -195,6 +199,20 @@ watch(
             class="workspace-browser-pane__status-icon workspace-browser-pane__status-icon--offline"
           />
         </span>
+
+        <button
+          class="workspace-browser-pane__header-btn"
+          type="button"
+          :style="{ 'anchor-name': PROVIDER_AUTH_POPOVER_ANCHOR }"
+          :popovertarget="PROVIDER_AUTH_POPOVER_ID"
+        >
+          <ShieldCheck :size="14" /> Codex auth
+        </button>
+
+        <ProviderAuthPopover
+          :popover-id="PROVIDER_AUTH_POPOVER_ID"
+          :anchor-name="PROVIDER_AUTH_POPOVER_ANCHOR"
+        />
 
         <button class="workspace-browser-pane__logout" @click="store.logout">
           <LogOut :size="14" /> Log out
@@ -423,6 +441,7 @@ watch(
   animation: workspace-browser-pane-spin 0.85s linear infinite;
 }
 
+.workspace-browser-pane__header-btn,
 .workspace-browser-pane__logout {
   display: inline-flex;
   align-items: center;
@@ -435,6 +454,11 @@ watch(
   transition:
     background 80ms ease,
     color 80ms ease;
+}
+
+.workspace-browser-pane__header-btn:hover {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-strong);
 }
 
 .workspace-browser-pane__logout:hover {

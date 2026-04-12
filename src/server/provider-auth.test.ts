@@ -2,6 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { ProviderAuthService } from "@/server/provider-auth";
 
+function createJwt(payload: Record<string, unknown>): string {
+  const header = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url");
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  return `${header}.${body}.signature`;
+}
+
 describe("ProviderAuthService", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -31,7 +37,7 @@ describe("ProviderAuthService", () => {
           capturedInput = (await callbacks.onManualCodeInput?.()) ?? "";
           credential = {
             type: "oauth",
-            access: "access-token",
+            access: createJwt({ email: "codex@example.com" }),
             refresh: "refresh-token",
             expires: Date.now() + 60_000,
           };
@@ -60,6 +66,7 @@ describe("ProviderAuthService", () => {
         id: "openai-codex",
         name: "ChatGPT Plus/Pro (Codex Subscription)",
         connected: true,
+        connectedEmail: "codex@example.com",
       },
     ]);
   });

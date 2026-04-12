@@ -42,16 +42,38 @@ function normalizeError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
+function decodeJwtPayload(token: string): Record<string, unknown> | undefined {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) {
+      return undefined;
+    }
+    const decoded = Buffer.from(payload, "base64url").toString("utf8");
+    return JSON.parse(decoded) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
 function statusForProvider(
   authStorage: AuthStorage,
   providerId: string,
   name: string,
 ): ProviderAuthProviderStatus {
   const credential = authStorage.get(providerId);
+  const payload = credential?.type === "oauth" ? decodeJwtPayload(credential.access) : undefined;
+  const connectedEmail =
+    typeof payload?.email === "string"
+      ? payload.email
+      : typeof payload?.preferred_username === "string"
+        ? payload.preferred_username
+        : undefined;
+
   return {
     id: providerId,
     name,
     connected: credential?.type === "oauth",
+    ...(connectedEmail ? { connectedEmail } : {}),
   };
 }
 

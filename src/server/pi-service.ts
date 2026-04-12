@@ -302,6 +302,10 @@ export class PiService {
     return this.providerAuthService.getStatus();
   }
 
+  setProviderApiKey(providerId: "google" | "openrouter", apiKey: string): ProviderAuthStatus {
+    return this.providerAuthService.setApiKey(providerId, apiKey);
+  }
+
   async listModels(): Promise<ModelOption[]> {
     const models = await this.modelRegistry.getAvailable();
     return models.map(toModelOption).sort((a, b) => a.label.localeCompare(b.label));

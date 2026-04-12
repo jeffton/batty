@@ -340,6 +340,21 @@ app.post<{ Body: { attemptId?: string; callbackUrlOrCode?: string } }>(
   },
 );
 
+app.post<{ Body: { providerId?: string; apiKey?: string } }>(
+  "/api/provider-auth/api-key",
+  async (request) => {
+    const providerId = request.body?.providerId;
+    if (providerId !== "google" && providerId !== "openrouter") {
+      throw new Error("Unsupported API key provider");
+    }
+    if (!request.body?.apiKey) {
+      throw new Error("Missing API key");
+    }
+
+    return service.setProviderApiKey(providerId, request.body.apiKey);
+  },
+);
+
 app.get("/api/push/public-key", async () => ({ publicKey: webPush.getPublicKey() }));
 
 app.post<{ Body: { subscription?: PushSubscriptionJSON } }>(

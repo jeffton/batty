@@ -220,6 +220,7 @@ export interface ProviderAuthProviderStatus {
   id: string;
   name: string;
   connected: boolean;
+  authKind?: "oauth" | "apiKey";
   connectedEmail?: string;
 }
 

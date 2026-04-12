@@ -62,6 +62,17 @@ export function completeOpenAICodexProviderAuth(
   });
 }
 
+export function setProviderApiKey(
+  providerId: "google" | "openrouter",
+  apiKey: string,
+): Promise<ProviderAuthStatus> {
+  return request("/api/provider-auth/api-key", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ providerId, apiKey }),
+  });
+}
+
 export function getPushPublicKey(): Promise<{ publicKey: string }> {
   return request("/api/push/public-key");
 }

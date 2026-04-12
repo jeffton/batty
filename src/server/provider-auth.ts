@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { AuthStorage } from "@mariozechner/pi-coding-agent";
+import type { ApiKeyCredential, AuthStorage } from "@mariozechner/pi-coding-agent";
 import type {
   ProviderAuthProviderStatus,
   ProviderAuthStartResponse,
@@ -7,6 +7,10 @@ import type {
 } from "@/shared/types";
 
 const PROVIDER_AUTH_TTL_MS = 10 * 60 * 1000;
+const API_KEY_PROVIDER_NAMES = {
+  google: "Gemini",
+  openrouter: "OpenRouter",
+} as const;
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -79,7 +83,9 @@ function statusForProvider(
   return {
     id: providerId,
     name,
-    connected: credential?.type === "oauth",
+    connected: credential?.type === "oauth" || credential?.type === "api_key",
+    ...(credential?.type === "oauth" ? { authKind: "oauth" as const } : {}),
+    ...(credential?.type === "api_key" ? { authKind: "apiKey" as const } : {}),
     ...(connectedEmail ? { connectedEmail } : {}),
   };
 }
@@ -91,12 +97,33 @@ export class ProviderAuthService {
 
   getStatus(): ProviderAuthStatus {
     this.cleanupExpiredAttempts();
-    const providers = this.authStorage
+    const oauthProviders = this.authStorage
       .getOAuthProviders()
       .filter((provider) => provider.id === "openai-codex")
       .map((provider) => statusForProvider(this.authStorage, provider.id, provider.name));
+    const apiKeyProviders = Object.entries(API_KEY_PROVIDER_NAMES).map(([providerId, name]) =>
+      statusForProvider(this.authStorage, providerId, name),
+    );
 
-    return { providers };
+    return {
+      providers: [...oauthProviders, ...apiKeyProviders].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      ),
+    };
+  }
+
+  setApiKey(providerId: keyof typeof API_KEY_PROVIDER_NAMES, apiKey: string): ProviderAuthStatus {
+    const trimmed = apiKey.trim();
+    if (!trimmed) {
+      throw new Error("Missing API key");
+    }
+
+    const credential: ApiKeyCredential = {
+      type: "api_key",
+      key: trimmed,
+    };
+    this.authStorage.set(providerId, credential);
+    return this.getStatus();
   }
 
   async start(providerId: "openai-codex"): Promise<ProviderAuthStartResponse> {

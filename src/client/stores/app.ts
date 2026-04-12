@@ -16,6 +16,7 @@ import {
   logout as logoutRequest,
   openSession,
   sendPrompt,
+  setProviderApiKey,
   setSessionModel,
   setSessionThinkingLevel,
   startOpenAICodexProviderAuth,
@@ -592,6 +593,11 @@ export const useAppStore = defineStore("app", {
       callbackUrlOrCode: string,
     ): Promise<void> {
       this.providerAuth = await completeOpenAICodexProviderAuth(attemptId, callbackUrlOrCode);
+      await this.bootstrap();
+    },
+
+    async setProviderApiKey(providerId: "google" | "openrouter", apiKey: string): Promise<void> {
+      this.providerAuth = await setProviderApiKey(providerId, apiKey);
       await this.bootstrap();
     },
 

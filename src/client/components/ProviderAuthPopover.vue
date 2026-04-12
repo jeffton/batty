@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ExternalLink, KeyRound } from "lucide-vue-next";
-import { computed, ref, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
 import { useAppStore } from "@/client/stores/app";
+import type { ProviderAuthProviderStatus } from "@/shared/types";
 
 const props = defineProps<{
   popoverId: string;
@@ -12,20 +13,39 @@ const props = defineProps<{
 const store = useAppStore();
 const connectPending = ref(false);
 const completePending = ref(false);
+const apiKeySaving = reactive<Record<string, boolean>>({
+  google: false,
+  openrouter: false,
+});
+const apiKeyInputs = reactive<Record<"google" | "openrouter", string>>({
+  google: "",
+  openrouter: "",
+});
 const authAttemptId = ref("");
 const authUrl = ref("");
 const authInstructions = ref("");
 const authExpiresAt = ref<number | null>(null);
 const authInput = ref("");
 const authError = ref("");
+const apiKeyErrors = reactive<Record<string, string>>({
+  google: "",
+  openrouter: "",
+});
 
-const openAICodexStatus = computed(() =>
-  store.providerAuth.providers.find((provider) => provider.id === "openai-codex"),
+const openAICodexStatus = computed(() => providerById("openai-codex"));
+const googleStatus = computed(() => providerById("google"));
+const openRouterStatus = computed(() => providerById("openrouter"));
+const connectedProviders = computed(() =>
+  store.providerAuth.providers.filter((provider) => provider.connected),
 );
 const hasOpenAICodexAttempt = computed(() => authAttemptId.value.length > 0);
 const authExpiryLabel = computed(() =>
   authExpiresAt.value == null ? "" : formatShortDateTime(authExpiresAt.value),
 );
+
+function providerById(providerId: string): ProviderAuthProviderStatus | undefined {
+  return store.providerAuth.providers.find((provider) => provider.id === providerId);
+}
 
 function resetAttempt(): void {
   authAttemptId.value = "";
@@ -69,11 +89,29 @@ async function completeOpenAICodexAuth(): Promise<void> {
   try {
     await store.completeOpenAICodexProviderAuth(authAttemptId.value, authInput.value.trim());
     resetAttempt();
-    authError.value = "";
   } catch (error) {
     authError.value = error instanceof Error ? error.message : String(error);
   } finally {
     completePending.value = false;
+  }
+}
+
+async function saveApiKey(providerId: "google" | "openrouter"): Promise<void> {
+  const apiKey = apiKeyInputs[providerId].trim();
+  if (!apiKey) {
+    apiKeyErrors[providerId] = "Enter an API key";
+    return;
+  }
+
+  apiKeySaving[providerId] = true;
+  apiKeyErrors[providerId] = "";
+  try {
+    await store.setProviderApiKey(providerId, apiKey);
+    apiKeyInputs[providerId] = "";
+  } catch (error) {
+    apiKeyErrors[providerId] = error instanceof Error ? error.message : String(error);
+  } finally {
+    apiKeySaving[providerId] = false;
   }
 }
 
@@ -85,6 +123,8 @@ watch(
     }
 
     authError.value = "";
+    apiKeyErrors.google = "";
+    apiKeyErrors.openrouter = "";
     void store.refreshProviderAuthStatus();
   },
 );
@@ -97,82 +137,193 @@ watch(
     :style="{ 'position-anchor': props.anchorName }"
     popover="auto"
   >
-    <div class="provider-auth-popover__header">
-      <div>
-        <div class="provider-auth-popover__title">ChatGPT/Codex subscription</div>
-        <div class="provider-auth-popover__subtitle">Provider: openai-codex</div>
+    <section class="provider-auth-popover__section">
+      <div class="provider-auth-popover__section-title">Connected providers</div>
+      <div v-if="connectedProviders.length > 0" class="provider-auth-popover__connected-list">
+        <div
+          v-for="provider in connectedProviders"
+          :key="provider.id"
+          class="provider-auth-popover__connected-item"
+        >
+          <div>
+            <div class="provider-auth-popover__provider-name">{{ provider.name }}</div>
+            <div class="provider-auth-popover__provider-meta">
+              {{ provider.authKind === "apiKey" ? "API key" : "OAuth" }}
+              <template v-if="provider.connectedEmail"> · {{ provider.connectedEmail }}</template>
+            </div>
+          </div>
+          <span class="provider-auth-popover__badge provider-auth-popover__badge--connected">
+            <KeyRound :size="13" /> Connected
+          </span>
+        </div>
       </div>
-      <span
-        :class="[
-          'provider-auth-popover__badge',
-          openAICodexStatus?.connected
-            ? 'provider-auth-popover__badge--connected'
-            : 'provider-auth-popover__badge--disconnected',
-        ]"
-      >
-        <KeyRound v-if="openAICodexStatus?.connected" :size="13" />
-        {{ openAICodexStatus?.connected ? "Connected" : "Not connected" }}
-      </span>
-    </div>
+      <div v-else class="provider-auth-popover__empty">No providers connected yet.</div>
+    </section>
 
-    <div v-if="openAICodexStatus?.connectedEmail" class="provider-auth-popover__account">
-      Connected account: <strong>{{ openAICodexStatus.connectedEmail }}</strong>
-    </div>
-
-    <p class="provider-auth-popover__copy">
-      Sign in with your ChatGPT/Codex subscription to use <code>openai-codex/*</code> models.
-    </p>
-
-    <button
-      class="provider-auth-popover__action"
-      type="button"
-      :disabled="connectPending || completePending"
-      @click="startOpenAICodexAuth"
-    >
-      {{
-        connectPending
-          ? "Starting…"
-          : hasOpenAICodexAttempt
-            ? "Restart connect flow"
-            : openAICodexStatus?.connected
-              ? "Reconnect account"
-              : "Connect ChatGPT/Codex"
-      }}
-    </button>
-
-    <div v-if="hasOpenAICodexAttempt" class="provider-auth-popover__attempt">
-      <div v-if="authInstructions" class="provider-auth-popover__help">{{ authInstructions }}</div>
-      <div class="provider-auth-popover__help">
-        Open the sign-in page, finish login in the browser, then paste the localhost callback URL or
-        just the authorization code here.
-      </div>
-      <div v-if="authExpiryLabel" class="provider-auth-popover__help">
-        Expires: {{ authExpiryLabel }}
+    <section class="provider-auth-popover__section">
+      <div class="provider-auth-popover__header">
+        <div>
+          <div class="provider-auth-popover__title">ChatGPT/Codex subscription</div>
+          <div class="provider-auth-popover__subtitle">Provider: openai-codex</div>
+        </div>
+        <span
+          :class="[
+            'provider-auth-popover__badge',
+            openAICodexStatus?.connected
+              ? 'provider-auth-popover__badge--connected'
+              : 'provider-auth-popover__badge--disconnected',
+          ]"
+        >
+          <KeyRound v-if="openAICodexStatus?.connected" :size="13" />
+          {{ openAICodexStatus?.connected ? "Connected" : "Not connected" }}
+        </span>
       </div>
 
-      <button class="provider-auth-popover__link" type="button" @click="openAuthUrl">
-        <ExternalLink :size="14" /> Open sign-in page
-      </button>
-
-      <textarea
-        v-model="authInput"
-        class="provider-auth-popover__input"
-        rows="4"
-        placeholder="Paste the localhost callback URL or the authorization code"
-        :disabled="completePending"
-      />
+      <p class="provider-auth-popover__copy">
+        Sign in with your ChatGPT/Codex subscription to use <code>openai-codex/*</code> models.
+      </p>
 
       <button
-        class="provider-auth-popover__action provider-auth-popover__action--primary"
+        class="provider-auth-popover__action"
         type="button"
-        :disabled="completePending || !authInput.trim()"
-        @click="completeOpenAICodexAuth"
+        :disabled="connectPending || completePending"
+        @click="startOpenAICodexAuth"
       >
-        {{ completePending ? "Completing…" : "Complete connection" }}
+        {{
+          connectPending
+            ? "Starting…"
+            : hasOpenAICodexAttempt
+              ? "Restart connect flow"
+              : openAICodexStatus?.connected
+                ? "Reconnect account"
+                : "Connect ChatGPT/Codex"
+        }}
       </button>
-    </div>
 
-    <div v-if="authError" class="provider-auth-popover__error">{{ authError }}</div>
+      <div v-if="hasOpenAICodexAttempt" class="provider-auth-popover__attempt">
+        <div v-if="authInstructions" class="provider-auth-popover__help">
+          {{ authInstructions }}
+        </div>
+        <div class="provider-auth-popover__help">
+          Open the sign-in page, finish login in the browser, then paste the localhost callback URL
+          or just the authorization code here.
+        </div>
+        <div v-if="authExpiryLabel" class="provider-auth-popover__help">
+          Expires: {{ authExpiryLabel }}
+        </div>
+
+        <button class="provider-auth-popover__link" type="button" @click="openAuthUrl">
+          <ExternalLink :size="14" /> Open sign-in page
+        </button>
+
+        <textarea
+          v-model="authInput"
+          class="provider-auth-popover__input"
+          rows="4"
+          placeholder="Paste the localhost callback URL or the authorization code"
+          :disabled="completePending"
+        />
+
+        <button
+          class="provider-auth-popover__action provider-auth-popover__action--primary"
+          type="button"
+          :disabled="completePending || !authInput.trim()"
+          @click="completeOpenAICodexAuth"
+        >
+          {{ completePending ? "Completing…" : "Complete connection" }}
+        </button>
+      </div>
+
+      <div v-if="authError" class="provider-auth-popover__error">{{ authError }}</div>
+    </section>
+
+    <section class="provider-auth-popover__section">
+      <div class="provider-auth-popover__header">
+        <div>
+          <div class="provider-auth-popover__title">Gemini API key</div>
+          <div class="provider-auth-popover__subtitle">Provider: google</div>
+        </div>
+        <span
+          :class="[
+            'provider-auth-popover__badge',
+            googleStatus?.connected
+              ? 'provider-auth-popover__badge--connected'
+              : 'provider-auth-popover__badge--disconnected',
+          ]"
+        >
+          {{ googleStatus?.connected ? "Connected" : "Not connected" }}
+        </span>
+      </div>
+
+      <div class="provider-auth-popover__api-key-row">
+        <input
+          v-model="apiKeyInputs.google"
+          class="provider-auth-popover__api-key-input"
+          type="password"
+          placeholder="Paste Gemini API key"
+          :disabled="apiKeySaving.google"
+        />
+        <button
+          class="provider-auth-popover__action provider-auth-popover__action--primary"
+          type="button"
+          :disabled="apiKeySaving.google"
+          @click="saveApiKey('google')"
+        >
+          {{
+            apiKeySaving.google ? "Saving…" : googleStatus?.connected ? "Replace key" : "Save key"
+          }}
+        </button>
+      </div>
+      <div v-if="apiKeyErrors.google" class="provider-auth-popover__error">
+        {{ apiKeyErrors.google }}
+      </div>
+    </section>
+
+    <section class="provider-auth-popover__section">
+      <div class="provider-auth-popover__header">
+        <div>
+          <div class="provider-auth-popover__title">OpenRouter API key</div>
+          <div class="provider-auth-popover__subtitle">Provider: openrouter</div>
+        </div>
+        <span
+          :class="[
+            'provider-auth-popover__badge',
+            openRouterStatus?.connected
+              ? 'provider-auth-popover__badge--connected'
+              : 'provider-auth-popover__badge--disconnected',
+          ]"
+        >
+          {{ openRouterStatus?.connected ? "Connected" : "Not connected" }}
+        </span>
+      </div>
+
+      <div class="provider-auth-popover__api-key-row">
+        <input
+          v-model="apiKeyInputs.openrouter"
+          class="provider-auth-popover__api-key-input"
+          type="password"
+          placeholder="Paste OpenRouter API key"
+          :disabled="apiKeySaving.openrouter"
+        />
+        <button
+          class="provider-auth-popover__action provider-auth-popover__action--primary"
+          type="button"
+          :disabled="apiKeySaving.openrouter"
+          @click="saveApiKey('openrouter')"
+        >
+          {{
+            apiKeySaving.openrouter
+              ? "Saving…"
+              : openRouterStatus?.connected
+                ? "Replace key"
+                : "Save key"
+          }}
+        </button>
+      </div>
+      <div v-if="apiKeyErrors.openrouter" class="provider-auth-popover__error">
+        {{ apiKeyErrors.openrouter }}
+      </div>
+    </section>
   </div>
 </template>
 
@@ -188,11 +339,11 @@ watch(
     block-end span-inline-start,
     block-start span-inline-end,
     block-start span-inline-start;
-  width: min(24rem, calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 1rem));
+  width: min(28rem, calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 1rem));
   max-width: calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 1rem);
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
+  gap: 0.7rem;
   margin: 0;
   padding: 0.65rem;
   border: 1px solid var(--color-border-soft);
@@ -200,10 +351,68 @@ watch(
   background: var(--color-bg-overlay);
   color: inherit;
   box-shadow: var(--color-shadow-popover);
+  max-height: min(40rem, calc(100dvh - var(--safe-area-top) - var(--safe-area-bottom) - 2rem));
+  overflow-y: auto;
 }
 
 .provider-auth-popover::backdrop {
   background: var(--color-backdrop);
+}
+
+.provider-auth-popover__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.1rem 0;
+}
+
+.provider-auth-popover__section + .provider-auth-popover__section {
+  border-top: 1px solid var(--color-border-soft);
+  padding-top: 0.7rem;
+}
+
+.provider-auth-popover__section-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+
+.provider-auth-popover__connected-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.provider-auth-popover__connected-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.55rem 0.6rem;
+  border-radius: 0.6rem;
+  background: var(--color-bg-panel);
+}
+
+.provider-auth-popover__provider-name,
+.provider-auth-popover__title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text-strong);
+}
+
+.provider-auth-popover__provider-meta,
+.provider-auth-popover__subtitle,
+.provider-auth-popover__copy,
+.provider-auth-popover__help,
+.provider-auth-popover__empty {
+  font-size: 0.82rem;
+  color: var(--color-text-subtle);
+}
+
+.provider-auth-popover__copy {
+  margin: 0;
 }
 
 .provider-auth-popover__header {
@@ -211,24 +420,6 @@ watch(
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.5rem;
-}
-
-.provider-auth-popover__title {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--color-text-strong);
-}
-
-.provider-auth-popover__subtitle,
-.provider-auth-popover__copy,
-.provider-auth-popover__help,
-.provider-auth-popover__account {
-  font-size: 0.82rem;
-  color: var(--color-text-subtle);
-}
-
-.provider-auth-popover__copy {
-  margin: 0;
 }
 
 .provider-auth-popover__badge {
@@ -250,10 +441,6 @@ watch(
 .provider-auth-popover__badge--disconnected {
   background: var(--color-bg-elevated);
   color: var(--color-text-subtle);
-}
-
-.provider-auth-popover__account strong {
-  color: var(--color-text-strong);
 }
 
 .provider-auth-popover__attempt {
@@ -298,15 +485,25 @@ watch(
   cursor: default;
 }
 
-.provider-auth-popover__input {
+.provider-auth-popover__input,
+.provider-auth-popover__api-key-input {
   width: 100%;
-  resize: vertical;
   border: 1px solid var(--color-border-soft);
   border-radius: 0.5rem;
   background: var(--color-bg-elevated);
   color: inherit;
   padding: 0.55rem 0.65rem;
   font: inherit;
+}
+
+.provider-auth-popover__input {
+  resize: vertical;
+}
+
+.provider-auth-popover__api-key-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
 }
 
 .provider-auth-popover__error {

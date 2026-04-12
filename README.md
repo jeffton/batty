@@ -269,4 +269,3 @@ The deploy script installs Batty to `/opt/batty`:
 - service entrypoint `/opt/batty/current/dist/server/main.mjs`
 - CLI entrypoint `/opt/batty/current/dist/server/cli.mjs`
 
-That means the running service no longer depends on the repo checkout being available at runtime.

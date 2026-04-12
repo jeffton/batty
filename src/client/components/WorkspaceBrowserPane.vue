@@ -206,7 +206,7 @@ watch(
           :style="{ 'anchor-name': PROVIDER_AUTH_POPOVER_ANCHOR }"
           :popovertarget="PROVIDER_AUTH_POPOVER_ID"
         >
-          <KeyRound :size="14" /> Codex auth
+          <KeyRound :size="14" /> Auth
         </button>
 
         <ProviderAuthPopover

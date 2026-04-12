@@ -37,12 +37,13 @@ async function goBackToWorkspaceBrowser(): Promise<void> {
       ? normalizedHistoryPath(window.history.state.back)
       : "";
 
+  setPaneTransition("slide-from-left");
+
   if (backPath === targetPath) {
     await router.back();
     return;
   }
 
-  setPaneTransition("slide-from-left");
   await router.push(targetPath);
 }
 

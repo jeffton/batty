@@ -9,6 +9,9 @@ import { createHeadView, createTailView } from "@/client/lib/tool-output";
 import { hasToolResultContent } from "@/client/lib/transcript";
 import type { ToolExecutionDetails, UiContentBlock } from "@/shared/types";
 
+// Keep this in sync with .tool-call__output-window--collapsed using 20lh below.
+// The collapsed container reserves exactly one line box per truncated line so the
+// transcript height stays stable while the visible tail slides during streaming.
 const OUTPUT_TAIL_LINE_COUNT = 20;
 
 const props = withDefaults(
@@ -119,6 +122,15 @@ const visibleBashOutput = computed(() =>
 );
 const visibleWebSearchOutput = computed(() =>
   isExpanded.value ? webSearchTextOutput.value : webSearchHeadView.value.text,
+);
+const showCollapsedBashWindow = computed(
+  () => props.name === "bash" && !isExpanded.value && bashTailView.value.isTrimmed,
+);
+const showCollapsedWriteWindow = computed(
+  () => props.name === "write" && !isExpanded.value && writeTailView.value.isTrimmed,
+);
+const showCollapsedWebSearchWindow = computed(
+  () => props.name === "web-search" && !isExpanded.value && webSearchHeadView.value.isTrimmed,
 );
 const visibleResultBlocks = computed(() => {
   if (props.name === "read" && props.status !== "error") {
@@ -265,12 +277,15 @@ const genericEntries = computed(() => {
           {{ expandButtonLabel }}
         </button>
       </div>
-      <CodeBlock
+      <div
         v-if="visibleBashOutput.trim().length > 0"
-        :code="visibleBashOutput"
-        language="bash"
-        :compact="props.compact"
-      />
+        :class="[
+          'tool-call__output-window',
+          showCollapsedBashWindow ? 'tool-call__output-window--collapsed' : '',
+        ]"
+      >
+        <CodeBlock :code="visibleBashOutput" language="bash" :compact="props.compact" />
+      </div>
     </div>
 
     <template v-else-if="props.name === 'write' && visibleWriteContent">
@@ -280,7 +295,14 @@ const genericEntries = computed(() => {
             {{ expandButtonLabel }}
           </button>
         </div>
-        <CodeBlock :code="visibleWriteContent" :language="codeLanguage" :compact="props.compact" />
+        <div
+          :class="[
+            'tool-call__output-window',
+            showCollapsedWriteWindow ? 'tool-call__output-window--collapsed' : '',
+          ]"
+        >
+          <CodeBlock :code="visibleWriteContent" :language="codeLanguage" :compact="props.compact" />
+        </div>
       </div>
     </template>
 
@@ -293,7 +315,14 @@ const genericEntries = computed(() => {
 
     <template v-if="props.name === 'web-search' && visibleWebSearchOutput.trim().length > 0">
       <div class="tool-call__bash">
-        <CodeBlock :code="visibleWebSearchOutput" language="markdown" :compact="props.compact" />
+        <div
+          :class="[
+            'tool-call__output-window',
+            showCollapsedWebSearchWindow ? 'tool-call__output-window--collapsed' : '',
+          ]"
+        >
+          <CodeBlock :code="visibleWebSearchOutput" language="markdown" :compact="props.compact" />
+        </div>
         <div v-if="canExpandOutput" class="tool-call__expand-row">
           <button type="button" class="tool-call__expand-btn" @click="isExpanded = !isExpanded">
             {{ expandButtonLabel }}
@@ -461,6 +490,21 @@ const genericEntries = computed(() => {
 .tool-call__overlay-output {
   position: relative;
   padding-top: 0.4rem;
+}
+
+.tool-call__output-window {
+  min-width: 0;
+}
+
+.tool-call__output-window--collapsed {
+  display: flex;
+  align-items: flex-end;
+  /* Keep this in sync with OUTPUT_TAIL_LINE_COUNT above.
+     20lh reserves exactly 20 visible line boxes for the truncated output so the
+     transcript height does not bob while the tail window drops old lines and adds new ones. */
+  min-height: calc(20 * 1lh);
+  max-height: calc(20 * 1lh);
+  overflow: hidden;
 }
 
 .tool-call__overlay-control,

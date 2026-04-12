@@ -92,10 +92,12 @@ describe("ToolCallBlock", () => {
     expect(wrapper.find("pre.code-block").text()).toContain("line-30");
     expect(wrapper.find("pre.code-block").text()).toContain("line-11");
     expect(wrapper.find("pre.code-block").text()).not.toContain("line-10");
+    expect(wrapper.find(".tool-call__output-window--collapsed").exists()).toBe(true);
 
     await wrapper.get(".tool-call__expand-btn").trigger("click");
 
     expect(wrapper.find("pre.code-block").text()).toContain("line-1");
+    expect(wrapper.find(".tool-call__output-window--collapsed").exists()).toBe(false);
   });
 
   it("shows web-search arguments before output and expands to the full output on demand", async () => {

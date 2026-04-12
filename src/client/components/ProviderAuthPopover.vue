@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ExternalLink, KeyRound } from "lucide-vue-next";
+import { ExternalLink, KeyRound, Save } from "lucide-vue-next";
 import { computed, reactive, ref, watch } from "vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
 import { useAppStore } from "@/client/stores/app";
@@ -280,15 +280,11 @@ watch(
             class="provider-auth-popover__action provider-auth-popover__action--primary provider-auth-popover__api-key-button"
             type="button"
             :disabled="apiKeySaving[provider.id]"
+            :title="provider.connected ? 'Replace key' : 'Save key'"
+            :aria-label="provider.connected ? 'Replace key' : 'Save key'"
             @click="saveApiKey(provider.id as 'google' | 'openrouter')"
           >
-            {{
-              apiKeySaving[provider.id]
-                ? "💾 Saving…"
-                : provider.connected
-                  ? "💾 Replace key"
-                  : "💾 Save key"
-            }}
+            <Save :size="16" />
           </button>
         </div>
         <div v-if="apiKeyErrors[provider.id]" class="provider-auth-popover__error">
@@ -448,7 +444,7 @@ watch(
 
 .provider-auth-popover__api-key-row {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 0.45rem;
 }
 
@@ -458,7 +454,10 @@ watch(
 
 .provider-auth-popover__api-key-button {
   flex: 0 0 auto;
-  white-space: nowrap;
+  width: 2.75rem;
+  min-width: 2.75rem;
+  padding: 0;
+  aspect-ratio: 1;
 }
 
 .provider-auth-popover__error {

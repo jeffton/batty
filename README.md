@@ -268,4 +268,3 @@ The deploy script installs Batty to `/opt/batty`:
 - systemd `WorkingDirectory=/opt/batty/current`
 - service entrypoint `/opt/batty/current/dist/server/main.mjs`
 - CLI entrypoint `/opt/batty/current/dist/server/cli.mjs`
-

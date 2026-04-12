@@ -1,13 +1,10 @@
 <script setup lang="ts">
-import { ChevronDown, Wifi, WifiOff, LoaderCircle, Clock3 } from "lucide-vue-next";
+import { ChevronLeft, Wifi, WifiOff, LoaderCircle, Clock3 } from "lucide-vue-next";
 import CronPopover from "@/client/components/CronPopover.vue";
 import ModelConfigPopover from "@/client/components/ModelConfigPopover.vue";
-import WorkspacePopover from "@/client/components/WorkspacePopover.vue";
 import type { ModelOption } from "@/shared/types";
 
 const props = defineProps<{
-  workspacePopoverId: string;
-  workspacePopoverAnchor: string;
   modelPopoverId: string;
   modelPopoverAnchor: string;
   cronPopoverId: string;
@@ -31,6 +28,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
+  back: [];
   setModel: [modelId: string];
   setThinkingLevel: [thinkingLevel: string];
 }>();
@@ -46,27 +44,21 @@ function closePopover(id: string): void {
     <button
       class="header__ws-btn"
       type="button"
-      :style="{ 'anchor-name': props.workspacePopoverAnchor }"
-      :popovertarget="props.workspacePopoverId"
+      aria-label="Back to workspaces and sessions"
+      @click="emit('back')"
     >
+      <ChevronLeft :size="16" class="header__back-icon" />
       <img src="/favicon.png" alt="" class="header__icon" />
       <div class="header__ws-info">
-        <span class="header__ws-name">{{ props.workspaceLabel }}</span>
-        <span class="header__ws-path">{{ props.cwd }}</span>
+        <span class="header__ws-name">{{ props.workspaceLabel || "Workspaces & sessions" }}</span>
+        <span class="header__ws-path">{{ props.cwd || "Back to workspace browser" }}</span>
       </div>
       <LoaderCircle
         v-if="props.workspaceSwitcherLoading"
         :size="14"
         class="header__chevron header__status-icon--spin"
       />
-      <ChevronDown v-else :size="14" class="header__chevron" />
     </button>
-
-    <WorkspacePopover
-      :popover-id="props.workspacePopoverId"
-      :anchor-name="props.workspacePopoverAnchor"
-      @close="closePopover(props.workspacePopoverId)"
-    />
 
     <button
       class="header__model-btn"
@@ -79,7 +71,7 @@ function closePopover(id: string): void {
         <span class="header__model-name">{{ props.modelButtonLabel }}</span>
         <span class="header__model-effort">{{ props.thinkingButtonLabel }}</span>
       </div>
-      <ChevronDown :size="14" class="header__chevron" />
+      <span class="header__model-caret">▾</span>
     </button>
 
     <ModelConfigPopover
@@ -186,6 +178,11 @@ function closePopover(id: string): void {
   background: var(--color-bg-elevated);
 }
 
+.header__back-icon {
+  color: var(--color-text-subtle);
+  flex-shrink: 0;
+}
+
 .header__ws-info {
   display: flex;
   flex-direction: column;
@@ -211,7 +208,8 @@ function closePopover(id: string): void {
   white-space: nowrap;
 }
 
-.header__chevron {
+.header__chevron,
+.header__model-caret {
   color: var(--color-text-subtle);
   flex-shrink: 0;
 }

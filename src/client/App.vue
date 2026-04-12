@@ -68,9 +68,6 @@ function fallbackWorkspaceRoute(): string | undefined {
 
 async function hydrateRouteFromCache(workspaceId: string, sessionId?: string): Promise<boolean> {
   if (!sessionId) {
-    if (store.activeSession) {
-      store.clearActiveSession();
-    }
     return true;
   }
 
@@ -189,9 +186,6 @@ async function syncRouteToStore(): Promise<void> {
     }
 
     if (!sessionId) {
-      if (store.activeSession) {
-        store.clearActiveSession();
-      }
       return;
     }
 

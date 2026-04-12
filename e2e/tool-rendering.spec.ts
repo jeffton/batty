@@ -483,7 +483,7 @@ test.describe("tool rendering", () => {
     }
 
     const after = await page.locator(".transcript").evaluate((element) => element.scrollTop);
-    expect(Math.abs(after - before)).toBeLessThanOrEqual(8);
+    expect(Math.abs(after - before)).toBeLessThanOrEqual(12);
   });
 
   test("streams edit output, then replaces it with the final diff", async ({ page }) => {

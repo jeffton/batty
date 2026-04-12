@@ -9,9 +9,11 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:33147",
     trace: "on-first-retry",
+    serviceWorkers: "block",
   },
   webServer: {
-    command: "pnpm exec tsx e2e/prepare.ts && BATTY_PORT=33147 pnpm start -- .",
+    command:
+      "pnpm exec tsx e2e/prepare.ts && BATTY_SELF_PATH=$PWD BATTY_PORT=33147 pnpm start -- .",
     url: "http://127.0.0.1:33147/healthz",
     reuseExistingServer: false,
     timeout: 120_000,

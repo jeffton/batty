@@ -9,6 +9,7 @@ const props = defineProps<{
   modelPopoverAnchor: string;
   cronPopoverId: string;
   cronPopoverAnchor: string;
+  workspaceLabel?: string;
   cwd?: string;
   workspaceSwitcherLoading: boolean;
   activeSession: boolean;
@@ -49,8 +50,8 @@ function closePopover(id: string): void {
       <ChevronLeft :size="16" class="header__back-icon" />
       <img src="/favicon.png" alt="" class="header__icon" />
       <div class="header__ws-info">
-        <span class="header__ws-name">Workspaces & sessions</span>
-        <span class="header__ws-path">{{ props.cwd || "Pick a session" }}</span>
+        <span class="header__ws-name">{{ props.workspaceLabel || "Workspaces & sessions" }}</span>
+        <span class="header__ws-path">{{ props.cwd || "Back to workspace browser" }}</span>
       </div>
       <LoaderCircle
         v-if="props.workspaceSwitcherLoading"

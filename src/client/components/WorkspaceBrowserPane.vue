@@ -3,6 +3,7 @@ import { Search, Plus, LogOut, LoaderCircle, Wifi, WifiOff } from "lucide-vue-ne
 import { computed, nextTick, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { formatShortDateTime } from "@/client/lib/formatting";
+import { usePaneTransition } from "@/client/lib/pane-transition";
 import { sessionRoutePath, workspaceRoutePath } from "@/client/lib/routes";
 import type { SessionSummary } from "@/shared/types";
 import { useAppStore } from "@/client/stores/app";
@@ -20,6 +21,7 @@ const startingSession = ref(false);
 const openingSessionId = ref<string>();
 const createWorkspaceInput = ref<HTMLInputElement>();
 const actionsDisabled = computed(() => store.connectionState !== "online");
+const { setPaneTransition } = usePaneTransition();
 
 const filteredWorkspaces = computed(() => {
   const query = workspaceFilter.value.toLowerCase().trim();
@@ -100,6 +102,7 @@ async function submitCreateWorkspace(): Promise<void> {
   createWorkspaceError.value = "";
   try {
     const session = await store.createWorkspace(name);
+    setPaneTransition("slide-from-right");
     await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
     resetCreateWorkspaceForm();
   } catch (error) {
@@ -130,6 +133,7 @@ async function startSession(): Promise<void> {
   startingSession.value = true;
   try {
     const session = await store.startSession(store.selectedWorkspaceId);
+    setPaneTransition("slide-from-right");
     await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
   } finally {
     startingSession.value = false;
@@ -143,6 +147,7 @@ async function openSession(session: SessionSummary): Promise<void> {
 
   openingSessionId.value = session.sessionId;
   try {
+    setPaneTransition("slide-from-right");
     await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
   } finally {
     openingSessionId.value = undefined;
@@ -165,7 +170,13 @@ watch(
         <img src="/favicon.png" alt="Batty" class="workspace-browser-pane__brand-icon" />
         <div class="workspace-browser-pane__brand-copy">
           <h1>Batty</h1>
-          <p>Workspaces & sessions</p>
+          <p>
+            {{
+              store.selectedWorkspace
+                ? `Workspace: ${store.selectedWorkspace.label}`
+                : "Workspaces & sessions"
+            }}
+          </p>
         </div>
       </div>
 
@@ -677,6 +688,27 @@ watch(
 @keyframes workspace-browser-pane-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 760px) {
+  .workspace-browser-pane__header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .workspace-browser-pane__header-actions {
+    justify-content: space-between;
+  }
+
+  .workspace-browser-pane__cols {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 18rem) minmax(0, 1fr);
+  }
+
+  .workspace-browser-pane__column--sessions {
+    border-left: 0;
+    border-top: 1px solid var(--color-border-soft);
   }
 }
 </style>

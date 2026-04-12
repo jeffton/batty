@@ -186,9 +186,6 @@ async function syncRouteToStore(): Promise<void> {
     }
 
     if (!sessionId) {
-      if (store.activeSession) {
-        store.clearActiveSession();
-      }
       return;
     }
 

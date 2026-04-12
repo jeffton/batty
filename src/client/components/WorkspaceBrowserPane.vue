@@ -302,11 +302,6 @@ watch(
       <section class="workspace-browser-pane__column workspace-browser-pane__column--sessions">
         <div class="workspace-browser-pane__section-label">Sessions</div>
 
-        <div class="workspace-browser-pane__workspace-meta">
-          <strong>{{ store.selectedWorkspace?.label || "No workspace selected" }}</strong>
-          <span>{{ store.selectedWorkspace?.path }}</span>
-        </div>
-
         <div class="workspace-browser-pane__search-row">
           <Search :size="14" class="workspace-browser-pane__search-icon" />
           <input
@@ -476,7 +471,7 @@ watch(
 .workspace-browser-pane__cols {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 20rem) minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .workspace-browser-pane__column {
@@ -500,30 +495,6 @@ watch(
   letter-spacing: 0.08em;
   color: var(--color-text-subtle);
   padding: 0.2rem 0.35rem;
-}
-
-.workspace-browser-pane__workspace-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  padding: 0 0.35rem;
-  min-width: 0;
-}
-
-.workspace-browser-pane__workspace-meta strong,
-.workspace-browser-pane__workspace-meta span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workspace-browser-pane__workspace-meta strong {
-  color: var(--color-text-strong);
-}
-
-.workspace-browser-pane__workspace-meta span {
-  color: var(--color-text-subtle);
-  font-size: 0.84rem;
 }
 
 .workspace-browser-pane__search-row {
@@ -688,27 +659,6 @@ watch(
 @keyframes workspace-browser-pane-spin {
   to {
     transform: rotate(360deg);
-  }
-}
-
-@media (max-width: 760px) {
-  .workspace-browser-pane__header {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .workspace-browser-pane__header-actions {
-    justify-content: space-between;
-  }
-
-  .workspace-browser-pane__cols {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 18rem) minmax(0, 1fr);
-  }
-
-  .workspace-browser-pane__column--sessions {
-    border-left: 0;
-    border-top: 1px solid var(--color-border-soft);
   }
 }
 </style>

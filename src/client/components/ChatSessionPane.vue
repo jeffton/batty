@@ -667,7 +667,6 @@ watch(
       :model-popover-anchor="MODEL_POPOVER_ANCHOR"
       :cron-popover-id="CRON_POPOVER_ID"
       :cron-popover-anchor="CRON_POPOVER_ANCHOR"
-      :workspace-label="store.selectedWorkspace?.label"
       :cwd="store.activeSession?.cwd"
       :workspace-switcher-loading="workspaceSwitcherLoading"
       :active-session="Boolean(store.activeSession)"

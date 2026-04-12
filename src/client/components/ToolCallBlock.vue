@@ -506,8 +506,8 @@ const genericEntries = computed(() => {
   /* Keep this in sync with OUTPUT_TAIL_LINE_COUNT above.
      20lh reserves exactly 20 visible line boxes for the truncated output so the
      transcript height does not bob while the tail window drops old lines and adds new ones. */
-  min-height: calc(20 * 1lh);
-  max-height: calc(20 * 1lh);
+  min-height: 20lh;
+  max-height: 20lh;
   overflow: hidden;
 }
 

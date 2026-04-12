@@ -277,17 +277,17 @@ watch(
             :disabled="apiKeySaving[provider.id]"
           />
           <button
-            class="provider-auth-popover__action provider-auth-popover__action--primary"
+            class="provider-auth-popover__action provider-auth-popover__action--primary provider-auth-popover__api-key-button"
             type="button"
             :disabled="apiKeySaving[provider.id]"
             @click="saveApiKey(provider.id as 'google' | 'openrouter')"
           >
             {{
               apiKeySaving[provider.id]
-                ? "Saving…"
+                ? "💾 Saving…"
                 : provider.connected
-                  ? "Replace key"
-                  : "Save key"
+                  ? "💾 Replace key"
+                  : "💾 Save key"
             }}
           </button>
         </div>
@@ -448,8 +448,17 @@ watch(
 
 .provider-auth-popover__api-key-row {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 0.45rem;
+}
+
+.provider-auth-popover__api-key-input {
+  flex: 1 1 auto;
+}
+
+.provider-auth-popover__api-key-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .provider-auth-popover__error {

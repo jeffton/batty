@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Search, Plus, LogOut, LoaderCircle, Wifi, WifiOff, KeyRound } from "lucide-vue-next";
+import { Search, Plus, LogOut, LoaderCircle, Wifi, WifiOff, KeyRound, Star } from "lucide-vue-next";
 import ProviderAuthPopover from "@/client/components/ProviderAuthPopover.vue";
 import { computed, nextTick, ref, watch } from "vue";
 import { useRouter } from "vue-router";
@@ -70,6 +70,14 @@ const connectionDescription = computed(() => {
 
 function sessionLabel(session: SessionSummary): string {
   return (session.firstMessage || "(no messages)").replace(/\s+/g, " ").trim();
+}
+
+function isWorkspacePinned(workspaceId: string): boolean {
+  return store.pinnedWorkspaceIds.includes(workspaceId);
+}
+
+function toggleWorkspacePin(workspaceId: string): void {
+  store.toggleWorkspacePin(workspaceId);
 }
 
 function resetCreateWorkspaceForm(): void {
@@ -288,21 +296,36 @@ watch(
         </button>
 
         <div class="workspace-browser-pane__list">
-          <button
+          <div
             v-for="workspace in filteredWorkspaces"
             :key="workspace.id"
             :class="[
-              'workspace-browser-pane__item',
+              'workspace-browser-pane__item-row',
               workspace.id === store.selectedWorkspaceId ? 'is-active' : '',
             ]"
-            :disabled="actionsDisabled"
-            @click="openWorkspace(workspace.id)"
           >
-            <span class="workspace-browser-pane__item-main">
-              <span class="workspace-browser-pane__item-label">{{ workspace.label }}</span>
-            </span>
-            <span class="workspace-browser-pane__item-meta">{{ workspace.path }}</span>
-          </button>
+            <button
+              class="workspace-browser-pane__item workspace-browser-pane__item--workspace"
+              :disabled="actionsDisabled"
+              @click="openWorkspace(workspace.id)"
+            >
+              <span class="workspace-browser-pane__item-main">
+                <span class="workspace-browser-pane__item-label">{{ workspace.label }}</span>
+              </span>
+              <span class="workspace-browser-pane__item-meta">{{ workspace.path }}</span>
+            </button>
+
+            <button
+              class="workspace-browser-pane__pin-btn"
+              type="button"
+              :class="isWorkspacePinned(workspace.id) ? 'is-pinned' : ''"
+              :aria-label="isWorkspacePinned(workspace.id) ? 'Unpin workspace' : 'Pin workspace'"
+              :title="isWorkspacePinned(workspace.id) ? 'Unpin workspace' : 'Pin workspace'"
+              @click.stop="toggleWorkspacePin(workspace.id)"
+            >
+              <Star :size="16" :fill="isWorkspacePinned(workspace.id) ? 'currentColor' : 'none'" />
+            </button>
+          </div>
 
           <div v-if="filteredWorkspaces.length === 0" class="workspace-browser-pane__empty">
             No workspaces match.
@@ -594,27 +617,43 @@ watch(
   padding-right: 0.1rem;
 }
 
-.workspace-browser-pane__item {
+.workspace-browser-pane__item-row {
   display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  width: 100%;
-  text-align: left;
-  border: 0;
+  align-items: stretch;
+  gap: 0.2rem;
   border-radius: 0.55rem;
   background: transparent;
   color: inherit;
-  padding: 0.55rem 0.65rem;
-  transition: background 80ms ease;
+  transition:
+    background 80ms ease,
+    color 80ms ease;
 }
 
-.workspace-browser-pane__item:hover:not(:disabled):not(.is-active) {
+.workspace-browser-pane__item-row:hover:not(.is-active) {
   background: var(--color-bg-hover);
 }
 
-.workspace-browser-pane__item.is-active {
+.workspace-browser-pane__item-row.is-active {
   background: var(--color-user-bg);
   color: var(--color-user-text);
+}
+
+.workspace-browser-pane__item {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  text-align: left;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0.55rem 0.65rem;
+}
+
+.workspace-browser-pane__item--workspace {
+  padding-right: 0.35rem;
 }
 
 .workspace-browser-pane__item-main {
@@ -640,9 +679,39 @@ watch(
   white-space: nowrap;
 }
 
-.workspace-browser-pane__item.is-active .workspace-browser-pane__item-meta {
+.workspace-browser-pane__item.is-active .workspace-browser-pane__item-meta,
+.workspace-browser-pane__item-row.is-active .workspace-browser-pane__item-meta {
   color: var(--color-user-text);
   opacity: 0.76;
+}
+
+.workspace-browser-pane__pin-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  flex-shrink: 0;
+  aspect-ratio: 1;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--color-text-subtle);
+  appearance: none;
+  -webkit-appearance: none;
+  transition:
+    background 80ms ease,
+    color 80ms ease;
+}
+
+.workspace-browser-pane__pin-btn:hover {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  color: var(--color-text-strong);
+}
+
+.workspace-browser-pane__pin-btn.is-pinned {
+  color: var(--color-accent-strong);
 }
 
 .workspace-browser-pane__empty {

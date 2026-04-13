@@ -103,6 +103,7 @@ export const useAppStore = defineStore("app", {
     providerAuth: defaultProviderAuthStatus as ProviderAuthStatus,
     connectionState: "online" as "online" | "offline" | "connecting",
     workspaces: [] as WorkspaceInfo[],
+    pinnedWorkspaceIds: [] as string[],
     models: [] as ModelOption[],
     sessionsByWorkspace: {} as Record<string, SessionSummary[]>,
     cronJobsByWorkspace: {} as Record<string, CronJob[]>,
@@ -145,8 +146,7 @@ export const useAppStore = defineStore("app", {
     sortWorkspaces(): void {
       this.workspaces = sortWorkspacesByRecentSession(
         uniqueWorkspaces(this.workspaces),
-        this.sessionsByWorkspace,
-        this.activeSession,
+        this.pinnedWorkspaceIds,
       );
     },
     async bootstrap(): Promise<void> {
@@ -180,11 +180,7 @@ export const useAppStore = defineStore("app", {
       this.auth = payload.auth;
       this.buildId = payload.buildId;
       this.providerAuth = payload.providerAuth ?? defaultProviderAuthStatus;
-      this.workspaces = sortWorkspacesByRecentSession(
-        workspaces,
-        this.sessionsByWorkspace,
-        this.activeSession,
-      );
+      this.workspaces = sortWorkspacesByRecentSession(workspaces, this.pinnedWorkspaceIds);
       this.models = payload.models;
       this.selectedWorkspaceId =
         this.selectedWorkspaceId &&
@@ -285,6 +281,13 @@ export const useAppStore = defineStore("app", {
       } else {
         this.openWorkspaceStream(workspaceId);
       }
+    },
+
+    toggleWorkspacePin(workspaceId: string): void {
+      this.pinnedWorkspaceIds = this.pinnedWorkspaceIds.includes(workspaceId)
+        ? this.pinnedWorkspaceIds.filter((id) => id !== workspaceId)
+        : [...this.pinnedWorkspaceIds, workspaceId];
+      this.sortWorkspaces();
     },
 
     updateSessionSummary(session: SessionState): void {
@@ -632,5 +635,8 @@ export const useAppStore = defineStore("app", {
         this.openStream(this.activeSession);
       }
     },
+  },
+  persist: {
+    pick: ["pinnedWorkspaceIds"],
   },
 });

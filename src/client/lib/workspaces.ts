@@ -1,5 +1,4 @@
-import { toSessionSummary } from "@/client/lib/session-summary";
-import type { SessionState, SessionSummary, WorkspaceInfo } from "@/shared/types";
+import type { WorkspaceInfo } from "@/shared/types";
 
 export function uniqueWorkspaces(workspaces: WorkspaceInfo[]): WorkspaceInfo[] {
   const seenPaths = new Set<string>();
@@ -14,50 +13,20 @@ export function uniqueWorkspaces(workspaces: WorkspaceInfo[]): WorkspaceInfo[] {
   });
 }
 
-function latestSessionUpdatedAt(
-  workspaceId: string,
-  sessionsByWorkspace: Record<string, SessionSummary[]>,
-  activeSession?: SessionState,
-): number | undefined {
-  const latestWorkspaceSession = sessionsByWorkspace[workspaceId]?.[0]?.updatedAt;
-  const activeSessionSummary =
-    activeSession?.workspaceId === workspaceId && activeSession.path
-      ? toSessionSummary(activeSession).updatedAt
-      : undefined;
-
-  if (latestWorkspaceSession == null) {
-    return activeSessionSummary;
-  }
-
-  if (activeSessionSummary == null) {
-    return latestWorkspaceSession;
-  }
-
-  return Math.max(latestWorkspaceSession, activeSessionSummary);
-}
-
 export function sortWorkspacesByRecentSession(
   workspaces: WorkspaceInfo[],
-  sessionsByWorkspace: Record<string, SessionSummary[]>,
-  activeSession?: SessionState,
+  pinnedWorkspaceIds: Iterable<string> = [],
 ): WorkspaceInfo[] {
+  const pinnedWorkspaceIdSet = new Set(pinnedWorkspaceIds);
+
   return [...workspaces].sort((left, right) => {
-    const leftUpdatedAt = latestSessionUpdatedAt(left.id, sessionsByWorkspace, activeSession);
-    const rightUpdatedAt = latestSessionUpdatedAt(right.id, sessionsByWorkspace, activeSession);
+    const leftPinned = pinnedWorkspaceIdSet.has(left.id);
+    const rightPinned = pinnedWorkspaceIdSet.has(right.id);
 
-    if (leftUpdatedAt == null && rightUpdatedAt == null) {
-      return left.label.localeCompare(right.label);
-    }
-    if (leftUpdatedAt == null) {
-      return 1;
-    }
-    if (rightUpdatedAt == null) {
-      return -1;
-    }
-    if (leftUpdatedAt !== rightUpdatedAt) {
-      return rightUpdatedAt - leftUpdatedAt;
+    if (leftPinned !== rightPinned) {
+      return leftPinned ? -1 : 1;
     }
 
-    return left.label.localeCompare(right.label);
+    return left.label.localeCompare(right.label, undefined, { sensitivity: "base" });
   });
 }

@@ -1,6 +1,9 @@
 /// <reference lib="webworker" />
 
-import { NOTIFICATION_NAVIGATION_MESSAGE_TYPE } from "@/client/lib/notification-navigation";
+import {
+  NOTIFICATION_NAVIGATION_MESSAGE_TYPE,
+  notificationLaunchUrl,
+} from "@/client/lib/notification-navigation";
 import { clientsClaim } from "workbox-core";
 import { NavigationRoute, registerRoute } from "workbox-routing";
 import { StaleWhileRevalidate } from "workbox-strategies";
@@ -92,6 +95,7 @@ self.addEventListener("notificationclick", (event) => {
       : "/",
     self.location.origin,
   ).href;
+  const launchUrl = notificationLaunchUrl(targetUrl, self.location.origin) ?? targetUrl;
 
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(async (clients) => {
@@ -107,11 +111,11 @@ self.addEventListener("notificationclick", (event) => {
         (client) => "navigate" in client && "focus" in client,
       );
       if (existingClient) {
-        await routeClient(existingClient, targetUrl);
+        await routeClient(existingClient, launchUrl);
         return;
       }
 
-      const opened = await self.clients.openWindow(targetUrl);
+      const opened = await self.clients.openWindow(launchUrl);
       if (opened && "focus" in opened && "navigate" in opened) {
         await routeClient(opened, targetUrl);
       }

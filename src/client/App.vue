@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import {
   NOTIFICATION_NAVIGATION_MESSAGE_TYPE,
   notificationPathFromUrl,
+  notificationTargetFromQuery,
 } from "@/client/lib/notification-navigation";
 import { readCachedSession } from "@/client/lib/cache";
 import { workspaceRoutePath } from "@/client/lib/routes";
@@ -89,6 +90,11 @@ async function syncRouteToStore(): Promise<void> {
     return;
   }
 
+  const notificationTargetFromRoute = notificationTargetFromQuery(route.query.notificationTarget);
+  if (notificationTargetFromRoute) {
+    pendingNotificationPath = notificationTargetFromRoute;
+  }
+
   if (!store.authenticated) {
     store.clearRouteLoading();
     if (route.path !== "/login") {
@@ -99,6 +105,7 @@ async function syncRouteToStore(): Promise<void> {
 
   if (pendingNotificationPath && route.fullPath !== pendingNotificationPath) {
     store.clearRouteLoading();
+    store.clearActiveSession();
     await router.replace(pendingNotificationPath);
     return;
   }

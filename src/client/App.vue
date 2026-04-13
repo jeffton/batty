@@ -3,9 +3,7 @@ import { onMounted, onUnmounted, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   NOTIFICATION_NAVIGATION_MESSAGE_TYPE,
-  consumePendingNotificationTarget,
   notificationPathFromUrl,
-  notificationTargetFromQuery,
 } from "@/client/lib/notification-navigation";
 import { readCachedSession } from "@/client/lib/cache";
 import { workspaceRoutePath } from "@/client/lib/routes";
@@ -49,12 +47,6 @@ const onServiceWorkerMessage = (event: MessageEvent<unknown>) => {
   }
 
   pendingNotificationPath = targetPath;
-  store.clearActiveSession();
-  if (route.fullPath !== targetPath) {
-    void router.replace(targetPath).then(() => syncRouteToStore());
-    return;
-  }
-
   void syncRouteToStore();
 };
 
@@ -91,16 +83,6 @@ async function syncRouteToStore(): Promise<void> {
     return;
   }
 
-  const notificationTargetFromStorage = await consumePendingNotificationTarget();
-  if (notificationTargetFromStorage) {
-    pendingNotificationPath = notificationTargetFromStorage;
-  }
-
-  const notificationTargetFromRoute = notificationTargetFromQuery(route.query.notificationTarget);
-  if (notificationTargetFromRoute) {
-    pendingNotificationPath = notificationTargetFromRoute;
-  }
-
   if (!store.authenticated) {
     store.clearRouteLoading();
     if (route.path !== "/login") {
@@ -111,9 +93,14 @@ async function syncRouteToStore(): Promise<void> {
 
   if (pendingNotificationPath && route.fullPath !== pendingNotificationPath) {
     store.clearRouteLoading();
-    store.clearActiveSession();
-    await router.replace(pendingNotificationPath);
+    const targetPath = pendingNotificationPath;
+    pendingNotificationPath = undefined;
+    await router.replace(targetPath);
     return;
+  }
+
+  if (pendingNotificationPath === route.fullPath) {
+    pendingNotificationPath = undefined;
   }
 
   if (route.path === "/login") {
@@ -187,9 +174,6 @@ async function syncRouteToStore(): Promise<void> {
     }
 
     if (!sessionId) {
-      if (pendingNotificationPath === route.fullPath) {
-        pendingNotificationPath = undefined;
-      }
       return;
     }
 
@@ -213,9 +197,6 @@ async function syncRouteToStore(): Promise<void> {
 
     try {
       await store.resumeSession(workspaceId, session.path);
-      if (pendingNotificationPath === route.fullPath) {
-        pendingNotificationPath = undefined;
-      }
     } catch {
       const hydrated = await hydrateRouteFromCache(workspaceId, sessionId);
       if (!hydrated) {

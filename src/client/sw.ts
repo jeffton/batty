@@ -1,10 +1,6 @@
 /// <reference lib="webworker" />
 
-import {
-  NOTIFICATION_NAVIGATION_MESSAGE_TYPE,
-  notificationLaunchUrl,
-  writePendingNotificationTarget,
-} from "@/client/lib/notification-navigation";
+import { NOTIFICATION_NAVIGATION_MESSAGE_TYPE } from "@/client/lib/notification-navigation";
 import { clientsClaim } from "workbox-core";
 import { NavigationRoute, registerRoute } from "workbox-routing";
 import { StaleWhileRevalidate } from "workbox-strategies";
@@ -96,32 +92,29 @@ self.addEventListener("notificationclick", (event) => {
       : "/",
     self.location.origin,
   ).href;
-  const launchUrl = notificationLaunchUrl(targetUrl, self.location.origin) ?? targetUrl;
 
   event.waitUntil(
-    writePendingNotificationTarget(targetUrl).then(() =>
-      self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(async (clients) => {
-        const sameOriginClients = clients.filter(
-          (client): client is WindowClient => new URL(client.url).origin === self.location.origin,
-        );
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(async (clients) => {
+      const sameOriginClients = clients.filter(
+        (client): client is WindowClient => new URL(client.url).origin === self.location.origin,
+      );
 
-        for (const client of sameOriginClients) {
-          notifyClient(client, targetUrl);
-        }
+      for (const client of sameOriginClients) {
+        notifyClient(client, targetUrl);
+      }
 
-        const existingClient = sameOriginClients.find(
-          (client) => "navigate" in client && "focus" in client,
-        );
-        if (existingClient) {
-          await routeClient(existingClient, launchUrl);
-          return;
-        }
+      const existingClient = sameOriginClients.find(
+        (client) => "navigate" in client && "focus" in client,
+      );
+      if (existingClient) {
+        await routeClient(existingClient, targetUrl);
+        return;
+      }
 
-        const opened = await self.clients.openWindow(launchUrl);
-        if (opened && "focus" in opened && "navigate" in opened) {
-          await routeClient(opened, targetUrl);
-        }
-      }),
-    ),
+      const opened = await self.clients.openWindow(targetUrl);
+      if (opened && "focus" in opened && "navigate" in opened) {
+        await routeClient(opened, targetUrl);
+      }
+    }),
   );
 });

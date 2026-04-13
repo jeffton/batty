@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   NOTIFICATION_NAVIGATION_MESSAGE_TYPE,
+  consumePendingNotificationTarget,
   notificationPathFromUrl,
   notificationTargetFromQuery,
 } from "@/client/lib/notification-navigation";
@@ -88,6 +89,11 @@ async function syncRouteToStore(): Promise<void> {
 
   if (!store.bootstrapped) {
     return;
+  }
+
+  const notificationTargetFromStorage = await consumePendingNotificationTarget();
+  if (notificationTargetFromStorage) {
+    pendingNotificationPath = notificationTargetFromStorage;
   }
 
   const notificationTargetFromRoute = notificationTargetFromQuery(route.query.notificationTarget);

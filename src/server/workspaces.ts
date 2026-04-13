@@ -2,18 +2,23 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { WorkspaceInfo } from "@/shared/types";
 import type { AppConfig } from "./config";
-import { latestSessionUpdatedAt } from "./session-summaries";
+import { loadAppOptions } from "./options";
 
 function createHttpError(statusCode: number, message: string): Error & { statusCode: number } {
   return Object.assign(new Error(message), { statusCode });
 }
 
-function toWorkspaceInfo(workspacesRoot: string, name: string): WorkspaceInfo {
+function toWorkspaceInfo(
+  workspacesRoot: string,
+  name: string,
+  pinnedWorkspaceIds: ReadonlySet<string>,
+): WorkspaceInfo {
   return {
     id: name,
     label: name,
     path: path.join(workspacesRoot, name),
     kind: "workspace",
+    isPinned: pinnedWorkspaceIds.has(name),
   };
 }
 
@@ -56,43 +61,23 @@ function resolveWorkspacePath(workspacesRoot: string, name: string): string {
   return workspacePath;
 }
 
-async function workspaceLastSessionUpdatedAt(
-  config: AppConfig,
-  workspace: WorkspaceInfo,
-): Promise<number | undefined> {
-  return latestSessionUpdatedAt(config, workspace.id);
-}
-
 export async function listWorkspaces(config: AppConfig): Promise<WorkspaceInfo[]> {
   const entries = await fs.readdir(config.workspacesRoot, { withFileTypes: true }).catch(() => []);
-  const workspaces = entries
+  const options = await loadAppOptions(config.battyDir);
+  const pinnedWorkspaceIds = new Set(options.pinnedWorkspaceIds);
+
+  return entries
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-    .map<WorkspaceInfo>((entry) => toWorkspaceInfo(config.workspacesRoot, entry.name));
-
-  const workspacesWithActivity = await Promise.all(
-    workspaces.map(async (workspace) => ({
-      workspace,
-      lastSessionUpdatedAt: await workspaceLastSessionUpdatedAt(config, workspace),
-    })),
-  );
-
-  return workspacesWithActivity
+    .map<WorkspaceInfo>((entry) =>
+      toWorkspaceInfo(config.workspacesRoot, entry.name, pinnedWorkspaceIds),
+    )
     .sort((left, right) => {
-      if (left.lastSessionUpdatedAt == null && right.lastSessionUpdatedAt == null) {
-        return left.workspace.label.localeCompare(right.workspace.label);
+      if (left.isPinned !== right.isPinned) {
+        return left.isPinned ? -1 : 1;
       }
-      if (left.lastSessionUpdatedAt == null) {
-        return 1;
-      }
-      if (right.lastSessionUpdatedAt == null) {
-        return -1;
-      }
-      if (left.lastSessionUpdatedAt !== right.lastSessionUpdatedAt) {
-        return right.lastSessionUpdatedAt - left.lastSessionUpdatedAt;
-      }
-      return left.workspace.label.localeCompare(right.workspace.label);
-    })
-    .map(({ workspace }) => workspace);
+
+      return left.label.localeCompare(right.label, undefined, { sensitivity: "base" });
+    });
 }
 
 export async function createWorkspace(config: AppConfig, name: string): Promise<WorkspaceInfo> {
@@ -110,7 +95,7 @@ export async function createWorkspace(config: AppConfig, name: string): Promise<
     throw error;
   }
 
-  return toWorkspaceInfo(config.workspacesRoot, normalized);
+  return toWorkspaceInfo(config.workspacesRoot, normalized, new Set());
 }
 
 export function resolveWorkspace(workspaces: WorkspaceInfo[], workspaceId: string): WorkspaceInfo {

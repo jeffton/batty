@@ -12,6 +12,7 @@ import { createLoginRateLimiter } from "./login-rate-limit";
 import { formatSetupCode, PasskeyAuthService } from "./passkeys";
 import type { ProviderAuthStatus, WorkspaceSnapshot } from "@/shared/types";
 import { CronService } from "./cron";
+import { setWorkspacePinned } from "./options";
 import { PiService, type UploadedFile } from "./pi-service";
 import { WebPushService } from "./web-push";
 import { createWorkspace, listWorkspaces, resolveWorkspace } from "./workspaces";
@@ -366,6 +367,21 @@ app.get("/api/workspaces", async () => {
 app.post<{ Body: { name?: string } }>("/api/workspaces", async (request) => {
   return createWorkspace(config, request.body?.name ?? "");
 });
+
+app.post<{ Params: { workspaceId: string }; Body: { pinned?: boolean } }>(
+  "/api/workspaces/:workspaceId/pin",
+  async (request) => {
+    const pinned = request.body?.pinned;
+    if (typeof pinned !== "boolean") {
+      throw new Error("Missing pinned state");
+    }
+
+    const workspaces = await listWorkspaces(config);
+    resolveWorkspace(workspaces, request.params.workspaceId);
+    await setWorkspacePinned(config.battyDir, request.params.workspaceId, pinned);
+    return listWorkspaces(config);
+  },
+);
 
 app.get<{ Params: { workspaceId: string } }>(
   "/api/workspaces/:workspaceId/sessions",

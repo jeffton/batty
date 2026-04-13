@@ -71,6 +71,7 @@ export interface WorkspaceInfo {
   label: string;
   path: string;
   kind: "workspace";
+  isPinned: boolean;
 }
 
 export interface SessionSummary {

@@ -40,6 +40,7 @@ function workspaceInfo(config: AppConfig, workspaceId: string): WorkspaceInfo {
     label: workspaceId,
     path: path.join(config.workspacesRoot, workspaceId),
     kind: "workspace",
+    isPinned: false,
   };
 }
 

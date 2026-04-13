@@ -2,10 +2,9 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { SessionManager } from "@mariozechner/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import type { AppConfig } from "@/server/config";
-import { workspaceSessionDir } from "@/server/pi-paths";
+import { optionsFilePath } from "@/server/options";
 import { createWorkspace, listWorkspaces } from "@/server/workspaces";
 
 const tempDirs: string[] = [];
@@ -34,43 +33,6 @@ async function createConfig(): Promise<AppConfig> {
   };
 }
 
-async function createSession(
-  config: AppConfig,
-  workspacePath: string,
-  updatedAt: Date,
-): Promise<void> {
-  const session = SessionManager.create(
-    workspacePath,
-    workspaceSessionDir(config, path.basename(workspacePath)),
-  );
-  const sessionFile = session.getSessionFile();
-  if (!sessionFile) {
-    throw new Error("Expected persisted session file");
-  }
-
-  const sessionId = path.basename(sessionFile, ".jsonl");
-  const header = {
-    type: "session",
-    version: 3,
-    id: sessionId,
-    timestamp: updatedAt.toISOString(),
-    cwd: workspacePath,
-  };
-  const message = {
-    type: "message",
-    id: `${sessionId}-message-1`,
-    timestamp: updatedAt.toISOString(),
-    message: {
-      role: "user",
-      content: `Session for ${path.basename(workspacePath)}`,
-    },
-  };
-
-  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-  await fs.writeFile(sessionFile, `${JSON.stringify(header)}\n${JSON.stringify(message)}\n`);
-  await fs.utimes(sessionFile, updatedAt, updatedAt);
-}
-
 describe("workspaces", () => {
   it("includes discovered visible child folders", async () => {
     const config = await createConfig();
@@ -83,21 +45,32 @@ describe("workspaces", () => {
     expect(workspaces.map((workspace) => workspace.label)).toEqual(["alpha", "beta"]);
   });
 
-  it("orders workspaces by most recent session before alphabetical fallback", async () => {
+  it("orders pinned workspaces first and then alphabetically", async () => {
     const config = await createConfig();
-    const alphaPath = path.join(config.workspacesRoot, "alpha");
-    const betaPath = path.join(config.workspacesRoot, "beta");
-    const gammaPath = path.join(config.workspacesRoot, "gamma");
 
-    await fs.mkdir(alphaPath);
-    await fs.mkdir(betaPath);
-    await fs.mkdir(gammaPath);
-    await createSession(config, betaPath, new Date("2026-03-25T12:00:00Z"));
-    await createSession(config, alphaPath, new Date("2026-03-24T12:00:00Z"));
+    await fs.mkdir(path.join(config.workspacesRoot, "alpha"));
+    await fs.mkdir(path.join(config.workspacesRoot, "beta"));
+    await fs.mkdir(path.join(config.workspacesRoot, "gamma"));
+    await fs.mkdir(path.dirname(optionsFilePath(config.battyDir)), { recursive: true });
+    await fs.writeFile(
+      optionsFilePath(config.battyDir),
+      `${JSON.stringify(
+        {
+          authSecret: config.authSecret,
+          workspacesRoot: config.workspacesRoot,
+          webPushSubject: config.webPushSubject,
+          cronDailySessionStartTime: config.cronDailySessionStartTime,
+          pinnedWorkspaceIds: ["gamma", "beta"],
+        },
+        null,
+        2,
+      )}\n`,
+    );
 
     const workspaces = await listWorkspaces(config);
 
-    expect(workspaces.map((workspace) => workspace.label)).toEqual(["beta", "alpha", "gamma"]);
+    expect(workspaces.map((workspace) => workspace.label)).toEqual(["beta", "gamma", "alpha"]);
+    expect(workspaces.map((workspace) => workspace.isPinned)).toEqual([true, true, false]);
   });
 
   it("uses folder names as workspace ids", async () => {
@@ -122,6 +95,7 @@ describe("workspaces", () => {
       label: "alpha",
       path: path.join(config.workspacesRoot, "alpha"),
       kind: "workspace",
+      isPinned: false,
     });
     expect(stats.isDirectory()).toBe(true);
   });

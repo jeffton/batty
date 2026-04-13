@@ -8,6 +8,7 @@ export interface StoredAppOptions {
   webPushSubject?: string;
   cronDailySessionStartTime?: string;
   braveSearchKey?: string;
+  pinnedWorkspaceIds?: string[];
 }
 
 export interface AppOptions {
@@ -16,6 +17,7 @@ export interface AppOptions {
   webPushSubject: string;
   cronDailySessionStartTime: string;
   braveSearchKey?: string;
+  pinnedWorkspaceIds: string[];
 }
 
 const DEFAULT_CRON_DAILY_SESSION_START_TIME = "04:00";
@@ -85,6 +87,11 @@ function normalizeStoredOptions(options: StoredAppOptions | undefined): StoredAp
       typeof options?.braveSearchKey === "string" && options.braveSearchKey.trim().length > 0
         ? options.braveSearchKey.trim()
         : undefined,
+    pinnedWorkspaceIds: Array.isArray(options?.pinnedWorkspaceIds)
+      ? options.pinnedWorkspaceIds.filter(
+          (value): value is string => typeof value === "string" && value.trim().length > 0,
+        )
+      : [],
   };
 }
 
@@ -95,7 +102,9 @@ function missingRequiredOptions(options: StoredAppOptions): string[] {
   });
 }
 
-async function readStoredOptions(projectRoot: string): Promise<StoredAppOptions | undefined> {
+export async function readStoredOptions(
+  projectRoot: string,
+): Promise<StoredAppOptions | undefined> {
   try {
     const content = await fs.readFile(optionsFilePath(projectRoot), "utf8");
     return JSON.parse(content) as StoredAppOptions;
@@ -107,12 +116,15 @@ async function readStoredOptions(projectRoot: string): Promise<StoredAppOptions 
   }
 }
 
-async function writeStoredOptions(projectRoot: string, options: StoredAppOptions): Promise<void> {
+export async function writeStoredOptions(
+  projectRoot: string,
+  options: StoredAppOptions,
+): Promise<void> {
   await fs.mkdir(stateDirPath(projectRoot), { recursive: true });
   await fs.writeFile(optionsFilePath(projectRoot), `${JSON.stringify(options, null, 2)}\n`, "utf8");
 }
 
-export async function ensureOptionsFile(projectRoot: string): Promise<AppOptions> {
+export async function loadAppOptions(projectRoot: string): Promise<AppOptions> {
   const stored = await readStoredOptions(projectRoot);
   const normalized = normalizeStoredOptions(stored);
 
@@ -120,6 +132,11 @@ export async function ensureOptionsFile(projectRoot: string): Promise<AppOptions
     await writeStoredOptions(projectRoot, normalized);
   }
 
+  return normalized as AppOptions;
+}
+
+export async function ensureOptionsFile(projectRoot: string): Promise<AppOptions> {
+  const normalized = await loadAppOptions(projectRoot);
   const missing = missingRequiredOptions(normalized);
   if (missing.length > 0) {
     throw new Error(
@@ -127,5 +144,24 @@ export async function ensureOptionsFile(projectRoot: string): Promise<AppOptions
     );
   }
 
-  return normalized as AppOptions;
+  return normalized;
+}
+
+export async function setWorkspacePinned(
+  projectRoot: string,
+  workspaceId: string,
+  pinned: boolean,
+): Promise<AppOptions> {
+  const options = await loadAppOptions(projectRoot);
+  const nextPinnedWorkspaceIds = pinned
+    ? [...new Set([...options.pinnedWorkspaceIds, workspaceId])]
+    : options.pinnedWorkspaceIds.filter((id) => id !== workspaceId);
+
+  const nextOptions: AppOptions = {
+    ...options,
+    pinnedWorkspaceIds: nextPinnedWorkspaceIds,
+  };
+
+  await writeStoredOptions(projectRoot, nextOptions);
+  return nextOptions;
 }

@@ -13,18 +13,10 @@ export function uniqueWorkspaces(workspaces: WorkspaceInfo[]): WorkspaceInfo[] {
   });
 }
 
-export function sortWorkspacesByRecentSession(
-  workspaces: WorkspaceInfo[],
-  pinnedWorkspaceIds: Iterable<string> = [],
-): WorkspaceInfo[] {
-  const pinnedWorkspaceIdSet = new Set(pinnedWorkspaceIds);
-
+export function sortWorkspacesByRecentSession(workspaces: WorkspaceInfo[]): WorkspaceInfo[] {
   return [...workspaces].sort((left, right) => {
-    const leftPinned = pinnedWorkspaceIdSet.has(left.id);
-    const rightPinned = pinnedWorkspaceIdSet.has(right.id);
-
-    if (leftPinned !== rightPinned) {
-      return leftPinned ? -1 : 1;
+    if (left.isPinned !== right.isPinned) {
+      return left.isPinned ? -1 : 1;
     }
 
     return left.label.localeCompare(right.label, undefined, { sensitivity: "base" });

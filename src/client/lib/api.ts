@@ -153,6 +153,14 @@ export function createWorkspace(name: string): Promise<WorkspaceInfo> {
   });
 }
 
+export function setWorkspacePinned(workspaceId: string, pinned: boolean): Promise<WorkspaceInfo[]> {
+  return request(`/api/workspaces/${workspaceId}/pin`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pinned }),
+  });
+}
+
 export function listWorkspaceSessions(workspaceId: string): Promise<SessionSummary[]> {
   return request(`/api/workspaces/${workspaceId}/sessions`);
 }

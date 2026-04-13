@@ -19,6 +19,7 @@ import {
   setProviderApiKey,
   setSessionModel,
   setSessionThinkingLevel,
+  setWorkspacePinned as setWorkspacePinnedRequest,
   startOpenAICodexProviderAuth,
   updateCronJob as updateCronJobRequest,
 } from "@/client/lib/api";
@@ -103,7 +104,6 @@ export const useAppStore = defineStore("app", {
     providerAuth: defaultProviderAuthStatus as ProviderAuthStatus,
     connectionState: "online" as "online" | "offline" | "connecting",
     workspaces: [] as WorkspaceInfo[],
-    pinnedWorkspaceIds: [] as string[],
     models: [] as ModelOption[],
     sessionsByWorkspace: {} as Record<string, SessionSummary[]>,
     cronJobsByWorkspace: {} as Record<string, CronJob[]>,
@@ -144,10 +144,7 @@ export const useAppStore = defineStore("app", {
   },
   actions: {
     sortWorkspaces(): void {
-      this.workspaces = sortWorkspacesByRecentSession(
-        uniqueWorkspaces(this.workspaces),
-        this.pinnedWorkspaceIds,
-      );
+      this.workspaces = sortWorkspacesByRecentSession(uniqueWorkspaces(this.workspaces));
     },
     async bootstrap(): Promise<void> {
       this.connectionState = navigator.onLine ? "online" : "offline";
@@ -180,7 +177,7 @@ export const useAppStore = defineStore("app", {
       this.auth = payload.auth;
       this.buildId = payload.buildId;
       this.providerAuth = payload.providerAuth ?? defaultProviderAuthStatus;
-      this.workspaces = sortWorkspacesByRecentSession(workspaces, this.pinnedWorkspaceIds);
+      this.workspaces = sortWorkspacesByRecentSession(workspaces);
       this.models = payload.models;
       this.selectedWorkspaceId =
         this.selectedWorkspaceId &&
@@ -283,11 +280,35 @@ export const useAppStore = defineStore("app", {
       }
     },
 
-    toggleWorkspacePin(workspaceId: string): void {
-      this.pinnedWorkspaceIds = this.pinnedWorkspaceIds.includes(workspaceId)
-        ? this.pinnedWorkspaceIds.filter((id) => id !== workspaceId)
-        : [...this.pinnedWorkspaceIds, workspaceId];
-      this.sortWorkspaces();
+    async toggleWorkspacePin(workspaceId: string): Promise<void> {
+      const workspace = this.workspaces.find((candidate) => candidate.id === workspaceId);
+      if (!workspace) {
+        return;
+      }
+
+      this.workspaces = sortWorkspacesByRecentSession(
+        this.workspaces.map((candidate) =>
+          candidate.id === workspaceId
+            ? { ...candidate, isPinned: !candidate.isPinned }
+            : candidate,
+        ),
+      );
+
+      try {
+        this.workspaces = uniqueWorkspaces(
+          await setWorkspacePinnedRequest(workspaceId, !workspace.isPinned),
+        );
+        this.sortWorkspaces();
+      } catch (error) {
+        this.workspaces = sortWorkspacesByRecentSession(
+          this.workspaces.map((candidate) =>
+            candidate.id === workspaceId
+              ? { ...candidate, isPinned: workspace.isPinned }
+              : candidate,
+          ),
+        );
+        throw error;
+      }
     },
 
     updateSessionSummary(session: SessionState): void {
@@ -635,8 +656,5 @@ export const useAppStore = defineStore("app", {
         this.openStream(this.activeSession);
       }
     },
-  },
-  persist: {
-    pick: ["pinnedWorkspaceIds"],
   },
 });

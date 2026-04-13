@@ -30,6 +30,7 @@ describe("ensureOptionsFile", () => {
       webPushSubject: string;
       cronDailySessionStartTime: string;
       braveSearchKey?: string;
+      pinnedWorkspaceIds?: string[];
     };
 
     expect(persisted.authSecret.length).toBeGreaterThan(0);
@@ -37,6 +38,7 @@ describe("ensureOptionsFile", () => {
     expect(persisted.webPushSubject).toBe("");
     expect(persisted.cronDailySessionStartTime).toBe("04:00");
     expect(persisted.braveSearchKey).toBeUndefined();
+    expect(persisted.pinnedWorkspaceIds).toEqual([]);
   });
 
   it("drops legacy password auth fields and preserves the rest", async () => {
@@ -54,6 +56,7 @@ describe("ensureOptionsFile", () => {
           webPushSubject: "https://batty.roybot.se",
           cronDailySessionStartTime: "4:00",
           braveSearchKey: "  brave-key  ",
+          pinnedWorkspaceIds: ["batty", "", 123, "kladde"],
         },
         null,
         2,
@@ -72,6 +75,7 @@ describe("ensureOptionsFile", () => {
     expect(options.webPushSubject).toBe("https://batty.roybot.se");
     expect(options.cronDailySessionStartTime).toBe("04:00");
     expect(options.braveSearchKey).toBe("brave-key");
+    expect(options.pinnedWorkspaceIds).toEqual(["batty", "kladde"]);
     expect(persisted.username).toBeUndefined();
     expect(persisted.password).toBeUndefined();
   });

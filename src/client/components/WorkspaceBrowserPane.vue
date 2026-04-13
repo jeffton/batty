@@ -73,11 +73,15 @@ function sessionLabel(session: SessionSummary): string {
 }
 
 function isWorkspacePinned(workspaceId: string): boolean {
-  return store.pinnedWorkspaceIds.includes(workspaceId);
+  return store.workspaces.some((workspace) => workspace.id === workspaceId && workspace.isPinned);
 }
 
-function toggleWorkspacePin(workspaceId: string): void {
-  store.toggleWorkspacePin(workspaceId);
+async function toggleWorkspacePin(workspaceId: string): Promise<void> {
+  try {
+    await store.toggleWorkspacePin(workspaceId);
+  } catch (error) {
+    console.error(error);
+  }
 }
 
 function resetCreateWorkspaceForm(): void {
@@ -321,7 +325,7 @@ watch(
               :class="isWorkspacePinned(workspace.id) ? 'is-pinned' : ''"
               :aria-label="isWorkspacePinned(workspace.id) ? 'Unpin workspace' : 'Pin workspace'"
               :title="isWorkspacePinned(workspace.id) ? 'Unpin workspace' : 'Pin workspace'"
-              @click.stop="toggleWorkspacePin(workspace.id)"
+              @click.stop="void toggleWorkspacePin(workspace.id)"
             >
               <Star :size="16" :fill="isWorkspacePinned(workspace.id) ? 'currentColor' : 'none'" />
             </button>

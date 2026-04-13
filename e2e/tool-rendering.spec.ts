@@ -12,6 +12,7 @@ const workspace: WorkspaceInfo = {
   label: "batty",
   path: "/root/github/batty",
   kind: "workspace",
+  isPinned: false,
 };
 
 const summary: SessionSummary = {

@@ -10,7 +10,7 @@ import { readBuildId } from "./build-id";
 import { loadConfig, resolveBattyDir } from "./config";
 import { createLoginRateLimiter } from "./login-rate-limit";
 import { formatSetupCode, PasskeyAuthService } from "./passkeys";
-import type { ProviderAuthStatus, SessionSummary, WorkspaceSnapshot } from "@/shared/types";
+import type { ProviderAuthStatus, WorkspaceSnapshot } from "@/shared/types";
 import { CronService } from "./cron";
 import { PiService, type UploadedFile } from "./pi-service";
 import { WebPushService } from "./web-push";
@@ -32,24 +32,6 @@ async function workspaceSnapshot(workspaceId: string): Promise<WorkspaceSnapshot
     sessions: await service.listSessionSummaries(workspace),
     cronJobs: cronService.listJobs(workspaceId),
   };
-}
-
-async function mostRecentSessionSummary(
-  workspaces: Awaited<ReturnType<typeof listWorkspaces>>,
-): Promise<SessionSummary | undefined> {
-  let mostRecent: SessionSummary | undefined;
-
-  for (const workspace of workspaces) {
-    const session = (await service.listSessionSummaries(workspace))[0];
-    if (!session) {
-      continue;
-    }
-    if (!mostRecent || session.updatedAt > mostRecent.updatedAt) {
-      mostRecent = session;
-    }
-  }
-
-  return mostRecent;
 }
 
 async function publishWorkspace(workspaceId: string): Promise<void> {
@@ -312,7 +294,6 @@ app.get("/api/bootstrap", async (request) => {
     buildId,
     workspaces,
     models: authenticated ? await service.listModels() : [],
-    recentSession: authenticated ? await mostRecentSessionSummary(workspaces) : undefined,
   };
 });
 

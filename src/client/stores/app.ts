@@ -107,7 +107,6 @@ export const useAppStore = defineStore("app", {
     sessionsByWorkspace: {} as Record<string, SessionSummary[]>,
     cronJobsByWorkspace: {} as Record<string, CronJob[]>,
     activeSession: undefined as SessionState | undefined,
-    recentSessionSummary: undefined as SessionSummary | undefined,
     selectedWorkspaceId: undefined as string | undefined,
     authError: undefined as string | undefined,
     lastError: undefined as string | undefined,
@@ -140,28 +139,6 @@ export const useAppStore = defineStore("app", {
       }
 
       return state.cronJobsByWorkspace[state.selectedWorkspaceId] ?? [];
-    },
-    mostRecentSessionSummary(state): SessionSummary | undefined {
-      let mostRecent = state.recentSessionSummary;
-
-      for (const sessions of Object.values(state.sessionsByWorkspace)) {
-        const candidate = sessions[0];
-        if (!candidate) {
-          continue;
-        }
-        if (!mostRecent || candidate.updatedAt > mostRecent.updatedAt) {
-          mostRecent = candidate;
-        }
-      }
-
-      if (state.activeSession?.path) {
-        const activeSessionSummary = toSessionSummary(state.activeSession);
-        if (!mostRecent || activeSessionSummary.updatedAt > mostRecent.updatedAt) {
-          mostRecent = activeSessionSummary;
-        }
-      }
-
-      return mostRecent;
     },
   },
   actions: {
@@ -203,7 +180,6 @@ export const useAppStore = defineStore("app", {
       this.auth = payload.auth;
       this.buildId = payload.buildId;
       this.providerAuth = payload.providerAuth ?? defaultProviderAuthStatus;
-      this.recentSessionSummary = payload.recentSession;
       this.workspaces = sortWorkspacesByRecentSession(
         workspaces,
         this.sessionsByWorkspace,
@@ -223,7 +199,6 @@ export const useAppStore = defineStore("app", {
       } else {
         this.activeSession = undefined;
         this.providerAuth = defaultProviderAuthStatus;
-        this.recentSessionSummary = undefined;
         this.sessionsByWorkspace = {};
         this.cronJobsByWorkspace = {};
         this.closeStream();
@@ -242,7 +217,6 @@ export const useAppStore = defineStore("app", {
       this.authenticated = false;
       this.providerAuth = defaultProviderAuthStatus;
       this.activeSession = undefined;
-      this.recentSessionSummary = undefined;
       this.sessionsByWorkspace = {};
       this.cronJobsByWorkspace = {};
     },

@@ -243,7 +243,6 @@ export interface BootstrapPayload {
   buildId: string;
   workspaces: WorkspaceInfo[];
   models: ModelOption[];
-  recentSession?: SessionSummary;
   activeSession?: SessionState;
 }
 

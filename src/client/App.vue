@@ -6,7 +6,7 @@ import {
   notificationPathFromUrl,
 } from "@/client/lib/notification-navigation";
 import { readCachedSession } from "@/client/lib/cache";
-import { sessionRoutePath, workspaceRoutePath } from "@/client/lib/routes";
+import { workspaceRoutePath } from "@/client/lib/routes";
 import { useAppStore } from "@/client/stores/app";
 
 const store = useAppStore();
@@ -53,18 +53,7 @@ const onServiceWorkerMessage = (event: MessageEvent<unknown>) => {
 let syncVersion = 0;
 let pendingNotificationPath: string | undefined;
 
-function fallbackWorkspaceRoute(): string | undefined {
-  const recentSession = store.mostRecentSessionSummary;
-  if (
-    recentSession &&
-    store.workspaces.some((workspace) => workspace.id === recentSession.workspaceId)
-  ) {
-    return sessionRoutePath(recentSession.workspaceId, recentSession.sessionId);
-  }
-
-  const workspaceId = store.selectedWorkspaceId ?? store.workspaces[0]?.id;
-  return workspaceId ? workspaceRoutePath(workspaceId) : undefined;
-}
+const WORKSPACES_ROUTE = "/";
 
 async function hydrateRouteFromCache(workspaceId: string, sessionId?: string): Promise<boolean> {
   if (!sessionId) {
@@ -112,34 +101,29 @@ async function syncRouteToStore(): Promise<void> {
 
   if (route.path === "/login") {
     store.clearRouteLoading();
-    const fallback = fallbackWorkspaceRoute();
-    if (fallback) {
-      await router.replace(fallback);
-    }
+    await router.replace(WORKSPACES_ROUTE);
     return;
   }
 
-  const workspaceId =
+  const routeWorkspaceId =
     typeof route.params.workspaceId === "string" ? route.params.workspaceId : undefined;
+  if (
+    routeWorkspaceId &&
+    !store.workspaces.some((workspace) => workspace.id === routeWorkspaceId)
+  ) {
+    store.clearRouteLoading();
+    await router.replace(WORKSPACES_ROUTE);
+    return;
+  }
+
+  const workspaceId = routeWorkspaceId ?? store.selectedWorkspaceId ?? store.workspaces[0]?.id;
+  const sessionId = typeof route.params.sessionId === "string" ? route.params.sessionId : undefined;
+
   if (!workspaceId) {
     store.clearRouteLoading();
-    const fallback = fallbackWorkspaceRoute();
-    if (fallback) {
-      await router.replace(fallback);
-    }
     return;
   }
 
-  if (!store.workspaces.some((workspace) => workspace.id === workspaceId)) {
-    store.clearRouteLoading();
-    const fallback = fallbackWorkspaceRoute();
-    if (fallback) {
-      await router.replace(fallback);
-    }
-    return;
-  }
-
-  const sessionId = typeof route.params.sessionId === "string" ? route.params.sessionId : undefined;
   store.setRouteLoading(workspaceId, sessionId);
 
   try {

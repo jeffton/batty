@@ -373,6 +373,7 @@ watch(
               :key="session.id"
               :class="[
                 'workspace-browser-pane__item',
+                'workspace-browser-pane__item--session',
                 session.sessionId === store.activeSession?.sessionId ? 'is-active' : '',
               ]"
               :disabled="actionsDisabled"
@@ -644,7 +645,6 @@ watch(
 
 .workspace-browser-pane__item {
   display: flex;
-  flex: 1;
   flex-direction: column;
   gap: 0.15rem;
   min-width: 0;
@@ -657,7 +657,12 @@ watch(
 }
 
 .workspace-browser-pane__item--workspace {
+  flex: 1;
   padding-right: 0.35rem;
+}
+
+.workspace-browser-pane__item--session {
+  flex: 0 0 auto;
 }
 
 .workspace-browser-pane__item-main {

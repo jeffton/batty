@@ -706,18 +706,12 @@ watch(
   appearance: none;
   -webkit-appearance: none;
   background-clip: padding-box;
-  transition:
-    background 80ms ease,
-    color 80ms ease;
+  transition: color 80ms ease;
 }
 
 .workspace-browser-pane__pin-btn:hover {
-  background: color-mix(in srgb, currentColor 10%, transparent);
+  background: transparent;
   color: var(--color-text-strong);
-}
-
-.workspace-browser-pane__pin-btn.is-pinned {
-  color: var(--color-accent-strong);
 }
 
 .workspace-browser-pane__empty {

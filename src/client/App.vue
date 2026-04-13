@@ -47,8 +47,9 @@ const onServiceWorkerMessage = (event: MessageEvent<unknown>) => {
   }
 
   pendingNotificationPath = targetPath;
+  store.clearActiveSession();
   if (route.fullPath !== targetPath) {
-    void router.replace(targetPath);
+    void router.replace(targetPath).then(() => syncRouteToStore());
     return;
   }
 
@@ -98,14 +99,8 @@ async function syncRouteToStore(): Promise<void> {
 
   if (pendingNotificationPath && route.fullPath !== pendingNotificationPath) {
     store.clearRouteLoading();
-    const targetPath = pendingNotificationPath;
-    pendingNotificationPath = undefined;
-    await router.replace(targetPath);
+    await router.replace(pendingNotificationPath);
     return;
-  }
-
-  if (pendingNotificationPath === route.fullPath) {
-    pendingNotificationPath = undefined;
   }
 
   if (route.path === "/login") {
@@ -179,6 +174,9 @@ async function syncRouteToStore(): Promise<void> {
     }
 
     if (!sessionId) {
+      if (pendingNotificationPath === route.fullPath) {
+        pendingNotificationPath = undefined;
+      }
       return;
     }
 
@@ -202,6 +200,9 @@ async function syncRouteToStore(): Promise<void> {
 
     try {
       await store.resumeSession(workspaceId, session.path);
+      if (pendingNotificationPath === route.fullPath) {
+        pendingNotificationPath = undefined;
+      }
     } catch {
       const hydrated = await hydrateRouteFromCache(workspaceId, sessionId);
       if (!hydrated) {

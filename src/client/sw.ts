@@ -53,20 +53,6 @@ async function routeClient(client: WindowClient, targetUrl: string): Promise<voi
   notifyClient(client, targetUrl);
 }
 
-function matchingClientUrl(client: WindowClient, targetUrl: string): boolean {
-  return new URL(client.url).href === targetUrl;
-}
-
-function selectClient(clients: WindowClient[], targetUrl: string): WindowClient | undefined {
-  return (
-    clients.find((client) => matchingClientUrl(client, targetUrl) && client.focused) ??
-    clients.find((client) => client.focused) ??
-    clients.find((client) => matchingClientUrl(client, targetUrl)) ??
-    clients.find((client) => client.visibilityState === "visible") ??
-    clients[0]
-  );
-}
-
 self.skipWaiting();
 clientsClaim();
 cleanupOutdatedCaches();
@@ -117,7 +103,9 @@ self.addEventListener("notificationclick", (event) => {
         notifyClient(client, targetUrl);
       }
 
-      const existingClient = selectClient(sameOriginClients, targetUrl);
+      const existingClient = sameOriginClients.find(
+        (client) => "navigate" in client && "focus" in client,
+      );
       if (existingClient) {
         await routeClient(existingClient, targetUrl);
         return;

@@ -696,7 +696,7 @@ watch(
   align-self: stretch;
   flex-shrink: 0;
   aspect-ratio: 1;
-  height: auto;
+  height: 100%;
   padding: 0.35rem;
   box-sizing: border-box;
   border: 0;

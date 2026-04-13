@@ -47,6 +47,11 @@ const onServiceWorkerMessage = (event: MessageEvent<unknown>) => {
   }
 
   pendingNotificationPath = targetPath;
+  if (route.fullPath !== targetPath) {
+    void router.replace(targetPath);
+    return;
+  }
+
   void syncRouteToStore();
 };
 
@@ -97,6 +102,10 @@ async function syncRouteToStore(): Promise<void> {
     pendingNotificationPath = undefined;
     await router.replace(targetPath);
     return;
+  }
+
+  if (pendingNotificationPath === route.fullPath) {
+    pendingNotificationPath = undefined;
   }
 
   if (route.path === "/login") {

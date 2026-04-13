@@ -693,13 +693,15 @@ watch(
   flex-shrink: 0;
   aspect-ratio: 1;
   height: auto;
-  padding: 0;
+  padding: 0.35rem;
+  box-sizing: border-box;
   border: 0;
   border-radius: 0.5rem;
   background: transparent;
   color: var(--color-text-subtle);
   appearance: none;
   -webkit-appearance: none;
+  background-clip: padding-box;
   transition:
     background 80ms ease,
     color 80ms ease;

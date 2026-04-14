@@ -17,21 +17,28 @@ export function buildDailyCronSessionBinding(
   };
 }
 
-export function findDailyCronSessionBinding(
+export function findLatestDailyCronSessionBinding(
   entries: Array<{ type: string; customType?: string; data?: unknown }>,
-  date = toLocalIsoDate(new Date(), "04:00"),
 ): DailyCronSessionBinding | undefined {
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index];
     if (entry?.type !== "custom" || entry.customType !== CRON_SESSION_CUSTOM_TYPE) {
       continue;
     }
-    if (isDailyCronSessionBinding(entry.data) && entry.data.date === date) {
+    if (isDailyCronSessionBinding(entry.data)) {
       return entry.data;
     }
   }
 
   return undefined;
+}
+
+export function findDailyCronSessionBinding(
+  entries: Array<{ type: string; customType?: string; data?: unknown }>,
+  date = toLocalIsoDate(new Date(), "04:00"),
+): DailyCronSessionBinding | undefined {
+  const binding = findLatestDailyCronSessionBinding(entries);
+  return binding?.date === date ? binding : undefined;
 }
 
 export function localDayStartMs(now = new Date(), startTime = "04:00"): number {

@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import {
   abortSession,
   completeOpenAICodexProviderAuth,
+  createOrOpenDailySession,
   createSession,
   createWorkspace as createWorkspaceRequest,
   deleteCronJob as deleteCronJobRequest,
@@ -358,6 +359,16 @@ export const useAppStore = defineStore("app", {
       const session = normalizeSessionState(await createSession(workspaceId));
       if (!session) {
         throw new Error("Failed to create session");
+      }
+      await this.selectSession(session);
+      await this.loadWorkspaceSessions(workspaceId);
+      return session;
+    },
+
+    async startDailySession(workspaceId: string): Promise<SessionState> {
+      const session = normalizeSessionState(await createOrOpenDailySession(workspaceId));
+      if (!session) {
+        throw new Error("Failed to open daily session");
       }
       await this.selectSession(session);
       await this.loadWorkspaceSessions(workspaceId);

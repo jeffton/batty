@@ -2,10 +2,11 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { AppConfig } from "@/server/config";
 import { latestSessionUpdatedAt, listSessionSummaries } from "@/server/session-summaries";
 import { workspaceSessionDir } from "@/server/pi-paths";
+import { CRON_SESSION_CUSTOM_TYPE } from "@/server/cron-session";
 import type { WorkspaceInfo } from "@/shared/types";
 
 const tempDirs: string[] = [];
@@ -95,28 +96,47 @@ describe("session summaries", () => {
       },
     ]);
 
-    const sessions = await listSessionSummaries(config, workspace);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-25T12:00:00Z"));
+    try {
+      const sessions = await listSessionSummaries(config, workspace);
 
-    expect(sessions).toEqual([
-      {
-        id: path.join(workspaceSessionDir(config, workspace.id), "newer.jsonl"),
-        sessionId: "newer-id",
-        path: path.join(workspaceSessionDir(config, workspace.id), "newer.jsonl"),
-        firstMessage: "newer first message",
-        updatedAt: new Date("2026-03-25T12:00:00Z").getTime(),
-        messageCount: 0,
-        workspaceId: workspace.id,
-      },
-      {
-        id: olderPath,
-        sessionId: "older-id",
-        path: olderPath,
-        firstMessage: "older first message",
-        updatedAt: new Date("2026-03-24T12:00:00Z").getTime(),
-        messageCount: 0,
-        workspaceId: workspace.id,
-      },
-    ]);
+      expect(sessions).toEqual([
+        {
+          id: "daily:alpha:2026-03-25",
+          sessionId: "daily:alpha:2026-03-25",
+          firstMessage: "(no messages)",
+          updatedAt: new Date("2026-03-25T12:00:00Z").getTime(),
+          messageCount: 0,
+          workspaceId: workspace.id,
+          dailySession: {
+            date: "2026-03-25",
+            isToday: true,
+            exists: false,
+          },
+        },
+        {
+          id: path.join(workspaceSessionDir(config, workspace.id), "newer.jsonl"),
+          sessionId: "newer-id",
+          path: path.join(workspaceSessionDir(config, workspace.id), "newer.jsonl"),
+          firstMessage: "newer first message",
+          updatedAt: new Date("2026-03-25T12:00:00Z").getTime(),
+          messageCount: 0,
+          workspaceId: workspace.id,
+        },
+        {
+          id: olderPath,
+          sessionId: "older-id",
+          path: olderPath,
+          firstMessage: "older first message",
+          updatedAt: new Date("2026-03-24T12:00:00Z").getTime(),
+          messageCount: 0,
+          workspaceId: workspace.id,
+        },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("falls back to a placeholder when no user message exists", async () => {
@@ -133,9 +153,113 @@ describe("session summaries", () => {
       },
     ]);
 
-    const sessions = await listSessionSummaries(config, workspace);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-25T12:00:00Z"));
+    try {
+      const sessions = await listSessionSummaries(config, workspace);
 
-    expect(sessions[0]?.firstMessage).toBe("(no messages)");
+      expect(sessions[1]?.firstMessage).toBe("(no messages)");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("puts today's daily session first and preserves daily metadata", async () => {
+    const config = await createConfig();
+    const workspace = workspaceInfo(config, "daily");
+    await fs.mkdir(workspace.path, { recursive: true });
+
+    await writeSession(config, workspace.id, "older.jsonl", "2026-03-24T12:00:00Z", [
+      { type: "session", version: 3, id: "older-id", timestamp: "2026-03-24T12:00:00Z" },
+      {
+        type: "custom",
+        customType: CRON_SESSION_CUSTOM_TYPE,
+        data: { version: 1, kind: "daily", date: "2026-03-24" },
+      },
+    ]);
+    const todayPath = await writeSession(
+      config,
+      workspace.id,
+      "today.jsonl",
+      "2026-03-20T12:00:00Z",
+      [
+        { type: "session", version: 3, id: "today-id", timestamp: "2026-03-31T12:00:00Z" },
+        {
+          type: "custom",
+          customType: CRON_SESSION_CUSTOM_TYPE,
+          data: { version: 1, kind: "daily", date: "2026-03-31" },
+        },
+      ],
+    );
+    await writeSession(config, workspace.id, "newer.jsonl", "2026-03-25T12:00:00Z", [
+      { type: "session", version: 3, id: "newer-id", timestamp: "2026-03-25T12:00:00Z" },
+    ]);
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-31T12:00:00Z"));
+    try {
+      const sessions = await listSessionSummaries(config, workspace);
+
+      expect(sessions[0]).toEqual({
+        id: todayPath,
+        sessionId: "today-id",
+        path: todayPath,
+        firstMessage: "(no messages)",
+        updatedAt: new Date("2026-03-20T12:00:00Z").getTime(),
+        messageCount: 0,
+        workspaceId: workspace.id,
+        dailySession: {
+          date: "2026-03-31",
+          isToday: true,
+          exists: true,
+        },
+      });
+      expect(sessions.map((session) => session.sessionId)).toEqual([
+        "today-id",
+        "newer-id",
+        "older-id",
+      ]);
+      expect(sessions[2]?.dailySession).toEqual({
+        date: "2026-03-24",
+        isToday: false,
+        exists: true,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("adds a synthetic entry when today's daily session does not exist", async () => {
+    const config = await createConfig();
+    const workspace = workspaceInfo(config, "missing-daily");
+    await fs.mkdir(workspace.path, { recursive: true });
+
+    await writeSession(config, workspace.id, "regular.jsonl", "2026-03-25T12:00:00Z", [
+      { type: "session", version: 3, id: "regular-id", timestamp: "2026-03-25T12:00:00Z" },
+    ]);
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-31T12:00:00Z"));
+    try {
+      const sessions = await listSessionSummaries(config, workspace);
+
+      expect(sessions[0]).toEqual({
+        id: "daily:missing-daily:2026-03-31",
+        sessionId: "daily:missing-daily:2026-03-31",
+        firstMessage: "(no messages)",
+        updatedAt: new Date("2026-03-31T12:00:00Z").getTime(),
+        messageCount: 0,
+        workspaceId: workspace.id,
+        dailySession: {
+          date: "2026-03-31",
+          isToday: true,
+          exists: false,
+        },
+      });
+      expect(sessions[1]?.sessionId).toBe("regular-id");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("uses file mtimes for latest workspace activity", async () => {

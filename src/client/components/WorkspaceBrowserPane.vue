@@ -1,11 +1,22 @@
 <script setup lang="ts">
-import { Search, Plus, LogOut, LoaderCircle, Wifi, WifiOff, KeyRound, Star } from "lucide-vue-next";
+import {
+  Search,
+  Plus,
+  LogOut,
+  LoaderCircle,
+  Wifi,
+  WifiOff,
+  KeyRound,
+  Star,
+  CalendarDays,
+} from "lucide-vue-next";
 import ProviderAuthPopover from "@/client/components/ProviderAuthPopover.vue";
 import { computed, nextTick, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { formatShortDateTime } from "@/client/lib/formatting";
 import { usePaneTransition } from "@/client/lib/pane-transition";
 import { sessionRoutePath, workspaceRoutePath } from "@/client/lib/routes";
+import { sessionDisplayTitle } from "@/client/lib/daily-sessions";
 import type { SessionSummary } from "@/shared/types";
 import { useAppStore } from "@/client/stores/app";
 
@@ -69,7 +80,15 @@ const connectionDescription = computed(() => {
 });
 
 function sessionLabel(session: SessionSummary): string {
-  return (session.firstMessage || "(no messages)").replace(/\s+/g, " ").trim();
+  return sessionDisplayTitle(session);
+}
+
+function sessionMeta(session: SessionSummary): string {
+  if (session.dailySession && !session.dailySession.exists) {
+    return "";
+  }
+
+  return formatShortDateTime(session.updatedAt);
 }
 
 function isWorkspacePinned(workspaceId: string): boolean {
@@ -163,6 +182,13 @@ async function openSession(session: SessionSummary): Promise<void> {
 
   openingSessionId.value = session.sessionId;
   try {
+    if (session.dailySession && !session.dailySession.exists) {
+      const openedSession = await store.startDailySession(session.workspaceId);
+      setPaneTransition("slide-from-right");
+      await router.push(sessionRoutePath(openedSession.workspaceId, openedSession.sessionId));
+      return;
+    }
+
     setPaneTransition("slide-from-right");
     await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
   } finally {
@@ -379,10 +405,26 @@ watch(
               :disabled="actionsDisabled"
               @click="openSession(session)"
             >
-              <span class="workspace-browser-pane__item-label">{{ sessionLabel(session) }}</span>
-              <span class="workspace-browser-pane__item-meta">{{
-                formatShortDateTime(session.updatedAt)
-              }}</span>
+              <span class="workspace-browser-pane__session-main">
+                <span class="workspace-browser-pane__session-copy">
+                  <span class="workspace-browser-pane__item-label">{{
+                    sessionLabel(session)
+                  }}</span>
+                  <span v-if="sessionMeta(session)" class="workspace-browser-pane__item-meta">
+                    {{ sessionMeta(session) }}
+                  </span>
+                </span>
+                <span
+                  v-if="session.dailySession"
+                  class="workspace-browser-pane__session-icon"
+                  :title="session.dailySession.exists ? 'Daily session' : 'Start daily session'"
+                  :aria-label="
+                    session.dailySession.exists ? 'Daily session' : 'Start daily session'
+                  "
+                >
+                  <CalendarDays :size="16" />
+                </span>
+              </span>
             </button>
 
             <div v-if="filteredSessions.length === 0" class="workspace-browser-pane__empty">
@@ -665,6 +707,22 @@ watch(
   flex: 0 0 auto;
 }
 
+.workspace-browser-pane__session-main {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.workspace-browser-pane__session-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
 .workspace-browser-pane__item-main {
   display: flex;
   align-items: center;
@@ -694,7 +752,8 @@ watch(
   opacity: 0.76;
 }
 
-.workspace-browser-pane__pin-btn {
+.workspace-browser-pane__pin-btn,
+.workspace-browser-pane__session-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -717,6 +776,15 @@ watch(
 .workspace-browser-pane__pin-btn:hover {
   background: transparent;
   color: var(--color-text-strong);
+}
+
+.workspace-browser-pane__session-icon {
+  color: var(--color-text-strong);
+}
+
+.workspace-browser-pane__item.is-active .workspace-browser-pane__session-icon {
+  color: var(--color-user-text);
+  opacity: 0.76;
 }
 
 .workspace-browser-pane__empty {

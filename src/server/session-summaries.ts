@@ -5,6 +5,11 @@ import readline from "node:readline";
 import type { SessionSummary, WorkspaceInfo } from "@/shared/types";
 import type { AppConfig } from "./config";
 import { workspaceSessionDir } from "./pi-paths";
+import {
+  CRON_SESSION_CUSTOM_TYPE,
+  findLatestDailyCronSessionBinding,
+  toLocalIsoDate,
+} from "./cron-session";
 
 const DEFAULT_SESSION_LABEL = "(no messages)";
 
@@ -39,12 +44,13 @@ function extractMessageText(content: unknown): string {
 
 async function readSessionHeaderAndFirstUserMessage(
   filePath: string,
-): Promise<{ sessionId?: string; firstMessage: string }> {
+): Promise<{ sessionId?: string; firstMessage: string; dailySessionDate?: string }> {
   const stream = createReadStream(filePath, { encoding: "utf8" });
   const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
 
   let sessionId: string | undefined;
   let firstMessage = "";
+  let dailySessionDate: string | undefined;
 
   try {
     for await (const line of lines) {
@@ -66,6 +72,8 @@ async function readSessionHeaderAndFirstUserMessage(
       const candidate = entry as {
         type?: unknown;
         id?: unknown;
+        customType?: unknown;
+        data?: unknown;
         message?: { role?: unknown; content?: unknown };
       };
 
@@ -77,10 +85,17 @@ async function readSessionHeaderAndFirstUserMessage(
         firstMessage = extractMessageText(candidate.message.content);
       }
 
-      if (sessionId && firstMessage) {
-        lines.close();
-        stream.destroy();
-        break;
+      if (candidate.type === "custom" && candidate.customType === CRON_SESSION_CUSTOM_TYPE) {
+        const binding = findLatestDailyCronSessionBinding([
+          {
+            type: "custom",
+            customType: candidate.customType,
+            data: candidate.data,
+          },
+        ]);
+        if (binding) {
+          dailySessionDate = binding.date;
+        }
       }
     }
   } finally {
@@ -88,15 +103,16 @@ async function readSessionHeaderAndFirstUserMessage(
     stream.destroy();
   }
 
-  return { sessionId, firstMessage };
+  return { sessionId, firstMessage, dailySessionDate };
 }
 
 async function buildSessionSummary(
   filePath: string,
   workspaceId: string,
+  todayDate: string,
 ): Promise<SessionSummary | undefined> {
   try {
-    const [{ sessionId, firstMessage }, stats] = await Promise.all([
+    const [{ sessionId, firstMessage, dailySessionDate }, stats] = await Promise.all([
       readSessionHeaderAndFirstUserMessage(filePath),
       fs.stat(filePath),
     ]);
@@ -113,6 +129,15 @@ async function buildSessionSummary(
       updatedAt: stats.mtime.getTime(),
       messageCount: 0,
       workspaceId,
+      ...(dailySessionDate
+        ? {
+            dailySession: {
+              date: dailySessionDate,
+              isToday: dailySessionDate === todayDate,
+              exists: true,
+            },
+          }
+        : {}),
     };
   } catch {
     return undefined;
@@ -120,7 +145,7 @@ async function buildSessionSummary(
 }
 
 export async function listSessionSummaries(
-  config: Pick<AppConfig, "battyDir">,
+  config: Pick<AppConfig, "battyDir" | "cronDailySessionStartTime">,
   workspace: WorkspaceInfo,
 ): Promise<SessionSummary[]> {
   const sessionDir = workspaceSessionDir(config, workspace.id);
@@ -129,12 +154,35 @@ export async function listSessionSummaries(
     .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
     .map((entry) => path.join(sessionDir, entry.name));
 
+  const todayDate = toLocalIsoDate(new Date(), config.cronDailySessionStartTime);
   const sessions = (
-    await Promise.all(sessionFiles.map((filePath) => buildSessionSummary(filePath, workspace.id)))
+    await Promise.all(
+      sessionFiles.map((filePath) => buildSessionSummary(filePath, workspace.id, todayDate)),
+    )
   ).filter((session): session is SessionSummary => Boolean(session));
 
   sessions.sort((a, b) => b.updatedAt - a.updatedAt);
-  return sessions;
+  const todayDailySession = sessions.find((session) => session.dailySession?.date === todayDate);
+  if (todayDailySession) {
+    return [todayDailySession, ...sessions.filter((session) => session !== todayDailySession)];
+  }
+
+  return [
+    {
+      id: `daily:${workspace.id}:${todayDate}`,
+      sessionId: `daily:${workspace.id}:${todayDate}`,
+      firstMessage: DEFAULT_SESSION_LABEL,
+      updatedAt: Date.now(),
+      messageCount: 0,
+      workspaceId: workspace.id,
+      dailySession: {
+        date: todayDate,
+        isToday: true,
+        exists: false,
+      },
+    },
+    ...sessions,
+  ];
 }
 
 export async function latestSessionUpdatedAt(

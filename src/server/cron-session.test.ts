@@ -3,6 +3,7 @@ import {
   buildDailyCronSessionBinding,
   CRON_SESSION_CUSTOM_TYPE,
   findDailyCronSessionBinding,
+  findLatestDailyCronSessionBinding,
   localDayStartMs,
   toLocalIsoDate,
 } from "./cron-session";
@@ -24,15 +25,13 @@ describe("cron session helpers", () => {
     const older = buildDailyCronSessionBinding(new Date("2026-03-30T08:00:00Z"), "04:00");
     const today = buildDailyCronSessionBinding(new Date("2026-03-31T08:00:00Z"), "04:00");
 
-    const binding = findDailyCronSessionBinding(
-      [
-        { type: "custom", customType: CRON_SESSION_CUSTOM_TYPE, data: older },
-        { type: "custom", customType: "other", data: { nope: true } },
-        { type: "custom", customType: CRON_SESSION_CUSTOM_TYPE, data: today },
-      ],
-      "2026-03-31",
-    );
+    const entries = [
+      { type: "custom", customType: CRON_SESSION_CUSTOM_TYPE, data: older },
+      { type: "custom", customType: "other", data: { nope: true } },
+      { type: "custom", customType: CRON_SESSION_CUSTOM_TYPE, data: today },
+    ];
 
-    expect(binding).toEqual(today);
+    expect(findLatestDailyCronSessionBinding(entries)).toEqual(today);
+    expect(findDailyCronSessionBinding(entries, "2026-03-31")).toEqual(today);
   });
 });

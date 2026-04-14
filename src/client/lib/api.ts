@@ -199,6 +199,14 @@ export function createSession(workspaceId: string): Promise<SessionState> {
   });
 }
 
+export function createOrOpenDailySession(workspaceId: string): Promise<SessionState> {
+  return request("/api/sessions/daily", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workspaceId }),
+  });
+}
+
 export function openSession(workspaceId: string, sessionPath: string): Promise<SessionState> {
   return request("/api/sessions/open", {
     method: "POST",

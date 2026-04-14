@@ -528,6 +528,12 @@ app.post<{ Body: { workspaceId: string } }>("/api/sessions", async (request) => 
   return service.createSession(workspace);
 });
 
+app.post<{ Body: { workspaceId: string } }>("/api/sessions/daily", async (request) => {
+  const workspaces = await listWorkspaces(config);
+  const workspace = resolveWorkspace(workspaces, request.body.workspaceId);
+  return service.createOrOpenDailySession(workspace);
+});
+
 app.post<{ Body: { workspaceId: string; sessionPath: string } }>(
   "/api/sessions/open",
   async (request) => {

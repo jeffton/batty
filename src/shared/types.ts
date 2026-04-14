@@ -84,6 +84,11 @@ export interface SessionSummary {
   messageCount: number;
   workspaceId: string;
   model?: string;
+  dailySession?: {
+    date: string;
+    isToday: boolean;
+    exists: boolean;
+  };
 }
 
 export type CronJobSchedule =

@@ -361,7 +361,10 @@ export class PiService {
   }): Promise<{ sessionId: string; sessionPath: string }> {
     const session =
       job.session.kind === "daily"
-        ? await this.resolveOrCreateDailyCronSession(job.workspace, job.model, job.thinkingLevel)
+        ? await this.resolveOrCreateDailySession(job.workspace, {
+            modelId: job.model,
+            thinkingLevel: job.thinkingLevel,
+          })
         : await this.createSession(job.workspace, {
             modelId: job.model,
             thinkingLevel: job.thinkingLevel,
@@ -381,10 +384,13 @@ export class PiService {
     };
   }
 
-  private async resolveOrCreateDailyCronSession(
+  async createOrOpenDailySession(workspace: WorkspaceInfo): Promise<SessionState> {
+    return this.resolveOrCreateDailySession(workspace);
+  }
+
+  private async resolveOrCreateDailySession(
     workspace: WorkspaceInfo,
-    model: string,
-    thinkingLevel: string,
+    options?: { modelId?: string; thinkingLevel?: string },
   ): Promise<SessionState> {
     const now = new Date();
     const date = toLocalIsoDate(now, this.config.cronDailySessionStartTime);
@@ -423,8 +429,8 @@ export class PiService {
       }
 
       const session = await this.createSession(workspace, {
-        modelId: model,
-        thinkingLevel,
+        ...(options?.modelId ? { modelId: options.modelId } : {}),
+        ...(options?.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
       });
       const webSession = this.requireSession(session.id);
       webSession.session.sessionManager.appendCustomEntry(

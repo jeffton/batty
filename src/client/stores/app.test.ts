@@ -6,6 +6,7 @@ import type { SessionState, SessionSummary } from "@/shared/types";
 vi.mock("@/client/lib/api", () => ({
   abortSession: vi.fn(),
   completeOpenAICodexProviderAuth: vi.fn(),
+  createOrOpenDailySession: vi.fn(),
   createSession: vi.fn(),
   createWorkspace: vi.fn(),
   deleteCronJob: vi.fn(),

@@ -33,6 +33,25 @@ const props = withDefaults(
 
 const isExpanded = ref(false);
 
+async function downloadSentFile(event: MouseEvent, file: SentFileDescriptor): Promise<void> {
+  event.preventDefault();
+  const response = await fetch(file.downloadUrl, { credentials: "include" });
+  if (!response.ok) {
+    throw new Error(`Download failed: ${response.status} ${response.statusText}`);
+  }
+
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = file.name;
+  link.style.display = "none";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000);
+}
+
 function readString(key: string): string | undefined {
   const value = props.arguments[key];
   return typeof value === "string" ? value : undefined;
@@ -410,7 +429,6 @@ const sentFiles = computed(() =>
             muted
             playsinline
           />
-          <div v-else class="tool-call__sent-file-placeholder">{{ file.kind.toUpperCase() }}</div>
 
           <div class="tool-call__sent-file-meta">
             <strong class="tool-call__sent-file-name">{{ file.name }}</strong>
@@ -419,7 +437,12 @@ const sentFiles = computed(() =>
             </span>
           </div>
 
-          <a :href="file.downloadUrl" :download="file.name" class="tool-call__sent-file-download">
+          <a
+            :href="file.downloadUrl"
+            :download="file.name"
+            class="tool-call__sent-file-download"
+            @click="downloadSentFile($event, file)"
+          >
             Download
           </a>
         </article>
@@ -630,25 +653,12 @@ const sentFiles = computed(() =>
   background: color-mix(in srgb, var(--color-bg-elevated) 82%, transparent);
 }
 
-.tool-call__sent-file-preview,
-.tool-call__sent-file-placeholder {
+.tool-call__sent-file-preview {
   width: 100%;
   aspect-ratio: 16 / 10;
   border-radius: 0.55rem;
   background: var(--color-bg-inline-code);
-}
-
-.tool-call__sent-file-preview {
   object-fit: cover;
-}
-
-.tool-call__sent-file-placeholder {
-  display: grid;
-  place-items: center;
-  color: var(--color-text-subtle);
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
 }
 
 .tool-call__sent-file-meta {

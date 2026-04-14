@@ -178,6 +178,10 @@ describe("ToolCallBlock", () => {
     expect(wrapper.findAll(".tool-call__sent-file-download").at(2)?.attributes("download")).toBe(
       "archive.zip",
     );
+    expect(wrapper.findAll(".tool-call__sent-file-download").at(0)?.attributes("target")).toBe(
+      undefined,
+    );
+    expect(wrapper.findAll(".tool-call__sent-file-placeholder")).toHaveLength(0);
     expect(wrapper.text()).toContain("report.png");
     expect(wrapper.text()).toContain("archive.zip");
   });

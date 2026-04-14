@@ -12,18 +12,6 @@ const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const DEFAULT_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
 const DEFAULT_ACCEPT_LANGUAGE = "en-US,en;q=0.9";
-const BLOCKED_PAGE_MARKERS = [
-  "access denied",
-  "just a moment",
-  "enable javascript",
-  "verify you are human",
-  "cf-browser-verification",
-  "challenge-platform",
-  "captcha",
-  "datadome",
-  "akamai",
-];
-
 type HtmlFetchResult =
   | {
       ok: true;
@@ -76,6 +64,10 @@ export interface WebSearchResult {
 
 let browserPromise: Promise<Browser> | null = null;
 
+export function resetWebSearchStateForTests(): void {
+  browserPromise = null;
+}
+
 function htmlToMarkdown(html: string): string {
   const turndown = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced" });
   turndown.use(gfm);
@@ -119,11 +111,6 @@ function extractReadableContent(html: string, url: string): string {
   return "Could not extract readable content from this page.";
 }
 
-function looksLikeBlockedPage(html: string): boolean {
-  const normalized = html.toLowerCase();
-  return BLOCKED_PAGE_MARKERS.some((marker) => normalized.includes(marker));
-}
-
 function isUsefulContent(content: string): boolean {
   if (
     content === "Could not extract readable content from this page." ||
@@ -142,7 +129,7 @@ function shouldUseBrowserFallback(result: HtmlFetchResult, content?: string): bo
     return result.status === 401 || result.status === 403 || result.status === 429;
   }
 
-  return looksLikeBlockedPage(result.html) || !isUsefulContent(content ?? "");
+  return !isUsefulContent(content ?? "");
 }
 
 function formatFetchFailure(result: HtmlFetchResult): string {
@@ -330,7 +317,7 @@ async function fetchPageContent(url: string): Promise<string> {
   }
 
   const browserContent = extractReadableContent(browserResult.html, browserResult.finalUrl);
-  if (looksLikeBlockedPage(browserResult.html) || !isUsefulContent(browserContent)) {
+  if (!isUsefulContent(browserContent)) {
     return formatFallbackFailure(httpResult, {
       ok: false,
       finalUrl: browserResult.finalUrl,

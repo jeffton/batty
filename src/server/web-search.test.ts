@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { chromium } from "playwright";
-import { runWebSearch } from "@/server/web-search";
+import { resetWebSearchStateForTests, runWebSearch } from "@/server/web-search";
 
 vi.mock("playwright", () => ({
   chromium: {
@@ -12,6 +12,7 @@ const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  resetWebSearchStateForTests();
   vi.clearAllMocks();
   vi.restoreAllMocks();
 });
@@ -87,6 +88,26 @@ describe("runWebSearch", () => {
     expect(result.text).toContain("# Example Article");
     expect(result.text).toContain("Hello **world**.");
     expect(result.details.url).toBe("https://example.com/article");
+    expect(chromium.launch).not.toHaveBeenCalled();
+  });
+
+  it("does not mistake GitHub feature flags for a bot challenge", async () => {
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(
+          "<!doctype html><html><head><title>GitHub - SharpAI/SwiftLM</title></head><body><main><article><div>octocaptcha_origin_optimization</div><h1>SwiftLM</h1><p>A native Swift inference server for MLX models with an OpenAI-compatible API.</p><p>This README text is long enough to be useful content and should not trigger a browser fallback just because the page HTML contains an internal feature flag with the word captcha in it.</p></article></main></body></html>",
+          { status: 200, headers: { "Content-Type": "text/html" } },
+        ),
+    ) as typeof fetch;
+
+    const result = await runWebSearch({
+      apiKey: "brave-key",
+      action: "content",
+      url: "https://github.com/SharpAI/SwiftLM",
+    });
+
+    expect(result.text).toContain("# GitHub - SharpAI/SwiftLM");
+    expect(result.text).toContain("A native Swift inference server for MLX models");
     expect(chromium.launch).not.toHaveBeenCalled();
   });
 

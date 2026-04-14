@@ -28,6 +28,7 @@ cp -R "$repo_dir/dist/server" "$tmp_dir/dist/server"
 (
   cd "$tmp_dir"
   pnpm install --prod --frozen-lockfile --ignore-scripts
+  pnpm exec playwright install chromium
 )
 
 mv "$tmp_dir" "$release_dir"

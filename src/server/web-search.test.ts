@@ -1,10 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { chromium } from "playwright";
 import { runWebSearch } from "@/server/web-search";
+
+vi.mock("playwright", () => ({
+  chromium: {
+    launch: vi.fn(),
+  },
+}));
 
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  vi.clearAllMocks();
   vi.restoreAllMocks();
 });
 
@@ -65,7 +73,7 @@ describe("runWebSearch", () => {
     globalThis.fetch = vi.fn(
       async () =>
         new Response(
-          "<!doctype html><html><head><title>Example Article</title></head><body><main><article><h1>Example Article</h1><p>Hello <strong>world</strong>.</p></article></main></body></html>",
+          "<!doctype html><html><head><title>Example Article</title></head><body><main><article><h1>Example Article</h1><p>Hello <strong>world</strong>.</p><p>This article has enough text to avoid the browser fallback path in the extractor.</p></article></main></body></html>",
           { status: 200, headers: { "Content-Type": "text/html" } },
         ),
     ) as typeof fetch;
@@ -79,5 +87,54 @@ describe("runWebSearch", () => {
     expect(result.text).toContain("# Example Article");
     expect(result.text).toContain("Hello **world**.");
     expect(result.details.url).toBe("https://example.com/article");
+    expect(chromium.launch).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a browser when direct fetch is blocked", async () => {
+    globalThis.fetch = vi.fn(
+      async () => new Response("Forbidden", { status: 403, statusText: "Forbidden" }),
+    ) as typeof fetch;
+
+    const routeAbort = vi.fn(async () => {});
+    const routeContinue = vi.fn(async () => {});
+    const page = {
+      setDefaultNavigationTimeout: vi.fn(),
+      setDefaultTimeout: vi.fn(),
+      route: vi.fn(async (_pattern: string, handler: (route: unknown) => Promise<void>) => {
+        await handler({
+          request: () => ({ resourceType: () => "document" }),
+          abort: routeAbort,
+          continue: routeContinue,
+        });
+      }),
+      goto: vi.fn(async () => ({ status: () => 200, statusText: () => "OK" })),
+      waitForLoadState: vi.fn(async () => {}),
+      waitForTimeout: vi.fn(async () => {}),
+      content: vi.fn(
+        async () =>
+          "<!doctype html><html><head><title>Browser Article</title></head><body><main><article><h1>Browser Article</h1><p>Rendered content from the headless browser path.</p><p>This paragraph is long enough to be considered useful extracted content for the fallback strategy.</p></article></main></body></html>",
+      ),
+      url: vi.fn(() => "https://example.com/rendered"),
+    };
+    const context = {
+      newPage: vi.fn(async () => page),
+      close: vi.fn(async () => {}),
+    };
+
+    vi.mocked(chromium.launch).mockResolvedValue({
+      newContext: vi.fn(async () => context),
+    } as never);
+
+    const result = await runWebSearch({
+      apiKey: "brave-key",
+      action: "content",
+      url: "https://example.com/protected",
+    });
+
+    expect(chromium.launch).toHaveBeenCalledOnce();
+    expect(result.text).toContain("# Browser Article");
+    expect(result.text).toContain("Rendered content from the headless browser path.");
+    expect(routeAbort).not.toHaveBeenCalled();
+    expect(routeContinue).toHaveBeenCalled();
   });
 });

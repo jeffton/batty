@@ -260,9 +260,9 @@ const WebSearchToolSchema = Type.Object(
   },
 );
 
-const SendFilesToolSchema = Type.Object(
+const AttachFilesToolSchema = Type.Object(
   {
-    paths: Type.Array(Type.String({ description: "Path to a file to send to the user." }), {
+    paths: Type.Array(Type.String({ description: "Path to a file to attach for the user." }), {
       minItems: 1,
       description: "Files to copy into Batty storage and expose as downloads for the user.",
     }),
@@ -670,7 +670,7 @@ export class PiService {
       customTools: [
         this.createCronTool(workspace) as never,
         this.createWebSearchTool() as never,
-        this.createSendFilesTool(workspace) as never,
+        this.createAttachFilesTool(workspace) as never,
       ],
     });
 
@@ -1046,20 +1046,21 @@ export class PiService {
     };
   }
 
-  private createSendFilesTool(
+  private createAttachFilesTool(
     workspace: WorkspaceInfo,
-  ): ToolDefinition<typeof SendFilesToolSchema> {
+  ): ToolDefinition<typeof AttachFilesToolSchema> {
     return {
-      name: "send-files",
-      label: "Send Files",
-      description: "Copy files into Batty storage so the user can preview and download them.",
-      promptSnippet: "Send files to the user without leaving Batty.",
+      name: "attach-files",
+      label: "Attach Files",
+      description:
+        "Copy files into Batty storage so they appear as attachments in the final response and downloads during the tool call.",
+      promptSnippet: "Attach files to the final response without leaving Batty.",
       promptGuidelines: [
-        "Use this tool when the user asks you to send them one or more files.",
-        "Pass every file path you want to send in paths.",
-        "Only send files that already exist in the workspace or as absolute paths you have access to.",
+        "Use this tool when the user asks you to send or attach one or more files.",
+        "Pass every file path you want to attach in paths.",
+        "Only attach files that already exist in the workspace or as absolute paths you have access to.",
       ],
-      parameters: SendFilesToolSchema,
+      parameters: AttachFilesToolSchema,
       execute: async (toolCallId, params, _signal, _onUpdate, ctx) => {
         const sessionFile = ctx.sessionManager.getSessionFile();
         const sessionId =
@@ -1079,7 +1080,7 @@ export class PiService {
         const count = sentFiles.length;
         const noun = count === 1 ? "file" : "files";
         return {
-          content: [{ type: "text", text: `Sent ${count} ${noun} to the user.` }],
+          content: [{ type: "text", text: `Attached ${count} ${noun} for the user.` }],
           details: { sentFiles },
         };
       },

@@ -127,10 +127,10 @@ describe("ToolCallBlock", () => {
     expect(wrapper.text()).toContain("Collapse output");
   });
 
-  it("renders sent files with previews and download links", () => {
+  it("renders attached files as download links without inline previews", () => {
     const wrapper = mount(ToolCallBlock, {
       props: {
-        name: "send-files",
+        name: "attach-files",
         arguments: {
           paths: ["dist/report.png", "dist/demo.mp4", "dist/archive.zip"],
         },
@@ -168,20 +168,15 @@ describe("ToolCallBlock", () => {
       },
     });
 
-    expect(wrapper.findAll(".tool-call__sent-file-card")).toHaveLength(3);
-    expect(wrapper.find("img.tool-call__sent-file-preview").attributes("src")).toBe(
-      "/api/sent-files/workspace/session/call/image-1",
-    );
-    expect(wrapper.find("video.tool-call__sent-file-preview").attributes("src")).toBe(
-      "/api/sent-files/workspace/session/call/video-1",
-    );
-    expect(wrapper.findAll(".tool-call__sent-file-download").at(2)?.attributes("download")).toBe(
+    expect(wrapper.findAll(".attached-files__card")).toHaveLength(3);
+    expect(wrapper.find("img.attached-files__preview").exists()).toBe(false);
+    expect(wrapper.find("video.attached-files__preview").exists()).toBe(false);
+    expect(wrapper.findAll(".attached-files__download").at(2)?.attributes("download")).toBe(
       "archive.zip",
     );
-    expect(wrapper.findAll(".tool-call__sent-file-download").at(0)?.attributes("target")).toBe(
+    expect(wrapper.findAll(".attached-files__download").at(0)?.attributes("target")).toBe(
       undefined,
     );
-    expect(wrapper.findAll(".tool-call__sent-file-placeholder")).toHaveLength(0);
     expect(wrapper.text()).toContain("report.png");
     expect(wrapper.text()).toContain("archive.zip");
   });

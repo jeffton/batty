@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import AttachedFilesList from "@/client/components/AttachedFilesList.vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
 import MarkdownBlock from "@/client/components/MarkdownBlock.vue";
 import ToolCallBlock from "@/client/components/ToolCallBlock.vue";
 import type { ToolDisplayState } from "@/client/lib/transcript";
-import type { UiContentBlock, UiMessage } from "@/shared/types";
+import type { SentFileDescriptor, UiContentBlock, UiMessage } from "@/shared/types";
 
 type AssistantSegment = {
   kind: "bubble" | "plain";
@@ -60,6 +61,50 @@ const assistantSegments = computed<AssistantSegment[]>(() => {
     { kind: "bubble", blocks: props.message.blocks.slice(trailingBubbleStart) },
   ];
 });
+
+const attachedFiles = computed<SentFileDescriptor[]>(() => {
+  if (props.message.role !== "assistant") {
+    return [];
+  }
+
+  const files: SentFileDescriptor[] = [];
+  const seen = new Set<string>();
+
+  for (const block of props.message.blocks) {
+    if (block.type !== "toolCall" || block.name !== "attach-files") {
+      continue;
+    }
+
+    const candidates = toolStateFor(block.id)?.resultDetails?.sentFiles;
+    if (!Array.isArray(candidates)) {
+      continue;
+    }
+
+    for (const candidate of candidates) {
+      if (
+        !candidate ||
+        typeof candidate !== "object" ||
+        typeof candidate.id !== "string" ||
+        typeof candidate.name !== "string" ||
+        typeof candidate.size !== "number" ||
+        typeof candidate.mimeType !== "string" ||
+        typeof candidate.kind !== "string" ||
+        typeof candidate.downloadUrl !== "string"
+      ) {
+        continue;
+      }
+
+      if (seen.has(candidate.id)) {
+        continue;
+      }
+
+      seen.add(candidate.id);
+      files.push(candidate as SentFileDescriptor);
+    }
+  }
+
+  return files;
+});
 </script>
 
 <template>
@@ -109,6 +154,8 @@ const assistantSegments = computed<AssistantSegment[]>(() => {
           />
         </template>
       </div>
+
+      <AttachedFilesList v-if="attachedFiles.length > 0" :files="attachedFiles" />
     </div>
 
     <div v-else class="message__body">

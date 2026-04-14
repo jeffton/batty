@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Check, CircleAlert, LoaderCircle } from "lucide-vue-next";
 import { computed, ref } from "vue";
+import AttachedFilesList from "@/client/components/AttachedFilesList.vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
 import DiffBlock from "@/client/components/DiffBlock.vue";
 import MarkdownBlock from "@/client/components/MarkdownBlock.vue";
@@ -33,25 +34,6 @@ const props = withDefaults(
 
 const isExpanded = ref(false);
 
-async function downloadSentFile(event: MouseEvent, file: SentFileDescriptor): Promise<void> {
-  event.preventDefault();
-  const response = await fetch(file.downloadUrl, { credentials: "include" });
-  if (!response.ok) {
-    throw new Error(`Download failed: ${response.status} ${response.statusText}`);
-  }
-
-  const blob = await response.blob();
-  const objectUrl = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = objectUrl;
-  link.download = file.name;
-  link.style.display = "none";
-  document.body.append(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000);
-}
-
 function readString(key: string): string | undefined {
   const value = props.arguments[key];
   return typeof value === "string" ? value : undefined;
@@ -59,23 +41,6 @@ function readString(key: string): string | undefined {
 
 function imageUrl(block: Extract<UiContentBlock, { type: "image" }>): string {
   return `data:${block.mimeType};base64,${block.data}`;
-}
-
-function formatFileSize(size: number): string {
-  if (!Number.isFinite(size) || size < 1024) {
-    return `${Math.max(0, Math.floor(size || 0))} B`;
-  }
-
-  const units = ["KB", "MB", "GB", "TB"];
-  let value = size / 1024;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-
-  const digits = value >= 100 ? 0 : value >= 10 ? 1 : 2;
-  return `${value.toFixed(digits)} ${units[unitIndex]}`;
 }
 
 const pathValue = computed(() => readString("path"));
@@ -239,7 +204,7 @@ const showResultSection = computed(() => {
     return !commandValue.value ? hasResultContent.value : visibleResultBlocks.value.length > 0;
   }
 
-  if (props.name === "send-files") {
+  if (props.name === "attach-files") {
     return props.status === "error" || sentFiles.value.length > 0 || hasResultContent.value;
   }
 
@@ -413,40 +378,12 @@ const sentFiles = computed(() =>
         />
       </template>
 
-      <div v-if="props.name === 'send-files' && sentFiles.length > 0" class="tool-call__sent-files">
-        <article v-for="file in sentFiles" :key="file.id" class="tool-call__sent-file-card">
-          <img
-            v-if="file.kind === 'image' && file.previewUrl"
-            :src="file.previewUrl"
-            :alt="file.name"
-            class="tool-call__sent-file-preview"
-          />
-          <video
-            v-else-if="file.kind === 'video' && file.previewUrl"
-            :src="file.previewUrl"
-            class="tool-call__sent-file-preview"
-            preload="metadata"
-            muted
-            playsinline
-          />
-
-          <div class="tool-call__sent-file-meta">
-            <strong class="tool-call__sent-file-name">{{ file.name }}</strong>
-            <span class="tool-call__sent-file-facts">
-              {{ file.mimeType }} · {{ formatFileSize(file.size) }}
-            </span>
-          </div>
-
-          <a
-            :href="file.downloadUrl"
-            :download="file.name"
-            class="tool-call__sent-file-download"
-            @click="downloadSentFile($event, file)"
-          >
-            Download
-          </a>
-        </article>
-      </div>
+      <AttachedFilesList
+        v-if="props.name === 'attach-files' && sentFiles.length > 0"
+        :files="sentFiles"
+        :preview="false"
+        :compact="props.compact"
+      />
 
       <DiffBlock
         v-if="props.name === 'edit' && showEditDiff"
@@ -636,57 +573,6 @@ const sentFiles = computed(() =>
 .tool-call img {
   width: min(100%, 28rem);
   border-radius: 0.45rem;
-}
-
-.tool-call__sent-files {
-  display: grid;
-  gap: 0.7rem;
-  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
-}
-
-.tool-call__sent-file-card {
-  display: grid;
-  gap: 0.65rem;
-  padding: 0.7rem;
-  border: 1px solid var(--color-border);
-  border-radius: 0.7rem;
-  background: color-mix(in srgb, var(--color-bg-elevated) 82%, transparent);
-}
-
-.tool-call__sent-file-preview {
-  width: 100%;
-  aspect-ratio: 16 / 10;
-  border-radius: 0.55rem;
-  background: var(--color-bg-inline-code);
-  object-fit: cover;
-}
-
-.tool-call__sent-file-meta {
-  display: grid;
-  gap: 0.2rem;
-  min-width: 0;
-}
-
-.tool-call__sent-file-name {
-  color: var(--color-text-strong);
-  overflow-wrap: anywhere;
-}
-
-.tool-call__sent-file-facts {
-  color: var(--color-text-subtle);
-  font-size: 0.85rem;
-  overflow-wrap: anywhere;
-}
-
-.tool-call__sent-file-download {
-  justify-self: start;
-  color: var(--color-info);
-  text-decoration: none;
-  font-weight: 600;
-}
-
-.tool-call__sent-file-download:hover {
-  text-decoration: underline;
 }
 
 @keyframes tool-call-spin {

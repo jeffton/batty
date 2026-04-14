@@ -4,9 +4,20 @@ export type UiContentBlock =
   | { type: "thinking"; thinking: string }
   | { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> };
 
+export interface SentFileDescriptor {
+  id: string;
+  name: string;
+  size: number;
+  mimeType: string;
+  kind: "file" | "image" | "video";
+  downloadUrl: string;
+  previewUrl?: string;
+}
+
 export interface ToolExecutionDetails {
   diff?: string;
   firstChangedLine?: number;
+  sentFiles?: SentFileDescriptor[];
   [key: string]: unknown;
 }
 

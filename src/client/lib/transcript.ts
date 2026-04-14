@@ -119,7 +119,11 @@ export function buildTranscriptMessages(
 
 export function hasToolResultContent(
   blocks: UiContentBlock[],
-  details?: { diff?: string },
+  details?: { diff?: string; sentFiles?: unknown[] },
 ): boolean {
-  return blocks.length > 0 || typeof details?.diff === "string";
+  return (
+    blocks.length > 0 ||
+    typeof details?.diff === "string" ||
+    (Array.isArray(details?.sentFiles) && details.sentFiles.length > 0)
+  );
 }

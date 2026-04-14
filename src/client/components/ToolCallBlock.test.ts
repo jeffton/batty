@@ -126,4 +126,59 @@ describe("ToolCallBlock", () => {
     expect(wrapper.find("pre.code-block").text()).toContain("line-30");
     expect(wrapper.text()).toContain("Collapse output");
   });
+
+  it("renders sent files with previews and download links", () => {
+    const wrapper = mount(ToolCallBlock, {
+      props: {
+        name: "send-files",
+        arguments: {
+          paths: ["dist/report.png", "dist/demo.mp4", "dist/archive.zip"],
+        },
+        resultDetails: {
+          sentFiles: [
+            {
+              id: "image-1",
+              name: "report.png",
+              size: 2048,
+              mimeType: "image/png",
+              kind: "image",
+              downloadUrl: "/api/sent-files/workspace/session/call/image-1?download=1",
+              previewUrl: "/api/sent-files/workspace/session/call/image-1",
+            },
+            {
+              id: "video-1",
+              name: "demo.mp4",
+              size: 4096,
+              mimeType: "video/mp4",
+              kind: "video",
+              downloadUrl: "/api/sent-files/workspace/session/call/video-1?download=1",
+              previewUrl: "/api/sent-files/workspace/session/call/video-1",
+            },
+            {
+              id: "file-1",
+              name: "archive.zip",
+              size: 8192,
+              mimeType: "application/zip",
+              kind: "file",
+              downloadUrl: "/api/sent-files/workspace/session/call/file-1?download=1",
+            },
+          ],
+        },
+        status: "success",
+      },
+    });
+
+    expect(wrapper.findAll(".tool-call__sent-file-card")).toHaveLength(3);
+    expect(wrapper.find("img.tool-call__sent-file-preview").attributes("src")).toBe(
+      "/api/sent-files/workspace/session/call/image-1",
+    );
+    expect(wrapper.find("video.tool-call__sent-file-preview").attributes("src")).toBe(
+      "/api/sent-files/workspace/session/call/video-1",
+    );
+    expect(wrapper.findAll(".tool-call__sent-file-download").at(2)?.attributes("download")).toBe(
+      "archive.zip",
+    );
+    expect(wrapper.text()).toContain("report.png");
+    expect(wrapper.text()).toContain("archive.zip");
+  });
 });

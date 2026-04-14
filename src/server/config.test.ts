@@ -89,5 +89,6 @@ describe("loadConfig", () => {
 
     expect(config.selfPath).toBe("/opt/batty/current");
     expect(config.publicDir).toBe("/opt/batty/current/dist/client");
+    expect(config.sentFilesDir).toBe(path.join(battyDir, ".batty", "sent-files"));
   });
 });

@@ -45,6 +45,7 @@ import {
   findBattySystemPromptSnapshot,
 } from "./batty-system-prompt";
 import { buildCronJobSummary, type CronService } from "./cron";
+import { storeSentFiles } from "./send-files";
 import { runWebSearch } from "./web-search";
 import {
   buildDailyCronSessionBinding,
@@ -253,6 +254,18 @@ const WebSearchToolSchema = Type.Object(
           "Freshness filter such as pd, pw, pm, py, or a range like 2024-01-01to2024-06-30.",
       }),
     ),
+  },
+  {
+    additionalProperties: false,
+  },
+);
+
+const SendFilesToolSchema = Type.Object(
+  {
+    paths: Type.Array(Type.String({ description: "Path to a file to send to the user." }), {
+      minItems: 1,
+      description: "Files to copy into Batty storage and expose as downloads for the user.",
+    }),
   },
   {
     additionalProperties: false,
@@ -654,7 +667,11 @@ export class PiService {
       ...(options?.thinkingLevel
         ? { thinkingLevel: options.thinkingLevel as AgentSession["thinkingLevel"] }
         : {}),
-      customTools: [this.createCronTool(workspace) as never, this.createWebSearchTool() as never],
+      customTools: [
+        this.createCronTool(workspace) as never,
+        this.createWebSearchTool() as never,
+        this.createSendFilesTool(workspace) as never,
+      ],
     });
 
     if (!persistedPrompt) {
@@ -1024,6 +1041,46 @@ export class PiService {
         return {
           content: [{ type: "text", text: result.text }],
           details: result.details,
+        };
+      },
+    };
+  }
+
+  private createSendFilesTool(
+    workspace: WorkspaceInfo,
+  ): ToolDefinition<typeof SendFilesToolSchema> {
+    return {
+      name: "send-files",
+      label: "Send Files",
+      description: "Copy files into Batty storage so the user can preview and download them.",
+      promptSnippet: "Send files to the user without leaving Batty.",
+      promptGuidelines: [
+        "Use this tool when the user asks you to send them one or more files.",
+        "Pass every file path you want to send in paths.",
+        "Only send files that already exist in the workspace or as absolute paths you have access to.",
+      ],
+      parameters: SendFilesToolSchema,
+      execute: async (toolCallId, params, _signal, _onUpdate, ctx) => {
+        const sessionFile = ctx.sessionManager.getSessionFile();
+        const sessionId =
+          typeof sessionFile === "string" && sessionFile.length > 0
+            ? path.basename(sessionFile, path.extname(sessionFile))
+            : "ephemeral-session";
+        const sentFiles = await storeSentFiles({
+          rootDir: this.config.sentFilesDir,
+          workspaceId: workspace.id,
+          sessionId,
+          toolCallId,
+          cwd: workspace.path,
+          paths: Array.isArray(params.paths)
+            ? params.paths.filter((value): value is string => typeof value === "string")
+            : [],
+        });
+        const count = sentFiles.length;
+        const noun = count === 1 ? "file" : "files";
+        return {
+          content: [{ type: "text", text: `Sent ${count} ${noun} to the user.` }],
+          details: { sentFiles },
         };
       },
     };

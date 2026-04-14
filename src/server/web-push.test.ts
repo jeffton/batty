@@ -28,6 +28,7 @@ function createConfig(webPushDir: string): AppConfig {
     selfPath: "/tmp/batty",
     battyDir: "/tmp",
     uploadsDir: "/tmp/uploads",
+    sentFilesDir: "/tmp/sent-files",
     publicDir: "/tmp/public",
     webPushDir,
     webPushSubject: "mailto:test@example.com",

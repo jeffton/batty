@@ -1,3 +1,4 @@
+import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/server";
@@ -16,6 +17,7 @@ import { setWorkspacePinned } from "./options";
 import { PiService, type UploadedFile } from "./pi-service";
 import { WebPushService } from "./web-push";
 import { createWorkspace, listWorkspaces, resolveWorkspace } from "./workspaces";
+import { resolveSentFile } from "./send-files";
 
 const config = await loadConfig(resolveBattyDir());
 const passkeys = new PasskeyAuthService(config.battyDir, config.authSecret);
@@ -93,6 +95,7 @@ if (bootstrapSetupCode) {
 }
 
 await fs.mkdir(config.uploadsDir, { recursive: true });
+await fs.mkdir(config.sentFilesDir, { recursive: true });
 
 await app.register(cookie);
 await app.register(multipart);
@@ -157,6 +160,57 @@ function setAuthCookie(request: FastifyRequest, reply: FastifyReply): void {
     secure: request.protocol === "https",
     maxAge: 60 * 60 * 24 * 30,
   });
+}
+
+function formatContentDisposition(filename: string, disposition: "attachment" | "inline"): string {
+  const fallback = filename.replace(/[^\x20-\x7e]+/g, "_").replace(/"/g, "");
+  const encoded = encodeURIComponent(filename).replace(
+    /['()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `${disposition}; filename="${fallback || "download"}"; filename*=UTF-8''${encoded}`;
+}
+
+function parseRangeHeader(
+  rangeHeader: string,
+  size: number,
+): { start: number; end: number } | undefined {
+  const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
+  if (!match) {
+    return undefined;
+  }
+
+  const startText = match[1] ?? "";
+  const endText = match[2] ?? "";
+  if (!startText && !endText) {
+    return undefined;
+  }
+
+  if (!startText) {
+    const suffixLength = Number.parseInt(endText, 10);
+    if (!Number.isFinite(suffixLength) || suffixLength <= 0) {
+      return undefined;
+    }
+    return {
+      start: Math.max(0, size - suffixLength),
+      end: size - 1,
+    };
+  }
+
+  const start = Number.parseInt(startText, 10);
+  const end = endText ? Number.parseInt(endText, 10) : size - 1;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start) {
+    return undefined;
+  }
+
+  if (start >= size) {
+    return { start: size, end: size - 1 };
+  }
+
+  return {
+    start,
+    end: Math.min(end, size - 1),
+  };
 }
 
 function unauthenticatedAuthStatus() {
@@ -640,6 +694,49 @@ app.get<{
     unsubscribe();
     reply.raw.end();
   });
+});
+
+app.get<{
+  Params: { workspaceId: string; sessionId: string; toolCallId: string; fileId: string };
+  Querystring: { download?: string };
+}>("/api/sent-files/:workspaceId/:sessionId/:toolCallId/:fileId", async (request, reply) => {
+  const resolved = await resolveSentFile({
+    rootDir: config.sentFilesDir,
+    workspaceId: request.params.workspaceId,
+    sessionId: request.params.sessionId,
+    toolCallId: request.params.toolCallId,
+    fileId: request.params.fileId,
+  });
+  const stats = await fs.stat(resolved.storedPath);
+  const download = request.query.download === "1";
+
+  reply.header("Accept-Ranges", "bytes");
+  reply.header("Cache-Control", "private, max-age=31536000, immutable");
+  reply.header("Content-Type", resolved.descriptor.mimeType);
+  reply.header(
+    "Content-Disposition",
+    formatContentDisposition(resolved.descriptor.name, download ? "attachment" : "inline"),
+  );
+  reply.header("X-Content-Type-Options", "nosniff");
+
+  if (!download && typeof request.headers.range === "string") {
+    const range = parseRangeHeader(request.headers.range, stats.size);
+    if (!range || range.start >= stats.size) {
+      reply.code(416);
+      reply.header("Content-Range", `bytes */${stats.size}`);
+      return reply.send();
+    }
+
+    reply.code(206);
+    reply.header("Content-Length", String(range.end - range.start + 1));
+    reply.header("Content-Range", `bytes ${range.start}-${range.end}/${stats.size}`);
+    return reply.send(
+      createReadStream(resolved.storedPath, { start: range.start, end: range.end }),
+    );
+  }
+
+  reply.header("Content-Length", String(stats.size));
+  return reply.send(createReadStream(resolved.storedPath));
 });
 
 app.get("/healthz", async () => ({ ok: true }));

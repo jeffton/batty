@@ -26,6 +26,7 @@ async function createConfig(): Promise<AppConfig> {
     selfPath: path.join(root, "self-project"),
     battyDir: root,
     uploadsDir: path.join(root, "uploads"),
+    sentFilesDir: path.join(root, "sent-files"),
     publicDir: path.join(root, "public"),
     webPushDir: path.join(root, "web-push"),
     webPushSubject: "mailto:test@example.com",

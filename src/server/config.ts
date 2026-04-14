@@ -9,6 +9,7 @@ export interface AppConfig {
   selfPath: string;
   battyDir: string;
   uploadsDir: string;
+  sentFilesDir: string;
   publicDir: string;
   webPushDir: string;
   webPushSubject: string;
@@ -61,6 +62,7 @@ export async function loadConfig(battyDir: string): Promise<AppConfig> {
     selfPath,
     battyDir,
     uploadsDir: path.join(stateDir, "uploads"),
+    sentFilesDir: path.join(stateDir, "sent-files"),
     publicDir: path.join(selfPath, "dist", "client"),
     webPushDir: path.join(stateDir, "web-push"),
     webPushSubject: options.webPushSubject,

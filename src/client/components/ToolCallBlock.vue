@@ -7,7 +7,7 @@ import MarkdownBlock from "@/client/components/MarkdownBlock.vue";
 import { formatValue, languageFromPath } from "@/client/lib/code-format";
 import { createHeadView, createTailView } from "@/client/lib/tool-output";
 import { hasToolResultContent } from "@/client/lib/transcript";
-import type { ToolExecutionDetails, UiContentBlock } from "@/shared/types";
+import type { SentFileDescriptor, ToolExecutionDetails, UiContentBlock } from "@/shared/types";
 
 // Keep this in sync with .tool-call__output-window--collapsed using 20lh below.
 // The collapsed container reserves exactly one line box per truncated line so the
@@ -40,6 +40,23 @@ function readString(key: string): string | undefined {
 
 function imageUrl(block: Extract<UiContentBlock, { type: "image" }>): string {
   return `data:${block.mimeType};base64,${block.data}`;
+}
+
+function formatFileSize(size: number): string {
+  if (!Number.isFinite(size) || size < 1024) {
+    return `${Math.max(0, Math.floor(size || 0))} B`;
+  }
+
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = size / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  const digits = value >= 100 ? 0 : value >= 10 ? 1 : 2;
+  return `${value.toFixed(digits)} ${units[unitIndex]}`;
 }
 
 const pathValue = computed(() => readString("path"));
@@ -203,6 +220,10 @@ const showResultSection = computed(() => {
     return !commandValue.value ? hasResultContent.value : visibleResultBlocks.value.length > 0;
   }
 
+  if (props.name === "send-files") {
+    return props.status === "error" || sentFiles.value.length > 0 || hasResultContent.value;
+  }
+
   return props.status === "error" || hasResultContent.value;
 });
 
@@ -239,6 +260,21 @@ const genericEntries = computed(() => {
     .map(([key, value]) => ({ key, value: formatValue(value) }))
     .filter((entry) => entry.value.trim().length > 0);
 });
+const sentFiles = computed(() =>
+  Array.isArray(props.resultDetails?.sentFiles)
+    ? props.resultDetails.sentFiles.filter(
+        (file): file is SentFileDescriptor =>
+          Boolean(file) &&
+          typeof file === "object" &&
+          typeof file.id === "string" &&
+          typeof file.name === "string" &&
+          typeof file.size === "number" &&
+          typeof file.mimeType === "string" &&
+          typeof file.kind === "string" &&
+          typeof file.downloadUrl === "string",
+      )
+    : [],
+);
 </script>
 
 <template>
@@ -357,6 +393,37 @@ const genericEntries = computed(() => {
           :compact="props.compact"
         />
       </template>
+
+      <div v-if="props.name === 'send-files' && sentFiles.length > 0" class="tool-call__sent-files">
+        <article v-for="file in sentFiles" :key="file.id" class="tool-call__sent-file-card">
+          <img
+            v-if="file.kind === 'image' && file.previewUrl"
+            :src="file.previewUrl"
+            :alt="file.name"
+            class="tool-call__sent-file-preview"
+          />
+          <video
+            v-else-if="file.kind === 'video' && file.previewUrl"
+            :src="file.previewUrl"
+            class="tool-call__sent-file-preview"
+            preload="metadata"
+            muted
+            playsinline
+          />
+          <div v-else class="tool-call__sent-file-placeholder">{{ file.kind.toUpperCase() }}</div>
+
+          <div class="tool-call__sent-file-meta">
+            <strong class="tool-call__sent-file-name">{{ file.name }}</strong>
+            <span class="tool-call__sent-file-facts">
+              {{ file.mimeType }} · {{ formatFileSize(file.size) }}
+            </span>
+          </div>
+
+          <a :href="file.downloadUrl" :download="file.name" class="tool-call__sent-file-download">
+            Download
+          </a>
+        </article>
+      </div>
 
       <DiffBlock
         v-if="props.name === 'edit' && showEditDiff"
@@ -546,6 +613,70 @@ const genericEntries = computed(() => {
 .tool-call img {
   width: min(100%, 28rem);
   border-radius: 0.45rem;
+}
+
+.tool-call__sent-files {
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+}
+
+.tool-call__sent-file-card {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.7rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.7rem;
+  background: color-mix(in srgb, var(--color-bg-elevated) 82%, transparent);
+}
+
+.tool-call__sent-file-preview,
+.tool-call__sent-file-placeholder {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  border-radius: 0.55rem;
+  background: var(--color-bg-inline-code);
+}
+
+.tool-call__sent-file-preview {
+  object-fit: cover;
+}
+
+.tool-call__sent-file-placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--color-text-subtle);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.tool-call__sent-file-meta {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.tool-call__sent-file-name {
+  color: var(--color-text-strong);
+  overflow-wrap: anywhere;
+}
+
+.tool-call__sent-file-facts {
+  color: var(--color-text-subtle);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.tool-call__sent-file-download {
+  justify-self: start;
+  color: var(--color-info);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.tool-call__sent-file-download:hover {
+  text-decoration: underline;
 }
 
 @keyframes tool-call-spin {

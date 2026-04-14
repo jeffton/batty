@@ -59,6 +59,17 @@ import type {
 let eventSource: EventSource | undefined;
 let workspaceEventSource: EventSource | undefined;
 
+function closeEventSource(source?: EventSource): void {
+  if (!source) {
+    return;
+  }
+
+  source.onopen = null;
+  source.onmessage = null;
+  source.onerror = null;
+  source.close();
+}
+
 const defaultAuthStatus: AuthStatus = {
   passkeyCount: 0,
   passkeyLoginAvailable: false,
@@ -215,12 +226,12 @@ export const useAppStore = defineStore("app", {
     },
 
     closeStream(): void {
-      eventSource?.close();
+      closeEventSource(eventSource);
       eventSource = undefined;
     },
 
     closeWorkspaceStream(): void {
-      workspaceEventSource?.close();
+      closeEventSource(workspaceEventSource);
       workspaceEventSource = undefined;
     },
 
@@ -412,26 +423,49 @@ export const useAppStore = defineStore("app", {
     openStream(session: Pick<SessionState, "id" | "sessionId" | "workspaceId" | "path">): void {
       this.closeStream();
       this.connectionState = "connecting";
-      eventSource = new EventSource(sessionEventsPath(session));
-      eventSource.onopen = () => {
+      const source = new EventSource(sessionEventsPath(session));
+      eventSource = source;
+      source.onopen = () => {
+        if (eventSource !== source) {
+          return;
+        }
+
         this.connectionState = "online";
         void this.checkForClientUpdate();
       };
-      eventSource.onmessage = async (message) => {
-        const event = JSON.parse(message.data) as ServerEvent;
-        this.activeSession = applyServerEvent(this.activeSession, event);
-        if (this.activeSession && shouldUpdateSessionSummary(event)) {
-          this.updateSessionSummary(this.activeSession);
+      source.onmessage = async (message) => {
+        if (eventSource !== source) {
+          return;
         }
-        if (this.activeSession && shouldWriteSessionCache(event)) {
-          await writeCachedSession(this.activeSession);
+
+        const currentSession = this.activeSession;
+        if (!currentSession || currentSession.sessionId !== session.sessionId) {
+          return;
+        }
+
+        const event = JSON.parse(message.data) as ServerEvent;
+        const nextSession = applyServerEvent(currentSession, event);
+        if (!nextSession || nextSession.sessionId !== session.sessionId) {
+          return;
+        }
+
+        this.activeSession = nextSession;
+        if (shouldUpdateSessionSummary(event)) {
+          this.updateSessionSummary(nextSession);
+        }
+        if (shouldWriteSessionCache(event)) {
+          await writeCachedSession(nextSession);
         }
         this.connectionState = "online";
       };
-      eventSource.onerror = async () => {
+      source.onerror = async () => {
+        if (eventSource !== source) {
+          return;
+        }
+
         this.connectionState = navigator.onLine ? "connecting" : "offline";
-        if (this.activeSession?.sessionId) {
-          const cached = await readCachedSession(this.activeSession.sessionId);
+        if (this.activeSession?.sessionId === session.sessionId) {
+          const cached = await readCachedSession(session.sessionId);
           if (cached) {
             this.activeSession = cached;
           }
@@ -446,11 +480,20 @@ export const useAppStore = defineStore("app", {
       }
 
       this.closeWorkspaceStream();
-      workspaceEventSource = new EventSource(workspaceEventsPath(workspaceId));
-      workspaceEventSource.onopen = () => {
+      const source = new EventSource(workspaceEventsPath(workspaceId));
+      workspaceEventSource = source;
+      source.onopen = () => {
+        if (workspaceEventSource !== source) {
+          return;
+        }
+
         void this.checkForClientUpdate();
       };
-      workspaceEventSource.onmessage = (message) => {
+      source.onmessage = (message) => {
+        if (workspaceEventSource !== source) {
+          return;
+        }
+
         const snapshot = JSON.parse(message.data) as WorkspaceSnapshot;
         this.sessionsByWorkspace = {
           ...this.sessionsByWorkspace,
@@ -462,7 +505,11 @@ export const useAppStore = defineStore("app", {
         };
         this.sortWorkspaces();
       };
-      workspaceEventSource.onerror = () => {
+      source.onerror = () => {
+        if (workspaceEventSource !== source) {
+          return;
+        }
+
         if (!navigator.onLine) {
           this.closeWorkspaceStream();
         }

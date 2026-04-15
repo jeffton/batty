@@ -524,6 +524,10 @@ export class PiService {
     return this.resolveOrCreateDailySession(workspace);
   }
 
+  private async waitForSubagentQueue(sessionId: string): Promise<void> {
+    await (this.subagentQueues.get(sessionId) ?? Promise.resolve()).catch(() => undefined);
+  }
+
   private async runSubagentSerial<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
     const previous = this.subagentQueues.get(sessionId) ?? Promise.resolve();
     let release: (() => void) | undefined;
@@ -996,6 +1000,7 @@ export class PiService {
     streamingBehavior?: "steer" | "followUp",
   ): Promise<void> {
     const webSession = this.requireSession(sessionId);
+    await this.waitForSubagentQueue(sessionId);
     const prepared = await this.preparePromptFiles(sessionId, files);
     const parts = [text.trim(), prepared.text.trim()].filter(Boolean);
     const promptText = parts.join("\n\n").trim() || "Please inspect the attached files.";

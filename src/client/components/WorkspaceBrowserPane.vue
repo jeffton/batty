@@ -263,10 +263,12 @@ watch(
     </div>
 
     <div class="workspace-browser-pane__cols">
-      <section class="workspace-browser-pane__column">
+      <section class="workspace-browser-pane__column workspace-browser-pane__column--workspaces">
         <div class="workspace-browser-pane__section-label">Workspaces</div>
 
-        <div class="workspace-browser-pane__search-row">
+        <div
+          class="workspace-browser-pane__search-row workspace-browser-pane__search-row--workspaces"
+        >
           <Search :size="14" class="workspace-browser-pane__search-icon" />
           <input
             v-model="workspaceFilter"
@@ -318,7 +320,7 @@ watch(
 
         <button
           v-else
-          class="workspace-browser-pane__btn workspace-browser-pane__btn--primary"
+          class="workspace-browser-pane__btn workspace-browser-pane__btn--primary workspace-browser-pane__btn--workspaces"
           :disabled="actionsDisabled"
           @click="openCreateWorkspaceForm"
         >
@@ -331,6 +333,7 @@ watch(
             :key="workspace.id"
             :class="[
               'workspace-browser-pane__item-row',
+              'workspace-browser-pane__item-row--workspace',
               workspace.id === store.selectedWorkspaceId ? 'is-active' : '',
             ]"
           >
@@ -366,7 +369,9 @@ watch(
       <section class="workspace-browser-pane__column workspace-browser-pane__column--sessions">
         <div class="workspace-browser-pane__section-label">Sessions</div>
 
-        <div class="workspace-browser-pane__search-row">
+        <div
+          class="workspace-browser-pane__search-row workspace-browser-pane__search-row--sessions"
+        >
           <Search :size="14" class="workspace-browser-pane__search-icon" />
           <input
             v-model="sessionFilter"
@@ -378,7 +383,7 @@ watch(
 
         <button
           v-if="store.selectedWorkspaceId"
-          class="workspace-browser-pane__btn workspace-browser-pane__btn--primary workspace-browser-pane__new-session"
+          class="workspace-browser-pane__btn workspace-browser-pane__btn--primary workspace-browser-pane__btn--sessions workspace-browser-pane__new-session"
           :disabled="actionsDisabled || startingSession"
           @click="startSession"
         >
@@ -548,6 +553,7 @@ watch(
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 0.45rem;
 }
 
 .workspace-browser-pane__column {
@@ -556,12 +562,18 @@ watch(
   min-width: 0;
   min-height: 0;
   gap: 0.45rem;
-  padding: 0.8rem;
+  padding-block: 0.8rem;
   overflow: hidden;
 }
 
+.workspace-browser-pane__column--workspaces {
+  padding-left: 0;
+  padding-right: 0.225rem;
+}
+
 .workspace-browser-pane__column--sessions {
-  border-left: 1px solid var(--color-border-soft);
+  padding-left: 0.225rem;
+  padding-right: 0;
 }
 
 .workspace-browser-pane__section-label {
@@ -580,6 +592,16 @@ watch(
   padding: 0.5rem 0.6rem;
   background: var(--color-bg-elevated);
   border-radius: 0.6rem;
+}
+
+.workspace-browser-pane__search-row--workspaces {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.workspace-browser-pane__search-row--sessions {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
 }
 
 .workspace-browser-pane__search-icon {
@@ -620,6 +642,16 @@ watch(
   color: inherit;
   padding: 0.55rem 0.7rem;
   transition: background 80ms ease;
+}
+
+.workspace-browser-pane__btn--workspaces {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.workspace-browser-pane__btn--sessions {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
 }
 
 .workspace-browser-pane__btn:hover:not(:disabled) {
@@ -674,6 +706,11 @@ watch(
   transition:
     background 80ms ease,
     color 80ms ease;
+}
+
+.workspace-browser-pane__item-row--workspace {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
 }
 
 .workspace-browser-pane__item-row:hover:not(.is-active) {

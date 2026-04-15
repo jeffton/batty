@@ -502,7 +502,18 @@ export class PiService {
         });
 
         this.appendDailySubagentRun(webSession.session, toolCallId, toolArgs, result);
-        this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
+        const completedState = this.getState(webSession.id);
+        this.publish(webSession, { type: "reset", state: completedState });
+        try {
+          await this.onAgentCompleted?.({
+            ...completedState,
+            isStreaming: false,
+            pendingMessageCount: 0,
+            activeAssistant: undefined,
+          });
+        } catch (error) {
+          console.error("Failed to run agent completion hook for synthetic cron subagent", error);
+        }
         await this.notifyWorkspaceUpdated(job.workspace.id);
 
         if (result.isError) {

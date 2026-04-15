@@ -1,5 +1,16 @@
 import type { SessionState, SessionSummary, UiContentBlock, UiMessage } from "@/shared/types";
 
+function compareSessionSummaries(left: SessionSummary, right: SessionSummary): number {
+  const leftIsTodayDaily = left.dailySession?.isToday === true;
+  const rightIsTodayDaily = right.dailySession?.isToday === true;
+
+  if (leftIsTodayDaily !== rightIsTodayDaily) {
+    return leftIsTodayDaily ? -1 : 1;
+  }
+
+  return right.updatedAt - left.updatedAt;
+}
+
 function blockText(block: UiContentBlock): string {
   switch (block.type) {
     case "text":
@@ -70,5 +81,5 @@ export function mergeSessionSummaries(...groups: SessionSummary[][]): SessionSum
     }
   }
 
-  return [...bySessionId.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+  return [...bySessionId.values()].sort(compareSessionSummaries);
 }

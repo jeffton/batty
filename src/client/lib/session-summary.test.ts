@@ -116,4 +116,47 @@ describe("session-summary", () => {
       "older",
     ]);
   });
+
+  it("keeps today's daily session first even when another session is newer", () => {
+    const todayDaily: SessionSummary = {
+      id: "daily",
+      sessionId: "daily",
+      firstMessage: "today",
+      updatedAt: 100,
+      messageCount: 1,
+      workspaceId: "batty",
+      dailySession: {
+        date: "2026-04-15",
+        isToday: true,
+        exists: true,
+      },
+    };
+
+    const newer: SessionSummary = {
+      id: "newer",
+      sessionId: "newer",
+      firstMessage: "newer",
+      updatedAt: 300,
+      messageCount: 1,
+      workspaceId: "batty",
+    };
+
+    const olderDaily: SessionSummary = {
+      id: "older-daily",
+      sessionId: "older-daily",
+      firstMessage: "older daily",
+      updatedAt: 200,
+      messageCount: 1,
+      workspaceId: "batty",
+      dailySession: {
+        date: "2026-04-14",
+        isToday: false,
+        exists: true,
+      },
+    };
+
+    expect(
+      mergeSessionSummaries([olderDaily, todayDaily], [newer]).map((session) => session.sessionId),
+    ).toEqual(["daily", "newer", "older-daily"]);
+  });
 });

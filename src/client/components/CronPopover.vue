@@ -17,6 +17,7 @@ interface CronDraft {
   model: string;
   thinkingLevel: string;
   sessionKind: CronJob["session"]["kind"];
+  includePreviousContext: boolean;
   saving: boolean;
   deleting: boolean;
   error: string;
@@ -37,6 +38,8 @@ function ensureDraft(job: CronJob): CronDraft {
     model: job.model,
     thinkingLevel: job.thinkingLevel,
     sessionKind: job.session.kind,
+    includePreviousContext:
+      job.session.kind === "daily" ? job.session.includePreviousContext !== false : true,
     saving: false,
     deleting: false,
     error: "",
@@ -54,6 +57,8 @@ function syncDrafts(nextJobs: CronJob[]): void {
       draft.model = job.model;
       draft.thinkingLevel = job.thinkingLevel;
       draft.sessionKind = job.session.kind;
+      draft.includePreviousContext =
+        job.session.kind === "daily" ? job.session.includePreviousContext !== false : true;
       draft.error = "";
     }
   }
@@ -84,7 +89,10 @@ function isDirty(job: CronJob): boolean {
     draft.prompt !== job.prompt ||
     draft.model !== job.model ||
     draft.thinkingLevel !== job.thinkingLevel ||
-    draft.sessionKind !== job.session.kind
+    draft.sessionKind !== job.session.kind ||
+    (draft.sessionKind === "daily" &&
+      draft.includePreviousContext !==
+        (job.session.kind === "daily" ? job.session.includePreviousContext !== false : true))
   );
 }
 
@@ -97,12 +105,17 @@ async function saveJob(job: CronJob): Promise<void> {
       prompt: draft.prompt,
       model: draft.model,
       thinkingLevel: draft.thinkingLevel,
-      session: { kind: draft.sessionKind },
+      session:
+        draft.sessionKind === "daily"
+          ? { kind: "daily", includePreviousContext: draft.includePreviousContext }
+          : { kind: "new" },
     });
     draft.prompt = updated.prompt;
     draft.model = updated.model;
     draft.thinkingLevel = updated.thinkingLevel;
     draft.sessionKind = updated.session.kind;
+    draft.includePreviousContext =
+      updated.session.kind === "daily" ? updated.session.includePreviousContext !== false : true;
   } catch (error) {
     draft.error = error instanceof Error ? error.message : String(error);
   } finally {
@@ -165,7 +178,16 @@ watch(
             <span v-if="job.state.nextRunAtMs"
               >Next: {{ formatShortDateTime(job.state.nextRunAtMs) }}</span
             >
-            <span>Session: {{ job.session.kind }}</span>
+            <span>
+              Session:
+              {{
+                job.session.kind === "daily"
+                  ? job.session.includePreviousContext !== false
+                    ? "daily · with previous context"
+                    : "daily · fresh context"
+                  : "new"
+              }}
+            </span>
             <span v-if="job.state.lastRunAtMs && job.state.lastStatus">
               Last: {{ formatShortDateTime(job.state.lastRunAtMs) }} ·
               {{ job.state.lastStatus }}
@@ -219,6 +241,16 @@ watch(
           >
             <option value="new">new session</option>
             <option value="daily">daily session</option>
+          </select>
+
+          <select
+            v-if="draftFor(job).sessionKind === 'daily'"
+            v-model="draftFor(job).includePreviousContext"
+            class="cron-popover__select cron-popover__select--session"
+            :disabled="draftFor(job).saving || draftFor(job).deleting"
+          >
+            <option :value="true">with previous context</option>
+            <option :value="false">fresh context</option>
           </select>
 
           <button

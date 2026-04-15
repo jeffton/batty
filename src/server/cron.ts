@@ -44,7 +44,12 @@ type StoredCronJobSchedule =
   | StoredCronJobEverySchedule
   | StoredCronJobCronSchedule;
 
-type StoredCronJobSession = CronJobSession;
+type StoredCronJobSession =
+  | { kind: "new" }
+  | {
+      kind: "daily";
+      includePreviousContext: boolean;
+    };
 
 interface StoredCronJob {
   id: string;
@@ -104,7 +109,10 @@ function normalizeSession(value: CronJobSession | undefined): StoredCronJobSessi
     case "new":
       return { kind: "new" };
     case "daily":
-      return { kind: "daily" };
+      return {
+        kind: "daily",
+        includePreviousContext: value.includePreviousContext !== false,
+      };
     default:
       throw createHttpError(
         400,
@@ -253,12 +261,14 @@ function formatScheduleLabel(schedule: StoredCronJobSchedule): string {
   }
 }
 
-function formatSessionLabel(session: StoredCronJobSession): string {
+function formatSessionLabel(session: CronJobSession | StoredCronJobSession): string {
   switch (session.kind) {
     case "new":
       return "New per run";
     case "daily":
-      return "Daily";
+      return session.includePreviousContext !== false
+        ? "Daily · with previous context"
+        : "Daily · fresh context";
   }
 }
 

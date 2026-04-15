@@ -139,6 +139,7 @@ export type CronJobSession =
     }
   | {
       kind: "daily";
+      includePreviousContext?: boolean;
     };
 
 export interface CronJobState {

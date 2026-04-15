@@ -7,9 +7,16 @@ export interface UploadedFile {
   data: Buffer;
 }
 
-import { StringEnum } from "@mariozechner/pi-ai";
+import {
+  StringEnum,
+  type AssistantMessage,
+  type Message,
+  type ToolCall,
+  type ToolResultMessage,
+} from "@mariozechner/pi-ai";
 import {
   AuthStorage,
+  buildSessionContext,
   createAgentSession,
   DefaultResourceLoader,
   ModelRegistry,
@@ -17,6 +24,7 @@ import {
   SettingsManager,
   type AgentSession,
   type AgentSessionEvent,
+  type ExtensionContext,
   type ToolDefinition,
 } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
@@ -65,6 +73,15 @@ import {
 import { listSessionSummaries as listFastSessionSummaries } from "./session-summaries";
 import { sanitizeTerminalBlocks } from "./terminal-output";
 import { ProviderAuthService } from "./provider-auth";
+import {
+  buildSubagentDetails,
+  cloneMessagesForSubagent,
+  extractAssistantText,
+  findLastAssistantMessage,
+  SUBAGENT_EFFORT_LEVELS,
+  SUBAGENT_TOOL_NAME,
+  ZERO_USAGE,
+} from "./subagent";
 
 interface SessionSubscriber {
   (event: ServerEvent): void;
@@ -74,6 +91,7 @@ type PiModel = {
   id: string;
   name: string;
   provider: string;
+  api?: string;
   reasoning?: boolean;
   input: string[];
   contextWindow?: number;
@@ -89,6 +107,11 @@ interface WebSession {
   openedAt: number;
   modelFallbackMessage?: string | undefined;
   ephemeral: boolean;
+}
+
+interface LiveSession {
+  workspace: WorkspaceInfo;
+  session: AgentSession;
 }
 
 function modelKey(model: PiModel): string {
@@ -197,11 +220,17 @@ const CronSessionSchema = Type.Object(
     kind: StringEnum(["new", "daily"] as const, {
       description: "Session strategy for cron runs.",
     }),
+    includePreviousContext: Type.Optional(
+      Type.Boolean({
+        description:
+          "When kind=daily, whether the subagent should include previous daily-session context. Defaults to true.",
+      }),
+    ),
   },
   {
     additionalProperties: false,
     description:
-      'Use {kind:"new"} for a fresh session each run or {kind:"daily"} to reuse one workspace cron session per local day.',
+      'Use {kind:"new"} for a fresh session each run or {kind:"daily", includePreviousContext:true} to reuse one workspace cron conversation per local day.',
   },
 );
 
@@ -228,6 +257,29 @@ const CronToolSchema = Type.Object(
     ),
     session: Type.Optional(CronSessionSchema),
     schedule: Type.Optional(CronScheduleSchema),
+  },
+  {
+    additionalProperties: false,
+  },
+);
+
+const SubagentToolSchema = Type.Object(
+  {
+    prompt: Type.String({ description: "Prompt the subagent should run." }),
+    model: Type.Optional(
+      Type.String({ description: "Model id for the subagent, for example openai/gpt-5." }),
+    ),
+    effort: Type.Optional(
+      StringEnum(SUBAGENT_EFFORT_LEVELS, {
+        description: "Effort level for the subagent: off, minimal, low, medium, high, xhigh.",
+      }),
+    ),
+    includeSessionContext: Type.Optional(
+      Type.Boolean({
+        description:
+          "Whether to include the current session context. Defaults to true. When false, the subagent still gets the workspace system prompts.",
+      }),
+    ),
   },
   {
     additionalProperties: false,
@@ -278,6 +330,8 @@ export class PiService {
   private readonly modelRegistry: ModelRegistry;
   private readonly providerAuthService: ProviderAuthService;
   private readonly sessions = new Map<string, WebSession>();
+  private readonly liveSessions = new Map<string, LiveSession>();
+  private readonly subagentQueues = new Map<string, Promise<void>>();
   private readonly cronSessionResolutions = new Map<string, Promise<SessionState>>();
   private readonly onAgentCompleted: ((session: SessionState) => Promise<void>) | undefined;
   private readonly onWorkspaceUpdated: ((workspaceId: string) => Promise<void>) | undefined;
@@ -297,6 +351,14 @@ export class PiService {
     this.authStorage = AuthStorage.create(path.join(agentDir, "auth.json"));
     this.modelRegistry = ModelRegistry.create(this.authStorage, path.join(agentDir, "models.json"));
     this.providerAuthService = new ProviderAuthService(this.authStorage);
+  }
+
+  private registerLiveSession(workspace: WorkspaceInfo, session: AgentSession): void {
+    this.liveSessions.set(session.sessionId, { workspace, session });
+  }
+
+  private unregisterLiveSession(sessionId: string): void {
+    this.liveSessions.delete(sessionId);
   }
 
   getProviderAuthStatus(): ProviderAuthStatus {
@@ -372,33 +434,380 @@ export class PiService {
     thinkingLevel: string;
     session: CronJobSession;
   }): Promise<{ sessionId: string; sessionPath: string }> {
-    const session =
-      job.session.kind === "daily"
-        ? await this.resolveOrCreateDailySession(job.workspace, {
-            modelId: job.model,
-            thinkingLevel: job.thinkingLevel,
-          })
-        : await this.createSession(job.workspace, {
-            modelId: job.model,
-            thinkingLevel: job.thinkingLevel,
-          });
+    if (job.session.kind !== "daily") {
+      const session = await this.createSession(job.workspace, {
+        modelId: job.model,
+        thinkingLevel: job.thinkingLevel,
+      });
+      const current = this.getState(session.id);
+      await this.prompt(current.id, job.prompt, [], current.isStreaming ? "followUp" : undefined);
 
-    if (job.session.kind === "daily") {
-      this.setThinkingLevel(session.id, job.thinkingLevel);
-      await this.setModel(session.id, job.model);
+      return {
+        sessionId: current.sessionId,
+        sessionPath: this.requireSessionPath(current.id),
+      };
     }
 
-    const current = this.getState(session.id);
-    await this.prompt(current.id, job.prompt, [], current.isStreaming ? "followUp" : undefined);
+    const session = await this.resolveOrCreateDailySession(job.workspace, {
+      modelId: job.model,
+      thinkingLevel: job.thinkingLevel,
+    });
 
-    return {
-      sessionId: current.sessionId,
-      sessionPath: this.requireSessionPath(current.id),
+    const webSession = this.requireSession(session.id);
+    const includePreviousContext = job.session.includePreviousContext !== false;
+    const toolCallId = `${SUBAGENT_TOOL_NAME}-${randomUUID()}`;
+    const toolArgs = {
+      prompt: job.prompt,
+      model: job.model,
+      effort: job.thinkingLevel,
+      includeSessionContext: includePreviousContext,
     };
+
+    return this.runSubagentSerial(webSession.session.sessionId, async () => {
+      await webSession.session.agent.waitForIdle();
+      this.setThinkingLevel(session.id, job.thinkingLevel);
+      await this.setModel(session.id, job.model);
+      webSession.activeTools.set(toolCallId, {
+        toolCallId,
+        toolName: SUBAGENT_TOOL_NAME,
+        args: toolArgs,
+        blocks: [],
+        status: "running",
+        isError: false,
+        details: undefined,
+      });
+      this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
+
+      try {
+        const result = await this.runDetachedSubagentSession({
+          workspace: job.workspace,
+          parentSessionId: webSession.session.sessionId,
+          prompt: job.prompt,
+          modelId: job.model,
+          thinkingLevel: job.thinkingLevel,
+          includeSessionContext: includePreviousContext,
+          onUpdate: (partial) => {
+            const current = webSession.activeTools.get(toolCallId);
+            if (!current) {
+              return;
+            }
+            current.blocks = normalizeBlocks(partial.content ?? []);
+            current.details = normalizeToolDetails(partial.details);
+            webSession.activeTools.set(toolCallId, current);
+            this.publish(webSession, {
+              type: "tools",
+              tools: [...webSession.activeTools.values()],
+            });
+          },
+        });
+
+        this.appendDailySubagentRun(webSession.session, toolCallId, toolArgs, result);
+        this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
+        await this.notifyWorkspaceUpdated(job.workspace.id);
+
+        if (result.isError) {
+          throw new Error(result.errorMessage || result.text || "Subagent failed");
+        }
+
+        return {
+          sessionId: webSession.session.sessionId,
+          sessionPath: this.requireSessionPath(webSession.id),
+        };
+      } finally {
+        webSession.activeTools.delete(toolCallId);
+        this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
+      }
+    });
   }
 
   async createOrOpenDailySession(workspace: WorkspaceInfo): Promise<SessionState> {
     return this.resolveOrCreateDailySession(workspace);
+  }
+
+  private async runSubagentSerial<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
+    const previous = this.subagentQueues.get(sessionId) ?? Promise.resolve();
+    let release: (() => void) | undefined;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.subagentQueues.set(
+      sessionId,
+      previous.catch(() => undefined).then(() => current),
+    );
+
+    await previous.catch(() => undefined);
+    try {
+      return await run();
+    } finally {
+      release?.();
+      if (this.subagentQueues.get(sessionId) === current) {
+        this.subagentQueues.delete(sessionId);
+      }
+    }
+  }
+
+  private resolveSubagentDefaults(
+    sessionId: string,
+    ctx: ExtensionContext,
+  ): {
+    modelId?: string;
+    thinkingLevel: string;
+  } {
+    const liveSession = this.liveSessions.get(sessionId)?.session;
+    const snapshot = findBattySystemPromptSnapshot(ctx.sessionManager.getEntries());
+
+    return {
+      modelId:
+        liveSession?.model != null
+          ? modelKey(liveSession.model as PiModel)
+          : ctx.model != null
+            ? modelKey(ctx.model as PiModel)
+            : snapshot?.model,
+      thinkingLevel: liveSession?.thinkingLevel ?? snapshot?.thinkingLevel ?? "medium",
+    };
+  }
+
+  private sessionMessagesForSubagent(
+    sessionId: string,
+    currentToolCallId?: string,
+  ): AgentSession["messages"] {
+    const liveSession = this.liveSessions.get(sessionId)?.session;
+    if (liveSession) {
+      return cloneMessagesForSubagent(liveSession.messages, currentToolCallId);
+    }
+
+    const attached = this.sessions.get(sessionId);
+    if (attached) {
+      const context = buildSessionContext(
+        attached.session.sessionManager.getEntries(),
+        attached.session.sessionManager.getLeafId(),
+      );
+      return cloneMessagesForSubagent(
+        context.messages as AgentSession["messages"],
+        currentToolCallId,
+      );
+    }
+
+    throw new Error(`Unknown live session for subagent: ${sessionId}`);
+  }
+
+  private async runDetachedSubagentSession(options: {
+    workspace: WorkspaceInfo;
+    parentSessionId: string;
+    prompt: string;
+    modelId: string;
+    thinkingLevel: string;
+    includeSessionContext: boolean;
+    currentToolCallId?: string;
+    signal?: AbortSignal;
+    onUpdate?: (partial: {
+      content: Array<{ type: "text"; text: string }>;
+      details: ToolExecutionDetails;
+    }) => void;
+  }): Promise<{
+    text: string;
+    details: ToolExecutionDetails;
+    messages: AgentSession["messages"];
+    finalAssistant?: AssistantMessage;
+    isError: boolean;
+    errorMessage?: string;
+  }> {
+    const result = await this.createPiAgentSession(
+      options.workspace,
+      SessionManager.inMemory(options.workspace.path),
+      {
+        modelId: options.modelId,
+        thinkingLevel: options.thinkingLevel,
+      },
+    );
+    const subagentSession = result.session;
+    this.registerLiveSession(options.workspace, subagentSession);
+
+    const seedMessages = options.includeSessionContext
+      ? this.sessionMessagesForSubagent(options.parentSessionId, options.currentToolCallId)
+      : [];
+    if (seedMessages.length > 0) {
+      subagentSession.agent.state.messages = structuredClone(seedMessages);
+      for (const message of seedMessages) {
+        if (message.role === "branchSummary" || message.role === "compactionSummary") {
+          continue;
+        }
+        subagentSession.sessionManager.appendMessage(message as Message);
+      }
+    }
+
+    let lastText = "";
+    const unsubscribe = subagentSession.subscribe((event) => {
+      if (
+        event.type !== "message_start" &&
+        event.type !== "message_update" &&
+        event.type !== "message_end"
+      ) {
+        return;
+      }
+      if (event.message.role !== "assistant") {
+        return;
+      }
+
+      const text = extractAssistantText(event.message);
+      if (!text || text === lastText) {
+        return;
+      }
+
+      lastText = text;
+      const finalAssistant = event.message as AssistantMessage;
+      options.onUpdate?.({
+        content: [{ type: "text", text }],
+        details: buildSubagentDetails(
+          {
+            prompt: options.prompt,
+            model: options.modelId,
+            effort: options.thinkingLevel,
+            includeSessionContext: options.includeSessionContext,
+          },
+          subagentSession.messages,
+          finalAssistant,
+        ),
+      });
+    });
+
+    const abortListener = () => {
+      void subagentSession.abort();
+    };
+    if (options.signal) {
+      if (options.signal.aborted) {
+        abortListener();
+      } else {
+        options.signal.addEventListener("abort", abortListener, { once: true });
+      }
+    }
+
+    try {
+      await subagentSession.prompt(options.prompt);
+      const messages = structuredClone(subagentSession.messages) as AgentSession["messages"];
+      const finalAssistant = findLastAssistantMessage(messages);
+      const text = extractAssistantText(finalAssistant) || lastText;
+      const details = buildSubagentDetails(
+        {
+          prompt: options.prompt,
+          model: options.modelId,
+          effort: options.thinkingLevel,
+          includeSessionContext: options.includeSessionContext,
+        },
+        messages,
+        finalAssistant,
+      );
+      return {
+        text,
+        details,
+        messages,
+        finalAssistant,
+        isError: finalAssistant?.stopReason === "error" || finalAssistant?.stopReason === "aborted",
+        errorMessage: finalAssistant?.errorMessage,
+      };
+    } catch (error) {
+      const messages = structuredClone(subagentSession.messages) as AgentSession["messages"];
+      const finalAssistant = findLastAssistantMessage(messages);
+      const text =
+        extractAssistantText(finalAssistant) ||
+        finalAssistant?.errorMessage ||
+        (error instanceof Error ? error.message : String(error));
+      const details = buildSubagentDetails(
+        {
+          prompt: options.prompt,
+          model: options.modelId,
+          effort: options.thinkingLevel,
+          includeSessionContext: options.includeSessionContext,
+        },
+        messages,
+        finalAssistant,
+      );
+      return {
+        text,
+        details,
+        messages,
+        finalAssistant,
+        isError: true,
+        errorMessage:
+          finalAssistant?.errorMessage || (error instanceof Error ? error.message : String(error)),
+      };
+    } finally {
+      if (options.signal) {
+        options.signal.removeEventListener("abort", abortListener);
+      }
+      unsubscribe();
+      this.unregisterLiveSession(subagentSession.sessionId);
+      subagentSession.dispose();
+    }
+  }
+
+  private appendDailySubagentRun(
+    session: AgentSession,
+    toolCallId: string,
+    args: {
+      prompt: string;
+      model: string;
+      effort: string;
+      includeSessionContext: boolean;
+    },
+    result: {
+      text: string;
+      details: ToolExecutionDetails;
+      finalAssistant?: AssistantMessage;
+      isError: boolean;
+      errorMessage?: string;
+    },
+  ): void {
+    const timestamp = Date.now();
+    const assistantToolCall: AssistantMessage = {
+      role: "assistant",
+      content: [
+        {
+          type: "toolCall",
+          id: toolCallId,
+          name: SUBAGENT_TOOL_NAME,
+          arguments: args,
+        } satisfies ToolCall,
+      ],
+      api: (session.model as PiModel | undefined)?.api ?? "openai-responses",
+      provider: session.model?.provider ?? "unknown",
+      model: session.model?.id ?? args.model,
+      usage: ZERO_USAGE,
+      stopReason: "toolUse",
+      timestamp: timestamp + 1,
+    };
+    const toolResult: ToolResultMessage<ToolExecutionDetails> = {
+      role: "toolResult",
+      toolCallId,
+      toolName: SUBAGENT_TOOL_NAME,
+      content: [{ type: "text", text: result.text || "(no output)" }],
+      details: result.details,
+      isError: result.isError,
+      timestamp: timestamp + 2,
+    };
+    const finalAssistant: AssistantMessage = result.finalAssistant ?? {
+      role: "assistant",
+      content: [{ type: "text", text: result.text || result.errorMessage || "(no output)" }],
+      api: (session.model as PiModel | undefined)?.api ?? "openai-responses",
+      provider: session.model?.provider ?? "unknown",
+      model: session.model?.id ?? args.model,
+      usage: ZERO_USAGE,
+      stopReason: result.isError ? "error" : "stop",
+      errorMessage: result.isError ? result.errorMessage : undefined,
+      timestamp: timestamp + 3,
+    };
+
+    const messages: Message[] = [
+      { role: "user", content: args.prompt, timestamp },
+      assistantToolCall,
+      toolResult,
+      finalAssistant,
+    ];
+
+    session.agent.state.messages = [...session.messages, ...messages];
+    for (const message of messages) {
+      session.sessionManager.appendMessage(message);
+    }
   }
 
   private async resolveOrCreateDailySession(
@@ -488,6 +897,7 @@ export class PiService {
         !webSession.session.isStreaming
       ) {
         this.sessions.delete(webSession.id);
+        this.unregisterLiveSession(webSession.id);
       }
     };
   }
@@ -668,6 +1078,7 @@ export class PiService {
         ? { thinkingLevel: options.thinkingLevel as AgentSession["thinkingLevel"] }
         : {}),
       customTools: [
+        this.createSubagentTool(workspace) as never,
         this.createCronTool(workspace) as never,
         this.createWebSearchTool() as never,
         this.createAttachFilesTool(workspace) as never,
@@ -726,6 +1137,7 @@ export class PiService {
       });
     });
     this.sessions.set(webSession.id, webSession);
+    this.registerLiveSession(workspace, session);
     return webSession;
   }
 
@@ -867,6 +1279,7 @@ export class PiService {
           }
           if (webSession.ephemeral && webSession.subscribers.size === 0) {
             this.sessions.delete(webSession.id);
+            this.unregisterLiveSession(webSession.id);
           }
         }
         break;
@@ -897,6 +1310,63 @@ export class PiService {
     webSession.session.setActiveToolsByName(webSession.session.getActiveToolNames());
   }
 
+  private createSubagentTool(workspace: WorkspaceInfo): ToolDefinition<typeof SubagentToolSchema> {
+    return {
+      name: SUBAGENT_TOOL_NAME,
+      label: "Subagent",
+      description:
+        "Run a synchronous subagent in the current workspace. The tool result is the subagent's reply.",
+      promptSnippet:
+        "Run a synchronous subagent in the current workspace, optionally reusing the current session context.",
+      promptGuidelines: [
+        "Use this tool to delegate focused work to another agent without leaving the current session.",
+        "Prefer omitting model and effort so the subagent inherits the current session settings.",
+        "Set includeSessionContext=false when you want a fresh workspace-scoped subagent with only the system prompts.",
+      ],
+      parameters: SubagentToolSchema,
+      execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+        const sessionId = ctx.sessionManager.getSessionId();
+        const defaults = this.resolveSubagentDefaults(sessionId, ctx);
+        const modelId =
+          typeof params.model === "string" && params.model.trim().length > 0
+            ? params.model.trim()
+            : defaults.modelId;
+        if (!modelId) {
+          throw new Error("No model available for subagent");
+        }
+
+        const thinkingLevel =
+          typeof params.effort === "string" && params.effort.trim().length > 0
+            ? params.effort.trim()
+            : defaults.thinkingLevel;
+        const prompt = String(params.prompt ?? "").trim();
+        if (!prompt) {
+          throw new Error("prompt is required for subagent");
+        }
+
+        const includeSessionContext = params.includeSessionContext !== false;
+        return this.runSubagentSerial(sessionId, async () => {
+          const result = await this.runDetachedSubagentSession({
+            workspace,
+            parentSessionId: sessionId,
+            prompt,
+            modelId,
+            thinkingLevel,
+            includeSessionContext,
+            currentToolCallId: toolCallId,
+            signal,
+            onUpdate,
+          });
+          return {
+            content: [{ type: "text", text: result.text || "(no output)" }],
+            details: result.details,
+            isError: result.isError,
+          };
+        });
+      },
+    };
+  }
+
   private createCronTool(workspace: WorkspaceInfo): ToolDefinition<typeof CronToolSchema> {
     return {
       name: "cron",
@@ -907,8 +1377,9 @@ export class PiService {
         "Create and manage scheduled agent turns for Batty workspaces. Prefer reusing the current session model unless the user explicitly asks for a different one.",
       promptGuidelines: [
         "When scheduling a cron job, always provide the full prompt the future agent turn should run.",
-        "Prefer omitting model so the cron job reuses the current session model. Only set model explicitly if the user asks for a different model.",
+        "Prefer omitting model and thinkingLevel so the cron job reuses the current session settings. Only set them explicitly if the user asks for different ones.",
         'Use session.kind="daily" to reuse one workspace cron conversation per local day.',
+        'Use session.includePreviousContext=false with session.kind="daily" to run the daily subagent without earlier daily-session context.',
         'Use schedule.kind="at" with schedule.in for relative times like 10m or 2h.',
         'Use schedule.kind="cron" with a standard cron expression and optional timezone for recurring schedules.',
         'Use schedule.kind="every" with durations like 15m, 2h, or 1d for interval schedules.',
@@ -934,18 +1405,18 @@ export class PiService {
             };
           }
           case "add": {
-            const currentModel = ctx.model ? modelKey(ctx.model as PiModel) : undefined;
+            const defaults = this.resolveSubagentDefaults(ctx.sessionManager.getSessionId(), ctx);
             const input: CreateCronJobInput = {
               workspaceId,
               prompt: String(params.prompt ?? ""),
               model:
                 typeof params.model === "string" && params.model.trim().length > 0
                   ? params.model.trim()
-                  : (currentModel ?? ""),
+                  : (defaults.modelId ?? ""),
               thinkingLevel:
                 typeof params.thinkingLevel === "string" && params.thinkingLevel.trim().length > 0
                   ? params.thinkingLevel.trim()
-                  : "medium",
+                  : defaults.thinkingLevel,
               session:
                 params.session && typeof params.session === "object"
                   ? (params.session as CreateCronJobInput["session"])

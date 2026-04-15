@@ -14,6 +14,7 @@ Batty is a web UI for [Pi Coding Agent](https://pi.dev). It keeps Pi's workspace
 - Queue follow-up prompts while a run is streaming, or send steer prompts mid-run
 - Rich tool rendering, including inline diffs for edits and readable bash output
 - Built-in cron jobs for scheduled agent turns
+- Built-in `subagent` tool for synchronous workspace-scoped delegation
 - Built-in `web-search` tool powered by Brave Search
 - Passkey auth with one-time setup codes for enrolling devices
 - Web Push notifications when background runs finish
@@ -37,6 +38,7 @@ Batty adds a browser-native layer on top:
 - local caching and drafts
 - push notifications
 - cron
+- subagents
 - web search
 - passkey login
 
@@ -132,8 +134,8 @@ pnpm batty -- --root /path/to/batty-root <command>
 ```text
 batty auth code
 batty cron list [--workspace ID] [--json]
-batty cron add --workspace ID --prompt TEXT --thinking LEVEL (--in DUR | --at ISO | --every DUR | --cron EXPR) [--model ID] [--tz IANA] [--session new|daily]
-batty cron edit <jobId> [--workspace ID] [--prompt TEXT] [--model ID] [--thinking LEVEL] [--in DUR | --at ISO | --every DUR | --cron EXPR] [--tz IANA] [--session new|daily]
+batty cron add --workspace ID --prompt TEXT --thinking LEVEL (--in DUR | --at ISO | --every DUR | --cron EXPR) [--model ID] [--tz IANA] [--session new|daily] [--daily-context include|omit]
+batty cron edit <jobId> [--workspace ID] [--prompt TEXT] [--model ID] [--thinking LEVEL] [--in DUR | --at ISO | --every DUR | --cron EXPR] [--tz IANA] [--session new|daily] [--daily-context include|omit]
 batty cron rm <jobId>
 ```
 
@@ -142,8 +144,8 @@ batty cron rm <jobId>
 ```bash
 batty --root /path/to/batty-root auth code
 batty --root /path/to/batty-root cron list --workspace batty
-batty --root /path/to/batty-root cron add --workspace batty --prompt "Check CI and summarize failures" --thinking medium --every 1h --session daily
-batty --root /path/to/batty-root cron add --workspace batty --prompt "Morning summary" --thinking low --cron "0 8 * * 1-5" --tz Europe/Copenhagen --session daily
+batty --root /path/to/batty-root cron add --workspace batty --prompt "Check CI and summarize failures" --thinking medium --every 1h --session daily --daily-context include
+batty --root /path/to/batty-root cron add --workspace batty --prompt "Morning summary" --thinking low --cron "0 8 * * 1-5" --tz Europe/Copenhagen --session daily --daily-context omit
 batty --root /path/to/batty-root cron edit <jobId> --prompt "Updated prompt"
 batty --root /path/to/batty-root cron rm <jobId>
 ```
@@ -161,10 +163,11 @@ Schedules supported by both the CLI and the built-in tool:
 - repeating interval schedules like `1h` or `1d`
 - cron expressions with an optional timezone
 - session mode `new` or `daily`
+- daily-session context mode `include` or `omit`
 
 If `--tz` / `timezone` is omitted for a cron expression, Batty uses the server's local timezone.
 
-Daily session reuse keeps one cron conversation per workspace day. The day rollover defaults to `04:00` local time and can be changed in `options.json`.
+Daily session reuse keeps one cron conversation per workspace day. Daily runs are stored as `subagent` tool calls in that session. `--daily-context include` / `session.includePreviousContext=true` reuses earlier daily-session context, while `omit` starts the subagent from the workspace system prompts only. The day rollover defaults to `04:00` local time and can be changed in `options.json`.
 
 Cron job state includes:
 
@@ -174,7 +177,7 @@ Cron job state includes:
 - last error
 - last session id
 
-The chat header also includes a cron popover for browsing, editing prompt/model/thinking level, and deleting existing jobs.
+The chat header also includes a cron popover for browsing, editing prompt/model/thinking level/session mode, and deleting existing jobs.
 
 ## Useful commands
 

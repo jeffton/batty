@@ -499,6 +499,7 @@ app.post<{
     thinkingLevel?: string;
     session?: {
       kind?: string;
+      includePreviousContext?: boolean;
     };
     schedule?: {
       kind?: string;
@@ -529,6 +530,7 @@ app.patch<{
     thinkingLevel?: string;
     session?: {
       kind?: string;
+      includePreviousContext?: boolean;
     };
     schedule?: {
       kind?: string;

@@ -65,18 +65,19 @@ describe("cron store", () => {
       schedule: { kind: "cron", expression: "0 8 * * *" },
     });
 
-    expect(created.session).toEqual({ kind: "daily" });
-    expect(buildCronJobSummary(created)).toContain("Session: Daily");
+    expect(created.session).toEqual({ kind: "daily", includePreviousContext: true });
+    expect(buildCronJobSummary(created)).toContain("Session: Daily · with previous context");
 
     const updated = await store.updateJob(created.id, {
-      session: { kind: "new" },
+      session: { kind: "daily", includePreviousContext: false },
     });
 
-    expect(updated.session).toEqual({ kind: "new" });
+    expect(updated.session).toEqual({ kind: "daily", includePreviousContext: false });
+    expect(buildCronJobSummary(updated)).toContain("Session: Daily · fresh context");
 
     const persisted = JSON.parse(await fs.readFile(store.filePath, "utf8")) as {
-      jobs: Array<{ session?: { kind?: string } }>;
+      jobs: Array<{ session?: { kind?: string; includePreviousContext?: boolean } }>;
     };
-    expect(persisted.jobs[0]?.session).toEqual({ kind: "new" });
+    expect(persisted.jobs[0]?.session).toEqual({ kind: "daily", includePreviousContext: false });
   });
 });

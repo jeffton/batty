@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import ThinkingLevelPicker from "@/client/components/ThinkingLevelPicker.vue";
-import { Save, Trash2 } from "lucide-vue-next";
+import { Pencil, Save, Trash2, X } from "lucide-vue-next";
 import { computed, reactive, watch } from "vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
 import { resolveThinkingOptions } from "@/client/lib/thinking-levels";
@@ -18,6 +18,7 @@ interface CronDraft {
   thinkingLevel: string;
   sessionKind: CronJob["session"]["kind"];
   includePreviousContext: boolean;
+  editing: boolean;
   saving: boolean;
   deleting: boolean;
   error: string;
@@ -26,6 +27,10 @@ interface CronDraft {
 const store = useAppStore();
 const drafts = reactive<Record<string, CronDraft>>({});
 const jobs = computed(() => store.workspaceCronJobs);
+
+function includePreviousContextFor(job: CronJob): boolean {
+  return job.session.kind === "daily" ? job.session.includePreviousContext !== false : true;
+}
 
 function ensureDraft(job: CronJob): CronDraft {
   const existing = drafts[job.id];
@@ -38,8 +43,8 @@ function ensureDraft(job: CronJob): CronDraft {
     model: job.model,
     thinkingLevel: job.thinkingLevel,
     sessionKind: job.session.kind,
-    includePreviousContext:
-      job.session.kind === "daily" ? job.session.includePreviousContext !== false : true,
+    includePreviousContext: includePreviousContextFor(job),
+    editing: false,
     saving: false,
     deleting: false,
     error: "",
@@ -57,8 +62,7 @@ function syncDrafts(nextJobs: CronJob[]): void {
       draft.model = job.model;
       draft.thinkingLevel = job.thinkingLevel;
       draft.sessionKind = job.session.kind;
-      draft.includePreviousContext =
-        job.session.kind === "daily" ? job.session.includePreviousContext !== false : true;
+      draft.includePreviousContext = includePreviousContextFor(job);
       draft.error = "";
     }
   }
@@ -72,6 +76,29 @@ function syncDrafts(nextJobs: CronJob[]): void {
 
 function draftFor(job: CronJob): CronDraft {
   return ensureDraft(job);
+}
+
+function resetDraft(job: CronJob): void {
+  const draft = draftFor(job);
+  draft.prompt = job.prompt;
+  draft.model = job.model;
+  draft.thinkingLevel = job.thinkingLevel;
+  draft.sessionKind = job.session.kind;
+  draft.includePreviousContext = includePreviousContextFor(job);
+  draft.error = "";
+}
+
+function editJob(job: CronJob): void {
+  for (const [jobId, draft] of Object.entries(drafts)) {
+    draft.editing = jobId === job.id;
+  }
+  resetDraft(job);
+  draftFor(job).editing = true;
+}
+
+function cancelEdit(job: CronJob): void {
+  resetDraft(job);
+  draftFor(job).editing = false;
 }
 
 function thinkingOptions(job: CronJob): string[] {
@@ -91,9 +118,16 @@ function isDirty(job: CronJob): boolean {
     draft.thinkingLevel !== job.thinkingLevel ||
     draft.sessionKind !== job.session.kind ||
     (draft.sessionKind === "daily" &&
-      draft.includePreviousContext !==
-        (job.session.kind === "daily" ? job.session.includePreviousContext !== false : true))
+      draft.includePreviousContext !== includePreviousContextFor(job))
   );
+}
+
+function sessionLabel(job: CronJob): string {
+  return job.session.kind === "daily"
+    ? job.session.includePreviousContext !== false
+      ? "daily · with previous context"
+      : "daily · fresh context"
+    : "new";
 }
 
 async function saveJob(job: CronJob): Promise<void> {
@@ -114,8 +148,8 @@ async function saveJob(job: CronJob): Promise<void> {
     draft.model = updated.model;
     draft.thinkingLevel = updated.thinkingLevel;
     draft.sessionKind = updated.session.kind;
-    draft.includePreviousContext =
-      updated.session.kind === "daily" ? updated.session.includePreviousContext !== false : true;
+    draft.includePreviousContext = includePreviousContextFor(updated);
+    draft.editing = false;
   } catch (error) {
     draft.error = error instanceof Error ? error.message : String(error);
   } finally {
@@ -178,89 +212,98 @@ watch(
             <span v-if="job.state.nextRunAtMs"
               >Next: {{ formatShortDateTime(job.state.nextRunAtMs) }}</span
             >
-            <span>
-              Session:
-              {{
-                job.session.kind === "daily"
-                  ? job.session.includePreviousContext !== false
-                    ? "daily · with previous context"
-                    : "daily · fresh context"
-                  : "new"
-              }}
-            </span>
+            <span>Session: {{ sessionLabel(job) }}</span>
             <span v-if="job.state.lastRunAtMs && job.state.lastStatus">
-              Last: {{ formatShortDateTime(job.state.lastRunAtMs) }} ·
-              {{ job.state.lastStatus }}
+              Last: {{ formatShortDateTime(job.state.lastRunAtMs) }} · {{ job.state.lastStatus }}
             </span>
             <span v-else-if="job.state.lastRunAtMs">
               Last: {{ formatShortDateTime(job.state.lastRunAtMs) }}
             </span>
           </div>
-          <button
-            class="cron-popover__icon-btn cron-popover__icon-btn--danger"
-            type="button"
-            :disabled="draftFor(job).deleting"
-            @click="deleteJob(job)"
-          >
-            <Trash2 :size="14" />
-          </button>
+
+          <div class="cron-popover__job-actions">
+            <button
+              class="cron-popover__icon-btn"
+              type="button"
+              :disabled="draftFor(job).saving || draftFor(job).deleting"
+              @click="draftFor(job).editing ? cancelEdit(job) : editJob(job)"
+            >
+              <component :is="draftFor(job).editing ? X : Pencil" :size="14" />
+            </button>
+            <button
+              class="cron-popover__icon-btn cron-popover__icon-btn--danger"
+              type="button"
+              :disabled="draftFor(job).deleting"
+              @click="deleteJob(job)"
+            >
+              <Trash2 :size="14" />
+            </button>
+          </div>
         </div>
 
-        <textarea
-          v-model="draftFor(job).prompt"
-          class="cron-popover__prompt"
-          rows="5"
-          :disabled="draftFor(job).saving || draftFor(job).deleting"
-        />
+        <div v-if="!draftFor(job).editing" class="cron-popover__readonly">
+          <div class="cron-popover__readonly-label">Prompt</div>
+          <div class="cron-popover__prompt-preview">{{ job.prompt }}</div>
+        </div>
 
-        <div class="cron-popover__controls">
-          <select
-            v-model="draftFor(job).model"
-            class="cron-popover__select"
+        <div v-else class="cron-popover__editor">
+          <textarea
+            v-model="draftFor(job).prompt"
+            class="cron-popover__prompt"
+            rows="5"
             :disabled="draftFor(job).saving || draftFor(job).deleting"
-          >
-            <option v-for="model in store.models" :key="model.id" :value="model.id">
-              {{ model.label }}
-            </option>
-          </select>
-
-          <ThinkingLevelPicker
-            v-if="thinkingOptions(job).length > 0"
-            class="cron-popover__thinking-picker"
-            :options="thinkingOptions(job)"
-            :current="draftFor(job).thinkingLevel"
-            :disabled="draftFor(job).saving || draftFor(job).deleting"
-            @change="draftFor(job).thinkingLevel = $event"
           />
-          <div v-else class="cron-popover__thinking-unavailable">Effort unavailable</div>
 
-          <select
-            v-model="draftFor(job).sessionKind"
-            class="cron-popover__select cron-popover__select--session"
-            :disabled="draftFor(job).saving || draftFor(job).deleting"
-          >
-            <option value="new">new session</option>
-            <option value="daily">daily session</option>
-          </select>
+          <div class="cron-popover__edit-fields">
+            <select
+              v-model="draftFor(job).model"
+              class="cron-popover__select"
+              :disabled="draftFor(job).saving || draftFor(job).deleting"
+            >
+              <option v-for="model in store.models" :key="model.id" :value="model.id">
+                {{ model.label }}
+              </option>
+            </select>
 
-          <select
-            v-if="draftFor(job).sessionKind === 'daily'"
-            v-model="draftFor(job).includePreviousContext"
-            class="cron-popover__select cron-popover__select--session"
-            :disabled="draftFor(job).saving || draftFor(job).deleting"
-          >
-            <option :value="true">with previous context</option>
-            <option :value="false">fresh context</option>
-          </select>
+            <ThinkingLevelPicker
+              v-if="thinkingOptions(job).length > 0"
+              class="cron-popover__thinking-picker"
+              :options="thinkingOptions(job)"
+              :current="draftFor(job).thinkingLevel"
+              :disabled="draftFor(job).saving || draftFor(job).deleting"
+              @change="draftFor(job).thinkingLevel = $event"
+            />
+            <div v-else class="cron-popover__thinking-unavailable">Effort unavailable</div>
 
-          <button
-            class="cron-popover__save"
-            type="button"
-            :disabled="!isDirty(job) || draftFor(job).saving || draftFor(job).deleting"
-            @click="saveJob(job)"
-          >
-            <Save :size="14" /> {{ draftFor(job).saving ? "Saving…" : "Save" }}
-          </button>
+            <select
+              v-model="draftFor(job).sessionKind"
+              class="cron-popover__select"
+              :disabled="draftFor(job).saving || draftFor(job).deleting"
+            >
+              <option value="new">new session</option>
+              <option value="daily">daily session</option>
+            </select>
+
+            <label v-if="draftFor(job).sessionKind === 'daily'" class="cron-popover__checkbox">
+              <input
+                v-model="draftFor(job).includePreviousContext"
+                type="checkbox"
+                :disabled="draftFor(job).saving || draftFor(job).deleting"
+              />
+              <span>Include previous context</span>
+            </label>
+          </div>
+
+          <div class="cron-popover__editor-actions">
+            <button
+              class="cron-popover__save"
+              type="button"
+              :disabled="!isDirty(job) || draftFor(job).saving || draftFor(job).deleting"
+              @click="saveJob(job)"
+            >
+              <Save :size="14" /> {{ draftFor(job).saving ? "Saving…" : "Save" }}
+            </button>
+          </div>
         </div>
 
         <div v-if="job.state.lastError" class="cron-popover__server-error">
@@ -340,7 +383,7 @@ watch(
 .cron-popover__job {
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 0.55rem;
   padding: 0.55rem;
   border-radius: 0.65rem;
   background: var(--color-bg-panel);
@@ -377,6 +420,27 @@ watch(
   color: var(--color-text-subtle);
 }
 
+.cron-popover__job-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.cron-popover__readonly {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.cron-popover__readonly-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.cron-popover__prompt-preview,
 .cron-popover__prompt,
 .cron-popover__select {
   width: 100%;
@@ -387,6 +451,21 @@ watch(
   font: inherit;
   outline: none;
   transition: border-color 80ms ease;
+}
+
+.cron-popover__prompt-preview {
+  padding: 0.65rem 0.75rem;
+  font-family: var(--font-family-mono);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cron-popover__editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .cron-popover__prompt {
@@ -403,11 +482,10 @@ watch(
   border-color: var(--color-accent);
 }
 
-.cron-popover__controls {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(12rem, auto) auto;
+.cron-popover__edit-fields {
+  display: flex;
+  flex-direction: column;
   gap: 0.4rem;
-  align-items: center;
 }
 
 .cron-popover__select {
@@ -415,11 +493,10 @@ watch(
 }
 
 .cron-popover__thinking-picker {
-  min-width: 12rem;
+  width: 100%;
 }
 
 .cron-popover__thinking-unavailable {
-  min-width: 12rem;
   padding: 0.55rem 0.65rem;
   border: 1px dashed var(--color-border-soft);
   border-radius: 0.6rem;
@@ -428,8 +505,22 @@ watch(
   text-align: center;
 }
 
-.cron-popover__select--session {
-  min-width: 7rem;
+.cron-popover__checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.15rem 0.1rem;
+  color: var(--color-text);
+  font-size: 0.82rem;
+}
+
+.cron-popover__checkbox input {
+  margin: 0;
+}
+
+.cron-popover__editor-actions {
+  display: flex;
+  justify-content: flex-start;
 }
 
 .cron-popover__save,
@@ -461,7 +552,8 @@ watch(
 .cron-popover__save:disabled,
 .cron-popover__icon-btn:disabled,
 .cron-popover__prompt:disabled,
-.cron-popover__select:disabled {
+.cron-popover__select:disabled,
+.cron-popover__checkbox input:disabled {
   opacity: 0.6;
 }
 
@@ -478,11 +570,5 @@ watch(
 
 .cron-popover__empty code {
   font-family: var(--font-family-mono);
-}
-
-@media (max-width: 30rem) {
-  .cron-popover__controls {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

@@ -104,6 +104,21 @@ export function findLastAssistantMessage(messages: AgentMessage[]): AssistantMes
   return undefined;
 }
 
+export function stripThinkingFromAssistantMessage(
+  message: AssistantMessage | undefined,
+): AssistantMessage | undefined {
+  if (!message || !Array.isArray(message.content)) {
+    return message;
+  }
+
+  return {
+    ...message,
+    content: message.content.filter(
+      (block) => typeof block === "object" && block !== null && block.type !== "thinking",
+    ) as AssistantMessage["content"],
+  };
+}
+
 function isSentFileDescriptor(value: unknown): value is SentFileDescriptor {
   return (
     typeof value === "object" &&

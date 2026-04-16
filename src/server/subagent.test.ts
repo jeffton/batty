@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { AssistantMessage } from "@mariozechner/pi-ai";
 import {
   buildSubagentDetails,
   cloneMessagesForSubagent,
@@ -7,6 +8,7 @@ import {
   extractAssistantText,
   findLastAssistantMessage,
   newlyGeneratedSubagentMessages,
+  stripThinkingFromAssistantMessage,
 } from "./subagent";
 
 type AgentMessage = AgentSession["messages"][number];
@@ -76,6 +78,35 @@ describe("cloneMessagesForSubagent", () => {
     ] as unknown as AgentMessage[];
 
     expect(cloneMessagesForSubagent(messages, "sub-1")).toEqual(messages);
+  });
+});
+
+describe("stripThinkingFromAssistantMessage", () => {
+  it("removes thinking blocks and keeps visible assistant output", () => {
+    const message: AssistantMessage = {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "internal" },
+        { type: "text", text: "NO_REPLY" },
+      ],
+      api: "openai-responses",
+      provider: "openai",
+      model: "gpt-5",
+      usage: {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 2,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp: 1,
+    } as const;
+
+    expect(stripThinkingFromAssistantMessage(message)).toMatchObject({
+      content: [{ type: "text", text: "NO_REPLY" }],
+    });
   });
 });
 

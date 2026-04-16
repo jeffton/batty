@@ -79,6 +79,7 @@ import {
   extractAssistantText,
   findLastAssistantMessage,
   newlyGeneratedSubagentMessages,
+  stripThinkingFromAssistantMessage,
   SUBAGENT_EFFORT_LEVELS,
   SUBAGENT_TOOL_NAME,
   ZERO_USAGE,
@@ -491,6 +492,7 @@ export class PiService {
           thinkingLevel: job.thinkingLevel,
           includeSessionContext: includePreviousContext,
           respondIn: "session",
+          currentToolCallId: toolCallId,
           onUpdate: (partial) => {
             const current = webSession.activeTools.get(toolCallId);
             if (!current) {
@@ -851,9 +853,10 @@ export class PiService {
       isError: result.isError,
       timestamp,
     };
-    const deliveredAssistant: AssistantMessage = result.finalAssistant
+    const sanitizedFinalAssistant = stripThinkingFromAssistantMessage(result.finalAssistant);
+    const deliveredAssistant: AssistantMessage = sanitizedFinalAssistant
       ? {
-          ...result.finalAssistant,
+          ...sanitizedFinalAssistant,
           timestamp: timestamp + 1,
         }
       : {

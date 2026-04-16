@@ -10,6 +10,7 @@ export interface BattySystemPromptSnapshot {
   thinkingLevel: string;
   date: string;
   isoWeek: number;
+  dailySessionDate?: string;
 }
 
 export function buildBattySystemPromptSnapshot(
@@ -18,6 +19,7 @@ export function buildBattySystemPromptSnapshot(
   thinkingLevel: string,
   now = new Date(),
   battyReadmePath?: string,
+  dailySessionDate?: string,
 ): BattySystemPromptSnapshot {
   const date = toIsoDate(now);
   const dayOfWeek = getDayOfWeek(now);
@@ -30,6 +32,9 @@ export function buildBattySystemPromptSnapshot(
       "If your final reply would not add anything useful for the user, reply with exactly NO_REPLY. Batty will still display that in the transcript, but it will not send a push notification for it.",
       ...(battyReadmePath ? [`Batty README: ${battyReadmePath}`] : []),
       `Current workspace: ${workspace.id} (${workspace.path})`,
+      ...(dailySessionDate === date
+        ? [`Current session: today's daily session for workspace ${workspace.id}`]
+        : []),
       `Current model: ${model}`,
       `Current thinking level: ${thinkingLevel}`,
       `Current date: ${date} (${dayOfWeek}, ISO week ${isoWeek})`,
@@ -40,6 +45,7 @@ export function buildBattySystemPromptSnapshot(
     thinkingLevel,
     date,
     isoWeek,
+    ...(dailySessionDate ? { dailySessionDate } : {}),
   };
 }
 
@@ -71,7 +77,8 @@ function isBattySystemPromptSnapshot(value: unknown): value is BattySystemPrompt
     typeof snapshot.model === "string" &&
     typeof snapshot.thinkingLevel === "string" &&
     typeof snapshot.date === "string" &&
-    typeof snapshot.isoWeek === "number"
+    typeof snapshot.isoWeek === "number" &&
+    (snapshot.dailySessionDate === undefined || typeof snapshot.dailySessionDate === "string")
   );
 }
 

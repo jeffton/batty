@@ -919,6 +919,7 @@ export class PiService {
         CRON_SESSION_CUSTOM_TYPE,
         buildDailyCronSessionBinding(now, this.config.cronDailySessionStartTime),
       );
+      await this.refreshBattySystemPrompt(webSession);
       await this.notifyWorkspaceUpdated(workspace.id);
       return this.getState(webSession.id);
     })();
@@ -1165,6 +1166,7 @@ export class PiService {
         selectedThinkingLevel,
         new Date(),
         path.join(this.config.selfPath, "README.md"),
+        this.getCurrentDailySessionDate(sessionManager),
       );
 
       sessionManager.appendCustomEntry(BATTY_SYSTEM_PROMPT_CUSTOM_TYPE, snapshot);
@@ -1364,11 +1366,19 @@ export class PiService {
       webSession.session.thinkingLevel,
       new Date(),
       path.join(this.config.selfPath, "README.md"),
+      this.getCurrentDailySessionDate(webSession.session.sessionManager),
     );
 
     webSession.session.sessionManager.appendCustomEntry(BATTY_SYSTEM_PROMPT_CUSTOM_TYPE, snapshot);
     await webSession.session.resourceLoader.reload();
     webSession.session.setActiveToolsByName(webSession.session.getActiveToolNames());
+  }
+
+  private getCurrentDailySessionDate(sessionManager: SessionManager): string | undefined {
+    return findDailyCronSessionBinding(
+      sessionManager.getEntries(),
+      toLocalIsoDate(new Date(), this.config.cronDailySessionStartTime),
+    )?.date;
   }
 
   private createSubagentTool(workspace: WorkspaceInfo): ToolDefinition<typeof SubagentToolSchema> {

@@ -691,6 +691,12 @@ export class PiService {
           },
           subagentSession.messages,
           finalAssistant,
+          {
+            sentFileMessages: newlyGeneratedSubagentMessages(
+              subagentSession.messages,
+              seedMessageCount,
+            ),
+          },
         ),
       });
     });
@@ -711,6 +717,7 @@ export class PiService {
       const messages = structuredClone(subagentSession.messages) as AgentSession["messages"];
       const finalAssistant = findLastAssistantMessage(messages);
       const text = extractAssistantText(finalAssistant) || lastText;
+      const generatedMessages = newlyGeneratedSubagentMessages(messages, seedMessageCount);
       const details = buildSubagentDetails(
         {
           prompt: options.prompt,
@@ -721,12 +728,13 @@ export class PiService {
         },
         messages,
         finalAssistant,
+        { sentFileMessages: generatedMessages },
       );
       return {
         text,
         details,
         messages,
-        generatedMessages: newlyGeneratedSubagentMessages(messages, seedMessageCount),
+        generatedMessages,
         finalAssistant,
         isError: finalAssistant?.stopReason === "error" || finalAssistant?.stopReason === "aborted",
         errorMessage: finalAssistant?.errorMessage,
@@ -738,6 +746,7 @@ export class PiService {
         extractAssistantText(finalAssistant) ||
         finalAssistant?.errorMessage ||
         (error instanceof Error ? error.message : String(error));
+      const generatedMessages = newlyGeneratedSubagentMessages(messages, seedMessageCount);
       const details = buildSubagentDetails(
         {
           prompt: options.prompt,
@@ -748,12 +757,13 @@ export class PiService {
         },
         messages,
         finalAssistant,
+        { sentFileMessages: generatedMessages },
       );
       return {
         text,
         details,
         messages,
-        generatedMessages: newlyGeneratedSubagentMessages(messages, seedMessageCount),
+        generatedMessages,
         finalAssistant,
         isError: true,
         errorMessage:
@@ -824,11 +834,14 @@ export class PiService {
     session: AgentSession,
     toolCallId: string,
     result: {
+      text: string;
       details: ToolExecutionDetails;
-      generatedMessages: AgentSession["messages"];
+      finalAssistant?: AssistantMessage;
       isError: boolean;
+      errorMessage?: string;
     },
   ): void {
+    const timestamp = Date.now();
     const toolResult: ToolResultMessage<ToolExecutionDetails> = {
       role: "toolResult",
       toolCallId,
@@ -836,10 +849,25 @@ export class PiService {
       content: [],
       details: result.details,
       isError: result.isError,
-      timestamp: Date.now(),
+      timestamp,
     };
-    const generatedMessages = result.generatedMessages.slice(1) as Message[];
-    this.appendMessages(session, [toolResult, ...generatedMessages]);
+    const deliveredAssistant: AssistantMessage = result.finalAssistant
+      ? {
+          ...result.finalAssistant,
+          timestamp: timestamp + 1,
+        }
+      : {
+          role: "assistant",
+          content: [{ type: "text", text: result.text || result.errorMessage || "(no output)" }],
+          api: (session.model as PiModel | undefined)?.api ?? "openai-responses",
+          provider: session.model?.provider ?? "unknown",
+          model: session.model?.id ?? "unknown",
+          usage: ZERO_USAGE,
+          stopReason: result.isError ? "error" : "stop",
+          errorMessage: result.isError ? result.errorMessage : undefined,
+          timestamp: timestamp + 1,
+        };
+    this.appendMessages(session, [toolResult, deliveredAssistant]);
   }
 
   private async resolveOrCreateDailySession(

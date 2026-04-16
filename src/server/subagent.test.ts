@@ -211,4 +211,72 @@ describe("subagent message helpers", () => {
     ]);
     expect(newlyGeneratedSubagentMessages(messages, 1)).toEqual([messages[1]]);
   });
+
+  it("only propagates attachments from newly generated subagent messages", () => {
+    const inherited = {
+      role: "toolResult",
+      toolCallId: "attach-old",
+      toolName: "attach-files",
+      content: [{ type: "text", text: "Attached 1 file for the user." }],
+      details: {
+        sentFiles: [
+          {
+            id: "old-file",
+            name: "old.png",
+            size: 10,
+            mimeType: "image/png",
+            kind: "image",
+            downloadUrl: "/api/sent-files/workspace/session/tool/old-file?download=1",
+            previewUrl: "/api/sent-files/workspace/session/tool/old-file",
+          },
+        ],
+      },
+      isError: false,
+      timestamp: 1,
+    };
+    const generated = {
+      role: "toolResult",
+      toolCallId: "attach-new",
+      toolName: "attach-files",
+      content: [{ type: "text", text: "Attached 1 file for the user." }],
+      details: {
+        sentFiles: [
+          {
+            id: "new-file",
+            name: "new.png",
+            size: 11,
+            mimeType: "image/png",
+            kind: "image",
+            downloadUrl: "/api/sent-files/workspace/session/tool/new-file?download=1",
+            previewUrl: "/api/sent-files/workspace/session/tool/new-file",
+          },
+        ],
+      },
+      isError: false,
+      timestamp: 2,
+    };
+    const messages = [inherited, generated] as unknown as AgentMessage[];
+
+    expect(
+      buildSubagentDetails(
+        {
+          prompt: "Attach the latest image",
+          model: "openai/gpt-5",
+          effort: "medium",
+          includeSessionContext: true,
+          respondIn: "session",
+        },
+        messages,
+        undefined,
+        { sentFileMessages: [generated as unknown as AgentMessage] },
+      ),
+    ).toMatchObject({
+      sentFiles: [
+        {
+          id: "new-file",
+          name: "new.png",
+        },
+      ],
+    });
+  });
 });

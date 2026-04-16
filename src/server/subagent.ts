@@ -160,8 +160,9 @@ export function buildSubagentDetails(
   },
   messages: AgentMessage[],
   finalAssistant: AssistantMessage | undefined,
+  options?: { sentFileMessages?: AgentMessage[] },
 ): SubagentToolDetails {
-  const sentFiles = collectSentFiles(messages);
+  const sentFiles = collectSentFiles(options?.sentFileMessages ?? messages);
   return {
     subagent: {
       prompt: input.prompt,

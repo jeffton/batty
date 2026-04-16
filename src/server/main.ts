@@ -76,6 +76,7 @@ cronService.setRunner({
       model: job.model,
       thinkingLevel: job.thinkingLevel,
       session: job.session,
+      scheduleLabel: job.scheduleLabel,
     });
   },
 });

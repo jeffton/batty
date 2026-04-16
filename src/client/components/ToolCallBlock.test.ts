@@ -180,4 +180,65 @@ describe("ToolCallBlock", () => {
     expect(wrapper.text()).toContain("report.png");
     expect(wrapper.text()).toContain("archive.zip");
   });
+
+  it("does not repeat session-mode subagent text in the tool call display", () => {
+    const wrapper = mount(ToolCallBlock, {
+      props: {
+        name: "subagent",
+        arguments: {
+          prompt: "Check the repo",
+        },
+        resultBlocks: [{ type: "text", text: "Full subagent response" }],
+        resultDetails: {
+          subagent: {
+            prompt: "Check the repo",
+            model: "openai/gpt-5",
+            effort: "medium",
+            includeSessionContext: true,
+            respondIn: "session",
+            messageCount: 3,
+          },
+        },
+        status: "success",
+      },
+    });
+
+    expect(wrapper.text()).toContain("Check the repo");
+    expect(wrapper.text()).not.toContain("Full subagent response");
+  });
+
+  it("renders subagent attachments from nested attach-files results", () => {
+    const wrapper = mount(ToolCallBlock, {
+      props: {
+        name: "subagent",
+        arguments: {
+          prompt: "Build the report",
+        },
+        resultDetails: {
+          sentFiles: [
+            {
+              id: "file-1",
+              name: "report.zip",
+              size: 8192,
+              mimeType: "application/zip",
+              kind: "file",
+              downloadUrl: "/api/sent-files/workspace/session/call/file-1?download=1",
+            },
+          ],
+          subagent: {
+            prompt: "Build the report",
+            model: "openai/gpt-5",
+            effort: "medium",
+            includeSessionContext: true,
+            respondIn: "tool-call",
+            messageCount: 4,
+          },
+        },
+        status: "success",
+      },
+    });
+
+    expect(wrapper.findAll(".attached-files__card")).toHaveLength(1);
+    expect(wrapper.text()).toContain("report.zip");
+  });
 });

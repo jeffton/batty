@@ -1,5 +1,6 @@
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { AssistantMessage, Usage } from "@mariozechner/pi-ai";
+import type { SentFileDescriptor } from "@/shared/types";
 
 export const SUBAGENT_TOOL_NAME = "subagent";
 export const SUBAGENT_EFFORT_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
@@ -13,12 +14,15 @@ export interface SubagentToolInput {
   includeSessionContext?: boolean;
 }
 
+export type SubagentRespondIn = "tool-call" | "session";
+
 export interface SubagentToolDetails extends Record<string, unknown> {
   subagent: {
     prompt: string;
     model: string;
     effort: string;
     includeSessionContext: boolean;
+    respondIn: SubagentRespondIn;
     messageCount: number;
     stopReason?: string;
     errorMessage?: string;
@@ -100,24 +104,75 @@ export function findLastAssistantMessage(messages: AgentMessage[]): AssistantMes
   return undefined;
 }
 
+function isSentFileDescriptor(value: unknown): value is SentFileDescriptor {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { id?: unknown }).id === "string" &&
+    typeof (value as { name?: unknown }).name === "string" &&
+    typeof (value as { size?: unknown }).size === "number" &&
+    typeof (value as { mimeType?: unknown }).mimeType === "string" &&
+    typeof (value as { kind?: unknown }).kind === "string" &&
+    typeof (value as { downloadUrl?: unknown }).downloadUrl === "string"
+  );
+}
+
+export function collectSentFiles(messages: AgentMessage[]): SentFileDescriptor[] {
+  const files: SentFileDescriptor[] = [];
+  const seen = new Set<string>();
+
+  for (const message of messages) {
+    if (message.role !== "toolResult") {
+      continue;
+    }
+
+    const details = (message as { details?: { sentFiles?: unknown } }).details;
+    const sentFiles = details?.sentFiles;
+    if (!Array.isArray(sentFiles)) {
+      continue;
+    }
+
+    for (const file of sentFiles) {
+      if (!isSentFileDescriptor(file) || seen.has(file.id)) {
+        continue;
+      }
+      seen.add(file.id);
+      files.push(file);
+    }
+  }
+
+  return files;
+}
+
+export function newlyGeneratedSubagentMessages(
+  messages: AgentMessage[],
+  seedMessageCount: number,
+): AgentMessage[] {
+  return messages.slice(seedMessageCount);
+}
+
 export function buildSubagentDetails(
   input: Required<Pick<SubagentToolInput, "prompt">> & {
     model: string;
     effort: string;
     includeSessionContext: boolean;
+    respondIn: SubagentRespondIn;
   },
   messages: AgentMessage[],
   finalAssistant: AssistantMessage | undefined,
 ): SubagentToolDetails {
+  const sentFiles = collectSentFiles(messages);
   return {
     subagent: {
       prompt: input.prompt,
       model: input.model,
       effort: input.effort,
       includeSessionContext: input.includeSessionContext,
+      respondIn: input.respondIn,
       messageCount: messages.length,
       stopReason: finalAssistant?.stopReason,
       errorMessage: finalAssistant?.errorMessage,
     },
+    ...(sentFiles.length > 0 ? { sentFiles } : {}),
   };
 }

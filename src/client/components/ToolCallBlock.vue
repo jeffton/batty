@@ -59,6 +59,14 @@ const timeoutValue = computed(() => {
   return undefined;
 });
 const codeLanguage = computed(() => languageFromPath(pathValue.value));
+const subagentRespondIn = computed(() => {
+  const value = props.resultDetails?.subagent;
+  return value && typeof value === "object" && value.respondIn === "session"
+    ? "session"
+    : value && typeof value === "object" && value.respondIn === "tool-call"
+      ? "tool-call"
+      : undefined;
+});
 const hasResultContent = computed(() =>
   hasToolResultContent(props.resultBlocks, props.resultDetails),
 );
@@ -138,6 +146,10 @@ const visibleResultBlocks = computed(() => {
     return [];
   }
 
+  if (props.name === "subagent" && subagentRespondIn.value === "session") {
+    return props.status === "error" ? props.resultBlocks : [];
+  }
+
   if (props.name === "edit") {
     if (props.status === "running") {
       return props.resultBlocks;
@@ -206,6 +218,10 @@ const showResultSection = computed(() => {
 
   if (props.name === "attach-files") {
     return props.status === "error" || sentFiles.value.length > 0 || hasResultContent.value;
+  }
+
+  if (props.name === "subagent" && subagentRespondIn.value === "session") {
+    return props.status === "error";
   }
 
   return props.status === "error" || hasResultContent.value;
@@ -379,9 +395,11 @@ const sentFiles = computed(() =>
       </template>
 
       <AttachedFilesList
-        v-if="props.name === 'attach-files' && sentFiles.length > 0"
+        v-if="
+          sentFiles.length > 0 && !(props.name === 'subagent' && subagentRespondIn === 'session')
+        "
         :files="sentFiles"
-        :preview="false"
+        :preview="props.name !== 'attach-files'"
         :compact="props.compact"
       />
 

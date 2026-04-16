@@ -78,6 +78,7 @@ import {
   cloneMessagesForSubagent,
   extractAssistantText,
   findLastAssistantMessage,
+  newlyGeneratedSubagentMessages,
   SUBAGENT_EFFORT_LEVELS,
   SUBAGENT_TOOL_NAME,
   ZERO_USAGE,
@@ -433,14 +434,16 @@ export class PiService {
     model: string;
     thinkingLevel: string;
     session: CronJobSession;
+    scheduleLabel: string;
   }): Promise<{ sessionId: string; sessionPath: string }> {
+    const cronPrompt = this.buildCronPrompt(job.prompt, job.scheduleLabel);
     if (job.session.kind !== "daily") {
       const session = await this.createSession(job.workspace, {
         modelId: job.model,
         thinkingLevel: job.thinkingLevel,
       });
       const current = this.getState(session.id);
-      await this.prompt(current.id, job.prompt, [], current.isStreaming ? "followUp" : undefined);
+      await this.prompt(current.id, cronPrompt, [], current.isStreaming ? "followUp" : undefined);
 
       return {
         sessionId: current.sessionId,
@@ -457,7 +460,7 @@ export class PiService {
     const includePreviousContext = job.session.includePreviousContext !== false;
     const toolCallId = `${SUBAGENT_TOOL_NAME}-${randomUUID()}`;
     const toolArgs = {
-      prompt: job.prompt,
+      prompt: cronPrompt,
       model: job.model,
       effort: job.thinkingLevel,
       includeSessionContext: includePreviousContext,
@@ -467,6 +470,7 @@ export class PiService {
       await webSession.session.agent.waitForIdle();
       this.setThinkingLevel(session.id, job.thinkingLevel);
       await this.setModel(session.id, job.model);
+      this.appendCronSubagentStart(webSession.session, toolCallId, toolArgs);
       webSession.activeTools.set(toolCallId, {
         toolCallId,
         toolName: SUBAGENT_TOOL_NAME,
@@ -476,16 +480,17 @@ export class PiService {
         isError: false,
         details: undefined,
       });
-      this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
+      this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
 
       try {
         const result = await this.runDetachedSubagentSession({
           workspace: job.workspace,
           parentSessionId: webSession.session.sessionId,
-          prompt: job.prompt,
+          prompt: cronPrompt,
           modelId: job.model,
           thinkingLevel: job.thinkingLevel,
           includeSessionContext: includePreviousContext,
+          respondIn: "session",
           onUpdate: (partial) => {
             const current = webSession.activeTools.get(toolCallId);
             if (!current) {
@@ -501,7 +506,7 @@ export class PiService {
           },
         });
 
-        this.appendDailySubagentRun(webSession.session, toolCallId, toolArgs, result);
+        this.appendCronSubagentCompletion(webSession.session, toolCallId, result);
         const completedState = this.getState(webSession.id);
         this.publish(webSession, { type: "reset", state: completedState });
         try {
@@ -512,7 +517,7 @@ export class PiService {
             activeAssistant: undefined,
           });
         } catch (error) {
-          console.error("Failed to run agent completion hook for synthetic cron subagent", error);
+          console.error("Failed to run agent completion hook for cron subagent", error);
         }
         await this.notifyWorkspaceUpdated(job.workspace.id);
 
@@ -613,6 +618,7 @@ export class PiService {
     modelId: string;
     thinkingLevel: string;
     includeSessionContext: boolean;
+    respondIn: "tool-call" | "session";
     currentToolCallId?: string;
     signal?: AbortSignal;
     onUpdate?: (partial: {
@@ -623,6 +629,7 @@ export class PiService {
     text: string;
     details: ToolExecutionDetails;
     messages: AgentSession["messages"];
+    generatedMessages: AgentSession["messages"];
     finalAssistant?: AssistantMessage;
     isError: boolean;
     errorMessage?: string;
@@ -641,6 +648,7 @@ export class PiService {
     const seedMessages = options.includeSessionContext
       ? this.sessionMessagesForSubagent(options.parentSessionId, options.currentToolCallId)
       : [];
+    const seedMessageCount = seedMessages.length;
     if (seedMessages.length > 0) {
       subagentSession.agent.state.messages = structuredClone(seedMessages);
       for (const message of seedMessages) {
@@ -679,6 +687,7 @@ export class PiService {
             model: options.modelId,
             effort: options.thinkingLevel,
             includeSessionContext: options.includeSessionContext,
+            respondIn: options.respondIn,
           },
           subagentSession.messages,
           finalAssistant,
@@ -708,6 +717,7 @@ export class PiService {
           model: options.modelId,
           effort: options.thinkingLevel,
           includeSessionContext: options.includeSessionContext,
+          respondIn: options.respondIn,
         },
         messages,
         finalAssistant,
@@ -716,6 +726,7 @@ export class PiService {
         text,
         details,
         messages,
+        generatedMessages: newlyGeneratedSubagentMessages(messages, seedMessageCount),
         finalAssistant,
         isError: finalAssistant?.stopReason === "error" || finalAssistant?.stopReason === "aborted",
         errorMessage: finalAssistant?.errorMessage,
@@ -733,6 +744,7 @@ export class PiService {
           model: options.modelId,
           effort: options.thinkingLevel,
           includeSessionContext: options.includeSessionContext,
+          respondIn: options.respondIn,
         },
         messages,
         finalAssistant,
@@ -741,6 +753,7 @@ export class PiService {
         text,
         details,
         messages,
+        generatedMessages: newlyGeneratedSubagentMessages(messages, seedMessageCount),
         finalAssistant,
         isError: true,
         errorMessage:
@@ -756,7 +769,25 @@ export class PiService {
     }
   }
 
-  private appendDailySubagentRun(
+  private appendMessages(session: AgentSession, messages: Message[]): void {
+    session.agent.state.messages = [...session.messages, ...messages];
+    for (const message of messages) {
+      session.sessionManager.appendMessage(message);
+    }
+  }
+
+  private buildCronPrompt(prompt: string, scheduleLabel: string): string {
+    const trimmedPrompt = prompt.trim();
+    return [
+      "[Cron trigger]\nThis turn was triggered by a Batty cron job.",
+      `Schedule: ${scheduleLabel}`,
+      trimmedPrompt,
+    ]
+      .filter((part) => part.length > 0)
+      .join("\n\n");
+  }
+
+  private appendCronSubagentStart(
     session: AgentSession,
     toolCallId: string,
     args: {
@@ -765,64 +796,50 @@ export class PiService {
       effort: string;
       includeSessionContext: boolean;
     },
-    result: {
-      text: string;
-      details: ToolExecutionDetails;
-      finalAssistant?: AssistantMessage;
-      isError: boolean;
-      errorMessage?: string;
-    },
   ): void {
     const timestamp = Date.now();
-    const assistantToolCall: AssistantMessage = {
-      role: "assistant",
-      content: [
-        {
-          type: "toolCall",
-          id: toolCallId,
-          name: SUBAGENT_TOOL_NAME,
-          arguments: args,
-        } satisfies ToolCall,
-      ],
-      api: (session.model as PiModel | undefined)?.api ?? "openai-responses",
-      provider: session.model?.provider ?? "unknown",
-      model: session.model?.id ?? args.model,
-      usage: ZERO_USAGE,
-      stopReason: "toolUse",
-      timestamp: timestamp + 1,
-    };
+    this.appendMessages(session, [
+      { role: "user", content: args.prompt, timestamp },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: toolCallId,
+            name: SUBAGENT_TOOL_NAME,
+            arguments: args,
+          } satisfies ToolCall,
+        ],
+        api: (session.model as PiModel | undefined)?.api ?? "openai-responses",
+        provider: session.model?.provider ?? "unknown",
+        model: session.model?.id ?? args.model,
+        usage: ZERO_USAGE,
+        stopReason: "toolUse",
+        timestamp: timestamp + 1,
+      } satisfies AssistantMessage,
+    ]);
+  }
+
+  private appendCronSubagentCompletion(
+    session: AgentSession,
+    toolCallId: string,
+    result: {
+      details: ToolExecutionDetails;
+      generatedMessages: AgentSession["messages"];
+      isError: boolean;
+    },
+  ): void {
     const toolResult: ToolResultMessage<ToolExecutionDetails> = {
       role: "toolResult",
       toolCallId,
       toolName: SUBAGENT_TOOL_NAME,
-      content: [{ type: "text", text: result.text || "(no output)" }],
+      content: [],
       details: result.details,
       isError: result.isError,
-      timestamp: timestamp + 2,
+      timestamp: Date.now(),
     };
-    const finalAssistant: AssistantMessage = result.finalAssistant ?? {
-      role: "assistant",
-      content: [{ type: "text", text: result.text || result.errorMessage || "(no output)" }],
-      api: (session.model as PiModel | undefined)?.api ?? "openai-responses",
-      provider: session.model?.provider ?? "unknown",
-      model: session.model?.id ?? args.model,
-      usage: ZERO_USAGE,
-      stopReason: result.isError ? "error" : "stop",
-      errorMessage: result.isError ? result.errorMessage : undefined,
-      timestamp: timestamp + 3,
-    };
-
-    const messages: Message[] = [
-      { role: "user", content: args.prompt, timestamp },
-      assistantToolCall,
-      toolResult,
-      finalAssistant,
-    ];
-
-    session.agent.state.messages = [...session.messages, ...messages];
-    for (const message of messages) {
-      session.sessionManager.appendMessage(message);
-    }
+    const generatedMessages = result.generatedMessages.slice(1) as Message[];
+    this.appendMessages(session, [toolResult, ...generatedMessages]);
   }
 
   private async resolveOrCreateDailySession(
@@ -1369,6 +1386,7 @@ export class PiService {
             modelId,
             thinkingLevel,
             includeSessionContext,
+            respondIn: "tool-call",
             currentToolCallId: toolCallId,
             signal,
             onUpdate,

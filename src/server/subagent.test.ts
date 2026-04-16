@@ -3,8 +3,10 @@ import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import {
   buildSubagentDetails,
   cloneMessagesForSubagent,
+  collectSentFiles,
   extractAssistantText,
   findLastAssistantMessage,
+  newlyGeneratedSubagentMessages,
 } from "./subagent";
 
 type AgentMessage = AgentSession["messages"][number];
@@ -149,6 +151,7 @@ describe("subagent message helpers", () => {
           model: "openai/gpt-5",
           effort: "high",
           includeSessionContext: true,
+          respondIn: "tool-call",
         },
         messages,
         findLastAssistantMessage(messages),
@@ -159,10 +162,53 @@ describe("subagent message helpers", () => {
         model: "openai/gpt-5",
         effort: "high",
         includeSessionContext: true,
+        respondIn: "tool-call",
         messageCount: 1,
         stopReason: "stop",
         errorMessage: undefined,
       },
     });
+  });
+
+  it("collects sent files from nested tool results and keeps generated messages", () => {
+    const messages = [
+      {
+        role: "user",
+        content: "seed",
+        timestamp: 1,
+      },
+      {
+        role: "toolResult",
+        toolCallId: "attach-1",
+        toolName: "attach-files",
+        content: [{ type: "text", text: "Attached 1 file for the user." }],
+        details: {
+          sentFiles: [
+            {
+              id: "file-1",
+              name: "report.txt",
+              size: 7,
+              mimeType: "text/plain",
+              kind: "file",
+              downloadUrl: "/api/sent-files/workspace/session/tool/file-1?download=1",
+            },
+          ],
+        },
+        isError: false,
+        timestamp: 2,
+      },
+    ] as unknown as AgentMessage[];
+
+    expect(collectSentFiles(messages)).toEqual([
+      {
+        id: "file-1",
+        name: "report.txt",
+        size: 7,
+        mimeType: "text/plain",
+        kind: "file",
+        downloadUrl: "/api/sent-files/workspace/session/tool/file-1?download=1",
+      },
+    ]);
+    expect(newlyGeneratedSubagentMessages(messages, 1)).toEqual([messages[1]]);
   });
 });

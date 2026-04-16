@@ -81,6 +81,56 @@ describe("cloneMessagesForSubagent", () => {
 
     expect(cloneMessagesForSubagent(messages, "sub-1")).toEqual(messages);
   });
+
+  it("drops a trailing user message when it matches the injected prompt", () => {
+    const messages = [
+      {
+        role: "user",
+        content: [{ type: "text", text: "[Cron trigger]\n\nHeartbeat" }],
+        timestamp: 1,
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "sub-1",
+            name: "subagent",
+            arguments: { prompt: "[Cron trigger]\n\nHeartbeat" },
+          },
+        ],
+        api: "openai-responses",
+        provider: "openai",
+        model: "gpt-5",
+        usage: {
+          input: 1,
+          output: 1,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 2,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: "toolUse",
+        timestamp: 2,
+      },
+    ] as unknown as AgentMessage[];
+
+    expect(cloneMessagesForSubagent(messages, "sub-1", "[Cron trigger]\n\nHeartbeat")).toEqual([]);
+  });
+
+  it("keeps the trailing user message when it differs from the injected prompt", () => {
+    const messages = [
+      {
+        role: "user",
+        content: "Please investigate the auth flow",
+        timestamp: 1,
+      },
+    ] as unknown as AgentMessage[];
+
+    expect(cloneMessagesForSubagent(messages, undefined, "Review only the login redirect")).toEqual(
+      messages,
+    );
+  });
 });
 
 describe("subagent session markers", () => {

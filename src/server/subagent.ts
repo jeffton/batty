@@ -58,20 +58,48 @@ function isToolCallBlock(value: unknown): value is { type: "toolCall"; id: strin
   );
 }
 
+function extractTextContent(content: unknown): string {
+  if (typeof content === "string") {
+    return content.trim();
+  }
+
+  if (!Array.isArray(content)) {
+    return "";
+  }
+
+  return content
+    .flatMap((block) =>
+      typeof block === "object" && block !== null && (block as { type?: unknown }).type === "text"
+        ? [String((block as { text?: unknown }).text ?? "")]
+        : [],
+    )
+    .join("")
+    .trim();
+}
+
 export function cloneMessagesForSubagent(
   messages: AgentMessage[],
   currentToolCallId?: string,
+  injectedPrompt?: string,
 ): AgentMessage[] {
   const cloned = structuredClone(messages) as AgentMessage[];
-  if (!currentToolCallId) {
-    return cloned;
-  }
 
   const lastMessage = cloned.at(-1);
   if (
+    currentToolCallId &&
     lastMessage?.role === "assistant" &&
     Array.isArray(lastMessage.content) &&
     lastMessage.content.some((block) => isToolCallBlock(block) && block.id === currentToolCallId)
+  ) {
+    cloned.pop();
+  }
+
+  const trimmedPrompt = injectedPrompt?.trim();
+  const trailingMessage = cloned.at(-1);
+  if (
+    trimmedPrompt &&
+    trailingMessage?.role === "user" &&
+    extractTextContent(trailingMessage.content) === trimmedPrompt
   ) {
     cloned.pop();
   }

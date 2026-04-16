@@ -594,10 +594,11 @@ export class PiService {
   private sessionMessagesForSubagent(
     sessionId: string,
     currentToolCallId?: string,
+    injectedPrompt?: string,
   ): AgentSession["messages"] {
     const liveSession = this.liveSessions.get(sessionId)?.session;
     if (liveSession) {
-      return cloneMessagesForSubagent(liveSession.messages, currentToolCallId);
+      return cloneMessagesForSubagent(liveSession.messages, currentToolCallId, injectedPrompt);
     }
 
     const attached = this.sessions.get(sessionId);
@@ -609,6 +610,7 @@ export class PiService {
       return cloneMessagesForSubagent(
         context.messages as AgentSession["messages"],
         currentToolCallId,
+        injectedPrompt,
       );
     }
 
@@ -657,7 +659,11 @@ export class PiService {
     this.registerLiveSession(options.workspace, subagentSession);
 
     const seedMessages = options.includeSessionContext
-      ? this.sessionMessagesForSubagent(options.parentSessionId, options.currentToolCallId)
+      ? this.sessionMessagesForSubagent(
+          options.parentSessionId,
+          options.currentToolCallId,
+          options.prompt,
+        )
       : [];
     const seedMessageCount = seedMessages.length;
     if (seedMessages.length > 0) {

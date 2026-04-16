@@ -131,6 +131,68 @@ describe("cloneMessagesForSubagent", () => {
       messages,
     );
   });
+
+  it("drops historical subagent tool plumbing while keeping visible messages", () => {
+    const messages = [
+      {
+        role: "user",
+        content: "Heartbeat prompt",
+        timestamp: 1,
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "sub-old",
+            name: "subagent",
+            arguments: { prompt: "Heartbeat prompt" },
+          },
+        ],
+        api: "openai-responses",
+        provider: "openai",
+        model: "gpt-5",
+        usage: {
+          input: 1,
+          output: 1,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 2,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: "toolUse",
+        timestamp: 2,
+      },
+      {
+        role: "toolResult",
+        toolCallId: "sub-old",
+        toolName: "subagent",
+        content: [{ type: "text", text: "NO_REPLY" }],
+        details: {},
+        isError: false,
+        timestamp: 3,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "NO_REPLY" }],
+        api: "openai-responses",
+        provider: "openai",
+        model: "gpt-5",
+        usage: {
+          input: 1,
+          output: 1,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 2,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: "stop",
+        timestamp: 4,
+      },
+    ] as unknown as AgentMessage[];
+
+    expect(cloneMessagesForSubagent(messages)).toEqual([messages[0], messages[3]]);
+  });
 });
 
 describe("subagent session markers", () => {

@@ -49,12 +49,33 @@ export const ZERO_USAGE: Usage = {
 
 type AgentMessage = AgentSession["messages"][number];
 
-function isToolCallBlock(value: unknown): value is { type: "toolCall"; id: string } {
+function isToolCallBlock(value: unknown): value is { type: "toolCall"; id: string; name?: string } {
   return (
     typeof value === "object" &&
     value !== null &&
     (value as { type?: unknown }).type === "toolCall" &&
     typeof (value as { id?: unknown }).id === "string"
+  );
+}
+
+function isSubagentToolCallMessage(message: AgentMessage | undefined): message is AgentMessage {
+  return (
+    message?.role === "assistant" &&
+    Array.isArray(message.content) &&
+    message.content.some(
+      (block) =>
+        isToolCallBlock(block) &&
+        typeof block.name === "string" &&
+        block.name === SUBAGENT_TOOL_NAME,
+    )
+  );
+}
+
+function isSubagentToolResultMessage(message: AgentMessage | undefined): boolean {
+  return (
+    message?.role === "toolResult" &&
+    "toolName" in message &&
+    message.toolName === SUBAGENT_TOOL_NAME
   );
 }
 
@@ -104,7 +125,9 @@ export function cloneMessagesForSubagent(
     cloned.pop();
   }
 
-  return cloned;
+  return cloned.filter(
+    (message) => !isSubagentToolCallMessage(message) && !isSubagentToolResultMessage(message),
+  );
 }
 
 export function extractAssistantText(

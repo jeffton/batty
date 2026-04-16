@@ -3,6 +3,7 @@ import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import {
   buildSubagentDetails,
+  buildSubagentPrompt,
   cloneMessagesForSubagent,
   collectSentFiles,
   extractAssistantText,
@@ -14,6 +15,20 @@ import {
 } from "./subagent";
 
 type AgentMessage = AgentSession["messages"][number];
+
+describe("buildSubagentPrompt", () => {
+  it("prepends a note that the agent is already running inside a subagent", () => {
+    expect(buildSubagentPrompt("Review the auth flow")).toBe(
+      [
+        "[Subagent session]",
+        "You are running inside a Batty subagent.",
+        "Do not call the subagent tool from this session.",
+        "",
+        "Review the auth flow",
+      ].join("\n"),
+    );
+  });
+});
 
 describe("cloneMessagesForSubagent", () => {
   it("drops the current assistant tool-call message from inherited context", () => {

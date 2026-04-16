@@ -75,6 +75,7 @@ import { sanitizeTerminalBlocks } from "./terminal-output";
 import { ProviderAuthService } from "./provider-auth";
 import {
   buildSubagentDetails,
+  buildSubagentPrompt,
   cloneMessagesForSubagent,
   extractAssistantText,
   findLastAssistantMessage,
@@ -731,8 +732,10 @@ export class PiService {
       }
     }
 
+    const effectivePrompt = buildSubagentPrompt(options.prompt);
+
     try {
-      await subagentSession.prompt(options.prompt);
+      await subagentSession.prompt(effectivePrompt);
       const messages = structuredClone(subagentSession.messages) as AgentSession["messages"];
       const finalAssistant = findLastAssistantMessage(messages);
       const text = extractAssistantText(finalAssistant) || lastText;
@@ -1428,6 +1431,10 @@ export class PiService {
       ],
       parameters: SubagentToolSchema,
       execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+        if (hasSubagentSessionMarker(ctx.sessionManager.getEntries())) {
+          throw new Error("subagent tool cannot be called from inside a subagent session");
+        }
+
         const sessionId = ctx.sessionManager.getSessionId();
         const defaults = this.resolveSubagentDefaults(sessionId, ctx);
         const modelId =

@@ -7,6 +7,7 @@ import type { AppConfig } from "@/server/config";
 import { latestSessionUpdatedAt, listSessionSummaries } from "@/server/session-summaries";
 import { workspaceSessionDir } from "@/server/pi-paths";
 import { CRON_SESSION_CUSTOM_TYPE } from "@/server/cron-session";
+import { SUBAGENT_SESSION_CUSTOM_TYPE } from "@/server/subagent";
 import type { WorkspaceInfo } from "@/shared/types";
 
 const tempDirs: string[] = [];
@@ -160,6 +161,56 @@ describe("session summaries", () => {
       const sessions = await listSessionSummaries(config, workspace);
 
       expect(sessions[1]?.firstMessage).toBe("(no messages)");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not mark persisted subagent sessions as daily sessions", async () => {
+    const config = await createConfig();
+    const workspace = workspaceInfo(config, "alpha");
+    await fs.mkdir(workspace.path, { recursive: true });
+
+    const subagentPath = await writeSession(
+      config,
+      workspace.id,
+      "subagent.jsonl",
+      "2026-03-25T12:00:00Z",
+      [
+        { type: "session", version: 3, id: "subagent-id", timestamp: "2026-03-25T12:00:00Z" },
+        {
+          type: "custom",
+          customType: SUBAGENT_SESSION_CUSTOM_TYPE,
+          data: { parentSessionId: "parent", respondIn: "session" },
+        },
+        {
+          type: "custom",
+          customType: CRON_SESSION_CUSTOM_TYPE,
+          data: { kind: "daily", workspaceId: workspace.id, date: "2026-03-25" },
+        },
+        {
+          type: "message",
+          id: "subagent-1",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "cron prompt" }],
+          },
+        },
+      ],
+    );
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-25T12:00:00Z"));
+    try {
+      const sessions = await listSessionSummaries(config, workspace);
+      const subagent = sessions.find((session) => session.path === subagentPath);
+
+      expect(subagent).toMatchObject({
+        path: subagentPath,
+        sessionId: "subagent-id",
+        firstMessage: "cron prompt",
+      });
+      expect(subagent?.dailySession).toBeUndefined();
     } finally {
       vi.useRealTimers();
     }

@@ -78,9 +78,11 @@ import {
   cloneMessagesForSubagent,
   extractAssistantText,
   findLastAssistantMessage,
+  hasSubagentSessionMarker,
   newlyGeneratedSubagentMessages,
   stripThinkingFromAssistantMessage,
   SUBAGENT_EFFORT_LEVELS,
+  SUBAGENT_SESSION_CUSTOM_TYPE,
   SUBAGENT_TOOL_NAME,
   ZERO_USAGE,
 } from "./subagent";
@@ -638,13 +640,20 @@ export class PiService {
   }> {
     const result = await this.createPiAgentSession(
       options.workspace,
-      SessionManager.inMemory(options.workspace.path),
+      SessionManager.create(
+        options.workspace.path,
+        workspaceSessionDir(this.config, options.workspace.id),
+      ),
       {
         modelId: options.modelId,
         thinkingLevel: options.thinkingLevel,
       },
     );
     const subagentSession = result.session;
+    subagentSession.sessionManager.appendCustomEntry(SUBAGENT_SESSION_CUSTOM_TYPE, {
+      parentSessionId: options.parentSessionId,
+      respondIn: options.respondIn,
+    });
     this.registerLiveSession(options.workspace, subagentSession);
 
     const seedMessages = options.includeSessionContext
@@ -698,6 +707,8 @@ export class PiService {
               subagentSession.messages,
               seedMessageCount,
             ),
+            sessionId: subagentSession.sessionId,
+            sessionPath: subagentSession.sessionFile,
           },
         ),
       });
@@ -730,7 +741,11 @@ export class PiService {
         },
         messages,
         finalAssistant,
-        { sentFileMessages: generatedMessages },
+        {
+          sentFileMessages: generatedMessages,
+          sessionId: subagentSession.sessionId,
+          sessionPath: subagentSession.sessionFile,
+        },
       );
       return {
         text,
@@ -759,7 +774,11 @@ export class PiService {
         },
         messages,
         finalAssistant,
-        { sentFileMessages: generatedMessages },
+        {
+          sentFileMessages: generatedMessages,
+          sessionId: subagentSession.sessionId,
+          sessionPath: subagentSession.sessionFile,
+        },
       );
       return {
         text,
@@ -908,6 +927,10 @@ export class PiService {
         const entries = loaded
           ? loaded.session.sessionManager.getEntries()
           : SessionManager.open(sessionPath).getEntries();
+        if (hasSubagentSessionMarker(entries)) {
+          continue;
+        }
+
         if (findDailyCronSessionBinding(entries, date)) {
           return this.openSession(workspace, sessionPath);
         }

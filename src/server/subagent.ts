@@ -3,6 +3,7 @@ import type { AssistantMessage, Usage } from "@mariozechner/pi-ai";
 import type { SentFileDescriptor } from "@/shared/types";
 
 export const SUBAGENT_TOOL_NAME = "subagent";
+export const SUBAGENT_SESSION_CUSTOM_TYPE = "batty-subagent-session";
 export const SUBAGENT_EFFORT_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 
 export type SubagentEffort = (typeof SUBAGENT_EFFORT_LEVELS)[number];
@@ -24,6 +25,8 @@ export interface SubagentToolDetails extends Record<string, unknown> {
     includeSessionContext: boolean;
     respondIn: SubagentRespondIn;
     messageCount: number;
+    sessionId?: string;
+    sessionPath?: string;
     stopReason?: string;
     errorMessage?: string;
   };
@@ -175,7 +178,7 @@ export function buildSubagentDetails(
   },
   messages: AgentMessage[],
   finalAssistant: AssistantMessage | undefined,
-  options?: { sentFileMessages?: AgentMessage[] },
+  options?: { sentFileMessages?: AgentMessage[]; sessionId?: string; sessionPath?: string },
 ): SubagentToolDetails {
   const sentFiles = collectSentFiles(options?.sentFileMessages ?? messages);
   return {
@@ -186,9 +189,23 @@ export function buildSubagentDetails(
       includeSessionContext: input.includeSessionContext,
       respondIn: input.respondIn,
       messageCount: messages.length,
+      ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
+      ...(options?.sessionPath ? { sessionPath: options.sessionPath } : {}),
       stopReason: finalAssistant?.stopReason,
       errorMessage: finalAssistant?.errorMessage,
     },
     ...(sentFiles.length > 0 ? { sentFiles } : {}),
   };
+}
+
+export function isSubagentSessionEntry(
+  entry: { type?: unknown; customType?: unknown } | undefined,
+): boolean {
+  return entry?.type === "custom" && entry.customType === SUBAGENT_SESSION_CUSTOM_TYPE;
+}
+
+export function hasSubagentSessionMarker(
+  entries: Array<{ type?: unknown; customType?: unknown }>,
+): boolean {
+  return entries.some((entry) => isSubagentSessionEntry(entry));
 }

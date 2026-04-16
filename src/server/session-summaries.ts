@@ -10,6 +10,7 @@ import {
   findLatestDailyCronSessionBinding,
   toLocalIsoDate,
 } from "./cron-session";
+import { isSubagentSessionEntry } from "./subagent";
 
 const DEFAULT_SESSION_LABEL = "(no messages)";
 
@@ -42,15 +43,19 @@ function extractMessageText(content: unknown): string {
     .trim();
 }
 
-async function readSessionHeaderAndFirstUserMessage(
-  filePath: string,
-): Promise<{ sessionId?: string; firstMessage: string; dailySessionDate?: string }> {
+async function readSessionHeaderAndFirstUserMessage(filePath: string): Promise<{
+  sessionId?: string;
+  firstMessage: string;
+  dailySessionDate?: string;
+  isSubagentSession: boolean;
+}> {
   const stream = createReadStream(filePath, { encoding: "utf8" });
   const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
 
   let sessionId: string | undefined;
   let firstMessage = "";
   let dailySessionDate: string | undefined;
+  let isSubagentSession = false;
 
   try {
     for await (const line of lines) {
@@ -85,6 +90,10 @@ async function readSessionHeaderAndFirstUserMessage(
         firstMessage = extractMessageText(candidate.message.content);
       }
 
+      if (isSubagentSessionEntry(candidate)) {
+        isSubagentSession = true;
+      }
+
       if (candidate.type === "custom" && candidate.customType === CRON_SESSION_CUSTOM_TYPE) {
         const binding = findLatestDailyCronSessionBinding([
           {
@@ -103,7 +112,7 @@ async function readSessionHeaderAndFirstUserMessage(
     stream.destroy();
   }
 
-  return { sessionId, firstMessage, dailySessionDate };
+  return { sessionId, firstMessage, dailySessionDate, isSubagentSession };
 }
 
 async function buildSessionSummary(
@@ -112,10 +121,8 @@ async function buildSessionSummary(
   todayDate: string,
 ): Promise<SessionSummary | undefined> {
   try {
-    const [{ sessionId, firstMessage, dailySessionDate }, stats] = await Promise.all([
-      readSessionHeaderAndFirstUserMessage(filePath),
-      fs.stat(filePath),
-    ]);
+    const [{ sessionId, firstMessage, dailySessionDate, isSubagentSession }, stats] =
+      await Promise.all([readSessionHeaderAndFirstUserMessage(filePath), fs.stat(filePath)]);
 
     if (!sessionId) {
       return undefined;
@@ -129,7 +136,7 @@ async function buildSessionSummary(
       updatedAt: stats.mtime.getTime(),
       messageCount: 0,
       workspaceId,
-      ...(dailySessionDate
+      ...(!isSubagentSession && dailySessionDate
         ? {
             dailySession: {
               date: dailySessionDate,

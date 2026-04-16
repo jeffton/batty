@@ -9,6 +9,8 @@ import {
   findLastAssistantMessage,
   newlyGeneratedSubagentMessages,
   stripThinkingFromAssistantMessage,
+  hasSubagentSessionMarker,
+  SUBAGENT_SESSION_CUSTOM_TYPE,
 } from "./subagent";
 
 type AgentMessage = AgentSession["messages"][number];
@@ -78,6 +80,18 @@ describe("cloneMessagesForSubagent", () => {
     ] as unknown as AgentMessage[];
 
     expect(cloneMessagesForSubagent(messages, "sub-1")).toEqual(messages);
+  });
+});
+
+describe("subagent session markers", () => {
+  it("detects persisted subagent sessions", () => {
+    expect(
+      hasSubagentSessionMarker([
+        { type: "custom", customType: SUBAGENT_SESSION_CUSTOM_TYPE },
+        { type: "custom", customType: "other" },
+      ]),
+    ).toBe(true);
+    expect(hasSubagentSessionMarker([{ type: "custom", customType: "other" }])).toBe(false);
   });
 });
 
@@ -186,6 +200,10 @@ describe("subagent message helpers", () => {
         },
         messages,
         findLastAssistantMessage(messages),
+        {
+          sessionId: "sub-123",
+          sessionPath: "/tmp/sub-123.jsonl",
+        },
       ),
     ).toEqual({
       subagent: {
@@ -195,6 +213,8 @@ describe("subagent message helpers", () => {
         includeSessionContext: true,
         respondIn: "tool-call",
         messageCount: 1,
+        sessionId: "sub-123",
+        sessionPath: "/tmp/sub-123.jsonl",
         stopReason: "stop",
         errorMessage: undefined,
       },

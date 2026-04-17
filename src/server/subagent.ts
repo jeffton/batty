@@ -30,6 +30,7 @@ export interface SubagentToolDetails extends Record<string, unknown> {
     includeSessionContext: boolean;
     respondIn: SubagentRespondIn;
     messageCount: number;
+    workspaceId?: string;
     sessionId?: string;
     sessionPath?: string;
     stopReason?: string;
@@ -216,7 +217,12 @@ export function buildSubagentDetails(
   },
   messages: AgentMessage[],
   finalAssistant: AssistantMessage | undefined,
-  options?: { sentFileMessages?: AgentMessage[]; sessionId?: string; sessionPath?: string },
+  options?: {
+    sentFileMessages?: AgentMessage[];
+    workspaceId?: string;
+    sessionId?: string;
+    sessionPath?: string;
+  },
 ): SubagentToolDetails {
   const sentFiles = collectSentFiles(options?.sentFileMessages ?? messages);
   return {
@@ -227,6 +233,7 @@ export function buildSubagentDetails(
       includeSessionContext: input.includeSessionContext,
       respondIn: input.respondIn,
       messageCount: messages.length,
+      ...(options?.workspaceId ? { workspaceId: options.workspaceId } : {}),
       ...(options?.sessionId ? { sessionId: options.sessionId } : {}),
       ...(options?.sessionPath ? { sessionPath: options.sessionPath } : {}),
       stopReason: finalAssistant?.stopReason,

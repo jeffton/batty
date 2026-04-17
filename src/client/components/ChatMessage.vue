@@ -134,6 +134,7 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
       <ToolCallBlock
         :name="props.message.toolName"
         :arguments="{}"
+        :tool-call-id="props.message.toolCallId"
         :result-blocks="props.message.blocks"
         :result-details="props.message.details"
         :status="props.message.isError ? 'error' : 'success'"
@@ -161,6 +162,7 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
             v-else-if="block.type === 'toolCall'"
             :name="block.name"
             :arguments="block.arguments"
+            :tool-call-id="block.id"
             :result-blocks="toolStateFor(block.id)?.resultBlocks ?? []"
             :result-details="toolStateFor(block.id)?.resultDetails"
             :status="toolStateFor(block.id)?.status"
@@ -187,6 +189,7 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
           v-else-if="block.type === 'toolCall'"
           :name="block.name"
           :arguments="block.arguments"
+          :tool-call-id="block.id"
           :result-blocks="toolStateFor(block.id)?.resultBlocks ?? []"
           :result-details="toolStateFor(block.id)?.resultDetails"
           :status="toolStateFor(block.id)?.status"

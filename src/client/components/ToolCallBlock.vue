@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { Check, CircleAlert, LoaderCircle } from "lucide-vue-next";
+import { Check, CircleAlert, LoaderCircle, PanelRightOpen } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import AttachedFilesList from "@/client/components/AttachedFilesList.vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
+import SubagentSessionPopover from "@/client/components/SubagentSessionPopover.vue";
 import DiffBlock from "@/client/components/DiffBlock.vue";
 import MarkdownBlock from "@/client/components/MarkdownBlock.vue";
 import { formatValue, languageFromPath } from "@/client/lib/code-format";
@@ -15,16 +16,25 @@ import type { SentFileDescriptor, ToolExecutionDetails, UiContentBlock } from "@
 // transcript height stays stable while the visible tail slides during streaming.
 const OUTPUT_TAIL_LINE_COUNT = 20;
 
+type SubagentResultDetails = {
+  respondIn?: unknown;
+  workspaceId?: unknown;
+  sessionId?: unknown;
+  sessionPath?: unknown;
+};
+
 const props = withDefaults(
   defineProps<{
     name: string;
     arguments: Record<string, unknown>;
+    toolCallId?: string;
     compact?: boolean;
     status?: "running" | "success" | "error";
     resultBlocks?: UiContentBlock[];
     resultDetails?: ToolExecutionDetails;
   }>(),
   {
+    toolCallId: undefined,
     compact: false,
     status: undefined,
     resultBlocks: () => [],
@@ -59,14 +69,51 @@ const timeoutValue = computed(() => {
   return undefined;
 });
 const codeLanguage = computed(() => languageFromPath(pathValue.value));
-const subagentRespondIn = computed(() => {
+const subagentDetails = computed<SubagentResultDetails | undefined>(() => {
   const value = props.resultDetails?.subagent;
-  return value && typeof value === "object" && value.respondIn === "session"
+  return value && typeof value === "object" ? (value as SubagentResultDetails) : undefined;
+});
+const subagentRespondIn = computed(() => {
+  return subagentDetails.value?.respondIn === "session"
     ? "session"
-    : value && typeof value === "object" && value.respondIn === "tool-call"
+    : subagentDetails.value?.respondIn === "tool-call"
       ? "tool-call"
       : undefined;
 });
+const subagentWorkspaceId = computed(() =>
+  typeof subagentDetails.value?.workspaceId === "string"
+    ? subagentDetails.value.workspaceId
+    : undefined,
+);
+const subagentSessionId = computed(() =>
+  typeof subagentDetails.value?.sessionId === "string"
+    ? subagentDetails.value.sessionId
+    : undefined,
+);
+const subagentSessionPath = computed(() =>
+  typeof subagentDetails.value?.sessionPath === "string"
+    ? subagentDetails.value.sessionPath
+    : undefined,
+);
+const subagentPopoverId = computed(() => {
+  const stableId = props.toolCallId ?? subagentSessionId.value;
+  if (!stableId) {
+    return undefined;
+  }
+
+  return `subagent-session-popover-${stableId.replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
+});
+const canOpenSubagentSession = computed(
+  () =>
+    props.name === "subagent" &&
+    subagentRespondIn.value === "session" &&
+    typeof subagentWorkspaceId.value === "string" &&
+    typeof subagentSessionPath.value === "string" &&
+    typeof subagentPopoverId.value === "string",
+);
+const subagentOpenLabel = computed(() =>
+  props.status === "running" ? "Open live session" : "Open session",
+);
 const hasResultContent = computed(() =>
   hasToolResultContent(props.resultBlocks, props.resultDetails),
 );
@@ -353,6 +400,19 @@ const sentFiles = computed(() =>
       </div>
     </div>
 
+    <div v-if="canOpenSubagentSession" class="tool-call__subagent-row">
+      <button type="button" class="tool-call__subagent-btn" :popovertarget="subagentPopoverId">
+        <PanelRightOpen :size="14" />
+        {{ subagentOpenLabel }}
+      </button>
+      <SubagentSessionPopover
+        :popover-id="subagentPopoverId!"
+        :title="String(props.arguments.prompt ?? '')"
+        :workspace-id="subagentWorkspaceId!"
+        :session-path="subagentSessionPath!"
+      />
+    </div>
+
     <template v-if="props.name === 'web-search' && visibleWebSearchOutput.trim().length > 0">
       <div class="tool-call__bash">
         <div
@@ -390,6 +450,7 @@ const sentFiles = computed(() =>
           v-else-if="block.type === 'toolCall'"
           :name="block.name"
           :arguments="block.arguments"
+          :tool-call-id="block.id"
           :compact="props.compact"
         />
       </template>
@@ -503,7 +564,8 @@ const sentFiles = computed(() =>
 
 .tool-call__meta,
 .tool-call__result,
-.tool-call__bash {
+.tool-call__bash,
+.tool-call__subagent-row {
   display: grid;
   gap: 0.4rem;
 }
@@ -585,6 +647,29 @@ const sentFiles = computed(() =>
 }
 
 .tool-call__expand-btn:hover {
+  background: color-mix(in srgb, var(--color-bg-inline-code) 78%, var(--color-info));
+}
+
+.tool-call__subagent-row {
+  justify-items: start;
+}
+
+.tool-call__subagent-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--color-info) 30%, transparent);
+  border-radius: 0.5rem;
+  padding: 0.35rem 0.7rem;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--color-info);
+  background: var(--color-bg-inline-code);
+  cursor: pointer;
+}
+
+.tool-call__subagent-btn:hover {
   background: color-mix(in srgb, var(--color-bg-inline-code) 78%, var(--color-info));
 }
 

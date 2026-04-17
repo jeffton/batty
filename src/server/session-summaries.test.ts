@@ -166,7 +166,7 @@ describe("session summaries", () => {
     }
   });
 
-  it("does not mark persisted subagent sessions as daily sessions", async () => {
+  it("does not include persisted subagent sessions in the session list", async () => {
     const config = await createConfig();
     const workspace = workspaceInfo(config, "alpha");
     await fs.mkdir(workspace.path, { recursive: true });
@@ -203,14 +203,8 @@ describe("session summaries", () => {
     vi.setSystemTime(new Date("2026-03-25T12:00:00Z"));
     try {
       const sessions = await listSessionSummaries(config, workspace);
-      const subagent = sessions.find((session) => session.path === subagentPath);
 
-      expect(subagent).toMatchObject({
-        path: subagentPath,
-        sessionId: "subagent-id",
-        firstMessage: "cron prompt",
-      });
-      expect(subagent?.dailySession).toBeUndefined();
+      expect(sessions.find((session) => session.path === subagentPath)).toBeUndefined();
     } finally {
       vi.useRealTimers();
     }

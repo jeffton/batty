@@ -428,7 +428,12 @@ export class PiService {
     }
 
     const result = await this.createPiAgentSession(workspace, SessionManager.open(sessionPath));
-    const webSession = this.attachSession(workspace, result.session, result.modelFallbackMessage);
+    const webSession = this.attachSession(
+      workspace,
+      result.session,
+      result.modelFallbackMessage,
+      hasSubagentSessionMarker(result.session.sessionManager.getEntries()),
+    );
     return this.getState(webSession.id);
   }
 
@@ -657,7 +662,12 @@ export class PiService {
       parentSessionId: options.parentSessionId,
       respondIn: options.respondIn,
     });
-    this.registerLiveSession(options.workspace, subagentSession);
+    const webSubagentSession = this.attachSession(
+      options.workspace,
+      subagentSession,
+      undefined,
+      true,
+    );
 
     const seedMessages = options.includeSessionContext
       ? this.sessionMessagesForSubagent(
@@ -698,7 +708,7 @@ export class PiService {
       lastText = text;
       const finalAssistant = event.message as AssistantMessage;
       options.onUpdate?.({
-        content: [{ type: "text", text }],
+        content: [],
         details: buildSubagentDetails(
           {
             prompt: options.prompt,
@@ -714,6 +724,7 @@ export class PiService {
               subagentSession.messages,
               seedMessageCount,
             ),
+            workspaceId: options.workspace.id,
             sessionId: subagentSession.sessionId,
             sessionPath: subagentSession.sessionFile,
           },
@@ -752,6 +763,7 @@ export class PiService {
         finalAssistant,
         {
           sentFileMessages: generatedMessages,
+          workspaceId: options.workspace.id,
           sessionId: subagentSession.sessionId,
           sessionPath: subagentSession.sessionFile,
         },
@@ -785,6 +797,7 @@ export class PiService {
         finalAssistant,
         {
           sentFileMessages: generatedMessages,
+          workspaceId: options.workspace.id,
           sessionId: subagentSession.sessionId,
           sessionPath: subagentSession.sessionFile,
         },
@@ -804,8 +817,9 @@ export class PiService {
         options.signal.removeEventListener("abort", abortListener);
       }
       unsubscribe();
-      this.unregisterLiveSession(subagentSession.sessionId);
-      subagentSession.dispose();
+      if (webSubagentSession.subscribers.size === 0 && !webSubagentSession.session.isStreaming) {
+        this.disposeWebSession(webSubagentSession);
+      }
     }
   }
 
@@ -992,8 +1006,7 @@ export class PiService {
         webSession.subscribers.size === 0 &&
         !webSession.session.isStreaming
       ) {
-        this.sessions.delete(webSession.id);
-        this.unregisterLiveSession(webSession.id);
+        this.disposeWebSession(webSession);
       }
     };
   }
@@ -1212,6 +1225,12 @@ export class PiService {
     return result;
   }
 
+  private disposeWebSession(webSession: WebSession): void {
+    this.sessions.delete(webSession.id);
+    this.unregisterLiveSession(webSession.id);
+    webSession.session.dispose();
+  }
+
   private attachSession(
     workspace: WorkspaceInfo,
     session: AgentSession,
@@ -1376,8 +1395,7 @@ export class PiService {
             console.error("Failed to publish workspace update", error);
           }
           if (webSession.ephemeral && webSession.subscribers.size === 0) {
-            this.sessions.delete(webSession.id);
-            this.unregisterLiveSession(webSession.id);
+            this.disposeWebSession(webSession);
           }
         }
         break;
@@ -1463,13 +1481,13 @@ export class PiService {
             modelId,
             thinkingLevel,
             includeSessionContext,
-            respondIn: "tool-call",
+            respondIn: "session",
             currentToolCallId: toolCallId,
             signal,
             onUpdate,
           });
           return {
-            content: [{ type: "text", text: result.text || "(no output)" }],
+            content: result.isError ? [{ type: "text", text: result.text || "(no output)" }] : [],
             details: result.details,
             isError: result.isError,
           };

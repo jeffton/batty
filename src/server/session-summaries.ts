@@ -124,7 +124,7 @@ async function buildSessionSummary(
     const [{ sessionId, firstMessage, dailySessionDate, isSubagentSession }, stats] =
       await Promise.all([readSessionHeaderAndFirstUserMessage(filePath), fs.stat(filePath)]);
 
-    if (!sessionId) {
+    if (!sessionId || isSubagentSession) {
       return undefined;
     }
 
@@ -136,7 +136,7 @@ async function buildSessionSummary(
       updatedAt: stats.mtime.getTime(),
       messageCount: 0,
       workspaceId,
-      ...(!isSubagentSession && dailySessionDate
+      ...(dailySessionDate
         ? {
             dailySession: {
               date: dailySessionDate,

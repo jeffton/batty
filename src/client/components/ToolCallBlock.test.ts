@@ -208,6 +208,9 @@ describe("ToolCallBlock", () => {
             includeSessionContext: true,
             respondIn: "session",
             messageCount: 3,
+            workspaceId: "workspace",
+            sessionId: "subagent-123",
+            sessionPath: "/tmp/subagent-123.jsonl",
           },
         },
         status: "success",
@@ -215,6 +218,7 @@ describe("ToolCallBlock", () => {
     });
 
     expect(wrapper.text()).toContain("Check the repo");
+    expect(wrapper.text()).toContain("Open session");
     expect(wrapper.text()).not.toContain("Full subagent response");
     expect(wrapper.findAll(".attached-files__card")).toHaveLength(0);
     expect(wrapper.find("img.attached-files__preview").exists()).toBe(false);

@@ -190,6 +190,17 @@ describe("ToolCallBlock", () => {
         },
         resultBlocks: [{ type: "text", text: "Full subagent response" }],
         resultDetails: {
+          sentFiles: [
+            {
+              id: "image-1",
+              name: "report.png",
+              size: 2048,
+              mimeType: "image/png",
+              kind: "image",
+              downloadUrl: "/api/sent-files/workspace/session/call/image-1?download=1",
+              previewUrl: "/api/sent-files/workspace/session/call/image-1",
+            },
+          ],
           subagent: {
             prompt: "Check the repo",
             model: "openai/gpt-5",
@@ -205,6 +216,10 @@ describe("ToolCallBlock", () => {
 
     expect(wrapper.text()).toContain("Check the repo");
     expect(wrapper.text()).not.toContain("Full subagent response");
+    expect(wrapper.findAll(".attached-files__card")).toHaveLength(1);
+    expect(wrapper.find("img.attached-files__preview").attributes("src")).toBe(
+      "/api/sent-files/workspace/session/call/image-1",
+    );
   });
 
   it("renders subagent attachments from nested attach-files results", () => {

@@ -221,7 +221,7 @@ const showResultSection = computed(() => {
   }
 
   if (props.name === "subagent" && subagentRespondIn.value === "session") {
-    return props.status === "error";
+    return props.status === "error" || sentFiles.value.length > 0;
   }
 
   return props.status === "error" || hasResultContent.value;
@@ -395,9 +395,7 @@ const sentFiles = computed(() =>
       </template>
 
       <AttachedFilesList
-        v-if="
-          sentFiles.length > 0 && !(props.name === 'subagent' && subagentRespondIn === 'session')
-        "
+        v-if="sentFiles.length > 0"
         :files="sentFiles"
         :preview="props.name !== 'attach-files'"
         :compact="props.compact"

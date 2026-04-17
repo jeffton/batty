@@ -199,6 +199,7 @@ export interface SessionStateInput {
   messages: AgentMessage[];
   activeAssistant?: AgentMessage;
   title?: string;
+  isSubagentSession?: boolean;
   activeTools: SessionState["activeTools"];
 }
 
@@ -232,5 +233,6 @@ export function createSessionState(input: SessionStateInput): SessionState {
     activeAssistant,
     activeTools: input.activeTools,
     title: input.title,
+    isSubagentSession: input.isSubagentSession,
   };
 }

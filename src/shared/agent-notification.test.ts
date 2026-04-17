@@ -67,6 +67,13 @@ describe("buildAgentCompletionNotificationContent", () => {
 });
 
 describe("suppressAgentCompletionNotification", () => {
+  it("suppresses notifications for subagent sessions", () => {
+    const session = createSession("Subagent done.");
+    session.isSubagentSession = true;
+
+    expect(suppressAgentCompletionNotification(session)).toBe(true);
+  });
+
   it("suppresses notifications for exact NO_REPLY assistant messages", () => {
     expect(suppressAgentCompletionNotification(createSession(" NO_REPLY\n"))).toBe(true);
   });

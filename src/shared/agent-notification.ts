@@ -81,6 +81,10 @@ export function assistantNotificationText(
 }
 
 export function suppressAgentCompletionNotification(session: SessionState): boolean {
+  if (session.isSubagentSession) {
+    return true;
+  }
+
   const latestMessage = session.messages.at(-1);
   if (latestMessage?.role !== "assistant") {
     return false;

@@ -161,6 +161,27 @@ describe("WebPushService", () => {
     expect(persisted.subscriptions).toEqual([]);
   });
 
+  it("does not send a push notification for subagent completions", async () => {
+    const service = new WebPushService(createConfig(tempDir));
+    await service.initialize();
+
+    await service.upsertSubscription({
+      endpoint: "https://push.example/subscription",
+      expirationTime: null,
+      keys: {
+        p256dh: "p256dh_key",
+        auth: "auth-key",
+      },
+    });
+
+    const session = createSession();
+    session.isSubagentSession = true;
+
+    await service.notifyAgentCompleted(session);
+
+    expect(webPushMocks.sendNotification).not.toHaveBeenCalled();
+  });
+
   it("does not send a push notification for NO_REPLY completions", async () => {
     const service = new WebPushService(createConfig(tempDir));
     await service.initialize();

@@ -1044,6 +1044,7 @@ export class PiService {
       activeAssistant: webSession.activeAssistant ?? undefined,
       activeTools: [...webSession.activeTools.values()],
       title: webSession.session.sessionName,
+      isSubagentSession: hasSubagentSessionMarker(webSession.session.sessionManager.getEntries()),
     });
   }
 

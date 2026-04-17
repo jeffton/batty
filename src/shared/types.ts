@@ -206,6 +206,7 @@ export interface SessionState {
   activeAssistant?: Extract<UiMessage, { role: "assistant" }>;
   activeTools: ActiveToolRun[];
   title?: string;
+  isSubagentSession?: boolean;
 }
 
 export type SessionStateMetadata = Omit<

@@ -70,4 +70,64 @@ describe("ChatMessage", () => {
       "/api/sent-files/workspace/session/call/video-1",
     );
   });
+
+  it("renders session-mode subagent attachments at the end of the outer assistant response", () => {
+    const message: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-2",
+      role: "assistant",
+      timestamp: 2,
+      blocks: [
+        { type: "text", text: "Morning report" },
+        {
+          type: "toolCall",
+          id: "subagent-1",
+          name: "subagent",
+          arguments: { prompt: "Build the morning report" },
+        },
+      ],
+    };
+    const toolStatesByCallId = new Map<string, ToolDisplayState>([
+      [
+        "subagent-1",
+        {
+          status: "success",
+          resultBlocks: [],
+          resultDetails: {
+            sentFiles: [
+              {
+                id: "image-1",
+                name: "webcam.jpg",
+                size: 2048,
+                mimeType: "image/jpeg",
+                kind: "image",
+                downloadUrl: "/api/sent-files/workspace/session/call/image-1?download=1",
+                previewUrl: "/api/sent-files/workspace/session/call/image-1",
+              },
+            ],
+            subagent: {
+              prompt: "Build the morning report",
+              model: "openai/gpt-5",
+              effort: "medium",
+              includeSessionContext: true,
+              respondIn: "session",
+              messageCount: 3,
+            },
+          },
+        },
+      ],
+    ]);
+
+    const wrapper = mount(ChatMessage, {
+      props: {
+        message,
+        toolStatesByCallId,
+      },
+    });
+
+    expect(wrapper.text()).toContain("Morning report");
+    expect(wrapper.findAll(".attached-files__card")).toHaveLength(1);
+    expect(wrapper.find("img.attached-files__preview").attributes("src")).toBe(
+      "/api/sent-files/workspace/session/call/image-1",
+    );
+  });
 });

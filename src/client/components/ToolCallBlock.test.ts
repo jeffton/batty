@@ -181,7 +181,7 @@ describe("ToolCallBlock", () => {
     expect(wrapper.text()).toContain("archive.zip");
   });
 
-  it("does not repeat session-mode subagent text in the tool call display", () => {
+  it("does not repeat session-mode subagent text or attachments in the tool call display", () => {
     const wrapper = mount(ToolCallBlock, {
       props: {
         name: "subagent",
@@ -216,10 +216,8 @@ describe("ToolCallBlock", () => {
 
     expect(wrapper.text()).toContain("Check the repo");
     expect(wrapper.text()).not.toContain("Full subagent response");
-    expect(wrapper.findAll(".attached-files__card")).toHaveLength(1);
-    expect(wrapper.find("img.attached-files__preview").attributes("src")).toBe(
-      "/api/sent-files/workspace/session/call/image-1",
-    );
+    expect(wrapper.findAll(".attached-files__card")).toHaveLength(0);
+    expect(wrapper.find("img.attached-files__preview").exists()).toBe(false);
   });
 
   it("renders subagent attachments from nested attach-files results", () => {

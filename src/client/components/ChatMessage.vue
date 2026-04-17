@@ -34,6 +34,26 @@ function isBubbleBlock(block: UiContentBlock): boolean {
   return block.type === "text" || block.type === "image";
 }
 
+function isSentFileDescriptor(candidate: unknown): candidate is SentFileDescriptor {
+  return (
+    !!candidate &&
+    typeof candidate === "object" &&
+    typeof candidate.id === "string" &&
+    typeof candidate.name === "string" &&
+    typeof candidate.size === "number" &&
+    typeof candidate.mimeType === "string" &&
+    typeof candidate.kind === "string" &&
+    typeof candidate.downloadUrl === "string"
+  );
+}
+
+function subagentRespondIn(toolCallId: string): string | undefined {
+  const subagent = toolStateFor(toolCallId)?.resultDetails?.subagent;
+  return subagent && typeof subagent === "object" && typeof subagent.respondIn === "string"
+    ? subagent.respondIn
+    : undefined;
+}
+
 const assistantSegments = computed<AssistantSegment[]>(() => {
   if (props.message.role !== "assistant" || props.message.blocks.length === 0) {
     return [];
@@ -71,8 +91,14 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
   const seen = new Set<string>();
 
   for (const block of props.message.blocks) {
-    if (block.type !== "toolCall" || block.name !== "attach-files") {
+    if (block.type !== "toolCall") {
       continue;
+    }
+
+    if (block.name !== "attach-files") {
+      if (!(block.name === "subagent" && subagentRespondIn(block.id) === "session")) {
+        continue;
+      }
     }
 
     const candidates = toolStateFor(block.id)?.resultDetails?.sentFiles;
@@ -81,25 +107,12 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
     }
 
     for (const candidate of candidates) {
-      if (
-        !candidate ||
-        typeof candidate !== "object" ||
-        typeof candidate.id !== "string" ||
-        typeof candidate.name !== "string" ||
-        typeof candidate.size !== "number" ||
-        typeof candidate.mimeType !== "string" ||
-        typeof candidate.kind !== "string" ||
-        typeof candidate.downloadUrl !== "string"
-      ) {
-        continue;
-      }
-
-      if (seen.has(candidate.id)) {
+      if (!isSentFileDescriptor(candidate) || seen.has(candidate.id)) {
         continue;
       }
 
       seen.add(candidate.id);
-      files.push(candidate as SentFileDescriptor);
+      files.push(candidate);
     }
   }
 

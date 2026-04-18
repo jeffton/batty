@@ -193,6 +193,11 @@ body,
   background: var(--color-bg-panel);
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   overflow: visible;
 }

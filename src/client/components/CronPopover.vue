@@ -134,6 +134,7 @@ async function saveJob(job: CronJob): Promise<void> {
   const draft = draftFor(job);
   draft.saving = true;
   draft.error = "";
+  draft.editing = false;
   try {
     const updated = await store.updateCronJob(job.id, {
       prompt: draft.prompt,
@@ -149,9 +150,9 @@ async function saveJob(job: CronJob): Promise<void> {
     draft.thinkingLevel = updated.thinkingLevel;
     draft.sessionKind = updated.session.kind;
     draft.includePreviousContext = includePreviousContextFor(updated);
-    draft.editing = false;
   } catch (error) {
     draft.error = error instanceof Error ? error.message : String(error);
+    draft.editing = true;
   } finally {
     draft.saving = false;
   }

@@ -247,6 +247,25 @@ export async function runDetachedSubagentSession(
 
   appendRuntimeNotice(subagentSession, subagentNotice);
   deps.queueRuntimeNotice(subagentSession.sessionId, subagentNotice);
+  options.onUpdate?.({
+    content: [],
+    details: buildSubagentDetails(
+      {
+        prompt: options.prompt,
+        model: options.modelId,
+        effort: options.thinkingLevel,
+        includeSessionContext: options.includeSessionContext,
+        respondIn: options.respondIn,
+      },
+      subagentSession.messages,
+      undefined,
+      {
+        workspaceId: options.workspace.id,
+        sessionId: subagentSession.sessionId,
+        sessionPath: subagentSession.sessionFile,
+      },
+    ),
+  });
 
   let lastText = "";
   const unsubscribe = subagentSession.subscribe((event) => {

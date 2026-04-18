@@ -557,6 +557,8 @@ watch(
 }
 
 .workspace-browser-pane__column {
+  --workspace-browser-pane-safe-start: 0px;
+  --workspace-browser-pane-safe-end: 0px;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -567,11 +569,13 @@ watch(
 }
 
 .workspace-browser-pane__column--workspaces {
+  --workspace-browser-pane-safe-start: var(--safe-area-left);
   padding-left: 0;
   padding-right: 0.225rem;
 }
 
 .workspace-browser-pane__column--sessions {
+  --workspace-browser-pane-safe-end: var(--safe-area-right);
   padding-left: 0.225rem;
   padding-right: 0;
 }
@@ -582,14 +586,16 @@ watch(
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--color-text-subtle);
-  padding: 0.2rem 0.35rem;
+  padding: 0.2rem calc(var(--workspace-browser-pane-safe-end) + 0.35rem) 0.2rem
+    calc(var(--workspace-browser-pane-safe-start) + 0.35rem);
 }
 
 .workspace-browser-pane__search-row {
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.5rem 0.6rem;
+  padding: 0.5rem calc(var(--workspace-browser-pane-safe-end) + 0.6rem) 0.5rem
+    calc(var(--workspace-browser-pane-safe-start) + 0.6rem);
   background: var(--color-bg-elevated);
   border-radius: 0.6rem;
 }
@@ -640,7 +646,8 @@ watch(
   border-radius: 0.55rem;
   background: var(--color-bg-elevated);
   color: inherit;
-  padding: 0.55rem 0.7rem;
+  padding: 0.55rem calc(var(--workspace-browser-pane-safe-end) + 0.7rem) 0.55rem
+    calc(var(--workspace-browser-pane-safe-start) + 0.7rem);
   transition: background 80ms ease;
 }
 
@@ -682,7 +689,8 @@ watch(
   margin: 0;
   color: var(--color-error);
   font-size: 0.82rem;
-  padding: 0 0.2rem;
+  padding: 0 calc(var(--workspace-browser-pane-safe-end) + 0.2rem) 0
+    calc(var(--workspace-browser-pane-safe-start) + 0.2rem);
 }
 
 .workspace-browser-pane__list,
@@ -732,7 +740,8 @@ watch(
   border-radius: 0;
   background: transparent;
   color: inherit;
-  padding: 0.55rem 0.65rem;
+  padding: 0.55rem calc(var(--workspace-browser-pane-safe-end) + 0.65rem) 0.55rem
+    calc(var(--workspace-browser-pane-safe-start) + 0.65rem);
 }
 
 .workspace-browser-pane__item--workspace {
@@ -825,7 +834,8 @@ watch(
 }
 
 .workspace-browser-pane__empty {
-  padding: 0.8rem 0.4rem;
+  padding: 0.8rem calc(var(--workspace-browser-pane-safe-end) + 0.4rem) 0.8rem
+    calc(var(--workspace-browser-pane-safe-start) + 0.4rem);
   color: var(--color-text-subtle);
 }
 

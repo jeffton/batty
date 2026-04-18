@@ -23,7 +23,7 @@ import type {
 } from "@/shared/types";
 import type { AppConfig } from "./config";
 import { createPiAgentSession, refreshBattySystemPrompt } from "./pi-agent-session";
-import { buildCronRuntimeNotice, type RuntimeNotice } from "./runtime-notices";
+import { buildCronRuntimeNotice } from "./runtime-notices";
 import { createSessionState, normalizeBlocks } from "./pi-state";
 import { battyAgentDir, workspaceSessionDir } from "./pi-paths";
 import { listSessionSummaries as listFastSessionSummaries } from "./session-summaries";
@@ -49,9 +49,7 @@ import {
 import {
   appendCronSubagentCompletion,
   appendCronSubagentStart,
-  appendRuntimeNotice,
-  consumeRuntimeNotices,
-  queueRuntimeNotice,
+  appendRuntimeNoticeMessage,
   resolveOrCreateDailySession,
   resolveSubagentDefaults,
   runDetachedSubagentSession,
@@ -83,7 +81,6 @@ export class PiService {
   private readonly liveSessions = new Map<string, LiveSession>();
   private readonly subagentQueues = new Map<string, Promise<void>>();
   private readonly cronSessionResolutions = new Map<string, Promise<SessionState>>();
-  private readonly pendingRuntimeNotices = new Map<string, RuntimeNotice[]>();
   private readonly onAgentCompleted: ((session: SessionState) => Promise<void>) | undefined;
   private readonly onWorkspaceUpdated: ((workspaceId: string) => Promise<void>) | undefined;
   private readonly cronService: CronService;
@@ -199,7 +196,6 @@ export class PiService {
       });
       const current = this.requireSession(session.id);
       this.appendRuntimeNotice(current.session, cronNotice);
-      this.queueRuntimeNotice(current.session.sessionId, cronNotice);
       await this.prompt(
         session.id,
         job.prompt,
@@ -253,6 +249,7 @@ export class PiService {
           thinkingLevel: job.thinkingLevel,
           includeSessionContext: includePreviousContext,
           respondIn: "session",
+          preludeNotices: [cronNotice],
           currentToolCallId: toolCallId,
           onUpdate: (partial) => {
             const current = webSession.activeTools.get(toolCallId);
@@ -307,20 +304,12 @@ export class PiService {
     await waitForSubagentQueue(this.subagentQueues, sessionId);
   }
 
-  private queueRuntimeNotice(sessionId: string, notice: RuntimeNotice): void {
-    queueRuntimeNotice(this.pendingRuntimeNotices, sessionId, notice);
-  }
-
-  private consumeRuntimeNotices(sessionId: string): RuntimeNotice[] {
-    return consumeRuntimeNotices(this.pendingRuntimeNotices, sessionId);
-  }
-
   private appendRuntimeNotice(
     session: AgentSession,
-    notice: RuntimeNotice,
+    notice: { kind: "cron" | "subagent"; text: string },
     timestamp = Date.now(),
   ): void {
-    appendRuntimeNotice(session, notice, timestamp);
+    appendRuntimeNoticeMessage(session, notice, timestamp);
   }
 
   private async runSubagentSerial<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
@@ -372,7 +361,6 @@ export class PiService {
           this.createPiAgentSession(workspace, sessionManager, createOptions),
         attachSession: (workspace, session, modelFallbackMessage, ephemeral) =>
           this.attachSession(workspace, session, modelFallbackMessage, ephemeral),
-        queueRuntimeNotice: (sessionId, notice) => this.queueRuntimeNotice(sessionId, notice),
         disposeWebSession: (webSession) => this.disposeWebSession(webSession),
         getSessionMessagesForSubagent: (sessionId, currentToolCallId, injectedPrompt) =>
           this.sessionMessagesForSubagent(sessionId, currentToolCallId, injectedPrompt),
@@ -580,7 +568,6 @@ export class PiService {
       modelRegistry: this.modelRegistry,
       model,
       thinkingLevel: options?.thinkingLevel,
-      consumeRuntimeNotices: (sessionId) => this.consumeRuntimeNotices(sessionId),
       customTools: [
         this.createSubagentTool(workspace),
         this.createCronTool(workspace),

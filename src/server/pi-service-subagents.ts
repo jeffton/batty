@@ -26,7 +26,7 @@ import {
 } from "./cron-session";
 import {
   BATTY_RUNTIME_NOTICE_CUSTOM_TYPE,
-  buildRuntimeNoticeEntryData,
+  buildRuntimeNoticeMessage,
   buildSubagentRuntimeNotice,
   type RuntimeNotice,
 } from "./runtime-notices";
@@ -52,33 +52,23 @@ export function waitForSubagentQueue(
   return (subagentQueues.get(sessionId) ?? Promise.resolve()).catch(() => undefined);
 }
 
-export function queueRuntimeNotice(
-  pendingRuntimeNotices: Map<string, RuntimeNotice[]>,
-  sessionId: string,
-  notice: RuntimeNotice,
-): void {
-  const pending = pendingRuntimeNotices.get(sessionId) ?? [];
-  pending.push(notice);
-  pendingRuntimeNotices.set(sessionId, pending);
-}
-
-export function consumeRuntimeNotices(
-  pendingRuntimeNotices: Map<string, RuntimeNotice[]>,
-  sessionId: string,
-): RuntimeNotice[] {
-  const notices = pendingRuntimeNotices.get(sessionId) ?? [];
-  pendingRuntimeNotices.delete(sessionId);
-  return notices;
-}
-
-export function appendRuntimeNotice(
+export function appendRuntimeNoticeMessage(
   session: AgentSession,
   notice: RuntimeNotice,
   timestamp = Date.now(),
 ): void {
-  session.sessionManager.appendCustomEntry(
-    BATTY_RUNTIME_NOTICE_CUSTOM_TYPE,
-    buildRuntimeNoticeEntryData(notice, timestamp),
+  appendMessages(session, [buildRuntimeNoticeMessage(notice, timestamp) as Message]);
+}
+
+function matchesPreludeNotice(
+  message: AgentSession["messages"][number],
+  notices: RuntimeNotice[],
+): boolean {
+  return notices.some(
+    (notice) =>
+      message.role === "custom" &&
+      message.customType === `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:${notice.kind}` &&
+      message.content === notice.text,
   );
 }
 
@@ -162,6 +152,7 @@ export interface DetachedSubagentOptions {
   thinkingLevel: string;
   includeSessionContext: boolean;
   respondIn: "tool-call" | "session";
+  preludeNotices?: RuntimeNotice[];
   currentToolCallId?: string;
   signal?: AbortSignal;
   onUpdate?: (partial: {
@@ -192,7 +183,6 @@ export interface RunDetachedSubagentDeps {
     modelFallbackMessage?: string,
     ephemeral?: boolean,
   ) => WebSession;
-  queueRuntimeNotice: (sessionId: string, notice: RuntimeNotice) => void;
   disposeWebSession: (webSession: WebSession) => void;
   getSessionMessagesForSubagent: (
     sessionId: string,
@@ -227,17 +217,23 @@ export async function runDetachedSubagentSession(
   );
 
   const subagentNotice = buildSubagentRuntimeNotice();
+  const preludeNotices = options.preludeNotices ?? [];
   const seedMessages = options.includeSessionContext
     ? deps.getSessionMessagesForSubagent(
         options.parentSessionId,
         options.currentToolCallId,
         options.prompt,
-      )
+      ).filter((message) => !matchesPreludeNotice(message, preludeNotices))
     : [];
-  const seedMessageCount = seedMessages.length;
-  if (seedMessages.length > 0) {
-    subagentSession.agent.state.messages = structuredClone(seedMessages);
-    for (const message of seedMessages) {
+  const initialTimestamp = Date.now();
+  const preludeMessages = preludeNotices.map((notice, index) =>
+    buildRuntimeNoticeMessage(notice, initialTimestamp + index),
+  );
+  const initialMessages = [...preludeMessages, ...seedMessages] as AgentSession["messages"];
+  const seedMessageCount = initialMessages.length;
+  if (initialMessages.length > 0) {
+    subagentSession.agent.state.messages = structuredClone(initialMessages);
+    for (const message of initialMessages) {
       if (message.role === "branchSummary" || message.role === "compactionSummary") {
         continue;
       }
@@ -245,8 +241,7 @@ export async function runDetachedSubagentSession(
     }
   }
 
-  appendRuntimeNotice(subagentSession, subagentNotice);
-  deps.queueRuntimeNotice(subagentSession.sessionId, subagentNotice);
+  appendRuntimeNoticeMessage(subagentSession, subagentNotice, initialTimestamp + initialMessages.length);
   options.onUpdate?.({
     content: [],
     details: buildSubagentDetails(
@@ -420,7 +415,7 @@ export function appendCronSubagentStart(
   notice: RuntimeNotice,
 ): void {
   const timestamp = Date.now();
-  appendRuntimeNotice(session, notice, timestamp);
+  appendRuntimeNoticeMessage(session, notice, timestamp);
   appendMessages(session, [
     { role: "user", content: args.prompt, timestamp: timestamp + 1 },
     {

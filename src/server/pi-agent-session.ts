@@ -24,7 +24,6 @@ import {
   loadBattySettings,
   workspaceSessionDir,
 } from "./pi-paths";
-import type { RuntimeNotice } from "./runtime-notices";
 import type { PiModel, WebSession } from "./pi-service-types";
 import { modelKey } from "./pi-service-types";
 
@@ -35,7 +34,6 @@ export interface CreatePiAgentSessionOptions {
   authStorage: AuthStorage;
   modelRegistry: ModelRegistry;
   customTools: Array<ToolDefinition<any>>;
-  consumeRuntimeNotices: (sessionId: string) => RuntimeNotice[];
   model?: PiModel;
   thinkingLevel?: string;
 }
@@ -47,7 +45,6 @@ export async function createPiAgentSession({
   authStorage,
   modelRegistry,
   customTools,
-  consumeRuntimeNotices,
   model,
   thinkingLevel,
 }: CreatePiAgentSessionOptions): Promise<Awaited<ReturnType<typeof createAgentSession>>> {
@@ -79,22 +76,6 @@ export async function createPiAgentSession({
     additionalSkillPaths: resourcePaths.skills,
     additionalPromptTemplatePaths: resourcePaths.prompts,
     additionalThemePaths: resourcePaths.themes,
-    extensionFactories: [
-      (pi) => {
-        pi.on("before_agent_start", async (event, ctx) => {
-          const notices = consumeRuntimeNotices(ctx.sessionManager.getSessionId());
-          if (notices.length === 0) {
-            return undefined;
-          }
-
-          return {
-            systemPrompt: [event.systemPrompt, ...notices.map((notice) => notice.systemPrompt)]
-              .filter((part) => part.trim().length > 0)
-              .join("\n\n"),
-          };
-        });
-      },
-    ],
     agentsFilesOverride: (base) => ({
       agentsFiles: base.agentsFiles.filter((file) => {
         const resolved = path.resolve(file.path);

@@ -73,6 +73,18 @@ export function getStateMetadata(
   return rest;
 }
 
+function hasToolCallInBlocks(blocks: ReturnType<typeof normalizeBlocks>): boolean {
+  return blocks.some((block) => block.type === "toolCall");
+}
+
+function hasToolCallMessage(messages: SessionState["messages"], toolCallIds: string[]): boolean {
+  return messages.some(
+    (message) =>
+      message.role === "assistant" &&
+      message.blocks.some((block) => block.type === "toolCall" && toolCallIds.includes(block.id)),
+  );
+}
+
 export async function handleAgentEvent(
   deps: {
     getState: (
@@ -101,6 +113,21 @@ export async function handleAgentEvent(
       break;
     case "message_end":
       if (event.message.role === "assistant") {
+        const blocks = normalizeBlocks(event.message.content);
+        if (hasToolCallInBlocks(blocks)) {
+          const toolCallIds = blocks.flatMap((block) =>
+            block.type === "toolCall" ? [block.id] : [],
+          );
+          const state = deps.getState(webSession.id);
+          if (hasToolCallMessage(state.messages, toolCallIds)) {
+            webSession.activeAssistant = undefined;
+            deps.publish(webSession, { type: "reset", state: deps.getState(webSession.id) });
+          } else {
+            deps.publish(webSession, { type: "reset", state });
+          }
+          break;
+        }
+
         webSession.activeAssistant = undefined;
       }
       deps.publish(webSession, { type: "reset", state: deps.getState(webSession.id) });

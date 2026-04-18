@@ -1,0 +1,133 @@
+import { describe, expect, it, vi } from "vite-plus/test";
+import type { AgentSessionEvent } from "@mariozechner/pi-coding-agent";
+import type { SessionState, WorkspaceInfo } from "@/shared/types";
+import { handleAgentEvent } from "./pi-service-sessions";
+import type { WebSession } from "./pi-service-types";
+
+const workspace: WorkspaceInfo = {
+  id: "batty",
+  label: "Batty",
+  path: "/root/github/batty",
+  kind: "workspace",
+  isPinned: true,
+};
+
+function createState(
+  partial: Partial<SessionState>,
+  webSession: WebSession,
+  messages: SessionState["messages"],
+): SessionState {
+  return {
+    id: webSession.id,
+    sessionId: webSession.session.sessionId,
+    workspaceId: workspace.id,
+    cwd: workspace.path,
+    thinkingLevel: "medium",
+    availableThinkingLevels: ["medium"],
+    isStreaming: true,
+    pendingMessageCount: 0,
+    updatedAt: 1,
+    contextTokens: null,
+    contextWindow: null,
+    contextPercent: null,
+    totalMessageCount: messages.length,
+    hasMoreMessages: false,
+    messages,
+    activeAssistant: webSession.activeAssistant as
+      | Extract<SessionState["messages"][number], { role: "assistant" }>
+      | undefined,
+    activeTools: [],
+    ...partial,
+  };
+}
+
+describe("handleAgentEvent", () => {
+  it("keeps a tool-call assistant active when message_end arrives before the message is persisted", async () => {
+    const published: Array<{ type: string; state?: SessionState }> = [];
+    const assistantMessage = {
+      role: "assistant",
+      content: [
+        { type: "text", text: "Checking that" },
+        { type: "toolCall", id: "call-1", name: "subagent", arguments: { prompt: "Search" } },
+      ],
+      timestamp: 1,
+    };
+    const webSession = {
+      id: "web-1",
+      workspace,
+      session: { sessionId: "session-1" },
+      subscribers: new Set(),
+      activeAssistant: assistantMessage,
+      activeTools: new Map(),
+      openedAt: 1,
+      ephemeral: false,
+    } as unknown as WebSession;
+
+    await handleAgentEvent(
+      {
+        getState: () => createState({}, webSession, []),
+        getStateMetadata: () => createState({}, webSession, []),
+        publish: (_webSession, event) =>
+          published.push(event as { type: string; state?: SessionState }),
+        notifyWorkspaceUpdated: async () => {},
+        disposeWebSession: () => {},
+      },
+      webSession,
+      { type: "message_end", message: assistantMessage } as unknown as AgentSessionEvent,
+    );
+
+    expect(webSession.activeAssistant).toEqual(assistantMessage);
+    expect(published).toHaveLength(1);
+    expect(published[0]?.type).toBe("reset");
+    expect(published[0]?.state?.activeAssistant).toEqual(assistantMessage);
+  });
+
+  it("clears a tool-call assistant once the persisted message is present", async () => {
+    const published: Array<{ type: string; state?: SessionState }> = [];
+    const assistantMessage = {
+      role: "assistant",
+      content: [
+        { type: "toolCall", id: "call-1", name: "subagent", arguments: { prompt: "Search" } },
+      ],
+      timestamp: 1,
+    };
+    const webSession = {
+      id: "web-1",
+      workspace,
+      session: { sessionId: "session-1" },
+      subscribers: new Set(),
+      activeAssistant: assistantMessage,
+      activeTools: new Map(),
+      openedAt: 1,
+      ephemeral: false,
+    } as unknown as WebSession;
+    const persistedMessages: SessionState["messages"] = [
+      {
+        id: "assistant-1",
+        role: "assistant",
+        timestamp: 1,
+        blocks: [
+          { type: "toolCall", id: "call-1", name: "subagent", arguments: { prompt: "Search" } },
+        ],
+      },
+    ];
+
+    await handleAgentEvent(
+      {
+        getState: () => createState({}, webSession, persistedMessages),
+        getStateMetadata: vi.fn(),
+        publish: (_webSession, event) =>
+          published.push(event as { type: string; state?: SessionState }),
+        notifyWorkspaceUpdated: async () => {},
+        disposeWebSession: () => {},
+      },
+      webSession,
+      { type: "message_end", message: assistantMessage } as unknown as AgentSessionEvent,
+    );
+
+    expect(webSession.activeAssistant).toBeUndefined();
+    expect(published).toHaveLength(1);
+    expect(published[0]?.type).toBe("reset");
+    expect(published[0]?.state?.activeAssistant).toBeUndefined();
+  });
+});

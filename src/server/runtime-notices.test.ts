@@ -58,7 +58,7 @@ describe("runtime notices", () => {
         customType: "batty-system-prompt",
         data: { nope: true },
       },
-    ]);
+    ] as Array<{ type?: unknown; message?: unknown; customType?: unknown; data?: unknown }>);
 
     expect(messages).toEqual([
       {

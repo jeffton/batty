@@ -348,6 +348,7 @@ export class PiService {
     thinkingLevel: string;
     includeSessionContext: boolean;
     respondIn: "tool-call" | "session";
+    preludeNotices?: Array<{ kind: "cron" | "subagent"; text: string }>;
     currentToolCallId?: string;
     signal?: AbortSignal;
     onUpdate?: (partial: {
@@ -379,7 +380,7 @@ export class PiService {
       effort: string;
       includeSessionContext: boolean;
     },
-    notice: RuntimeNotice,
+    notice: { kind: "cron" | "subagent"; text: string },
   ): void {
     appendCronSubagentStart(session, toolCallId, args, notice);
   }

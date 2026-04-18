@@ -28,14 +28,14 @@ const CronSessionSchema = Type.Object(
     includePreviousContext: Type.Optional(
       Type.Boolean({
         description:
-          "When kind=daily, whether the subagent should include previous daily-session context. Defaults to true.",
+          "When kind=daily, whether the subagent should include previous daily-session context. Defaults to false.",
       }),
     ),
   },
   {
     additionalProperties: false,
     description:
-      'Use {kind:"new"} for a fresh session each run or {kind:"daily", includePreviousContext:true} to reuse one workspace cron conversation per local day.',
+      'Use {kind:"new"} for a fresh session each run or {kind:"daily"} for one workspace cron conversation per local day. Daily sessions start fresh unless includePreviousContext:true is set.',
   },
 );
 
@@ -82,7 +82,7 @@ export const SubagentToolSchema = Type.Object(
     includeSessionContext: Type.Optional(
       Type.Boolean({
         description:
-          "Whether to include the current session context. Defaults to true. When false, the subagent still gets the workspace system prompts.",
+          "Whether to include the current session context. Defaults to false. When false, the subagent still gets the workspace system prompts.",
       }),
     ),
   },

@@ -219,7 +219,7 @@ export class PiService {
     });
 
     const webSession = this.requireSession(session.id);
-    const includePreviousContext = job.session.includePreviousContext !== false;
+    const includePreviousContext = job.session.includePreviousContext === true;
     const toolCallId = `${SUBAGENT_TOOL_NAME}-${randomUUID()}`;
     const toolArgs = {
       prompt: job.prompt,

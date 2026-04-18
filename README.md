@@ -145,7 +145,7 @@ batty cron rm <jobId>
 batty --root /path/to/batty-root auth code
 batty --root /path/to/batty-root cron list --workspace batty
 batty --root /path/to/batty-root cron add --workspace batty --prompt "Check CI and summarize failures" --thinking medium --every 1h --session daily --daily-context include
-batty --root /path/to/batty-root cron add --workspace batty --prompt "Morning summary" --thinking low --cron "0 8 * * 1-5" --tz Europe/Copenhagen --session daily --daily-context omit
+batty --root /path/to/batty-root cron add --workspace batty --prompt "Morning summary" --thinking low --cron "0 8 * * 1-5" --tz Europe/Copenhagen --session daily
 batty --root /path/to/batty-root cron edit <jobId> --prompt "Updated prompt"
 batty --root /path/to/batty-root cron rm <jobId>
 ```
@@ -167,7 +167,7 @@ Schedules supported by both the CLI and the built-in tool:
 
 If `--tz` / `timezone` is omitted for a cron expression, Batty uses the server's local timezone.
 
-Daily session reuse keeps one cron conversation per workspace day. Daily runs are stored as `subagent` tool calls in that session. `--daily-context include` / `session.includePreviousContext=true` reuses earlier daily-session context, while `omit` starts the subagent from the workspace system prompts only. The day rollover defaults to `04:00` local time and can be changed in `options.json`.
+Daily session reuse keeps one cron conversation per workspace day. Daily runs are stored as `subagent` tool calls in that session. Daily runs start fresh from the workspace system prompts by default. `--daily-context include` / `session.includePreviousContext=true` reuses earlier daily-session context. The day rollover defaults to `04:00` local time and can be changed in `options.json`.
 
 Cron job state includes:
 

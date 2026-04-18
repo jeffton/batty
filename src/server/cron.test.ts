@@ -51,7 +51,7 @@ describe("cron store", () => {
     expect(buildCronJobSummary(job)).toContain("Session: New per run");
   });
 
-  it("persists and updates daily session mode", async () => {
+  it("defaults daily session mode to fresh context and persists updates", async () => {
     const config = await createConfig();
     await fs.mkdir(path.join(config.workspacesRoot, "alpha"));
     const store = new CronStore(config);
@@ -65,19 +65,19 @@ describe("cron store", () => {
       schedule: { kind: "cron", expression: "0 8 * * *" },
     });
 
-    expect(created.session).toEqual({ kind: "daily", includePreviousContext: true });
-    expect(buildCronJobSummary(created)).toContain("Session: Daily · with previous context");
+    expect(created.session).toEqual({ kind: "daily", includePreviousContext: false });
+    expect(buildCronJobSummary(created)).toContain("Session: Daily · fresh context");
 
     const updated = await store.updateJob(created.id, {
-      session: { kind: "daily", includePreviousContext: false },
+      session: { kind: "daily", includePreviousContext: true },
     });
 
-    expect(updated.session).toEqual({ kind: "daily", includePreviousContext: false });
-    expect(buildCronJobSummary(updated)).toContain("Session: Daily · fresh context");
+    expect(updated.session).toEqual({ kind: "daily", includePreviousContext: true });
+    expect(buildCronJobSummary(updated)).toContain("Session: Daily · with previous context");
 
     const persisted = JSON.parse(await fs.readFile(store.filePath, "utf8")) as {
       jobs: Array<{ session?: { kind?: string; includePreviousContext?: boolean } }>;
     };
-    expect(persisted.jobs[0]?.session).toEqual({ kind: "daily", includePreviousContext: false });
+    expect(persisted.jobs[0]?.session).toEqual({ kind: "daily", includePreviousContext: true });
   });
 });

@@ -94,7 +94,7 @@ function usage(): string {
     "Examples:",
     "  batty --root /root/github auth code",
     '  batty --root /root/github cron add --workspace batty --prompt "Check CI" --model openai/gpt-5 --thinking medium --every 1h --session daily --daily-context include',
-    '  batty --root /root/github cron add --workspace batty --prompt "Morning summary" --model anthropic/claude-sonnet-4 --thinking low --cron "0 8 * * 1-5" --tz Europe/Copenhagen --session daily --daily-context omit',
+    '  batty --root /root/github cron add --workspace batty --prompt "Morning summary" --model anthropic/claude-sonnet-4 --thinking low --cron "0 8 * * 1-5" --tz Europe/Copenhagen --session daily',
     '  batty --root /root/github cron edit abc123 --prompt "Updated prompt" --thinking high',
   ].join("\n");
 }
@@ -195,7 +195,7 @@ function buildSession(
       return { kind: "new" };
     case "daily":
       return includePreviousContext == null
-        ? { kind: "daily" }
+        ? { kind: "daily", includePreviousContext: false }
         : { kind: "daily", includePreviousContext };
     default:
       throw new Error(`Invalid --session value: ${session}. Expected new or daily.`);

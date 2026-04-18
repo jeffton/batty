@@ -29,7 +29,7 @@ const drafts = reactive<Record<string, CronDraft>>({});
 const jobs = computed(() => store.workspaceCronJobs);
 
 function includePreviousContextFor(job: CronJob): boolean {
-  return job.session.kind === "daily" ? job.session.includePreviousContext !== false : true;
+  return job.session.kind === "daily" ? job.session.includePreviousContext === true : false;
 }
 
 function ensureDraft(job: CronJob): CronDraft {
@@ -112,7 +112,7 @@ function thinkingOptions(job: CronJob): string[] {
 
 function sessionLabel(job: CronJob): string {
   return job.session.kind === "daily"
-    ? job.session.includePreviousContext !== false
+    ? job.session.includePreviousContext === true
       ? "daily · with previous context"
       : "daily · fresh context"
     : "new";

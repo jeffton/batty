@@ -111,7 +111,7 @@ function normalizeSession(value: CronJobSession | undefined): StoredCronJobSessi
     case "daily":
       return {
         kind: "daily",
-        includePreviousContext: value.includePreviousContext !== false,
+        includePreviousContext: value.includePreviousContext === true,
       };
     default:
       throw createHttpError(
@@ -266,7 +266,7 @@ function formatSessionLabel(session: CronJobSession | StoredCronJobSession): str
     case "new":
       return "New per run";
     case "daily":
-      return session.includePreviousContext !== false
+      return session.includePreviousContext === true
         ? "Daily · with previous context"
         : "Daily · fresh context";
   }

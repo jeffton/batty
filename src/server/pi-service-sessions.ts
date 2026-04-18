@@ -1,0 +1,224 @@
+import type { AgentSession, AgentSessionEvent } from "@mariozechner/pi-coding-agent";
+import type {
+  ServerEvent,
+  SessionState,
+  SessionStateMetadata,
+  WorkspaceInfo,
+} from "@/shared/types";
+import { normalizeBlocks } from "./pi-state";
+import { sanitizeTerminalBlocks } from "./terminal-output";
+import type { SessionSubscriber, WebSession } from "./pi-service-types";
+import { normalizeToolDetails } from "./pi-service-types";
+
+export function disposeWebSession(
+  sessions: Map<string, WebSession>,
+  unregisterLiveSession: (sessionId: string) => void,
+  webSession: WebSession,
+): void {
+  sessions.delete(webSession.id);
+  unregisterLiveSession(webSession.id);
+  webSession.session.dispose();
+}
+
+export function attachSession(
+  sessions: Map<string, WebSession>,
+  registerLiveSession: (workspace: WorkspaceInfo, session: AgentSession) => void,
+  handleAgentEvent: (webSession: WebSession, event: AgentSessionEvent) => Promise<void>,
+  workspace: WorkspaceInfo,
+  session: AgentSession,
+  modelFallbackMessage?: string,
+  ephemeral = false,
+): WebSession {
+  const webSession: WebSession = {
+    id: session.sessionId,
+    workspace,
+    session,
+    subscribers: new Set(),
+    activeTools: new Map(),
+    openedAt: Date.now(),
+    modelFallbackMessage,
+    ephemeral,
+  };
+
+  session.subscribe((event) => {
+    void handleAgentEvent(webSession, event).catch((error) => {
+      console.error("Failed to handle agent event", error);
+    });
+  });
+  sessions.set(webSession.id, webSession);
+  registerLiveSession(workspace, session);
+  return webSession;
+}
+
+export function publish(webSession: WebSession, event: ServerEvent): void {
+  for (const subscriber of webSession.subscribers) {
+    subscriber(event);
+  }
+}
+
+export function getStateMetadata(
+  getState: (
+    sessionId: string,
+    options?: { beforeMessageId?: string; limit?: number },
+  ) => SessionState,
+  webSession: WebSession,
+): SessionStateMetadata {
+  const state = getState(webSession.id, { limit: 1 });
+  const {
+    messages: _messages,
+    activeAssistant: _activeAssistant,
+    activeTools: _activeTools,
+    ...rest
+  } = state;
+  return rest;
+}
+
+export async function handleAgentEvent(
+  deps: {
+    getState: (
+      sessionId: string,
+      options?: { beforeMessageId?: string; limit?: number },
+    ) => SessionState;
+    getStateMetadata: (webSession: WebSession) => SessionStateMetadata;
+    publish: (webSession: WebSession, event: ServerEvent) => void;
+    notifyWorkspaceUpdated: (workspaceId: string) => Promise<void>;
+    disposeWebSession: (webSession: WebSession) => void;
+    onAgentCompleted?: (session: SessionState) => Promise<void>;
+  },
+  webSession: WebSession,
+  event: AgentSessionEvent,
+): Promise<void> {
+  switch (event.type) {
+    case "message_start":
+    case "message_update":
+      if (event.message.role === "assistant") {
+        webSession.activeAssistant = event.message;
+        deps.publish(webSession, {
+          type: "assistant",
+          assistant: deps.getState(webSession.id).activeAssistant,
+        });
+      }
+      break;
+    case "message_end":
+      if (event.message.role === "assistant") {
+        webSession.activeAssistant = undefined;
+      }
+      deps.publish(webSession, { type: "reset", state: deps.getState(webSession.id) });
+      break;
+    case "tool_execution_start":
+      webSession.activeTools.set(event.toolCallId, {
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        args: event.args as Record<string, unknown>,
+        blocks: [],
+        status: "running",
+        isError: false,
+        details: undefined,
+      });
+      deps.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
+      break;
+    case "tool_execution_update": {
+      const current = webSession.activeTools.get(event.toolCallId);
+      if (current) {
+        const blocks = normalizeBlocks(event.partialResult.content ?? []);
+        current.blocks = current.toolName === "bash" ? sanitizeTerminalBlocks(blocks) : blocks;
+        current.details = normalizeToolDetails(event.partialResult.details);
+        webSession.activeTools.set(event.toolCallId, current);
+        deps.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
+      }
+      break;
+    }
+    case "tool_execution_end": {
+      const current = webSession.activeTools.get(event.toolCallId);
+      if (current) {
+        const blocks = normalizeBlocks(event.result.content ?? []);
+        current.blocks = current.toolName === "bash" ? sanitizeTerminalBlocks(blocks) : blocks;
+        current.status = event.isError ? "error" : "success";
+        current.isError = event.isError;
+        current.details = normalizeToolDetails(event.result.details);
+        webSession.activeTools.set(event.toolCallId, current);
+        deps.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
+      }
+      break;
+    }
+    case "agent_start":
+      webSession.activeTools.clear();
+      deps.publish(webSession, { type: "tools", tools: [] });
+      deps.publish(webSession, { type: "state", state: deps.getStateMetadata(webSession) });
+      break;
+    case "agent_end":
+    case "turn_end":
+    case "compaction_end":
+    case "auto_retry_end": {
+      if (event.type === "agent_end") {
+        webSession.activeAssistant = undefined;
+      }
+      const state = deps.getState(webSession.id);
+      const publishedState =
+        event.type === "agent_end"
+          ? {
+              ...state,
+              isStreaming: false,
+              pendingMessageCount: 0,
+              activeAssistant: undefined,
+            }
+          : state;
+      deps.publish(webSession, { type: "reset", state: publishedState });
+      if (event.type === "agent_end") {
+        try {
+          console.info("Running agent completion hook", {
+            sessionId: publishedState.sessionId,
+            workspaceId: publishedState.workspaceId,
+          });
+          await deps.onAgentCompleted?.(publishedState);
+        } catch (error) {
+          console.error("Failed to run agent completion hook", error);
+        }
+        try {
+          await deps.notifyWorkspaceUpdated(publishedState.workspaceId);
+        } catch (error) {
+          console.error("Failed to publish workspace update", error);
+        }
+        if (webSession.ephemeral && webSession.subscribers.size === 0) {
+          deps.disposeWebSession(webSession);
+        }
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+export function requireSession(sessions: Map<string, WebSession>, sessionId: string): WebSession {
+  const webSession = sessions.get(sessionId);
+  if (!webSession) {
+    throw new Error(`Unknown session: ${sessionId}`);
+  }
+  return webSession;
+}
+
+export function subscribeToSession(
+  requireSession: (sessionId: string) => WebSession,
+  getState: (
+    sessionId: string,
+    options?: { beforeMessageId?: string; limit?: number },
+  ) => SessionState,
+  disposeWebSession: (webSession: WebSession) => void,
+  sessionId: string,
+  subscriber: SessionSubscriber,
+): () => void {
+  const webSession = requireSession(sessionId);
+  webSession.subscribers.add(subscriber);
+  subscriber({ type: "reset", state: getState(sessionId) });
+  return () => {
+    webSession.subscribers.delete(subscriber);
+    if (
+      webSession.ephemeral &&
+      webSession.subscribers.size === 0 &&
+      !webSession.session.isStreaming
+    ) {
+      disposeWebSession(webSession);
+    }
+  };
+}

@@ -222,10 +222,13 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .subagent-session-popover {
-  width: min(52rem, calc(100vw - 1.5rem));
-  max-width: calc(100vw - 1.5rem);
-  height: min(42rem, calc(100vh - 1.5rem));
-  max-height: calc(100vh - 1.5rem);
+  inset: calc(var(--safe-area-top) + 1rem) calc(var(--safe-area-right) + 1rem)
+    calc(var(--safe-area-bottom) + 1rem) calc(var(--safe-area-left) + 1rem);
+  width: auto;
+  max-width: none;
+  height: auto;
+  max-height: none;
+  margin: 0;
   padding: 0;
   border: 1px solid var(--color-border-soft);
   border-radius: 0.9rem;

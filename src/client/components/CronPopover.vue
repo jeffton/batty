@@ -57,7 +57,7 @@ function syncDrafts(nextJobs: CronJob[]): void {
   const activeIds = new Set(nextJobs.map((job) => job.id));
   for (const job of nextJobs) {
     const draft = ensureDraft(job);
-    if (!draft.saving) {
+    if (!draft.saving && !draft.editing) {
       draft.prompt = job.prompt;
       draft.model = job.model;
       draft.thinkingLevel = job.thinkingLevel;
@@ -132,19 +132,21 @@ function sessionLabel(job: CronJob): string {
 
 async function saveJob(job: CronJob): Promise<void> {
   const draft = draftFor(job);
+  const patch = {
+    prompt: draft.prompt,
+    model: draft.model,
+    thinkingLevel: draft.thinkingLevel,
+    session:
+      draft.sessionKind === "daily"
+        ? { kind: "daily", includePreviousContext: draft.includePreviousContext }
+        : { kind: "new" },
+  } as const;
+
   draft.saving = true;
   draft.error = "";
   draft.editing = false;
   try {
-    const updated = await store.updateCronJob(job.id, {
-      prompt: draft.prompt,
-      model: draft.model,
-      thinkingLevel: draft.thinkingLevel,
-      session:
-        draft.sessionKind === "daily"
-          ? { kind: "daily", includePreviousContext: draft.includePreviousContext }
-          : { kind: "new" },
-    });
+    const updated = await store.updateCronJob(job.id, patch);
     draft.prompt = updated.prompt;
     draft.model = updated.model;
     draft.thinkingLevel = updated.thinkingLevel;
@@ -227,7 +229,7 @@ watch(
               class="cron-popover__icon-btn"
               type="button"
               :disabled="draftFor(job).saving || draftFor(job).deleting"
-              @click="draftFor(job).editing ? cancelEdit(job) : editJob(job)"
+              @click.stop.prevent="draftFor(job).editing ? cancelEdit(job) : editJob(job)"
             >
               <component :is="draftFor(job).editing ? X : Pencil" :size="14" />
             </button>
@@ -235,7 +237,7 @@ watch(
               class="cron-popover__icon-btn cron-popover__icon-btn--danger"
               type="button"
               :disabled="draftFor(job).deleting"
-              @click="deleteJob(job)"
+              @click.stop.prevent="deleteJob(job)"
             >
               <Trash2 :size="14" />
             </button>
@@ -300,7 +302,7 @@ watch(
               class="cron-popover__save"
               type="button"
               :disabled="!isDirty(job) || draftFor(job).saving || draftFor(job).deleting"
-              @click="saveJob(job)"
+              @click.stop.prevent="saveJob(job)"
             >
               <Save :size="14" /> {{ draftFor(job).saving ? "Saving…" : "Save" }}
             </button>

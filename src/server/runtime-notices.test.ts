@@ -13,13 +13,14 @@ type AgentMessage = AgentSession["messages"][number];
 
 describe("runtime notices", () => {
   it("builds cron notices for the system prompt and transcript", () => {
-    expect(buildCronRuntimeNotice("0 9 * * 1-5")).toEqual({
+    expect(buildCronRuntimeNotice("0 9 * * 1-5", new Date("2026-03-20T12:34:56Z"))).toEqual({
       kind: "cron",
       text: "Cron run triggered. Schedule: 0 9 * * 1-5",
       systemPrompt: [
         "[Batty cron turn]",
         "This turn was triggered by a Batty cron job.",
         "Schedule: 0 9 * * 1-5",
+        "Current local date and time: 2026-03-20 13:34:56 (Friday)",
       ].join("\n"),
     });
   });

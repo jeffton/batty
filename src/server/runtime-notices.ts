@@ -24,7 +24,7 @@ type SessionEntry = {
   data?: unknown;
 };
 
-export function buildCronRuntimeNotice(scheduleLabel: string): RuntimeNotice {
+export function buildCronRuntimeNotice(scheduleLabel: string, now = new Date()): RuntimeNotice {
   return {
     kind: "cron",
     text: `Cron run triggered. Schedule: ${scheduleLabel}`,
@@ -32,6 +32,7 @@ export function buildCronRuntimeNotice(scheduleLabel: string): RuntimeNotice {
       "[Batty cron turn]",
       "This turn was triggered by a Batty cron job.",
       `Schedule: ${scheduleLabel}`,
+      `Current local date and time: ${formatLocalDateTime(now)}`,
     ].join("\n"),
   };
 }
@@ -86,4 +87,23 @@ export function runtimeNoticeMessageFromEntry(
     content: candidate.text,
     timestamp: candidate.timestamp,
   } as AgentMessage;
+}
+
+function formatLocalDateTime(date: Date): string {
+  const isoDate = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+  const time = new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
+  const dayOfWeek = new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+  }).format(date);
+
+  return `${isoDate} ${time} (${dayOfWeek})`;
 }

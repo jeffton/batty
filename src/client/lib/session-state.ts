@@ -37,10 +37,6 @@ function mergeRetainedActiveTools(
       return false;
     }
 
-    if (incoming.isStreaming) {
-      return true;
-    }
-
     return (
       incoming.messages.some((message) => hasToolCall(message, tool.toolCallId)) ||
       hasToolCall(incoming.activeAssistant, tool.toolCallId)

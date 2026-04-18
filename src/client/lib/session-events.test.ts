@@ -178,6 +178,30 @@ describe("applyServerEvent", () => {
     expect(next?.activeTools).toEqual(previous.activeTools);
   });
 
+  it("retains in-flight tool output across streaming resets before the tool result arrives", () => {
+    const previous: SessionState = {
+      ...baseState,
+      isStreaming: true,
+      activeTools: [
+        {
+          toolCallId: "call-1",
+          toolName: "subagent",
+          args: { prompt: "Search the web" },
+          blocks: [{ type: "text", text: "Searching…" }],
+          status: "running",
+          isError: false,
+        },
+      ],
+    };
+
+    const next = applyServerEvent(previous, {
+      type: "reset",
+      state: { ...previous, activeAssistant: undefined, activeTools: [], messages: [] },
+    } as unknown as Parameters<typeof applyServerEvent>[1]);
+
+    expect(next?.activeTools).toEqual(previous.activeTools);
+  });
+
   it("updates the active assistant during streaming", () => {
     const next = applyServerEvent(baseState, {
       type: "assistant",

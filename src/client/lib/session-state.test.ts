@@ -255,6 +255,46 @@ describe("normalizeSessionState", () => {
     expect(mergeSessionState(incoming, previous)?.activeTools).toEqual(previous.activeTools);
   });
 
+  it("retains in-flight tool output across streaming resets before the tool result arrives", () => {
+    const previous: SessionState = {
+      id: "web-1",
+      sessionId: "session-1",
+      workspaceId: "batty",
+      cwd: "/tmp/batty",
+      thinkingLevel: "medium",
+      availableThinkingLevels: ["medium"],
+      isStreaming: true,
+      pendingMessageCount: 0,
+      updatedAt: 200,
+      contextTokens: null,
+      contextWindow: null,
+      contextPercent: null,
+      totalMessageCount: 1,
+      hasMoreMessages: false,
+      messages: [],
+      activeTools: [
+        {
+          toolCallId: "call-1",
+          toolName: "subagent",
+          args: { prompt: "Search the web" },
+          blocks: [{ type: "text", text: "Searching…" }],
+          status: "running",
+          isError: false,
+        },
+      ],
+    };
+
+    const incoming: SessionState = {
+      ...previous,
+      updatedAt: 300,
+      activeTools: [],
+      activeAssistant: undefined,
+      messages: [],
+    };
+
+    expect(mergeSessionState(incoming, previous)?.activeTools).toEqual(previous.activeTools);
+  });
+
   it("drops cached tool output once the final tool result exists", () => {
     const previous: SessionState = {
       id: "web-1",

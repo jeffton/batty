@@ -77,6 +77,13 @@ function hasToolCallInBlocks(blocks: ReturnType<typeof normalizeBlocks>): boolea
   return blocks.some((block) => block.type === "toolCall");
 }
 
+async function waitForSessionStateFlush(): Promise<void> {
+  // `message_end` can arrive before the session manager's branch view reflects
+  // the finished message. Yield once so the reset snapshot includes the new
+  // user message instead of forcing the client to rediscover it later.
+  await Promise.resolve();
+}
+
 function hasToolCallMessage(messages: SessionState["messages"], toolCallIds: string[]): boolean {
   return messages.some(
     (message) =>
@@ -130,6 +137,7 @@ export async function handleAgentEvent(
 
         webSession.activeAssistant = undefined;
       }
+      await waitForSessionStateFlush();
       deps.publish(webSession, { type: "reset", state: deps.getState(webSession.id) });
       break;
     case "tool_execution_start":

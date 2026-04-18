@@ -130,4 +130,53 @@ describe("handleAgentEvent", () => {
     expect(published[0]?.type).toBe("reset");
     expect(published[0]?.state?.activeAssistant).toBeUndefined();
   });
+
+  it("waits a microtask before publishing a user message reset", async () => {
+    const published: Array<{ type: string; state?: SessionState }> = [];
+    const userMessage = {
+      role: "user",
+      content: "hello",
+      timestamp: 1,
+    };
+    const webSession = {
+      id: "web-1",
+      workspace,
+      session: { sessionId: "session-1" },
+      subscribers: new Set(),
+      activeAssistant: undefined,
+      activeTools: new Map(),
+      openedAt: 1,
+      ephemeral: false,
+    } as unknown as WebSession;
+    const persistedMessages: SessionState["messages"] = [
+      {
+        id: "user-1",
+        role: "user",
+        timestamp: 1,
+        blocks: [{ type: "text", text: "hello" }],
+      },
+    ];
+    let flushComplete = false;
+
+    queueMicrotask(() => {
+      flushComplete = true;
+    });
+
+    await handleAgentEvent(
+      {
+        getState: () => createState({}, webSession, flushComplete ? persistedMessages : []),
+        getStateMetadata: vi.fn(),
+        publish: (_webSession, event) =>
+          published.push(event as { type: string; state?: SessionState }),
+        notifyWorkspaceUpdated: async () => {},
+        disposeWebSession: () => {},
+      },
+      webSession,
+      { type: "message_end", message: userMessage } as unknown as AgentSessionEvent,
+    );
+
+    expect(published).toHaveLength(1);
+    expect(published[0]?.type).toBe("reset");
+    expect(published[0]?.state?.messages).toEqual(persistedMessages);
+  });
 });

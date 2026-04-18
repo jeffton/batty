@@ -646,8 +646,10 @@ const sentFiles = computed(() =>
   cursor: pointer;
 }
 
-.tool-call__expand-btn:hover {
-  background: color-mix(in srgb, var(--color-bg-inline-code) 78%, var(--color-info));
+@media (hover: hover) {
+  .tool-call__expand-btn:hover {
+    background: color-mix(in srgb, var(--color-bg-inline-code) 78%, var(--color-info));
+  }
 }
 
 .tool-call__subagent-row {
@@ -669,8 +671,10 @@ const sentFiles = computed(() =>
   cursor: pointer;
 }
 
-.tool-call__subagent-btn:hover {
-  background: color-mix(in srgb, var(--color-bg-inline-code) 78%, var(--color-info));
+@media (hover: hover) {
+  .tool-call__subagent-btn:hover {
+    background: color-mix(in srgb, var(--color-bg-inline-code) 78%, var(--color-info));
+  }
 }
 
 .tool-call img {

@@ -189,8 +189,10 @@ async function register(): Promise<void> {
   transition: background 80ms ease;
 }
 
-.login-card__submit:hover:not(:disabled) {
-  background: var(--color-accent-strong);
+@media (hover: hover) {
+  .login-card__submit:hover:not(:disabled) {
+    background: var(--color-accent-strong);
+  }
 }
 
 .login-card__submit:disabled {
@@ -201,8 +203,10 @@ async function register(): Promise<void> {
   background: color-mix(in srgb, var(--color-accent) 82%, black);
 }
 
-.login-card__submit--secondary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-accent-strong) 82%, black);
+@media (hover: hover) {
+  .login-card__submit--secondary:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--color-accent-strong) 82%, black);
+  }
 }
 
 .login-card__hint code {

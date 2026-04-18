@@ -535,9 +535,11 @@ watch(
   padding-inline: 0.45rem;
 }
 
-.cron-popover__icon-btn--danger:hover {
-  background: var(--color-error-soft);
-  color: var(--color-error);
+@media (hover: hover) {
+  .cron-popover__icon-btn--danger:hover {
+    background: var(--color-error-soft);
+    color: var(--color-error);
+  }
 }
 
 .cron-popover__save:disabled,

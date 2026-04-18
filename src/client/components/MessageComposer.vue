@@ -442,8 +442,10 @@ defineExpose({ clear, restore });
   transition: background 80ms ease;
 }
 
-.composer__chip:hover:not(:disabled) {
-  background: var(--color-border-soft);
+@media (hover: hover) {
+  .composer__chip:hover:not(:disabled) {
+    background: var(--color-border-soft);
+  }
 }
 
 .composer__chip:disabled {
@@ -492,9 +494,11 @@ defineExpose({ clear, restore });
     color 80ms ease;
 }
 
-.composer__icon-button:hover:not(:disabled) {
-  background: var(--color-bg-elevated);
-  color: var(--color-text);
+@media (hover: hover) {
+  .composer__icon-button:hover:not(:disabled) {
+    background: var(--color-bg-elevated);
+    color: var(--color-text);
+  }
 }
 
 .composer__icon-button:disabled {

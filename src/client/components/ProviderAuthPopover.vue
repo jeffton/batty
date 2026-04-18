@@ -413,13 +413,15 @@ watch(
   font-weight: 600;
 }
 
-.provider-auth-popover__link:hover,
-.provider-auth-popover__action:hover {
-  background: var(--color-bg-hover);
-}
+@media (hover: hover) {
+  .provider-auth-popover__link:hover,
+  .provider-auth-popover__action:hover {
+    background: var(--color-bg-hover);
+  }
 
-.provider-auth-popover__action--primary:hover {
-  filter: brightness(1.03);
+  .provider-auth-popover__action--primary:hover {
+    filter: brightness(1.03);
+  }
 }
 
 .provider-auth-popover__link:disabled,

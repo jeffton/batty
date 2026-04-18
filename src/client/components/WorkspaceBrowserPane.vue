@@ -531,14 +531,16 @@ watch(
     color 80ms ease;
 }
 
-.workspace-browser-pane__header-btn:hover {
-  background: var(--color-bg-elevated);
-  color: var(--color-text-strong);
-}
+@media (hover: hover) {
+  .workspace-browser-pane__header-btn:hover {
+    background: var(--color-bg-elevated);
+    color: var(--color-text-strong);
+  }
 
-.workspace-browser-pane__logout:hover {
-  background: var(--color-error-soft);
-  color: var(--color-error);
+  .workspace-browser-pane__logout:hover {
+    background: var(--color-error-soft);
+    color: var(--color-error);
+  }
 }
 
 .workspace-browser-pane__notice {
@@ -661,8 +663,10 @@ watch(
   border-bottom-right-radius: 0;
 }
 
-.workspace-browser-pane__btn:hover:not(:disabled) {
-  background: var(--color-bg-hover);
+@media (hover: hover) {
+  .workspace-browser-pane__btn:hover:not(:disabled) {
+    background: var(--color-bg-hover);
+  }
 }
 
 .workspace-browser-pane__btn:disabled,
@@ -677,8 +681,10 @@ watch(
   font-weight: 600;
 }
 
-.workspace-browser-pane__btn--primary:hover:not(:disabled) {
-  background: var(--color-accent-soft);
+@media (hover: hover) {
+  .workspace-browser-pane__btn--primary:hover:not(:disabled) {
+    background: var(--color-accent-soft);
+  }
 }
 
 .workspace-browser-pane__new-session {
@@ -721,8 +727,10 @@ watch(
   border-bottom-left-radius: 0;
 }
 
-.workspace-browser-pane__item-row:hover:not(.is-active) {
-  background: var(--color-bg-hover);
+@media (hover: hover) {
+  .workspace-browser-pane__item-row:hover:not(.is-active) {
+    background: var(--color-bg-hover);
+  }
 }
 
 .workspace-browser-pane__item-row.is-active {
@@ -819,9 +827,11 @@ watch(
   transition: color 80ms ease;
 }
 
-.workspace-browser-pane__pin-btn:hover {
-  background: transparent;
-  color: var(--color-text-strong);
+@media (hover: hover) {
+  .workspace-browser-pane__pin-btn:hover {
+    background: transparent;
+    color: var(--color-text-strong);
+  }
 }
 
 .workspace-browser-pane__session-icon {

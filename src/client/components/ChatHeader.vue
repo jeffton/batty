@@ -174,8 +174,10 @@ function closePopover(id: string): void {
   transition: background 80ms ease;
 }
 
-.header__ws-btn:hover {
-  background: var(--color-bg-elevated);
+@media (hover: hover) {
+  .header__ws-btn:hover {
+    background: var(--color-bg-elevated);
+  }
 }
 
 .header__back-icon {
@@ -229,8 +231,10 @@ function closePopover(id: string): void {
   transition: background 80ms ease;
 }
 
-.header__model-btn:hover:not(:disabled) {
-  background: var(--color-bg-elevated);
+@media (hover: hover) {
+  .header__model-btn:hover:not(:disabled) {
+    background: var(--color-bg-elevated);
+  }
 }
 
 .header__model-btn:disabled,
@@ -260,8 +264,10 @@ function closePopover(id: string): void {
   transition: background 80ms ease;
 }
 
-.header__icon-btn:hover:not(:disabled) {
-  background: var(--color-bg-elevated);
+@media (hover: hover) {
+  .header__icon-btn:hover:not(:disabled) {
+    background: var(--color-bg-elevated);
+  }
 }
 
 .header__model-name {

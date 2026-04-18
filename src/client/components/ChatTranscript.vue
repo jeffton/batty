@@ -143,10 +143,12 @@ defineExpose({
     color 80ms ease;
 }
 
-.transcript__jump-btn:hover {
-  background: color-mix(in srgb, var(--color-bg-inline-code) 78%, var(--color-info));
-  border-color: color-mix(in srgb, var(--color-info) 30%, transparent);
-  transform: translateX(-50%) translateY(-1px);
+@media (hover: hover) {
+  .transcript__jump-btn:hover {
+    background: color-mix(in srgb, var(--color-bg-inline-code) 78%, var(--color-info));
+    border-color: color-mix(in srgb, var(--color-info) 30%, transparent);
+    transform: translateX(-50%) translateY(-1px);
+  }
 }
 
 .transcript__jump-btn :deep(svg) {

@@ -301,8 +301,10 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.subagent-session-popover__close:hover {
-  background: var(--color-bg-elevated-soft);
+@media (hover: hover) {
+  .subagent-session-popover__close:hover {
+    background: var(--color-bg-elevated-soft);
+  }
 }
 
 .subagent-session-popover__empty {

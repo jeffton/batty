@@ -173,8 +173,10 @@ watch(
   transition: background 80ms ease;
 }
 
-.mc-popover__model:hover:not(.is-active) {
-  background: var(--color-bg-hover);
+@media (hover: hover) {
+  .mc-popover__model:hover:not(.is-active) {
+    background: var(--color-bg-hover);
+  }
 }
 
 .mc-popover__model.is-active {

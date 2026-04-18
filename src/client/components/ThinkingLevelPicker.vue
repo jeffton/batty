@@ -56,9 +56,11 @@ function thinkingLabel(value: string): string {
     color 80ms ease;
 }
 
-.thinking-picker__btn:hover:not(:disabled):not(.is-active) {
-  color: var(--color-text);
-  background: var(--color-bg-hover);
+@media (hover: hover) {
+  .thinking-picker__btn:hover:not(:disabled):not(.is-active) {
+    color: var(--color-text);
+    background: var(--color-bg-hover);
+  }
 }
 
 .thinking-picker__btn.is-active {

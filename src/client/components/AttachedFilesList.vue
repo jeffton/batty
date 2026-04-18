@@ -139,7 +139,9 @@ function formatFileSize(size: number): string {
   font-weight: 600;
 }
 
-.attached-files__download:hover {
-  text-decoration: underline;
+@media (hover: hover) {
+  .attached-files__download:hover {
+    text-decoration: underline;
+  }
 }
 </style>

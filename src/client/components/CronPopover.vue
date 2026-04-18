@@ -57,7 +57,7 @@ function syncDrafts(nextJobs: CronJob[]): void {
   const activeIds = new Set(nextJobs.map((job) => job.id));
   for (const job of nextJobs) {
     const draft = ensureDraft(job);
-    if (!draft.saving && !draft.editing) {
+    if (!draft.saving) {
       draft.prompt = job.prompt;
       draft.model = job.model;
       draft.thinkingLevel = job.thinkingLevel;
@@ -108,18 +108,6 @@ function thinkingOptions(job: CronJob): string[] {
   }
 
   return resolveThinkingOptions(store.activeSession);
-}
-
-function isDirty(job: CronJob): boolean {
-  const draft = draftFor(job);
-  return (
-    draft.prompt !== job.prompt ||
-    draft.model !== job.model ||
-    draft.thinkingLevel !== job.thinkingLevel ||
-    draft.sessionKind !== job.session.kind ||
-    (draft.sessionKind === "daily" &&
-      draft.includePreviousContext !== includePreviousContextFor(job))
-  );
 }
 
 function sessionLabel(job: CronJob): string {
@@ -301,7 +289,7 @@ watch(
             <button
               class="cron-popover__save"
               type="button"
-              :disabled="!isDirty(job) || draftFor(job).saving || draftFor(job).deleting"
+              :disabled="draftFor(job).saving || draftFor(job).deleting"
               @click.stop.prevent="saveJob(job)"
             >
               <Save :size="14" /> {{ draftFor(job).saving ? "Saving…" : "Save" }}

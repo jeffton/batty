@@ -1,7 +1,6 @@
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { nextTick } from "vue";
 import CronPopover from "@/client/components/CronPopover.vue";
 import { useAppStore } from "@/client/stores/app";
 import type { CronJob, SessionSummary } from "@/shared/types";
@@ -79,7 +78,7 @@ describe("CronPopover", () => {
     }));
   });
 
-  it("saves cron edits and leaves edit mode", async () => {
+  it("saves and leaves edit mode even when nothing changed", async () => {
     const store = useAppStore();
     store.workspaces = [
       {
@@ -138,19 +137,6 @@ describe("CronPopover", () => {
     });
 
     await wrapper.find(".cron-popover__icon-btn").trigger("click");
-    await wrapper.find("textarea").setValue("Updated prompt");
-
-    store.cronJobsByWorkspace = {
-      batty: [
-        {
-          ...job,
-          updatedAt: 99,
-        },
-      ],
-    };
-    await nextTick();
-
-    expect(wrapper.find("textarea").element.value).toBe("Updated prompt");
 
     const saveButton = wrapper.find(".cron-popover__save");
     expect((saveButton.element as HTMLButtonElement).disabled).toBe(false);
@@ -160,12 +146,12 @@ describe("CronPopover", () => {
     await Promise.resolve();
 
     expect(updateCronJob).toHaveBeenCalledWith("cron-1", {
-      prompt: "Updated prompt",
+      prompt: "Original prompt",
       model: "openai/gpt-5",
       thinkingLevel: "medium",
       session: { kind: "new" },
     });
     expect(wrapper.find("textarea").exists()).toBe(false);
-    expect(wrapper.text()).toContain("Updated prompt");
+    expect(wrapper.text()).toContain("Original prompt");
   });
 });

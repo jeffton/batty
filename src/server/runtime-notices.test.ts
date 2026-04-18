@@ -26,7 +26,10 @@ describe("runtime notices", () => {
   });
 
   it("builds runtime notice messages", () => {
-    const message = buildRuntimeNoticeMessage(buildCronRuntimeNotice("every 1h"), 42) as AgentMessage;
+    const message = buildRuntimeNoticeMessage(
+      buildCronRuntimeNotice("every 1h"),
+      42,
+    ) as AgentMessage;
 
     expect(message).toMatchObject({
       role: "custom",

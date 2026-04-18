@@ -219,11 +219,13 @@ export async function runDetachedSubagentSession(
   const subagentNotice = buildSubagentRuntimeNotice();
   const preludeNotices = options.preludeNotices ?? [];
   const seedMessages = options.includeSessionContext
-    ? deps.getSessionMessagesForSubagent(
-        options.parentSessionId,
-        options.currentToolCallId,
-        options.prompt,
-      ).filter((message) => !matchesPreludeNotice(message, preludeNotices))
+    ? deps
+        .getSessionMessagesForSubagent(
+          options.parentSessionId,
+          options.currentToolCallId,
+          options.prompt,
+        )
+        .filter((message) => !matchesPreludeNotice(message, preludeNotices))
     : [];
   const initialTimestamp = Date.now();
   const preludeMessages = preludeNotices.map((notice, index) =>
@@ -241,7 +243,11 @@ export async function runDetachedSubagentSession(
     }
   }
 
-  appendRuntimeNoticeMessage(subagentSession, subagentNotice, initialTimestamp + initialMessages.length);
+  appendRuntimeNoticeMessage(
+    subagentSession,
+    subagentNotice,
+    initialTimestamp + initialMessages.length,
+  );
   options.onUpdate?.({
     content: [],
     details: buildSubagentDetails(

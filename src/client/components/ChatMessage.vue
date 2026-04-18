@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Cog } from "lucide-vue-next";
 import { computed } from "vue";
 import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE } from "@/server/runtime-notices";
 import AttachedFilesList from "@/client/components/AttachedFilesList.vue";
@@ -134,8 +135,15 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
     </div>
 
     <div v-else-if="props.message.role === 'custom'" class="message__body">
-      <div :class="['message__text', { 'message__runtime-notice': isRuntimeNotice }]">
-        {{ props.message.text }}
+      <div
+        :class="['message__system-bubble', { 'message__system-bubble--runtime': isRuntimeNotice }]"
+      >
+        <span class="message__system-icon" aria-hidden="true">
+          <Cog :size="16" />
+        </span>
+        <div class="message__text">
+          {{ props.message.text }}
+        </div>
       </div>
     </div>
 
@@ -257,13 +265,32 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
   line-height: 1.5;
 }
 
-.message__runtime-notice {
-  padding: 0.45rem 0.65rem;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--color-bg-panel) 75%, transparent);
-  border: 1px solid var(--color-border);
-  color: var(--color-text-muted);
-  font-size: 0.92rem;
+.message__system-bubble {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  max-width: 100%;
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.5rem;
+  background: var(--color-info-soft);
+  color: var(--color-info);
+}
+
+.message__system-bubble--runtime {
+  background: var(--color-info-soft);
+  color: var(--color-info);
+}
+
+.message__system-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  margin-top: 0.12rem;
+}
+
+.message__system-icon :deep(svg) {
+  display: block;
 }
 
 img {

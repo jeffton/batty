@@ -1,5 +1,6 @@
 import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vite-plus/test";
+import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE } from "@/server/runtime-notices";
 import ChatMessage from "@/client/components/ChatMessage.vue";
 import type { ToolDisplayState } from "@/client/lib/transcript";
 import type { UiMessage } from "@/shared/types";
@@ -129,5 +130,25 @@ describe("ChatMessage", () => {
     expect(wrapper.find("img.attached-files__preview").attributes("src")).toBe(
       "/api/sent-files/workspace/session/call/image-1",
     );
+  });
+
+  it("renders system messages as blue bubbles with a cog icon", () => {
+    const message: Extract<UiMessage, { role: "custom" }> = {
+      id: "custom-1",
+      role: "custom",
+      timestamp: 3,
+      customType: `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:subagent`,
+      text: "Subagent run started.",
+    };
+
+    const wrapper = mount(ChatMessage, {
+      props: {
+        message,
+      },
+    });
+
+    expect(wrapper.text()).toContain("Subagent run started.");
+    expect(wrapper.find(".message__system-bubble").exists()).toBe(true);
+    expect(wrapper.find(".message__system-icon svg").exists()).toBe(true);
   });
 });

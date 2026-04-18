@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE } from "@/server/runtime-notices";
 import AttachedFilesList from "@/client/components/AttachedFilesList.vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
 import MarkdownBlock from "@/client/components/MarkdownBlock.vue";
@@ -82,6 +83,12 @@ const assistantSegments = computed<AssistantSegment[]>(() => {
   ];
 });
 
+const isRuntimeNotice = computed(
+  () =>
+    props.message.role === "custom" &&
+    props.message.customType.startsWith(BATTY_RUNTIME_NOTICE_CUSTOM_TYPE),
+);
+
 const attachedFiles = computed<SentFileDescriptor[]>(() => {
   if (props.message.role !== "assistant") {
     return [];
@@ -127,7 +134,9 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
     </div>
 
     <div v-else-if="props.message.role === 'custom'" class="message__body">
-      <div class="message__text">{{ props.message.text }}</div>
+      <div :class="['message__text', { 'message__runtime-notice': isRuntimeNotice }]">
+        {{ props.message.text }}
+      </div>
     </div>
 
     <div v-else-if="props.message.role === 'toolResult'" class="message__body">
@@ -246,6 +255,15 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.5;
+}
+
+.message__runtime-notice {
+  padding: 0.45rem 0.65rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-bg-panel) 75%, transparent);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 0.92rem;
 }
 
 img {

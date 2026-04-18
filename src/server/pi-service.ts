@@ -62,7 +62,11 @@ import {
   localDayStartMs,
   toLocalIsoDate,
 } from "./cron-session";
-import { createSessionState, normalizeBlocks } from "./pi-state";
+import {
+  createSessionState,
+  normalizeBlocks,
+  transcriptMessagesFromSessionEntries,
+} from "./pi-state";
 import {
   battyAgentDir,
   battyResourcePaths,
@@ -75,7 +79,6 @@ import { sanitizeTerminalBlocks } from "./terminal-output";
 import { ProviderAuthService } from "./provider-auth";
 import {
   buildSubagentDetails,
-  buildSubagentPrompt,
   cloneMessagesForSubagent,
   extractAssistantText,
   findLastAssistantMessage,
@@ -87,6 +90,13 @@ import {
   SUBAGENT_TOOL_NAME,
   ZERO_USAGE,
 } from "./subagent";
+import {
+  BATTY_RUNTIME_NOTICE_CUSTOM_TYPE,
+  buildCronRuntimeNotice,
+  buildRuntimeNoticeEntryData,
+  buildSubagentRuntimeNotice,
+  type RuntimeNotice,
+} from "./runtime-notices";
 
 interface SessionSubscriber {
   (event: ServerEvent): void;
@@ -338,6 +348,7 @@ export class PiService {
   private readonly liveSessions = new Map<string, LiveSession>();
   private readonly subagentQueues = new Map<string, Promise<void>>();
   private readonly cronSessionResolutions = new Map<string, Promise<SessionState>>();
+  private readonly pendingRuntimeNotices = new Map<string, RuntimeNotice[]>();
   private readonly onAgentCompleted: ((session: SessionState) => Promise<void>) | undefined;
   private readonly onWorkspaceUpdated: ((workspaceId: string) => Promise<void>) | undefined;
   private readonly cronService: CronService;
@@ -445,18 +456,25 @@ export class PiService {
     session: CronJobSession;
     scheduleLabel: string;
   }): Promise<{ sessionId: string; sessionPath: string }> {
-    const cronPrompt = this.buildCronPrompt(job.prompt, job.scheduleLabel);
+    const cronNotice = buildCronRuntimeNotice(job.scheduleLabel);
     if (job.session.kind !== "daily") {
       const session = await this.createSession(job.workspace, {
         modelId: job.model,
         thinkingLevel: job.thinkingLevel,
       });
-      const current = this.getState(session.id);
-      await this.prompt(current.id, cronPrompt, [], current.isStreaming ? "followUp" : undefined);
+      const current = this.requireSession(session.id);
+      this.appendRuntimeNotice(current.session, cronNotice);
+      this.queueRuntimeNotice(current.session.sessionId, cronNotice);
+      await this.prompt(
+        session.id,
+        job.prompt,
+        [],
+        current.session.isStreaming ? "followUp" : undefined,
+      );
 
       return {
-        sessionId: current.sessionId,
-        sessionPath: this.requireSessionPath(current.id),
+        sessionId: current.session.sessionId,
+        sessionPath: this.requireSessionPath(session.id),
       };
     }
 
@@ -469,7 +487,7 @@ export class PiService {
     const includePreviousContext = job.session.includePreviousContext !== false;
     const toolCallId = `${SUBAGENT_TOOL_NAME}-${randomUUID()}`;
     const toolArgs = {
-      prompt: cronPrompt,
+      prompt: job.prompt,
       model: job.model,
       effort: job.thinkingLevel,
       includeSessionContext: includePreviousContext,
@@ -479,7 +497,7 @@ export class PiService {
       await webSession.session.agent.waitForIdle();
       this.setThinkingLevel(session.id, job.thinkingLevel);
       await this.setModel(session.id, job.model);
-      this.appendCronSubagentStart(webSession.session, toolCallId, toolArgs);
+      this.appendCronSubagentStart(webSession.session, toolCallId, toolArgs, cronNotice);
       webSession.activeTools.set(toolCallId, {
         toolCallId,
         toolName: SUBAGENT_TOOL_NAME,
@@ -495,7 +513,7 @@ export class PiService {
         const result = await this.runDetachedSubagentSession({
           workspace: job.workspace,
           parentSessionId: webSession.session.sessionId,
-          prompt: cronPrompt,
+          prompt: job.prompt,
           modelId: job.model,
           thinkingLevel: job.thinkingLevel,
           includeSessionContext: includePreviousContext,
@@ -552,6 +570,29 @@ export class PiService {
 
   private async waitForSubagentQueue(sessionId: string): Promise<void> {
     await (this.subagentQueues.get(sessionId) ?? Promise.resolve()).catch(() => undefined);
+  }
+
+  private queueRuntimeNotice(sessionId: string, notice: RuntimeNotice): void {
+    const pending = this.pendingRuntimeNotices.get(sessionId) ?? [];
+    pending.push(notice);
+    this.pendingRuntimeNotices.set(sessionId, pending);
+  }
+
+  private consumeRuntimeNotices(sessionId: string): RuntimeNotice[] {
+    const notices = this.pendingRuntimeNotices.get(sessionId) ?? [];
+    this.pendingRuntimeNotices.delete(sessionId);
+    return notices;
+  }
+
+  private appendRuntimeNotice(
+    session: AgentSession,
+    notice: RuntimeNotice,
+    timestamp = Date.now(),
+  ): void {
+    session.sessionManager.appendCustomEntry(
+      BATTY_RUNTIME_NOTICE_CUSTOM_TYPE,
+      buildRuntimeNoticeEntryData(notice, timestamp),
+    );
   }
 
   private async runSubagentSerial<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
@@ -669,6 +710,7 @@ export class PiService {
       true,
     );
 
+    const subagentNotice = buildSubagentRuntimeNotice();
     const seedMessages = options.includeSessionContext
       ? this.sessionMessagesForSubagent(
           options.parentSessionId,
@@ -686,6 +728,9 @@ export class PiService {
         subagentSession.sessionManager.appendMessage(message as Message);
       }
     }
+
+    this.appendRuntimeNotice(subagentSession, subagentNotice);
+    this.queueRuntimeNotice(subagentSession.sessionId, subagentNotice);
 
     let lastText = "";
     const unsubscribe = subagentSession.subscribe((event) => {
@@ -743,10 +788,8 @@ export class PiService {
       }
     }
 
-    const effectivePrompt = buildSubagentPrompt(options.prompt);
-
     try {
-      await subagentSession.prompt(effectivePrompt);
+      await subagentSession.prompt(options.prompt);
       const messages = structuredClone(subagentSession.messages) as AgentSession["messages"];
       const finalAssistant = findLastAssistantMessage(messages);
       const text = extractAssistantText(finalAssistant) || lastText;
@@ -830,17 +873,6 @@ export class PiService {
     }
   }
 
-  private buildCronPrompt(prompt: string, scheduleLabel: string): string {
-    const trimmedPrompt = prompt.trim();
-    return [
-      "[Cron trigger]\nThis turn was triggered by a Batty cron job.",
-      `Schedule: ${scheduleLabel}`,
-      trimmedPrompt,
-    ]
-      .filter((part) => part.length > 0)
-      .join("\n\n");
-  }
-
   private appendCronSubagentStart(
     session: AgentSession,
     toolCallId: string,
@@ -850,10 +882,12 @@ export class PiService {
       effort: string;
       includeSessionContext: boolean;
     },
+    notice: RuntimeNotice,
   ): void {
     const timestamp = Date.now();
+    this.appendRuntimeNotice(session, notice, timestamp);
     this.appendMessages(session, [
-      { role: "user", content: args.prompt, timestamp },
+      { role: "user", content: args.prompt, timestamp: timestamp + 1 },
       {
         role: "assistant",
         content: [
@@ -869,7 +903,7 @@ export class PiService {
         model: session.model?.id ?? args.model,
         usage: ZERO_USAGE,
         stopReason: "toolUse",
-        timestamp: timestamp + 1,
+        timestamp: timestamp + 2,
       } satisfies AssistantMessage,
     ]);
   }
@@ -1157,6 +1191,22 @@ export class PiService {
       additionalSkillPaths: resourcePaths.skills,
       additionalPromptTemplatePaths: resourcePaths.prompts,
       additionalThemePaths: resourcePaths.themes,
+      extensionFactories: [
+        (pi) => {
+          pi.on("before_agent_start", async (event, ctx) => {
+            const notices = this.consumeRuntimeNotices(ctx.sessionManager.getSessionId());
+            if (notices.length === 0) {
+              return undefined;
+            }
+
+            return {
+              systemPrompt: [event.systemPrompt, ...notices.map((notice) => notice.systemPrompt)]
+                .filter((part) => part.trim().length > 0)
+                .join("\n\n"),
+            };
+          });
+        },
+      ],
       agentsFilesOverride: (base) => ({
         agentsFiles: base.agentsFiles.filter((file) => {
           const resolved = path.resolve(file.path);
@@ -1274,7 +1324,9 @@ export class PiService {
     hasMoreMessages: boolean;
     messageIndexOffset: number;
   } {
-    const allMessages = webSession.session.messages;
+    const allMessages = transcriptMessagesFromSessionEntries(
+      webSession.session.sessionManager.getBranch(),
+    );
     const totalMessageCount = allMessages.length;
     const limit = clampMessagePageSize(options?.limit);
     const beforeIndex = messageIndexFromId(options?.beforeMessageId);

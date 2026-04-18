@@ -1,6 +1,7 @@
 import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { SessionState, ToolExecutionDetails, UiContentBlock, UiMessage } from "@/shared/types";
+import { runtimeNoticeMessageFromEntry } from "./runtime-notices";
 import { sanitizeTerminalBlocks, stripTerminalFormatting } from "./terminal-output";
 
 type AgentMessage = AgentSession["messages"][number];
@@ -175,6 +176,19 @@ export function normalizeMessages(messages: AgentMessage[], offset = 0): UiMessa
   return messages
     .map((message, index) => normalizeMessage(message, index + offset))
     .filter((message): message is UiMessage => Boolean(message));
+}
+
+export function transcriptMessagesFromSessionEntries(
+  entries: Array<{ type?: unknown; message?: unknown; customType?: unknown; data?: unknown }>,
+): AgentMessage[] {
+  return entries.flatMap((entry) => {
+    if (entry?.type === "message" && entry.message) {
+      return [entry.message as AgentMessage];
+    }
+
+    const noticeMessage = runtimeNoticeMessageFromEntry(entry);
+    return noticeMessage ? [noticeMessage] : [];
+  });
 }
 
 export interface SessionStateInput {

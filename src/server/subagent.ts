@@ -5,12 +5,6 @@ import type { SentFileDescriptor } from "@/shared/types";
 export const SUBAGENT_TOOL_NAME = "subagent";
 export const SUBAGENT_SESSION_CUSTOM_TYPE = "batty-subagent-session";
 export const SUBAGENT_EFFORT_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
-export const SUBAGENT_SESSION_NOTICE = [
-  "[Subagent session]",
-  "You are running inside a Batty subagent.",
-  `Do not call the ${SUBAGENT_TOOL_NAME} tool from this session.`,
-].join("\n");
-
 export type SubagentEffort = (typeof SUBAGENT_EFFORT_LEVELS)[number];
 
 export interface SubagentToolInput {
@@ -111,11 +105,6 @@ export function cloneMessagesForSubagent(
   }
 
   return cloned;
-}
-
-export function buildSubagentPrompt(prompt: string): string {
-  const trimmedPrompt = prompt.trim();
-  return [SUBAGENT_SESSION_NOTICE, trimmedPrompt].filter((part) => part.length > 0).join("\n\n");
 }
 
 export function extractAssistantText(

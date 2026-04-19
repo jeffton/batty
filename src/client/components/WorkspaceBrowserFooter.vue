@@ -57,9 +57,10 @@ function chooseAssistantWorkspace(workspaceId: string | undefined): void {
         class="workspace-browser-footer__spinner"
       />
       <CalendarDays v-else :size="16" />
-      <span>{{
-        props.startingDailySession ? "Opening…" : `Today in ${props.assistantWorkspaceLabel}`
-      }}</span>
+      <span v-if="props.startingDailySession">Opening…</span>
+      <span v-else>
+        Today in <strong>{{ props.assistantWorkspaceLabel }}</strong>
+      </span>
     </button>
 
     <div v-else class="workspace-browser-footer__spacer" />
@@ -153,6 +154,8 @@ function chooseAssistantWorkspace(workspaceId: string | undefined): void {
   flex: 0 0 auto;
   width: 2.75rem;
   padding-inline: 0;
+  background: transparent;
+  color: var(--color-text-muted);
 }
 
 @media (hover: hover) {

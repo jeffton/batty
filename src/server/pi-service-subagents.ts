@@ -261,6 +261,10 @@ export async function runDetachedSubagentSession(
       subagentSession.messages,
       undefined,
       {
+        generatedMessages: newlyGeneratedSubagentMessages(
+          subagentSession.messages,
+          seedMessageCount,
+        ),
         workspaceId: options.workspace.id,
         sessionId: subagentSession.sessionId,
         sessionPath: subagentSession.sessionFile,
@@ -301,7 +305,7 @@ export async function runDetachedSubagentSession(
         subagentSession.messages,
         finalAssistant,
         {
-          sentFileMessages: newlyGeneratedSubagentMessages(
+          generatedMessages: newlyGeneratedSubagentMessages(
             subagentSession.messages,
             seedMessageCount,
           ),
@@ -341,7 +345,7 @@ export async function runDetachedSubagentSession(
       messages,
       finalAssistant,
       {
-        sentFileMessages: generatedMessages,
+        generatedMessages,
         workspaceId: options.workspace.id,
         sessionId: subagentSession.sessionId,
         sessionPath: subagentSession.sessionFile,
@@ -375,7 +379,7 @@ export async function runDetachedSubagentSession(
       messages,
       finalAssistant,
       {
-        sentFileMessages: generatedMessages,
+        generatedMessages,
         workspaceId: options.workspace.id,
         sessionId: subagentSession.sessionId,
         sessionPath: subagentSession.sessionFile,

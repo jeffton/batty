@@ -140,6 +140,108 @@ describe("runDetachedSubagentSession", () => {
     ]);
   });
 
+  it("does not leak inherited attachments into the initial subagent update", async () => {
+    const sessionMessages: AgentMessage[] = [];
+    const updates: Array<{ content: Array<{ type: "text"; text: string }>; details: any }> = [];
+    const copiedMessages: AgentMessage[] = [
+      {
+        role: "toolResult",
+        toolCallId: "attach-old",
+        toolName: "attach-files",
+        content: [{ type: "text", text: "Attached 1 file for the user." }],
+        details: {
+          sentFiles: [
+            {
+              id: "old-file",
+              name: "old.png",
+              size: 10,
+              mimeType: "image/png",
+              kind: "image",
+              downloadUrl: "/api/sent-files/workspace/session/tool/old-file?download=1",
+              previewUrl: "/api/sent-files/workspace/session/tool/old-file",
+            },
+          ],
+        },
+        isError: false,
+        timestamp: 1,
+      } as AgentMessage,
+    ];
+
+    const subagentSession = {
+      sessionId: "subagent-session-inherited-files",
+      sessionFile: "/tmp/subagent-session-inherited-files.jsonl",
+      messages: sessionMessages,
+      isStreaming: false,
+      agent: {
+        state: {
+          messages: sessionMessages,
+        },
+      },
+      sessionManager: {
+        appendCustomEntry() {
+          return undefined;
+        },
+        appendMessage() {
+          return undefined;
+        },
+      },
+      subscribe() {
+        return () => undefined;
+      },
+      async prompt() {
+        return undefined;
+      },
+      async abort() {
+        return undefined;
+      },
+    } as unknown as AgentSession;
+
+    await runDetachedSubagentSession(
+      {
+        async createPiAgentSession() {
+          return { session: subagentSession };
+        },
+        attachSession(workspace, session) {
+          return {
+            id: "web-subagent-inherited-files",
+            workspace,
+            session,
+            subscribers: new Set(),
+            activeTools: new Map(),
+            openedAt: 0,
+            ephemeral: true,
+          };
+        },
+        disposeWebSession: vi.fn(),
+        getSessionMessagesForSubagent() {
+          return copiedMessages;
+        },
+        workspaceSessionDir: "/tmp",
+      },
+      {
+        workspace: {
+          id: "batty",
+          label: "Batty",
+          path: "/root/github/batty",
+          kind: "workspace",
+          isPinned: true,
+        },
+        parentSessionId: "parent-session-inherited-files",
+        prompt: "Inspect the issue",
+        modelId: "openai/gpt-5",
+        thinkingLevel: "medium",
+        includeSessionContext: true,
+        respondIn: "session",
+        onUpdate: (partial) => {
+          updates.push(partial);
+        },
+      },
+    );
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.details).not.toHaveProperty("sentFiles");
+  });
+
   it("prepends cron notices in subagent sessions and avoids duplicate copied notices", async () => {
     const appendedMessages: AgentMessage[] = [];
     const sessionMessages: AgentMessage[] = [];

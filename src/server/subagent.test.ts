@@ -369,7 +369,7 @@ describe("subagent message helpers", () => {
         },
         messages,
         undefined,
-        { sentFileMessages: [generated as unknown as AgentMessage] },
+        { generatedMessages: [generated as unknown as AgentMessage] },
       ),
     ).toMatchObject({
       sentFiles: [

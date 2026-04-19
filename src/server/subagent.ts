@@ -207,13 +207,13 @@ export function buildSubagentDetails(
   messages: AgentMessage[],
   finalAssistant: AssistantMessage | undefined,
   options?: {
-    sentFileMessages?: AgentMessage[];
+    generatedMessages?: AgentMessage[];
     workspaceId?: string;
     sessionId?: string;
     sessionPath?: string;
   },
 ): SubagentToolDetails {
-  const sentFiles = collectSentFiles(options?.sentFileMessages ?? messages);
+  const sentFiles = collectSentFiles(options?.generatedMessages ?? []);
   return {
     subagent: {
       prompt: input.prompt,

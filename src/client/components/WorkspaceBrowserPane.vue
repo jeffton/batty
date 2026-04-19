@@ -1,18 +1,7 @@
 <script setup lang="ts">
-import {
-  Search,
-  Plus,
-  LogOut,
-  LoaderCircle,
-  Wifi,
-  WifiOff,
-  KeyRound,
-  Star,
-  CalendarDays,
-  EllipsisVertical,
-  Check,
-} from "lucide-vue-next";
-import ProviderAuthPopover from "@/client/components/ProviderAuthPopover.vue";
+import { Search, Plus, LoaderCircle, Star, CalendarDays } from "lucide-vue-next";
+import WorkspaceBrowserFooter from "@/client/components/WorkspaceBrowserFooter.vue";
+import WorkspaceBrowserHeader from "@/client/components/WorkspaceBrowserHeader.vue";
 import { computed, nextTick, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { formatShortDateTime } from "@/client/lib/formatting";
@@ -45,11 +34,11 @@ const actionsDisabled = computed(() => store.connectionState !== "online");
 const { setPaneTransition } = usePaneTransition();
 
 const selectedWorkspace = computed(() => store.selectedWorkspace);
+const assistantWorkspace = computed(() =>
+  store.workspaces.find((workspace) => workspace.isAssistant),
+);
 const assistantMenuDisabled = computed(
   () => !selectedWorkspace.value || actionsDisabled.value || assistantMenuPending.value,
-);
-const todayButtonLabel = computed(() =>
-  selectedWorkspace.value ? `Today in ${selectedWorkspace.value.label}` : "Today",
 );
 
 const filteredWorkspaces = computed(() => {
@@ -115,11 +104,6 @@ async function toggleWorkspacePin(workspaceId: string): Promise<void> {
   } catch (error) {
     console.error(error);
   }
-}
-
-function closePopover(id: string): void {
-  const element = document.getElementById(id) as HTMLElement | null;
-  element?.hidePopover?.();
 }
 
 function resetCreateWorkspaceForm(): void {
@@ -195,13 +179,13 @@ async function startSession(): Promise<void> {
 }
 
 async function openTodaySession(): Promise<void> {
-  if (!selectedWorkspace.value || actionsDisabled.value || startingDailySession.value) {
+  if (!assistantWorkspace.value || actionsDisabled.value || startingDailySession.value) {
     return;
   }
 
   startingDailySession.value = true;
   try {
-    const session = await store.startDailySession(selectedWorkspace.value.id);
+    const session = await store.startDailySession(assistantWorkspace.value.id);
     setPaneTransition("slide-from-right");
     await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
   } finally {
@@ -217,7 +201,6 @@ async function toggleAssistantWorkspace(): Promise<void> {
   assistantMenuPending.value = true;
   try {
     await store.toggleWorkspaceAssistant(selectedWorkspace.value.id);
-    closePopover(ASSISTANT_MENU_POPOVER_ID);
   } catch (error) {
     console.error(error);
   } finally {
@@ -257,56 +240,13 @@ watch(
 
 <template>
   <section class="workspace-browser-pane">
-    <header class="workspace-browser-pane__header">
-      <div class="workspace-browser-pane__brand">
-        <img src="/favicon.png" alt="Batty" class="workspace-browser-pane__brand-icon" />
-        <div class="workspace-browser-pane__brand-copy">
-          <h1>Batty</h1>
-        </div>
-      </div>
-
-      <div class="workspace-browser-pane__header-actions">
-        <span
-          class="workspace-browser-pane__status"
-          :aria-label="connectionDescription"
-          :title="connectionDescription"
-        >
-          <Wifi
-            v-if="store.connectionState === 'online'"
-            :size="15"
-            class="workspace-browser-pane__status-icon workspace-browser-pane__status-icon--online"
-          />
-          <LoaderCircle
-            v-else-if="store.connectionState === 'connecting'"
-            :size="15"
-            class="workspace-browser-pane__status-icon workspace-browser-pane__status-icon--spin"
-          />
-          <WifiOff
-            v-else
-            :size="15"
-            class="workspace-browser-pane__status-icon workspace-browser-pane__status-icon--offline"
-          />
-        </span>
-
-        <button
-          class="workspace-browser-pane__header-btn"
-          type="button"
-          :style="{ 'anchor-name': PROVIDER_AUTH_POPOVER_ANCHOR }"
-          :popovertarget="PROVIDER_AUTH_POPOVER_ID"
-        >
-          <KeyRound :size="14" /> Auth
-        </button>
-
-        <ProviderAuthPopover
-          :popover-id="PROVIDER_AUTH_POPOVER_ID"
-          :anchor-name="PROVIDER_AUTH_POPOVER_ANCHOR"
-        />
-
-        <button class="workspace-browser-pane__logout" @click="store.logout">
-          <LogOut :size="14" /> Log out
-        </button>
-      </div>
-    </header>
+    <WorkspaceBrowserHeader
+      :popover-id="PROVIDER_AUTH_POPOVER_ID"
+      :popover-anchor="PROVIDER_AUTH_POPOVER_ANCHOR"
+      :connection-state="store.connectionState"
+      :connection-description="connectionDescription"
+      @logout="store.logout"
+    />
 
     <div v-if="actionsDisabled" class="workspace-browser-pane__notice">
       Offline or reconnecting — workspace and session actions are disabled.
@@ -490,53 +430,19 @@ watch(
       </section>
     </div>
 
-    <footer class="workspace-browser-pane__footer">
-      <button
-        class="workspace-browser-pane__footer-btn workspace-browser-pane__footer-btn--primary"
-        type="button"
-        :disabled="!selectedWorkspace || actionsDisabled || startingDailySession"
-        @click="openTodaySession"
-      >
-        <LoaderCircle
-          v-if="startingDailySession"
-          :size="16"
-          class="workspace-browser-pane__spinner"
-        />
-        <CalendarDays v-else :size="16" />
-        <span>{{ startingDailySession ? "Opening…" : todayButtonLabel }}</span>
-      </button>
-
-      <button
-        class="workspace-browser-pane__footer-btn workspace-browser-pane__footer-btn--icon"
-        type="button"
-        :style="{ 'anchor-name': ASSISTANT_MENU_POPOVER_ANCHOR }"
-        :disabled="assistantMenuDisabled"
-        :popovertarget="ASSISTANT_MENU_POPOVER_ID"
-        aria-label="Workspace menu"
-        title="Workspace menu"
-      >
-        <EllipsisVertical :size="16" />
-      </button>
-
-      <div
-        :id="ASSISTANT_MENU_POPOVER_ID"
-        class="workspace-browser-pane__menu"
-        popover="auto"
-        :style="{ positionAnchor: ASSISTANT_MENU_POPOVER_ANCHOR }"
-      >
-        <button
-          class="workspace-browser-pane__menu-item"
-          type="button"
-          :disabled="assistantMenuPending || !selectedWorkspace"
-          @click="toggleAssistantWorkspace"
-        >
-          <span class="workspace-browser-pane__menu-icon" aria-hidden="true">
-            <Check v-if="selectedWorkspace?.isAssistant" :size="15" />
-          </span>
-          <span>{{ selectedWorkspace ? `Use ${selectedWorkspace.label} as assistant` : "" }}</span>
-        </button>
-      </div>
-    </footer>
+    <WorkspaceBrowserFooter
+      :assistant-workspace-label="assistantWorkspace?.label"
+      :selected-workspace-label="selectedWorkspace?.label"
+      :selected-workspace-is-assistant="Boolean(selectedWorkspace?.isAssistant)"
+      :actions-disabled="actionsDisabled"
+      :assistant-menu-disabled="assistantMenuDisabled"
+      :starting-daily-session="startingDailySession"
+      :assistant-menu-pending="assistantMenuPending"
+      :menu-popover-id="ASSISTANT_MENU_POPOVER_ID"
+      :menu-popover-anchor="ASSISTANT_MENU_POPOVER_ANCHOR"
+      @open-today-session="openTodaySession"
+      @toggle-assistant-workspace="toggleAssistantWorkspace"
+    />
   </section>
 </template>
 
@@ -549,96 +455,6 @@ watch(
   flex-direction: column;
   background: var(--color-bg-app);
   overflow: hidden;
-}
-
-.workspace-browser-pane__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: calc(var(--safe-area-top) + 0.9rem) calc(var(--safe-area-right) + 1rem) 0.9rem
-    calc(var(--safe-area-left) + 1rem);
-  border-bottom: 1px solid var(--color-border-soft);
-  background: var(--color-bg-panel);
-}
-
-.workspace-browser-pane__brand {
-  display: flex;
-  align-items: center;
-  gap: 0.8rem;
-  min-width: 0;
-}
-
-.workspace-browser-pane__brand-icon {
-  width: 2.4rem;
-  height: 2.4rem;
-  border-radius: 0.65rem;
-  flex-shrink: 0;
-}
-
-.workspace-browser-pane__brand-copy {
-  min-width: 0;
-}
-
-.workspace-browser-pane__brand-copy h1 {
-  margin: 0;
-  font-size: 1.2rem;
-  line-height: 1.1;
-  color: var(--color-text-strong);
-}
-
-.workspace-browser-pane__header-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  flex-shrink: 0;
-}
-
-.workspace-browser-pane__status,
-.workspace-browser-pane__status-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.workspace-browser-pane__status-icon--online {
-  color: var(--color-success);
-}
-
-.workspace-browser-pane__status-icon--offline {
-  color: var(--color-warning);
-}
-
-.workspace-browser-pane__status-icon--spin {
-  color: var(--color-text-subtle);
-  animation: workspace-browser-pane-spin 0.85s linear infinite;
-}
-
-.workspace-browser-pane__header-btn,
-.workspace-browser-pane__logout {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  border: 0;
-  border-radius: 0.55rem;
-  background: transparent;
-  color: var(--color-text-muted);
-  padding: 0.45rem 0.65rem;
-  transition:
-    background 80ms ease,
-    color 80ms ease;
-}
-
-@media (hover: hover) {
-  .workspace-browser-pane__header-btn:hover {
-    background: var(--color-bg-elevated);
-    color: var(--color-text-strong);
-  }
-
-  .workspace-browser-pane__logout:hover {
-    background: var(--color-error-soft);
-    color: var(--color-error);
-  }
 }
 
 .workspace-browser-pane__notice {
@@ -957,111 +773,6 @@ watch(
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.workspace-browser-pane__footer {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  padding: 0.65rem calc(var(--safe-area-right) + 1rem) calc(var(--safe-area-bottom) + 0.65rem)
-    calc(var(--safe-area-left) + 1rem);
-  border-top: 1px solid var(--color-border-soft);
-  background: var(--color-bg-panel);
-}
-
-.workspace-browser-pane__footer-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.45rem;
-  border: 0;
-  border-radius: 0.6rem;
-  background: var(--color-bg-elevated);
-  color: inherit;
-  padding: 0.7rem 0.9rem;
-  transition:
-    background 80ms ease,
-    color 80ms ease;
-}
-
-.workspace-browser-pane__footer-btn--primary {
-  flex: 1;
-  justify-content: flex-start;
-  background: var(--color-bg-selection);
-  color: var(--color-accent-strong);
-  font-weight: 600;
-}
-
-.workspace-browser-pane__footer-btn--icon {
-  flex: 0 0 auto;
-  width: 2.75rem;
-  padding-inline: 0;
-}
-
-@media (hover: hover) {
-  .workspace-browser-pane__footer-btn:hover:not(:disabled) {
-    background: var(--color-bg-hover);
-  }
-
-  .workspace-browser-pane__footer-btn--primary:hover:not(:disabled) {
-    background: var(--color-accent-soft);
-  }
-}
-
-.workspace-browser-pane__footer-btn:disabled,
-.workspace-browser-pane__menu-item:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
-.workspace-browser-pane__menu {
-  margin: 0;
-  inset: auto;
-  min-width: 16rem;
-  padding: 0.35rem;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.8rem;
-  background: var(--color-bg-overlay);
-  color: var(--color-text);
-  box-shadow: var(--color-shadow-popover);
-  position-area: top span-right;
-}
-
-.workspace-browser-pane__menu:popover-open {
-  display: block;
-}
-
-.workspace-browser-pane__menu::backdrop {
-  background: transparent;
-}
-
-.workspace-browser-pane__menu-item {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  width: 100%;
-  border: 0;
-  border-radius: 0.55rem;
-  background: transparent;
-  color: inherit;
-  padding: 0.65rem 0.7rem;
-  text-align: left;
-}
-
-@media (hover: hover) {
-  .workspace-browser-pane__menu-item:hover:not(:disabled) {
-    background: var(--color-bg-elevated);
-  }
-}
-
-.workspace-browser-pane__menu-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1rem;
-  color: var(--color-accent-strong);
-  flex-shrink: 0;
 }
 
 .workspace-browser-pane__spinner {

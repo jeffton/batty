@@ -99,6 +99,7 @@ defineExpose({
   min-width: 0;
   height: 100%;
   overflow: auto;
+  overscroll-behavior: contain;
   overflow-anchor: none;
   padding: 0.6rem calc(var(--safe-area-right) + 0.8rem) 0.2rem calc(var(--safe-area-left) + 0.8rem);
   background: var(--color-bg-app);

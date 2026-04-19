@@ -236,6 +236,7 @@ onBeforeUnmount(() => {
   color: var(--color-text);
   box-shadow: var(--color-shadow-popover);
   overflow: hidden;
+  overscroll-behavior: contain;
 }
 
 .subagent-session-popover:popover-open {

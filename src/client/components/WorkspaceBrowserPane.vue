@@ -193,14 +193,14 @@ async function openTodaySession(): Promise<void> {
   }
 }
 
-async function toggleAssistantWorkspace(): Promise<void> {
-  if (!selectedWorkspace.value || actionsDisabled.value || assistantMenuPending.value) {
+async function chooseAssistantWorkspace(workspaceId: string): Promise<void> {
+  if (actionsDisabled.value || assistantMenuPending.value) {
     return;
   }
 
   assistantMenuPending.value = true;
   try {
-    await store.toggleWorkspaceAssistant(selectedWorkspace.value.id);
+    await store.setWorkspaceAssistant(workspaceId);
   } catch (error) {
     console.error(error);
   } finally {
@@ -431,7 +431,9 @@ watch(
     </div>
 
     <WorkspaceBrowserFooter
+      :assistant-workspace-id="assistantWorkspace?.id"
       :assistant-workspace-label="assistantWorkspace?.label"
+      :selected-workspace-id="selectedWorkspace?.id"
       :selected-workspace-label="selectedWorkspace?.label"
       :selected-workspace-is-assistant="Boolean(selectedWorkspace?.isAssistant)"
       :actions-disabled="actionsDisabled"
@@ -441,7 +443,7 @@ watch(
       :menu-popover-id="ASSISTANT_MENU_POPOVER_ID"
       :menu-popover-anchor="ASSISTANT_MENU_POPOVER_ANCHOR"
       @open-today-session="openTodaySession"
-      @toggle-assistant-workspace="toggleAssistantWorkspace"
+      @choose-assistant-workspace="chooseAssistantWorkspace"
     />
   </section>
 </template>

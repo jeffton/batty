@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { CalendarDays, Check, EllipsisVertical, LoaderCircle } from "lucide-vue-next";
 
 const props = defineProps<{
+  assistantWorkspaceId?: string;
   assistantWorkspaceLabel?: string;
+  selectedWorkspaceId?: string;
   selectedWorkspaceLabel?: string;
   selectedWorkspaceIsAssistant: boolean;
   actionsDisabled: boolean;
@@ -13,10 +16,30 @@ const props = defineProps<{
   menuPopoverAnchor: string;
 }>();
 
+const showAssistantWorkspaceMenuItem = computed(
+  () =>
+    Boolean(props.assistantWorkspaceLabel) &&
+    props.assistantWorkspaceLabel !== props.selectedWorkspaceLabel,
+);
+
 const emit = defineEmits<{
   openTodaySession: [];
-  toggleAssistantWorkspace: [];
+  chooseAssistantWorkspace: [workspaceId: string];
 }>();
+
+function closePopover(): void {
+  const element = document.getElementById(props.menuPopoverId) as HTMLElement | null;
+  element?.hidePopover?.();
+}
+
+function chooseAssistantWorkspace(workspaceId: string | undefined): void {
+  if (!workspaceId) {
+    return;
+  }
+
+  emit("chooseAssistantWorkspace", workspaceId);
+  closePopover();
+}
 </script>
 
 <template>
@@ -60,10 +83,25 @@ const emit = defineEmits<{
       :style="{ positionAnchor: props.menuPopoverAnchor }"
     >
       <button
+        v-if="showAssistantWorkspaceMenuItem"
+        class="workspace-browser-footer__menu-item"
+        type="button"
+        :disabled="props.assistantMenuPending"
+        @click="chooseAssistantWorkspace(props.assistantWorkspaceId)"
+      >
+        <span class="workspace-browser-footer__menu-icon" aria-hidden="true">
+          <Check :size="15" />
+        </span>
+        <span>
+          Use <strong>{{ props.assistantWorkspaceLabel }}</strong> as assistant
+        </span>
+      </button>
+
+      <button
         class="workspace-browser-footer__menu-item"
         type="button"
         :disabled="props.assistantMenuPending || !props.selectedWorkspaceLabel"
-        @click="emit('toggleAssistantWorkspace')"
+        @click="chooseAssistantWorkspace(props.selectedWorkspaceId)"
       >
         <span class="workspace-browser-footer__menu-icon" aria-hidden="true">
           <Check v-if="props.selectedWorkspaceIsAssistant" :size="15" />

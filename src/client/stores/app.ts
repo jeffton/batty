@@ -324,28 +324,38 @@ export const useAppStore = defineStore("app", {
       }
     },
 
-    async toggleWorkspaceAssistant(workspaceId: string): Promise<void> {
+    async setWorkspaceAssistant(workspaceId: string): Promise<void> {
       const workspace = this.workspaces.find((candidate) => candidate.id === workspaceId);
       if (!workspace) {
         return;
       }
 
       const previousWorkspaces = this.workspaces;
-      const nextSelected = !workspace.isAssistant;
       this.workspaces = this.workspaces.map((candidate) => ({
         ...candidate,
-        isAssistant: candidate.id === workspaceId ? nextSelected : false,
+        isAssistant: candidate.id === workspaceId,
       }));
 
       try {
-        this.workspaces = uniqueWorkspaces(
-          await setWorkspaceAssistantRequest(workspaceId, nextSelected),
-        );
+        this.workspaces = uniqueWorkspaces(await setWorkspaceAssistantRequest(workspaceId, true));
         this.sortWorkspaces();
       } catch (error) {
         this.workspaces = previousWorkspaces;
         throw error;
       }
+    },
+
+    async toggleWorkspaceAssistant(workspaceId: string): Promise<void> {
+      const workspace = this.workspaces.find((candidate) => candidate.id === workspaceId);
+      if (!workspace) {
+        return;
+      }
+
+      if (workspace.isAssistant) {
+        return;
+      }
+
+      await this.setWorkspaceAssistant(workspaceId);
     },
 
     updateSessionSummary(session: SessionState): void {

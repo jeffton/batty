@@ -31,6 +31,7 @@ vi.mock("@/client/lib/api", () => ({
   setProviderApiKey: vi.fn(),
   setSessionModel: vi.fn(),
   setSessionThinkingLevel: vi.fn(),
+  setWorkspaceAssistant: vi.fn(),
   setWorkspacePinned: vi.fn(),
   startOpenAICodexProviderAuth: vi.fn(),
   updateCronJob,
@@ -87,6 +88,7 @@ describe("CronPopover", () => {
         path: "/root/github/batty",
         kind: "workspace",
         isPinned: false,
+        isAssistant: false,
       },
     ];
     store.selectedWorkspaceId = "batty";

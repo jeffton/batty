@@ -20,6 +20,7 @@ import {
   setProviderApiKey,
   setSessionModel,
   setSessionThinkingLevel,
+  setWorkspaceAssistant as setWorkspaceAssistantRequest,
   setWorkspacePinned as setWorkspacePinnedRequest,
   startOpenAICodexProviderAuth,
   updateCronJob as updateCronJobRequest,
@@ -319,6 +320,30 @@ export const useAppStore = defineStore("app", {
               : candidate,
           ),
         );
+        throw error;
+      }
+    },
+
+    async toggleWorkspaceAssistant(workspaceId: string): Promise<void> {
+      const workspace = this.workspaces.find((candidate) => candidate.id === workspaceId);
+      if (!workspace) {
+        return;
+      }
+
+      const previousWorkspaces = this.workspaces;
+      const nextSelected = !workspace.isAssistant;
+      this.workspaces = this.workspaces.map((candidate) => ({
+        ...candidate,
+        isAssistant: candidate.id === workspaceId ? nextSelected : false,
+      }));
+
+      try {
+        this.workspaces = uniqueWorkspaces(
+          await setWorkspaceAssistantRequest(workspaceId, nextSelected),
+        );
+        this.sortWorkspaces();
+      } catch (error) {
+        this.workspaces = previousWorkspaces;
         throw error;
       }
     },

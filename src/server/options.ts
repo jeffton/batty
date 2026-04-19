@@ -9,6 +9,7 @@ export interface StoredAppOptions {
   cronDailySessionStartTime?: string;
   braveSearchKey?: string;
   pinnedWorkspaceIds?: string[];
+  assistantWorkspaceId?: string;
 }
 
 export interface AppOptions {
@@ -18,6 +19,7 @@ export interface AppOptions {
   cronDailySessionStartTime: string;
   braveSearchKey?: string;
   pinnedWorkspaceIds: string[];
+  assistantWorkspaceId?: string;
 }
 
 const DEFAULT_CRON_DAILY_SESSION_START_TIME = "04:00";
@@ -92,6 +94,11 @@ function normalizeStoredOptions(options: StoredAppOptions | undefined): StoredAp
           (value): value is string => typeof value === "string" && value.trim().length > 0,
         )
       : [],
+    assistantWorkspaceId:
+      typeof options?.assistantWorkspaceId === "string" &&
+      options.assistantWorkspaceId.trim().length > 0
+        ? options.assistantWorkspaceId.trim()
+        : undefined,
   };
 }
 
@@ -160,6 +167,20 @@ export async function setWorkspacePinned(
   const nextOptions: AppOptions = {
     ...options,
     pinnedWorkspaceIds: nextPinnedWorkspaceIds,
+  };
+
+  await writeStoredOptions(projectRoot, nextOptions);
+  return nextOptions;
+}
+
+export async function setAssistantWorkspace(
+  projectRoot: string,
+  workspaceId: string | undefined,
+): Promise<AppOptions> {
+  const options = await loadAppOptions(projectRoot);
+  const nextOptions: AppOptions = {
+    ...options,
+    assistantWorkspaceId: workspaceId,
   };
 
   await writeStoredOptions(projectRoot, nextOptions);

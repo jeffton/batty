@@ -11,6 +11,7 @@ describe("uniqueWorkspaces", () => {
         path: "/root/github/batty",
         kind: "workspace",
         isPinned: false,
+        isAssistant: false,
       },
       {
         id: "babyface",
@@ -18,6 +19,7 @@ describe("uniqueWorkspaces", () => {
         path: "/root/github/babyface",
         kind: "workspace",
         isPinned: false,
+        isAssistant: false,
       },
       {
         id: "babyface copy",
@@ -25,6 +27,7 @@ describe("uniqueWorkspaces", () => {
         path: "/root/github/babyface",
         kind: "workspace",
         isPinned: false,
+        isAssistant: false,
       },
     ];
 
@@ -35,6 +38,7 @@ describe("uniqueWorkspaces", () => {
         path: "/root/github/batty",
         kind: "workspace",
         isPinned: false,
+        isAssistant: false,
       },
       {
         id: "babyface",
@@ -42,6 +46,7 @@ describe("uniqueWorkspaces", () => {
         path: "/root/github/babyface",
         kind: "workspace",
         isPinned: false,
+        isAssistant: false,
       },
     ]);
   });
@@ -50,15 +55,30 @@ describe("uniqueWorkspaces", () => {
 describe("sortWorkspacesByRecentSession", () => {
   it("orders workspaces alphabetically when nothing is pinned", () => {
     const workspaces: WorkspaceInfo[] = [
-      { id: "zeta", label: "zeta", path: "/root/github/zeta", kind: "workspace", isPinned: false },
+      {
+        id: "zeta",
+        label: "zeta",
+        path: "/root/github/zeta",
+        kind: "workspace",
+        isPinned: false,
+        isAssistant: false,
+      },
       {
         id: "alpha",
         label: "alpha",
         path: "/root/github/alpha",
         kind: "workspace",
         isPinned: false,
+        isAssistant: false,
       },
-      { id: "beta", label: "beta", path: "/root/github/beta", kind: "workspace", isPinned: false },
+      {
+        id: "beta",
+        label: "beta",
+        path: "/root/github/beta",
+        kind: "workspace",
+        isPinned: false,
+        isAssistant: false,
+      },
     ];
 
     expect(sortWorkspacesByRecentSession(workspaces).map(({ id }) => id)).toEqual([
@@ -70,21 +90,37 @@ describe("sortWorkspacesByRecentSession", () => {
 
   it("keeps pinned workspaces on top and sorts each group alphabetically", () => {
     const workspaces: WorkspaceInfo[] = [
-      { id: "zeta", label: "zeta", path: "/root/github/zeta", kind: "workspace", isPinned: true },
+      {
+        id: "zeta",
+        label: "zeta",
+        path: "/root/github/zeta",
+        kind: "workspace",
+        isPinned: true,
+        isAssistant: false,
+      },
       {
         id: "alpha",
         label: "alpha",
         path: "/root/github/alpha",
         kind: "workspace",
         isPinned: false,
+        isAssistant: false,
       },
-      { id: "beta", label: "beta", path: "/root/github/beta", kind: "workspace", isPinned: true },
+      {
+        id: "beta",
+        label: "beta",
+        path: "/root/github/beta",
+        kind: "workspace",
+        isPinned: true,
+        isAssistant: false,
+      },
       {
         id: "delta",
         label: "delta",
         path: "/root/github/delta",
         kind: "workspace",
         isPinned: false,
+        isAssistant: false,
       },
     ];
 

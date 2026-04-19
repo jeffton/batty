@@ -9,6 +9,8 @@ import {
   KeyRound,
   Star,
   CalendarDays,
+  EllipsisVertical,
+  Check,
 } from "lucide-vue-next";
 import ProviderAuthPopover from "@/client/components/ProviderAuthPopover.vue";
 import { computed, nextTick, ref, watch } from "vue";
@@ -22,6 +24,8 @@ import { useAppStore } from "@/client/stores/app";
 
 const PROVIDER_AUTH_POPOVER_ID = "workspace-provider-auth-popover";
 const PROVIDER_AUTH_POPOVER_ANCHOR = "--workspace-provider-auth-anchor";
+const ASSISTANT_MENU_POPOVER_ID = "workspace-assistant-menu-popover";
+const ASSISTANT_MENU_POPOVER_ANCHOR = "--workspace-assistant-menu-anchor";
 
 const store = useAppStore();
 const router = useRouter();
@@ -33,10 +37,20 @@ const createWorkspaceError = ref("");
 const creatingWorkspace = ref(false);
 const switchingWorkspaceId = ref<string>();
 const startingSession = ref(false);
+const startingDailySession = ref(false);
 const openingSessionId = ref<string>();
+const assistantMenuPending = ref(false);
 const createWorkspaceInput = ref<HTMLInputElement>();
 const actionsDisabled = computed(() => store.connectionState !== "online");
 const { setPaneTransition } = usePaneTransition();
+
+const selectedWorkspace = computed(() => store.selectedWorkspace);
+const assistantMenuDisabled = computed(
+  () => !selectedWorkspace.value || actionsDisabled.value || assistantMenuPending.value,
+);
+const todayButtonLabel = computed(() =>
+  selectedWorkspace.value ? `Today in ${selectedWorkspace.value.label}` : "Today",
+);
 
 const filteredWorkspaces = computed(() => {
   const query = workspaceFilter.value.toLowerCase().trim();
@@ -101,6 +115,11 @@ async function toggleWorkspacePin(workspaceId: string): Promise<void> {
   } catch (error) {
     console.error(error);
   }
+}
+
+function closePopover(id: string): void {
+  const element = document.getElementById(id) as HTMLElement | null;
+  element?.hidePopover?.();
 }
 
 function resetCreateWorkspaceForm(): void {
@@ -172,6 +191,37 @@ async function startSession(): Promise<void> {
     await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
   } finally {
     startingSession.value = false;
+  }
+}
+
+async function openTodaySession(): Promise<void> {
+  if (!selectedWorkspace.value || actionsDisabled.value || startingDailySession.value) {
+    return;
+  }
+
+  startingDailySession.value = true;
+  try {
+    const session = await store.startDailySession(selectedWorkspace.value.id);
+    setPaneTransition("slide-from-right");
+    await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
+  } finally {
+    startingDailySession.value = false;
+  }
+}
+
+async function toggleAssistantWorkspace(): Promise<void> {
+  if (!selectedWorkspace.value || actionsDisabled.value || assistantMenuPending.value) {
+    return;
+  }
+
+  assistantMenuPending.value = true;
+  try {
+    await store.toggleWorkspaceAssistant(selectedWorkspace.value.id);
+    closePopover(ASSISTANT_MENU_POPOVER_ID);
+  } catch (error) {
+    console.error(error);
+  } finally {
+    assistantMenuPending.value = false;
   }
 }
 
@@ -439,6 +489,54 @@ watch(
         </div>
       </section>
     </div>
+
+    <footer class="workspace-browser-pane__footer">
+      <button
+        class="workspace-browser-pane__footer-btn workspace-browser-pane__footer-btn--primary"
+        type="button"
+        :disabled="!selectedWorkspace || actionsDisabled || startingDailySession"
+        @click="openTodaySession"
+      >
+        <LoaderCircle
+          v-if="startingDailySession"
+          :size="16"
+          class="workspace-browser-pane__spinner"
+        />
+        <CalendarDays v-else :size="16" />
+        <span>{{ startingDailySession ? "Opening…" : todayButtonLabel }}</span>
+      </button>
+
+      <button
+        class="workspace-browser-pane__footer-btn workspace-browser-pane__footer-btn--icon"
+        type="button"
+        :style="{ 'anchor-name': ASSISTANT_MENU_POPOVER_ANCHOR }"
+        :disabled="assistantMenuDisabled"
+        :popovertarget="ASSISTANT_MENU_POPOVER_ID"
+        aria-label="Workspace menu"
+        title="Workspace menu"
+      >
+        <EllipsisVertical :size="16" />
+      </button>
+
+      <div
+        :id="ASSISTANT_MENU_POPOVER_ID"
+        class="workspace-browser-pane__menu"
+        popover="auto"
+        :style="{ positionAnchor: ASSISTANT_MENU_POPOVER_ANCHOR }"
+      >
+        <button
+          class="workspace-browser-pane__menu-item"
+          type="button"
+          :disabled="assistantMenuPending || !selectedWorkspace"
+          @click="toggleAssistantWorkspace"
+        >
+          <span class="workspace-browser-pane__menu-icon" aria-hidden="true">
+            <Check v-if="selectedWorkspace?.isAssistant" :size="15" />
+          </span>
+          <span>{{ selectedWorkspace ? `Use ${selectedWorkspace.label} as assistant` : "" }}</span>
+        </button>
+      </div>
+    </footer>
   </section>
 </template>
 
@@ -447,8 +545,8 @@ watch(
   width: 100%;
   height: 100%;
   min-height: 0;
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   background: var(--color-bg-app);
   overflow: hidden;
 }
@@ -544,7 +642,8 @@ watch(
 }
 
 .workspace-browser-pane__notice {
-  padding: 0.7rem 1rem;
+  flex: 0 0 auto;
+  padding: 0.7rem calc(var(--safe-area-right) + 1rem) 0.7rem calc(var(--safe-area-left) + 1rem);
   border-bottom: 1px solid var(--color-border-soft);
   background: var(--color-warning-soft);
   color: var(--color-warning);
@@ -552,10 +651,13 @@ watch(
 }
 
 .workspace-browser-pane__cols {
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   column-gap: 0.45rem;
+  overflow: hidden;
 }
 
 .workspace-browser-pane__column {
@@ -708,6 +810,7 @@ watch(
   flex-direction: column;
   gap: 1px;
   padding-right: 0.1rem;
+  padding-bottom: 0;
 }
 
 .workspace-browser-pane__item-row {
@@ -854,6 +957,111 @@ watch(
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.workspace-browser-pane__footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.65rem calc(var(--safe-area-right) + 1rem) calc(var(--safe-area-bottom) + 0.65rem)
+    calc(var(--safe-area-left) + 1rem);
+  border-top: 1px solid var(--color-border-soft);
+  background: var(--color-bg-panel);
+}
+
+.workspace-browser-pane__footer-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border: 0;
+  border-radius: 0.6rem;
+  background: var(--color-bg-elevated);
+  color: inherit;
+  padding: 0.7rem 0.9rem;
+  transition:
+    background 80ms ease,
+    color 80ms ease;
+}
+
+.workspace-browser-pane__footer-btn--primary {
+  flex: 1;
+  justify-content: flex-start;
+  background: var(--color-bg-selection);
+  color: var(--color-accent-strong);
+  font-weight: 600;
+}
+
+.workspace-browser-pane__footer-btn--icon {
+  flex: 0 0 auto;
+  width: 2.75rem;
+  padding-inline: 0;
+}
+
+@media (hover: hover) {
+  .workspace-browser-pane__footer-btn:hover:not(:disabled) {
+    background: var(--color-bg-hover);
+  }
+
+  .workspace-browser-pane__footer-btn--primary:hover:not(:disabled) {
+    background: var(--color-accent-soft);
+  }
+}
+
+.workspace-browser-pane__footer-btn:disabled,
+.workspace-browser-pane__menu-item:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.workspace-browser-pane__menu {
+  margin: 0;
+  inset: auto;
+  min-width: 16rem;
+  padding: 0.35rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.8rem;
+  background: var(--color-bg-overlay);
+  color: var(--color-text);
+  box-shadow: var(--color-shadow-popover);
+  position-area: top span-right;
+}
+
+.workspace-browser-pane__menu:popover-open {
+  display: block;
+}
+
+.workspace-browser-pane__menu::backdrop {
+  background: transparent;
+}
+
+.workspace-browser-pane__menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  border: 0;
+  border-radius: 0.55rem;
+  background: transparent;
+  color: inherit;
+  padding: 0.65rem 0.7rem;
+  text-align: left;
+}
+
+@media (hover: hover) {
+  .workspace-browser-pane__menu-item:hover:not(:disabled) {
+    background: var(--color-bg-elevated);
+  }
+}
+
+.workspace-browser-pane__menu-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  color: var(--color-accent-strong);
+  flex-shrink: 0;
 }
 
 .workspace-browser-pane__spinner {

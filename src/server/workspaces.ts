@@ -12,6 +12,7 @@ function toWorkspaceInfo(
   workspacesRoot: string,
   name: string,
   pinnedWorkspaceIds: ReadonlySet<string>,
+  assistantWorkspaceId?: string,
 ): WorkspaceInfo {
   return {
     id: name,
@@ -19,6 +20,7 @@ function toWorkspaceInfo(
     path: path.join(workspacesRoot, name),
     kind: "workspace",
     isPinned: pinnedWorkspaceIds.has(name),
+    isAssistant: assistantWorkspaceId === name,
   };
 }
 
@@ -69,7 +71,12 @@ export async function listWorkspaces(config: AppConfig): Promise<WorkspaceInfo[]
   return entries
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
     .map<WorkspaceInfo>((entry) =>
-      toWorkspaceInfo(config.workspacesRoot, entry.name, pinnedWorkspaceIds),
+      toWorkspaceInfo(
+        config.workspacesRoot,
+        entry.name,
+        pinnedWorkspaceIds,
+        options.assistantWorkspaceId,
+      ),
     )
     .sort((left, right) => {
       if (left.isPinned !== right.isPinned) {

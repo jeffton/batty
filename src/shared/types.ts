@@ -83,6 +83,7 @@ export interface WorkspaceInfo {
   path: string;
   kind: "workspace";
   isPinned: boolean;
+  isAssistant: boolean;
 }
 
 export interface SessionSummary {

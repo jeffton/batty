@@ -2,7 +2,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
-import { ensureOptionsFile, optionsFilePath } from "@/server/options";
+import {
+  ensureOptionsFile,
+  optionsFilePath,
+  readStoredOptions,
+  setAssistantWorkspace,
+} from "@/server/options";
 
 const tempDirs: string[] = [];
 
@@ -31,6 +36,7 @@ describe("ensureOptionsFile", () => {
       cronDailySessionStartTime: string;
       braveSearchKey?: string;
       pinnedWorkspaceIds?: string[];
+      assistantWorkspaceId?: string;
     };
 
     expect(persisted.authSecret.length).toBeGreaterThan(0);
@@ -39,6 +45,7 @@ describe("ensureOptionsFile", () => {
     expect(persisted.cronDailySessionStartTime).toBe("04:00");
     expect(persisted.braveSearchKey).toBeUndefined();
     expect(persisted.pinnedWorkspaceIds).toEqual([]);
+    expect(persisted.assistantWorkspaceId).toBeUndefined();
   });
 
   it("drops legacy password auth fields and preserves the rest", async () => {
@@ -57,6 +64,7 @@ describe("ensureOptionsFile", () => {
           cronDailySessionStartTime: "4:00",
           braveSearchKey: "  brave-key  ",
           pinnedWorkspaceIds: ["batty", "", 123, "kladde"],
+          assistantWorkspaceId: "  batty  ",
         },
         null,
         2,
@@ -76,8 +84,35 @@ describe("ensureOptionsFile", () => {
     expect(options.cronDailySessionStartTime).toBe("04:00");
     expect(options.braveSearchKey).toBe("brave-key");
     expect(options.pinnedWorkspaceIds).toEqual(["batty", "kladde"]);
+    expect(options.assistantWorkspaceId).toBe("batty");
     expect(persisted.username).toBeUndefined();
     expect(persisted.password).toBeUndefined();
+  });
+
+  it("persists the selected assistant workspace", async () => {
+    const battyDir = await createBattyDir();
+
+    await fs.mkdir(path.dirname(optionsFilePath(battyDir)), { recursive: true });
+    await fs.writeFile(
+      optionsFilePath(battyDir),
+      `${JSON.stringify(
+        {
+          authSecret: "existing-secret",
+          workspacesRoot: "/root/github",
+          webPushSubject: "https://batty.roybot.se",
+          cronDailySessionStartTime: "04:00",
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    await setAssistantWorkspace(battyDir, "assistant-ws");
+    expect((await readStoredOptions(battyDir))?.assistantWorkspaceId).toBe("assistant-ws");
+
+    await setAssistantWorkspace(battyDir, undefined);
+    expect((await readStoredOptions(battyDir))?.assistantWorkspaceId).toBeUndefined();
   });
 
   it("rejects invalid cronDailySessionStartTime values", async () => {

@@ -62,6 +62,7 @@ describe("workspaces", () => {
           webPushSubject: config.webPushSubject,
           cronDailySessionStartTime: config.cronDailySessionStartTime,
           pinnedWorkspaceIds: ["gamma", "beta"],
+          assistantWorkspaceId: "beta",
         },
         null,
         2,
@@ -72,6 +73,7 @@ describe("workspaces", () => {
 
     expect(workspaces.map((workspace) => workspace.label)).toEqual(["beta", "gamma", "alpha"]);
     expect(workspaces.map((workspace) => workspace.isPinned)).toEqual([true, true, false]);
+    expect(workspaces.map((workspace) => workspace.isAssistant)).toEqual([true, false, false]);
   });
 
   it("uses folder names as workspace ids", async () => {
@@ -97,6 +99,7 @@ describe("workspaces", () => {
       path: path.join(config.workspacesRoot, "alpha"),
       kind: "workspace",
       isPinned: false,
+      isAssistant: false,
     });
     expect(stats.isDirectory()).toBe(true);
   });

@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { useAppStore } from "@/client/stores/app";
 import type { SessionState, SessionSummary } from "@/shared/types";
 
+const { setWorkspaceAssistant } = vi.hoisted(() => ({
+  setWorkspaceAssistant: vi.fn(),
+}));
+
 vi.mock("@/client/lib/api", () => ({
   abortSession: vi.fn(),
   completeOpenAICodexProviderAuth: vi.fn(),
@@ -24,6 +28,7 @@ vi.mock("@/client/lib/api", () => ({
   setProviderApiKey: vi.fn(),
   setSessionModel: vi.fn(),
   setSessionThinkingLevel: vi.fn(),
+  setWorkspaceAssistant,
   setWorkspacePinned: vi.fn(),
   startOpenAICodexProviderAuth: vi.fn(),
   updateCronJob: vi.fn(),
@@ -149,5 +154,52 @@ describe("app store session streams", () => {
     expect(store.activeSession?.sessionId).toBe(session.sessionId);
     expect(store.activeSession?.isStreaming).toBe(true);
     expect(store.activeSession?.pendingMessageCount).toBe(2);
+  });
+
+  it("marks one workspace as the assistant", async () => {
+    const store = useAppStore();
+    store.workspaces = [
+      {
+        id: "batty",
+        label: "batty",
+        path: "/root/github/batty",
+        kind: "workspace",
+        isPinned: false,
+        isAssistant: false,
+      },
+      {
+        id: "notes",
+        label: "notes",
+        path: "/root/github/notes",
+        kind: "workspace",
+        isPinned: false,
+        isAssistant: true,
+      },
+    ];
+
+    setWorkspaceAssistant.mockResolvedValue([
+      {
+        id: "batty",
+        label: "batty",
+        path: "/root/github/batty",
+        kind: "workspace",
+        isPinned: false,
+        isAssistant: true,
+      },
+      {
+        id: "notes",
+        label: "notes",
+        path: "/root/github/notes",
+        kind: "workspace",
+        isPinned: false,
+        isAssistant: false,
+      },
+    ]);
+
+    await store.toggleWorkspaceAssistant("batty");
+
+    expect(setWorkspaceAssistant).toHaveBeenCalledWith("batty", true);
+    expect(store.workspaces.find((workspace) => workspace.id === "batty")?.isAssistant).toBe(true);
+    expect(store.workspaces.find((workspace) => workspace.id === "notes")?.isAssistant).toBe(false);
   });
 });

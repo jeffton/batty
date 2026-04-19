@@ -44,6 +44,7 @@ function workspaceInfo(config: AppConfig, workspaceId: string): WorkspaceInfo {
     path: path.join(config.workspacesRoot, workspaceId),
     kind: "workspace",
     isPinned: false,
+    isAssistant: false,
   };
 }
 

@@ -154,19 +154,30 @@ export function createWorkspace(name: string): Promise<WorkspaceInfo> {
 }
 
 export function setWorkspacePinned(workspaceId: string, pinned: boolean): Promise<WorkspaceInfo[]> {
-  return request(`/api/workspaces/${workspaceId}/pin`, {
+  return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/pin`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ pinned }),
   });
 }
 
+export function setWorkspaceAssistant(
+  workspaceId: string,
+  selected: boolean,
+): Promise<WorkspaceInfo[]> {
+  return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/assistant`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ selected }),
+  });
+}
+
 export function listWorkspaceSessions(workspaceId: string): Promise<SessionSummary[]> {
-  return request(`/api/workspaces/${workspaceId}/sessions`);
+  return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/sessions`);
 }
 
 export function listWorkspaceCronJobs(workspaceId: string): Promise<CronJob[]> {
-  return request(`/api/workspaces/${workspaceId}/cron-jobs`);
+  return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/cron-jobs`);
 }
 
 export function createCronJob(input: CreateCronJobInput): Promise<CronJob> {

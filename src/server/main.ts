@@ -13,7 +13,7 @@ import { createLoginRateLimiter } from "./login-rate-limit";
 import { formatSetupCode, PasskeyAuthService } from "./passkeys";
 import type { ProviderAuthStatus, WorkspaceSnapshot } from "@/shared/types";
 import { CronService } from "./cron";
-import { setWorkspacePinned } from "./options";
+import { setAssistantWorkspace, setWorkspacePinned } from "./options";
 import { PiService, type UploadedFile } from "./pi-service";
 import { WebPushService } from "./web-push";
 import { createWorkspace, listWorkspaces, resolveWorkspace } from "./workspaces";
@@ -434,6 +434,21 @@ app.post<{ Params: { workspaceId: string }; Body: { pinned?: boolean } }>(
     const workspaces = await listWorkspaces(config);
     resolveWorkspace(workspaces, request.params.workspaceId);
     await setWorkspacePinned(config.battyDir, request.params.workspaceId, pinned);
+    return listWorkspaces(config);
+  },
+);
+
+app.post<{ Params: { workspaceId: string }; Body: { selected?: boolean } }>(
+  "/api/workspaces/:workspaceId/assistant",
+  async (request) => {
+    const selected = request.body?.selected;
+    if (typeof selected !== "boolean") {
+      throw new Error("Missing assistant selection state");
+    }
+
+    const workspaces = await listWorkspaces(config);
+    resolveWorkspace(workspaces, request.params.workspaceId);
+    await setAssistantWorkspace(config.battyDir, selected ? request.params.workspaceId : undefined);
     return listWorkspaces(config);
   },
 );

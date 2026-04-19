@@ -10,6 +10,7 @@ const workspace: WorkspaceInfo = {
   path: "/root/github/batty",
   kind: "workspace",
   isPinned: true,
+  isAssistant: false,
 };
 
 function createState(

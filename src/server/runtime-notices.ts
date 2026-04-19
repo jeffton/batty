@@ -9,10 +9,10 @@ export interface RuntimeNotice {
   text: string;
 }
 
-export function buildCronRuntimeNotice(scheduleLabel: string): RuntimeNotice {
+export function buildCronRuntimeNotice(scheduleLabel: string, now = new Date()): RuntimeNotice {
   return {
     kind: "cron",
-    text: `Cron run triggered. Schedule: ${scheduleLabel}`,
+    text: `Cron run triggered. Current time: ${formatLocalDateTime(now)}. Schedule: ${scheduleLabel}`,
   };
 }
 
@@ -33,4 +33,14 @@ export function buildRuntimeNoticeMessage(
     content: notice.text,
     timestamp,
   } as AgentSession["messages"][number];
+}
+
+function formatLocalDateTime(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 }

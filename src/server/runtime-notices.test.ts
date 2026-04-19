@@ -12,9 +12,9 @@ type AgentMessage = AgentSession["messages"][number];
 
 describe("runtime notices", () => {
   it("builds cron notices", () => {
-    expect(buildCronRuntimeNotice("0 9 * * 1-5")).toEqual({
+    expect(buildCronRuntimeNotice("0 9 * * 1-5", new Date("2026-04-19T08:58:37"))).toEqual({
       kind: "cron",
-      text: "Cron run triggered. Schedule: 0 9 * * 1-5",
+      text: "Cron run triggered. Current time: 2026-04-19 08:58:37. Schedule: 0 9 * * 1-5",
     });
   });
 
@@ -27,14 +27,14 @@ describe("runtime notices", () => {
 
   it("builds runtime notice messages", () => {
     const message = buildRuntimeNoticeMessage(
-      buildCronRuntimeNotice("every 1h"),
+      buildCronRuntimeNotice("every 1h", new Date("2026-04-19T08:58:37")),
       42,
     ) as AgentMessage;
 
     expect(message).toMatchObject({
       role: "custom",
       customType: `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:cron`,
-      content: "Cron run triggered. Schedule: every 1h",
+      content: "Cron run triggered. Current time: 2026-04-19 08:58:37. Schedule: every 1h",
       timestamp: 42,
     });
   });

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ExternalLink, KeyRound, LogOut, Pencil, Save, Settings2, X } from "lucide-vue-next";
+import { ExternalLink, LogOut, Pencil, Save, Settings2, X } from "lucide-vue-next";
 import { computed, reactive, ref, watch } from "vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
 import { useAppStore } from "@/client/stores/app";
@@ -80,13 +80,26 @@ function itemTitle(itemId: string): string {
   return itemId;
 }
 
-function itemStatus(itemId: string): string {
+function itemConnected(itemId: string): boolean {
   if (itemId === BRAVE_SEARCH_ITEM_ID) {
-    return store.settings.braveSearchConfigured ? "Connected" : "Not connected";
+    return store.settings.braveSearchConfigured;
   }
 
   const provider = store.providerAuth.providers.find((candidate) => candidate.id === itemId);
-  return provider?.connected ? "Connected" : "Not connected";
+  return provider?.connected === true;
+}
+
+function itemStatusLabel(itemId: string): string {
+  return itemConnected(itemId) ? "Connected" : "Not connected";
+}
+
+function itemStatusDetail(itemId: string): string {
+  if (itemId !== "openai-codex") {
+    return "";
+  }
+
+  const provider = store.providerAuth.providers.find((candidate) => candidate.id === itemId);
+  return provider?.connectedEmail ?? "";
 }
 
 function isExpanded(itemId: string): boolean {
@@ -271,7 +284,18 @@ watch(
         <div class="settings-popover__item-top">
           <div class="settings-popover__item-meta">
             <strong>{{ itemTitle(BRAVE_SEARCH_ITEM_ID) }}</strong>
-            <span>{{ itemStatus(BRAVE_SEARCH_ITEM_ID) }}</span>
+            <div class="settings-popover__item-status-row">
+              <span
+                :class="[
+                  'settings-popover__badge',
+                  itemConnected(BRAVE_SEARCH_ITEM_ID)
+                    ? 'settings-popover__badge--connected'
+                    : 'settings-popover__badge--disconnected',
+                ]"
+              >
+                {{ itemStatusLabel(BRAVE_SEARCH_ITEM_ID) }}
+              </span>
+            </div>
           </div>
 
           <button
@@ -311,7 +335,24 @@ watch(
         <div class="settings-popover__item-top">
           <div class="settings-popover__item-meta">
             <strong>{{ itemTitle(provider.id) }}</strong>
-            <span>{{ itemStatus(provider.id) }}</span>
+            <div class="settings-popover__item-status-row">
+              <span
+                :class="[
+                  'settings-popover__badge',
+                  itemConnected(provider.id)
+                    ? 'settings-popover__badge--connected'
+                    : 'settings-popover__badge--disconnected',
+                ]"
+              >
+                {{ itemStatusLabel(provider.id) }}
+              </span>
+              <span
+                v-if="itemStatusDetail(provider.id)"
+                class="settings-popover__item-status-detail"
+              >
+                · {{ itemStatusDetail(provider.id) }}
+              </span>
+            </div>
           </div>
 
           <button
@@ -330,22 +371,6 @@ watch(
 
         <div v-if="isExpanded(provider.id)" class="settings-popover__editor">
           <template v-if="isCodexProvider(provider.id)">
-            <div
-              :class="[
-                'settings-popover__badge',
-                provider.connected
-                  ? 'settings-popover__badge--connected'
-                  : 'settings-popover__badge--disconnected',
-              ]"
-            >
-              <KeyRound v-if="provider.connected" :size="13" />
-              {{ provider.connected ? "Connected" : "Not connected" }}
-            </div>
-
-            <div v-if="provider.connectedEmail" class="settings-popover__help">
-              {{ provider.connectedEmail }}
-            </div>
-
             <div class="settings-popover__help">
               Sign in with your ChatGPT/Codex subscription to use <code>openai-codex/*</code>
               models.
@@ -547,7 +572,7 @@ watch(
 }
 
 .settings-popover__item-meta strong,
-.settings-popover__item-meta span {
+.settings-popover__item-status-detail {
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -557,7 +582,14 @@ watch(
   color: var(--color-text-strong);
 }
 
-.settings-popover__item-meta span,
+.settings-popover__item-status-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.settings-popover__item-status-detail,
 .settings-popover__help {
   font-size: 0.78rem;
   color: var(--color-text-subtle);

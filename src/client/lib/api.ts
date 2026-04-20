@@ -6,6 +6,7 @@ import type {
 } from "@simplewebauthn/browser";
 import { withBaseUrl } from "@/client/lib/base-url";
 import type {
+  AppSettingsStatus,
   BootstrapPayload,
   CreateCronJobInput,
   CronJob,
@@ -162,14 +163,19 @@ export function setWorkspacePinned(workspaceId: string, pinned: boolean): Promis
   });
 }
 
-export function setWorkspaceAssistant(
-  workspaceId: string,
-  selected: boolean,
-): Promise<WorkspaceInfo[]> {
-  return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/assistant`, {
+export function setWorkspaceAssistant(workspaceId?: string): Promise<WorkspaceInfo[]> {
+  return request("/api/settings/assistant-workspace", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ selected }),
+    body: JSON.stringify({ workspaceId: workspaceId ?? null }),
+  });
+}
+
+export function setBraveSearchApiKey(apiKey: string): Promise<AppSettingsStatus> {
+  return request("/api/settings/brave-search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apiKey }),
   });
 }
 

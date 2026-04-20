@@ -11,9 +11,9 @@ import { readBuildId } from "./build-id";
 import { loadConfig, resolveBattyDir } from "./config";
 import { createLoginRateLimiter } from "./login-rate-limit";
 import { formatSetupCode, PasskeyAuthService } from "./passkeys";
-import type { ProviderAuthStatus, WorkspaceSnapshot } from "@/shared/types";
+import type { AppSettingsStatus, ProviderAuthStatus, WorkspaceSnapshot } from "@/shared/types";
 import { CronService } from "./cron";
-import { setAssistantWorkspace, setWorkspacePinned } from "./options";
+import { setAssistantWorkspace, setBraveSearchKey, setWorkspacePinned } from "./options";
 import { PiService, type UploadedFile } from "./pi-service";
 import { WebPushService } from "./web-push";
 import { createWorkspace, listWorkspaces, resolveWorkspace } from "./workspaces";
@@ -261,6 +261,12 @@ function unauthenticatedAuthStatus() {
   };
 }
 
+function appSettingsStatus(): AppSettingsStatus {
+  return {
+    braveSearchConfigured: Boolean(config.braveSearchKey),
+  };
+}
+
 function unauthenticatedProviderAuthStatus(): ProviderAuthStatus {
   return { providers: [] };
 }
@@ -408,6 +414,7 @@ app.get(routePath("/api/bootstrap"), async (request) => {
     providerAuth: authenticated
       ? service.getProviderAuthStatus()
       : unauthenticatedProviderAuthStatus(),
+    settings: appSettingsStatus(),
     buildId,
     workspaces,
     models: authenticated ? await service.listModels() : [],
@@ -419,6 +426,38 @@ app.get(routePath("/api/version"), async () => ({ buildId }));
 app.get(routePath("/api/provider-auth/status"), async () => {
   return service.getProviderAuthStatus();
 });
+
+app.post<{ Body: { apiKey?: string } }>(
+  routePath("/api/settings/brave-search"),
+  async (request) => {
+    const apiKey = request.body?.apiKey;
+    if (typeof apiKey !== "string") {
+      throw new Error("Missing Brave Search API key");
+    }
+
+    const options = await setBraveSearchKey(config.battyDir, apiKey);
+    config.braveSearchKey = options.braveSearchKey;
+    return appSettingsStatus();
+  },
+);
+
+app.post<{ Body: { workspaceId?: string | null } }>(
+  routePath("/api/settings/assistant-workspace"),
+  async (request) => {
+    const workspaceId = request.body?.workspaceId;
+    if (workspaceId != null && typeof workspaceId !== "string") {
+      throw new Error("Invalid assistant workspace id");
+    }
+
+    if (workspaceId) {
+      const workspaces = await listWorkspaces(config);
+      resolveWorkspace(workspaces, workspaceId);
+    }
+
+    await setAssistantWorkspace(config.battyDir, workspaceId ?? undefined);
+    return listWorkspaces(config);
+  },
+);
 
 app.post(routePath("/api/provider-auth/openai-codex/start"), async () => {
   return service.startProviderAuth("openai-codex");

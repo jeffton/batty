@@ -209,3 +209,18 @@ export async function setAssistantWorkspace(
   await writeStoredOptions(projectRoot, nextOptions);
   return nextOptions;
 }
+
+export async function setBraveSearchKey(
+  projectRoot: string,
+  apiKey: string | undefined,
+): Promise<AppOptions> {
+  const options = await loadAppOptions(projectRoot);
+  const normalizedApiKey = apiKey?.trim();
+  const nextOptions: AppOptions = {
+    ...options,
+    braveSearchKey: normalizedApiKey ? normalizedApiKey : undefined,
+  };
+
+  await writeStoredOptions(projectRoot, nextOptions);
+  return nextOptions;
+}

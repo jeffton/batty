@@ -1,51 +1,20 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { CalendarDays, Check, EllipsisVertical, LoaderCircle } from "lucide-vue-next";
+import { CalendarDays, LoaderCircle } from "lucide-vue-next";
 
 const props = defineProps<{
-  assistantWorkspaceId?: string;
-  assistantWorkspaceLabel?: string;
-  selectedWorkspaceId?: string;
-  selectedWorkspaceLabel?: string;
-  selectedWorkspaceIsAssistant: boolean;
+  assistantWorkspaceLabel: string;
   actionsDisabled: boolean;
-  assistantMenuDisabled: boolean;
   startingDailySession: boolean;
-  assistantMenuPending: boolean;
-  menuPopoverId: string;
-  menuPopoverAnchor: string;
 }>();
-
-const showAssistantWorkspaceMenuItem = computed(
-  () =>
-    Boolean(props.assistantWorkspaceLabel) &&
-    props.assistantWorkspaceLabel !== props.selectedWorkspaceLabel,
-);
 
 const emit = defineEmits<{
   openTodaySession: [];
-  chooseAssistantWorkspace: [workspaceId: string];
 }>();
-
-function closePopover(): void {
-  const element = document.getElementById(props.menuPopoverId) as HTMLElement | null;
-  element?.hidePopover?.();
-}
-
-function chooseAssistantWorkspace(workspaceId: string | undefined): void {
-  if (!workspaceId) {
-    return;
-  }
-
-  emit("chooseAssistantWorkspace", workspaceId);
-  closePopover();
-}
 </script>
 
 <template>
   <footer class="workspace-browser-footer">
     <button
-      v-if="props.assistantWorkspaceLabel"
       class="workspace-browser-footer__btn workspace-browser-footer__btn--assistant"
       type="button"
       :disabled="props.actionsDisabled || props.startingDailySession"
@@ -62,56 +31,6 @@ function chooseAssistantWorkspace(workspaceId: string | undefined): void {
         Today in <strong>{{ props.assistantWorkspaceLabel }}</strong>
       </span>
     </button>
-
-    <div v-else class="workspace-browser-footer__spacer" />
-
-    <button
-      class="workspace-browser-footer__btn workspace-browser-footer__btn--icon"
-      type="button"
-      :style="{ 'anchor-name': props.menuPopoverAnchor }"
-      :disabled="props.assistantMenuDisabled"
-      :popovertarget="props.menuPopoverId"
-      aria-label="Workspace menu"
-      title="Workspace menu"
-    >
-      <EllipsisVertical :size="16" />
-    </button>
-
-    <div
-      :id="props.menuPopoverId"
-      class="workspace-browser-footer__menu"
-      popover="auto"
-      :style="{ positionAnchor: props.menuPopoverAnchor }"
-    >
-      <button
-        v-if="showAssistantWorkspaceMenuItem"
-        class="workspace-browser-footer__menu-item"
-        type="button"
-        :disabled="props.assistantMenuPending"
-        @click="chooseAssistantWorkspace(props.assistantWorkspaceId)"
-      >
-        <span class="workspace-browser-footer__menu-icon" aria-hidden="true">
-          <Check :size="15" />
-        </span>
-        <span>
-          Use <strong>{{ props.assistantWorkspaceLabel }}</strong> as assistant
-        </span>
-      </button>
-
-      <button
-        class="workspace-browser-footer__menu-item"
-        type="button"
-        :disabled="props.assistantMenuPending || !props.selectedWorkspaceLabel"
-        @click="chooseAssistantWorkspace(props.selectedWorkspaceId)"
-      >
-        <span class="workspace-browser-footer__menu-icon" aria-hidden="true">
-          <Check v-if="props.selectedWorkspaceIsAssistant" :size="15" />
-        </span>
-        <span v-if="props.selectedWorkspaceLabel">
-          Use <strong>{{ props.selectedWorkspaceLabel }}</strong> as assistant
-        </span>
-      </button>
-    </div>
   </footer>
 </template>
 
@@ -132,30 +51,20 @@ function chooseAssistantWorkspace(workspaceId: string | undefined): void {
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
+  width: 100%;
   border: 0;
   border-radius: 0.6rem;
-  background: var(--color-bg-elevated);
-  color: inherit;
+  background: transparent;
+  color: var(--color-text-muted);
   padding: 0.7rem 0.9rem;
+  font-weight: 600;
   transition:
     background 80ms ease,
     color 80ms ease;
 }
 
 .workspace-browser-footer__btn--assistant {
-  flex: 1;
   justify-content: flex-start;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-weight: 600;
-}
-
-.workspace-browser-footer__btn--icon {
-  flex: 0 0 auto;
-  width: 2.75rem;
-  padding-inline: 0;
-  background: transparent;
-  color: var(--color-text-muted);
 }
 
 @media (hover: hover) {
@@ -165,63 +74,9 @@ function chooseAssistantWorkspace(workspaceId: string | undefined): void {
   }
 }
 
-.workspace-browser-footer__spacer {
-  flex: 1;
-}
-
-.workspace-browser-footer__btn:disabled,
-.workspace-browser-footer__menu-item:disabled {
+.workspace-browser-footer__btn:disabled {
   opacity: 0.55;
   cursor: default;
-}
-
-.workspace-browser-footer__menu {
-  margin: 0;
-  inset: auto;
-  min-width: 16rem;
-  padding: 0.35rem;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.8rem;
-  background: var(--color-bg-overlay);
-  color: var(--color-text);
-  box-shadow: var(--color-shadow-popover);
-  position-area: top span-right;
-}
-
-.workspace-browser-footer__menu:popover-open {
-  display: block;
-}
-
-.workspace-browser-footer__menu::backdrop {
-  background: transparent;
-}
-
-.workspace-browser-footer__menu-item {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  width: 100%;
-  border: 0;
-  border-radius: 0.55rem;
-  background: transparent;
-  color: inherit;
-  padding: 0.65rem 0.7rem;
-  text-align: left;
-}
-
-@media (hover: hover) {
-  .workspace-browser-footer__menu-item:hover:not(:disabled) {
-    background: var(--color-bg-elevated);
-  }
-}
-
-.workspace-browser-footer__menu-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1rem;
-  color: var(--color-accent-strong);
-  flex-shrink: 0;
 }
 
 .workspace-browser-footer__spinner {

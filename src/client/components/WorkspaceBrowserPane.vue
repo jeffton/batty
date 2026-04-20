@@ -13,8 +13,6 @@ import { useAppStore } from "@/client/stores/app";
 
 const PROVIDER_AUTH_POPOVER_ID = "workspace-provider-auth-popover";
 const PROVIDER_AUTH_POPOVER_ANCHOR = "--workspace-provider-auth-anchor";
-const ASSISTANT_MENU_POPOVER_ID = "workspace-assistant-menu-popover";
-const ASSISTANT_MENU_POPOVER_ANCHOR = "--workspace-assistant-menu-anchor";
 
 const store = useAppStore();
 const router = useRouter();
@@ -28,17 +26,12 @@ const switchingWorkspaceId = ref<string>();
 const startingSession = ref(false);
 const startingDailySession = ref(false);
 const openingSessionId = ref<string>();
-const assistantMenuPending = ref(false);
 const createWorkspaceInput = ref<HTMLInputElement>();
 const actionsDisabled = computed(() => store.connectionState !== "online");
 const { setPaneTransition } = usePaneTransition();
 
-const selectedWorkspace = computed(() => store.selectedWorkspace);
 const assistantWorkspace = computed(() =>
   store.workspaces.find((workspace) => workspace.isAssistant),
-);
-const assistantMenuDisabled = computed(
-  () => !selectedWorkspace.value || actionsDisabled.value || assistantMenuPending.value,
 );
 
 const filteredWorkspaces = computed(() => {
@@ -190,21 +183,6 @@ async function openTodaySession(): Promise<void> {
     await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
   } finally {
     startingDailySession.value = false;
-  }
-}
-
-async function chooseAssistantWorkspace(workspaceId: string): Promise<void> {
-  if (actionsDisabled.value || assistantMenuPending.value) {
-    return;
-  }
-
-  assistantMenuPending.value = true;
-  try {
-    await store.setWorkspaceAssistant(workspaceId);
-  } catch (error) {
-    console.error(error);
-  } finally {
-    assistantMenuPending.value = false;
   }
 }
 
@@ -431,19 +409,11 @@ watch(
     </div>
 
     <WorkspaceBrowserFooter
-      :assistant-workspace-id="assistantWorkspace?.id"
-      :assistant-workspace-label="assistantWorkspace?.label"
-      :selected-workspace-id="selectedWorkspace?.id"
-      :selected-workspace-label="selectedWorkspace?.label"
-      :selected-workspace-is-assistant="Boolean(selectedWorkspace?.isAssistant)"
+      v-if="assistantWorkspace"
+      :assistant-workspace-label="assistantWorkspace.label"
       :actions-disabled="actionsDisabled"
-      :assistant-menu-disabled="assistantMenuDisabled"
       :starting-daily-session="startingDailySession"
-      :assistant-menu-pending="assistantMenuPending"
-      :menu-popover-id="ASSISTANT_MENU_POPOVER_ID"
-      :menu-popover-anchor="ASSISTANT_MENU_POPOVER_ANCHOR"
       @open-today-session="openTodaySession"
-      @choose-assistant-workspace="chooseAssistantWorkspace"
     />
   </section>
 </template>

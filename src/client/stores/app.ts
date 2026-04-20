@@ -17,6 +17,7 @@ import {
   logout as logoutRequest,
   openSession,
   sendPrompt,
+  setBraveSearchApiKey as setBraveSearchApiKeyRequest,
   setProviderApiKey,
   setSessionModel,
   setSessionThinkingLevel,
@@ -45,6 +46,7 @@ import { workspaceEventsPath } from "@/client/lib/workspace-stream";
 import { sortWorkspacesByRecentSession, uniqueWorkspaces } from "@/client/lib/workspaces";
 import { RECENT_SESSION_MESSAGE_WINDOW } from "@/shared/session-history";
 import type {
+  AppSettingsStatus,
   AuthStatus,
   BootstrapPayload,
   CronJob,
@@ -83,6 +85,10 @@ const defaultProviderAuthStatus: ProviderAuthStatus = {
   providers: [],
 };
 
+const defaultAppSettingsStatus: AppSettingsStatus = {
+  braveSearchConfigured: false,
+};
+
 function compareCronJobsByNextRun(left: CronJob, right: CronJob): number {
   if (left.state.nextRunAtMs == null && right.state.nextRunAtMs == null) {
     return left.createdAt - right.createdAt;
@@ -115,6 +121,7 @@ export const useAppStore = defineStore("app", {
     buildId: undefined as string | undefined,
     auth: defaultAuthStatus as AuthStatus,
     providerAuth: defaultProviderAuthStatus as ProviderAuthStatus,
+    settings: defaultAppSettingsStatus as AppSettingsStatus,
     connectionState: "online" as "online" | "offline" | "connecting",
     workspaces: [] as WorkspaceInfo[],
     models: [] as ModelOption[],
@@ -190,6 +197,7 @@ export const useAppStore = defineStore("app", {
       this.auth = payload.auth;
       this.buildId = payload.buildId;
       this.providerAuth = payload.providerAuth ?? defaultProviderAuthStatus;
+      this.settings = payload.settings ?? defaultAppSettingsStatus;
       this.workspaces = sortWorkspacesByRecentSession(workspaces);
       this.models = payload.models;
       this.selectedWorkspaceId =
@@ -205,6 +213,7 @@ export const useAppStore = defineStore("app", {
       } else {
         this.activeSession = undefined;
         this.providerAuth = defaultProviderAuthStatus;
+        this.settings = defaultAppSettingsStatus;
         this.sessionsByWorkspace = {};
         this.cronJobsByWorkspace = {};
         this.closeStream();
@@ -222,6 +231,7 @@ export const useAppStore = defineStore("app", {
       this.closeWorkspaceStream();
       this.authenticated = false;
       this.providerAuth = defaultProviderAuthStatus;
+      this.settings = defaultAppSettingsStatus;
       this.activeSession = undefined;
       this.sessionsByWorkspace = {};
       this.cronJobsByWorkspace = {};
@@ -324,12 +334,7 @@ export const useAppStore = defineStore("app", {
       }
     },
 
-    async setWorkspaceAssistant(workspaceId: string): Promise<void> {
-      const workspace = this.workspaces.find((candidate) => candidate.id === workspaceId);
-      if (!workspace) {
-        return;
-      }
-
+    async setWorkspaceAssistant(workspaceId?: string): Promise<void> {
       const previousWorkspaces = this.workspaces;
       this.workspaces = this.workspaces.map((candidate) => ({
         ...candidate,
@@ -337,7 +342,7 @@ export const useAppStore = defineStore("app", {
       }));
 
       try {
-        this.workspaces = uniqueWorkspaces(await setWorkspaceAssistantRequest(workspaceId, true));
+        this.workspaces = uniqueWorkspaces(await setWorkspaceAssistantRequest(workspaceId));
         this.sortWorkspaces();
       } catch (error) {
         this.workspaces = previousWorkspaces;
@@ -690,6 +695,10 @@ export const useAppStore = defineStore("app", {
     async setProviderApiKey(providerId: "google" | "openrouter", apiKey: string): Promise<void> {
       this.providerAuth = await setProviderApiKey(providerId, apiKey);
       await this.bootstrap();
+    },
+
+    async setBraveSearchApiKey(apiKey: string): Promise<void> {
+      this.settings = await setBraveSearchApiKeyRequest(apiKey);
     },
 
     async updateCronJob(jobId: string, patch: UpdateCronJobInput): Promise<CronJob> {

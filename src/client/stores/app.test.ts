@@ -25,6 +25,7 @@ vi.mock("@/client/lib/api", () => ({
   logout: vi.fn(),
   openSession: vi.fn(),
   sendPrompt: vi.fn(),
+  setBraveSearchApiKey: vi.fn(),
   setProviderApiKey: vi.fn(),
   setSessionModel: vi.fn(),
   setSessionThinkingLevel: vi.fn(),
@@ -198,7 +199,7 @@ describe("app store session streams", () => {
 
     await store.toggleWorkspaceAssistant("batty");
 
-    expect(setWorkspaceAssistant).toHaveBeenCalledWith("batty", true);
+    expect(setWorkspaceAssistant).toHaveBeenCalledWith("batty");
     expect(store.workspaces.find((workspace) => workspace.id === "batty")?.isAssistant).toBe(true);
     expect(store.workspaces.find((workspace) => workspace.id === "notes")?.isAssistant).toBe(false);
   });

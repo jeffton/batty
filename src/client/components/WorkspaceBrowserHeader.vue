@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { LogOut, LoaderCircle, Wifi, WifiOff, KeyRound } from "lucide-vue-next";
-import ProviderAuthPopover from "@/client/components/ProviderAuthPopover.vue";
+import { Cog, LoaderCircle, Wifi, WifiOff } from "lucide-vue-next";
+import SettingsPopover from "@/client/components/SettingsPopover.vue";
 
 const props = defineProps<{
   popoverId: string;
@@ -51,15 +51,17 @@ const emit = defineEmits<{
         type="button"
         :style="{ 'anchor-name': props.popoverAnchor }"
         :popovertarget="props.popoverId"
+        aria-label="Settings"
+        title="Settings"
       >
-        <KeyRound :size="14" /> Auth
+        <Cog :size="16" />
       </button>
 
-      <ProviderAuthPopover :popover-id="props.popoverId" :anchor-name="props.popoverAnchor" />
-
-      <button class="workspace-browser-header__logout" @click="emit('logout')">
-        <LogOut :size="14" /> Log out
-      </button>
+      <SettingsPopover
+        :popover-id="props.popoverId"
+        :anchor-name="props.popoverAnchor"
+        @logout="emit('logout')"
+      />
     </div>
   </header>
 </template>
@@ -128,16 +130,15 @@ const emit = defineEmits<{
   animation: workspace-browser-header-spin 0.85s linear infinite;
 }
 
-.workspace-browser-header__btn,
-.workspace-browser-header__logout {
+.workspace-browser-header__btn {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  justify-content: center;
   border: 0;
   border-radius: 0.55rem;
   background: transparent;
   color: var(--color-text-muted);
-  padding: 0.45rem 0.65rem;
+  padding: 0.45rem;
   transition:
     background 80ms ease,
     color 80ms ease;
@@ -147,11 +148,6 @@ const emit = defineEmits<{
   .workspace-browser-header__btn:hover {
     background: var(--color-bg-elevated);
     color: var(--color-text-strong);
-  }
-
-  .workspace-browser-header__logout:hover {
-    background: var(--color-error-soft);
-    color: var(--color-error);
   }
 }
 

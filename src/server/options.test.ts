@@ -7,6 +7,7 @@ import {
   optionsFilePath,
   readStoredOptions,
   setAssistantWorkspace,
+  setBraveSearchKey,
 } from "@/server/options";
 
 const tempDirs: string[] = [];
@@ -117,6 +118,32 @@ describe("ensureOptionsFile", () => {
 
     await setAssistantWorkspace(battyDir, undefined);
     expect((await readStoredOptions(battyDir))?.assistantWorkspaceId).toBeUndefined();
+  });
+
+  it("persists the Brave Search API key", async () => {
+    const battyDir = await createBattyDir();
+
+    await fs.mkdir(path.dirname(optionsFilePath(battyDir)), { recursive: true });
+    await fs.writeFile(
+      optionsFilePath(battyDir),
+      `${JSON.stringify(
+        {
+          authSecret: "existing-secret",
+          workspacesRoot: "/root/github",
+          webPushSubject: "https://batty.roybot.se",
+          cronDailySessionStartTime: "04:00",
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    await setBraveSearchKey(battyDir, "  brave-key  ");
+    expect((await readStoredOptions(battyDir))?.braveSearchKey).toBe("brave-key");
+
+    await setBraveSearchKey(battyDir, "   ");
+    expect((await readStoredOptions(battyDir))?.braveSearchKey).toBeUndefined();
   });
 
   it("rejects invalid baseUrl values", async () => {

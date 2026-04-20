@@ -256,10 +256,15 @@ export interface ProviderAuthStartResponse {
   expiresAt: number;
 }
 
+export interface AppSettingsStatus {
+  braveSearchConfigured: boolean;
+}
+
 export interface BootstrapPayload {
   authenticated: boolean;
   auth: AuthStatus;
   providerAuth: ProviderAuthStatus;
+  settings: AppSettingsStatus;
   buildId: string;
   workspaces: WorkspaceInfo[];
   models: ModelOption[];

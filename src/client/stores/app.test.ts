@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { useAppStore } from "@/client/stores/app";
 import type { SessionState, SessionSummary } from "@/shared/types";
 
-const { setWorkspaceAssistant } = vi.hoisted(() => ({
+const { setUiTheme, setWorkspaceAssistant } = vi.hoisted(() => ({
+  setUiTheme: vi.fn(),
   setWorkspaceAssistant: vi.fn(),
 }));
 
@@ -29,6 +30,7 @@ vi.mock("@/client/lib/api", () => ({
   setProviderApiKey: vi.fn(),
   setSessionModel: vi.fn(),
   setSessionThinkingLevel: vi.fn(),
+  setUiTheme,
   setWorkspaceAssistant,
   setWorkspacePinned: vi.fn(),
   startOpenAICodexProviderAuth: vi.fn(),
@@ -155,6 +157,24 @@ describe("app store session streams", () => {
     expect(store.activeSession?.sessionId).toBe(session.sessionId);
     expect(store.activeSession?.isStreaming).toBe(true);
     expect(store.activeSession?.pendingMessageCount).toBe(2);
+  });
+
+  it("persists the selected UI theme in store settings", async () => {
+    const store = useAppStore();
+    store.settings = {
+      braveSearchConfigured: false,
+      uiTheme: "neon-reef",
+    };
+
+    setUiTheme.mockResolvedValue({
+      braveSearchConfigured: false,
+      uiTheme: "serious-business",
+    });
+
+    await store.setUiTheme("serious-business");
+
+    expect(setUiTheme).toHaveBeenCalledWith("serious-business");
+    expect(store.settings.uiTheme).toBe("serious-business");
   });
 
   it("marks one workspace as the assistant", async () => {

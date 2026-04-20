@@ -15,6 +15,7 @@ export interface AppConfig {
   webPushSubject: string;
   cronDailySessionStartTime: string;
   braveSearchKey?: string;
+  uiTheme: "neon-reef" | "serious-business";
   baseUrl: string;
   cookieName: string;
   authSecret: string;
@@ -69,6 +70,7 @@ export async function loadConfig(battyDir: string): Promise<AppConfig> {
     webPushSubject: options.webPushSubject,
     cronDailySessionStartTime: options.cronDailySessionStartTime,
     braveSearchKey: options.braveSearchKey,
+    uiTheme: options.uiTheme,
     baseUrl: options.baseUrl,
     cookieName: "batty-auth",
     authSecret: options.authSecret,

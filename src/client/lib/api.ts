@@ -179,6 +179,14 @@ export function setBraveSearchApiKey(apiKey: string): Promise<AppSettingsStatus>
   });
 }
 
+export function setUiTheme(uiTheme: "neon-reef" | "serious-business"): Promise<AppSettingsStatus> {
+  return request("/api/settings/theme", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ uiTheme }),
+  });
+}
+
 export function listWorkspaceSessions(workspaceId: string): Promise<SessionSummary[]> {
   return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/sessions`);
 }

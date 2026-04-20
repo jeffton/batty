@@ -13,7 +13,12 @@ import { createLoginRateLimiter } from "./login-rate-limit";
 import { formatSetupCode, PasskeyAuthService } from "./passkeys";
 import type { AppSettingsStatus, ProviderAuthStatus, WorkspaceSnapshot } from "@/shared/types";
 import { CronService } from "./cron";
-import { setAssistantWorkspace, setBraveSearchKey, setWorkspacePinned } from "./options";
+import {
+  setAssistantWorkspace,
+  setBraveSearchKey,
+  setUiTheme,
+  setWorkspacePinned,
+} from "./options";
 import { PiService, type UploadedFile } from "./pi-service";
 import { WebPushService } from "./web-push";
 import { createWorkspace, listWorkspaces, resolveWorkspace } from "./workspaces";
@@ -264,6 +269,7 @@ function unauthenticatedAuthStatus() {
 function appSettingsStatus(): AppSettingsStatus {
   return {
     braveSearchConfigured: Boolean(config.braveSearchKey),
+    uiTheme: config.uiTheme,
   };
 }
 
@@ -437,6 +443,20 @@ app.post<{ Body: { apiKey?: string } }>(
 
     const options = await setBraveSearchKey(config.battyDir, apiKey);
     config.braveSearchKey = options.braveSearchKey;
+    return appSettingsStatus();
+  },
+);
+
+app.post<{ Body: { uiTheme?: "neon-reef" | "serious-business" } }>(
+  routePath("/api/settings/theme"),
+  async (request) => {
+    const uiTheme = request.body?.uiTheme;
+    if (uiTheme !== "neon-reef" && uiTheme !== "serious-business") {
+      throw new Error("Invalid UI theme");
+    }
+
+    const options = await setUiTheme(config.battyDir, uiTheme);
+    config.uiTheme = options.uiTheme;
     return appSettingsStatus();
   },
 );

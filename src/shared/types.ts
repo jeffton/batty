@@ -256,8 +256,11 @@ export interface ProviderAuthStartResponse {
   expiresAt: number;
 }
 
+export type AppUiTheme = "neon-reef" | "serious-business";
+
 export interface AppSettingsStatus {
   braveSearchConfigured: boolean;
+  uiTheme: AppUiTheme;
 }
 
 export interface BootstrapPayload {

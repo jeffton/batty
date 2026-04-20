@@ -13,6 +13,10 @@ const store = useAppStore();
 const route = useRoute();
 const router = useRouter();
 
+function applyUiTheme(uiTheme: "neon-reef" | "serious-business"): void {
+  document.documentElement.dataset.theme = uiTheme;
+}
+
 const handleOffline = () => store.markOffline();
 const handleOnline = async () => {
   store.markOnline();
@@ -233,6 +237,14 @@ watch(
   }),
   () => {
     void syncRouteToStore();
+  },
+  { immediate: true },
+);
+
+watch(
+  () => store.settings.uiTheme,
+  (uiTheme) => {
+    applyUiTheme(uiTheme);
   },
   { immediate: true },
 );

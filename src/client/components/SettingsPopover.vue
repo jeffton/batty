@@ -29,6 +29,7 @@ const apiKeyInputs = reactive<Record<"google" | "openrouter", string>>({
 const braveSearchInput = ref("");
 const braveSearchSaving = ref(false);
 const assistantWorkspaceSaving = ref(false);
+const uiThemeSaving = ref(false);
 const authAttemptId = ref("");
 const authUrl = ref("");
 const authInstructions = ref("");
@@ -59,6 +60,7 @@ const authExpiryLabel = computed(() =>
 const assistantWorkspaceId = computed(
   () => store.workspaces.find((workspace) => workspace.isAssistant)?.id ?? "",
 );
+const uiTheme = computed(() => store.settings.uiTheme);
 
 function isCodexProvider(providerId: string): boolean {
   return providerId === "openai-codex";
@@ -210,6 +212,22 @@ async function saveBraveSearchKey(): Promise<void> {
   }
 }
 
+async function updateUiTheme(event: Event): Promise<void> {
+  const uiTheme = (event.target as HTMLSelectElement).value;
+  if (uiTheme !== "neon-reef" && uiTheme !== "serious-business") {
+    return;
+  }
+
+  uiThemeSaving.value = true;
+  try {
+    await store.setUiTheme(uiTheme);
+  } catch (error) {
+    console.error(error);
+  } finally {
+    uiThemeSaving.value = false;
+  }
+}
+
 async function updateAssistantWorkspace(event: Event): Promise<void> {
   const workspaceId = (event.target as HTMLSelectElement).value.trim();
   assistantWorkspaceSaving.value = true;
@@ -258,6 +276,19 @@ watch(
           <h2 class="settings-popover__section-title">Settings</h2>
         </div>
       </div>
+    </section>
+
+    <section class="settings-popover__section">
+      <div class="settings-popover__group-title">Theme</div>
+      <select
+        class="settings-popover__select"
+        :value="uiTheme"
+        :disabled="uiThemeSaving"
+        @change="updateUiTheme"
+      >
+        <option value="neon-reef">Neon reef</option>
+        <option value="serious-business">Serious business</option>
+      </select>
     </section>
 
     <section class="settings-popover__section">

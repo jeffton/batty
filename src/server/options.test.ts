@@ -8,6 +8,7 @@ import {
   readStoredOptions,
   setAssistantWorkspace,
   setBraveSearchKey,
+  setUiTheme,
 } from "@/server/options";
 
 const tempDirs: string[] = [];
@@ -38,6 +39,7 @@ describe("ensureOptionsFile", () => {
       braveSearchKey?: string;
       pinnedWorkspaceIds?: string[];
       assistantWorkspaceId?: string;
+      uiTheme?: string;
       baseUrl?: string;
     };
 
@@ -48,6 +50,7 @@ describe("ensureOptionsFile", () => {
     expect(persisted.braveSearchKey).toBeUndefined();
     expect(persisted.pinnedWorkspaceIds).toEqual([]);
     expect(persisted.assistantWorkspaceId).toBeUndefined();
+    expect(persisted.uiTheme).toBe("neon-reef");
     expect(persisted.baseUrl).toBe("/");
   });
 
@@ -68,6 +71,7 @@ describe("ensureOptionsFile", () => {
           braveSearchKey: "  brave-key  ",
           pinnedWorkspaceIds: ["batty", "", 123, "kladde"],
           assistantWorkspaceId: "  batty  ",
+          uiTheme: "serious-business",
           baseUrl: "batty/",
         },
         null,
@@ -89,6 +93,7 @@ describe("ensureOptionsFile", () => {
     expect(options.braveSearchKey).toBe("brave-key");
     expect(options.pinnedWorkspaceIds).toEqual(["batty", "kladde"]);
     expect(options.assistantWorkspaceId).toBe("batty");
+    expect(options.uiTheme).toBe("serious-business");
     expect(options.baseUrl).toBe("/batty");
     expect(persisted.username).toBeUndefined();
     expect(persisted.password).toBeUndefined();
@@ -146,6 +151,32 @@ describe("ensureOptionsFile", () => {
     expect((await readStoredOptions(battyDir))?.braveSearchKey).toBeUndefined();
   });
 
+  it("persists the selected UI theme", async () => {
+    const battyDir = await createBattyDir();
+
+    await fs.mkdir(path.dirname(optionsFilePath(battyDir)), { recursive: true });
+    await fs.writeFile(
+      optionsFilePath(battyDir),
+      `${JSON.stringify(
+        {
+          authSecret: "existing-secret",
+          workspacesRoot: "/root/github",
+          webPushSubject: "https://batty.roybot.se",
+          cronDailySessionStartTime: "04:00",
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    await setUiTheme(battyDir, "serious-business");
+    expect((await readStoredOptions(battyDir))?.uiTheme).toBe("serious-business");
+
+    await setUiTheme(battyDir, "neon-reef");
+    expect((await readStoredOptions(battyDir))?.uiTheme).toBe("neon-reef");
+  });
+
   it("rejects invalid baseUrl values", async () => {
     const battyDir = await createBattyDir();
 
@@ -168,6 +199,31 @@ describe("ensureOptionsFile", () => {
 
     await expect(ensureOptionsFile(battyDir)).rejects.toThrow(
       "Invalid baseUrl in options.json: /batty?bad=1. Expected a URL path.",
+    );
+  });
+
+  it("rejects invalid uiTheme values", async () => {
+    const battyDir = await createBattyDir();
+
+    await fs.mkdir(path.dirname(optionsFilePath(battyDir)), { recursive: true });
+    await fs.writeFile(
+      optionsFilePath(battyDir),
+      `${JSON.stringify(
+        {
+          authSecret: "existing-secret",
+          workspacesRoot: "/root/github",
+          webPushSubject: "https://batty.roybot.se",
+          cronDailySessionStartTime: "04:00",
+          uiTheme: "laser-party",
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    await expect(ensureOptionsFile(battyDir)).rejects.toThrow(
+      'Invalid uiTheme in options.json: laser-party. Expected "neon-reef" or "serious-business".',
     );
   });
 

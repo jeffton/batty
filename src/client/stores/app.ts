@@ -20,6 +20,7 @@ import {
   setBraveSearchApiKey as setBraveSearchApiKeyRequest,
   setProviderApiKey,
   setSessionModel,
+  setUiTheme as setUiThemeRequest,
   setSessionThinkingLevel,
   setWorkspaceAssistant as setWorkspaceAssistantRequest,
   setWorkspacePinned as setWorkspacePinnedRequest,
@@ -87,6 +88,7 @@ const defaultProviderAuthStatus: ProviderAuthStatus = {
 
 const defaultAppSettingsStatus: AppSettingsStatus = {
   braveSearchConfigured: false,
+  uiTheme: "neon-reef",
 };
 
 function compareCronJobsByNextRun(left: CronJob, right: CronJob): number {
@@ -699,6 +701,10 @@ export const useAppStore = defineStore("app", {
 
     async setBraveSearchApiKey(apiKey: string): Promise<void> {
       this.settings = await setBraveSearchApiKeyRequest(apiKey);
+    },
+
+    async setUiTheme(uiTheme: "neon-reef" | "serious-business"): Promise<void> {
+      this.settings = await setUiThemeRequest(uiTheme);
     },
 
     async updateCronJob(jobId: string, patch: UpdateCronJobInput): Promise<CronJob> {

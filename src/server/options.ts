@@ -10,6 +10,7 @@ export interface StoredAppOptions {
   braveSearchKey?: string;
   pinnedWorkspaceIds?: string[];
   assistantWorkspaceId?: string;
+  uiTheme?: "neon-reef" | "serious-business";
   baseUrl?: string;
 }
 
@@ -21,10 +22,12 @@ export interface AppOptions {
   braveSearchKey?: string;
   pinnedWorkspaceIds: string[];
   assistantWorkspaceId?: string;
+  uiTheme: "neon-reef" | "serious-business";
   baseUrl: string;
 }
 
 const DEFAULT_CRON_DAILY_SESSION_START_TIME = "04:00";
+const DEFAULT_UI_THEME = "neon-reef";
 
 const REQUIRED_OPTION_KEYS = ["workspacesRoot", "webPushSubject"] as const;
 
@@ -76,6 +79,19 @@ function normalizeDailySessionStartTime(value: unknown): string {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
+function normalizeUiTheme(value: unknown): AppOptions["uiTheme"] {
+  if (value == null) {
+    return DEFAULT_UI_THEME;
+  }
+  if (value === "neon-reef" || value === "serious-business") {
+    return value;
+  }
+
+  throw new Error(
+    `Invalid uiTheme in options.json: ${String(value)}. Expected "neon-reef" or "serious-business".`,
+  );
+}
+
 export function normalizeBaseUrl(value: unknown): string {
   if (value == null) {
     return "/";
@@ -121,6 +137,7 @@ function normalizeStoredOptions(options: StoredAppOptions | undefined): StoredAp
       options.assistantWorkspaceId.trim().length > 0
         ? options.assistantWorkspaceId.trim()
         : undefined,
+    uiTheme: normalizeUiTheme(options?.uiTheme),
     baseUrl: normalizeBaseUrl(options?.baseUrl),
   };
 }
@@ -219,6 +236,20 @@ export async function setBraveSearchKey(
   const nextOptions: AppOptions = {
     ...options,
     braveSearchKey: normalizedApiKey ? normalizedApiKey : undefined,
+  };
+
+  await writeStoredOptions(projectRoot, nextOptions);
+  return nextOptions;
+}
+
+export async function setUiTheme(
+  projectRoot: string,
+  uiTheme: AppOptions["uiTheme"],
+): Promise<AppOptions> {
+  const options = await loadAppOptions(projectRoot);
+  const nextOptions: AppOptions = {
+    ...options,
+    uiTheme,
   };
 
   await writeStoredOptions(projectRoot, nextOptions);

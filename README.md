@@ -258,16 +258,65 @@ Repo includes:
 - `deploy/batty.nginx.conf` — nginx example
 - `scripts/deploy.sh` — build, package, install, and reload helper
 
-Deploy on the server with the project script:
+Deploy on Linux with the project script:
 
 ```bash
 sudo ./scripts/deploy.sh
 ```
 
-The deploy script installs Batty to `/opt/batty`:
+The Linux deploy script installs Batty to `/opt/batty`:
 
 - versioned releases under `/opt/batty/releases/<git-sha>`
 - current install symlink at `/opt/batty/current`
 - systemd `WorkingDirectory=/opt/batty/current`
 - service entrypoint `/opt/batty/current/dist/server/main.mjs`
 - CLI entrypoint `/opt/batty/current/dist/server/cli.mjs`
+
+### Windows deployment behind IIS
+
+This repo also includes a Windows deployment flow that runs Batty behind IIS with the ASP.NET Core Module acting as the reverse proxy to the Node process.
+
+Requirements:
+
+- IIS site with HTTPS already configured
+- ASP.NET Core Module V2 installed on the machine
+- Node.js available at `node.exe`
+- an elevated PowerShell session for the IIS application setup step
+
+Example deployment for `https://t14-dt-pc1028.cbrain.net/batty`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\deploy-windows.ps1 `
+  -InstallRoot 'D:\Batty\app' `
+  -BattyRoot 'D:\Batty\root' `
+  -WorkspacesRoot 'D:\projects' `
+  -PublicOrigin 'https://t14-dt-pc1028.cbrain.net' `
+  -BaseUrl '/batty' `
+  -SiteName 'Default Web Site' `
+  -AppPath 'batty'
+```
+
+That flow:
+
+- installs dependencies
+- runs checks, tests, and a production build
+- writes `D:\Batty\root\.batty\options.json`
+- packages a versioned release under `D:\Batty\app\releases\<git-sha>`
+- updates `D:\Batty\app\current` as a junction
+- writes `web.config` for IIS out-of-process hosting
+- configures the IIS application automatically when run elevated
+
+The generated IIS app serves Batty from the configured subpath and forwards requests to the Node server through a launcher script that sets:
+
+- `BATTY_HOST=127.0.0.1`
+- `BATTY_PORT=%ASPNETCORE_PORT%`
+- `BATTY_SELF_PATH=<install-root>\current`
+
+If the main deploy script is run without elevation, finish the IIS step from an elevated PowerShell session:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\configure-iis-app.ps1 `
+  -SiteName 'Default Web Site' `
+  -AppPath 'batty' `
+  -PhysicalPath 'D:\Batty\app\current'
+```

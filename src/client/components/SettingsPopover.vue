@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ExternalLink, KeyRound, LogOut, Save, Settings2 } from "lucide-vue-next";
+import { ExternalLink, KeyRound, LogOut, Pencil, Save, Settings2, X } from "lucide-vue-next";
 import { computed, reactive, ref, watch } from "vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
 import { useAppStore } from "@/client/stores/app";
@@ -13,9 +13,11 @@ const emit = defineEmits<{
   logout: [];
 }>();
 
+const BRAVE_SEARCH_ITEM_ID = "brave-search";
 const store = useAppStore();
 const connectPending = ref(false);
 const completePending = ref(false);
+const expandedItemId = ref<string>();
 const apiKeySaving = reactive<Record<string, boolean>>({
   google: false,
   openrouter: false,
@@ -62,6 +64,39 @@ function isCodexProvider(providerId: string): boolean {
   return providerId === "openai-codex";
 }
 
+function itemTitle(itemId: string): string {
+  if (itemId === BRAVE_SEARCH_ITEM_ID) {
+    return "Brave Search API key";
+  }
+  if (itemId === "openai-codex") {
+    return "ChatGPT/Codex subscription";
+  }
+  if (itemId === "google") {
+    return "Gemini API key";
+  }
+  if (itemId === "openrouter") {
+    return "OpenRouter API key";
+  }
+  return itemId;
+}
+
+function itemStatus(itemId: string): string {
+  if (itemId === BRAVE_SEARCH_ITEM_ID) {
+    return store.settings.braveSearchConfigured ? "Connected" : "Not connected";
+  }
+
+  const provider = store.providerAuth.providers.find((candidate) => candidate.id === itemId);
+  return provider?.connected ? "Connected" : "Not connected";
+}
+
+function isExpanded(itemId: string): boolean {
+  return expandedItemId.value === itemId;
+}
+
+function toggleExpanded(itemId: string): void {
+  expandedItemId.value = expandedItemId.value === itemId ? undefined : itemId;
+}
+
 function resetAttempt(): void {
   authAttemptId.value = "";
   authUrl.value = "";
@@ -82,15 +117,12 @@ function openAuthUrl(): void {
   window.open(authUrl.value, "_blank", "noopener,noreferrer");
 }
 
-function apiKeyTitle(providerId: "google" | "openrouter"): string {
-  return providerId === "google" ? "Gemini API key" : "OpenRouter API key";
-}
-
 function apiKeyPlaceholder(providerId: "google" | "openrouter"): string {
   return providerId === "google" ? "Paste Gemini API key" : "Paste OpenRouter API key";
 }
 
 async function startOpenAICodexAuth(): Promise<void> {
+  expandedItemId.value = "openai-codex";
   connectPending.value = true;
   authError.value = "";
   try {
@@ -117,6 +149,7 @@ async function completeOpenAICodexAuth(): Promise<void> {
   try {
     await store.completeOpenAICodexProviderAuth(authAttemptId.value, authInput.value.trim());
     resetAttempt();
+    expandedItemId.value = undefined;
   } catch (error) {
     authError.value = error instanceof Error ? error.message : String(error);
   } finally {
@@ -131,11 +164,13 @@ async function saveApiKey(providerId: "google" | "openrouter"): Promise<void> {
     return;
   }
 
+  expandedItemId.value = providerId;
   apiKeySaving[providerId] = true;
   apiKeyErrors[providerId] = "";
   try {
     await store.setProviderApiKey(providerId, apiKey);
     apiKeyInputs[providerId] = "";
+    expandedItemId.value = undefined;
   } catch (error) {
     apiKeyErrors[providerId] = error instanceof Error ? error.message : String(error);
   } finally {
@@ -150,11 +185,13 @@ async function saveBraveSearchKey(): Promise<void> {
     return;
   }
 
+  expandedItemId.value = BRAVE_SEARCH_ITEM_ID;
   braveSearchSaving.value = true;
   braveSearchError.value = "";
   try {
     await store.setBraveSearchApiKey(apiKey);
     braveSearchInput.value = "";
+    expandedItemId.value = undefined;
   } catch (error) {
     braveSearchError.value = error instanceof Error ? error.message : String(error);
   } finally {
@@ -183,6 +220,7 @@ watch(
   () => document.getElementById(props.popoverId)?.matches(":popover-open"),
   (open) => {
     if (!open) {
+      expandedItemId.value = undefined;
       return;
     }
 
@@ -213,9 +251,6 @@ watch(
 
     <section class="settings-popover__section">
       <div class="settings-popover__group-title">Assistant workspace</div>
-      <div class="settings-popover__copy">
-        Choose which workspace gets the daily assistant entry point.
-      </div>
       <select
         class="settings-popover__select"
         :value="assistantWorkspaceId"
@@ -230,48 +265,72 @@ watch(
     </section>
 
     <section class="settings-popover__section">
-      <div class="settings-popover__group-title">Brave Search API key</div>
-      <div class="settings-popover__provider-meta">
-        {{ store.settings.braveSearchConfigured ? "API key saved" : "Not configured" }}
-      </div>
-      <div class="settings-popover__api-key-row">
-        <input
-          v-model="braveSearchInput"
-          class="settings-popover__input"
-          type="text"
-          autocomplete="off"
-          placeholder="Paste Brave Search API key"
-          :disabled="braveSearchSaving"
-        />
-        <button
-          class="settings-popover__action settings-popover__action--primary settings-popover__icon-button"
-          type="button"
-          :disabled="braveSearchSaving"
-          :title="store.settings.braveSearchConfigured ? 'Replace key' : 'Save key'"
-          :aria-label="store.settings.braveSearchConfigured ? 'Replace key' : 'Save key'"
-          @click="saveBraveSearchKey"
-        >
-          <Save :size="16" />
-        </button>
-      </div>
-      <div v-if="braveSearchError" class="settings-popover__error">{{ braveSearchError }}</div>
-    </section>
-
-    <section class="settings-popover__section">
       <div class="settings-popover__group-title">Auth</div>
 
-      <section
-        v-for="provider in providerOrder"
-        :key="provider.id"
-        class="settings-popover__provider"
-      >
-        <template v-if="isCodexProvider(provider.id)">
-          <div class="settings-popover__header">
-            <div>
-              <div class="settings-popover__title">ChatGPT/Codex subscription</div>
-              <div class="settings-popover__subtitle">Provider: openai-codex</div>
-            </div>
-            <span
+      <article class="settings-popover__item">
+        <div class="settings-popover__item-top">
+          <div class="settings-popover__item-meta">
+            <strong>{{ itemTitle(BRAVE_SEARCH_ITEM_ID) }}</strong>
+            <span>{{ itemStatus(BRAVE_SEARCH_ITEM_ID) }}</span>
+          </div>
+
+          <button
+            class="settings-popover__icon-btn"
+            type="button"
+            :disabled="braveSearchSaving"
+            @click="toggleExpanded(BRAVE_SEARCH_ITEM_ID)"
+          >
+            <component :is="isExpanded(BRAVE_SEARCH_ITEM_ID) ? X : Pencil" :size="14" />
+          </button>
+        </div>
+
+        <div v-if="isExpanded(BRAVE_SEARCH_ITEM_ID)" class="settings-popover__editor">
+          <input
+            v-model="braveSearchInput"
+            class="settings-popover__input"
+            type="text"
+            autocomplete="off"
+            placeholder="Paste Brave Search API key"
+            :disabled="braveSearchSaving"
+          />
+          <div class="settings-popover__editor-actions">
+            <button
+              class="settings-popover__action settings-popover__action--primary"
+              type="button"
+              :disabled="braveSearchSaving"
+              @click="saveBraveSearchKey"
+            >
+              <Save :size="14" /> {{ braveSearchSaving ? "Saving…" : "Save" }}
+            </button>
+          </div>
+          <div v-if="braveSearchError" class="settings-popover__error">{{ braveSearchError }}</div>
+        </div>
+      </article>
+
+      <article v-for="provider in providerOrder" :key="provider.id" class="settings-popover__item">
+        <div class="settings-popover__item-top">
+          <div class="settings-popover__item-meta">
+            <strong>{{ itemTitle(provider.id) }}</strong>
+            <span>{{ itemStatus(provider.id) }}</span>
+          </div>
+
+          <button
+            class="settings-popover__icon-btn"
+            type="button"
+            :disabled="
+              provider.id === 'openai-codex'
+                ? connectPending || completePending
+                : apiKeySaving[provider.id]
+            "
+            @click="toggleExpanded(provider.id)"
+          >
+            <component :is="isExpanded(provider.id) ? X : Pencil" :size="14" />
+          </button>
+        </div>
+
+        <div v-if="isExpanded(provider.id)" class="settings-popover__editor">
+          <template v-if="isCodexProvider(provider.id)">
+            <div
               :class="[
                 'settings-popover__badge',
                 provider.connected
@@ -281,101 +340,72 @@ watch(
             >
               <KeyRound v-if="provider.connected" :size="13" />
               {{ provider.connected ? "Connected" : "Not connected" }}
-            </span>
-          </div>
-
-          <div v-if="provider.connectedEmail" class="settings-popover__provider-meta">
-            {{ provider.connectedEmail }}
-          </div>
-
-          <p class="settings-popover__copy">
-            Sign in with your ChatGPT/Codex subscription to use <code>openai-codex/*</code>
-            models.
-          </p>
-
-          <button
-            class="settings-popover__action"
-            type="button"
-            :disabled="connectPending || completePending"
-            @click="startOpenAICodexAuth"
-          >
-            {{
-              connectPending
-                ? "Starting…"
-                : hasOpenAICodexAttempt
-                  ? "Restart connect flow"
-                  : provider.connected
-                    ? "Reconnect account"
-                    : "Connect ChatGPT/Codex"
-            }}
-          </button>
-
-          <div v-if="hasOpenAICodexAttempt" class="settings-popover__attempt">
-            <div v-if="authInstructions" class="settings-popover__help">
-              {{ authInstructions }}
             </div>
+
+            <div v-if="provider.connectedEmail" class="settings-popover__help">
+              {{ provider.connectedEmail }}
+            </div>
+
             <div class="settings-popover__help">
-              Open the sign-in page, finish login in the browser, then paste the localhost callback
-              URL or just the authorization code here.
+              Sign in with your ChatGPT/Codex subscription to use <code>openai-codex/*</code>
+              models.
             </div>
-            <div v-if="authExpiryLabel" class="settings-popover__help">
-              Expires: {{ authExpiryLabel }}
-            </div>
-
-            <button class="settings-popover__link" type="button" @click="openAuthUrl">
-              <ExternalLink :size="14" /> Open sign-in page
-            </button>
-
-            <textarea
-              v-model="authInput"
-              class="settings-popover__input settings-popover__textarea"
-              rows="4"
-              placeholder="Paste the localhost callback URL or the authorization code"
-              :disabled="completePending"
-            />
 
             <button
-              class="settings-popover__action settings-popover__action--primary"
+              class="settings-popover__action"
               type="button"
-              :disabled="completePending || !authInput.trim()"
-              @click="completeOpenAICodexAuth"
+              :disabled="connectPending || completePending"
+              @click="startOpenAICodexAuth"
             >
-              {{ completePending ? "Completing…" : "Complete connection" }}
+              {{
+                connectPending
+                  ? "Starting…"
+                  : hasOpenAICodexAttempt
+                    ? "Restart connect flow"
+                    : provider.connected
+                      ? "Reconnect account"
+                      : "Connect ChatGPT/Codex"
+              }}
             </button>
-          </div>
 
-          <div v-if="authError" class="settings-popover__error">{{ authError }}</div>
-        </template>
-
-        <template v-else>
-          <div class="settings-popover__header">
-            <div>
-              <div class="settings-popover__title">
-                {{ apiKeyTitle(provider.id as "google" | "openrouter") }}
+            <div v-if="hasOpenAICodexAttempt" class="settings-popover__attempt">
+              <div v-if="authInstructions" class="settings-popover__help">
+                {{ authInstructions }}
               </div>
-              <div class="settings-popover__subtitle">Provider: {{ provider.id }}</div>
+              <div class="settings-popover__help">
+                Open the sign-in page, finish login in the browser, then paste the localhost
+                callback URL or just the authorization code here.
+              </div>
+              <div v-if="authExpiryLabel" class="settings-popover__help">
+                Expires: {{ authExpiryLabel }}
+              </div>
+
+              <button class="settings-popover__link" type="button" @click="openAuthUrl">
+                <ExternalLink :size="14" /> Open sign-in page
+              </button>
+
+              <textarea
+                v-model="authInput"
+                class="settings-popover__input settings-popover__textarea"
+                rows="4"
+                placeholder="Paste the localhost callback URL or the authorization code"
+                :disabled="completePending"
+              />
+
+              <button
+                class="settings-popover__action settings-popover__action--primary"
+                type="button"
+                :disabled="completePending || !authInput.trim()"
+                @click="completeOpenAICodexAuth"
+              >
+                {{ completePending ? "Completing…" : "Complete connection" }}
+              </button>
             </div>
-            <span
-              :class="[
-                'settings-popover__badge',
-                provider.connected
-                  ? 'settings-popover__badge--connected'
-                  : 'settings-popover__badge--disconnected',
-              ]"
-            >
-              {{ provider.connected ? "Connected" : "Not connected" }}
-            </span>
-          </div>
 
-          <div class="settings-popover__provider-meta">
-            {{
-              provider.connected
-                ? "API key saved"
-                : "Save an API key to enable models for this provider."
-            }}
-          </div>
+            <div v-if="authError" class="settings-popover__error">{{ authError }}</div>
+          </template>
 
-          <div class="settings-popover__api-key-row">
+          <template v-else>
             <input
               v-model="apiKeyInputs[provider.id as 'google' | 'openrouter']"
               class="settings-popover__input"
@@ -384,22 +414,22 @@ watch(
               :placeholder="apiKeyPlaceholder(provider.id as 'google' | 'openrouter')"
               :disabled="apiKeySaving[provider.id]"
             />
-            <button
-              class="settings-popover__action settings-popover__action--primary settings-popover__icon-button"
-              type="button"
-              :disabled="apiKeySaving[provider.id]"
-              :title="provider.connected ? 'Replace key' : 'Save key'"
-              :aria-label="provider.connected ? 'Replace key' : 'Save key'"
-              @click="saveApiKey(provider.id as 'google' | 'openrouter')"
-            >
-              <Save :size="16" />
-            </button>
-          </div>
-          <div v-if="apiKeyErrors[provider.id]" class="settings-popover__error">
-            {{ apiKeyErrors[provider.id] }}
-          </div>
-        </template>
-      </section>
+            <div class="settings-popover__editor-actions">
+              <button
+                class="settings-popover__action settings-popover__action--primary"
+                type="button"
+                :disabled="apiKeySaving[provider.id]"
+                @click="saveApiKey(provider.id as 'google' | 'openrouter')"
+              >
+                <Save :size="14" /> {{ apiKeySaving[provider.id] ? "Saving…" : "Save" }}
+              </button>
+            </div>
+            <div v-if="apiKeyErrors[provider.id]" class="settings-popover__error">
+              {{ apiKeyErrors[provider.id] }}
+            </div>
+          </template>
+        </div>
+      </article>
     </section>
 
     <section class="settings-popover__section settings-popover__section--logout">
@@ -455,14 +485,13 @@ watch(
 
 .settings-popover__section-header,
 .settings-popover__section-title-row,
-.settings-popover__header,
-.settings-popover__api-key-row {
+.settings-popover__item-top {
   display: flex;
   align-items: center;
 }
 
 .settings-popover__section-header,
-.settings-popover__header {
+.settings-popover__item-top {
   justify-content: space-between;
   gap: 0.5rem;
 }
@@ -473,7 +502,6 @@ watch(
 }
 
 .settings-popover__section-title,
-.settings-popover__title,
 .settings-popover__group-title {
   margin: 0;
   font-size: 0.9rem;
@@ -481,33 +509,116 @@ watch(
   color: var(--color-text-strong);
 }
 
-.settings-popover__provider {
+.settings-popover__select,
+.settings-popover__input {
+  width: 100%;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.55rem;
+  background: var(--color-bg-elevated);
+  color: inherit;
+  padding: 0.55rem 0.65rem;
+  font: inherit;
+}
+
+.settings-popover__input {
+  font-family: var(--font-family-mono);
+}
+
+.settings-popover__textarea {
+  resize: vertical;
+}
+
+.settings-popover__item {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
+  padding: 0.55rem;
+  border-radius: 0.65rem;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border-soft);
 }
 
-.settings-popover__provider + .settings-popover__provider {
-  border-top: 1px solid var(--color-border-soft);
-  padding-top: 0.7rem;
+.settings-popover__item-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 0;
+  flex: 1;
 }
 
-.settings-popover__subtitle,
-.settings-popover__copy,
-.settings-popover__help,
-.settings-popover__provider-meta {
-  font-size: 0.82rem;
+.settings-popover__item-meta strong,
+.settings-popover__item-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-popover__item-meta strong {
+  font-size: 0.84rem;
+  color: var(--color-text-strong);
+}
+
+.settings-popover__item-meta span,
+.settings-popover__help {
+  font-size: 0.78rem;
   color: var(--color-text-subtle);
 }
 
-.settings-popover__copy {
-  margin: 0;
+.settings-popover__editor,
+.settings-popover__attempt {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.settings-popover__editor-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.settings-popover__action,
+.settings-popover__link,
+.settings-popover__logout,
+.settings-popover__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  border: 0;
+  border-radius: 0.45rem;
+  font-size: 0.82rem;
+}
+
+.settings-popover__action,
+.settings-popover__link,
+.settings-popover__logout {
+  width: fit-content;
+  padding: 0.45rem 0.65rem;
+  background: var(--color-bg-elevated);
+  color: inherit;
+}
+
+.settings-popover__action--primary {
+  background: var(--color-bg-selection);
+  color: var(--color-accent-strong);
+  font-weight: 600;
+}
+
+.settings-popover__logout {
+  background: var(--color-error-soft);
+  color: var(--color-error);
+}
+
+.settings-popover__icon-btn {
+  background: transparent;
+  color: var(--color-text-muted);
+  padding: 0.45rem;
 }
 
 .settings-popover__badge {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
+  width: fit-content;
   border-radius: 999px;
   padding: 0.18rem 0.5rem;
   font-size: 0.72rem;
@@ -525,91 +636,27 @@ watch(
   color: var(--color-text-subtle);
 }
 
-.settings-popover__attempt {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.settings-popover__link,
-.settings-popover__action,
-.settings-popover__logout {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  width: fit-content;
-  border: 0;
-  border-radius: 0.5rem;
-  padding: 0.45rem 0.65rem;
-  font-size: 0.84rem;
-  background: var(--color-bg-elevated);
-  color: inherit;
-}
-
-.settings-popover__action--primary {
-  background: var(--color-user-bg);
-  color: var(--color-user-text);
-  font-weight: 600;
-}
-
-.settings-popover__logout {
-  background: var(--color-error-soft);
-  color: var(--color-error);
-}
-
 @media (hover: hover) {
+  .settings-popover__action:hover,
   .settings-popover__link:hover,
-  .settings-popover__action:hover {
+  .settings-popover__icon-btn:hover {
     background: var(--color-bg-hover);
   }
 
-  .settings-popover__action--primary:hover {
-    filter: brightness(1.03);
-  }
-
+  .settings-popover__action--primary:hover,
   .settings-popover__logout:hover {
     filter: brightness(1.03);
   }
 }
 
-.settings-popover__link:disabled,
 .settings-popover__action:disabled,
-.settings-popover__logout:disabled {
+.settings-popover__link:disabled,
+.settings-popover__logout:disabled,
+.settings-popover__icon-btn:disabled,
+.settings-popover__select:disabled,
+.settings-popover__input:disabled {
   opacity: 0.6;
   cursor: default;
-}
-
-.settings-popover__select,
-.settings-popover__input {
-  width: 100%;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.5rem;
-  background: var(--color-bg-elevated);
-  color: inherit;
-  padding: 0.55rem 0.65rem;
-  font: inherit;
-}
-
-.settings-popover__input {
-  font-family: var(--font-family-mono);
-}
-
-.settings-popover__textarea {
-  resize: vertical;
-}
-
-.settings-popover__api-key-row {
-  align-items: stretch;
-  gap: 0.45rem;
-}
-
-.settings-popover__icon-button {
-  flex: 0 0 auto;
-  width: 2.75rem;
-  min-width: 2.75rem;
-  padding: 0;
-  aspect-ratio: 1;
 }
 
 .settings-popover__section--logout {
@@ -617,7 +664,7 @@ watch(
 }
 
 .settings-popover__error {
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   color: var(--color-error);
 }
 </style>

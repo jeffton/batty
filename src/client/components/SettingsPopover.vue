@@ -90,16 +90,14 @@ function itemConnected(itemId: string): boolean {
 }
 
 function itemStatusLabel(itemId: string): string {
-  return itemConnected(itemId) ? "Connected" : "Not connected";
-}
-
-function itemStatusDetail(itemId: string): string {
-  if (itemId !== "openai-codex") {
-    return "";
+  if (itemId === "openai-codex") {
+    const provider = store.providerAuth.providers.find((candidate) => candidate.id === itemId);
+    if (provider?.connected && provider.connectedEmail) {
+      return `Connected · ${provider.connectedEmail}`;
+    }
   }
 
-  const provider = store.providerAuth.providers.find((candidate) => candidate.id === itemId);
-  return provider?.connectedEmail ?? "";
+  return itemConnected(itemId) ? "Connected" : "Not connected";
 }
 
 function isExpanded(itemId: string): boolean {
@@ -346,12 +344,6 @@ watch(
               >
                 {{ itemStatusLabel(provider.id) }}
               </span>
-              <span
-                v-if="itemStatusDetail(provider.id)"
-                class="settings-popover__item-status-detail"
-              >
-                · {{ itemStatusDetail(provider.id) }}
-              </span>
             </div>
           </div>
 
@@ -504,7 +496,6 @@ watch(
 }
 
 .settings-popover__section + .settings-popover__section {
-  border-top: 1px solid var(--color-border-soft);
   padding-top: 0.7rem;
 }
 
@@ -571,8 +562,7 @@ watch(
   flex: 1;
 }
 
-.settings-popover__item-meta strong,
-.settings-popover__item-status-detail {
+.settings-popover__item-meta strong {
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -589,7 +579,6 @@ watch(
   flex-wrap: wrap;
 }
 
-.settings-popover__item-status-detail,
 .settings-popover__help {
   font-size: 0.78rem;
   color: var(--color-text-subtle);

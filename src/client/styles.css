@@ -52,6 +52,7 @@
   --color-bg-hover: oklch(0.9 0.01 240);
   --color-bg-inline-code: oklch(0.92 0.01 240);
   --color-bg-selection: oklch(0.92 0.04 175);
+  --color-bg-chrome: var(--color-bg-panel);
 
   --color-border-soft: oklch(0.88 0.01 240);
   --color-border-strong: oklch(0.82 0.015 240);
@@ -116,6 +117,7 @@
   --color-bg-hover: oklch(0.9 0.01 255);
   --color-bg-inline-code: oklch(0.925 0.008 255);
   --color-bg-selection: oklch(0.9 0.025 248);
+  --color-bg-chrome: oklch(0.9 0.02 246);
 
   --color-border-soft: oklch(0.87 0.008 255);
   --color-border-strong: oklch(0.79 0.01 255);
@@ -145,10 +147,10 @@
   --color-info-soft: oklch(0.91 0.02 248);
   --color-info-soft-strong: oklch(0.89 0.025 248);
 
-  --color-diff-add-bg: oklch(0.9 0.03 145);
-  --color-diff-add-text: oklch(0.36 0.07 145);
-  --color-diff-remove-bg: oklch(0.91 0.025 22);
-  --color-diff-remove-text: oklch(0.38 0.06 22);
+  --color-diff-add-bg: oklch(0.89 0.045 150);
+  --color-diff-add-text: oklch(0.3 0.11 150);
+  --color-diff-remove-bg: oklch(0.93 0.055 32);
+  --color-diff-remove-text: oklch(0.44 0.12 32);
   --color-diff-inline: oklch(0.35 0 0 / 0.08);
 
   --color-code-text: oklch(0.22 0.01 255);
@@ -182,6 +184,7 @@
     --color-bg-hover: oklch(0.28 0.02 240);
     --color-bg-inline-code: oklch(0.22 0.02 240);
     --color-bg-selection: oklch(0.25 0.05 175);
+    --color-bg-chrome: var(--color-bg-panel);
 
     --color-border-soft: oklch(0.28 0.02 240);
     --color-border-strong: oklch(0.35 0.02 240);
@@ -245,6 +248,7 @@
     --color-bg-hover: oklch(0.28 0.014 255);
     --color-bg-inline-code: oklch(0.225 0.012 255);
     --color-bg-selection: oklch(0.27 0.03 248);
+    --color-bg-chrome: oklch(0.26 0.028 246);
 
     --color-border-soft: oklch(0.3 0.012 255);
     --color-border-strong: oklch(0.37 0.014 255);
@@ -273,10 +277,10 @@
     --color-info-soft: oklch(0.24 0.02 248);
     --color-info-soft-strong: oklch(0.27 0.025 248);
 
-    --color-diff-add-bg: oklch(0.24 0.035 145);
-    --color-diff-add-text: oklch(0.8 0.09 145);
-    --color-diff-remove-bg: oklch(0.24 0.03 22);
-    --color-diff-remove-text: oklch(0.81 0.08 22);
+    --color-diff-add-bg: oklch(0.27 0.055 150);
+    --color-diff-add-text: oklch(0.83 0.13 150);
+    --color-diff-remove-bg: oklch(0.3 0.075 32);
+    --color-diff-remove-text: oklch(0.9 0.16 32);
     --color-diff-inline: oklch(1 0 0 / 0.08);
 
     --color-code-text: oklch(0.9 0.008 255);

@@ -105,34 +105,34 @@
   --color-text-muted: oklch(0.47 0.015 255);
   --color-text-subtle: oklch(0.62 0.012 255);
   --color-text-strong: oklch(0.18 0.01 255);
-  --color-link: oklch(0.42 0.09 250);
+  --color-link: oklch(0.37 0.065 250);
 
-  --color-bg-app: oklch(0.965 0.004 255);
-  --color-bg-panel: oklch(0.935 0.006 255);
-  --color-bg-panel-strong: oklch(0.99 0.002 255);
-  --color-bg-panel-soft: oklch(0.955 0.005 255);
-  --color-bg-elevated: oklch(0.915 0.008 255);
-  --color-bg-elevated-soft: oklch(0.95 0.006 255);
-  --color-bg-overlay: oklch(0.99 0.002 255);
-  --color-bg-hover: oklch(0.9 0.01 255);
-  --color-bg-inline-code: oklch(0.925 0.008 255);
-  --color-bg-selection: oklch(0.9 0.025 248);
-  --color-bg-chrome: oklch(0.9 0.02 246);
+  --color-bg-app: oklch(0.955 0.003 255);
+  --color-bg-panel: oklch(0.925 0.004 255);
+  --color-bg-panel-strong: oklch(0.985 0.001 255);
+  --color-bg-panel-soft: oklch(0.945 0.003 255);
+  --color-bg-elevated: oklch(0.905 0.005 255);
+  --color-bg-elevated-soft: oklch(0.94 0.004 255);
+  --color-bg-overlay: oklch(0.985 0.001 255);
+  --color-bg-hover: oklch(0.885 0.008 255);
+  --color-bg-inline-code: oklch(0.915 0.005 255);
+  --color-bg-selection: oklch(0.875 0.018 248);
+  --color-bg-chrome: oklch(0.855 0.025 246);
 
-  --color-border-soft: oklch(0.87 0.008 255);
-  --color-border-strong: oklch(0.79 0.01 255);
-  --color-border-accent: oklch(0.5 0.075 248);
+  --color-border-soft: oklch(0.845 0.006 255);
+  --color-border-strong: oklch(0.765 0.008 255);
+  --color-border-accent: oklch(0.44 0.055 248);
 
   --color-shadow-popover:
     0 10px 28px oklch(0.1 0.01 255 / 0.1), 0 2px 8px oklch(0.1 0.01 255 / 0.05);
   --color-backdrop: oklch(0.12 0.01 255 / 0.22);
 
-  --color-accent: oklch(0.52 0.09 248);
-  --color-accent-soft: oklch(0.91 0.02 248);
-  --color-accent-strong: oklch(0.4 0.07 248);
+  --color-accent: oklch(0.46 0.07 248);
+  --color-accent-soft: oklch(0.89 0.014 248);
+  --color-accent-strong: oklch(0.36 0.055 248);
 
-  --color-user-bg: oklch(0.87 0.03 248);
-  --color-user-text: oklch(0.21 0.02 248);
+  --color-user-bg: oklch(0.84 0.022 248);
+  --color-user-text: oklch(0.21 0.018 248);
 
   --color-success: oklch(0.58 0.12 145);
   --color-success-soft: oklch(0.91 0.025 145);

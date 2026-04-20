@@ -23,6 +23,7 @@ interface StoredSentFileManifest {
 
 export interface StoreSentFilesOptions {
   rootDir: string;
+  baseUrl?: string;
   workspaceId: string;
   sessionId: string;
   toolCallId: string;
@@ -32,6 +33,7 @@ export interface StoreSentFilesOptions {
 
 export interface ResolveSentFileOptions {
   rootDir: string;
+  baseUrl?: string;
   workspaceId: string;
   sessionId: string;
   toolCallId: string;
@@ -79,18 +81,29 @@ function toolDirectory(
   );
 }
 
+function normalizeBaseUrl(baseUrl: string | undefined): string {
+  if (!baseUrl || baseUrl === "/") {
+    return "/";
+  }
+  return `/${baseUrl.replace(/^\/+/, "").replace(/\/+$/, "")}`;
+}
+
 function sentFileUrl(
+  baseUrl: string | undefined,
   workspaceId: string,
   sessionId: string,
   toolCallId: string,
   fileId: string,
   download: boolean,
 ): string {
-  const base = [workspaceId, sessionId, toolCallId, fileId].map(encodeURIComponent).join("/");
-  return `/api/sent-files/${base}${download ? "?download=1" : ""}`;
+  const routeBase = [workspaceId, sessionId, toolCallId, fileId].map(encodeURIComponent).join("/");
+  const route = `/api/sent-files/${routeBase}${download ? "?download=1" : ""}`;
+  const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
+  return normalizedBaseUrl === "/" ? route : `${normalizedBaseUrl}${route}`;
 }
 
 function toDescriptor(
+  baseUrl: string | undefined,
   workspaceId: string,
   sessionId: string,
   toolCallId: string,
@@ -102,10 +115,10 @@ function toDescriptor(
     size: file.size,
     mimeType: file.mimeType,
     kind: file.kind,
-    downloadUrl: sentFileUrl(workspaceId, sessionId, toolCallId, file.id, true),
+    downloadUrl: sentFileUrl(baseUrl, workspaceId, sessionId, toolCallId, file.id, true),
     previewUrl:
       file.kind === "image" || file.kind === "video"
-        ? sentFileUrl(workspaceId, sessionId, toolCallId, file.id, false)
+        ? sentFileUrl(baseUrl, workspaceId, sessionId, toolCallId, file.id, false)
         : undefined,
   };
 }
@@ -179,7 +192,7 @@ export async function storeSentFiles(
   );
 
   return files.map((file) =>
-    toDescriptor(options.workspaceId, options.sessionId, options.toolCallId, file),
+    toDescriptor(options.baseUrl, options.workspaceId, options.sessionId, options.toolCallId, file),
   );
 }
 
@@ -196,7 +209,13 @@ export async function resolveSentFile(options: ResolveSentFileOptions): Promise<
   }
 
   return {
-    descriptor: toDescriptor(options.workspaceId, options.sessionId, options.toolCallId, file),
+    descriptor: toDescriptor(
+      options.baseUrl,
+      options.workspaceId,
+      options.sessionId,
+      options.toolCallId,
+      file,
+    ),
     storedPath: path.join(
       toolDirectory(options.rootDir, options.workspaceId, options.sessionId, options.toolCallId),
       file.storedName,

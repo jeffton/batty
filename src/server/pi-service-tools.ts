@@ -311,6 +311,7 @@ export function createAttachFilesTool({
           : "ephemeral-session";
       const sentFiles = await storeSentFiles({
         rootDir: config.sentFilesDir,
+        baseUrl: config.baseUrl,
         workspaceId: workspace.id,
         sessionId,
         toolCallId,

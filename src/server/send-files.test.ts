@@ -27,6 +27,7 @@ describe("storeSentFiles", () => {
 
     const sentFiles = await storeSentFiles({
       rootDir,
+      baseUrl: "/batty",
       workspaceId: "workspace-1",
       sessionId: "session-1",
       toolCallId: "tool-1",
@@ -39,7 +40,7 @@ describe("storeSentFiles", () => {
       name: "chart.png",
       kind: "image",
       mimeType: "image/png",
-      previewUrl: expect.stringContaining("/api/sent-files/workspace-1/session-1/tool-1/"),
+      previewUrl: expect.stringContaining("/batty/api/sent-files/workspace-1/session-1/tool-1/"),
       downloadUrl: expect.stringContaining("?download=1"),
     });
     expect(sentFiles[1]).toMatchObject({
@@ -56,12 +57,16 @@ describe("storeSentFiles", () => {
 
     const resolved = await resolveSentFile({
       rootDir,
+      baseUrl: "/batty",
       workspaceId: "workspace-1",
       sessionId: "session-1",
       toolCallId: "tool-1",
       fileId: sentFiles[2]!.id,
     });
     expect(await fs.readFile(resolved.storedPath, "utf8")).toBe("hello world");
+    expect(resolved.descriptor.downloadUrl).toContain(
+      "/batty/api/sent-files/workspace-1/session-1/tool-1/",
+    );
     expect(resolved.descriptor.downloadUrl).toContain("?download=1");
   });
 

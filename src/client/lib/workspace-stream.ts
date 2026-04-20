@@ -1,3 +1,5 @@
+import { withBaseUrl } from "@/client/lib/base-url";
+
 export function workspaceEventsPath(workspaceId: string): string {
-  return `/api/workspaces/${encodeURIComponent(workspaceId)}/events`;
+  return withBaseUrl(`/api/workspaces/${encodeURIComponent(workspaceId)}/events`);
 }

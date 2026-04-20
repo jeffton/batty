@@ -37,6 +37,7 @@ describe("ensureOptionsFile", () => {
       braveSearchKey?: string;
       pinnedWorkspaceIds?: string[];
       assistantWorkspaceId?: string;
+      baseUrl?: string;
     };
 
     expect(persisted.authSecret.length).toBeGreaterThan(0);
@@ -46,6 +47,7 @@ describe("ensureOptionsFile", () => {
     expect(persisted.braveSearchKey).toBeUndefined();
     expect(persisted.pinnedWorkspaceIds).toEqual([]);
     expect(persisted.assistantWorkspaceId).toBeUndefined();
+    expect(persisted.baseUrl).toBe("/");
   });
 
   it("drops legacy password auth fields and preserves the rest", async () => {
@@ -65,6 +67,7 @@ describe("ensureOptionsFile", () => {
           braveSearchKey: "  brave-key  ",
           pinnedWorkspaceIds: ["batty", "", 123, "kladde"],
           assistantWorkspaceId: "  batty  ",
+          baseUrl: "batty/",
         },
         null,
         2,
@@ -85,6 +88,7 @@ describe("ensureOptionsFile", () => {
     expect(options.braveSearchKey).toBe("brave-key");
     expect(options.pinnedWorkspaceIds).toEqual(["batty", "kladde"]);
     expect(options.assistantWorkspaceId).toBe("batty");
+    expect(options.baseUrl).toBe("/batty");
     expect(persisted.username).toBeUndefined();
     expect(persisted.password).toBeUndefined();
   });
@@ -113,6 +117,31 @@ describe("ensureOptionsFile", () => {
 
     await setAssistantWorkspace(battyDir, undefined);
     expect((await readStoredOptions(battyDir))?.assistantWorkspaceId).toBeUndefined();
+  });
+
+  it("rejects invalid baseUrl values", async () => {
+    const battyDir = await createBattyDir();
+
+    await fs.mkdir(path.dirname(optionsFilePath(battyDir)), { recursive: true });
+    await fs.writeFile(
+      optionsFilePath(battyDir),
+      `${JSON.stringify(
+        {
+          authSecret: "existing-secret",
+          workspacesRoot: "/root/github",
+          webPushSubject: "https://batty.roybot.se",
+          cronDailySessionStartTime: "04:00",
+          baseUrl: "/batty?bad=1",
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    await expect(ensureOptionsFile(battyDir)).rejects.toThrow(
+      "Invalid baseUrl in options.json: /batty?bad=1. Expected a URL path.",
+    );
   });
 
   it("rejects invalid cronDailySessionStartTime values", async () => {

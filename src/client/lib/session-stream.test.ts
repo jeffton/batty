@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 import { sessionEventsPath } from "@/client/lib/session-stream";
+
+afterEach(() => {
+  delete window.__BATTY_BASE_URL__;
+});
 
 describe("session-stream", () => {
   it("includes workspace and session path for resumable event streams", () => {
@@ -12,6 +16,18 @@ describe("session-stream", () => {
     ).toBe(
       "/api/sessions/session%2F123/events?workspaceId=batty&sessionPath=%2Froot%2Fgithub%2F.batty%2Fsessions%2Fbatty%2Fdemo+session.jsonl",
     );
+  });
+
+  it("prefixes the event stream with the configured base url", () => {
+    window.__BATTY_BASE_URL__ = "/batty";
+
+    expect(
+      sessionEventsPath({
+        id: "session-123",
+        workspaceId: "batty",
+        path: undefined,
+      }),
+    ).toBe("/batty/api/sessions/session-123/events?workspaceId=batty");
   });
 
   it("still includes the workspace when no session path exists", () => {

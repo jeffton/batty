@@ -10,6 +10,7 @@ export interface StoredAppOptions {
   braveSearchKey?: string;
   pinnedWorkspaceIds?: string[];
   assistantWorkspaceId?: string;
+  baseUrl?: string;
 }
 
 export interface AppOptions {
@@ -20,6 +21,7 @@ export interface AppOptions {
   braveSearchKey?: string;
   pinnedWorkspaceIds: string[];
   assistantWorkspaceId?: string;
+  baseUrl: string;
 }
 
 const DEFAULT_CRON_DAILY_SESSION_START_TIME = "04:00";
@@ -74,6 +76,26 @@ function normalizeDailySessionStartTime(value: unknown): string {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
+export function normalizeBaseUrl(value: unknown): string {
+  if (value == null) {
+    return "/";
+  }
+  if (typeof value !== "string") {
+    throw new Error(`Invalid baseUrl in options.json: ${String(value)}. Expected a URL path.`);
+  }
+
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed === "/") {
+    return "/";
+  }
+  if (trimmed.includes("?") || trimmed.includes("#")) {
+    throw new Error(`Invalid baseUrl in options.json: ${trimmed}. Expected a URL path.`);
+  }
+
+  const normalized = `/${trimmed.replace(/^\/+/, "").replace(/\/+$/, "")}`;
+  return normalized === "/" ? "/" : normalized;
+}
+
 function normalizeStoredOptions(options: StoredAppOptions | undefined): StoredAppOptions {
   return {
     authSecret:
@@ -99,6 +121,7 @@ function normalizeStoredOptions(options: StoredAppOptions | undefined): StoredAp
       options.assistantWorkspaceId.trim().length > 0
         ? options.assistantWorkspaceId.trim()
         : undefined,
+    baseUrl: normalizeBaseUrl(options?.baseUrl),
   };
 }
 

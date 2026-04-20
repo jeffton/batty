@@ -119,20 +119,23 @@ function isInvalidSubscriptionError(error: unknown): boolean {
   return error instanceof Error && error.message.includes("Unsupported characters set");
 }
 
-function sessionUrl(session: SessionState): string {
-  return `/workspaces/${encodeURIComponent(session.workspaceId)}/sessions/${encodeURIComponent(session.sessionId)}`;
+function sessionUrl(baseUrl: string, session: SessionState): string {
+  const route = `/workspaces/${encodeURIComponent(session.workspaceId)}/sessions/${encodeURIComponent(session.sessionId)}`;
+  return baseUrl === "/" ? route : `${baseUrl}${route}`;
 }
 
 export class WebPushService {
   private readonly vapidKeysPath: string;
   private readonly subscriptionsPath: string;
   private readonly subject: string;
+  private readonly baseUrl: string;
   private vapidKeys?: VapidKeys;
 
   constructor(config: AppConfig) {
     this.vapidKeysPath = path.join(config.webPushDir, "vapid-keys.json");
     this.subscriptionsPath = path.join(config.webPushDir, "subscriptions.json");
     this.subject = config.webPushSubject;
+    this.baseUrl = config.baseUrl;
   }
 
   async initialize(): Promise<void> {
@@ -193,7 +196,7 @@ export class WebPushService {
     const payload: PushNotificationPayload = {
       ...content,
       data: {
-        url: sessionUrl(session),
+        url: sessionUrl(this.baseUrl, session),
         sessionId: session.sessionId,
         workspaceId: session.workspaceId,
       },

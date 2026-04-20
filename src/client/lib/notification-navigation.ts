@@ -1,3 +1,5 @@
+import { stripBaseUrl } from "@/client/lib/base-url";
+
 export const NOTIFICATION_NAVIGATION_MESSAGE_TYPE = "notification-navigate";
 
 export interface NotificationNavigationMessage {
@@ -14,7 +16,11 @@ export function notificationPathFromUrl(
     if (target.origin !== origin) {
       return undefined;
     }
-    return `${target.pathname}${target.search}${target.hash}`;
+    const pathname = stripBaseUrl(target.pathname);
+    if (!pathname) {
+      return undefined;
+    }
+    return `${pathname}${target.search}${target.hash}`;
   } catch {
     return undefined;
   }

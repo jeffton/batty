@@ -105,11 +105,46 @@ const hasBuiltClient = await fs
   .then(() => true)
   .catch(() => false);
 const buildId = await readBuildId(config.publicDir);
+const appBaseUrl = config.baseUrl;
+const appBaseHref = appBaseUrl === "/" ? "/" : `${appBaseUrl}/`;
+const clientIndexHtml = hasBuiltClient
+  ? await fs.readFile(path.join(config.publicDir, "index.html"), "utf8")
+  : undefined;
+
+function routePath(route: string): string {
+  return appBaseUrl === "/" ? route : `${appBaseUrl}${route}`;
+}
+
+function stripBaseUrl(url: string): string | undefined {
+  const pathname = url.split("?", 1)[0]?.split("#", 1)[0] ?? "/";
+  if (appBaseUrl === "/") {
+    return pathname;
+  }
+  if (pathname === appBaseUrl) {
+    return "/";
+  }
+  if (!pathname.startsWith(`${appBaseUrl}/`)) {
+    return undefined;
+  }
+  return pathname.slice(appBaseUrl.length);
+}
+
+function renderClientHtml(): string {
+  if (!clientIndexHtml) {
+    throw new Error("Client build not available");
+  }
+
+  const configScript = `<script>window.__BATTY_BASE_URL__=${JSON.stringify(appBaseUrl).replace(/</g, "\\u003C")};</script>`;
+  return clientIndexHtml.replace(
+    "<head>",
+    `<head>\n    <base href="${appBaseHref}" />\n    ${configScript}`,
+  );
+}
 
 if (hasBuiltClient) {
   await app.register(staticFiles, {
     root: config.publicDir,
-    prefix: "/",
+    prefix: appBaseHref,
   });
 }
 
@@ -118,8 +153,8 @@ function isAuthenticated(token?: string): boolean {
 }
 
 function shouldServeClientApp(url: string): boolean {
-  const pathname = url.split("?", 1)[0]?.split("#", 1)[0] ?? "/";
-  if (pathname.startsWith("/api")) {
+  const pathname = stripBaseUrl(url);
+  if (!pathname || pathname.startsWith("/api")) {
     return false;
   }
   if (pathname === "/") {
@@ -128,7 +163,10 @@ function shouldServeClientApp(url: string): boolean {
   return path.extname(pathname) === "";
 }
 
-function allowUnauthenticatedApi(pathname: string): boolean {
+function allowUnauthenticatedApi(pathname: string | undefined): boolean {
+  if (!pathname) {
+    return false;
+  }
   return (
     pathname === "/api/bootstrap" ||
     pathname === "/api/version" ||
@@ -157,7 +195,7 @@ function setAuthCookie(request: FastifyRequest, reply: FastifyReply): void {
   reply.setCookie(config.cookieName, createAuthToken(config.authSecret), {
     httpOnly: true,
     sameSite: "lax",
-    path: "/",
+    path: appBaseUrl,
     secure: request.protocol === "https",
     maxAge: 60 * 60 * 24 * 30,
   });
@@ -238,17 +276,37 @@ declare module "fastify" {
 app.addHook("onRequest", async (request, reply) => {
   request.auth = isAuthenticated(request.cookies[config.cookieName]);
 
-  if (request.url.startsWith("/api") && !allowUnauthenticatedApi(request.url) && !request.auth) {
+  const pathname = stripBaseUrl(request.url);
+  if (pathname?.startsWith("/api") && !allowUnauthenticatedApi(pathname) && !request.auth) {
     reply.code(401).send({ error: "Authentication required" });
   }
 });
 
-app.post("/api/auth/login/options", async (request) => {
+if (hasBuiltClient) {
+  app.get(routePath("/"), async (_request, reply) => {
+    reply.type("text/html; charset=utf-8");
+    return reply.send(renderClientHtml());
+  });
+
+  if (appBaseHref !== "/" && appBaseHref !== routePath("/")) {
+    app.get(appBaseHref, async (_request, reply) => {
+      reply.type("text/html; charset=utf-8");
+      return reply.send(renderClientHtml());
+    });
+  }
+
+  app.get(routePath("/index.html"), async (_request, reply) => {
+    reply.type("text/html; charset=utf-8");
+    return reply.send(renderClientHtml());
+  });
+}
+
+app.post(routePath("/api/auth/login/options"), async (request) => {
   return passkeys.beginAuthentication(requestOrigin(request), requestRpId(request));
 });
 
 app.post<{ Body: { requestId?: string; response?: AuthenticationResponseJSON } }>(
-  "/api/auth/login/verify",
+  routePath("/api/auth/login/verify"),
   async (request, reply) => {
     const rateLimitKey = "login";
     if (authAttemptLimiter.isLimited(rateLimitKey)) {
@@ -278,31 +336,34 @@ app.post<{ Body: { requestId?: string; response?: AuthenticationResponseJSON } }
   },
 );
 
-app.post<{ Body: { setupCode?: string } }>("/api/auth/register/options", async (request, reply) => {
-  const rateLimitKey = "register";
-  if (authAttemptLimiter.isLimited(rateLimitKey)) {
-    reply.code(429).send({ error: "Too many setup code attempts. Try again in a minute." });
-    return;
-  }
-  if (!request.body?.setupCode) {
-    reply.code(400).send({ error: "Missing setup code" });
-    return;
-  }
+app.post<{ Body: { setupCode?: string } }>(
+  routePath("/api/auth/register/options"),
+  async (request, reply) => {
+    const rateLimitKey = "register";
+    if (authAttemptLimiter.isLimited(rateLimitKey)) {
+      reply.code(429).send({ error: "Too many setup code attempts. Try again in a minute." });
+      return;
+    }
+    if (!request.body?.setupCode) {
+      reply.code(400).send({ error: "Missing setup code" });
+      return;
+    }
 
-  try {
-    return await passkeys.beginRegistration(
-      request.body.setupCode,
-      requestOrigin(request),
-      requestRpId(request),
-    );
-  } catch (error) {
-    authAttemptLimiter.recordFailure(rateLimitKey);
-    throw error;
-  }
-});
+    try {
+      return await passkeys.beginRegistration(
+        request.body.setupCode,
+        requestOrigin(request),
+        requestRpId(request),
+      );
+    } catch (error) {
+      authAttemptLimiter.recordFailure(rateLimitKey);
+      throw error;
+    }
+  },
+);
 
 app.post<{ Body: { requestId?: string; response?: RegistrationResponseJSON } }>(
-  "/api/auth/register/verify",
+  routePath("/api/auth/register/verify"),
   async (request, reply) => {
     const rateLimitKey = "register";
     if (authAttemptLimiter.isLimited(rateLimitKey)) {
@@ -332,12 +393,12 @@ app.post<{ Body: { requestId?: string; response?: RegistrationResponseJSON } }>(
   },
 );
 
-app.post("/api/logout", async (_request, reply) => {
-  reply.clearCookie(config.cookieName, { path: "/" });
+app.post(routePath("/api/logout"), async (_request, reply) => {
+  reply.clearCookie(config.cookieName, { path: appBaseUrl });
   reply.send({ ok: true });
 });
 
-app.get("/api/bootstrap", async (request) => {
+app.get(routePath("/api/bootstrap"), async (request) => {
   const authenticated = request.auth;
   const workspaces = authenticated ? await listWorkspaces(config) : [];
 
@@ -353,18 +414,18 @@ app.get("/api/bootstrap", async (request) => {
   };
 });
 
-app.get("/api/version", async () => ({ buildId }));
+app.get(routePath("/api/version"), async () => ({ buildId }));
 
-app.get("/api/provider-auth/status", async () => {
+app.get(routePath("/api/provider-auth/status"), async () => {
   return service.getProviderAuthStatus();
 });
 
-app.post("/api/provider-auth/openai-codex/start", async () => {
+app.post(routePath("/api/provider-auth/openai-codex/start"), async () => {
   return service.startProviderAuth("openai-codex");
 });
 
 app.post<{ Body: { attemptId?: string; callbackUrlOrCode?: string } }>(
-  "/api/provider-auth/openai-codex/complete",
+  routePath("/api/provider-auth/openai-codex/complete"),
   async (request) => {
     if (!request.body?.attemptId) {
       throw new Error("Missing auth attempt id");
@@ -378,7 +439,7 @@ app.post<{ Body: { attemptId?: string; callbackUrlOrCode?: string } }>(
 );
 
 app.post<{ Body: { providerId?: string; apiKey?: string } }>(
-  "/api/provider-auth/api-key",
+  routePath("/api/provider-auth/api-key"),
   async (request) => {
     const providerId = request.body?.providerId;
     if (providerId !== "google" && providerId !== "openrouter") {
@@ -392,10 +453,10 @@ app.post<{ Body: { providerId?: string; apiKey?: string } }>(
   },
 );
 
-app.get("/api/push/public-key", async () => ({ publicKey: webPush.getPublicKey() }));
+app.get(routePath("/api/push/public-key"), async () => ({ publicKey: webPush.getPublicKey() }));
 
 app.post<{ Body: { subscription?: PushSubscriptionJSON } }>(
-  "/api/push/subscriptions",
+  routePath("/api/push/subscriptions"),
   async (request) => {
     if (!request.body?.subscription) {
       throw new Error("Missing push subscription");
@@ -406,25 +467,28 @@ app.post<{ Body: { subscription?: PushSubscriptionJSON } }>(
   },
 );
 
-app.post<{ Body: { endpoint?: string } }>("/api/push/subscriptions/delete", async (request) => {
-  if (!request.body?.endpoint) {
-    throw new Error("Missing push subscription endpoint");
-  }
+app.post<{ Body: { endpoint?: string } }>(
+  routePath("/api/push/subscriptions/delete"),
+  async (request) => {
+    if (!request.body?.endpoint) {
+      throw new Error("Missing push subscription endpoint");
+    }
 
-  await webPush.removeSubscription(request.body.endpoint);
-  return { ok: true };
-});
+    await webPush.removeSubscription(request.body.endpoint);
+    return { ok: true };
+  },
+);
 
-app.get("/api/workspaces", async () => {
+app.get(routePath("/api/workspaces"), async () => {
   return listWorkspaces(config);
 });
 
-app.post<{ Body: { name?: string } }>("/api/workspaces", async (request) => {
+app.post<{ Body: { name?: string } }>(routePath("/api/workspaces"), async (request) => {
   return createWorkspace(config, request.body?.name ?? "");
 });
 
 app.post<{ Params: { workspaceId: string }; Body: { pinned?: boolean } }>(
-  "/api/workspaces/:workspaceId/pin",
+  routePath("/api/workspaces/:workspaceId/pin"),
   async (request) => {
     const pinned = request.body?.pinned;
     if (typeof pinned !== "boolean") {
@@ -439,7 +503,7 @@ app.post<{ Params: { workspaceId: string }; Body: { pinned?: boolean } }>(
 );
 
 app.post<{ Params: { workspaceId: string }; Body: { selected?: boolean } }>(
-  "/api/workspaces/:workspaceId/assistant",
+  routePath("/api/workspaces/:workspaceId/assistant"),
   async (request) => {
     const selected = request.body?.selected;
     if (typeof selected !== "boolean") {
@@ -454,7 +518,7 @@ app.post<{ Params: { workspaceId: string }; Body: { selected?: boolean } }>(
 );
 
 app.get<{ Params: { workspaceId: string } }>(
-  "/api/workspaces/:workspaceId/sessions",
+  routePath("/api/workspaces/:workspaceId/sessions"),
   async (request) => {
     const workspaces = await listWorkspaces(config);
     const workspace = resolveWorkspace(workspaces, request.params.workspaceId);
@@ -463,7 +527,7 @@ app.get<{ Params: { workspaceId: string } }>(
 );
 
 app.get<{ Params: { workspaceId: string } }>(
-  "/api/workspaces/:workspaceId/events",
+  routePath("/api/workspaces/:workspaceId/events"),
   async (request, reply) => {
     const snapshot = await workspaceSnapshot(request.params.workspaceId);
 
@@ -499,7 +563,7 @@ app.get<{ Params: { workspaceId: string } }>(
 );
 
 app.get<{ Params: { workspaceId: string } }>(
-  "/api/workspaces/:workspaceId/cron-jobs",
+  routePath("/api/workspaces/:workspaceId/cron-jobs"),
   async (request) => {
     const workspaces = await listWorkspaces(config);
     const workspace = resolveWorkspace(workspaces, request.params.workspaceId);
@@ -526,7 +590,7 @@ app.post<{
       timezone?: string;
     };
   };
-}>("/api/cron-jobs", async (request) => {
+}>(routePath("/api/cron-jobs"), async (request) => {
   return cronService.createJob({
     workspaceId: request.body?.workspaceId ?? "",
     prompt: request.body?.prompt ?? "",
@@ -557,7 +621,7 @@ app.patch<{
       timezone?: string;
     };
   };
-}>("/api/cron-jobs/:jobId", async (request) => {
+}>(routePath("/api/cron-jobs/:jobId"), async (request) => {
   return cronService.updateJob(request.params.jobId, {
     workspaceId: request.body?.workspaceId,
     prompt: request.body?.prompt,
@@ -568,7 +632,7 @@ app.patch<{
   });
 });
 
-app.delete<{ Params: { jobId: string } }>("/api/cron-jobs/:jobId", async (request) => {
+app.delete<{ Params: { jobId: string } }>(routePath("/api/cron-jobs/:jobId"), async (request) => {
   return cronService.deleteJob(request.params.jobId);
 });
 
@@ -594,20 +658,20 @@ async function ensureSessionLoaded(
   }
 }
 
-app.post<{ Body: { workspaceId: string } }>("/api/sessions", async (request) => {
+app.post<{ Body: { workspaceId: string } }>(routePath("/api/sessions"), async (request) => {
   const workspaces = await listWorkspaces(config);
   const workspace = resolveWorkspace(workspaces, request.body.workspaceId);
   return service.createSession(workspace);
 });
 
-app.post<{ Body: { workspaceId: string } }>("/api/sessions/daily", async (request) => {
+app.post<{ Body: { workspaceId: string } }>(routePath("/api/sessions/daily"), async (request) => {
   const workspaces = await listWorkspaces(config);
   const workspace = resolveWorkspace(workspaces, request.body.workspaceId);
   return service.createOrOpenDailySession(workspace);
 });
 
 app.post<{ Body: { workspaceId: string; sessionPath: string } }>(
-  "/api/sessions/open",
+  routePath("/api/sessions/open"),
   async (request) => {
     const workspaces = await listWorkspaces(config);
     const workspace = resolveWorkspace(workspaces, request.body.workspaceId);
@@ -615,14 +679,17 @@ app.post<{ Body: { workspaceId: string; sessionPath: string } }>(
   },
 );
 
-app.get<{ Params: { sessionId: string } }>("/api/sessions/:sessionId", async (request) => {
-  return service.getState(request.params.sessionId);
-});
+app.get<{ Params: { sessionId: string } }>(
+  routePath("/api/sessions/:sessionId"),
+  async (request) => {
+    return service.getState(request.params.sessionId);
+  },
+);
 
 app.get<{
   Params: { sessionId: string };
   Querystring: { before?: string; limit?: string; workspaceId?: string; sessionPath?: string };
-}>("/api/sessions/:sessionId/messages", async (request) => {
+}>(routePath("/api/sessions/:sessionId/messages"), async (request) => {
   await ensureSessionLoaded(request.params.sessionId, {
     ...(request.query.workspaceId ? { workspaceId: request.query.workspaceId } : {}),
     ...(request.query.sessionPath ? { sessionPath: request.query.sessionPath } : {}),
@@ -636,21 +703,21 @@ app.get<{
 });
 
 app.post<{ Params: { sessionId: string }; Body: { modelId: string } }>(
-  "/api/sessions/:sessionId/model",
+  routePath("/api/sessions/:sessionId/model"),
   async (request) => {
     return service.setModel(request.params.sessionId, request.body.modelId);
   },
 );
 
 app.post<{ Params: { sessionId: string }; Body: { thinkingLevel: string } }>(
-  "/api/sessions/:sessionId/thinking",
+  routePath("/api/sessions/:sessionId/thinking"),
   async (request) => {
     return service.setThinkingLevel(request.params.sessionId, request.body.thinkingLevel);
   },
 );
 
 app.post<{ Params: { sessionId: string } }>(
-  "/api/sessions/:sessionId/prompt",
+  routePath("/api/sessions/:sessionId/prompt"),
   async (request, reply) => {
     const files: UploadedFile[] = [];
     let text = "";
@@ -678,15 +745,18 @@ app.post<{ Params: { sessionId: string } }>(
   },
 );
 
-app.post<{ Params: { sessionId: string } }>("/api/sessions/:sessionId/abort", async (request) => {
-  await service.abort(request.params.sessionId);
-  return { ok: true };
-});
+app.post<{ Params: { sessionId: string } }>(
+  routePath("/api/sessions/:sessionId/abort"),
+  async (request) => {
+    await service.abort(request.params.sessionId);
+    return { ok: true };
+  },
+);
 
 app.get<{
   Params: { sessionId: string };
   Querystring: { workspaceId?: string; sessionPath?: string };
-}>("/api/sessions/:sessionId/events", async (request, reply) => {
+}>(routePath("/api/sessions/:sessionId/events"), async (request, reply) => {
   await ensureSessionLoaded(request.params.sessionId, {
     ...(request.query.workspaceId ? { workspaceId: request.query.workspaceId } : {}),
     ...(request.query.sessionPath ? { sessionPath: request.query.sessionPath } : {}),
@@ -717,51 +787,59 @@ app.get<{
 app.get<{
   Params: { workspaceId: string; sessionId: string; toolCallId: string; fileId: string };
   Querystring: { download?: string };
-}>("/api/sent-files/:workspaceId/:sessionId/:toolCallId/:fileId", async (request, reply) => {
-  const resolved = await resolveSentFile({
-    rootDir: config.sentFilesDir,
-    workspaceId: request.params.workspaceId,
-    sessionId: request.params.sessionId,
-    toolCallId: request.params.toolCallId,
-    fileId: request.params.fileId,
-  });
-  const stats = await fs.stat(resolved.storedPath);
-  const download = request.query.download === "1";
+}>(
+  routePath("/api/sent-files/:workspaceId/:sessionId/:toolCallId/:fileId"),
+  async (request, reply) => {
+    const resolved = await resolveSentFile({
+      rootDir: config.sentFilesDir,
+      baseUrl: config.baseUrl,
+      workspaceId: request.params.workspaceId,
+      sessionId: request.params.sessionId,
+      toolCallId: request.params.toolCallId,
+      fileId: request.params.fileId,
+    });
+    const stats = await fs.stat(resolved.storedPath);
+    const download = request.query.download === "1";
 
-  reply.header("Accept-Ranges", "bytes");
-  reply.header("Cache-Control", "private, max-age=31536000, immutable");
-  reply.header("Content-Type", resolved.descriptor.mimeType);
-  reply.header(
-    "Content-Disposition",
-    formatContentDisposition(resolved.descriptor.name, download ? "attachment" : "inline"),
-  );
-  reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("Accept-Ranges", "bytes");
+    reply.header("Cache-Control", "private, max-age=31536000, immutable");
+    reply.header("Content-Type", resolved.descriptor.mimeType);
+    reply.header(
+      "Content-Disposition",
+      formatContentDisposition(resolved.descriptor.name, download ? "attachment" : "inline"),
+    );
+    reply.header("X-Content-Type-Options", "nosniff");
 
-  if (!download && typeof request.headers.range === "string") {
-    const range = parseRangeHeader(request.headers.range, stats.size);
-    if (!range || range.start >= stats.size) {
-      reply.code(416);
-      reply.header("Content-Range", `bytes */${stats.size}`);
-      return reply.send();
+    if (!download && typeof request.headers.range === "string") {
+      const range = parseRangeHeader(request.headers.range, stats.size);
+      if (!range || range.start >= stats.size) {
+        reply.code(416);
+        reply.header("Content-Range", `bytes */${stats.size}`);
+        return reply.send();
+      }
+
+      reply.code(206);
+      reply.header("Content-Length", String(range.end - range.start + 1));
+      reply.header("Content-Range", `bytes ${range.start}-${range.end}/${stats.size}`);
+      return reply.send(
+        createReadStream(resolved.storedPath, { start: range.start, end: range.end }),
+      );
     }
 
-    reply.code(206);
-    reply.header("Content-Length", String(range.end - range.start + 1));
-    reply.header("Content-Range", `bytes ${range.start}-${range.end}/${stats.size}`);
-    return reply.send(
-      createReadStream(resolved.storedPath, { start: range.start, end: range.end }),
-    );
-  }
-
-  reply.header("Content-Length", String(stats.size));
-  return reply.send(createReadStream(resolved.storedPath));
-});
+    reply.header("Content-Length", String(stats.size));
+    return reply.send(createReadStream(resolved.storedPath));
+  },
+);
 
 app.get("/healthz", async () => ({ ok: true }));
+if (appBaseUrl !== "/") {
+  app.get(routePath("/healthz"), async () => ({ ok: true }));
+}
 
 app.setNotFoundHandler((request, reply) => {
   if (hasBuiltClient && shouldServeClientApp(request.url)) {
-    return reply.sendFile("index.html");
+    reply.type("text/html; charset=utf-8");
+    return reply.send(renderClientHtml());
   }
 
   reply.code(404).send({ error: "Not found" });

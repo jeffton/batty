@@ -4,6 +4,7 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
   RegistrationResponseJSON,
 } from "@simplewebauthn/browser";
+import { withBaseUrl } from "@/client/lib/base-url";
 import type {
   BootstrapPayload,
   CreateCronJobInput,
@@ -18,7 +19,7 @@ import type {
 } from "@/shared/types";
 
 async function request<T>(input: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(input, {
+  const response = await fetch(withBaseUrl(input), {
     credentials: "include",
     ...init,
   });

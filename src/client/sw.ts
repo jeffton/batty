@@ -24,6 +24,25 @@ type PushNotificationPayload = NotificationOptions & {
   };
 };
 
+function normalizeBaseUrl(pathname: string): string {
+  if (pathname === "/") {
+    return "/";
+  }
+  return pathname.replace(/\/+$/, "") || "/";
+}
+
+function appBaseUrl(): string {
+  return normalizeBaseUrl(new URL(self.registration.scope).pathname);
+}
+
+function withBaseUrl(pathname: string): string {
+  const baseUrl = appBaseUrl();
+  if (baseUrl === "/") {
+    return pathname;
+  }
+  return pathname === "/" ? baseUrl : `${baseUrl}${pathname}`;
+}
+
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -57,13 +76,14 @@ self.skipWaiting();
 clientsClaim();
 cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST);
+const baseUrl = appBaseUrl();
 registerRoute(
-  new NavigationRoute(createHandlerBoundToURL("/index.html"), {
-    denylist: [/^\/api/],
+  new NavigationRoute(createHandlerBoundToURL(withBaseUrl("/index.html")), {
+    denylist: [new RegExp(`^${baseUrl === "/" ? "" : baseUrl}\\/api(?:\\/|$)`)],
   }),
 );
 registerRoute(
-  ({ url }) => url.pathname.startsWith("/assets/"),
+  ({ url }) => url.pathname.startsWith(withBaseUrl("/assets/")),
   new StaleWhileRevalidate({
     cacheName: "static-assets",
   }),
@@ -89,7 +109,7 @@ self.addEventListener("notificationclick", (event) => {
   const targetUrl = new URL(
     typeof event.notification.data?.url === "string" && event.notification.data.url.length > 0
       ? event.notification.data.url
-      : "/",
+      : withBaseUrl("/"),
     self.location.origin,
   ).href;
 

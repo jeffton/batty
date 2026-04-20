@@ -34,6 +34,7 @@ async function createBattyDir(): Promise<string> {
         webPushSubject: "https://batty.test",
         cronDailySessionStartTime: "04:00",
         braveSearchKey: "configured-brave-key",
+        baseUrl: "/batty",
       },
       null,
       2,
@@ -79,6 +80,7 @@ describe("loadConfig", () => {
     expect(config.port).toBe(4242);
     expect(config.cronDailySessionStartTime).toBe("04:00");
     expect(config.braveSearchKey).toBe("configured-brave-key");
+    expect(config.baseUrl).toBe("/batty");
   });
 
   it("prefers BATTY_SELF_PATH over the current working directory", async () => {

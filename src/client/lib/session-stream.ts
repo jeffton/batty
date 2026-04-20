@@ -1,3 +1,4 @@
+import { withBaseUrl } from "@/client/lib/base-url";
 import type { SessionState } from "@/shared/types";
 
 export function sessionEventsPath(
@@ -10,5 +11,7 @@ export function sessionEventsPath(
   }
 
   const query = params.toString();
-  return `/api/sessions/${encodeURIComponent(session.id)}/events${query ? `?${query}` : ""}`;
+  return withBaseUrl(
+    `/api/sessions/${encodeURIComponent(session.id)}/events${query ? `?${query}` : ""}`,
+  );
 }

@@ -473,6 +473,7 @@ export function appendCronSubagentCompletion(
   const deliveredAssistant: AssistantMessage = sanitizedFinalAssistant
     ? {
         ...sanitizedFinalAssistant,
+        usage: ZERO_USAGE,
         timestamp: timestamp + 1,
       }
     : {

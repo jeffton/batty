@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
-import { runDetachedSubagentSession } from "./pi-service-subagents";
+import { appendCronSubagentCompletion, runDetachedSubagentSession } from "./pi-service-subagents";
 import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE, buildCronRuntimeNotice } from "./runtime-notices";
 
 type AgentMessage = AgentSession["messages"][number];
@@ -25,6 +25,62 @@ function createAssistantMessage(text: string, timestamp: number): AssistantMessa
     timestamp,
   };
 }
+
+describe("appendCronSubagentCompletion", () => {
+  it("does not copy subagent usage onto the parent daily-session assistant message", () => {
+    const appendedMessages: AgentMessage[] = [];
+    const sessionMessages: AgentMessage[] = [];
+    const session = {
+      model: { api: "openai-codex-responses", provider: "openai-codex", id: "gpt-5.4" },
+      messages: sessionMessages,
+      agent: { state: { messages: sessionMessages } },
+      sessionManager: {
+        appendMessage(message: AgentMessage) {
+          appendedMessages.push(message);
+        },
+      },
+    } as unknown as AgentSession;
+
+    appendCronSubagentCompletion(session, "subagent-call-1", {
+      text: "Delivered report",
+      details: { subagent: { prompt: "Do work" } } as any,
+      finalAssistant: {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "secret" },
+          { type: "text", text: "Delivered report" },
+        ],
+        api: "openai-codex-responses",
+        provider: "openai-codex",
+        model: "gpt-5.4",
+        usage: {
+          input: 1234,
+          output: 567,
+          cacheRead: 890,
+          cacheWrite: 0,
+          totalTokens: 2691,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: "stop",
+        timestamp: 1,
+      },
+      isError: false,
+    });
+
+    expect(appendedMessages).toHaveLength(2);
+    expect(appendedMessages[1]).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "Delivered report" }],
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+      },
+    });
+  });
+});
 
 describe("runDetachedSubagentSession", () => {
   it("publishes subagent session details before assistant text starts streaming", async () => {

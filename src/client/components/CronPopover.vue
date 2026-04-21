@@ -29,7 +29,9 @@ const drafts = reactive<Record<string, CronDraft>>({});
 const jobs = computed(() => store.workspaceCronJobs);
 
 function includePreviousContextFor(job: CronJob): boolean {
-  return job.session.kind === "daily" ? job.session.includePreviousContext === true : false;
+  return job.session.kind === "daily-subagent"
+    ? job.session.includePreviousContext === true
+    : false;
 }
 
 function ensureDraft(job: CronJob): CronDraft {
@@ -111,11 +113,16 @@ function thinkingOptions(job: CronJob): string[] {
 }
 
 function sessionLabel(job: CronJob): string {
-  return job.session.kind === "daily"
-    ? job.session.includePreviousContext === true
-      ? "daily · with previous context"
-      : "daily · fresh context"
-    : "new";
+  switch (job.session.kind) {
+    case "new":
+      return "new";
+    case "daily-inline":
+      return "daily · inline";
+    case "daily-subagent":
+      return job.session.includePreviousContext === true
+        ? "daily · subagent · with previous context"
+        : "daily · subagent · fresh context";
+  }
 }
 
 async function saveJob(job: CronJob): Promise<void> {
@@ -125,9 +132,11 @@ async function saveJob(job: CronJob): Promise<void> {
     model: draft.model,
     thinkingLevel: draft.thinkingLevel,
     session:
-      draft.sessionKind === "daily"
-        ? { kind: "daily", includePreviousContext: draft.includePreviousContext }
-        : { kind: "new" },
+      draft.sessionKind === "daily-subagent"
+        ? { kind: "daily-subagent", includePreviousContext: draft.includePreviousContext }
+        : draft.sessionKind === "daily-inline"
+          ? { kind: "daily-inline" }
+          : { kind: "new" },
   } as const;
 
   draft.saving = true;
@@ -272,10 +281,14 @@ watch(
               :disabled="draftFor(job).saving || draftFor(job).deleting"
             >
               <option value="new">new session</option>
-              <option value="daily">daily session</option>
+              <option value="daily-inline">daily session · inline</option>
+              <option value="daily-subagent">daily session · subagent</option>
             </select>
 
-            <label v-if="draftFor(job).sessionKind === 'daily'" class="cron-popover__checkbox">
+            <label
+              v-if="draftFor(job).sessionKind === 'daily-subagent'"
+              class="cron-popover__checkbox"
+            >
               <input
                 v-model="draftFor(job).includePreviousContext"
                 type="checkbox"

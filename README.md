@@ -134,8 +134,8 @@ pnpm batty -- --root /path/to/batty-root <command>
 ```text
 batty auth code
 batty cron list [--workspace ID] [--json]
-batty cron add --workspace ID --prompt TEXT --thinking LEVEL (--in DUR | --at ISO | --every DUR | --cron EXPR) [--model ID] [--tz IANA] [--session new|daily] [--daily-context include|omit]
-batty cron edit <jobId> [--workspace ID] [--prompt TEXT] [--model ID] [--thinking LEVEL] [--in DUR | --at ISO | --every DUR | --cron EXPR] [--tz IANA] [--session new|daily] [--daily-context include|omit]
+batty cron add --workspace ID --prompt TEXT --thinking LEVEL (--in DUR | --at ISO | --every DUR | --cron EXPR) [--model ID] [--tz IANA] [--session new|daily-inline|daily-subagent] [--daily-context include|omit]
+batty cron edit <jobId> [--workspace ID] [--prompt TEXT] [--model ID] [--thinking LEVEL] [--in DUR | --at ISO | --every DUR | --cron EXPR] [--tz IANA] [--session new|daily-inline|daily-subagent] [--daily-context include|omit]
 batty cron rm <jobId>
 ```
 
@@ -144,8 +144,8 @@ batty cron rm <jobId>
 ```bash
 batty --root /path/to/batty-root auth code
 batty --root /path/to/batty-root cron list --workspace batty
-batty --root /path/to/batty-root cron add --workspace batty --prompt "Check CI and summarize failures" --thinking medium --every 1h --session daily --daily-context include
-batty --root /path/to/batty-root cron add --workspace batty --prompt "Morning summary" --thinking low --cron "0 8 * * 1-5" --tz Europe/Copenhagen --session daily
+batty --root /path/to/batty-root cron add --workspace batty --prompt "Check CI and summarize failures" --thinking medium --every 1h --session daily-subagent --daily-context include
+batty --root /path/to/batty-root cron add --workspace batty --prompt "Morning summary" --thinking low --cron "0 8 * * 1-5" --tz Europe/Copenhagen --session daily-inline
 batty --root /path/to/batty-root cron edit <jobId> --prompt "Updated prompt"
 batty --root /path/to/batty-root cron rm <jobId>
 ```
@@ -162,12 +162,12 @@ Schedules supported by both the CLI and the built-in tool:
 - one-shot after a relative duration like `10m` or `2h`
 - repeating interval schedules like `1h` or `1d`
 - cron expressions with an optional timezone
-- session mode `new` or `daily`
-- daily-session context mode `include` or `omit`
+- session mode `new`, `daily-inline`, or `daily-subagent`
+- daily-subagent context mode `include` or `omit`
 
 If `--tz` / `timezone` is omitted for a cron expression, Batty uses the server's local timezone.
 
-Daily session reuse keeps one cron conversation per workspace day. Daily runs are stored as `subagent` tool calls in that session. Daily runs start fresh from the workspace system prompts by default. `--daily-context include` / `session.includePreviousContext=true` reuses earlier daily-session context. The day rollover defaults to `04:00` local time and can be changed in `options.json`.
+Daily session reuse keeps one cron conversation per workspace day. `daily-inline` runs directly in that daily session like a regular session turn. `daily-subagent` runs are stored as `subagent` tool calls in that session. Daily-subagent runs start fresh from the workspace system prompts by default. `--daily-context include` / `session.includePreviousContext=true` reuses earlier daily-session context for daily-subagent jobs. The day rollover defaults to `04:00` local time and can be changed in `options.json`.
 
 Cron job state includes:
 

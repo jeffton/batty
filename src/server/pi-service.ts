@@ -190,7 +190,7 @@ export class PiService {
     scheduleLabel: string;
   }): Promise<{ sessionId: string; sessionPath: string }> {
     const cronNotice = buildCronRuntimeNotice(job.scheduleLabel);
-    if (job.session.kind !== "daily") {
+    if (job.session.kind === "new") {
       const session = await this.createSession(job.workspace, {
         modelId: job.model,
         thinkingLevel: job.thinkingLevel,
@@ -214,21 +214,35 @@ export class PiService {
       modelId: job.model,
       thinkingLevel: job.thinkingLevel,
     });
-
     const webSession = this.requireSession(session.id);
-    const includePreviousContext = job.session.includePreviousContext === true;
-    const toolCallId = `${SUBAGENT_TOOL_NAME}-${randomUUID()}`;
-    const toolArgs = {
-      prompt: job.prompt,
-      model: job.model,
-      effort: job.thinkingLevel,
-      includeSessionContext: includePreviousContext,
-    };
 
     return this.runSubagentSerial(webSession.session.sessionId, async () => {
       await webSession.session.agent.waitForIdle();
       this.setThinkingLevel(session.id, job.thinkingLevel);
       await this.setModel(session.id, job.model);
+
+      if (job.session.kind === "daily-inline") {
+        this.appendRuntimeNotice(webSession.session, cronNotice);
+        this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
+        await webSession.session.prompt(job.prompt);
+        return {
+          sessionId: webSession.session.sessionId,
+          sessionPath: this.requireSessionPath(webSession.id),
+        };
+      }
+      if (job.session.kind !== "daily-subagent") {
+        throw new Error(`Invalid cron session kind: ${job.session.kind}`);
+      }
+
+      const includePreviousContext = job.session.includePreviousContext === true;
+      const toolCallId = `${SUBAGENT_TOOL_NAME}-${randomUUID()}`;
+      const toolArgs = {
+        prompt: job.prompt,
+        model: job.model,
+        effort: job.thinkingLevel,
+        includeSessionContext: includePreviousContext,
+      };
+
       this.appendCronSubagentStart(webSession.session, toolCallId, toolArgs, cronNotice);
       webSession.activeTools.set(toolCallId, {
         toolCallId,

@@ -20,22 +20,48 @@ const CronScheduleSchema = Type.Object(
   },
 );
 
-const CronSessionSchema = Type.Object(
-  {
-    kind: StringEnum(["new", "daily"] as const, {
-      description: "Session strategy for cron runs.",
-    }),
-    includePreviousContext: Type.Optional(
-      Type.Boolean({
-        description:
-          "When kind=daily, whether the subagent should include previous daily-session context. Defaults to false.",
-      }),
+const CronSessionSchema = Type.Union(
+  [
+    Type.Object(
+      {
+        kind: Type.Literal("new", {
+          description: "Run each cron job in a fresh session.",
+        }),
+      },
+      {
+        additionalProperties: false,
+      },
     ),
-  },
+    Type.Object(
+      {
+        kind: Type.Literal("daily-inline", {
+          description: "Run directly in one workspace daily session.",
+        }),
+      },
+      {
+        additionalProperties: false,
+      },
+    ),
+    Type.Object(
+      {
+        kind: Type.Literal("daily-subagent", {
+          description: "Run inside one workspace daily session as a subagent tool call.",
+        }),
+        includePreviousContext: Type.Optional(
+          Type.Boolean({
+            description:
+              "Whether the subagent should include previous daily-session context. Defaults to false.",
+          }),
+        ),
+      },
+      {
+        additionalProperties: false,
+      },
+    ),
+  ],
   {
-    additionalProperties: false,
     description:
-      'Use {kind:"new"} for a fresh session each run or {kind:"daily"} for one workspace cron conversation per local day. Daily sessions start fresh unless includePreviousContext:true is set.',
+      'Use {kind:"new"} for a fresh session each run, {kind:"daily-inline"} to run directly in one workspace daily session, or {kind:"daily-subagent"} to run in that daily session through a subagent tool call. Daily-subagent runs start fresh unless includePreviousContext:true is set.',
   },
 );
 

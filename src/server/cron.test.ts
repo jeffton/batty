@@ -52,33 +52,85 @@ describe("cron store", () => {
     expect(buildCronJobSummary(job)).toContain("Session: New per run");
   });
 
-  it("defaults daily session mode to fresh context and persists updates", async () => {
+  it("persists daily-inline and daily-subagent cron sessions", async () => {
     const config = await createConfig();
     await fs.mkdir(path.join(config.workspacesRoot, "alpha"));
     const store = new CronStore(config);
 
-    const created = await store.createJob({
+    const inline = await store.createJob({
       workspaceId: "alpha",
       prompt: "Heartbeat",
       model: "openai/gpt-5",
       thinkingLevel: "low",
-      session: { kind: "daily" },
+      session: { kind: "daily-inline" },
       schedule: { kind: "cron", expression: "0 8 * * *" },
     });
 
-    expect(created.session).toEqual({ kind: "daily", includePreviousContext: false });
-    expect(buildCronJobSummary(created)).toContain("Session: Daily · fresh context");
+    expect(inline.session).toEqual({ kind: "daily-inline" });
+    expect(buildCronJobSummary(inline)).toContain("Session: Daily inline");
 
-    const updated = await store.updateJob(created.id, {
-      session: { kind: "daily", includePreviousContext: true },
+    const updated = await store.updateJob(inline.id, {
+      session: { kind: "daily-subagent", includePreviousContext: true },
     });
 
-    expect(updated.session).toEqual({ kind: "daily", includePreviousContext: true });
-    expect(buildCronJobSummary(updated)).toContain("Session: Daily · with previous context");
+    expect(updated.session).toEqual({ kind: "daily-subagent", includePreviousContext: true });
+    expect(buildCronJobSummary(updated)).toContain(
+      "Session: Daily subagent · with previous context",
+    );
 
     const persisted = JSON.parse(await fs.readFile(store.filePath, "utf8")) as {
       jobs: Array<{ session?: { kind?: string; includePreviousContext?: boolean } }>;
     };
-    expect(persisted.jobs[0]?.session).toEqual({ kind: "daily", includePreviousContext: true });
+    expect(persisted.jobs[0]?.session).toEqual({
+      kind: "daily-subagent",
+      includePreviousContext: true,
+    });
+  });
+
+  it("migrates legacy daily cron sessions to daily-subagent on read", async () => {
+    const config = await createConfig();
+    await fs.mkdir(path.join(config.workspacesRoot, "alpha"));
+    const store = new CronStore(config);
+
+    await fs.mkdir(path.dirname(store.filePath), { recursive: true });
+    await fs.writeFile(
+      store.filePath,
+      `${JSON.stringify(
+        {
+          version: 1,
+          jobs: [
+            {
+              id: "legacy-job",
+              workspaceId: "alpha",
+              prompt: "Legacy job",
+              model: "openai/gpt-5",
+              thinkingLevel: "medium",
+              session: { kind: "daily", includePreviousContext: true },
+              createdAt: 1,
+              updatedAt: 1,
+              schedule: { kind: "every", every: "1h", everyMs: 3600000, anchorAtMs: 1 },
+              state: {},
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const [job] = await store.listJobs("alpha");
+    expect(job?.session).toEqual({ kind: "daily-subagent", includePreviousContext: true });
+    expect(buildCronJobSummary(job!)).toContain("Session: Daily subagent · with previous context");
+
+    const migrated = JSON.parse(await fs.readFile(store.filePath, "utf8")) as {
+      version: number;
+      jobs: Array<{ session?: { kind?: string; includePreviousContext?: boolean } }>;
+    };
+    expect(migrated.version).toBe(2);
+    expect(migrated.jobs[0]?.session).toEqual({
+      kind: "daily-subagent",
+      includePreviousContext: true,
+    });
   });
 });

@@ -149,8 +149,9 @@ export function createCronTool({
     promptGuidelines: [
       "When scheduling a cron job, always provide the full prompt the future agent turn should run.",
       "Prefer omitting model and thinkingLevel so the cron job reuses the current session settings. Only set them explicitly if the user asks for different ones.",
-      'Use session.kind="daily" to reuse one workspace cron conversation per local day.',
-      "Daily cron sessions start fresh by default and only reuse earlier daily-session context when session.includePreviousContext=true is set.",
+      'Use session.kind="daily-inline" to run directly in one workspace daily session.',
+      'Use session.kind="daily-subagent" to run in one workspace daily session as a subagent tool call.',
+      "Daily-subagent runs start fresh by default and only reuse earlier daily-session context when session.includePreviousContext=true is set.",
       'Use schedule.kind="at" with schedule.in for relative times like 10m or 2h.',
       'Use schedule.kind="cron" with a standard cron expression and optional timezone for recurring schedules.',
       'Use schedule.kind="every" with durations like 15m, 2h, or 1d for interval schedules.',

@@ -139,7 +139,10 @@ export type CronJobSession =
       kind: "new";
     }
   | {
-      kind: "daily";
+      kind: "daily-inline";
+    }
+  | {
+      kind: "daily-subagent";
       includePreviousContext?: boolean;
     };
 

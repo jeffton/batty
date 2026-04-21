@@ -6,6 +6,7 @@ import {
   createSession,
   createWorkspace as createWorkspaceRequest,
   deleteCronJob as deleteCronJobRequest,
+  getBattyAgentsFile,
   getBootstrap,
   getProviderAuthStatus,
   getSession,
@@ -17,6 +18,7 @@ import {
   logout as logoutRequest,
   openSession,
   sendPrompt,
+  setBattyAgentsFile as setBattyAgentsFileRequest,
   setBraveSearchApiKey as setBraveSearchApiKeyRequest,
   setProviderApiKey,
   setSessionModel,
@@ -699,6 +701,14 @@ export const useAppStore = defineStore("app", {
 
     async setBraveSearchApiKey(apiKey: string): Promise<void> {
       this.settings = await setBraveSearchApiKeyRequest(apiKey);
+    },
+
+    async getBattyAgentsFile(): Promise<string> {
+      return (await getBattyAgentsFile()).content;
+    },
+
+    async setBattyAgentsFile(content: string): Promise<string> {
+      return (await setBattyAgentsFileRequest(content)).content;
     },
 
     async updateCronJob(jobId: string, patch: UpdateCronJobInput): Promise<CronJob> {

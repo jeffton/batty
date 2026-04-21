@@ -14,6 +14,7 @@ import { formatSetupCode, PasskeyAuthService } from "./passkeys";
 import type { AppSettingsStatus, ProviderAuthStatus, WorkspaceSnapshot } from "@/shared/types";
 import { CronService } from "./cron";
 import { setAssistantWorkspace, setBraveSearchKey, setWorkspacePinned } from "./options";
+import { battyAgentDir } from "./pi-paths";
 import { PiService, type UploadedFile } from "./pi-service";
 import { WebPushService } from "./web-push";
 import { createWorkspace, listWorkspaces, resolveWorkspace } from "./workspaces";
@@ -267,6 +268,25 @@ function appSettingsStatus(): AppSettingsStatus {
   };
 }
 
+async function readBattyAgentsFile(): Promise<string> {
+  const filePath = path.join(battyAgentDir(config), "AGENTS.md");
+  try {
+    return await fs.readFile(filePath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return "";
+    }
+    throw error;
+  }
+}
+
+async function writeBattyAgentsFile(content: string): Promise<string> {
+  const filePath = path.join(battyAgentDir(config), "AGENTS.md");
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, content, "utf8");
+  return content;
+}
+
 function unauthenticatedProviderAuthStatus(): ProviderAuthStatus {
   return { providers: [] };
 }
@@ -440,6 +460,18 @@ app.post<{ Body: { apiKey?: string } }>(
     return appSettingsStatus();
   },
 );
+
+app.get(routePath("/api/settings/agents"), async () => {
+  return { content: await readBattyAgentsFile() };
+});
+
+app.post<{ Body: { content?: string } }>(routePath("/api/settings/agents"), async (request) => {
+  if (typeof request.body?.content !== "string") {
+    throw new Error("Missing AGENTS file content");
+  }
+
+  return { content: await writeBattyAgentsFile(request.body.content) };
+});
 
 app.post<{ Body: { workspaceId?: string | null } }>(
   routePath("/api/settings/assistant-workspace"),

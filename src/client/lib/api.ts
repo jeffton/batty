@@ -179,6 +179,18 @@ export function setBraveSearchApiKey(apiKey: string): Promise<AppSettingsStatus>
   });
 }
 
+export function getBattyAgentsFile(): Promise<{ content: string }> {
+  return request("/api/settings/agents");
+}
+
+export function setBattyAgentsFile(content: string): Promise<{ content: string }> {
+  return request("/api/settings/agents", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+}
+
 export function listWorkspaceSessions(workspaceId: string): Promise<SessionSummary[]> {
   return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/sessions`);
 }

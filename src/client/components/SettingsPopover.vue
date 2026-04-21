@@ -339,7 +339,7 @@ watch(
         <div v-if="isExpanded(AGENTS_ITEM_ID)" class="settings-popover__editor">
           <textarea
             v-model="battyAgentsInput"
-            class="settings-popover__input settings-popover__textarea settings-popover__textarea--compose"
+            class="settings-popover__input settings-popover__textarea"
             rows="12"
             spellcheck="false"
             placeholder="Write AGENTS instructions"
@@ -616,7 +616,7 @@ watch(
   width: 100%;
   border: 1px solid var(--color-border-soft);
   border-radius: 0.55rem;
-  background: var(--color-bg-elevated);
+  background: var(--color-bg-app);
   color: inherit;
   padding: 0.55rem 0.65rem;
   font: inherit;
@@ -628,10 +628,6 @@ watch(
 
 .settings-popover__textarea {
   resize: vertical;
-}
-
-.settings-popover__textarea--compose {
-  background: var(--color-bg-app);
 }
 
 .settings-popover__item {

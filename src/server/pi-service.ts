@@ -22,6 +22,7 @@ import type {
   WorkspaceInfo,
 } from "@/shared/types";
 import type { AppConfig } from "./config";
+import { getSessionContextUsage } from "./pi-context-usage";
 import { createPiAgentSession, refreshBattySystemPrompt } from "./pi-agent-session";
 import { buildCronRuntimeNotice } from "./runtime-notices";
 import { createSessionState, normalizeBlocks } from "./pi-state";
@@ -448,7 +449,7 @@ export class PiService {
     options?: { beforeMessageId?: string; limit?: number },
   ): SessionState {
     const webSession = this.requireSession(sessionId);
-    const contextUsage = webSession.session.getContextUsage();
+    const contextUsage = getSessionContextUsage(webSession.session);
     const messagePage = this.getMessagePage(webSession, options);
 
     return createSessionState({

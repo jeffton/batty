@@ -201,10 +201,7 @@ function buildDetachedSubagentResult(
   const messages = structuredClone(subagentSession.messages) as AgentSession["messages"];
   const finalAssistant = findLastAssistantMessage(messages);
   const text =
-    extractAssistantText(finalAssistant) ||
-    finalAssistant?.errorMessage ||
-    errorOverride ||
-    "";
+    extractAssistantText(finalAssistant) || finalAssistant?.errorMessage || errorOverride || "";
   const generatedMessages = newlyGeneratedSubagentMessages(messages, seedMessageCount);
   const details = buildSubagentDetails(
     {
@@ -441,8 +438,7 @@ export async function runDetachedSubagentSession(
       ...result,
       text: result.text || lastText || (error instanceof Error ? error.message : String(error)),
       isError: true,
-      errorMessage:
-        result.errorMessage || (error instanceof Error ? error.message : String(error)),
+      errorMessage: result.errorMessage || (error instanceof Error ? error.message : String(error)),
     };
   } finally {
     if (options.signal) {

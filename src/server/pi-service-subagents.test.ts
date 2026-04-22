@@ -246,9 +246,7 @@ describe("runDetachedSubagentSession", () => {
 
   it("returns after final auto-retry failure even if prompt never settles", async () => {
     const sessionMessages: AgentMessage[] = [];
-    let subscriber:
-      | ((event: { type: string; [key: string]: unknown }) => void)
-      | undefined;
+    let subscriber: ((event: { type: string; [key: string]: unknown }) => void) | undefined;
 
     const subagentSession = {
       sessionId: "subagent-session-retry-failure",

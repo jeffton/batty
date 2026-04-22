@@ -90,6 +90,23 @@ const isRuntimeNotice = computed(
     props.message.customType.startsWith(BATTY_RUNTIME_NOTICE_CUSTOM_TYPE),
 );
 
+const assistantErrorText = computed(() => {
+  if (props.message.role !== "assistant") {
+    return undefined;
+  }
+
+  const errorMessage = props.message.errorMessage?.trim();
+  if (errorMessage) {
+    return errorMessage;
+  }
+
+  return props.message.stopReason === "error" ? "Request failed." : undefined;
+});
+
+const showAssistantErrorBubble = computed(
+  () => props.message.role === "assistant" && assistantSegments.value.length === 0,
+);
+
 const attachedFiles = computed<SentFileDescriptor[]>(() => {
   if (props.message.role !== "assistant") {
     return [];
@@ -187,6 +204,13 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
         </template>
       </div>
 
+      <div
+        v-if="showAssistantErrorBubble && assistantErrorText"
+        class="message__segment message__segment--bubble message__segment--error"
+      >
+        <div class="message__text">{{ assistantErrorText }}</div>
+      </div>
+
       <AttachedFilesList v-if="attachedFiles.length > 0" :files="attachedFiles" />
     </div>
 
@@ -257,6 +281,11 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
   border-radius: 0.5rem;
   background: var(--color-bg-panel);
   color: var(--color-text);
+}
+
+.message__segment--error {
+  background: var(--color-error-soft);
+  color: var(--color-error);
 }
 
 .message__text {

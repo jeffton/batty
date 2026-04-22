@@ -180,4 +180,92 @@ describe("handleAgentEvent", () => {
     expect(published[0]?.type).toBe("reset");
     expect(published[0]?.state?.messages).toEqual(persistedMessages);
   });
+
+  it("defers completion hooks until auto-retry has fully finished", async () => {
+    const onAgentCompleted = vi.fn();
+    const notifyWorkspaceUpdated = vi.fn(async () => undefined);
+    const webSession = {
+      id: "web-1",
+      workspace,
+      session: { sessionId: "session-1" },
+      subscribers: new Set(),
+      activeAssistant: undefined,
+      activeTools: new Map(),
+      openedAt: 1,
+      ephemeral: false,
+    } as unknown as WebSession;
+    const completedState = createState({ isStreaming: false }, webSession, []);
+    const retryingState = createState({ isStreaming: true }, webSession, []);
+
+    await handleAgentEvent(
+      {
+        getState: () => retryingState,
+        getStateMetadata: vi.fn(),
+        publish: vi.fn(),
+        notifyWorkspaceUpdated,
+        disposeWebSession: vi.fn(),
+        onAgentCompleted,
+      },
+      webSession,
+      {
+        type: "auto_retry_start",
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 2000,
+        errorMessage: "server overloaded",
+      } as unknown as AgentSessionEvent,
+    );
+
+    await handleAgentEvent(
+      {
+        getState: () => retryingState,
+        getStateMetadata: vi.fn(),
+        publish: vi.fn(),
+        notifyWorkspaceUpdated,
+        disposeWebSession: vi.fn(),
+        onAgentCompleted,
+      },
+      webSession,
+      { type: "agent_end", messages: [] } as unknown as AgentSessionEvent,
+    );
+
+    expect(onAgentCompleted).not.toHaveBeenCalled();
+
+    await handleAgentEvent(
+      {
+        getState: () => completedState,
+        getStateMetadata: vi.fn(),
+        publish: vi.fn(),
+        notifyWorkspaceUpdated,
+        disposeWebSession: vi.fn(),
+        onAgentCompleted,
+      },
+      webSession,
+      {
+        type: "auto_retry_end",
+        success: false,
+        attempt: 3,
+        finalError: "server overloaded",
+      } as unknown as AgentSessionEvent,
+    );
+
+    expect(onAgentCompleted).toHaveBeenCalledTimes(1);
+    expect(notifyWorkspaceUpdated).toHaveBeenCalledTimes(1);
+
+    await handleAgentEvent(
+      {
+        getState: () => completedState,
+        getStateMetadata: vi.fn(),
+        publish: vi.fn(),
+        notifyWorkspaceUpdated,
+        disposeWebSession: vi.fn(),
+        onAgentCompleted,
+      },
+      webSession,
+      { type: "agent_end", messages: [] } as unknown as AgentSessionEvent,
+    );
+
+    expect(onAgentCompleted).toHaveBeenCalledTimes(1);
+    expect(notifyWorkspaceUpdated).toHaveBeenCalledTimes(1);
+  });
 });

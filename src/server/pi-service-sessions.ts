@@ -84,6 +84,34 @@ async function waitForSessionStateFlush(): Promise<void> {
   await Promise.resolve();
 }
 
+async function runCompletionHook(
+  deps: {
+    notifyWorkspaceUpdated: (workspaceId: string) => Promise<void>;
+    onAgentCompleted?: (session: SessionState) => Promise<void>;
+    disposeWebSession: (webSession: WebSession) => void;
+  },
+  webSession: WebSession,
+  session: SessionState,
+): Promise<void> {
+  try {
+    console.info("Running agent completion hook", {
+      sessionId: session.sessionId,
+      workspaceId: session.workspaceId,
+    });
+    await deps.onAgentCompleted?.(session);
+  } catch (error) {
+    console.error("Failed to run agent completion hook", error);
+  }
+  try {
+    await deps.notifyWorkspaceUpdated(session.workspaceId);
+  } catch (error) {
+    console.error("Failed to publish workspace update", error);
+  }
+  if (webSession.ephemeral && webSession.subscribers.size === 0) {
+    deps.disposeWebSession(webSession);
+  }
+}
+
 function hasToolCallMessage(messages: SessionState["messages"], toolCallIds: string[]): boolean {
   return messages.some(
     (message) =>
@@ -178,8 +206,12 @@ export async function handleAgentEvent(
     }
     case "agent_start":
       webSession.activeTools.clear();
+      webSession.suppressNextAgentEndCompletion = false;
       deps.publish(webSession, { type: "tools", tools: [] });
       deps.publish(webSession, { type: "state", state: deps.getStateMetadata(webSession) });
+      break;
+    case "auto_retry_start":
+      webSession.autoRetryActive = true;
       break;
     case "agent_end":
     case "turn_end":
@@ -199,23 +231,23 @@ export async function handleAgentEvent(
             }
           : state;
       deps.publish(webSession, { type: "reset", state: publishedState });
+
+      if (event.type === "auto_retry_end") {
+        webSession.autoRetryActive = false;
+        if (!state.isStreaming) {
+          webSession.suppressNextAgentEndCompletion = true;
+          await runCompletionHook(deps, webSession, state);
+        }
+        break;
+      }
+
       if (event.type === "agent_end") {
-        try {
-          console.info("Running agent completion hook", {
-            sessionId: publishedState.sessionId,
-            workspaceId: publishedState.workspaceId,
-          });
-          await deps.onAgentCompleted?.(publishedState);
-        } catch (error) {
-          console.error("Failed to run agent completion hook", error);
+        if (webSession.suppressNextAgentEndCompletion) {
+          webSession.suppressNextAgentEndCompletion = false;
+          break;
         }
-        try {
-          await deps.notifyWorkspaceUpdated(publishedState.workspaceId);
-        } catch (error) {
-          console.error("Failed to publish workspace update", error);
-        }
-        if (webSession.ephemeral && webSession.subscribers.size === 0) {
-          deps.disposeWebSession(webSession);
+        if (!state.isStreaming && !webSession.autoRetryActive) {
+          await runCompletionHook(deps, webSession, state);
         }
       }
       break;

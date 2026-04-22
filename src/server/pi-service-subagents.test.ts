@@ -80,6 +80,53 @@ describe("appendCronSubagentCompletion", () => {
       },
     });
   });
+
+  it("synthesizes a visible parent error message when the subagent ended with empty content", () => {
+    const appendedMessages: AgentMessage[] = [];
+    const sessionMessages: AgentMessage[] = [];
+    const session = {
+      model: { api: "openai-codex-responses", provider: "openai-codex", id: "gpt-5.4" },
+      messages: sessionMessages,
+      agent: { state: { messages: sessionMessages } },
+      sessionManager: {
+        appendMessage(message: AgentMessage) {
+          appendedMessages.push(message);
+        },
+      },
+    } as unknown as AgentSession;
+
+    appendCronSubagentCompletion(session, "subagent-call-2", {
+      text: "Codex error: upstream overloaded",
+      details: { subagent: { prompt: "Do work" } } as any,
+      finalAssistant: {
+        role: "assistant",
+        content: [],
+        api: "openai-codex-responses",
+        provider: "openai-codex",
+        model: "gpt-5.4",
+        usage: {
+          input: 10,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 10,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: "error",
+        errorMessage: "Codex error: upstream overloaded",
+        timestamp: 2,
+      },
+      isError: true,
+      errorMessage: "Codex error: upstream overloaded",
+    });
+
+    expect(appendedMessages[1]).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "Codex error: upstream overloaded" }],
+      stopReason: "error",
+      errorMessage: "Codex error: upstream overloaded",
+    });
+  });
 });
 
 describe("runDetachedSubagentSession", () => {
@@ -195,6 +242,114 @@ describe("runDetachedSubagentSession", () => {
         timestamp: expect.any(Number),
       },
     ]);
+  });
+
+  it("returns after final auto-retry failure even if prompt never settles", async () => {
+    const sessionMessages: AgentMessage[] = [];
+    let subscriber:
+      | ((event: { type: string; [key: string]: unknown }) => void)
+      | undefined;
+
+    const subagentSession = {
+      sessionId: "subagent-session-retry-failure",
+      sessionFile: "/tmp/subagent-session-retry-failure.jsonl",
+      messages: sessionMessages,
+      isStreaming: false,
+      agent: {
+        state: {
+          messages: sessionMessages,
+        },
+      },
+      sessionManager: {
+        appendCustomEntry() {
+          return undefined;
+        },
+        appendMessage() {
+          return undefined;
+        },
+      },
+      subscribe(callback: (event: { type: string; [key: string]: unknown }) => void) {
+        subscriber = callback;
+        return () => undefined;
+      },
+      async prompt() {
+        const errorMessage = "Codex error: upstream overloaded";
+        const finalAssistant = {
+          role: "assistant",
+          content: [],
+          api: "openai-codex-responses",
+          provider: "openai-codex",
+          model: "gpt-5.4",
+          usage: {
+            input: 10,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 10,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: "error",
+          errorMessage,
+          timestamp: 1,
+        } satisfies AssistantMessage;
+        sessionMessages.push(finalAssistant as unknown as AgentMessage);
+        subscriber?.({ type: "message_end", message: finalAssistant });
+        subscriber?.({
+          type: "auto_retry_end",
+          success: false,
+          attempt: 3,
+          finalError: errorMessage,
+        });
+        return new Promise<void>(() => undefined);
+      },
+      async abort() {
+        return undefined;
+      },
+    } as unknown as AgentSession;
+
+    const result = await runDetachedSubagentSession(
+      {
+        async createPiAgentSession() {
+          return { session: subagentSession };
+        },
+        attachSession(workspace, session) {
+          return {
+            id: "web-subagent-retry-failure",
+            workspace,
+            session,
+            subscribers: new Set(),
+            activeTools: new Map(),
+            openedAt: 0,
+            ephemeral: true,
+          };
+        },
+        disposeWebSession: vi.fn(),
+        getSessionMessagesForSubagent() {
+          return [];
+        },
+        workspaceSessionDir: "/tmp",
+      },
+      {
+        workspace: {
+          id: "batty",
+          label: "Batty",
+          path: "/root/github/batty",
+          kind: "workspace",
+          isPinned: true,
+          isAssistant: false,
+        },
+        parentSessionId: "parent-session-retry-failure",
+        prompt: "Inspect the issue",
+        modelId: "openai/gpt-5",
+        thinkingLevel: "medium",
+        includeSessionContext: true,
+        respondIn: "session",
+      },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.errorMessage).toBe("Codex error: upstream overloaded");
+    expect(result.text).toBe("Codex error: upstream overloaded");
   });
 
   it("does not leak inherited attachments into the initial subagent update", async () => {

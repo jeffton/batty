@@ -36,6 +36,8 @@ export interface WebSession {
   openedAt: number;
   modelFallbackMessage?: string | undefined;
   ephemeral: boolean;
+  autoRetryActive?: boolean;
+  suppressNextAgentEndCompletion?: boolean;
 }
 
 export interface LiveSession {

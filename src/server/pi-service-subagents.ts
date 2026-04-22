@@ -192,6 +192,67 @@ export interface RunDetachedSubagentDeps {
   workspaceSessionDir: string;
 }
 
+function buildDetachedSubagentResult(
+  subagentSession: AgentSession,
+  options: DetachedSubagentOptions,
+  seedMessageCount: number,
+  errorOverride?: string,
+): DetachedSubagentResult {
+  const messages = structuredClone(subagentSession.messages) as AgentSession["messages"];
+  const finalAssistant = findLastAssistantMessage(messages);
+  const text =
+    extractAssistantText(finalAssistant) ||
+    finalAssistant?.errorMessage ||
+    errorOverride ||
+    "";
+  const generatedMessages = newlyGeneratedSubagentMessages(messages, seedMessageCount);
+  const details = buildSubagentDetails(
+    {
+      prompt: options.prompt,
+      model: options.modelId,
+      effort: options.thinkingLevel,
+      includeSessionContext: options.includeSessionContext,
+      respondIn: options.respondIn,
+    },
+    messages,
+    finalAssistant,
+    {
+      generatedMessages,
+      workspaceId: options.workspace.id,
+      sessionId: subagentSession.sessionId,
+      sessionPath: subagentSession.sessionFile,
+    },
+  );
+  return {
+    text,
+    details,
+    messages,
+    generatedMessages,
+    finalAssistant,
+    isError: finalAssistant?.stopReason === "error" || finalAssistant?.stopReason === "aborted",
+    errorMessage: finalAssistant?.errorMessage || errorOverride,
+  };
+}
+
+function assistantHasRenderableContent(message: AssistantMessage | undefined): boolean {
+  if (!message || !Array.isArray(message.content)) {
+    return false;
+  }
+
+  return message.content.some((block) => {
+    if (typeof block !== "object" || block === null) {
+      return false;
+    }
+    if (block.type === "thinking") {
+      return false;
+    }
+    if (block.type === "text") {
+      return typeof block.text === "string" && block.text.trim().length > 0;
+    }
+    return true;
+  });
+}
+
 export async function runDetachedSubagentSession(
   deps: RunDetachedSubagentDeps,
   options: DetachedSubagentOptions,
@@ -273,7 +334,19 @@ export async function runDetachedSubagentSession(
   });
 
   let lastText = "";
+  let finalRetryError: string | undefined;
+  let resolveFinalRetryFailure: (() => void) | undefined;
+  const finalRetryFailure = new Promise<void>((resolve) => {
+    resolveFinalRetryFailure = resolve;
+  });
   const unsubscribe = subagentSession.subscribe((event) => {
+    if (event.type === "auto_retry_end") {
+      if (event.success === false) {
+        finalRetryError = event.finalError;
+        resolveFinalRetryFailure?.();
+      }
+      return;
+    }
     if (
       event.type !== "message_start" &&
       event.type !== "message_update" &&
@@ -329,71 +402,47 @@ export async function runDetachedSubagentSession(
   }
 
   try {
-    await subagentSession.prompt(options.prompt);
-    const messages = structuredClone(subagentSession.messages) as AgentSession["messages"];
-    const finalAssistant = findLastAssistantMessage(messages);
-    const text = extractAssistantText(finalAssistant) || lastText;
-    const generatedMessages = newlyGeneratedSubagentMessages(messages, seedMessageCount);
-    const details = buildSubagentDetails(
-      {
-        prompt: options.prompt,
-        model: options.modelId,
-        effort: options.thinkingLevel,
-        includeSessionContext: options.includeSessionContext,
-        respondIn: options.respondIn,
-      },
-      messages,
-      finalAssistant,
-      {
-        generatedMessages,
-        workspaceId: options.workspace.id,
-        sessionId: subagentSession.sessionId,
-        sessionPath: subagentSession.sessionFile,
-      },
-    );
+    const promptPromise = subagentSession.prompt(options.prompt);
+    void promptPromise.catch(() => undefined);
+    const completion = await Promise.race([
+      promptPromise.then(() => "prompt-complete" as const),
+      finalRetryFailure.then(() => "final-retry-failure" as const),
+    ]);
+
+    if (completion === "final-retry-failure") {
+      const result = buildDetachedSubagentResult(
+        subagentSession,
+        options,
+        seedMessageCount,
+        finalRetryError,
+      );
+      return {
+        ...result,
+        text: result.text || lastText || finalRetryError || "",
+        isError: true,
+        errorMessage: result.errorMessage || finalRetryError,
+      };
+    }
+
+    await promptPromise;
+    const result = buildDetachedSubagentResult(subagentSession, options, seedMessageCount);
     return {
-      text,
-      details,
-      messages,
-      generatedMessages,
-      finalAssistant,
-      isError: finalAssistant?.stopReason === "error" || finalAssistant?.stopReason === "aborted",
-      errorMessage: finalAssistant?.errorMessage,
+      ...result,
+      text: result.text || lastText,
     };
   } catch (error) {
-    const messages = structuredClone(subagentSession.messages) as AgentSession["messages"];
-    const finalAssistant = findLastAssistantMessage(messages);
-    const text =
-      extractAssistantText(finalAssistant) ||
-      finalAssistant?.errorMessage ||
-      (error instanceof Error ? error.message : String(error));
-    const generatedMessages = newlyGeneratedSubagentMessages(messages, seedMessageCount);
-    const details = buildSubagentDetails(
-      {
-        prompt: options.prompt,
-        model: options.modelId,
-        effort: options.thinkingLevel,
-        includeSessionContext: options.includeSessionContext,
-        respondIn: options.respondIn,
-      },
-      messages,
-      finalAssistant,
-      {
-        generatedMessages,
-        workspaceId: options.workspace.id,
-        sessionId: subagentSession.sessionId,
-        sessionPath: subagentSession.sessionFile,
-      },
+    const result = buildDetachedSubagentResult(
+      subagentSession,
+      options,
+      seedMessageCount,
+      error instanceof Error ? error.message : String(error),
     );
     return {
-      text,
-      details,
-      messages,
-      generatedMessages,
-      finalAssistant,
+      ...result,
+      text: result.text || lastText || (error instanceof Error ? error.message : String(error)),
       isError: true,
       errorMessage:
-        finalAssistant?.errorMessage || (error instanceof Error ? error.message : String(error)),
+        result.errorMessage || (error instanceof Error ? error.message : String(error)),
     };
   } finally {
     if (options.signal) {
@@ -470,23 +519,24 @@ export function appendCronSubagentCompletion(
     timestamp,
   };
   const sanitizedFinalAssistant = stripThinkingFromAssistantMessage(result.finalAssistant);
-  const deliveredAssistant: AssistantMessage = sanitizedFinalAssistant
-    ? {
-        ...sanitizedFinalAssistant,
-        usage: ZERO_USAGE,
-        timestamp: timestamp + 1,
-      }
-    : {
-        role: "assistant",
-        content: [{ type: "text", text: result.text || result.errorMessage || "(no output)" }],
-        api: (session.model as PiModel | undefined)?.api ?? "openai-responses",
-        provider: session.model?.provider ?? "unknown",
-        model: session.model?.id ?? "unknown",
-        usage: ZERO_USAGE,
-        stopReason: result.isError ? "error" : "stop",
-        errorMessage: result.isError ? result.errorMessage : undefined,
-        timestamp: timestamp + 1,
-      };
+  const deliveredAssistant: AssistantMessage =
+    sanitizedFinalAssistant && assistantHasRenderableContent(sanitizedFinalAssistant)
+      ? {
+          ...sanitizedFinalAssistant,
+          usage: ZERO_USAGE,
+          timestamp: timestamp + 1,
+        }
+      : {
+          role: "assistant",
+          content: [{ type: "text", text: result.text || result.errorMessage || "(no output)" }],
+          api: (session.model as PiModel | undefined)?.api ?? "openai-responses",
+          provider: session.model?.provider ?? "unknown",
+          model: session.model?.id ?? "unknown",
+          usage: ZERO_USAGE,
+          stopReason: result.isError ? "error" : "stop",
+          errorMessage: result.isError ? result.errorMessage : undefined,
+          timestamp: timestamp + 1,
+        };
   appendMessages(session, [toolResult, deliveredAssistant]);
 }
 

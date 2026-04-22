@@ -1,5 +1,5 @@
 import { StringEnum } from "@mariozechner/pi-ai";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { SUBAGENT_EFFORT_LEVELS } from "./subagent";
 
 const CronScheduleSchema = Type.Object(

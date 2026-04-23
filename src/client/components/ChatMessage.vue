@@ -103,6 +103,10 @@ const assistantErrorText = computed(() => {
   return props.message.stopReason === "error" ? "Request failed." : undefined;
 });
 
+const assistantHasError = computed(
+  () => props.message.role === "assistant" && typeof assistantErrorText.value === "string",
+);
+
 const showAssistantErrorBubble = computed(
   () => props.message.role === "assistant" && assistantSegments.value.length === 0,
 );
@@ -179,7 +183,13 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
       <div
         v-for="(segment, segmentIndex) in assistantSegments"
         :key="`${props.message.id}-segment-${segmentIndex}`"
-        :class="['message__segment', { 'message__segment--bubble': segment.kind === 'bubble' }]"
+        :class="[
+          'message__segment',
+          {
+            'message__segment--bubble': segment.kind === 'bubble',
+            'message__segment--error': segment.kind === 'bubble' && assistantHasError,
+          },
+        ]"
       >
         <template
           v-for="(block, blockIndex) in segment.blocks"

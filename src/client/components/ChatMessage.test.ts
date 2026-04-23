@@ -152,6 +152,26 @@ describe("ChatMessage", () => {
     expect(wrapper.find(".message__segment--error").exists()).toBe(true);
   });
 
+  it("renders contentful assistant errors as red bubbles too", () => {
+    const message: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-error-2",
+      role: "assistant",
+      timestamp: 4,
+      blocks: [{ type: "text", text: "Codex error: upstream overloaded" }],
+      stopReason: "error",
+      errorMessage: "Codex error: upstream overloaded",
+    };
+
+    const wrapper = mount(ChatMessage, {
+      props: {
+        message,
+      },
+    });
+
+    expect(wrapper.text()).toContain("Codex error: upstream overloaded");
+    expect(wrapper.find(".message__segment--error").exists()).toBe(true);
+  });
+
   it("renders system messages as blue bubbles with a cog icon", () => {
     const message: Extract<UiMessage, { role: "custom" }> = {
       id: "custom-1",

@@ -350,6 +350,106 @@ describe("runDetachedSubagentSession", () => {
     expect(result.text).toBe("Codex error: upstream overloaded");
   });
 
+  it("returns after a direct terminal assistant failure even if prompt never settles", async () => {
+    const sessionMessages: AgentMessage[] = [];
+    let subscriber: ((event: { type: string; [key: string]: unknown }) => void) | undefined;
+
+    const subagentSession = {
+      sessionId: "subagent-session-terminal-failure",
+      sessionFile: "/tmp/subagent-session-terminal-failure.jsonl",
+      messages: sessionMessages,
+      isStreaming: false,
+      agent: {
+        state: {
+          messages: sessionMessages,
+        },
+      },
+      sessionManager: {
+        appendCustomEntry() {
+          return undefined;
+        },
+        appendMessage() {
+          return undefined;
+        },
+      },
+      subscribe(callback: (event: { type: string; [key: string]: unknown }) => void) {
+        subscriber = callback;
+        return () => undefined;
+      },
+      async prompt() {
+        const errorMessage = "Codex error: request failed";
+        const finalAssistant = {
+          role: "assistant",
+          content: [],
+          api: "openai-codex-responses",
+          provider: "openai-codex",
+          model: "gpt-5.4",
+          usage: {
+            input: 10,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 10,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: "error",
+          errorMessage,
+          timestamp: 1,
+        } satisfies AssistantMessage;
+        sessionMessages.push(finalAssistant as unknown as AgentMessage);
+        subscriber?.({ type: "message_end", message: finalAssistant });
+        return new Promise<void>(() => undefined);
+      },
+      async abort() {
+        return undefined;
+      },
+    } as unknown as AgentSession;
+
+    const result = await runDetachedSubagentSession(
+      {
+        async createPiAgentSession() {
+          return { session: subagentSession };
+        },
+        attachSession(workspace, session) {
+          return {
+            id: "web-subagent-terminal-failure",
+            workspace,
+            session,
+            subscribers: new Set(),
+            activeTools: new Map(),
+            openedAt: 0,
+            ephemeral: true,
+          };
+        },
+        disposeWebSession: vi.fn(),
+        getSessionMessagesForSubagent() {
+          return [];
+        },
+        workspaceSessionDir: "/tmp",
+      },
+      {
+        workspace: {
+          id: "batty",
+          label: "Batty",
+          path: "/root/github/batty",
+          kind: "workspace",
+          isPinned: true,
+          isAssistant: false,
+        },
+        parentSessionId: "parent-session-terminal-failure",
+        prompt: "Inspect the issue",
+        modelId: "openai/gpt-5",
+        thinkingLevel: "medium",
+        includeSessionContext: true,
+        respondIn: "session",
+      },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.errorMessage).toBe("Codex error: request failed");
+    expect(result.text).toBe("Codex error: request failed");
+  });
+
   it("does not leak inherited attachments into the initial subagent update", async () => {
     const sessionMessages: AgentMessage[] = [];
     const updates: Array<{ content: Array<{ type: "text"; text: string }>; details: any }> = [];

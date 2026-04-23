@@ -181,6 +181,47 @@ describe("handleAgentEvent", () => {
     expect(published[0]?.state?.messages).toEqual(persistedMessages);
   });
 
+  it("runs completion hooks on agent_end even when state still reports streaming", async () => {
+    const onAgentCompleted = vi.fn();
+    const notifyWorkspaceUpdated = vi.fn(async () => undefined);
+    const published: Array<{ type: string; state?: SessionState }> = [];
+    const webSession = {
+      id: "web-1",
+      workspace,
+      session: { sessionId: "session-1" },
+      subscribers: new Set(),
+      activeAssistant: undefined,
+      activeTools: new Map(),
+      openedAt: 1,
+      ephemeral: false,
+    } as unknown as WebSession;
+    const state = createState({ isStreaming: true }, webSession, []);
+
+    await handleAgentEvent(
+      {
+        getState: () => state,
+        getStateMetadata: vi.fn(),
+        publish: (_webSession, event) =>
+          published.push(event as { type: string; state?: SessionState }),
+        notifyWorkspaceUpdated,
+        disposeWebSession: vi.fn(),
+        onAgentCompleted,
+      },
+      webSession,
+      { type: "agent_end", messages: [] } as unknown as AgentSessionEvent,
+    );
+
+    expect(onAgentCompleted).toHaveBeenCalledTimes(1);
+    expect(notifyWorkspaceUpdated).toHaveBeenCalledTimes(1);
+    expect(published.at(-1)).toMatchObject({
+      type: "reset",
+      state: expect.objectContaining({ isStreaming: false, activeAssistant: undefined }),
+    });
+    expect(onAgentCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({ isStreaming: false, pendingMessageCount: 0 }),
+    );
+  });
+
   it("defers completion hooks until auto-retry has fully finished", async () => {
     const onAgentCompleted = vi.fn();
     const notifyWorkspaceUpdated = vi.fn(async () => undefined);

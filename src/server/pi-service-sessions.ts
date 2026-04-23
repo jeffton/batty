@@ -246,8 +246,8 @@ export async function handleAgentEvent(
           webSession.suppressNextAgentEndCompletion = false;
           break;
         }
-        if (!state.isStreaming && !webSession.autoRetryActive) {
-          await runCompletionHook(deps, webSession, state);
+        if (!webSession.autoRetryActive) {
+          await runCompletionHook(deps, webSession, publishedState);
         }
       }
       break;

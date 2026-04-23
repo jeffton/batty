@@ -490,7 +490,8 @@ watch(
   min-width: 0;
   min-height: 0;
   gap: 0.45rem;
-  padding-block: 0.8rem;
+  padding-top: 0.8rem;
+  padding-bottom: 0;
   overflow: hidden;
 }
 

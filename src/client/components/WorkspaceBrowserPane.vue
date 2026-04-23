@@ -13,12 +13,13 @@ import { useAppStore } from "@/client/stores/app";
 
 const PROVIDER_AUTH_POPOVER_ID = "workspace-provider-auth-popover";
 const PROVIDER_AUTH_POPOVER_ANCHOR = "--workspace-provider-auth-anchor";
+const CREATE_WORKSPACE_POPOVER_ID = "workspace-create-popover";
+const CREATE_WORKSPACE_POPOVER_ANCHOR = "--workspace-create-popover-anchor";
 
 const store = useAppStore();
 const router = useRouter();
 const workspaceFilter = ref("");
 const sessionFilter = ref("");
-const createWorkspaceOpen = ref(false);
 const createWorkspaceName = ref("");
 const createWorkspaceError = ref("");
 const creatingWorkspace = ref(false);
@@ -26,7 +27,8 @@ const switchingWorkspaceId = ref<string>();
 const startingSession = ref(false);
 const startingDailySession = ref(false);
 const openingSessionId = ref<string>();
-const createWorkspaceInput = ref<HTMLInputElement>();
+const createWorkspaceInput = ref<HTMLInputElement | null>(null);
+const createWorkspacePopover = ref<HTMLElement | null>(null);
 const actionsDisabled = computed(() => store.connectionState !== "online");
 const { setPaneTransition } = usePaneTransition();
 
@@ -100,17 +102,21 @@ async function toggleWorkspacePin(workspaceId: string): Promise<void> {
 }
 
 function resetCreateWorkspaceForm(): void {
-  createWorkspaceOpen.value = false;
   createWorkspaceName.value = "";
   createWorkspaceError.value = "";
 }
 
-async function openCreateWorkspaceForm(): Promise<void> {
-  if (actionsDisabled.value) {
+function closeCreateWorkspacePopover(): void {
+  createWorkspacePopover.value?.hidePopover?.();
+}
+
+async function handleCreateWorkspacePopoverToggle(event: Event): Promise<void> {
+  const nextState = (event as Event & { newState?: "open" | "closed" }).newState;
+  if (nextState !== "open") {
+    resetCreateWorkspaceForm();
     return;
   }
 
-  createWorkspaceOpen.value = true;
   createWorkspaceError.value = "";
   await nextTick();
   createWorkspaceInput.value?.focus();
@@ -133,9 +139,9 @@ async function submitCreateWorkspace(): Promise<void> {
   createWorkspaceError.value = "";
   try {
     const session = await store.createWorkspace(name);
+    closeCreateWorkspacePopover();
     setPaneTransition("slide-from-right");
     await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
-    resetCreateWorkspaceForm();
   } catch (error) {
     createWorkspaceError.value = error instanceof Error ? error.message : String(error);
   } finally {
@@ -212,6 +218,7 @@ watch(
   () => {
     workspaceFilter.value = "";
     sessionFilter.value = "";
+    closeCreateWorkspacePopover();
   },
 );
 </script>
@@ -246,91 +253,105 @@ watch(
           />
         </div>
 
-        <form
-          v-if="createWorkspaceOpen"
-          class="workspace-browser-pane__create-form"
-          @submit.prevent="submitCreateWorkspace"
+        <div
+          class="workspace-browser-pane__list-shell workspace-browser-pane__list-shell--workspaces"
         >
-          <input
-            ref="createWorkspaceInput"
-            v-model="createWorkspaceName"
-            class="workspace-browser-pane__search"
-            type="text"
-            placeholder="workspace-name"
-            :disabled="creatingWorkspace || actionsDisabled"
-          />
-          <div class="workspace-browser-pane__create-btns">
-            <button
-              class="workspace-browser-pane__btn workspace-browser-pane__btn--primary"
-              type="submit"
-              :disabled="creatingWorkspace || actionsDisabled"
+          <div class="workspace-browser-pane__list">
+            <div
+              v-for="workspace in filteredWorkspaces"
+              :key="workspace.id"
+              :class="[
+                'workspace-browser-pane__item-row',
+                'workspace-browser-pane__item-row--workspace',
+                workspace.id === store.selectedWorkspaceId ? 'is-active' : '',
+              ]"
             >
-              <LoaderCircle
-                v-if="creatingWorkspace"
-                :size="14"
-                class="workspace-browser-pane__spinner"
-              />
-              <span>{{ creatingWorkspace ? "Creating…" : "Create" }}</span>
-            </button>
-            <button
-              class="workspace-browser-pane__btn"
-              type="button"
-              :disabled="creatingWorkspace"
-              @click="resetCreateWorkspaceForm"
-            >
-              Cancel
-            </button>
+              <button
+                class="workspace-browser-pane__item workspace-browser-pane__item--workspace"
+                :disabled="actionsDisabled"
+                @click="openWorkspace(workspace.id)"
+              >
+                <span class="workspace-browser-pane__item-main">
+                  <span class="workspace-browser-pane__item-label">{{ workspace.label }}</span>
+                </span>
+                <span class="workspace-browser-pane__item-meta">{{ workspace.path }}</span>
+              </button>
+
+              <button
+                class="workspace-browser-pane__pin-btn"
+                type="button"
+                :class="isWorkspacePinned(workspace.id) ? 'is-pinned' : ''"
+                :aria-label="isWorkspacePinned(workspace.id) ? 'Unpin workspace' : 'Pin workspace'"
+                :title="isWorkspacePinned(workspace.id) ? 'Unpin workspace' : 'Pin workspace'"
+                @click.stop="void toggleWorkspacePin(workspace.id)"
+              >
+                <Star
+                  :size="16"
+                  :fill="isWorkspacePinned(workspace.id) ? 'currentColor' : 'none'"
+                />
+              </button>
+            </div>
+
+            <div v-if="filteredWorkspaces.length === 0" class="workspace-browser-pane__empty">
+              No workspaces match.
+            </div>
           </div>
-          <p v-if="createWorkspaceError" class="workspace-browser-pane__error">
-            {{ createWorkspaceError }}
-          </p>
-        </form>
 
-        <button
-          v-else
-          class="workspace-browser-pane__btn workspace-browser-pane__btn--primary workspace-browser-pane__btn--workspaces"
-          :disabled="actionsDisabled"
-          @click="openCreateWorkspaceForm"
-        >
-          <Plus :size="14" /> New workspace
-        </button>
-
-        <div class="workspace-browser-pane__list">
-          <div
-            v-for="workspace in filteredWorkspaces"
-            :key="workspace.id"
-            :class="[
-              'workspace-browser-pane__item-row',
-              'workspace-browser-pane__item-row--workspace',
-              workspace.id === store.selectedWorkspaceId ? 'is-active' : '',
-            ]"
+          <button
+            class="workspace-browser-pane__fab"
+            type="button"
+            :style="{ 'anchor-name': CREATE_WORKSPACE_POPOVER_ANCHOR }"
+            :popovertarget="CREATE_WORKSPACE_POPOVER_ID"
+            :disabled="actionsDisabled"
+            aria-label="New workspace"
+            title="New workspace"
           >
-            <button
-              class="workspace-browser-pane__item workspace-browser-pane__item--workspace"
-              :disabled="actionsDisabled"
-              @click="openWorkspace(workspace.id)"
-            >
-              <span class="workspace-browser-pane__item-main">
-                <span class="workspace-browser-pane__item-label">{{ workspace.label }}</span>
-              </span>
-              <span class="workspace-browser-pane__item-meta">{{ workspace.path }}</span>
-            </button>
+            <Plus :size="22" />
+          </button>
 
-            <button
-              class="workspace-browser-pane__pin-btn"
-              type="button"
-              :class="isWorkspacePinned(workspace.id) ? 'is-pinned' : ''"
-              :aria-label="isWorkspacePinned(workspace.id) ? 'Unpin workspace' : 'Pin workspace'"
-              :title="isWorkspacePinned(workspace.id) ? 'Unpin workspace' : 'Pin workspace'"
-              @click.stop="void toggleWorkspacePin(workspace.id)"
-            >
-              <Star :size="16" :fill="isWorkspacePinned(workspace.id) ? 'currentColor' : 'none'" />
-            </button>
-          </div>
-
-          <div v-if="filteredWorkspaces.length === 0" class="workspace-browser-pane__empty">
-            No workspaces match.
-          </div>
+          <form
+            :id="CREATE_WORKSPACE_POPOVER_ID"
+            ref="createWorkspacePopover"
+            class="workspace-browser-pane__create-popover"
+            :style="{ 'position-anchor': CREATE_WORKSPACE_POPOVER_ANCHOR }"
+            popover="auto"
+            @submit.prevent="submitCreateWorkspace"
+            @toggle="handleCreateWorkspacePopoverToggle"
+          >
+            <input
+              ref="createWorkspaceInput"
+              v-model="createWorkspaceName"
+              class="workspace-browser-pane__popover-input"
+              type="text"
+              placeholder="workspace-name"
+              :disabled="creatingWorkspace || actionsDisabled"
+            />
+            <div class="workspace-browser-pane__create-btns">
+              <button
+                class="workspace-browser-pane__btn workspace-browser-pane__btn--primary"
+                type="submit"
+                :disabled="creatingWorkspace || actionsDisabled"
+              >
+                <LoaderCircle
+                  v-if="creatingWorkspace"
+                  :size="14"
+                  class="workspace-browser-pane__spinner"
+                />
+                <span>{{ creatingWorkspace ? "Creating…" : "Create" }}</span>
+              </button>
+              <button
+                class="workspace-browser-pane__btn"
+                type="button"
+                :disabled="creatingWorkspace"
+                @click="closeCreateWorkspacePopover"
+              >
+                Cancel
+              </button>
+            </div>
+            <p v-if="createWorkspaceError" class="workspace-browser-pane__error">
+              {{ createWorkspaceError }}
+            </p>
+          </form>
         </div>
       </section>
 
@@ -349,61 +370,75 @@ watch(
           />
         </div>
 
-        <button
-          v-if="store.selectedWorkspaceId"
-          class="workspace-browser-pane__btn workspace-browser-pane__btn--primary workspace-browser-pane__btn--sessions workspace-browser-pane__new-session"
-          :disabled="actionsDisabled || startingSession"
-          @click="startSession"
+        <div
+          class="workspace-browser-pane__list-shell workspace-browser-pane__list-shell--sessions"
         >
-          <LoaderCircle v-if="startingSession" :size="14" class="workspace-browser-pane__spinner" />
-          <Plus v-else :size="14" />
-          {{ startingSession ? "Starting…" : "New session" }}
-        </button>
-
-        <div class="workspace-browser-pane__sessions">
-          <template v-if="sessionListLoading">
-            <div class="workspace-browser-pane__empty workspace-browser-pane__empty--loading">
-              <LoaderCircle :size="18" class="workspace-browser-pane__spinner" />
-            </div>
-          </template>
-          <template v-else>
-            <button
-              v-for="session in filteredSessions"
-              :key="session.id"
-              :class="[
-                'workspace-browser-pane__item',
-                'workspace-browser-pane__item--session',
-                session.sessionId === store.activeSession?.sessionId ? 'is-active' : '',
-              ]"
-              :disabled="actionsDisabled"
-              @click="openSession(session)"
-            >
-              <span class="workspace-browser-pane__session-main">
-                <span class="workspace-browser-pane__session-copy">
-                  <span class="workspace-browser-pane__item-label">{{
-                    sessionLabel(session)
-                  }}</span>
-                  <span v-if="sessionMeta(session)" class="workspace-browser-pane__item-meta">
-                    {{ sessionMeta(session) }}
+          <div class="workspace-browser-pane__sessions">
+            <template v-if="sessionListLoading">
+              <div class="workspace-browser-pane__empty workspace-browser-pane__empty--loading">
+                <LoaderCircle :size="18" class="workspace-browser-pane__spinner" />
+              </div>
+            </template>
+            <template v-else>
+              <button
+                v-for="session in filteredSessions"
+                :key="session.id"
+                :class="[
+                  'workspace-browser-pane__item',
+                  'workspace-browser-pane__item--session',
+                  session.sessionId === store.activeSession?.sessionId ? 'is-active' : '',
+                ]"
+                :disabled="actionsDisabled"
+                @click="openSession(session)"
+              >
+                <span class="workspace-browser-pane__session-main">
+                  <span class="workspace-browser-pane__session-copy">
+                    <span class="workspace-browser-pane__item-label">{{
+                      sessionLabel(session)
+                    }}</span>
+                    <span v-if="sessionMeta(session)" class="workspace-browser-pane__item-meta">
+                      {{ sessionMeta(session) }}
+                    </span>
+                  </span>
+                  <span
+                    v-if="session.dailySession"
+                    class="workspace-browser-pane__session-icon"
+                    :title="session.dailySession.exists ? 'Daily session' : 'Start daily session'"
+                    :aria-label="
+                      session.dailySession.exists ? 'Daily session' : 'Start daily session'
+                    "
+                  >
+                    <CalendarDays :size="16" />
                   </span>
                 </span>
-                <span
-                  v-if="session.dailySession"
-                  class="workspace-browser-pane__session-icon"
-                  :title="session.dailySession.exists ? 'Daily session' : 'Start daily session'"
-                  :aria-label="
-                    session.dailySession.exists ? 'Daily session' : 'Start daily session'
-                  "
-                >
-                  <CalendarDays :size="16" />
-                </span>
-              </span>
-            </button>
+              </button>
 
-            <div v-if="filteredSessions.length === 0" class="workspace-browser-pane__empty">
-              No sessions yet.
-            </div>
-          </template>
+              <div v-if="filteredSessions.length === 0" class="workspace-browser-pane__empty">
+                No sessions yet.
+              </div>
+            </template>
+          </div>
+
+          <button
+            v-if="store.selectedWorkspaceId"
+            :class="[
+              'workspace-browser-pane__fab',
+              'workspace-browser-pane__fab--sessions',
+              startingSession ? 'is-busy' : '',
+            ]"
+            type="button"
+            :disabled="actionsDisabled || startingSession"
+            aria-label="New session"
+            title="New session"
+            @click="startSession"
+          >
+            <LoaderCircle
+              v-if="startingSession"
+              :size="22"
+              class="workspace-browser-pane__spinner"
+            />
+            <Plus v-else :size="22" />
+          </button>
         </div>
       </section>
     </div>
@@ -517,10 +552,10 @@ watch(
   padding: 0;
 }
 
-.workspace-browser-pane__create-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
+.workspace-browser-pane__list-shell {
+  position: relative;
+  flex: 1;
+  min-height: 0;
 }
 
 .workspace-browser-pane__create-btns {
@@ -541,16 +576,6 @@ watch(
   padding: 0.55rem calc(var(--workspace-browser-pane-safe-end) + 0.7rem) 0.55rem
     calc(var(--workspace-browser-pane-safe-start) + 0.7rem);
   transition: background 80ms ease;
-}
-
-.workspace-browser-pane__btn--workspaces {
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-}
-
-.workspace-browser-pane__btn--sessions {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
 }
 
 @media (hover: hover) {
@@ -577,28 +602,23 @@ watch(
   }
 }
 
-.workspace-browser-pane__new-session {
-  flex-shrink: 0;
-}
-
 .workspace-browser-pane__error {
   margin: 0;
   color: var(--color-error);
   font-size: 0.82rem;
-  padding: 0 calc(var(--workspace-browser-pane-safe-end) + 0.2rem) 0
-    calc(var(--workspace-browser-pane-safe-start) + 0.2rem);
 }
 
 .workspace-browser-pane__list,
 .workspace-browser-pane__sessions {
   flex: 1;
   min-height: 0;
+  height: 100%;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 1px;
   padding-right: 0.1rem;
-  padding-bottom: 0;
+  padding-bottom: 6rem;
 }
 
 .workspace-browser-pane__item-row {
@@ -745,6 +765,91 @@ watch(
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.workspace-browser-pane__fab {
+  position: absolute;
+  right: 0.85rem;
+  bottom: 0.85rem;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.7rem;
+  height: 3.7rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-bg-selection);
+  color: var(--color-accent-strong);
+  box-shadow:
+    0 12px 24px oklch(0.15 0.02 240 / 0.14),
+    0 4px 10px oklch(0.15 0.02 240 / 0.1),
+    inset 0 1px 0 oklch(1 0 0 / 0.28);
+  transition:
+    background 80ms ease,
+    transform 80ms ease,
+    box-shadow 80ms ease;
+}
+
+.workspace-browser-pane__fab--sessions {
+  right: calc(var(--safe-area-right) + 0.85rem);
+}
+
+@media (hover: hover) {
+  .workspace-browser-pane__fab:hover:not(:disabled) {
+    background: var(--color-accent-soft);
+    transform: translateY(-1px);
+    box-shadow:
+      0 14px 28px oklch(0.15 0.02 240 / 0.16),
+      0 5px 12px oklch(0.15 0.02 240 / 0.12),
+      inset 0 1px 0 oklch(1 0 0 / 0.28);
+  }
+}
+
+.workspace-browser-pane__fab:disabled:not(.is-busy) {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.workspace-browser-pane__fab.is-busy {
+  opacity: 1;
+}
+
+.workspace-browser-pane__create-popover {
+  display: none;
+}
+
+.workspace-browser-pane__create-popover:popover-open {
+  position: fixed;
+  left: anchor(center);
+  top: anchor(top);
+  transform: translate(-50%, calc(-100% - 0.75rem));
+  width: min(18rem, calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 1rem));
+  max-width: calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 1rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.6rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.8rem;
+  background: var(--color-bg-overlay);
+  color: inherit;
+  box-shadow: var(--color-shadow-popover);
+}
+
+.workspace-browser-pane__create-popover::backdrop {
+  background: var(--color-backdrop);
+}
+
+.workspace-browser-pane__popover-input {
+  width: 100%;
+  border: 0;
+  border-radius: 0.55rem;
+  background: var(--color-bg-elevated);
+  color: inherit;
+  outline: none;
+  padding: 0.65rem 0.75rem;
 }
 
 .workspace-browser-pane__spinner {

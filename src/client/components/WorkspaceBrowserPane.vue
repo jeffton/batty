@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Search, Plus, LoaderCircle, Star, CalendarDays } from "lucide-vue-next";
+import { Plus, LoaderCircle, Star, CalendarDays } from "lucide-vue-next";
 import WorkspaceBrowserFooter from "@/client/components/WorkspaceBrowserFooter.vue";
 import WorkspaceBrowserHeader from "@/client/components/WorkspaceBrowserHeader.vue";
 import { computed, nextTick, ref, watch } from "vue";
@@ -18,8 +18,8 @@ const CREATE_WORKSPACE_POPOVER_ANCHOR = "--workspace-create-popover-anchor";
 
 const store = useAppStore();
 const router = useRouter();
-const workspaceFilter = ref("");
-const sessionFilter = ref("");
+const searchOpen = ref(false);
+const searchQuery = ref("");
 const createWorkspaceName = ref("");
 const createWorkspaceError = ref("");
 const creatingWorkspace = ref(false);
@@ -36,10 +36,17 @@ const assistantWorkspace = computed(() =>
   store.workspaces.find((workspace) => workspace.isAssistant),
 );
 
+const normalizedSearchQuery = computed(() => searchQuery.value.toLowerCase().trim());
+
 const filteredWorkspaces = computed(() => {
-  const query = workspaceFilter.value.toLowerCase().trim();
+  const query = normalizedSearchQuery.value;
   if (!query) return store.workspaces;
+
   return store.workspaces.filter((workspace) => {
+    if (workspace.id === store.selectedWorkspaceId) {
+      return true;
+    }
+
     const haystack = `${workspace.label} ${workspace.path}`.toLowerCase();
     return haystack.includes(query);
   });
@@ -48,7 +55,7 @@ const filteredWorkspaces = computed(() => {
 const sessions = computed(() => store.workspaceSessions);
 
 const filteredSessions = computed(() => {
-  const query = sessionFilter.value.toLowerCase().trim();
+  const query = normalizedSearchQuery.value;
   if (!query) return sessions.value;
   return sessions.value.filter((session) => sessionLabel(session).toLowerCase().includes(query));
 });
@@ -213,11 +220,22 @@ async function openSession(session: SessionSummary): Promise<void> {
   }
 }
 
+function openSearch(): void {
+  searchOpen.value = true;
+}
+
+function setSearchQuery(value: string): void {
+  searchQuery.value = value;
+}
+
+function closeSearch(): void {
+  searchQuery.value = "";
+  searchOpen.value = false;
+}
+
 watch(
   () => store.selectedWorkspaceId,
   () => {
-    workspaceFilter.value = "";
-    sessionFilter.value = "";
     closeCreateWorkspacePopover();
   },
 );
@@ -230,6 +248,11 @@ watch(
       :popover-anchor="PROVIDER_AUTH_POPOVER_ANCHOR"
       :connection-state="store.connectionState"
       :connection-description="connectionDescription"
+      :search-open="searchOpen"
+      :search-query="searchQuery"
+      @open-search="openSearch"
+      @close-search="closeSearch"
+      @update-search-query="setSearchQuery"
       @logout="store.logout"
     />
 
@@ -240,18 +263,6 @@ watch(
     <div class="workspace-browser-pane__cols">
       <section class="workspace-browser-pane__column workspace-browser-pane__column--workspaces">
         <div class="workspace-browser-pane__section-label">Workspaces</div>
-
-        <div
-          class="workspace-browser-pane__search-row workspace-browser-pane__search-row--workspaces"
-        >
-          <Search :size="14" class="workspace-browser-pane__search-icon" />
-          <input
-            v-model="workspaceFilter"
-            class="workspace-browser-pane__search"
-            type="text"
-            placeholder="Filter workspaces…"
-          />
-        </div>
 
         <div
           class="workspace-browser-pane__list-shell workspace-browser-pane__list-shell--workspaces"
@@ -359,18 +370,6 @@ watch(
         <div class="workspace-browser-pane__section-label">Sessions</div>
 
         <div
-          class="workspace-browser-pane__search-row workspace-browser-pane__search-row--sessions"
-        >
-          <Search :size="14" class="workspace-browser-pane__search-icon" />
-          <input
-            v-model="sessionFilter"
-            class="workspace-browser-pane__search"
-            type="text"
-            placeholder="Filter sessions…"
-          />
-        </div>
-
-        <div
           class="workspace-browser-pane__list-shell workspace-browser-pane__list-shell--sessions"
         >
           <div class="workspace-browser-pane__sessions">
@@ -414,7 +413,7 @@ watch(
               </button>
 
               <div v-if="filteredSessions.length === 0" class="workspace-browser-pane__empty">
-                No sessions yet.
+                {{ normalizedSearchQuery ? "No sessions match." : "No sessions yet." }}
               </div>
             </template>
           </div>
@@ -515,41 +514,6 @@ watch(
   color: var(--color-text-subtle);
   padding: 0.2rem calc(var(--workspace-browser-pane-safe-end) + 0.35rem) 0.2rem
     calc(var(--workspace-browser-pane-safe-start) + 0.35rem);
-}
-
-.workspace-browser-pane__search-row {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.5rem calc(var(--workspace-browser-pane-safe-end) + 0.6rem) 0.5rem
-    calc(var(--workspace-browser-pane-safe-start) + 0.6rem);
-  background: var(--color-bg-elevated);
-  border-radius: 0.6rem;
-}
-
-.workspace-browser-pane__search-row--workspaces {
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-}
-
-.workspace-browser-pane__search-row--sessions {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
-.workspace-browser-pane__search-icon {
-  color: var(--color-text-subtle);
-  flex-shrink: 0;
-}
-
-.workspace-browser-pane__search {
-  flex: 1;
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  outline: none;
-  padding: 0;
 }
 
 .workspace-browser-pane__list-shell {

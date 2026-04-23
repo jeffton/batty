@@ -1,17 +1,38 @@
 <script setup lang="ts">
-import { Cog, LoaderCircle, Wifi, WifiOff } from "lucide-vue-next";
+import { Cog, LoaderCircle, Search, Wifi, WifiOff, X } from "lucide-vue-next";
 import SettingsPopover from "@/client/components/SettingsPopover.vue";
+import { nextTick, ref, watch } from "vue";
 
 const props = defineProps<{
   popoverId: string;
   popoverAnchor: string;
   connectionState: "online" | "connecting" | "offline";
   connectionDescription: string;
+  searchOpen: boolean;
+  searchQuery: string;
 }>();
 
 const emit = defineEmits<{
   logout: [];
+  openSearch: [];
+  closeSearch: [];
+  updateSearchQuery: [value: string];
 }>();
+
+const searchInput = ref<HTMLInputElement | null>(null);
+
+watch(
+  () => props.searchOpen,
+  async (searchOpen) => {
+    if (!searchOpen) {
+      return;
+    }
+
+    await nextTick();
+    searchInput.value?.focus();
+    searchInput.value?.select();
+  },
+);
 </script>
 
 <template>
@@ -24,6 +45,39 @@ const emit = defineEmits<{
     </div>
 
     <div class="workspace-browser-header__actions">
+      <button
+        v-if="!props.searchOpen"
+        class="workspace-browser-header__btn"
+        type="button"
+        aria-label="Search workspaces and sessions"
+        title="Search"
+        @click="emit('openSearch')"
+      >
+        <Search :size="16" />
+      </button>
+
+      <div v-else class="workspace-browser-header__search-shell">
+        <Search :size="14" class="workspace-browser-header__search-icon" />
+        <input
+          ref="searchInput"
+          class="workspace-browser-header__search-input"
+          type="text"
+          :value="props.searchQuery"
+          aria-label="Search workspaces and sessions"
+          @input="emit('updateSearchQuery', ($event.target as HTMLInputElement).value)"
+          @keydown.escape="emit('closeSearch')"
+        />
+        <button
+          class="workspace-browser-header__btn workspace-browser-header__btn--search-close"
+          type="button"
+          aria-label="Clear search"
+          title="Clear search"
+          @click="emit('closeSearch')"
+        >
+          <X :size="16" />
+        </button>
+      </div>
+
       <span
         class="workspace-browser-header__status"
         :aria-label="props.connectionDescription"
@@ -107,7 +161,38 @@ const emit = defineEmits<{
   display: flex;
   align-items: center;
   gap: 0.6rem;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.workspace-browser-header__search-shell {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: min(18rem, calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 8rem));
+  max-width: min(22rem, calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 8rem));
+  padding: 0.2rem 0.25rem 0.2rem 0.55rem;
+  border-radius: 0.7rem;
+  background: var(--color-bg-elevated);
+}
+
+.workspace-browser-header__search-icon {
+  color: var(--color-text-subtle);
   flex-shrink: 0;
+}
+
+.workspace-browser-header__search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  outline: none;
+  padding: 0;
+}
+
+.workspace-browser-header__btn--search-close {
+  padding: 0.35rem;
 }
 
 .workspace-browser-header__status,

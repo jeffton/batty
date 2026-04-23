@@ -117,32 +117,6 @@ export const SubagentToolSchema = Type.Object(
   },
 );
 
-export const WebSearchToolSchema = Type.Object(
-  {
-    action: StringEnum(["search", "content"] as const, {
-      description: "Whether to run a web search or extract page content from a URL.",
-    }),
-    query: Type.Optional(Type.String({ description: "Search query for action=search." })),
-    url: Type.Optional(Type.String({ description: "Page URL for action=content." })),
-    count: Type.Optional(Type.Number({ description: "Number of search results to return, 1-20." })),
-    includeContent: Type.Optional(
-      Type.Boolean({ description: "Fetch readable markdown content for each search result." }),
-    ),
-    country: Type.Optional(
-      Type.String({ description: "Two-letter country code for search results. Defaults to US." }),
-    ),
-    freshness: Type.Optional(
-      Type.String({
-        description:
-          "Freshness filter such as pd, pw, pm, py, or a range like 2024-01-01to2024-06-30.",
-      }),
-    ),
-  },
-  {
-    additionalProperties: false,
-  },
-);
-
 export const AttachFilesToolSchema = Type.Object(
   {
     paths: Type.Array(Type.String({ description: "Path to a file to attach for the user." }), {

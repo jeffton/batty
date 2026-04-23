@@ -16,6 +16,7 @@ Batty is a web UI for [Pi Coding Agent](https://pi.dev). It keeps Pi's workspace
 - Built-in cron jobs for scheduled agent turns
 - Built-in `subagent` tool for synchronous workspace-scoped delegation
 - Built-in `web-search` tool powered by Brave Search
+- Pi-installable `web-search` extension backed by the same shared implementation
 - Passkey auth with one-time setup codes for enrolling devices
 - Web Push notifications when background runs finish
 - PWA install support with offline-friendly cached session snapshots
@@ -93,6 +94,30 @@ The production build output lives in `dist/`, but the deployment flow packages a
 - `README.md`
 - `package.json`
 - `pnpm-lock.yaml`
+
+## Pi web-search extension
+
+This repo ships the `web-search` tool as a Pi package extension as well.
+
+Set a Brave Search API key in your shell before starting Pi:
+
+```bash
+export BRAVE_SEARCH_API_KEY="your-brave-search-api-key"
+```
+
+Install the Batty repo as a Pi package:
+
+```bash
+pi install https://github.com/jeffton/batty.git
+```
+
+For a one-off run without installing it globally or into the project:
+
+```bash
+pi -e https://github.com/jeffton/batty.git
+```
+
+Pi loads `extensions/web-search/index.ts` from this repo and registers the same shared web-search tool code that Batty uses.
 
 ## Authentication
 

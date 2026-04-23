@@ -7,16 +7,11 @@ import type {
   WorkspaceInfo,
 } from "@/shared/types";
 import type { AppConfig } from "./config";
+import { createWebSearchToolDefinition } from "../shared/web-search-tool";
 import { buildCronJobSummary, type CronService } from "./cron";
 import { storeSentFiles } from "./send-files";
-import { runWebSearch } from "./web-search";
 import { hasSubagentSessionMarker, SUBAGENT_TOOL_NAME } from "./subagent";
-import {
-  AttachFilesToolSchema,
-  CronToolSchema,
-  SubagentToolSchema,
-  WebSearchToolSchema,
-} from "./pi-service-schemas";
+import { AttachFilesToolSchema, CronToolSchema, SubagentToolSchema } from "./pi-service-schemas";
 
 type ResolveSubagentDefaults = (
   sessionId: string,
@@ -255,37 +250,10 @@ export function createCronTool({
   };
 }
 
-export function createWebSearchTool(config: AppConfig): ToolDefinition<typeof WebSearchToolSchema> {
-  return {
-    name: "web-search",
-    label: "Web Search",
-    description:
-      "Search the web with Brave Search and extract readable markdown content from result pages.",
-    promptSnippet: "Search the web or extract readable page content without leaving Batty.",
-    promptGuidelines: [
-      "Use this tool for web lookups, current facts, API docs, or extracting readable page content from URLs.",
-      'Use action="search" with query for web search.',
-      'Use action="content" with url to extract readable markdown from a specific page.',
-      "Set includeContent=true when you need the actual page text for the search results.",
-    ],
-    parameters: WebSearchToolSchema,
-    execute: async (_toolCallId, params) => {
-      const result = await runWebSearch({
-        apiKey: config.braveSearchKey ?? "",
-        action: params.action,
-        query: typeof params.query === "string" ? params.query : undefined,
-        url: typeof params.url === "string" ? params.url : undefined,
-        count: typeof params.count === "number" ? params.count : undefined,
-        includeContent: typeof params.includeContent === "boolean" ? params.includeContent : false,
-        country: typeof params.country === "string" ? params.country : undefined,
-        freshness: typeof params.freshness === "string" ? params.freshness : undefined,
-      });
-      return {
-        content: [{ type: "text", text: result.text }],
-        details: result.details,
-      };
-    },
-  };
+export function createWebSearchTool(config: AppConfig) {
+  return createWebSearchToolDefinition({
+    getApiKey: () => config.braveSearchKey ?? "",
+  });
 }
 
 export function createAttachFilesTool({

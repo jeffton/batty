@@ -55,7 +55,6 @@ import {
   resolveSubagentDefaults,
   runDetachedSubagentSession,
   runSubagentSerial,
-  sessionMessagesForSubagent,
   waitForSubagentQueue,
 } from "./pi-service-subagents";
 import {
@@ -219,10 +218,10 @@ export class PiService {
 
     return this.runSubagentSerial(webSession.session.sessionId, async () => {
       await webSession.session.agent.waitForIdle();
-      this.setThinkingLevel(session.id, job.thinkingLevel);
-      await this.setModel(session.id, job.model);
 
       if (job.session.kind === "daily-inline") {
+        this.setThinkingLevel(session.id, job.thinkingLevel);
+        await this.setModel(session.id, job.model);
         this.appendRuntimeNotice(webSession.session, cronNotice);
         this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
         await webSession.session.prompt(job.prompt);
@@ -236,6 +235,10 @@ export class PiService {
       }
 
       const includePreviousContext = job.session.includePreviousContext === true;
+      const contextBranchLeafId = includePreviousContext
+        ? webSession.session.sessionManager.getLeafId()
+        : undefined;
+      const parentSessionPath = this.requireSessionPath(webSession.id);
       const toolCallId = `${SUBAGENT_TOOL_NAME}-${randomUUID()}`;
       const toolArgs = {
         prompt: job.prompt,
@@ -260,6 +263,8 @@ export class PiService {
         const result = await this.runDetachedSubagentSession({
           workspace: job.workspace,
           parentSessionId: webSession.session.sessionId,
+          parentSessionPath,
+          contextBranchLeafId,
           prompt: job.prompt,
           modelId: job.model,
           thinkingLevel: job.thinkingLevel,
@@ -342,23 +347,11 @@ export class PiService {
     return resolveSubagentDefaults(this.liveSessions.get(sessionId)?.session, ctx);
   }
 
-  private sessionMessagesForSubagent(
-    sessionId: string,
-    currentToolCallId?: string,
-    injectedPrompt?: string,
-  ): AgentSession["messages"] {
-    return sessionMessagesForSubagent(
-      this.liveSessions.get(sessionId)?.session,
-      this.sessions.get(sessionId),
-      sessionId,
-      currentToolCallId,
-      injectedPrompt,
-    );
-  }
-
   private async runDetachedSubagentSession(options: {
     workspace: WorkspaceInfo;
     parentSessionId: string;
+    parentSessionPath?: string;
+    contextBranchLeafId?: string | null;
     prompt: string;
     modelId: string;
     thinkingLevel: string;
@@ -379,8 +372,6 @@ export class PiService {
         attachSession: (workspace, session, modelFallbackMessage, ephemeral) =>
           this.attachSession(workspace, session, modelFallbackMessage, ephemeral),
         disposeWebSession: (webSession) => this.disposeWebSession(webSession),
-        getSessionMessagesForSubagent: (sessionId, currentToolCallId, injectedPrompt) =>
-          this.sessionMessagesForSubagent(sessionId, currentToolCallId, injectedPrompt),
         workspaceSessionDir: workspaceSessionDir(this.config, options.workspace.id),
       },
       options,

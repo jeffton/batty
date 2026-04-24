@@ -40,6 +40,7 @@ interface DetachedSubagentResult {
 interface DetachedSubagentRequest {
   workspace: WorkspaceInfo;
   parentSessionId: string;
+  parentSessionPath?: string;
   prompt: string;
   modelId: string;
   thinkingLevel: string;
@@ -115,6 +116,9 @@ export function createSubagentTool({
         const result = await runDetachedSubagentSession({
           workspace,
           parentSessionId: sessionId,
+          parentSessionPath: (
+            ctx.sessionManager as { getSessionFile?: () => string | undefined }
+          ).getSessionFile?.(),
           prompt,
           modelId,
           thinkingLevel,

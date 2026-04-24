@@ -5,7 +5,6 @@ import {
   type ToolResultMessage,
 } from "@mariozechner/pi-ai";
 import {
-  buildSessionContext,
   SessionManager,
   type AgentSession,
   type ExtensionContext,
@@ -25,14 +24,12 @@ import {
   toLocalIsoDate,
 } from "./cron-session";
 import {
-  BATTY_RUNTIME_NOTICE_CUSTOM_TYPE,
   buildRuntimeNoticeMessage,
   buildSubagentRuntimeNotice,
   type RuntimeNotice,
 } from "./runtime-notices";
 import {
   buildSubagentDetails,
-  cloneMessagesForSubagent,
   extractAssistantText,
   findLastAssistantMessage,
   hasSubagentSessionMarker,
@@ -58,18 +55,6 @@ export function appendRuntimeNoticeMessage(
   timestamp = Date.now(),
 ): void {
   appendMessages(session, [buildRuntimeNoticeMessage(notice, timestamp) as Message]);
-}
-
-function matchesPreludeNotice(
-  message: AgentSession["messages"][number],
-  notices: RuntimeNotice[],
-): boolean {
-  return notices.some(
-    (notice) =>
-      message.role === "custom" &&
-      message.customType === `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:${notice.kind}` &&
-      message.content === notice.text,
-  );
 }
 
 export async function runSubagentSerial<T>(
@@ -118,35 +103,11 @@ export function resolveSubagentDefaults(
   };
 }
 
-export function sessionMessagesForSubagent(
-  liveSession: AgentSession | undefined,
-  attachedSession: WebSession | undefined,
-  sessionId: string,
-  currentToolCallId?: string,
-  injectedPrompt?: string,
-): AgentSession["messages"] {
-  if (liveSession) {
-    return cloneMessagesForSubagent(liveSession.messages, currentToolCallId, injectedPrompt);
-  }
-
-  if (attachedSession) {
-    const context = buildSessionContext(
-      attachedSession.session.sessionManager.getEntries(),
-      attachedSession.session.sessionManager.getLeafId(),
-    );
-    return cloneMessagesForSubagent(
-      context.messages as AgentSession["messages"],
-      currentToolCallId,
-      injectedPrompt,
-    );
-  }
-
-  throw new Error(`Unknown live session for subagent: ${sessionId}`);
-}
-
 export interface DetachedSubagentOptions {
   workspace: WorkspaceInfo;
   parentSessionId: string;
+  parentSessionPath?: string;
+  contextBranchLeafId?: string | null;
   prompt: string;
   modelId: string;
   thinkingLevel: string;
@@ -184,11 +145,6 @@ export interface RunDetachedSubagentDeps {
     ephemeral?: boolean,
   ) => WebSession;
   disposeWebSession: (webSession: WebSession) => void;
-  getSessionMessagesForSubagent: (
-    sessionId: string,
-    currentToolCallId?: string,
-    injectedPrompt?: string,
-  ) => AgentSession["messages"];
   workspaceSessionDir: string;
 }
 
@@ -231,6 +187,69 @@ function buildDetachedSubagentResult(
   };
 }
 
+function isToolCallBlockForId(block: unknown, toolCallId: string): boolean {
+  return (
+    typeof block === "object" &&
+    block !== null &&
+    (block as { type?: unknown }).type === "toolCall" &&
+    (block as { id?: unknown }).id === toolCallId
+  );
+}
+
+function resolveDetachedContextLeafId(
+  sessionManager: SessionManager,
+  options: Pick<DetachedSubagentOptions, "contextBranchLeafId" | "currentToolCallId">,
+): string | undefined {
+  if (options.contextBranchLeafId !== undefined) {
+    return options.contextBranchLeafId ?? undefined;
+  }
+
+  const leafEntry = sessionManager.getLeafEntry() as
+    | {
+        id: string;
+        parentId: string | null;
+        type?: unknown;
+        message?: { role?: unknown; content?: unknown };
+      }
+    | undefined;
+  if (
+    options.currentToolCallId &&
+    leafEntry?.type === "message" &&
+    leafEntry.message?.role === "assistant" &&
+    Array.isArray(leafEntry.message.content) &&
+    leafEntry.message.content.some((block) =>
+      isToolCallBlockForId(block, options.currentToolCallId!),
+    )
+  ) {
+    return leafEntry.parentId ?? undefined;
+  }
+
+  return sessionManager.getLeafId() ?? undefined;
+}
+
+function createDetachedSubagentSessionManager(
+  deps: RunDetachedSubagentDeps,
+  options: DetachedSubagentOptions,
+): SessionManager {
+  if (!options.includeSessionContext) {
+    return SessionManager.create(options.workspace.path, deps.workspaceSessionDir);
+  }
+  if (!options.parentSessionPath) {
+    throw new Error("Cannot include session context without a persisted parent session");
+  }
+
+  const sourceManager = SessionManager.open(options.parentSessionPath);
+  const leafId = resolveDetachedContextLeafId(sourceManager, options);
+  if (!leafId) {
+    const sessionManager = SessionManager.create(options.workspace.path, deps.workspaceSessionDir);
+    sessionManager.newSession({ parentSession: options.parentSessionPath });
+    return sessionManager;
+  }
+
+  sourceManager.createBranchedSession(leafId);
+  return sourceManager;
+}
+
 function assistantHasRenderableContent(message: AssistantMessage | undefined): boolean {
   if (!message || !Array.isArray(message.content)) {
     return false;
@@ -256,7 +275,7 @@ export async function runDetachedSubagentSession(
 ): Promise<DetachedSubagentResult> {
   const result = await deps.createPiAgentSession(
     options.workspace,
-    SessionManager.create(options.workspace.path, deps.workspaceSessionDir),
+    createDetachedSubagentSessionManager(deps, options),
     {
       modelId: options.modelId,
       thinkingLevel: options.thinkingLevel,
@@ -276,35 +295,19 @@ export async function runDetachedSubagentSession(
 
   const subagentNotice = buildSubagentRuntimeNotice();
   const preludeNotices = options.preludeNotices ?? [];
-  const seedMessages = options.includeSessionContext
-    ? deps
-        .getSessionMessagesForSubagent(
-          options.parentSessionId,
-          options.currentToolCallId,
-          options.prompt,
-        )
-        .filter((message) => !matchesPreludeNotice(message, preludeNotices))
-    : [];
   const initialTimestamp = Date.now();
   const preludeMessages = preludeNotices.map((notice, index) =>
     buildRuntimeNoticeMessage(notice, initialTimestamp + index),
   );
-  const initialMessages = [...preludeMessages, ...seedMessages] as AgentSession["messages"];
-  const seedMessageCount = initialMessages.length;
-  if (initialMessages.length > 0) {
-    subagentSession.agent.state.messages = structuredClone(initialMessages);
-    for (const message of initialMessages) {
-      if (message.role === "branchSummary" || message.role === "compactionSummary") {
-        continue;
-      }
-      subagentSession.sessionManager.appendMessage(message as Message);
-    }
+  if (preludeMessages.length > 0) {
+    appendMessages(subagentSession, preludeMessages as Message[]);
   }
+  const seedMessageCount = subagentSession.messages.length;
 
   appendRuntimeNoticeMessage(
     subagentSession,
     subagentNotice,
-    initialTimestamp + initialMessages.length,
+    initialTimestamp + preludeMessages.length,
   );
   options.onUpdate?.({
     content: [],

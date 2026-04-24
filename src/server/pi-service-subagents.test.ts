@@ -1,6 +1,10 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vite-plus/test";
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import { SessionManager, type AgentSession } from "@mariozechner/pi-coding-agent";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
+import { BATTY_SYSTEM_PROMPT_CUSTOM_TYPE } from "./batty-system-prompt";
 import { appendCronSubagentCompletion, runDetachedSubagentSession } from "./pi-service-subagents";
 import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE, buildCronRuntimeNotice } from "./runtime-notices";
 
@@ -130,6 +134,138 @@ describe("appendCronSubagentCompletion", () => {
 });
 
 describe("runDetachedSubagentSession", () => {
+  it("branches inherited context from the parent session before the current tool call", async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "batty-subagent-workspace-"));
+    const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "batty-subagent-sessions-"));
+    const parentManager = SessionManager.create(workspaceDir, sessionDir);
+    parentManager.appendCustomEntry(BATTY_SYSTEM_PROMPT_CUSTOM_TYPE, {
+      appendedPrompt: "cached parent prompt",
+      workspaceId: "batty",
+      workspacePath: workspaceDir,
+      model: "parent/model",
+      thinkingLevel: "medium",
+      date: "2026-04-24",
+      isoWeek: 17,
+    });
+    parentManager.appendMessage({ role: "user", content: "Parent request", timestamp: 1 });
+    parentManager.appendMessage(createAssistantMessage("Parent answer", 2));
+    parentManager.appendMessage({
+      role: "assistant",
+      content: [
+        {
+          type: "toolCall",
+          id: "subagent-call-1",
+          name: "subagent",
+          arguments: { prompt: "Child work" },
+        },
+      ],
+      api: "openai-responses",
+      provider: "openai",
+      model: "gpt-5",
+      usage: {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 2,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "toolUse",
+      timestamp: 3,
+    } satisfies AssistantMessage);
+    const parentSessionPath = parentManager.getSessionFile();
+    if (!parentSessionPath) {
+      throw new Error("Expected persisted parent session");
+    }
+
+    let branchedContextMessages: AgentMessage[] = [];
+    let branchedPromptEntry: unknown;
+    let branchedParentSession: string | undefined;
+
+    const result = await runDetachedSubagentSession(
+      {
+        async createPiAgentSession(_workspace, sessionManager) {
+          branchedContextMessages = sessionManager.buildSessionContext().messages as AgentMessage[];
+          branchedPromptEntry = (
+            sessionManager
+              .getEntries()
+              .find(
+                (entry) =>
+                  entry.type === "custom" && entry.customType === BATTY_SYSTEM_PROMPT_CUSTOM_TYPE,
+              ) as { data?: unknown } | undefined
+          )?.data;
+          branchedParentSession = sessionManager.getHeader()?.parentSession;
+          const subagentSession = {
+            sessionId: sessionManager.getSessionId(),
+            sessionFile: sessionManager.getSessionFile() ?? "",
+            get messages() {
+              return sessionManager.buildSessionContext().messages as AgentMessage[];
+            },
+            isStreaming: false,
+            agent: { state: { messages: [] } },
+            sessionManager,
+            subscribe() {
+              return () => undefined;
+            },
+            async prompt() {
+              sessionManager.appendMessage(createAssistantMessage("Child done", 4));
+            },
+            async abort() {
+              return undefined;
+            },
+          } as unknown as AgentSession;
+          return { session: subagentSession };
+        },
+        attachSession(workspace, session) {
+          return {
+            id: "web-subagent-branch",
+            workspace,
+            session,
+            subscribers: new Set(),
+            activeTools: new Map(),
+            openedAt: 0,
+            ephemeral: true,
+          };
+        },
+        disposeWebSession: vi.fn(),
+        workspaceSessionDir: sessionDir,
+      },
+      {
+        workspace: {
+          id: "batty",
+          label: "Batty",
+          path: workspaceDir,
+          kind: "workspace",
+          isPinned: true,
+          isAssistant: false,
+        },
+        parentSessionId: parentManager.getSessionId(),
+        parentSessionPath,
+        prompt: "Child work",
+        modelId: "child/model",
+        thinkingLevel: "high",
+        includeSessionContext: true,
+        respondIn: "session",
+        currentToolCallId: "subagent-call-1",
+      },
+    );
+
+    expect(branchedContextMessages.map((message) => message.role)).toEqual(["user", "assistant"]);
+    expect(branchedContextMessages).not.toContainEqual(
+      expect.objectContaining({
+        role: "assistant",
+        content: expect.arrayContaining([expect.objectContaining({ type: "toolCall" })]),
+      }),
+    );
+    expect(branchedPromptEntry).toMatchObject({
+      appendedPrompt: "cached parent prompt",
+      model: "parent/model",
+      thinkingLevel: "medium",
+    });
+    expect(branchedParentSession).toBe(parentSessionPath);
+    expect(result.text).toBe("Child done");
+  });
+
   it("publishes subagent session details before assistant text starts streaming", async () => {
     const appendedCustomEntries: Array<{ customType: string; data: unknown }> = [];
     const appendedMessages: AgentMessage[] = [];
@@ -185,9 +321,6 @@ describe("runDetachedSubagentSession", () => {
           };
         },
         disposeWebSession,
-        getSessionMessagesForSubagent() {
-          return [];
-        },
         workspaceSessionDir: "/tmp",
       },
       {
@@ -203,7 +336,7 @@ describe("runDetachedSubagentSession", () => {
         prompt: "Inspect the issue",
         modelId: "openai/gpt-5",
         thinkingLevel: "medium",
-        includeSessionContext: true,
+        includeSessionContext: false,
         respondIn: "session",
         onUpdate: (partial) => {
           updates.push(partial);
@@ -219,7 +352,7 @@ describe("runDetachedSubagentSession", () => {
         prompt: "Inspect the issue",
         model: "openai/gpt-5",
         effort: "medium",
-        includeSessionContext: true,
+        includeSessionContext: false,
         respondIn: "session",
         workspaceId: "batty",
         sessionId: "subagent-session-1",
@@ -322,9 +455,6 @@ describe("runDetachedSubagentSession", () => {
           };
         },
         disposeWebSession: vi.fn(),
-        getSessionMessagesForSubagent() {
-          return [];
-        },
         workspaceSessionDir: "/tmp",
       },
       {
@@ -340,7 +470,7 @@ describe("runDetachedSubagentSession", () => {
         prompt: "Inspect the issue",
         modelId: "openai/gpt-5",
         thinkingLevel: "medium",
-        includeSessionContext: true,
+        includeSessionContext: false,
         respondIn: "session",
       },
     );
@@ -422,9 +552,6 @@ describe("runDetachedSubagentSession", () => {
           };
         },
         disposeWebSession: vi.fn(),
-        getSessionMessagesForSubagent() {
-          return [];
-        },
         workspaceSessionDir: "/tmp",
       },
       {
@@ -440,7 +567,7 @@ describe("runDetachedSubagentSession", () => {
         prompt: "Inspect the issue",
         modelId: "openai/gpt-5",
         thinkingLevel: "medium",
-        includeSessionContext: true,
+        includeSessionContext: false,
         respondIn: "session",
       },
     );
@@ -450,8 +577,7 @@ describe("runDetachedSubagentSession", () => {
     expect(result.text).toBe("Codex error: request failed");
   });
 
-  it("does not leak inherited attachments into the initial subagent update", async () => {
-    const sessionMessages: AgentMessage[] = [];
+  it("does not leak preexisting child-session attachments into the initial subagent update", async () => {
     const updates: Array<{ content: Array<{ type: "text"; text: string }>; details: any }> = [];
     const copiedMessages: AgentMessage[] = [
       {
@@ -476,6 +602,7 @@ describe("runDetachedSubagentSession", () => {
         timestamp: 1,
       } as AgentMessage,
     ];
+    const sessionMessages: AgentMessage[] = [...copiedMessages];
 
     const subagentSession = {
       sessionId: "subagent-session-inherited-files",
@@ -523,9 +650,6 @@ describe("runDetachedSubagentSession", () => {
           };
         },
         disposeWebSession: vi.fn(),
-        getSessionMessagesForSubagent() {
-          return copiedMessages;
-        },
         workspaceSessionDir: "/tmp",
       },
       {
@@ -541,7 +665,7 @@ describe("runDetachedSubagentSession", () => {
         prompt: "Inspect the issue",
         modelId: "openai/gpt-5",
         thinkingLevel: "medium",
-        includeSessionContext: true,
+        includeSessionContext: false,
         respondIn: "session",
         onUpdate: (partial) => {
           updates.push(partial);
@@ -553,9 +677,8 @@ describe("runDetachedSubagentSession", () => {
     expect(updates[0]?.details).not.toHaveProperty("sentFiles");
   });
 
-  it("prepends cron notices in subagent sessions and avoids duplicate copied notices", async () => {
+  it("appends cron notices after existing subagent session context", async () => {
     const appendedMessages: AgentMessage[] = [];
-    const sessionMessages: AgentMessage[] = [];
     const cronNotice = buildCronRuntimeNotice("every 1h");
     const copiedMessages: AgentMessage[] = [
       {
@@ -570,6 +693,7 @@ describe("runDetachedSubagentSession", () => {
         timestamp: 11,
       } as AgentMessage,
     ];
+    const sessionMessages: AgentMessage[] = [...copiedMessages];
 
     const subagentSession = {
       sessionId: "subagent-session-2",
@@ -617,9 +741,6 @@ describe("runDetachedSubagentSession", () => {
           };
         },
         disposeWebSession: vi.fn(),
-        getSessionMessagesForSubagent() {
-          return copiedMessages;
-        },
         workspaceSessionDir: "/tmp",
       },
       {
@@ -635,23 +756,19 @@ describe("runDetachedSubagentSession", () => {
         prompt: "Inspect cron work",
         modelId: "openai/gpt-5",
         thinkingLevel: "medium",
-        includeSessionContext: true,
+        includeSessionContext: false,
         respondIn: "session",
         preludeNotices: [cronNotice],
       },
     );
 
-    expect(appendedMessages).toHaveLength(3);
+    expect(appendedMessages).toHaveLength(2);
     expect(appendedMessages[0]).toMatchObject({
       role: "custom",
       customType: `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:cron`,
       content: cronNotice.text,
     });
     expect(appendedMessages[1]).toMatchObject({
-      role: "user",
-      content: "Earlier context",
-    });
-    expect(appendedMessages[2]).toMatchObject({
       role: "custom",
       customType: `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:subagent`,
     });

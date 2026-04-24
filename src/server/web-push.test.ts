@@ -24,7 +24,7 @@ function createConfig(webPushDir: string): AppConfig {
   return {
     host: "127.0.0.1",
     port: 3147,
-    workspacesRoot: "/tmp/workspaces",
+    workspacesRoots: ["/tmp/workspaces"],
     selfPath: "/tmp/batty",
     battyDir: "/tmp",
     uploadsDir: "/tmp/uploads",

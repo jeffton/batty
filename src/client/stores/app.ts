@@ -126,6 +126,7 @@ export const useAppStore = defineStore("app", {
     providerAuth: defaultProviderAuthStatus as ProviderAuthStatus,
     settings: defaultAppSettingsStatus as AppSettingsStatus,
     connectionState: "online" as "online" | "offline" | "connecting",
+    workspaceRoots: [] as string[],
     workspaces: [] as WorkspaceInfo[],
     models: [] as ModelOption[],
     sessionsByWorkspace: {} as Record<string, SessionSummary[]>,
@@ -201,6 +202,7 @@ export const useAppStore = defineStore("app", {
       this.buildId = payload.buildId;
       this.providerAuth = payload.providerAuth ?? defaultProviderAuthStatus;
       this.settings = payload.settings ?? defaultAppSettingsStatus;
+      this.workspaceRoots = payload.workspaceRoots ?? [];
       this.workspaces = sortWorkspacesByRecentSession(workspaces);
       this.models = payload.models;
       this.selectedWorkspaceId =
@@ -381,8 +383,8 @@ export const useAppStore = defineStore("app", {
       this.sortWorkspaces();
     },
 
-    async createWorkspace(name: string): Promise<SessionState> {
-      const workspace = await createWorkspaceRequest(name);
+    async createWorkspace(name: string, rootPath?: string): Promise<SessionState> {
+      const workspace = await createWorkspaceRequest(name, rootPath);
       this.workspaces = uniqueWorkspaces(await listWorkspacesRequest());
       this.sessionsByWorkspace = {
         ...this.sessionsByWorkspace,

@@ -21,6 +21,7 @@ const router = useRouter();
 const searchOpen = ref(false);
 const searchQuery = ref("");
 const createWorkspaceName = ref("");
+const createWorkspaceRootPath = ref("");
 const createWorkspaceError = ref("");
 const creatingWorkspace = ref(false);
 const switchingWorkspaceId = ref<string>();
@@ -37,6 +38,10 @@ const assistantWorkspace = computed(() =>
 );
 
 const normalizedSearchQuery = computed(() => searchQuery.value.toLowerCase().trim());
+
+const createWorkspaceRootOptions = computed(() => store.workspaceRoots);
+
+const showCreateWorkspaceRootSelect = computed(() => createWorkspaceRootOptions.value.length > 1);
 
 const filteredWorkspaces = computed(() => {
   const query = normalizedSearchQuery.value;
@@ -108,8 +113,13 @@ async function toggleWorkspacePin(workspaceId: string): Promise<void> {
   }
 }
 
+function selectedWorkspaceRootPath(): string {
+  return store.selectedWorkspace?.rootPath ?? createWorkspaceRootOptions.value[0] ?? "";
+}
+
 function resetCreateWorkspaceForm(): void {
   createWorkspaceName.value = "";
+  createWorkspaceRootPath.value = selectedWorkspaceRootPath();
   createWorkspaceError.value = "";
 }
 
@@ -124,6 +134,7 @@ async function handleCreateWorkspacePopoverToggle(event: Event): Promise<void> {
     return;
   }
 
+  createWorkspaceRootPath.value = selectedWorkspaceRootPath();
   createWorkspaceError.value = "";
   await nextTick();
   createWorkspaceInput.value?.focus();
@@ -145,7 +156,7 @@ async function submitCreateWorkspace(): Promise<void> {
   creatingWorkspace.value = true;
   createWorkspaceError.value = "";
   try {
-    const session = await store.createWorkspace(name);
+    const session = await store.createWorkspace(name, createWorkspaceRootPath.value);
     closeCreateWorkspacePopover();
     setPaneTransition("slide-from-right");
     await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
@@ -329,6 +340,20 @@ watch(
             @submit.prevent="submitCreateWorkspace"
             @toggle="handleCreateWorkspacePopoverToggle"
           >
+            <select
+              v-if="showCreateWorkspaceRootSelect"
+              v-model="createWorkspaceRootPath"
+              class="workspace-browser-pane__popover-input"
+              :disabled="creatingWorkspace || actionsDisabled"
+            >
+              <option
+                v-for="rootPath in createWorkspaceRootOptions"
+                :key="rootPath"
+                :value="rootPath"
+              >
+                {{ rootPath }}
+              </option>
+            </select>
             <input
               ref="createWorkspaceInput"
               v-model="createWorkspaceName"

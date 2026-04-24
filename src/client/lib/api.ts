@@ -152,11 +152,11 @@ export function listWorkspaces(): Promise<WorkspaceInfo[]> {
   return request("/api/workspaces");
 }
 
-export function createWorkspace(name: string): Promise<WorkspaceInfo> {
+export function createWorkspace(name: string, rootPath?: string): Promise<WorkspaceInfo> {
   return request("/api/workspaces", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, rootPath }),
   });
 }
 

@@ -30,7 +30,7 @@ async function createBattyDir(): Promise<string> {
     `${JSON.stringify(
       {
         authSecret: "test-secret",
-        workspacesRoot: "/tmp/workspaces",
+        workspacesRoots: ["/tmp/workspaces"],
         webPushSubject: "https://batty.test",
         cronDailySessionStartTime: "04:00",
         braveSearchKey: "configured-brave-key",

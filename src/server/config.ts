@@ -5,7 +5,7 @@ import { ensureOptionsFile, stateDirPath } from "./options";
 export interface AppConfig {
   host: string;
   port: number;
-  workspacesRoot: string;
+  workspacesRoots: string[];
   selfPath: string;
   battyDir: string;
   uploadsDir: string;
@@ -59,7 +59,7 @@ export async function loadConfig(battyDir: string): Promise<AppConfig> {
   return {
     host: process.env.BATTY_HOST ?? "127.0.0.1",
     port: Number(process.env.BATTY_PORT ?? "3147"),
-    workspacesRoot: options.workspacesRoot,
+    workspacesRoots: options.workspacesRoots,
     selfPath,
     battyDir,
     uploadsDir: path.join(stateDir, "uploads"),

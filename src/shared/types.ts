@@ -81,6 +81,7 @@ export interface WorkspaceInfo {
   id: string;
   label: string;
   path: string;
+  rootPath?: string;
   kind: "workspace";
   isPinned: boolean;
   isAssistant: boolean;
@@ -269,6 +270,7 @@ export interface BootstrapPayload {
   providerAuth: ProviderAuthStatus;
   settings: AppSettingsStatus;
   buildId: string;
+  workspaceRoots?: string[];
   workspaces: WorkspaceInfo[];
   models: ModelOption[];
   activeSession?: SessionState;

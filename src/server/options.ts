@@ -4,7 +4,7 @@ import path from "node:path";
 
 export interface StoredAppOptions {
   authSecret?: string;
-  workspacesRoot?: string;
+  workspacesRoots?: string[];
   webPushSubject?: string;
   cronDailySessionStartTime?: string;
   braveSearchKey?: string;
@@ -15,7 +15,7 @@ export interface StoredAppOptions {
 
 export interface AppOptions {
   authSecret: string;
-  workspacesRoot: string;
+  workspacesRoots: string[];
   webPushSubject: string;
   cronDailySessionStartTime: string;
   braveSearchKey?: string;
@@ -26,7 +26,7 @@ export interface AppOptions {
 
 const DEFAULT_CRON_DAILY_SESSION_START_TIME = "04:00";
 
-const REQUIRED_OPTION_KEYS = ["workspacesRoot", "webPushSubject"] as const;
+const REQUIRED_OPTION_KEYS = ["webPushSubject"] as const;
 
 export function stateDirPath(battyDir: string): string {
   return path.join(battyDir, ".batty");
@@ -96,14 +96,28 @@ export function normalizeBaseUrl(value: unknown): string {
   return normalized === "/" ? "/" : normalized;
 }
 
+function normalizeWorkspacesRoots(options: StoredAppOptions | undefined): string[] {
+  const roots = Array.isArray(options?.workspacesRoots) ? options.workspacesRoots : [];
+
+  return [
+    ...new Set(
+      roots
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0),
+    ),
+  ];
+}
+
 function normalizeStoredOptions(options: StoredAppOptions | undefined): StoredAppOptions {
+  const workspacesRoots = normalizeWorkspacesRoots(options);
+
   return {
     authSecret:
       typeof options?.authSecret === "string" && options.authSecret.trim().length > 0
         ? options.authSecret.trim()
         : createAuthSecret(),
-    workspacesRoot:
-      typeof options?.workspacesRoot === "string" ? options.workspacesRoot.trim() : "",
+    workspacesRoots,
     webPushSubject:
       typeof options?.webPushSubject === "string" ? options.webPushSubject.trim() : "",
     cronDailySessionStartTime: normalizeDailySessionStartTime(options?.cronDailySessionStartTime),
@@ -126,10 +140,16 @@ function normalizeStoredOptions(options: StoredAppOptions | undefined): StoredAp
 }
 
 function missingRequiredOptions(options: StoredAppOptions): string[] {
-  return REQUIRED_OPTION_KEYS.filter((key) => {
+  const missing: string[] = REQUIRED_OPTION_KEYS.filter((key) => {
     const value = options[key];
     return typeof value !== "string" || value.length === 0;
   });
+
+  if (!Array.isArray(options.workspacesRoots) || options.workspacesRoots.length === 0) {
+    missing.unshift("workspacesRoots");
+  }
+
+  return missing;
 }
 
 export async function readStoredOptions(

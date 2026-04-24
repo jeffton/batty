@@ -19,7 +19,7 @@ async function createConfig(): Promise<AppConfig> {
   return {
     host: "127.0.0.1",
     port: 3147,
-    workspacesRoot: root,
+    workspacesRoots: [root],
     selfPath: path.join(root, "self-project"),
     battyDir: root,
     uploadsDir: path.join(root, "uploads"),
@@ -37,7 +37,7 @@ async function createConfig(): Promise<AppConfig> {
 describe("cron store", () => {
   it("defaults jobs to new sessions", async () => {
     const config = await createConfig();
-    await fs.mkdir(path.join(config.workspacesRoot, "alpha"));
+    await fs.mkdir(path.join(config.workspacesRoots[0]!, "alpha"));
     const store = new CronStore(config);
 
     const job = await store.createJob({
@@ -54,7 +54,7 @@ describe("cron store", () => {
 
   it("persists daily-inline and daily-subagent cron sessions", async () => {
     const config = await createConfig();
-    await fs.mkdir(path.join(config.workspacesRoot, "alpha"));
+    await fs.mkdir(path.join(config.workspacesRoots[0]!, "alpha"));
     const store = new CronStore(config);
 
     const inline = await store.createJob({
@@ -89,7 +89,7 @@ describe("cron store", () => {
 
   it("migrates legacy daily cron sessions to daily-subagent on read", async () => {
     const config = await createConfig();
-    await fs.mkdir(path.join(config.workspacesRoot, "alpha"));
+    await fs.mkdir(path.join(config.workspacesRoots[0]!, "alpha"));
     const store = new CronStore(config);
 
     await fs.mkdir(path.dirname(store.filePath), { recursive: true });

@@ -17,7 +17,12 @@ import { setAssistantWorkspace, setBraveSearchKey, setWorkspacePinned } from "./
 import { battyAgentDir } from "./pi-paths";
 import { PiService, type UploadedFile } from "./pi-service";
 import { WebPushService } from "./web-push";
-import { createWorkspace, listWorkspaces, resolveWorkspace } from "./workspaces";
+import {
+  createWorkspace,
+  listWorkspaceRoots,
+  listWorkspaces,
+  resolveWorkspace,
+} from "./workspaces";
 import { resolveSentFile } from "./send-files";
 
 const config = await loadConfig(resolveBattyDir());
@@ -436,6 +441,7 @@ app.get(routePath("/api/bootstrap"), async (request) => {
       : unauthenticatedProviderAuthStatus(),
     settings: appSettingsStatus(),
     buildId,
+    workspaceRoots: authenticated ? listWorkspaceRoots(config) : [],
     workspaces,
     models: authenticated ? await service.listModels() : [],
   };
@@ -558,9 +564,12 @@ app.get(routePath("/api/workspaces"), async () => {
   return listWorkspaces(config);
 });
 
-app.post<{ Body: { name?: string } }>(routePath("/api/workspaces"), async (request) => {
-  return createWorkspace(config, request.body?.name ?? "");
-});
+app.post<{ Body: { name?: string; rootPath?: string } }>(
+  routePath("/api/workspaces"),
+  async (request) => {
+    return createWorkspace(config, request.body?.name ?? "", request.body?.rootPath);
+  },
+);
 
 app.post<{ Params: { workspaceId: string }; Body: { pinned?: boolean } }>(
   routePath("/api/workspaces/:workspaceId/pin"),

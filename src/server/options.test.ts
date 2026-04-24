@@ -27,12 +27,12 @@ describe("ensureOptionsFile", () => {
     const battyDir = await createBattyDir();
 
     await expect(ensureOptionsFile(battyDir)).rejects.toThrow(
-      `Missing required options in ${optionsFilePath(battyDir)}: workspacesRoot, webPushSubject.`,
+      `Missing required options in ${optionsFilePath(battyDir)}: workspacesRoots, webPushSubject.`,
     );
 
     const persisted = JSON.parse(await fs.readFile(optionsFilePath(battyDir), "utf8")) as {
       authSecret: string;
-      workspacesRoot: string;
+      workspacesRoots: string[];
       webPushSubject: string;
       cronDailySessionStartTime: string;
       braveSearchKey?: string;
@@ -42,7 +42,7 @@ describe("ensureOptionsFile", () => {
     };
 
     expect(persisted.authSecret.length).toBeGreaterThan(0);
-    expect(persisted.workspacesRoot).toBe("");
+    expect(persisted.workspacesRoots).toEqual([]);
     expect(persisted.webPushSubject).toBe("");
     expect(persisted.cronDailySessionStartTime).toBe("04:00");
     expect(persisted.braveSearchKey).toBeUndefined();
@@ -62,7 +62,7 @@ describe("ensureOptionsFile", () => {
           username: "david",
           password: "configured-password",
           authSecret: "existing-secret",
-          workspacesRoot: "/root/github",
+          workspacesRoots: ["/root/github"],
           webPushSubject: "https://batty.roybot.se",
           cronDailySessionStartTime: "4:00",
           braveSearchKey: "  brave-key  ",
@@ -83,7 +83,7 @@ describe("ensureOptionsFile", () => {
     >;
 
     expect(options.authSecret).toBe("existing-secret");
-    expect(options.workspacesRoot).toBe("/root/github");
+    expect(options.workspacesRoots).toEqual(["/root/github"]);
     expect(options.webPushSubject).toBe("https://batty.roybot.se");
     expect(options.cronDailySessionStartTime).toBe("04:00");
     expect(options.braveSearchKey).toBe("brave-key");
@@ -103,7 +103,7 @@ describe("ensureOptionsFile", () => {
       `${JSON.stringify(
         {
           authSecret: "existing-secret",
-          workspacesRoot: "/root/github",
+          workspacesRoots: ["/root/github"],
           webPushSubject: "https://batty.roybot.se",
           cronDailySessionStartTime: "04:00",
         },
@@ -129,7 +129,7 @@ describe("ensureOptionsFile", () => {
       `${JSON.stringify(
         {
           authSecret: "existing-secret",
-          workspacesRoot: "/root/github",
+          workspacesRoots: ["/root/github"],
           webPushSubject: "https://batty.roybot.se",
           cronDailySessionStartTime: "04:00",
         },
@@ -155,7 +155,7 @@ describe("ensureOptionsFile", () => {
       `${JSON.stringify(
         {
           authSecret: "existing-secret",
-          workspacesRoot: "/root/github",
+          workspacesRoots: ["/root/github"],
           webPushSubject: "https://batty.roybot.se",
           cronDailySessionStartTime: "04:00",
           baseUrl: "/batty?bad=1",
@@ -180,7 +180,7 @@ describe("ensureOptionsFile", () => {
       `${JSON.stringify(
         {
           authSecret: "existing-secret",
-          workspacesRoot: "/root/github",
+          workspacesRoots: ["/root/github"],
           webPushSubject: "https://batty.roybot.se",
           cronDailySessionStartTime: "25:00",
         },

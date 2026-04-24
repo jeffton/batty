@@ -20,7 +20,7 @@ async function createConfig(): Promise<AppConfig> {
   return {
     host: "127.0.0.1",
     port: 3147,
-    workspacesRoot: root,
+    workspacesRoots: [root],
     selfPath: path.join(root, "self-project"),
     battyDir: root,
     uploadsDir: path.join(root, "uploads"),
@@ -38,9 +38,9 @@ async function createConfig(): Promise<AppConfig> {
 describe("workspaces", () => {
   it("includes discovered visible child folders", async () => {
     const config = await createConfig();
-    await fs.mkdir(path.join(config.workspacesRoot, "alpha"));
-    await fs.mkdir(path.join(config.workspacesRoot, "beta"));
-    await fs.mkdir(path.join(config.workspacesRoot, ".batty"));
+    await fs.mkdir(path.join(config.workspacesRoots[0]!, "alpha"));
+    await fs.mkdir(path.join(config.workspacesRoots[0]!, "beta"));
+    await fs.mkdir(path.join(config.workspacesRoots[0]!, ".batty"));
 
     const workspaces = await listWorkspaces(config);
 
@@ -50,16 +50,16 @@ describe("workspaces", () => {
   it("orders pinned workspaces first and then alphabetically", async () => {
     const config = await createConfig();
 
-    await fs.mkdir(path.join(config.workspacesRoot, "alpha"));
-    await fs.mkdir(path.join(config.workspacesRoot, "beta"));
-    await fs.mkdir(path.join(config.workspacesRoot, "gamma"));
+    await fs.mkdir(path.join(config.workspacesRoots[0]!, "alpha"));
+    await fs.mkdir(path.join(config.workspacesRoots[0]!, "beta"));
+    await fs.mkdir(path.join(config.workspacesRoots[0]!, "gamma"));
     await fs.mkdir(path.dirname(optionsFilePath(config.battyDir)), { recursive: true });
     await fs.writeFile(
       optionsFilePath(config.battyDir),
       `${JSON.stringify(
         {
           authSecret: config.authSecret,
-          workspacesRoot: config.workspacesRoot,
+          workspacesRoots: [config.workspacesRoots[0]!],
           webPushSubject: config.webPushSubject,
           cronDailySessionStartTime: config.cronDailySessionStartTime,
           pinnedWorkspaceIds: ["gamma", "beta"],
@@ -79,7 +79,7 @@ describe("workspaces", () => {
 
   it("uses folder names as workspace ids", async () => {
     const config = await createConfig();
-    await fs.mkdir(path.join(config.workspacesRoot, "my workspace"));
+    await fs.mkdir(path.join(config.workspacesRoots[0]!, "my workspace"));
 
     const workspaces = await listWorkspaces(config);
 
@@ -92,16 +92,42 @@ describe("workspaces", () => {
     const config = await createConfig();
 
     const workspace = await createWorkspace(config, "alpha");
-    const stats = await fs.stat(path.join(config.workspacesRoot, "alpha"));
+    const stats = await fs.stat(path.join(config.workspacesRoots[0]!, "alpha"));
 
     expect(workspace).toEqual({
       id: "alpha",
       label: "alpha",
-      path: path.join(config.workspacesRoot, "alpha"),
+      path: path.join(config.workspacesRoots[0]!, "alpha"),
       kind: "workspace",
       isPinned: false,
       isAssistant: false,
     });
+    expect(stats.isDirectory()).toBe(true);
+  });
+
+  it("lists and creates workspaces across multiple configured roots sorted by workspace name", async () => {
+    const config = await createConfig();
+    const secondRoot = await fs.mkdtemp(path.join(os.tmpdir(), "batty-workspaces-extra-"));
+    tempDirs.push(secondRoot);
+    config.workspacesRoots = [config.workspacesRoots[0]!, secondRoot];
+
+    await fs.mkdir(path.join(config.workspacesRoots[0]!, "zeta"));
+    await fs.mkdir(path.join(secondRoot, "alpha"));
+    await fs.mkdir(path.join(config.workspacesRoots[0]!, "beta"));
+
+    const created = await createWorkspace(config, "aardvark", secondRoot);
+    const workspaces = await listWorkspaces(config);
+
+    expect(workspaces.map((workspace) => workspace.label)).toEqual([
+      "aardvark",
+      "alpha",
+      "beta",
+      "zeta",
+    ]);
+    expect(workspaces.every((workspace) => workspace.rootPath)).toBe(true);
+    expect(workspaces.find((workspace) => workspace.label === "alpha")?.rootPath).toBe(secondRoot);
+    const stats = await fs.stat(path.join(secondRoot, "aardvark"));
+    expect(created.rootPath).toBe(secondRoot);
     expect(stats.isDirectory()).toBe(true);
   });
 

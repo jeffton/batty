@@ -23,7 +23,7 @@ async function createConfig(): Promise<AppConfig> {
   return {
     host: "127.0.0.1",
     port: 3147,
-    workspacesRoot: root,
+    workspacesRoots: [root],
     selfPath: path.join(root, "self-project"),
     battyDir: root,
     uploadsDir: path.join(root, "uploads"),
@@ -42,7 +42,7 @@ function workspaceInfo(config: AppConfig, workspaceId: string): WorkspaceInfo {
   return {
     id: workspaceId,
     label: workspaceId,
-    path: path.join(config.workspacesRoot, workspaceId),
+    path: path.join(config.workspacesRoots[0]!, workspaceId),
     kind: "workspace",
     isPinned: false,
     isAssistant: false,

@@ -131,6 +131,7 @@ export class PiService {
   }
 
   async listModels(): Promise<ModelOption[]> {
+    this.modelRegistry.refresh();
     const models = await this.modelRegistry.getAvailable();
     return models.map(toModelOption).sort((a, b) => a.label.localeCompare(b.label));
   }

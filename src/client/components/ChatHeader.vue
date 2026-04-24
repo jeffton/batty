@@ -29,6 +29,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   back: [];
+  refreshModels: [];
   setModel: [modelId: string];
   setThinkingLevel: [thinkingLevel: string];
 }>();
@@ -66,6 +67,7 @@ function closePopover(id: string): void {
       :style="{ 'anchor-name': props.modelPopoverAnchor }"
       :disabled="!props.activeSession"
       :popovertarget="props.modelPopoverId"
+      @click="emit('refreshModels')"
     >
       <div class="header__model-info">
         <span class="header__model-name">{{ props.modelButtonLabel }}</span>

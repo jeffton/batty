@@ -160,8 +160,9 @@ watch(
 .workspace-browser-header__actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.6rem;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -169,8 +170,10 @@ watch(
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  min-width: min(18rem, calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 8rem));
-  max-width: min(22rem, calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 8rem));
+  flex: 1 1 auto;
+  width: 0;
+  min-width: 0;
+  max-width: 100%;
   padding: 0.2rem 0.25rem 0.2rem 0.55rem;
   border-radius: 0.7rem;
   background: var(--color-bg-elevated);

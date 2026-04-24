@@ -8,6 +8,7 @@ import {
   deleteCronJob as deleteCronJobRequest,
   getBattyAgentsFile,
   getBootstrap,
+  getModels,
   getProviderAuthStatus,
   getSession,
   getSessionMessages,
@@ -676,6 +677,10 @@ export const useAppStore = defineStore("app", {
       this.activeSession = session;
       this.updateSessionSummary(session);
       await writeCachedSession(session);
+    },
+
+    async refreshModels(): Promise<void> {
+      this.models = await getModels();
     },
 
     async refreshProviderAuthStatus(): Promise<void> {

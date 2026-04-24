@@ -10,6 +10,7 @@ import type {
   BootstrapPayload,
   CreateCronJobInput,
   CronJob,
+  ModelOption,
   ProviderAuthStartResponse,
   ProviderAuthStatus,
   SessionMessagesPage,
@@ -41,6 +42,10 @@ export function getBootstrap(): Promise<BootstrapPayload> {
 
 export function getVersion(): Promise<{ buildId: string }> {
   return request("/api/version");
+}
+
+export function getModels(): Promise<ModelOption[]> {
+  return request("/api/models");
 }
 
 export function getProviderAuthStatus(): Promise<ProviderAuthStatus> {

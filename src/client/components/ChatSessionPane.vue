@@ -109,6 +109,10 @@ function thinkingLabel(value: string): string {
   return value === "xhigh" ? "XHigh" : value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+function refreshModels(): void {
+  void store.refreshModels();
+}
+
 function setModel(modelId: string): void {
   if (!modelId) {
     return;
@@ -255,6 +259,7 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
       :connection-state="store.connectionState"
       :connection-description="connectionDescription"
       @back="emit('back')"
+      @refresh-models="refreshModels"
       @set-model="setModel"
       @set-thinking-level="setThinkingLevel"
     />

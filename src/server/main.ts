@@ -443,6 +443,10 @@ app.get(routePath("/api/bootstrap"), async (request) => {
 
 app.get(routePath("/api/version"), async () => ({ buildId }));
 
+app.get(routePath("/api/models"), async (request) => {
+  return request.auth ? await service.listModels() : [];
+});
+
 app.get(routePath("/api/provider-auth/status"), async () => {
   return service.getProviderAuthStatus();
 });

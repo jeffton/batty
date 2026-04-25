@@ -417,9 +417,10 @@ defineExpose({ clear, restore });
 }
 
 .composer__notice {
-  margin: 0 calc(var(--safe-area-right) + 0.8rem) 0 calc(var(--safe-area-left) + 0.8rem);
-  padding: 0.55rem 0.75rem;
-  border-radius: 0.45rem;
+  margin: 0;
+  padding: 0.55rem calc(var(--safe-area-right) + 0.8rem) 0.55rem
+    calc(var(--safe-area-left) + 0.8rem);
+  border-radius: 0;
   background: var(--color-warning-soft);
   color: var(--color-warning);
   font-size: 0.82rem;

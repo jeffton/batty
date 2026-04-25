@@ -479,6 +479,7 @@ watch(
 
 <style scoped>
 .workspace-browser-pane {
+  --workspace-browser-pane-selected-item-radius: 0.55rem;
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -615,7 +616,7 @@ watch(
   display: flex;
   align-items: stretch;
   gap: 0.2rem;
-  border-radius: 0.55rem;
+  border-radius: var(--workspace-browser-pane-selected-item-radius);
   background: transparent;
   color: inherit;
   transition:
@@ -768,7 +769,7 @@ watch(
   width: 3.7rem;
   height: 3.7rem;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--workspace-browser-pane-selected-item-radius);
   background: var(--color-bg-selection);
   color: var(--color-accent-strong);
   box-shadow:

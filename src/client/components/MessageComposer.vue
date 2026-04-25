@@ -29,6 +29,9 @@ const inputFocused = ref(false);
 const actionsDisabled = computed(() => Boolean(props.disabled || props.actionsDisabled));
 const hasPayload = computed(() => text.value.trim().length > 0 || files.value.length > 0);
 
+let textareaResizeObserver: ResizeObserver | undefined;
+let textareaHeightAnimationFrame: number | undefined;
+
 let draftSaveTimeout: number | undefined;
 let queuedDraftSessionKey: string | undefined;
 let queuedDraftText = "";
@@ -105,6 +108,11 @@ function removeFile(index: number): void {
   files.value.splice(index, 1);
 }
 
+function textareaMinHeight(element: HTMLTextAreaElement): number {
+  const minHeight = Number.parseFloat(window.getComputedStyle(element).minHeight);
+  return Number.isFinite(minHeight) ? minHeight : 0;
+}
+
 function syncTextareaHeight(): void {
   const element = textarea.value;
   if (!element) {
@@ -112,9 +120,21 @@ function syncTextareaHeight(): void {
   }
 
   element.style.height = "auto";
-  const nextHeight = Math.min(element.scrollHeight, maxInputHeight.value);
+  const naturalHeight = Math.max(element.scrollHeight, textareaMinHeight(element));
+  const nextHeight = Math.min(naturalHeight, maxInputHeight.value);
   element.style.height = `${nextHeight}px`;
-  element.style.overflowY = element.scrollHeight > maxInputHeight.value ? "auto" : "hidden";
+  element.style.overflowY = naturalHeight > maxInputHeight.value ? "auto" : "hidden";
+}
+
+function scheduleTextareaHeightSync(): void {
+  if (textareaHeightAnimationFrame != null) {
+    window.cancelAnimationFrame(textareaHeightAnimationFrame);
+  }
+
+  textareaHeightAnimationFrame = window.requestAnimationFrame(() => {
+    textareaHeightAnimationFrame = undefined;
+    syncTextareaHeight();
+  });
 }
 
 let lastEarlyAction:
@@ -141,7 +161,7 @@ function loadDraft(sessionKey?: string): void {
   resetFileInput();
   void nextTick(() => {
     hydratingDraft = false;
-    syncTextareaHeight();
+    scheduleTextareaHeightSync();
   });
 }
 
@@ -155,7 +175,7 @@ function clear(): void {
   text.value = "";
   files.value = [];
   resetFileInput();
-  void nextTick(syncTextareaHeight);
+  void nextTick(scheduleTextareaHeightSync);
 }
 
 function restore(textValue: string, nextFiles: File[]): void {
@@ -169,7 +189,7 @@ function restore(textValue: string, nextFiles: File[]): void {
     writeSessionDraft(props.sessionKey, textValue);
     lastDraftSavedAt = Date.now();
   }
-  void nextTick(syncTextareaHeight);
+  void nextTick(scheduleTextareaHeightSync);
 }
 
 function submit(): void {
@@ -277,16 +297,25 @@ watch(text, () => {
   if (!hydratingDraft) {
     scheduleDraftSave();
   }
-  void nextTick(syncTextareaHeight);
+  void nextTick(scheduleTextareaHeightSync);
 });
 
 onMounted(() => {
   updateMaxInputHeight();
+  scheduleTextareaHeightSync();
+  if (typeof ResizeObserver !== "undefined" && textarea.value) {
+    textareaResizeObserver = new ResizeObserver(scheduleTextareaHeightSync);
+    textareaResizeObserver.observe(textarea.value);
+  }
   window.addEventListener("resize", updateMaxInputHeight);
 });
 
 onBeforeUnmount(() => {
   flushDraftSave();
+  textareaResizeObserver?.disconnect();
+  if (textareaHeightAnimationFrame != null) {
+    window.cancelAnimationFrame(textareaHeightAnimationFrame);
+  }
   window.removeEventListener("resize", updateMaxInputHeight);
 });
 
@@ -460,7 +489,7 @@ defineExpose({ clear, restore });
   display: block;
   width: auto;
   resize: none;
-  min-height: 0;
+  min-height: calc(1lh + 1.35rem + 1px);
   margin: 0 calc(var(--safe-area-right) + 0.8rem) 0 calc(var(--safe-area-left) + 0.8rem);
   border: 0;
   border-bottom: 1px solid var(--color-border-soft);

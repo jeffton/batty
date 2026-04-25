@@ -190,7 +190,7 @@ body,
   height: 100%;
   min-height: 100%;
   margin: 0;
-  background: var(--color-bg-panel);
+  background: var(--color-bg-panel-strong);
 }
 
 html {
@@ -230,7 +230,7 @@ textarea {
   height: 100dvh;
   min-height: 100dvh;
   overflow: hidden;
-  background: var(--color-bg-panel);
+  background: var(--color-bg-panel-strong);
 }
 
 .center-panel {

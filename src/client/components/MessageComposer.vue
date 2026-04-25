@@ -113,7 +113,7 @@ function syncTextareaHeight(): void {
 
   element.style.height = "auto";
   const nextHeight = Math.min(element.scrollHeight, maxInputHeight.value);
-  element.style.height = `${Math.max(nextHeight, 56)}px`;
+  element.style.height = `${nextHeight}px`;
   element.style.overflowY = element.scrollHeight > maxInputHeight.value ? "auto" : "hidden";
 }
 
@@ -398,9 +398,8 @@ defineExpose({ clear, restore });
 
 <style scoped>
 .composer {
-  padding: 0.4rem calc(var(--safe-area-right) + 0.8rem) calc(var(--safe-area-bottom) + 0.5rem)
-    calc(var(--safe-area-left) + 0.8rem);
-  background: var(--color-bg-panel);
+  padding: 0.4rem 0 calc(var(--safe-area-bottom) + 0.5rem);
+  background: var(--color-bg-panel-strong);
   border-top: 1px solid var(--color-border-soft);
 }
 
@@ -418,7 +417,7 @@ defineExpose({ clear, restore });
 }
 
 .composer__notice {
-  margin: 0;
+  margin: 0 calc(var(--safe-area-right) + 0.8rem) 0 calc(var(--safe-area-left) + 0.8rem);
   padding: 0.55rem 0.75rem;
   border-radius: 0.45rem;
   background: var(--color-warning-soft);
@@ -430,6 +429,7 @@ defineExpose({ clear, restore });
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
+  padding: 0 calc(var(--safe-area-right) + 0.8rem) 0 calc(var(--safe-area-left) + 0.8rem);
 }
 
 .composer__chip {
@@ -455,12 +455,13 @@ defineExpose({ clear, restore });
 .composer__input {
   width: 100%;
   resize: none;
-  min-height: 3.5rem;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.6rem;
-  background: var(--color-bg-app);
+  min-height: 0;
+  border: 0;
+  border-bottom: 1px solid var(--color-border-soft);
+  border-radius: 0;
+  background: var(--color-bg-panel-strong);
   color: inherit;
-  padding: 0.65rem 0.75rem;
+  padding: 0.45rem calc(var(--safe-area-right) + 0.8rem) 0.5rem calc(var(--safe-area-left) + 0.8rem);
   font-size: 0.95rem;
   line-height: 1.5;
   outline: none;
@@ -476,6 +477,7 @@ defineExpose({ clear, restore });
   grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 0.4rem;
+  padding: 0 calc(var(--safe-area-right) + 0.4rem) 0 calc(var(--safe-area-left) + 0.4rem);
 }
 
 .composer__icon-button {

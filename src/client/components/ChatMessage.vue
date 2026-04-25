@@ -252,8 +252,26 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
 
 <style scoped>
 .message {
+  position: relative;
   display: grid;
   min-width: 0;
+}
+
+.message::before,
+.message__segment--bubble::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--message-bg, transparent);
+  border-radius: inherit;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.message > *,
+.message__segment--bubble > * {
+  position: relative;
+  z-index: 1;
 }
 
 .message--toolResult,
@@ -264,9 +282,9 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
 }
 
 .message--user {
-  padding: 0.5rem 0.65rem;
-  border-radius: 0.5rem;
-  background: var(--color-user-bg);
+  --message-bg: var(--color-user-bg);
+  padding: 0.5rem 0 0.5rem 0.65rem;
+  border-radius: 0.5rem 0 0 0.5rem;
   color: var(--color-user-text);
   margin-left: auto;
   font-family:
@@ -286,15 +304,24 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
   min-width: 0;
 }
 
+.message--user::before {
+  right: calc(-1 * (var(--safe-area-right) + 0.8rem));
+}
+
 .message__segment--bubble {
-  padding: 0.5rem 0.65rem;
-  border-radius: 0.5rem;
-  background: var(--color-bg-panel);
+  --message-bg: var(--color-bg-panel);
+  position: relative;
+  padding: 0.5rem 0.65rem 0.5rem 0;
+  border-radius: 0 0.5rem 0.5rem 0;
   color: var(--color-text);
 }
 
+.message__segment--bubble::before {
+  left: calc(-1 * (var(--safe-area-left) + 0.8rem));
+}
+
 .message__segment--error {
-  background: var(--color-error-soft);
+  --message-bg: var(--color-error-soft);
   color: var(--color-error);
 }
 

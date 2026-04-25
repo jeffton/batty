@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import DOMPurify from "dompurify";
-import { marked } from "marked";
+import { Marked, marked, type Tokens } from "marked";
 
 const props = withDefaults(
   defineProps<{
@@ -13,12 +13,29 @@ const props = withDefaults(
   },
 );
 
-marked.setOptions({
+function escapeAttribute(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+const renderer = new marked.Renderer();
+renderer.link = function (this: typeof renderer, { href, title, tokens }: Tokens.Link): string {
+  const titleAttribute = title ? ` title="${escapeAttribute(title)}"` : "";
+  return `<a target="_blank" rel="noopener noreferrer" href="${escapeAttribute(href)}"${titleAttribute}>${this.parser.parseInline(tokens)}</a>`;
+};
+
+const markdown = new Marked({
   breaks: true,
   gfm: true,
+  renderer,
 });
 
-const html = computed(() => DOMPurify.sanitize(marked.parse(props.text) as string));
+const html = computed(() =>
+  DOMPurify.sanitize(markdown.parse(props.text) as string, { ADD_ATTR: ["target"] }),
+);
 </script>
 
 <template>

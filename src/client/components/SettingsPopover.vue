@@ -126,13 +126,6 @@ function closePopover(): void {
   element?.hidePopover?.();
 }
 
-function openAuthUrl(): void {
-  if (!authUrl.value) {
-    return;
-  }
-  window.open(authUrl.value, "_blank", "noopener,noreferrer");
-}
-
 function apiKeyPlaceholder(providerId: "google" | "openrouter"): string {
   return providerId === "google" ? "Paste Gemini API key" : "Paste OpenRouter API key";
 }
@@ -483,9 +476,14 @@ watch(
                 Expires: {{ authExpiryLabel }}
               </div>
 
-              <button class="settings-popover__link" type="button" @click="openAuthUrl">
+              <a
+                class="settings-popover__link"
+                :href="authUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 <ExternalLink :size="14" /> Open sign-in page
-              </button>
+              </a>
 
               <textarea
                 v-model="authInput"
@@ -702,6 +700,7 @@ watch(
   padding: 0.45rem 0.65rem;
   background: var(--color-bg-elevated);
   color: inherit;
+  text-decoration: none;
 }
 
 .settings-popover__action--primary {

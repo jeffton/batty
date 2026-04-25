@@ -129,7 +129,7 @@ watch(
   padding: calc(var(--safe-area-top) + 0.9rem) calc(var(--safe-area-right) + 1rem) 0.9rem
     calc(var(--safe-area-left) + 1rem);
   border-bottom: 1px solid var(--color-border-soft);
-  background: var(--color-bg-panel);
+  background: var(--color-bg-panel-strong);
 }
 
 .workspace-browser-header__brand {

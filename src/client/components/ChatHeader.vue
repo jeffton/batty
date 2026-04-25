@@ -149,7 +149,7 @@ function closePopover(id: string): void {
   min-width: 0;
   padding: calc(var(--safe-area-top) + 0.4rem) calc(var(--safe-area-right) + 0.6rem) 0.4rem
     calc(var(--safe-area-left) + 0.6rem);
-  background: var(--color-bg-panel);
+  background: var(--color-bg-panel-strong);
   border-bottom: 1px solid var(--color-border-soft);
 }
 

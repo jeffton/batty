@@ -43,7 +43,7 @@ const emit = defineEmits<{
   padding: 0.65rem calc(var(--safe-area-right) + 1rem) calc(var(--safe-area-bottom) + 0.65rem)
     calc(var(--safe-area-left) + 1rem);
   border-top: 1px solid var(--color-border-soft);
-  background: var(--color-bg-panel);
+  background: var(--color-bg-panel-strong);
 }
 
 .workspace-browser-footer__btn {

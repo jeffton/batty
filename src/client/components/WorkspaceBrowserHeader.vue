@@ -122,6 +122,8 @@ watch(
 
 <style scoped>
 .workspace-browser-header {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -130,6 +132,7 @@ watch(
     calc(var(--safe-area-left) + 1rem);
   border-bottom: 1px solid var(--color-border-soft);
   background: var(--color-bg-panel-strong);
+  box-shadow: 0 0.35rem 0.75rem oklch(0.15 0.02 240 / 0.08);
 }
 
 .workspace-browser-header__brand {

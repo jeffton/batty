@@ -129,6 +129,31 @@ function isAttachmentCarrierMessage(
   );
 }
 
+function attachmentBlockFromToolResult(
+  message: Extract<UiMessage, { role: "toolResult" }>,
+): UiContentBlock | undefined {
+  const state: ToolDisplayState = {
+    status: message.isError ? "error" : "success",
+    resultBlocks: message.blocks,
+    resultDetails: message.details,
+  };
+  if (
+    !isAttachmentOutputToolCall(
+      { type: "toolCall", id: message.toolCallId, name: message.toolName, arguments: {} },
+      new Map([[message.toolCallId, state]]),
+    )
+  ) {
+    return undefined;
+  }
+
+  return {
+    type: "toolCall",
+    id: message.toolCallId,
+    name: message.toolName,
+    arguments: {},
+  };
+}
+
 export function mergeAttachmentCarrierIntoAssistant(
   message: Extract<UiMessage, { role: "assistant" }>,
   attachmentBlocks: UiContentBlock[],
@@ -146,11 +171,20 @@ export function buildTranscriptMessages(
   let pendingAttachmentTimestamp = 0;
 
   for (const message of messages) {
-    if (
-      message.role === "toolResult" &&
-      toolStateLookup.referencedToolCallIds.has(message.toolCallId)
-    ) {
-      continue;
+    if (message.role === "toolResult") {
+      if (toolStateLookup.referencedToolCallIds.has(message.toolCallId)) {
+        continue;
+      }
+
+      const attachmentBlock = attachmentBlockFromToolResult(message);
+      if (attachmentBlock) {
+        if (pendingAttachmentBlocks.length === 0) {
+          pendingAttachmentId = message.id;
+          pendingAttachmentTimestamp = message.timestamp;
+        }
+        pendingAttachmentBlocks = [...pendingAttachmentBlocks, attachmentBlock];
+        continue;
+      }
     }
 
     if (

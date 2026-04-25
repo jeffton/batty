@@ -5,7 +5,12 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { SessionManager, type AgentSession } from "@mariozechner/pi-coding-agent";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import { BATTY_SYSTEM_PROMPT_CUSTOM_TYPE } from "./batty-system-prompt";
-import { appendCronSubagentCompletion, runDetachedSubagentSession } from "./pi-service-subagents";
+import {
+  appendCronSubagentCompletion,
+  appendDanglingCronSubagentFailure,
+  findDanglingCronSubagentToolCall,
+  runDetachedSubagentSession,
+} from "./pi-service-subagents";
 import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE, buildCronRuntimeNotice } from "./runtime-notices";
 
 type AgentMessage = AgentSession["messages"][number];
@@ -29,6 +34,92 @@ function createAssistantMessage(text: string, timestamp: number): AssistantMessa
     timestamp,
   };
 }
+
+describe("cron subagent transcript repair", () => {
+  it("finds and completes a dangling simulated cron subagent tool call", () => {
+    const appendedMessages: AgentMessage[] = [];
+    const sessionMessages: AgentMessage[] = [
+      { role: "user", content: "Run heartbeat", timestamp: 1 },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "subagent-cron-1",
+            name: "subagent",
+            arguments: {
+              prompt: "Run heartbeat",
+              model: "openai-codex/gpt-5.5",
+              effort: "medium",
+              includeSessionContext: true,
+            },
+          },
+        ],
+        api: "openai-codex-responses",
+        provider: "openai-codex",
+        model: "gpt-5.5",
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: "toolUse",
+        timestamp: 2,
+      },
+    ];
+    const session = {
+      model: { api: "openai-codex-responses", provider: "openai-codex", id: "gpt-5.5" },
+      messages: sessionMessages,
+      agent: { state: { messages: sessionMessages } },
+      sessionManager: {
+        appendMessage(message: AgentMessage) {
+          appendedMessages.push(message);
+        },
+      },
+    } as unknown as AgentSession;
+
+    expect(findDanglingCronSubagentToolCall(session)).toMatchObject({ id: "subagent-cron-1" });
+    expect(appendDanglingCronSubagentFailure(session, "Cron subagent died")).toBe(true);
+
+    expect(appendedMessages).toHaveLength(2);
+    expect(appendedMessages[0]).toMatchObject({
+      role: "toolResult",
+      toolCallId: "subagent-cron-1",
+      toolName: "subagent",
+      isError: true,
+    });
+    expect(appendedMessages[1]).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "Cron subagent died" }],
+      stopReason: "error",
+      errorMessage: "Cron subagent died",
+    });
+  });
+
+  it("leaves completed subagent transcripts alone", () => {
+    const sessionMessages: AgentMessage[] = [
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "subagent-cron-1", name: "subagent", arguments: {} }],
+        timestamp: 1,
+      } as AgentMessage,
+      {
+        role: "toolResult",
+        toolCallId: "subagent-cron-1",
+        toolName: "subagent",
+        content: [],
+        isError: false,
+        timestamp: 2,
+      } as AgentMessage,
+    ];
+    const session = { messages: sessionMessages } as unknown as AgentSession;
+
+    expect(findDanglingCronSubagentToolCall(session)).toBeUndefined();
+  });
+});
 
 describe("appendCronSubagentCompletion", () => {
   it("does not copy subagent usage onto the parent daily-session assistant message", () => {

@@ -51,7 +51,9 @@ import {
 import {
   appendCronSubagentCompletion,
   appendCronSubagentStart,
+  appendDanglingCronSubagentFailure,
   appendRuntimeNoticeMessage,
+  buildFailedCronSubagentResult,
   resolveOrCreateDailySession,
   resolveSubagentDefaults,
   runDetachedSubagentSession,
@@ -218,6 +220,13 @@ export class PiService {
     const webSession = this.requireSession(session.id);
 
     return this.runSubagentSerial(webSession.session.sessionId, async () => {
+      const recovered = appendDanglingCronSubagentFailure(
+        webSession.session,
+        "Cron subagent did not finish before the server stopped.",
+      );
+      if (recovered) {
+        this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
+      }
       await webSession.session.agent.waitForIdle();
 
       if (job.session.kind === "daily-inline") {
@@ -260,6 +269,7 @@ export class PiService {
       });
       this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
 
+      let completionAppended = false;
       try {
         const result = await this.runDetachedSubagentSession({
           workspace: job.workspace,
@@ -289,6 +299,7 @@ export class PiService {
         });
 
         this.appendCronSubagentCompletion(webSession.session, toolCallId, result);
+        completionAppended = true;
         const completedState = this.getState(webSession.id);
         this.publish(webSession, { type: "reset", state: completedState });
         try {
@@ -311,6 +322,16 @@ export class PiService {
           sessionId: webSession.session.sessionId,
           sessionPath: this.requireSessionPath(webSession.id),
         };
+      } catch (error) {
+        if (!completionAppended) {
+          this.appendCronSubagentCompletion(
+            webSession.session,
+            toolCallId,
+            buildFailedCronSubagentResult(toolArgs, error),
+          );
+          this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
+        }
+        throw error;
       } finally {
         webSession.activeTools.delete(toolCallId);
         this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
@@ -548,6 +569,13 @@ export class PiService {
     streamingBehavior?: "steer" | "followUp",
   ): Promise<void> {
     const webSession = this.requireSession(sessionId);
+    const recovered = appendDanglingCronSubagentFailure(
+      webSession.session,
+      "Cron subagent did not finish before the next prompt.",
+    );
+    if (recovered) {
+      this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
+    }
     await this.waitForSubagentQueue(sessionId);
     const prepared = await this.preparePromptFiles(sessionId, files);
     const parts = [text.trim(), prepared.text.trim()].filter(Boolean);

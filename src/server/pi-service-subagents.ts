@@ -542,16 +542,18 @@ export function appendCronSubagentStart(
   ]);
 }
 
+export interface CronSubagentCompletionResult {
+  text: string;
+  details: ToolExecutionDetails;
+  finalAssistant?: AssistantMessage;
+  isError: boolean;
+  errorMessage?: string;
+}
+
 export function appendCronSubagentCompletion(
   session: AgentSession,
   toolCallId: string,
-  result: {
-    text: string;
-    details: ToolExecutionDetails;
-    finalAssistant?: AssistantMessage;
-    isError: boolean;
-    errorMessage?: string;
-  },
+  result: CronSubagentCompletionResult,
 ): void {
   const timestamp = Date.now();
   const toolResult: ToolResultMessage<ToolExecutionDetails> = {
@@ -583,6 +585,81 @@ export function appendCronSubagentCompletion(
           timestamp: timestamp + 1,
         };
   appendMessages(session, [toolResult, deliveredAssistant]);
+}
+
+function getSubagentToolCall(
+  message: AgentSession["messages"][number] | undefined,
+): ToolCall | undefined {
+  if (message?.role !== "assistant" || !Array.isArray(message.content)) {
+    return undefined;
+  }
+  return message.content.find(
+    (block): block is ToolCall =>
+      typeof block === "object" &&
+      block !== null &&
+      block.type === "toolCall" &&
+      block.name === SUBAGENT_TOOL_NAME &&
+      typeof block.id === "string",
+  );
+}
+
+export function findDanglingCronSubagentToolCall(
+  session: AgentSession,
+): { id: string; args: Record<string, unknown> } | undefined {
+  const messages = session.messages;
+  const lastMessage = messages.at(-1);
+  const toolCall = getSubagentToolCall(lastMessage);
+  if (!toolCall) {
+    return undefined;
+  }
+
+  return {
+    id: toolCall.id,
+    args:
+      typeof toolCall.arguments === "object" && toolCall.arguments !== null
+        ? (toolCall.arguments as Record<string, unknown>)
+        : {},
+  };
+}
+
+export function buildFailedCronSubagentResult(
+  args: Record<string, unknown>,
+  error: unknown,
+): CronSubagentCompletionResult {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const prompt = typeof args.prompt === "string" ? args.prompt : "";
+  const model = typeof args.model === "string" ? args.model : "unknown";
+  const effort = typeof args.effort === "string" ? args.effort : "medium";
+  const includeSessionContext = args.includeSessionContext === true;
+  return {
+    text: errorMessage,
+    details: {
+      subagent: {
+        prompt,
+        model,
+        effort,
+        includeSessionContext,
+        respondIn: "session",
+        messageCount: 0,
+        errorMessage,
+      },
+    },
+    isError: true,
+    errorMessage,
+  };
+}
+
+export function appendDanglingCronSubagentFailure(session: AgentSession, error: unknown): boolean {
+  const dangling = findDanglingCronSubagentToolCall(session);
+  if (!dangling) {
+    return false;
+  }
+  appendCronSubagentCompletion(
+    session,
+    dangling.id,
+    buildFailedCronSubagentResult(dangling.args, error),
+  );
+  return true;
 }
 
 export interface ResolveDailySessionDeps {

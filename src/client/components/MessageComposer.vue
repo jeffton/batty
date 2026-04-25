@@ -398,7 +398,7 @@ defineExpose({ clear, restore });
 
 <style scoped>
 .composer {
-  padding: 0.4rem 0 calc(var(--safe-area-bottom) + 0.5rem);
+  padding: 0 0 calc(var(--safe-area-bottom) + 0.5rem);
   background: var(--color-bg-panel-strong);
   border-top: 1px solid var(--color-border-soft);
 }

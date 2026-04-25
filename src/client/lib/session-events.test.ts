@@ -140,7 +140,7 @@ describe("applyServerEvent", () => {
     expect(next?.pendingMessageCount).toBe(2);
   });
 
-  it("retains cached tool output when a reset snapshot arrives without active tools", () => {
+  it("drops cached tool output when an idle reset snapshot arrives without active tools", () => {
     const previous: SessionState = {
       ...baseState,
       messages: [
@@ -175,7 +175,7 @@ describe("applyServerEvent", () => {
       state: { ...previous, isStreaming: false, activeTools: [] },
     } as unknown as Parameters<typeof applyServerEvent>[1]);
 
-    expect(next?.activeTools).toEqual(previous.activeTools);
+    expect(next?.activeTools).toEqual([]);
   });
 
   it("updates the active assistant during streaming", () => {

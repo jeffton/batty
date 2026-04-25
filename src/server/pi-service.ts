@@ -51,9 +51,9 @@ import {
 import {
   appendCronSubagentCompletion,
   appendCronSubagentStart,
-  appendDanglingCronSubagentFailure,
   appendRuntimeNoticeMessage,
   buildFailedCronSubagentResult,
+  findDanglingCronSubagentToolCall,
   resolveOrCreateDailySession,
   resolveSubagentDefaults,
   runDetachedSubagentSession,
@@ -84,6 +84,7 @@ export class PiService {
   private readonly liveSessions = new Map<string, LiveSession>();
   private readonly subagentQueues = new Map<string, Promise<void>>();
   private readonly cronSessionResolutions = new Map<string, Promise<SessionState>>();
+  private readonly cronSubagentAbortControllers = new Map<string, AbortController>();
   private readonly onAgentCompleted: ((session: SessionState) => Promise<void>) | undefined;
   private readonly onWorkspaceUpdated: ((workspaceId: string) => Promise<void>) | undefined;
   private readonly cronService: CronService;
@@ -220,12 +221,13 @@ export class PiService {
     const webSession = this.requireSession(session.id);
 
     return this.runSubagentSerial(webSession.session.sessionId, async () => {
-      const recovered = appendDanglingCronSubagentFailure(
-        webSession.session,
+      const recovered = this.recoverDanglingCronSubagent(
+        webSession,
         "Cron subagent did not finish before the server stopped.",
       );
       if (recovered) {
         this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
+        this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
       }
       await webSession.session.agent.waitForIdle();
 
@@ -270,6 +272,8 @@ export class PiService {
       this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
 
       let completionAppended = false;
+      const abortController = new AbortController();
+      this.cronSubagentAbortControllers.set(toolCallId, abortController);
       try {
         const result = await this.runDetachedSubagentSession({
           workspace: job.workspace,
@@ -283,6 +287,7 @@ export class PiService {
           respondIn: "session",
           preludeNotices: [cronNotice],
           currentToolCallId: toolCallId,
+          signal: abortController.signal,
           onUpdate: (partial) => {
             const current = webSession.activeTools.get(toolCallId);
             if (!current) {
@@ -323,7 +328,10 @@ export class PiService {
           sessionPath: this.requireSessionPath(webSession.id),
         };
       } catch (error) {
-        if (!completionAppended) {
+        if (
+          !completionAppended &&
+          findDanglingCronSubagentToolCall(webSession.session)?.id === toolCallId
+        ) {
           this.appendCronSubagentCompletion(
             webSession.session,
             toolCallId,
@@ -333,6 +341,7 @@ export class PiService {
         }
         throw error;
       } finally {
+        this.cronSubagentAbortControllers.delete(toolCallId);
         webSession.activeTools.delete(toolCallId);
         this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
       }
@@ -345,6 +354,23 @@ export class PiService {
 
   private async waitForSubagentQueue(sessionId: string): Promise<void> {
     await waitForSubagentQueue(this.subagentQueues, sessionId);
+  }
+
+  private recoverDanglingCronSubagent(webSession: WebSession, error: string): boolean {
+    const dangling = findDanglingCronSubagentToolCall(webSession.session);
+    if (!dangling) {
+      return false;
+    }
+
+    this.cronSubagentAbortControllers.get(dangling.id)?.abort();
+    this.cronSubagentAbortControllers.delete(dangling.id);
+    webSession.activeTools.delete(dangling.id);
+    this.appendCronSubagentCompletion(
+      webSession.session,
+      dangling.id,
+      buildFailedCronSubagentResult(dangling.args, error),
+    );
+    return true;
   }
 
   private appendRuntimeNotice(
@@ -569,14 +595,16 @@ export class PiService {
     streamingBehavior?: "steer" | "followUp",
   ): Promise<void> {
     const webSession = this.requireSession(sessionId);
-    const recovered = appendDanglingCronSubagentFailure(
-      webSession.session,
+    const recovered = this.recoverDanglingCronSubagent(
+      webSession,
       "Cron subagent did not finish before the next prompt.",
     );
     if (recovered) {
       this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
+      this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
+    } else {
+      await this.waitForSubagentQueue(sessionId);
     }
-    await this.waitForSubagentQueue(sessionId);
     const prepared = await this.preparePromptFiles(sessionId, files);
     const parts = [text.trim(), prepared.text.trim()].filter(Boolean);
     const promptText = parts.join("\n\n").trim() || "Please inspect the attached files.";

@@ -153,8 +153,8 @@ describe("transcript tool state merging", () => {
     );
   });
 
-  it("prefers active tool output while a tool is still running", () => {
-    const messages: SessionState["messages"] = [assistantMessage, toolResultMessage];
+  it("uses active tool output while a tool has not persisted a result", () => {
+    const messages: SessionState["messages"] = [assistantMessage];
     const lookup = buildToolStateLookup(messages, [
       {
         toolCallId: "call-1",
@@ -170,6 +170,28 @@ describe("transcript tool state merging", () => {
       {
         status: "running",
         resultBlocks: [{ type: "text", text: "still streaming" }],
+        resultDetails: undefined,
+      },
+    );
+  });
+
+  it("prefers persisted tool results over stale active tool output", () => {
+    const messages: SessionState["messages"] = [assistantMessage, toolResultMessage];
+    const lookup = buildToolStateLookup(messages, [
+      {
+        toolCallId: "call-1",
+        toolName: "bash",
+        args: { command: "git status --short", timeout: 600 },
+        blocks: [{ type: "text", text: "still streaming" }],
+        status: "running",
+        isError: false,
+      },
+    ]);
+
+    expect(toolStatesForMessage(assistantMessage, lookup.toolStatesByCallId).get("call-1")).toEqual(
+      {
+        status: "success",
+        resultBlocks: [{ type: "text", text: "M src/client/views/ChatView.vue" }],
         resultDetails: undefined,
       },
     );

@@ -55,7 +55,7 @@ export function buildToolStateLookup(
 
   for (const tool of activeTools) {
     const persistedToolState = toolStatesByCallId.get(tool.toolCallId);
-    if (persistedToolState && tool.status !== "running") {
+    if (persistedToolState) {
       continue;
     }
 

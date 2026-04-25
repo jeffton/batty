@@ -26,7 +26,7 @@ const store = useAppStore();
 const composer = ref<ComposerHandle | null>(null);
 const thinkingOptions = computed(() => resolveThinkingOptions(store.activeSession));
 const promptActionPending = ref(false);
-const isUnavailable = computed(() => store.connectionState !== "online");
+const isUnavailable = computed(() => store.connectionState === "offline");
 const selectedWorkspaceLoading = computed(() => {
   const workspaceId = store.selectedWorkspaceId;
   if (!workspaceId) {

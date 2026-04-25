@@ -202,7 +202,7 @@ describe("normalizeSessionState", () => {
     expect(mergeSessionState(incoming, previous)?.messages).toEqual(incoming.messages);
   });
 
-  it("retains cached tool output when a refreshed session loses in-flight tools", () => {
+  it("drops cached tool output when an idle refreshed session has no active tools", () => {
     const previous: SessionState = {
       id: "web-1",
       sessionId: "session-1",
@@ -249,6 +249,58 @@ describe("normalizeSessionState", () => {
     const incoming: SessionState = {
       ...previous,
       isStreaming: false,
+      updatedAt: 300,
+      activeTools: [],
+    };
+
+    expect(mergeSessionState(incoming, previous)?.activeTools).toEqual([]);
+  });
+
+  it("retains cached tool output while a refreshed streaming session loses in-flight tools", () => {
+    const previous: SessionState = {
+      id: "web-1",
+      sessionId: "session-1",
+      workspaceId: "batty",
+      cwd: "/tmp/batty",
+      thinkingLevel: "medium",
+      availableThinkingLevels: ["medium"],
+      isStreaming: true,
+      pendingMessageCount: 0,
+      updatedAt: 200,
+      contextTokens: null,
+      contextWindow: null,
+      contextPercent: null,
+      totalMessageCount: 1,
+      hasMoreMessages: false,
+      messages: [
+        {
+          id: "assistant-1",
+          role: "assistant",
+          timestamp: 100,
+          blocks: [
+            {
+              type: "toolCall",
+              id: "call-1",
+              name: "bash",
+              arguments: { command: "sudo ./scripts/deploy.sh" },
+            },
+          ],
+        },
+      ],
+      activeTools: [
+        {
+          toolCallId: "call-1",
+          toolName: "bash",
+          args: { command: "sudo ./scripts/deploy.sh" },
+          blocks: [{ type: "text", text: "==> Reloading services" }],
+          status: "running",
+          isError: false,
+        },
+      ],
+    };
+
+    const incoming: SessionState = {
+      ...previous,
       updatedAt: 300,
       activeTools: [],
     };

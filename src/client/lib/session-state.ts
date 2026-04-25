@@ -26,6 +26,9 @@ function mergeRetainedActiveTools(
   if (!previous || previous.sessionId !== incoming.sessionId || previous.activeTools.length === 0) {
     return incoming.activeTools;
   }
+  if (incoming.activeTools.length === 0 && !incoming.isStreaming) {
+    return [];
+  }
 
   const incomingToolIds = new Set(incoming.activeTools.map((tool) => tool.toolCallId));
   const retained = previous.activeTools.filter((tool) => {

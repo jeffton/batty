@@ -453,15 +453,17 @@ defineExpose({ clear, restore });
 }
 
 .composer__input {
-  width: 100%;
+  display: block;
+  width: auto;
   resize: none;
   min-height: 0;
+  margin: 0 calc(var(--safe-area-right) + 0.8rem) 0 calc(var(--safe-area-left) + 0.8rem);
   border: 0;
   border-bottom: 1px solid var(--color-border-soft);
   border-radius: 0;
   background: var(--color-bg-panel-strong);
   color: inherit;
-  padding: 0.45rem calc(var(--safe-area-right) + 0.8rem) 0.5rem calc(var(--safe-area-left) + 0.8rem);
+  padding: 0.45rem 0 0.5rem;
   font-size: 0.95rem;
   line-height: 1.5;
   outline: none;

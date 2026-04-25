@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { Compass, ListOrdered, Paperclip, SendHorizontal, Square } from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import ComposerQueuedPrompts from "@/client/components/ComposerQueuedPrompts.vue";
 import { clearSessionDraft, readSessionDraft, writeSessionDraft } from "@/client/lib/session-draft";
+import type { QueuedPrompt } from "@/shared/types";
 
 const DRAFT_SAVE_INTERVAL_MS = 400;
 
@@ -11,12 +13,14 @@ const props = defineProps<{
   streaming?: boolean;
   offline?: boolean;
   sessionKey?: string;
+  queuedPrompts?: QueuedPrompt[];
 }>();
 
 const emit = defineEmits<{
   submit: [text: string, files: File[]];
   steer: [text: string, files: File[]];
   stop: [];
+  removeQueuedPrompt: [prompt: QueuedPrompt];
 }>();
 
 const text = ref("");
@@ -106,6 +110,17 @@ function addFiles(next: FileList | File[]): void {
 
 function removeFile(index: number): void {
   files.value.splice(index, 1);
+}
+
+function removeQueuedPrompt(prompt: QueuedPrompt): void {
+  emit("removeQueuedPrompt", prompt);
+  if (prompt.kind === "followUp" && text.value.trim().length === 0) {
+    text.value = prompt.text;
+    void nextTick(() => {
+      scheduleTextareaHeightSync();
+      textarea.value?.focus();
+    });
+  }
 }
 
 function textareaMinHeight(element: HTMLTextAreaElement): number {
@@ -346,6 +361,12 @@ defineExpose({ clear, restore });
           {{ file.name }} ×
         </button>
       </div>
+
+      <ComposerQueuedPrompts
+        :prompts="props.queuedPrompts"
+        :disabled="props.disabled"
+        @remove="removeQueuedPrompt"
+      />
 
       <textarea
         ref="textarea"

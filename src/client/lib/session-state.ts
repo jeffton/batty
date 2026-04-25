@@ -116,6 +116,7 @@ export function normalizeSessionState(session: SessionState | undefined): Sessio
       Number.isFinite(session.pendingMessageCount)
         ? session.pendingMessageCount
         : 0,
+    queuedPrompts: Array.isArray(session.queuedPrompts) ? session.queuedPrompts : [],
     updatedAt: updatedAtCandidates[0] ?? Date.now(),
     contextTokens:
       typeof session.contextTokens === "number" && Number.isFinite(session.contextTokens)

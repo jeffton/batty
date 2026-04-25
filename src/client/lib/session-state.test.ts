@@ -30,6 +30,7 @@ describe("normalizeSessionState", () => {
       availableThinkingLevels: [],
       isStreaming: false,
       pendingMessageCount: 0,
+      queuedPrompts: [],
       updatedAt: 123,
       contextTokens: null,
       contextWindow: null,

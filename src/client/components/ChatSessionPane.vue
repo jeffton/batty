@@ -6,6 +6,7 @@ import SessionTranscriptView from "@/client/components/SessionTranscriptView.vue
 import { formatTokenCount } from "@/client/lib/formatting";
 import { resolveThinkingOptions } from "@/client/lib/thinking-levels";
 import { useAppStore } from "@/client/stores/app";
+import type { QueuedPrompt } from "@/shared/types";
 
 const MODEL_POPOVER_ID = "chat-main-model-popover";
 const MODEL_POPOVER_ANCHOR = "--chat-main-model-anchor";
@@ -201,6 +202,10 @@ async function sendPrompt(text: string, files: File[]): Promise<void> {
   }
 }
 
+async function removeQueuedPrompt(prompt: QueuedPrompt): Promise<void> {
+  await store.removeQueuedPrompt(prompt.kind, prompt.index);
+}
+
 async function steerPrompt(text: string, files: File[]): Promise<void> {
   const before = store.activeSession
     ? {
@@ -288,9 +293,11 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
         :session-key="store.activeSession.sessionId"
         :offline="isUnavailable"
         :actions-disabled="isUnavailable"
+        :queued-prompts="store.activeSession.queuedPrompts"
         @submit="sendPrompt"
         @steer="steerPrompt"
         @stop="store.stopActiveSession"
+        @remove-queued-prompt="removeQueuedPrompt"
       />
     </template>
   </main>

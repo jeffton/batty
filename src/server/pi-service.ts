@@ -31,6 +31,7 @@ import { listSessionSummaries as listFastSessionSummaries } from "./session-summ
 import { ProviderAuthService } from "./provider-auth";
 import { hasSubagentSessionMarker, SUBAGENT_TOOL_NAME } from "./subagent";
 import { getSessionMessagePage } from "./pi-service-message-page";
+import { getQueuedPrompts, removeQueuedPrompt } from "./pi-service-queue";
 import { preparePromptFiles } from "./pi-service-uploads";
 import {
   createAttachFilesTool,
@@ -472,6 +473,7 @@ export class PiService {
       availableThinkingLevels: webSession.session.getAvailableThinkingLevels(),
       isStreaming: webSession.session.isStreaming,
       pendingMessageCount: webSession.session.pendingMessageCount,
+      queuedPrompts: getQueuedPrompts(webSession),
       updatedAt: sessionUpdatedAt(webSession.session, webSession.openedAt),
       contextTokens: contextUsage?.tokens ?? null,
       contextWindow: contextUsage?.contextWindow ?? webSession.session.model?.contextWindow ?? null,
@@ -506,6 +508,7 @@ export class PiService {
         availableThinkingLevels: webSession.session.getAvailableThinkingLevels(),
         isStreaming: webSession.session.isStreaming,
         pendingMessageCount: webSession.session.pendingMessageCount,
+        queuedPrompts: getQueuedPrompts(webSession),
         updatedAt: sessionUpdatedAt(webSession.session, webSession.openedAt),
         contextTokens: null,
         contextWindow: null,
@@ -554,6 +557,19 @@ export class PiService {
       images: prepared.images,
       ...(streamingBehavior ? { streamingBehavior } : {}),
     });
+    this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
+  }
+
+  async removeQueuedPrompt(
+    sessionId: string,
+    kind: "steer" | "followUp",
+    index: number,
+  ): Promise<SessionState> {
+    const webSession = this.requireSession(sessionId);
+    await removeQueuedPrompt(webSession, kind, index);
+    const state = this.getState(sessionId);
+    this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
+    return state;
   }
 
   async abort(sessionId: string): Promise<void> {

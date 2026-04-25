@@ -189,6 +189,12 @@ export interface UpdateCronJobInput {
   schedule?: CronJobScheduleInput;
 }
 
+export interface QueuedPrompt {
+  kind: "steer" | "followUp";
+  index: number;
+  text: string;
+}
+
 export interface SessionState {
   id: string;
   sessionId: string;
@@ -201,6 +207,7 @@ export interface SessionState {
   availableThinkingLevels: string[];
   isStreaming: boolean;
   pendingMessageCount: number;
+  queuedPrompts?: QueuedPrompt[];
   updatedAt: number;
   contextTokens: number | null;
   contextWindow: number | null;

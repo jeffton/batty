@@ -313,6 +313,16 @@ export async function sendPrompt(
   });
 }
 
+export function removeQueuedPrompt(
+  sessionId: string,
+  kind: "steer" | "followUp",
+  index: number,
+): Promise<SessionState> {
+  return request(`/api/sessions/${sessionId}/queue/${kind}/${index}`, {
+    method: "DELETE",
+  });
+}
+
 export function abortSession(sessionId: string): Promise<{ ok: true }> {
   return request(`/api/sessions/${sessionId}/abort`, {
     method: "POST",

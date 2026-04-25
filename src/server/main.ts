@@ -829,6 +829,13 @@ app.post<{ Params: { sessionId: string } }>(
   },
 );
 
+app.delete<{
+  Params: { sessionId: string; kind: "steer" | "followUp"; index: string };
+}>(routePath("/api/sessions/:sessionId/queue/:kind/:index"), async (request) => {
+  const index = Number.parseInt(request.params.index, 10);
+  return service.removeQueuedPrompt(request.params.sessionId, request.params.kind, index);
+});
+
 app.post<{ Params: { sessionId: string } }>(
   routePath("/api/sessions/:sessionId/abort"),
   async (request) => {

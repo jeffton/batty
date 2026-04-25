@@ -18,6 +18,7 @@ import {
   listWorkspaces as listWorkspacesRequest,
   logout as logoutRequest,
   openSession,
+  removeQueuedPrompt as removeQueuedPromptRequest,
   sendPrompt,
   setBattyAgentsFile as setBattyAgentsFileRequest,
   setBraveSearchApiKey as setBraveSearchApiKeyRequest,
@@ -651,6 +652,25 @@ export const useAppStore = defineStore("app", {
         }
       });
       await sendPrompt(this.activeSession.id, text, files, "steer");
+    },
+
+    async removeQueuedPrompt(kind: "steer" | "followUp", index: number): Promise<void> {
+      if (!this.activeSession) {
+        return;
+      }
+      const session = normalizeSessionState(
+        await removeQueuedPromptRequest(this.activeSession.id, kind, index),
+      );
+      if (!session) {
+        throw new Error("Failed to remove queued prompt");
+      }
+      const merged = mergeSessionState(session, this.activeSession);
+      if (!merged) {
+        throw new Error("Failed to remove queued prompt");
+      }
+      this.activeSession = merged;
+      this.updateSessionSummary(merged);
+      await writeCachedSession(merged);
     },
 
     async setModel(modelId: string): Promise<void> {

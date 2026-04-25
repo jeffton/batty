@@ -197,6 +197,7 @@ export interface SessionStateInput {
   availableThinkingLevels: string[];
   isStreaming: boolean;
   pendingMessageCount: number;
+  queuedPrompts?: SessionState["queuedPrompts"];
   updatedAt: number;
   contextTokens: number | null;
   contextWindow: number | null;
@@ -231,6 +232,7 @@ export function createSessionState(input: SessionStateInput): SessionState {
     availableThinkingLevels: input.availableThinkingLevels,
     isStreaming: input.isStreaming,
     pendingMessageCount: input.pendingMessageCount,
+    queuedPrompts: input.queuedPrompts ?? [],
     updatedAt: input.updatedAt,
     contextTokens: input.contextTokens,
     contextWindow: input.contextWindow,

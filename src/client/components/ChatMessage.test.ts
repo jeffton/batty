@@ -61,7 +61,8 @@ describe("ChatMessage", () => {
     });
 
     expect(wrapper.text()).toContain("Here you go.");
-    expect(wrapper.findAll(".attached-files__card")).toHaveLength(4);
+    expect(wrapper.text()).not.toContain("attach-files");
+    expect(wrapper.findAll(".attached-files__card")).toHaveLength(2);
     expect(wrapper.findAll("img.attached-files__preview")).toHaveLength(1);
     expect(wrapper.findAll("video.attached-files__preview")).toHaveLength(1);
     expect(wrapper.find("img.attached-files__preview").attributes("src")).toBe(
@@ -70,9 +71,10 @@ describe("ChatMessage", () => {
     expect(wrapper.find("video.attached-files__preview").attributes("src")).toBe(
       "/api/sent-files/workspace/session/call/video-1",
     );
+    expect(wrapper.find(".message__segment--bubble .attached-files__card").exists()).toBe(true);
   });
 
-  it("renders session-mode subagent attachments at the end of the outer assistant response", () => {
+  it("renders subagent attachments at the end of the outer assistant response", () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-2",
       role: "assistant",
@@ -110,7 +112,7 @@ describe("ChatMessage", () => {
               model: "openai/gpt-5",
               effort: "medium",
               includeSessionContext: true,
-              respondIn: "session",
+              respondIn: "tool-call",
               messageCount: 3,
             },
           },

@@ -6,6 +6,7 @@ import AttachedFilesList from "@/client/components/AttachedFilesList.vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
 import MarkdownBlock from "@/client/components/MarkdownBlock.vue";
 import ToolCallBlock from "@/client/components/ToolCallBlock.vue";
+import { isAttachmentOutputToolCall } from "@/client/lib/transcript";
 import type { ToolDisplayState } from "@/client/lib/transcript";
 import type { SentFileDescriptor, UiContentBlock, UiMessage } from "@/shared/types";
 
@@ -36,6 +37,10 @@ function isBubbleBlock(block: UiContentBlock): boolean {
   return block.type === "text" || block.type === "image";
 }
 
+function showAssistantBlock(block: UiContentBlock): boolean {
+  return !isAttachmentOutputToolCall(block, props.toolStatesByCallId);
+}
+
 function isSentFileDescriptor(candidate: unknown): candidate is SentFileDescriptor {
   return (
     !!candidate &&
@@ -49,38 +54,36 @@ function isSentFileDescriptor(candidate: unknown): candidate is SentFileDescript
   );
 }
 
-function subagentRespondIn(toolCallId: string): string | undefined {
-  const subagent = toolStateFor(toolCallId)?.resultDetails?.subagent;
-  return subagent && typeof subagent === "object" && typeof subagent.respondIn === "string"
-    ? subagent.respondIn
-    : undefined;
-}
-
 const assistantSegments = computed<AssistantSegment[]>(() => {
-  if (props.message.role !== "assistant" || props.message.blocks.length === 0) {
+  if (props.message.role !== "assistant") {
     return [];
   }
 
-  let trailingBubbleStart = props.message.blocks.length;
+  const blocks = props.message.blocks.filter(showAssistantBlock);
+  if (blocks.length === 0) {
+    return [];
+  }
+
+  let trailingBubbleStart = blocks.length;
 
   while (
     trailingBubbleStart > 0 &&
-    isBubbleBlock(props.message.blocks[trailingBubbleStart - 1] as UiContentBlock)
+    isBubbleBlock(blocks[trailingBubbleStart - 1] as UiContentBlock)
   ) {
     trailingBubbleStart -= 1;
   }
 
   if (trailingBubbleStart === 0) {
-    return [{ kind: "bubble", blocks: [...props.message.blocks] }];
+    return [{ kind: "bubble", blocks }];
   }
 
-  if (trailingBubbleStart === props.message.blocks.length) {
-    return [{ kind: "plain", blocks: [...props.message.blocks] }];
+  if (trailingBubbleStart === blocks.length) {
+    return [{ kind: "plain", blocks }];
   }
 
   return [
-    { kind: "plain", blocks: props.message.blocks.slice(0, trailingBubbleStart) },
-    { kind: "bubble", blocks: props.message.blocks.slice(trailingBubbleStart) },
+    { kind: "plain", blocks: blocks.slice(0, trailingBubbleStart) },
+    { kind: "bubble", blocks: blocks.slice(trailingBubbleStart) },
   ];
 });
 
@@ -111,6 +114,11 @@ const showAssistantErrorBubble = computed(
   () => props.message.role === "assistant" && assistantSegments.value.length === 0,
 );
 
+const hasTrailingAssistantBubble = computed(() => {
+  const lastSegment = assistantSegments.value.at(-1);
+  return lastSegment?.kind === "bubble";
+});
+
 const attachedFiles = computed<SentFileDescriptor[]>(() => {
   if (props.message.role !== "assistant") {
     return [];
@@ -124,10 +132,8 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
       continue;
     }
 
-    if (block.name !== "attach-files") {
-      if (!(block.name === "subagent" && subagentRespondIn(block.id) === "session")) {
-        continue;
-      }
+    if (block.name !== "attach-files" && block.name !== "subagent") {
+      continue;
     }
 
     const candidates = toolStateFor(block.id)?.resultDetails?.sentFiles;
@@ -210,8 +216,25 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
             :result-blocks="toolStateFor(block.id)?.resultBlocks ?? []"
             :result-details="toolStateFor(block.id)?.resultDetails"
             :status="toolStateFor(block.id)?.status"
+            :suppress-sent-files="block.name === 'attach-files' || block.name === 'subagent'"
           />
         </template>
+
+        <AttachedFilesList
+          v-if="
+            attachedFiles.length > 0 &&
+            segmentIndex === assistantSegments.length - 1 &&
+            segment.kind === 'bubble'
+          "
+          :files="attachedFiles"
+        />
+      </div>
+
+      <div
+        v-if="attachedFiles.length > 0 && !hasTrailingAssistantBubble"
+        class="message__segment message__segment--bubble"
+      >
+        <AttachedFilesList :files="attachedFiles" />
       </div>
 
       <div
@@ -220,8 +243,6 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
       >
         <div class="message__text">{{ assistantErrorText }}</div>
       </div>
-
-      <AttachedFilesList v-if="attachedFiles.length > 0" :files="attachedFiles" />
     </div>
 
     <div v-else class="message__body">

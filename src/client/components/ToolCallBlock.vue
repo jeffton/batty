@@ -29,6 +29,7 @@ const props = withDefaults(
     arguments: Record<string, unknown>;
     toolCallId?: string;
     compact?: boolean;
+    suppressSentFiles?: boolean;
     status?: "running" | "success" | "error";
     resultBlocks?: UiContentBlock[];
     resultDetails?: ToolExecutionDetails;
@@ -36,6 +37,7 @@ const props = withDefaults(
   {
     toolCallId: undefined,
     compact: false,
+    suppressSentFiles: false,
     status: undefined,
     resultBlocks: () => [],
     resultDetails: undefined,
@@ -115,7 +117,10 @@ const subagentOpenLabel = computed(() =>
   props.status === "running" ? "Open live session" : "Open session",
 );
 const hasResultContent = computed(() =>
-  hasToolResultContent(props.resultBlocks, props.resultDetails),
+  hasToolResultContent(
+    props.resultBlocks,
+    props.suppressSentFiles ? { ...props.resultDetails, sentFiles: [] } : props.resultDetails,
+  ),
 );
 const bashTextOutput = computed(() =>
   props.name !== "bash"
@@ -246,6 +251,23 @@ const showEditDiff = computed(() => {
 
   return typeof oldTextValue.value === "string" || typeof newTextValue.value === "string";
 });
+const sentFiles = computed(() =>
+  Array.isArray(props.resultDetails?.sentFiles)
+    ? props.resultDetails.sentFiles.filter(
+        (file): file is SentFileDescriptor =>
+          Boolean(file) &&
+          typeof file === "object" &&
+          typeof file.id === "string" &&
+          typeof file.name === "string" &&
+          typeof file.size === "number" &&
+          typeof file.mimeType === "string" &&
+          typeof file.kind === "string" &&
+          typeof file.downloadUrl === "string",
+      )
+    : [],
+);
+const hasVisibleSentFiles = computed(() => !props.suppressSentFiles && sentFiles.value.length > 0);
+
 const showResultSection = computed(() => {
   if (props.name === "read") {
     return props.status === "error" && visibleResultBlocks.value.length > 0;
@@ -264,7 +286,7 @@ const showResultSection = computed(() => {
   }
 
   if (props.name === "attach-files") {
-    return props.status === "error" || sentFiles.value.length > 0 || hasResultContent.value;
+    return props.status === "error" || hasVisibleSentFiles.value || hasResultContent.value;
   }
 
   if (props.name === "subagent" && subagentRespondIn.value === "session") {
@@ -307,21 +329,6 @@ const genericEntries = computed(() => {
     .map(([key, value]) => ({ key, value: formatValue(value) }))
     .filter((entry) => entry.value.trim().length > 0);
 });
-const sentFiles = computed(() =>
-  Array.isArray(props.resultDetails?.sentFiles)
-    ? props.resultDetails.sentFiles.filter(
-        (file): file is SentFileDescriptor =>
-          Boolean(file) &&
-          typeof file === "object" &&
-          typeof file.id === "string" &&
-          typeof file.name === "string" &&
-          typeof file.size === "number" &&
-          typeof file.mimeType === "string" &&
-          typeof file.kind === "string" &&
-          typeof file.downloadUrl === "string",
-      )
-    : [],
-);
 </script>
 
 <template>
@@ -457,7 +464,7 @@ const sentFiles = computed(() =>
 
       <AttachedFilesList
         v-if="
-          sentFiles.length > 0 && !(props.name === 'subagent' && subagentRespondIn === 'session')
+          hasVisibleSentFiles && !(props.name === 'subagent' && subagentRespondIn === 'session')
         "
         :files="sentFiles"
         :preview="props.name !== 'attach-files'"

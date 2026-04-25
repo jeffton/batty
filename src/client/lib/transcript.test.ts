@@ -46,6 +46,68 @@ describe("transcript tool state merging", () => {
     });
   });
 
+  it("moves attachment-only assistant tool calls into the following assistant response", () => {
+    const attachmentAssistant: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-attach",
+      role: "assistant",
+      timestamp: 3,
+      blocks: [
+        {
+          type: "toolCall",
+          id: "attach-1",
+          name: "attach-files",
+          arguments: { paths: ["report.txt"] },
+        },
+      ],
+    };
+    const attachmentResult: Extract<UiMessage, { role: "toolResult" }> = {
+      id: "tool-attach",
+      role: "toolResult",
+      timestamp: 4,
+      toolCallId: "attach-1",
+      toolName: "attach-files",
+      blocks: [{ type: "text", text: "Attached 1 file for the user." }],
+      details: {
+        sentFiles: [
+          {
+            id: "file-1",
+            name: "report.txt",
+            size: 42,
+            mimeType: "text/plain",
+            kind: "file",
+            downloadUrl: "/api/sent-files/file-1?download=1",
+          },
+        ],
+      },
+      isError: false,
+    };
+    const finalAssistant: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-final",
+      role: "assistant",
+      timestamp: 5,
+      blocks: [{ type: "text", text: "Here is the report." }],
+    };
+
+    const messages: SessionState["messages"] = [
+      attachmentAssistant,
+      attachmentResult,
+      finalAssistant,
+    ];
+    const lookup = buildToolStateLookup(messages, []);
+    const transcript = buildTranscriptMessages(messages, lookup);
+
+    expect(transcript).toHaveLength(1);
+    const transcriptMessage = transcript[0]?.message as Extract<UiMessage, { role: "assistant" }>;
+    expect(transcriptMessage.id).toBe("assistant-final");
+    expect(transcriptMessage.blocks).toEqual([
+      { type: "text", text: "Here is the report." },
+      attachmentAssistant.blocks[0],
+    ]);
+    expect(transcript[0]?.toolStatesByCallId.get("attach-1")?.resultDetails).toEqual(
+      attachmentResult.details,
+    );
+  });
+
   it("prefers active tool output while a tool is still running", () => {
     const messages: SessionState["messages"] = [assistantMessage, toolResultMessage];
     const lookup = buildToolStateLookup(messages, [

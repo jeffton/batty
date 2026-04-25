@@ -96,25 +96,103 @@ export function toolStatesForMessage(
   return result;
 }
 
+function hasSentFiles(state: ToolDisplayState | undefined): boolean {
+  return Array.isArray(state?.resultDetails?.sentFiles) && state.resultDetails.sentFiles.length > 0;
+}
+
+export function isAttachmentOutputToolCall(
+  block: UiContentBlock,
+  toolStatesByCallId: Map<string, ToolDisplayState>,
+): boolean {
+  if (block.type !== "toolCall") {
+    return false;
+  }
+
+  const state = toolStatesByCallId.get(block.id);
+  if (state?.status !== "success" || !hasSentFiles(state)) {
+    return false;
+  }
+
+  return (
+    block.name === "attach-files" || (block.name === "subagent" && state.resultBlocks.length === 0)
+  );
+}
+
+function isAttachmentCarrierMessage(
+  message: UiMessage,
+  toolStatesByCallId: Map<string, ToolDisplayState>,
+): boolean {
+  return (
+    message.role === "assistant" &&
+    message.blocks.length > 0 &&
+    message.blocks.every((block) => isAttachmentOutputToolCall(block, toolStatesByCallId))
+  );
+}
+
+export function mergeAttachmentCarrierIntoAssistant(
+  message: Extract<UiMessage, { role: "assistant" }>,
+  attachmentBlocks: UiContentBlock[],
+): Extract<UiMessage, { role: "assistant" }> {
+  return { ...message, blocks: [...message.blocks, ...attachmentBlocks] };
+}
+
 export function buildTranscriptMessages(
   messages: UiMessage[],
   toolStateLookup: ToolStateLookup,
 ): TranscriptMessageView[] {
-  return messages.flatMap((message) => {
+  const entries: TranscriptMessageView[] = [];
+  let pendingAttachmentBlocks: UiContentBlock[] = [];
+  let pendingAttachmentId = "attachment-carrier";
+  let pendingAttachmentTimestamp = 0;
+
+  for (const message of messages) {
     if (
       message.role === "toolResult" &&
       toolStateLookup.referencedToolCallIds.has(message.toolCallId)
     ) {
-      return [];
+      continue;
     }
 
-    return [
-      {
-        message,
-        toolStatesByCallId: toolStatesForMessage(message, toolStateLookup.toolStatesByCallId),
-      },
-    ];
-  });
+    if (
+      message.role === "assistant" &&
+      isAttachmentCarrierMessage(message, toolStateLookup.toolStatesByCallId)
+    ) {
+      if (pendingAttachmentBlocks.length === 0) {
+        pendingAttachmentId = message.id;
+        pendingAttachmentTimestamp = message.timestamp;
+      }
+      pendingAttachmentBlocks = [...pendingAttachmentBlocks, ...message.blocks];
+      continue;
+    }
+
+    const renderedMessage =
+      message.role === "assistant" && pendingAttachmentBlocks.length > 0
+        ? mergeAttachmentCarrierIntoAssistant(message, pendingAttachmentBlocks)
+        : message;
+    pendingAttachmentBlocks = [];
+    pendingAttachmentId = "attachment-carrier";
+    pendingAttachmentTimestamp = 0;
+
+    entries.push({
+      message: renderedMessage,
+      toolStatesByCallId: toolStatesForMessage(renderedMessage, toolStateLookup.toolStatesByCallId),
+    });
+  }
+
+  if (pendingAttachmentBlocks.length > 0) {
+    const message: Extract<UiMessage, { role: "assistant" }> = {
+      id: pendingAttachmentId,
+      role: "assistant",
+      timestamp: pendingAttachmentTimestamp,
+      blocks: pendingAttachmentBlocks,
+    };
+    entries.push({
+      message,
+      toolStatesByCallId: toolStatesForMessage(message, toolStateLookup.toolStatesByCallId),
+    });
+  }
+
+  return entries;
 }
 
 export function hasToolResultContent(

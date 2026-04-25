@@ -467,7 +467,7 @@ defineExpose({ clear, restore });
   border-radius: 0;
   background: var(--color-bg-panel-strong);
   color: inherit;
-  padding: 0.45rem 0 0.5rem;
+  padding: 0.85rem 0 0.5rem;
   font-size: 0.95rem;
   line-height: 1.5;
   outline: none;

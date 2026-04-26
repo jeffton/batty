@@ -432,9 +432,11 @@ defineExpose({ clear, restore });
             aria-label="Model and thinking"
             @click="emit('refreshModels')"
           >
-            <Bot :size="17" />
-            <span class="composer__model-label">{{ props.modelButtonLabel }}</span>
-            <span class="composer__model-effort">{{ props.thinkingButtonLabel }}</span>
+            <Bot :size="17" class="composer__model-icon" />
+            <span class="composer__model-info">
+              <span class="composer__model-label">{{ props.modelButtonLabel }}</span>
+              <span class="composer__model-effort">{{ props.thinkingButtonLabel }}</span>
+            </span>
           </button>
 
           <ModelConfigPopover
@@ -629,17 +631,18 @@ defineExpose({ clear, restore });
 }
 
 .composer__model-button {
-  max-width: min(12rem, 42vw);
+  max-width: min(12rem, 44vw);
   min-height: 2.5rem;
   padding: 0 0.55rem;
   border: 0;
   border-radius: 0.5rem;
   background: transparent;
   color: var(--color-text-muted);
-  display: inline-flex;
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   justify-content: center;
-  gap: 0.25rem;
+  gap: 0.35rem;
   transition:
     background 80ms ease,
     color 80ms ease;
@@ -656,6 +659,18 @@ defineExpose({ clear, restore });
   opacity: 0.4;
 }
 
+.composer__model-icon {
+  display: block;
+}
+
+.composer__model-info {
+  min-width: 0;
+  display: grid;
+  gap: 0.05rem;
+  text-align: left;
+  line-height: 1.05;
+}
+
 .composer__model-label,
 .composer__model-effort {
   min-width: 0;
@@ -665,14 +680,14 @@ defineExpose({ clear, restore });
 }
 
 .composer__model-label {
-  font-size: 0.82rem;
+  color: var(--color-text-strong);
+  font-size: 0.8rem;
   font-weight: 600;
 }
 
 .composer__model-effort {
-  flex-shrink: 0;
   color: var(--color-text-subtle);
-  font-size: 0.72rem;
+  font-size: 0.7rem;
 }
 
 .composer__stream-actions {

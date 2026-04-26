@@ -121,11 +121,10 @@ watch(
 }
 
 .mc-popover--up:popover-open {
-  position-area: block-start span-inline-end;
-  position-try-fallbacks:
-    block-start span-inline-start,
-    block-end span-inline-end,
-    block-end span-inline-start;
+  position-area: normal;
+  position-try-fallbacks: none;
+  inset-block: auto calc(var(--safe-area-bottom) + 4.5rem);
+  inset-inline: auto calc(var(--safe-area-right) + 0.8rem);
 }
 
 .mc-popover::backdrop {

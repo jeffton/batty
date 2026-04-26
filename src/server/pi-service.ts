@@ -1,12 +1,10 @@
 import path from "node:path";
-import { randomUUID } from "node:crypto";
 import {
   AuthStorage,
   ModelRegistry,
   SessionManager,
   type AgentSession,
   type ExtensionContext,
-  type ToolDefinition,
 } from "@mariozechner/pi-coding-agent";
 import type {
   CronJobSession,
@@ -23,22 +21,18 @@ import type {
 } from "@/shared/types";
 import type { AppConfig } from "./config";
 import { getSessionContextUsage } from "./pi-context-usage";
-import { createPiAgentSession, refreshBattySystemPrompt } from "./pi-agent-session";
-import { buildCronRuntimeNotice } from "./runtime-notices";
-import { createSessionState, normalizeBlocks } from "./pi-state";
+import {
+  createPiAgentSession as createPiAgentSessionImpl,
+  refreshBattySystemPrompt,
+} from "./pi-agent-session";
+import { createSessionState } from "./pi-state";
 import { battyAgentDir, workspaceSessionDir } from "./pi-paths";
 import { listSessionSummaries as listFastSessionSummaries } from "./session-summaries";
 import { ProviderAuthService } from "./provider-auth";
-import { hasSubagentSessionMarker, SUBAGENT_TOOL_NAME } from "./subagent";
+import { hasSubagentSessionMarker } from "./subagent";
 import { getSessionMessagePage } from "./pi-service-message-page";
 import { getQueuedPrompts, removeQueuedPrompt } from "./pi-service-queue";
 import { preparePromptFiles } from "./pi-service-uploads";
-import {
-  createAttachFilesTool,
-  createCronTool,
-  createSubagentTool,
-  createWebSearchTool,
-} from "./pi-service-tools";
 import {
   attachSession,
   disposeWebSession,
@@ -49,11 +43,7 @@ import {
   subscribeToSession,
 } from "./pi-service-sessions";
 import {
-  appendCronSubagentCompletion,
-  appendCronSubagentStart,
   appendRuntimeNoticeMessage,
-  buildFailedCronSubagentResult,
-  findDanglingCronSubagentToolCall,
   resolveOrCreateDailySession,
   resolveSubagentDefaults,
   runDetachedSubagentSession,
@@ -62,7 +52,6 @@ import {
 } from "./pi-service-subagents";
 import {
   modelKey,
-  normalizeToolDetails,
   sessionUpdatedAt,
   toModelOption,
   type LiveSession,
@@ -72,6 +61,8 @@ import {
   type WebSession,
 } from "./pi-service-types";
 import type { CronService } from "./cron";
+import { recoverDanglingCronSubagent, runCronJobSession } from "./pi-service-cron-adapter";
+import { createPiServiceTools } from "./pi-service-tool-factory";
 
 export type { UploadedFile } from "./pi-service-types";
 
@@ -193,159 +184,30 @@ export class PiService {
     session: CronJobSession;
     scheduleLabel: string;
   }): Promise<{ sessionId: string; sessionPath: string }> {
-    const cronNotice = buildCronRuntimeNotice(job.scheduleLabel);
-    if (job.session.kind === "new") {
-      const session = await this.createSession(job.workspace, {
-        modelId: job.model,
-        thinkingLevel: job.thinkingLevel,
-      });
-      const current = this.requireSession(session.id);
-      this.appendRuntimeNotice(current.session, cronNotice);
-      await this.prompt(
-        session.id,
-        job.prompt,
-        [],
-        current.session.isStreaming ? "followUp" : undefined,
-      );
-
-      return {
-        sessionId: current.session.sessionId,
-        sessionPath: this.requireSessionPath(session.id),
-      };
-    }
-
-    const session = await this.resolveOrCreateDailySession(job.workspace, {
-      modelId: job.model,
-      thinkingLevel: job.thinkingLevel,
-    });
-    const webSession = this.requireSession(session.id);
-
-    return this.runSubagentSerial(webSession.session.sessionId, async () => {
-      const recovered = this.recoverDanglingCronSubagent(
-        webSession,
-        "Cron subagent did not finish before the server stopped.",
-      );
-      if (recovered) {
-        this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
-        this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
-      }
-      await webSession.session.agent.waitForIdle();
-
-      if (job.session.kind === "daily-inline") {
-        this.setThinkingLevel(session.id, job.thinkingLevel);
-        await this.setModel(session.id, job.model);
-        this.appendRuntimeNotice(webSession.session, cronNotice);
-        this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
-        await webSession.session.prompt(job.prompt);
-        return {
-          sessionId: webSession.session.sessionId,
-          sessionPath: this.requireSessionPath(webSession.id),
-        };
-      }
-      if (job.session.kind !== "daily-subagent") {
-        throw new Error(`Invalid cron session kind: ${job.session.kind}`);
-      }
-
-      const includePreviousContext = job.session.includePreviousContext === true;
-      const contextBranchLeafId = includePreviousContext
-        ? webSession.session.sessionManager.getLeafId()
-        : undefined;
-      const parentSessionPath = this.requireSessionPath(webSession.id);
-      const toolCallId = `${SUBAGENT_TOOL_NAME}-${randomUUID()}`;
-      const toolArgs = {
-        prompt: job.prompt,
-        model: job.model,
-        effort: job.thinkingLevel,
-        includeSessionContext: includePreviousContext,
-      };
-
-      this.appendCronSubagentStart(webSession.session, toolCallId, toolArgs, cronNotice);
-      webSession.activeTools.set(toolCallId, {
-        toolCallId,
-        toolName: SUBAGENT_TOOL_NAME,
-        args: toolArgs,
-        blocks: [],
-        status: "running",
-        isError: false,
-        details: undefined,
-      });
-      this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
-
-      let completionAppended = false;
-      const abortController = new AbortController();
-      this.cronSubagentAbortControllers.set(toolCallId, abortController);
-      try {
-        const result = await this.runDetachedSubagentSession({
-          workspace: job.workspace,
-          parentSessionId: webSession.session.sessionId,
-          parentSessionPath,
-          contextBranchLeafId,
-          prompt: job.prompt,
-          modelId: job.model,
-          thinkingLevel: job.thinkingLevel,
-          includeSessionContext: includePreviousContext,
-          respondIn: "session",
-          preludeNotices: [cronNotice],
-          currentToolCallId: toolCallId,
-          signal: abortController.signal,
-          onUpdate: (partial) => {
-            const current = webSession.activeTools.get(toolCallId);
-            if (!current) {
-              return;
-            }
-            current.blocks = normalizeBlocks(partial.content ?? []);
-            current.details = normalizeToolDetails(partial.details);
-            webSession.activeTools.set(toolCallId, current);
-            this.publish(webSession, {
-              type: "tools",
-              tools: [...webSession.activeTools.values()],
-            });
-          },
-        });
-
-        this.appendCronSubagentCompletion(webSession.session, toolCallId, result);
-        completionAppended = true;
-        const completedState = this.getState(webSession.id);
-        this.publish(webSession, { type: "reset", state: completedState });
-        try {
-          await this.onAgentCompleted?.({
-            ...completedState,
-            isStreaming: false,
-            pendingMessageCount: 0,
-            activeAssistant: undefined,
-          });
-        } catch (error) {
-          console.error("Failed to run agent completion hook for cron subagent", error);
-        }
-        await this.notifyWorkspaceUpdated(job.workspace.id);
-
-        if (result.isError) {
-          throw new Error(result.errorMessage || result.text || "Subagent failed");
-        }
-
-        return {
-          sessionId: webSession.session.sessionId,
-          sessionPath: this.requireSessionPath(webSession.id),
-        };
-      } catch (error) {
-        if (
-          !completionAppended &&
-          findDanglingCronSubagentToolCall(webSession.session)?.id === toolCallId
-        ) {
-          this.appendCronSubagentCompletion(
-            webSession.session,
-            toolCallId,
-            buildFailedCronSubagentResult(toolArgs, error),
-          );
-          this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
-        }
-        throw error;
-      } finally {
-        this.cronSubagentAbortControllers.delete(toolCallId);
-        webSession.activeTools.delete(toolCallId);
-        this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
-      }
-    });
+    return runCronJobSession(
+      {
+        cronSubagentAbortControllers: this.cronSubagentAbortControllers,
+        createSession: (workspace, options) => this.createSession(workspace, options),
+        prompt: (sessionId, text, files, streamingBehavior) =>
+          this.prompt(sessionId, text, files, streamingBehavior),
+        resolveOrCreateDailySession: (workspace, options) =>
+          this.resolveOrCreateDailySession(workspace, options),
+        requireSession: (sessionId) => this.requireSession(sessionId),
+        requireSessionPath: (sessionId) => this.requireSessionPath(sessionId),
+        runSubagentSerial: (sessionId, run) => this.runSubagentSerial(sessionId, run),
+        getState: (sessionId) => this.getState(sessionId),
+        publishReset: (webSession, state) => this.publish(webSession, { type: "reset", state }),
+        publishTools: (webSession) =>
+          this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] }),
+        setThinkingLevel: (sessionId, thinkingLevel) =>
+          this.setThinkingLevel(sessionId, thinkingLevel),
+        setModel: (sessionId, modelId) => this.setModel(sessionId, modelId),
+        runDetachedSubagentSession: (options) => this.runDetachedSubagentSession(options),
+        onAgentCompleted: this.onAgentCompleted,
+        notifyWorkspaceUpdated: (workspaceId) => this.notifyWorkspaceUpdated(workspaceId),
+      },
+      job,
+    );
   }
 
   async createOrOpenDailySession(workspace: WorkspaceInfo): Promise<SessionState> {
@@ -354,23 +216,6 @@ export class PiService {
 
   private async waitForSubagentQueue(sessionId: string): Promise<void> {
     await waitForSubagentQueue(this.subagentQueues, sessionId);
-  }
-
-  private recoverDanglingCronSubagent(webSession: WebSession, error: string): boolean {
-    const dangling = findDanglingCronSubagentToolCall(webSession.session);
-    if (!dangling) {
-      return false;
-    }
-
-    this.cronSubagentAbortControllers.get(dangling.id)?.abort();
-    this.cronSubagentAbortControllers.delete(dangling.id);
-    webSession.activeTools.delete(dangling.id);
-    this.appendCronSubagentCompletion(
-      webSession.session,
-      dangling.id,
-      buildFailedCronSubagentResult(dangling.args, error),
-    );
-    return true;
   }
 
   private appendRuntimeNotice(
@@ -412,7 +257,7 @@ export class PiService {
       content: Array<{ type: "text"; text: string }>;
       details: ToolExecutionDetails;
     }) => void;
-  }) {
+  }): ReturnType<typeof runDetachedSubagentSession> {
     return runDetachedSubagentSession(
       {
         createPiAgentSession: (workspace, sessionManager, createOptions) =>
@@ -424,34 +269,6 @@ export class PiService {
       },
       options,
     );
-  }
-
-  private appendCronSubagentStart(
-    session: AgentSession,
-    toolCallId: string,
-    args: {
-      prompt: string;
-      model: string;
-      effort: string;
-      includeSessionContext: boolean;
-    },
-    notice: { kind: "cron" | "subagent"; text: string },
-  ): void {
-    appendCronSubagentStart(session, toolCallId, args, notice);
-  }
-
-  private appendCronSubagentCompletion(
-    session: AgentSession,
-    toolCallId: string,
-    result: {
-      text: string;
-      details: ToolExecutionDetails;
-      finalAssistant?: any;
-      isError: boolean;
-      errorMessage?: string;
-    },
-  ): void {
-    appendCronSubagentCompletion(session, toolCallId, result);
   }
 
   private async resolveOrCreateDailySession(
@@ -595,7 +412,8 @@ export class PiService {
     streamingBehavior?: "steer" | "followUp",
   ): Promise<void> {
     const webSession = this.requireSession(sessionId);
-    const recovered = this.recoverDanglingCronSubagent(
+    const recovered = recoverDanglingCronSubagent(
+      { cronSubagentAbortControllers: this.cronSubagentAbortControllers },
       webSession,
       "Cron subagent did not finish before the next prompt.",
     );
@@ -638,9 +456,9 @@ export class PiService {
     workspace: WorkspaceInfo,
     sessionManager: SessionManager,
     options?: { modelId?: string; thinkingLevel?: string },
-  ) {
+  ): ReturnType<typeof createPiAgentSessionImpl> {
     const model = options?.modelId ? await this.resolveModel(options.modelId) : undefined;
-    return createPiAgentSession({
+    return createPiAgentSessionImpl({
       config: this.config,
       workspace,
       sessionManager,
@@ -648,12 +466,16 @@ export class PiService {
       modelRegistry: this.modelRegistry,
       model,
       thinkingLevel: options?.thinkingLevel,
-      customTools: [
-        this.createSubagentTool(workspace),
-        this.createCronTool(workspace),
-        this.createWebSearchTool(),
-        this.createAttachFilesTool(workspace),
-      ],
+      customTools: createPiServiceTools(
+        {
+          config: this.config,
+          cronService: this.cronService,
+          resolveSubagentDefaults: (sessionId, ctx) => this.resolveSubagentDefaults(sessionId, ctx),
+          runSubagentSerial: (sessionId, run) => this.runSubagentSerial(sessionId, run),
+          runDetachedSubagentSession: (request) => this.runDetachedSubagentSession(request),
+        },
+        workspace,
+      ),
     });
   }
 
@@ -718,35 +540,6 @@ export class PiService {
 
   private async refreshBattySystemPrompt(webSession: WebSession): Promise<void> {
     await refreshBattySystemPrompt(this.config, webSession);
-  }
-
-  private createSubagentTool(workspace: WorkspaceInfo): ToolDefinition<any> {
-    return createSubagentTool({
-      workspace,
-      config: this.config,
-      resolveSubagentDefaults: (sessionId, ctx) => this.resolveSubagentDefaults(sessionId, ctx),
-      runSubagentSerial: (sessionId, run) => this.runSubagentSerial(sessionId, run),
-      runDetachedSubagentSession: (request) => this.runDetachedSubagentSession(request),
-    });
-  }
-
-  private createCronTool(workspace: WorkspaceInfo): ToolDefinition<any> {
-    return createCronTool({
-      workspace,
-      cronService: this.cronService,
-      resolveSubagentDefaults: (sessionId, ctx) => this.resolveSubagentDefaults(sessionId, ctx),
-    });
-  }
-
-  private createWebSearchTool(): ToolDefinition<any> {
-    return createWebSearchTool(this.config);
-  }
-
-  private createAttachFilesTool(workspace: WorkspaceInfo): ToolDefinition<any> {
-    return createAttachFilesTool({
-      workspace,
-      config: this.config,
-    });
   }
 
   private async resolveModel(modelId: string): Promise<PiModel> {

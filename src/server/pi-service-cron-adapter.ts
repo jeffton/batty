@@ -32,7 +32,7 @@ export type PiServiceCronAdapterContext = {
     workspace: WorkspaceInfo,
     options?: { modelId?: string; thinkingLevel?: string; ephemeral?: boolean },
   ) => Promise<SessionState>;
-  promptCron: (sessionId: string, text: string, notice: RuntimeNotice) => Promise<void>;
+  promptCron: (sessionId: string, notice: RuntimeNotice) => Promise<void>;
   resolveOrCreateDailySession: (
     workspace: WorkspaceInfo,
     options?: { modelId?: string; thinkingLevel?: string },
@@ -87,7 +87,7 @@ export async function runCronJobSession(
       thinkingLevel: job.thinkingLevel,
     });
     const current = context.requireSession(session.id);
-    await context.promptCron(session.id, job.prompt, cronNotice);
+    await context.promptCron(session.id, cronNotice);
 
     return {
       sessionId: current.session.sessionId,
@@ -117,7 +117,7 @@ export async function runCronJobSession(
       context.setThinkingLevel(session.id, job.thinkingLevel);
       await context.setModel(session.id, job.model);
       context.publishReset(webSession, context.getState(webSession.id));
-      await context.promptCron(session.id, job.prompt, cronNotice);
+      await context.promptCron(session.id, cronNotice);
       return {
         sessionId: webSession.session.sessionId,
         sessionPath: context.requireSessionPath(webSession.id),

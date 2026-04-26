@@ -190,7 +190,7 @@ export class PiService {
       {
         cronSubagentAbortControllers: this.cronSubagentAbortControllers,
         createSession: (workspace, options) => this.createSession(workspace, options),
-        promptCron: (sessionId, text, notice) => this.promptCron(sessionId, text, notice),
+        promptCron: (sessionId, notice) => this.promptCron(sessionId, notice),
         resolveOrCreateDailySession: (workspace, options) =>
           this.resolveOrCreateDailySession(workspace, options),
         requireSession: (sessionId) => this.requireSession(sessionId),
@@ -406,7 +406,7 @@ export class PiService {
     return this.getState(sessionId);
   }
 
-  async promptCron(sessionId: string, text: string, notice: RuntimeNotice): Promise<void> {
+  async promptCron(sessionId: string, notice: RuntimeNotice): Promise<void> {
     const webSession = this.requireSession(sessionId);
     const timestamp = Date.now();
     const messages: Message[] = [
@@ -416,12 +416,6 @@ export class PiService {
         content: notice.text,
         timestamp,
       } as unknown as Message,
-      {
-        role: "user",
-        content: [{ type: "text", text }],
-        display: false,
-        timestamp: timestamp + 1,
-      } as Message,
     ];
 
     await webSession.session.agent.prompt(messages);

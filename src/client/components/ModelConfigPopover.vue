@@ -11,6 +11,7 @@ const props = defineProps<{
   currentModelId?: string;
   currentThinkingLevel: string;
   thinkingOptions: string[];
+  placement?: "down" | "up";
 }>();
 
 const emit = defineEmits<{
@@ -54,7 +55,7 @@ watch(
 <template>
   <div
     :id="props.popoverId"
-    class="mc-popover"
+    :class="['mc-popover', props.placement === 'up' ? 'mc-popover--up' : '']"
     :style="{ 'position-anchor': props.anchorName }"
     popover="auto"
   >
@@ -117,6 +118,14 @@ watch(
   color: inherit;
   box-shadow: var(--color-shadow-popover);
   gap: 0.35rem;
+}
+
+.mc-popover--up:popover-open {
+  position-area: block-start span-inline-end;
+  position-try-fallbacks:
+    block-start span-inline-start,
+    block-end span-inline-end,
+    block-end span-inline-start;
 }
 
 .mc-popover::backdrop {

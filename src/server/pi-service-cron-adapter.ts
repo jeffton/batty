@@ -77,7 +77,10 @@ export async function runCronJobSession(
   context: PiServiceCronAdapterContext,
   job: CronJobRun,
 ): Promise<{ sessionId: string; sessionPath: string }> {
-  const cronNotice = buildCronRuntimeNotice(job.scheduleLabel, job.prompt);
+  const cronNotice = buildCronRuntimeNotice({
+    scheduleLabel: job.scheduleLabel,
+    prompt: job.prompt,
+  });
   if (job.session.kind === "new") {
     const session = await context.createSession(job.workspace, {
       modelId: job.model,

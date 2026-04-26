@@ -123,8 +123,11 @@ watch(
 .mc-popover--up:popover-open {
   position-area: normal;
   position-try-fallbacks: none;
-  inset-block: auto calc(var(--safe-area-bottom) + 4.5rem);
-  inset-inline: auto calc(var(--safe-area-right) + 0.8rem);
+  top: auto;
+  right: calc(var(--safe-area-right) + 0.8rem);
+  bottom: calc(var(--safe-area-bottom) + 4.5rem);
+  left: auto;
+  margin: 0;
 }
 
 .mc-popover::backdrop {

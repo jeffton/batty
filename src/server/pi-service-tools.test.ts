@@ -20,7 +20,7 @@ describe("createSubagentTool", () => {
           model: "openai/gpt-5",
           effort: "medium",
           includeSessionContext: false,
-          respondIn: "session",
+          respondIn: "tool-call",
           messageCount: 1,
         },
       },
@@ -49,12 +49,12 @@ describe("createSubagentTool", () => {
         modelId: "openai/gpt-5",
         thinkingLevel: "medium",
         includeSessionContext: false,
-        respondIn: "session",
+        respondIn: "tool-call",
         currentToolCallId: "tool-call-1",
       }),
     );
     expect(result).toMatchObject({
-      content: [],
+      content: [{ type: "text", text: "done" }],
       isError: false,
     });
     expect(result).not.toHaveProperty("terminate");
@@ -74,7 +74,7 @@ describe("createSubagentTool", () => {
             model: "openai/gpt-5",
             effort: "medium",
             includeSessionContext: false,
-            respondIn: "session",
+            respondIn: "tool-call",
             messageCount: 1,
             errorMessage: "subagent failed",
           },

@@ -37,6 +37,12 @@ interface DetachedSubagentResult {
   isError: boolean;
 }
 
+function subagentToolContent(
+  result: DetachedSubagentResult,
+): Array<{ type: "text"; text: string }> {
+  return [{ type: "text", text: result.text || "(no output)" }];
+}
+
 interface DetachedSubagentRequest {
   workspace: WorkspaceInfo;
   parentSessionId: string;
@@ -123,13 +129,13 @@ export function createSubagentTool({
           modelId,
           thinkingLevel,
           includeSessionContext,
-          respondIn: "session",
+          respondIn: "tool-call",
           currentToolCallId: toolCallId,
           signal,
           onUpdate,
         });
         return {
-          content: result.isError ? [{ type: "text", text: result.text || "(no output)" }] : [],
+          content: subagentToolContent(result),
           details: result.details,
           isError: result.isError,
         };

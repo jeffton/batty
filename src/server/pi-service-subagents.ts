@@ -250,6 +250,15 @@ function createDetachedSubagentSessionManager(
   return sourceManager;
 }
 
+function subagentUpdateContent(
+  options: Pick<DetachedSubagentOptions, "respondIn">,
+  text: string,
+): Array<{ type: "text"; text: string }> {
+  return options.respondIn === "tool-call" && text.trim().length > 0
+    ? [{ type: "text", text }]
+    : [];
+}
+
 function assistantHasRenderableContent(message: AssistantMessage | undefined): boolean {
   if (!message || !Array.isArray(message.content)) {
     return false;
@@ -380,7 +389,7 @@ export async function runDetachedSubagentSession(
 
     lastText = text;
     options.onUpdate?.({
-      content: [],
+      content: subagentUpdateContent(options, text),
       details: buildSubagentDetails(
         {
           prompt: options.prompt,

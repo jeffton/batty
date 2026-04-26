@@ -503,7 +503,6 @@ export function appendCronSubagentStart(
   const timestamp = Date.now();
   appendRuntimeNoticeMessage(session, notice, timestamp);
   appendMessages(session, [
-    { role: "user", content: args.prompt, timestamp: timestamp + 1 },
     {
       role: "assistant",
       content: [
@@ -519,7 +518,7 @@ export function appendCronSubagentStart(
       model: session.model?.id ?? args.model,
       usage: ZERO_USAGE,
       stopReason: "toolUse",
-      timestamp: timestamp + 2,
+      timestamp: timestamp + 1,
     } satisfies AssistantMessage,
   ]);
 }

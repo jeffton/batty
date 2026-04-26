@@ -34,6 +34,11 @@ export const useAppStore = defineStore("app", {
 
       return state.cronJobsByWorkspace[state.selectedWorkspaceId] ?? [];
     },
+    workspaceEasyMode(state): boolean {
+      return state.selectedWorkspaceId
+        ? (state.workspaceUiSettings[state.selectedWorkspaceId]?.easyMode ?? false)
+        : false;
+    },
   },
   actions: {
     ...authBootstrapActions,

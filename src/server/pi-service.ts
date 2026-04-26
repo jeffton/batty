@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { Message } from "@mariozechner/pi-ai";
 import {
   AuthStorage,
   ModelRegistry,
@@ -63,6 +64,7 @@ import {
 import type { CronService } from "./cron";
 import { recoverDanglingCronSubagent, runCronJobSession } from "./pi-service-cron-adapter";
 import { createPiServiceTools } from "./pi-service-tool-factory";
+import type { RuntimeNotice } from "./runtime-notices";
 
 export type { UploadedFile } from "./pi-service-types";
 
@@ -188,8 +190,7 @@ export class PiService {
       {
         cronSubagentAbortControllers: this.cronSubagentAbortControllers,
         createSession: (workspace, options) => this.createSession(workspace, options),
-        prompt: (sessionId, text, files, streamingBehavior) =>
-          this.prompt(sessionId, text, files, streamingBehavior),
+        promptCron: (sessionId, text, notice) => this.promptCron(sessionId, text, notice),
         resolveOrCreateDailySession: (workspace, options) =>
           this.resolveOrCreateDailySession(workspace, options),
         requireSession: (sessionId) => this.requireSession(sessionId),
@@ -403,6 +404,29 @@ export class PiService {
     webSession.session.setThinkingLevel(thinkingLevel as AgentSession["thinkingLevel"]);
     this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
     return this.getState(sessionId);
+  }
+
+  async promptCron(sessionId: string, text: string, notice: RuntimeNotice): Promise<void> {
+    const webSession = this.requireSession(sessionId);
+    const timestamp = Date.now();
+    const messages: Message[] = [
+      {
+        role: "custom",
+        customType: `batty-runtime-notice:${notice.kind}`,
+        content: notice.text,
+        timestamp,
+      } as unknown as Message,
+      {
+        role: "user",
+        content: [{ type: "text", text }],
+        display: false,
+        timestamp: timestamp + 1,
+      } as Message,
+    ];
+
+    await webSession.session.agent.prompt(messages);
+    await (webSession.session as unknown as { waitForRetry: () => Promise<void> }).waitForRetry();
+    this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
   }
 
   async prompt(

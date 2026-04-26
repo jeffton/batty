@@ -9,10 +9,23 @@ export interface RuntimeNotice {
   text: string;
 }
 
-export function buildCronRuntimeNotice(scheduleLabel: string, now = new Date()): RuntimeNotice {
+export function buildCronRuntimeNotice(
+  scheduleLabel: string,
+  promptOrNow?: string | Date,
+  now = new Date(),
+): RuntimeNotice {
+  const prompt = typeof promptOrNow === "string" ? promptOrNow : undefined;
+  const timestamp = promptOrNow instanceof Date ? promptOrNow : now;
+  const lines = [
+    `Cron run triggered. Current time: ${formatLocalDateTime(timestamp)}. Schedule: ${scheduleLabel}`,
+  ];
+  if (prompt?.trim()) {
+    lines.push("", "Prompt:", prompt.trim());
+  }
+
   return {
     kind: "cron",
-    text: `Cron run triggered. Current time: ${formatLocalDateTime(now)}. Schedule: ${scheduleLabel}`,
+    text: lines.join("\n"),
   };
 }
 

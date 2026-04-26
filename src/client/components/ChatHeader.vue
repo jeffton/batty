@@ -25,6 +25,7 @@ const props = defineProps<{
   contextArcStyle: Record<string, string>;
   connectionState: "online" | "connecting" | "offline";
   connectionDescription: string;
+  easyMode: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -32,6 +33,7 @@ const emit = defineEmits<{
   refreshModels: [];
   setModel: [modelId: string];
   setThinkingLevel: [thinkingLevel: string];
+  setEasyMode: [enabled: boolean];
 }>();
 
 function closePopover(id: string): void {
@@ -101,6 +103,16 @@ function closePopover(id: string): void {
     </button>
 
     <CronPopover :popover-id="props.cronPopoverId" :anchor-name="props.cronPopoverAnchor" />
+
+    <label class="header__easy-mode" title="Show only user and agent messages">
+      <span>Easy</span>
+      <input
+        type="checkbox"
+        :checked="props.easyMode"
+        :disabled="!props.selectedWorkspaceId"
+        @change="emit('setEasyMode', ($event.target as HTMLInputElement).checked)"
+      />
+    </label>
 
     <div class="header__spacer" />
 
@@ -295,6 +307,24 @@ function closePopover(id: string): void {
 .header__spacer {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.header__easy-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.18rem 0.35rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-subtle);
+  font-size: 0.72rem;
+  line-height: 1;
+  user-select: none;
+}
+
+.header__easy-mode input {
+  margin: 0;
+  accent-color: var(--color-accent);
 }
 
 .header__context {

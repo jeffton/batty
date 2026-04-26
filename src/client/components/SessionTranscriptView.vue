@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import ChatTranscript from "@/client/components/ChatTranscript.vue";
 import { withoutRenderedToolCalls } from "@/client/lib/active-assistant";
+import { easyModeMessage, easyModeMessages } from "@/client/lib/easy-mode";
 import { splitHistoryAndTail } from "@/client/lib/transcript-tail";
 import {
   buildToolStateLookup,
@@ -28,10 +29,12 @@ const props = withDefaults(
     session?: SessionState;
     loadOlderMessages: () => Promise<void>;
     loadingOlderMessages?: boolean;
+    easyMode?: boolean;
   }>(),
   {
     session: undefined,
     loadingOlderMessages: false,
+    easyMode: false,
   },
 );
 
@@ -43,15 +46,27 @@ let transcriptViewportObserver: ResizeObserver | null = null;
 let followTranscriptToken = 0;
 let lastUserScrollIntentAt = 0;
 
+const visibleMessages = computed(() =>
+  props.easyMode
+    ? easyModeMessages(props.session?.messages ?? [])
+    : (props.session?.messages ?? []),
+);
+const visibleActiveAssistant = computed(() => {
+  const assistant = props.session?.activeAssistant;
+  return props.easyMode && assistant ? easyModeMessage(assistant) : assistant;
+});
+const visibleActiveTools = computed(() =>
+  props.easyMode ? [] : (props.session?.activeTools ?? []),
+);
 const toolStateLookup = computed(() =>
-  buildToolStateLookup(props.session?.messages ?? [], props.session?.activeTools ?? []),
+  buildToolStateLookup(visibleMessages.value, visibleActiveTools.value),
 );
 const transcriptMessages = computed(() =>
-  buildTranscriptMessages(props.session?.messages ?? [], toolStateLookup.value),
+  buildTranscriptMessages(visibleMessages.value, toolStateLookup.value),
 );
 const activeAssistantMessage = computed(() =>
   withoutRenderedToolCalls(
-    props.session?.activeAssistant,
+    visibleActiveAssistant.value?.role === "assistant" ? visibleActiveAssistant.value : undefined,
     toolStateLookup.value.referencedToolCallIds,
   ),
 );
@@ -438,6 +453,7 @@ watch(transcriptPane, () => {
 watch(
   [
     () => props.session?.id,
+    () => props.easyMode,
     transcriptTailSignature,
     activeAssistantSignature,
     activeToolsSignature,

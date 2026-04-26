@@ -96,6 +96,10 @@ function messageId(prefix: string, timestamp: number, index: number): string {
 }
 
 export function normalizeMessage(message: AgentMessage, index: number): UiMessage | undefined {
+  if ((message as { display?: unknown }).display === false) {
+    return undefined;
+  }
+
   if (message.role === "user") {
     return {
       id: messageId("user", message.timestamp, index),

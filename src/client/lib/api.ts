@@ -18,6 +18,7 @@ import type {
   SessionSummary,
   UpdateCronJobInput,
   WorkspaceInfo,
+  WorkspaceUiSettings,
 } from "@/shared/types";
 
 async function request<T>(input: string, init?: RequestInit): Promise<T> {
@@ -278,6 +279,17 @@ export function setSessionModel(sessionId: string, modelId: string): Promise<Ses
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ modelId }),
+  });
+}
+
+export function setWorkspaceUiSettings(
+  workspaceId: string,
+  settings: Partial<WorkspaceUiSettings>,
+): Promise<WorkspaceUiSettings> {
+  return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/ui-settings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
   });
 }
 

@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import ChatTranscript from "@/client/components/ChatTranscript.vue";
 import { withoutRenderedToolCalls } from "@/client/lib/active-assistant";
-import { easyModeMessage, easyModeMessages } from "@/client/lib/easy-mode";
+import { easyModeMessage } from "@/client/lib/easy-mode";
 import { splitHistoryAndTail } from "@/client/lib/transcript-tail";
 import {
   buildToolStateLookup,
@@ -12,6 +12,7 @@ import {
   toolStatesForMessage,
 } from "@/client/lib/transcript";
 import type { SessionState, UiContentBlock } from "@/shared/types";
+import type { TranscriptMessageView } from "@/client/lib/transcript";
 
 const TRANSCRIPT_BOTTOM_THRESHOLD = 12;
 const TRANSCRIPT_LOAD_OLDER_THRESHOLD = 80;
@@ -46,24 +47,28 @@ let transcriptViewportObserver: ResizeObserver | null = null;
 let followTranscriptToken = 0;
 let lastUserScrollIntentAt = 0;
 
-const visibleMessages = computed(() =>
-  props.easyMode
-    ? easyModeMessages(props.session?.messages ?? [])
-    : (props.session?.messages ?? []),
-);
-const visibleActiveAssistant = computed(() => {
-  const assistant = props.session?.activeAssistant;
-  return props.easyMode && assistant ? easyModeMessage(assistant) : assistant;
-});
-const visibleActiveTools = computed(() =>
-  props.easyMode ? [] : (props.session?.activeTools ?? []),
-);
 const toolStateLookup = computed(() =>
-  buildToolStateLookup(visibleMessages.value, visibleActiveTools.value),
+  buildToolStateLookup(props.session?.messages ?? [], props.session?.activeTools ?? []),
 );
 const transcriptMessages = computed(() =>
-  buildTranscriptMessages(visibleMessages.value, toolStateLookup.value),
+  buildTranscriptMessages(props.session?.messages ?? [], toolStateLookup.value),
 );
+const visibleTranscriptMessages = computed<TranscriptMessageView[]>(() => {
+  if (!props.easyMode) {
+    return transcriptMessages.value;
+  }
+
+  return transcriptMessages.value.flatMap((entry) => {
+    const message = easyModeMessage(entry.message, toolStateLookup.value.toolStatesByCallId);
+    return message ? [{ ...entry, message }] : [];
+  });
+});
+const visibleActiveAssistant = computed(() => {
+  const assistant = props.session?.activeAssistant;
+  return props.easyMode && assistant
+    ? easyModeMessage(assistant, toolStateLookup.value.toolStatesByCallId)
+    : assistant;
+});
 const activeAssistantMessage = computed(() =>
   withoutRenderedToolCalls(
     visibleActiveAssistant.value?.role === "assistant" ? visibleActiveAssistant.value : undefined,
@@ -74,7 +79,7 @@ const activeAssistantToolStates = computed(() =>
   toolStatesForMessage(activeAssistantMessage.value, toolStateLookup.value.toolStatesByCallId),
 );
 const transcriptEntries = computed(() => {
-  const entries = [...transcriptMessages.value];
+  const entries = [...visibleTranscriptMessages.value];
 
   if (activeAssistantMessage.value) {
     const lastEntry = entries.at(-1);

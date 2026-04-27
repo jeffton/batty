@@ -108,6 +108,154 @@ describe("transcript tool state merging", () => {
     );
   });
 
+  it("moves attachment tool calls with thinking into the following assistant response", () => {
+    const attachmentAssistant: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-attach",
+      role: "assistant",
+      timestamp: 3,
+      blocks: [
+        { type: "thinking", thinking: "I should attach the latest image." },
+        {
+          type: "toolCall",
+          id: "attach-1",
+          name: "attach-files",
+          arguments: { paths: ["webcam.jpg"] },
+        },
+      ],
+    };
+    const attachmentResult: Extract<UiMessage, { role: "toolResult" }> = {
+      id: "tool-attach",
+      role: "toolResult",
+      timestamp: 4,
+      toolCallId: "attach-1",
+      toolName: "attach-files",
+      blocks: [{ type: "text", text: "Attached 1 file for the user." }],
+      details: {
+        sentFiles: [
+          {
+            id: "file-1",
+            name: "webcam.jpg",
+            size: 42,
+            mimeType: "image/jpeg",
+            kind: "image",
+            downloadUrl: "/api/sent-files/file-1?download=1",
+            previewUrl: "/api/sent-files/file-1",
+          },
+        ],
+      },
+      isError: false,
+    };
+    const finalAssistant: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-final",
+      role: "assistant",
+      timestamp: 5,
+      blocks: [{ type: "text", text: "Here is the report." }],
+    };
+
+    const messages: SessionState["messages"] = [
+      attachmentAssistant,
+      attachmentResult,
+      finalAssistant,
+    ];
+    const lookup = buildToolStateLookup(messages, []);
+    const transcript = buildTranscriptMessages(messages, lookup);
+
+    expect(transcript).toHaveLength(1);
+    const transcriptMessage = transcript[0]?.message as Extract<UiMessage, { role: "assistant" }>;
+    expect(transcriptMessage.id).toBe("assistant-final");
+    expect(transcriptMessage.blocks).toEqual([
+      { type: "text", text: "Here is the report." },
+      attachmentAssistant.blocks[1],
+    ]);
+  });
+
+  it("carries pending attachments across intermediary tool-call assistant messages", () => {
+    const attachmentAssistant: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-attach",
+      role: "assistant",
+      timestamp: 3,
+      blocks: [
+        {
+          type: "toolCall",
+          id: "attach-1",
+          name: "attach-files",
+          arguments: { paths: ["webcam.jpg"] },
+        },
+      ],
+    };
+    const attachmentResult: Extract<UiMessage, { role: "toolResult" }> = {
+      id: "tool-attach",
+      role: "toolResult",
+      timestamp: 4,
+      toolCallId: "attach-1",
+      toolName: "attach-files",
+      blocks: [{ type: "text", text: "Attached 1 file for the user." }],
+      details: {
+        sentFiles: [
+          {
+            id: "file-1",
+            name: "webcam.jpg",
+            size: 42,
+            mimeType: "image/jpeg",
+            kind: "image",
+            downloadUrl: "/api/sent-files/file-1?download=1",
+            previewUrl: "/api/sent-files/file-1",
+          },
+        ],
+      },
+      isError: false,
+    };
+    const commitAssistant: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-commit",
+      role: "assistant",
+      timestamp: 5,
+      blocks: [
+        {
+          type: "toolCall",
+          id: "bash-1",
+          name: "bash",
+          arguments: { command: "git commit -am update" },
+        },
+      ],
+    };
+    const commitResult: Extract<UiMessage, { role: "toolResult" }> = {
+      id: "tool-commit",
+      role: "toolResult",
+      timestamp: 6,
+      toolCallId: "bash-1",
+      toolName: "bash",
+      blocks: [{ type: "text", text: "[main abc123] update" }],
+      isError: false,
+    };
+    const finalAssistant: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-final",
+      role: "assistant",
+      timestamp: 7,
+      blocks: [{ type: "text", text: "Here is the image." }],
+    };
+
+    const messages: SessionState["messages"] = [
+      attachmentAssistant,
+      attachmentResult,
+      commitAssistant,
+      commitResult,
+      finalAssistant,
+    ];
+    const lookup = buildToolStateLookup(messages, []);
+    const transcript = buildTranscriptMessages(messages, lookup);
+
+    expect(transcript).toHaveLength(2);
+    expect(transcript[0]?.message).toEqual(commitAssistant);
+    const finalTranscriptMessage = transcript[1]?.message as Extract<
+      UiMessage,
+      { role: "assistant" }
+    >;
+    expect(finalTranscriptMessage.blocks).toEqual([
+      { type: "text", text: "Here is the image." },
+      attachmentAssistant.blocks[0],
+    ]);
+  });
+
   it("moves standalone attachment tool results into the following assistant response", () => {
     const attachmentResult: Extract<UiMessage, { role: "toolResult" }> = {
       id: "tool-attach",

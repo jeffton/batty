@@ -118,15 +118,32 @@ export function isAttachmentOutputToolCall(
   );
 }
 
+function attachmentCarrierBlocks(
+  message: UiMessage,
+  toolStatesByCallId: Map<string, ToolDisplayState>,
+): UiContentBlock[] {
+  if (message.role !== "assistant") {
+    return [];
+  }
+
+  const attachmentBlocks = message.blocks.filter((block) =>
+    isAttachmentOutputToolCall(block, toolStatesByCallId),
+  );
+  if (attachmentBlocks.length === 0) {
+    return [];
+  }
+
+  const hasOnlyAttachmentCallsAndThinking = message.blocks.every(
+    (block) => block.type === "thinking" || isAttachmentOutputToolCall(block, toolStatesByCallId),
+  );
+  return hasOnlyAttachmentCallsAndThinking ? attachmentBlocks : [];
+}
+
 function isAttachmentCarrierMessage(
   message: UiMessage,
   toolStatesByCallId: Map<string, ToolDisplayState>,
 ): boolean {
-  return (
-    message.role === "assistant" &&
-    message.blocks.length > 0 &&
-    message.blocks.every((block) => isAttachmentOutputToolCall(block, toolStatesByCallId))
-  );
+  return attachmentCarrierBlocks(message, toolStatesByCallId).length > 0;
 }
 
 function attachmentBlockFromToolResult(
@@ -159,6 +176,13 @@ export function mergeAttachmentCarrierIntoAssistant(
   attachmentBlocks: UiContentBlock[],
 ): Extract<UiMessage, { role: "assistant" }> {
   return { ...message, blocks: [...message.blocks, ...attachmentBlocks] };
+}
+
+function acceptsPendingAttachmentBlocks(message: UiMessage): boolean {
+  return (
+    message.role === "assistant" &&
+    message.blocks.some((block) => block.type === "text" || block.type === "image")
+  );
 }
 
 export function buildTranscriptMessages(
@@ -195,22 +219,51 @@ export function buildTranscriptMessages(
         pendingAttachmentId = message.id;
         pendingAttachmentTimestamp = message.timestamp;
       }
-      pendingAttachmentBlocks = [...pendingAttachmentBlocks, ...message.blocks];
+      pendingAttachmentBlocks = [
+        ...pendingAttachmentBlocks,
+        ...attachmentCarrierBlocks(message, toolStateLookup.toolStatesByCallId),
+      ];
       continue;
     }
 
-    const renderedMessage =
-      message.role === "assistant" && pendingAttachmentBlocks.length > 0
-        ? mergeAttachmentCarrierIntoAssistant(message, pendingAttachmentBlocks)
-        : message;
-    pendingAttachmentBlocks = [];
-    pendingAttachmentId = "attachment-carrier";
-    pendingAttachmentTimestamp = 0;
+    if (pendingAttachmentBlocks.length > 0 && message.role !== "assistant") {
+      const attachmentMessage: Extract<UiMessage, { role: "assistant" }> = {
+        id: pendingAttachmentId,
+        role: "assistant",
+        timestamp: pendingAttachmentTimestamp,
+        blocks: pendingAttachmentBlocks,
+      };
+      entries.push({
+        message: attachmentMessage,
+        toolStatesByCallId: toolStatesForMessage(
+          attachmentMessage,
+          toolStateLookup.toolStatesByCallId,
+        ),
+      });
+      pendingAttachmentBlocks = [];
+      pendingAttachmentId = "attachment-carrier";
+      pendingAttachmentTimestamp = 0;
+    }
+
+    const shouldMergePendingAttachments =
+      pendingAttachmentBlocks.length > 0 && acceptsPendingAttachmentBlocks(message);
+    const renderedMessage = shouldMergePendingAttachments
+      ? mergeAttachmentCarrierIntoAssistant(
+          message as Extract<UiMessage, { role: "assistant" }>,
+          pendingAttachmentBlocks,
+        )
+      : message;
 
     entries.push({
       message: renderedMessage,
       toolStatesByCallId: toolStatesForMessage(renderedMessage, toolStateLookup.toolStatesByCallId),
     });
+
+    if (shouldMergePendingAttachments) {
+      pendingAttachmentBlocks = [];
+      pendingAttachmentId = "attachment-carrier";
+      pendingAttachmentTimestamp = 0;
+    }
   }
 
   if (pendingAttachmentBlocks.length > 0) {

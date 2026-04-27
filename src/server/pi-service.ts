@@ -434,6 +434,7 @@ export class PiService {
       { cronSubagentAbortControllers: this.cronSubagentAbortControllers },
       webSession,
       "Cron subagent did not finish before the next prompt.",
+      { abortRunning: false },
     );
     if (recovered) {
       this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
@@ -466,7 +467,17 @@ export class PiService {
 
   async abort(sessionId: string): Promise<void> {
     const webSession = this.requireSession(sessionId);
+    const recovered = recoverDanglingCronSubagent(
+      { cronSubagentAbortControllers: this.cronSubagentAbortControllers },
+      webSession,
+      "Cron subagent stopped by user.",
+      { abortRunning: true },
+    );
     await webSession.session.abort();
+    if (recovered) {
+      this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
+      this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
+    }
     this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
   }
 

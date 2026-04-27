@@ -106,6 +106,7 @@ export async function runCronJobSession(
       context,
       webSession,
       "Cron subagent did not finish before the server stopped.",
+      { abortRunning: false },
     );
     if (recovered) {
       context.publishReset(webSession, context.getState(webSession.id));
@@ -230,13 +231,19 @@ export function recoverDanglingCronSubagent(
   context: Pick<PiServiceCronAdapterContext, "cronSubagentAbortControllers">,
   webSession: WebSession,
   error: string,
+  options: { abortRunning?: boolean } = {},
 ): boolean {
   const dangling = findDanglingCronSubagentToolCall(webSession.session);
   if (!dangling) {
     return false;
   }
 
-  context.cronSubagentAbortControllers.get(dangling.id)?.abort();
+  const abortController = context.cronSubagentAbortControllers.get(dangling.id);
+  if (abortController && options.abortRunning !== true) {
+    return false;
+  }
+
+  abortController?.abort();
   context.cronSubagentAbortControllers.delete(dangling.id);
   webSession.activeTools.delete(dangling.id);
   appendCronSubagentCompletion(

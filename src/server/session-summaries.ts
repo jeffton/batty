@@ -13,7 +13,8 @@ import {
 import { isSubagentSessionEntry } from "./subagent";
 
 const DEFAULT_SESSION_LABEL = "(no messages)";
-const SESSION_SUMMARY_READ_CONCURRENCY = 4;
+const SESSION_SUMMARY_READ_CONCURRENCY = 16;
+const SESSION_SUMMARY_HEADER_LINE_LIMIT = 128;
 
 function extractMessageText(content: unknown): string {
   if (typeof content === "string") {
@@ -58,8 +59,15 @@ async function readSessionHeaderAndFirstUserMessage(filePath: string): Promise<{
   let dailySessionDate: string | undefined;
   let isSubagentSession = false;
 
+  let scannedLines = 0;
+
   try {
     for await (const line of lines) {
+      scannedLines += 1;
+      if (scannedLines > SESSION_SUMMARY_HEADER_LINE_LIMIT) {
+        break;
+      }
+
       if (!line.trim()) {
         continue;
       }
@@ -106,6 +114,10 @@ async function readSessionHeaderAndFirstUserMessage(filePath: string): Promise<{
         if (binding) {
           dailySessionDate = binding.date;
         }
+      }
+
+      if (sessionId && firstMessage && (dailySessionDate || scannedLines >= 16)) {
+        break;
       }
     }
   } finally {
@@ -157,7 +169,7 @@ async function mapWithConcurrency<T, R>(
   concurrency: number,
   mapper: (item: T) => Promise<R>,
 ): Promise<R[]> {
-  const results = new Array<R>(items.length);
+  const results = Array.from<R>({ length: items.length });
   let nextIndex = 0;
 
   async function worker(): Promise<void> {

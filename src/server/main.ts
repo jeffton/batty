@@ -11,7 +11,7 @@ import { CronService } from "./cron";
 import { createLoginRateLimiter } from "./login-rate-limit";
 import { formatSetupCode, PasskeyAuthService } from "./passkeys";
 import { PiService } from "./pi-service";
-import type { WorkspaceSnapshot } from "@/shared/types";
+import type { WorkspaceSnapshot, WorkspaceUiSettings } from "@/shared/types";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerCronRoutes } from "./routes/cron";
 import type { RouteContext } from "./routes/context";
@@ -29,6 +29,21 @@ const webPush = new WebPushService(config);
 await webPush.initialize();
 const cronService = new CronService(config);
 const workspaceSubscribers = new Map<string, Set<(snapshot: WorkspaceSnapshot) => void>>();
+const workspaceUiSettings = new Map<string, WorkspaceUiSettings>();
+
+function getWorkspaceUiSettings(workspaceId: string): WorkspaceUiSettings {
+  return workspaceUiSettings.get(workspaceId) ?? { easyMode: false };
+}
+
+async function setWorkspaceUiSettings(
+  workspaceId: string,
+  patch: Partial<WorkspaceUiSettings>,
+): Promise<WorkspaceUiSettings> {
+  const next = { ...getWorkspaceUiSettings(workspaceId), ...patch };
+  workspaceUiSettings.set(workspaceId, next);
+  await publishWorkspace(workspaceId);
+  return next;
+}
 
 async function workspaceSnapshot(workspaceId: string): Promise<WorkspaceSnapshot> {
   const workspaces = await listWorkspaces(config);
@@ -37,6 +52,7 @@ async function workspaceSnapshot(workspaceId: string): Promise<WorkspaceSnapshot
     workspaceId,
     sessions: await service.listSessionSummaries(workspace),
     cronJobs: cronService.listJobs(workspaceId),
+    uiSettings: getWorkspaceUiSettings(workspaceId),
   };
 }
 
@@ -228,6 +244,8 @@ const routeContext: RouteContext = {
   buildId,
   routePath,
   workspaceSnapshot,
+  getWorkspaceUiSettings,
+  setWorkspaceUiSettings,
 };
 
 registerAuthRoutes(routeContext);

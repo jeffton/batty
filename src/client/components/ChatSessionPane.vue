@@ -130,6 +130,15 @@ function setThinkingLevel(level: string): void {
   void store.setThinkingLevel(level);
 }
 
+function setEasyMode(enabled: boolean): void {
+  const workspaceId = store.selectedWorkspaceId;
+  if (!workspaceId) {
+    return;
+  }
+
+  void store.setWorkspaceEasyMode(workspaceId, enabled);
+}
+
 function shouldRestoreComposerAfterPromptError(
   before:
     | {
@@ -243,30 +252,20 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
 <template>
   <main class="chat-session-pane">
     <ChatHeader
-      :model-popover-id="MODEL_POPOVER_ID"
-      :model-popover-anchor="MODEL_POPOVER_ANCHOR"
       :cron-popover-id="CRON_POPOVER_ID"
       :cron-popover-anchor="CRON_POPOVER_ANCHOR"
       :workspace-label="store.selectedWorkspace?.label"
       :cwd="store.activeSession?.cwd"
       :workspace-switcher-loading="workspaceSwitcherLoading"
-      :active-session="Boolean(store.activeSession)"
-      :models="store.models"
-      :current-model-id="store.activeSession?.model"
-      :current-thinking-level="store.activeSession?.thinkingLevel ?? 'off'"
-      :thinking-options="thinkingOptions"
-      :model-button-label="modelButtonLabel"
-      :thinking-button-label="thinkingButtonLabel"
       :selected-workspace-id="store.selectedWorkspaceId"
       :context-usage-label="contextUsageLabel"
       :context-arc-class="contextArcClass"
       :context-arc-style="contextArcStyle"
       :connection-state="store.connectionState"
       :connection-description="connectionDescription"
+      :easy-mode="store.workspaceEasyMode"
       @back="emit('back')"
-      @refresh-models="refreshModels"
-      @set-model="setModel"
-      @set-thinking-level="setThinkingLevel"
+      @set-easy-mode="setEasyMode"
     />
 
     <div v-if="!store.activeSession && sessionLoading" class="chat-loading">
@@ -285,6 +284,7 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
         :session="store.activeSession"
         :load-older-messages="() => store.loadOlderMessages()"
         :loading-older-messages="store.loadingOlderMessages"
+        :easy-mode="store.workspaceEasyMode"
       />
 
       <MessageComposer
@@ -294,10 +294,21 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
         :offline="isUnavailable"
         :actions-disabled="isUnavailable"
         :queued-prompts="store.activeSession.queuedPrompts"
+        :model-popover-id="MODEL_POPOVER_ID"
+        :model-popover-anchor="MODEL_POPOVER_ANCHOR"
+        :models="store.models"
+        :current-model-id="store.activeSession?.model"
+        :current-thinking-level="store.activeSession?.thinkingLevel ?? 'off'"
+        :thinking-options="thinkingOptions"
+        :model-button-label="modelButtonLabel"
+        :thinking-button-label="thinkingButtonLabel"
         @submit="sendPrompt"
         @steer="steerPrompt"
         @stop="store.stopActiveSession"
         @remove-queued-prompt="removeQueuedPrompt"
+        @refresh-models="refreshModels"
+        @set-model="setModel"
+        @set-thinking-level="setThinkingLevel"
       />
     </template>
   </main>

@@ -7,6 +7,7 @@ import type {
   SessionState,
   SessionSummary,
   WorkspaceInfo,
+  WorkspaceUiSettings,
 } from "@/shared/types";
 
 export interface AppStoreState {
@@ -22,6 +23,7 @@ export interface AppStoreState {
   models: ModelOption[];
   sessionsByWorkspace: Record<string, SessionSummary[]>;
   cronJobsByWorkspace: Record<string, CronJob[]>;
+  workspaceUiSettings: Record<string, WorkspaceUiSettings>;
   activeSession: SessionState | undefined;
   selectedWorkspaceId: string | undefined;
   authError: string | undefined;
@@ -64,6 +66,7 @@ export function createAppState(): AppStoreState {
     models: [],
     sessionsByWorkspace: {},
     cronJobsByWorkspace: {},
+    workspaceUiSettings: {},
     activeSession: undefined,
     selectedWorkspaceId: undefined,
     authError: undefined,

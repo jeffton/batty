@@ -44,6 +44,7 @@ export const authBootstrapActions = {
     this.settings = payload.settings ?? defaultAppSettingsStatus;
     this.workspaceRoots = payload.workspaceRoots ?? [];
     this.workspaces = sortWorkspacesByRecentSession(workspaces);
+    this.workspaceUiSettings = payload.workspaceUiSettings ?? {};
     this.models = payload.models;
     this.selectedWorkspaceId =
       this.selectedWorkspaceId &&
@@ -61,6 +62,7 @@ export const authBootstrapActions = {
       this.settings = defaultAppSettingsStatus;
       this.sessionsByWorkspace = {};
       this.cronJobsByWorkspace = {};
+      this.workspaceUiSettings = {};
       this.closeStream();
       this.closeWorkspaceStream();
     }
@@ -80,6 +82,7 @@ export const authBootstrapActions = {
     this.activeSession = undefined;
     this.sessionsByWorkspace = {};
     this.cronJobsByWorkspace = {};
+    this.workspaceUiSettings = {};
   },
 
   async checkForClientUpdate(this: AppActionContext): Promise<void> {

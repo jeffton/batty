@@ -271,6 +271,10 @@ export interface AppSettingsStatus {
   braveSearchConfigured: boolean;
 }
 
+export interface WorkspaceUiSettings {
+  easyMode: boolean;
+}
+
 export interface BootstrapPayload {
   authenticated: boolean;
   auth: AuthStatus;
@@ -279,6 +283,7 @@ export interface BootstrapPayload {
   buildId: string;
   workspaceRoots?: string[];
   workspaces: WorkspaceInfo[];
+  workspaceUiSettings?: Record<string, WorkspaceUiSettings>;
   models: ModelOption[];
   activeSession?: SessionState;
 }
@@ -287,6 +292,7 @@ export interface WorkspaceSnapshot {
   workspaceId: string;
   sessions: SessionSummary[];
   cronJobs: CronJob[];
+  uiSettings: WorkspaceUiSettings;
 }
 
 export type ServerEvent =

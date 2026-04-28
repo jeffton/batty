@@ -46,6 +46,9 @@ export function registerSettingsRoutes(context: RouteContext): void {
       buildId,
       workspaceRoots: authenticated ? listWorkspaceRoots(config) : [],
       workspaces,
+      workspaceUiSettings: Object.fromEntries(
+        workspaces.map((workspace) => [workspace.id, context.getWorkspaceUiSettings(workspace.id)]),
+      ),
       models: authenticated ? await service.listModels() : [],
     };
   });
@@ -85,6 +88,17 @@ export function registerSettingsRoutes(context: RouteContext): void {
 
     return { content: await writeBattyAgentsFile(context, request.body.content) };
   });
+
+  app.post<{ Params: { workspaceId: string }; Body: { easyMode?: boolean } }>(
+    routePath("/api/workspaces/:workspaceId/ui-settings"),
+    async (request) => {
+      const workspaces = await listWorkspaces(config);
+      const workspace = resolveWorkspace(workspaces, request.params.workspaceId);
+      return context.setWorkspaceUiSettings(workspace.id, {
+        easyMode: request.body?.easyMode === true,
+      });
+    },
+  );
 
   app.post<{ Body: { workspaceId?: string | null } }>(
     routePath("/api/settings/assistant-workspace"),

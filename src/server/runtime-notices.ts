@@ -9,10 +9,25 @@ export interface RuntimeNotice {
   text: string;
 }
 
-export function buildCronRuntimeNotice(scheduleLabel: string, now = new Date()): RuntimeNotice {
+export function buildCronRuntimeNotice({
+  scheduleLabel,
+  prompt,
+  now = new Date(),
+}: {
+  scheduleLabel: string;
+  prompt: string;
+  now?: Date;
+}): RuntimeNotice {
+  const lines = [
+    `Cron run triggered. Current time: ${formatLocalDateTime(now)}. Schedule: ${scheduleLabel}`,
+    "",
+    "Prompt:",
+    prompt.trim(),
+  ];
+
   return {
     kind: "cron",
-    text: `Cron run triggered. Current time: ${formatLocalDateTime(now)}. Schedule: ${scheduleLabel}`,
+    text: lines.join("\n"),
   };
 }
 

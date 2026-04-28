@@ -13,6 +13,8 @@ import {
 import { isSubagentSessionEntry } from "./subagent";
 
 const DEFAULT_SESSION_LABEL = "(no messages)";
+const SESSION_SUMMARY_READ_CONCURRENCY = 16;
+const SESSION_SUMMARY_HEADER_LINE_LIMIT = 128;
 
 function extractMessageText(content: unknown): string {
   if (typeof content === "string") {
@@ -57,8 +59,15 @@ async function readSessionHeaderAndFirstUserMessage(filePath: string): Promise<{
   let dailySessionDate: string | undefined;
   let isSubagentSession = false;
 
+  let scannedLines = 0;
+
   try {
     for await (const line of lines) {
+      scannedLines += 1;
+      if (scannedLines > SESSION_SUMMARY_HEADER_LINE_LIMIT) {
+        break;
+      }
+
       if (!line.trim()) {
         continue;
       }
@@ -79,11 +88,13 @@ async function readSessionHeaderAndFirstUserMessage(filePath: string): Promise<{
         id?: unknown;
         customType?: unknown;
         data?: unknown;
+        parentSession?: unknown;
         message?: { role?: unknown; content?: unknown };
       };
 
       if (!sessionId && candidate.type === "session" && typeof candidate.id === "string") {
         sessionId = candidate.id;
+        isSubagentSession = typeof candidate.parentSession === "string";
       }
 
       if (candidate.type === "message" && candidate.message?.role === "user" && !firstMessage) {
@@ -105,6 +116,10 @@ async function readSessionHeaderAndFirstUserMessage(filePath: string): Promise<{
         if (binding) {
           dailySessionDate = binding.date;
         }
+      }
+
+      if (sessionId && firstMessage && (dailySessionDate || scannedLines >= 16)) {
+        break;
       }
     }
   } finally {
@@ -151,6 +166,31 @@ async function buildSessionSummary(
   }
 }
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = Array.from<R>({ length: items.length });
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(items[index]!);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+      await worker();
+    }),
+  );
+
+  return results;
+}
+
 export async function listSessionSummaries(
   config: Pick<AppConfig, "battyDir" | "cronDailySessionStartTime">,
   workspace: WorkspaceInfo,
@@ -163,8 +203,8 @@ export async function listSessionSummaries(
 
   const todayDate = toLocalIsoDate(new Date(), config.cronDailySessionStartTime);
   const sessions = (
-    await Promise.all(
-      sessionFiles.map((filePath) => buildSessionSummary(filePath, workspace.id, todayDate)),
+    await mapWithConcurrency(sessionFiles, SESSION_SUMMARY_READ_CONCURRENCY, (filePath) =>
+      buildSessionSummary(filePath, workspace.id, todayDate),
     )
   ).filter((session): session is SessionSummary => Boolean(session));
 

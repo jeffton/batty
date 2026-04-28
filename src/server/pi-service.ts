@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { Message } from "@mariozechner/pi-ai";
 import {
   AuthStorage,
   ModelRegistry,
@@ -63,6 +64,7 @@ import {
 import type { CronService } from "./cron";
 import { recoverDanglingCronSubagent, runCronJobSession } from "./pi-service-cron-adapter";
 import { createPiServiceTools } from "./pi-service-tool-factory";
+import type { RuntimeNotice } from "./runtime-notices";
 
 export type { UploadedFile } from "./pi-service-types";
 
@@ -188,8 +190,7 @@ export class PiService {
       {
         cronSubagentAbortControllers: this.cronSubagentAbortControllers,
         createSession: (workspace, options) => this.createSession(workspace, options),
-        prompt: (sessionId, text, files, streamingBehavior) =>
-          this.prompt(sessionId, text, files, streamingBehavior),
+        promptCron: (sessionId, notice) => this.promptCron(sessionId, notice),
         resolveOrCreateDailySession: (workspace, options) =>
           this.resolveOrCreateDailySession(workspace, options),
         requireSession: (sessionId) => this.requireSession(sessionId),
@@ -405,6 +406,23 @@ export class PiService {
     return this.getState(sessionId);
   }
 
+  async promptCron(sessionId: string, notice: RuntimeNotice): Promise<void> {
+    const webSession = this.requireSession(sessionId);
+    const timestamp = Date.now();
+    const messages: Message[] = [
+      {
+        role: "custom",
+        customType: `batty-runtime-notice:${notice.kind}`,
+        content: notice.text,
+        timestamp,
+      } as unknown as Message,
+    ];
+
+    await webSession.session.agent.prompt(messages);
+    await (webSession.session as unknown as { waitForRetry: () => Promise<void> }).waitForRetry();
+    this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
+  }
+
   async prompt(
     sessionId: string,
     text: string,
@@ -416,6 +434,7 @@ export class PiService {
       { cronSubagentAbortControllers: this.cronSubagentAbortControllers },
       webSession,
       "Cron subagent did not finish before the next prompt.",
+      { abortRunning: false },
     );
     if (recovered) {
       this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
@@ -448,7 +467,17 @@ export class PiService {
 
   async abort(sessionId: string): Promise<void> {
     const webSession = this.requireSession(sessionId);
+    const recovered = recoverDanglingCronSubagent(
+      { cronSubagentAbortControllers: this.cronSubagentAbortControllers },
+      webSession,
+      "Cron subagent stopped by user.",
+      { abortRunning: true },
+    );
     await webSession.session.abort();
+    if (recovered) {
+      this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
+      this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
+    }
     this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
   }
 

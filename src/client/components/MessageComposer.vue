@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { Compass, ListOrdered, Paperclip, SendHorizontal, Square } from "lucide-vue-next";
+import { Bot, Compass, ListOrdered, Paperclip, SendHorizontal, Square } from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import ComposerQueuedPrompts from "@/client/components/ComposerQueuedPrompts.vue";
+import ModelConfigPopover from "@/client/components/ModelConfigPopover.vue";
 import { clearSessionDraft, readSessionDraft, writeSessionDraft } from "@/client/lib/session-draft";
-import type { QueuedPrompt } from "@/shared/types";
+import type { ModelOption, QueuedPrompt } from "@/shared/types";
 
 const DRAFT_SAVE_INTERVAL_MS = 400;
 
@@ -14,6 +15,14 @@ const props = defineProps<{
   offline?: boolean;
   sessionKey?: string;
   queuedPrompts?: QueuedPrompt[];
+  modelPopoverId: string;
+  modelPopoverAnchor: string;
+  models: ModelOption[];
+  currentModelId?: string;
+  currentThinkingLevel: string;
+  thinkingOptions: string[];
+  modelButtonLabel: string;
+  thinkingButtonLabel: string;
 }>();
 
 const emit = defineEmits<{
@@ -21,6 +30,9 @@ const emit = defineEmits<{
   steer: [text: string, files: File[]];
   stop: [];
   removeQueuedPrompt: [prompt: QueuedPrompt];
+  refreshModels: [];
+  setModel: [modelId: string];
+  setThinkingLevel: [thinkingLevel: string];
 }>();
 
 const text = ref("");
@@ -287,6 +299,11 @@ function onTextareaKeydown(event: KeyboardEvent): void {
   submit();
 }
 
+function closePopover(id: string): void {
+  const element = document.getElementById(id) as HTMLElement | null;
+  element?.hidePopover?.();
+}
+
 function openFilePicker(): void {
   if (actionsDisabled.value) {
     return;
@@ -405,6 +422,35 @@ defineExpose({ clear, restore });
         </div>
 
         <div class="composer__send-actions">
+          <button
+            class="composer__model-button"
+            type="button"
+            :style="{ 'anchor-name': props.modelPopoverAnchor }"
+            :disabled="props.disabled"
+            :popovertarget="props.modelPopoverId"
+            :title="`${props.modelButtonLabel} · ${props.thinkingButtonLabel}`"
+            aria-label="Model and thinking"
+            @click="emit('refreshModels')"
+          >
+            <Bot :size="17" class="composer__model-icon" />
+            <span class="composer__model-info">
+              <span class="composer__model-label">{{ props.modelButtonLabel }}</span>
+              <span class="composer__model-effort">{{ props.thinkingButtonLabel }}</span>
+            </span>
+          </button>
+
+          <ModelConfigPopover
+            :popover-id="props.modelPopoverId"
+            :anchor-name="props.modelPopoverAnchor"
+            :models="props.models"
+            :current-model-id="props.currentModelId"
+            :current-thinking-level="props.currentThinkingLevel"
+            :thinking-options="props.thinkingOptions"
+            placement="up"
+            @set-model="emit('setModel', $event)"
+            @set-thinking-level="emit('setThinkingLevel', $event)"
+            @close="closePopover(props.modelPopoverId)"
+          />
           <button
             v-if="props.streaming"
             class="composer__icon-button composer__steer"
@@ -582,6 +628,66 @@ defineExpose({ clear, restore });
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
+}
+
+.composer__model-button {
+  max-width: min(12rem, 44vw);
+  min-height: 2.5rem;
+  padding: 0 0.55rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--color-text-muted);
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  transition:
+    background 80ms ease,
+    color 80ms ease;
+}
+
+@media (hover: hover) {
+  .composer__model-button:hover:not(:disabled) {
+    background: var(--color-bg-elevated);
+    color: var(--color-text);
+  }
+}
+
+.composer__model-button:disabled {
+  opacity: 0.4;
+}
+
+.composer__model-icon {
+  display: block;
+}
+
+.composer__model-info {
+  min-width: 0;
+  display: grid;
+  gap: 0.05rem;
+  text-align: left;
+  line-height: 1.05;
+}
+
+.composer__model-label,
+.composer__model-effort {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer__model-label {
+  color: var(--color-text-strong);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.composer__model-effort {
+  color: var(--color-text-subtle);
+  font-size: 0.7rem;
 }
 
 .composer__stream-actions {

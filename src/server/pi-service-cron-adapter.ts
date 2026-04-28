@@ -6,13 +6,12 @@ import type {
   ToolExecutionDetails,
   WorkspaceInfo,
 } from "@/shared/types";
-import { buildCronRuntimeNotice } from "./runtime-notices";
+import { buildCronRuntimeNotice, type RuntimeNotice } from "./runtime-notices";
 import { normalizeBlocks } from "./pi-state";
 import { SUBAGENT_TOOL_NAME } from "./subagent";
 import {
   appendCronSubagentCompletion,
   appendCronSubagentStart,
-  appendRuntimeNoticeMessage,
   buildFailedCronSubagentResult,
   findDanglingCronSubagentToolCall,
 } from "./pi-service-subagents";
@@ -33,12 +32,7 @@ export type PiServiceCronAdapterContext = {
     workspace: WorkspaceInfo,
     options?: { modelId?: string; thinkingLevel?: string; ephemeral?: boolean },
   ) => Promise<SessionState>;
-  prompt: (
-    sessionId: string,
-    text: string,
-    files: [],
-    streamingBehavior?: "steer" | "followUp",
-  ) => Promise<void>;
+  promptCron: (sessionId: string, notice: RuntimeNotice) => Promise<void>;
   resolveOrCreateDailySession: (
     workspace: WorkspaceInfo,
     options?: { modelId?: string; thinkingLevel?: string },
@@ -83,20 +77,17 @@ export async function runCronJobSession(
   context: PiServiceCronAdapterContext,
   job: CronJobRun,
 ): Promise<{ sessionId: string; sessionPath: string }> {
-  const cronNotice = buildCronRuntimeNotice(job.scheduleLabel);
+  const cronNotice = buildCronRuntimeNotice({
+    scheduleLabel: job.scheduleLabel,
+    prompt: job.prompt,
+  });
   if (job.session.kind === "new") {
     const session = await context.createSession(job.workspace, {
       modelId: job.model,
       thinkingLevel: job.thinkingLevel,
     });
     const current = context.requireSession(session.id);
-    appendRuntimeNotice(current.session, cronNotice);
-    await context.prompt(
-      session.id,
-      job.prompt,
-      [],
-      current.session.isStreaming ? "followUp" : undefined,
-    );
+    await context.promptCron(session.id, cronNotice);
 
     return {
       sessionId: current.session.sessionId,
@@ -115,6 +106,7 @@ export async function runCronJobSession(
       context,
       webSession,
       "Cron subagent did not finish before the server stopped.",
+      { abortRunning: false },
     );
     if (recovered) {
       context.publishReset(webSession, context.getState(webSession.id));
@@ -125,9 +117,8 @@ export async function runCronJobSession(
     if (job.session.kind === "daily-inline") {
       context.setThinkingLevel(session.id, job.thinkingLevel);
       await context.setModel(session.id, job.model);
-      appendRuntimeNotice(webSession.session, cronNotice);
       context.publishReset(webSession, context.getState(webSession.id));
-      await webSession.session.prompt(job.prompt);
+      await context.promptCron(session.id, cronNotice);
       return {
         sessionId: webSession.session.sessionId,
         sessionPath: context.requireSessionPath(webSession.id),
@@ -240,13 +231,19 @@ export function recoverDanglingCronSubagent(
   context: Pick<PiServiceCronAdapterContext, "cronSubagentAbortControllers">,
   webSession: WebSession,
   error: string,
+  options: { abortRunning?: boolean } = {},
 ): boolean {
   const dangling = findDanglingCronSubagentToolCall(webSession.session);
   if (!dangling) {
     return false;
   }
 
-  context.cronSubagentAbortControllers.get(dangling.id)?.abort();
+  const abortController = context.cronSubagentAbortControllers.get(dangling.id);
+  if (abortController && options.abortRunning !== true) {
+    return false;
+  }
+
+  abortController?.abort();
   context.cronSubagentAbortControllers.delete(dangling.id);
   webSession.activeTools.delete(dangling.id);
   appendCronSubagentCompletion(
@@ -256,5 +253,3 @@ export function recoverDanglingCronSubagent(
   );
   return true;
 }
-
-const appendRuntimeNotice = appendRuntimeNoticeMessage;

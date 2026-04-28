@@ -5,6 +5,7 @@ import {
   listWorkspaces as listWorkspacesRequest,
   setWorkspaceAssistant as setWorkspaceAssistantRequest,
   setWorkspacePinned as setWorkspacePinnedRequest,
+  setWorkspaceUiSettings as setWorkspaceUiSettingsRequest,
 } from "@/client/lib/api";
 import { mergeSessionSummaries, toSessionSummary } from "@/client/lib/session-summary";
 import { workspaceEventsPath } from "@/client/lib/workspace-stream";
@@ -151,6 +152,10 @@ export const workspaceActions = {
       ...this.cronJobsByWorkspace,
       [workspace.id]: [],
     };
+    this.workspaceUiSettings = {
+      ...this.workspaceUiSettings,
+      [workspace.id]: { easyMode: false },
+    };
     this.sortWorkspaces();
     this.selectWorkspace(workspace.id);
     await this.loadWorkspaceCronJobs(workspace.id);
@@ -187,6 +192,10 @@ export const workspaceActions = {
         ...this.cronJobsByWorkspace,
         [snapshot.workspaceId]: snapshot.cronJobs,
       };
+      this.workspaceUiSettings = {
+        ...this.workspaceUiSettings,
+        [snapshot.workspaceId]: snapshot.uiSettings,
+      };
       this.sortWorkspaces();
     };
     source.onerror = () => {
@@ -198,5 +207,29 @@ export const workspaceActions = {
         this.closeWorkspaceStream();
       }
     };
+  },
+
+  async setWorkspaceEasyMode(
+    this: AppActionContext,
+    workspaceId: string,
+    easyMode: boolean,
+  ): Promise<void> {
+    this.workspaceUiSettings = {
+      ...this.workspaceUiSettings,
+      [workspaceId]: { easyMode },
+    };
+    try {
+      const settings = await setWorkspaceUiSettingsRequest(workspaceId, { easyMode });
+      this.workspaceUiSettings = {
+        ...this.workspaceUiSettings,
+        [workspaceId]: settings,
+      };
+    } catch (error) {
+      this.workspaceUiSettings = {
+        ...this.workspaceUiSettings,
+        [workspaceId]: { easyMode: !easyMode },
+      };
+      throw error;
+    }
   },
 };

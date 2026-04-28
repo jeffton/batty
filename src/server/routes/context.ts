@@ -1,5 +1,10 @@
 import type { FastifyInstance } from "fastify";
-import type { AppSettingsStatus, ProviderAuthStatus, WorkspaceSnapshot } from "@/shared/types";
+import type {
+  AppSettingsStatus,
+  ProviderAuthStatus,
+  WorkspaceSnapshot,
+  WorkspaceUiSettings,
+} from "@/shared/types";
 import type { AppConfig } from "../config";
 import type { CronService } from "../cron";
 import type { LoginRateLimiter } from "../login-rate-limit";
@@ -18,6 +23,11 @@ export interface RouteContext {
   buildId: string;
   routePath: (route: string) => string;
   workspaceSnapshot: (workspaceId: string) => Promise<WorkspaceSnapshot>;
+  getWorkspaceUiSettings: (workspaceId: string) => WorkspaceUiSettings;
+  setWorkspaceUiSettings: (
+    workspaceId: string,
+    patch: Partial<WorkspaceUiSettings>,
+  ) => Promise<WorkspaceUiSettings>;
 }
 
 export function unauthenticatedAuthStatus() {

@@ -1,43 +1,26 @@
 <script setup lang="ts">
 import { ChevronLeft, Wifi, WifiOff, LoaderCircle, Clock3 } from "lucide-vue-next";
 import CronPopover from "@/client/components/CronPopover.vue";
-import ModelConfigPopover from "@/client/components/ModelConfigPopover.vue";
-import type { ModelOption } from "@/shared/types";
 
 const props = defineProps<{
-  modelPopoverId: string;
-  modelPopoverAnchor: string;
   cronPopoverId: string;
   cronPopoverAnchor: string;
   workspaceLabel?: string;
   cwd?: string;
   workspaceSwitcherLoading: boolean;
-  activeSession: boolean;
-  models: ModelOption[];
-  currentModelId?: string;
-  currentThinkingLevel: string;
-  thinkingOptions: string[];
-  modelButtonLabel: string;
-  thinkingButtonLabel: string;
   selectedWorkspaceId?: string;
   contextUsageLabel: string;
   contextArcClass: string;
   contextArcStyle: Record<string, string>;
   connectionState: "online" | "connecting" | "offline";
   connectionDescription: string;
+  easyMode: boolean;
 }>();
 
 const emit = defineEmits<{
   back: [];
-  refreshModels: [];
-  setModel: [modelId: string];
-  setThinkingLevel: [thinkingLevel: string];
+  setEasyMode: [enabled: boolean];
 }>();
-
-function closePopover(id: string): void {
-  const element = document.getElementById(id) as HTMLElement | null;
-  element?.hidePopover?.();
-}
 </script>
 
 <template>
@@ -62,33 +45,6 @@ function closePopover(id: string): void {
     </button>
 
     <button
-      class="header__model-btn"
-      type="button"
-      :style="{ 'anchor-name': props.modelPopoverAnchor }"
-      :disabled="!props.activeSession"
-      :popovertarget="props.modelPopoverId"
-      @click="emit('refreshModels')"
-    >
-      <div class="header__model-info">
-        <span class="header__model-name">{{ props.modelButtonLabel }}</span>
-        <span class="header__model-effort">{{ props.thinkingButtonLabel }}</span>
-      </div>
-      <span class="header__model-caret">▾</span>
-    </button>
-
-    <ModelConfigPopover
-      :popover-id="props.modelPopoverId"
-      :anchor-name="props.modelPopoverAnchor"
-      :models="props.models"
-      :current-model-id="props.currentModelId"
-      :current-thinking-level="props.currentThinkingLevel"
-      :thinking-options="props.thinkingOptions"
-      @set-model="emit('setModel', $event)"
-      @set-thinking-level="emit('setThinkingLevel', $event)"
-      @close="closePopover(props.modelPopoverId)"
-    />
-
-    <button
       class="header__icon-btn"
       type="button"
       :style="{ 'anchor-name': props.cronPopoverAnchor }"
@@ -101,6 +57,17 @@ function closePopover(id: string): void {
     </button>
 
     <CronPopover :popover-id="props.cronPopoverId" :anchor-name="props.cronPopoverAnchor" />
+
+    <label class="header__easy-mode" title="Show only user and agent messages">
+      <span>Easy</span>
+      <input
+        type="checkbox"
+        :checked="props.easyMode"
+        :disabled="!props.selectedWorkspaceId"
+        switch
+        @change="emit('setEasyMode', ($event.target as HTMLInputElement).checked)"
+      />
+    </label>
 
     <div class="header__spacer" />
 
@@ -295,6 +262,24 @@ function closePopover(id: string): void {
 .header__spacer {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.header__easy-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.18rem 0.35rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-subtle);
+  font-size: 0.72rem;
+  line-height: 1;
+  user-select: none;
+}
+
+.header__easy-mode input {
+  margin: 0;
+  accent-color: var(--color-accent);
 }
 
 .header__context {

@@ -876,7 +876,10 @@ describe("runDetachedSubagentSession", () => {
 
   it("appends cron notices after existing subagent session context", async () => {
     const appendedMessages: AgentMessage[] = [];
-    const cronNotice = buildCronRuntimeNotice("every 1h");
+    const cronNotice = buildCronRuntimeNotice({
+      scheduleLabel: "every 1h",
+      prompt: "Inspect cron work",
+    });
     const copiedMessages: AgentMessage[] = [
       {
         role: "custom",

@@ -13,6 +13,7 @@ import {
 import { isSubagentSessionEntry } from "./subagent";
 
 const DEFAULT_SESSION_LABEL = "(no messages)";
+const SESSION_SUMMARY_READ_CONCURRENCY = 4;
 
 function extractMessageText(content: unknown): string {
   if (typeof content === "string") {
@@ -151,6 +152,31 @@ async function buildSessionSummary(
   }
 }
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(items[index]!);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+      await worker();
+    }),
+  );
+
+  return results;
+}
+
 export async function listSessionSummaries(
   config: Pick<AppConfig, "battyDir" | "cronDailySessionStartTime">,
   workspace: WorkspaceInfo,
@@ -163,8 +189,8 @@ export async function listSessionSummaries(
 
   const todayDate = toLocalIsoDate(new Date(), config.cronDailySessionStartTime);
   const sessions = (
-    await Promise.all(
-      sessionFiles.map((filePath) => buildSessionSummary(filePath, workspace.id, todayDate)),
+    await mapWithConcurrency(sessionFiles, SESSION_SUMMARY_READ_CONCURRENCY, (filePath) =>
+      buildSessionSummary(filePath, workspace.id, todayDate),
     )
   ).filter((session): session is SessionSummary => Boolean(session));
 

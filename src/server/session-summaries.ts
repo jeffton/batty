@@ -88,11 +88,13 @@ async function readSessionHeaderAndFirstUserMessage(filePath: string): Promise<{
         id?: unknown;
         customType?: unknown;
         data?: unknown;
+        parentSession?: unknown;
         message?: { role?: unknown; content?: unknown };
       };
 
       if (!sessionId && candidate.type === "session" && typeof candidate.id === "string") {
         sessionId = candidate.id;
+        isSubagentSession = typeof candidate.parentSession === "string";
       }
 
       if (candidate.type === "message" && candidate.message?.role === "user" && !firstMessage) {

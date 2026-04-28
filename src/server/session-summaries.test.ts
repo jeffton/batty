@@ -212,6 +212,60 @@ describe("session summaries", () => {
     }
   });
 
+  it("does not include branched subagent sessions in the session list", async () => {
+    const config = await createConfig();
+    const workspace = workspaceInfo(config, "alpha");
+    await fs.mkdir(workspace.path, { recursive: true });
+
+    const entries: unknown[] = [
+      {
+        type: "session",
+        version: 3,
+        id: "branched-subagent-id",
+        timestamp: "2026-03-25T12:00:00Z",
+        parentSession: "/tmp/parent.jsonl",
+      },
+      {
+        type: "message",
+        id: "copied-context-message",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "copied parent context" }],
+        },
+      },
+    ];
+    for (let index = 0; index < 140; index += 1) {
+      entries.push({
+        type: "message",
+        id: `copied-${index}`,
+        message: { role: "assistant", content: "ok" },
+      });
+    }
+    entries.push({
+      type: "custom",
+      customType: SUBAGENT_SESSION_CUSTOM_TYPE,
+      data: { parentSessionId: "parent", respondIn: "session" },
+    });
+
+    const subagentPath = await writeSession(
+      config,
+      workspace.id,
+      "branched-subagent.jsonl",
+      "2026-03-25T12:00:00Z",
+      entries,
+    );
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-25T12:00:00Z"));
+    try {
+      const sessions = await listSessionSummaries(config, workspace);
+
+      expect(sessions.find((session) => session.path === subagentPath)).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("puts today's daily session first and preserves daily metadata", async () => {
     const config = await createConfig();
     const workspace = workspaceInfo(config, "daily");

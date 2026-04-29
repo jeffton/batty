@@ -26,7 +26,7 @@ const props = withDefaults(
 );
 
 function imageUrl(block: Extract<UiContentBlock, { type: "image" }>): string {
-  return `data:${block.mimeType};base64,${block.data}`;
+  return block.url ?? `data:${block.mimeType};base64,${block.data ?? ""}`;
 }
 
 function toolStateFor(toolCallId: string): ToolDisplayState | undefined {
@@ -202,7 +202,11 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
           :key="`${segmentIndex}-${blockIndex}`"
         >
           <MarkdownBlock v-if="block.type === 'text'" :text="block.text" />
-          <img v-else-if="block.type === 'image'" :src="imageUrl(block)" alt="Message attachment" />
+          <img
+            v-else-if="block.type === 'image'"
+            :src="imageUrl(block)"
+            :alt="block.name ?? 'Message attachment'"
+          />
           <MarkdownBlock
             v-else-if="block.type === 'thinking'"
             :text="block.thinking"
@@ -251,7 +255,11 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
         :key="`${props.message.id}-${index}`"
       >
         <div v-if="block.type === 'text'" class="message__text">{{ block.text }}</div>
-        <img v-else-if="block.type === 'image'" :src="imageUrl(block)" alt="Message attachment" />
+        <img
+          v-else-if="block.type === 'image'"
+          :src="imageUrl(block)"
+          :alt="block.name ?? 'Message attachment'"
+        />
         <MarkdownBlock
           v-else-if="block.type === 'thinking'"
           :text="block.thinking"

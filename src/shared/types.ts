@@ -1,6 +1,6 @@
 export type UiContentBlock =
   | { type: "text"; text: string }
-  | { type: "image"; mimeType: string; data: string }
+  | { type: "image"; mimeType: string; data?: string; url?: string; name?: string }
   | { type: "thinking"; thinking: string }
   | { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> };
 

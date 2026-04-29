@@ -2,6 +2,7 @@ import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import { listWorkspaces, resolveWorkspace } from "../workspaces";
 import { resolveSentFile } from "../send-files";
+import { resolveUploadedFile } from "../pi-service-uploads";
 import type { UploadedFile } from "../pi-service";
 import type { RouteContext } from "./context";
 
@@ -213,6 +214,19 @@ export function registerSessionRoutes(context: RouteContext): void {
       unsubscribe();
       reply.raw.end();
     });
+  });
+
+  app.get<{
+    Params: { sessionId: string; batchId: string; storedName: string };
+  }>(routePath("/api/uploads/:sessionId/:batchId/:storedName"), async (request, reply) => {
+    const resolved = await resolveUploadedFile(
+      config.uploadsDir,
+      request.params.sessionId,
+      request.params.batchId,
+      request.params.storedName,
+    );
+    reply.header("Content-Type", resolved.mimeType);
+    return reply.send(createReadStream(resolved.path));
   });
 
   app.get<{

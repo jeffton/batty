@@ -33,7 +33,11 @@ import { ProviderAuthService } from "./provider-auth";
 import { hasSubagentSessionMarker } from "./subagent";
 import { getSessionMessagePage } from "./pi-service-message-page";
 import { getQueuedPrompts, removeQueuedPrompt } from "./pi-service-queue";
-import { preparePromptFiles } from "./pi-service-uploads";
+import {
+  externalizeInlineImagesInSession,
+  externalizeUploadedImagesInSession,
+  preparePromptFiles,
+} from "./pi-service-uploads";
 import {
   attachSession,
   disposeWebSession,
@@ -450,6 +454,7 @@ export class PiService {
       images: prepared.images,
       ...(streamingBehavior ? { streamingBehavior } : {}),
     });
+    externalizeUploadedImagesInSession(webSession.session, prepared.uploadedImages);
     this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
   }
 
@@ -522,6 +527,7 @@ export class PiService {
     modelFallbackMessage?: string,
     ephemeral = false,
   ): WebSession {
+    externalizeInlineImagesInSession(session, this.config.uploadsDir, this.config.baseUrl);
     return attachSession(
       this.sessions,
       (workspace, session) => this.registerLiveSession(workspace, session),
@@ -589,10 +595,7 @@ export class PiService {
     return requireSession(this.sessions, sessionId);
   }
 
-  private async preparePromptFiles(
-    sessionId: string,
-    files: UploadedFile[],
-  ): Promise<{ text: string; images: Array<{ type: "image"; mimeType: string; data: string }> }> {
-    return preparePromptFiles(this.config.uploadsDir, sessionId, files);
+  private async preparePromptFiles(sessionId: string, files: UploadedFile[]) {
+    return preparePromptFiles(this.config.uploadsDir, sessionId, files, this.config.baseUrl);
   }
 }

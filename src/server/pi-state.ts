@@ -47,6 +47,33 @@ function normalizeToolDetails(details: unknown): ToolExecutionDetails | undefine
   return details && typeof details === "object" ? (details as ToolExecutionDetails) : undefined;
 }
 
+function normalizeBattyAttachments(message: unknown): UiContentBlock[] {
+  const attachments = (message as { battyAttachments?: unknown }).battyAttachments;
+  if (!Array.isArray(attachments)) {
+    return [];
+  }
+
+  return attachments.flatMap<UiContentBlock>((attachment) => {
+    if (!attachment || typeof attachment !== "object") {
+      return [];
+    }
+
+    const candidate = attachment as Record<string, unknown>;
+    return candidate.kind === "image" &&
+      typeof candidate.mimeType === "string" &&
+      typeof candidate.url === "string"
+      ? [
+          {
+            type: "image",
+            mimeType: candidate.mimeType,
+            url: candidate.url,
+            name: typeof candidate.name === "string" ? candidate.name : undefined,
+          },
+        ]
+      : [];
+  });
+}
+
 export function normalizeBlocks(content: unknown): UiContentBlock[] {
   if (typeof content === "string") {
     return [{ type: "text", text: content }];
@@ -66,8 +93,17 @@ export function normalizeBlocks(content: unknown): UiContentBlock[] {
       case "text":
         return typeof candidate.text === "string" ? [{ type: "text", text: candidate.text }] : [];
       case "image":
-        return typeof candidate.mimeType === "string" && typeof candidate.data === "string"
-          ? [{ type: "image", mimeType: candidate.mimeType, data: candidate.data }]
+        return typeof candidate.mimeType === "string" &&
+          (typeof candidate.data === "string" || typeof candidate.url === "string")
+          ? [
+              {
+                type: "image",
+                mimeType: candidate.mimeType,
+                data: typeof candidate.data === "string" ? candidate.data : undefined,
+                url: typeof candidate.url === "string" ? candidate.url : undefined,
+                name: typeof candidate.name === "string" ? candidate.name : undefined,
+              },
+            ]
           : [];
       case "thinking":
         return typeof candidate.thinking === "string"
@@ -105,7 +141,7 @@ export function normalizeMessage(message: AgentMessage, index: number): UiMessag
       id: messageId("user", message.timestamp, index),
       role: "user",
       timestamp: message.timestamp,
-      blocks: normalizeBlocks(message.content),
+      blocks: [...normalizeBlocks(message.content), ...normalizeBattyAttachments(message)],
     };
   }
 

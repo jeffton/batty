@@ -52,7 +52,7 @@ function readString(key: string): string | undefined {
 }
 
 function imageUrl(block: Extract<UiContentBlock, { type: "image" }>): string {
-  return `data:${block.mimeType};base64,${block.data}`;
+  return block.url ?? `data:${block.mimeType};base64,${block.data ?? ""}`;
 }
 
 const pathValue = computed(() => readString("path"));

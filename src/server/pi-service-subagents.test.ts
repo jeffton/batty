@@ -571,7 +571,7 @@ describe("runDetachedSubagentSession", () => {
     expect(result.text).toBe("Codex error: upstream overloaded");
   });
 
-  it("returns after a terminal assistant failure even when auto-retry starts and never settles", async () => {
+  it("waits for auto-retry failure after a retryable terminal assistant failure", async () => {
     const sessionMessages: AgentMessage[] = [];
     let subscriber: ((event: { type: string; [key: string]: unknown }) => void) | undefined;
     let aborted = false;
@@ -634,7 +634,7 @@ describe("runDetachedSubagentSession", () => {
       },
     } as unknown as AgentSession;
 
-    const result = await runDetachedSubagentSession(
+    const resultPromise = runDetachedSubagentSession(
       {
         async createPiAgentSession() {
           return { session: subagentSession };
@@ -671,10 +671,21 @@ describe("runDetachedSubagentSession", () => {
       },
     );
 
-    expect(aborted).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(aborted).toBe(false);
+
+    subscriber?.({
+      type: "auto_retry_end",
+      success: false,
+      attempt: 3,
+      finalError: "terminated after retries",
+    });
+
+    const result = await resultPromise;
+    expect(aborted).toBe(false);
     expect(result.isError).toBe(true);
-    expect(result.errorMessage).toBe("terminated");
-    expect(result.text).toBe("terminated");
+    expect(result.errorMessage).toBe("terminated after retries");
+    expect(result.text).toBe("terminated after retries");
   });
 
   it("returns after a direct terminal assistant failure even if prompt never settles", async () => {

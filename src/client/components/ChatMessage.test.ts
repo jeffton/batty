@@ -134,6 +134,32 @@ describe("ChatMessage", () => {
     );
   });
 
+  it("hides assistant thinking blocks from the parent transcript", () => {
+    const message: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-thinking-1",
+      role: "assistant",
+      timestamp: 3,
+      blocks: [
+        { type: "thinking", thinking: "I should inspect the setup." },
+        {
+          type: "toolCall",
+          id: "call-1",
+          name: "subagent",
+          arguments: { prompt: "Inspect" },
+        },
+      ],
+    };
+
+    const wrapper = mount(ChatMessage, {
+      props: {
+        message,
+      },
+    });
+
+    expect(wrapper.text()).not.toContain("I should inspect the setup");
+    expect(wrapper.text()).toContain("subagent");
+  });
+
   it("renders assistant errors as red bubbles", () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-error-1",

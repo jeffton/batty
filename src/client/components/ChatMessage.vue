@@ -38,7 +38,7 @@ function isBubbleBlock(block: UiContentBlock): boolean {
 }
 
 function showAssistantBlock(block: UiContentBlock): boolean {
-  return !isAttachmentOutputToolCall(block, props.toolStatesByCallId);
+  return block.type !== "thinking" && !isAttachmentOutputToolCall(block, props.toolStatesByCallId);
 }
 
 function isSentFileDescriptor(candidate: unknown): candidate is SentFileDescriptor {

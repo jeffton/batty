@@ -70,6 +70,55 @@ describe("runWebSearch", () => {
     ]);
   });
 
+  it("returns text/plain markdown unchanged", async () => {
+    const markdown = [
+      "# Tool docs",
+      "",
+      "Call `list_apps` to enumerate apps.",
+      "Literal fences stay literal:",
+      "```",
+      "list_apps",
+      "```",
+    ].join("\n");
+
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(markdown, { status: 200, headers: { "Content-Type": "text/plain" } }),
+    ) as typeof fetch;
+
+    const result = await runWebSearch({
+      apiKey: "brave-key",
+      action: "content",
+      url: "https://example.com/tool-docs.txt",
+    });
+
+    expect(result.text).toBe(markdown);
+    expect(result.text).toContain("`list_apps`");
+    expect(result.text).not.toContain("\\`list\\_apps\\`");
+    expect(chromium.launch).not.toHaveBeenCalled();
+  });
+
+  it("returns JSON content unchanged", async () => {
+    const json = JSON.stringify({ tool: "list_apps", enabled: true }, null, 2);
+
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(json, {
+          status: 200,
+          headers: { "Content-Type": "application/json; charset=utf-8" },
+        }),
+    ) as typeof fetch;
+
+    const result = await runWebSearch({
+      apiKey: "brave-key",
+      action: "content",
+      url: "https://example.com/tool-docs.json",
+    });
+
+    expect(result.text).toBe(json);
+    expect(chromium.launch).not.toHaveBeenCalled();
+  });
+
   it("extracts readable markdown content from pages", async () => {
     globalThis.fetch = vi.fn(
       async () =>
@@ -128,7 +177,11 @@ describe("runWebSearch", () => {
           continue: routeContinue,
         });
       }),
-      goto: vi.fn(async () => ({ status: () => 200, statusText: () => "OK" })),
+      goto: vi.fn(async () => ({
+        headers: () => ({ "content-type": "text/html" }),
+        status: () => 200,
+        statusText: () => "OK",
+      })),
       waitForLoadState: vi.fn(async () => {}),
       waitForTimeout: vi.fn(async () => {}),
       content: vi.fn(

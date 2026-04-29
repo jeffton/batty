@@ -12,10 +12,11 @@ const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const DEFAULT_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
 const DEFAULT_ACCEPT_LANGUAGE = "en-US,en;q=0.9";
-type HtmlFetchResult =
+type PageFetchResult =
   | {
       ok: true;
-      html: string;
+      body: string;
+      contentType?: string;
       finalUrl: string;
       status?: number;
       statusText?: string;
@@ -124,15 +125,32 @@ function isUsefulContent(content: string): boolean {
   return withoutHeading.length >= 40;
 }
 
-function shouldUseBrowserFallback(result: HtmlFetchResult, content?: string): boolean {
+function isHtmlContentType(contentType: string | undefined): boolean {
+  const mediaType = contentType?.split(";", 1)[0]?.trim().toLowerCase();
+  return mediaType === "text/html" || mediaType === "application/xhtml+xml";
+}
+
+function extractContent(result: Extract<PageFetchResult, { ok: true }>): string {
+  if (isHtmlContentType(result.contentType)) {
+    return extractReadableContent(result.body, result.finalUrl);
+  }
+
+  return result.body.slice(0, MAX_CONTENT_LENGTH);
+}
+
+function shouldUseBrowserFallback(result: PageFetchResult, content?: string): boolean {
   if (!result.ok) {
     return result.status === 401 || result.status === 403 || result.status === 429;
+  }
+
+  if (!isHtmlContentType(result.contentType)) {
+    return false;
   }
 
   return !isUsefulContent(content ?? "");
 }
 
-function formatFetchFailure(result: HtmlFetchResult): string {
+function formatFetchFailure(result: PageFetchResult): string {
   if (typeof result.status === "number") {
     return `(HTTP ${result.status}: ${result.statusText || "Unknown"})`;
   }
@@ -145,13 +163,13 @@ function formatFetchFailure(result: HtmlFetchResult): string {
 }
 
 function formatFallbackFailure(
-  httpResult: HtmlFetchResult,
-  browserResult: HtmlFetchResult,
+  httpResult: PageFetchResult,
+  browserResult: PageFetchResult,
 ): string {
   return `${formatFetchFailure(httpResult)}\nBrowser fallback failed: ${formatFetchFailure(browserResult)}`;
 }
 
-async function fetchPageHtmlViaHttp(url: string): Promise<HtmlFetchResult> {
+async function fetchPageViaHttp(url: string): Promise<PageFetchResult> {
   try {
     const response = await fetch(url, {
       headers: {
@@ -173,7 +191,8 @@ async function fetchPageHtmlViaHttp(url: string): Promise<HtmlFetchResult> {
 
     return {
       ok: true,
-      html: await response.text(),
+      body: await response.text(),
+      contentType: response.headers.get("content-type") || undefined,
       finalUrl: response.url || url,
       status: response.status,
       statusText: response.statusText,
@@ -246,7 +265,7 @@ function createConcurrencyLimiter(limit: number): <T>(task: () => Promise<T>) =>
 
 const withBrowserFallbackSlot = createConcurrencyLimiter(BROWSER_FALLBACK_CONCURRENCY);
 
-async function fetchPageHtmlViaBrowser(url: string): Promise<HtmlFetchResult> {
+async function fetchPageViaBrowser(url: string): Promise<PageFetchResult> {
   return withBrowserFallbackSlot(async () => {
     let context: Awaited<ReturnType<Browser["newContext"]>> | undefined;
 
@@ -281,9 +300,15 @@ async function fetchPageHtmlViaBrowser(url: string): Promise<HtmlFetchResult> {
         .catch(() => {});
       await page.waitForTimeout(250);
 
+      const contentType = response?.headers()["content-type"] ?? "text/html";
+      const body = isHtmlContentType(contentType)
+        ? await page.content()
+        : await (response?.text() ?? page.content());
+
       return {
         ok: true,
-        html: await page.content(),
+        body,
+        contentType,
         finalUrl: page.url(),
         status: response?.status(),
         statusText: response?.statusText(),
@@ -301,9 +326,9 @@ async function fetchPageHtmlViaBrowser(url: string): Promise<HtmlFetchResult> {
 }
 
 async function fetchPageContent(url: string): Promise<string> {
-  const httpResult = await fetchPageHtmlViaHttp(url);
+  const httpResult = await fetchPageViaHttp(url);
   if (httpResult.ok) {
-    const content = extractReadableContent(httpResult.html, httpResult.finalUrl);
+    const content = extractContent(httpResult);
     if (!shouldUseBrowserFallback(httpResult, content)) {
       return content;
     }
@@ -311,13 +336,13 @@ async function fetchPageContent(url: string): Promise<string> {
     return formatFetchFailure(httpResult);
   }
 
-  const browserResult = await fetchPageHtmlViaBrowser(url);
+  const browserResult = await fetchPageViaBrowser(url);
   if (!browserResult.ok) {
     return formatFallbackFailure(httpResult, browserResult);
   }
 
-  const browserContent = extractReadableContent(browserResult.html, browserResult.finalUrl);
-  if (!isUsefulContent(browserContent)) {
+  const browserContent = extractContent(browserResult);
+  if (isHtmlContentType(browserResult.contentType) && !isUsefulContent(browserContent)) {
     return formatFallbackFailure(httpResult, {
       ok: false,
       finalUrl: browserResult.finalUrl,

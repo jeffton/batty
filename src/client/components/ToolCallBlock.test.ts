@@ -224,6 +224,35 @@ describe("ToolCallBlock", () => {
     expect(wrapper.find("img.attached-files__preview").exists()).toBe(false);
   });
 
+  it("opens tool-call mode subagent sessions while keeping the result in the tool call", () => {
+    const wrapper = mount(ToolCallBlock, {
+      props: {
+        name: "subagent",
+        arguments: {
+          prompt: "Check the repo",
+        },
+        resultBlocks: [{ type: "text", text: "Full subagent response" }],
+        resultDetails: {
+          subagent: {
+            prompt: "Check the repo",
+            model: "openai/gpt-5",
+            effort: "medium",
+            includeSessionContext: true,
+            respondIn: "tool-call",
+            messageCount: 3,
+            workspaceId: "workspace",
+            sessionId: "subagent-123",
+            sessionPath: "/tmp/subagent-123.jsonl",
+          },
+        },
+        status: "success",
+      },
+    });
+
+    expect(wrapper.text()).toContain("Open session");
+    expect(wrapper.text()).toContain("Full subagent response");
+  });
+
   it("renders subagent attachments from nested attach-files results", () => {
     const wrapper = mount(ToolCallBlock, {
       props: {

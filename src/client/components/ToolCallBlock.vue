@@ -108,7 +108,6 @@ const subagentPopoverId = computed(() => {
 const canOpenSubagentSession = computed(
   () =>
     props.name === "subagent" &&
-    subagentRespondIn.value === "session" &&
     typeof subagentWorkspaceId.value === "string" &&
     typeof subagentSessionPath.value === "string" &&
     typeof subagentPopoverId.value === "string",

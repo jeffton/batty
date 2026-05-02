@@ -458,7 +458,7 @@ export async function runDetachedSubagentSession(
     if (completion === "final-retry-failure" || completion === "terminal-assistant-failure") {
       const surfacedError = finalRetryError || terminalAssistantError;
       if (completion === "terminal-assistant-failure") {
-        await subagentSession.abort();
+        void subagentSession.abort().catch(() => undefined);
       }
       const result = buildDetachedSubagentResult(
         subagentSession,

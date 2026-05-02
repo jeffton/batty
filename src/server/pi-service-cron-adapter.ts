@@ -153,37 +153,40 @@ export async function runCronJobSession(
     });
     context.publishReset(webSession, context.getState(webSession.id));
 
-    let completionAppended = false;
     const abortController = new AbortController();
     context.cronSubagentAbortControllers.set(toolCallId, abortController);
     try {
-      const result = await context.runDetachedSubagentSession({
-        workspace: job.workspace,
-        parentSessionId: webSession.session.sessionId,
-        parentSessionPath,
-        contextBranchLeafId,
-        prompt: job.prompt,
-        modelId: job.model,
-        thinkingLevel: job.thinkingLevel,
-        includeSessionContext: includePreviousContext,
-        respondIn: "session",
-        preludeNotices: [cronNotice],
-        currentToolCallId: toolCallId,
-        signal: abortController.signal,
-        onUpdate: (partial) => {
-          const current = webSession.activeTools.get(toolCallId);
-          if (!current) {
-            return;
-          }
-          current.blocks = normalizeBlocks(partial.content ?? []);
-          current.details = normalizeToolDetails(partial.details);
-          webSession.activeTools.set(toolCallId, current);
-          context.publishTools(webSession);
-        },
-      });
+      let result: Awaited<ReturnType<PiServiceCronAdapterContext["runDetachedSubagentSession"]>>;
+      try {
+        result = await context.runDetachedSubagentSession({
+          workspace: job.workspace,
+          parentSessionId: webSession.session.sessionId,
+          parentSessionPath,
+          contextBranchLeafId,
+          prompt: job.prompt,
+          modelId: job.model,
+          thinkingLevel: job.thinkingLevel,
+          includeSessionContext: includePreviousContext,
+          respondIn: "session",
+          preludeNotices: [cronNotice],
+          currentToolCallId: toolCallId,
+          signal: abortController.signal,
+          onUpdate: (partial) => {
+            const current = webSession.activeTools.get(toolCallId);
+            if (!current) {
+              return;
+            }
+            current.blocks = normalizeBlocks(partial.content ?? []);
+            current.details = normalizeToolDetails(partial.details);
+            webSession.activeTools.set(toolCallId, current);
+            context.publishTools(webSession);
+          },
+        });
+      } catch (error) {
+        result = buildFailedCronSubagentResult(toolArgs, error);
+      }
 
       appendCronSubagentCompletion(webSession.session, toolCallId, result);
-      completionAppended = true;
       const completedState = context.getState(webSession.id);
       context.publishReset(webSession, completedState);
       try {
@@ -206,19 +209,6 @@ export async function runCronJobSession(
         sessionId: webSession.session.sessionId,
         sessionPath: context.requireSessionPath(webSession.id),
       };
-    } catch (error) {
-      if (
-        !completionAppended &&
-        findDanglingCronSubagentToolCall(webSession.session)?.id === toolCallId
-      ) {
-        appendCronSubagentCompletion(
-          webSession.session,
-          toolCallId,
-          buildFailedCronSubagentResult(toolArgs, error),
-        );
-        context.publishReset(webSession, context.getState(webSession.id));
-      }
-      throw error;
     } finally {
       context.cronSubagentAbortControllers.delete(toolCallId);
       webSession.activeTools.delete(toolCallId);

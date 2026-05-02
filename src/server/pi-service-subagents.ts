@@ -347,12 +347,17 @@ export async function runDetachedSubagentSession(
   let terminalAssistantError: string | undefined;
   let resolveFinalRetryFailure: (() => void) | undefined;
   let resolveTerminalAssistantFailure: (() => void) | undefined;
+  let resolveTerminalAssistantIdleFailure: (() => void) | undefined;
   let terminalAssistantFailureTimer: NodeJS.Timeout | undefined;
+  let terminalAssistantIdleFailureTimer: NodeJS.Timeout | undefined;
   const finalRetryFailure = new Promise<void>((resolve) => {
     resolveFinalRetryFailure = resolve;
   });
   const terminalAssistantFailure = new Promise<void>((resolve) => {
     resolveTerminalAssistantFailure = resolve;
+  });
+  const terminalAssistantIdleFailure = new Promise<void>((resolve) => {
+    resolveTerminalAssistantIdleFailure = resolve;
   });
   const cancelTerminalAssistantFailure = () => {
     if (terminalAssistantFailureTimer) {
@@ -366,6 +371,39 @@ export async function runDetachedSubagentSession(
       terminalAssistantFailureTimer = undefined;
       resolveTerminalAssistantFailure?.();
     }, 100);
+  };
+  const cancelTerminalAssistantIdleFailure = () => {
+    if (terminalAssistantIdleFailureTimer) {
+      clearInterval(terminalAssistantIdleFailureTimer);
+      terminalAssistantIdleFailureTimer = undefined;
+    }
+  };
+  const scheduleTerminalAssistantIdleFailure = () => {
+    const retryState = subagentSession as AgentSession & { isRetrying?: unknown };
+    if (typeof retryState.isRetrying !== "boolean") {
+      return;
+    }
+    cancelTerminalAssistantIdleFailure();
+    terminalAssistantIdleFailureTimer = setInterval(() => {
+      const generatedMessages = newlyGeneratedSubagentMessages(
+        subagentSession.messages,
+        seedMessageCount,
+      );
+      const finalAssistant = findLastAssistantMessage(generatedMessages);
+      if (
+        !finalAssistant ||
+        (finalAssistant.stopReason !== "error" && finalAssistant.stopReason !== "aborted")
+      ) {
+        return;
+      }
+      if (subagentSession.isStreaming || retryState.isRetrying) {
+        return;
+      }
+
+      terminalAssistantError = extractAssistantText(finalAssistant) || finalAssistant.errorMessage;
+      cancelTerminalAssistantIdleFailure();
+      resolveTerminalAssistantIdleFailure?.();
+    }, 250);
   };
 
   const unsubscribe = subagentSession.subscribe((event) => {
@@ -402,6 +440,7 @@ export async function runDetachedSubagentSession(
     ) {
       terminalAssistantError = extractAssistantText(finalAssistant) || finalAssistant.errorMessage;
       scheduleTerminalAssistantFailure();
+      scheduleTerminalAssistantIdleFailure();
     }
 
     const text = extractAssistantText(finalAssistant);
@@ -449,13 +488,19 @@ export async function runDetachedSubagentSession(
   try {
     const promptPromise = subagentSession.prompt(options.prompt);
     void promptPromise.catch(() => undefined);
+    scheduleTerminalAssistantIdleFailure();
     const completion = await Promise.race([
       promptPromise.then(() => "prompt-complete" as const),
       finalRetryFailure.then(() => "final-retry-failure" as const),
       terminalAssistantFailure.then(() => "terminal-assistant-failure" as const),
+      terminalAssistantIdleFailure.then(() => "terminal-assistant-idle-failure" as const),
     ]);
 
-    if (completion === "final-retry-failure" || completion === "terminal-assistant-failure") {
+    if (
+      completion === "final-retry-failure" ||
+      completion === "terminal-assistant-failure" ||
+      completion === "terminal-assistant-idle-failure"
+    ) {
       const surfacedError = finalRetryError || terminalAssistantError;
       if (completion === "terminal-assistant-failure") {
         void subagentSession.abort().catch(() => undefined);
@@ -501,6 +546,7 @@ export async function runDetachedSubagentSession(
     };
   } finally {
     cancelTerminalAssistantFailure();
+    cancelTerminalAssistantIdleFailure();
     if (options.signal) {
       options.signal.removeEventListener("abort", abortListener);
     }

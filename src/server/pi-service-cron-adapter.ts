@@ -187,15 +187,22 @@ export async function runCronJobSession(
       }
 
       appendCronSubagentCompletion(webSession.session, toolCallId, result);
-      const completedState = context.getState(webSession.id);
+      webSession.activeTools.delete(toolCallId);
+      context.publishTools(webSession);
+
+      const completedState = {
+        ...context.getState(webSession.id),
+        isStreaming: false,
+        pendingMessageCount: 0,
+        activeAssistant: undefined,
+      };
       context.publishReset(webSession, completedState);
       try {
-        await context.onAgentCompleted?.({
-          ...completedState,
-          isStreaming: false,
-          pendingMessageCount: 0,
-          activeAssistant: undefined,
+        console.info("Running agent completion hook", {
+          sessionId: completedState.sessionId,
+          workspaceId: completedState.workspaceId,
         });
+        await context.onAgentCompleted?.(completedState);
       } catch (error) {
         console.error("Failed to run agent completion hook for cron subagent", error);
       }
@@ -211,8 +218,9 @@ export async function runCronJobSession(
       };
     } finally {
       context.cronSubagentAbortControllers.delete(toolCallId);
-      webSession.activeTools.delete(toolCallId);
-      context.publishTools(webSession);
+      if (webSession.activeTools.delete(toolCallId)) {
+        context.publishTools(webSession);
+      }
     }
   });
 }

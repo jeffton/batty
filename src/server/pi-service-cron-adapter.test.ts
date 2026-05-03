@@ -111,6 +111,7 @@ describe("runCronJobSession", () => {
     const publishTools = vi.fn();
     const publishReset = vi.fn();
     const notifyWorkspaceUpdated = vi.fn(async () => undefined);
+    const onAgentCompleted = vi.fn(async () => undefined);
 
     await expect(
       runCronJobSession(
@@ -130,6 +131,7 @@ describe("runCronJobSession", () => {
           runDetachedSubagentSession: vi.fn(async () => {
             throw new Error("detached exploded");
           }),
+          onAgentCompleted,
           notifyWorkspaceUpdated,
         },
         {
@@ -155,6 +157,13 @@ describe("runCronJobSession", () => {
     });
     expect(publishReset).toHaveBeenCalled();
     expect(publishTools).toHaveBeenCalled();
+    expect(onAgentCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        isStreaming: false,
+        pendingMessageCount: 0,
+        activeAssistant: undefined,
+      }),
+    );
     expect(notifyWorkspaceUpdated).toHaveBeenCalledWith("roy");
     expect(webSession.activeTools.size).toBe(0);
   });

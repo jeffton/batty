@@ -3,12 +3,12 @@ import {
   type Message,
   type ToolCall,
   type ToolResultMessage,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
 import {
   SessionManager,
   type AgentSession,
   type ExtensionContext,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import type {
   SessionState,
   SessionSummary,
@@ -387,7 +387,7 @@ export async function runDetachedSubagentSession(
   const startTerminalAssistantPolling = () => {
     terminalAssistantPollTimer = setInterval(() => {
       const retryState = subagentSession as AgentSession & { isRetrying?: unknown };
-      if (retryState.isRetrying === true) {
+      if (retryState.isRetrying === true && subagentSession.isStreaming) {
         return;
       }
       const error = latestGeneratedAssistantError();

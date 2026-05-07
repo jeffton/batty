@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { AssistantMessage } from "@mariozechner/pi-ai";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type {
   CronJobSession,
   SessionState,
@@ -226,7 +226,9 @@ export async function runCronJobSession(
 }
 
 export function recoverDanglingCronSubagent(
-  context: Pick<PiServiceCronAdapterContext, "cronSubagentAbortControllers">,
+  context: Pick<PiServiceCronAdapterContext, "cronSubagentAbortControllers"> & {
+    requireSession?: (sessionId: string) => WebSession;
+  },
   webSession: WebSession,
   error: string,
   options: { abortRunning?: boolean } = {},
@@ -237,7 +239,11 @@ export function recoverDanglingCronSubagent(
   }
 
   const abortController = context.cronSubagentAbortControllers.get(dangling.id);
-  if (abortController && options.abortRunning !== true) {
+  if (
+    abortController &&
+    options.abortRunning !== true &&
+    isCronSubagentStillRunning(context, webSession, dangling.id)
+  ) {
     return false;
   }
 
@@ -250,4 +256,23 @@ export function recoverDanglingCronSubagent(
     buildFailedCronSubagentResult(dangling.args, error),
   );
   return true;
+}
+
+function isCronSubagentStillRunning(
+  context: { requireSession?: (sessionId: string) => WebSession },
+  webSession: WebSession,
+  toolCallId: string,
+): boolean {
+  const details = webSession.activeTools.get(toolCallId)?.details;
+  const subagent = details?.subagent;
+  if (
+    typeof subagent !== "object" ||
+    subagent === null ||
+    typeof (subagent as { sessionId?: unknown }).sessionId !== "string" ||
+    !context.requireSession
+  ) {
+    return true;
+  }
+
+  return context.requireSession((subagent as { sessionId: string }).sessionId).session.isStreaming;
 }

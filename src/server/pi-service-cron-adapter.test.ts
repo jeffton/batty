@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { WebSession } from "./pi-service-types";
 import { recoverDanglingCronSubagent, runCronJobSession } from "./pi-service-cron-adapter";
 
@@ -72,6 +72,92 @@ function createWebSession(): { webSession: WebSession; appendedMessages: AgentMe
 }
 
 describe("runCronJobSession", () => {
+  it("persists exactly one failed parent completion when the detached subagent reports an error", async () => {
+    const appendedMessages: AgentMessage[] = [];
+    const sessionMessages: AgentMessage[] = [];
+    const webSession = {
+      id: "daily-session-state-id",
+      workspace: {
+        id: "roy",
+        label: "Roy",
+        path: "/root/github/roy",
+        kind: "workspace",
+        isPinned: true,
+        isAssistant: false,
+      },
+      session: {
+        sessionId: "daily-session-id",
+        sessionFile: "/tmp/daily-session.jsonl",
+        model: { api: "openai-codex-responses", provider: "openai-codex", id: "gpt-5.5" },
+        get messages() {
+          return sessionMessages;
+        },
+        agent: {
+          state: { messages: sessionMessages },
+          waitForIdle: vi.fn(async () => undefined),
+        },
+        sessionManager: {
+          getLeafId: () => "leaf-id",
+          appendMessage(message: AgentMessage) {
+            appendedMessages.push(message);
+          },
+        },
+      } as unknown as AgentSession,
+      subscribers: new Set(),
+      activeTools: new Map(),
+      openedAt: 0,
+      ephemeral: false,
+    } as unknown as WebSession;
+
+    await expect(
+      runCronJobSession(
+        {
+          cronSubagentAbortControllers: new Map(),
+          createSession: vi.fn(),
+          promptCron: vi.fn(),
+          resolveOrCreateDailySession: vi.fn(async () => ({ id: webSession.id }) as never),
+          requireSession: vi.fn(() => webSession),
+          requireSessionPath: vi.fn(() => "/tmp/daily-session.jsonl"),
+          runSubagentSerial: async (_sessionId, run) => run(),
+          getState: vi.fn(() => ({ id: webSession.id }) as never),
+          publishReset: vi.fn(),
+          publishTools: vi.fn(),
+          setThinkingLevel: vi.fn(),
+          setModel: vi.fn(),
+          runDetachedSubagentSession: vi.fn(async () => ({
+            text: "WebSocket closed 1000",
+            details: { subagent: { errorMessage: "WebSocket closed 1000" } },
+            isError: true,
+            errorMessage: "WebSocket closed 1000",
+          })),
+          notifyWorkspaceUpdated: vi.fn(async () => undefined),
+        },
+        {
+          workspace: webSession.workspace,
+          prompt: "Run heartbeat",
+          model: "openai-codex/gpt-5.5",
+          thinkingLevel: "medium",
+          session: { kind: "daily-subagent", includePreviousContext: true },
+          scheduleLabel: "Every hour",
+        },
+      ),
+    ).rejects.toThrow("WebSocket closed 1000");
+
+    expect(appendedMessages.filter((message) => message.role === "toolResult")).toHaveLength(1);
+    expect(appendedMessages.filter((message) => message.role === "toolResult")[0]).toMatchObject({
+      toolName: "subagent",
+      isError: true,
+      details: { subagent: { errorMessage: "WebSocket closed 1000" } },
+    });
+    expect(appendedMessages.at(-1)).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "WebSocket closed 1000" }],
+      stopReason: "error",
+      errorMessage: "WebSocket closed 1000",
+    });
+    expect(webSession.activeTools.size).toBe(0);
+  });
+
   it("persists exactly one failed parent completion when the detached subagent throws", async () => {
     const appendedMessages: AgentMessage[] = [];
     const sessionMessages: AgentMessage[] = [];
@@ -187,6 +273,37 @@ describe("recoverDanglingCronSubagent", () => {
     expect(cronSubagentAbortControllers.has("subagent-cron-1")).toBe(true);
     expect(webSession.activeTools.has("subagent-cron-1")).toBe(true);
     expect(appendedMessages).toEqual([]);
+  });
+
+  it("repairs a failed cron subagent that still has a running controller", () => {
+    const { webSession, appendedMessages } = createWebSession();
+    const abortController = new AbortController();
+    const abortSpy = vi.spyOn(abortController, "abort");
+    const cronSubagentAbortControllers = new Map([["subagent-cron-1", abortController]]);
+    webSession.activeTools.set("subagent-cron-1", {
+      toolCallId: "subagent-cron-1",
+      toolName: "subagent",
+      args: {},
+      blocks: [],
+      status: "running",
+      isError: false,
+      details: { subagent: { sessionId: "child-session-1" } },
+    });
+
+    const recovered = recoverDanglingCronSubagent(
+      {
+        cronSubagentAbortControllers,
+        requireSession: vi.fn(() => ({ session: { isStreaming: false } }) as unknown as WebSession),
+      },
+      webSession,
+      "Cron subagent did not finish before the next prompt.",
+    );
+
+    expect(recovered).toBe(true);
+    expect(abortSpy).toHaveBeenCalledOnce();
+    expect(cronSubagentAbortControllers.has("subagent-cron-1")).toBe(false);
+    expect(webSession.activeTools.has("subagent-cron-1")).toBe(false);
+    expect(appendedMessages).toHaveLength(2);
   });
 
   it("aborts and completes an actively running cron subagent when requested", () => {

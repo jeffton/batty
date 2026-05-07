@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { createSessionState, normalizeMessage } from "./pi-state";
 
 type AgentMessage = AgentSession["messages"][number];

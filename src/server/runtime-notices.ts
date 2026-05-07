@@ -1,4 +1,4 @@
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 
 export const BATTY_RUNTIME_NOTICE_CUSTOM_TYPE = "batty-runtime-notice";
 

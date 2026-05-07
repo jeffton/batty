@@ -1,4 +1,4 @@
-import type { AgentSession, AgentSessionEvent } from "@mariozechner/pi-coding-agent";
+import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type {
   ServerEvent,
   SessionState,

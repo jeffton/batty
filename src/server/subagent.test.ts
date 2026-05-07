@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
-import type { AssistantMessage } from "@mariozechner/pi-ai";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
   buildSubagentDetails,
   cloneMessagesForSubagent,

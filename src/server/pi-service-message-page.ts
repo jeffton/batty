@@ -1,4 +1,4 @@
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { RECENT_SESSION_MESSAGE_WINDOW } from "@/shared/session-history";
 import { transcriptMessagesFromSessionEntries } from "./pi-state";
 

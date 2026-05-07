@@ -8,7 +8,7 @@ import {
   SettingsManager,
   type AgentSession,
   type ToolDefinition,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import type { WorkspaceInfo } from "@/shared/types";
 import type { AppConfig } from "./config";
 import {

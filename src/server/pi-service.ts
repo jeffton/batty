@@ -1,12 +1,12 @@
 import path from "node:path";
-import type { Message } from "@mariozechner/pi-ai";
+import type { Message } from "@earendil-works/pi-ai";
 import {
   AuthStorage,
   ModelRegistry,
   SessionManager,
   type AgentSession,
   type ExtensionContext,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import type {
   CronJobSession,
   ModelOption,
@@ -340,7 +340,9 @@ export class PiService {
         : undefined,
       thinkingLevel: webSession.session.thinkingLevel,
       availableThinkingLevels: webSession.session.getAvailableThinkingLevels(),
-      isStreaming: webSession.session.isStreaming,
+      isStreaming:
+        webSession.session.isStreaming ||
+        [...webSession.activeTools.values()].some((tool) => tool.status === "running"),
       pendingMessageCount: webSession.session.pendingMessageCount,
       queuedPrompts: getQueuedPrompts(webSession),
       updatedAt: sessionUpdatedAt(webSession.session, webSession.openedAt),
@@ -375,7 +377,9 @@ export class PiService {
         modelLabel: undefined,
         thinkingLevel: webSession.session.thinkingLevel,
         availableThinkingLevels: webSession.session.getAvailableThinkingLevels(),
-        isStreaming: webSession.session.isStreaming,
+        isStreaming:
+          webSession.session.isStreaming ||
+          [...webSession.activeTools.values()].some((tool) => tool.status === "running"),
         pendingMessageCount: webSession.session.pendingMessageCount,
         queuedPrompts: getQueuedPrompts(webSession),
         updatedAt: sessionUpdatedAt(webSession.session, webSession.openedAt),

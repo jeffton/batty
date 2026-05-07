@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import type { AuthStorage } from "@mariozechner/pi-coding-agent";
+import type { AuthStorage } from "@earendil-works/pi-coding-agent";
 import { ProviderAuthService } from "@/server/provider-auth";
 
 function createJwt(payload: Record<string, unknown>): string {

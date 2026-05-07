@@ -3,8 +3,8 @@ import {
   estimateTokens,
   getLatestCompactionEntry,
   type AgentSession,
-} from "@mariozechner/pi-coding-agent";
-import type { AssistantMessage } from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 
 interface ContextUsage {
   tokens: number | null;

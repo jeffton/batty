@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { ApiKeyCredential, AuthStorage } from "@mariozechner/pi-coding-agent";
+import type { ApiKeyCredential, AuthStorage } from "@earendil-works/pi-coding-agent";
 import type {
   ProviderAuthProviderStatus,
   ProviderAuthStartResponse,

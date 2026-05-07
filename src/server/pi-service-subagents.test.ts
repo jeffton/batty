@@ -2,8 +2,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { SessionManager, type AgentSession } from "@mariozechner/pi-coding-agent";
-import type { AssistantMessage } from "@mariozechner/pi-ai";
+import { SessionManager, type AgentSession } from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { BATTY_SYSTEM_PROMPT_CUSTOM_TYPE } from "./batty-system-prompt";
 import {
   appendCronSubagentCompletion,
@@ -883,6 +883,107 @@ describe("runDetachedSubagentSession", () => {
       isError: true,
       errorMessage: "terminated",
       text: "terminated",
+    });
+  });
+
+  it("propagates an idle terminal assistant failure even if retry state is stale", async () => {
+    const sessionMessages: AgentMessage[] = [];
+
+    const subagentSession = {
+      sessionId: "subagent-session-stale-retry-terminal-failure",
+      sessionFile: "/tmp/subagent-session-stale-retry-terminal-failure.jsonl",
+      messages: sessionMessages,
+      isStreaming: false,
+      isRetrying: true,
+      agent: {
+        state: {
+          messages: sessionMessages,
+        },
+      },
+      sessionManager: {
+        appendCustomEntry() {
+          return undefined;
+        },
+        appendMessage() {
+          return undefined;
+        },
+      },
+      subscribe() {
+        return () => undefined;
+      },
+      async prompt() {
+        sessionMessages.push({
+          role: "assistant",
+          content: [],
+          api: "openai-codex-responses",
+          provider: "openai-codex",
+          model: "gpt-5.5",
+          usage: {
+            input: 10,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 10,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: "error",
+          errorMessage: "WebSocket closed 1000",
+          timestamp: 1,
+        } satisfies AssistantMessage as unknown as AgentMessage);
+        return new Promise<void>(() => undefined);
+      },
+      async abort() {
+        return undefined;
+      },
+    } as unknown as AgentSession;
+
+    const resultPromise = runDetachedSubagentSession(
+      {
+        async createPiAgentSession() {
+          return { session: subagentSession };
+        },
+        attachSession(workspace, session) {
+          return {
+            id: "web-subagent-stale-retry-terminal-failure",
+            workspace,
+            session,
+            subscribers: new Set(),
+            activeTools: new Map(),
+            openedAt: 0,
+            ephemeral: true,
+          };
+        },
+        disposeWebSession: vi.fn(),
+        workspaceSessionDir: "/tmp",
+      },
+      {
+        workspace: {
+          id: "batty",
+          label: "Batty",
+          path: "/root/github/batty",
+          kind: "workspace",
+          isPinned: true,
+          isAssistant: false,
+        },
+        parentSessionId: "parent-session-stale-retry-terminal-failure",
+        prompt: "Inspect the issue",
+        modelId: "openai/gpt-5",
+        thinkingLevel: "medium",
+        includeSessionContext: false,
+        respondIn: "session",
+      },
+    );
+
+    const result = await Promise.race([
+      resultPromise,
+      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 500)),
+    ]);
+
+    expect(result).not.toBe("timeout");
+    expect(result).toMatchObject({
+      isError: true,
+      errorMessage: "WebSocket closed 1000",
+      text: "WebSocket closed 1000",
     });
   });
 

@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { ExtensionContext, ToolDefinition } from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type {
   CreateCronJobInput,
   ToolExecutionDetails,

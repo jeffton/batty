@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import type { AgentSessionEvent } from "@mariozechner/pi-coding-agent";
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { SessionState, WorkspaceInfo } from "@/shared/types";
 import { handleAgentEvent } from "./pi-service-sessions";
 import type { WebSession } from "./pi-service-types";

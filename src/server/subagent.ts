@@ -1,5 +1,5 @@
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
-import type { AssistantMessage, Usage } from "@mariozechner/pi-ai";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 import type { SentFileDescriptor } from "@/shared/types";
 
 export const SUBAGENT_TOOL_NAME = "subagent";

@@ -1,5 +1,5 @@
-import type { AssistantMessage } from "@mariozechner/pi-ai";
-import type { ExtensionContext, ToolDefinition } from "@mariozechner/pi-coding-agent";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { ToolExecutionDetails, WorkspaceInfo } from "@/shared/types";
 import type { AppConfig } from "./config";
 import type { CronService } from "./cron";

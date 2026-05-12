@@ -147,29 +147,20 @@ const hasTrailingAssistantBubble = computed(() => {
 });
 
 const messageTimestampLabel = computed(() => {
-  if (props.message.role !== "assistant" && props.message.role !== "user") {
-    return undefined;
-  }
-
   const timestamp = props.message.timestamp;
   const date = new Date(timestamp);
   const now = new Date();
+  const locales = navigator.languages.length > 0 ? navigator.languages : navigator.language;
   const isToday =
     date.getFullYear() === now.getFullYear() &&
     date.getMonth() === now.getMonth() &&
     date.getDate() === now.getDate();
 
   if (isToday) {
-    return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    return date.toLocaleTimeString(locales, { hour: "2-digit", minute: "2-digit" });
   }
 
-  return date.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return date.toLocaleString(locales, { dateStyle: "medium", timeStyle: "short" });
 });
 
 const attachedFiles = computed<SentFileDescriptor[]>(() => {
@@ -209,9 +200,11 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
 </script>
 
 <template>
-  <article :class="['message', `message--${props.message.role}`]">
-    <div v-if="messageTimestampLabel" class="message__timestamp">{{ messageTimestampLabel }}</div>
+  <div v-if="props.message.role === 'user'" class="message__timestamp">
+    {{ messageTimestampLabel }}
+  </div>
 
+  <article :class="['message', `message--${props.message.role}`]">
     <div v-if="props.message.role === 'bashExecution'" class="message__body">
       <CodeBlock :code="`$ ${props.message.command}\n${props.message.output}`" language="bash" />
     </div>
@@ -254,53 +247,59 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
     </div>
 
     <div v-else-if="props.message.role === 'assistant'" class="message__body">
-      <div
+      <template
         v-for="(segment, segmentIndex) in assistantSegments"
         :key="`${props.message.id}-segment-${segmentIndex}`"
-        :class="[
-          'message__segment',
-          {
-            'message__segment--bubble': segment.kind === 'bubble',
-            'message__segment--error': segment.kind === 'bubble' && assistantHasError,
-          },
-        ]"
       >
-        <template
-          v-for="(block, blockIndex) in segment.blocks"
-          :key="`${segmentIndex}-${blockIndex}`"
+        <div v-if="segment.kind === 'bubble'" class="message__timestamp">
+          {{ messageTimestampLabel }}
+        </div>
+        <div
+          :class="[
+            'message__segment',
+            {
+              'message__segment--bubble': segment.kind === 'bubble',
+              'message__segment--error': segment.kind === 'bubble' && assistantHasError,
+            },
+          ]"
         >
-          <MarkdownBlock v-if="block.type === 'text'" :text="block.text" />
-          <img
-            v-else-if="block.type === 'image'"
-            :src="imageUrl(block)"
-            :alt="block.name ?? 'Message attachment'"
-          />
-          <MarkdownBlock
-            v-else-if="block.type === 'thinking'"
-            :text="block.thinking"
-            variant="thinking"
-          />
-          <ToolCallBlock
-            v-else-if="block.type === 'toolCall'"
-            :name="block.name"
-            :arguments="block.arguments"
-            :tool-call-id="block.id"
-            :result-blocks="toolStateFor(block.id)?.resultBlocks ?? []"
-            :result-details="toolStateFor(block.id)?.resultDetails"
-            :status="toolStateFor(block.id)?.status"
-            :suppress-sent-files="block.name === 'attach-files' || block.name === 'subagent'"
-          />
-        </template>
+          <template
+            v-for="(block, blockIndex) in segment.blocks"
+            :key="`${segmentIndex}-${blockIndex}`"
+          >
+            <MarkdownBlock v-if="block.type === 'text'" :text="block.text" />
+            <img
+              v-else-if="block.type === 'image'"
+              :src="imageUrl(block)"
+              :alt="block.name ?? 'Message attachment'"
+            />
+            <MarkdownBlock
+              v-else-if="block.type === 'thinking'"
+              :text="block.thinking"
+              variant="thinking"
+            />
+            <ToolCallBlock
+              v-else-if="block.type === 'toolCall'"
+              :name="block.name"
+              :arguments="block.arguments"
+              :tool-call-id="block.id"
+              :result-blocks="toolStateFor(block.id)?.resultBlocks ?? []"
+              :result-details="toolStateFor(block.id)?.resultDetails"
+              :status="toolStateFor(block.id)?.status"
+              :suppress-sent-files="block.name === 'attach-files' || block.name === 'subagent'"
+            />
+          </template>
 
-        <AttachedFilesList
-          v-if="
-            attachedFiles.length > 0 &&
-            segmentIndex === assistantSegments.length - 1 &&
-            segment.kind === 'bubble'
-          "
-          :files="attachedFiles"
-        />
-      </div>
+          <AttachedFilesList
+            v-if="
+              attachedFiles.length > 0 &&
+              segmentIndex === assistantSegments.length - 1 &&
+              segment.kind === 'bubble'
+            "
+            :files="attachedFiles"
+          />
+        </div>
+      </template>
 
       <div
         v-if="attachedFiles.length > 0 && !hasTrailingAssistantBubble"
@@ -309,12 +308,12 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
         <AttachedFilesList :files="attachedFiles" />
       </div>
 
-      <div
-        v-if="showAssistantErrorBubble && assistantErrorText"
-        class="message__segment message__segment--bubble message__segment--error"
-      >
-        <div class="message__text">{{ assistantErrorText }}</div>
-      </div>
+      <template v-if="showAssistantErrorBubble && assistantErrorText">
+        <div class="message__timestamp">{{ messageTimestampLabel }}</div>
+        <div class="message__segment message__segment--bubble message__segment--error">
+          <div class="message__text">{{ assistantErrorText }}</div>
+        </div>
+      </template>
     </div>
 
     <div v-else class="message__body">
@@ -390,12 +389,20 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
 }
 
 .message__timestamp {
-  justify-self: center;
-  margin-bottom: 0.45rem;
-  color: var(--color-text-subtle);
-  font-size: 0.72rem;
-  line-height: 1;
-  opacity: 0.75;
+  justify-self: stretch;
+  margin: 0.05rem 0 0.35rem;
+  color: color-mix(in srgb, var(--color-text-subtle) 88%, var(--color-text));
+  font-family:
+    "Source Sans 3",
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.1;
+  text-align: center;
 }
 
 .message__body {
@@ -412,10 +419,6 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
 
 .message--user::before {
   right: calc(-1 * (var(--safe-area-right) + 0.8rem));
-}
-
-.message--user:has(.message__timestamp)::before {
-  top: 1.15rem;
 }
 
 .message__segment--bubble {

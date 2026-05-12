@@ -5,10 +5,14 @@ import CronPopover from "@/client/components/CronPopover.vue";
 import { useAppStore } from "@/client/stores/app";
 import type { CronJob, SessionSummary } from "@/shared/types";
 
-const { updateCronJob, listWorkspaceCronJobs } = vi.hoisted(() => ({
-  updateCronJob: vi.fn(),
-  listWorkspaceCronJobs: vi.fn(),
-}));
+const { updateCronJob, listWorkspaceCronJobs, listWorkspaceCronRuns, stopCronRun } = vi.hoisted(
+  () => ({
+    updateCronJob: vi.fn(),
+    listWorkspaceCronJobs: vi.fn(),
+    listWorkspaceCronRuns: vi.fn(),
+    stopCronRun: vi.fn(),
+  }),
+);
 
 vi.mock("@/client/lib/api", () => ({
   abortSession: vi.fn(),
@@ -23,6 +27,7 @@ vi.mock("@/client/lib/api", () => ({
   getSessionMessages: vi.fn(),
   getVersion: vi.fn(async () => ({ buildId: "build-1" })),
   listWorkspaceCronJobs,
+  listWorkspaceCronRuns,
   listWorkspaceSessions: vi.fn(async (): Promise<SessionSummary[]> => []),
   listWorkspaces: vi.fn(async () => []),
   logout: vi.fn(),
@@ -34,6 +39,7 @@ vi.mock("@/client/lib/api", () => ({
   setWorkspaceAssistant: vi.fn(),
   setWorkspacePinned: vi.fn(),
   startOpenAICodexProviderAuth: vi.fn(),
+  stopCronRun,
   updateCronJob,
 }));
 
@@ -71,6 +77,7 @@ describe("CronPopover", () => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
     listWorkspaceCronJobs.mockResolvedValue([job]);
+    listWorkspaceCronRuns.mockResolvedValue([]);
     updateCronJob.mockImplementation(async (_jobId: string, patch: Partial<CronJob>) => ({
       ...job,
       ...patch,

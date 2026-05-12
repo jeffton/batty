@@ -1,4 +1,6 @@
+import fs from "node:fs/promises";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import type { Message } from "@earendil-works/pi-ai";
 import {
   AuthStorage,
@@ -27,9 +29,14 @@ import {
   refreshBattySystemPrompt,
 } from "./pi-agent-session";
 import { createSessionState } from "./pi-state";
-import { battyAgentDir, workspaceSessionDir } from "./pi-paths";
+import { battyAgentDir, workspaceCronSessionDir, workspaceSessionDir } from "./pi-paths";
 import { listSessionSummaries as listFastSessionSummaries } from "./session-summaries";
 import { ProviderAuthService } from "./provider-auth";
+import {
+  hasCronRunSessionMarker,
+  buildCronRunSessionBinding,
+  CRON_RUN_SESSION_CUSTOM_TYPE,
+} from "./cron-session";
 import { hasSubagentSessionMarker } from "./subagent";
 import { getSessionMessagePage } from "./pi-service-message-page";
 import { getQueuedPrompts, removeQueuedPrompt } from "./pi-service-queue";
@@ -66,7 +73,7 @@ import {
   type WebSession,
 } from "./pi-service-types";
 import type { CronService } from "./cron";
-import { recoverDanglingCronSubagent, runCronJobSession } from "./pi-service-cron-adapter";
+import { runCronJobSession } from "./pi-service-cron-adapter";
 import { createPiServiceTools } from "./pi-service-tool-factory";
 import type { RuntimeNotice } from "./runtime-notices";
 
@@ -81,7 +88,6 @@ export class PiService {
   private readonly liveSessions = new Map<string, LiveSession>();
   private readonly subagentQueues = new Map<string, Promise<void>>();
   private readonly cronSessionResolutions = new Map<string, Promise<SessionState>>();
-  private readonly cronSubagentAbortControllers = new Map<string, AbortController>();
   private readonly onAgentCompleted: ((session: SessionState) => Promise<void>) | undefined;
   private readonly onWorkspaceUpdated: ((workspaceId: string) => Promise<void>) | undefined;
   private readonly cronService: CronService;
@@ -164,6 +170,76 @@ export class PiService {
     return this.getState(webSession.id);
   }
 
+  private async createCronSession(
+    workspace: WorkspaceInfo,
+    options: {
+      jobId: string;
+      runId: string;
+      modelId: string;
+      thinkingLevel: string;
+      parentSessionId?: string;
+      copySessionPath?: string;
+    },
+  ): Promise<SessionState> {
+    const sessionDir = workspaceCronSessionDir(
+      this.config,
+      workspace.id,
+      options.jobId,
+      options.runId,
+    );
+    const sessionManager = options.copySessionPath
+      ? await this.copySessionManager(workspace, sessionDir, options.copySessionPath)
+      : SessionManager.create(workspace.path, sessionDir);
+    const result = await this.createPiAgentSession(workspace, sessionManager, {
+      modelId: options.modelId,
+      thinkingLevel: options.thinkingLevel,
+    });
+    result.session.sessionManager.appendCustomEntry(
+      CRON_RUN_SESSION_CUSTOM_TYPE,
+      buildCronRunSessionBinding({
+        jobId: options.jobId,
+        runId: options.runId,
+        parentSessionId: options.parentSessionId,
+      }),
+    );
+    const webSession = this.attachSession(
+      workspace,
+      result.session,
+      result.modelFallbackMessage,
+      true,
+    );
+    await this.notifyWorkspaceUpdated(workspace.id);
+    return this.getState(webSession.id);
+  }
+
+  private async copySessionManager(
+    workspace: WorkspaceInfo,
+    sessionDir: string,
+    sourceSessionPath: string,
+  ): Promise<SessionManager> {
+    await fs.mkdir(sessionDir, { recursive: true });
+    const sessionId = randomUUID();
+    const timestamp = new Date().toISOString();
+    const fileTimestamp = timestamp.replace(/[:.]/g, "-");
+    const sessionPath = path.join(sessionDir, `${fileTimestamp}_${sessionId}.jsonl`);
+    const lines = (await fs.readFile(sourceSessionPath, "utf8")).split(/\r?\n/).filter(Boolean);
+    const entries = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+    const copied = entries.map((entry, index) => {
+      if (index !== 0 || entry.type !== "session") {
+        return entry;
+      }
+      return {
+        ...entry,
+        id: sessionId,
+        timestamp,
+        cwd: workspace.path,
+        parentSession: undefined,
+      };
+    });
+    await fs.writeFile(sessionPath, copied.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+    return SessionManager.open(sessionPath);
+  }
+
   async openSession(workspace: WorkspaceInfo, sessionPath: string): Promise<SessionState> {
     const existing = [...this.sessions.values()].find(
       (candidate) => candidate.session.sessionFile === sessionPath,
@@ -177,7 +253,8 @@ export class PiService {
       workspace,
       result.session,
       result.modelFallbackMessage,
-      hasSubagentSessionMarker(result.session.sessionManager.getEntries()),
+      hasSubagentSessionMarker(result.session.sessionManager.getEntries()) ||
+        hasCronRunSessionMarker(result.session.sessionManager.getEntries()),
     );
     return this.getState(webSession.id);
   }
@@ -189,11 +266,14 @@ export class PiService {
     thinkingLevel: string;
     session: CronJobSession;
     scheduleLabel: string;
+    jobId: string;
+    runId: string;
+    signal: AbortSignal;
+    onSessionStarted(session: { sessionId: string; sessionPath: string }): void;
   }): Promise<{ sessionId: string; sessionPath: string }> {
     return runCronJobSession(
       {
-        cronSubagentAbortControllers: this.cronSubagentAbortControllers,
-        createSession: (workspace, options) => this.createSession(workspace, options),
+        createCronSession: (workspace, options) => this.createCronSession(workspace, options),
         promptCron: (sessionId, notice) => this.promptCron(sessionId, notice),
         resolveOrCreateDailySession: (workspace, options) =>
           this.resolveOrCreateDailySession(workspace, options),
@@ -202,12 +282,9 @@ export class PiService {
         runSubagentSerial: (sessionId, run) => this.runSubagentSerial(sessionId, run),
         getState: (sessionId) => this.getState(sessionId),
         publishReset: (webSession, state) => this.publish(webSession, { type: "reset", state }),
-        publishTools: (webSession) =>
-          this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] }),
         setThinkingLevel: (sessionId, thinkingLevel) =>
           this.setThinkingLevel(sessionId, thinkingLevel),
         setModel: (sessionId, modelId) => this.setModel(sessionId, modelId),
-        runDetachedSubagentSession: (options) => this.runDetachedSubagentSession(options),
         onAgentCompleted: this.onAgentCompleted,
         notifyWorkspaceUpdated: (workspaceId) => this.notifyWorkspaceUpdated(workspaceId),
       },
@@ -357,6 +434,7 @@ export class PiService {
       activeTools: [...webSession.activeTools.values()],
       title: webSession.session.sessionName,
       isSubagentSession: hasSubagentSessionMarker(webSession.session.sessionManager.getEntries()),
+      isCronSession: hasCronRunSessionMarker(webSession.session.sessionManager.getEntries()),
     });
   }
 
@@ -438,18 +516,7 @@ export class PiService {
     streamingBehavior?: "steer" | "followUp",
   ): Promise<void> {
     const webSession = this.requireSession(sessionId);
-    const recovered = recoverDanglingCronSubagent(
-      { cronSubagentAbortControllers: this.cronSubagentAbortControllers },
-      webSession,
-      "Cron subagent did not finish before the next prompt.",
-      { abortRunning: false },
-    );
-    if (recovered) {
-      this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
-      this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
-    } else {
-      await this.waitForSubagentQueue(sessionId);
-    }
+    await this.waitForSubagentQueue(sessionId);
     const prepared = await this.preparePromptFiles(sessionId, files);
     const parts = [text.trim(), prepared.text.trim()].filter(Boolean);
     const promptText = parts.join("\n\n").trim() || "Please inspect the attached files.";
@@ -476,17 +543,7 @@ export class PiService {
 
   async abort(sessionId: string): Promise<void> {
     const webSession = this.requireSession(sessionId);
-    const recovered = recoverDanglingCronSubagent(
-      { cronSubagentAbortControllers: this.cronSubagentAbortControllers },
-      webSession,
-      "Cron subagent stopped by user.",
-      { abortRunning: true },
-    );
     await webSession.session.abort();
-    if (recovered) {
-      this.publish(webSession, { type: "reset", state: this.getState(webSession.id) });
-      this.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
-    }
     this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
   }
 

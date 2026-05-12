@@ -100,10 +100,10 @@ const emit = defineEmits<{
         >
           <option value="new">new session</option>
           <option value="daily-inline">daily session · inline</option>
-          <option value="daily-subagent">daily session · subagent</option>
+          <option value="daily-detached">daily session · detached</option>
         </select>
 
-        <label v-if="props.draft.sessionKind === 'daily-subagent'" class="cron-popover__checkbox">
+        <label v-if="props.draft.sessionKind === 'daily-detached'" class="cron-popover__checkbox">
           <input
             v-model="props.draft.includePreviousContext"
             type="checkbox"

@@ -10,6 +10,7 @@ import type {
   BootstrapPayload,
   CreateCronJobInput,
   CronJob,
+  RunningCronJob,
   ModelOption,
   ProviderAuthStartResponse,
   ProviderAuthStatus,
@@ -205,6 +206,10 @@ export function listWorkspaceCronJobs(workspaceId: string): Promise<CronJob[]> {
   return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/cron-jobs`);
 }
 
+export function listWorkspaceCronRuns(workspaceId: string): Promise<RunningCronJob[]> {
+  return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/cron-runs`);
+}
+
 export function createCronJob(input: CreateCronJobInput): Promise<CronJob> {
   return request("/api/cron-jobs", {
     method: "POST",
@@ -223,6 +228,12 @@ export function updateCronJob(jobId: string, patch: UpdateCronJobInput): Promise
 
 export function deleteCronJob(jobId: string): Promise<CronJob> {
   return request(`/api/cron-jobs/${jobId}`, {
+    method: "DELETE",
+  });
+}
+
+export function stopCronRun(runId: string): Promise<RunningCronJob> {
+  return request(`/api/cron-runs/${runId}`, {
     method: "DELETE",
   });
 }

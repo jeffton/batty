@@ -18,14 +18,14 @@ export interface CronDraft {
 type AppStore = ReturnType<typeof useAppStore>;
 
 function includePreviousContextFor(job: CronJob): boolean {
-  return job.session.kind === "daily-subagent"
+  return job.session.kind === "daily-detached"
     ? job.session.includePreviousContext === true
     : false;
 }
 
 function sessionPatchFromDraft(draft: CronDraft): CronJob["session"] {
-  if (draft.sessionKind === "daily-subagent") {
-    return { kind: "daily-subagent", includePreviousContext: draft.includePreviousContext };
+  if (draft.sessionKind === "daily-detached") {
+    return { kind: "daily-detached", includePreviousContext: draft.includePreviousContext };
   }
   if (draft.sessionKind === "daily-inline") {
     return { kind: "daily-inline" };
@@ -130,10 +130,10 @@ export function useCronJobDrafts(store: AppStore): {
         return "new";
       case "daily-inline":
         return "daily · inline";
-      case "daily-subagent":
+      case "daily-detached":
         return job.session.includePreviousContext === true
-          ? "daily · subagent · with previous context"
-          : "daily · subagent · fresh context";
+          ? "daily · detached · with previous context"
+          : "daily · detached · fresh context";
     }
   }
 

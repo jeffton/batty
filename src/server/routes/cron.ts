@@ -50,4 +50,8 @@ export function registerCronRoutes(context: RouteContext): void {
   app.delete<{ Params: { jobId: string } }>(routePath("/api/cron-jobs/:jobId"), async (request) => {
     return cronService.deleteJob(request.params.jobId);
   });
+
+  app.delete<{ Params: { runId: string } }>(routePath("/api/cron-runs/:runId"), async (request) => {
+    return cronService.stopRunningJob({ runId: request.params.runId });
+  });
 }

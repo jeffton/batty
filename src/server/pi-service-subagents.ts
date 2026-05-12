@@ -1,9 +1,4 @@
-import {
-  type AssistantMessage,
-  type Message,
-  type ToolCall,
-  type ToolResultMessage,
-} from "@earendil-works/pi-ai";
+import { type AssistantMessage, type Message } from "@earendil-works/pi-ai";
 import {
   SessionManager,
   type AgentSession,
@@ -34,10 +29,7 @@ import {
   findLastAssistantMessage,
   hasSubagentSessionMarker,
   newlyGeneratedSubagentMessages,
-  stripThinkingFromAssistantMessage,
   SUBAGENT_SESSION_CUSTOM_TYPE,
-  SUBAGENT_TOOL_NAME,
-  ZERO_USAGE,
 } from "./subagent";
 import type { PiModel, WebSession } from "./pi-service-types";
 import { modelKey } from "./pi-service-types";
@@ -259,25 +251,6 @@ function subagentUpdateContent(
     : [];
 }
 
-function assistantHasRenderableContent(message: AssistantMessage | undefined): boolean {
-  if (!message || !Array.isArray(message.content)) {
-    return false;
-  }
-
-  return message.content.some((block) => {
-    if (typeof block !== "object" || block === null) {
-      return false;
-    }
-    if (block.type === "thinking") {
-      return false;
-    }
-    if (block.type === "text") {
-      return typeof block.text === "string" && block.text.trim().length > 0;
-    }
-    return true;
-  });
-}
-
 export async function runDetachedSubagentSession(
   deps: RunDetachedSubagentDeps,
   options: DetachedSubagentOptions,
@@ -349,6 +322,7 @@ export async function runDetachedSubagentSession(
   let resolveTerminalAssistantFailure: (() => void) | undefined;
   let terminalAssistantFailureTimer: NodeJS.Timeout | undefined;
   let terminalAssistantPollTimer: NodeJS.Timeout | undefined;
+  let waitingForAutoRetryEnd = false;
   const finalRetryFailure = new Promise<void>((resolve) => {
     resolveFinalRetryFailure = resolve;
   });
@@ -386,8 +360,7 @@ export async function runDetachedSubagentSession(
   };
   const startTerminalAssistantPolling = () => {
     terminalAssistantPollTimer = setInterval(() => {
-      const retryState = subagentSession as AgentSession & { isRetrying?: unknown };
-      if (retryState.isRetrying === true && subagentSession.isStreaming) {
+      if (waitingForAutoRetryEnd) {
         return;
       }
       const error = latestGeneratedAssistantError();
@@ -405,11 +378,13 @@ export async function runDetachedSubagentSession(
 
   const unsubscribe = subagentSession.subscribe((event) => {
     if (event.type === "auto_retry_start") {
+      waitingForAutoRetryEnd = true;
       cancelTerminalAssistantFailure();
       terminalAssistantError = undefined;
       return;
     }
     if (event.type === "auto_retry_end") {
+      waitingForAutoRetryEnd = false;
       cancelTerminalAssistantFailure();
       if (event.success === false) {
         finalRetryError = event.finalError;
@@ -552,160 +527,6 @@ export function appendMessages(session: AgentSession, messages: Message[]): void
   for (const message of messages) {
     session.sessionManager.appendMessage(message);
   }
-}
-
-export function appendCronSubagentStart(
-  session: AgentSession,
-  toolCallId: string,
-  args: {
-    prompt: string;
-    model: string;
-    effort: string;
-    includeSessionContext: boolean;
-  },
-  notice: RuntimeNotice,
-): void {
-  const timestamp = Date.now();
-  appendRuntimeNoticeMessage(session, notice, timestamp);
-  appendMessages(session, [
-    {
-      role: "assistant",
-      content: [
-        {
-          type: "toolCall",
-          id: toolCallId,
-          name: SUBAGENT_TOOL_NAME,
-          arguments: args,
-        } satisfies ToolCall,
-      ],
-      api: (session.model as PiModel | undefined)?.api ?? "openai-responses",
-      provider: session.model?.provider ?? "unknown",
-      model: session.model?.id ?? args.model,
-      usage: ZERO_USAGE,
-      stopReason: "toolUse",
-      timestamp: timestamp + 1,
-    } satisfies AssistantMessage,
-  ]);
-}
-
-export interface CronSubagentCompletionResult {
-  text: string;
-  details: ToolExecutionDetails;
-  finalAssistant?: AssistantMessage;
-  isError: boolean;
-  errorMessage?: string;
-}
-
-export function appendCronSubagentCompletion(
-  session: AgentSession,
-  toolCallId: string,
-  result: CronSubagentCompletionResult,
-): void {
-  const timestamp = Date.now();
-  const toolResult: ToolResultMessage<ToolExecutionDetails> = {
-    role: "toolResult",
-    toolCallId,
-    toolName: SUBAGENT_TOOL_NAME,
-    content: [],
-    details: result.details,
-    isError: result.isError,
-    timestamp,
-  };
-  const sanitizedFinalAssistant = stripThinkingFromAssistantMessage(result.finalAssistant);
-  const deliveredAssistant: AssistantMessage =
-    sanitizedFinalAssistant && assistantHasRenderableContent(sanitizedFinalAssistant)
-      ? {
-          ...sanitizedFinalAssistant,
-          usage: ZERO_USAGE,
-          timestamp: timestamp + 1,
-        }
-      : {
-          role: "assistant",
-          content: [{ type: "text", text: result.text || result.errorMessage || "(no output)" }],
-          api: (session.model as PiModel | undefined)?.api ?? "openai-responses",
-          provider: session.model?.provider ?? "unknown",
-          model: session.model?.id ?? "unknown",
-          usage: ZERO_USAGE,
-          stopReason: result.isError ? "error" : "stop",
-          errorMessage: result.isError ? result.errorMessage : undefined,
-          timestamp: timestamp + 1,
-        };
-  appendMessages(session, [toolResult, deliveredAssistant]);
-}
-
-function getSubagentToolCall(
-  message: AgentSession["messages"][number] | undefined,
-): ToolCall | undefined {
-  if (message?.role !== "assistant" || !Array.isArray(message.content)) {
-    return undefined;
-  }
-  return message.content.find(
-    (block): block is ToolCall =>
-      typeof block === "object" &&
-      block !== null &&
-      block.type === "toolCall" &&
-      block.name === SUBAGENT_TOOL_NAME &&
-      typeof block.id === "string",
-  );
-}
-
-export function findDanglingCronSubagentToolCall(
-  session: AgentSession,
-): { id: string; args: Record<string, unknown> } | undefined {
-  const messages = session.messages;
-  const lastMessage = messages.at(-1);
-  const toolCall = getSubagentToolCall(lastMessage);
-  if (!toolCall) {
-    return undefined;
-  }
-
-  return {
-    id: toolCall.id,
-    args:
-      typeof toolCall.arguments === "object" && toolCall.arguments !== null
-        ? (toolCall.arguments as Record<string, unknown>)
-        : {},
-  };
-}
-
-export function buildFailedCronSubagentResult(
-  args: Record<string, unknown>,
-  error: unknown,
-): CronSubagentCompletionResult {
-  const errorMessage = error instanceof Error ? error.message : String(error);
-  const prompt = typeof args.prompt === "string" ? args.prompt : "";
-  const model = typeof args.model === "string" ? args.model : "unknown";
-  const effort = typeof args.effort === "string" ? args.effort : "medium";
-  const includeSessionContext = args.includeSessionContext === true;
-  return {
-    text: errorMessage,
-    details: {
-      subagent: {
-        prompt,
-        model,
-        effort,
-        includeSessionContext,
-        respondIn: "session",
-        messageCount: 0,
-        errorMessage,
-      },
-    },
-    isError: true,
-    errorMessage,
-  };
-}
-
-export function appendDanglingCronSubagentFailure(session: AgentSession, error: unknown): boolean {
-  const dangling = findDanglingCronSubagentToolCall(session);
-  if (!dangling) {
-    return false;
-  }
-  appendCronSubagentCompletion(
-    session,
-    dangling.id,
-    buildFailedCronSubagentResult(dangling.args, error),
-  );
-  return true;
 }
 
 export interface ResolveDailySessionDeps {

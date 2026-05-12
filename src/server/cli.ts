@@ -87,13 +87,13 @@ function usage(): string {
     "Commands:",
     "  auth code                  Print a fresh one-time 8 char auth code",
     "  cron list [--workspace ID] [--json]",
-    "  cron add --workspace ID --prompt TEXT --model ID --thinking LEVEL (--in DUR | --at ISO | --every DUR | --cron EXPR) [--tz IANA] [--session new|daily-inline|daily-subagent] [--daily-context include|omit]",
-    "  cron edit <jobId> [fields...] [--session new|daily-inline|daily-subagent] [--daily-context include|omit]",
+    "  cron add --workspace ID --prompt TEXT --model ID --thinking LEVEL (--in DUR | --at ISO | --every DUR | --cron EXPR) [--tz IANA] [--session new|daily-inline|daily-detached] [--daily-context include|omit]",
+    "  cron edit <jobId> [fields...] [--session new|daily-inline|daily-detached] [--daily-context include|omit]",
     "  cron rm <jobId>",
     "",
     "Examples:",
     "  batty --root /root/github auth code",
-    '  batty --root /root/github cron add --workspace batty --prompt "Check CI" --model openai/gpt-5 --thinking medium --every 1h --session daily-subagent --daily-context include',
+    '  batty --root /root/github cron add --workspace batty --prompt "Check CI" --model openai/gpt-5 --thinking medium --every 1h --session daily-detached --daily-context include',
     '  batty --root /root/github cron add --workspace batty --prompt "Morning summary" --model anthropic/claude-sonnet-4 --thinking low --cron "0 8 * * 1-5" --tz Europe/Copenhagen --session daily-inline',
     '  batty --root /root/github cron edit abc123 --prompt "Updated prompt" --thinking high',
   ].join("\n");
@@ -182,25 +182,25 @@ function buildSession(
       return undefined;
     }
     if (options?.requireExplicitSession) {
-      throw new Error("--daily-context requires --session daily-subagent.");
+      throw new Error("--daily-context requires --session daily-detached.");
     }
-    return { kind: "daily-subagent", includePreviousContext };
+    return { kind: "daily-detached", includePreviousContext };
   }
 
   switch (session) {
     case "new":
     case "daily-inline":
       if (includePreviousContext != null) {
-        throw new Error("--daily-context can only be used with --session daily-subagent.");
+        throw new Error("--daily-context can only be used with --session daily-detached.");
       }
       return { kind: session };
-    case "daily-subagent":
+    case "daily-detached":
       return includePreviousContext == null
-        ? { kind: "daily-subagent", includePreviousContext: false }
-        : { kind: "daily-subagent", includePreviousContext };
+        ? { kind: "daily-detached", includePreviousContext: false }
+        : { kind: "daily-detached", includePreviousContext };
     default:
       throw new Error(
-        `Invalid --session value: ${session}. Expected new, daily-inline, or daily-subagent.`,
+        `Invalid --session value: ${session}. Expected new, daily-inline, or daily-detached.`,
       );
   }
 }

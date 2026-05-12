@@ -1,9 +1,18 @@
 export const CRON_SESSION_CUSTOM_TYPE = "batty-cron-session";
+export const CRON_RUN_SESSION_CUSTOM_TYPE = "batty-cron-run-session";
 
 export interface DailyCronSessionBinding {
   version: 1;
   kind: "daily";
   date: string;
+}
+
+export interface CronRunSessionBinding {
+  version: 1;
+  kind: "run";
+  jobId: string;
+  runId: string;
+  parentSessionId?: string;
 }
 
 export function buildDailyCronSessionBinding(
@@ -39,6 +48,34 @@ export function findDailyCronSessionBinding(
 ): DailyCronSessionBinding | undefined {
   const binding = findLatestDailyCronSessionBinding(entries);
   return binding?.date === date ? binding : undefined;
+}
+
+export function buildCronRunSessionBinding(input: {
+  jobId: string;
+  runId: string;
+  parentSessionId?: string;
+}): CronRunSessionBinding {
+  return {
+    version: 1,
+    kind: "run",
+    jobId: input.jobId,
+    runId: input.runId,
+    ...(input.parentSessionId ? { parentSessionId: input.parentSessionId } : {}),
+  };
+}
+
+export function isCronRunSessionEntry(entry: {
+  type?: unknown;
+  customType?: unknown;
+  data?: unknown;
+}): boolean {
+  return entry.type === "custom" && entry.customType === CRON_RUN_SESSION_CUSTOM_TYPE;
+}
+
+export function hasCronRunSessionMarker(
+  entries: Array<{ type?: unknown; customType?: unknown; data?: unknown }>,
+): boolean {
+  return entries.some(isCronRunSessionEntry);
 }
 
 export function localDayStartMs(now = new Date(), startTime = "04:00"): number {

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { Cog } from "lucide-vue-next";
+import { Cog, PanelRightOpen } from "lucide-vue-next";
 import { computed } from "vue";
 import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE } from "@/server/runtime-notices";
 import AttachedFilesList from "@/client/components/AttachedFilesList.vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
 import MarkdownBlock from "@/client/components/MarkdownBlock.vue";
+import SubagentSessionPopover from "@/client/components/SubagentSessionPopover.vue";
 import ToolCallBlock from "@/client/components/ToolCallBlock.vue";
 import { isAttachmentOutputToolCall } from "@/client/lib/transcript";
 import type { ToolDisplayState } from "@/client/lib/transcript";
@@ -93,6 +94,32 @@ const isRuntimeNotice = computed(
     props.message.customType.startsWith(BATTY_RUNTIME_NOTICE_CUSTOM_TYPE),
 );
 
+const cronNoticeDetails = computed(() => {
+  if (props.message.role !== "custom") {
+    return undefined;
+  }
+  const cron = props.message.data?.cron;
+  if (!cron || typeof cron !== "object") {
+    return undefined;
+  }
+  const details = cron as Record<string, unknown>;
+  return typeof details.workspaceId === "string" && typeof details.sessionPath === "string"
+    ? {
+        workspaceId: details.workspaceId,
+        sessionPath: details.sessionPath,
+        prompt: typeof details.prompt === "string" ? details.prompt : "Cron run",
+        runId: typeof details.runId === "string" ? details.runId : props.message.id,
+      }
+    : undefined;
+});
+
+const cronNoticePopoverId = computed(() => {
+  if (!cronNoticeDetails.value) {
+    return undefined;
+  }
+  return `cron-notice-popover-${cronNoticeDetails.value.runId.replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
+});
+
 const assistantErrorText = computed(() => {
   if (props.message.role !== "assistant") {
     return undefined;
@@ -170,6 +197,19 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
         </span>
         <div class="message__text">
           {{ props.message.text }}
+          <div v-if="cronNoticeDetails && cronNoticePopoverId" class="message__notice-actions">
+            <button type="button" class="message__notice-btn" :popovertarget="cronNoticePopoverId">
+              <PanelRightOpen :size="14" />
+              Open cron session
+            </button>
+            <SubagentSessionPopover
+              :popover-id="cronNoticePopoverId"
+              header-title="Cron run"
+              :title="cronNoticeDetails.prompt"
+              :workspace-id="cronNoticeDetails.workspaceId"
+              :session-path="cronNoticeDetails.sessionPath"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -386,6 +426,24 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
 
 .message__system-icon :deep(svg) {
   display: block;
+}
+
+.message__notice-actions {
+  margin-top: 0.45rem;
+}
+
+.message__notice-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--color-info) 30%, transparent);
+  border-radius: 0.45rem;
+  background: color-mix(in srgb, var(--color-info-soft) 75%, var(--color-bg-panel));
+  color: var(--color-info);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
 }
 
 img {

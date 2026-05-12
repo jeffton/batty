@@ -1,36 +1,40 @@
-import { randomUUID } from "node:crypto";
-import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type {
-  CronJobSession,
-  SessionState,
-  ToolExecutionDetails,
-  WorkspaceInfo,
-} from "@/shared/types";
+import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { CronJobSession, SessionState, WorkspaceInfo } from "@/shared/types";
 import { buildCronRuntimeNotice, type RuntimeNotice } from "./runtime-notices";
-import { normalizeBlocks } from "./pi-state";
-import { SUBAGENT_TOOL_NAME } from "./subagent";
+import { appendMessages } from "./pi-service-subagents";
+import type { WebSession } from "./pi-service-types";
 import {
-  appendCronSubagentCompletion,
-  appendCronSubagentStart,
-  buildFailedCronSubagentResult,
-  findDanglingCronSubagentToolCall,
-} from "./pi-service-subagents";
-import { normalizeToolDetails, type WebSession } from "./pi-service-types";
+  extractAssistantText,
+  findLastAssistantMessage,
+  stripThinkingFromAssistantMessage,
+  ZERO_USAGE,
+} from "./subagent";
 
 export type CronJobRun = {
+  jobId: string;
+  runId: string;
   workspace: WorkspaceInfo;
   prompt: string;
   model: string;
   thinkingLevel: string;
   session: CronJobSession;
   scheduleLabel: string;
+  signal: AbortSignal;
+  onSessionStarted(session: { sessionId: string; sessionPath: string }): void;
 };
 
 export type PiServiceCronAdapterContext = {
-  cronSubagentAbortControllers: Map<string, AbortController>;
-  createSession: (
+  createCronSession: (
     workspace: WorkspaceInfo,
-    options?: { modelId?: string; thinkingLevel?: string; ephemeral?: boolean },
+    options: {
+      jobId: string;
+      runId: string;
+      modelId: string;
+      thinkingLevel: string;
+      parentSessionId?: string;
+      copySessionPath?: string;
+    },
   ) => Promise<SessionState>;
   promptCron: (sessionId: string, notice: RuntimeNotice) => Promise<void>;
   resolveOrCreateDailySession: (
@@ -42,33 +46,8 @@ export type PiServiceCronAdapterContext = {
   runSubagentSerial: <T>(sessionId: string, run: () => Promise<T>) => Promise<T>;
   getState: (sessionId: string) => SessionState;
   publishReset: (webSession: WebSession, state: SessionState) => void;
-  publishTools: (webSession: WebSession) => void;
   setThinkingLevel: (sessionId: string, thinkingLevel: string) => SessionState;
   setModel: (sessionId: string, modelId: string) => Promise<SessionState>;
-  runDetachedSubagentSession: (options: {
-    workspace: WorkspaceInfo;
-    parentSessionId: string;
-    parentSessionPath?: string;
-    contextBranchLeafId?: string | null;
-    prompt: string;
-    modelId: string;
-    thinkingLevel: string;
-    includeSessionContext: boolean;
-    respondIn: "tool-call" | "session";
-    preludeNotices?: Array<{ kind: "cron" | "subagent"; text: string }>;
-    currentToolCallId?: string;
-    signal?: AbortSignal;
-    onUpdate?: (partial: {
-      content: Array<{ type: "text"; text: string }>;
-      details: ToolExecutionDetails;
-    }) => void;
-  }) => Promise<{
-    text: string;
-    details: ToolExecutionDetails;
-    finalAssistant?: AssistantMessage;
-    isError: boolean;
-    errorMessage?: string;
-  }>;
   onAgentCompleted?: (session: SessionState) => Promise<void>;
   notifyWorkspaceUpdated: (workspaceId: string) => Promise<void>;
 };
@@ -81,20 +60,74 @@ export async function runCronJobSession(
     scheduleLabel: job.scheduleLabel,
     prompt: job.prompt,
   });
-  if (job.session.kind === "new") {
-    const session = await context.createSession(job.workspace, {
-      modelId: job.model,
-      thinkingLevel: job.thinkingLevel,
-    });
-    const current = context.requireSession(session.id);
-    await context.promptCron(session.id, cronNotice);
 
-    return {
-      sessionId: current.session.sessionId,
-      sessionPath: context.requireSessionPath(session.id),
-    };
+  if (job.session.kind === "daily-inline") {
+    return runInlineCronJob(context, job, cronNotice);
   }
 
+  const parent =
+    job.session.kind === "daily-detached"
+      ? await context.resolveOrCreateDailySession(job.workspace)
+      : undefined;
+  const includePreviousContext =
+    job.session.kind === "daily-detached" && job.session.includePreviousContext === true;
+  const parentSessionPath =
+    parent && includePreviousContext ? context.requireSessionPath(parent.id) : undefined;
+  const cronSession = await context.createCronSession(job.workspace, {
+    jobId: job.jobId,
+    runId: job.runId,
+    modelId: job.model,
+    thinkingLevel: job.thinkingLevel,
+    ...(parent ? { parentSessionId: parent.sessionId } : {}),
+    ...(parentSessionPath ? { copySessionPath: parentSessionPath } : {}),
+  });
+  const cronWebSession = context.requireSession(cronSession.id);
+  job.onSessionStarted({
+    sessionId: cronWebSession.session.sessionId,
+    sessionPath: context.requireSessionPath(cronWebSession.id),
+  });
+
+  const abortListener = () => {
+    void cronWebSession.session.abort();
+  };
+  if (job.signal.aborted) {
+    abortListener();
+  } else {
+    job.signal.addEventListener("abort", abortListener, { once: true });
+  }
+
+  try {
+    await context.promptCron(cronWebSession.id, cronNotice);
+  } catch (error) {
+    if (parent) {
+      await deliverCronRun(context, parent.id, cronNotice, job, cronWebSession.session, error);
+    }
+    throw error;
+  } finally {
+    job.signal.removeEventListener("abort", abortListener);
+  }
+
+  if (parent) {
+    await deliverCronRun(context, parent.id, cronNotice, job, cronWebSession.session);
+  }
+
+  const finalAssistant = findLastAssistantMessage(cronWebSession.session.messages);
+  const errorMessage = finalAssistantError(finalAssistant);
+  if (errorMessage) {
+    throw new Error(errorMessage);
+  }
+
+  return {
+    sessionId: cronWebSession.session.sessionId,
+    sessionPath: context.requireSessionPath(cronWebSession.id),
+  };
+}
+
+async function runInlineCronJob(
+  context: PiServiceCronAdapterContext,
+  job: CronJobRun,
+  cronNotice: RuntimeNotice,
+): Promise<{ sessionId: string; sessionPath: string }> {
   const session = await context.resolveOrCreateDailySession(job.workspace, {
     modelId: job.model,
     thinkingLevel: job.thinkingLevel,
@@ -102,177 +135,151 @@ export async function runCronJobSession(
   const webSession = context.requireSession(session.id);
 
   return context.runSubagentSerial(webSession.session.sessionId, async () => {
-    const recovered = recoverDanglingCronSubagent(
-      context,
-      webSession,
-      "Cron subagent did not finish before the server stopped.",
-      { abortRunning: false },
-    );
-    if (recovered) {
-      context.publishReset(webSession, context.getState(webSession.id));
-      context.publishTools(webSession);
-    }
     await webSession.session.agent.waitForIdle();
-
-    if (job.session.kind === "daily-inline") {
-      context.setThinkingLevel(session.id, job.thinkingLevel);
-      await context.setModel(session.id, job.model);
-      context.publishReset(webSession, context.getState(webSession.id));
-      await context.promptCron(session.id, cronNotice);
-      return {
-        sessionId: webSession.session.sessionId,
-        sessionPath: context.requireSessionPath(webSession.id),
-      };
-    }
-    if (job.session.kind !== "daily-subagent") {
-      throw new Error(`Invalid cron session kind: ${job.session.kind}`);
-    }
-
-    const includePreviousContext = job.session.includePreviousContext === true;
-    const contextBranchLeafId = includePreviousContext
-      ? webSession.session.sessionManager.getLeafId()
-      : undefined;
-    const parentSessionPath = context.requireSessionPath(webSession.id);
-    const toolCallId = `${SUBAGENT_TOOL_NAME}-${randomUUID()}`;
-    const toolArgs = {
-      prompt: job.prompt,
-      model: job.model,
-      effort: job.thinkingLevel,
-      includeSessionContext: includePreviousContext,
-    };
-
-    appendCronSubagentStart(webSession.session, toolCallId, toolArgs, cronNotice);
-    webSession.activeTools.set(toolCallId, {
-      toolCallId,
-      toolName: SUBAGENT_TOOL_NAME,
-      args: toolArgs,
-      blocks: [],
-      status: "running",
-      isError: false,
-      details: undefined,
-    });
+    context.setThinkingLevel(session.id, job.thinkingLevel);
+    await context.setModel(session.id, job.model);
     context.publishReset(webSession, context.getState(webSession.id));
+    job.onSessionStarted({
+      sessionId: webSession.session.sessionId,
+      sessionPath: context.requireSessionPath(webSession.id),
+    });
 
-    const abortController = new AbortController();
-    context.cronSubagentAbortControllers.set(toolCallId, abortController);
-    try {
-      let result: Awaited<ReturnType<PiServiceCronAdapterContext["runDetachedSubagentSession"]>>;
-      try {
-        result = await context.runDetachedSubagentSession({
-          workspace: job.workspace,
-          parentSessionId: webSession.session.sessionId,
-          parentSessionPath,
-          contextBranchLeafId,
-          prompt: job.prompt,
-          modelId: job.model,
-          thinkingLevel: job.thinkingLevel,
-          includeSessionContext: includePreviousContext,
-          respondIn: "session",
-          preludeNotices: [cronNotice],
-          currentToolCallId: toolCallId,
-          signal: abortController.signal,
-          onUpdate: (partial) => {
-            const current = webSession.activeTools.get(toolCallId);
-            if (!current) {
-              return;
-            }
-            current.blocks = normalizeBlocks(partial.content ?? []);
-            current.details = normalizeToolDetails(partial.details);
-            webSession.activeTools.set(toolCallId, current);
-            context.publishTools(webSession);
-          },
-        });
-      } catch (error) {
-        result = buildFailedCronSubagentResult(toolArgs, error);
-      }
-
-      appendCronSubagentCompletion(webSession.session, toolCallId, result);
-      webSession.activeTools.delete(toolCallId);
-      context.publishTools(webSession);
-
-      const completedState = {
-        ...context.getState(webSession.id),
-        isStreaming: false,
-        pendingMessageCount: 0,
-        activeAssistant: undefined,
-      };
-      context.publishReset(webSession, completedState);
-      try {
-        console.info("Running agent completion hook", {
-          sessionId: completedState.sessionId,
-          workspaceId: completedState.workspaceId,
-        });
-        await context.onAgentCompleted?.(completedState);
-      } catch (error) {
-        console.error("Failed to run agent completion hook for cron subagent", error);
-      }
-      await context.notifyWorkspaceUpdated(job.workspace.id);
-
-      if (result.isError) {
-        throw new Error(result.errorMessage || result.text || "Subagent failed");
-      }
-
-      return {
-        sessionId: webSession.session.sessionId,
-        sessionPath: context.requireSessionPath(webSession.id),
-      };
-    } finally {
-      context.cronSubagentAbortControllers.delete(toolCallId);
-      if (webSession.activeTools.delete(toolCallId)) {
-        context.publishTools(webSession);
-      }
+    const abortListener = () => {
+      void webSession.session.abort();
+    };
+    if (job.signal.aborted) {
+      abortListener();
+    } else {
+      job.signal.addEventListener("abort", abortListener, { once: true });
     }
+
+    try {
+      await context.promptCron(session.id, cronNotice);
+    } finally {
+      job.signal.removeEventListener("abort", abortListener);
+    }
+    return {
+      sessionId: webSession.session.sessionId,
+      sessionPath: context.requireSessionPath(webSession.id),
+    };
   });
 }
 
-export function recoverDanglingCronSubagent(
-  context: Pick<PiServiceCronAdapterContext, "cronSubagentAbortControllers"> & {
-    requireSession?: (sessionId: string) => WebSession;
-  },
-  webSession: WebSession,
-  error: string,
-  options: { abortRunning?: boolean } = {},
-): boolean {
-  const dangling = findDanglingCronSubagentToolCall(webSession.session);
-  if (!dangling) {
-    return false;
-  }
-
-  const abortController = context.cronSubagentAbortControllers.get(dangling.id);
-  if (
-    abortController &&
-    options.abortRunning !== true &&
-    isCronSubagentStillRunning(context, webSession, dangling.id)
-  ) {
-    return false;
-  }
-
-  abortController?.abort();
-  context.cronSubagentAbortControllers.delete(dangling.id);
-  webSession.activeTools.delete(dangling.id);
-  appendCronSubagentCompletion(
-    webSession.session,
-    dangling.id,
-    buildFailedCronSubagentResult(dangling.args, error),
-  );
-  return true;
+async function deliverCronRun(
+  context: PiServiceCronAdapterContext,
+  parentSessionId: string,
+  cronNotice: RuntimeNotice,
+  job: CronJobRun,
+  cronSession: AgentSession,
+  error?: unknown,
+): Promise<void> {
+  await context.runSubagentSerial(parentSessionId, async () => {
+    const parent = context.requireSession(parentSessionId);
+    await parent.session.agent.waitForIdle();
+    appendCronRunDelivery(parent.session, cronNotice, job, cronSession, error);
+    const state = {
+      ...context.getState(parent.id),
+      isStreaming: false,
+      pendingMessageCount: 0,
+      activeAssistant: undefined,
+    };
+    context.publishReset(parent, state);
+    await context.onAgentCompleted?.(state);
+    await context.notifyWorkspaceUpdated(parent.workspace.id);
+  });
 }
 
-function isCronSubagentStillRunning(
-  context: { requireSession?: (sessionId: string) => WebSession },
-  webSession: WebSession,
-  toolCallId: string,
-): boolean {
-  const details = webSession.activeTools.get(toolCallId)?.details;
-  const subagent = details?.subagent;
-  if (
-    typeof subagent !== "object" ||
-    subagent === null ||
-    typeof (subagent as { sessionId?: unknown }).sessionId !== "string" ||
-    !context.requireSession
-  ) {
-    return true;
+function appendCronRunDelivery(
+  parent: AgentSession,
+  cronNotice: RuntimeNotice,
+  job: CronJobRun,
+  cronSession: AgentSession,
+  error?: unknown,
+): void {
+  const timestamp = Date.now();
+  const sessionPath = cronSession.sessionFile;
+  const noticeMessage = {
+    role: "custom",
+    customType: `batty-runtime-notice:${cronNotice.kind}`,
+    content: cronNotice.text,
+    data: {
+      cron: {
+        jobId: job.jobId,
+        runId: job.runId,
+        workspaceId: job.workspace.id,
+        sessionId: cronSession.sessionId,
+        sessionPath,
+        prompt: job.prompt,
+      },
+    },
+    timestamp,
+  } as unknown as Message;
+
+  appendMessages(parent, [
+    noticeMessage,
+    deliveredAssistant(parent, cronSession, timestamp + 1, error),
+  ]);
+}
+
+function deliveredAssistant(
+  parent: AgentSession,
+  cronSession: AgentSession,
+  timestamp: number,
+  error?: unknown,
+): AssistantMessage {
+  const finalAssistant = stripThinkingFromAssistantMessage(
+    findLastAssistantMessage(cronSession.messages),
+  );
+  if (!error && finalAssistant && assistantHasRenderableContent(finalAssistant)) {
+    return {
+      ...finalAssistant,
+      usage: ZERO_USAGE,
+      timestamp,
+    };
   }
 
-  return context.requireSession((subagent as { sessionId: string }).sessionId).session.isStreaming;
+  const errorMessage = error
+    ? error instanceof Error
+      ? error.message
+      : String(error)
+    : finalAssistantError(finalAssistant);
+  const text =
+    (finalAssistant ? extractAssistantText(finalAssistant) : "") || errorMessage || "(no output)";
+  return {
+    role: "assistant",
+    content: [{ type: "text", text }],
+    api: (parent.model as { api?: string } | undefined)?.api ?? "openai-responses",
+    provider: parent.model?.provider ?? "unknown",
+    model: parent.model?.id ?? "unknown",
+    usage: ZERO_USAGE,
+    stopReason: errorMessage ? "error" : "stop",
+    errorMessage,
+    timestamp,
+  };
+}
+
+function finalAssistantError(message: AssistantMessage | undefined): string | undefined {
+  if (!message || (message.stopReason !== "error" && message.stopReason !== "aborted")) {
+    return undefined;
+  }
+  return extractAssistantText(message) || message.errorMessage || "Cron run failed";
+}
+
+function assistantHasRenderableContent(message: AssistantMessage): boolean {
+  if (!Array.isArray(message.content)) {
+    return false;
+  }
+
+  return message.content.some((block) => {
+    if (typeof block !== "object" || block === null) {
+      return false;
+    }
+    if (block.type === "thinking") {
+      return false;
+    }
+    if (block.type === "text") {
+      return typeof block.text === "string" && block.text.trim().length > 0;
+    }
+    return true;
+  });
 }

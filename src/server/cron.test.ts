@@ -52,7 +52,7 @@ describe("cron store", () => {
     expect(buildCronJobSummary(job)).toContain("Session: New per run");
   });
 
-  it("persists daily-inline and daily-subagent cron sessions", async () => {
+  it("persists daily-inline and daily-detached cron sessions", async () => {
     const config = await createConfig();
     await fs.mkdir(path.join(config.workspacesRoots[0]!, "alpha"));
     const store = new CronStore(config);
@@ -70,24 +70,24 @@ describe("cron store", () => {
     expect(buildCronJobSummary(inline)).toContain("Session: Daily inline");
 
     const updated = await store.updateJob(inline.id, {
-      session: { kind: "daily-subagent", includePreviousContext: true },
+      session: { kind: "daily-detached", includePreviousContext: true },
     });
 
-    expect(updated.session).toEqual({ kind: "daily-subagent", includePreviousContext: true });
+    expect(updated.session).toEqual({ kind: "daily-detached", includePreviousContext: true });
     expect(buildCronJobSummary(updated)).toContain(
-      "Session: Daily subagent · with previous context",
+      "Session: Daily detached · with previous context",
     );
 
     const persisted = JSON.parse(await fs.readFile(store.filePath, "utf8")) as {
       jobs: Array<{ session?: { kind?: string; includePreviousContext?: boolean } }>;
     };
     expect(persisted.jobs[0]?.session).toEqual({
-      kind: "daily-subagent",
+      kind: "daily-detached",
       includePreviousContext: true,
     });
   });
 
-  it("migrates legacy daily cron sessions to daily-subagent on read", async () => {
+  it("migrates legacy daily cron sessions to daily-detached on read", async () => {
     const config = await createConfig();
     await fs.mkdir(path.join(config.workspacesRoots[0]!, "alpha"));
     const store = new CronStore(config);
@@ -120,8 +120,8 @@ describe("cron store", () => {
     );
 
     const [job] = await store.listJobs("alpha");
-    expect(job?.session).toEqual({ kind: "daily-subagent", includePreviousContext: true });
-    expect(buildCronJobSummary(job!)).toContain("Session: Daily subagent · with previous context");
+    expect(job?.session).toEqual({ kind: "daily-detached", includePreviousContext: true });
+    expect(buildCronJobSummary(job!)).toContain("Session: Daily detached · with previous context");
 
     const migrated = JSON.parse(await fs.readFile(store.filePath, "utf8")) as {
       version: number;
@@ -129,7 +129,7 @@ describe("cron store", () => {
     };
     expect(migrated.version).toBe(2);
     expect(migrated.jobs[0]?.session).toEqual({
-      kind: "daily-subagent",
+      kind: "daily-detached",
       includePreviousContext: true,
     });
   });

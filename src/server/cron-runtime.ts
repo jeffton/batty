@@ -2,7 +2,13 @@ import fs from "node:fs/promises";
 import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 import { Cron } from "croner";
-import type { CreateCronJobInput, CronJob, UpdateCronJobInput } from "@/shared/types";
+import { randomUUID } from "node:crypto";
+import type {
+  CreateCronJobInput,
+  CronJob,
+  RunningCronJob,
+  UpdateCronJobInput,
+} from "@/shared/types";
 import type { AppConfig } from "./config";
 import {
   CronStore,
@@ -20,8 +26,17 @@ interface ScheduledHandle {
   stop(): void;
 }
 
+export interface CronJobRunnerContext {
+  runId: string;
+  signal: AbortSignal;
+  onSessionStarted(session: { sessionId: string; sessionPath: string }): void;
+}
+
 export interface CronJobRunner {
-  run(job: CronJob): Promise<{ sessionId: string; sessionPath: string }>;
+  run(
+    job: CronJob,
+    context: CronJobRunnerContext,
+  ): Promise<{ sessionId: string; sessionPath: string }>;
 }
 
 function createEveryHandle(job: StoredCronJob, onTrigger: () => void): ScheduledHandle {
@@ -69,7 +84,10 @@ export class CronService {
   private readonly store: CronStore;
   private readonly scheduledHandles = new Map<string, ScheduledHandle>();
   private readonly jobs = new Map<string, StoredCronJob>();
-  private readonly runningJobs = new Set<string>();
+  private readonly runningJobs = new Map<
+    string,
+    RunningCronJob & { abortController: AbortController }
+  >();
   private readonly changeListeners = new Set<(workspaceIds: string[]) => void>();
   private runner: CronJobRunner | undefined;
   private watcher: FSWatcher | undefined;
@@ -127,6 +145,28 @@ export class CronService {
       .filter((job) => (workspaceId ? job.workspaceId === workspaceId : true))
       .map(toCronJob)
       .sort(compareCronJobsByNextRun);
+  }
+
+  listRunningJobs(workspaceId?: string): RunningCronJob[] {
+    return [...this.runningJobs.values()]
+      .filter((run) => (workspaceId ? run.workspaceId === workspaceId : true))
+      .map(({ abortController: _abortController, ...run }) => run)
+      .sort((a, b) => a.startedAtMs - b.startedAtMs);
+  }
+
+  stopRunningJob(selector: { runId?: string; jobId?: string }): RunningCronJob {
+    const entry = [...this.runningJobs.values()].find(
+      (run) =>
+        (selector.runId ? run.runId === selector.runId : true) &&
+        (selector.jobId ? run.jobId === selector.jobId : true),
+    );
+    if (!entry) {
+      throw new Error(`Unknown running cron job: ${selector.runId ?? selector.jobId ?? ""}`);
+    }
+
+    entry.abortController.abort();
+    const { abortController: _abortController, ...run } = entry;
+    return run;
   }
 
   async createJob(input: CreateCronJobInput): Promise<CronJob> {
@@ -246,14 +286,28 @@ export class CronService {
       return;
     }
 
-    if (this.runningJobs.has(jobId)) {
+    if ([...this.runningJobs.values()].some((run) => run.jobId === jobId)) {
       console.warn("Cron job trigger skipped because a previous run is still active", { jobId });
       return;
     }
 
-    this.runningJobs.add(jobId);
     const startedAt = Date.now();
     const publicJob = toCronJob(current);
+    const abortController = new AbortController();
+    const running: RunningCronJob & { abortController: AbortController } = {
+      runId: randomUUID(),
+      jobId,
+      workspaceId: current.workspaceId,
+      prompt: current.prompt,
+      model: current.model,
+      thinkingLevel: current.thinkingLevel,
+      session: publicJob.session,
+      scheduleLabel: publicJob.scheduleLabel,
+      startedAtMs: startedAt,
+      abortController,
+    };
+    this.runningJobs.set(running.runId, running);
+    this.notifyChanged([current.workspaceId]);
 
     try {
       if (current.schedule.kind === "at") {
@@ -266,7 +320,15 @@ export class CronService {
         throw new Error("Cron runner not configured");
       }
 
-      const result = await this.runner.run(publicJob);
+      const result = await this.runner.run(publicJob, {
+        runId: running.runId,
+        signal: abortController.signal,
+        onSessionStarted: (session) => {
+          running.sessionId = session.sessionId;
+          running.sessionPath = session.sessionPath;
+          this.notifyChanged([running.workspaceId]);
+        },
+      });
       if (current.schedule.kind !== "at") {
         this.ignoreOwnWatchEvents();
         await this.store.setJobState(jobId, markJobRunSucceeded(current.state, startedAt, result));
@@ -280,7 +342,8 @@ export class CronService {
         await this.reloadFromDisk();
       }
     } finally {
-      this.runningJobs.delete(jobId);
+      this.runningJobs.delete(running.runId);
+      this.notifyChanged([current.workspaceId]);
     }
   }
 }

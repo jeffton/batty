@@ -9,12 +9,18 @@ import { sessionEventsPath } from "@/client/lib/session-stream";
 import { RECENT_SESSION_MESSAGE_WINDOW } from "@/shared/session-history";
 import type { ServerEvent, SessionState } from "@/shared/types";
 
-const props = defineProps<{
-  popoverId: string;
-  title: string;
-  workspaceId: string;
-  sessionPath: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    popoverId: string;
+    title: string;
+    workspaceId: string;
+    sessionPath: string;
+    headerTitle?: string;
+  }>(),
+  {
+    headerTitle: "Subagent",
+  },
+);
 
 const popoverElement = ref<HTMLElement | null>(null);
 const session = ref<SessionState | undefined>(undefined);
@@ -96,7 +102,7 @@ async function ensureSessionLoaded(): Promise<void> {
   try {
     const opened = normalizeSessionState(await openSession(props.workspaceId, props.sessionPath));
     if (!opened) {
-      throw new Error("Failed to open subagent session");
+      throw new Error("Failed to open session");
     }
 
     session.value = mergeSessionState(opened, session.value);
@@ -174,7 +180,7 @@ onBeforeUnmount(() => {
   >
     <div class="subagent-session-popover__header">
       <div>
-        <div class="subagent-session-popover__title">Subagent</div>
+        <div class="subagent-session-popover__title">{{ props.headerTitle }}</div>
         <div class="subagent-session-popover__subtitle">{{ props.title }}</div>
       </div>
       <button
@@ -199,7 +205,7 @@ onBeforeUnmount(() => {
 
     <div v-if="loading && !session" class="subagent-session-popover__empty">
       <LoaderCircle :size="18" class="subagent-session-popover__spinner" />
-      <span>Loading subagent session…</span>
+      <span>Loading session…</span>
     </div>
 
     <div

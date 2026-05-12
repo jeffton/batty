@@ -5,12 +5,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { SessionManager, type AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { BATTY_SYSTEM_PROMPT_CUSTOM_TYPE } from "./batty-system-prompt";
-import {
-  appendCronSubagentCompletion,
-  appendDanglingCronSubagentFailure,
-  findDanglingCronSubagentToolCall,
-  runDetachedSubagentSession,
-} from "./pi-service-subagents";
+import { runDetachedSubagentSession } from "./pi-service-subagents";
 import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE, buildCronRuntimeNotice } from "./runtime-notices";
 
 type AgentMessage = AgentSession["messages"][number];
@@ -34,195 +29,6 @@ function createAssistantMessage(text: string, timestamp: number): AssistantMessa
     timestamp,
   };
 }
-
-describe("cron subagent transcript repair", () => {
-  it("finds and completes a dangling simulated cron subagent tool call", () => {
-    const appendedMessages: AgentMessage[] = [];
-    const sessionMessages: AgentMessage[] = [
-      { role: "user", content: "Run heartbeat", timestamp: 1 },
-      {
-        role: "assistant",
-        content: [
-          {
-            type: "toolCall",
-            id: "subagent-cron-1",
-            name: "subagent",
-            arguments: {
-              prompt: "Run heartbeat",
-              model: "openai-codex/gpt-5.5",
-              effort: "medium",
-              includeSessionContext: true,
-            },
-          },
-        ],
-        api: "openai-codex-responses",
-        provider: "openai-codex",
-        model: "gpt-5.5",
-        usage: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0,
-          totalTokens: 0,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-        },
-        stopReason: "toolUse",
-        timestamp: 2,
-      },
-    ];
-    const session = {
-      model: { api: "openai-codex-responses", provider: "openai-codex", id: "gpt-5.5" },
-      messages: sessionMessages,
-      agent: { state: { messages: sessionMessages } },
-      sessionManager: {
-        appendMessage(message: AgentMessage) {
-          appendedMessages.push(message);
-        },
-      },
-    } as unknown as AgentSession;
-
-    expect(findDanglingCronSubagentToolCall(session)).toMatchObject({ id: "subagent-cron-1" });
-    expect(appendDanglingCronSubagentFailure(session, "Cron subagent died")).toBe(true);
-
-    expect(appendedMessages).toHaveLength(2);
-    expect(appendedMessages[0]).toMatchObject({
-      role: "toolResult",
-      toolCallId: "subagent-cron-1",
-      toolName: "subagent",
-      isError: true,
-    });
-    expect(appendedMessages[1]).toMatchObject({
-      role: "assistant",
-      content: [{ type: "text", text: "Cron subagent died" }],
-      stopReason: "error",
-      errorMessage: "Cron subagent died",
-    });
-  });
-
-  it("leaves completed subagent transcripts alone", () => {
-    const sessionMessages: AgentMessage[] = [
-      {
-        role: "assistant",
-        content: [{ type: "toolCall", id: "subagent-cron-1", name: "subagent", arguments: {} }],
-        timestamp: 1,
-      } as AgentMessage,
-      {
-        role: "toolResult",
-        toolCallId: "subagent-cron-1",
-        toolName: "subagent",
-        content: [],
-        isError: false,
-        timestamp: 2,
-      } as AgentMessage,
-    ];
-    const session = { messages: sessionMessages } as unknown as AgentSession;
-
-    expect(findDanglingCronSubagentToolCall(session)).toBeUndefined();
-  });
-});
-
-describe("appendCronSubagentCompletion", () => {
-  it("does not copy subagent usage onto the parent daily-session assistant message", () => {
-    const appendedMessages: AgentMessage[] = [];
-    const sessionMessages: AgentMessage[] = [];
-    const session = {
-      model: { api: "openai-codex-responses", provider: "openai-codex", id: "gpt-5.4" },
-      messages: sessionMessages,
-      agent: { state: { messages: sessionMessages } },
-      sessionManager: {
-        appendMessage(message: AgentMessage) {
-          appendedMessages.push(message);
-        },
-      },
-    } as unknown as AgentSession;
-
-    appendCronSubagentCompletion(session, "subagent-call-1", {
-      text: "Delivered report",
-      details: { subagent: { prompt: "Do work" } } as any,
-      finalAssistant: {
-        role: "assistant",
-        content: [
-          { type: "thinking", thinking: "secret" },
-          { type: "text", text: "Delivered report" },
-        ],
-        api: "openai-codex-responses",
-        provider: "openai-codex",
-        model: "gpt-5.4",
-        usage: {
-          input: 1234,
-          output: 567,
-          cacheRead: 890,
-          cacheWrite: 0,
-          totalTokens: 2691,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-        },
-        stopReason: "stop",
-        timestamp: 1,
-      },
-      isError: false,
-    });
-
-    expect(appendedMessages).toHaveLength(2);
-    expect(appendedMessages[1]).toMatchObject({
-      role: "assistant",
-      content: [{ type: "text", text: "Delivered report" }],
-      usage: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        totalTokens: 0,
-      },
-    });
-  });
-
-  it("synthesizes a visible parent error message when the subagent ended with empty content", () => {
-    const appendedMessages: AgentMessage[] = [];
-    const sessionMessages: AgentMessage[] = [];
-    const session = {
-      model: { api: "openai-codex-responses", provider: "openai-codex", id: "gpt-5.4" },
-      messages: sessionMessages,
-      agent: { state: { messages: sessionMessages } },
-      sessionManager: {
-        appendMessage(message: AgentMessage) {
-          appendedMessages.push(message);
-        },
-      },
-    } as unknown as AgentSession;
-
-    appendCronSubagentCompletion(session, "subagent-call-2", {
-      text: "Codex error: upstream overloaded",
-      details: { subagent: { prompt: "Do work" } } as any,
-      finalAssistant: {
-        role: "assistant",
-        content: [],
-        api: "openai-codex-responses",
-        provider: "openai-codex",
-        model: "gpt-5.4",
-        usage: {
-          input: 10,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0,
-          totalTokens: 10,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-        },
-        stopReason: "error",
-        errorMessage: "Codex error: upstream overloaded",
-        timestamp: 2,
-      },
-      isError: true,
-      errorMessage: "Codex error: upstream overloaded",
-    });
-
-    expect(appendedMessages[1]).toMatchObject({
-      role: "assistant",
-      content: [{ type: "text", text: "Codex error: upstream overloaded" }],
-      stopReason: "error",
-      errorMessage: "Codex error: upstream overloaded",
-    });
-  });
-});
 
 describe("runDetachedSubagentSession", () => {
   it("branches inherited context from the parent session before the current tool call", async () => {
@@ -886,14 +692,14 @@ describe("runDetachedSubagentSession", () => {
     });
   });
 
-  it("propagates an idle terminal assistant failure even if retry state is stale", async () => {
+  it("propagates an idle terminal assistant failure even if retry and streaming state are stale", async () => {
     const sessionMessages: AgentMessage[] = [];
 
     const subagentSession = {
       sessionId: "subagent-session-stale-retry-terminal-failure",
       sessionFile: "/tmp/subagent-session-stale-retry-terminal-failure.jsonl",
       messages: sessionMessages,
-      isStreaming: false,
+      isStreaming: true,
       isRetrying: true,
       agent: {
         state: {

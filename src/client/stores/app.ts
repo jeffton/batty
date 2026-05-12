@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { mergeSessionSummaries, toSessionSummary } from "@/client/lib/session-summary";
-import type { CronJob, SessionSummary, WorkspaceInfo } from "@/shared/types";
+import type { CronJob, RunningCronJob, SessionSummary, WorkspaceInfo } from "@/shared/types";
 import { authBootstrapActions } from "./app-auth";
 import { cronActions } from "./app-cron";
 import { providerSettingsActions } from "./app-provider-settings";
@@ -33,6 +33,13 @@ export const useAppStore = defineStore("app", {
       }
 
       return state.cronJobsByWorkspace[state.selectedWorkspaceId] ?? [];
+    },
+    workspaceRunningCronJobs(state): RunningCronJob[] {
+      if (!state.selectedWorkspaceId) {
+        return [];
+      }
+
+      return state.runningCronJobsByWorkspace[state.selectedWorkspaceId] ?? [];
     },
     workspaceEasyMode(state): boolean {
       return state.selectedWorkspaceId

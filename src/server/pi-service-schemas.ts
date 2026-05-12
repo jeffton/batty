@@ -44,13 +44,13 @@ const CronSessionSchema = Type.Union(
     ),
     Type.Object(
       {
-        kind: Type.Literal("daily-subagent", {
-          description: "Run inside one workspace daily session as a subagent tool call.",
+        kind: Type.Literal("daily-detached", {
+          description: "Run asynchronously beside one workspace daily session.",
         }),
         includePreviousContext: Type.Optional(
           Type.Boolean({
             description:
-              "Whether the subagent should include previous daily-session context. Defaults to false.",
+              "Whether the cron run should include previous daily-session context. Defaults to false.",
           }),
         ),
       },
@@ -61,16 +61,22 @@ const CronSessionSchema = Type.Union(
   ],
   {
     description:
-      'Use {kind:"new"} for a fresh session each run, {kind:"daily-inline"} to run directly in one workspace daily session, or {kind:"daily-subagent"} to run in that daily session through a subagent tool call. Daily-subagent runs start fresh unless includePreviousContext:true is set.',
+      'Use {kind:"new"} for a fresh session each run, {kind:"daily-inline"} to run directly in one workspace daily session, or {kind:"daily-detached"} to run asynchronously beside that daily session. Detached runs start fresh unless includePreviousContext:true is set.',
   },
 );
 
 export const CronToolSchema = Type.Object(
   {
-    action: StringEnum(["list", "add", "update", "remove"] as const, {
-      description: "Which cron action to perform.",
-    }),
-    jobId: Type.Optional(Type.String({ description: "Job id for update or remove." })),
+    action: StringEnum(
+      ["list", "add", "update", "remove", "list-running", "stop-running"] as const,
+      {
+        description: "Which cron action to perform.",
+      },
+    ),
+    jobId: Type.Optional(
+      Type.String({ description: "Job id for update, remove, or stopping a running job." }),
+    ),
+    runId: Type.Optional(Type.String({ description: "Running cron run id for stop-running." })),
     workspaceId: Type.Optional(
       Type.String({ description: "Target workspace id. Defaults to the current workspace." }),
     ),

@@ -7,7 +7,7 @@ export type StoredCronJobSession =
   | { kind: "new" }
   | { kind: "daily-inline" }
   | {
-      kind: "daily-subagent";
+      kind: "daily-detached";
       includePreviousContext: boolean;
     };
 
@@ -32,9 +32,9 @@ export function normalizeSession(value: CronJobSession | undefined): StoredCronJ
       return { kind: "new" };
     case "daily-inline":
       return { kind: "daily-inline" };
-    case "daily-subagent":
+    case "daily-detached":
       return {
-        kind: "daily-subagent",
+        kind: "daily-detached",
         includePreviousContext: value.includePreviousContext === true,
       };
     default:
@@ -56,9 +56,10 @@ export function normalizeStoredSession(value: unknown): StoredCronJobSession {
       return { kind: "new" };
     case "daily-inline":
       return { kind: "daily-inline" };
+    case "daily-detached":
     case "daily-subagent":
       return {
-        kind: "daily-subagent",
+        kind: "daily-detached",
         includePreviousContext: session.includePreviousContext === true,
       };
     default:
@@ -72,9 +73,9 @@ export function migrateStoredSession(value: unknown): StoredCronJobSession {
   }
 
   const session = value as { kind?: unknown; includePreviousContext?: unknown };
-  if (session.kind === "daily") {
+  if (session.kind === "daily" || session.kind === "daily-subagent") {
     return {
-      kind: "daily-subagent",
+      kind: "daily-detached",
       includePreviousContext: session.includePreviousContext === true,
     };
   }
@@ -88,9 +89,9 @@ export function toPublicSession(session: StoredCronJobSession): CronJobSession {
       return { kind: "new" };
     case "daily-inline":
       return { kind: "daily-inline" };
-    case "daily-subagent":
+    case "daily-detached":
       return {
-        kind: "daily-subagent",
+        kind: "daily-detached",
         includePreviousContext: session.includePreviousContext,
       };
   }
@@ -102,10 +103,10 @@ export function formatSessionLabel(session: CronJobSession | StoredCronJobSessio
       return "New per run";
     case "daily-inline":
       return "Daily inline";
-    case "daily-subagent":
+    case "daily-detached":
       return session.includePreviousContext === true
-        ? "Daily subagent · with previous context"
-        : "Daily subagent · fresh context";
+        ? "Daily detached · with previous context"
+        : "Daily detached · fresh context";
   }
 }
 

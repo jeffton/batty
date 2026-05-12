@@ -97,6 +97,15 @@ export function workspaceSessionDir(
   return path.join(battySessionRootDir(config), workspaceId);
 }
 
+export function workspaceCronSessionDir(
+  config: Pick<AppConfig, "battyDir">,
+  workspaceId: string,
+  jobId: string,
+  runId: string,
+): string {
+  return path.join(workspaceSessionDir(config, workspaceId), "cron", jobId, runId);
+}
+
 function getResourcePaths(
   settings: Partial<BattyAgentSettings>,
   key: "extensions" | "skills" | "prompts" | "themes",

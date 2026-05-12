@@ -65,6 +65,7 @@ export type UiMessage =
       timestamp: number;
       customType: string;
       text: string;
+      data?: Record<string, unknown>;
     };
 
 export interface ActiveToolRun {
@@ -143,9 +144,23 @@ export type CronJobSession =
       kind: "daily-inline";
     }
   | {
-      kind: "daily-subagent";
+      kind: "daily-detached";
       includePreviousContext?: boolean;
     };
+
+export interface RunningCronJob {
+  runId: string;
+  jobId: string;
+  workspaceId: string;
+  prompt: string;
+  model: string;
+  thinkingLevel: string;
+  session: CronJobSession;
+  scheduleLabel: string;
+  startedAtMs: number;
+  sessionId?: string;
+  sessionPath?: string;
+}
 
 export interface CronJobState {
   nextRunAtMs?: number;
@@ -219,6 +234,7 @@ export interface SessionState {
   activeTools: ActiveToolRun[];
   title?: string;
   isSubagentSession?: boolean;
+  isCronSession?: boolean;
 }
 
 export type SessionStateMetadata = Omit<
@@ -292,6 +308,7 @@ export interface WorkspaceSnapshot {
   workspaceId: string;
   sessions: SessionSummary[];
   cronJobs: CronJob[];
+  runningCronJobs: RunningCronJob[];
   uiSettings: WorkspaceUiSettings;
 }
 

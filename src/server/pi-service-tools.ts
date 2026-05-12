@@ -160,8 +160,8 @@ export function createCronTool({
       "When scheduling a cron job, always provide the full prompt the future agent turn should run.",
       "Prefer omitting model and thinkingLevel so the cron job reuses the current session settings. Only set them explicitly if the user asks for different ones.",
       'Use session.kind="daily-inline" to run directly in one workspace daily session.',
-      'Use session.kind="daily-subagent" to run in one workspace daily session as a subagent tool call.',
-      "Daily-subagent runs start fresh by default and only reuse earlier daily-session context when session.includePreviousContext=true is set.",
+      'Use session.kind="daily-detached" to run asynchronously beside one workspace daily session.',
+      "Daily detached runs start fresh by default and only reuse earlier daily-session context when session.includePreviousContext=true is set.",
       'Use schedule.kind="at" with schedule.in for relative times like 10m or 2h.',
       'Use schedule.kind="cron" with a standard cron expression and optional timezone for recurring schedules.',
       'Use schedule.kind="every" with durations like 15m, 2h, or 1d for interval schedules.',
@@ -177,13 +177,23 @@ export function createCronTool({
       switch (action) {
         case "list": {
           const jobs = cronService.listJobs(workspaceId);
-          const text =
+          const running = cronService.listRunningJobs(workspaceId);
+          const scheduledText =
             jobs.length === 0
               ? `No cron jobs found for workspace ${workspaceId}.`
               : jobs.map(buildCronJobSummary).join("\n\n---\n\n");
+          const runningText =
+            running.length === 0
+              ? "No running cron jobs."
+              : running
+                  .map(
+                    (run) =>
+                      `Running ${run.runId} · job ${run.jobId}\nStarted: ${new Date(run.startedAtMs).toISOString()}\nSession: ${run.sessionPath ?? "starting…"}\nPrompt: ${run.prompt}`,
+                  )
+                  .join("\n\n---\n\n");
           return {
-            content: [{ type: "text", text }],
-            details: { count: jobs.length, workspaceId },
+            content: [{ type: "text", text: `${scheduledText}\n\n\n${runningText}` }],
+            details: { count: jobs.length, runningCount: running.length, workspaceId, running },
           };
         }
         case "add": {
@@ -256,6 +266,37 @@ export function createCronTool({
               },
             ],
             details: job,
+          };
+        }
+        case "list-running": {
+          const running = cronService.listRunningJobs(workspaceId);
+          const text =
+            running.length === 0
+              ? `No running cron jobs found for workspace ${workspaceId}.`
+              : running
+                  .map(
+                    (run) =>
+                      `Running ${run.runId} · job ${run.jobId}\nStarted: ${new Date(run.startedAtMs).toISOString()}\nSession: ${run.sessionPath ?? "starting…"}\nPrompt: ${run.prompt}`,
+                  )
+                  .join("\n\n---\n\n");
+          return {
+            content: [{ type: "text", text }],
+            details: { count: running.length, workspaceId, running },
+          };
+        }
+        case "stop-running": {
+          const runId = String(params.runId ?? "").trim();
+          const jobId = String(params.jobId ?? "").trim();
+          if (!runId && !jobId) {
+            throw new Error("runId or jobId is required for cron stop-running");
+          }
+          const stopped = cronService.stopRunningJob({
+            runId: runId || undefined,
+            jobId: jobId || undefined,
+          });
+          return {
+            content: [{ type: "text", text: `Stopped running cron job ${stopped.runId}.` }],
+            details: stopped,
           };
         }
         default:

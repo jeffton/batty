@@ -62,6 +62,7 @@ export const authBootstrapActions = {
       this.settings = defaultAppSettingsStatus;
       this.sessionsByWorkspace = {};
       this.cronJobsByWorkspace = {};
+      this.runningCronJobsByWorkspace = {};
       this.workspaceUiSettings = {};
       this.closeStream();
       this.closeWorkspaceStream();
@@ -82,6 +83,7 @@ export const authBootstrapActions = {
     this.activeSession = undefined;
     this.sessionsByWorkspace = {};
     this.cronJobsByWorkspace = {};
+    this.runningCronJobsByWorkspace = {};
     this.workspaceUiSettings = {};
   },
 

@@ -1,8 +1,9 @@
 import {
   deleteCronJob as deleteCronJobRequest,
+  stopCronRun as stopCronRunRequest,
   updateCronJob as updateCronJobRequest,
 } from "@/client/lib/api";
-import type { CronJob, UpdateCronJobInput } from "@/shared/types";
+import type { CronJob, RunningCronJob, UpdateCronJobInput } from "@/shared/types";
 import type { AppActionContext } from "./app-state";
 
 function compareCronJobsByNextRun(left: CronJob, right: CronJob): number {
@@ -44,5 +45,15 @@ export const cronActions = {
       [job.workspaceId]: workspaceJobs.filter((candidate) => candidate.id !== job.id),
     };
     return job;
+  },
+
+  async stopCronRun(this: AppActionContext, runId: string): Promise<RunningCronJob> {
+    const run = await stopCronRunRequest(runId);
+    const workspaceRuns = this.runningCronJobsByWorkspace[run.workspaceId] ?? [];
+    this.runningCronJobsByWorkspace = {
+      ...this.runningCronJobsByWorkspace,
+      [run.workspaceId]: workspaceRuns.filter((candidate) => candidate.runId !== run.runId),
+    };
+    return run;
   },
 };

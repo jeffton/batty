@@ -36,15 +36,24 @@ interface BashExecutionLikeMessage {
   timestamp: number;
 }
 
+type CustomMessageData = Record<string, unknown>;
+
 interface CustomLikeMessage {
   role: "custom";
   customType: string;
   content: string | (TextContent | ImageContent)[];
   timestamp: number;
+  data?: CustomMessageData;
 }
 
 function normalizeToolDetails(details: unknown): ToolExecutionDetails | undefined {
   return details && typeof details === "object" ? (details as ToolExecutionDetails) : undefined;
+}
+
+function normalizeCustomData(data: unknown): CustomMessageData | undefined {
+  return data && typeof data === "object" && !Array.isArray(data)
+    ? (data as CustomMessageData)
+    : undefined;
 }
 
 function normalizeBattyAttachments(message: unknown): UiContentBlock[] {
@@ -205,6 +214,7 @@ export function normalizeMessage(message: AgentMessage, index: number): UiMessag
               )
               .join("\n")
               .trim(),
+      data: normalizeCustomData(custom.data),
     };
   }
 
@@ -249,6 +259,7 @@ export interface SessionStateInput {
   activeAssistant?: AgentMessage;
   title?: string;
   isSubagentSession?: boolean;
+  isCronSession?: boolean;
   activeTools: SessionState["activeTools"];
 }
 
@@ -284,5 +295,6 @@ export function createSessionState(input: SessionStateInput): SessionState {
     activeTools: input.activeTools,
     title: input.title,
     isSubagentSession: input.isSubagentSession,
+    isCronSession: input.isCronSession,
   };
 }

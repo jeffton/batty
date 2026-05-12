@@ -52,6 +52,7 @@ async function workspaceSnapshot(workspaceId: string): Promise<WorkspaceSnapshot
     workspaceId,
     sessions: await service.listSessionSummaries(workspace),
     cronJobs: cronService.listJobs(workspaceId),
+    runningCronJobs: cronService.listRunningJobs(workspaceId),
     uiSettings: getWorkspaceUiSettings(workspaceId),
   };
 }
@@ -86,7 +87,7 @@ cronService.subscribe((workspaceIds) => {
   }
 });
 cronService.setRunner({
-  run: async (job) => {
+  run: async (job, runContext) => {
     const workspaces = await listWorkspaces(config);
     const workspace = resolveWorkspace(workspaces, job.workspaceId);
     return service.runCronJobSession({
@@ -96,6 +97,10 @@ cronService.setRunner({
       thinkingLevel: job.thinkingLevel,
       session: job.session,
       scheduleLabel: job.scheduleLabel,
+      jobId: job.id,
+      runId: runContext.runId,
+      signal: runContext.signal,
+      onSessionStarted: runContext.onSessionStarted,
     });
   },
 });

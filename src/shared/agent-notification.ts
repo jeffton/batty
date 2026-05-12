@@ -81,7 +81,7 @@ export function assistantNotificationText(
 }
 
 export function suppressAgentCompletionNotification(session: SessionState): boolean {
-  if (session.isSubagentSession) {
+  if (session.isSubagentSession || session.isCronSession) {
     return true;
   }
 

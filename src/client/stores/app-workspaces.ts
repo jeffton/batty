@@ -1,6 +1,7 @@
 import {
   createWorkspace as createWorkspaceRequest,
   listWorkspaceCronJobs,
+  listWorkspaceCronRuns,
   listWorkspaceSessions,
   listWorkspaces as listWorkspacesRequest,
   setWorkspaceAssistant as setWorkspaceAssistantRequest,
@@ -59,10 +60,17 @@ export const workspaceActions = {
     };
 
     try {
-      const jobs = await listWorkspaceCronJobs(workspaceId);
+      const [jobs, running] = await Promise.all([
+        listWorkspaceCronJobs(workspaceId),
+        listWorkspaceCronRuns(workspaceId),
+      ]);
       this.cronJobsByWorkspace = {
         ...this.cronJobsByWorkspace,
         [workspaceId]: jobs,
+      };
+      this.runningCronJobsByWorkspace = {
+        ...this.runningCronJobsByWorkspace,
+        [workspaceId]: running,
       };
     } finally {
       this.loadingWorkspaceCronJobs = {
@@ -152,6 +160,10 @@ export const workspaceActions = {
       ...this.cronJobsByWorkspace,
       [workspace.id]: [],
     };
+    this.runningCronJobsByWorkspace = {
+      ...this.runningCronJobsByWorkspace,
+      [workspace.id]: [],
+    };
     this.workspaceUiSettings = {
       ...this.workspaceUiSettings,
       [workspace.id]: { easyMode: false },
@@ -191,6 +203,10 @@ export const workspaceActions = {
       this.cronJobsByWorkspace = {
         ...this.cronJobsByWorkspace,
         [snapshot.workspaceId]: snapshot.cronJobs,
+      };
+      this.runningCronJobsByWorkspace = {
+        ...this.runningCronJobsByWorkspace,
+        [snapshot.workspaceId]: snapshot.runningCronJobs,
       };
       this.workspaceUiSettings = {
         ...this.workspaceUiSettings,

@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { PanelRightOpen, Square } from "lucide-vue-next";
 import CronJobCard from "@/client/components/CronJobCard.vue";
+import SubagentSessionPopover from "@/client/components/SubagentSessionPopover.vue";
 import { useCronJobDrafts } from "@/client/composables/useCronJobDrafts";
 import { useAppStore } from "@/client/stores/app";
-import { watch } from "vue";
+import { computed, ref, watch } from "vue";
 
 const props = defineProps<{
   popoverId: string;
@@ -10,8 +12,25 @@ const props = defineProps<{
 }>();
 
 const store = useAppStore();
+const stoppingRunIds = ref(new Set<string>());
 const { jobs, draftFor, editJob, cancelEdit, thinkingOptions, sessionLabel, saveJob, deleteJob } =
   useCronJobDrafts(store);
+const runningJobs = computed(() => store.workspaceRunningCronJobs);
+
+function runPopoverId(runId: string): string {
+  return `cron-run-popover-${runId.replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
+}
+
+async function stopRun(runId: string): Promise<void> {
+  stoppingRunIds.value = new Set([...stoppingRunIds.value, runId]);
+  try {
+    await store.stopCronRun(runId);
+  } finally {
+    const next = new Set(stoppingRunIds.value);
+    next.delete(runId);
+    stoppingRunIds.value = next;
+  }
+}
 
 watch(
   () => store.selectedWorkspaceId,
@@ -38,6 +57,42 @@ watch(
           Current workspace: {{ store.selectedWorkspace?.label }}
         </div>
       </div>
+    </div>
+
+    <div v-if="runningJobs.length > 0" class="cron-popover__running">
+      <div class="cron-popover__section-title">Running now</div>
+      <article v-for="run in runningJobs" :key="run.runId" class="cron-popover__running-job">
+        <div class="cron-popover__running-meta">
+          <strong>{{ run.scheduleLabel }}</strong>
+          <span>{{ run.prompt }}</span>
+        </div>
+        <div class="cron-popover__running-actions">
+          <button
+            v-if="run.sessionPath"
+            type="button"
+            class="cron-popover__icon-btn"
+            :popovertarget="runPopoverId(run.runId)"
+          >
+            <PanelRightOpen :size="14" />
+          </button>
+          <button
+            type="button"
+            class="cron-popover__icon-btn cron-popover__icon-btn--danger"
+            :disabled="stoppingRunIds.has(run.runId)"
+            @click.stop.prevent="stopRun(run.runId)"
+          >
+            <Square :size="13" />
+          </button>
+        </div>
+        <SubagentSessionPopover
+          v-if="run.sessionPath"
+          :popover-id="runPopoverId(run.runId)"
+          header-title="Cron run"
+          :title="run.prompt"
+          :workspace-id="run.workspaceId"
+          :session-path="run.sessionPath"
+        />
+      </article>
     </div>
 
     <div class="cron-popover__jobs">
@@ -113,12 +168,82 @@ watch(
   color: var(--color-text-subtle);
 }
 
-.cron-popover__jobs {
+.cron-popover__jobs,
+.cron-popover__running {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
   min-height: 0;
   overflow-y: auto;
+}
+
+.cron-popover__running {
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--color-border-soft);
+  flex: 0 0 auto;
+}
+
+.cron-popover__section-title {
+  padding: 0 0.2rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--color-text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cron-popover__running-job {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.55rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.55rem;
+  background: var(--color-bg-panel);
+}
+
+.cron-popover__running-meta {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+}
+
+.cron-popover__running-meta strong,
+.cron-popover__running-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cron-popover__running-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.3rem;
+}
+
+.cron-popover__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.45rem;
+  background: color-mix(in srgb, var(--color-bg-overlay) 86%, transparent);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.cron-popover__icon-btn--danger {
+  color: var(--color-danger);
+}
+
+.cron-popover__icon-btn:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
 .cron-popover__empty {

@@ -2,6 +2,7 @@ import type {
   AppSettingsStatus,
   AuthStatus,
   CronJob,
+  RunningCronJob,
   ModelOption,
   ProviderAuthStatus,
   SessionState,
@@ -23,6 +24,7 @@ export interface AppStoreState {
   models: ModelOption[];
   sessionsByWorkspace: Record<string, SessionSummary[]>;
   cronJobsByWorkspace: Record<string, CronJob[]>;
+  runningCronJobsByWorkspace: Record<string, RunningCronJob[]>;
   workspaceUiSettings: Record<string, WorkspaceUiSettings>;
   activeSession: SessionState | undefined;
   selectedWorkspaceId: string | undefined;
@@ -66,6 +68,7 @@ export function createAppState(): AppStoreState {
     models: [],
     sessionsByWorkspace: {},
     cronJobsByWorkspace: {},
+    runningCronJobsByWorkspace: {},
     workspaceUiSettings: {},
     activeSession: undefined,
     selectedWorkspaceId: undefined,

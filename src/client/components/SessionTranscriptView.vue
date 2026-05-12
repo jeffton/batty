@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import ChatTranscript from "@/client/components/ChatTranscript.vue";
-import { NO_REPLY_SENTINEL } from "@/shared/agent-notification";
 import { withoutRenderedToolCalls } from "@/client/lib/active-assistant";
 import { easyModeMessage } from "@/client/lib/easy-mode";
 import { splitHistoryAndTail } from "@/client/lib/transcript-tail";
@@ -53,9 +52,7 @@ const toolStateLookup = computed(() =>
   buildToolStateLookup(props.session?.messages ?? [], props.session?.activeTools ?? []),
 );
 const transcriptMessages = computed(() =>
-  buildTranscriptMessages(props.session?.messages ?? [], toolStateLookup.value).filter(
-    (entry) => !isNoReplyAssistant(entry.message),
-  ),
+  buildTranscriptMessages(props.session?.messages ?? [], toolStateLookup.value),
 );
 const activeAssistantMessage = computed(() =>
   withoutRenderedToolCalls(
@@ -68,7 +65,7 @@ const activeAssistantMessage = computed(() =>
 const rawTranscriptEntries = computed<TranscriptMessageView[]>(() => {
   const entries = [...transcriptMessages.value];
 
-  if (activeAssistantMessage.value && !isNoReplyAssistant(activeAssistantMessage.value)) {
+  if (activeAssistantMessage.value) {
     const lastEntry = entries.at(-1);
     const lastMessage = lastEntry?.message;
     const attachmentBlocks =
@@ -97,21 +94,6 @@ const rawTranscriptEntries = computed<TranscriptMessageView[]>(() => {
 
   return entries;
 });
-
-function assistantText(
-  message: Extract<SessionState["messages"][number], { role: "assistant" }>,
-): string {
-  return message.blocks
-    .map((block) =>
-      block.type === "text" ? block.text : block.type === "thinking" ? block.thinking : "",
-    )
-    .join("")
-    .trim();
-}
-
-function isNoReplyAssistant(message: SessionState["messages"][number] | undefined): boolean {
-  return message?.role === "assistant" && assistantText(message) === NO_REPLY_SENTINEL;
-}
 
 function isTurnStart(entry: TranscriptMessageView): boolean {
   return entry.message.role === "user" || entry.message.role === "custom";

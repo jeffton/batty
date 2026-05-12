@@ -2,7 +2,6 @@
 import { Cog, PanelRightOpen } from "lucide-vue-next";
 import { computed } from "vue";
 import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE } from "@/server/runtime-notices";
-import { NO_REPLY_SENTINEL } from "@/shared/agent-notification";
 import AttachedFilesList from "@/client/components/AttachedFilesList.vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
 import MarkdownBlock from "@/client/components/MarkdownBlock.vue";
@@ -123,21 +122,8 @@ const cronNoticePopoverId = computed(() => {
   return `cron-notice-popover-${cronNoticeDetails.value.runId.replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
 });
 
-function assistantText(message: Extract<UiMessage, { role: "assistant" }>): string {
-  return message.blocks
-    .map((block) =>
-      block.type === "text" ? block.text : block.type === "thinking" ? block.thinking : "",
-    )
-    .join("")
-    .trim();
-}
-
-const assistantIsNoReply = computed(
-  () => props.message.role === "assistant" && assistantText(props.message) === NO_REPLY_SENTINEL,
-);
-
 const assistantErrorText = computed(() => {
-  if (props.message.role !== "assistant" || assistantIsNoReply.value) {
+  if (props.message.role !== "assistant") {
     return undefined;
   }
 
@@ -150,10 +136,7 @@ const assistantErrorText = computed(() => {
 });
 
 const assistantHasError = computed(
-  () =>
-    props.message.role === "assistant" &&
-    !assistantIsNoReply.value &&
-    typeof assistantErrorText.value === "string",
+  () => props.message.role === "assistant" && typeof assistantErrorText.value === "string",
 );
 
 const showAssistantErrorBubble = computed(

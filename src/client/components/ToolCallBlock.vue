@@ -1,17 +1,20 @@
 <script setup lang="ts">
-import { Check, CircleAlert, LoaderCircle, PanelRightOpen } from "lucide-vue-next";
+import { PanelRightOpen } from "lucide-vue-next";
 import { computed, ref } from "vue";
 import AttachedFilesList from "@/client/components/AttachedFilesList.vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
 import SubagentSessionPopover from "@/client/components/SubagentSessionPopover.vue";
 import DiffBlock from "@/client/components/DiffBlock.vue";
 import MarkdownBlock from "@/client/components/MarkdownBlock.vue";
+import ToolCallCodeOutput from "@/client/components/ToolCallCodeOutput.vue";
+import ToolCallHeader from "@/client/components/ToolCallHeader.vue";
+import ToolCallMeta from "@/client/components/ToolCallMeta.vue";
 import { formatValue, languageFromPath } from "@/client/lib/code-format";
 import { createHeadView, createTailView } from "@/client/lib/tool-output";
 import { hasToolResultContent } from "@/client/lib/transcript";
 import type { SentFileDescriptor, ToolExecutionDetails, UiContentBlock } from "@/shared/types";
 
-// Keep this in sync with .tool-call__output-window--collapsed using 20lh below.
+// Keep this in sync with .tool-call-code__output-window--collapsed in ToolCallCodeOutput.vue.
 // The collapsed container reserves exactly one line box per truncated line so the
 // transcript height stays stable while the visible tail slides during streaming.
 const OUTPUT_TAIL_LINE_COUNT = 20;
@@ -135,6 +138,28 @@ const bashTailView = computed(() => createTailView(bashTextOutput.value, OUTPUT_
 const writeTailView = computed(() =>
   createTailView(contentValue.value ?? "", OUTPUT_TAIL_LINE_COUNT),
 );
+const readTextOutput = computed(() =>
+  props.name !== "read"
+    ? ""
+    : props.resultBlocks
+        .filter(
+          (block): block is Extract<UiContentBlock, { type: "text" }> => block.type === "text",
+        )
+        .map((block) => block.text)
+        .join("\n"),
+);
+const readTailView = computed(() => createTailView(readTextOutput.value, OUTPUT_TAIL_LINE_COUNT));
+const cronTextOutput = computed(() =>
+  props.name !== "cron"
+    ? ""
+    : props.resultBlocks
+        .filter(
+          (block): block is Extract<UiContentBlock, { type: "text" }> => block.type === "text",
+        )
+        .map((block) => block.text)
+        .join("\n"),
+);
+const cronHeadView = computed(() => createHeadView(cronTextOutput.value, OUTPUT_TAIL_LINE_COUNT));
 const webSearchTextOutput = computed(() =>
   props.name !== "web-search"
     ? ""
@@ -152,6 +177,8 @@ const canExpandOutput = computed(
   () =>
     (props.name === "bash" && bashTailView.value.isTrimmed) ||
     (props.name === "write" && writeTailView.value.isTrimmed) ||
+    (props.name === "read" && readTailView.value.isTrimmed) ||
+    (props.name === "cron" && cronHeadView.value.isTrimmed) ||
     (props.name === "web-search" && webSearchHeadView.value.isTrimmed),
 );
 const expandButtonLabel = computed(() => {
@@ -168,7 +195,11 @@ const expandButtonLabel = computed(() => {
       ? bashTailView.value.hiddenLineCount
       : props.name === "write"
         ? writeTailView.value.hiddenLineCount
-        : webSearchHeadView.value.hiddenLineCount;
+        : props.name === "read"
+          ? readTailView.value.hiddenLineCount
+          : props.name === "cron"
+            ? cronHeadView.value.hiddenLineCount
+            : webSearchHeadView.value.hiddenLineCount;
   return `Show full output (+${hiddenLineCount} lines)`;
 });
 const visibleWriteContent = computed(() => {
@@ -180,6 +211,12 @@ const visibleWriteContent = computed(() => {
 const visibleBashOutput = computed(() =>
   isExpanded.value ? bashTextOutput.value : bashTailView.value.text,
 );
+const visibleReadOutput = computed(() =>
+  isExpanded.value ? readTextOutput.value : readTailView.value.text,
+);
+const visibleCronOutput = computed(() =>
+  isExpanded.value ? cronTextOutput.value : cronHeadView.value.text,
+);
 const visibleWebSearchOutput = computed(() =>
   isExpanded.value ? webSearchTextOutput.value : webSearchHeadView.value.text,
 );
@@ -189,12 +226,18 @@ const showCollapsedBashWindow = computed(
 const showCollapsedWriteWindow = computed(
   () => props.name === "write" && !isExpanded.value && writeTailView.value.isTrimmed,
 );
+const showCollapsedReadWindow = computed(
+  () => props.name === "read" && !isExpanded.value && readTailView.value.isTrimmed,
+);
+const showCollapsedCronWindow = computed(
+  () => props.name === "cron" && !isExpanded.value && cronHeadView.value.isTrimmed,
+);
 const showCollapsedWebSearchWindow = computed(
   () => props.name === "web-search" && !isExpanded.value && webSearchHeadView.value.isTrimmed,
 );
 const visibleResultBlocks = computed(() => {
-  if (props.name === "read" && props.status !== "error") {
-    return [];
+  if ((props.name === "read" || props.name === "cron") && props.status !== "error") {
+    return props.resultBlocks.filter((block) => block.type !== "text");
   }
 
   if (props.name === "subagent" && subagentRespondIn.value === "session") {
@@ -272,6 +315,10 @@ const showResultSection = computed(() => {
     return props.status === "error" && visibleResultBlocks.value.length > 0;
   }
 
+  if (props.name === "cron") {
+    return props.status === "error" || visibleResultBlocks.value.length > 0;
+  }
+
   if (props.name === "edit") {
     return props.status === "error" || visibleResultBlocks.value.length > 0 || showEditDiff.value;
   }
@@ -332,79 +379,74 @@ const genericEntries = computed(() => {
 
 <template>
   <section :class="['tool-call', props.compact ? 'tool-call--compact' : '']">
-    <header class="tool-call__header">
-      <strong class="tool-call__name">{{ props.name }}</strong>
-      <span v-if="props.name === 'bash' && timeoutValue" class="tool-call__timeout">
-        {{ timeoutValue }}
-      </span>
-      <code v-if="pathValue" class="tool-call__path">{{ pathValue }}</code>
-      <span
-        v-if="props.status"
-        :class="['tool-call__status', `tool-call__status--${props.status}`]"
-      >
-        <LoaderCircle
-          v-if="props.status === 'running'"
-          :size="14"
-          class="tool-call__status-icon tool-call__status-icon--spin"
-        />
-        <Check v-else-if="props.status === 'success'" :size="14" class="tool-call__status-icon" />
-        <CircleAlert v-else :size="14" class="tool-call__status-icon" />
-      </span>
-    </header>
+    <ToolCallHeader
+      :name="props.name"
+      :path="pathValue"
+      :timeout="timeoutValue"
+      :status="props.status"
+    />
 
-    <div v-if="readEntries.length > 0" class="tool-call__meta tool-call__meta--read">
-      <div v-for="entry in readEntries" :key="entry.key" class="tool-call__meta-chip">
-        <span class="tool-call__meta-key">{{ entry.key }}</span>
-        <code class="tool-call__meta-value">{{ entry.value }}</code>
-      </div>
-    </div>
+    <ToolCallMeta :entries="readEntries" inline />
 
-    <div v-if="props.name === 'bash' && commandValue" class="tool-call__bash">
-      <CodeBlock :code="`$ ${commandValue}`" language="bash" :compact="props.compact" />
-      <div v-if="canExpandOutput" class="tool-call__expand-row">
-        <button type="button" class="tool-call__expand-btn" @click="isExpanded = !isExpanded">
-          {{ expandButtonLabel }}
-        </button>
-      </div>
-      <div
-        v-if="visibleBashOutput.trim().length > 0"
-        :class="[
-          'tool-call__output-window',
-          showCollapsedBashWindow ? 'tool-call__output-window--collapsed' : '',
-        ]"
-      >
-        <CodeBlock :code="visibleBashOutput" language="bash" :compact="props.compact" />
-      </div>
-    </div>
-
-    <template v-else-if="props.name === 'write' && visibleWriteContent">
-      <div class="tool-call__overlay-output">
-        <div v-if="canExpandOutput" class="tool-call__overlay-control">
-          <button type="button" class="tool-call__expand-btn" @click="isExpanded = !isExpanded">
-            {{ expandButtonLabel }}
-          </button>
-        </div>
-        <div
-          :class="[
-            'tool-call__output-window',
-            showCollapsedWriteWindow ? 'tool-call__output-window--collapsed' : '',
-          ]"
-        >
-          <CodeBlock
-            :code="visibleWriteContent"
-            :language="codeLanguage"
-            :compact="props.compact"
-          />
-        </div>
-      </div>
+    <template
+      v-if="
+        props.name === 'read' && props.status !== 'error' && visibleReadOutput.trim().length > 0
+      "
+    >
+      <ToolCallCodeOutput
+        :code="visibleReadOutput"
+        :language="codeLanguage"
+        :compact="props.compact"
+        :collapsed="showCollapsedReadWindow"
+        :can-expand="canExpandOutput"
+        :expand-button-label="expandButtonLabel"
+        @toggle-expanded="isExpanded = !isExpanded"
+      />
     </template>
 
-    <div v-if="genericEntries.length > 0" class="tool-call__meta">
-      <div v-for="entry in genericEntries" :key="entry.key" class="tool-call__meta-row">
-        <span class="tool-call__meta-key">{{ entry.key }}</span>
-        <code class="tool-call__meta-value">{{ entry.value }}</code>
-      </div>
-    </div>
+    <template
+      v-else-if="
+        props.name === 'cron' && props.status !== 'error' && visibleCronOutput.trim().length > 0
+      "
+    >
+      <ToolCallCodeOutput
+        :code="visibleCronOutput"
+        language="json"
+        :compact="props.compact"
+        :collapsed="showCollapsedCronWindow"
+        :can-expand="canExpandOutput"
+        :expand-button-label="expandButtonLabel"
+        @toggle-expanded="isExpanded = !isExpanded"
+      />
+    </template>
+
+    <ToolCallCodeOutput
+      v-else-if="props.name === 'bash' && commandValue"
+      :code="visibleBashOutput"
+      language="bash"
+      :compact="props.compact"
+      :collapsed="showCollapsedBashWindow"
+      :can-expand="canExpandOutput"
+      :expand-button-label="expandButtonLabel"
+      :command="commandValue"
+      button-placement="before"
+      @toggle-expanded="isExpanded = !isExpanded"
+    />
+
+    <template v-else-if="props.name === 'write' && visibleWriteContent">
+      <ToolCallCodeOutput
+        :code="visibleWriteContent"
+        :language="codeLanguage"
+        :compact="props.compact"
+        :collapsed="showCollapsedWriteWindow"
+        :can-expand="canExpandOutput"
+        :expand-button-label="expandButtonLabel"
+        button-placement="overlay"
+        @toggle-expanded="isExpanded = !isExpanded"
+      />
+    </template>
+
+    <ToolCallMeta :entries="genericEntries" />
 
     <div v-if="canOpenSubagentSession" class="tool-call__subagent-row">
       <button type="button" class="tool-call__subagent-btn" :popovertarget="subagentPopoverId">
@@ -420,21 +462,15 @@ const genericEntries = computed(() => {
     </div>
 
     <template v-if="props.name === 'web-search' && visibleWebSearchOutput.trim().length > 0">
-      <div class="tool-call__bash">
-        <div
-          :class="[
-            'tool-call__output-window',
-            showCollapsedWebSearchWindow ? 'tool-call__output-window--collapsed' : '',
-          ]"
-        >
-          <CodeBlock :code="visibleWebSearchOutput" language="markdown" :compact="props.compact" />
-        </div>
-        <div v-if="canExpandOutput" class="tool-call__expand-row">
-          <button type="button" class="tool-call__expand-btn" @click="isExpanded = !isExpanded">
-            {{ expandButtonLabel }}
-          </button>
-        </div>
-      </div>
+      <ToolCallCodeOutput
+        :code="visibleWebSearchOutput"
+        language="markdown"
+        :compact="props.compact"
+        :collapsed="showCollapsedWebSearchWindow"
+        :can-expand="canExpandOutput"
+        :expand-button-label="expandButtonLabel"
+        @toggle-expanded="isExpanded = !isExpanded"
+      />
     </template>
 
     <div v-if="showResultSection" class="tool-call__result">
@@ -496,105 +532,10 @@ const genericEntries = computed(() => {
   padding: 0.4rem calc(var(--safe-area-right) + 0.8rem) 0.4rem calc(var(--safe-area-left) + 0.8rem);
 }
 
-.tool-call__header {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  flex-wrap: wrap;
-}
-
-.tool-call__name {
-  color: var(--color-text-strong);
-}
-
-.tool-call__timeout,
-.tool-call__meta-key {
-  color: var(--color-text-subtle);
-}
-
-.tool-call__timeout {
-  font-size: 0.78rem;
-}
-
-.tool-call__status {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.tool-call__status--success {
-  color: var(--color-success-contrast);
-}
-
-.tool-call__status--error {
-  color: var(--color-error);
-}
-
-.tool-call__status--running {
-  color: var(--color-info);
-}
-
-.tool-call__status-icon {
-  display: block;
-}
-
-.tool-call__status-icon--spin {
-  animation: tool-call-spin 0.9s linear infinite;
-}
-
-.tool-call__path,
-.tool-call__meta-value,
-.tool-call__expand-btn {
-  color: var(--color-info);
-  background: var(--color-bg-inline-code);
-  border-radius: 0.2rem;
-}
-
-.tool-call__path,
-.tool-call__meta-value {
-  padding: 0.12rem 0.35rem;
-}
-
-.tool-call__path {
-  display: inline-block;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  vertical-align: baseline;
-}
-
-.tool-call__meta-value {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.tool-call__meta,
 .tool-call__result,
-.tool-call__bash,
 .tool-call__subagent-row {
   display: grid;
   gap: 0.4rem;
-}
-
-.tool-call__meta--read {
-  display: flex;
-  gap: 0.6rem 1rem;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.tool-call__meta-row,
-.tool-call__meta-chip {
-  display: flex;
-  align-items: baseline;
-  gap: 0.45rem;
-  flex-wrap: wrap;
-}
-
-.tool-call__meta-key {
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
 }
 
 .tool-call__text {
@@ -602,60 +543,6 @@ const genericEntries = computed(() => {
   overflow-wrap: anywhere;
   color: var(--color-text);
   line-height: 1.45;
-}
-
-.tool-call__overlay-output {
-  position: relative;
-  padding-top: 0.4rem;
-}
-
-.tool-call__output-window {
-  min-width: 0;
-}
-
-.tool-call__output-window--collapsed {
-  display: flex;
-  align-items: flex-end;
-  /* Keep this in sync with OUTPUT_TAIL_LINE_COUNT above.
-     20lh reserves exactly 20 visible line boxes for the truncated output so the
-     transcript height does not bob while the tail window drops old lines and adds new ones. */
-  min-height: 20lh;
-  max-height: 20lh;
-  overflow: hidden;
-}
-
-.tool-call__overlay-control,
-.tool-call__expand-row {
-  display: flex;
-  justify-content: center;
-  z-index: 1;
-}
-
-.tool-call__overlay-control {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-}
-
-.tool-call__expand-row {
-  margin: -0.05rem 0;
-}
-
-.tool-call__expand-btn {
-  border: 1px solid color-mix(in srgb, var(--color-info) 30%, transparent);
-  border-radius: 0.5rem;
-  padding: 0.22rem 0.65rem;
-  font: inherit;
-  font-size: 0.88rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-@media (hover: hover) {
-  .tool-call__expand-btn:hover {
-    background: color-mix(in srgb, var(--color-bg-inline-code) 78%, var(--color-info));
-  }
 }
 
 .tool-call__subagent-row {
@@ -686,11 +573,5 @@ const genericEntries = computed(() => {
 .tool-call img {
   width: min(100%, 28rem);
   border-radius: 0.45rem;
-}
-
-@keyframes tool-call-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 </style>

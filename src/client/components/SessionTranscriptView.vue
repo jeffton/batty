@@ -13,6 +13,7 @@ import {
 } from "@/client/lib/transcript";
 import type { SessionState, UiContentBlock } from "@/shared/types";
 import type { TranscriptMessageView } from "@/client/lib/transcript";
+import type { TranscriptDisplayEntry } from "@/client/components/ChatTranscript.vue";
 
 const TRANSCRIPT_BOTTOM_THRESHOLD = 12;
 const TRANSCRIPT_LOAD_OLDER_THRESHOLD = 80;
@@ -30,17 +31,16 @@ const props = withDefaults(
     session?: SessionState;
     loadOlderMessages: () => Promise<void>;
     loadingOlderMessages?: boolean;
-    easyMode?: boolean;
   }>(),
   {
     session: undefined,
     loadingOlderMessages: false,
-    easyMode: false,
   },
 );
 
 const transcriptPane = ref<ChatTranscriptHandle | null>(null);
 const isTranscriptPinnedToBottom = ref(true);
+const showAllToolCalls = ref(false);
 let transcriptScrollElement: HTMLElement | null = null;
 let transcriptTailObserver: ResizeObserver | null = null;
 let transcriptViewportObserver: ResizeObserver | null = null;
@@ -53,33 +53,16 @@ const toolStateLookup = computed(() =>
 const transcriptMessages = computed(() =>
   buildTranscriptMessages(props.session?.messages ?? [], toolStateLookup.value),
 );
-const visibleTranscriptMessages = computed<TranscriptMessageView[]>(() => {
-  if (!props.easyMode) {
-    return transcriptMessages.value;
-  }
-
-  return transcriptMessages.value.flatMap((entry) => {
-    const message = easyModeMessage(entry.message, toolStateLookup.value.toolStatesByCallId);
-    return message ? [{ ...entry, message }] : [];
-  });
-});
-const visibleActiveAssistant = computed(() => {
-  const assistant = props.session?.activeAssistant;
-  return props.easyMode && assistant
-    ? easyModeMessage(assistant, toolStateLookup.value.toolStatesByCallId)
-    : assistant;
-});
 const activeAssistantMessage = computed(() =>
   withoutRenderedToolCalls(
-    visibleActiveAssistant.value?.role === "assistant" ? visibleActiveAssistant.value : undefined,
+    props.session?.activeAssistant?.role === "assistant"
+      ? props.session.activeAssistant
+      : undefined,
     toolStateLookup.value.referencedToolCallIds,
   ),
 );
-const activeAssistantToolStates = computed(() =>
-  toolStatesForMessage(activeAssistantMessage.value, toolStateLookup.value.toolStatesByCallId),
-);
-const transcriptEntries = computed(() => {
-  const entries = [...visibleTranscriptMessages.value];
+const rawTranscriptEntries = computed<TranscriptMessageView[]>(() => {
+  const entries = [...transcriptMessages.value];
 
   if (activeAssistantMessage.value) {
     const lastEntry = entries.at(-1);
@@ -110,6 +93,69 @@ const transcriptEntries = computed(() => {
 
   return entries;
 });
+
+function isTurnStart(entry: TranscriptMessageView): boolean {
+  return entry.message.role === "user" || entry.message.role === "custom";
+}
+
+function latestTurnStartIndex(entries: TranscriptMessageView[]): number {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    if (isTurnStart(entries[index] as TranscriptMessageView)) {
+      return index;
+    }
+  }
+
+  return Math.max(0, entries.length - 1);
+}
+
+function collapsedMessage(entry: TranscriptMessageView): TranscriptMessageView | undefined {
+  const message = easyModeMessage(entry.message, toolStateLookup.value.toolStatesByCallId);
+  return message ? { ...entry, message } : undefined;
+}
+
+function hidesToolDetails(
+  original: TranscriptMessageView,
+  collapsed: TranscriptMessageView | undefined,
+): boolean {
+  if (!collapsed) {
+    return true;
+  }
+
+  if (!("blocks" in original.message) || !("blocks" in collapsed.message)) {
+    return false;
+  }
+
+  return original.message.blocks.length !== collapsed.message.blocks.length;
+}
+
+const transcriptEntries = computed<TranscriptDisplayEntry[]>(() => {
+  const entries = rawTranscriptEntries.value;
+  const latestTurnIndex = latestTurnStartIndex(entries);
+  const collapsedByIndex = entries.map((entry, index) =>
+    index >= latestTurnIndex ? entry : collapsedMessage(entry),
+  );
+  const latestHiddenIndex = collapsedByIndex.reduce(
+    (latest, collapsed, index) =>
+      index < latestTurnIndex &&
+      hidesToolDetails(entries[index] as TranscriptMessageView, collapsed)
+        ? index
+        : latest,
+    -1,
+  );
+
+  const displayEntries: TranscriptDisplayEntry[] = [];
+  entries.forEach((entry, index) => {
+    const visibleEntry = showAllToolCalls.value ? entry : collapsedByIndex[index];
+    if (visibleEntry) {
+      displayEntries.push({ kind: "message", entry: visibleEntry });
+    }
+    if (index === latestHiddenIndex) {
+      displayEntries.push({ kind: "tool-toggle", expanded: showAllToolCalls.value });
+    }
+  });
+
+  return displayEntries;
+});
 const transcriptSplit = computed(() =>
   splitHistoryAndTail(transcriptEntries.value, TRANSCRIPT_TAIL_COUNT),
 );
@@ -125,7 +171,11 @@ const transcriptTailSignature = computed(() => {
   }
 
   return tailEntries.value
-    .map((entry) => `${entry.message.id}:${entry.message.timestamp}`)
+    .map((entry) =>
+      entry.kind === "message"
+        ? `${entry.entry.message.id}:${entry.entry.message.timestamp}`
+        : `tool-toggle:${entry.expanded}`,
+    )
     .join("|");
 });
 const activeAssistantSignature = computed(() => {
@@ -458,7 +508,7 @@ watch(transcriptPane, () => {
 watch(
   [
     () => props.session?.id,
-    () => props.easyMode,
+    () => showAllToolCalls.value,
     transcriptTailSignature,
     activeAssistantSignature,
     activeToolsSignature,
@@ -498,5 +548,6 @@ watch(
     :is-streaming="Boolean(props.session?.isStreaming)"
     :is-pinned-to-bottom="isTranscriptPinnedToBottom"
     @jump-to-latest="jumpToLatest"
+    @toggle-tool-calls="showAllToolCalls = !showAllToolCalls"
   />
 </template>

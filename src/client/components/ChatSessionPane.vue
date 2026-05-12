@@ -130,15 +130,6 @@ function setThinkingLevel(level: string): void {
   void store.setThinkingLevel(level);
 }
 
-function setEasyMode(enabled: boolean): void {
-  const workspaceId = store.selectedWorkspaceId;
-  if (!workspaceId) {
-    return;
-  }
-
-  void store.setWorkspaceEasyMode(workspaceId, enabled);
-}
-
 function shouldRestoreComposerAfterPromptError(
   before:
     | {
@@ -263,9 +254,7 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
       :context-arc-style="contextArcStyle"
       :connection-state="store.connectionState"
       :connection-description="connectionDescription"
-      :easy-mode="store.workspaceEasyMode"
       @back="emit('back')"
-      @set-easy-mode="setEasyMode"
     />
 
     <div v-if="!store.activeSession && sessionLoading" class="chat-loading">
@@ -284,7 +273,6 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
         :session="store.activeSession"
         :load-older-messages="() => store.loadOlderMessages()"
         :loading-older-messages="store.loadingOlderMessages"
-        :easy-mode="store.workspaceEasyMode"
       />
 
       <MessageComposer

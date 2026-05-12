@@ -146,6 +146,32 @@ const hasTrailingAssistantBubble = computed(() => {
   return lastSegment?.kind === "bubble";
 });
 
+const messageTimestampLabel = computed(() => {
+  if (props.message.role !== "assistant" && props.message.role !== "user") {
+    return undefined;
+  }
+
+  const timestamp = props.message.timestamp;
+  const date = new Date(timestamp);
+  const now = new Date();
+  const isToday =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+
+  if (isToday) {
+    return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  }
+
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+});
+
 const attachedFiles = computed<SentFileDescriptor[]>(() => {
   if (props.message.role !== "assistant") {
     return [];
@@ -184,6 +210,8 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
 
 <template>
   <article :class="['message', `message--${props.message.role}`]">
+    <div v-if="messageTimestampLabel" class="message__timestamp">{{ messageTimestampLabel }}</div>
+
     <div v-if="props.message.role === 'bashExecution'" class="message__body">
       <CodeBlock :code="`$ ${props.message.command}\n${props.message.output}`" language="bash" />
     </div>
@@ -361,6 +389,15 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
   font-size: 0.92em;
 }
 
+.message__timestamp {
+  justify-self: center;
+  margin-bottom: 0.45rem;
+  color: var(--color-text-subtle);
+  font-size: 0.72rem;
+  line-height: 1;
+  opacity: 0.75;
+}
+
 .message__body {
   display: grid;
   gap: 0.45rem;
@@ -375,6 +412,10 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
 
 .message--user::before {
   right: calc(-1 * (var(--safe-area-right) + 0.8rem));
+}
+
+.message--user:has(.message__timestamp)::before {
+  top: 1.15rem;
 }
 
 .message__segment--bubble {

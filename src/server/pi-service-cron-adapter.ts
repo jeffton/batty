@@ -82,9 +82,10 @@ export async function runCronJobSession(
     ...(parentSessionPath ? { copySessionPath: parentSessionPath } : {}),
   });
   const cronWebSession = context.requireSession(cronSession.id);
+  const cronSessionPath = context.requireSessionPath(cronWebSession.id);
   job.onSessionStarted({
     sessionId: cronWebSession.session.sessionId,
-    sessionPath: context.requireSessionPath(cronWebSession.id),
+    sessionPath: cronSessionPath,
   });
 
   const abortListener = () => {
@@ -119,7 +120,7 @@ export async function runCronJobSession(
 
   return {
     sessionId: cronWebSession.session.sessionId,
-    sessionPath: context.requireSessionPath(cronWebSession.id),
+    sessionPath: cronSessionPath,
   };
 }
 

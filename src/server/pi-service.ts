@@ -506,7 +506,9 @@ export class PiService {
 
     await webSession.session.agent.prompt(messages);
     await (webSession.session as unknown as { waitForRetry: () => Promise<void> }).waitForRetry();
-    this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
+    if (this.hasSession(sessionId)) {
+      this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
+    }
   }
 
   async prompt(

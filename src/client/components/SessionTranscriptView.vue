@@ -19,6 +19,7 @@ const TRANSCRIPT_BOTTOM_THRESHOLD = 12;
 const TRANSCRIPT_LOAD_OLDER_THRESHOLD = 80;
 const TRANSCRIPT_TAIL_COUNT = 25;
 const USER_SCROLL_INTENT_WINDOW_MS = 1000;
+const TIMESTAMP_GROUP_WINDOW_MS = 10 * 60 * 1000;
 
 type ChatTranscriptHandle = InstanceType<typeof ChatTranscript> & {
   rootElement: () => HTMLElement | null;
@@ -128,6 +129,34 @@ function hidesToolDetails(
   return original.message.blocks.length !== collapsed.message.blocks.length;
 }
 
+function canShowTimestamp(entry: TranscriptMessageView): boolean {
+  const message = entry.message;
+  if (message.role === "user") {
+    return true;
+  }
+
+  return (
+    message.role === "assistant" &&
+    message.blocks.some((block) => block.type === "text" || block.type === "image")
+  );
+}
+
+function addTimestampVisibility(entries: TranscriptDisplayEntry[]): TranscriptDisplayEntry[] {
+  let previousTimestamp: number | undefined;
+
+  return entries.map((entry) => {
+    if (entry.kind !== "message" || !canShowTimestamp(entry.entry)) {
+      return entry;
+    }
+
+    const timestamp = entry.entry.message.timestamp;
+    const showTimestamp =
+      previousTimestamp === undefined || timestamp - previousTimestamp >= TIMESTAMP_GROUP_WINDOW_MS;
+    previousTimestamp = timestamp;
+    return { ...entry, showTimestamp };
+  });
+}
+
 const transcriptEntries = computed<TranscriptDisplayEntry[]>(() => {
   const entries = rawTranscriptEntries.value;
   const latestTurnIndex = latestTurnStartIndex(entries);
@@ -147,14 +176,14 @@ const transcriptEntries = computed<TranscriptDisplayEntry[]>(() => {
   entries.forEach((entry, index) => {
     const visibleEntry = showAllToolCalls.value ? entry : collapsedByIndex[index];
     if (visibleEntry) {
-      displayEntries.push({ kind: "message", entry: visibleEntry });
+      displayEntries.push({ kind: "message", entry: visibleEntry, showTimestamp: false });
     }
     if (index === latestHiddenIndex) {
       displayEntries.push({ kind: "tool-toggle", expanded: showAllToolCalls.value });
     }
   });
 
-  return displayEntries;
+  return addTimestampVisibility(displayEntries);
 });
 const transcriptSplit = computed(() =>
   splitHistoryAndTail(transcriptEntries.value, TRANSCRIPT_TAIL_COUNT),

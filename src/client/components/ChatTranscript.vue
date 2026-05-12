@@ -6,7 +6,7 @@ import ChatMessage from "@/client/components/ChatMessage.vue";
 import type { TranscriptMessageView } from "@/client/lib/transcript";
 
 export type TranscriptDisplayEntry =
-  | { kind: "message"; entry: TranscriptMessageView }
+  | { kind: "message"; entry: TranscriptMessageView; showTimestamp: boolean }
   | { kind: "tool-toggle"; expanded: boolean };
 
 const props = defineProps<{
@@ -71,6 +71,7 @@ defineExpose({
               v-if="displayEntry.kind === 'message'"
               :message="displayEntry.entry.message"
               :tool-states-by-call-id="displayEntry.entry.toolStatesByCallId"
+              :show-timestamp="displayEntry.showTimestamp"
             />
             <div v-else class="transcript__tool-toggle-row">
               <button
@@ -96,6 +97,7 @@ defineExpose({
             v-if="displayEntry.kind === 'message'"
             :message="displayEntry.entry.message"
             :tool-states-by-call-id="displayEntry.entry.toolStatesByCallId"
+            :show-timestamp="displayEntry.showTimestamp"
           />
           <div v-else class="transcript__tool-toggle-row">
             <button

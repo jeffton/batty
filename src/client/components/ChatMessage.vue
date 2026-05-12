@@ -20,9 +20,11 @@ const props = withDefaults(
   defineProps<{
     message: UiMessage;
     toolStatesByCallId?: Map<string, ToolDisplayState>;
+    showTimestamp?: boolean;
   }>(),
   {
     toolStatesByCallId: () => new Map(),
+    showTimestamp: false,
   },
 );
 
@@ -200,7 +202,7 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
 </script>
 
 <template>
-  <div v-if="props.message.role === 'user'" class="message__timestamp">
+  <div v-if="props.message.role === 'user' && props.showTimestamp" class="message__timestamp">
     {{ messageTimestampLabel }}
   </div>
 
@@ -251,7 +253,7 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
         v-for="(segment, segmentIndex) in assistantSegments"
         :key="`${props.message.id}-segment-${segmentIndex}`"
       >
-        <div v-if="segment.kind === 'bubble'" class="message__timestamp">
+        <div v-if="segment.kind === 'bubble' && props.showTimestamp" class="message__timestamp">
           {{ messageTimestampLabel }}
         </div>
         <div
@@ -309,7 +311,7 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
       </div>
 
       <template v-if="showAssistantErrorBubble && assistantErrorText">
-        <div class="message__timestamp">{{ messageTimestampLabel }}</div>
+        <div v-if="props.showTimestamp" class="message__timestamp">{{ messageTimestampLabel }}</div>
         <div class="message__segment message__segment--bubble message__segment--error">
           <div class="message__text">{{ assistantErrorText }}</div>
         </div>

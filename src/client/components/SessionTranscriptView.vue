@@ -124,10 +124,6 @@ function latestExpandedTurnRange(entries: TranscriptMessageView[]): {
 }
 
 function collapsedMessage(entry: TranscriptMessageView): TranscriptMessageView | undefined {
-  if (isDetachedCronTurnStart(entry)) {
-    return entry;
-  }
-
   const message = easyModeMessage(entry.message, toolStateLookup.value.toolStatesByCallId);
   return message ? { ...entry, message } : undefined;
 }

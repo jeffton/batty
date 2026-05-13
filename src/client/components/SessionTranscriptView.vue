@@ -95,18 +95,24 @@ const rawTranscriptEntries = computed<TranscriptMessageView[]>(() => {
   return entries;
 });
 
-function isTurnStart(entry: TranscriptMessageView): boolean {
+function startsAnyTurn(entry: TranscriptMessageView): boolean {
   return entry.message.role === "user" || entry.message.role === "custom";
 }
 
-function latestTurnStartIndex(entries: TranscriptMessageView[]): number {
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    if (isTurnStart(entries[index] as TranscriptMessageView)) {
-      return index;
-    }
+function latestUserInitiatedTurnRange(entries: TranscriptMessageView[]): {
+  startIndex: number;
+  endIndex: number;
+} {
+  const startIndex = entries.findLastIndex((entry) => entry.message.role === "user");
+  if (startIndex < 0) {
+    return { startIndex: entries.length, endIndex: entries.length };
   }
 
-  return Math.max(0, entries.length - 1);
+  const relativeEndIndex = entries.slice(startIndex + 1).findIndex(startsAnyTurn);
+  return {
+    startIndex,
+    endIndex: relativeEndIndex < 0 ? entries.length : startIndex + 1 + relativeEndIndex,
+  };
 }
 
 function collapsedMessage(entry: TranscriptMessageView): TranscriptMessageView | undefined {
@@ -159,13 +165,15 @@ function addTimestampVisibility(entries: TranscriptDisplayEntry[]): TranscriptDi
 
 const transcriptEntries = computed<TranscriptDisplayEntry[]>(() => {
   const entries = rawTranscriptEntries.value;
-  const latestTurnIndex = latestTurnStartIndex(entries);
+  const latestUserTurn = latestUserInitiatedTurnRange(entries);
   const collapsedByIndex = entries.map((entry, index) =>
-    index >= latestTurnIndex ? entry : collapsedMessage(entry),
+    index >= latestUserTurn.startIndex && index < latestUserTurn.endIndex
+      ? entry
+      : collapsedMessage(entry),
   );
   const latestHiddenIndex = collapsedByIndex.reduce(
     (latest, collapsed, index) =>
-      index < latestTurnIndex &&
+      (index < latestUserTurn.startIndex || index >= latestUserTurn.endIndex) &&
       hidesToolDetails(entries[index] as TranscriptMessageView, collapsed)
         ? index
         : latest,

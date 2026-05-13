@@ -11,6 +11,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type {
   CronJobSession,
+  RunningCronJob,
   ModelOption,
   ProviderAuthStartResponse,
   ProviderAuthStatus,
@@ -73,7 +74,7 @@ import {
   type WebSession,
 } from "./pi-service-types";
 import type { CronService } from "./cron";
-import { runCronJobSession } from "./pi-service-cron-adapter";
+import { deliverSkippedCronJobRun, runCronJobSession } from "./pi-service-cron-adapter";
 import { createPiServiceTools } from "./pi-service-tool-factory";
 import type { RuntimeNotice } from "./runtime-notices";
 
@@ -289,6 +290,41 @@ export class PiService {
         notifyWorkspaceUpdated: (workspaceId) => this.notifyWorkspaceUpdated(workspaceId),
       },
       job,
+    );
+  }
+
+  async deliverSkippedCronJobRun(
+    job: {
+      workspace: WorkspaceInfo;
+      prompt: string;
+      model: string;
+      thinkingLevel: string;
+      session: CronJobSession;
+      scheduleLabel: string;
+      jobId: string;
+      runId: string;
+    },
+    skipped: { skippedAtMs: number; activeRun: RunningCronJob; reason: string },
+  ): Promise<void> {
+    return deliverSkippedCronJobRun(
+      {
+        createCronSession: (workspace, options) => this.createCronSession(workspace, options),
+        promptCron: (sessionId, notice) => this.promptCron(sessionId, notice),
+        resolveOrCreateDailySession: (workspace, options) =>
+          this.resolveOrCreateDailySession(workspace, options),
+        requireSession: (sessionId) => this.requireSession(sessionId),
+        requireSessionPath: (sessionId) => this.requireSessionPath(sessionId),
+        runSubagentSerial: (sessionId, run) => this.runSubagentSerial(sessionId, run),
+        getState: (sessionId) => this.getState(sessionId),
+        publishReset: (webSession, state) => this.publish(webSession, { type: "reset", state }),
+        setThinkingLevel: (sessionId, thinkingLevel) =>
+          this.setThinkingLevel(sessionId, thinkingLevel),
+        setModel: (sessionId, modelId) => this.setModel(sessionId, modelId),
+        onAgentCompleted: this.onAgentCompleted,
+        notifyWorkspaceUpdated: (workspaceId) => this.notifyWorkspaceUpdated(workspaceId),
+      },
+      job,
+      skipped,
     );
   }
 

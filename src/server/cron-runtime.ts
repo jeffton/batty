@@ -32,11 +32,18 @@ export interface CronJobRunnerContext {
   onSessionStarted(session: { sessionId: string; sessionPath: string }): void;
 }
 
+export interface CronJobSkippedContext {
+  skippedAtMs: number;
+  activeRun: RunningCronJob;
+  reason: string;
+}
+
 export interface CronJobRunner {
   run(
     job: CronJob,
     context: CronJobRunnerContext,
   ): Promise<{ sessionId: string; sessionPath: string }>;
+  onSkipped?(job: CronJob, context: CronJobSkippedContext): Promise<void>;
 }
 
 function createEveryHandle(job: StoredCronJob, onTrigger: () => void): ScheduledHandle {
@@ -280,14 +287,39 @@ export class CronService {
     }
   }
 
+  private async skipOverlappingRun(
+    job: StoredCronJob,
+    activeRun: RunningCronJob & { abortController: AbortController },
+  ): Promise<void> {
+    const skippedAtMs = Date.now();
+    const reason = `Cron job skipped because previous run is still active: ${activeRun.runId}`;
+    console.warn(reason, { jobId: job.id, activeRunId: activeRun.runId });
+    activeRun.abortController.abort();
+    this.runningJobs.delete(activeRun.runId);
+
+    if (job.schedule.kind !== "at") {
+      this.ignoreOwnWatchEvents();
+      await this.store.setJobState(job.id, markJobRunFailed(job.state, skippedAtMs, reason));
+      await this.reloadFromDisk();
+    }
+
+    await this.runner?.onSkipped?.(toCronJob(job), {
+      skippedAtMs,
+      activeRun,
+      reason,
+    });
+    this.notifyChanged([job.workspaceId]);
+  }
+
   private async triggerJob(jobId: string): Promise<void> {
     const current = this.jobs.get(jobId);
     if (!current) {
       return;
     }
 
-    if ([...this.runningJobs.values()].some((run) => run.jobId === jobId)) {
-      console.warn("Cron job trigger skipped because a previous run is still active", { jobId });
+    const activeRun = [...this.runningJobs.values()].find((run) => run.jobId === jobId);
+    if (activeRun) {
+      await this.skipOverlappingRun(current, activeRun);
       return;
     }
 
@@ -329,20 +361,22 @@ export class CronService {
           this.notifyChanged([running.workspaceId]);
         },
       });
-      if (current.schedule.kind !== "at") {
+      if (this.runningJobs.get(running.runId) === running && current.schedule.kind !== "at") {
         this.ignoreOwnWatchEvents();
         await this.store.setJobState(jobId, markJobRunSucceeded(current.state, startedAt, result));
         await this.reloadFromDisk();
       }
     } catch (error) {
       console.error("Cron job failed", { jobId, error });
-      if (current.schedule.kind !== "at") {
+      if (this.runningJobs.get(running.runId) === running && current.schedule.kind !== "at") {
         this.ignoreOwnWatchEvents();
         await this.store.setJobState(jobId, markJobRunFailed(current.state, startedAt, error));
         await this.reloadFromDisk();
       }
     } finally {
-      this.runningJobs.delete(running.runId);
+      if (this.runningJobs.get(running.runId) === running) {
+        this.runningJobs.delete(running.runId);
+      }
       this.notifyChanged([current.workspaceId]);
     }
   }

@@ -1,6 +1,6 @@
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import type { CronJobSession, SessionState, WorkspaceInfo } from "@/shared/types";
+import type { CronJobSession, RunningCronJob, SessionState, WorkspaceInfo } from "@/shared/types";
 import { buildCronRuntimeNotice, type RuntimeNotice } from "./runtime-notices";
 import { appendMessages } from "./pi-service-subagents";
 import type { WebSession } from "./pi-service-types";
@@ -51,6 +51,37 @@ export type PiServiceCronAdapterContext = {
   onAgentCompleted?: (session: SessionState) => Promise<void>;
   notifyWorkspaceUpdated: (workspaceId: string) => Promise<void>;
 };
+
+export async function deliverSkippedCronJobRun(
+  context: PiServiceCronAdapterContext,
+  job: Omit<CronJobRun, "signal" | "onSessionStarted">,
+  skipped: { skippedAtMs: number; activeRun: RunningCronJob; reason: string },
+): Promise<void> {
+  if (job.session.kind === "new") {
+    return;
+  }
+
+  const session = await context.resolveOrCreateDailySession(job.workspace);
+  const notice = buildCronRuntimeNotice({
+    scheduleLabel: job.scheduleLabel,
+    prompt: job.prompt,
+    now: new Date(skipped.skippedAtMs),
+  });
+
+  await context.runSubagentSerial(session.id, async () => {
+    const parent = context.requireSession(session.id);
+    appendCronErrorDelivery(parent.session, notice, job, skipped.reason, skipped.skippedAtMs);
+    const state = {
+      ...context.getState(parent.id),
+      isStreaming: false,
+      pendingMessageCount: 0,
+      activeAssistant: undefined,
+    };
+    context.publishReset(parent, state);
+    await context.onAgentCompleted?.(state);
+    await context.notifyWorkspaceUpdated(parent.workspace.id);
+  });
+}
 
 export async function runCronJobSession(
   context: PiServiceCronAdapterContext,
@@ -190,6 +221,31 @@ async function deliverCronRun(
   });
 }
 
+function appendCronErrorDelivery(
+  parent: AgentSession,
+  cronNotice: RuntimeNotice,
+  job: Pick<CronJobRun, "jobId" | "runId" | "workspace" | "prompt">,
+  errorMessage: string,
+  timestamp = Date.now(),
+): void {
+  const jobId = job.jobId;
+  const runId = job.runId;
+  const workspaceId = job.workspace.id;
+  appendMessages(parent, [
+    cronNoticeMessage(
+      cronNotice,
+      {
+        jobId,
+        runId,
+        workspaceId,
+        prompt: job.prompt,
+      },
+      timestamp,
+    ),
+    errorAssistant(parent, errorMessage, timestamp + 1),
+  ]);
+}
+
 function appendCronRunDelivery(
   parent: AgentSession,
   cronNotice: RuntimeNotice,
@@ -198,28 +254,53 @@ function appendCronRunDelivery(
   error?: unknown,
 ): void {
   const timestamp = Date.now();
-  const sessionPath = cronSession.sessionFile;
-  const noticeMessage = {
-    role: "custom",
-    customType: `batty-runtime-notice:${cronNotice.kind}`,
-    content: cronNotice.text,
-    data: {
-      cron: {
+  appendMessages(parent, [
+    cronNoticeMessage(
+      cronNotice,
+      {
         jobId: job.jobId,
         runId: job.runId,
         workspaceId: job.workspace.id,
         sessionId: cronSession.sessionId,
-        sessionPath,
+        sessionPath: cronSession.sessionFile,
         prompt: job.prompt,
       },
-    },
-    timestamp,
-  } as unknown as Message;
-
-  appendMessages(parent, [
-    noticeMessage,
+      timestamp,
+    ),
     deliveredAssistant(parent, cronSession, timestamp + 1, error),
   ]);
+}
+
+function cronNoticeMessage(
+  cronNotice: RuntimeNotice,
+  cron: Record<string, unknown>,
+  timestamp: number,
+): Message {
+  return {
+    role: "custom",
+    customType: `batty-runtime-notice:${cronNotice.kind}`,
+    content: cronNotice.text,
+    data: { cron },
+    timestamp,
+  } as unknown as Message;
+}
+
+function errorAssistant(
+  parent: AgentSession,
+  errorMessage: string,
+  timestamp: number,
+): AssistantMessage {
+  return {
+    role: "assistant",
+    content: [{ type: "text", text: errorMessage }],
+    api: (parent.model as { api?: string } | undefined)?.api ?? "openai-responses",
+    provider: parent.model?.provider ?? "unknown",
+    model: parent.model?.id ?? "unknown",
+    usage: ZERO_USAGE,
+    stopReason: "error",
+    errorMessage,
+    timestamp,
+  };
 }
 
 function deliveredAssistant(

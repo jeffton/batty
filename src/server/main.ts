@@ -103,6 +103,23 @@ cronService.setRunner({
       onSessionStarted: runContext.onSessionStarted,
     });
   },
+  onSkipped: async (job, skippedContext) => {
+    const workspaces = await listWorkspaces(config);
+    const workspace = resolveWorkspace(workspaces, job.workspaceId);
+    await service.deliverSkippedCronJobRun(
+      {
+        workspace,
+        prompt: job.prompt,
+        model: job.model,
+        thinkingLevel: job.thinkingLevel,
+        session: job.session,
+        scheduleLabel: job.scheduleLabel,
+        jobId: job.id,
+        runId: `skipped-${skippedContext.skippedAtMs}`,
+      },
+      skippedContext,
+    );
+  },
 });
 await cronService.initialize();
 

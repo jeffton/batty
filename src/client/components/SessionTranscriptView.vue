@@ -99,11 +99,19 @@ function startsAnyTurn(entry: TranscriptMessageView): boolean {
   return entry.message.role === "user" || entry.message.role === "custom";
 }
 
-function latestUserInitiatedTurnRange(entries: TranscriptMessageView[]): {
+function isDetachedCronTurnStart(entry: TranscriptMessageView): boolean {
+  return entry.message.role === "custom" && Boolean(entry.message.data?.cron);
+}
+
+function startsExpandedTurn(entry: TranscriptMessageView): boolean {
+  return startsAnyTurn(entry) && !isDetachedCronTurnStart(entry);
+}
+
+function latestExpandedTurnRange(entries: TranscriptMessageView[]): {
   startIndex: number;
   endIndex: number;
 } {
-  const startIndex = entries.findLastIndex((entry) => entry.message.role === "user");
+  const startIndex = entries.findLastIndex(startsExpandedTurn);
   if (startIndex < 0) {
     return { startIndex: entries.length, endIndex: entries.length };
   }
@@ -165,15 +173,15 @@ function addTimestampVisibility(entries: TranscriptDisplayEntry[]): TranscriptDi
 
 const transcriptEntries = computed<TranscriptDisplayEntry[]>(() => {
   const entries = rawTranscriptEntries.value;
-  const latestUserTurn = latestUserInitiatedTurnRange(entries);
+  const latestExpandedTurn = latestExpandedTurnRange(entries);
   const collapsedByIndex = entries.map((entry, index) =>
-    index >= latestUserTurn.startIndex && index < latestUserTurn.endIndex
+    index >= latestExpandedTurn.startIndex && index < latestExpandedTurn.endIndex
       ? entry
       : collapsedMessage(entry),
   );
   const latestHiddenIndex = collapsedByIndex.reduce(
     (latest, collapsed, index) =>
-      (index < latestUserTurn.startIndex || index >= latestUserTurn.endIndex) &&
+      (index < latestExpandedTurn.startIndex || index >= latestExpandedTurn.endIndex) &&
       hidesToolDetails(entries[index] as TranscriptMessageView, collapsed)
         ? index
         : latest,

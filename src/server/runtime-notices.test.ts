@@ -50,6 +50,31 @@ describe("runtime notices", () => {
     });
   });
 
+  it("includes visible custom-message runtime notices in transcript pagination", () => {
+    const messages = transcriptMessagesFromSessionEntries([
+      {
+        type: "custom_message",
+        customType: `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:cron`,
+        content: "Cron run triggered.",
+        timestamp: "2026-05-16T10:30:00.904Z",
+      },
+    ] as Array<{
+      type?: unknown;
+      customType?: unknown;
+      content?: unknown;
+      timestamp?: unknown;
+    }>);
+
+    expect(messages).toEqual([
+      {
+        role: "custom",
+        customType: `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:cron`,
+        content: "Cron run triggered.",
+        timestamp: Date.parse("2026-05-16T10:30:00.904Z"),
+      },
+    ]);
+  });
+
   it("includes visible runtime notice messages in transcript pagination", () => {
     const messages = transcriptMessagesFromSessionEntries([
       {

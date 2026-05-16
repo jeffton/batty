@@ -228,11 +228,44 @@ export function normalizeMessages(messages: AgentMessage[], offset = 0): UiMessa
 }
 
 export function transcriptMessagesFromSessionEntries(
-  entries: Array<{ type?: unknown; message?: unknown }>,
+  entries: Array<{
+    type?: unknown;
+    message?: unknown;
+    customType?: unknown;
+    content?: unknown;
+    timestamp?: unknown;
+    data?: unknown;
+  }>,
 ): AgentMessage[] {
-  return entries.flatMap((entry) =>
-    entry?.type === "message" && entry.message ? [entry.message as AgentMessage] : [],
-  );
+  return entries.flatMap((entry) => {
+    if (entry?.type === "message" && entry.message) {
+      return [entry.message as AgentMessage];
+    }
+
+    if (
+      entry?.type === "custom_message" &&
+      typeof entry.customType === "string" &&
+      typeof entry.content === "string"
+    ) {
+      const timestamp =
+        typeof entry.timestamp === "number"
+          ? entry.timestamp
+          : typeof entry.timestamp === "string"
+            ? Date.parse(entry.timestamp)
+            : Date.now();
+      return [
+        {
+          role: "custom",
+          customType: entry.customType,
+          content: entry.content,
+          timestamp,
+          data: normalizeCustomData(entry.data),
+        } as unknown as AgentMessage,
+      ];
+    }
+
+    return [];
+  });
 }
 
 export interface SessionStateInput {

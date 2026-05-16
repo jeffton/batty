@@ -1,5 +1,6 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { RECENT_SESSION_MESSAGE_WINDOW } from "@/shared/session-history";
+import { CRON_RUN_SESSION_CUSTOM_TYPE } from "./cron-session";
 import { transcriptMessagesFromSessionEntries } from "./pi-state";
 
 const DEFAULT_MESSAGE_PAGE_SIZE = RECENT_SESSION_MESSAGE_WINDOW;
@@ -39,11 +40,22 @@ function messageIndexFromId(messageId: string | undefined): number | undefined {
   return Number.isFinite(index) && index >= 0 ? index : undefined;
 }
 
+function transcriptEntriesForPage(
+  entries: Array<{ type?: unknown; customType?: unknown }>,
+): Array<{ type?: unknown; customType?: unknown }> {
+  const cronRunMarkerIndex = entries.findLastIndex(
+    (entry) => entry.type === "custom" && entry.customType === CRON_RUN_SESSION_CUSTOM_TYPE,
+  );
+  return cronRunMarkerIndex >= 0 ? entries.slice(cronRunMarkerIndex + 1) : entries;
+}
+
 export function getSessionMessagePage(
   session: AgentSession,
   options?: SessionMessagePageOptions,
 ): SessionMessagePage {
-  const allMessages = transcriptMessagesFromSessionEntries(session.sessionManager.getBranch());
+  const allMessages = transcriptMessagesFromSessionEntries(
+    transcriptEntriesForPage(session.sessionManager.getBranch()),
+  );
   const totalMessageCount = allMessages.length;
   const limit = clampMessagePageSize(options?.limit);
   const beforeIndex = messageIndexFromId(options?.beforeMessageId);

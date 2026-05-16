@@ -279,10 +279,25 @@ function cronNoticeMessage(
   return {
     role: "custom",
     customType: `batty-runtime-notice:${cronNotice.kind}`,
-    content: cronNotice.text,
+    content: cronNoticeText(cronNotice, cron),
     data: { cron },
     timestamp,
   } as unknown as Message;
+}
+
+function cronNoticeText(cronNotice: RuntimeNotice, cron: Record<string, unknown>): string {
+  if (typeof cron.sessionPath !== "string") {
+    return cronNotice.text;
+  }
+
+  return [
+    cronNotice.text,
+    "",
+    "Detached cron session:",
+    cron.sessionPath,
+    "",
+    "The detailed work and tool calls for this cron run are in that detached session. This daily transcript only contains the delivered result.",
+  ].join("\n");
 }
 
 function errorAssistant(

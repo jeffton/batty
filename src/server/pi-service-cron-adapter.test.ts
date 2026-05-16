@@ -123,6 +123,9 @@ describe("runCronJobSession", () => {
     expect(parent.session.messages[0]).toMatchObject({
       role: "custom",
       customType: "batty-runtime-notice:cron",
+      content: expect.stringContaining(
+        "The detailed work and tool calls for this cron run are in that detached session.",
+      ),
       data: { cron: { jobId: "job-1", runId: "run-1", sessionPath: "/tmp/cron-session.jsonl" } },
     });
     expect(parent.session.messages[1]).toMatchObject({
@@ -177,6 +180,10 @@ describe("runCronJobSession", () => {
     ).rejects.toThrow("detached exploded");
 
     expect(parent.session.messages).toHaveLength(2);
+    expect(parent.session.messages[0]).toMatchObject({
+      role: "custom",
+      content: expect.stringContaining("/tmp/cron-session.jsonl"),
+    });
     expect(parent.session.messages[1]).toMatchObject({
       role: "assistant",
       content: [{ type: "text", text: "detached exploded" }],

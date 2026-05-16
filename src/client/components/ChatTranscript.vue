@@ -9,13 +9,19 @@ export type TranscriptDisplayEntry =
   | { kind: "message"; entry: TranscriptMessageView; showTimestamp: boolean }
   | { kind: "tool-toggle"; expanded: boolean };
 
-const props = defineProps<{
-  historyEntries: TranscriptDisplayEntry[];
-  tailEntries: TranscriptDisplayEntry[];
-  keptHistoryIndexes: number[];
-  isStreaming: boolean;
-  isPinnedToBottom: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    historyEntries: TranscriptDisplayEntry[];
+    tailEntries: TranscriptDisplayEntry[];
+    keptHistoryIndexes: number[];
+    isStreaming: boolean;
+    isPinnedToBottom: boolean;
+    allowSessionPopovers?: boolean;
+  }>(),
+  {
+    allowSessionPopovers: true,
+  },
+);
 
 const emit = defineEmits<{
   jumpToLatest: [];
@@ -72,6 +78,7 @@ defineExpose({
               :message="displayEntry.entry.message"
               :tool-states-by-call-id="displayEntry.entry.toolStatesByCallId"
               :show-timestamp="displayEntry.showTimestamp"
+              :allow-session-popovers="props.allowSessionPopovers"
             />
             <div v-else class="transcript__tool-toggle-row">
               <button
@@ -98,6 +105,7 @@ defineExpose({
             :message="displayEntry.entry.message"
             :tool-states-by-call-id="displayEntry.entry.toolStatesByCallId"
             :show-timestamp="displayEntry.showTimestamp"
+            :allow-session-popovers="props.allowSessionPopovers"
           />
           <div v-else class="transcript__tool-toggle-row">
             <button

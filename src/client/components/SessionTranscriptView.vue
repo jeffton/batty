@@ -32,16 +32,20 @@ const props = withDefaults(
     session?: SessionState;
     loadOlderMessages: () => Promise<void>;
     loadingOlderMessages?: boolean;
+    alwaysShowToolCalls?: boolean;
+    allowSessionPopovers?: boolean;
   }>(),
   {
     session: undefined,
     loadingOlderMessages: false,
+    alwaysShowToolCalls: false,
+    allowSessionPopovers: true,
   },
 );
 
 const transcriptPane = ref<ChatTranscriptHandle | null>(null);
 const isTranscriptPinnedToBottom = ref(true);
-const showAllToolCalls = ref(false);
+const showAllToolCalls = ref(props.alwaysShowToolCalls);
 let transcriptScrollElement: HTMLElement | null = null;
 let transcriptTailObserver: ResizeObserver | null = null;
 let transcriptViewportObserver: ResizeObserver | null = null;
@@ -173,6 +177,12 @@ function addTimestampVisibility(entries: TranscriptDisplayEntry[]): TranscriptDi
 
 const transcriptEntries = computed<TranscriptDisplayEntry[]>(() => {
   const entries = rawTranscriptEntries.value;
+  if (props.alwaysShowToolCalls) {
+    return addTimestampVisibility(
+      entries.map((entry) => ({ kind: "message", entry, showTimestamp: false })),
+    );
+  }
+
   const latestExpandedTurn = latestExpandedTurnRange(entries);
   const collapsedByIndex = entries.map((entry, index) =>
     index >= latestExpandedTurn.startIndex && index < latestExpandedTurn.endIndex
@@ -593,6 +603,7 @@ watch(
     :is-streaming="Boolean(props.session?.isStreaming)"
     :is-pinned-to-bottom="isTranscriptPinnedToBottom"
     @jump-to-latest="jumpToLatest"
+    :allow-session-popovers="props.allowSessionPopovers"
     @toggle-tool-calls="showAllToolCalls = !showAllToolCalls"
   />
 </template>

@@ -21,10 +21,12 @@ const props = withDefaults(
     message: UiMessage;
     toolStatesByCallId?: Map<string, ToolDisplayState>;
     showTimestamp?: boolean;
+    allowSessionPopovers?: boolean;
   }>(),
   {
     toolStatesByCallId: () => new Map(),
     showTimestamp: false,
+    allowSessionPopovers: true,
   },
 );
 
@@ -220,7 +222,10 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
         </span>
         <div class="message__text">
           {{ props.message.text }}
-          <div v-if="cronNoticeDetails && cronNoticePopoverId" class="message__notice-actions">
+          <div
+            v-if="props.allowSessionPopovers && cronNoticeDetails && cronNoticePopoverId"
+            class="message__notice-actions"
+          >
             <button type="button" class="message__notice-btn" :popovertarget="cronNoticePopoverId">
               <PanelRightOpen :size="14" />
               Open cron session
@@ -245,6 +250,7 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
         :result-blocks="props.message.blocks"
         :result-details="props.message.details"
         :status="props.message.isError ? 'error' : 'success'"
+        :allow-session-popovers="props.allowSessionPopovers"
       />
     </div>
 
@@ -289,6 +295,7 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
               :result-details="toolStateFor(block.id)?.resultDetails"
               :status="toolStateFor(block.id)?.status"
               :suppress-sent-files="block.name === 'attach-files' || block.name === 'subagent'"
+              :allow-session-popovers="props.allowSessionPopovers"
             />
           </template>
 
@@ -342,6 +349,7 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
           :result-blocks="toolStateFor(block.id)?.resultBlocks ?? []"
           :result-details="toolStateFor(block.id)?.resultDetails"
           :status="toolStateFor(block.id)?.status"
+          :allow-session-popovers="props.allowSessionPopovers"
         />
       </template>
     </div>

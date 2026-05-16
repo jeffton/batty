@@ -104,7 +104,6 @@ async function ensureSessionLoaded(): Promise<void> {
     if (!opened) {
       throw new Error("Failed to open session");
     }
-
     session.value = mergeSessionState(opened, session.value);
     openStream();
   } catch (error) {
@@ -155,6 +154,21 @@ function handlePopoverToggle(event: Event): void {
   closeStream();
   reconnecting.value = false;
 }
+
+watch(
+  () => [props.workspaceId, props.sessionPath] as const,
+  () => {
+    closeStream();
+    session.value = undefined;
+    loading.value = false;
+    loadingOlderMessages.value = false;
+    errorMessage.value = undefined;
+    reconnecting.value = false;
+    if (popoverElement.value?.matches(":popover-open")) {
+      void ensureSessionLoaded();
+    }
+  },
+);
 
 watch(
   () => session.value?.isStreaming,
@@ -222,6 +236,8 @@ onBeforeUnmount(() => {
       :session="session"
       :load-older-messages="loadOlderMessages"
       :loading-older-messages="loadingOlderMessages"
+      always-show-tool-calls
+      :allow-session-popovers="false"
     />
   </div>
 </template>

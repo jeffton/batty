@@ -200,6 +200,34 @@ describe("ChatMessage", () => {
     expect(wrapper.find(".message__segment--error").exists()).toBe(true);
   });
 
+  it("hides cron session buttons when session popovers are disabled", () => {
+    const message: Extract<UiMessage, { role: "custom" }> = {
+      id: "custom-cron-1",
+      role: "custom",
+      timestamp: 4,
+      customType: `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:cron`,
+      text: "Cron run finished.",
+      data: {
+        cron: {
+          workspaceId: "batty",
+          sessionPath: "/tmp/cron-session.jsonl",
+          runId: "run-1",
+          prompt: "Check status",
+        },
+      },
+    };
+
+    const wrapper = mount(ChatMessage, {
+      props: {
+        message,
+        allowSessionPopovers: false,
+      },
+    });
+
+    expect(wrapper.text()).toContain("Cron run finished.");
+    expect(wrapper.find(".message__notice-btn").exists()).toBe(false);
+  });
+
   it("renders system messages as blue bubbles with a cog icon", () => {
     const message: Extract<UiMessage, { role: "custom" }> = {
       id: "custom-1",

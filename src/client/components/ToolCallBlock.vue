@@ -36,6 +36,7 @@ const props = withDefaults(
     status?: "running" | "success" | "error";
     resultBlocks?: UiContentBlock[];
     resultDetails?: ToolExecutionDetails;
+    allowSessionPopovers?: boolean;
   }>(),
   {
     toolCallId: undefined,
@@ -44,6 +45,7 @@ const props = withDefaults(
     status: undefined,
     resultBlocks: () => [],
     resultDetails: undefined,
+    allowSessionPopovers: true,
   },
 );
 
@@ -110,6 +112,7 @@ const subagentPopoverId = computed(() => {
 });
 const canOpenSubagentSession = computed(
   () =>
+    props.allowSessionPopovers &&
     props.name === "subagent" &&
     typeof subagentWorkspaceId.value === "string" &&
     typeof subagentSessionPath.value === "string" &&
@@ -494,6 +497,7 @@ const genericEntries = computed(() => {
           :arguments="block.arguments"
           :tool-call-id="block.id"
           :compact="props.compact"
+          :allow-session-popovers="props.allowSessionPopovers"
         />
       </template>
 

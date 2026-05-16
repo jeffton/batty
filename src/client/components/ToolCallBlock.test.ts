@@ -224,6 +224,30 @@ describe("ToolCallBlock", () => {
     expect(wrapper.find("img.attached-files__preview").exists()).toBe(false);
   });
 
+  it("hides subagent session buttons when session popovers are disabled", () => {
+    const wrapper = mount(ToolCallBlock, {
+      props: {
+        name: "subagent",
+        arguments: {
+          prompt: "Check the repo",
+        },
+        resultDetails: {
+          subagent: {
+            respondIn: "tool-call",
+            workspaceId: "workspace",
+            sessionId: "subagent-123",
+            sessionPath: "/tmp/subagent-123.jsonl",
+          },
+        },
+        status: "success",
+        allowSessionPopovers: false,
+      },
+    });
+
+    expect(wrapper.text()).not.toContain("Open session");
+    expect(wrapper.find(".tool-call__subagent-btn").exists()).toBe(false);
+  });
+
   it("opens tool-call mode subagent sessions while keeping the result in the tool call", () => {
     const wrapper = mount(ToolCallBlock, {
       props: {

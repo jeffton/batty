@@ -104,6 +104,15 @@ export function registerSessionRoutes(context: RouteContext): void {
     },
   );
 
+  app.post<{ Body: { workspaceId: string; sessionId: string } }>(
+    routePath("/api/sessions/open-by-id"),
+    async (request) => {
+      const workspaces = await listWorkspaces(config);
+      const workspace = resolveWorkspace(workspaces, request.body.workspaceId);
+      return service.openSessionById(workspace, request.body.sessionId);
+    },
+  );
+
   app.get<{ Params: { sessionId: string } }>(
     routePath("/api/sessions/:sessionId"),
     async (request) => {

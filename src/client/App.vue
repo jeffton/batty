@@ -152,10 +152,21 @@ async function syncRouteToStore(): Promise<void> {
     }
 
     try {
-      await Promise.all([
-        store.loadWorkspaceSessions(workspaceId),
-        store.loadWorkspaceCronJobs(workspaceId),
-      ]);
+      if (sessionId) {
+        void store.loadWorkspaceSessions(workspaceId).catch((error) => {
+          if (!navigator.onLine || store.connectionState === "offline") {
+            store.markOffline();
+            return;
+          }
+          console.error("Failed to load workspace sessions", error);
+        });
+        await store.loadWorkspaceCronJobs(workspaceId);
+      } else {
+        await Promise.all([
+          store.loadWorkspaceSessions(workspaceId),
+          store.loadWorkspaceCronJobs(workspaceId),
+        ]);
+      }
     } catch (error) {
       if (!navigator.onLine || store.connectionState === "offline") {
         store.markOffline();
@@ -184,19 +195,8 @@ async function syncRouteToStore(): Promise<void> {
       return;
     }
 
-    const session = (store.sessionsByWorkspace[workspaceId] ?? []).find(
-      (candidate) => candidate.sessionId === sessionId,
-    );
-    if (!session?.path) {
-      const hydrated = await hydrateRouteFromCache(workspaceId, sessionId);
-      if (!hydrated) {
-        await router.replace(workspaceRoutePath(workspaceId));
-      }
-      return;
-    }
-
     try {
-      await store.resumeSession(workspaceId, session.path);
+      await store.resumeSessionById(workspaceId, sessionId);
     } catch {
       const hydrated = await hydrateRouteFromCache(workspaceId, sessionId);
       if (!hydrated) {

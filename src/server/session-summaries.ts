@@ -16,6 +16,43 @@ const DEFAULT_SESSION_LABEL = "(no messages)";
 const SESSION_SUMMARY_READ_CONCURRENCY = 16;
 const SESSION_SUMMARY_HEADER_LINE_LIMIT = 128;
 
+type SessionSummaryCacheEntry = {
+  mtimeMs: number;
+  size: number;
+  summary: SessionSummary | undefined;
+};
+
+type SessionSummaryCache = {
+  entries: Map<string, SessionSummaryCacheEntry>;
+};
+
+const sessionSummaryCaches = new Map<string, SessionSummaryCache>();
+
+function cacheKey(config: Pick<AppConfig, "battyDir">, workspaceId: string): string {
+  return `${config.battyDir}:${workspaceId}`;
+}
+
+function cloneSummaryForToday(
+  summary: SessionSummary | undefined,
+  todayDate: string,
+): SessionSummary | undefined {
+  if (!summary) {
+    return undefined;
+  }
+
+  return {
+    ...summary,
+    ...(summary.dailySession
+      ? {
+          dailySession: {
+            ...summary.dailySession,
+            isToday: summary.dailySession.date === todayDate,
+          },
+        }
+      : {}),
+  };
+}
+
 function extractMessageText(content: unknown): string {
   if (typeof content === "string") {
     return content.replace(/\s+/g, " ").trim();
@@ -134,10 +171,11 @@ async function buildSessionSummary(
   filePath: string,
   workspaceId: string,
   todayDate: string,
+  stats: { mtime: Date },
 ): Promise<SessionSummary | undefined> {
   try {
-    const [{ sessionId, firstMessage, dailySessionDate, isSubagentSession }, stats] =
-      await Promise.all([readSessionHeaderAndFirstUserMessage(filePath), fs.stat(filePath)]);
+    const { sessionId, firstMessage, dailySessionDate, isSubagentSession } =
+      await readSessionHeaderAndFirstUserMessage(filePath);
 
     if (!sessionId || isSubagentSession) {
       return undefined;
@@ -202,11 +240,47 @@ export async function listSessionSummaries(
     .map((entry) => path.join(sessionDir, entry.name));
 
   const todayDate = toLocalIsoDate(new Date(), config.cronDailySessionStartTime);
-  const sessions = (
-    await mapWithConcurrency(sessionFiles, SESSION_SUMMARY_READ_CONCURRENCY, (filePath) =>
-      buildSessionSummary(filePath, workspace.id, todayDate),
-    )
-  ).filter((session): session is SessionSummary => Boolean(session));
+  const cache = sessionSummaryCaches.get(cacheKey(config, workspace.id)) ?? { entries: new Map() };
+  sessionSummaryCaches.set(cacheKey(config, workspace.id), cache);
+  const seenPaths = new Set(sessionFiles);
+  for (const cachedPath of cache.entries.keys()) {
+    if (!seenPaths.has(cachedPath)) {
+      cache.entries.delete(cachedPath);
+    }
+  }
+
+  const fileStats = await mapWithConcurrency(
+    sessionFiles,
+    SESSION_SUMMARY_READ_CONCURRENCY,
+    async (filePath) => {
+      try {
+        return { filePath, stats: await fs.stat(filePath) };
+      } catch {
+        return undefined;
+      }
+    },
+  );
+
+  const summaries = await mapWithConcurrency(
+    fileStats.filter((item): item is NonNullable<typeof item> => Boolean(item)),
+    SESSION_SUMMARY_READ_CONCURRENCY,
+    async ({ filePath, stats }) => {
+      const cached = cache.entries.get(filePath);
+      if (cached && cached.mtimeMs === stats.mtimeMs && cached.size === stats.size) {
+        return cloneSummaryForToday(cached.summary, todayDate);
+      }
+
+      const summary = await buildSessionSummary(filePath, workspace.id, todayDate, stats);
+      cache.entries.set(filePath, {
+        mtimeMs: stats.mtimeMs,
+        size: stats.size,
+        summary,
+      });
+      return summary;
+    },
+  );
+
+  const sessions = summaries.filter((session): session is SessionSummary => Boolean(session));
 
   sessions.sort((a, b) => b.updatedAt - a.updatedAt);
   const todayDailySession = sessions.find((session) => session.dailySession?.date === todayDate);

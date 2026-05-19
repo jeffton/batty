@@ -241,6 +241,38 @@ export class PiService {
     return SessionManager.open(sessionPath);
   }
 
+  private async findSessionPath(workspace: WorkspaceInfo, sessionId: string): Promise<string> {
+    const sessionDir = workspaceSessionDir(this.config, workspace.id);
+    const sessionFileSuffix = `_${sessionId}.jsonl`;
+
+    async function searchDir(dir: string): Promise<string | undefined> {
+      const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+      for (const entry of entries) {
+        const entryPath = path.join(dir, entry.name);
+        if (entry.isFile() && entry.name.endsWith(sessionFileSuffix)) {
+          return entryPath;
+        }
+        if (entry.isDirectory()) {
+          const match = await searchDir(entryPath);
+          if (match) {
+            return match;
+          }
+        }
+      }
+      return undefined;
+    }
+
+    const sessionPath = await searchDir(sessionDir);
+    if (!sessionPath) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+    return sessionPath;
+  }
+
+  async openSessionById(workspace: WorkspaceInfo, sessionId: string): Promise<SessionState> {
+    return this.openSession(workspace, await this.findSessionPath(workspace, sessionId));
+  }
+
   async openSession(workspace: WorkspaceInfo, sessionPath: string): Promise<SessionState> {
     const existing = [...this.sessions.values()].find(
       (candidate) => candidate.session.sessionFile === sessionPath,

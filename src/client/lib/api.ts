@@ -262,6 +262,14 @@ export function openSession(workspaceId: string, sessionPath: string): Promise<S
   });
 }
 
+export function openSessionById(workspaceId: string, sessionId: string): Promise<SessionState> {
+  return request("/api/sessions/open-by-id", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workspaceId, sessionId }),
+  });
+}
+
 export function getSession(sessionId: string): Promise<SessionState> {
   return request(`/api/sessions/${sessionId}`);
 }

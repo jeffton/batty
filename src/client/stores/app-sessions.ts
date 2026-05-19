@@ -5,6 +5,7 @@ import {
   getSession,
   getSessionMessages,
   openSession,
+  openSessionById,
   removeQueuedPrompt as removeQueuedPromptRequest,
   sendPrompt,
   setSessionModel,
@@ -83,8 +84,23 @@ export const sessionActions = {
     workspaceId: string,
     sessionPath: string,
   ): Promise<SessionState> {
+    return this.resumeOpenedSession(() => openSession(workspaceId, sessionPath));
+  },
+
+  async resumeSessionById(
+    this: AppActionContext,
+    workspaceId: string,
+    sessionId: string,
+  ): Promise<SessionState> {
+    return this.resumeOpenedSession(() => openSessionById(workspaceId, sessionId));
+  },
+
+  async resumeOpenedSession(
+    this: AppActionContext,
+    opener: () => Promise<SessionState>,
+  ): Promise<SessionState> {
     try {
-      const openedSession = normalizeSessionState(await openSession(workspaceId, sessionPath));
+      const openedSession = normalizeSessionState(await opener());
       if (!openedSession) {
         throw new Error("Failed to open session");
       }

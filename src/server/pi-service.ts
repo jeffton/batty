@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
 import type { Message } from "@earendil-works/pi-ai";
 import {
   AuthStorage,
@@ -8,6 +7,7 @@ import {
   SessionManager,
   type AgentSession,
   type ExtensionContext,
+  type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import type {
   CronJobSession,
@@ -79,6 +79,16 @@ import { createPiServiceTools } from "./pi-service-tool-factory";
 import type { RuntimeNotice } from "./runtime-notices";
 
 export type { UploadedFile } from "./pi-service-types";
+
+function leafBeforeCurrentTurn(branch: SessionEntry[]): string | null | undefined {
+  for (let index = branch.length - 1; index >= 0; index -= 1) {
+    const entry = branch[index]!;
+    if (entry.type === "message" && entry.message.role === "user") {
+      return entry.parentId;
+    }
+  }
+  return undefined;
+}
 
 export class PiService {
   private readonly config: AppConfig;
@@ -189,7 +199,12 @@ export class PiService {
       options.runId,
     );
     const sessionManager = options.copySessionPath
-      ? await this.copySessionManager(workspace, sessionDir, options.copySessionPath)
+      ? await this.copySessionManager(
+          workspace,
+          sessionDir,
+          options.copySessionPath,
+          this.resolveCronContextCopyLeafId(options.parentSessionId, options.copySessionPath),
+        )
       : SessionManager.create(workspace.path, sessionDir);
     const result = await this.createPiAgentSession(workspace, sessionManager, {
       modelId: options.modelId,
@@ -213,32 +228,42 @@ export class PiService {
     return this.getState(webSession.id);
   }
 
+  private resolveCronContextCopyLeafId(
+    parentSessionId: string | undefined,
+    sourceSessionPath: string,
+  ): string | null {
+    const webSession = parentSessionId
+      ? (this.sessions.get(parentSessionId) ??
+        [...this.sessions.values()].find(
+          (candidate) => candidate.session.sessionFile === sourceSessionPath,
+        ))
+      : undefined;
+    const sessionManager =
+      webSession?.session.sessionManager ?? SessionManager.open(sourceSessionPath);
+
+    if (!webSession?.session.isStreaming) {
+      return sessionManager.getLeafId();
+    }
+
+    return leafBeforeCurrentTurn(sessionManager.getBranch()) ?? sessionManager.getLeafId();
+  }
+
   private async copySessionManager(
     workspace: WorkspaceInfo,
     sessionDir: string,
     sourceSessionPath: string,
+    leafId: string | null,
   ): Promise<SessionManager> {
     await fs.mkdir(sessionDir, { recursive: true });
-    const sessionId = randomUUID();
-    const timestamp = new Date().toISOString();
-    const fileTimestamp = timestamp.replace(/[:.]/g, "-");
-    const sessionPath = path.join(sessionDir, `${fileTimestamp}_${sessionId}.jsonl`);
-    const lines = (await fs.readFile(sourceSessionPath, "utf8")).split(/\r?\n/).filter(Boolean);
-    const entries = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
-    const copied = entries.map((entry, index) => {
-      if (index !== 0 || entry.type !== "session") {
-        return entry;
-      }
-      return {
-        ...entry,
-        id: sessionId,
-        timestamp,
-        cwd: workspace.path,
-        parentSession: undefined,
-      };
-    });
-    await fs.writeFile(sessionPath, copied.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
-    return SessionManager.open(sessionPath);
+    if (!leafId) {
+      const sessionManager = SessionManager.create(workspace.path, sessionDir);
+      sessionManager.newSession({ parentSession: sourceSessionPath });
+      return sessionManager;
+    }
+
+    const sessionManager = SessionManager.open(sourceSessionPath, sessionDir, workspace.path);
+    sessionManager.createBranchedSession(leafId);
+    return sessionManager;
   }
 
   private async findSessionPath(workspace: WorkspaceInfo, sessionId: string): Promise<string> {

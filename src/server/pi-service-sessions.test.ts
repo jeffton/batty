@@ -222,6 +222,47 @@ describe("handleAgentEvent", () => {
     );
   });
 
+  it("defers completion hooks when agent_end announces a pending retry", async () => {
+    const onAgentCompleted = vi.fn();
+    const notifyWorkspaceUpdated = vi.fn(async () => undefined);
+    const publish = vi.fn();
+    const webSession = {
+      id: "web-1",
+      workspace,
+      session: { sessionId: "session-1" },
+      subscribers: new Set(),
+      activeAssistant: undefined,
+      activeTools: new Map(),
+      openedAt: 1,
+      ephemeral: false,
+    } as unknown as WebSession;
+    const retryingState = createState({ isStreaming: true }, webSession, []);
+
+    await handleAgentEvent(
+      {
+        getState: () => retryingState,
+        getStateMetadata: vi.fn(),
+        publish,
+        notifyWorkspaceUpdated,
+        disposeWebSession: vi.fn(),
+        onAgentCompleted,
+      },
+      webSession,
+      { type: "agent_end", messages: [], willRetry: true } as unknown as AgentSessionEvent,
+    );
+
+    expect(onAgentCompleted).not.toHaveBeenCalled();
+    expect(notifyWorkspaceUpdated).not.toHaveBeenCalled();
+    expect(webSession.autoRetryActive).toBe(true);
+    expect(publish).toHaveBeenCalledWith(
+      webSession,
+      expect.objectContaining({
+        type: "reset",
+        state: expect.objectContaining({ isStreaming: true }),
+      }),
+    );
+  });
+
   it("defers completion hooks until auto-retry has fully finished", async () => {
     const onAgentCompleted = vi.fn();
     const notifyWorkspaceUpdated = vi.fn(async () => undefined);

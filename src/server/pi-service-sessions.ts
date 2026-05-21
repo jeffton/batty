@@ -217,12 +217,16 @@ export async function handleAgentEvent(
     case "turn_end":
     case "compaction_end":
     case "auto_retry_end": {
+      const agentEndWillRetry = event.type === "agent_end" && event.willRetry;
+      if (agentEndWillRetry) {
+        webSession.autoRetryActive = true;
+      }
       if (event.type === "agent_end") {
         webSession.activeAssistant = undefined;
       }
       const state = deps.getState(webSession.id);
       const publishedState =
-        event.type === "agent_end"
+        event.type === "agent_end" && !agentEndWillRetry
           ? {
               ...state,
               isStreaming: false,
@@ -246,7 +250,7 @@ export async function handleAgentEvent(
           webSession.suppressNextAgentEndCompletion = false;
           break;
         }
-        if (!webSession.autoRetryActive) {
+        if (!agentEndWillRetry && !webSession.autoRetryActive) {
           await runCompletionHook(deps, webSession, publishedState);
         }
       }

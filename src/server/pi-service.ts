@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { Message } from "@earendil-works/pi-ai";
 import {
   AuthStorage,
   ModelRegistry,
@@ -587,18 +586,15 @@ export class PiService {
 
   async promptCron(sessionId: string, notice: RuntimeNotice): Promise<void> {
     const webSession = this.requireSession(sessionId);
-    const timestamp = Date.now();
-    const messages: Message[] = [
+    await webSession.session.sendCustomMessage(
       {
-        role: "custom",
         customType: `batty-runtime-notice:${notice.kind}`,
         content: notice.text,
-        timestamp,
-      } as unknown as Message,
-    ];
-
-    await webSession.session.agent.prompt(messages);
-    await (webSession.session as unknown as { waitForRetry: () => Promise<void> }).waitForRetry();
+        display: true,
+        details: undefined,
+      },
+      { triggerTurn: true },
+    );
     if (this.hasSession(sessionId)) {
       this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
     }

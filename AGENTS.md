@@ -1,5 +1,9 @@
 # AGENTS.md
 
+## Updating Pi dependencies
+
+When updating `@earendil-works/pi-*` packages, always read the relevant Pi release notes or changelog for every version being crossed before adapting Batty. Check for SDK/API lifecycle changes, session event changes, retry/compaction behavior changes, provider/model metadata changes, and breaking changes.
+
 ## Deploying Batty from inside Batty
 
 When you are running inside the Batty session and need to deploy or reload Batty itself, use the project scripts exactly as they are intended:

@@ -74,6 +74,13 @@ describe("suppressAgentCompletionNotification", () => {
     expect(suppressAgentCompletionNotification(session)).toBe(true);
   });
 
+  it("suppresses notifications for cron sessions marked as hidden", () => {
+    const session = createSession("Cron delivered to parent session.");
+    session.isCronSession = true;
+
+    expect(suppressAgentCompletionNotification(session)).toBe(true);
+  });
+
   it("suppresses notifications for exact NO_REPLY assistant messages", () => {
     expect(suppressAgentCompletionNotification(createSession(" NO_REPLY\n"))).toBe(true);
   });

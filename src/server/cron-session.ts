@@ -72,10 +72,28 @@ export function isCronRunSessionEntry(entry: {
   return entry.type === "custom" && entry.customType === CRON_RUN_SESSION_CUSTOM_TYPE;
 }
 
+export function isParentedCronRunSessionEntry(entry: {
+  type?: unknown;
+  customType?: unknown;
+  data?: unknown;
+}): boolean {
+  if (!isCronRunSessionEntry(entry) || !isCronRunSessionBinding(entry.data)) {
+    return false;
+  }
+
+  return typeof entry.data.parentSessionId === "string" && entry.data.parentSessionId.length > 0;
+}
+
 export function hasCronRunSessionMarker(
   entries: Array<{ type?: unknown; customType?: unknown; data?: unknown }>,
 ): boolean {
   return entries.some(isCronRunSessionEntry);
+}
+
+export function hasParentedCronRunSessionMarker(
+  entries: Array<{ type?: unknown; customType?: unknown; data?: unknown }>,
+): boolean {
+  return entries.some(isParentedCronRunSessionEntry);
 }
 
 export function localDayStartMs(now = new Date(), startTime = "04:00"): number {
@@ -128,4 +146,19 @@ function isDailyCronSessionBinding(value: unknown): value is DailyCronSessionBin
 
   const binding = value as Partial<DailyCronSessionBinding>;
   return binding.version === 1 && binding.kind === "daily" && typeof binding.date === "string";
+}
+
+function isCronRunSessionBinding(value: unknown): value is CronRunSessionBinding {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const binding = value as Partial<CronRunSessionBinding>;
+  return (
+    binding.version === 1 &&
+    binding.kind === "run" &&
+    typeof binding.jobId === "string" &&
+    typeof binding.runId === "string" &&
+    (binding.parentSessionId === undefined || typeof binding.parentSessionId === "string")
+  );
 }

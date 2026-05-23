@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { AppConfig } from "@/server/config";
 import { latestSessionUpdatedAt, listSessionSummaries } from "@/server/session-summaries";
 import { workspaceSessionDir } from "@/server/pi-paths";
-import { CRON_SESSION_CUSTOM_TYPE } from "@/server/cron-session";
+import { CRON_RUN_SESSION_CUSTOM_TYPE, CRON_SESSION_CUSTOM_TYPE } from "@/server/cron-session";
 import { SUBAGENT_SESSION_CUSTOM_TYPE } from "@/server/subagent";
 import type { WorkspaceInfo } from "@/shared/types";
 
@@ -59,6 +59,7 @@ async function writeSession(
   const sessionDir = workspaceSessionDir(config, workspaceId);
   await fs.mkdir(sessionDir, { recursive: true });
   const sessionPath = path.join(sessionDir, fileName);
+  await fs.mkdir(path.dirname(sessionPath), { recursive: true });
   await fs.writeFile(sessionPath, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
   const date = new Date(updatedAt);
   await fs.utimes(sessionPath, date, date);
@@ -207,6 +208,95 @@ describe("session summaries", () => {
       const sessions = await listSessionSummaries(config, workspace);
 
       expect(sessions.find((session) => session.path === subagentPath)).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("includes parentless cron run sessions from the workspace session directory", async () => {
+    const config = await createConfig();
+    const workspace = workspaceInfo(config, "cron-parentless");
+    await fs.mkdir(workspace.path, { recursive: true });
+
+    const cronPath = await writeSession(
+      config,
+      workspace.id,
+      "cron-run.jsonl",
+      "2026-03-25T12:00:00Z",
+      [
+        { type: "session", version: 3, id: "cron-run-id", timestamp: "2026-03-25T12:00:00Z" },
+        {
+          type: "custom",
+          customType: CRON_RUN_SESSION_CUSTOM_TYPE,
+          data: { version: 1, kind: "run", jobId: "job-1", runId: "run-1" },
+        },
+        {
+          type: "custom_message",
+          customType: "batty-runtime-notice:cron",
+          content:
+            "Cron run triggered. Current time: 2026-03-25 12:00:00. Schedule: Every 1h\n\nPrompt:\nPublish Roy's Picks.",
+        },
+      ],
+    );
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-25T12:00:00Z"));
+    try {
+      const sessions = await listSessionSummaries(config, workspace);
+      const cronSession = sessions.find((session) => session.path === cronPath);
+
+      expect(cronSession).toEqual({
+        id: cronPath,
+        sessionId: "cron-run-id",
+        path: cronPath,
+        firstMessage: "Publish Roy's Picks.",
+        updatedAt: new Date("2026-03-25T12:00:00Z").getTime(),
+        messageCount: 0,
+        workspaceId: workspace.id,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not include cron subdirectory sessions in the session list", async () => {
+    const config = await createConfig();
+    const workspace = workspaceInfo(config, "cron-parented");
+    await fs.mkdir(workspace.path, { recursive: true });
+
+    const cronPath = await writeSession(
+      config,
+      workspace.id,
+      "cron/job-1/run-1/cron-run.jsonl",
+      "2026-03-25T12:00:00Z",
+      [
+        { type: "session", version: 3, id: "cron-run-id", timestamp: "2026-03-25T12:00:00Z" },
+        {
+          type: "custom",
+          customType: CRON_RUN_SESSION_CUSTOM_TYPE,
+          data: {
+            version: 1,
+            kind: "run",
+            jobId: "job-1",
+            runId: "run-1",
+            parentSessionId: "daily-session-id",
+          },
+        },
+        {
+          type: "custom_message",
+          customType: "batty-runtime-notice:cron",
+          content:
+            "Cron run triggered. Current time: 2026-03-25 12:00:00. Schedule: Every 1h\n\nPrompt:\nSummarize work.",
+        },
+      ],
+    );
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-25T12:00:00Z"));
+    try {
+      const sessions = await listSessionSummaries(config, workspace);
+
+      expect(sessions.find((session) => session.path === cronPath)).toBeUndefined();
     } finally {
       vi.useRealTimers();
     }

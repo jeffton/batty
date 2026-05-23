@@ -33,7 +33,7 @@ import { battyAgentDir, workspaceCronSessionDir, workspaceSessionDir } from "./p
 import { listSessionSummaries as listFastSessionSummaries } from "./session-summaries";
 import { ProviderAuthService } from "./provider-auth";
 import {
-  hasCronRunSessionMarker,
+  hasParentedCronRunSessionMarker,
   buildCronRunSessionBinding,
   CRON_RUN_SESSION_CUSTOM_TYPE,
 } from "./cron-session";
@@ -191,12 +191,9 @@ export class PiService {
       copySessionPath?: string;
     },
   ): Promise<SessionState> {
-    const sessionDir = workspaceCronSessionDir(
-      this.config,
-      workspace.id,
-      options.jobId,
-      options.runId,
-    );
+    const sessionDir = options.parentSessionId
+      ? workspaceCronSessionDir(this.config, workspace.id, options.jobId, options.runId)
+      : workspaceSessionDir(this.config, workspace.id);
     const sessionManager = options.copySessionPath
       ? await this.copySessionManager(
           workspace,
@@ -221,7 +218,7 @@ export class PiService {
       workspace,
       result.session,
       result.modelFallbackMessage,
-      true,
+      Boolean(options.parentSessionId),
     );
     await this.notifyWorkspaceUpdated(workspace.id);
     return this.getState(webSession.id);
@@ -311,7 +308,7 @@ export class PiService {
       result.session,
       result.modelFallbackMessage,
       hasSubagentSessionMarker(result.session.sessionManager.getEntries()) ||
-        hasCronRunSessionMarker(result.session.sessionManager.getEntries()),
+        hasParentedCronRunSessionMarker(result.session.sessionManager.getEntries()),
     );
     return this.getState(webSession.id);
   }
@@ -526,7 +523,9 @@ export class PiService {
       activeTools: [...webSession.activeTools.values()],
       title: webSession.session.sessionName,
       isSubagentSession: hasSubagentSessionMarker(webSession.session.sessionManager.getEntries()),
-      isCronSession: hasCronRunSessionMarker(webSession.session.sessionManager.getEntries()),
+      isCronSession: hasParentedCronRunSessionMarker(
+        webSession.session.sessionManager.getEntries(),
+      ),
     });
   }
 

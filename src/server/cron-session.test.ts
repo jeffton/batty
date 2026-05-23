@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   buildDailyCronSessionBinding,
+  CRON_RUN_SESSION_CUSTOM_TYPE,
   CRON_SESSION_CUSTOM_TYPE,
   findDailyCronSessionBinding,
   findLatestDailyCronSessionBinding,
+  hasParentedCronRunSessionMarker,
   localDayStartMs,
   toLocalIsoDate,
 } from "./cron-session";
@@ -19,6 +21,34 @@ describe("cron session helpers", () => {
     expect(localDayStartMs(new Date("2026-03-31T01:30:00+02:00"), "04:00")).toBe(
       new Date("2026-03-30T04:00:00+02:00").getTime(),
     );
+  });
+
+  it("detects only cron run sessions with parent sessions as parented", () => {
+    expect(
+      hasParentedCronRunSessionMarker([
+        {
+          type: "custom",
+          customType: CRON_RUN_SESSION_CUSTOM_TYPE,
+          data: { version: 1, kind: "run", jobId: "job-1", runId: "run-1" },
+        },
+      ]),
+    ).toBe(false);
+
+    expect(
+      hasParentedCronRunSessionMarker([
+        {
+          type: "custom",
+          customType: CRON_RUN_SESSION_CUSTOM_TYPE,
+          data: {
+            version: 1,
+            kind: "run",
+            jobId: "job-1",
+            runId: "run-1",
+            parentSessionId: "parent-session",
+          },
+        },
+      ]),
+    ).toBe(true);
   });
 
   it("finds the latest matching daily cron binding for the local day", () => {

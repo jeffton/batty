@@ -15,6 +15,7 @@ import { isSubagentSessionEntry } from "./subagent";
 const DEFAULT_SESSION_LABEL = "(no messages)";
 const SESSION_SUMMARY_READ_CONCURRENCY = 16;
 const SESSION_SUMMARY_HEADER_LINE_LIMIT = 128;
+const CRON_RUNTIME_NOTICE_CUSTOM_TYPE = "batty-runtime-notice:cron";
 
 type SessionSummaryCacheEntry = {
   mtimeMs: number;
@@ -82,11 +83,23 @@ function extractMessageText(content: unknown): string {
     .trim();
 }
 
+function extractCronRuntimeNoticePrompt(content: unknown): string {
+  if (typeof content !== "string") {
+    return "";
+  }
+
+  const marker = "\nPrompt:\n";
+  const markerIndex = content.indexOf(marker);
+  return extractMessageText(
+    markerIndex >= 0 ? content.slice(markerIndex + marker.length) : content,
+  );
+}
+
 async function readSessionHeaderAndFirstUserMessage(filePath: string): Promise<{
   sessionId?: string;
   firstMessage: string;
   dailySessionDate?: string;
-  isSubagentSession: boolean;
+  isHiddenSession: boolean;
 }> {
   const stream = createReadStream(filePath, { encoding: "utf8" });
   const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
@@ -94,7 +107,7 @@ async function readSessionHeaderAndFirstUserMessage(filePath: string): Promise<{
   let sessionId: string | undefined;
   let firstMessage = "";
   let dailySessionDate: string | undefined;
-  let isSubagentSession = false;
+  let isHiddenSession = false;
 
   let scannedLines = 0;
 
@@ -126,20 +139,29 @@ async function readSessionHeaderAndFirstUserMessage(filePath: string): Promise<{
         customType?: unknown;
         data?: unknown;
         parentSession?: unknown;
+        content?: unknown;
         message?: { role?: unknown; content?: unknown };
       };
 
       if (!sessionId && candidate.type === "session" && typeof candidate.id === "string") {
         sessionId = candidate.id;
-        isSubagentSession = typeof candidate.parentSession === "string";
+        isHiddenSession = typeof candidate.parentSession === "string";
       }
 
       if (candidate.type === "message" && candidate.message?.role === "user" && !firstMessage) {
         firstMessage = extractMessageText(candidate.message.content);
       }
 
+      if (
+        candidate.type === "custom_message" &&
+        candidate.customType === CRON_RUNTIME_NOTICE_CUSTOM_TYPE &&
+        !firstMessage
+      ) {
+        firstMessage = extractCronRuntimeNoticePrompt(candidate.content);
+      }
+
       if (isSubagentSessionEntry(candidate)) {
-        isSubagentSession = true;
+        isHiddenSession = true;
       }
 
       if (candidate.type === "custom" && candidate.customType === CRON_SESSION_CUSTOM_TYPE) {
@@ -164,7 +186,7 @@ async function readSessionHeaderAndFirstUserMessage(filePath: string): Promise<{
     stream.destroy();
   }
 
-  return { sessionId, firstMessage, dailySessionDate, isSubagentSession };
+  return { sessionId, firstMessage, dailySessionDate, isHiddenSession };
 }
 
 async function buildSessionSummary(
@@ -174,10 +196,10 @@ async function buildSessionSummary(
   stats: { mtime: Date },
 ): Promise<SessionSummary | undefined> {
   try {
-    const { sessionId, firstMessage, dailySessionDate, isSubagentSession } =
+    const { sessionId, firstMessage, dailySessionDate, isHiddenSession } =
       await readSessionHeaderAndFirstUserMessage(filePath);
 
-    if (!sessionId || isSubagentSession) {
+    if (!sessionId || isHiddenSession) {
       return undefined;
     }
 

@@ -7,7 +7,6 @@ import { gfm } from "turndown-plugin-gfm";
 const PAGE_FETCH_TIMEOUT_MS = 15_000;
 const BROWSER_SETTLE_TIMEOUT_MS = 3_000;
 const BROWSER_FALLBACK_CONCURRENCY = 2;
-const MAX_CONTENT_LENGTH = 5_000;
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const DEFAULT_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
@@ -92,7 +91,7 @@ function extractReadableContent(html: string, url: string): string {
 
   if (article?.content) {
     const title = article.title ? `# ${article.title}\n\n` : "";
-    return `${title}${htmlToMarkdown(article.content)}`.trim().slice(0, MAX_CONTENT_LENGTH);
+    return `${title}${htmlToMarkdown(article.content)}`.trim();
   }
 
   const fallbackDoc = new JSDOM(html, { url });
@@ -106,7 +105,7 @@ function extractReadableContent(html: string, url: string): string {
   const text = main?.innerHTML || "";
   if (text.trim().length > 100) {
     const heading = title ? `# ${title}\n\n` : "";
-    return `${heading}${htmlToMarkdown(text)}`.trim().slice(0, MAX_CONTENT_LENGTH);
+    return `${heading}${htmlToMarkdown(text)}`.trim();
   }
 
   return "Could not extract readable content from this page.";
@@ -135,7 +134,7 @@ function extractContent(result: Extract<PageFetchResult, { ok: true }>): string 
     return extractReadableContent(result.body, result.finalUrl);
   }
 
-  return result.body.slice(0, MAX_CONTENT_LENGTH);
+  return result.body;
 }
 
 function shouldUseBrowserFallback(result: PageFetchResult, content?: string): boolean {

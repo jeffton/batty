@@ -53,9 +53,10 @@ function formatUploadedFileReference(file: {
   name: string;
   mimeType: string;
   size: number;
+  path: string;
   url: string;
 }): string {
-  return `<file name="${escapeXmlAttribute(file.name)}" mimeType="${escapeXmlAttribute(file.mimeType)}" size="${file.size}" url="${escapeXmlAttribute(file.url)}"></file>\n`;
+  return `<file name="${escapeXmlAttribute(file.name)}" mimeType="${escapeXmlAttribute(file.mimeType)}" size="${file.size}" path="${escapeXmlAttribute(file.path)}" url="${escapeXmlAttribute(file.url)}"></file>\n`;
 }
 
 function normalizeBaseUrl(baseUrl: string | undefined): string {
@@ -101,11 +102,23 @@ async function processUploadedFiles(
         data,
         url,
       });
-      text += formatUploadedFileReference({ name: storedName, mimeType, size: stats.size, url });
+      text += formatUploadedFileReference({
+        name: storedName,
+        mimeType,
+        size: stats.size,
+        path: filePath,
+        url,
+      });
       continue;
     }
 
-    text += formatUploadedFileReference({ name: storedName, mimeType, size: stats.size, url });
+    text += formatUploadedFileReference({
+      name: storedName,
+      mimeType,
+      size: stats.size,
+      path: filePath,
+      url,
+    });
   }
 
   return { text, images, uploadedImages };

@@ -31,6 +31,7 @@ describe("prompt uploads", () => {
     expect(prepared.text).toContain('mimeType="application/json"');
     expect(prepared.text).toContain(`size="${content.length}"`);
     expect(prepared.text).toContain("/batty/api/uploads/session-1/");
+    expect(prepared.text).toContain("/data.json");
     expect(prepared.text).not.toContain('{"big":"json"}');
   });
 

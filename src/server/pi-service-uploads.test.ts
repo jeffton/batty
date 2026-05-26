@@ -14,6 +14,26 @@ async function createTempDir(prefix: string): Promise<string> {
 }
 
 describe("prompt uploads", () => {
+  it("references uploaded text files without embedding their contents", async () => {
+    const uploadsDir = await createTempDir("batty-upload-text-");
+    const content = Buffer.from('{"big":"json"}');
+
+    const prepared = await preparePromptFiles(
+      uploadsDir,
+      "session-1",
+      [{ filename: "data.json", data: content }],
+      "/batty",
+    );
+
+    expect(prepared.images).toEqual([]);
+    expect(prepared.uploadedImages).toEqual([]);
+    expect(prepared.text).toContain('<file name="data.json"');
+    expect(prepared.text).toContain('mimeType="application/json"');
+    expect(prepared.text).toContain(`size="${content.length}"`);
+    expect(prepared.text).toContain("/batty/api/uploads/session-1/");
+    expect(prepared.text).not.toContain('{"big":"json"}');
+  });
+
   it("imports and externalizes existing inline image data", async () => {
     const uploadsDir = await createTempDir("batty-inline-images-");
     const imageData = Buffer.from("old-image").toString("base64");

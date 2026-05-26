@@ -45,6 +45,19 @@ function isImageMimeType(value: false | string): value is string {
   return typeof value === "string" && value.startsWith("image/");
 }
 
+function escapeXmlAttribute(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+function formatUploadedFileReference(file: {
+  name: string;
+  mimeType: string;
+  size: number;
+  url: string;
+}): string {
+  return `<file name="${escapeXmlAttribute(file.name)}" mimeType="${escapeXmlAttribute(file.mimeType)}" size="${file.size}" url="${escapeXmlAttribute(file.url)}"></file>\n`;
+}
+
 function normalizeBaseUrl(baseUrl: string | undefined): string {
   if (!baseUrl || baseUrl === "/") {
     return "/";
@@ -73,10 +86,11 @@ async function processUploadedFiles(
 
   for (const filePath of filePaths) {
     const storedName = path.basename(filePath);
-    const mimeType = mime.lookup(filePath);
+    const mimeType = mime.lookup(filePath) || "application/octet-stream";
+    const stats = await fs.stat(filePath);
+    const url = uploadUrl(options.baseUrl, options.sessionId, options.batchId, storedName);
     if (isImageMimeType(mimeType)) {
       const data = (await fs.readFile(filePath)).toString("base64");
-      const stats = await fs.stat(filePath);
       images.push({ type: "image", mimeType, data });
       uploadedImages.push({
         name: storedName,
@@ -85,14 +99,13 @@ async function processUploadedFiles(
         mimeType,
         size: stats.size,
         data,
-        url: uploadUrl(options.baseUrl, options.sessionId, options.batchId, storedName),
+        url,
       });
-      text += `<file name="${storedName}"></file>\n`;
+      text += formatUploadedFileReference({ name: storedName, mimeType, size: stats.size, url });
       continue;
     }
 
-    const content = await fs.readFile(filePath, "utf8");
-    text += `<file name="${storedName}">\n${content}\n</file>\n`;
+    text += formatUploadedFileReference({ name: storedName, mimeType, size: stats.size, url });
   }
 
   return { text, images, uploadedImages };

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { OPENAI_CODEX_BROWSER_LOGIN_METHOD } from "@earendil-works/pi-ai/oauth";
 import type { ApiKeyCredential, AuthStorage } from "@earendil-works/pi-coding-agent";
 import type {
   ProviderAuthProviderStatus,
@@ -150,8 +151,15 @@ export class ProviderAuthService {
         onAuth: (info) => {
           authInfo.resolve(info);
         },
+        onDeviceCode: (info) => {
+          authInfo.resolve({
+            url: info.verificationUri,
+            instructions: `Enter code: ${info.userCode}`,
+          });
+        },
         onPrompt: async () => manualInput.promise,
         onManualCodeInput: async () => manualInput.promise,
+        onSelect: async () => OPENAI_CODEX_BROWSER_LOGIN_METHOD,
       })
       .then(() => {
         const attempt = this.attempts.get(attemptId);

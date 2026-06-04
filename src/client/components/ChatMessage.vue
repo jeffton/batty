@@ -506,6 +506,7 @@ onBeforeUnmount(() => {
 
 .message__copy-button {
   position: absolute;
+  z-index: 2;
   top: 0.25rem;
   right: 0.25rem;
   min-width: 2rem;

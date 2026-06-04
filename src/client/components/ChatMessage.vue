@@ -387,17 +387,6 @@ onBeforeUnmount(() => {
         v-if="attachedFiles.length > 0 && !hasTrailingAssistantBubble"
         class="message__segment message__segment--bubble"
       >
-        <button
-          v-if="copyButtonSegmentIndex === -1"
-          type="button"
-          class="message__copy-button"
-          :aria-label="copied ? 'Copied reply markdown' : 'Copy reply as markdown'"
-          :title="copied ? 'Copied' : 'Copy reply as markdown'"
-          @click="copyAssistantMarkdown"
-        >
-          <Check v-if="copied" :size="17" />
-          <Copy v-else :size="17" />
-        </button>
         <AttachedFilesList :files="attachedFiles" />
       </div>
 

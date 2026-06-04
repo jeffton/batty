@@ -131,6 +131,76 @@ describe("ChatMessage", () => {
     );
   });
 
+  it("does not show the copy button for tool-call-only assistant messages", () => {
+    const message: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-tool-only-1",
+      role: "assistant",
+      timestamp: 2,
+      blocks: [
+        {
+          type: "toolCall",
+          id: "call-1",
+          name: "bash",
+          arguments: { command: "pwd" },
+        },
+      ],
+    };
+
+    const wrapper = mount(ChatMessage, {
+      props: {
+        message,
+      },
+    });
+
+    expect(wrapper.find(".message__copy-button").exists()).toBe(false);
+  });
+
+  it("does not show the copy button for attachment-only assistant messages", () => {
+    const message: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-attachment-only-1",
+      role: "assistant",
+      timestamp: 2,
+      blocks: [
+        {
+          type: "toolCall",
+          id: "call-1",
+          name: "attach-files",
+          arguments: { paths: ["dist/report.md"] },
+        },
+      ],
+    };
+    const toolStatesByCallId = new Map<string, ToolDisplayState>([
+      [
+        "call-1",
+        {
+          status: "success",
+          resultBlocks: [{ type: "text", text: "Attached report." }],
+          resultDetails: {
+            sentFiles: [
+              {
+                id: "file-1",
+                name: "report.md",
+                size: 2048,
+                mimeType: "text/markdown",
+                kind: "file",
+                downloadUrl: "/api/sent-files/workspace/session/call/file-1?download=1",
+              },
+            ],
+          },
+        },
+      ],
+    ]);
+
+    const wrapper = mount(ChatMessage, {
+      props: {
+        message,
+        toolStatesByCallId,
+      },
+    });
+
+    expect(wrapper.find(".message__copy-button").exists()).toBe(false);
+  });
+
   it("renders subagent attachments at the end of the outer assistant response", () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-2",

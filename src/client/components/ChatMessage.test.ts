@@ -1,5 +1,5 @@
 import { mount } from "@vue/test-utils";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE } from "@/server/runtime-notices";
 import ChatMessage from "@/client/components/ChatMessage.vue";
 import type { ToolDisplayState } from "@/client/lib/transcript";
@@ -72,6 +72,63 @@ describe("ChatMessage", () => {
       "/api/sent-files/workspace/session/call/video-1",
     );
     expect(wrapper.find(".message__segment--bubble .attached-files__card").exists()).toBe(true);
+  });
+
+  it("copies assistant reply markdown", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const message: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-copy-1",
+      role: "assistant",
+      timestamp: 2,
+      blocks: [
+        { type: "text", text: "# Done\n\nHere you go." },
+        { type: "image", mimeType: "image/png", url: "/preview.png", name: "preview.png" },
+        {
+          type: "toolCall",
+          id: "call-1",
+          name: "attach-files",
+          arguments: { paths: ["dist/report.md"] },
+        },
+      ],
+    };
+    const toolStatesByCallId = new Map<string, ToolDisplayState>([
+      [
+        "call-1",
+        {
+          status: "success",
+          resultBlocks: [{ type: "text", text: "Attached report." }],
+          resultDetails: {
+            sentFiles: [
+              {
+                id: "file-1",
+                name: "report.md",
+                size: 2048,
+                mimeType: "text/markdown",
+                kind: "file",
+                downloadUrl: "/api/sent-files/workspace/session/call/file-1?download=1",
+              },
+            ],
+          },
+        },
+      ],
+    ]);
+
+    const wrapper = mount(ChatMessage, {
+      props: {
+        message,
+        toolStatesByCallId,
+      },
+    });
+
+    await wrapper.find(".message__copy-button").trigger("click");
+
+    expect(writeText).toHaveBeenCalledWith(
+      "# Done\n\nHere you go.\n\n![preview.png](/preview.png)\n\n[report.md](/api/sent-files/workspace/session/call/file-1?download=1)",
+    );
   });
 
   it("renders subagent attachments at the end of the outer assistant response", () => {

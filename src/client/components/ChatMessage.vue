@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Cog, PanelRightOpen } from "lucide-vue-next";
-import { computed } from "vue";
+import { Check, Clipboard, Cog, PanelRightOpen } from "lucide-vue-next";
+import { computed, onBeforeUnmount, ref } from "vue";
 import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE } from "@/server/runtime-notices";
 import AttachedFilesList from "@/client/components/AttachedFilesList.vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
@@ -15,6 +15,9 @@ type AssistantSegment = {
   kind: "bubble" | "plain";
   blocks: UiContentBlock[];
 };
+
+const copied = ref(false);
+let copiedTimeout: number | undefined;
 
 const props = withDefaults(
   defineProps<{
@@ -40,6 +43,18 @@ function toolStateFor(toolCallId: string): ToolDisplayState | undefined {
 
 function isBubbleBlock(block: UiContentBlock): boolean {
   return block.type === "text" || block.type === "image";
+}
+
+function markdownForBlock(block: UiContentBlock): string | undefined {
+  if (block.type === "text") {
+    return block.text;
+  }
+
+  if (block.type === "image") {
+    return `![${block.name ?? "Message attachment"}](${imageUrl(block)})`;
+  }
+
+  return undefined;
 }
 
 function showAssistantBlock(block: UiContentBlock): boolean {
@@ -201,6 +216,48 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
 
   return files;
 });
+
+const assistantMarkdown = computed(() => {
+  if (props.message.role !== "assistant") {
+    return "";
+  }
+
+  const markdown = props.message.blocks
+    .filter(showAssistantBlock)
+    .map(markdownForBlock)
+    .filter((block): block is string => typeof block === "string" && block.length > 0)
+    .join("\n\n");
+
+  const attachmentMarkdown = attachedFiles.value
+    .map((file) => `[${file.name}](${file.downloadUrl})`)
+    .join("\n");
+
+  const errorMarkdown = markdown.length === 0 ? assistantErrorText.value : undefined;
+
+  return [markdown, attachmentMarkdown, errorMarkdown]
+    .filter((section): section is string => typeof section === "string" && section.length > 0)
+    .join("\n\n");
+});
+
+async function copyAssistantMarkdown(): Promise<void> {
+  await navigator.clipboard.writeText(assistantMarkdown.value);
+  copied.value = true;
+
+  if (copiedTimeout !== undefined) {
+    window.clearTimeout(copiedTimeout);
+  }
+
+  copiedTimeout = window.setTimeout(() => {
+    copied.value = false;
+    copiedTimeout = undefined;
+  }, 1400);
+}
+
+onBeforeUnmount(() => {
+  if (copiedTimeout !== undefined) {
+    window.clearTimeout(copiedTimeout);
+  }
+});
 </script>
 
 <template>
@@ -255,6 +312,17 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
     </div>
 
     <div v-else-if="props.message.role === 'assistant'" class="message__body">
+      <button
+        type="button"
+        class="message__copy-button"
+        :aria-label="copied ? 'Copied reply markdown' : 'Copy reply as markdown'"
+        :title="copied ? 'Copied' : 'Copy reply as markdown'"
+        @click="copyAssistantMarkdown"
+      >
+        <Check v-if="copied" :size="17" />
+        <Clipboard v-else :size="17" />
+      </button>
+
       <template
         v-for="(segment, segmentIndex) in assistantSegments"
         :key="`${props.message.id}-segment-${segmentIndex}`"
@@ -419,6 +487,41 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
   display: grid;
   gap: 0.45rem;
   min-width: 0;
+}
+
+.message--assistant .message__body {
+  position: relative;
+  padding-right: 2.35rem;
+}
+
+.message__copy-button {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 2rem;
+  min-height: 2rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background 80ms ease,
+    color 80ms ease;
+}
+
+@media (hover: hover) {
+  .message__copy-button:hover {
+    background: var(--color-bg-elevated);
+    color: var(--color-text);
+  }
+}
+
+.message__copy-button :deep(svg) {
+  display: block;
 }
 
 .message__segment {

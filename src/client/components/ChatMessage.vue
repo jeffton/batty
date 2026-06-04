@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Check, Clipboard, Cog, PanelRightOpen } from "lucide-vue-next";
+import { Check, Cog, Copy, PanelRightOpen } from "lucide-vue-next";
 import { computed, onBeforeUnmount, ref } from "vue";
 import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE } from "@/server/runtime-notices";
 import AttachedFilesList from "@/client/components/AttachedFilesList.vue";
@@ -165,6 +165,10 @@ const hasTrailingAssistantBubble = computed(() => {
   return lastSegment?.kind === "bubble";
 });
 
+const copyButtonSegmentIndex = computed(() =>
+  assistantSegments.value.findIndex((segment) => segment.kind === "bubble"),
+);
+
 const messageTimestampLabel = computed(() => {
   const timestamp = props.message.timestamp;
   const date = new Date(timestamp);
@@ -312,17 +316,6 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else-if="props.message.role === 'assistant'" class="message__body">
-      <button
-        type="button"
-        class="message__copy-button"
-        :aria-label="copied ? 'Copied reply markdown' : 'Copy reply as markdown'"
-        :title="copied ? 'Copied' : 'Copy reply as markdown'"
-        @click="copyAssistantMarkdown"
-      >
-        <Check v-if="copied" :size="17" />
-        <Clipboard v-else :size="17" />
-      </button>
-
       <template
         v-for="(segment, segmentIndex) in assistantSegments"
         :key="`${props.message.id}-segment-${segmentIndex}`"
@@ -339,6 +332,18 @@ onBeforeUnmount(() => {
             },
           ]"
         >
+          <button
+            v-if="segmentIndex === copyButtonSegmentIndex"
+            type="button"
+            class="message__copy-button"
+            :aria-label="copied ? 'Copied reply markdown' : 'Copy reply as markdown'"
+            :title="copied ? 'Copied' : 'Copy reply as markdown'"
+            @click="copyAssistantMarkdown"
+          >
+            <Check v-if="copied" :size="17" />
+            <Copy v-else :size="17" />
+          </button>
+
           <template
             v-for="(block, blockIndex) in segment.blocks"
             :key="`${segmentIndex}-${blockIndex}`"
@@ -382,12 +387,33 @@ onBeforeUnmount(() => {
         v-if="attachedFiles.length > 0 && !hasTrailingAssistantBubble"
         class="message__segment message__segment--bubble"
       >
+        <button
+          v-if="copyButtonSegmentIndex === -1"
+          type="button"
+          class="message__copy-button"
+          :aria-label="copied ? 'Copied reply markdown' : 'Copy reply as markdown'"
+          :title="copied ? 'Copied' : 'Copy reply as markdown'"
+          @click="copyAssistantMarkdown"
+        >
+          <Check v-if="copied" :size="17" />
+          <Copy v-else :size="17" />
+        </button>
         <AttachedFilesList :files="attachedFiles" />
       </div>
 
       <template v-if="showAssistantErrorBubble && assistantErrorText">
         <div v-if="props.showTimestamp" class="message__timestamp">{{ messageTimestampLabel }}</div>
         <div class="message__segment message__segment--bubble message__segment--error">
+          <button
+            type="button"
+            class="message__copy-button"
+            :aria-label="copied ? 'Copied reply markdown' : 'Copy reply as markdown'"
+            :title="copied ? 'Copied' : 'Copy reply as markdown'"
+            @click="copyAssistantMarkdown"
+          >
+            <Check v-if="copied" :size="17" />
+            <Copy v-else :size="17" />
+          </button>
           <div class="message__text">{{ assistantErrorText }}</div>
         </div>
       </template>
@@ -489,15 +515,10 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
-.message--assistant .message__body {
-  position: relative;
-  padding-right: 2.35rem;
-}
-
 .message__copy-button {
   position: absolute;
-  top: 0;
-  right: 0;
+  top: 0.25rem;
+  right: 0.25rem;
   min-width: 2rem;
   min-height: 2rem;
   padding: 0;

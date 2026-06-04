@@ -505,12 +505,12 @@ onBeforeUnmount(() => {
 }
 
 .message__copy-button {
-  position: absolute;
+  float: right;
+  position: relative;
   z-index: 2;
-  top: 0.25rem;
-  right: 0.25rem;
   min-width: 2rem;
   min-height: 2rem;
+  margin: -0.25rem 0 0.35rem 0.5rem;
   padding: 0;
   border: 0;
   border-radius: 0.5rem;
@@ -547,6 +547,7 @@ onBeforeUnmount(() => {
 
 .message__segment--bubble {
   --message-bg: var(--color-bg-panel);
+  display: block;
   position: relative;
   padding: 0.5rem 0.65rem 0.5rem 0;
   border-radius: 0 0.5rem 0.5rem 0;

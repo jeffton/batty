@@ -43,6 +43,7 @@ export type PiServiceCronAdapterContext = {
   ) => Promise<SessionState>;
   requireSession: (sessionId: string) => WebSession;
   requireSessionPath: (sessionId: string) => string;
+  prepareSessionForContextCopy: (sessionId: string) => Promise<void>;
   runSubagentSerial: <T>(sessionId: string, run: () => Promise<T>) => Promise<T>;
   getState: (sessionId: string) => SessionState;
   publishReset: (webSession: WebSession, state: SessionState) => void;
@@ -102,6 +103,9 @@ export async function runCronJobSession(
       : undefined;
   const includePreviousContext =
     job.session.kind === "daily-detached" && job.session.includePreviousContext === true;
+  if (parent && includePreviousContext) {
+    await context.prepareSessionForContextCopy(parent.id);
+  }
   const parentSessionPath =
     parent && includePreviousContext ? context.requireSessionPath(parent.id) : undefined;
   const cronSession = await context.createCronSession(job.workspace, {

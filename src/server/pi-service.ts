@@ -333,6 +333,7 @@ export class PiService {
           this.resolveOrCreateDailySession(workspace, options),
         requireSession: (sessionId) => this.requireSession(sessionId),
         requireSessionPath: (sessionId) => this.requireSessionPath(sessionId),
+        prepareSessionForContextCopy: (sessionId) => this.prepareSessionForContextCopy(sessionId),
         runSubagentSerial: (sessionId, run) => this.runSubagentSerial(sessionId, run),
         getState: (sessionId) => this.getState(sessionId),
         publishReset: (webSession, state) => this.publish(webSession, { type: "reset", state }),
@@ -367,6 +368,7 @@ export class PiService {
           this.resolveOrCreateDailySession(workspace, options),
         requireSession: (sessionId) => this.requireSession(sessionId),
         requireSessionPath: (sessionId) => this.requireSessionPath(sessionId),
+        prepareSessionForContextCopy: (sessionId) => this.prepareSessionForContextCopy(sessionId),
         runSubagentSerial: (sessionId, run) => this.runSubagentSerial(sessionId, run),
         getState: (sessionId) => this.getState(sessionId),
         publishReset: (webSession, state) => this.publish(webSession, { type: "reset", state }),
@@ -470,6 +472,33 @@ export class PiService {
       throw new Error(`Session ${sessionId} is not persisted`);
     }
     return sessionPath;
+  }
+
+  private async prepareSessionForContextCopy(sessionId: string): Promise<void> {
+    await this.runSubagentSerial(sessionId, async () => {
+      const webSession = this.requireSession(sessionId);
+      await webSession.session.agent.waitForIdle();
+      const contextUsage = getSessionContextUsage(webSession.session);
+      if (contextUsage?.tokens == null) {
+        return;
+      }
+
+      const compactionSettings = webSession.session.settingsManager.getCompactionSettings();
+      if (
+        !compactionSettings.enabled ||
+        contextUsage.tokens <= contextUsage.contextWindow - compactionSettings.reserveTokens
+      ) {
+        return;
+      }
+
+      await webSession.session.compact(
+        "Prepare this daily session for a detached cron run that includes previous context. Preserve operational facts, recent decisions, current state, scheduled work, and anything needed by future Roy heartbeats.",
+      );
+      const state = this.getState(webSession.id);
+      this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
+      await this.onAgentCompleted?.(state);
+      await this.notifyWorkspaceUpdated(webSession.workspace.id);
+    });
   }
 
   hasSession(sessionId: string): boolean {

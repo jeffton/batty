@@ -63,6 +63,7 @@ describe("runCronJobSession", () => {
     const onAgentCompleted = vi.fn(async () => undefined);
     const notifyWorkspaceUpdated = vi.fn(async () => undefined);
     const onSessionStarted = vi.fn();
+    const prepareSessionForContextCopy = vi.fn(async () => undefined);
 
     const result = await runCronJobSession(
       {
@@ -89,6 +90,7 @@ describe("runCronJobSession", () => {
         requireSessionPath: vi.fn((sessionId) =>
           sessionId === cron.id ? cron.session.sessionFile! : parent.session.sessionFile!,
         ),
+        prepareSessionForContextCopy,
         runSubagentSerial: async (_sessionId, run) => run(),
         getState: vi.fn((sessionId) => ({ id: sessionId, workspaceId: "roy" }) as never),
         publishReset,
@@ -115,6 +117,7 @@ describe("runCronJobSession", () => {
       sessionId: "cron-session-id",
       sessionPath: "/tmp/cron-session.jsonl",
     });
+    expect(prepareSessionForContextCopy).toHaveBeenCalledWith(parent.id);
     expect(onSessionStarted).toHaveBeenCalledWith({
       sessionId: "cron-session-id",
       sessionPath: "/tmp/cron-session.jsonl",
@@ -157,6 +160,7 @@ describe("runCronJobSession", () => {
           requireSessionPath: vi.fn((sessionId) =>
             sessionId === cron.id ? cron.session.sessionFile! : parent.session.sessionFile!,
           ),
+          prepareSessionForContextCopy: vi.fn(async () => undefined),
           runSubagentSerial: async (_sessionId, run) => run(),
           getState: vi.fn((sessionId) => ({ id: sessionId, workspaceId: "roy" }) as never),
           publishReset: vi.fn(),

@@ -126,24 +126,23 @@ function attachmentCarrierBlocks(
     return [];
   }
 
-  const attachmentBlocks = message.blocks.filter((block) =>
-    isAttachmentOutputToolCall(block, toolStatesByCallId),
-  );
-  if (attachmentBlocks.length === 0) {
-    return [];
-  }
-
-  const hasOnlyAttachmentCallsAndThinking = message.blocks.every(
-    (block) => block.type === "thinking" || isAttachmentOutputToolCall(block, toolStatesByCallId),
-  );
-  return hasOnlyAttachmentCallsAndThinking ? attachmentBlocks : [];
+  return message.blocks.filter((block) => isAttachmentOutputToolCall(block, toolStatesByCallId));
 }
 
-function isAttachmentCarrierMessage(
-  message: UiMessage,
+function removeAttachmentCarrierBlocks(
+  message: Extract<UiMessage, { role: "assistant" }>,
   toolStatesByCallId: Map<string, ToolDisplayState>,
-): boolean {
-  return attachmentCarrierBlocks(message, toolStatesByCallId).length > 0;
+): Extract<UiMessage, { role: "assistant" }> {
+  return {
+    ...message,
+    blocks: message.blocks.filter(
+      (block) => !isAttachmentOutputToolCall(block, toolStatesByCallId),
+    ),
+  };
+}
+
+function hasRenderableBlocks(message: Extract<UiMessage, { role: "assistant" }>): boolean {
+  return message.blocks.some((block) => block.type !== "thinking");
 }
 
 function attachmentBlockFromToolResult(
@@ -211,22 +210,28 @@ export function buildTranscriptMessages(
       }
     }
 
-    if (
-      message.role === "assistant" &&
-      isAttachmentCarrierMessage(message, toolStateLookup.toolStatesByCallId)
-    ) {
+    const attachmentBlocks = attachmentCarrierBlocks(message, toolStateLookup.toolStatesByCallId);
+    if (attachmentBlocks.length > 0) {
       if (pendingAttachmentBlocks.length === 0) {
         pendingAttachmentId = message.id;
         pendingAttachmentTimestamp = message.timestamp;
       }
-      pendingAttachmentBlocks = [
-        ...pendingAttachmentBlocks,
-        ...attachmentCarrierBlocks(message, toolStateLookup.toolStatesByCallId),
-      ];
+      pendingAttachmentBlocks = [...pendingAttachmentBlocks, ...attachmentBlocks];
+    }
+
+    const messageWithoutAttachmentBlocks =
+      message.role === "assistant" && attachmentBlocks.length > 0
+        ? removeAttachmentCarrierBlocks(message, toolStateLookup.toolStatesByCallId)
+        : message;
+
+    if (
+      messageWithoutAttachmentBlocks.role === "assistant" &&
+      !hasRenderableBlocks(messageWithoutAttachmentBlocks)
+    ) {
       continue;
     }
 
-    if (pendingAttachmentBlocks.length > 0 && message.role !== "assistant") {
+    if (pendingAttachmentBlocks.length > 0 && messageWithoutAttachmentBlocks.role !== "assistant") {
       const attachmentMessage: Extract<UiMessage, { role: "assistant" }> = {
         id: pendingAttachmentId,
         role: "assistant",
@@ -246,13 +251,14 @@ export function buildTranscriptMessages(
     }
 
     const shouldMergePendingAttachments =
-      pendingAttachmentBlocks.length > 0 && acceptsPendingAttachmentBlocks(message);
+      pendingAttachmentBlocks.length > 0 &&
+      acceptsPendingAttachmentBlocks(messageWithoutAttachmentBlocks);
     const renderedMessage = shouldMergePendingAttachments
       ? mergeAttachmentCarrierIntoAssistant(
-          message as Extract<UiMessage, { role: "assistant" }>,
+          messageWithoutAttachmentBlocks as Extract<UiMessage, { role: "assistant" }>,
           pendingAttachmentBlocks,
         )
-      : message;
+      : messageWithoutAttachmentBlocks;
 
     entries.push({
       message: renderedMessage,

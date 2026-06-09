@@ -4,7 +4,7 @@ import {
   buildTranscriptMessages,
   toolStatesForMessage,
 } from "@/client/lib/transcript";
-import type { SessionState, UiMessage } from "@/shared/types";
+import type { SessionState, UiContentBlock, UiMessage } from "@/shared/types";
 
 const assistantMessage: Extract<UiMessage, { role: "assistant" }> = {
   id: "assistant-1",
@@ -181,6 +181,12 @@ describe("transcript tool state merging", () => {
           name: "attach-files",
           arguments: { paths: ["webcam.jpg"] },
         },
+        {
+          type: "toolCall",
+          id: "bash-0",
+          name: "bash",
+          arguments: { command: "date" },
+        },
       ],
     };
     const attachmentResult: Extract<UiMessage, { role: "toolResult" }> = {
@@ -205,10 +211,19 @@ describe("transcript tool state merging", () => {
       },
       isError: false,
     };
+    const firstResult: Extract<UiMessage, { role: "toolResult" }> = {
+      id: "tool-first",
+      role: "toolResult",
+      timestamp: 5,
+      toolCallId: "bash-0",
+      toolName: "bash",
+      blocks: [{ type: "text", text: "Tue Jun 9" }],
+      isError: false,
+    };
     const commitAssistant: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-commit",
       role: "assistant",
-      timestamp: 5,
+      timestamp: 6,
       blocks: [
         {
           type: "toolCall",
@@ -221,7 +236,7 @@ describe("transcript tool state merging", () => {
     const commitResult: Extract<UiMessage, { role: "toolResult" }> = {
       id: "tool-commit",
       role: "toolResult",
-      timestamp: 6,
+      timestamp: 7,
       toolCallId: "bash-1",
       toolName: "bash",
       blocks: [{ type: "text", text: "[main abc123] update" }],
@@ -230,13 +245,14 @@ describe("transcript tool state merging", () => {
     const finalAssistant: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-final",
       role: "assistant",
-      timestamp: 7,
+      timestamp: 8,
       blocks: [{ type: "text", text: "Here is the image." }],
     };
 
     const messages: SessionState["messages"] = [
       attachmentAssistant,
       attachmentResult,
+      firstResult,
       commitAssistant,
       commitResult,
       finalAssistant,
@@ -244,9 +260,13 @@ describe("transcript tool state merging", () => {
     const lookup = buildToolStateLookup(messages, []);
     const transcript = buildTranscriptMessages(messages, lookup);
 
-    expect(transcript).toHaveLength(2);
-    expect(transcript[0]?.message).toEqual(commitAssistant);
-    const finalTranscriptMessage = transcript[1]?.message as Extract<
+    expect(transcript).toHaveLength(3);
+    expect(transcript[0]?.message).toEqual({
+      ...attachmentAssistant,
+      blocks: [attachmentAssistant.blocks[1] as UiContentBlock],
+    });
+    expect(transcript[1]?.message).toEqual(commitAssistant);
+    const finalTranscriptMessage = transcript[2]?.message as Extract<
       UiMessage,
       { role: "assistant" }
     >;

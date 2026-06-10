@@ -1,0 +1,6 @@
+minimumReleaseAge: 4320
+ignoredBuiltDependencies:
+  - "@google/genai"
+  - esbuild
+  - koffi
+  - protobufjs

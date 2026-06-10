@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Compass, ListOrdered, X } from "lucide-vue-next";
+import { Compass, ListOrdered, X } from "@lucide/vue";
 import type { QueuedPrompt } from "@/shared/types";
 
 const props = defineProps<{

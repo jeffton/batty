@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ExternalLink, KeyRound, Save } from "lucide-vue-next";
+import { ExternalLink, KeyRound, Save } from "@lucide/vue";
 import { computed, reactive, ref, watch } from "vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
 import { useAppStore } from "@/client/stores/app";

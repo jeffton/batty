@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus, LoaderCircle, Star, CalendarDays } from "lucide-vue-next";
+import { Plus, LoaderCircle, Star, CalendarDays } from "@lucide/vue";
 import WorkspaceBrowserFooter from "@/client/components/WorkspaceBrowserFooter.vue";
 import WorkspaceBrowserHeader from "@/client/components/WorkspaceBrowserHeader.vue";
 import { computed, nextTick, ref, watch } from "vue";

@@ -3,7 +3,7 @@ import ThinkingLevelPicker from "@/client/components/ThinkingLevelPicker.vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
 import type { CronDraft } from "@/client/composables/useCronJobDrafts";
 import type { CronJob, ModelInfo } from "@/shared/types";
-import { Pencil, Save, Trash2, X } from "lucide-vue-next";
+import { Pencil, Save, Trash2, X } from "@lucide/vue";
 
 const props = defineProps<{
   job: CronJob;

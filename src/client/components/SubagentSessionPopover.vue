@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CircleAlert, LoaderCircle, X } from "lucide-vue-next";
+import { CircleAlert, LoaderCircle, X } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import SessionTranscriptView from "@/client/components/SessionTranscriptView.vue";
 import { getSessionMessages, openSession } from "@/client/lib/api";

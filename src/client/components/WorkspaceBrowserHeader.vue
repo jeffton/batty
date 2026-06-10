@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Cog, LoaderCircle, Search, Wifi, WifiOff, X } from "lucide-vue-next";
+import { Cog, LoaderCircle, Search, Wifi, WifiOff, X } from "@lucide/vue";
 import SettingsPopover from "@/client/components/SettingsPopover.vue";
 import { nextTick, ref, watch } from "vue";
 

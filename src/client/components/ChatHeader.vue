@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronLeft, Wifi, WifiOff, LoaderCircle, Clock3 } from "lucide-vue-next";
+import { ChevronLeft, Wifi, WifiOff, LoaderCircle, Clock3 } from "@lucide/vue";
 import CronPopover from "@/client/components/CronPopover.vue";
 
 const props = defineProps<{

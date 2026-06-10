@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { PanelRightOpen, Square } from "lucide-vue-next";
+import { PanelRightOpen, Square } from "@lucide/vue";
 import CronJobCard from "@/client/components/CronJobCard.vue";
 import SubagentSessionPopover from "@/client/components/SubagentSessionPopover.vue";
 import { useCronJobDrafts } from "@/client/composables/useCronJobDrafts";

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowDown } from "lucide-vue-next";
+import { ArrowDown } from "@lucide/vue";
 import { Virtualizer } from "virtua/vue";
 import { ref } from "vue";
 import ChatMessage from "@/client/components/ChatMessage.vue";

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { PanelRightOpen } from "lucide-vue-next";
+import { PanelRightOpen } from "@lucide/vue";
 import { computed, ref } from "vue";
 import AttachedFilesList from "@/client/components/AttachedFilesList.vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CalendarDays, LoaderCircle } from "lucide-vue-next";
+import { CalendarDays, LoaderCircle } from "@lucide/vue";
 
 const props = defineProps<{
   assistantWorkspaceLabel: string;

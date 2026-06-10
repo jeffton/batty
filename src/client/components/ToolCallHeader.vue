@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Check, CircleAlert, LoaderCircle } from "lucide-vue-next";
+import { Check, CircleAlert, LoaderCircle } from "@lucide/vue";
 
 const props = defineProps<{
   name: string;

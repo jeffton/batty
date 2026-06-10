@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ModelOption } from "@/shared/types";
 import ThinkingLevelPicker from "@/client/components/ThinkingLevelPicker.vue";
-import { Search } from "lucide-vue-next";
+import { Search } from "@lucide/vue";
 import { computed, ref, watch } from "vue";
 
 const props = defineProps<{

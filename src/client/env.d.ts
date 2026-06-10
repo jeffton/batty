@@ -4,6 +4,8 @@ interface Window {
   __BATTY_BASE_URL__?: string;
 }
 
+declare module "*.css";
+
 declare module "*.vue" {
   import type { DefineComponent } from "vue";
 

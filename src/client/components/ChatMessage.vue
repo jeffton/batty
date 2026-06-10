@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Check, Cog, Copy, PanelRightOpen } from "lucide-vue-next";
+import { Check, Cog, Copy, PanelRightOpen } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref } from "vue";
 import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE } from "@/server/runtime-notices";
 import AttachedFilesList from "@/client/components/AttachedFilesList.vue";

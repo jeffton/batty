@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Bot, Compass, ListOrdered, Paperclip, SendHorizontal, Square } from "lucide-vue-next";
+import { Bot, Compass, ListOrdered, Paperclip, SendHorizontal, Square } from "@lucide/vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import ComposerQueuedPrompts from "@/client/components/ComposerQueuedPrompts.vue";
 import ModelConfigPopover from "@/client/components/ModelConfigPopover.vue";

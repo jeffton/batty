@@ -1,4 +1,3 @@
-import DOMPurify from "dompurify";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
 import css from "highlight.js/lib/languages/css";
@@ -65,10 +64,7 @@ export function highlightCode(code: string, language?: string): string {
     ? hljs.highlight(code, { language: normalized, ignoreIllegals: true }).value
     : hljs.highlightAuto(code, AUTO_DETECT_LANGUAGES).value;
 
-  return DOMPurify.sanitize(value, {
-    ALLOWED_TAGS: ["span"],
-    ALLOWED_ATTR: ["class"],
-  });
+  return value;
 }
 
 export function languageFromPath(path?: string): string | undefined {

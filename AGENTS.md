@@ -1,5 +1,11 @@
 # AGENTS.md
 
+## Coding tasks
+
+Always pull changes before starting a coding task.
+
+When updating dependencies, check release notes and implement changes as needed.
+
 ## Updating Pi dependencies
 
 When updating `@earendil-works/pi-*` packages, always read the relevant Pi release notes or changelog for every version being crossed before adapting Batty. Check for SDK/API lifecycle changes, session event changes, retry/compaction behavior changes, provider/model metadata changes, and breaking changes.

@@ -74,19 +74,36 @@ function collapsedMessage(
   return message ? { ...entry, message } : undefined;
 }
 
+function hasToolDetails(entry: TranscriptMessageView): boolean {
+  const message = entry.message;
+  if (message.role === "toolResult" || message.role === "bashExecution") {
+    return true;
+  }
+
+  return "blocks" in message && message.blocks.some((block) => block.type === "toolCall");
+}
+
 function hidesToolDetails(
   original: TranscriptMessageView,
   collapsed: TranscriptMessageView | undefined,
 ): boolean {
+  if (!hasToolDetails(original)) {
+    return false;
+  }
+
   if (!collapsed) {
     return true;
   }
 
-  if (!("blocks" in original.message) || !("blocks" in collapsed.message)) {
+  const originalMessage = original.message;
+  const collapsedMessage = collapsed.message;
+  if (!("blocks" in originalMessage) || !("blocks" in collapsedMessage)) {
     return false;
   }
 
-  return original.message.blocks.length !== collapsed.message.blocks.length;
+  return originalMessage.blocks.some(
+    (block) => block.type === "toolCall" && !collapsedMessage.blocks.includes(block),
+  );
 }
 
 function toggleEntry(section: TranscriptSection, expanded: boolean): TranscriptDisplayEntry {

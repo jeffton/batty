@@ -41,6 +41,18 @@ function assistantText(id: string): TranscriptMessageView {
   });
 }
 
+function assistantThinkingAndText(id: string): TranscriptMessageView {
+  return view({
+    id,
+    role: "assistant",
+    timestamp: 3,
+    blocks: [
+      { type: "thinking", thinking: "private reasoning" },
+      { type: "text", text: `reply ${id}` },
+    ],
+  });
+}
+
 function messageBlockCount(entry: unknown): number {
   if (!entry || typeof entry !== "object" || !("kind" in entry) || entry.kind !== "message") {
     return 0;
@@ -91,6 +103,16 @@ describe("buildTranscriptDisplayEntries", () => {
       sectionKey: "turn:user-2",
       expanded: true,
     });
+  });
+
+  it("does not show a tool toggle when only thinking is hidden", () => {
+    const result = buildTranscriptDisplayEntries(
+      [user("user-1"), assistantThinkingAndText("assistant-1")],
+      toolStates,
+      { showLatestToolToggle: true },
+    );
+
+    expect(result.entries.map((entry) => entry.kind)).toEqual(["message", "message"]);
   });
 
   it("puts the show toggle after collapsed tool-call-only messages before the reply", () => {

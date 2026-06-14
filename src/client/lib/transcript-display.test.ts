@@ -148,6 +148,28 @@ describe("buildTranscriptDisplayEntries", () => {
     });
   });
 
+  it("hides the latest turn toggle while the turn is streaming", () => {
+    const result = buildTranscriptDisplayEntries(
+      [
+        user("user-1"),
+        assistantWithTool("assistant-1", "call-1"),
+        user("user-2"),
+        assistantWithTool("assistant-2", "call-2"),
+      ],
+      toolStates,
+      { disableToolToggleSectionKey: "turn:user-2" },
+    );
+
+    expect(result.entries.map((entry) => entry.kind)).toEqual([
+      "message",
+      "message",
+      "tool-toggle",
+      "message",
+      "message",
+    ]);
+    expect(messageBlockCount(result.entries[4])).toBe(2);
+  });
+
   it("collapses the latest turn when it is selected as collapsed", () => {
     const result = buildTranscriptDisplayEntries(
       [

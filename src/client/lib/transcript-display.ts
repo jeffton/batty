@@ -89,6 +89,42 @@ function hidesToolDetails(
   return original.message.blocks.length !== collapsed.message.blocks.length;
 }
 
+function toggleEntry(section: TranscriptSection, expanded: boolean): TranscriptDisplayEntry {
+  return {
+    kind: "tool-toggle",
+    sectionKey: section.key,
+    expanded,
+  };
+}
+
+function shouldPlaceToggleBeforeMessage(
+  original: TranscriptMessageView,
+  collapsed: TranscriptMessageView | undefined,
+): boolean {
+  if (!collapsed) {
+    return true;
+  }
+
+  if (!("blocks" in original.message) || !("blocks" in collapsed.message)) {
+    return false;
+  }
+
+  const originalMessage = original.message;
+  const collapsedMessage = collapsed.message;
+  if (!("blocks" in originalMessage) || !("blocks" in collapsedMessage)) {
+    return false;
+  }
+
+  const firstVisibleIndex = originalMessage.blocks.findIndex((block) =>
+    collapsedMessage.blocks.includes(block),
+  );
+  const firstHiddenIndex = originalMessage.blocks.findIndex(
+    (block) => !collapsedMessage.blocks.includes(block),
+  );
+
+  return firstHiddenIndex >= 0 && (firstVisibleIndex < 0 || firstHiddenIndex <= firstVisibleIndex);
+}
+
 export function buildTranscriptDisplayEntries(
   entries: TranscriptMessageView[],
   toolStatesByCallId: Map<string, ToolDisplayState>,
@@ -109,26 +145,30 @@ export function buildTranscriptDisplayEntries(
     const isLatestSection = section.key === latestSectionKey;
     const isOpenSection = section.key === options.openToolSectionKey;
     const isExpanded = isLatestSection || isOpenSection;
-    let hidesDetails = false;
+    let insertedToolToggle = false;
 
     for (let index = section.startIndex; index < section.endIndex; index += 1) {
       const entry = entries[index] as TranscriptMessageView;
       const collapsed = collapsedMessage(entry, toolStatesByCallId);
       const visibleEntry = isExpanded ? entry : collapsed;
-      if (!isLatestSection && hidesToolDetails(entry, collapsed)) {
-        hidesDetails = true;
+      const showToggleHere =
+        !isLatestSection && !insertedToolToggle && hidesToolDetails(entry, collapsed);
+      const toggleBeforeMessage =
+        showToggleHere && shouldPlaceToggleBeforeMessage(entry, collapsed);
+
+      if (toggleBeforeMessage) {
+        displayEntries.push(toggleEntry(section, isOpenSection));
+        insertedToolToggle = true;
       }
+
       if (visibleEntry) {
         displayEntries.push({ kind: "message", entry: visibleEntry, showTimestamp: false });
       }
-    }
 
-    if (!isLatestSection && hidesDetails) {
-      displayEntries.push({
-        kind: "tool-toggle",
-        sectionKey: section.key,
-        expanded: isOpenSection,
-      });
+      if (showToggleHere && !toggleBeforeMessage) {
+        displayEntries.push(toggleEntry(section, isOpenSection));
+        insertedToolToggle = true;
+      }
     }
   }
 

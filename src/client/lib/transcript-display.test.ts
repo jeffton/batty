@@ -23,6 +23,24 @@ function assistantWithTool(id: string, toolCallId: string): TranscriptMessageVie
   });
 }
 
+function assistantToolOnly(id: string, toolCallId: string): TranscriptMessageView {
+  return view({
+    id,
+    role: "assistant",
+    timestamp: 2,
+    blocks: [{ type: "toolCall", id: toolCallId, name: "bash", arguments: { command: "echo hi" } }],
+  });
+}
+
+function assistantText(id: string): TranscriptMessageView {
+  return view({
+    id,
+    role: "assistant",
+    timestamp: 3,
+    blocks: [{ type: "text", text: `reply ${id}` }],
+  });
+}
+
 function messageBlockCount(entry: unknown): number {
   if (!entry || typeof entry !== "object" || !("kind" in entry) || entry.kind !== "message") {
     return 0;
@@ -66,6 +84,32 @@ describe("buildTranscriptDisplayEntries", () => {
     });
     expect(result.entries[4]).toMatchObject({ kind: "message" });
     expect(messageBlockCount(result.entries[4])).toBe(2);
+  });
+
+  it("puts the toggle where a collapsed tool-call-only message was", () => {
+    const result = buildTranscriptDisplayEntries(
+      [
+        user("user-1"),
+        assistantToolOnly("assistant-tools-1", "call-1"),
+        assistantText("assistant-1"),
+        user("user-2"),
+        assistantText("assistant-2"),
+      ],
+      toolStates,
+    );
+
+    expect(result.entries.map((entry) => entry.kind)).toEqual([
+      "message",
+      "tool-toggle",
+      "message",
+      "message",
+      "message",
+    ]);
+    expect(result.entries[1]).toMatchObject({
+      kind: "tool-toggle",
+      sectionKey: "turn:user-1",
+      expanded: false,
+    });
   });
 
   it("opens only the selected old turn", () => {

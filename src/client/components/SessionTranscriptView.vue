@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import ChatTranscript from "@/client/components/ChatTranscript.vue";
 import { withoutRenderedToolCalls } from "@/client/lib/active-assistant";
-import { easyModeMessage } from "@/client/lib/easy-mode";
+import { buildTranscriptDisplayEntries } from "@/client/lib/transcript-display";
 import { splitHistoryAndTail } from "@/client/lib/transcript-tail";
 import {
   buildToolStateLookup,
@@ -12,8 +12,8 @@ import {
   toolStatesForMessage,
 } from "@/client/lib/transcript";
 import type { SessionState, UiContentBlock } from "@/shared/types";
+import type { TranscriptDisplayEntry } from "@/client/lib/transcript-display";
 import type { TranscriptMessageView } from "@/client/lib/transcript";
-import type { TranscriptDisplayEntry } from "@/client/components/ChatTranscript.vue";
 
 const TRANSCRIPT_BOTTOM_THRESHOLD = 12;
 const TRANSCRIPT_LOAD_OLDER_THRESHOLD = 80;
@@ -45,7 +45,8 @@ const props = withDefaults(
 
 const transcriptPane = ref<ChatTranscriptHandle | null>(null);
 const isTranscriptPinnedToBottom = ref(true);
-const showAllToolCalls = ref(props.alwaysShowToolCalls);
+const openToolSectionKey = ref<string | null>(null);
+const collapsedToolSectionKey = ref<string | null>(null);
 let transcriptScrollElement: HTMLElement | null = null;
 let transcriptTailObserver: ResizeObserver | null = null;
 let transcriptViewportObserver: ResizeObserver | null = null;
@@ -99,54 +100,6 @@ const rawTranscriptEntries = computed<TranscriptMessageView[]>(() => {
   return entries;
 });
 
-function startsAnyTurn(entry: TranscriptMessageView): boolean {
-  return entry.message.role === "user" || entry.message.role === "custom";
-}
-
-function isDetachedCronTurnStart(entry: TranscriptMessageView): boolean {
-  return entry.message.role === "custom" && Boolean(entry.message.data?.cron);
-}
-
-function startsExpandedTurn(entry: TranscriptMessageView): boolean {
-  return startsAnyTurn(entry) && !isDetachedCronTurnStart(entry);
-}
-
-function latestExpandedTurnRange(entries: TranscriptMessageView[]): {
-  startIndex: number;
-  endIndex: number;
-} {
-  const startIndex = entries.findLastIndex(startsExpandedTurn);
-  if (startIndex < 0) {
-    return { startIndex: entries.length, endIndex: entries.length };
-  }
-
-  const relativeEndIndex = entries.slice(startIndex + 1).findIndex(startsAnyTurn);
-  return {
-    startIndex,
-    endIndex: relativeEndIndex < 0 ? entries.length : startIndex + 1 + relativeEndIndex,
-  };
-}
-
-function collapsedMessage(entry: TranscriptMessageView): TranscriptMessageView | undefined {
-  const message = easyModeMessage(entry.message, toolStateLookup.value.toolStatesByCallId);
-  return message ? { ...entry, message } : undefined;
-}
-
-function hidesToolDetails(
-  original: TranscriptMessageView,
-  collapsed: TranscriptMessageView | undefined,
-): boolean {
-  if (!collapsed) {
-    return true;
-  }
-
-  if (!("blocks" in original.message) || !("blocks" in collapsed.message)) {
-    return false;
-  }
-
-  return original.message.blocks.length !== collapsed.message.blocks.length;
-}
-
 function canShowTimestamp(entry: TranscriptMessageView): boolean {
   const message = entry.message;
   if (message.role === "user") {
@@ -175,42 +128,22 @@ function addTimestampVisibility(entries: TranscriptDisplayEntry[]): TranscriptDi
   });
 }
 
-const transcriptEntries = computed<TranscriptDisplayEntry[]>(() => {
-  const entries = rawTranscriptEntries.value;
-  if (props.alwaysShowToolCalls) {
-    return addTimestampVisibility(
-      entries.map((entry) => ({ kind: "message", entry, showTimestamp: false })),
-    );
-  }
-
-  const latestExpandedTurn = latestExpandedTurnRange(entries);
-  const collapsedByIndex = entries.map((entry, index) =>
-    index >= latestExpandedTurn.startIndex && index < latestExpandedTurn.endIndex
-      ? entry
-      : collapsedMessage(entry),
-  );
-  const latestHiddenIndex = collapsedByIndex.reduce(
-    (latest, collapsed, index) =>
-      (index < latestExpandedTurn.startIndex || index >= latestExpandedTurn.endIndex) &&
-      hidesToolDetails(entries[index] as TranscriptMessageView, collapsed)
-        ? index
-        : latest,
-    -1,
-  );
-
-  const displayEntries: TranscriptDisplayEntry[] = [];
-  entries.forEach((entry, index) => {
-    const visibleEntry = showAllToolCalls.value ? entry : collapsedByIndex[index];
-    if (visibleEntry) {
-      displayEntries.push({ kind: "message", entry: visibleEntry, showTimestamp: false });
-    }
-    if (index === latestHiddenIndex) {
-      displayEntries.push({ kind: "tool-toggle", expanded: showAllToolCalls.value });
-    }
-  });
-
-  return addTimestampVisibility(displayEntries);
-});
+const transcriptDisplay = computed(() =>
+  buildTranscriptDisplayEntries(
+    rawTranscriptEntries.value,
+    toolStateLookup.value.toolStatesByCallId,
+    {
+      alwaysShowToolCalls: props.alwaysShowToolCalls,
+      openToolSectionKey: openToolSectionKey.value,
+      collapsedToolSectionKey: collapsedToolSectionKey.value,
+      showLatestToolToggle: !props.session?.isStreaming,
+    },
+  ),
+);
+const latestExpandedSectionKey = computed(() => transcriptDisplay.value.latestExpandedSectionKey);
+const transcriptEntries = computed<TranscriptDisplayEntry[]>(() =>
+  addTimestampVisibility(transcriptDisplay.value.entries),
+);
 const transcriptSplit = computed(() =>
   splitHistoryAndTail(transcriptEntries.value, TRANSCRIPT_TAIL_COUNT),
 );
@@ -229,7 +162,7 @@ const transcriptTailSignature = computed(() => {
     .map((entry) =>
       entry.kind === "message"
         ? `${entry.entry.message.id}:${entry.entry.message.timestamp}`
-        : `tool-toggle:${entry.expanded}`,
+        : `tool-toggle:${entry.sectionKey}:${entry.expanded}`,
     )
     .join("|");
 });
@@ -537,6 +470,18 @@ async function jumpToLatest(): Promise<void> {
   await scrollToBottom("smooth");
 }
 
+function toggleToolCalls(sectionKey: string): void {
+  if (sectionKey === latestExpandedSectionKey.value) {
+    openToolSectionKey.value = null;
+    collapsedToolSectionKey.value =
+      collapsedToolSectionKey.value === sectionKey ? null : sectionKey;
+    return;
+  }
+
+  collapsedToolSectionKey.value = null;
+  openToolSectionKey.value = openToolSectionKey.value === sectionKey ? null : sectionKey;
+}
+
 onMounted(() => {
   bindTranscriptScrollListener();
   bindTranscriptObservers();
@@ -561,9 +506,20 @@ watch(transcriptPane, () => {
 });
 
 watch(
+  [() => props.session?.id, latestExpandedSectionKey],
+  ([sessionId, sectionKey], [previousSessionId, previousSectionKey]) => {
+    if (sessionId !== previousSessionId || sectionKey !== previousSectionKey) {
+      openToolSectionKey.value = null;
+      collapsedToolSectionKey.value = null;
+    }
+  },
+);
+
+watch(
   [
     () => props.session?.id,
-    () => showAllToolCalls.value,
+    () => openToolSectionKey.value,
+    () => collapsedToolSectionKey.value,
     transcriptTailSignature,
     activeAssistantSignature,
     activeToolsSignature,
@@ -604,6 +560,6 @@ watch(
     :is-pinned-to-bottom="isTranscriptPinnedToBottom"
     @jump-to-latest="jumpToLatest"
     :allow-session-popovers="props.allowSessionPopovers"
-    @toggle-tool-calls="showAllToolCalls = !showAllToolCalls"
+    @toggle-tool-calls="toggleToolCalls"
   />
 </template>

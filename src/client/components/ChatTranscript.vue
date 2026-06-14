@@ -3,11 +3,7 @@ import { ArrowDown } from "@lucide/vue";
 import { Virtualizer } from "virtua/vue";
 import { ref } from "vue";
 import ChatMessage from "@/client/components/ChatMessage.vue";
-import type { TranscriptMessageView } from "@/client/lib/transcript";
-
-export type TranscriptDisplayEntry =
-  | { kind: "message"; entry: TranscriptMessageView; showTimestamp: boolean }
-  | { kind: "tool-toggle"; expanded: boolean };
+import type { TranscriptDisplayEntry } from "@/client/lib/transcript-display";
 
 const props = withDefaults(
   defineProps<{
@@ -25,7 +21,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   jumpToLatest: [];
-  toggleToolCalls: [];
+  toggleToolCalls: [sectionKey: string];
 }>();
 
 type TranscriptHistoryHandle = InstanceType<typeof Virtualizer>;
@@ -38,7 +34,7 @@ const transcriptBottom = ref<HTMLElement | null>(null);
 function entryKey(entry: TranscriptDisplayEntry): string {
   return entry.kind === "message"
     ? `message:${entry.entry.message.id}`
-    : `tool-toggle:${entry.expanded ? "expanded" : "collapsed"}`;
+    : `tool-toggle:${entry.sectionKey}:${entry.expanded ? "expanded" : "collapsed"}`;
 }
 
 function rootElement(): HTMLElement | null {
@@ -85,7 +81,7 @@ defineExpose({
                 type="button"
                 class="transcript__tool-toggle-btn"
                 :aria-pressed="displayEntry.expanded"
-                @click="emit('toggleToolCalls')"
+                @click="emit('toggleToolCalls', displayEntry.sectionKey)"
               >
                 {{ displayEntry.expanded ? "Collapse tool calls" : "Show tool calls" }}
               </button>
@@ -112,7 +108,7 @@ defineExpose({
               type="button"
               class="transcript__tool-toggle-btn"
               :aria-pressed="displayEntry.expanded"
-              @click="emit('toggleToolCalls')"
+              @click="emit('toggleToolCalls', displayEntry.sectionKey)"
             >
               {{ displayEntry.expanded ? "Collapse tool calls" : "Show tool calls" }}
             </button>

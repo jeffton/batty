@@ -104,7 +104,7 @@ export function buildTranscriptDisplayEntries(
     alwaysShowToolCalls?: boolean;
     openToolSectionKey?: string | null;
     collapsedToolSectionKey?: string | null;
-    disableToolToggleSectionKey?: string | null;
+    showLatestToolToggle?: boolean;
   } = {},
 ): TranscriptDisplayResult {
   if (options.alwaysShowToolCalls) {
@@ -121,8 +121,8 @@ export function buildTranscriptDisplayEntries(
   for (const section of sections) {
     const isLatestSection = section.key === latestSectionKey;
     const isOpenSection = section.key === options.openToolSectionKey;
-    const isToggleDisabled = section.key === options.disableToolToggleSectionKey;
-    const isCollapsedSection = !isToggleDisabled && section.key === options.collapsedToolSectionKey;
+    const canToggleSection = !isLatestSection || options.showLatestToolToggle === true;
+    const isCollapsedSection = isLatestSection && section.key === options.collapsedToolSectionKey;
     const isExpanded = (isLatestSection && !isCollapsedSection) || isOpenSection;
     const sectionEntries = entries.slice(section.startIndex, section.endIndex);
     const items = sectionEntries.map((entry) => {
@@ -134,7 +134,7 @@ export function buildTranscriptDisplayEntries(
         hidesDetails: hidesToolDetails(entry, collapsed),
       };
     });
-    const firstHiddenIndex = isToggleDisabled ? -1 : items.findIndex((item) => item.hidesDetails);
+    const firstHiddenIndex = canToggleSection ? items.findIndex((item) => item.hidesDetails) : -1;
     let toggleAfterIndex = -1;
     if (firstHiddenIndex >= 0) {
       toggleAfterIndex = firstHiddenIndex;

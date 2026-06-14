@@ -68,6 +68,7 @@ describe("buildTranscriptDisplayEntries", () => {
         assistantWithTool("assistant-2", "call-2"),
       ],
       toolStates,
+      { showLatestToolToggle: true },
     );
 
     expect(result.entries.map((entry) => entry.kind)).toEqual([
@@ -130,6 +131,7 @@ describe("buildTranscriptDisplayEntries", () => {
         assistantText("assistant-2"),
       ],
       toolStates,
+      { showLatestToolToggle: true },
     );
 
     expect(result.entries.map((entry) => entry.kind)).toEqual([
@@ -157,7 +159,7 @@ describe("buildTranscriptDisplayEntries", () => {
         assistantWithTool("assistant-2", "call-2"),
       ],
       toolStates,
-      { disableToolToggleSectionKey: "turn:user-2" },
+      { showLatestToolToggle: false },
     );
 
     expect(result.entries.map((entry) => entry.kind)).toEqual([
@@ -179,7 +181,7 @@ describe("buildTranscriptDisplayEntries", () => {
         assistantWithTool("assistant-2", "call-2"),
       ],
       toolStates,
-      { collapsedToolSectionKey: "turn:user-2" },
+      { collapsedToolSectionKey: "turn:user-2", showLatestToolToggle: true },
     );
 
     expect(messageBlockCount(result.entries[4])).toBe(1);

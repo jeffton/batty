@@ -136,9 +136,7 @@ const transcriptDisplay = computed(() =>
       alwaysShowToolCalls: props.alwaysShowToolCalls,
       openToolSectionKey: openToolSectionKey.value,
       collapsedToolSectionKey: collapsedToolSectionKey.value,
-      disableToolToggleSectionKey: props.session?.isStreaming
-        ? latestExpandedSectionKey.value
-        : undefined,
+      showLatestToolToggle: !props.session?.isStreaming,
     },
   ),
 );

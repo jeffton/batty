@@ -158,7 +158,7 @@ export function buildTranscriptDisplayEntries(
       const visibleEntry = isExpanded ? entry : collapsed;
       const showToggleHere = !insertedToolToggle && hidesToolDetails(entry, collapsed);
       const toggleBeforeMessage =
-        showToggleHere && shouldPlaceToggleBeforeMessage(entry, collapsed);
+        !isExpanded && showToggleHere && shouldPlaceToggleBeforeMessage(entry, collapsed);
 
       if (toggleBeforeMessage) {
         displayEntries.push(toggleEntry(section, isExpanded));

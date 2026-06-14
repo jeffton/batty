@@ -92,7 +92,7 @@ describe("buildTranscriptDisplayEntries", () => {
     });
   });
 
-  it("puts the toggle where a collapsed tool-call-only message was", () => {
+  it("puts the show toggle where a collapsed tool-call-only message was", () => {
     const result = buildTranscriptDisplayEntries(
       [
         user("user-1"),
@@ -115,6 +115,33 @@ describe("buildTranscriptDisplayEntries", () => {
       kind: "tool-toggle",
       sectionKey: "turn:user-1",
       expanded: false,
+    });
+  });
+
+  it("puts the collapse toggle after latest tool calls before the reply", () => {
+    const result = buildTranscriptDisplayEntries(
+      [
+        user("user-1"),
+        assistantToolOnly("assistant-tools-1", "call-1"),
+        user("user-2"),
+        assistantToolOnly("assistant-tools-2", "call-2"),
+        assistantText("assistant-2"),
+      ],
+      toolStates,
+    );
+
+    expect(result.entries.map((entry) => entry.kind)).toEqual([
+      "message",
+      "tool-toggle",
+      "message",
+      "message",
+      "tool-toggle",
+      "message",
+    ]);
+    expect(result.entries[4]).toMatchObject({
+      kind: "tool-toggle",
+      sectionKey: "turn:user-2",
+      expanded: true,
     });
   });
 

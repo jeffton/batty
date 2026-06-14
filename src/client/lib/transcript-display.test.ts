@@ -92,11 +92,12 @@ describe("buildTranscriptDisplayEntries", () => {
     });
   });
 
-  it("puts the show toggle where a collapsed tool-call-only message was", () => {
+  it("puts the show toggle after collapsed tool-call-only messages before the reply", () => {
     const result = buildTranscriptDisplayEntries(
       [
         user("user-1"),
         assistantToolOnly("assistant-tools-1", "call-1"),
+        assistantToolOnly("assistant-tools-2", "call-2"),
         assistantText("assistant-1"),
         user("user-2"),
         assistantText("assistant-2"),
@@ -124,7 +125,8 @@ describe("buildTranscriptDisplayEntries", () => {
         user("user-1"),
         assistantToolOnly("assistant-tools-1", "call-1"),
         user("user-2"),
-        assistantToolOnly("assistant-tools-2", "call-2"),
+        assistantToolOnly("assistant-tools-2", "call-1"),
+        assistantToolOnly("assistant-tools-3", "call-2"),
         assistantText("assistant-2"),
       ],
       toolStates,
@@ -135,10 +137,11 @@ describe("buildTranscriptDisplayEntries", () => {
       "tool-toggle",
       "message",
       "message",
+      "message",
       "tool-toggle",
       "message",
     ]);
-    expect(result.entries[4]).toMatchObject({
+    expect(result.entries[5]).toMatchObject({
       kind: "tool-toggle",
       sectionKey: "turn:user-2",
       expanded: true,

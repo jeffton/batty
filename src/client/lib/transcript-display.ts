@@ -97,34 +97,6 @@ function toggleEntry(section: TranscriptSection, expanded: boolean): TranscriptD
   };
 }
 
-function shouldPlaceToggleBeforeMessage(
-  original: TranscriptMessageView,
-  collapsed: TranscriptMessageView | undefined,
-): boolean {
-  if (!collapsed) {
-    return true;
-  }
-
-  if (!("blocks" in original.message) || !("blocks" in collapsed.message)) {
-    return false;
-  }
-
-  const originalMessage = original.message;
-  const collapsedMessage = collapsed.message;
-  if (!("blocks" in originalMessage) || !("blocks" in collapsedMessage)) {
-    return false;
-  }
-
-  const firstVisibleIndex = originalMessage.blocks.findIndex((block) =>
-    collapsedMessage.blocks.includes(block),
-  );
-  const firstHiddenIndex = originalMessage.blocks.findIndex(
-    (block) => !collapsedMessage.blocks.includes(block),
-  );
-
-  return firstHiddenIndex >= 0 && (firstVisibleIndex < 0 || firstHiddenIndex <= firstVisibleIndex);
-}
-
 export function buildTranscriptDisplayEntries(
   entries: TranscriptMessageView[],
   toolStatesByCallId: Map<string, ToolDisplayState>,
@@ -150,30 +122,37 @@ export function buildTranscriptDisplayEntries(
     const isOpenSection = section.key === options.openToolSectionKey;
     const isCollapsedSection = section.key === options.collapsedToolSectionKey;
     const isExpanded = (isLatestSection && !isCollapsedSection) || isOpenSection;
-    let insertedToolToggle = false;
-
-    for (let index = section.startIndex; index < section.endIndex; index += 1) {
-      const entry = entries[index] as TranscriptMessageView;
+    const sectionEntries = entries.slice(section.startIndex, section.endIndex);
+    const items = sectionEntries.map((entry) => {
       const collapsed = collapsedMessage(entry, toolStatesByCallId);
-      const visibleEntry = isExpanded ? entry : collapsed;
-      const showToggleHere = !insertedToolToggle && hidesToolDetails(entry, collapsed);
-      const toggleBeforeMessage =
-        !isExpanded && showToggleHere && shouldPlaceToggleBeforeMessage(entry, collapsed);
-
-      if (toggleBeforeMessage) {
-        displayEntries.push(toggleEntry(section, isExpanded));
-        insertedToolToggle = true;
-      }
-
-      if (visibleEntry) {
-        displayEntries.push({ kind: "message", entry: visibleEntry, showTimestamp: false });
-      }
-
-      if (showToggleHere && !toggleBeforeMessage) {
-        displayEntries.push(toggleEntry(section, isExpanded));
-        insertedToolToggle = true;
+      return {
+        entry,
+        collapsed,
+        visibleEntry: isExpanded ? entry : collapsed,
+        hidesDetails: hidesToolDetails(entry, collapsed),
+      };
+    });
+    const firstHiddenIndex = items.findIndex((item) => item.hidesDetails);
+    let toggleAfterIndex = -1;
+    if (firstHiddenIndex >= 0) {
+      toggleAfterIndex = firstHiddenIndex;
+      for (let index = firstHiddenIndex + 1; index < items.length; index += 1) {
+        if (!items[index]!.hidesDetails) {
+          break;
+        }
+        toggleAfterIndex = index;
       }
     }
+
+    items.forEach((item, index) => {
+      if (item.visibleEntry) {
+        displayEntries.push({ kind: "message", entry: item.visibleEntry, showTimestamp: false });
+      }
+
+      if (index === toggleAfterIndex) {
+        displayEntries.push(toggleEntry(section, isExpanded));
+      }
+    });
   }
 
   return {

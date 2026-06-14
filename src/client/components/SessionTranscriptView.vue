@@ -46,6 +46,7 @@ const props = withDefaults(
 const transcriptPane = ref<ChatTranscriptHandle | null>(null);
 const isTranscriptPinnedToBottom = ref(true);
 const openToolSectionKey = ref<string | null>(null);
+const collapsedToolSectionKey = ref<string | null>(null);
 let transcriptScrollElement: HTMLElement | null = null;
 let transcriptTailObserver: ResizeObserver | null = null;
 let transcriptViewportObserver: ResizeObserver | null = null;
@@ -134,6 +135,7 @@ const transcriptDisplay = computed(() =>
     {
       alwaysShowToolCalls: props.alwaysShowToolCalls,
       openToolSectionKey: openToolSectionKey.value,
+      collapsedToolSectionKey: collapsedToolSectionKey.value,
     },
   ),
 );
@@ -468,6 +470,14 @@ async function jumpToLatest(): Promise<void> {
 }
 
 function toggleToolCalls(sectionKey: string): void {
+  if (sectionKey === latestExpandedSectionKey.value) {
+    openToolSectionKey.value = null;
+    collapsedToolSectionKey.value =
+      collapsedToolSectionKey.value === sectionKey ? null : sectionKey;
+    return;
+  }
+
+  collapsedToolSectionKey.value = null;
   openToolSectionKey.value = openToolSectionKey.value === sectionKey ? null : sectionKey;
 }
 
@@ -499,6 +509,7 @@ watch(
   ([sessionId, sectionKey], [previousSessionId, previousSectionKey]) => {
     if (sessionId !== previousSessionId || sectionKey !== previousSectionKey) {
       openToolSectionKey.value = null;
+      collapsedToolSectionKey.value = null;
     }
   },
 );
@@ -507,6 +518,7 @@ watch(
   [
     () => props.session?.id,
     () => openToolSectionKey.value,
+    () => collapsedToolSectionKey.value,
     transcriptTailSignature,
     activeAssistantSignature,
     activeToolsSignature,

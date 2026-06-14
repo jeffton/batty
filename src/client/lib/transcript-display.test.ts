@@ -59,7 +59,7 @@ const toolStates = new Map<string, ToolDisplayState>([
 ]);
 
 describe("buildTranscriptDisplayEntries", () => {
-  it("keeps the latest turn expanded and gives each older hidden turn its own toggle", () => {
+  it("keeps the latest turn expanded and gives every hidden section a toggle", () => {
     const result = buildTranscriptDisplayEntries(
       [
         user("user-1"),
@@ -76,6 +76,7 @@ describe("buildTranscriptDisplayEntries", () => {
       "tool-toggle",
       "message",
       "message",
+      "tool-toggle",
     ]);
     expect(result.entries[2]).toMatchObject({
       kind: "tool-toggle",
@@ -84,6 +85,11 @@ describe("buildTranscriptDisplayEntries", () => {
     });
     expect(result.entries[4]).toMatchObject({ kind: "message" });
     expect(messageBlockCount(result.entries[4])).toBe(2);
+    expect(result.entries[5]).toMatchObject({
+      kind: "tool-toggle",
+      sectionKey: "turn:user-2",
+      expanded: true,
+    });
   });
 
   it("puts the toggle where a collapsed tool-call-only message was", () => {
@@ -108,6 +114,26 @@ describe("buildTranscriptDisplayEntries", () => {
     expect(result.entries[1]).toMatchObject({
       kind: "tool-toggle",
       sectionKey: "turn:user-1",
+      expanded: false,
+    });
+  });
+
+  it("collapses the latest turn when it is selected as collapsed", () => {
+    const result = buildTranscriptDisplayEntries(
+      [
+        user("user-1"),
+        assistantWithTool("assistant-1", "call-1"),
+        user("user-2"),
+        assistantWithTool("assistant-2", "call-2"),
+      ],
+      toolStates,
+      { collapsedToolSectionKey: "turn:user-2" },
+    );
+
+    expect(messageBlockCount(result.entries[4])).toBe(1);
+    expect(result.entries[5]).toMatchObject({
+      kind: "tool-toggle",
+      sectionKey: "turn:user-2",
       expanded: false,
     });
   });

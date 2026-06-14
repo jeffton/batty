@@ -128,7 +128,11 @@ function shouldPlaceToggleBeforeMessage(
 export function buildTranscriptDisplayEntries(
   entries: TranscriptMessageView[],
   toolStatesByCallId: Map<string, ToolDisplayState>,
-  options: { alwaysShowToolCalls?: boolean; openToolSectionKey?: string | null } = {},
+  options: {
+    alwaysShowToolCalls?: boolean;
+    openToolSectionKey?: string | null;
+    collapsedToolSectionKey?: string | null;
+  } = {},
 ): TranscriptDisplayResult {
   if (options.alwaysShowToolCalls) {
     return {
@@ -144,20 +148,20 @@ export function buildTranscriptDisplayEntries(
   for (const section of sections) {
     const isLatestSection = section.key === latestSectionKey;
     const isOpenSection = section.key === options.openToolSectionKey;
-    const isExpanded = isLatestSection || isOpenSection;
+    const isCollapsedSection = section.key === options.collapsedToolSectionKey;
+    const isExpanded = (isLatestSection && !isCollapsedSection) || isOpenSection;
     let insertedToolToggle = false;
 
     for (let index = section.startIndex; index < section.endIndex; index += 1) {
       const entry = entries[index] as TranscriptMessageView;
       const collapsed = collapsedMessage(entry, toolStatesByCallId);
       const visibleEntry = isExpanded ? entry : collapsed;
-      const showToggleHere =
-        !isLatestSection && !insertedToolToggle && hidesToolDetails(entry, collapsed);
+      const showToggleHere = !insertedToolToggle && hidesToolDetails(entry, collapsed);
       const toggleBeforeMessage =
         showToggleHere && shouldPlaceToggleBeforeMessage(entry, collapsed);
 
       if (toggleBeforeMessage) {
-        displayEntries.push(toggleEntry(section, isOpenSection));
+        displayEntries.push(toggleEntry(section, isExpanded));
         insertedToolToggle = true;
       }
 
@@ -166,7 +170,7 @@ export function buildTranscriptDisplayEntries(
       }
 
       if (showToggleHere && !toggleBeforeMessage) {
-        displayEntries.push(toggleEntry(section, isOpenSection));
+        displayEntries.push(toggleEntry(section, isExpanded));
         insertedToolToggle = true;
       }
     }

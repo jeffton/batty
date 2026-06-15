@@ -11,6 +11,17 @@ function user(id: string): TranscriptMessageView {
   return view({ id, role: "user", timestamp: 1, blocks: [{ type: "text", text: id }] });
 }
 
+function detachedCronNotice(id: string): TranscriptMessageView {
+  return view({
+    id,
+    role: "custom",
+    timestamp: 1,
+    customType: "batty-runtime-notice:cron",
+    text: "Cron run completed.",
+    data: { cron: { workspaceId: "roy", sessionPath: "/tmp/cron.jsonl" } },
+  });
+}
+
 function assistantWithTool(id: string, toolCallId: string): TranscriptMessageView {
   return view({
     id,
@@ -102,6 +113,20 @@ describe("buildTranscriptDisplayEntries", () => {
       kind: "tool-toggle",
       sectionKey: "turn:user-2",
       expanded: true,
+    });
+  });
+
+  it("shows a toggle when a detached cron notice is hidden", () => {
+    const result = buildTranscriptDisplayEntries(
+      [detachedCronNotice("cron-1"), assistantText("assistant-1")],
+      toolStates,
+    );
+
+    expect(result.entries.map((entry) => entry.kind)).toEqual(["tool-toggle", "message"]);
+    expect(result.entries[0]).toMatchObject({
+      kind: "tool-toggle",
+      sectionKey: "turn:cron-1",
+      expanded: false,
     });
   });
 

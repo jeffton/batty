@@ -74,8 +74,12 @@ function collapsedMessage(
   return message ? { ...entry, message } : undefined;
 }
 
-function hasToolDetails(entry: TranscriptMessageView): boolean {
+function hasExpandableDetails(entry: TranscriptMessageView): boolean {
   const message = entry.message;
+  if (message.role === "custom" && Boolean(message.data?.cron)) {
+    return true;
+  }
+
   if (message.role === "toolResult" || message.role === "bashExecution") {
     return true;
   }
@@ -83,11 +87,11 @@ function hasToolDetails(entry: TranscriptMessageView): boolean {
   return "blocks" in message && message.blocks.some((block) => block.type === "toolCall");
 }
 
-function hidesToolDetails(
+function hidesExpandableDetails(
   original: TranscriptMessageView,
   collapsed: TranscriptMessageView | undefined,
 ): boolean {
-  if (!hasToolDetails(original)) {
+  if (!hasExpandableDetails(original)) {
     return false;
   }
 
@@ -148,7 +152,7 @@ export function buildTranscriptDisplayEntries(
         entry,
         collapsed,
         visibleEntry: isExpanded ? entry : collapsed,
-        hidesDetails: hidesToolDetails(entry, collapsed),
+        hidesDetails: hidesExpandableDetails(entry, collapsed),
       };
     });
     const firstHiddenIndex = canToggleSection ? items.findIndex((item) => item.hidesDetails) : -1;

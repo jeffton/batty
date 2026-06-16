@@ -294,7 +294,6 @@ onBeforeUnmount(() => {
             <SubagentSessionPopover
               :popover-id="cronNoticePopoverId"
               header-title="Cron run"
-              :title="cronNoticeDetails.prompt"
               :workspace-id="cronNoticeDetails.workspaceId"
               :session-path="cronNoticeDetails.sessionPath"
             />

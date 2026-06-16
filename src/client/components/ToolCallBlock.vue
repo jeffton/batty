@@ -458,7 +458,6 @@ const genericEntries = computed(() => {
       </button>
       <SubagentSessionPopover
         :popover-id="subagentPopoverId!"
-        :title="String(props.arguments.prompt ?? '')"
         :workspace-id="subagentWorkspaceId!"
         :session-path="subagentSessionPath!"
       />

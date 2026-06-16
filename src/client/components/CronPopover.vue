@@ -88,7 +88,6 @@ watch(
           v-if="run.sessionPath"
           :popover-id="runPopoverId(run.runId)"
           header-title="Cron run"
-          :title="run.prompt"
           :workspace-id="run.workspaceId"
           :session-path="run.sessionPath"
         />

@@ -12,7 +12,6 @@ import type { ServerEvent, SessionState } from "@/shared/types";
 const props = withDefaults(
   defineProps<{
     popoverId: string;
-    title: string;
     workspaceId: string;
     sessionPath: string;
     headerTitle?: string;
@@ -193,10 +192,7 @@ onBeforeUnmount(() => {
     @toggle="handlePopoverToggle"
   >
     <div class="subagent-session-popover__header">
-      <div>
-        <div class="subagent-session-popover__title">{{ props.headerTitle }}</div>
-        <div class="subagent-session-popover__subtitle">{{ props.title }}</div>
-      </div>
+      <div class="subagent-session-popover__title">{{ props.headerTitle }}</div>
       <button
         class="subagent-session-popover__close"
         type="button"
@@ -283,13 +279,6 @@ onBeforeUnmount(() => {
   font-size: 1rem;
   font-weight: 700;
   color: var(--color-text-strong);
-}
-
-.subagent-session-popover__subtitle {
-  margin-top: 0.2rem;
-  color: var(--color-text-subtle);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 
 .subagent-session-popover__status-row {

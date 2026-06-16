@@ -1,5 +1,33 @@
+import fs from "node:fs/promises";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { createSubagentTool } from "./pi-service-tools";
+import { createSubagentTool, spillToolOutputToTempFile } from "./pi-service-tools";
+
+describe("spillToolOutputToTempFile", () => {
+  it("stores oversized output in a temp file and returns a truncated tail", async () => {
+    const fullText = Array.from({ length: 2_010 }, (_, index) => `line ${index + 1}`).join("\n");
+
+    const result = await spillToolOutputToTempFile("web-search-output", "tool/call:1", {
+      text: fullText,
+      details: {
+        action: "content",
+        content: fullText,
+        results: [{ title: "Result", content: fullText }],
+      },
+    });
+
+    expect(result.text).toContain("Full output saved to: ");
+    expect(result.text).toContain("Use the read tool on that path if you need more.");
+    expect(result.text).not.toContain("line 1\n");
+    expect(result.text).toContain("line 2010");
+    expect(result.details.truncated).toBe(true);
+    expect(result.details.fullOutputPath).toEqual(expect.stringMatching(/tool-call-1\.txt$/));
+    expect(result.details.content).toBeUndefined();
+    expect(result.details.results).toEqual([{ title: "Result" }]);
+    await expect(fs.readFile(String(result.details.fullOutputPath), "utf8")).resolves.toBe(
+      fullText,
+    );
+  });
+});
 
 describe("createSubagentTool", () => {
   function createContext() {

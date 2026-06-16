@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type {
@@ -30,6 +32,90 @@ type ToolUpdate = {
   content: Array<{ type: "text"; text: string }>;
   details: ToolExecutionDetails;
 };
+
+const TOOL_OUTPUT_MAX_LINES = 2_000;
+const TOOL_OUTPUT_MAX_BYTES = 50 * 1024;
+
+interface SpillableToolOutput {
+  text: string;
+  details: ToolExecutionDetails;
+}
+
+function countLines(text: string): number {
+  if (text.length === 0) {
+    return 0;
+  }
+
+  return text.split("\n").length;
+}
+
+function tailText(text: string, maxLines: number, maxBytes: number): string {
+  const lines = text.split("\n");
+  let tail = lines.length > maxLines ? lines.slice(-maxLines).join("\n") : text;
+  const buffer = Buffer.from(tail, "utf8");
+
+  if (buffer.byteLength > maxBytes) {
+    tail = buffer.subarray(buffer.byteLength - maxBytes).toString("utf8");
+  }
+
+  return tail;
+}
+
+function scrubWebSearchDetails(details: ToolExecutionDetails): ToolExecutionDetails {
+  const scrubbed: ToolExecutionDetails = { ...details };
+
+  if (typeof scrubbed.content === "string") {
+    delete scrubbed.content;
+  }
+
+  if (Array.isArray(scrubbed.results)) {
+    scrubbed.results = scrubbed.results.map((result) => {
+      if (!result || typeof result !== "object" || !Object.hasOwn(result, "content")) {
+        return result;
+      }
+
+      const { content: _content, ...rest } = result as Record<string, unknown>;
+      return rest;
+    });
+  }
+
+  return scrubbed;
+}
+
+export async function spillToolOutputToTempFile(
+  label: string,
+  toolCallId: string,
+  output: SpillableToolOutput,
+): Promise<SpillableToolOutput> {
+  const lineCount = countLines(output.text);
+  const byteCount = Buffer.byteLength(output.text, "utf8");
+  if (lineCount <= TOOL_OUTPUT_MAX_LINES && byteCount <= TOOL_OUTPUT_MAX_BYTES) {
+    return output;
+  }
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), `batty-${label}-`));
+  const filePath = path.join(dir, `${toolCallId.replace(/[^a-zA-Z0-9._-]/g, "-") || "output"}.txt`);
+  await fs.writeFile(filePath, output.text, "utf8");
+
+  const truncatedText = tailText(output.text, TOOL_OUTPUT_MAX_LINES, TOOL_OUTPUT_MAX_BYTES);
+  const message = [
+    `Output exceeded ${TOOL_OUTPUT_MAX_LINES} lines or ${TOOL_OUTPUT_MAX_BYTES} bytes.`,
+    `Showing the last ${countLines(truncatedText)} lines / ${Buffer.byteLength(truncatedText, "utf8")} bytes.`,
+    `Full output saved to: ${filePath}`,
+    "Use the read tool on that path if you need more.",
+  ].join("\n");
+
+  return {
+    text: `${message}\n\n${truncatedText}`,
+    details: {
+      ...scrubWebSearchDetails(output.details),
+      truncated: true,
+      fullOutputPath: filePath,
+      outputLines: lineCount,
+      outputBytes: byteCount,
+    },
+  };
+}
 
 interface DetachedSubagentResult {
   text: string;
@@ -314,9 +400,10 @@ export function createWebSearchTool(config: AppConfig): ToolDefinition<typeof We
       'Use action="search" with query for web search.',
       'Use action="content" with url to extract readable markdown from a specific page.',
       "Set includeContent=true when you need the actual page text for the search results.",
+      "Large outputs are truncated and written to a temp file; use the read tool on the reported path when you need the full content.",
     ],
     parameters: WebSearchToolSchema,
-    execute: async (_toolCallId, params) => {
+    execute: async (toolCallId, params) => {
       const result = await runWebSearch({
         apiKey: config.braveSearchKey ?? "",
         action: params.action,
@@ -327,9 +414,13 @@ export function createWebSearchTool(config: AppConfig): ToolDefinition<typeof We
         country: typeof params.country === "string" ? params.country : undefined,
         freshness: typeof params.freshness === "string" ? params.freshness : undefined,
       });
-      return {
-        content: [{ type: "text", text: result.text }],
+      const output = await spillToolOutputToTempFile("web-search-output", toolCallId, {
+        text: result.text,
         details: result.details,
+      });
+      return {
+        content: [{ type: "text", text: output.text }],
+        details: output.details,
       };
     },
   };

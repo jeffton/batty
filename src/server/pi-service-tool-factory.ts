@@ -17,7 +17,6 @@ export type PiServiceToolFactoryContext = {
     sessionId: string,
     ctx: ExtensionContext,
   ) => { modelId?: string; thinkingLevel: string };
-  runSubagentSerial: <T>(sessionId: string, run: () => Promise<T>) => Promise<T>;
   runDetachedSubagentSession: (request: {
     workspace: WorkspaceInfo;
     parentSessionId: string;
@@ -53,7 +52,6 @@ export function createPiServiceTools(
       workspace,
       config: context.config,
       resolveSubagentDefaults: context.resolveSubagentDefaults,
-      runSubagentSerial: context.runSubagentSerial,
       runDetachedSubagentSession: context.runDetachedSubagentSession,
     }),
     createCronTool({

@@ -64,7 +64,6 @@ interface CommonToolDependencies {
 
 export interface SubagentToolDependencies extends CommonToolDependencies {
   resolveSubagentDefaults: ResolveSubagentDefaults;
-  runSubagentSerial: <T>(sessionId: string, run: () => Promise<T>) => Promise<T>;
   runDetachedSubagentSession: (request: DetachedSubagentRequest) => Promise<DetachedSubagentResult>;
 }
 
@@ -77,7 +76,6 @@ export interface CronToolDependencies {
 export function createSubagentTool({
   workspace,
   resolveSubagentDefaults,
-  runSubagentSerial,
   runDetachedSubagentSession,
 }: SubagentToolDependencies): ToolDefinition<typeof SubagentToolSchema> {
   return {
@@ -118,28 +116,26 @@ export function createSubagentTool({
       }
 
       const includeSessionContext = params.includeSessionContext === true;
-      return runSubagentSerial(sessionId, async () => {
-        const result = await runDetachedSubagentSession({
-          workspace,
-          parentSessionId: sessionId,
-          parentSessionPath: (
-            ctx.sessionManager as { getSessionFile?: () => string | undefined }
-          ).getSessionFile?.(),
-          prompt,
-          modelId,
-          thinkingLevel,
-          includeSessionContext,
-          respondIn: "tool-call",
-          currentToolCallId: toolCallId,
-          signal,
-          onUpdate,
-        });
-        return {
-          content: subagentToolContent(result),
-          details: result.details,
-          isError: result.isError,
-        };
+      const result = await runDetachedSubagentSession({
+        workspace,
+        parentSessionId: sessionId,
+        parentSessionPath: (
+          ctx.sessionManager as { getSessionFile?: () => string | undefined }
+        ).getSessionFile?.(),
+        prompt,
+        modelId,
+        thinkingLevel,
+        includeSessionContext,
+        respondIn: "tool-call",
+        currentToolCallId: toolCallId,
+        signal,
+        onUpdate,
       });
+      return {
+        content: subagentToolContent(result),
+        details: result.details,
+        isError: result.isError,
+      };
     },
   };
 }

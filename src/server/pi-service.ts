@@ -685,7 +685,6 @@ export class PiService {
           config: this.config,
           cronService: this.cronService,
           resolveSubagentDefaults: (sessionId, ctx) => this.resolveSubagentDefaults(sessionId, ctx),
-          runSubagentSerial: (sessionId, run) => this.runSubagentSerial(sessionId, run),
           runDetachedSubagentSession: (request) => this.runDetachedSubagentSession(request),
         },
         workspace,

@@ -25,7 +25,7 @@ const emit = defineEmits<{
 const store = useAppStore();
 const composer = ref<ComposerHandle | null>(null);
 const thinkingOptions = computed(() => resolveThinkingOptions(store.activeSession));
-const promptActionPending = ref(false);
+const pendingIdlePromptSessionIds = new Set<string>();
 const isUnavailable = computed(() => store.connectionState === "offline");
 const selectedWorkspaceLoading = computed(() => {
   const workspaceId = store.selectedWorkspaceId;
@@ -179,14 +179,16 @@ async function sendPrompt(text: string, files: File[]): Promise<void> {
         messageCount: store.activeSession.messages.length,
       }
     : undefined;
-  const gateWhileIdle = !store.activeSession?.isStreaming;
-  if (gateWhileIdle && promptActionPending.value) {
+  const gateSessionId = store.activeSession?.isStreaming
+    ? undefined
+    : store.activeSession?.sessionId;
+  if (gateSessionId && pendingIdlePromptSessionIds.has(gateSessionId)) {
     return;
   }
 
   composer.value?.clear();
-  if (gateWhileIdle) {
-    promptActionPending.value = true;
+  if (gateSessionId) {
+    pendingIdlePromptSessionIds.add(gateSessionId);
   }
   try {
     await store.sendPrompt(text, files);
@@ -196,8 +198,8 @@ async function sendPrompt(text: string, files: File[]): Promise<void> {
     }
     throw error;
   } finally {
-    if (gateWhileIdle) {
-      promptActionPending.value = false;
+    if (gateSessionId) {
+      pendingIdlePromptSessionIds.delete(gateSessionId);
     }
   }
 }
@@ -216,14 +218,16 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
         messageCount: store.activeSession.messages.length,
       }
     : undefined;
-  const gateWhileIdle = !store.activeSession?.isStreaming;
-  if (gateWhileIdle && promptActionPending.value) {
+  const gateSessionId = store.activeSession?.isStreaming
+    ? undefined
+    : store.activeSession?.sessionId;
+  if (gateSessionId && pendingIdlePromptSessionIds.has(gateSessionId)) {
     return;
   }
 
   composer.value?.clear();
-  if (gateWhileIdle) {
-    promptActionPending.value = true;
+  if (gateSessionId) {
+    pendingIdlePromptSessionIds.add(gateSessionId);
   }
   try {
     await store.steerPrompt(text, files);
@@ -233,8 +237,8 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
     }
     throw error;
   } finally {
-    if (gateWhileIdle) {
-      promptActionPending.value = false;
+    if (gateSessionId) {
+      pendingIdlePromptSessionIds.delete(gateSessionId);
     }
   }
 }

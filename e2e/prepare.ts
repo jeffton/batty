@@ -17,7 +17,7 @@ await fs.writeFile(
   `${JSON.stringify(
     {
       authSecret: crypto.randomBytes(32).toString("base64url"),
-      workspacesRoot,
+      workspacesRoots: [workspacesRoot],
       webPushSubject: "https://batty.test",
     },
     null,

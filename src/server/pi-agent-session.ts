@@ -27,6 +27,8 @@ import {
 import type { PiModel, WebSession } from "./pi-service-types";
 import { modelKey } from "./pi-service-types";
 
+const DEFAULT_BATTY_PI_TOOL_NAMES = ["read", "bash", "edit", "write", "grep", "find"];
+
 export interface CreatePiAgentSessionOptions {
   config: AppConfig;
   workspace: WorkspaceInfo;
@@ -105,6 +107,10 @@ export async function createPiAgentSession({
     ...(thinkingLevel ? { thinkingLevel: thinkingLevel as AgentSession["thinkingLevel"] } : {}),
     customTools: customTools as never,
   });
+
+  result.session.setActiveToolsByName([
+    ...new Set([...result.session.getActiveToolNames(), ...DEFAULT_BATTY_PI_TOOL_NAMES]),
+  ]);
 
   if (!persistedPrompt) {
     const restoredContext = sessionManager.buildSessionContext();

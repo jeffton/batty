@@ -42,8 +42,7 @@ test.describe("workspace and session routing", () => {
     await expect(page.locator(".workspace-browser-pane")).toBeVisible();
 
     await page
-      .locator(".workspace-browser-pane__sessions .workspace-browser-pane__item")
-      .first()
+      .locator(".workspace-browser-pane__sessions .workspace-browser-pane__item.is-active")
       .click();
     await expect(page).toHaveURL(sessionUrl);
 

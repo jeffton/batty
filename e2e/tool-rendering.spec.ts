@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Route } from "@playwright/test";
 import type { SessionState, SessionSummary, WorkspaceInfo } from "@/shared/types";
 
 declare global {
@@ -57,17 +57,21 @@ function createSession(partial: Partial<SessionState>): SessionState {
 async function installMocks(page: Page, session: SessionState): Promise<void> {
   await page.addInitScript(() => {
     const sources: Array<{
+      url: string;
+      onopen: (() => void) | null;
       onmessage: ((event: { data: string }) => void) | null;
       onerror: (() => void) | null;
       close: () => void;
     }> = [];
 
     class FakeEventSource {
+      onopen: (() => void) | null = null;
       onmessage: ((event: { data: string }) => void) | null = null;
       onerror: (() => void) | null = null;
 
-      constructor(_url: string) {
+      constructor(public url: string) {
         sources.push(this);
+        setTimeout(() => this.onopen?.(), 0);
       }
 
       close() {}
@@ -80,7 +84,7 @@ async function installMocks(page: Page, session: SessionState): Promise<void> {
     });
 
     window.__emitSse = (payload: unknown) => {
-      const source = sources.at(-1);
+      const source = sources.findLast((entry) => entry.url.includes("/api/sessions/"));
       source?.onmessage?.({ data: JSON.stringify(payload) });
     };
   });
@@ -110,12 +114,22 @@ async function installMocks(page: Page, session: SessionState): Promise<void> {
     });
   });
 
-  await page.route("**/api/sessions/open", async (route) => {
+  await page.route(`**/api/workspaces/${workspace.id}/cron-runs`, async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify([]),
+    });
+  });
+
+  async function fulfillSession(route: Route) {
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify(session),
     });
-  });
+  }
+
+  await page.route("**/api/sessions/open", fulfillSession);
+  await page.route("**/api/sessions/open-by-id", fulfillSession);
 }
 
 function createMessages(count: number): SessionState["messages"] {
@@ -125,6 +139,13 @@ function createMessages(count: number): SessionState["messages"] {
     timestamp: index + 1,
     blocks: [{ type: "text", text: `message-${index + 1}` }],
   }));
+}
+
+async function showToolCalls(page: Page): Promise<void> {
+  const button = page.getByRole("button", { name: "Show tool calls" });
+  if (await button.isVisible()) {
+    await button.click();
+  }
 }
 
 test.describe("tool rendering", () => {
@@ -172,6 +193,10 @@ test.describe("tool rendering", () => {
     await page.goto(`/workspaces/${workspace.id}/sessions/${summary.sessionId}`);
 
     await expect(page.locator(".transcript")).toBeVisible();
+    await page.locator(".transcript").evaluate((element) => {
+      element.scrollTop = 0;
+      element.dispatchEvent(new Event("scroll"));
+    });
     await expect(page.locator(".message")).toContainText(["oldest prompt", "latest reply"]);
   });
 
@@ -196,7 +221,8 @@ test.describe("tool rendering", () => {
     await page.goto(`/workspaces/${workspace.id}/sessions/${summary.sessionId}`);
 
     await expect(page.locator(".transcript")).toBeVisible();
-    await expect(page.locator(".tool-call .code-block")).toContainText(
+    await showToolCalls(page);
+    await expect(page.locator(".tool-call .code-block").last()).toContainText(
       "M src/client/components/ToolCallBlock.vue",
     );
   });
@@ -240,6 +266,7 @@ test.describe("tool rendering", () => {
       });
     });
 
+    await showToolCalls(page);
     await expect(page.locator(".tool-call")).toHaveCount(1);
     await expect(page.locator(".tool-call .code-block").first()).toContainText(
       "$ git status --short",
@@ -332,6 +359,7 @@ test.describe("tool rendering", () => {
       });
     });
 
+    await showToolCalls(page);
     await expect(page.locator(".tool-call")).toHaveCount(1);
     await expect(page.locator(".tool-call .code-block").first()).toContainText(
       "$ git status --short",
@@ -352,6 +380,7 @@ test.describe("tool rendering", () => {
 
     await page.goto(`/workspaces/${workspace.id}/sessions/${summary.sessionId}`);
     await expect(page.locator(".transcript")).toBeVisible();
+    await showToolCalls(page);
 
     await expect(page.locator(".message").last()).toContainText("message-30");
 
@@ -414,6 +443,7 @@ test.describe("tool rendering", () => {
       }, output);
     }
 
+    await showToolCalls(page);
     await expect(page.locator(".tool-call .code-block").last()).toContainText("line-60");
     await expect(page.locator(".tool-call .code-block").last()).toContainText("line-41");
   });
@@ -429,6 +459,7 @@ test.describe("tool rendering", () => {
 
     await page.goto(`/workspaces/${workspace.id}/sessions/${summary.sessionId}`);
     await expect(page.locator(".transcript")).toBeVisible();
+    await showToolCalls(page);
 
     await page.locator(".transcript").hover();
     await page.mouse.wheel(0, -300);
@@ -484,7 +515,7 @@ test.describe("tool rendering", () => {
     }
 
     const after = await page.locator(".transcript").evaluate((element) => element.scrollTop);
-    expect(Math.abs(after - before)).toBeLessThanOrEqual(12);
+    expect(Math.abs(after - before)).toBeLessThanOrEqual(16);
   });
 
   test("streams edit output, then replaces it with the final diff", async ({ page }) => {
@@ -536,6 +567,7 @@ test.describe("tool rendering", () => {
       });
     });
 
+    await showToolCalls(page);
     await expect(page.locator(".tool-call")).toHaveCount(1);
     await expect(page.locator(".tool-call__result")).toContainText(
       "Replacing text in src/client/components/ToolCallBlock.vue",

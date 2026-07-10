@@ -1,5 +1,7 @@
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { getSessionMessages, openSessionById, setSessionModel } from "@/client/lib/api";
+import { readCachedSession } from "@/client/lib/cache";
 import { useAppStore } from "@/client/stores/app";
 import type { SessionState, SessionSummary } from "@/shared/types";
 
@@ -25,6 +27,8 @@ vi.mock("@/client/lib/api", () => ({
   listWorkspaces: vi.fn(async () => []),
   logout: vi.fn(),
   openSession: vi.fn(),
+  openSessionById: vi.fn(),
+  removeQueuedPrompt: vi.fn(),
   sendPrompt: vi.fn(),
   setBattyAgentsFile: vi.fn(),
   setBraveSearchApiKey: vi.fn(),
@@ -69,6 +73,14 @@ class MockEventSource {
   close(): void {
     this.closed = true;
   }
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
 }
 
 function makeSession(sessionId: string, overrides: Partial<SessionState> = {}): SessionState {
@@ -157,6 +169,100 @@ describe("app store session streams", () => {
     expect(store.activeSession?.sessionId).toBe(session.sessionId);
     expect(store.activeSession?.isStreaming).toBe(true);
     expect(store.activeSession?.pendingMessageCount).toBe(2);
+  });
+
+  it("does not roll session state back when the current stream reconnects", () => {
+    const store = useAppStore();
+    const session = makeSession("session-a", { isStreaming: true, pendingMessageCount: 2 });
+    store.activeSession = session;
+    store.openStream(session);
+
+    MockEventSource.instances[0]?.onerror?.(new Event("error"));
+
+    expect(store.activeSession).toEqual(session);
+    expect(readCachedSession).not.toHaveBeenCalled();
+    expect(store.connectionState).toBe("connecting");
+  });
+
+  it("does not select a resumed session when its commit guard is stale", async () => {
+    const store = useAppStore();
+    const sessionA = makeSession("session-a");
+    const sessionB = makeSession("session-b");
+    vi.mocked(openSessionById).mockResolvedValue(sessionA);
+    store.activeSession = sessionB;
+
+    await store.resumeSessionById("batty", "session-a", { shouldSelect: () => false });
+
+    expect(store.activeSession).toEqual(sessionB);
+    expect(MockEventSource.instances).toHaveLength(0);
+  });
+
+  it("preserves live state while applying a model response", async () => {
+    const response = deferred<SessionState>();
+    vi.mocked(setSessionModel).mockReturnValue(response.promise);
+    const live = { id: "live", role: "assistant", timestamp: 3, blocks: [] } as never;
+    const store = useAppStore();
+    store.activeSession = makeSession("session-a", { model: "old-model" });
+
+    const update = store.setModel("new-model");
+    store.activeSession = { ...store.activeSession, messages: [live], isStreaming: true };
+    response.resolve(makeSession("session-a", { model: "new-model", modelLabel: "New model" }));
+    await update;
+
+    expect(store.activeSession.model).toBe("new-model");
+    expect(store.activeSession.messages).toEqual([live]);
+    expect(store.activeSession.isStreaming).toBe(true);
+  });
+
+  it("ignores an older model response after a newer selection", async () => {
+    const first = deferred<SessionState>();
+    const second = deferred<SessionState>();
+    vi.mocked(setSessionModel)
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const store = useAppStore();
+    store.activeSession = makeSession("session-a", { model: "old-model" });
+
+    const firstUpdate = store.setModel("first-model");
+    const secondUpdate = store.setModel("second-model");
+    first.resolve(makeSession("session-a", { model: "first-model" }));
+    await firstUpdate;
+    second.resolve(makeSession("session-a", { model: "second-model" }));
+    await secondUpdate;
+
+    expect(setSessionModel).toHaveBeenNthCalledWith(1, "web-session-a", "first-model");
+    expect(setSessionModel).toHaveBeenNthCalledWith(2, "web-session-a", "second-model");
+    expect(store.activeSession.model).toBe("second-model");
+  });
+
+  it("merges older messages into current live session state", async () => {
+    const page = deferred<{
+      messages: SessionState["messages"];
+      totalMessageCount: number;
+      hasMoreMessages: boolean;
+    }>();
+    vi.mocked(getSessionMessages).mockReturnValue(page.promise);
+    const recent = { id: "recent", role: "user", timestamp: 2, blocks: [] } as never;
+    const live = { id: "live", role: "assistant", timestamp: 3, blocks: [] } as never;
+    const older = { id: "older", role: "user", timestamp: 1, blocks: [] } as never;
+    const store = useAppStore();
+    store.activeSession = makeSession("session-a", {
+      messages: [recent],
+      totalMessageCount: 2,
+      hasMoreMessages: true,
+    });
+
+    const loading = store.loadOlderMessages();
+    store.activeSession = { ...store.activeSession, messages: [recent, live], isStreaming: true };
+    page.resolve({ messages: [older], totalMessageCount: 3, hasMoreMessages: false });
+    await loading;
+
+    expect(store.activeSession.messages.map((message) => message.id)).toEqual([
+      "older",
+      "recent",
+      "live",
+    ]);
+    expect(store.activeSession.isStreaming).toBe(true);
   });
 
   it("marks one workspace as the assistant", async () => {

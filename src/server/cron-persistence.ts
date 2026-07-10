@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import lockfile from "proper-lockfile";
 import type { CreateCronJobInput, CronJob, CronJobState, UpdateCronJobInput } from "@/shared/types";
 import type { AppConfig } from "./config";
 import { createHttpError, normalizeNonEmptyString } from "./cron-http";
@@ -152,8 +153,7 @@ export class CronStore {
   }
 
   async readStoredJobs(): Promise<StoredCronJob[]> {
-    const persisted = await this.loadStore();
-    return persisted.jobs;
+    return this.withStoreLock(async () => (await this.loadStoreUnlocked()).jobs);
   }
 
   async createJob(input: CreateCronJobInput): Promise<CronJob> {
@@ -174,78 +174,86 @@ export class CronStore {
       state: {},
     };
 
-    const jobs = await this.readStoredJobs();
-    jobs.push(job);
-    await this.writeStore(jobs);
-    return toCronJob(job);
+    return this.withStoreLock(async () => {
+      const jobs = (await this.loadStoreUnlocked()).jobs;
+      jobs.push(job);
+      await this.writeStoreUnlocked(jobs);
+      return toCronJob(job);
+    });
   }
 
   async updateJob(jobId: string, patch: UpdateCronJobInput): Promise<CronJob> {
-    const jobs = await this.readStoredJobs();
-    const index = jobs.findIndex((job) => job.id === jobId);
-    if (index < 0) {
-      throw createHttpError(404, `Unknown cron job: ${jobId}`);
-    }
+    return this.withStoreLock(async () => {
+      const jobs = (await this.loadStoreUnlocked()).jobs;
+      const index = jobs.findIndex((job) => job.id === jobId);
+      if (index < 0) {
+        throw createHttpError(404, `Unknown cron job: ${jobId}`);
+      }
 
-    const current = jobs[index]!;
-    const workspaceId =
-      typeof patch.workspaceId === "string"
-        ? normalizeNonEmptyString(patch.workspaceId, "Workspace")
-        : current.workspaceId;
-    await this.requireWorkspace(workspaceId);
+      const current = jobs[index]!;
+      const workspaceId =
+        typeof patch.workspaceId === "string"
+          ? normalizeNonEmptyString(patch.workspaceId, "Workspace")
+          : current.workspaceId;
+      await this.requireWorkspace(workspaceId);
 
-    const updatedAt = Date.now();
-    const next: StoredCronJob = {
-      ...current,
-      workspaceId,
-      prompt:
-        patch.prompt == null ? current.prompt : normalizeNonEmptyString(patch.prompt, "Prompt"),
-      model: patch.model == null ? current.model : normalizeNonEmptyString(patch.model, "Model"),
-      thinkingLevel:
-        patch.thinkingLevel == null
-          ? current.thinkingLevel
-          : normalizeThinkingLevel(patch.thinkingLevel),
-      session: patch.session == null ? current.session : normalizeSession(patch.session),
-      updatedAt,
-      schedule: patch.schedule ? normalizeSchedule(patch.schedule, updatedAt) : current.schedule,
-    };
+      const updatedAt = Date.now();
+      const next: StoredCronJob = {
+        ...current,
+        workspaceId,
+        prompt:
+          patch.prompt == null ? current.prompt : normalizeNonEmptyString(patch.prompt, "Prompt"),
+        model: patch.model == null ? current.model : normalizeNonEmptyString(patch.model, "Model"),
+        thinkingLevel:
+          patch.thinkingLevel == null
+            ? current.thinkingLevel
+            : normalizeThinkingLevel(patch.thinkingLevel),
+        session: patch.session == null ? current.session : normalizeSession(patch.session),
+        updatedAt,
+        schedule: patch.schedule ? normalizeSchedule(patch.schedule, updatedAt) : current.schedule,
+      };
 
-    jobs[index] = next;
-    await this.writeStore(jobs);
-    return toCronJob(next);
+      jobs[index] = next;
+      await this.writeStoreUnlocked(jobs);
+      return toCronJob(next);
+    });
   }
 
   async deleteJob(jobId: string): Promise<CronJob> {
-    const jobs = await this.readStoredJobs();
-    const job = jobs.find((candidate) => candidate.id === jobId);
-    if (!job) {
-      throw createHttpError(404, `Unknown cron job: ${jobId}`);
-    }
+    return this.withStoreLock(async () => {
+      const jobs = (await this.loadStoreUnlocked()).jobs;
+      const job = jobs.find((candidate) => candidate.id === jobId);
+      if (!job) {
+        throw createHttpError(404, `Unknown cron job: ${jobId}`);
+      }
 
-    await this.writeStore(jobs.filter((candidate) => candidate.id !== jobId));
-    return toCronJob(job);
+      await this.writeStoreUnlocked(jobs.filter((candidate) => candidate.id !== jobId));
+      return toCronJob(job);
+    });
   }
 
   async setJobState(jobId: string, state: Partial<CronJobState>): Promise<CronJob | undefined> {
-    const jobs = await this.readStoredJobs();
-    const index = jobs.findIndex((job) => job.id === jobId);
-    if (index < 0) {
-      return undefined;
-    }
+    return this.withStoreLock(async () => {
+      const jobs = (await this.loadStoreUnlocked()).jobs;
+      const index = jobs.findIndex((job) => job.id === jobId);
+      if (index < 0) {
+        return undefined;
+      }
 
-    const current = jobs[index]!;
-    const next: StoredCronJob = {
-      ...current,
-      updatedAt: Date.now(),
-      state: {
-        ...current.state,
-        ...state,
-      },
-    };
+      const current = jobs[index]!;
+      const next: StoredCronJob = {
+        ...current,
+        updatedAt: Date.now(),
+        state: {
+          ...current.state,
+          ...state,
+        },
+      };
 
-    jobs[index] = next;
-    await this.writeStore(jobs);
-    return toCronJob(next);
+      jobs[index] = next;
+      await this.writeStoreUnlocked(jobs);
+      return toCronJob(next);
+    });
   }
 
   private async requireWorkspace(workspaceId: string): Promise<void> {
@@ -255,7 +263,7 @@ export class CronStore {
     }
   }
 
-  private async loadStore(): Promise<PersistedCronStore> {
+  private async loadStoreUnlocked(): Promise<PersistedCronStore> {
     const persisted = await this.readStoreFile();
     switch (persisted.version) {
       case CRON_STORE_VERSION:
@@ -265,7 +273,7 @@ export class CronStore {
         };
       case 1: {
         const jobs = persisted.jobs.map(migrateStoredJob);
-        await this.writeStore(jobs);
+        await this.writeStoreUnlocked(jobs);
         return {
           version: CRON_STORE_VERSION,
           jobs,
@@ -292,13 +300,26 @@ export class CronStore {
     }
   }
 
-  private async writeStore(jobs: StoredCronJob[]): Promise<void> {
-    await fs.mkdir(path.dirname(this.filePath), { recursive: true });
+  private async withStoreLock<T>(operation: () => Promise<T>): Promise<T> {
+    const cronDir = path.dirname(this.filePath);
+    await fs.mkdir(cronDir, { recursive: true });
+    const release = await lockfile.lock(cronDir, {
+      realpath: false,
+      retries: { retries: 20, factor: 1.2, minTimeout: 10, maxTimeout: 100 },
+    });
+    try {
+      return await operation();
+    } finally {
+      await release();
+    }
+  }
+
+  private async writeStoreUnlocked(jobs: StoredCronJob[]): Promise<void> {
     const payload: PersistedCronStore = {
       version: CRON_STORE_VERSION,
       jobs,
     };
-    const tempPath = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
+    const tempPath = `${this.filePath}.${process.pid}.${randomUUID()}.tmp`;
     await fs.writeFile(tempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
     await fs.rename(tempPath, this.filePath);
   }

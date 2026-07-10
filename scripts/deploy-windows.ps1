@@ -72,7 +72,7 @@ if (Test-Path $optionsPath) {
   $existingOptions = JsonObjectToHashtable (Get-Content $optionsPath -Raw | ConvertFrom-Json)
 }
 $nextOptions = @{
-  workspacesRoot = $WorkspacesRoot
+  workspacesRoots = @($WorkspacesRoot)
   webPushSubject = $PublicOrigin
   baseUrl = $BaseUrl
 }
@@ -82,7 +82,7 @@ foreach ($entry in $existingOptions.GetEnumerator()) {
   }
 }
 $orderedOptions = [ordered]@{}
-foreach ($key in @("authSecret", "workspacesRoot", "webPushSubject", "cronDailySessionStartTime", "braveSearchKey", "pinnedWorkspaceIds", "assistantWorkspaceId", "baseUrl")) {
+foreach ($key in @("authSecret", "workspacesRoots", "webPushSubject", "cronDailySessionStartTime", "braveSearchKey", "pinnedWorkspaceIds", "assistantWorkspaceId", "baseUrl")) {
   if ($nextOptions.ContainsKey($key) -and $null -ne $nextOptions[$key]) {
     $orderedOptions[$key] = $nextOptions[$key]
   }

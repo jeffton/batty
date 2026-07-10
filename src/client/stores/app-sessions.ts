@@ -27,6 +27,18 @@ import type { ServerEvent, SessionState } from "@/shared/types";
 import { closeEventSource, type AppActionContext } from "./app-state";
 
 let eventSource: EventSource | undefined;
+let modelUpdateVersion = 0;
+let thinkingLevelUpdateVersion = 0;
+let sessionConfigurationUpdateQueue = Promise.resolve();
+
+async function runSessionConfigurationUpdate<T>(update: () => Promise<T>): Promise<T> {
+  const result = sessionConfigurationUpdateQueue.then(update, update);
+  sessionConfigurationUpdateQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
 
 function prependUniqueMessages(
   existing: SessionState["messages"],
@@ -83,43 +95,38 @@ export const sessionActions = {
     this: AppActionContext,
     workspaceId: string,
     sessionPath: string,
+    options: { shouldSelect?: () => boolean } = {},
   ): Promise<SessionState> {
-    return this.resumeOpenedSession(() => openSession(workspaceId, sessionPath));
+    return this.resumeOpenedSession(() => openSession(workspaceId, sessionPath), options);
   },
 
   async resumeSessionById(
     this: AppActionContext,
     workspaceId: string,
     sessionId: string,
+    options: { shouldSelect?: () => boolean } = {},
   ): Promise<SessionState> {
-    return this.resumeOpenedSession(() => openSessionById(workspaceId, sessionId));
+    return this.resumeOpenedSession(() => openSessionById(workspaceId, sessionId), options);
   },
 
   async resumeOpenedSession(
     this: AppActionContext,
     opener: () => Promise<SessionState>,
+    options: { shouldSelect?: () => boolean } = {},
   ): Promise<SessionState> {
-    try {
-      const openedSession = normalizeSessionState(await opener());
-      if (!openedSession) {
-        throw new Error("Failed to open session");
-      }
-      const cached = await readCachedSession(openedSession.sessionId);
-      const session = mergeSessionState(openedSession, cached);
-      if (!session) {
-        throw new Error("Failed to open session");
-      }
-      await this.selectSession(session);
-      return session;
-    } catch (error) {
-      const cached = this.activeSession?.sessionId
-        ? await readCachedSession(this.activeSession.sessionId)
-        : undefined;
-      if (cached) {
-        this.activeSession = cached;
-      }
-      throw error;
+    const openedSession = normalizeSessionState(await opener());
+    if (!openedSession) {
+      throw new Error("Failed to open session");
     }
+    const cached = await readCachedSession(openedSession.sessionId);
+    const session = mergeSessionState(openedSession, cached);
+    if (!session) {
+      throw new Error("Failed to open session");
+    }
+    if (options.shouldSelect?.() !== false) {
+      await this.selectSession(session);
+    }
+    return session;
   },
 
   async selectSession(
@@ -132,12 +139,12 @@ export const sessionActions = {
     this.activeSession = session;
     this.selectedWorkspaceId = session.workspaceId;
     this.updateSessionSummary(session);
-    await writeCachedSession(session);
     if (openStream) {
       this.openStream(session);
     } else {
       this.closeStream();
     }
+    await writeCachedSession(session);
   },
 
   clearActiveSession(this: AppActionContext): void {
@@ -196,29 +203,26 @@ export const sessionActions = {
       }
       this.connectionState = "online";
     };
-    source.onerror = async () => {
+    source.onerror = () => {
       if (eventSource !== source) {
         return;
       }
 
       this.connectionState = navigator.onLine ? "connecting" : "offline";
-      if (this.activeSession?.sessionId === session.sessionId) {
-        const cached = await readCachedSession(session.sessionId);
-        if (cached) {
-          this.activeSession = cached;
-        }
-      }
     };
   },
 
   async refreshActiveSession(this: AppActionContext): Promise<void> {
-    if (!this.activeSession) {
+    const requestedSession = this.activeSession;
+    if (!requestedSession) {
       return;
     }
-    const session = mergeSessionState(
-      normalizeSessionState(await getSession(this.activeSession.id)),
-      this.activeSession,
-    );
+    const response = normalizeSessionState(await getSession(requestedSession.id));
+    const currentSession = this.activeSession;
+    if (!currentSession || currentSession.sessionId !== requestedSession.sessionId) {
+      return;
+    }
+    const session = mergeSessionState(response, currentSession);
     if (!session) {
       throw new Error("Failed to refresh session");
     }
@@ -245,11 +249,26 @@ export const sessionActions = {
         ...(before ? { before } : {}),
         limit: RECENT_SESSION_MESSAGE_WINDOW,
       });
+      const currentSession = this.activeSession;
+      if (!currentSession || currentSession.sessionId !== session.sessionId) {
+        return;
+      }
+      if (currentSession.messages[0]?.id !== session.messages[0]?.id) {
+        return;
+      }
+      const paginationMetadataChanged =
+        currentSession.totalMessageCount !== session.totalMessageCount ||
+        currentSession.hasMoreMessages !== session.hasMoreMessages ||
+        currentSession.messages[0]?.id !== session.messages[0]?.id;
       const nextSession = normalizeSessionState({
-        ...session,
-        messages: prependUniqueMessages(session.messages, page.messages),
-        totalMessageCount: page.totalMessageCount,
-        hasMoreMessages: page.hasMoreMessages,
+        ...currentSession,
+        messages: prependUniqueMessages(currentSession.messages, page.messages),
+        totalMessageCount: paginationMetadataChanged
+          ? Math.max(currentSession.totalMessageCount, page.totalMessageCount)
+          : page.totalMessageCount,
+        hasMoreMessages: paginationMetadataChanged
+          ? currentSession.hasMoreMessages
+          : page.hasMoreMessages,
       });
       if (!nextSession) {
         throw new Error("Failed to load older messages");
@@ -297,16 +316,21 @@ export const sessionActions = {
     kind: "steer" | "followUp",
     index: number,
   ): Promise<void> {
-    if (!this.activeSession) {
+    const requestedSession = this.activeSession;
+    if (!requestedSession) {
       return;
     }
     const session = normalizeSessionState(
-      await removeQueuedPromptRequest(this.activeSession.id, kind, index),
+      await removeQueuedPromptRequest(requestedSession.id, kind, index),
     );
+    const currentSession = this.activeSession;
+    if (!currentSession || currentSession.sessionId !== requestedSession.sessionId) {
+      return;
+    }
     if (!session) {
       throw new Error("Failed to remove queued prompt");
     }
-    const merged = mergeSessionState(session, this.activeSession);
+    const merged = mergeSessionState(session, currentSession);
     if (!merged) {
       throw new Error("Failed to remove queued prompt");
     }
@@ -316,38 +340,81 @@ export const sessionActions = {
   },
 
   async setModel(this: AppActionContext, modelId: string): Promise<void> {
-    if (!this.activeSession) {
-      return;
-    }
-    const session = normalizeSessionState(await setSessionModel(this.activeSession.id, modelId));
-    if (!session) {
-      throw new Error("Failed to update model");
-    }
-    this.activeSession = session;
-    this.updateSessionSummary(session);
-    await writeCachedSession(session);
-  },
-
-  async setThinkingLevel(this: AppActionContext, thinkingLevel: string): Promise<void> {
-    if (!this.activeSession) {
+    const requestVersion = ++modelUpdateVersion;
+    const requestedSession = this.activeSession;
+    if (!requestedSession) {
       return;
     }
     const session = normalizeSessionState(
-      await setSessionThinkingLevel(this.activeSession.id, thinkingLevel),
+      await runSessionConfigurationUpdate(() => setSessionModel(requestedSession.id, modelId)),
     );
+    if (
+      requestVersion !== modelUpdateVersion ||
+      this.activeSession?.sessionId !== requestedSession.sessionId
+    ) {
+      return;
+    }
+    if (!session) {
+      throw new Error("Failed to update model");
+    }
+    const currentSession = this.activeSession;
+    const merged = normalizeSessionState({
+      ...currentSession,
+      model: session.model,
+      modelLabel: session.modelLabel,
+      thinkingLevel: session.thinkingLevel,
+      availableThinkingLevels: session.availableThinkingLevels,
+    });
+    if (!merged) {
+      throw new Error("Failed to merge updated model");
+    }
+    this.activeSession = merged;
+    this.updateSessionSummary(merged);
+    await writeCachedSession(merged);
+  },
+
+  async setThinkingLevel(this: AppActionContext, thinkingLevel: string): Promise<void> {
+    const requestVersion = ++thinkingLevelUpdateVersion;
+    const requestedSession = this.activeSession;
+    if (!requestedSession) {
+      return;
+    }
+    const session = normalizeSessionState(
+      await runSessionConfigurationUpdate(() =>
+        setSessionThinkingLevel(requestedSession.id, thinkingLevel),
+      ),
+    );
+    if (
+      requestVersion !== thinkingLevelUpdateVersion ||
+      this.activeSession?.sessionId !== requestedSession.sessionId
+    ) {
+      return;
+    }
     if (!session) {
       throw new Error("Failed to update thinking level");
     }
-    this.activeSession = session;
-    this.updateSessionSummary(session);
-    await writeCachedSession(session);
+    const currentSession = this.activeSession;
+    const merged = normalizeSessionState({
+      ...currentSession,
+      thinkingLevel: session.thinkingLevel,
+      availableThinkingLevels: session.availableThinkingLevels,
+    });
+    if (!merged) {
+      throw new Error("Failed to merge updated thinking level");
+    }
+    this.activeSession = merged;
+    this.updateSessionSummary(merged);
+    await writeCachedSession(merged);
   },
 
   async stopActiveSession(this: AppActionContext): Promise<void> {
-    if (!this.activeSession) {
+    const requestedSession = this.activeSession;
+    if (!requestedSession) {
       return;
     }
-    await abortSession(this.activeSession.id);
-    await this.refreshActiveSession();
+    await abortSession(requestedSession.id);
+    if (this.activeSession?.sessionId === requestedSession.sessionId) {
+      await this.refreshActiveSession();
+    }
   },
 };

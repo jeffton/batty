@@ -133,4 +133,35 @@ describe("cron store", () => {
       includePreviousContext: true,
     });
   });
+
+  it("preserves concurrent mutations from separate stores", async () => {
+    const config = await createConfig();
+    await fs.mkdir(path.join(config.workspacesRoots[0]!, "alpha"));
+    const stores = Array.from({ length: 10 }, () => new CronStore(config));
+
+    const created = await Promise.all(
+      stores.map((store, index) =>
+        store.createJob({
+          workspaceId: "alpha",
+          prompt: `Job ${index}`,
+          model: "openai/gpt-5",
+          thinkingLevel: "medium",
+          schedule: { kind: "every", every: "1h" },
+        }),
+      ),
+    );
+
+    const jobs = await new CronStore(config).listJobs();
+    expect(new Set(jobs.map((job) => job.id))).toEqual(new Set(created.map((job) => job.id)));
+
+    const jobId = created[0]!.id;
+    await Promise.all([
+      new CronStore(config).updateJob(jobId, { prompt: "Updated prompt" }),
+      new CronStore(config).setJobState(jobId, { lastStatus: "ok" }),
+    ]);
+
+    const updated = (await new CronStore(config).listJobs()).find((job) => job.id === jobId);
+    expect(updated?.prompt).toBe("Updated prompt");
+    expect(updated?.state.lastStatus).toBe("ok");
+  });
 });

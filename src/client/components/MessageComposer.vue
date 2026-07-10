@@ -39,6 +39,7 @@ const text = ref("");
 const fileInput = ref<HTMLInputElement>();
 const textarea = ref<HTMLTextAreaElement>();
 const files = ref<File[]>([]);
+const draftFilesBySessionKey = new Map<string, File[]>();
 const dragging = ref(false);
 const maxInputHeight = ref(240);
 const inputFocused = ref(false);
@@ -117,11 +118,17 @@ function addFiles(next: FileList | File[]): void {
   }
 
   files.value = [...files.value, ...Array.from(next)];
+  if (props.sessionKey) {
+    draftFilesBySessionKey.set(props.sessionKey, [...files.value]);
+  }
   resetFileInput();
 }
 
 function removeFile(index: number): void {
   files.value.splice(index, 1);
+  if (props.sessionKey) {
+    draftFilesBySessionKey.set(props.sessionKey, [...files.value]);
+  }
 }
 
 function removeQueuedPrompt(prompt: QueuedPrompt): void {
@@ -184,7 +191,7 @@ function updateMaxInputHeight(): void {
 function loadDraft(sessionKey?: string): void {
   hydratingDraft = true;
   text.value = sessionKey ? readSessionDraft(sessionKey) : "";
-  files.value = [];
+  files.value = sessionKey ? [...(draftFilesBySessionKey.get(sessionKey) ?? [])] : [];
   resetFileInput();
   void nextTick(() => {
     hydratingDraft = false;
@@ -198,6 +205,7 @@ function clear(): void {
   queuedDraftText = "";
   if (props.sessionKey) {
     clearSessionDraft(props.sessionKey);
+    draftFilesBySessionKey.delete(props.sessionKey);
   }
   text.value = "";
   files.value = [];
@@ -205,17 +213,24 @@ function clear(): void {
   void nextTick(scheduleTextareaHeightSync);
 }
 
-function restore(textValue: string, nextFiles: File[]): void {
+function restore(sessionKey: string, textValue: string, nextFiles: File[]): void {
+  if (props.sessionKey === sessionKey && (text.value.length > 0 || files.value.length > 0)) {
+    return;
+  }
+
+  writeSessionDraft(sessionKey, textValue);
+  draftFilesBySessionKey.set(sessionKey, [...nextFiles]);
+  if (props.sessionKey !== sessionKey) {
+    return;
+  }
+
   clearDraftSaveTimeout();
   queuedDraftSessionKey = undefined;
   queuedDraftText = "";
   text.value = textValue;
   files.value = [...nextFiles];
   resetFileInput();
-  if (props.sessionKey) {
-    writeSessionDraft(props.sessionKey, textValue);
-    lastDraftSavedAt = Date.now();
-  }
+  lastDraftSavedAt = Date.now();
   void nextTick(scheduleTextareaHeightSync);
 }
 

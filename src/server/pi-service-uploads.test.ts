@@ -1,5 +1,5 @@
 import { writeFileSync } from "node:fs";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vite-plus/test";
@@ -33,6 +33,23 @@ describe("prompt uploads", () => {
     expect(prepared.text).toContain("/batty/api/uploads/session-1/");
     expect(prepared.text).toContain("/data.json");
     expect(prepared.text).not.toContain('{"big":"json"}');
+  });
+
+  it("stores colliding upload names independently", async () => {
+    const uploadsDir = await createTempDir("batty-upload-collisions-");
+    const prepared = await preparePromptFiles(uploadsDir, "session-1", [
+      { filename: "report?.txt", data: Buffer.from("first") },
+      { filename: "report*.txt", data: Buffer.from("second") },
+    ]);
+
+    const [batchId] = await readdir(path.join(uploadsDir, "session-1"));
+    const batchDir = path.join(uploadsDir, "session-1", batchId!);
+    const storedNames = (await readdir(batchDir)).sort();
+    expect(storedNames).toEqual(["report--2.txt", "report-.txt"]);
+    await expect(readFile(path.join(batchDir, "report-.txt"), "utf8")).resolves.toBe("first");
+    await expect(readFile(path.join(batchDir, "report--2.txt"), "utf8")).resolves.toBe("second");
+    expect(prepared.text).toContain("/report-.txt");
+    expect(prepared.text).toContain("/report--2.txt");
   });
 
   it("imports and externalizes existing inline image data", async () => {

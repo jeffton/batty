@@ -22,7 +22,11 @@ const handleVisibilityChange = async () => {
   if (document.visibilityState === "visible" && navigator.onLine) {
     await store.checkForClientUpdate();
     if (store.activeSession) {
-      await store.resumeSessionById(store.activeSession.workspaceId, store.activeSession.sessionId);
+      const sessionId = store.activeSession.sessionId;
+      const version = syncVersion;
+      await store.resumeSessionById(store.activeSession.workspaceId, sessionId, {
+        shouldSelect: () => version === syncVersion && store.activeSession?.sessionId === sessionId,
+      });
     }
   }
 };
@@ -58,8 +62,12 @@ let pendingNotificationPath: string | undefined;
 
 const WORKSPACES_ROUTE = "/";
 
-async function hydrateRouteFromCache(workspaceId: string, sessionId?: string): Promise<boolean> {
-  if (!sessionId) {
+async function hydrateRouteFromCache(
+  workspaceId: string,
+  sessionId?: string,
+  shouldSelect: () => boolean = () => true,
+): Promise<boolean> {
+  if (!sessionId || !shouldSelect()) {
     return true;
   }
 
@@ -70,6 +78,9 @@ async function hydrateRouteFromCache(workspaceId: string, sessionId?: string): P
   }
 
   const cached = await readCachedSession(sessionId);
+  if (!shouldSelect()) {
+    return true;
+  }
   if (!cached || cached.workspaceId !== workspaceId) {
     store.clearActiveSession();
     return false;
@@ -147,7 +158,11 @@ async function syncRouteToStore(): Promise<void> {
     }
 
     if (store.connectionState === "offline") {
-      const hydrated = await hydrateRouteFromCache(workspaceId, sessionId);
+      const hydrated = await hydrateRouteFromCache(
+        workspaceId,
+        sessionId,
+        () => version === syncVersion,
+      );
       if (!hydrated) {
         await router.replace(workspaceRoutePath(workspaceId));
       }
@@ -173,7 +188,11 @@ async function syncRouteToStore(): Promise<void> {
     } catch (error) {
       if (!navigator.onLine || store.connectionState === "offline") {
         store.markOffline();
-        const hydrated = await hydrateRouteFromCache(workspaceId, sessionId);
+        const hydrated = await hydrateRouteFromCache(
+          workspaceId,
+          sessionId,
+          () => version === syncVersion,
+        );
         if (!hydrated) {
           await router.replace(workspaceRoutePath(workspaceId));
         }
@@ -194,15 +213,19 @@ async function syncRouteToStore(): Promise<void> {
     const activeSessionMatches =
       store.activeSession?.workspaceId === workspaceId &&
       store.activeSession.sessionId === sessionId;
+    const shouldSelect = () => version === syncVersion;
     if (activeSessionMatches) {
-      await store.resumeSessionById(workspaceId, sessionId);
+      await store.resumeSessionById(workspaceId, sessionId, { shouldSelect });
       return;
     }
 
     try {
-      await store.resumeSessionById(workspaceId, sessionId);
+      await store.resumeSessionById(workspaceId, sessionId, { shouldSelect });
     } catch {
-      const hydrated = await hydrateRouteFromCache(workspaceId, sessionId);
+      if (!shouldSelect()) {
+        return;
+      }
+      const hydrated = await hydrateRouteFromCache(workspaceId, sessionId, shouldSelect);
       if (!hydrated) {
         await router.replace(workspaceRoutePath(workspaceId));
       }

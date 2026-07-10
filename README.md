@@ -44,7 +44,7 @@ Batty adds a browser-native layer on top:
 
 ## Quick start
 
-Create a Batty root directory. Batty stores its own state in `<batty-root>/.batty/` and lists workspaces from the configured `workspacesRoot`.
+Create a Batty root directory. Batty stores its own state in `<batty-root>/.batty/` and lists workspaces from the configured `workspacesRoots`.
 
 Example options file:
 
@@ -53,7 +53,7 @@ Example options file:
 ```json
 {
   "authSecret": "generated-on-first-run",
-  "workspacesRoot": "/path/to/workspaces",
+  "workspacesRoots": ["/path/to/workspaces"],
   "webPushSubject": "https://your-batty-host",
   "braveSearchKey": "optional-brave-search-api-key"
 }
@@ -61,7 +61,7 @@ Example options file:
 
 Required fields:
 
-- `workspacesRoot`
+- `workspacesRoots`
 - `webPushSubject`
 
 `authSecret` is generated automatically if missing.
@@ -205,7 +205,7 @@ Batty reads persisted server options from:
 Fields:
 
 - `authSecret` — cookie signing secret, generated if missing
-- `workspacesRoot` — required root containing workspace folders
+- `workspacesRoots` — required roots containing workspace folders
 - `webPushSubject` — required VAPID subject; use a real `https:` origin or valid `mailto:` URI
 - `cronDailySessionStartTime` — local rollover time for daily cron session reuse, formatted as `HH:MM`; defaults to `04:00`
 - `braveSearchKey` — optional Brave Search API key used by Batty's built-in `web-search` tool
@@ -233,8 +233,8 @@ Batty stores local state in `<batty-root>/.batty/`, including:
 
 ## Notes on files and sessions
 
-- Workspaces are direct child directories under `workspacesRoot`.
-- New workspaces created in the UI are created directly under that root.
+- Workspaces are direct child directories under the configured `workspacesRoots`.
+- New workspaces created in the UI are created under the selected root.
 - Uploaded files are staged on disk before being handed to Pi.
 - Non-image attachments are injected into the prompt as `<file>` blocks.
 - Image attachments are sent as image inputs and also referenced as file placeholders.

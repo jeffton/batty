@@ -83,6 +83,7 @@ export interface AuthenticationOptionsResult {
 
 const SETUP_CODE_TTL_MS = 1000 * 60 * 10;
 const REQUEST_TTL_MS = 1000 * 60 * 5;
+const MAX_PENDING_AUTHENTICATIONS = 1_000;
 const DEFAULT_USERNAME = "owner";
 const DEFAULT_DISPLAY_NAME = "Batty";
 
@@ -229,7 +230,8 @@ async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
 
 export class PasskeyAuthService {
   private readonly pendingRegistrations = new Map<string, PendingRegistration>();
-  private pendingAuthentication: PendingAuthentication | undefined;
+  private readonly pendingAuthentications = new Map<string, PendingAuthentication>();
+  private authenticationRequestsInFlight = 0;
 
   constructor(
     private readonly battyDir: string,
@@ -371,30 +373,41 @@ export class PasskeyAuthService {
 
   async beginAuthentication(origin: string, rpID: string): Promise<AuthenticationOptionsResult> {
     this.prunePendingRequests();
-    const state = await this.readState();
-    if (state.credentials.length === 0) {
-      throw new Error("No passkeys registered yet. Use the setup code first.");
+    if (
+      this.pendingAuthentications.size + this.authenticationRequestsInFlight >=
+      MAX_PENDING_AUTHENTICATIONS
+    ) {
+      throw new Error("Too many pending sign-in requests. Try again in a minute.");
     }
+    this.authenticationRequestsInFlight += 1;
+    try {
+      const state = await this.readState();
+      if (state.credentials.length === 0) {
+        throw new Error("No passkeys registered yet. Use the setup code first.");
+      }
 
-    const optionsJSON = await generateAuthenticationOptions({
-      rpID,
-      allowCredentials: state.credentials.map((credential) => ({
-        id: credential.id,
-        ...(credential.transports ? { transports: credential.transports } : {}),
-      })),
-      userVerification: "required",
-    });
+      const optionsJSON = await generateAuthenticationOptions({
+        rpID,
+        allowCredentials: state.credentials.map((credential) => ({
+          id: credential.id,
+          ...(credential.transports ? { transports: credential.transports } : {}),
+        })),
+        userVerification: "required",
+      });
 
-    const requestId = crypto.randomUUID();
-    this.pendingAuthentication = {
-      requestId,
-      challenge: optionsJSON.challenge,
-      origin,
-      rpID,
-      expiresAt: Date.now() + REQUEST_TTL_MS,
-    };
+      const requestId = crypto.randomUUID();
+      this.pendingAuthentications.set(requestId, {
+        requestId,
+        challenge: optionsJSON.challenge,
+        origin,
+        rpID,
+        expiresAt: Date.now() + REQUEST_TTL_MS,
+      });
 
-    return { requestId, optionsJSON };
+      return { requestId, optionsJSON };
+    } finally {
+      this.authenticationRequestsInFlight -= 1;
+    }
   }
 
   async finishAuthentication(
@@ -404,20 +417,18 @@ export class PasskeyAuthService {
     rpID: string,
   ): Promise<void> {
     this.prunePendingRequests();
-    const pending = this.pendingAuthentication;
-    if (!pending || pending.requestId !== requestId || pending.expiresAt <= Date.now()) {
-      this.pendingAuthentication = undefined;
+    const pending = this.pendingAuthentications.get(requestId);
+    if (!pending || pending.expiresAt <= Date.now()) {
       throw new Error("Passkey sign-in expired. Start again.");
     }
+    this.pendingAuthentications.delete(requestId);
     if (pending.origin !== origin || pending.rpID !== rpID) {
-      this.pendingAuthentication = undefined;
       throw new Error("Passkey sign-in origin changed. Start again.");
     }
 
     const state = await this.readState();
     const matchedCredential = state.credentials.find((credential) => credential.id === response.id);
     if (!matchedCredential) {
-      this.pendingAuthentication = undefined;
       throw new Error("Unknown passkey");
     }
 
@@ -429,7 +440,6 @@ export class PasskeyAuthService {
       requireUserVerification: true,
       credential: this.toWebAuthnCredential(matchedCredential),
     });
-    this.pendingAuthentication = undefined;
 
     if (!verification.verified) {
       throw new Error("Passkey sign-in failed");
@@ -512,8 +522,10 @@ export class PasskeyAuthService {
         this.pendingRegistrations.delete(requestId);
       }
     }
-    if (this.pendingAuthentication && this.pendingAuthentication.expiresAt <= now) {
-      this.pendingAuthentication = undefined;
+    for (const [requestId, pending] of this.pendingAuthentications) {
+      if (pending.expiresAt <= now) {
+        this.pendingAuthentications.delete(requestId);
+      }
     }
   }
 

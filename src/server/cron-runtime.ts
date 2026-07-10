@@ -20,11 +20,15 @@ import { nextEveryRunAtMs, nextRunAtMs } from "./cron-schedule";
 import { markJobRunFailed, markJobRunSucceeded } from "./cron-state";
 
 const WATCH_DEBOUNCE_MS = 150;
-const WATCH_IGNORE_MS = 500;
 
 interface ScheduledHandle {
   stop(): void;
 }
+
+type ActiveCronRun = RunningCronJob & {
+  abortController: AbortController;
+  cancelledByOverlap: boolean;
+};
 
 export interface CronJobRunnerContext {
   runId: string;
@@ -91,15 +95,11 @@ export class CronService {
   private readonly store: CronStore;
   private readonly scheduledHandles = new Map<string, ScheduledHandle>();
   private readonly jobs = new Map<string, StoredCronJob>();
-  private readonly runningJobs = new Map<
-    string,
-    RunningCronJob & { abortController: AbortController }
-  >();
+  private readonly runningJobs = new Map<string, ActiveCronRun>();
   private readonly changeListeners = new Set<(workspaceIds: string[]) => void>();
   private runner: CronJobRunner | undefined;
   private watcher: FSWatcher | undefined;
   private reloadTimer: NodeJS.Timeout | undefined;
-  private ignoreWatchEventsUntil = 0;
 
   constructor(config: AppConfig) {
     this.store = new CronStore(config);
@@ -120,9 +120,6 @@ export class CronService {
     await this.reloadFromDisk();
     await fs.mkdir(path.dirname(this.store.filePath), { recursive: true });
     this.watcher = watch(path.dirname(this.store.filePath), (_eventType, fileName) => {
-      if (Date.now() < this.ignoreWatchEventsUntil) {
-        return;
-      }
       if (fileName && fileName !== path.basename(this.store.filePath)) {
         return;
       }
@@ -157,7 +154,7 @@ export class CronService {
   listRunningJobs(workspaceId?: string): RunningCronJob[] {
     return [...this.runningJobs.values()]
       .filter((run) => (workspaceId ? run.workspaceId === workspaceId : true))
-      .map(({ abortController: _abortController, ...run }) => run)
+      .map(({ abortController: _abortController, cancelledByOverlap: _cancelled, ...run }) => run)
       .sort((a, b) => a.startedAtMs - b.startedAtMs);
   }
 
@@ -172,33 +169,26 @@ export class CronService {
     }
 
     entry.abortController.abort();
-    const { abortController: _abortController, ...run } = entry;
+    const { abortController: _abortController, cancelledByOverlap: _cancelled, ...run } = entry;
     return run;
   }
 
   async createJob(input: CreateCronJobInput): Promise<CronJob> {
-    this.ignoreOwnWatchEvents();
     const created = await this.store.createJob(input);
     await this.reloadFromDisk();
     return created;
   }
 
   async updateJob(jobId: string, patch: UpdateCronJobInput): Promise<CronJob> {
-    this.ignoreOwnWatchEvents();
     const updated = await this.store.updateJob(jobId, patch);
     await this.reloadFromDisk();
     return updated;
   }
 
   async deleteJob(jobId: string): Promise<CronJob> {
-    this.ignoreOwnWatchEvents();
     const deleted = await this.store.deleteJob(jobId);
     await this.reloadFromDisk();
     return deleted;
-  }
-
-  private ignoreOwnWatchEvents(): void {
-    this.ignoreWatchEventsUntil = Date.now() + WATCH_IGNORE_MS;
   }
 
   private notifyChanged(workspaceIds: string[]): void {
@@ -287,18 +277,14 @@ export class CronService {
     }
   }
 
-  private async skipOverlappingRun(
-    job: StoredCronJob,
-    activeRun: RunningCronJob & { abortController: AbortController },
-  ): Promise<void> {
+  private async skipOverlappingRun(job: StoredCronJob, activeRun: ActiveCronRun): Promise<void> {
     const skippedAtMs = Date.now();
     const reason = `Cron job skipped because previous run is still active: ${activeRun.runId}`;
     console.warn(reason, { jobId: job.id, activeRunId: activeRun.runId });
+    activeRun.cancelledByOverlap = true;
     activeRun.abortController.abort();
-    this.runningJobs.delete(activeRun.runId);
 
     if (job.schedule.kind !== "at") {
-      this.ignoreOwnWatchEvents();
       await this.store.setJobState(job.id, markJobRunFailed(job.state, skippedAtMs, reason));
       await this.reloadFromDisk();
     }
@@ -326,7 +312,7 @@ export class CronService {
     const startedAt = Date.now();
     const publicJob = toCronJob(current);
     const abortController = new AbortController();
-    const running: RunningCronJob & { abortController: AbortController } = {
+    const running: ActiveCronRun = {
       runId: randomUUID(),
       jobId,
       workspaceId: current.workspaceId,
@@ -337,13 +323,13 @@ export class CronService {
       scheduleLabel: publicJob.scheduleLabel,
       startedAtMs: startedAt,
       abortController,
+      cancelledByOverlap: false,
     };
     this.runningJobs.set(running.runId, running);
     this.notifyChanged([current.workspaceId]);
 
     try {
       if (current.schedule.kind === "at") {
-        this.ignoreOwnWatchEvents();
         await this.store.deleteJob(jobId);
         await this.reloadFromDisk();
       }
@@ -361,15 +347,21 @@ export class CronService {
           this.notifyChanged([running.workspaceId]);
         },
       });
-      if (this.runningJobs.get(running.runId) === running && current.schedule.kind !== "at") {
-        this.ignoreOwnWatchEvents();
+      if (
+        this.runningJobs.get(running.runId) === running &&
+        !running.cancelledByOverlap &&
+        current.schedule.kind !== "at"
+      ) {
         await this.store.setJobState(jobId, markJobRunSucceeded(current.state, startedAt, result));
         await this.reloadFromDisk();
       }
     } catch (error) {
       console.error("Cron job failed", { jobId, error });
-      if (this.runningJobs.get(running.runId) === running && current.schedule.kind !== "at") {
-        this.ignoreOwnWatchEvents();
+      if (
+        this.runningJobs.get(running.runId) === running &&
+        !running.cancelledByOverlap &&
+        current.schedule.kind !== "at"
+      ) {
         await this.store.setJobState(jobId, markJobRunFailed(current.state, startedAt, error));
         await this.reloadFromDisk();
       }

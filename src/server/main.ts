@@ -127,7 +127,7 @@ const authAttemptLimiter = createLoginRateLimiter();
 
 const app = fastify({
   logger: true,
-  trustProxy: true,
+  trustProxy: ["127.0.0.1", "::1"],
   bodyLimit: 1024 * 1024 * 100,
 });
 

@@ -30,6 +30,12 @@ interface BattyAttachment {
   url: string;
 }
 
+interface SavedUpload {
+  filePath: string;
+  name: string;
+  storedName: string;
+}
+
 const BATTY_ATTACHMENTS_PROPERTY = "battyAttachments";
 
 async function ensureDir(dir: string): Promise<void> {
@@ -39,6 +45,19 @@ async function ensureDir(dir: string): Promise<void> {
 function sanitizeFileName(name: string): string {
   const sanitized = path.basename(name).replace(/[^a-zA-Z0-9._-]+/g, "-");
   return sanitized.length > 0 ? sanitized : "attachment.bin";
+}
+
+function uniqueStoredName(name: string, usedNames: Set<string>): string {
+  const extension = path.extname(name);
+  const stem = name.slice(0, name.length - extension.length);
+  let candidate = name;
+  let suffix = 2;
+  while (usedNames.has(candidate.toLowerCase())) {
+    candidate = `${stem}-${suffix}${extension}`;
+    suffix += 1;
+  }
+  usedNames.add(candidate.toLowerCase());
+  return candidate;
 }
 
 function isImageMimeType(value: false | string): value is string {
@@ -78,23 +97,22 @@ function uploadUrl(
 }
 
 async function processUploadedFiles(
-  filePaths: string[],
+  uploads: SavedUpload[],
   options: { baseUrl?: string; sessionId: string; batchId: string },
 ): Promise<PreparedPromptFiles> {
   let text = "";
   const images: PreparedPromptFiles["images"] = [];
   const uploadedImages: UploadedPromptImage[] = [];
 
-  for (const filePath of filePaths) {
-    const storedName = path.basename(filePath);
-    const mimeType = mime.lookup(filePath) || "application/octet-stream";
+  for (const { filePath, name, storedName } of uploads) {
+    const mimeType = mime.lookup(storedName) || "application/octet-stream";
     const stats = await fs.stat(filePath);
     const url = uploadUrl(options.baseUrl, options.sessionId, options.batchId, storedName);
     if (isImageMimeType(mimeType)) {
       const data = (await fs.readFile(filePath)).toString("base64");
       images.push({ type: "image", mimeType, data });
       uploadedImages.push({
-        name: storedName,
+        name,
         storedName,
         batchId: options.batchId,
         mimeType,
@@ -103,7 +121,7 @@ async function processUploadedFiles(
         url,
       });
       text += formatUploadedFileReference({
-        name: storedName,
+        name,
         mimeType,
         size: stats.size,
         path: filePath,
@@ -113,7 +131,7 @@ async function processUploadedFiles(
     }
 
     text += formatUploadedFileReference({
-      name: storedName,
+      name,
       mimeType,
       size: stats.size,
       path: filePath,
@@ -138,14 +156,17 @@ export async function preparePromptFiles(
   const sessionDir = path.join(uploadsDir, sessionId, batchId);
   await ensureDir(sessionDir);
 
-  const savedPaths: string[] = [];
+  const savedUploads: SavedUpload[] = [];
+  const usedNames = new Set<string>();
   for (const file of files) {
-    const targetPath = path.join(sessionDir, sanitizeFileName(file.filename || "attachment.bin"));
-    await fs.writeFile(targetPath, file.data);
-    savedPaths.push(targetPath);
+    const name = sanitizeFileName(file.filename || "attachment.bin");
+    const storedName = uniqueStoredName(name, usedNames);
+    const filePath = path.join(sessionDir, storedName);
+    await fs.writeFile(filePath, file.data);
+    savedUploads.push({ filePath, name, storedName });
   }
 
-  return processUploadedFiles(savedPaths, { baseUrl, sessionId, batchId });
+  return processUploadedFiles(savedUploads, { baseUrl, sessionId, batchId });
 }
 
 function externalizeContentImages(

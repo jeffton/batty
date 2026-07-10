@@ -193,8 +193,8 @@ async function sendPrompt(text: string, files: File[]): Promise<void> {
   try {
     await store.sendPrompt(text, files);
   } catch (error) {
-    if (shouldRestoreComposerAfterPromptError(before)) {
-      composer.value?.restore(text, files);
+    if (before && shouldRestoreComposerAfterPromptError(before)) {
+      composer.value?.restore(before.sessionId, text, files);
     }
     throw error;
   } finally {
@@ -232,8 +232,8 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
   try {
     await store.steerPrompt(text, files);
   } catch (error) {
-    if (shouldRestoreComposerAfterPromptError(before)) {
-      composer.value?.restore(text, files);
+    if (before && shouldRestoreComposerAfterPromptError(before)) {
+      composer.value?.restore(before.sessionId, text, files);
     }
     throw error;
   } finally {

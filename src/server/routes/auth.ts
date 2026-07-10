@@ -16,6 +16,13 @@ export function requestRpId(request: FastifyRequest): string {
   return new URL(requestOrigin(request)).hostname;
 }
 
+function authRateLimitKey(
+  request: FastifyRequest,
+  flow: "login-options" | "login" | "register",
+): string {
+  return `${flow}:${request.ip}`;
+}
+
 function setAuthCookie(context: RouteContext, request: FastifyRequest, reply: FastifyReply): void {
   reply.setCookie(context.config.cookieName, createAuthToken(context.config.authSecret), {
     httpOnly: true,
@@ -29,14 +36,20 @@ function setAuthCookie(context: RouteContext, request: FastifyRequest, reply: Fa
 export function registerAuthRoutes(context: RouteContext): void {
   const { app, passkeys, authAttemptLimiter, routePath, config } = context;
 
-  app.post(routePath("/api/auth/login/options"), async (request) => {
+  app.post(routePath("/api/auth/login/options"), async (request, reply) => {
+    const rateLimitKey = authRateLimitKey(request, "login-options");
+    if (authAttemptLimiter.isLimited(rateLimitKey)) {
+      reply.code(429).send({ error: "Too many sign-in attempts. Try again in a minute." });
+      return;
+    }
+    authAttemptLimiter.recordFailure(rateLimitKey);
     return passkeys.beginAuthentication(requestOrigin(request), requestRpId(request));
   });
 
   app.post<{ Body: { requestId?: string; response?: AuthenticationResponseJSON } }>(
     routePath("/api/auth/login/verify"),
     async (request, reply) => {
-      const rateLimitKey = "login";
+      const rateLimitKey = authRateLimitKey(request, "login");
       if (authAttemptLimiter.isLimited(rateLimitKey)) {
         reply.code(429).send({ error: "Too many sign-in attempts. Try again in a minute." });
         return;
@@ -59,6 +72,7 @@ export function registerAuthRoutes(context: RouteContext): void {
       }
 
       authAttemptLimiter.reset(rateLimitKey);
+      authAttemptLimiter.reset(authRateLimitKey(request, "login-options"));
       setAuthCookie(context, request, reply);
       reply.send({ ok: true });
     },
@@ -67,7 +81,7 @@ export function registerAuthRoutes(context: RouteContext): void {
   app.post<{ Body: { setupCode?: string } }>(
     routePath("/api/auth/register/options"),
     async (request, reply) => {
-      const rateLimitKey = "register";
+      const rateLimitKey = authRateLimitKey(request, "register");
       if (authAttemptLimiter.isLimited(rateLimitKey)) {
         reply.code(429).send({ error: "Too many setup code attempts. Try again in a minute." });
         return;
@@ -93,7 +107,7 @@ export function registerAuthRoutes(context: RouteContext): void {
   app.post<{ Body: { requestId?: string; response?: RegistrationResponseJSON } }>(
     routePath("/api/auth/register/verify"),
     async (request, reply) => {
-      const rateLimitKey = "register";
+      const rateLimitKey = authRateLimitKey(request, "register");
       if (authAttemptLimiter.isLimited(rateLimitKey)) {
         reply.code(429).send({ error: "Too many setup code attempts. Try again in a minute." });
         return;

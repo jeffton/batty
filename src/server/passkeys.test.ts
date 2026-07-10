@@ -129,7 +129,7 @@ describe("PasskeyAuthService", () => {
     expect(registration.optionsJSON.challenge.length).toBeGreaterThan(0);
   });
 
-  it("keeps only the latest pending authentication challenge", async () => {
+  it("keeps concurrent pending authentication challenges", async () => {
     const battyDir = await createBattyDir();
 
     await fs.mkdir(path.dirname(passkeyStateFilePath(battyDir)), { recursive: true });
@@ -164,10 +164,12 @@ describe("PasskeyAuthService", () => {
     const second = await passkeys.beginAuthentication("https://batty.test", "batty.test");
 
     expect(second.requestId).not.toBe(first.requestId);
-    expect(
-      (passkeys as unknown as { pendingAuthentication?: { requestId: string } })
-        .pendingAuthentication?.requestId,
-    ).toBe(second.requestId);
+    const pending = (
+      passkeys as unknown as {
+        pendingAuthentications: Map<string, { requestId: string }>;
+      }
+    ).pendingAuthentications;
+    expect([...pending.keys()]).toEqual([first.requestId, second.requestId]);
   });
 
   it("drops expired setup codes from disk", async () => {

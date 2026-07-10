@@ -4,7 +4,15 @@ import type { SentFileDescriptor } from "@/shared/types";
 
 export const SUBAGENT_TOOL_NAME = "subagent";
 export const SUBAGENT_SESSION_CUSTOM_TYPE = "batty-subagent-session";
-export const SUBAGENT_EFFORT_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+export const SUBAGENT_EFFORT_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
 export type SubagentEffort = (typeof SUBAGENT_EFFORT_LEVELS)[number];
 
 export interface SubagentToolInput {

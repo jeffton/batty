@@ -1,7 +1,7 @@
 import type { CronJobSession, CronJobState } from "@/shared/types";
 import { createHttpError, normalizeNonEmptyString } from "./cron-http";
 
-const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
+const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 export type StoredCronJobSession =
   | { kind: "new" }

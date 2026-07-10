@@ -1,4 +1,6 @@
 minimumReleaseAge: 4320
+minimumReleaseAgeExclude:
+  - "@earendil-works/pi-*"
 ignoredBuiltDependencies:
   - "@google/genai"
   - esbuild

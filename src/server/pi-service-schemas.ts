@@ -89,7 +89,7 @@ export const CronToolSchema = Type.Object(
     thinkingLevel: Type.Optional(
       Type.String({
         description:
-          "Thinking level for the scheduled job: off, minimal, low, medium, high, xhigh.",
+          "Thinking level for the scheduled job: off, minimal, low, medium, high, xhigh, max.",
       }),
     ),
     session: Type.Optional(CronSessionSchema),
@@ -108,7 +108,7 @@ export const SubagentToolSchema = Type.Object(
     ),
     effort: Type.Optional(
       StringEnum(SUBAGENT_EFFORT_LEVELS, {
-        description: "Effort level for the subagent: off, minimal, low, medium, high, xhigh.",
+        description: "Effort level for the subagent: off, minimal, low, medium, high, xhigh, max.",
       }),
     ),
     includeSessionContext: Type.Optional(

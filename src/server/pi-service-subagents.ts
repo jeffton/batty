@@ -145,12 +145,19 @@ function buildDetachedSubagentResult(
   options: DetachedSubagentOptions,
   seedMessageCount: number,
   errorOverride?: string,
+  finalAssistantOverride?: AssistantMessage,
+  generatedMessagesOverride?: AgentSession["messages"],
 ): DetachedSubagentResult {
   const messages = structuredClone(subagentSession.messages) as AgentSession["messages"];
-  const finalAssistant = findLastAssistantMessage(messages);
-  const text =
-    extractAssistantText(finalAssistant) || finalAssistant?.errorMessage || errorOverride || "";
-  const generatedMessages = newlyGeneratedSubagentMessages(messages, seedMessageCount);
+  const generatedMessages =
+    generatedMessagesOverride ?? newlyGeneratedSubagentMessages(messages, seedMessageCount);
+  const finalAssistant = finalAssistantOverride ?? findLastAssistantMessage(generatedMessages);
+  const assistantError =
+    finalAssistant?.stopReason === "error" || finalAssistant?.stopReason === "aborted"
+      ? finalAssistant.errorMessage || "Subagent failed"
+      : undefined;
+  const errorMessage = errorOverride || assistantError;
+  const text = errorMessage || extractAssistantText(finalAssistant) || "";
   const details = buildSubagentDetails(
     {
       prompt: options.prompt,
@@ -174,8 +181,8 @@ function buildDetachedSubagentResult(
     messages,
     generatedMessages,
     finalAssistant,
-    isError: finalAssistant?.stopReason === "error" || finalAssistant?.stopReason === "aborted",
-    errorMessage: finalAssistant?.errorMessage || errorOverride,
+    isError: errorMessage !== undefined,
+    errorMessage,
   };
 }
 
@@ -316,82 +323,22 @@ export async function runDetachedSubagentSession(
   });
 
   let lastText = "";
-  let finalRetryError: string | undefined;
-  let terminalAssistantError: string | undefined;
-  let resolveFinalRetryFailure: (() => void) | undefined;
-  let resolveTerminalAssistantFailure: (() => void) | undefined;
-  let terminalAssistantFailureTimer: NodeJS.Timeout | undefined;
-  let terminalAssistantPollTimer: NodeJS.Timeout | undefined;
-  let waitingForAutoRetryEnd = false;
-  const finalRetryFailure = new Promise<void>((resolve) => {
-    resolveFinalRetryFailure = resolve;
-  });
-  const terminalAssistantFailure = new Promise<void>((resolve) => {
-    resolveTerminalAssistantFailure = resolve;
-  });
-  const terminalAssistantMessageError = (message: AssistantMessage | undefined) => {
-    if (!message || (message.stopReason !== "error" && message.stopReason !== "aborted")) {
-      return undefined;
-    }
-    return extractAssistantText(message) || message.errorMessage || "Subagent failed";
-  };
-  const cancelTerminalAssistantFailure = () => {
-    if (terminalAssistantFailureTimer) {
-      clearTimeout(terminalAssistantFailureTimer);
-      terminalAssistantFailureTimer = undefined;
-    }
-  };
-  const scheduleTerminalAssistantFailure = (error: string | undefined) => {
-    terminalAssistantError = error;
-    if (terminalAssistantFailureTimer) {
-      return;
-    }
-    terminalAssistantFailureTimer = setTimeout(() => {
-      terminalAssistantFailureTimer = undefined;
-      resolveTerminalAssistantFailure?.();
-    }, 100);
-  };
-  const latestGeneratedAssistantError = () => {
-    const generatedMessages = newlyGeneratedSubagentMessages(
-      subagentSession.messages,
-      seedMessageCount,
-    );
-    return terminalAssistantMessageError(findLastAssistantMessage(generatedMessages));
-  };
-  const startTerminalAssistantPolling = () => {
-    terminalAssistantPollTimer = setInterval(() => {
-      if (waitingForAutoRetryEnd) {
-        return;
-      }
-      const error = latestGeneratedAssistantError();
-      if (error) {
-        scheduleTerminalAssistantFailure(error);
-      }
-    }, 250);
-  };
-  const stopTerminalAssistantPolling = () => {
-    if (terminalAssistantPollTimer) {
-      clearInterval(terminalAssistantPollTimer);
-      terminalAssistantPollTimer = undefined;
-    }
-  };
+  let observedFinalAssistant: AssistantMessage | undefined;
+  let lifecycleError: string | undefined;
+  const observedGeneratedMessages: AgentSession["messages"] = [];
 
   const unsubscribe = subagentSession.subscribe((event) => {
-    if (event.type === "auto_retry_start") {
-      waitingForAutoRetryEnd = true;
-      cancelTerminalAssistantFailure();
-      terminalAssistantError = undefined;
+    if (event.type === "compaction_start" && options.signal?.aborted) {
+      subagentSession.abortCompaction();
+      queueMicrotask(() => subagentSession.abortCompaction());
       return;
     }
-    if (event.type === "auto_retry_end") {
-      waitingForAutoRetryEnd = false;
-      cancelTerminalAssistantFailure();
-      if (event.success === false) {
-        finalRetryError = event.finalError;
-        resolveFinalRetryFailure?.();
-      } else {
-        terminalAssistantError = undefined;
-      }
+    if (event.type === "auto_retry_end" && event.success === false) {
+      lifecycleError = event.finalError || "Subagent retry failed";
+      return;
+    }
+    if (event.type === "compaction_end" && event.reason === "overflow" && event.errorMessage) {
+      lifecycleError = event.errorMessage;
       return;
     }
     if (
@@ -401,16 +348,19 @@ export async function runDetachedSubagentSession(
     ) {
       return;
     }
+    if (event.type === "message_end") {
+      observedGeneratedMessages.push(structuredClone(event.message));
+    }
     if (event.message.role !== "assistant") {
       return;
     }
 
     const finalAssistant = event.message as AssistantMessage;
-    if (
-      event.type === "message_end" &&
-      (finalAssistant.stopReason === "error" || finalAssistant.stopReason === "aborted")
-    ) {
-      scheduleTerminalAssistantFailure(terminalAssistantMessageError(finalAssistant));
+    if (event.type === "message_end") {
+      observedFinalAssistant = structuredClone(finalAssistant);
+      if (finalAssistant.stopReason !== "error" && finalAssistant.stopReason !== "aborted") {
+        lifecycleError = undefined;
+      }
     }
 
     const text = extractAssistantText(finalAssistant);
@@ -432,10 +382,7 @@ export async function runDetachedSubagentSession(
         subagentSession.messages,
         finalAssistant,
         {
-          generatedMessages: newlyGeneratedSubagentMessages(
-            subagentSession.messages,
-            seedMessageCount,
-          ),
+          generatedMessages: observedGeneratedMessages,
           workspaceId: options.workspace.id,
           sessionId: subagentSession.sessionId,
           sessionPath: subagentSession.sessionFile,
@@ -445,7 +392,8 @@ export async function runDetachedSubagentSession(
   });
 
   const abortListener = () => {
-    void subagentSession.abort();
+    subagentSession.abortCompaction();
+    void subagentSession.abort().catch(() => undefined);
   };
   if (options.signal) {
     if (options.signal.aborted) {
@@ -456,42 +404,20 @@ export async function runDetachedSubagentSession(
   }
 
   try {
-    const promptPromise = subagentSession.prompt(options.prompt);
-    void promptPromise.catch(() => undefined);
-    startTerminalAssistantPolling();
-    const completion = await Promise.race([
-      promptPromise.then(() => "prompt-complete" as const),
-      finalRetryFailure.then(() => "final-retry-failure" as const),
-      terminalAssistantFailure.then(() => "terminal-assistant-failure" as const),
-    ]);
-
-    if (completion === "final-retry-failure" || completion === "terminal-assistant-failure") {
-      const surfacedError = finalRetryError || terminalAssistantError;
-      if (completion === "terminal-assistant-failure") {
-        void subagentSession.abort().catch(() => undefined);
-      }
-      const result = buildDetachedSubagentResult(
-        subagentSession,
-        options,
-        seedMessageCount,
-        surfacedError,
-      );
-      return {
-        ...result,
-        text:
-          completion === "final-retry-failure"
-            ? surfacedError || result.text || lastText || ""
-            : result.text || lastText || surfacedError || "",
-        isError: true,
-        errorMessage:
-          completion === "final-retry-failure"
-            ? surfacedError || result.errorMessage
-            : result.errorMessage || surfacedError,
-      };
+    if (options.signal?.aborted) {
+      throw options.signal.reason instanceof Error
+        ? options.signal.reason
+        : new Error("Subagent aborted");
     }
-
-    await promptPromise;
-    const result = buildDetachedSubagentResult(subagentSession, options, seedMessageCount);
+    await subagentSession.prompt(options.prompt);
+    const result = buildDetachedSubagentResult(
+      subagentSession,
+      options,
+      seedMessageCount,
+      lifecycleError,
+      observedFinalAssistant,
+      observedGeneratedMessages.length > 0 ? observedGeneratedMessages : undefined,
+    );
     return {
       ...result,
       text: result.text || lastText,
@@ -502,6 +428,8 @@ export async function runDetachedSubagentSession(
       options,
       seedMessageCount,
       error instanceof Error ? error.message : String(error),
+      observedFinalAssistant,
+      observedGeneratedMessages.length > 0 ? observedGeneratedMessages : undefined,
     );
     return {
       ...result,
@@ -510,8 +438,6 @@ export async function runDetachedSubagentSession(
       errorMessage: result.errorMessage || (error instanceof Error ? error.message : String(error)),
     };
   } finally {
-    cancelTerminalAssistantFailure();
-    stopTerminalAssistantPolling();
     if (options.signal) {
       options.signal.removeEventListener("abort", abortListener);
     }

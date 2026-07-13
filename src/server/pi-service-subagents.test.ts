@@ -274,7 +274,7 @@ describe("runDetachedSubagentSession", () => {
     ]);
   });
 
-  it("returns after final auto-retry failure even if prompt never settles", async () => {
+  it("returns a final auto-retry failure after the prompt settles", async () => {
     const sessionMessages: AgentMessage[] = [];
     let subscriber: ((event: { type: string; [key: string]: unknown }) => void) | undefined;
 
@@ -328,7 +328,6 @@ describe("runDetachedSubagentSession", () => {
           attempt: 3,
           finalError: errorMessage,
         });
-        return new Promise<void>(() => undefined);
       },
       async abort() {
         return undefined;
@@ -433,7 +432,7 @@ describe("runDetachedSubagentSession", () => {
           delayMs: 1000,
           errorMessage,
         });
-        return new Promise<void>(() => undefined);
+        await new Promise((resolve) => setTimeout(resolve, 200));
       },
       async abort() {
         aborted = true;
@@ -477,6 +476,10 @@ describe("runDetachedSubagentSession", () => {
       },
     );
 
+    let resultSettled = false;
+    void resultPromise.then(() => {
+      resultSettled = true;
+    });
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(aborted).toBe(false);
 
@@ -486,6 +489,8 @@ describe("runDetachedSubagentSession", () => {
       attempt: 3,
       finalError: "terminated after retries",
     });
+    await Promise.resolve();
+    expect(resultSettled).toBe(false);
 
     const result = await resultPromise;
     expect(aborted).toBe(false);
@@ -494,9 +499,10 @@ describe("runDetachedSubagentSession", () => {
     expect(result.text).toBe("terminated after retries");
   });
 
-  it("returns after a direct terminal assistant failure even if prompt never settles", async () => {
+  it("waits through overflow compaction and returns the successful retry", async () => {
     const sessionMessages: AgentMessage[] = [];
     let subscriber: ((event: { type: string; [key: string]: unknown }) => void) | undefined;
+    let aborted = false;
 
     const subagentSession = {
       sessionId: "subagent-session-terminal-failure",
@@ -521,31 +527,42 @@ describe("runDetachedSubagentSession", () => {
         return () => undefined;
       },
       async prompt() {
-        const errorMessage = "Codex error: request failed";
-        const finalAssistant = {
+        const overflowAssistant = {
           role: "assistant",
           content: [],
           api: "openai-codex-responses",
           provider: "openai-codex",
           model: "gpt-5.4",
           usage: {
-            input: 10,
+            input: 0,
             output: 0,
             cacheRead: 0,
             cacheWrite: 0,
-            totalTokens: 10,
+            totalTokens: 0,
             cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
           },
           stopReason: "error",
-          errorMessage,
+          errorMessage: "Your input exceeds the context window of this model.",
           timestamp: 1,
         } satisfies AssistantMessage;
-        sessionMessages.push(finalAssistant as unknown as AgentMessage);
-        subscriber?.({ type: "message_end", message: finalAssistant });
-        return new Promise<void>(() => undefined);
+        sessionMessages.push(overflowAssistant as unknown as AgentMessage);
+        subscriber?.({ type: "message_end", message: overflowAssistant });
+        sessionMessages.pop();
+        subscriber?.({ type: "compaction_start", reason: "overflow" });
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        subscriber?.({
+          type: "compaction_end",
+          reason: "overflow",
+          result: {},
+          aborted: false,
+          willRetry: true,
+        });
+        const recoveredAssistant = createAssistantMessage("Recovered", 2);
+        sessionMessages.push(recoveredAssistant as unknown as AgentMessage);
+        subscriber?.({ type: "message_end", message: recoveredAssistant });
       },
       async abort() {
-        return undefined;
+        aborted = true;
       },
     } as unknown as AgentSession;
 
@@ -586,13 +603,16 @@ describe("runDetachedSubagentSession", () => {
       },
     );
 
-    expect(result.isError).toBe(true);
-    expect(result.errorMessage).toBe("Codex error: request failed");
-    expect(result.text).toBe("Codex error: request failed");
+    expect(aborted).toBe(false);
+    expect(result.isError).toBe(false);
+    expect(result.errorMessage).toBeUndefined();
+    expect(result.text).toBe("Recovered");
+    expect(result.generatedMessages).toHaveLength(2);
   });
 
-  it("propagates an idle terminal assistant failure even if prompt never settles", async () => {
+  it("propagates a terminal error removed from the active context before settlement", async () => {
     const sessionMessages: AgentMessage[] = [];
+    let subscriber: ((event: { type: string; [key: string]: unknown }) => void) | undefined;
 
     const subagentSession = {
       sessionId: "subagent-session-idle-terminal-failure",
@@ -613,11 +633,12 @@ describe("runDetachedSubagentSession", () => {
           return undefined;
         },
       },
-      subscribe() {
+      subscribe(callback: (event: { type: string; [key: string]: unknown }) => void) {
+        subscriber = callback;
         return () => undefined;
       },
       async prompt() {
-        sessionMessages.push({
+        const finalAssistant = {
           role: "assistant",
           content: [],
           api: "openai-codex-responses",
@@ -632,10 +653,18 @@ describe("runDetachedSubagentSession", () => {
             cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
           },
           stopReason: "error",
-          errorMessage: "terminated",
+          errorMessage: "Your input exceeds the context window of this model.",
           timestamp: 1,
-        } satisfies AssistantMessage as unknown as AgentMessage);
-        return new Promise<void>(() => undefined);
+        } satisfies AssistantMessage;
+        subscriber?.({ type: "message_end", message: finalAssistant });
+        subscriber?.({
+          type: "compaction_end",
+          reason: "overflow",
+          result: undefined,
+          aborted: false,
+          willRetry: false,
+          errorMessage: "Context overflow recovery failed: summarization failed",
+        });
       },
       async abort() {
         return undefined;
@@ -687,12 +716,18 @@ describe("runDetachedSubagentSession", () => {
     expect(result).not.toBe("timeout");
     expect(result).toMatchObject({
       isError: true,
-      errorMessage: "terminated",
-      text: "terminated",
+      errorMessage: "Context overflow recovery failed: summarization failed",
+      text: "Context overflow recovery failed: summarization failed",
+      details: {
+        subagent: {
+          stopReason: "error",
+          errorMessage: "Your input exceeds the context window of this model.",
+        },
+      },
     });
   });
 
-  it("propagates an idle terminal assistant failure even if retry and streaming state are stale", async () => {
+  it("propagates a settled terminal assistant failure even if retry and streaming state are stale", async () => {
     const sessionMessages: AgentMessage[] = [];
 
     const subagentSession = {
@@ -736,7 +771,6 @@ describe("runDetachedSubagentSession", () => {
           errorMessage: "WebSocket closed 1000",
           timestamp: 1,
         } satisfies AssistantMessage as unknown as AgentMessage);
-        return new Promise<void>(() => undefined);
       },
       async abort() {
         return undefined;
@@ -793,7 +827,7 @@ describe("runDetachedSubagentSession", () => {
     });
   });
 
-  it("propagates a terminal assistant failure even if abort never settles", async () => {
+  it("propagates a terminal assistant failure after prompt settlement", async () => {
     const sessionMessages: AgentMessage[] = [];
     let subscriber: ((event: { type: string; [key: string]: unknown }) => void) | undefined;
 
@@ -823,7 +857,7 @@ describe("runDetachedSubagentSession", () => {
         const errorMessage = "Codex error: server is overloaded";
         const finalAssistant = {
           role: "assistant",
-          content: [],
+          content: [{ type: "text", text: "Partial response before failure" }],
           api: "openai-codex-responses",
           provider: "openai-codex",
           model: "gpt-5.5",
@@ -841,10 +875,9 @@ describe("runDetachedSubagentSession", () => {
         } satisfies AssistantMessage;
         sessionMessages.push(finalAssistant as unknown as AgentMessage);
         subscriber?.({ type: "message_end", message: finalAssistant });
-        return new Promise<void>(() => undefined);
       },
       async abort() {
-        return new Promise<void>(() => undefined);
+        return undefined;
       },
     } as unknown as AgentSession;
 
@@ -895,6 +928,115 @@ describe("runDetachedSubagentSession", () => {
       isError: true,
       errorMessage: "Codex error: server is overloaded",
       text: "Codex error: server is overloaded",
+    });
+  });
+
+  it("aborts compaction that starts immediately after parent cancellation", async () => {
+    const sessionMessages: AgentMessage[] = [];
+    const controller = new AbortController();
+    let subscriber: ((event: { type: string; [key: string]: unknown }) => void) | undefined;
+    let resolvePrompt!: () => void;
+    let notifyPromptStarted!: () => void;
+    let compactionControllerReady = false;
+    let effectiveCompactionAborts = 0;
+    const promptStarted = new Promise<void>((resolve) => {
+      notifyPromptStarted = resolve;
+    });
+    const promptPending = new Promise<void>((resolve) => {
+      resolvePrompt = resolve;
+    });
+
+    const subagentSession = {
+      sessionId: "subagent-session-cancel-compaction",
+      sessionFile: "/tmp/subagent-session-cancel-compaction.jsonl",
+      messages: sessionMessages,
+      isStreaming: true,
+      agent: { state: { messages: sessionMessages } },
+      sessionManager: {
+        appendCustomEntry() {
+          return undefined;
+        },
+        appendMessage() {
+          return undefined;
+        },
+      },
+      subscribe(callback: (event: { type: string; [key: string]: unknown }) => void) {
+        subscriber = callback;
+        return () => undefined;
+      },
+      async prompt() {
+        notifyPromptStarted();
+        await promptPending;
+      },
+      abortCompaction() {
+        if (compactionControllerReady) {
+          effectiveCompactionAborts += 1;
+        }
+      },
+      async abort() {
+        return undefined;
+      },
+    } as unknown as AgentSession;
+
+    const resultPromise = runDetachedSubagentSession(
+      {
+        async createPiAgentSession() {
+          return { session: subagentSession };
+        },
+        attachSession(workspace, session) {
+          return {
+            id: "web-subagent-cancel-compaction",
+            workspace,
+            session,
+            subscribers: new Set(),
+            activeTools: new Map(),
+            openedAt: 0,
+            ephemeral: true,
+          };
+        },
+        disposeWebSession: vi.fn(),
+        workspaceSessionDir: "/tmp",
+      },
+      {
+        workspace: {
+          id: "batty",
+          label: "Batty",
+          path: "/root/github/batty",
+          kind: "workspace",
+          isPinned: true,
+          isAssistant: false,
+        },
+        parentSessionId: "parent-session-cancel-compaction",
+        prompt: "Inspect the issue",
+        modelId: "openai/gpt-5",
+        thinkingLevel: "medium",
+        includeSessionContext: false,
+        respondIn: "session",
+        signal: controller.signal,
+      },
+    );
+
+    await promptStarted;
+    controller.abort();
+    subscriber?.({ type: "compaction_start", reason: "overflow" });
+    compactionControllerReady = true;
+    await Promise.resolve();
+    expect(effectiveCompactionAborts).toBe(1);
+
+    const abortedAssistant = {
+      ...createAssistantMessage("", 1),
+      content: [],
+      stopReason: "aborted",
+      errorMessage: "Subagent aborted",
+    } satisfies AssistantMessage;
+    sessionMessages.push(abortedAssistant as unknown as AgentMessage);
+    subscriber?.({ type: "message_end", message: abortedAssistant });
+    resolvePrompt();
+
+    await expect(resultPromise).resolves.toMatchObject({
+      isError: true,
+      errorMessage: "Subagent aborted",
+      text: "Subagent aborted",
     });
   });
 

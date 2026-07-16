@@ -38,6 +38,7 @@ New-Item -ItemType Directory -Force -Path (Join-Path $tmpDir "dist") | Out-Null
 Copy-Item (Join-Path $repoDir "README.md") (Join-Path $tmpDir "README.md")
 Copy-Item (Join-Path $repoDir "package.json") (Join-Path $tmpDir "package.json")
 Copy-Item (Join-Path $repoDir "pnpm-lock.yaml") (Join-Path $tmpDir "pnpm-lock.yaml")
+Copy-Item (Join-Path $repoDir "pnpm-workspace.yaml") (Join-Path $tmpDir "pnpm-workspace.yaml")
 Copy-Item -Recurse (Join-Path $repoDir "dist\client") (Join-Path $tmpDir "dist\client")
 Copy-Item -Recurse (Join-Path $repoDir "dist\server") (Join-Path $tmpDir "dist\server")
 New-Item -ItemType Directory -Force -Path (Join-Path $tmpDir "logs") | Out-Null

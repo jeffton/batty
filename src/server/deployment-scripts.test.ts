@@ -39,6 +39,7 @@ async function createInstallFixture(pnpmExitCode: number): Promise<{
     fs.writeFile(path.join(repoDir, "README.md"), "fixture\n"),
     fs.writeFile(path.join(repoDir, "package.json"), "{}\n"),
     fs.writeFile(path.join(repoDir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n"),
+    fs.writeFile(path.join(repoDir, "pnpm-workspace.yaml"), "catalog: {}\n"),
     fs.writeFile(path.join(repoDir, "dist", "client", "index.html"), "client\n"),
     fs.writeFile(path.join(repoDir, "dist", "server", "main.js"), "server\n"),
     fs.writeFile(path.join(oldRelease, "marker"), "old\n"),
@@ -97,6 +98,19 @@ describe("deployment scripts", () => {
     ).resolves.toBe("client\n");
     await expect(fs.readFile(path.join(fixture.oldRelease, "marker"), "utf8")).resolves.toBe(
       "old\n",
+    );
+    await expect(fs.readFile(path.join(current, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
+      "catalog: {}\n",
+    );
+  });
+
+  it("packages the pnpm workspace configuration in Windows releases", async () => {
+    const script = await fs.readFile(
+      path.join(process.cwd(), "scripts", "install-release.ps1"),
+      "utf8",
+    );
+    expect(script).toContain(
+      'Copy-Item (Join-Path $repoDir "pnpm-workspace.yaml") (Join-Path $tmpDir "pnpm-workspace.yaml")',
     );
   });
 

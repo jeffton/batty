@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
-  AuthStorage,
-  ModelRegistry,
+  ModelRuntime,
+  readStoredCredential,
   SessionManager,
   type AgentSession,
   type ExtensionContext,
@@ -91,8 +91,7 @@ function leafBeforeCurrentTurn(branch: SessionEntry[]): string | null | undefine
 
 export class PiService {
   private readonly config: AppConfig;
-  private readonly authStorage: AuthStorage;
-  private readonly modelRegistry: ModelRegistry;
+  private readonly modelRuntime: ModelRuntime;
   private readonly providerAuthService: ProviderAuthService;
   private readonly sessions = new Map<string, WebSession>();
   private readonly liveSessions = new Map<string, LiveSession>();
@@ -102,20 +101,36 @@ export class PiService {
   private readonly onWorkspaceUpdated: ((workspaceId: string) => Promise<void>) | undefined;
   private readonly cronService: CronService;
 
-  constructor(
+  private constructor(
     config: AppConfig,
     cronService: CronService,
+    modelRuntime: ModelRuntime,
     onAgentCompleted?: (session: SessionState) => Promise<void>,
     onWorkspaceUpdated?: (workspaceId: string) => Promise<void>,
   ) {
     this.config = config;
     this.cronService = cronService;
+    this.modelRuntime = modelRuntime;
     this.onAgentCompleted = onAgentCompleted;
     this.onWorkspaceUpdated = onWorkspaceUpdated;
+    const authPath = path.join(battyAgentDir(config), "auth.json");
+    this.providerAuthService = new ProviderAuthService(modelRuntime, (providerId) =>
+      readStoredCredential(providerId, authPath),
+    );
+  }
+
+  static async create(
+    config: AppConfig,
+    cronService: CronService,
+    onAgentCompleted?: (session: SessionState) => Promise<void>,
+    onWorkspaceUpdated?: (workspaceId: string) => Promise<void>,
+  ): Promise<PiService> {
     const agentDir = battyAgentDir(config);
-    this.authStorage = AuthStorage.create(path.join(agentDir, "auth.json"));
-    this.modelRegistry = ModelRegistry.create(this.authStorage, path.join(agentDir, "models.json"));
-    this.providerAuthService = new ProviderAuthService(this.authStorage);
+    const modelRuntime = await ModelRuntime.create({
+      authPath: path.join(agentDir, "auth.json"),
+      modelsPath: path.join(agentDir, "models.json"),
+    });
+    return new PiService(config, cronService, modelRuntime, onAgentCompleted, onWorkspaceUpdated);
   }
 
   private registerLiveSession(workspace: WorkspaceInfo, session: AgentSession): void {
@@ -142,13 +157,16 @@ export class PiService {
     return this.providerAuthService.getStatus();
   }
 
-  setProviderApiKey(providerId: "google" | "openrouter", apiKey: string): ProviderAuthStatus {
+  async setProviderApiKey(
+    providerId: "google" | "openrouter",
+    apiKey: string,
+  ): Promise<ProviderAuthStatus> {
     return this.providerAuthService.setApiKey(providerId, apiKey);
   }
 
   async listModels(): Promise<ModelOption[]> {
-    this.modelRegistry.refresh();
-    const models = await this.modelRegistry.getAvailable();
+    await this.modelRuntime.reloadConfig();
+    const models = await this.modelRuntime.getAvailable();
     return models.map(toModelOption).sort((a, b) => a.label.localeCompare(b.label));
   }
 
@@ -676,8 +694,7 @@ export class PiService {
       config: this.config,
       workspace,
       sessionManager,
-      authStorage: this.authStorage,
-      modelRegistry: this.modelRegistry,
+      modelRuntime: this.modelRuntime,
       model,
       thinkingLevel: options?.thinkingLevel,
       customTools: createPiServiceTools(
@@ -762,7 +779,7 @@ export class PiService {
       throw new Error(`Invalid model id: ${modelId}`);
     }
 
-    const resolved = this.modelRegistry.find(provider, rest.join("/"));
+    const resolved = this.modelRuntime.getModel(provider, rest.join("/"));
     if (!resolved) {
       throw new Error(`Model not found: ${modelId}`);
     }

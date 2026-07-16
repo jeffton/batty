@@ -1,9 +1,8 @@
 import path from "node:path";
 import {
-  AuthStorage,
   createAgentSession,
   DefaultResourceLoader,
-  ModelRegistry,
+  type ModelRuntime,
   SessionManager,
   SettingsManager,
   type AgentSession,
@@ -33,8 +32,7 @@ export interface CreatePiAgentSessionOptions {
   config: AppConfig;
   workspace: WorkspaceInfo;
   sessionManager: SessionManager;
-  authStorage: AuthStorage;
-  modelRegistry: ModelRegistry;
+  modelRuntime: ModelRuntime;
   customTools: Array<ToolDefinition<any>>;
   model?: PiModel;
   thinkingLevel?: string;
@@ -44,8 +42,7 @@ export async function createPiAgentSession({
   config,
   workspace,
   sessionManager,
-  authStorage,
-  modelRegistry,
+  modelRuntime,
   customTools,
   model,
   thinkingLevel,
@@ -98,8 +95,7 @@ export async function createPiAgentSession({
   const result = await createAgentSession({
     cwd: workspace.path,
     agentDir,
-    authStorage,
-    modelRegistry,
+    modelRuntime,
     sessionManager,
     settingsManager,
     resourceLoader,

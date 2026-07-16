@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { OPENAI_CODEX_BROWSER_LOGIN_METHOD } from "@earendil-works/pi-ai/oauth";
-import type { ApiKeyCredential, AuthStorage } from "@earendil-works/pi-coding-agent";
+import type { AuthEvent, AuthPrompt, Credential } from "@earendil-works/pi-ai";
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type {
   ProviderAuthProviderStatus,
   ProviderAuthStartResponse,
@@ -61,11 +61,11 @@ function decodeJwtPayload(token: string): Record<string, unknown> | undefined {
 }
 
 function statusForProvider(
-  authStorage: AuthStorage,
+  readCredential: (providerId: string) => Credential | undefined,
   providerId: string,
   name: string,
 ): ProviderAuthProviderStatus {
-  const credential = authStorage.get(providerId);
+  const credential = readCredential(providerId);
   const payload = credential?.type === "oauth" ? decodeJwtPayload(credential.access) : undefined;
   const profile =
     payload?.["https://api.openai.com/profile"] &&
@@ -94,36 +94,42 @@ function statusForProvider(
 export class ProviderAuthService {
   private readonly attempts = new Map<string, ProviderAuthAttempt>();
 
-  constructor(private readonly authStorage: AuthStorage) {}
+  constructor(
+    private readonly modelRuntime: Pick<ModelRuntime, "login">,
+    private readonly readCredential: (providerId: string) => Credential | undefined,
+  ) {}
 
   getStatus(): ProviderAuthStatus {
     this.cleanupExpiredAttempts();
-    const oauthProviders = this.authStorage
-      .getOAuthProviders()
-      .filter((provider) => provider.id === "openai-codex")
-      .map((provider) => statusForProvider(this.authStorage, provider.id, provider.name));
-    const apiKeyProviders = Object.entries(API_KEY_PROVIDER_NAMES).map(([providerId, name]) =>
-      statusForProvider(this.authStorage, providerId, name),
-    );
+    const providers = [
+      statusForProvider(
+        this.readCredential,
+        "openai-codex",
+        "ChatGPT Plus/Pro (Codex Subscription)",
+      ),
+      ...Object.entries(API_KEY_PROVIDER_NAMES).map(([providerId, name]) =>
+        statusForProvider(this.readCredential, providerId, name),
+      ),
+    ];
 
     return {
-      providers: [...oauthProviders, ...apiKeyProviders].sort((a, b) =>
-        a.name.localeCompare(b.name),
-      ),
+      providers: providers.sort((a, b) => a.name.localeCompare(b.name)),
     };
   }
 
-  setApiKey(providerId: keyof typeof API_KEY_PROVIDER_NAMES, apiKey: string): ProviderAuthStatus {
+  async setApiKey(
+    providerId: keyof typeof API_KEY_PROVIDER_NAMES,
+    apiKey: string,
+  ): Promise<ProviderAuthStatus> {
     const trimmed = apiKey.trim();
     if (!trimmed) {
       throw new Error("Missing API key");
     }
 
-    const credential: ApiKeyCredential = {
-      type: "api_key",
-      key: trimmed,
-    };
-    this.authStorage.set(providerId, credential);
+    await this.modelRuntime.login(providerId, "api_key", {
+      prompt: async () => trimmed,
+      notify: () => {},
+    });
     return this.getStatus();
   }
 
@@ -143,24 +149,25 @@ export class ProviderAuthService {
       }
       const error = new Error("Auth attempt expired");
       attempt.finalError = error;
+      authInfo.reject(error);
       manualInput.reject(error);
     }, PROVIDER_AUTH_TTL_MS);
 
-    const loginPromise = this.authStorage
-      .login(providerId, {
-        onAuth: (info) => {
-          authInfo.resolve(info);
-        },
-        onDeviceCode: (info) => {
-          authInfo.resolve({
-            url: info.verificationUri,
-            instructions: `Enter code: ${info.userCode}`,
-          });
-        },
-        onPrompt: async () => manualInput.promise,
-        onManualCodeInput: async () => manualInput.promise,
-        onSelect: async () => OPENAI_CODEX_BROWSER_LOGIN_METHOD,
-      })
+    const notify = (event: AuthEvent): void => {
+      if (event.type === "auth_url") {
+        authInfo.resolve({ url: event.url, instructions: event.instructions });
+      } else if (event.type === "device_code") {
+        authInfo.resolve({
+          url: event.verificationUri,
+          instructions: `Enter code: ${event.userCode}`,
+        });
+      }
+    };
+    const prompt = async (request: AuthPrompt): Promise<string> =>
+      request.type === "select" ? "browser" : manualInput.promise;
+
+    const loginPromise = this.modelRuntime
+      .login(providerId, "oauth", { notify, prompt })
       .then(() => {
         const attempt = this.attempts.get(attemptId);
         if (attempt) {
@@ -171,6 +178,7 @@ export class ProviderAuthService {
       .catch((error) => {
         const attempt = this.attempts.get(attemptId);
         const normalized = normalizeError(error);
+        authInfo.reject(normalized);
         if (attempt) {
           attempt.finalError = normalized;
           clearTimeout(attempt.timeout);

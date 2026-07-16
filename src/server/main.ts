@@ -69,7 +69,7 @@ async function publishWorkspace(workspaceId: string): Promise<void> {
   }
 }
 
-const service = new PiService(
+const service = await PiService.create(
   config,
   cronService,
   async (session) => {

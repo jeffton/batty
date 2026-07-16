@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import type { AuthStorage } from "@earendil-works/pi-coding-agent";
+import type { Credential } from "@earendil-works/pi-ai";
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { ProviderAuthService } from "@/server/provider-auth";
 
 function createJwt(payload: Record<string, unknown>): string {
@@ -14,46 +15,30 @@ describe("ProviderAuthService", () => {
   });
 
   it("starts and completes the openai-codex manual auth flow", async () => {
-    let credential:
-      | { type: "oauth"; access: string; refresh: string; expires: number }
-      | { type: "api_key"; key: string }
-      | undefined;
+    const credentials = new Map<string, Credential>();
     let capturedInput = "";
-
-    const authStorage = {
-      get: vi.fn((providerId: string) => (providerId === "openai-codex" ? credential : undefined)),
-      getOAuthProviders: vi.fn(() => [
-        {
-          id: "openai-codex",
-          name: "ChatGPT Plus/Pro (Codex Subscription)",
-        },
-      ]),
-      set: vi.fn((providerId: string, nextCredential: typeof credential) => {
-        if (providerId === "openai-codex") {
-          credential = nextCredential;
-        }
+    const modelRuntime = {
+      login: vi.fn(async (_providerId, type, interaction) => {
+        expect(type).toBe("oauth");
+        interaction.notify({ type: "auth_url", url: "https://auth.openai.com/example" });
+        capturedInput = await interaction.prompt({
+          type: "manual_code",
+          message: "Paste callback URL",
+        });
+        const credential: Credential = {
+          type: "oauth",
+          access: createJwt({ "https://api.openai.com/profile": { email: "codex@example.com" } }),
+          refresh: "refresh-token",
+          expires: Date.now() + 60_000,
+        };
+        credentials.set("openai-codex", credential);
+        return credential;
       }),
-      login: vi.fn(
-        async (
-          _providerId: string,
-          callbacks: {
-            onAuth: (info: { url: string }) => void;
-            onManualCodeInput?: () => Promise<string>;
-          },
-        ) => {
-          callbacks.onAuth({ url: "https://auth.openai.com/example" });
-          capturedInput = (await callbacks.onManualCodeInput?.()) ?? "";
-          credential = {
-            type: "oauth",
-            access: createJwt({ "https://api.openai.com/profile": { email: "codex@example.com" } }),
-            refresh: "refresh-token",
-            expires: Date.now() + 60_000,
-          };
-        },
-      ),
-    } as unknown as AuthStorage;
+    } as Pick<ModelRuntime, "login">;
+    const service = new ProviderAuthService(modelRuntime, (providerId) =>
+      credentials.get(providerId),
+    );
 
-    const service = new ProviderAuthService(authStorage);
     const started = await service.start("openai-codex");
 
     expect(started.providerId).toBe("openai-codex");
@@ -73,28 +58,43 @@ describe("ProviderAuthService", () => {
     });
   });
 
-  it("stores API keys for supported providers", () => {
-    const credentials = new Map<string, { type: "api_key"; key: string }>();
-    const authStorage = {
-      get: vi.fn((providerId: string) => credentials.get(providerId)),
-      getOAuthProviders: vi.fn(() => [
-        {
-          id: "openai-codex",
-          name: "ChatGPT Plus/Pro (Codex Subscription)",
-        },
-      ]),
-      set: vi.fn((providerId: string, credential: { type: "api_key"; key: string }) => {
-        credentials.set(providerId, credential);
+  it("rejects auth start when login fails before publishing a URL", async () => {
+    const modelRuntime = {
+      login: vi.fn(async () => {
+        throw new Error("OAuth callback port is unavailable");
       }),
-    } as unknown as AuthStorage;
+    } as Pick<ModelRuntime, "login">;
+    const service = new ProviderAuthService(modelRuntime, () => undefined);
 
-    const service = new ProviderAuthService(authStorage);
-    const status = service.setApiKey("openrouter", "sk-or-v1-secret");
+    await expect(service.start("openai-codex")).rejects.toThrow(
+      "OAuth callback port is unavailable",
+    );
+  });
 
-    expect(authStorage.set).toHaveBeenCalledWith("openrouter", {
-      type: "api_key",
-      key: "sk-or-v1-secret",
-    });
+  it("stores API keys for supported providers", async () => {
+    const credentials = new Map<string, Credential>();
+    const modelRuntime = {
+      login: vi.fn(async (providerId, type, interaction) => {
+        expect(type).toBe("api_key");
+        const credential: Credential = {
+          type: "api_key",
+          key: await interaction.prompt({ type: "secret", message: "API key" }),
+        };
+        credentials.set(providerId, credential);
+        return credential;
+      }),
+    } as Pick<ModelRuntime, "login">;
+    const service = new ProviderAuthService(modelRuntime, (providerId) =>
+      credentials.get(providerId),
+    );
+
+    const status = await service.setApiKey("openrouter", "sk-or-v1-secret");
+
+    expect(modelRuntime.login).toHaveBeenCalledWith(
+      "openrouter",
+      "api_key",
+      expect.objectContaining({ prompt: expect.any(Function), notify: expect.any(Function) }),
+    );
     expect(status.providers.find((provider) => provider.id === "openrouter")).toEqual({
       id: "openrouter",
       name: "OpenRouter",
@@ -106,29 +106,19 @@ describe("ProviderAuthService", () => {
   it("rejects expired attempts", async () => {
     vi.useFakeTimers();
 
-    const authStorage = {
-      get: vi.fn(() => undefined),
-      getOAuthProviders: vi.fn(() => [
-        {
-          id: "openai-codex",
-          name: "ChatGPT Plus/Pro (Codex Subscription)",
-        },
-      ]),
-      login: vi.fn(
-        async (
-          _providerId: string,
-          callbacks: {
-            onAuth: (info: { url: string }) => void;
-            onManualCodeInput?: () => Promise<string>;
-          },
-        ) => {
-          callbacks.onAuth({ url: "https://auth.openai.com/example" });
-          await callbacks.onManualCodeInput?.();
-        },
-      ),
-    } as unknown as AuthStorage;
-
-    const service = new ProviderAuthService(authStorage);
+    const modelRuntime = {
+      login: vi.fn(async (_providerId, _type, interaction) => {
+        interaction.notify({ type: "auth_url", url: "https://auth.openai.com/example" });
+        await interaction.prompt({ type: "manual_code", message: "Paste callback URL" });
+        return {
+          type: "oauth",
+          access: "access-token",
+          refresh: "refresh-token",
+          expires: Date.now() + 60_000,
+        };
+      }),
+    } as Pick<ModelRuntime, "login">;
+    const service = new ProviderAuthService(modelRuntime, () => undefined);
     const started = await service.start("openai-codex");
 
     await vi.advanceTimersByTimeAsync(10 * 60 * 1000 + 1);

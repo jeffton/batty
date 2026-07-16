@@ -1,8 +1,29 @@
 minimumReleaseAge: 4320
 minimumReleaseAgeExclude:
   - "@earendil-works/pi-*"
+  - vite-plus
+  - "@voidzero-dev/*"
+  - oxlint
+  - "@oxlint/*"
+  - oxlint-tsgolint
+  - "@oxlint-tsgolint/*"
+  - oxfmt
+  - "@oxfmt/*"
+  - vitest
+  - "@vitest/*"
 ignoredBuiltDependencies:
   - "@google/genai"
   - esbuild
   - koffi
   - protobufjs
+catalog:
+  vite: npm:@voidzero-dev/vite-plus-core@0.2.4
+  vite-plus: 0.2.4
+overrides:
+  vite: "catalog:"
+  vitest: 4.1.10
+peerDependencyRules:
+  allowAny:
+    - vite
+  allowedVersions:
+    vite: "*"

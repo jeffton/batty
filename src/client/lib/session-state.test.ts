@@ -1,79 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
-import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
+import { mergeSessionState } from "@/client/lib/session-state";
 import type { SessionState } from "@/shared/types";
 
 describe("normalizeSessionState", () => {
-  it("fills missing fields from legacy cached sessions", () => {
-    const legacy = {
-      id: "web-1",
-      sessionId: "session-1",
-      workspaceId: "batty",
-      cwd: "/tmp/batty",
-      thinkingLevel: "medium",
-      messages: [
-        {
-          id: "user-1",
-          role: "user",
-          timestamp: 123,
-          blocks: [{ type: "text", text: "hello" }],
-        },
-      ],
-      activeTools: [],
-    } as unknown as SessionState;
-
-    expect(normalizeSessionState(legacy)).toEqual({
-      ...legacy,
-      path: undefined,
-      model: undefined,
-      modelLabel: undefined,
-      thinkingLevel: "medium",
-      availableThinkingLevels: [],
-      isStreaming: false,
-      pendingMessageCount: 0,
-      queuedPrompts: [],
-      updatedAt: 123,
-      contextTokens: null,
-      contextWindow: null,
-      contextPercent: null,
-      totalMessageCount: 1,
-      hasMoreMessages: false,
-      messages: legacy.messages,
-      activeTools: [],
-    });
-  });
-
-  it("normalizes invalid arrays and timestamps", () => {
-    const normalized = normalizeSessionState({
-      id: "web-1",
-      sessionId: "session-1",
-      workspaceId: "batty",
-      cwd: "/tmp/batty",
-      thinkingLevel: "",
-      availableThinkingLevels: ["", "high", "high"] as unknown as string[],
-      isStreaming: true,
-      pendingMessageCount: Number.NaN,
-      updatedAt: Number.NaN,
-      contextTokens: Number.NaN,
-      contextWindow: Number.NaN,
-      contextPercent: Number.NaN,
-      messages: [],
-      activeTools: undefined as unknown as SessionState["activeTools"],
-    } as unknown as SessionState);
-
-    expect(normalized).toMatchObject({
-      thinkingLevel: "off",
-      availableThinkingLevels: ["high"],
-      pendingMessageCount: 0,
-      contextTokens: null,
-      contextWindow: null,
-      contextPercent: null,
-      totalMessageCount: 0,
-      hasMoreMessages: false,
-      activeTools: [],
-    });
-    expect(normalized?.updatedAt).toBeTypeOf("number");
-  });
-
   it("merges paginated snapshots into an already loaded history", () => {
     const previous = {
       id: "web-1",

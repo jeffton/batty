@@ -51,7 +51,7 @@ describe("ensureOptionsFile", () => {
     expect(persisted.baseUrl).toBe("/");
   });
 
-  it("drops legacy password auth fields and preserves the rest", async () => {
+  it("normalizes and persists configured options", async () => {
     const battyDir = await createBattyDir();
 
     await fs.mkdir(path.dirname(optionsFilePath(battyDir)), { recursive: true });
@@ -59,8 +59,6 @@ describe("ensureOptionsFile", () => {
       optionsFilePath(battyDir),
       `${JSON.stringify(
         {
-          username: "david",
-          password: "configured-password",
           authSecret: "existing-secret",
           workspacesRoots: ["/root/github"],
           webPushSubject: "https://batty.roybot.se",
@@ -90,8 +88,7 @@ describe("ensureOptionsFile", () => {
     expect(options.pinnedWorkspaceIds).toEqual(["batty", "kladde"]);
     expect(options.assistantWorkspaceId).toBe("batty");
     expect(options.baseUrl).toBe("/batty");
-    expect(persisted.username).toBeUndefined();
-    expect(persisted.password).toBeUndefined();
+    expect(persisted).toEqual(options);
   });
 
   it("persists the selected assistant workspace", async () => {

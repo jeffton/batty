@@ -297,9 +297,9 @@ export interface BootstrapPayload {
   providerAuth: ProviderAuthStatus;
   settings: AppSettingsStatus;
   buildId: string;
-  workspaceRoots?: string[];
+  workspaceRoots: string[];
   workspaces: WorkspaceInfo[];
-  workspaceUiSettings?: Record<string, WorkspaceUiSettings>;
+  workspaceUiSettings: Record<string, WorkspaceUiSettings>;
   models: ModelOption[];
   activeSession?: SessionState;
 }

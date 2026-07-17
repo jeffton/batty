@@ -1,10 +1,5 @@
 import type { ActiveToolRun, SessionState, UiMessage } from "@/shared/types";
 
-function lastMessageTimestamp(messages: UiMessage[]): number | undefined {
-  const lastMessage = messages.at(-1);
-  return typeof lastMessage?.timestamp === "number" ? lastMessage.timestamp : undefined;
-}
-
 function hasToolCall(message: UiMessage | undefined, toolCallId: string): boolean {
   return Boolean(
     message &&
@@ -80,63 +75,10 @@ export function normalizeSessionState(session: SessionState | undefined): Sessio
     return undefined;
   }
 
-  const messages = Array.isArray(session.messages) ? session.messages : [];
-  const thinkingLevel =
-    typeof session.thinkingLevel === "string" && session.thinkingLevel.length > 0
-      ? session.thinkingLevel
-      : "off";
-  const availableThinkingLevels = Array.isArray(session.availableThinkingLevels)
-    ? session.availableThinkingLevels.filter(
-        (candidate): candidate is string => typeof candidate === "string" && candidate.length > 0,
-      )
-    : [];
-  const updatedAtCandidates = [
-    typeof session.updatedAt === "number" ? session.updatedAt : undefined,
-    lastMessageTimestamp(messages),
-    typeof session.activeAssistant?.timestamp === "number"
-      ? session.activeAssistant.timestamp
-      : undefined,
-  ].filter((candidate): candidate is number => Number.isFinite(candidate));
-  const totalMessageCount =
-    typeof session.totalMessageCount === "number" && Number.isFinite(session.totalMessageCount)
-      ? Math.max(0, session.totalMessageCount)
-      : messages.length;
-
   return {
     ...session,
-    path: typeof session.path === "string" && session.path.length > 0 ? session.path : undefined,
-    model:
-      typeof session.model === "string" && session.model.length > 0 ? session.model : undefined,
-    modelLabel:
-      typeof session.modelLabel === "string" && session.modelLabel.length > 0
-        ? session.modelLabel
-        : undefined,
-    thinkingLevel,
-    availableThinkingLevels: [...new Set(availableThinkingLevels)],
-    isStreaming: Boolean(session.isStreaming),
-    pendingMessageCount:
-      typeof session.pendingMessageCount === "number" &&
-      Number.isFinite(session.pendingMessageCount)
-        ? session.pendingMessageCount
-        : 0,
-    queuedPrompts: Array.isArray(session.queuedPrompts) ? session.queuedPrompts : [],
-    updatedAt: updatedAtCandidates[0] ?? Date.now(),
-    contextTokens:
-      typeof session.contextTokens === "number" && Number.isFinite(session.contextTokens)
-        ? session.contextTokens
-        : null,
-    contextWindow:
-      typeof session.contextWindow === "number" && Number.isFinite(session.contextWindow)
-        ? session.contextWindow
-        : null,
-    contextPercent:
-      typeof session.contextPercent === "number" && Number.isFinite(session.contextPercent)
-        ? session.contextPercent
-        : null,
-    totalMessageCount,
-    hasMoreMessages: Boolean(session.hasMoreMessages) || totalMessageCount > messages.length,
-    messages,
-    activeTools: Array.isArray(session.activeTools) ? session.activeTools : [],
+    availableThinkingLevels: [...new Set(session.availableThinkingLevels)],
+    hasMoreMessages: session.hasMoreMessages || session.totalMessageCount > session.messages.length,
   };
 }
 

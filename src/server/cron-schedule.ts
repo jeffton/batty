@@ -199,6 +199,13 @@ export function nextRunAtMs(schedule: StoredCronJobSchedule, now = Date.now()): 
   }
 }
 
+function requireStoredString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0 || value.trim() !== value) {
+    throw new Error(`Invalid stored ${label.toLowerCase()}`);
+  }
+  return value;
+}
+
 export function normalizeStoredSchedule(value: unknown): StoredCronJobSchedule {
   if (!value || typeof value !== "object") {
     throw new Error("Invalid cron schedule");
@@ -206,34 +213,41 @@ export function normalizeStoredSchedule(value: unknown): StoredCronJobSchedule {
 
   const schedule = value as Partial<StoredCronJobSchedule>;
   if (schedule.kind === "at") {
-    return {
-      kind: "at",
-      at: normalizeAtInput({ kind: "at", at: schedule.at }, 0),
-    };
+    const at = requireStoredString(schedule.at, "At schedule");
+    const parsedAt = new Date(at);
+    if (!Number.isFinite(parsedAt.getTime()) || parsedAt.toISOString() !== at) {
+      throw new Error("Invalid stored at schedule");
+    }
+    return { kind: "at", at };
   }
 
   if (schedule.kind === "every") {
-    const every = normalizeNonEmptyString(schedule.every, "Every schedule");
-    const everyMs =
-      typeof schedule.everyMs === "number" && Number.isFinite(schedule.everyMs)
-        ? schedule.everyMs
-        : parseDurationMs(every);
-    const anchorAtMs =
-      typeof schedule.anchorAtMs === "number" && Number.isFinite(schedule.anchorAtMs)
-        ? schedule.anchorAtMs
-        : Date.now();
+    const every = requireStoredString(schedule.every, "Every schedule");
+    if (
+      typeof schedule.everyMs !== "number" ||
+      !Number.isFinite(schedule.everyMs) ||
+      schedule.everyMs <= 0
+    ) {
+      throw new Error("Invalid stored every duration");
+    }
+    if (parseDurationMs(every) !== schedule.everyMs) {
+      throw new Error("Stored every duration does not match its label");
+    }
+    if (typeof schedule.anchorAtMs !== "number" || !Number.isFinite(schedule.anchorAtMs)) {
+      throw new Error("Invalid stored every anchor");
+    }
 
     return {
       kind: "every",
       every,
-      everyMs,
-      anchorAtMs,
+      everyMs: schedule.everyMs,
+      anchorAtMs: schedule.anchorAtMs,
     };
   }
 
   if (schedule.kind === "cron") {
-    const expression = normalizeNonEmptyString(schedule.expression, "Cron expression");
-    const timezone = schedule.timezone?.trim() || DEFAULT_TIMEZONE;
+    const expression = requireStoredString(schedule.expression, "Cron expression");
+    const timezone = requireStoredString(schedule.timezone, "Cron timezone");
     new Cron(expression, { timezone, paused: true });
     return {
       kind: "cron",

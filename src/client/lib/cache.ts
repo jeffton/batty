@@ -1,5 +1,4 @@
 import { get, set } from "idb-keyval";
-import { normalizeSessionState } from "@/client/lib/session-state";
 import { RECENT_SESSION_MESSAGE_WINDOW } from "@/shared/session-history";
 import type { BootstrapPayload, SessionState } from "@/shared/types";
 
@@ -32,14 +31,9 @@ export async function writeCachedBootstrap(payload: BootstrapPayload): Promise<v
 }
 
 export async function readCachedSession(sessionId: string): Promise<SessionState | undefined> {
-  return normalizeSessionState(await get<SessionState>(`batty:session:${sessionId}`));
+  return await get<SessionState>(`batty:session:${sessionId}`);
 }
 
 export async function writeCachedSession(session: SessionState): Promise<void> {
-  const normalized = normalizeSessionState(session);
-  if (!normalized) {
-    return;
-  }
-
-  await set(`batty:session:${session.sessionId}`, cloneForCache(trimSessionForCache(normalized)));
+  await set(`batty:session:${session.sessionId}`, cloneForCache(trimSessionForCache(session)));
 }

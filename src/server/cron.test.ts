@@ -87,51 +87,18 @@ describe("cron store", () => {
     });
   });
 
-  it("migrates legacy daily cron sessions to daily-detached on read", async () => {
+  it("rejects unsupported cron store versions", async () => {
     const config = await createConfig();
-    await fs.mkdir(path.join(config.workspacesRoots[0]!, "alpha"));
     const store = new CronStore(config);
 
     await fs.mkdir(path.dirname(store.filePath), { recursive: true });
     await fs.writeFile(
       store.filePath,
-      `${JSON.stringify(
-        {
-          version: 1,
-          jobs: [
-            {
-              id: "legacy-job",
-              workspaceId: "alpha",
-              prompt: "Legacy job",
-              model: "openai/gpt-5",
-              thinkingLevel: "medium",
-              session: { kind: "daily", includePreviousContext: true },
-              createdAt: 1,
-              updatedAt: 1,
-              schedule: { kind: "every", every: "1h", everyMs: 3600000, anchorAtMs: 1 },
-              state: {},
-            },
-          ],
-        },
-        null,
-        2,
-      )}\n`,
+      `${JSON.stringify({ version: 999, jobs: [] }, null, 2)}\n`,
       "utf8",
     );
 
-    const [job] = await store.listJobs("alpha");
-    expect(job?.session).toEqual({ kind: "daily-detached", includePreviousContext: true });
-    expect(buildCronJobSummary(job!)).toContain("Session: Daily detached · with previous context");
-
-    const migrated = JSON.parse(await fs.readFile(store.filePath, "utf8")) as {
-      version: number;
-      jobs: Array<{ session?: { kind?: string; includePreviousContext?: boolean } }>;
-    };
-    expect(migrated.version).toBe(2);
-    expect(migrated.jobs[0]?.session).toEqual({
-      kind: "daily-detached",
-      includePreviousContext: true,
-    });
+    await expect(store.listJobs()).rejects.toThrow("Unsupported cron store version: 999");
   });
 
   it("preserves concurrent mutations from separate stores", async () => {

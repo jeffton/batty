@@ -40,11 +40,11 @@ export const authBootstrapActions = {
     this.authenticated = payload.authenticated;
     this.auth = payload.auth;
     this.buildId = payload.buildId;
-    this.providerAuth = payload.providerAuth ?? defaultProviderAuthStatus;
-    this.settings = payload.settings ?? defaultAppSettingsStatus;
-    this.workspaceRoots = payload.workspaceRoots ?? [];
+    this.providerAuth = payload.providerAuth;
+    this.settings = payload.settings;
+    this.workspaceRoots = payload.workspaceRoots;
     this.workspaces = sortWorkspacesByRecentSession(workspaces);
-    this.workspaceUiSettings = payload.workspaceUiSettings ?? {};
+    this.workspaceUiSettings = payload.workspaceUiSettings;
     this.models = payload.models;
     this.selectedWorkspaceId =
       this.selectedWorkspaceId &&

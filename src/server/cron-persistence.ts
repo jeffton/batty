@@ -17,8 +17,8 @@ import {
   normalizeSession,
   normalizeState,
   normalizeStoredSession,
+  normalizeStoredThinkingLevel,
   normalizeThinkingLevel,
-  migrateStoredSession,
   toPublicSession,
   type StoredCronJobSession,
 } from "./cron-state";
@@ -49,6 +49,20 @@ interface RawPersistedCronStore {
   jobs: unknown[];
 }
 
+function requireStoredString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0 || value.trim() !== value) {
+    throw new Error(`Invalid ${label.toLowerCase()}`);
+  }
+  return value;
+}
+
+function requireStoredTimestamp(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`Invalid ${label.toLowerCase()}`);
+  }
+  return value;
+}
+
 function normalizeStoredJob(value: unknown): StoredCronJob {
   if (!value || typeof value !== "object") {
     throw new Error("Invalid cron job");
@@ -56,46 +70,14 @@ function normalizeStoredJob(value: unknown): StoredCronJob {
 
   const job = value as Partial<StoredCronJob>;
   return {
-    id: normalizeNonEmptyString(job.id, "Job id"),
-    workspaceId: normalizeNonEmptyString(job.workspaceId, "Workspace"),
-    prompt: normalizeNonEmptyString(job.prompt, "Prompt"),
-    model: normalizeNonEmptyString(job.model, "Model"),
-    thinkingLevel: normalizeThinkingLevel(job.thinkingLevel),
+    id: requireStoredString(job.id, "Job id"),
+    workspaceId: requireStoredString(job.workspaceId, "Workspace"),
+    prompt: requireStoredString(job.prompt, "Prompt"),
+    model: requireStoredString(job.model, "Model"),
+    thinkingLevel: normalizeStoredThinkingLevel(job.thinkingLevel),
     session: normalizeStoredSession(job.session),
-    createdAt:
-      typeof job.createdAt === "number" && Number.isFinite(job.createdAt)
-        ? job.createdAt
-        : Date.now(),
-    updatedAt:
-      typeof job.updatedAt === "number" && Number.isFinite(job.updatedAt)
-        ? job.updatedAt
-        : Date.now(),
-    schedule: normalizeStoredSchedule(job.schedule),
-    state: normalizeState(job.state),
-  };
-}
-
-function migrateStoredJob(value: unknown): StoredCronJob {
-  if (!value || typeof value !== "object") {
-    throw new Error("Invalid cron job");
-  }
-
-  const job = value as Partial<StoredCronJob>;
-  return {
-    id: normalizeNonEmptyString(job.id, "Job id"),
-    workspaceId: normalizeNonEmptyString(job.workspaceId, "Workspace"),
-    prompt: normalizeNonEmptyString(job.prompt, "Prompt"),
-    model: normalizeNonEmptyString(job.model, "Model"),
-    thinkingLevel: normalizeThinkingLevel(job.thinkingLevel),
-    session: migrateStoredSession(job.session),
-    createdAt:
-      typeof job.createdAt === "number" && Number.isFinite(job.createdAt)
-        ? job.createdAt
-        : Date.now(),
-    updatedAt:
-      typeof job.updatedAt === "number" && Number.isFinite(job.updatedAt)
-        ? job.updatedAt
-        : Date.now(),
+    createdAt: requireStoredTimestamp(job.createdAt, "Created timestamp"),
+    updatedAt: requireStoredTimestamp(job.updatedAt, "Updated timestamp"),
     schedule: normalizeStoredSchedule(job.schedule),
     state: normalizeState(job.state),
   };
@@ -265,33 +247,26 @@ export class CronStore {
 
   private async loadStoreUnlocked(): Promise<PersistedCronStore> {
     const persisted = await this.readStoreFile();
-    switch (persisted.version) {
-      case CRON_STORE_VERSION:
-        return {
-          version: CRON_STORE_VERSION,
-          jobs: persisted.jobs.map(normalizeStoredJob),
-        };
-      case 1: {
-        const jobs = persisted.jobs.map(migrateStoredJob);
-        await this.writeStoreUnlocked(jobs);
-        return {
-          version: CRON_STORE_VERSION,
-          jobs,
-        };
-      }
-      default:
-        throw new Error(`Unsupported cron store version: ${persisted.version}`);
+    if (persisted.version !== CRON_STORE_VERSION) {
+      throw new Error(`Unsupported cron store version: ${persisted.version}`);
     }
+    return {
+      version: CRON_STORE_VERSION,
+      jobs: persisted.jobs.map(normalizeStoredJob),
+    };
   }
 
   private async readStoreFile(): Promise<RawPersistedCronStore> {
     try {
       const content = await fs.readFile(this.filePath, "utf8");
       const parsed = JSON.parse(content) as { version?: unknown; jobs?: unknown };
-      const jobs = Array.isArray(parsed.jobs) ? parsed.jobs : [];
-      const version =
-        typeof parsed.version === "number" && Number.isInteger(parsed.version) ? parsed.version : 1;
-      return { version, jobs };
+      if (!Array.isArray(parsed.jobs)) {
+        throw new Error("Invalid cron jobs");
+      }
+      if (typeof parsed.version !== "number" || !Number.isInteger(parsed.version)) {
+        throw new Error(`Invalid cron store version: ${String(parsed.version)}`);
+      }
+      return { version: parsed.version, jobs: parsed.jobs };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return { version: CRON_STORE_VERSION, jobs: [] };

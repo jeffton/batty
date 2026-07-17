@@ -22,6 +22,13 @@ export function normalizeThinkingLevel(value: string | undefined): string {
   return thinkingLevel;
 }
 
+export function normalizeStoredThinkingLevel(value: unknown): string {
+  if (typeof value !== "string" || !THINKING_LEVELS.has(value)) {
+    throw new Error(`Invalid stored thinking level: ${String(value)}`);
+  }
+  return value;
+}
+
 export function normalizeSession(value: CronJobSession | undefined): StoredCronJobSession {
   if (!value) {
     return { kind: "new" };
@@ -47,7 +54,7 @@ export function normalizeSession(value: CronJobSession | undefined): StoredCronJ
 
 export function normalizeStoredSession(value: unknown): StoredCronJobSession {
   if (!value || typeof value !== "object") {
-    return { kind: "new" };
+    throw new Error("Invalid cron session");
   }
 
   const session = value as { kind?: unknown; includePreviousContext?: unknown };
@@ -57,30 +64,16 @@ export function normalizeStoredSession(value: unknown): StoredCronJobSession {
     case "daily-inline":
       return { kind: "daily-inline" };
     case "daily-detached":
-    case "daily-subagent":
+      if (typeof session.includePreviousContext !== "boolean") {
+        throw new Error("Invalid daily detached context setting");
+      }
       return {
         kind: "daily-detached",
-        includePreviousContext: session.includePreviousContext === true,
+        includePreviousContext: session.includePreviousContext,
       };
     default:
       throw new Error(`Invalid cron session kind: ${String(session.kind)}`);
   }
-}
-
-export function migrateStoredSession(value: unknown): StoredCronJobSession {
-  if (!value || typeof value !== "object") {
-    return { kind: "new" };
-  }
-
-  const session = value as { kind?: unknown; includePreviousContext?: unknown };
-  if (session.kind === "daily" || session.kind === "daily-subagent") {
-    return {
-      kind: "daily-detached",
-      includePreviousContext: session.includePreviousContext === true,
-    };
-  }
-
-  return normalizeStoredSession(value);
 }
 
 export function toPublicSession(session: StoredCronJobSession): CronJobSession {
@@ -111,37 +104,38 @@ export function formatSessionLabel(session: CronJobSession | StoredCronJobSessio
 }
 
 export function normalizeState(value: unknown): CronJobState {
-  const candidate = value && typeof value === "object" ? (value as Partial<CronJobState>) : {};
-  return {
-    nextRunAtMs:
-      typeof candidate.nextRunAtMs === "number" && Number.isFinite(candidate.nextRunAtMs)
-        ? candidate.nextRunAtMs
-        : undefined,
-    lastRunAtMs:
-      typeof candidate.lastRunAtMs === "number" && Number.isFinite(candidate.lastRunAtMs)
-        ? candidate.lastRunAtMs
-        : undefined,
-    lastDurationMs:
-      typeof candidate.lastDurationMs === "number" && Number.isFinite(candidate.lastDurationMs)
-        ? candidate.lastDurationMs
-        : undefined,
-    lastStatus:
-      candidate.lastStatus === "ok" || candidate.lastStatus === "error"
-        ? candidate.lastStatus
-        : undefined,
-    lastError:
-      typeof candidate.lastError === "string" && candidate.lastError.length > 0
-        ? candidate.lastError
-        : undefined,
-    lastSessionId:
-      typeof candidate.lastSessionId === "string" && candidate.lastSessionId.length > 0
-        ? candidate.lastSessionId
-        : undefined,
-    lastSessionPath:
-      typeof candidate.lastSessionPath === "string" && candidate.lastSessionPath.length > 0
-        ? candidate.lastSessionPath
-        : undefined,
-  };
+  if (!value || typeof value !== "object") {
+    throw new Error("Invalid cron job state");
+  }
+
+  const candidate = value as Partial<CronJobState>;
+  for (const [key, field] of [
+    ["nextRunAtMs", candidate.nextRunAtMs],
+    ["lastRunAtMs", candidate.lastRunAtMs],
+    ["lastDurationMs", candidate.lastDurationMs],
+  ] as const) {
+    if (field !== undefined && (typeof field !== "number" || !Number.isFinite(field))) {
+      throw new Error(`Invalid cron job state field: ${key}`);
+    }
+  }
+  if (
+    candidate.lastStatus !== undefined &&
+    candidate.lastStatus !== "ok" &&
+    candidate.lastStatus !== "error"
+  ) {
+    throw new Error("Invalid cron job state field: lastStatus");
+  }
+  for (const [key, field] of [
+    ["lastError", candidate.lastError],
+    ["lastSessionId", candidate.lastSessionId],
+    ["lastSessionPath", candidate.lastSessionPath],
+  ] as const) {
+    if (field !== undefined && (typeof field !== "string" || field.length === 0)) {
+      throw new Error(`Invalid cron job state field: ${key}`);
+    }
+  }
+
+  return candidate;
 }
 
 export function markJobRunSucceeded(

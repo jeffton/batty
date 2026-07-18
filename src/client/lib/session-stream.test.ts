@@ -18,6 +18,17 @@ describe("session-stream", () => {
     );
   });
 
+  it("starts after the revision returned by session open", () => {
+    expect(
+      sessionEventsPath({
+        id: "session-123",
+        workspaceId: "batty",
+        path: undefined,
+        revision: 42,
+      }),
+    ).toBe("/api/sessions/session-123/events?workspaceId=batty&afterRevision=42");
+  });
+
   it("prefixes the event stream with the configured base url", () => {
     window.__BATTY_BASE_URL__ = "/batty";
 

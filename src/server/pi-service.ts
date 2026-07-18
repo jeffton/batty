@@ -41,6 +41,7 @@ import { hasSubagentSessionMarker } from "./subagent";
 import { getSessionMessagePage } from "./pi-service-message-page";
 import { getQueuedPrompts, removeQueuedPrompt } from "./pi-service-queue";
 import {
+  createUiImageResolver,
   externalizeInlineImagesInSession,
   externalizeUploadedImagesInSession,
   preparePromptFiles,
@@ -97,6 +98,7 @@ export class PiService {
   private readonly liveSessions = new Map<string, LiveSession>();
   private readonly subagentQueues = new Map<string, Promise<void>>();
   private readonly cronSessionResolutions = new Map<string, Promise<SessionState>>();
+  private readonly sessionOpenPromises = new Map<string, Promise<SessionState>>();
   private readonly onAgentCompleted: ((session: SessionState) => Promise<void>) | undefined;
   private readonly onWorkspaceUpdated: ((workspaceId: string) => Promise<void>) | undefined;
   private readonly cronService: CronService;
@@ -309,26 +311,47 @@ export class PiService {
   }
 
   async openSessionById(workspace: WorkspaceInfo, sessionId: string): Promise<SessionState> {
+    const existing = this.sessions.get(sessionId);
+    if (existing && existing.workspace.id === workspace.id) {
+      return this.getState(existing.id);
+    }
     return this.openSession(workspace, await this.findSessionPath(workspace, sessionId));
   }
 
   async openSession(workspace: WorkspaceInfo, sessionPath: string): Promise<SessionState> {
+    const canonicalPath = path.resolve(sessionPath);
     const existing = [...this.sessions.values()].find(
-      (candidate) => candidate.session.sessionFile === sessionPath,
+      (candidate) => candidate.session.sessionFile === canonicalPath,
     );
     if (existing) {
       return this.getState(existing.id);
     }
 
-    const result = await this.createPiAgentSession(workspace, SessionManager.open(sessionPath));
-    const webSession = this.attachSession(
-      workspace,
-      result.session,
-      result.modelFallbackMessage,
-      hasSubagentSessionMarker(result.session.sessionManager.getEntries()) ||
-        hasParentedCronRunSessionMarker(result.session.sessionManager.getEntries()),
-    );
-    return this.getState(webSession.id);
+    const pending = this.sessionOpenPromises.get(canonicalPath);
+    if (pending) {
+      return pending;
+    }
+
+    const opening = (async () => {
+      const result = await this.createPiAgentSession(workspace, SessionManager.open(canonicalPath));
+      const webSession = this.attachSession(
+        workspace,
+        result.session,
+        result.modelFallbackMessage,
+        hasSubagentSessionMarker(result.session.sessionManager.getEntries()) ||
+          hasParentedCronRunSessionMarker(result.session.sessionManager.getEntries()),
+      );
+      return this.getState(webSession.id);
+    })();
+    this.sessionOpenPromises.set(canonicalPath, opening);
+
+    try {
+      return await opening;
+    } finally {
+      if (this.sessionOpenPromises.get(canonicalPath) === opening) {
+        this.sessionOpenPromises.delete(canonicalPath);
+      }
+    }
   }
 
   async runCronJobSession(job: {
@@ -523,13 +546,14 @@ export class PiService {
     return this.sessions.has(sessionId);
   }
 
-  subscribe(sessionId: string, subscriber: SessionSubscriber): () => void {
+  subscribe(sessionId: string, subscriber: SessionSubscriber, afterRevision?: number): () => void {
     return subscribeToSession(
       (sessionId) => this.requireSession(sessionId),
       (sessionId, options) => this.getState(sessionId, options),
       (webSession) => this.disposeWebSession(webSession),
       sessionId,
       subscriber,
+      afterRevision,
     );
   }
 
@@ -543,6 +567,8 @@ export class PiService {
 
     return createSessionState({
       id: webSession.id,
+      revision: webSession.revision,
+      imageResolver: webSession.resolveUiImage,
       sessionId: webSession.session.sessionId,
       workspaceId: webSession.workspace.id,
       cwd: webSession.workspace.path,
@@ -585,6 +611,8 @@ export class PiService {
     return {
       messages: createSessionState({
         id: webSession.id,
+        revision: webSession.revision,
+        imageResolver: webSession.resolveUiImage,
         sessionId: webSession.session.sessionId,
         workspaceId: webSession.workspace.id,
         cwd: webSession.workspace.path,
@@ -732,6 +760,7 @@ export class PiService {
       session,
       modelFallbackMessage,
       ephemeral,
+      createUiImageResolver(this.config.uploadsDir, session.sessionId, this.config.baseUrl),
     );
   }
 

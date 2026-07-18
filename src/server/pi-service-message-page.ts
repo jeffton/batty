@@ -1,5 +1,8 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import { RECENT_SESSION_MESSAGE_WINDOW } from "@/shared/session-history";
+import {
+  RECENT_SESSION_MESSAGE_WINDOW,
+  SESSION_MESSAGE_PAGE_BYTE_BUDGET,
+} from "@/shared/session-history";
 import { CRON_RUN_SESSION_CUSTOM_TYPE } from "./cron-session";
 import { transcriptMessagesFromSessionEntries } from "./pi-state";
 
@@ -40,6 +43,35 @@ function messageIndexFromId(messageId: string | undefined): number | undefined {
   return Number.isFinite(index) && index >= 0 ? index : undefined;
 }
 
+function projectedMessageBytes(message: unknown): number {
+  const serialized = JSON.stringify(message, function (key, value) {
+    return key === "data" && this && (this as { type?: unknown }).type === "image"
+      ? undefined
+      : value;
+  });
+  return Buffer.byteLength(serialized ?? "", "utf8");
+}
+
+function byteBoundedPageStart(
+  messages: AgentSession["messages"],
+  start: number,
+  end: number,
+): number {
+  let selectedStart = end;
+  let selectedBytes = 0;
+
+  for (let index = end - 1; index >= start; index -= 1) {
+    const messageBytes = projectedMessageBytes(messages[index]);
+    if (selectedStart < end && selectedBytes + messageBytes > SESSION_MESSAGE_PAGE_BYTE_BUDGET) {
+      break;
+    }
+    selectedStart = index;
+    selectedBytes += messageBytes;
+  }
+
+  return selectedStart;
+}
+
 function transcriptEntriesForPage(
   entries: Array<{ type?: unknown; customType?: unknown }>,
 ): Array<{ type?: unknown; customType?: unknown }> {
@@ -63,7 +95,8 @@ export function getSessionMessagePage(
     typeof beforeIndex === "number" && beforeIndex >= 0
       ? Math.min(beforeIndex, totalMessageCount)
       : totalMessageCount;
-  const start = Math.max(0, end - limit);
+  const countBoundedStart = Math.max(0, end - limit);
+  const start = byteBoundedPageStart(allMessages, countBoundedStart, end);
 
   return {
     messages: allMessages.slice(start, end),

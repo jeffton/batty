@@ -2,10 +2,13 @@ import { withBaseUrl } from "@/client/lib/base-url";
 import type { SessionState } from "@/shared/types";
 
 export function sessionEventsPath(
-  session: Pick<SessionState, "id" | "workspaceId" | "path">,
+  session: Pick<SessionState, "id" | "workspaceId" | "path" | "revision">,
 ): string {
   const params = new URLSearchParams();
   params.set("workspaceId", session.workspaceId);
+  if (typeof session.revision === "number") {
+    params.set("afterRevision", String(session.revision));
+  }
   if (session.path) {
     params.set("sessionPath", session.path);
   }

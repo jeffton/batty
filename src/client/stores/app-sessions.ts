@@ -27,6 +27,9 @@ import type { ServerEvent, SessionState } from "@/shared/types";
 import { closeEventSource, type AppActionContext } from "./app-state";
 
 let eventSource: EventSource | undefined;
+let eventSourceSessionId: string | undefined;
+let eventSourceOwnerState: unknown;
+const sessionOpenRequests = new Map<string, Promise<SessionState>>();
 let modelUpdateVersion = 0;
 let thinkingLevelUpdateVersion = 0;
 let sessionConfigurationUpdateQueue = Promise.resolve();
@@ -56,6 +59,8 @@ export const sessionActions = {
   closeStream(): void {
     closeEventSource(eventSource);
     eventSource = undefined;
+    eventSourceSessionId = undefined;
+    eventSourceOwnerState = undefined;
   },
 
   updateSessionSummary(this: AppActionContext, session: SessionState): void {
@@ -106,7 +111,20 @@ export const sessionActions = {
     sessionId: string,
     options: { shouldSelect?: () => boolean } = {},
   ): Promise<SessionState> {
-    return this.resumeOpenedSession(() => openSessionById(workspaceId, sessionId), options);
+    const key = `${workspaceId}:${sessionId}`;
+    let opening = sessionOpenRequests.get(key);
+    if (!opening) {
+      opening = openSessionById(workspaceId, sessionId);
+      sessionOpenRequests.set(key, opening);
+    }
+
+    try {
+      return await this.resumeOpenedSession(() => opening!, options);
+    } finally {
+      if (sessionOpenRequests.get(key) === opening) {
+        sessionOpenRequests.delete(key);
+      }
+    }
   },
 
   async resumeOpenedSession(
@@ -164,12 +182,22 @@ export const sessionActions = {
 
   openStream(
     this: AppActionContext,
-    session: Pick<SessionState, "id" | "sessionId" | "workspaceId" | "path">,
+    session: Pick<SessionState, "id" | "sessionId" | "workspaceId" | "path" | "revision">,
   ): void {
+    if (
+      eventSource &&
+      eventSourceOwnerState === this.$state &&
+      eventSourceSessionId === session.sessionId
+    ) {
+      return;
+    }
+
     this.closeStream();
     this.connectionState = "connecting";
     const source = new EventSource(sessionEventsPath(session));
     eventSource = source;
+    eventSourceSessionId = session.sessionId;
+    eventSourceOwnerState = this.$state;
     source.onopen = () => {
       if (eventSource !== source) {
         return;

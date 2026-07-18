@@ -154,6 +154,19 @@ describe("app store session streams", () => {
     expect(store.connectionState).toBe("online");
   });
 
+  it("keeps one stream when the same session is selected again", () => {
+    const store = useAppStore();
+    const session = makeSession("session-a", { revision: 12 });
+
+    store.activeSession = session;
+    store.openStream(session);
+    store.openStream(session);
+
+    expect(MockEventSource.instances).toHaveLength(1);
+    expect(MockEventSource.instances[0]?.closed).toBe(false);
+    expect(MockEventSource.instances[0]?.url).toContain("afterRevision=12");
+  });
+
   it("applies events from the current session stream", async () => {
     const store = useAppStore();
     const session = makeSession("session-a");
@@ -182,6 +195,21 @@ describe("app store session streams", () => {
     expect(store.activeSession).toEqual(session);
     expect(readCachedSession).not.toHaveBeenCalled();
     expect(store.connectionState).toBe("connecting");
+  });
+
+  it("deduplicates concurrent opens for the same session", async () => {
+    const response = deferred<SessionState>();
+    const session = makeSession("session-a");
+    vi.mocked(openSessionById).mockReturnValue(response.promise);
+    const store = useAppStore();
+
+    const first = store.resumeSessionById("batty", "session-a", { shouldSelect: () => false });
+    const second = store.resumeSessionById("batty", "session-a", { shouldSelect: () => false });
+    response.resolve(session);
+
+    await expect(first).resolves.toEqual(session);
+    await expect(second).resolves.toEqual(session);
+    expect(openSessionById).toHaveBeenCalledTimes(1);
   });
 
   it("does not select a resumed session when its commit guard is stale", async () => {

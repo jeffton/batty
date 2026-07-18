@@ -13,7 +13,7 @@ export interface UploadedFile {
 }
 
 export interface SessionSubscriber {
-  (event: ServerEvent): void;
+  (event: ServerEvent, revision: number): void;
 }
 
 export interface PiModel {
@@ -38,6 +38,12 @@ export interface WebSession {
   ephemeral: boolean;
   autoRetryActive?: boolean;
   suppressNextAgentEndCompletion?: boolean;
+  revision?: number;
+  eventLog?: Array<{ revision: number; event: ServerEvent }>;
+  resolveUiImage?: (image: {
+    mimeType: string;
+    data: string;
+  }) => { url: string; name?: string } | undefined;
 }
 
 export interface LiveSession {

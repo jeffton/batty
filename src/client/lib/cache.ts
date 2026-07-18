@@ -2,7 +2,12 @@ import { get, set } from "idb-keyval";
 import { RECENT_SESSION_MESSAGE_WINDOW } from "@/shared/session-history";
 import type { BootstrapPayload, SessionState } from "@/shared/types";
 
-const BOOTSTRAP_KEY = "batty:bootstrap";
+const CACHE_VERSION = "v2";
+const BOOTSTRAP_KEY = `batty:${CACHE_VERSION}:bootstrap`;
+
+function sessionCacheKey(sessionId: string): string {
+  return `batty:${CACHE_VERSION}:session:${sessionId}`;
+}
 
 export function cloneForCache<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -31,9 +36,9 @@ export async function writeCachedBootstrap(payload: BootstrapPayload): Promise<v
 }
 
 export async function readCachedSession(sessionId: string): Promise<SessionState | undefined> {
-  return await get<SessionState>(`batty:session:${sessionId}`);
+  return await get<SessionState>(sessionCacheKey(sessionId));
 }
 
 export async function writeCachedSession(session: SessionState): Promise<void> {
-  await set(`batty:session:${session.sessionId}`, cloneForCache(trimSessionForCache(session)));
+  await set(sessionCacheKey(session.sessionId), cloneForCache(trimSessionForCache(session)));
 }

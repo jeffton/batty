@@ -37,6 +37,45 @@ describe("getSessionMessagePage", () => {
     expect(page.messageIndexOffset).toBe(2);
   });
 
+  it("bounds pages by projected bytes as well as message count", () => {
+    const messages = [
+      userMessage(1, "a".repeat(400 * 1024)),
+      userMessage(2, "b".repeat(400 * 1024)),
+      userMessage(3, "latest"),
+    ];
+
+    const page = getSessionMessagePage(makeSession(messages));
+
+    expect(page.messages).toEqual(messages.slice(1));
+    expect(page.hasMoreMessages).toBe(true);
+    expect(page.messageIndexOffset).toBe(1);
+  });
+
+  it("does not count inline image data against the projected UI byte budget", () => {
+    const messages = [
+      {
+        role: "toolResult",
+        toolCallId: "image-1",
+        toolName: "read",
+        timestamp: 1,
+        content: [
+          {
+            type: "image",
+            mimeType: "image/png",
+            data: Buffer.alloc(2 * 1024 * 1024).toString("base64"),
+          },
+        ],
+        isError: false,
+      },
+      userMessage(2, "latest"),
+    ];
+
+    const page = getSessionMessagePage(makeSession(messages));
+
+    expect(page.messages).toEqual(messages);
+    expect(page.hasMoreMessages).toBe(false);
+  });
+
   it("filters copied parent context out of cron run sessions", () => {
     const page = getSessionMessagePage(
       makeSessionFromEntries([

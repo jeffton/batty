@@ -21,13 +21,6 @@ const handleOnline = async () => {
 const handleVisibilityChange = async () => {
   if (document.visibilityState === "visible" && navigator.onLine) {
     await store.checkForClientUpdate();
-    if (store.activeSession) {
-      const sessionId = store.activeSession.sessionId;
-      const version = syncVersion;
-      await store.resumeSessionById(store.activeSession.workspaceId, sessionId, {
-        shouldSelect: () => version === syncVersion && store.activeSession?.sessionId === sessionId,
-      });
-    }
   }
 };
 const onOnline = () => {
@@ -215,7 +208,7 @@ async function syncRouteToStore(): Promise<void> {
       store.activeSession.sessionId === sessionId;
     const shouldSelect = () => version === syncVersion;
     if (activeSessionMatches) {
-      await store.resumeSessionById(workspaceId, sessionId, { shouldSelect });
+      store.openStream(store.activeSession!);
       return;
     }
 

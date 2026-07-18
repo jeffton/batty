@@ -58,7 +58,7 @@ defineExpose({
 
 <template>
   <div class="transcript-shell">
-    <div ref="transcript" class="transcript">
+    <div ref="transcript" class="transcript" tabindex="0" aria-label="Session transcript">
       <Virtualizer
         v-if="props.historyEntries.length > 0"
         ref="transcriptHistory"

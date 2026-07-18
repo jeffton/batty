@@ -58,6 +58,8 @@ function formatFileSize(size: number): string {
         :src="file.previewUrl"
         :alt="file.name"
         class="attached-files__preview"
+        loading="lazy"
+        decoding="async"
       />
       <video
         v-else-if="props.preview && file.kind === 'video' && file.previewUrl"

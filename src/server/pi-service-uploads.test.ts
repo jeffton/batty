@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 import {
+  createUiImageResolver,
   externalizeInlineImagesInSession,
   externalizeUploadedImagesInSession,
   preparePromptFiles,
@@ -87,6 +88,44 @@ describe("prompt uploads", () => {
       },
     ]);
     expect(await readFile(sessionFile, "utf8")).not.toContain(imageData);
+  });
+
+  it("stores tool-result images for the UI without changing agent history", async () => {
+    const uploadsDir = await createTempDir("batty-tool-images-");
+    const imageData = Buffer.from("tool-screenshot").toString("base64");
+    const message = {
+      role: "toolResult",
+      toolCallId: "call-1",
+      toolName: "read",
+      timestamp: 1,
+      content: [{ type: "image", mimeType: "image/png", data: imageData }],
+      isError: false,
+    };
+    const session = {
+      sessionId: "session-1",
+      messages: [message],
+      sessionManager: {
+        fileEntries: [{ type: "message", message }],
+        _rewriteFile: () => {
+          throw new Error("Tool history must not be rewritten");
+        },
+      },
+    } as never;
+
+    externalizeInlineImagesInSession(session, uploadsDir, "/batty");
+    const resolved = createUiImageResolver(
+      uploadsDir,
+      "session-1",
+      "/batty",
+    )({
+      mimeType: "image/png",
+      data: imageData,
+    });
+
+    expect(JSON.stringify(message)).toContain(imageData);
+    expect(resolved.url).toContain("/batty/api/uploads/session-1/imported/");
+    const files = await readdir(path.join(uploadsDir, "session-1", "imported"));
+    expect(files).toEqual([expect.stringMatching(/^[a-f0-9]{64}\.png$/)]);
   });
 
   it("externalizes uploaded image data from session messages", async () => {

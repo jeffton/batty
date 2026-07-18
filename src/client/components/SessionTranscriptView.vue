@@ -196,7 +196,7 @@ function blockContentSize(block: UiContentBlock): number {
     case "thinking":
       return block.thinking.length;
     case "image":
-      return block.data.length;
+      return block.data?.length ?? block.url?.length ?? 0;
     case "toolCall":
       return block.id.length + block.name.length;
   }
@@ -256,6 +256,19 @@ function handleTranscriptWheel(event: WheelEvent): void {
   }
 }
 
+function handleTranscriptPointerDown(): void {
+  markUserScrollIntent();
+}
+
+function handleTranscriptKeyDown(event: KeyboardEvent): void {
+  if (!["ArrowUp", "PageUp", "Home"].includes(event.key)) {
+    return;
+  }
+  markUserScrollIntent();
+  isTranscriptPinnedToBottom.value = false;
+  stopFollowingTranscript();
+}
+
 function handleTranscriptTouchStart(): void {
   markUserScrollIntent();
   stopFollowingTranscript();
@@ -282,12 +295,18 @@ function bindTranscriptScrollListener(): void {
 
   transcriptScrollElement?.removeEventListener("scroll", handleTranscriptScroll);
   transcriptScrollElement?.removeEventListener("wheel", handleTranscriptWheel);
+  transcriptScrollElement?.removeEventListener("pointerdown", handleTranscriptPointerDown);
+  transcriptScrollElement?.removeEventListener("keydown", handleTranscriptKeyDown);
   transcriptScrollElement?.removeEventListener("touchstart", handleTranscriptTouchStart);
   transcriptScrollElement?.removeEventListener("touchmove", handleTranscriptTouchMove);
 
   transcriptScrollElement = nextElement;
   transcriptScrollElement?.addEventListener("scroll", handleTranscriptScroll, { passive: true });
   transcriptScrollElement?.addEventListener("wheel", handleTranscriptWheel, { passive: true });
+  transcriptScrollElement?.addEventListener("pointerdown", handleTranscriptPointerDown, {
+    passive: true,
+  });
+  transcriptScrollElement?.addEventListener("keydown", handleTranscriptKeyDown);
   transcriptScrollElement?.addEventListener("touchstart", handleTranscriptTouchStart, {
     passive: true,
   });
@@ -428,6 +447,7 @@ async function maybeLoadOlderMessages(): Promise<void> {
     !session ||
     props.loadingOlderMessages ||
     !session.hasMoreMessages ||
+    !hasRecentUserScrollIntent() ||
     element.scrollTop > TRANSCRIPT_LOAD_OLDER_THRESHOLD
   ) {
     return;
@@ -435,6 +455,7 @@ async function maybeLoadOlderMessages(): Promise<void> {
 
   const previousScrollTop = element.scrollTop;
   const previousScrollHeight = element.scrollHeight;
+  lastUserScrollIntentAt = 0;
   await props.loadOlderMessages();
   await waitForTranscriptLayout();
 
@@ -448,13 +469,6 @@ async function maybeLoadOlderMessages(): Promise<void> {
     nextElement.scrollTop = previousScrollTop + addedHeight;
   }
   updateTranscriptPinnedState();
-
-  if (
-    nextElement.scrollHeight <= nextElement.clientHeight + TRANSCRIPT_LOAD_OLDER_THRESHOLD &&
-    props.session?.hasMoreMessages
-  ) {
-    await maybeLoadOlderMessages();
-  }
 }
 
 function handleTranscriptScroll(): void {
@@ -492,6 +506,8 @@ onUnmounted(() => {
   stopFollowingTranscript();
   transcriptScrollElement?.removeEventListener("scroll", handleTranscriptScroll);
   transcriptScrollElement?.removeEventListener("wheel", handleTranscriptWheel);
+  transcriptScrollElement?.removeEventListener("pointerdown", handleTranscriptPointerDown);
+  transcriptScrollElement?.removeEventListener("keydown", handleTranscriptKeyDown);
   transcriptScrollElement?.removeEventListener("touchstart", handleTranscriptTouchStart);
   transcriptScrollElement?.removeEventListener("touchmove", handleTranscriptTouchMove);
   transcriptScrollElement = null;
@@ -528,10 +544,11 @@ watch(
     const openedSession = sessionId !== previousSessionId;
     if (openedSession) {
       isTranscriptPinnedToBottom.value = true;
-      const followOnOpen = props.session?.isStreaming
-        ? followTranscriptWhilePinned("auto")
-        : scrollToBottom("auto");
-      void followOnOpen.then(() => maybeLoadOlderMessages());
+      if (props.session?.isStreaming) {
+        void followTranscriptWhilePinned("auto");
+      } else {
+        void scrollToBottom("auto");
+      }
       return;
     }
 

@@ -196,7 +196,7 @@ export function registerSessionRoutes(context: RouteContext): void {
 
   app.get<{
     Params: { sessionId: string };
-    Querystring: { workspaceId?: string; sessionPath?: string };
+    Querystring: { workspaceId?: string; sessionPath?: string; afterRevision?: string };
   }>(routePath("/api/sessions/:sessionId/events"), async (request, reply) => {
     await ensureSessionLoaded(context, request.params.sessionId, {
       ...(request.query.workspaceId ? { workspaceId: request.query.workspaceId } : {}),
@@ -209,11 +209,20 @@ export function registerSessionRoutes(context: RouteContext): void {
       Connection: "keep-alive",
     });
 
-    const send = (payload: unknown) => {
-      reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+    const send = (payload: unknown, revision: number) => {
+      reply.raw.write(`id: ${revision}\ndata: ${JSON.stringify(payload)}\n\n`);
     };
+    const revisionText =
+      typeof request.headers["last-event-id"] === "string"
+        ? request.headers["last-event-id"]
+        : request.query.afterRevision;
+    const parsedRevision = Number.parseInt(revisionText ?? "", 10);
 
-    const unsubscribe = service.subscribe(request.params.sessionId, send);
+    const unsubscribe = service.subscribe(
+      request.params.sessionId,
+      send,
+      Number.isFinite(parsedRevision) && parsedRevision >= 0 ? parsedRevision : undefined,
+    );
     const heartbeat = setInterval(() => {
       reply.raw.write(": keep-alive\n\n");
     }, 15000);
@@ -234,7 +243,9 @@ export function registerSessionRoutes(context: RouteContext): void {
       request.params.batchId,
       request.params.storedName,
     );
+    reply.header("Cache-Control", "private, max-age=31536000, immutable");
     reply.header("Content-Type", resolved.mimeType);
+    reply.header("X-Content-Type-Options", "nosniff");
     return reply.send(createReadStream(resolved.path));
   });
 

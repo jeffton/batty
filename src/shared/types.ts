@@ -212,6 +212,7 @@ export interface QueuedPrompt {
 
 export interface SessionState {
   id: string;
+  revision?: number;
   sessionId: string;
   workspaceId: string;
   cwd: string;
@@ -312,10 +313,27 @@ export interface WorkspaceSnapshot {
   uiSettings: WorkspaceUiSettings;
 }
 
-export type ServerEvent =
+export type ServerEvent = (
   | { type: "reset"; state: SessionState }
   | { type: "state"; state: SessionStateMetadata }
   | { type: "assistant"; assistant?: Extract<UiMessage, { role: "assistant" }> }
+  | {
+      type: "assistant-delta";
+      contentIndex: number;
+      blockType: "text" | "thinking";
+      delta: string;
+    }
   | { type: "tools"; tools: ActiveToolRun[] }
+  | {
+      type: "tool-delta";
+      toolCallId: string;
+      deltas: Array<{
+        contentIndex: number;
+        blockType: "text" | "thinking";
+        delta: string;
+      }>;
+      details?: ToolExecutionDetails;
+    }
   | { type: "status"; isStreaming: boolean; pendingMessageCount: number }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+) & { revision?: number };

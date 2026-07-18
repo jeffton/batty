@@ -80,6 +80,34 @@ describe("normalizeMessage", () => {
     });
   });
 
+  it("projects inline tool images as URLs without sending base64 data", () => {
+    const imageData = Buffer.from("large screenshot").toString("base64");
+    const message = {
+      role: "toolResult",
+      toolCallId: "call-image",
+      toolName: "read",
+      content: [{ type: "image", mimeType: "image/png", data: imageData }],
+      isError: false,
+      timestamp: 3,
+    } as unknown as AgentMessage;
+
+    const normalized = normalizeMessage(message, 0, {
+      imageResolver: () => ({ url: "/api/uploads/session/imported/image.png" }),
+    });
+
+    expect(normalized && "blocks" in normalized ? normalized.blocks : undefined).toEqual([
+      {
+        type: "image",
+        mimeType: "image/png",
+        data: undefined,
+        url: "/api/uploads/session/imported/image.png",
+        name: undefined,
+      },
+    ]);
+    expect(JSON.stringify(normalized)).not.toContain(imageData);
+    expect(JSON.stringify(message)).toContain(imageData);
+  });
+
   it("preserves tool execution details for edit results", () => {
     const message = {
       role: "toolResult",

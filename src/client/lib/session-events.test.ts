@@ -29,7 +29,7 @@ const baseState: SessionState = {
 };
 
 describe("session event policies", () => {
-  it("only persists snapshot-like events to cache", () => {
+  it("persists transcript snapshots but not metadata-only events", () => {
     expect(shouldWriteSessionCache({ type: "reset", state: baseState })).toBe(true);
     expect(
       shouldWriteSessionCache({
@@ -55,7 +55,7 @@ describe("session event policies", () => {
           title: baseState.title,
         },
       }),
-    ).toBe(true);
+    ).toBe(false);
     expect(shouldWriteSessionCache({ type: "assistant", assistant: undefined })).toBe(false);
     expect(shouldWriteSessionCache({ type: "tools", tools: [] })).toBe(false);
   });
@@ -140,6 +140,20 @@ describe("applyServerEvent", () => {
     expect(next?.pendingMessageCount).toBe(2);
   });
 
+  it("accepts an authoritative reset when server revisions restart", () => {
+    const next = applyServerEvent(
+      { ...baseState, revision: 42, isStreaming: true },
+      {
+        type: "reset",
+        revision: 0,
+        state: { ...baseState, revision: 0, isStreaming: false },
+      },
+    );
+
+    expect(next?.revision).toBe(0);
+    expect(next?.isStreaming).toBe(false);
+  });
+
   it("drops cached tool output when an idle reset snapshot arrives without active tools", () => {
     const previous: SessionState = {
       ...baseState,
@@ -189,6 +203,80 @@ describe("applyServerEvent", () => {
       },
     });
     expect(next?.activeAssistant?.blocks[0]).toEqual({ type: "text", text: "hello from batty" });
+  });
+
+  it("appends assistant deltas and advances the stream revision", () => {
+    const next = applyServerEvent(
+      {
+        ...baseState,
+        revision: 3,
+        activeAssistant: {
+          id: "assistant-1",
+          role: "assistant",
+          timestamp: 1,
+          blocks: [{ type: "text", text: "hello" }],
+        },
+      },
+      {
+        type: "assistant-delta",
+        revision: 4,
+        contentIndex: 0,
+        blockType: "text",
+        delta: " world",
+      },
+    );
+
+    expect(next?.activeAssistant?.blocks).toEqual([{ type: "text", text: "hello world" }]);
+    expect(next?.revision).toBe(4);
+  });
+
+  it("ignores duplicate revisioned deltas", () => {
+    const state = {
+      ...baseState,
+      revision: 4,
+      activeAssistant: {
+        id: "assistant-1",
+        role: "assistant" as const,
+        timestamp: 1,
+        blocks: [{ type: "text" as const, text: "complete" }],
+      },
+    };
+
+    const next = applyServerEvent(state, {
+      type: "assistant-delta",
+      revision: 4,
+      contentIndex: 0,
+      blockType: "text",
+      delta: "complete",
+    });
+
+    expect(next).toBe(state);
+    expect(next?.activeAssistant?.blocks).toEqual([{ type: "text", text: "complete" }]);
+  });
+
+  it("applies append-only tool deltas", () => {
+    const next = applyServerEvent(
+      {
+        ...baseState,
+        activeTools: [
+          {
+            toolCallId: "call-1",
+            toolName: "bash",
+            args: { command: "printf ab" },
+            blocks: [{ type: "text", text: "a" }],
+            status: "running",
+            isError: false,
+          },
+        ],
+      },
+      {
+        type: "tool-delta",
+        toolCallId: "call-1",
+        deltas: [{ contentIndex: 0, blockType: "text", delta: "b" }],
+      },
+    );
+
+    expect(next?.activeTools[0]?.blocks).toEqual([{ type: "text", text: "ab" }]);
   });
 
   it("merges tool updates by tool call id", () => {

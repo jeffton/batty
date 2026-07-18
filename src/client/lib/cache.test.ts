@@ -67,8 +67,8 @@ describe("trimSessionForCache", () => {
       })),
     });
 
-    expect(trimmed.messages).toHaveLength(50);
-    expect(trimmed.messages[0]?.id).toBe("user-30");
+    expect(trimmed.messages).toHaveLength(25);
+    expect(trimmed.messages[0]?.id).toBe("user-55");
     expect(trimmed.totalMessageCount).toBe(120);
     expect(trimmed.hasMoreMessages).toBe(true);
   });

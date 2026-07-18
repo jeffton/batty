@@ -5,6 +5,15 @@ import { sanitizeTerminalBlocks, stripTerminalFormatting } from "./terminal-outp
 
 type AgentMessage = AgentSession["messages"][number];
 
+export type UiImageResolver = (image: {
+  mimeType: string;
+  data: string;
+}) => { url: string; name?: string } | undefined;
+
+interface NormalizeOptions {
+  imageResolver?: UiImageResolver;
+}
+
 interface AssistantLikeMessage {
   role: "assistant";
   content: unknown;
@@ -83,7 +92,10 @@ function normalizeBattyAttachments(message: unknown): UiContentBlock[] {
   });
 }
 
-export function normalizeBlocks(content: unknown): UiContentBlock[] {
+export function normalizeBlocks(
+  content: unknown,
+  options: NormalizeOptions = {},
+): UiContentBlock[] {
   if (typeof content === "string") {
     return [{ type: "text", text: content }];
   }
@@ -101,19 +113,32 @@ export function normalizeBlocks(content: unknown): UiContentBlock[] {
     switch (candidate.type) {
       case "text":
         return typeof candidate.text === "string" ? [{ type: "text", text: candidate.text }] : [];
-      case "image":
-        return typeof candidate.mimeType === "string" &&
-          (typeof candidate.data === "string" || typeof candidate.url === "string")
-          ? [
-              {
-                type: "image",
-                mimeType: candidate.mimeType,
-                data: typeof candidate.data === "string" ? candidate.data : undefined,
-                url: typeof candidate.url === "string" ? candidate.url : undefined,
-                name: typeof candidate.name === "string" ? candidate.name : undefined,
-              },
-            ]
-          : [];
+      case "image": {
+        if (
+          typeof candidate.mimeType !== "string" ||
+          (typeof candidate.data !== "string" && typeof candidate.url !== "string")
+        ) {
+          return [];
+        }
+
+        const resolved =
+          typeof candidate.data === "string"
+            ? options.imageResolver?.({ mimeType: candidate.mimeType, data: candidate.data })
+            : undefined;
+        return [
+          {
+            type: "image",
+            mimeType: candidate.mimeType,
+            data:
+              !resolved && typeof candidate.url !== "string" && typeof candidate.data === "string"
+                ? candidate.data
+                : undefined,
+            url: resolved?.url ?? (typeof candidate.url === "string" ? candidate.url : undefined),
+            name:
+              resolved?.name ?? (typeof candidate.name === "string" ? candidate.name : undefined),
+          },
+        ];
+      }
       case "thinking":
         return typeof candidate.thinking === "string"
           ? [{ type: "thinking", thinking: candidate.thinking }]
@@ -140,7 +165,11 @@ function messageId(prefix: string, timestamp: number, index: number): string {
   return `${prefix}-${timestamp}-${index}`;
 }
 
-export function normalizeMessage(message: AgentMessage, index: number): UiMessage | undefined {
+export function normalizeMessage(
+  message: AgentMessage,
+  index: number,
+  options: NormalizeOptions = {},
+): UiMessage | undefined {
   if ((message as { display?: unknown }).display === false) {
     return undefined;
   }
@@ -150,7 +179,7 @@ export function normalizeMessage(message: AgentMessage, index: number): UiMessag
       id: messageId("user", message.timestamp, index),
       role: "user",
       timestamp: message.timestamp,
-      blocks: [...normalizeBlocks(message.content), ...normalizeBattyAttachments(message)],
+      blocks: [...normalizeBlocks(message.content, options), ...normalizeBattyAttachments(message)],
     };
   }
 
@@ -160,7 +189,7 @@ export function normalizeMessage(message: AgentMessage, index: number): UiMessag
       id: messageId("assistant", assistant.timestamp, index),
       role: "assistant",
       timestamp: assistant.timestamp,
-      blocks: normalizeBlocks(assistant.content),
+      blocks: normalizeBlocks(assistant.content, options),
       model: assistant.model,
       provider: assistant.provider,
       stopReason: assistant.stopReason,
@@ -170,7 +199,7 @@ export function normalizeMessage(message: AgentMessage, index: number): UiMessag
 
   if (message.role === "toolResult") {
     const toolResult = message as ToolResultLikeMessage;
-    const blocks = normalizeBlocks(toolResult.content);
+    const blocks = normalizeBlocks(toolResult.content, options);
     return {
       id: messageId("tool", toolResult.timestamp, index),
       role: "toolResult",
@@ -208,7 +237,7 @@ export function normalizeMessage(message: AgentMessage, index: number): UiMessag
       text:
         typeof custom.content === "string"
           ? custom.content
-          : normalizeBlocks(custom.content)
+          : normalizeBlocks(custom.content, options)
               .map((block) =>
                 "text" in block ? block.text : block.type === "thinking" ? block.thinking : "",
               )
@@ -221,9 +250,13 @@ export function normalizeMessage(message: AgentMessage, index: number): UiMessag
   return undefined;
 }
 
-export function normalizeMessages(messages: AgentMessage[], offset = 0): UiMessage[] {
+export function normalizeMessages(
+  messages: AgentMessage[],
+  offset = 0,
+  options: NormalizeOptions = {},
+): UiMessage[] {
   return messages
-    .map((message, index) => normalizeMessage(message, index + offset))
+    .map((message, index) => normalizeMessage(message, index + offset, options))
     .filter((message): message is UiMessage => Boolean(message));
 }
 
@@ -294,18 +327,21 @@ export interface SessionStateInput {
   isSubagentSession?: boolean;
   isCronSession?: boolean;
   activeTools: SessionState["activeTools"];
+  revision?: number;
+  imageResolver?: UiImageResolver;
 }
 
 export function createSessionState(input: SessionStateInput): SessionState {
   const activeAssistant =
     input.activeAssistant && input.activeAssistant.role === "assistant"
-      ? (normalizeMessage(input.activeAssistant, Number.MAX_SAFE_INTEGER) as
-          | Extract<UiMessage, { role: "assistant" }>
-          | undefined)
+      ? (normalizeMessage(input.activeAssistant, Number.MAX_SAFE_INTEGER, {
+          imageResolver: input.imageResolver,
+        }) as Extract<UiMessage, { role: "assistant" }> | undefined)
       : undefined;
 
   return {
     id: input.id,
+    revision: input.revision,
     sessionId: input.sessionId,
     workspaceId: input.workspaceId,
     cwd: input.cwd,
@@ -323,7 +359,9 @@ export function createSessionState(input: SessionStateInput): SessionState {
     contextPercent: input.contextPercent,
     totalMessageCount: input.totalMessageCount,
     hasMoreMessages: input.hasMoreMessages,
-    messages: normalizeMessages(input.messages, input.messageIndexOffset ?? 0),
+    messages: normalizeMessages(input.messages, input.messageIndexOffset ?? 0, {
+      imageResolver: input.imageResolver,
+    }),
     activeAssistant,
     activeTools: input.activeTools,
     title: input.title,

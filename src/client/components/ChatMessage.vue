@@ -352,6 +352,8 @@ onBeforeUnmount(() => {
               v-else-if="block.type === 'image'"
               :src="imageUrl(block)"
               :alt="block.name ?? 'Message attachment'"
+              loading="lazy"
+              decoding="async"
             />
             <MarkdownBlock
               v-else-if="block.type === 'thinking'"
@@ -417,6 +419,8 @@ onBeforeUnmount(() => {
           v-else-if="block.type === 'image'"
           :src="imageUrl(block)"
           :alt="block.name ?? 'Message attachment'"
+          loading="lazy"
+          decoding="async"
         />
         <MarkdownBlock
           v-else-if="block.type === 'thinking'"

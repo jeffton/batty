@@ -309,10 +309,11 @@ function collectInlineImages(
   const imagesByData = new Map<string, UploadedPromptImage>();
 
   for (const message of messages) {
-    const content = (message as { role?: unknown; content?: unknown }).content;
-    if (!Array.isArray(content)) {
+    const candidateMessage = message as { role?: unknown; content?: unknown };
+    if (candidateMessage.role !== "user" || !Array.isArray(candidateMessage.content)) {
       continue;
     }
+    const content = candidateMessage.content;
 
     for (const block of content) {
       if (
@@ -342,6 +343,26 @@ function collectInlineImages(
   }
 
   return [...imagesByData.values()];
+}
+
+export function createUiImageResolver(
+  uploadsDir: string,
+  sessionId: string,
+  baseUrl?: string,
+): (image: { mimeType: string; data: string }) => { url: string; name: string } {
+  const resolvedByData = new Map<string, { url: string; name: string }>();
+
+  return ({ mimeType, data }) => {
+    const cached = resolvedByData.get(data);
+    if (cached) {
+      return cached;
+    }
+
+    const uploaded = uploadedImageFromInlineData(uploadsDir, baseUrl, sessionId, mimeType, data);
+    const resolved = { url: uploaded.url, name: uploaded.name };
+    resolvedByData.set(data, resolved);
+    return resolved;
+  };
 }
 
 export function externalizeInlineImagesInSession(

@@ -484,7 +484,13 @@ const genericEntries = computed(() => {
           :compact="props.compact"
         />
         <div v-else-if="block.type === 'text'" class="tool-call__text">{{ block.text }}</div>
-        <img v-else-if="block.type === 'image'" :src="imageUrl(block)" alt="Tool output" />
+        <img
+          v-else-if="block.type === 'image'"
+          :src="imageUrl(block)"
+          alt="Tool output"
+          loading="lazy"
+          decoding="async"
+        />
         <MarkdownBlock
           v-else-if="block.type === 'thinking'"
           :text="block.thinking"

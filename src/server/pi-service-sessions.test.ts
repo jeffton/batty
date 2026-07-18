@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { SessionState, WorkspaceInfo } from "@/shared/types";
-import { handleAgentEvent } from "./pi-service-sessions";
+import { handleAgentEvent, publish, subscribeToSession } from "./pi-service-sessions";
 import type { WebSession } from "./pi-service-types";
 
 const workspace: WorkspaceInfo = {
@@ -42,7 +42,178 @@ function createState(
   };
 }
 
+describe("session event replay", () => {
+  it("skips the duplicate snapshot and replays only missed events", () => {
+    const webSession = {
+      id: "web-replay",
+      workspace,
+      session: { sessionId: "session-replay", isStreaming: false },
+      subscribers: new Set(),
+      activeTools: new Map(),
+      openedAt: 1,
+      ephemeral: false,
+      revision: 0,
+      eventLog: [],
+    } as unknown as WebSession;
+    const getState = vi.fn(() => createState({ isStreaming: false }, webSession, []));
+    const currentEvents = vi.fn();
+
+    const unsubscribeCurrent = subscribeToSession(
+      () => webSession,
+      getState,
+      vi.fn(),
+      webSession.id,
+      currentEvents,
+      0,
+    );
+    expect(currentEvents).not.toHaveBeenCalled();
+    expect(getState).not.toHaveBeenCalled();
+
+    publish(webSession, { type: "status", isStreaming: true, pendingMessageCount: 1 });
+    expect(currentEvents).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "status", revision: 1 }),
+      1,
+    );
+    unsubscribeCurrent();
+
+    const replayed = vi.fn();
+    subscribeToSession(() => webSession, getState, vi.fn(), webSession.id, replayed, 0);
+    expect(replayed).toHaveBeenCalledTimes(1);
+    expect(replayed).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "status", revision: 1 }),
+      1,
+    );
+    expect(getState).not.toHaveBeenCalled();
+  });
+
+  it("keeps replayed tool snapshots immutable", () => {
+    const tool = {
+      toolCallId: "call-1",
+      toolName: "bash",
+      args: { command: "echo" },
+      blocks: [{ type: "text" as const, text: "first" }],
+      status: "running" as const,
+      isError: false,
+    };
+    const webSession = {
+      id: "web-tools",
+      workspace,
+      session: { sessionId: "session-tools", isStreaming: true },
+      subscribers: new Set(),
+      activeTools: new Map([[tool.toolCallId, tool]]),
+      openedAt: 1,
+      ephemeral: false,
+      revision: 0,
+      eventLog: [],
+    } as unknown as WebSession;
+
+    publish(webSession, { type: "tools", tools: [tool] });
+    tool.blocks = [{ type: "text", text: "mutated" }];
+    const replayed = vi.fn();
+    subscribeToSession(() => webSession, vi.fn(), vi.fn(), webSession.id, replayed, 0);
+
+    expect(replayed.mock.calls[0]?.[0]).toMatchObject({
+      type: "tools",
+      tools: [{ blocks: [{ type: "text", text: "first" }] }],
+    });
+  });
+});
+
 describe("handleAgentEvent", () => {
+  it("publishes assistant text as deltas without rebuilding session state", async () => {
+    const publishEvent = vi.fn();
+    const getState = vi.fn();
+    const assistantMessage = {
+      role: "assistant",
+      content: [{ type: "text", text: "hello" }],
+      timestamp: 1,
+    };
+    const webSession = {
+      id: "web-delta",
+      workspace,
+      session: { sessionId: "session-delta" },
+      subscribers: new Set(),
+      activeTools: new Map(),
+      openedAt: 1,
+      ephemeral: false,
+    } as unknown as WebSession;
+
+    await handleAgentEvent(
+      {
+        getState,
+        getStateMetadata: vi.fn(),
+        publish: publishEvent,
+        notifyWorkspaceUpdated: vi.fn(async () => undefined),
+        disposeWebSession: vi.fn(),
+      },
+      webSession,
+      {
+        type: "message_update",
+        message: assistantMessage,
+        assistantMessageEvent: {
+          type: "text_delta",
+          contentIndex: 0,
+          delta: "o",
+          partial: assistantMessage,
+        },
+      } as unknown as AgentSessionEvent,
+    );
+
+    expect(publishEvent).toHaveBeenCalledWith(webSession, {
+      type: "assistant-delta",
+      contentIndex: 0,
+      blockType: "text",
+      delta: "o",
+    });
+    expect(getState).not.toHaveBeenCalled();
+  });
+
+  it("publishes append-only tool output as deltas", async () => {
+    const publishEvent = vi.fn();
+    const current = {
+      toolCallId: "call-1",
+      toolName: "bash",
+      args: { command: "printf ab" },
+      blocks: [{ type: "text" as const, text: "a" }],
+      status: "running" as const,
+      isError: false,
+    };
+    const webSession = {
+      id: "web-tool-delta",
+      workspace,
+      session: { sessionId: "session-tool-delta" },
+      subscribers: new Set(),
+      activeTools: new Map([[current.toolCallId, current]]),
+      openedAt: 1,
+      ephemeral: false,
+    } as unknown as WebSession;
+
+    await handleAgentEvent(
+      {
+        getState: vi.fn(),
+        getStateMetadata: vi.fn(),
+        publish: publishEvent,
+        notifyWorkspaceUpdated: vi.fn(async () => undefined),
+        disposeWebSession: vi.fn(),
+      },
+      webSession,
+      {
+        type: "tool_execution_update",
+        toolCallId: "call-1",
+        toolName: "bash",
+        args: current.args,
+        partialResult: { content: [{ type: "text", text: "ab" }] },
+      } as unknown as AgentSessionEvent,
+    );
+
+    expect(publishEvent).toHaveBeenCalledWith(webSession, {
+      type: "tool-delta",
+      toolCallId: "call-1",
+      deltas: [{ contentIndex: 0, blockType: "text", delta: "b" }],
+      details: undefined,
+    });
+  });
+
   it("keeps a tool-call assistant active when message_end arrives before the message is persisted", async () => {
     const published: Array<{ type: string; state?: SessionState }> = [];
     const assistantMessage = {

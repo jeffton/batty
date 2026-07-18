@@ -5,7 +5,7 @@ import type {
   SessionStateMetadata,
   WorkspaceInfo,
 } from "@/shared/types";
-import { normalizeBlocks } from "./pi-state";
+import { normalizeBlocks, normalizeMessage, type UiImageResolver } from "./pi-state";
 import { sanitizeTerminalBlocks } from "./terminal-output";
 import type { SessionSubscriber, WebSession } from "./pi-service-types";
 import { normalizeToolDetails } from "./pi-service-types";
@@ -28,6 +28,7 @@ export function attachSession(
   session: AgentSession,
   modelFallbackMessage?: string,
   ephemeral = false,
+  resolveUiImage?: UiImageResolver,
 ): WebSession {
   const webSession: WebSession = {
     id: session.sessionId,
@@ -38,6 +39,9 @@ export function attachSession(
     openedAt: Date.now(),
     modelFallbackMessage,
     ephemeral,
+    revision: 0,
+    eventLog: [],
+    resolveUiImage,
   };
 
   session.subscribe((event) => {
@@ -50,9 +54,33 @@ export function attachSession(
   return webSession;
 }
 
+const MAX_REPLAY_EVENTS = 500;
+
+function withRevision(event: ServerEvent, revision: number): ServerEvent {
+  if (event.type === "reset") {
+    return { ...event, revision, state: { ...event.state, revision } };
+  }
+  if (event.type === "state") {
+    return { ...event, revision, state: { ...event.state, revision } };
+  }
+  return { ...event, revision };
+}
+
 export function publish(webSession: WebSession, event: ServerEvent): void {
+  const revision = (webSession.revision ?? 0) + 1;
+  webSession.revision = revision;
+  const versionedEvent = withRevision(event, revision);
+  const eventLog = (webSession.eventLog ??= []);
+  if (versionedEvent.type === "reset") {
+    eventLog.length = 0;
+  }
+  eventLog.push({ revision, event: structuredClone(versionedEvent) });
+  if (eventLog.length > MAX_REPLAY_EVENTS) {
+    eventLog.splice(0, eventLog.length - MAX_REPLAY_EVENTS);
+  }
+
   for (const subscriber of webSession.subscribers) {
-    subscriber(event);
+    subscriber(versionedEvent, revision);
   }
 }
 
@@ -75,6 +103,55 @@ export function getStateMetadata(
 
 function hasToolCallInBlocks(blocks: ReturnType<typeof normalizeBlocks>): boolean {
   return blocks.some((block) => block.type === "toolCall");
+}
+
+function appendOnlyBlockDeltas(
+  previous: ReturnType<typeof normalizeBlocks>,
+  next: ReturnType<typeof normalizeBlocks>,
+):
+  | Array<{
+      contentIndex: number;
+      blockType: "text" | "thinking";
+      delta: string;
+    }>
+  | undefined {
+  if (previous.length !== next.length) {
+    return undefined;
+  }
+
+  const deltas: Array<{
+    contentIndex: number;
+    blockType: "text" | "thinking";
+    delta: string;
+  }> = [];
+  for (let contentIndex = 0; contentIndex < next.length; contentIndex += 1) {
+    const previousBlock = previous[contentIndex]!;
+    const nextBlock = next[contentIndex]!;
+    if (previousBlock.type === "text" && nextBlock.type === "text") {
+      if (!nextBlock.text.startsWith(previousBlock.text)) {
+        return undefined;
+      }
+      const delta = nextBlock.text.slice(previousBlock.text.length);
+      if (delta) {
+        deltas.push({ contentIndex, blockType: "text", delta });
+      }
+      continue;
+    }
+    if (previousBlock.type === "thinking" && nextBlock.type === "thinking") {
+      if (!nextBlock.thinking.startsWith(previousBlock.thinking)) {
+        return undefined;
+      }
+      const delta = nextBlock.thinking.slice(previousBlock.thinking.length);
+      if (delta) {
+        deltas.push({ contentIndex, blockType: "thinking", delta });
+      }
+      continue;
+    }
+    if (JSON.stringify(previousBlock) !== JSON.stringify(nextBlock)) {
+      return undefined;
+    }
+  }
+  return deltas;
 }
 
 async function waitForSessionStateFlush(): Promise<void> {
@@ -137,18 +214,47 @@ export async function handleAgentEvent(
 ): Promise<void> {
   switch (event.type) {
     case "message_start":
-    case "message_update":
       if (event.message.role === "assistant") {
         webSession.activeAssistant = event.message;
         deps.publish(webSession, {
           type: "assistant",
-          assistant: deps.getState(webSession.id).activeAssistant,
+          assistant: normalizeMessage(event.message, Number.MAX_SAFE_INTEGER, {
+            imageResolver: webSession.resolveUiImage,
+          }) as Extract<SessionState["messages"][number], { role: "assistant" }>,
         });
+      }
+      break;
+    case "message_update":
+      if (event.message.role === "assistant") {
+        webSession.activeAssistant = event.message;
+        const update = event.assistantMessageEvent;
+        if (update.type === "text_delta" || update.type === "thinking_delta") {
+          deps.publish(webSession, {
+            type: "assistant-delta",
+            contentIndex: update.contentIndex,
+            blockType: update.type === "text_delta" ? "text" : "thinking",
+            delta: update.delta,
+          });
+        } else if (
+          update.type === "toolcall_start" ||
+          update.type === "toolcall_delta" ||
+          update.type === "toolcall_end" ||
+          update.type === "error"
+        ) {
+          deps.publish(webSession, {
+            type: "assistant",
+            assistant: normalizeMessage(event.message, Number.MAX_SAFE_INTEGER, {
+              imageResolver: webSession.resolveUiImage,
+            }) as Extract<SessionState["messages"][number], { role: "assistant" }>,
+          });
+        }
       }
       break;
     case "message_end":
       if (event.message.role === "assistant") {
-        const blocks = normalizeBlocks(event.message.content);
+        const blocks = normalizeBlocks(event.message.content, {
+          imageResolver: webSession.resolveUiImage,
+        });
         if (hasToolCallInBlocks(blocks)) {
           const toolCallIds = blocks.flatMap((block) =>
             block.type === "toolCall" ? [block.id] : [],
@@ -166,6 +272,9 @@ export async function handleAgentEvent(
         webSession.activeAssistant = undefined;
       }
       await waitForSessionStateFlush();
+      if (event.message.role === "toolResult") {
+        webSession.activeTools.delete(event.message.toolCallId);
+      }
       deps.publish(webSession, { type: "reset", state: deps.getState(webSession.id) });
       break;
     case "tool_execution_start":
@@ -178,29 +287,48 @@ export async function handleAgentEvent(
         isError: false,
         details: undefined,
       });
-      deps.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
+      deps.publish(webSession, {
+        type: "tools",
+        tools: [webSession.activeTools.get(event.toolCallId)!],
+      });
       break;
     case "tool_execution_update": {
       const current = webSession.activeTools.get(event.toolCallId);
       if (current) {
-        const blocks = normalizeBlocks(event.partialResult.content ?? []);
-        current.blocks = current.toolName === "bash" ? sanitizeTerminalBlocks(blocks) : blocks;
-        current.details = normalizeToolDetails(event.partialResult.details);
-        webSession.activeTools.set(event.toolCallId, current);
-        deps.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
+        const normalizedBlocks = normalizeBlocks(event.partialResult.content ?? [], {
+          imageResolver: webSession.resolveUiImage,
+        });
+        const blocks =
+          current.toolName === "bash" ? sanitizeTerminalBlocks(normalizedBlocks) : normalizedBlocks;
+        const details = normalizeToolDetails(event.partialResult.details);
+        const deltas = appendOnlyBlockDeltas(current.blocks, blocks);
+        const next = { ...current, blocks, details };
+        webSession.activeTools.set(event.toolCallId, next);
+        if (deltas) {
+          deps.publish(webSession, {
+            type: "tool-delta",
+            toolCallId: event.toolCallId,
+            deltas,
+            details,
+          });
+        } else {
+          deps.publish(webSession, { type: "tools", tools: [next] });
+        }
       }
       break;
     }
     case "tool_execution_end": {
       const current = webSession.activeTools.get(event.toolCallId);
       if (current) {
-        const blocks = normalizeBlocks(event.result.content ?? []);
+        const blocks = normalizeBlocks(event.result.content ?? [], {
+          imageResolver: webSession.resolveUiImage,
+        });
         current.blocks = current.toolName === "bash" ? sanitizeTerminalBlocks(blocks) : blocks;
         current.status = event.isError ? "error" : "success";
         current.isError = event.isError;
         current.details = normalizeToolDetails(event.result.details);
         webSession.activeTools.set(event.toolCallId, current);
-        deps.publish(webSession, { type: "tools", tools: [...webSession.activeTools.values()] });
+        deps.publish(webSession, { type: "tools", tools: [current] });
       }
       break;
     }
@@ -278,10 +406,37 @@ export function subscribeToSession(
   disposeWebSession: (webSession: WebSession) => void,
   sessionId: string,
   subscriber: SessionSubscriber,
+  afterRevision?: number,
 ): () => void {
   const webSession = requireSession(sessionId);
   webSession.subscribers.add(subscriber);
-  subscriber({ type: "reset", state: getState(sessionId) });
+
+  const currentRevision = webSession.revision ?? 0;
+  if (afterRevision === undefined) {
+    subscriber(
+      withRevision({ type: "reset", state: getState(sessionId) }, currentRevision),
+      currentRevision,
+    );
+  } else if (afterRevision !== currentRevision) {
+    const replay = (webSession.eventLog ?? []).filter((entry) => entry.revision > afterRevision);
+    const firstReplay = replay[0];
+    const canReplay =
+      afterRevision < currentRevision &&
+      firstReplay &&
+      (firstReplay.revision === afterRevision + 1 || firstReplay.event.type === "reset");
+
+    if (canReplay) {
+      for (const entry of replay) {
+        subscriber(entry.event, entry.revision);
+      }
+    } else {
+      subscriber(
+        withRevision({ type: "reset", state: getState(sessionId) }, currentRevision),
+        currentRevision,
+      );
+    }
+  }
+
   return () => {
     webSession.subscribers.delete(subscriber);
     if (

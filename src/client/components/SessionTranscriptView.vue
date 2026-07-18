@@ -19,6 +19,7 @@ const TRANSCRIPT_BOTTOM_THRESHOLD = 12;
 const TRANSCRIPT_LOAD_OLDER_THRESHOLD = 80;
 const TRANSCRIPT_TAIL_COUNT = 25;
 const USER_SCROLL_INTENT_WINDOW_MS = 1000;
+const HISTORY_GESTURE_COOLDOWN_MS = 600;
 const TIMESTAMP_GROUP_WINDOW_MS = 10 * 60 * 1000;
 
 type ChatTranscriptHandle = InstanceType<typeof ChatTranscript> & {
@@ -52,6 +53,13 @@ let transcriptTailObserver: ResizeObserver | null = null;
 let transcriptViewportObserver: ResizeObserver | null = null;
 let followTranscriptToken = 0;
 let lastUserScrollIntentAt = 0;
+let lastHistoryGestureLoadAt = 0;
+let historyLoadScheduled = false;
+let touchStartX: number | undefined;
+let touchStartY: number | undefined;
+let touchHistoryLoadRequested = false;
+let wheelHistoryLoadLatched = false;
+let wheelGestureResetTimeout: number | undefined;
 
 const toolStateLookup = computed(() =>
   buildToolStateLookup(props.session?.messages ?? [], props.session?.activeTools ?? []),
@@ -248,12 +256,39 @@ function markUserScrollIntent(): void {
   lastUserScrollIntentAt = performance.now();
 }
 
-function handleTranscriptWheel(event: WheelEvent): void {
-  markUserScrollIntent();
-  if (event.deltaY < 0) {
-    isTranscriptPinnedToBottom.value = false;
-    stopFollowingTranscript();
+function scheduleOlderMessagesFromGesture(): void {
+  if (historyLoadScheduled) {
+    return;
   }
+  historyLoadScheduled = true;
+  requestAnimationFrame(() => {
+    historyLoadScheduled = false;
+    void maybeLoadOlderMessages();
+  });
+}
+
+function handleTranscriptWheel(event: WheelEvent): void {
+  if (event.deltaY >= 0) {
+    markUserScrollIntent();
+    return;
+  }
+
+  if (wheelGestureResetTimeout !== undefined) {
+    window.clearTimeout(wheelGestureResetTimeout);
+  }
+  wheelGestureResetTimeout = window.setTimeout(() => {
+    wheelHistoryLoadLatched = false;
+    wheelGestureResetTimeout = undefined;
+  }, 180);
+  if (wheelHistoryLoadLatched) {
+    return;
+  }
+
+  wheelHistoryLoadLatched = true;
+  markUserScrollIntent();
+  isTranscriptPinnedToBottom.value = false;
+  stopFollowingTranscript();
+  scheduleOlderMessagesFromGesture();
 }
 
 function handleTranscriptPointerDown(): void {
@@ -261,23 +296,52 @@ function handleTranscriptPointerDown(): void {
 }
 
 function handleTranscriptKeyDown(event: KeyboardEvent): void {
-  if (!["ArrowUp", "PageUp", "Home"].includes(event.key)) {
+  if (event.repeat || !["ArrowUp", "PageUp", "Home"].includes(event.key)) {
     return;
   }
   markUserScrollIntent();
   isTranscriptPinnedToBottom.value = false;
   stopFollowingTranscript();
+  scheduleOlderMessagesFromGesture();
 }
 
-function handleTranscriptTouchStart(): void {
+function handleTranscriptTouchStart(event: TouchEvent): void {
+  const touch = event.touches[0];
+  touchStartX = touch?.clientX;
+  touchStartY = touch?.clientY;
+  touchHistoryLoadRequested = false;
   markUserScrollIntent();
   stopFollowingTranscript();
 }
 
-function handleTranscriptTouchMove(): void {
+function handleTranscriptTouchMove(event: TouchEvent): void {
+  const touch = event.touches[0];
+  if (
+    touchHistoryLoadRequested ||
+    !touch ||
+    touchStartX === undefined ||
+    touchStartY === undefined
+  ) {
+    return;
+  }
+
+  const deltaX = touch.clientX - touchStartX;
+  const deltaY = touch.clientY - touchStartY;
+  if (deltaY <= 12 || Math.abs(deltaY) <= Math.abs(deltaX)) {
+    return;
+  }
+
+  touchHistoryLoadRequested = true;
   markUserScrollIntent();
   isTranscriptPinnedToBottom.value = false;
   stopFollowingTranscript();
+  scheduleOlderMessagesFromGesture();
+}
+
+function handleTranscriptTouchEnd(): void {
+  touchStartX = undefined;
+  touchStartY = undefined;
+  touchHistoryLoadRequested = false;
 }
 
 function hasRecentUserScrollIntent(): boolean {
@@ -299,6 +363,8 @@ function bindTranscriptScrollListener(): void {
   transcriptScrollElement?.removeEventListener("keydown", handleTranscriptKeyDown);
   transcriptScrollElement?.removeEventListener("touchstart", handleTranscriptTouchStart);
   transcriptScrollElement?.removeEventListener("touchmove", handleTranscriptTouchMove);
+  transcriptScrollElement?.removeEventListener("touchend", handleTranscriptTouchEnd);
+  transcriptScrollElement?.removeEventListener("touchcancel", handleTranscriptTouchEnd);
 
   transcriptScrollElement = nextElement;
   transcriptScrollElement?.addEventListener("scroll", handleTranscriptScroll, { passive: true });
@@ -311,6 +377,12 @@ function bindTranscriptScrollListener(): void {
     passive: true,
   });
   transcriptScrollElement?.addEventListener("touchmove", handleTranscriptTouchMove, {
+    passive: true,
+  });
+  transcriptScrollElement?.addEventListener("touchend", handleTranscriptTouchEnd, {
+    passive: true,
+  });
+  transcriptScrollElement?.addEventListener("touchcancel", handleTranscriptTouchEnd, {
     passive: true,
   });
 }
@@ -439,7 +511,9 @@ async function followTranscriptWhilePinned(behavior: ScrollBehavior = "auto"): P
   }
 }
 
-async function maybeLoadOlderMessages(): Promise<void> {
+async function maybeLoadOlderMessages(
+  options: { ignoreGestureCooldown?: boolean } = {},
+): Promise<void> {
   const element = transcriptRootElement();
   const session = props.session;
   if (
@@ -448,6 +522,9 @@ async function maybeLoadOlderMessages(): Promise<void> {
     props.loadingOlderMessages ||
     !session.hasMoreMessages ||
     !hasRecentUserScrollIntent() ||
+    (!options.ignoreGestureCooldown &&
+      lastHistoryGestureLoadAt > 0 &&
+      performance.now() - lastHistoryGestureLoadAt < HISTORY_GESTURE_COOLDOWN_MS) ||
     element.scrollTop > TRANSCRIPT_LOAD_OLDER_THRESHOLD
   ) {
     return;
@@ -456,6 +533,7 @@ async function maybeLoadOlderMessages(): Promise<void> {
   const previousScrollTop = element.scrollTop;
   const previousScrollHeight = element.scrollHeight;
   lastUserScrollIntentAt = 0;
+  lastHistoryGestureLoadAt = performance.now();
   await props.loadOlderMessages();
   await waitForTranscriptLayout();
 
@@ -469,6 +547,13 @@ async function maybeLoadOlderMessages(): Promise<void> {
     nextElement.scrollTop = previousScrollTop + addedHeight;
   }
   updateTranscriptPinnedState();
+}
+
+async function loadOlderFromControl(): Promise<void> {
+  markUserScrollIntent();
+  isTranscriptPinnedToBottom.value = false;
+  stopFollowingTranscript();
+  await maybeLoadOlderMessages({ ignoreGestureCooldown: true });
 }
 
 function handleTranscriptScroll(): void {
@@ -504,12 +589,17 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopFollowingTranscript();
+  if (wheelGestureResetTimeout !== undefined) {
+    window.clearTimeout(wheelGestureResetTimeout);
+  }
   transcriptScrollElement?.removeEventListener("scroll", handleTranscriptScroll);
   transcriptScrollElement?.removeEventListener("wheel", handleTranscriptWheel);
   transcriptScrollElement?.removeEventListener("pointerdown", handleTranscriptPointerDown);
   transcriptScrollElement?.removeEventListener("keydown", handleTranscriptKeyDown);
   transcriptScrollElement?.removeEventListener("touchstart", handleTranscriptTouchStart);
   transcriptScrollElement?.removeEventListener("touchmove", handleTranscriptTouchMove);
+  transcriptScrollElement?.removeEventListener("touchend", handleTranscriptTouchEnd);
+  transcriptScrollElement?.removeEventListener("touchcancel", handleTranscriptTouchEnd);
   transcriptScrollElement = null;
   transcriptViewportObserver?.disconnect();
   transcriptTailObserver?.disconnect();
@@ -575,6 +665,9 @@ watch(
     :kept-history-indexes="keptHistoryIndexes"
     :is-streaming="Boolean(props.session?.isStreaming)"
     :is-pinned-to-bottom="isTranscriptPinnedToBottom"
+    :has-more-messages="Boolean(props.session?.hasMoreMessages)"
+    :loading-older-messages="props.loadingOlderMessages"
+    @load-older-messages="loadOlderFromControl"
     @jump-to-latest="jumpToLatest"
     :allow-session-popovers="props.allowSessionPopovers"
     @toggle-tool-calls="toggleToolCalls"

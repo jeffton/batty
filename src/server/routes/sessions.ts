@@ -1,5 +1,6 @@
 import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
+import type { ServerResponse } from "node:http";
 import { listWorkspaces, resolveWorkspace } from "../workspaces";
 import { resolveSentFile } from "../send-files";
 import { resolveUploadedFile } from "../pi-service-uploads";
@@ -55,6 +56,17 @@ function parseRangeHeader(
     start,
     end: Math.min(end, size - 1),
   };
+}
+
+export function startEventStream(
+  response: Pick<ServerResponse, "writeHead" | "flushHeaders">,
+): void {
+  response.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+  });
+  response.flushHeaders();
 }
 
 async function ensureSessionLoaded(
@@ -203,11 +215,7 @@ export function registerSessionRoutes(context: RouteContext): void {
       ...(request.query.sessionPath ? { sessionPath: request.query.sessionPath } : {}),
     });
 
-    reply.raw.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-    });
+    startEventStream(reply.raw);
 
     const send = (payload: unknown, revision: number) => {
       reply.raw.write(`id: ${revision}\ndata: ${JSON.stringify(payload)}\n\n`);

@@ -321,6 +321,77 @@ describe("transcript tool state merging", () => {
     );
   });
 
+  it("keeps a settled empty assistant error for the red error bubble", () => {
+    const errorAssistant: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-error",
+      role: "assistant",
+      timestamp: 3,
+      blocks: [],
+      stopReason: "error",
+      errorMessage: "Too many concurrent requests",
+    };
+    const messages: SessionState["messages"] = [assistantMessage, errorAssistant];
+    const lookup = buildToolStateLookup(messages, []);
+
+    const transcript = buildTranscriptMessages(messages, lookup);
+
+    expect(transcript.map((entry) => entry.message)).toEqual([assistantMessage, errorAssistant]);
+  });
+
+  it("hides failed attempts superseded by a later assistant response", () => {
+    const failedAttempt: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-error",
+      role: "assistant",
+      timestamp: 3,
+      blocks: [],
+      stopReason: "error",
+      errorMessage: "Service Unavailable",
+    };
+    const recoveredAssistant: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-recovered",
+      role: "assistant",
+      timestamp: 4,
+      blocks: [{ type: "text", text: "Recovered" }],
+    };
+    const messages: SessionState["messages"] = [failedAttempt, recoveredAssistant];
+    const lookup = buildToolStateLookup(messages, []);
+
+    const transcript = buildTranscriptMessages(messages, lookup);
+
+    expect(transcript.map((entry) => entry.message)).toEqual([recoveredAssistant]);
+  });
+
+  it("hides the latest assistant error until the running request settles", () => {
+    const historicalError: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-old-error",
+      role: "assistant",
+      timestamp: 3,
+      blocks: [],
+      stopReason: "error",
+      errorMessage: "Earlier failure",
+    };
+    const nextUser: Extract<UiMessage, { role: "user" }> = {
+      id: "user-retry",
+      role: "user",
+      timestamp: 4,
+      blocks: [{ type: "text", text: "Retry" }],
+    };
+    const activeError: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-active-error",
+      role: "assistant",
+      timestamp: 5,
+      blocks: [],
+      stopReason: "error",
+      errorMessage: "Temporary failure",
+    };
+    const messages: SessionState["messages"] = [historicalError, nextUser, activeError];
+    const lookup = buildToolStateLookup(messages, []);
+
+    const transcript = buildTranscriptMessages(messages, lookup, true);
+
+    expect(transcript.map((entry) => entry.message)).toEqual([historicalError, nextUser]);
+  });
+
   it("uses active tool output while a tool has not persisted a result", () => {
     const messages: SessionState["messages"] = [assistantMessage];
     const lookup = buildToolStateLookup(messages, [

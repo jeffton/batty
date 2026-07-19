@@ -141,8 +141,38 @@ function removeAttachmentCarrierBlocks(
   };
 }
 
-function hasRenderableBlocks(message: Extract<UiMessage, { role: "assistant" }>): boolean {
-  return message.blocks.some((block) => block.type !== "thinking");
+function assistantHasError(message: Extract<UiMessage, { role: "assistant" }>): boolean {
+  return message.stopReason === "error" || Boolean(message.errorMessage?.trim());
+}
+
+function hiddenAssistantErrorIds(messages: UiMessage[], isStreaming: boolean): Set<string> {
+  const hiddenIds = new Set<string>();
+  let latestErrorId: string | undefined;
+
+  for (const message of messages) {
+    if (message.role === "user" || message.role === "custom") {
+      latestErrorId = undefined;
+      continue;
+    }
+    if (message.role !== "assistant") {
+      continue;
+    }
+
+    if (latestErrorId) {
+      hiddenIds.add(latestErrorId);
+    }
+    latestErrorId = assistantHasError(message) ? message.id : undefined;
+  }
+
+  if (isStreaming && latestErrorId) {
+    hiddenIds.add(latestErrorId);
+  }
+
+  return hiddenIds;
+}
+
+function hasRenderableContent(message: Extract<UiMessage, { role: "assistant" }>): boolean {
+  return assistantHasError(message) || message.blocks.some((block) => block.type !== "thinking");
 }
 
 function attachmentBlockFromToolResult(
@@ -187,8 +217,10 @@ function acceptsPendingAttachmentBlocks(message: UiMessage): boolean {
 export function buildTranscriptMessages(
   messages: UiMessage[],
   toolStateLookup: ToolStateLookup,
+  isStreaming = false,
 ): TranscriptMessageView[] {
   const entries: TranscriptMessageView[] = [];
+  const hiddenErrorIds = hiddenAssistantErrorIds(messages, isStreaming);
   let pendingAttachmentBlocks: UiContentBlock[] = [];
   let pendingAttachmentId = "attachment-carrier";
   let pendingAttachmentTimestamp = 0;
@@ -226,7 +258,8 @@ export function buildTranscriptMessages(
 
     if (
       messageWithoutAttachmentBlocks.role === "assistant" &&
-      !hasRenderableBlocks(messageWithoutAttachmentBlocks)
+      (hiddenErrorIds.has(messageWithoutAttachmentBlocks.id) ||
+        !hasRenderableContent(messageWithoutAttachmentBlocks))
     ) {
       continue;
     }

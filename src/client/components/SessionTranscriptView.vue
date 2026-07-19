@@ -57,7 +57,11 @@ const toolStateLookup = computed(() =>
   buildToolStateLookup(props.session?.messages ?? [], props.session?.activeTools ?? []),
 );
 const transcriptMessages = computed(() =>
-  buildTranscriptMessages(props.session?.messages ?? [], toolStateLookup.value),
+  buildTranscriptMessages(
+    props.session?.messages ?? [],
+    toolStateLookup.value,
+    props.session?.isStreaming ?? false,
+  ),
 );
 const activeAssistantMessage = computed(() =>
   withoutRenderedToolCalls(

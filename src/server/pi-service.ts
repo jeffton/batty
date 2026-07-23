@@ -167,8 +167,7 @@ export class PiService {
   }
 
   async listModels(): Promise<ModelOption[]> {
-    await this.modelRuntime.reloadConfig();
-    const models = await this.modelRuntime.getAvailable();
+    const models = this.modelRuntime.getAvailableSnapshot();
     return models.map(toModelOption).sort((a, b) => a.label.localeCompare(b.label));
   }
 

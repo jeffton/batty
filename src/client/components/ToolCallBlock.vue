@@ -478,9 +478,9 @@ const genericEntries = computed(() => {
     <div v-if="showResultSection" class="tool-call__result">
       <template v-for="(block, index) in visibleResultBlocks" :key="`${props.name}-${index}`">
         <CodeBlock
-          v-if="block.type === 'text' && props.name === 'bash'"
+          v-if="block.type === 'text' && ['bash', 'find', 'grep'].includes(props.name)"
           :code="block.text"
-          language="bash"
+          :language="props.name === 'bash' ? 'bash' : undefined"
           :compact="props.compact"
         />
         <MarkdownBlock

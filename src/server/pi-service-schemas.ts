@@ -113,6 +113,7 @@ export const SubagentToolSchema = Type.Object(
     ),
     includeSessionContext: Type.Optional(
       Type.Boolean({
+        default: false,
         description:
           "Whether to include the current session context. Defaults to false. When false, the subagent still gets the workspace system prompts.",
       }),

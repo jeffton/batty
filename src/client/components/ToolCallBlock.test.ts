@@ -77,6 +77,20 @@ describe("ToolCallBlock", () => {
     expect(wrapper.text()).toContain("Collapse output");
   });
 
+  it.each(["find", "grep"])("renders %s output as monospaced code", (name) => {
+    const wrapper = mount(ToolCallBlock, {
+      props: {
+        name,
+        arguments: {},
+        resultBlocks: [{ type: "text", text: "src/example.ts:12:match" }],
+        status: "success",
+      },
+    });
+
+    expect(wrapper.get("pre.code-block").text()).toBe("src/example.ts:12:match");
+    expect(wrapper.find(".tool-call__text").exists()).toBe(false);
+  });
+
   it("tails write content and expands to the full buffer on demand", async () => {
     const wrapper = mount(ToolCallBlock, {
       props: {

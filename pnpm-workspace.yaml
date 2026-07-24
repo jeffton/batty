@@ -3,6 +3,7 @@ minimumReleaseAgeExclude:
   - "@earendil-works/pi-*"
   - vite-plus
   - "@voidzero-dev/*"
+  - "@oxc-project/*"
   - oxlint
   - "@oxlint/*"
   - oxlint-tsgolint
@@ -11,14 +12,14 @@ minimumReleaseAgeExclude:
   - "@oxfmt/*"
   - vitest
   - "@vitest/*"
-ignoredBuiltDependencies:
-  - "@google/genai"
-  - esbuild
-  - koffi
-  - protobufjs
+allowBuilds:
+  "@google/genai": false
+  esbuild: false
+  koffi: false
+  protobufjs: false
 catalog:
-  vite: npm:@voidzero-dev/vite-plus-core@0.2.5
-  vite-plus: 0.2.5
+  vite: npm:@voidzero-dev/vite-plus-core@0.2.6
+  vite-plus: 0.2.6
 overrides:
   vite: "catalog:"
   vitest: 4.1.10
@@ -26,7 +27,7 @@ overrides:
   "fast-uri@3": 3.1.4
   "fast-uri@4": 4.1.1
 patchedDependencies:
-  "@earendil-works/pi-coding-agent@0.81.1": patches/@earendil-works__pi-coding-agent@0.81.1.patch
+  "@earendil-works/pi-coding-agent@0.82.0": patches/@earendil-works__pi-coding-agent@0.82.0.patch
 peerDependencyRules:
   allowAny:
     - vite

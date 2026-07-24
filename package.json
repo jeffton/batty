@@ -21,8 +21,8 @@
     "check:fix": "vp check --fix"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "0.81.1",
-    "@earendil-works/pi-coding-agent": "0.81.1",
+    "@earendil-works/pi-ai": "0.82.0",
+    "@earendil-works/pi-coding-agent": "0.82.0",
     "@fastify/cookie": "11.1.2",
     "@fastify/multipart": "10.1.0",
     "@fastify/static": "10.1.0",
@@ -39,7 +39,7 @@
     "highlight.js": "11.11.1",
     "idb-keyval": "6.3.0",
     "jsdom": "29.1.1",
-    "marked": "18.0.6",
+    "marked": "18.0.7",
     "mime-types": "3.0.2",
     "pinia": "4.0.2",
     "pinia-plugin-persistedstate": "4.7.1",
@@ -76,5 +76,5 @@
     "vite-plus": "catalog:",
     "workbox-build": "7.4.1"
   },
-  "packageManager": "pnpm@10.34.5"
+  "packageManager": "pnpm@11.17.0"
 }

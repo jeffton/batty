@@ -483,6 +483,10 @@ const genericEntries = computed(() => {
           language="bash"
           :compact="props.compact"
         />
+        <MarkdownBlock
+          v-else-if="block.type === 'text' && props.name === 'subagent'"
+          :text="block.text"
+        />
         <div v-else-if="block.type === 'text'" class="tool-call__text">{{ block.text }}</div>
         <img
           v-else-if="block.type === 'image'"

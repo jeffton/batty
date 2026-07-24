@@ -248,14 +248,19 @@ describe("ToolCallBlock", () => {
     expect(wrapper.find(".tool-call__subagent-btn").exists()).toBe(false);
   });
 
-  it("opens tool-call mode subagent sessions while keeping the result in the tool call", () => {
+  it("renders tool-call mode subagent responses as markdown", () => {
     const wrapper = mount(ToolCallBlock, {
       props: {
         name: "subagent",
         arguments: {
           prompt: "Check the repo",
         },
-        resultBlocks: [{ type: "text", text: "Full subagent response" }],
+        resultBlocks: [
+          {
+            type: "text",
+            text: "## Full subagent response\n\nIncludes **important** findings and `code`.",
+          },
+        ],
         resultDetails: {
           subagent: {
             prompt: "Check the repo",
@@ -274,7 +279,11 @@ describe("ToolCallBlock", () => {
     });
 
     expect(wrapper.text()).toContain("Open session");
-    expect(wrapper.text()).toContain("Full subagent response");
+    const markdown = wrapper.get(".markdown-body");
+    expect(markdown.text()).toContain("Full subagent response");
+    expect(markdown.get("strong").text()).toBe("important");
+    expect(markdown.get("code").text()).toBe("code");
+    expect(wrapper.find(".tool-call__text").exists()).toBe(false);
   });
 
   it("renders subagent attachments from nested attach-files results", () => {

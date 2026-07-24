@@ -1,0 +1,82 @@
+diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
+index 6379a7b35dc0abb111fad29db2cacc4bc71e0dd6..711bd137a9b109d155b2e290e7aa85667b5387ae 100644
+--- a/dist/core/agent-session.js
++++ b/dist/core/agent-session.js
+@@ -265,7 +265,35 @@ export class AgentSession {
+                 : undefined);
+         this.agent.prepareNextTurnWithContext = async (turn, signal) => {
+             const previousSnapshot = await previousPrepareNextTurnWithContext?.(turn, signal);
+-            const previousContext = previousSnapshot?.context ?? turn.context;
++            let previousContext = previousSnapshot?.context ?? turn.context;
++            // Check threshold compaction between tool turns so a single long-running
++            // prompt cannot overflow before the normal post-run check executes.
++            // See https://github.com/earendil-works/pi/issues/5512
++            const model = this.model;
++            if (model && model.contextWindow > 0) {
++                const settings = this.settingsManager.getCompactionSettings();
++                const estimate = estimateContextTokens(previousContext.messages);
++                const compactionEntry = getLatestCompactionEntry(this.sessionManager.getBranch());
++                const usageMessage = estimate.lastUsageIndex === null
++                    ? undefined
++                    : previousContext.messages[estimate.lastUsageIndex];
++                const usageIsAfterCompaction = !compactionEntry ||
++                    (usageMessage?.role === "assistant" &&
++                        usageMessage.timestamp > new Date(compactionEntry.timestamp).getTime());
++                if (!signal?.aborted &&
++                    usageIsAfterCompaction &&
++                    shouldCompact(estimate.tokens, model.contextWindow, settings)) {
++                    const previousCompactionId = compactionEntry?.id;
++                    await this._runAutoCompaction("threshold", false, signal);
++                    const latestCompaction = getLatestCompactionEntry(this.sessionManager.getBranch());
++                    if (latestCompaction?.id !== previousCompactionId) {
++                        previousContext = {
++                            ...previousContext,
++                            messages: this.agent.state.messages.slice(),
++                        };
++                    }
++                }
++            }
+             return {
+                 ...previousSnapshot,
+                 context: {
+@@ -1588,11 +1616,12 @@ export class AgentSession {
+     /**
+      * Internal: Run auto-compaction with events.
+      */
+-    async _runAutoCompaction(reason, willRetry) {
++    async _runAutoCompaction(reason, willRetry, signal) {
+         const settings = this.settingsManager.getCompactionSettings();
+         let started = false;
++        const abortCompaction = () => this._autoCompactionAbortController?.abort();
+         try {
+-            if (!this.model) {
++            if (!this.model || signal?.aborted) {
+                 return false;
+             }
+             let apiKey;
+@@ -1609,6 +1638,9 @@ export class AgentSession {
+             else {
+                 ({ apiKey, headers, env } = await this._getSummarizationRequestAuth(this.model));
+             }
++            if (signal?.aborted) {
++                return false;
++            }
+             const pathEntries = this.sessionManager.getBranch();
+             const preparation = prepareCompaction(pathEntries, settings);
+             if (!preparation) {
+@@ -1616,6 +1648,7 @@ export class AgentSession {
+             }
+             this._emit({ type: "compaction_start", reason });
+             this._autoCompactionAbortController = new AbortController();
++            signal?.addEventListener("abort", abortCompaction, { once: true });
+             started = true;
+             let extensionCompaction;
+             let fromExtension = false;
+@@ -1730,6 +1763,7 @@ export class AgentSession {
+             return false;
+         }
+         finally {
++            signal?.removeEventListener("abort", abortCompaction);
+             this._autoCompactionAbortController = undefined;
+         }
+     }

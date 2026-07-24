@@ -28,6 +28,7 @@ async function createInstallFixture(pnpmExitCode: number): Promise<{
     fs.mkdir(path.join(repoDir, "scripts"), { recursive: true }),
     fs.mkdir(path.join(repoDir, "dist", "client"), { recursive: true }),
     fs.mkdir(path.join(repoDir, "dist", "server"), { recursive: true }),
+    fs.mkdir(path.join(repoDir, "patches"), { recursive: true }),
     fs.mkdir(oldRelease, { recursive: true }),
     fs.mkdir(fakeBin, { recursive: true }),
   ]);
@@ -40,6 +41,7 @@ async function createInstallFixture(pnpmExitCode: number): Promise<{
     fs.writeFile(path.join(repoDir, "package.json"), "{}\n"),
     fs.writeFile(path.join(repoDir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n"),
     fs.writeFile(path.join(repoDir, "pnpm-workspace.yaml"), "catalog: {}\n"),
+    fs.writeFile(path.join(repoDir, "patches", "dependency.patch"), "patch\n"),
     fs.writeFile(path.join(repoDir, "dist", "client", "index.html"), "client\n"),
     fs.writeFile(path.join(repoDir, "dist", "server", "main.js"), "server\n"),
     fs.writeFile(path.join(oldRelease, "marker"), "old\n"),
@@ -102,6 +104,9 @@ describe("deployment scripts", () => {
     await expect(fs.readFile(path.join(current, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
       "catalog: {}\n",
     );
+    await expect(
+      fs.readFile(path.join(current, "patches", "dependency.patch"), "utf8"),
+    ).resolves.toBe("patch\n");
   });
 
   it("packages the pnpm workspace configuration in Windows releases", async () => {
@@ -111,6 +116,9 @@ describe("deployment scripts", () => {
     );
     expect(script).toContain(
       'Copy-Item (Join-Path $repoDir "pnpm-workspace.yaml") (Join-Path $tmpDir "pnpm-workspace.yaml")',
+    );
+    expect(script).toContain(
+      'Copy-Item -Recurse (Join-Path $repoDir "patches") (Join-Path $tmpDir "patches")',
     );
   });
 

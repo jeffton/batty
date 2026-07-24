@@ -34,6 +34,7 @@ cp "$repo_dir/README.md" "$staging_dir/README.md"
 cp "$repo_dir/package.json" "$staging_dir/package.json"
 cp "$repo_dir/pnpm-lock.yaml" "$staging_dir/pnpm-lock.yaml"
 cp "$repo_dir/pnpm-workspace.yaml" "$staging_dir/pnpm-workspace.yaml"
+cp -R "$repo_dir/patches" "$staging_dir/patches"
 cp -R "$repo_dir/dist/client" "$staging_dir/dist/client"
 cp -R "$repo_dir/dist/server" "$staging_dir/dist/server"
 

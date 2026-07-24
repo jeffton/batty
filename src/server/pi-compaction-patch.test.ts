@@ -1,0 +1,211 @@
+import { describe, expect, it, vi } from "vite-plus/test";
+import { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
+
+interface CompactionTestSession {
+  agent: {
+    prepareNextTurnWithContext?: (
+      turn: { context: { messages: unknown[]; systemPrompt: string; tools: unknown[] } },
+      signal?: AbortSignal,
+    ) => Promise<{ context: { messages: unknown[]; systemPrompt: string; tools: unknown[] } }>;
+    prepareNextTurn?: undefined;
+    state: {
+      messages: unknown[];
+      tools: unknown[];
+      model: { provider: string; id: string; contextWindow: number };
+      thinkingLevel: string;
+    };
+  };
+  model: { provider: string; id: string; contextWindow: number };
+  settingsManager: {
+    getCompactionSettings: () => {
+      enabled: boolean;
+      reserveTokens: number;
+      keepRecentTokens: number;
+    };
+  };
+  sessionManager: { getBranch: () => unknown[] };
+  _runAutoCompaction: (
+    reason: string,
+    willRetry: boolean,
+    signal?: AbortSignal,
+  ) => Promise<boolean>;
+  abortCompaction: () => void;
+  _systemPromptOverride?: string;
+  _baseSystemPrompt: string;
+}
+
+function assistant(totalTokens: number): AssistantMessage {
+  return {
+    role: "assistant",
+    content: [
+      {
+        type: "toolCall",
+        id: "call-1",
+        name: "read",
+        arguments: { path: "large.txt" },
+      },
+    ],
+    api: "openai-responses",
+    provider: "openai",
+    model: "test-model",
+    usage: {
+      input: totalTokens,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "toolUse",
+    timestamp: 1,
+  };
+}
+
+function installNextTurnCompaction(session: CompactionTestSession): void {
+  const install = (
+    AgentSession.prototype as unknown as {
+      _installAgentNextTurnRefresh: (this: CompactionTestSession) => void;
+    }
+  )._installAgentNextTurnRefresh;
+  install.call(session);
+}
+
+describe("Pi between-turn compaction patch", () => {
+  it("compacts before the next model request when tool results cross the threshold", async () => {
+    const compactedMessages = [{ role: "compactionSummary", summary: "Preserved work" }];
+    let branch: unknown[] = [];
+    const runAutoCompaction = vi.fn(async () => {
+      branch = [
+        {
+          type: "compaction",
+          id: "compaction-1",
+          parentId: "tool-result-1",
+          timestamp: new Date(2).toISOString(),
+          summary: "Preserved work",
+          firstKeptEntryId: "tool-result-1",
+          tokensBefore: 95,
+        },
+      ];
+      session.agent.state.messages = compactedMessages;
+      return false;
+    });
+    const session: CompactionTestSession = {
+      agent: {
+        state: {
+          messages: [],
+          tools: [],
+          model: { provider: "openai", id: "test-model", contextWindow: 100 },
+          thinkingLevel: "medium",
+        },
+      },
+      model: { provider: "openai", id: "test-model", contextWindow: 100 },
+      settingsManager: {
+        getCompactionSettings: () => ({
+          enabled: true,
+          reserveTokens: 20,
+          keepRecentTokens: 10,
+        }),
+      },
+      sessionManager: { getBranch: () => branch },
+      _runAutoCompaction: runAutoCompaction,
+      abortCompaction: vi.fn(),
+      _baseSystemPrompt: "system",
+    };
+    installNextTurnCompaction(session);
+
+    const messages = [
+      assistant(75),
+      {
+        role: "toolResult",
+        toolCallId: "call-1",
+        toolName: "read",
+        content: [{ type: "text", text: "x".repeat(100) }],
+        isError: false,
+        timestamp: 2,
+      },
+    ];
+    const result = await session.agent.prepareNextTurnWithContext?.({
+      context: { messages, systemPrompt: "old", tools: [] },
+    });
+
+    expect(runAutoCompaction).toHaveBeenCalledWith("threshold", false, undefined);
+    expect(result?.context.messages).toStrictEqual(compactedMessages);
+  });
+
+  it("leaves normal turns to the standard agent loop", async () => {
+    const runAutoCompaction = vi.fn(async () => false);
+    const session: CompactionTestSession = {
+      agent: {
+        state: {
+          messages: [],
+          tools: [],
+          model: { provider: "openai", id: "test-model", contextWindow: 100 },
+          thinkingLevel: "medium",
+        },
+      },
+      model: { provider: "openai", id: "test-model", contextWindow: 100 },
+      settingsManager: {
+        getCompactionSettings: () => ({
+          enabled: true,
+          reserveTokens: 20,
+          keepRecentTokens: 10,
+        }),
+      },
+      sessionManager: { getBranch: () => [] },
+      _runAutoCompaction: runAutoCompaction,
+      abortCompaction: vi.fn(),
+      _baseSystemPrompt: "system",
+    };
+    installNextTurnCompaction(session);
+    const messages = [assistant(10)];
+
+    const result = await session.agent.prepareNextTurnWithContext?.({
+      context: { messages, systemPrompt: "old", tools: [] },
+    });
+
+    expect(runAutoCompaction).not.toHaveBeenCalled();
+    expect(result?.context.messages).toBe(messages);
+  });
+
+  it("does not start summarization when the run is aborted during authentication", async () => {
+    let finishAuthentication!: (auth: { apiKey: string }) => void;
+    const authenticationPending = new Promise<{ apiKey: string }>((resolve) => {
+      finishAuthentication = resolve;
+    });
+    const getBranch = vi.fn(() => []);
+    const controller = new AbortController();
+    const session = {
+      model: { provider: "openai", id: "test-model", contextWindow: 100 },
+      agent: { streamFunction: vi.fn() },
+      settingsManager: {
+        getCompactionSettings: () => ({
+          enabled: true,
+          reserveTokens: 20,
+          keepRecentTokens: 10,
+        }),
+      },
+      sessionManager: { getBranch },
+      _getSummarizationRequestAuth: vi.fn(async () => authenticationPending),
+      _autoCompactionAbortController: undefined,
+    };
+    const runAutoCompaction = (
+      AgentSession.prototype as unknown as {
+        _runAutoCompaction: (
+          this: typeof session,
+          reason: string,
+          willRetry: boolean,
+          signal?: AbortSignal,
+        ) => Promise<boolean>;
+      }
+    )._runAutoCompaction;
+
+    const resultPromise = runAutoCompaction.call(session, "threshold", false, controller.signal);
+    await Promise.resolve();
+    controller.abort();
+    finishAuthentication({ apiKey: "test-key" });
+
+    await expect(resultPromise).resolves.toBe(false);
+    expect(getBranch).not.toHaveBeenCalled();
+  });
+});

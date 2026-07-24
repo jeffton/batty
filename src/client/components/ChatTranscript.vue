@@ -21,7 +21,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   jumpToLatest: [];
-  toggleToolCalls: [sectionKey: string];
+  toggleDetails: [sectionKey: string];
 }>();
 
 type TranscriptHistoryHandle = InstanceType<typeof Virtualizer>;
@@ -34,7 +34,7 @@ const transcriptBottom = ref<HTMLElement | null>(null);
 function entryKey(entry: TranscriptDisplayEntry): string {
   return entry.kind === "message"
     ? `message:${entry.entry.message.id}`
-    : `tool-toggle:${entry.sectionKey}:${entry.expanded ? "expanded" : "collapsed"}`;
+    : `details-toggle:${entry.sectionKey}:${entry.expanded ? "expanded" : "collapsed"}`;
 }
 
 function rootElement(): HTMLElement | null {
@@ -76,14 +76,14 @@ defineExpose({
               :show-timestamp="displayEntry.showTimestamp"
               :allow-session-popovers="props.allowSessionPopovers"
             />
-            <div v-else class="transcript__tool-toggle-row">
+            <div v-else class="transcript__details-toggle-row">
               <button
                 type="button"
-                class="transcript__tool-toggle-btn"
+                class="transcript__details-toggle-btn"
                 :aria-pressed="displayEntry.expanded"
-                @click="emit('toggleToolCalls', displayEntry.sectionKey)"
+                @click="emit('toggleDetails', displayEntry.sectionKey)"
               >
-                {{ displayEntry.expanded ? "Collapse tool calls" : "Show tool calls" }}
+                {{ displayEntry.expanded ? "Collapse details" : "Show details" }}
               </button>
             </div>
           </div>
@@ -103,14 +103,14 @@ defineExpose({
             :show-timestamp="displayEntry.showTimestamp"
             :allow-session-popovers="props.allowSessionPopovers"
           />
-          <div v-else class="transcript__tool-toggle-row">
+          <div v-else class="transcript__details-toggle-row">
             <button
               type="button"
-              class="transcript__tool-toggle-btn"
+              class="transcript__details-toggle-btn"
               :aria-pressed="displayEntry.expanded"
-              @click="emit('toggleToolCalls', displayEntry.sectionKey)"
+              @click="emit('toggleDetails', displayEntry.sectionKey)"
             >
-              {{ displayEntry.expanded ? "Collapse tool calls" : "Show tool calls" }}
+              {{ displayEntry.expanded ? "Collapse details" : "Show details" }}
             </button>
           </div>
         </div>
@@ -163,12 +163,12 @@ defineExpose({
   height: 1px;
 }
 
-.transcript__tool-toggle-row {
+.transcript__details-toggle-row {
   display: flex;
   justify-content: center;
 }
 
-.transcript__tool-toggle-btn {
+.transcript__details-toggle-btn {
   border: 1px solid color-mix(in srgb, var(--color-info) 30%, transparent);
   border-radius: 0.5rem;
   padding: 0.22rem 0.65rem;
@@ -209,7 +209,7 @@ defineExpose({
     transform: translateX(-50%) translateY(-1px);
   }
 
-  .transcript__tool-toggle-btn:hover,
+  .transcript__details-toggle-btn:hover,
   .transcript__jump-btn:hover {
     background: color-mix(in srgb, var(--color-bg-inline-code) 78%, var(--color-info));
   }

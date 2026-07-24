@@ -32,21 +32,21 @@ const props = withDefaults(
     session?: SessionState;
     loadOlderMessages: () => Promise<void>;
     loadingOlderMessages?: boolean;
-    alwaysShowToolCalls?: boolean;
+    alwaysShowDetails?: boolean;
     allowSessionPopovers?: boolean;
   }>(),
   {
     session: undefined,
     loadingOlderMessages: false,
-    alwaysShowToolCalls: false,
+    alwaysShowDetails: false,
     allowSessionPopovers: true,
   },
 );
 
 const transcriptPane = ref<ChatTranscriptHandle | null>(null);
 const isTranscriptPinnedToBottom = ref(true);
-const openToolSectionKey = ref<string | null>(null);
-const collapsedToolSectionKey = ref<string | null>(null);
+const openDetailsSectionKey = ref<string | null>(null);
+const collapsedDetailsSectionKey = ref<string | null>(null);
 let transcriptScrollElement: HTMLElement | null = null;
 let transcriptTailObserver: ResizeObserver | null = null;
 let transcriptViewportObserver: ResizeObserver | null = null;
@@ -137,10 +137,10 @@ const transcriptDisplay = computed(() =>
     rawTranscriptEntries.value,
     toolStateLookup.value.toolStatesByCallId,
     {
-      alwaysShowToolCalls: props.alwaysShowToolCalls,
-      openToolSectionKey: openToolSectionKey.value,
-      collapsedToolSectionKey: collapsedToolSectionKey.value,
-      showLatestToolToggle: !props.session?.isStreaming,
+      alwaysShowDetails: props.alwaysShowDetails,
+      openDetailsSectionKey: openDetailsSectionKey.value,
+      collapsedDetailsSectionKey: collapsedDetailsSectionKey.value,
+      showLatestDetailsToggle: !props.session?.isStreaming,
     },
   ),
 );
@@ -166,7 +166,7 @@ const transcriptTailSignature = computed(() => {
     .map((entry) =>
       entry.kind === "message"
         ? `${entry.entry.message.id}:${entry.entry.message.timestamp}`
-        : `tool-toggle:${entry.sectionKey}:${entry.expanded}`,
+        : `details-toggle:${entry.sectionKey}:${entry.expanded}`,
     )
     .join("|");
 });
@@ -500,16 +500,16 @@ async function initializeOpenedTranscript(sessionId: string): Promise<void> {
   }
 }
 
-function toggleToolCalls(sectionKey: string): void {
+function toggleDetails(sectionKey: string): void {
   if (sectionKey === latestExpandedSectionKey.value) {
-    openToolSectionKey.value = null;
-    collapsedToolSectionKey.value =
-      collapsedToolSectionKey.value === sectionKey ? null : sectionKey;
+    openDetailsSectionKey.value = null;
+    collapsedDetailsSectionKey.value =
+      collapsedDetailsSectionKey.value === sectionKey ? null : sectionKey;
     return;
   }
 
-  collapsedToolSectionKey.value = null;
-  openToolSectionKey.value = openToolSectionKey.value === sectionKey ? null : sectionKey;
+  collapsedDetailsSectionKey.value = null;
+  openDetailsSectionKey.value = openDetailsSectionKey.value === sectionKey ? null : sectionKey;
 }
 
 onMounted(() => {
@@ -544,8 +544,8 @@ watch(
   [() => props.session?.id, latestExpandedSectionKey],
   ([sessionId, sectionKey], [previousSessionId, previousSectionKey]) => {
     if (sessionId !== previousSessionId || sectionKey !== previousSectionKey) {
-      openToolSectionKey.value = null;
-      collapsedToolSectionKey.value = null;
+      openDetailsSectionKey.value = null;
+      collapsedDetailsSectionKey.value = null;
     }
   },
 );
@@ -553,8 +553,8 @@ watch(
 watch(
   [
     () => props.session?.id,
-    () => openToolSectionKey.value,
-    () => collapsedToolSectionKey.value,
+    () => openDetailsSectionKey.value,
+    () => collapsedDetailsSectionKey.value,
     transcriptTailSignature,
     activeAssistantSignature,
     activeToolsSignature,
@@ -593,6 +593,6 @@ watch(
     :is-pinned-to-bottom="isTranscriptPinnedToBottom"
     @jump-to-latest="jumpToLatest"
     :allow-session-popovers="props.allowSessionPopovers"
-    @toggle-tool-calls="toggleToolCalls"
+    @toggle-details="toggleDetails"
   />
 </template>

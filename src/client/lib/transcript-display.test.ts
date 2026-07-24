@@ -58,9 +58,18 @@ function assistantThinkingAndText(id: string): TranscriptMessageView {
     role: "assistant",
     timestamp: 3,
     blocks: [
-      { type: "thinking", thinking: "private reasoning" },
+      { type: "thinking", thinking: "reasoning summary" },
       { type: "text", text: `reply ${id}` },
     ],
+  });
+}
+
+function assistantThinkingOnly(id: string): TranscriptMessageView {
+  return view({
+    id,
+    role: "assistant",
+    timestamp: 3,
+    blocks: [{ type: "thinking", thinking: "reasoning summary" }],
   });
 }
 
@@ -91,26 +100,26 @@ describe("buildTranscriptDisplayEntries", () => {
         assistantWithTool("assistant-2", "call-2"),
       ],
       toolStates,
-      { showLatestToolToggle: true },
+      { showLatestDetailsToggle: true },
     );
 
     expect(result.entries.map((entry) => entry.kind)).toEqual([
       "message",
       "message",
-      "tool-toggle",
+      "details-toggle",
       "message",
       "message",
-      "tool-toggle",
+      "details-toggle",
     ]);
     expect(result.entries[2]).toMatchObject({
-      kind: "tool-toggle",
+      kind: "details-toggle",
       sectionKey: "turn:user-1",
       expanded: false,
     });
     expect(result.entries[4]).toMatchObject({ kind: "message" });
     expect(messageBlockCount(result.entries[4])).toBe(2);
     expect(result.entries[5]).toMatchObject({
-      kind: "tool-toggle",
+      kind: "details-toggle",
       sectionKey: "turn:user-2",
       expanded: true,
     });
@@ -122,22 +131,58 @@ describe("buildTranscriptDisplayEntries", () => {
       toolStates,
     );
 
-    expect(result.entries.map((entry) => entry.kind)).toEqual(["tool-toggle", "message"]);
+    expect(result.entries.map((entry) => entry.kind)).toEqual(["details-toggle", "message"]);
     expect(result.entries[0]).toMatchObject({
-      kind: "tool-toggle",
+      kind: "details-toggle",
       sectionKey: "turn:cron-1",
       expanded: false,
     });
   });
 
-  it("does not show a tool toggle when only thinking is hidden", () => {
-    const result = buildTranscriptDisplayEntries(
+  it("shows thinking in the expanded latest turn and collapses it with other details", () => {
+    const expanded = buildTranscriptDisplayEntries(
       [user("user-1"), assistantThinkingAndText("assistant-1")],
       toolStates,
-      { showLatestToolToggle: true },
+      { showLatestDetailsToggle: true },
     );
 
-    expect(result.entries.map((entry) => entry.kind)).toEqual(["message", "message"]);
+    expect(expanded.entries.map((entry) => entry.kind)).toEqual([
+      "message",
+      "message",
+      "details-toggle",
+    ]);
+    expect(messageBlockCount(expanded.entries[1])).toBe(2);
+
+    const collapsed = buildTranscriptDisplayEntries(
+      [user("user-1"), assistantThinkingAndText("assistant-1")],
+      toolStates,
+      {
+        collapsedDetailsSectionKey: "turn:user-1",
+        showLatestDetailsToggle: true,
+      },
+    );
+
+    expect(messageBlockCount(collapsed.entries[1])).toBe(1);
+    expect(collapsed.entries[2]).toMatchObject({ kind: "details-toggle", expanded: false });
+  });
+
+  it("keeps a reveal toggle for a collapsed thinking-only historical turn", () => {
+    const result = buildTranscriptDisplayEntries(
+      [
+        user("user-1"),
+        assistantThinkingOnly("assistant-1"),
+        user("user-2"),
+        assistantText("assistant-2"),
+      ],
+      toolStates,
+    );
+
+    expect(result.entries.map((entry) => entry.kind)).toEqual([
+      "message",
+      "details-toggle",
+      "message",
+      "message",
+    ]);
   });
 
   it("puts the show toggle after collapsed tool-call-only messages before the reply", () => {
@@ -155,13 +200,13 @@ describe("buildTranscriptDisplayEntries", () => {
 
     expect(result.entries.map((entry) => entry.kind)).toEqual([
       "message",
-      "tool-toggle",
+      "details-toggle",
       "message",
       "message",
       "message",
     ]);
     expect(result.entries[1]).toMatchObject({
-      kind: "tool-toggle",
+      kind: "details-toggle",
       sectionKey: "turn:user-1",
       expanded: false,
     });
@@ -178,20 +223,20 @@ describe("buildTranscriptDisplayEntries", () => {
         assistantText("assistant-2"),
       ],
       toolStates,
-      { showLatestToolToggle: true },
+      { showLatestDetailsToggle: true },
     );
 
     expect(result.entries.map((entry) => entry.kind)).toEqual([
       "message",
-      "tool-toggle",
+      "details-toggle",
       "message",
       "message",
       "message",
-      "tool-toggle",
+      "details-toggle",
       "message",
     ]);
     expect(result.entries[5]).toMatchObject({
-      kind: "tool-toggle",
+      kind: "details-toggle",
       sectionKey: "turn:user-2",
       expanded: true,
     });
@@ -206,13 +251,13 @@ describe("buildTranscriptDisplayEntries", () => {
         assistantWithTool("assistant-2", "call-2"),
       ],
       toolStates,
-      { showLatestToolToggle: false },
+      { showLatestDetailsToggle: false },
     );
 
     expect(result.entries.map((entry) => entry.kind)).toEqual([
       "message",
       "message",
-      "tool-toggle",
+      "details-toggle",
       "message",
       "message",
     ]);
@@ -228,12 +273,12 @@ describe("buildTranscriptDisplayEntries", () => {
         assistantWithTool("assistant-2", "call-2"),
       ],
       toolStates,
-      { collapsedToolSectionKey: "turn:user-2", showLatestToolToggle: true },
+      { collapsedDetailsSectionKey: "turn:user-2", showLatestDetailsToggle: true },
     );
 
     expect(messageBlockCount(result.entries[4])).toBe(1);
     expect(result.entries[5]).toMatchObject({
-      kind: "tool-toggle",
+      kind: "details-toggle",
       sectionKey: "turn:user-2",
       expanded: false,
     });
@@ -248,12 +293,12 @@ describe("buildTranscriptDisplayEntries", () => {
         assistantWithTool("assistant-2", "call-2"),
       ],
       toolStates,
-      { openToolSectionKey: "turn:user-1" },
+      { openDetailsSectionKey: "turn:user-1" },
     );
 
     expect(messageBlockCount(result.entries[1])).toBe(2);
     expect(result.entries[2]).toMatchObject({
-      kind: "tool-toggle",
+      kind: "details-toggle",
       sectionKey: "turn:user-1",
       expanded: true,
     });

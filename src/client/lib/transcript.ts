@@ -172,7 +172,10 @@ function hiddenAssistantErrorIds(messages: UiMessage[], isStreaming: boolean): S
 }
 
 function hasRenderableContent(message: Extract<UiMessage, { role: "assistant" }>): boolean {
-  return assistantHasError(message) || message.blocks.some((block) => block.type !== "thinking");
+  return (
+    assistantHasError(message) ||
+    message.blocks.some((block) => block.type !== "thinking" || block.thinking.trim().length > 0)
+  );
 }
 
 function attachmentBlockFromToolResult(
@@ -266,7 +269,7 @@ export function buildTranscriptMessages(
 
     if (pendingAttachmentBlocks.length > 0 && messageWithoutAttachmentBlocks.role !== "assistant") {
       const attachmentMessage: Extract<UiMessage, { role: "assistant" }> = {
-        id: pendingAttachmentId,
+        id: `${pendingAttachmentId}:attachments`,
         role: "assistant",
         timestamp: pendingAttachmentTimestamp,
         blocks: pendingAttachmentBlocks,
@@ -307,7 +310,7 @@ export function buildTranscriptMessages(
 
   if (pendingAttachmentBlocks.length > 0) {
     const message: Extract<UiMessage, { role: "assistant" }> = {
-      id: pendingAttachmentId,
+      id: `${pendingAttachmentId}:attachments`,
       role: "assistant",
       timestamp: pendingAttachmentTimestamp,
       blocks: pendingAttachmentBlocks,

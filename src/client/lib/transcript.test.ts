@@ -160,13 +160,83 @@ describe("transcript tool state merging", () => {
     const lookup = buildToolStateLookup(messages, []);
     const transcript = buildTranscriptMessages(messages, lookup);
 
-    expect(transcript).toHaveLength(1);
-    const transcriptMessage = transcript[0]?.message as Extract<UiMessage, { role: "assistant" }>;
+    expect(transcript).toHaveLength(2);
+    expect(transcript[0]?.message).toEqual({
+      ...attachmentAssistant,
+      blocks: [attachmentAssistant.blocks[0] as UiContentBlock],
+    });
+    const transcriptMessage = transcript[1]?.message as Extract<UiMessage, { role: "assistant" }>;
     expect(transcriptMessage.id).toBe("assistant-final");
     expect(transcriptMessage.blocks).toEqual([
       { type: "text", text: "Here is the report." },
       attachmentAssistant.blocks[1],
     ]);
+  });
+
+  it("uses a distinct message ID when thinking and its attachment carrier both remain", () => {
+    const attachmentAssistant: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-attach",
+      role: "assistant",
+      timestamp: 3,
+      blocks: [
+        { type: "thinking", thinking: "Attaching the image." },
+        {
+          type: "toolCall",
+          id: "attach-1",
+          name: "attach-files",
+          arguments: { paths: ["webcam.jpg"] },
+        },
+      ],
+    };
+    const attachmentResult: Extract<UiMessage, { role: "toolResult" }> = {
+      id: "tool-attach",
+      role: "toolResult",
+      timestamp: 4,
+      toolCallId: "attach-1",
+      toolName: "attach-files",
+      blocks: [{ type: "text", text: "Attached 1 file for the user." }],
+      details: {
+        sentFiles: [
+          {
+            id: "file-1",
+            name: "webcam.jpg",
+            size: 42,
+            mimeType: "image/jpeg",
+            kind: "image",
+            downloadUrl: "/api/sent-files/file-1?download=1",
+          },
+        ],
+      },
+      isError: false,
+    };
+
+    const messages: SessionState["messages"] = [attachmentAssistant, attachmentResult];
+    const lookup = buildToolStateLookup(messages, []);
+    const transcript = buildTranscriptMessages(messages, lookup);
+
+    expect(transcript.map((entry) => entry.message.id)).toEqual([
+      "assistant-attach",
+      "assistant-attach:attachments",
+    ]);
+    const thinkingMessage = transcript[0]!.message as Extract<UiMessage, { role: "assistant" }>;
+    const attachmentMessage = transcript[1]!.message as Extract<UiMessage, { role: "assistant" }>;
+    expect(thinkingMessage.blocks).toEqual([attachmentAssistant.blocks[0]]);
+    expect(attachmentMessage.blocks).toEqual([attachmentAssistant.blocks[1]]);
+  });
+
+  it("preserves thinking-only assistant messages for expandable transcript details", () => {
+    const thinkingAssistant: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-thinking",
+      role: "assistant",
+      timestamp: 3,
+      blocks: [{ type: "thinking", thinking: "Inspecting the setup." }],
+    };
+
+    const lookup = buildToolStateLookup([thinkingAssistant], []);
+    const transcript = buildTranscriptMessages([thinkingAssistant], lookup);
+
+    expect(transcript).toHaveLength(1);
+    expect(transcript[0]?.message).toEqual(thinkingAssistant);
   });
 
   it("carries pending attachments across intermediary tool-call assistant messages", () => {

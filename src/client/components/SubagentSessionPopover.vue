@@ -232,7 +232,7 @@ onBeforeUnmount(() => {
       :session="session"
       :load-older-messages="loadOlderMessages"
       :loading-older-messages="loadingOlderMessages"
-      always-show-tool-calls
+      always-show-details
       :allow-session-popovers="false"
     />
   </div>

@@ -58,7 +58,7 @@ function markdownForBlock(block: UiContentBlock): string | undefined {
 }
 
 function showAssistantBlock(block: UiContentBlock): boolean {
-  return block.type !== "thinking" && !isAttachmentOutputToolCall(block, props.toolStatesByCallId);
+  return !isAttachmentOutputToolCall(block, props.toolStatesByCallId);
 }
 
 function isSentFileDescriptor(candidate: unknown): candidate is SentFileDescriptor {
@@ -157,7 +157,7 @@ const assistantHasError = computed(
 );
 
 const showAssistantErrorBubble = computed(
-  () => props.message.role === "assistant" && assistantSegments.value.length === 0,
+  () => props.message.role === "assistant" && !hasTrailingAssistantBubble.value,
 );
 
 const hasTrailingAssistantBubble = computed(() => {

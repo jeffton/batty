@@ -3,7 +3,7 @@ import type { ToolDisplayState, TranscriptMessageView } from "@/client/lib/trans
 
 export type TranscriptDisplayEntry =
   | { kind: "message"; entry: TranscriptMessageView; showTimestamp: boolean }
-  | { kind: "tool-toggle"; sectionKey: string; expanded: boolean };
+  | { kind: "details-toggle"; sectionKey: string; expanded: boolean };
 
 export interface TranscriptDisplayResult {
   entries: TranscriptDisplayEntry[];
@@ -84,7 +84,14 @@ function hasExpandableDetails(entry: TranscriptMessageView): boolean {
     return true;
   }
 
-  return "blocks" in message && message.blocks.some((block) => block.type === "toolCall");
+  return (
+    "blocks" in message &&
+    message.blocks.some(
+      (block) =>
+        block.type === "toolCall" ||
+        (block.type === "thinking" && block.thinking.trim().length > 0),
+    )
+  );
 }
 
 function hidesExpandableDetails(
@@ -106,13 +113,15 @@ function hidesExpandableDetails(
   }
 
   return originalMessage.blocks.some(
-    (block) => block.type === "toolCall" && !collapsedMessage.blocks.includes(block),
+    (block) =>
+      (block.type === "toolCall" || block.type === "thinking") &&
+      !collapsedMessage.blocks.includes(block),
   );
 }
 
 function toggleEntry(section: TranscriptSection, expanded: boolean): TranscriptDisplayEntry {
   return {
-    kind: "tool-toggle",
+    kind: "details-toggle",
     sectionKey: section.key,
     expanded,
   };
@@ -122,13 +131,13 @@ export function buildTranscriptDisplayEntries(
   entries: TranscriptMessageView[],
   toolStatesByCallId: Map<string, ToolDisplayState>,
   options: {
-    alwaysShowToolCalls?: boolean;
-    openToolSectionKey?: string | null;
-    collapsedToolSectionKey?: string | null;
-    showLatestToolToggle?: boolean;
+    alwaysShowDetails?: boolean;
+    openDetailsSectionKey?: string | null;
+    collapsedDetailsSectionKey?: string | null;
+    showLatestDetailsToggle?: boolean;
   } = {},
 ): TranscriptDisplayResult {
-  if (options.alwaysShowToolCalls) {
+  if (options.alwaysShowDetails) {
     return {
       entries: entries.map((entry) => ({ kind: "message", entry, showTimestamp: false })),
       latestExpandedSectionKey: undefined,
@@ -141,9 +150,10 @@ export function buildTranscriptDisplayEntries(
 
   for (const section of sections) {
     const isLatestSection = section.key === latestSectionKey;
-    const isOpenSection = section.key === options.openToolSectionKey;
-    const canToggleSection = !isLatestSection || options.showLatestToolToggle === true;
-    const isCollapsedSection = isLatestSection && section.key === options.collapsedToolSectionKey;
+    const isOpenSection = section.key === options.openDetailsSectionKey;
+    const canToggleSection = !isLatestSection || options.showLatestDetailsToggle === true;
+    const isCollapsedSection =
+      isLatestSection && section.key === options.collapsedDetailsSectionKey;
     const isExpanded = (isLatestSection && !isCollapsedSection) || isOpenSection;
     const sectionEntries = entries.slice(section.startIndex, section.endIndex);
     const items = sectionEntries.map((entry) => {

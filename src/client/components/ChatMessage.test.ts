@@ -261,13 +261,13 @@ describe("ChatMessage", () => {
     );
   });
 
-  it("hides assistant thinking blocks from the parent transcript", () => {
+  it("renders assistant thinking summaries with the existing italic styling", () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-thinking-1",
       role: "assistant",
       timestamp: 3,
       blocks: [
-        { type: "thinking", thinking: "I should inspect the setup." },
+        { type: "thinking", thinking: "Inspecting the setup." },
         {
           type: "toolCall",
           id: "call-1",
@@ -283,7 +283,9 @@ describe("ChatMessage", () => {
       },
     });
 
-    expect(wrapper.text()).not.toContain("I should inspect the setup");
+    expect(wrapper.text()).toContain("Inspecting the setup.");
+    expect(wrapper.find(".markdown-body--thinking").exists()).toBe(true);
+    expect(wrapper.find(".message__copy-button").exists()).toBe(false);
     expect(wrapper.text()).toContain("subagent");
   });
 
@@ -303,6 +305,27 @@ describe("ChatMessage", () => {
       },
     });
 
+    expect(wrapper.text()).toContain("Codex error: upstream overloaded");
+    expect(wrapper.find(".message__segment--error").exists()).toBe(true);
+  });
+
+  it("renders thinking before a failed response and keeps the error bubble", () => {
+    const message: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-thinking-error-1",
+      role: "assistant",
+      timestamp: 4,
+      blocks: [{ type: "thinking", thinking: "Retrying the request." }],
+      stopReason: "error",
+      errorMessage: "Codex error: upstream overloaded",
+    };
+
+    const wrapper = mount(ChatMessage, {
+      props: {
+        message,
+      },
+    });
+
+    expect(wrapper.text()).toContain("Retrying the request.");
     expect(wrapper.text()).toContain("Codex error: upstream overloaded");
     expect(wrapper.find(".message__segment--error").exists()).toBe(true);
   });

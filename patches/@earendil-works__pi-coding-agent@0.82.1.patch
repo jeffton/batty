@@ -1,8 +1,8 @@
 diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
-index 6379a7b35dc0abb111fad29db2cacc4bc71e0dd6..711bd137a9b109d155b2e290e7aa85667b5387ae 100644
+index c99a78f..5e2dd30 100644
 --- a/dist/core/agent-session.js
 +++ b/dist/core/agent-session.js
-@@ -265,7 +265,35 @@ export class AgentSession {
+@@ -265,7 +265,38 @@ export class AgentSession {
                  : undefined);
          this.agent.prepareNextTurnWithContext = async (turn, signal) => {
              const previousSnapshot = await previousPrepareNextTurnWithContext?.(turn, signal);
@@ -34,6 +34,9 @@ index 6379a7b35dc0abb111fad29db2cacc4bc71e0dd6..711bd137a9b109d155b2e290e7aa8566
 +                            messages: this.agent.state.messages.slice(),
 +                        };
 +                    }
++                    else if (!signal?.aborted) {
++                        throw new Error("Auto-compaction failed before the next model request");
++                    }
 +                }
 +            }
              return {
@@ -54,7 +57,7 @@ index 6379a7b35dc0abb111fad29db2cacc4bc71e0dd6..711bd137a9b109d155b2e290e7aa8566
                  return false;
              }
              let apiKey;
-@@ -1609,6 +1638,9 @@ export class AgentSession {
+@@ -1604,6 +1633,9 @@ export class AgentSession {
              else {
                  ({ apiKey, headers, env } = await this._getSummarizationRequestAuth(this.model));
              }
@@ -64,7 +67,7 @@ index 6379a7b35dc0abb111fad29db2cacc4bc71e0dd6..711bd137a9b109d155b2e290e7aa8566
              const pathEntries = this.sessionManager.getBranch();
              const preparation = prepareCompaction(pathEntries, settings);
              if (!preparation) {
-@@ -1616,6 +1648,7 @@ export class AgentSession {
+@@ -1611,6 +1643,7 @@ export class AgentSession {
              }
              this._emit({ type: "compaction_start", reason });
              this._autoCompactionAbortController = new AbortController();
@@ -72,7 +75,7 @@ index 6379a7b35dc0abb111fad29db2cacc4bc71e0dd6..711bd137a9b109d155b2e290e7aa8566
              started = true;
              let extensionCompaction;
              let fromExtension = false;
-@@ -1730,6 +1763,7 @@ export class AgentSession {
+@@ -1725,6 +1758,7 @@ export class AgentSession {
              return false;
          }
          finally {

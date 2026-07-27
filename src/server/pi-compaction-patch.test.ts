@@ -133,6 +133,38 @@ describe("Pi between-turn compaction patch", () => {
     expect(result?.context.messages).toStrictEqual(compactedMessages);
   });
 
+  it("stops before an oversized model request when compaction fails", async () => {
+    const session: CompactionTestSession = {
+      agent: {
+        state: {
+          messages: [],
+          tools: [],
+          model: { provider: "openai", id: "test-model", contextWindow: 100 },
+          thinkingLevel: "medium",
+        },
+      },
+      model: { provider: "openai", id: "test-model", contextWindow: 100 },
+      settingsManager: {
+        getCompactionSettings: () => ({
+          enabled: true,
+          reserveTokens: 20,
+          keepRecentTokens: 10,
+        }),
+      },
+      sessionManager: { getBranch: () => [] },
+      _runAutoCompaction: vi.fn(async () => false),
+      abortCompaction: vi.fn(),
+      _baseSystemPrompt: "system",
+    };
+    installNextTurnCompaction(session);
+
+    await expect(
+      session.agent.prepareNextTurnWithContext?.({
+        context: { messages: [assistant(95)], systemPrompt: "old", tools: [] },
+      }),
+    ).rejects.toThrow("Auto-compaction failed before the next model request");
+  });
+
   it("leaves normal turns to the standard agent loop", async () => {
     const runAutoCompaction = vi.fn(async () => false);
     const session: CompactionTestSession = {

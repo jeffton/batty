@@ -26,8 +26,10 @@ overrides:
   shell-quote: 1.10.0
   "fast-uri@3": 3.1.4
   "fast-uri@4": 4.1.1
+  "brace-expansion@5": 5.0.8
+  "find-my-way@9": 9.7.0
 patchedDependencies:
-  "@earendil-works/pi-coding-agent@0.82.0": patches/@earendil-works__pi-coding-agent@0.82.0.patch
+  "@earendil-works/pi-coding-agent@0.82.1": patches/@earendil-works__pi-coding-agent@0.82.1.patch
 peerDependencyRules:
   allowAny:
     - vite

@@ -20,7 +20,7 @@ overrides:
   find-my-way@9: 9.7.0
 
 patchedDependencies:
-  '@earendil-works/pi-coding-agent@0.82.1': bf27d4949692ed1bcc8eccd514f4614db65f1af5c3d7b0a4b2832ed51a6677e5
+  '@earendil-works/pi-coding-agent@0.82.1': ed9641f974a5cb9f0913f684d39fdf398bd476cbe56922e4e8bc83d9e98002ea
 
 importers:
 
@@ -31,7 +31,7 @@ importers:
         version: 0.82.1(supports-color@10.2.2)(ws@8.21.0)(zod@4.4.3)
       '@earendil-works/pi-coding-agent':
         specifier: 0.82.1
-        version: 0.82.1(patch_hash=bf27d4949692ed1bcc8eccd514f4614db65f1af5c3d7b0a4b2832ed51a6677e5)(supports-color@10.2.2)(ws@8.21.0)(zod@4.4.3)
+        version: 0.82.1(patch_hash=ed9641f974a5cb9f0913f684d39fdf398bd476cbe56922e4e8bc83d9e98002ea)(supports-color@10.2.2)(ws@8.21.0)(zod@4.4.3)
       '@fastify/cookie':
         specifier: 11.1.2
         version: 11.1.2
@@ -5496,7 +5496,7 @@ snapshots:
       - ws
       - zod
 
-  '@earendil-works/pi-coding-agent@0.82.1(patch_hash=bf27d4949692ed1bcc8eccd514f4614db65f1af5c3d7b0a4b2832ed51a6677e5)(supports-color@10.2.2)(ws@8.21.0)(zod@4.4.3)':
+  '@earendil-works/pi-coding-agent@0.82.1(patch_hash=ed9641f974a5cb9f0913f684d39fdf398bd476cbe56922e4e8bc83d9e98002ea)(supports-color@10.2.2)(ws@8.21.0)(zod@4.4.3)':
     dependencies:
       '@earendil-works/pi-agent-core': 0.82.1(supports-color@10.2.2)(ws@8.21.0)(zod@4.4.3)
       '@earendil-works/pi-ai': 0.82.1(supports-color@10.2.2)(ws@8.21.0)(zod@4.4.3)

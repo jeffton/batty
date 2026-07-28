@@ -610,7 +610,7 @@ describe("runDetachedSubagentSession", () => {
     expect(result.generatedMessages).toHaveLength(2);
   });
 
-  it("propagates a terminal error removed from the active context before settlement", async () => {
+  it("propagates a compaction error removed from the active context before settlement", async () => {
     const sessionMessages: AgentMessage[] = [];
     let subscriber: ((event: { type: string; [key: string]: unknown }) => void) | undefined;
 
@@ -659,11 +659,11 @@ describe("runDetachedSubagentSession", () => {
         subscriber?.({ type: "message_end", message: finalAssistant });
         subscriber?.({
           type: "compaction_end",
-          reason: "overflow",
+          reason: "threshold",
           result: undefined,
           aborted: false,
           willRetry: false,
-          errorMessage: "Context overflow recovery failed: summarization failed",
+          errorMessage: "Threshold compaction failed: summarization failed",
         });
       },
       async abort() {
@@ -716,8 +716,8 @@ describe("runDetachedSubagentSession", () => {
     expect(result).not.toBe("timeout");
     expect(result).toMatchObject({
       isError: true,
-      errorMessage: "Context overflow recovery failed: summarization failed",
-      text: "Context overflow recovery failed: summarization failed",
+      errorMessage: "Threshold compaction failed: summarization failed",
+      text: "Threshold compaction failed: summarization failed",
       details: {
         subagent: {
           stopReason: "error",

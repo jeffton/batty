@@ -1,3 +1,28 @@
+diff --git a/dist/core/compaction/compaction.js b/dist/core/compaction/compaction.js
+index 2b38e95..19c713f 100644
+--- a/dist/core/compaction/compaction.js
++++ b/dist/core/compaction/compaction.js
+@@ -319,13 +319,20 @@ export function findCutPoint(entries, startIndex, endIndex, keepRecentTokens) {
+         accumulatedTokens += messageTokens;
+         // Check if we've exceeded the budget
+         if (accumulatedTokens >= keepRecentTokens) {
++            let foundCutPoint = false;
+             // Find the closest valid cut point at or after this entry
+             for (let c = 0; c < cutPoints.length; c++) {
+                 if (cutPoints[c] >= i) {
+                     cutIndex = cutPoints[c];
++                    foundCutPoint = true;
+                     break;
+                 }
+             }
++            // The budget can be crossed inside trailing tool results. They must
++            // stay with their assistant tool call, so retain that preceding call.
++            if (!foundCutPoint) {
++                cutIndex = cutPoints[cutPoints.length - 1];
++            }
+             break;
+         }
+     }
 diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
 index c99a78f..5e2dd30 100644
 --- a/dist/core/agent-session.js

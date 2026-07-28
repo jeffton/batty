@@ -337,7 +337,7 @@ export async function runDetachedSubagentSession(
       lifecycleError = event.finalError || "Subagent retry failed";
       return;
     }
-    if (event.type === "compaction_end" && event.reason === "overflow" && event.errorMessage) {
+    if (event.type === "compaction_end" && event.errorMessage) {
       lifecycleError = event.errorMessage;
       return;
     }

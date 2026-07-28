@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { AgentSession } from "@earendil-works/pi-coding-agent";
+import { AgentSession, findCutPoint, type SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 
 interface CompactionTestSession {
@@ -72,6 +72,57 @@ function installNextTurnCompaction(session: CompactionTestSession): void {
 }
 
 describe("Pi between-turn compaction patch", () => {
+  it("keeps an assistant tool call when trailing results exceed the retention budget", () => {
+    const entry = (id: string, message: unknown): SessionEntry =>
+      ({
+        type: "message",
+        id,
+        parentId: null,
+        timestamp: new Date().toISOString(),
+        message,
+      }) as SessionEntry;
+    const entries = [
+      {
+        type: "model_change",
+        id: "model",
+        parentId: null,
+        timestamp: new Date().toISOString(),
+        provider: "openai",
+        modelId: "test-model",
+      } as SessionEntry,
+      entry("user", { role: "user", content: "Investigate", timestamp: 1 }),
+      entry("assistant", {
+        ...assistant(100),
+        content: [
+          { type: "toolCall", id: "call-1", name: "read", arguments: { path: "one.txt" } },
+          { type: "toolCall", id: "call-2", name: "read", arguments: { path: "two.txt" } },
+        ],
+      }),
+      entry("tool-result-1", {
+        role: "toolResult",
+        toolCallId: "call-1",
+        toolName: "read",
+        content: [{ type: "text", text: "x".repeat(80) }],
+        isError: false,
+        timestamp: 2,
+      }),
+      entry("tool-result-2", {
+        role: "toolResult",
+        toolCallId: "call-2",
+        toolName: "read",
+        content: [{ type: "text", text: "y".repeat(80) }],
+        isError: false,
+        timestamp: 3,
+      }),
+    ];
+
+    expect(findCutPoint(entries, 0, entries.length, 30)).toStrictEqual({
+      firstKeptEntryIndex: 2,
+      turnStartIndex: 1,
+      isSplitTurn: true,
+    });
+  });
+
   it("compacts before the next model request when tool results cross the threshold", async () => {
     const compactedMessages = [{ role: "compactionSummary", summary: "Preserved work" }];
     let branch: unknown[] = [];

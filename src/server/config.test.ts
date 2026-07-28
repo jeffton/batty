@@ -34,6 +34,9 @@ async function createBattyDir(): Promise<string> {
         webPushSubject: "https://batty.test",
         cronDailySessionStartTime: "04:00",
         braveSearchKey: "configured-brave-key",
+        defaultProvider: "openai-codex",
+        defaultModel: "gpt-5.6-sol",
+        defaultThinkingLevel: "medium",
         baseUrl: "/batty",
       },
       null,
@@ -80,6 +83,9 @@ describe("loadConfig", () => {
     expect(config.port).toBe(4242);
     expect(config.cronDailySessionStartTime).toBe("04:00");
     expect(config.braveSearchKey).toBe("configured-brave-key");
+    expect(config.defaultProvider).toBe("openai-codex");
+    expect(config.defaultModel).toBe("gpt-5.6-sol");
+    expect(config.defaultThinkingLevel).toBe("medium");
     expect(config.baseUrl).toBe("/batty");
   });
 

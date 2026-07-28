@@ -38,6 +38,9 @@ describe("ensureOptionsFile", () => {
       braveSearchKey?: string;
       pinnedWorkspaceIds?: string[];
       assistantWorkspaceId?: string;
+      defaultProvider?: string;
+      defaultModel?: string;
+      defaultThinkingLevel?: string;
       baseUrl?: string;
     };
 
@@ -48,6 +51,9 @@ describe("ensureOptionsFile", () => {
     expect(persisted.braveSearchKey).toBeUndefined();
     expect(persisted.pinnedWorkspaceIds).toEqual([]);
     expect(persisted.assistantWorkspaceId).toBeUndefined();
+    expect(persisted.defaultProvider).toBeUndefined();
+    expect(persisted.defaultModel).toBeUndefined();
+    expect(persisted.defaultThinkingLevel).toBeUndefined();
     expect(persisted.baseUrl).toBe("/");
   });
 
@@ -66,6 +72,9 @@ describe("ensureOptionsFile", () => {
           braveSearchKey: "  brave-key  ",
           pinnedWorkspaceIds: ["batty", "", 123, "kladde"],
           assistantWorkspaceId: "  batty  ",
+          defaultProvider: "  openai-codex  ",
+          defaultModel: "  gpt-5.6-sol  ",
+          defaultThinkingLevel: "medium",
           baseUrl: "batty/",
         },
         null,
@@ -87,6 +96,9 @@ describe("ensureOptionsFile", () => {
     expect(options.braveSearchKey).toBe("brave-key");
     expect(options.pinnedWorkspaceIds).toEqual(["batty", "kladde"]);
     expect(options.assistantWorkspaceId).toBe("batty");
+    expect(options.defaultProvider).toBe("openai-codex");
+    expect(options.defaultModel).toBe("gpt-5.6-sol");
+    expect(options.defaultThinkingLevel).toBe("medium");
     expect(options.baseUrl).toBe("/batty");
     expect(persisted).toEqual(options);
   });
@@ -165,6 +177,50 @@ describe("ensureOptionsFile", () => {
 
     await expect(ensureOptionsFile(battyDir)).rejects.toThrow(
       "Invalid baseUrl in options.json: /batty?bad=1. Expected a URL path.",
+    );
+  });
+
+  it("rejects invalid defaultThinkingLevel values", async () => {
+    const battyDir = await createBattyDir();
+
+    await fs.mkdir(path.dirname(optionsFilePath(battyDir)), { recursive: true });
+    await fs.writeFile(
+      optionsFilePath(battyDir),
+      `${JSON.stringify(
+        {
+          authSecret: "existing-secret",
+          workspacesRoots: ["/root/github"],
+          webPushSubject: "https://batty.roybot.se",
+          defaultThinkingLevel: "extreme",
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    await expect(ensureOptionsFile(battyDir)).rejects.toThrow(
+      "Invalid defaultThinkingLevel in options.json: extreme. Expected off, minimal, low, medium, high, xhigh, or max.",
+    );
+  });
+
+  it("rejects non-string defaultThinkingLevel values", async () => {
+    const battyDir = await createBattyDir();
+
+    await fs.mkdir(path.dirname(optionsFilePath(battyDir)), { recursive: true });
+    await fs.writeFile(
+      optionsFilePath(battyDir),
+      `${JSON.stringify({
+        authSecret: "existing-secret",
+        workspacesRoots: ["/root/github"],
+        webPushSubject: "https://batty.roybot.se",
+        defaultThinkingLevel: 123,
+      })}\n`,
+      "utf8",
+    );
+
+    await expect(ensureOptionsFile(battyDir)).rejects.toThrow(
+      "Invalid defaultThinkingLevel in options.json: 123. Expected off, minimal, low, medium, high, xhigh, or max.",
     );
   });
 

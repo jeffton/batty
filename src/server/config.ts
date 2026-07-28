@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { ensureOptionsFile, stateDirPath } from "./options";
+import { ensureOptionsFile, stateDirPath, type DefaultThinkingLevel } from "./options";
 
 export interface AppConfig {
   host: string;
@@ -15,6 +15,9 @@ export interface AppConfig {
   webPushSubject: string;
   cronDailySessionStartTime: string;
   braveSearchKey?: string;
+  defaultProvider?: string;
+  defaultModel?: string;
+  defaultThinkingLevel?: DefaultThinkingLevel;
   baseUrl: string;
   cookieName: string;
   authSecret: string;
@@ -69,6 +72,9 @@ export async function loadConfig(battyDir: string): Promise<AppConfig> {
     webPushSubject: options.webPushSubject,
     cronDailySessionStartTime: options.cronDailySessionStartTime,
     braveSearchKey: options.braveSearchKey,
+    defaultProvider: options.defaultProvider,
+    defaultModel: options.defaultModel,
+    defaultThinkingLevel: options.defaultThinkingLevel,
     baseUrl: options.baseUrl,
     cookieName: "batty-auth",
     authSecret: options.authSecret,

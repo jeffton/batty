@@ -68,6 +68,59 @@ describe("pi-paths", () => {
     );
   });
 
+  it("uses options for global model defaults and lets workspace settings override them", async () => {
+    const { root, workspace } = await createLayout();
+    await fs.writeFile(
+      path.join(root, ".batty", "settings.json"),
+      JSON.stringify({
+        defaultProvider: "stale-provider",
+        defaultModel: "stale-model",
+        defaultThinkingLevel: "off",
+      }),
+    );
+
+    const optionsDefaults = {
+      battyDir: root,
+      defaultProvider: "openai-codex",
+      defaultModel: "gpt-5.6-sol",
+      defaultThinkingLevel: "medium",
+    } as const;
+    await expect(loadBattySettings(optionsDefaults, workspace)).resolves.toEqual(
+      expect.objectContaining({
+        defaultProvider: "openai-codex",
+        defaultModel: "gpt-5.6-sol",
+        defaultThinkingLevel: "medium",
+      }),
+    );
+
+    await fs.writeFile(
+      path.join(workspace, ".batty", "settings.json"),
+      JSON.stringify({
+        defaultProvider: "anthropic",
+        defaultModel: "claude-opus-5",
+        defaultThinkingLevel: "high",
+      }),
+    );
+
+    await expect(loadBattySettings(optionsDefaults, workspace)).resolves.toEqual(
+      expect.objectContaining({
+        defaultProvider: "anthropic",
+        defaultModel: "claude-opus-5",
+        defaultThinkingLevel: "high",
+      }),
+    );
+  });
+
+  it("rejects invalid workspace default thinking levels", async () => {
+    const { root, workspace } = await createLayout();
+    const settingsPath = path.join(workspace, ".batty", "settings.json");
+    await fs.writeFile(settingsPath, JSON.stringify({ defaultThinkingLevel: "extreme" }));
+
+    await expect(loadBattySettings({ battyDir: root }, workspace)).rejects.toThrow(
+      `Invalid defaultThinkingLevel in ${settingsPath}: extreme. Expected off, minimal, low, medium, high, xhigh, or max.`,
+    );
+  });
+
   it("includes settings-defined resource paths alongside default .batty resource directories", async () => {
     const { root, workspace } = await createLayout();
     await fs.writeFile(

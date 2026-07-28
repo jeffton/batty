@@ -209,6 +209,21 @@ Fields:
 - `webPushSubject` — required VAPID subject; use a real `https:` origin or valid `mailto:` URI
 - `cronDailySessionStartTime` — local rollover time for daily cron session reuse, formatted as `HH:MM`; defaults to `04:00`
 - `braveSearchKey` — optional Brave Search API key used by Batty's built-in `web-search` tool
+- `defaultProvider` — optional default Pi model provider for new sessions, such as `openai-codex`
+- `defaultModel` — optional default Pi model ID for new sessions, such as `gpt-5.6-sol`
+- `defaultThinkingLevel` — optional default reasoning level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`
+
+Example model defaults:
+
+```json
+{
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.6-sol",
+  "defaultThinkingLevel": "medium"
+}
+```
+
+Other global Pi settings can be placed in `<batty-root>/.batty/settings.json`. Model defaults in that file are ignored because `options.json` is authoritative. A workspace can override model defaults and other Pi settings in `<workspace>/.batty/settings.json`.
 
 ### Loaded environment file
 

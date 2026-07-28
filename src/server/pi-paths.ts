@@ -1,9 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AppConfig } from "./config";
-import { stateDirPath } from "./options";
+import { DEFAULT_THINKING_LEVELS, stateDirPath, type DefaultThinkingLevel } from "./options";
 
 export interface BattyAgentSettings {
+  defaultProvider?: string;
+  defaultModel?: string;
+  defaultThinkingLevel?: DefaultThinkingLevel;
   theme?: string;
   extensions?: string[];
   skills?: string[];
@@ -40,6 +43,21 @@ async function readJsonObject(filePath: string): Promise<Record<string, unknown>
       return undefined;
     }
     throw error;
+  }
+}
+
+function validateDefaultThinkingLevel(
+  settings: Record<string, unknown> | undefined,
+  filePath: string,
+): void {
+  const value = settings?.defaultThinkingLevel;
+  if (
+    value !== undefined &&
+    (typeof value !== "string" || !DEFAULT_THINKING_LEVELS.includes(value as DefaultThinkingLevel))
+  ) {
+    throw new Error(
+      `Invalid defaultThinkingLevel in ${filePath}: ${String(value)}. Expected off, minimal, low, medium, high, xhigh, or max.`,
+    );
   }
 }
 
@@ -158,7 +176,7 @@ export function battyResourcePaths(
 }
 
 export async function loadBattySettings(
-  config: Pick<AppConfig, "battyDir">,
+  config: Pick<AppConfig, "battyDir" | "defaultProvider" | "defaultModel" | "defaultThinkingLevel">,
   workspacePath: string,
 ): Promise<Partial<BattyAgentSettings>> {
   const globalDir = battyAgentDir(config);
@@ -167,12 +185,24 @@ export async function loadBattySettings(
     await readJsonObject(path.join(globalDir, "settings.json")),
     globalDir,
   );
-  const projectSettings = normalizeSettingsPaths(
-    await readJsonObject(path.join(projectDir, "settings.json")),
-    projectDir,
-  );
+  delete globalSettings.defaultProvider;
+  delete globalSettings.defaultModel;
+  delete globalSettings.defaultThinkingLevel;
 
-  return mergeSettingsValue(globalSettings, projectSettings) as Partial<BattyAgentSettings>;
+  const configuredDefaults: Partial<BattyAgentSettings> = {
+    ...(config.defaultProvider ? { defaultProvider: config.defaultProvider } : {}),
+    ...(config.defaultModel ? { defaultModel: config.defaultModel } : {}),
+    ...(config.defaultThinkingLevel ? { defaultThinkingLevel: config.defaultThinkingLevel } : {}),
+  };
+  const projectSettingsPath = path.join(projectDir, "settings.json");
+  const projectSettingsJson = await readJsonObject(projectSettingsPath);
+  validateDefaultThinkingLevel(projectSettingsJson, projectSettingsPath);
+  const projectSettings = normalizeSettingsPaths(projectSettingsJson, projectDir);
+
+  return mergeSettingsValue(
+    mergeSettingsValue(globalSettings, configuredDefaults),
+    projectSettings,
+  ) as Partial<BattyAgentSettings>;
 }
 
 export async function loadBattyPromptFile(

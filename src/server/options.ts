@@ -2,6 +2,18 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+export const DEFAULT_THINKING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+
+export type DefaultThinkingLevel = (typeof DEFAULT_THINKING_LEVELS)[number];
+
 export interface StoredAppOptions {
   authSecret?: string;
   workspacesRoots?: string[];
@@ -10,6 +22,9 @@ export interface StoredAppOptions {
   braveSearchKey?: string;
   pinnedWorkspaceIds?: string[];
   assistantWorkspaceId?: string;
+  defaultProvider?: string;
+  defaultModel?: string;
+  defaultThinkingLevel?: DefaultThinkingLevel;
   baseUrl?: string;
 }
 
@@ -21,6 +36,9 @@ export interface AppOptions {
   braveSearchKey?: string;
   pinnedWorkspaceIds: string[];
   assistantWorkspaceId?: string;
+  defaultProvider?: string;
+  defaultModel?: string;
+  defaultThinkingLevel?: DefaultThinkingLevel;
   baseUrl: string;
 }
 
@@ -96,6 +114,33 @@ export function normalizeBaseUrl(value: unknown): string {
   return normalized === "/" ? "/" : normalized;
 }
 
+function normalizeOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function normalizeThinkingLevel(value: unknown): DefaultThinkingLevel | undefined {
+  if (value == null) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    throw new Error(
+      `Invalid defaultThinkingLevel in options.json: ${String(value)}. Expected off, minimal, low, medium, high, xhigh, or max.`,
+    );
+  }
+
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    return undefined;
+  }
+  if (DEFAULT_THINKING_LEVELS.includes(normalized as DefaultThinkingLevel)) {
+    return normalized as DefaultThinkingLevel;
+  }
+
+  throw new Error(
+    `Invalid defaultThinkingLevel in options.json: ${normalized}. Expected off, minimal, low, medium, high, xhigh, or max.`,
+  );
+}
+
 function normalizeWorkspacesRoots(options: StoredAppOptions | undefined): string[] {
   const roots = Array.isArray(options?.workspacesRoots) ? options.workspacesRoots : [];
 
@@ -121,20 +166,16 @@ function normalizeStoredOptions(options: StoredAppOptions | undefined): StoredAp
     webPushSubject:
       typeof options?.webPushSubject === "string" ? options.webPushSubject.trim() : "",
     cronDailySessionStartTime: normalizeDailySessionStartTime(options?.cronDailySessionStartTime),
-    braveSearchKey:
-      typeof options?.braveSearchKey === "string" && options.braveSearchKey.trim().length > 0
-        ? options.braveSearchKey.trim()
-        : undefined,
+    braveSearchKey: normalizeOptionalString(options?.braveSearchKey),
     pinnedWorkspaceIds: Array.isArray(options?.pinnedWorkspaceIds)
       ? options.pinnedWorkspaceIds.filter(
           (value): value is string => typeof value === "string" && value.trim().length > 0,
         )
       : [],
-    assistantWorkspaceId:
-      typeof options?.assistantWorkspaceId === "string" &&
-      options.assistantWorkspaceId.trim().length > 0
-        ? options.assistantWorkspaceId.trim()
-        : undefined,
+    assistantWorkspaceId: normalizeOptionalString(options?.assistantWorkspaceId),
+    defaultProvider: normalizeOptionalString(options?.defaultProvider),
+    defaultModel: normalizeOptionalString(options?.defaultModel),
+    defaultThinkingLevel: normalizeThinkingLevel(options?.defaultThinkingLevel),
     baseUrl: normalizeBaseUrl(options?.baseUrl),
   };
 }

@@ -82,7 +82,7 @@ foreach ($entry in $existingOptions.GetEnumerator()) {
   }
 }
 $orderedOptions = [ordered]@{}
-foreach ($key in @("authSecret", "workspacesRoots", "webPushSubject", "cronDailySessionStartTime", "braveSearchKey", "pinnedWorkspaceIds", "assistantWorkspaceId", "baseUrl")) {
+foreach ($key in @("authSecret", "workspacesRoots", "webPushSubject", "cronDailySessionStartTime", "braveSearchKey", "pinnedWorkspaceIds", "assistantWorkspaceId", "defaultProvider", "defaultModel", "defaultThinkingLevel", "baseUrl")) {
   if ($nextOptions.ContainsKey($key) -and $null -ne $nextOptions[$key]) {
     $orderedOptions[$key] = $nextOptions[$key]
   }

@@ -231,7 +231,7 @@ If present, Batty also loads:
 
 `<batty-root>/.batty/environment.json`
 
-This file can provide environment variables before the server starts.
+This file provides environment variables at server startup and is loaded again before every Pi `bash` tool invocation, so added or updated values are available to subsequent commands without restarting Batty.
 
 ### State directory contents
 

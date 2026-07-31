@@ -2,6 +2,7 @@ import path from "node:path";
 import {
   createAgentSession,
   DefaultResourceLoader,
+  type InlineExtension,
   type ModelRuntime,
   SessionManager,
   SettingsManager,
@@ -9,7 +10,7 @@ import {
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import type { WorkspaceInfo } from "@/shared/types";
-import type { AppConfig } from "./config";
+import { type AppConfig, loadEnvironmentFile } from "./config";
 import {
   buildBattySystemPromptSnapshot,
   BATTY_SYSTEM_PROMPT_CUSTOM_TYPE,
@@ -27,6 +28,20 @@ import type { PiModel, WebSession } from "./pi-service-types";
 import { modelKey } from "./pi-service-types";
 
 const DEFAULT_BATTY_PI_TOOL_NAMES = ["read", "bash", "edit", "write", "grep", "find"];
+
+export function createEnvironmentReloadExtension(battyDir: string): InlineExtension {
+  return {
+    name: "batty-environment",
+    hidden: true,
+    factory: (pi) => {
+      pi.on("tool_call", async (event) => {
+        if (event.toolName === "bash") {
+          await loadEnvironmentFile(battyDir);
+        }
+      });
+    },
+  };
+}
 
 export interface CreatePiAgentSessionOptions {
   config: AppConfig;
@@ -72,6 +87,7 @@ export async function createPiAgentSession({
     noPromptTemplates: true,
     noThemes: true,
     additionalExtensionPaths: resourcePaths.extensions,
+    extensionFactories: [createEnvironmentReloadExtension(config.battyDir)],
     additionalSkillPaths: resourcePaths.skills,
     additionalPromptTemplatePaths: resourcePaths.prompts,
     additionalThemePaths: resourcePaths.themes,

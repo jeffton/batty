@@ -36,7 +36,7 @@ export function environmentFilePath(battyDir: string): string {
   return path.join(stateDirPath(battyDir), "environment.json");
 }
 
-async function loadEnvironmentFile(battyDir: string): Promise<void> {
+export async function loadEnvironmentFile(battyDir: string): Promise<void> {
   try {
     const content = await fs.readFile(environmentFilePath(battyDir), "utf8");
     const environment = JSON.parse(content) as Record<string, string>;

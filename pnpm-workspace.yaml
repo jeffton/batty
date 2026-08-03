@@ -18,18 +18,18 @@ allowBuilds:
   koffi: false
   protobufjs: false
 catalog:
-  vite: npm:@voidzero-dev/vite-plus-core@0.2.6
-  vite-plus: 0.2.6
+  vite: npm:@voidzero-dev/vite-plus-core@0.2.7
+  vite-plus: 0.2.7
 overrides:
   vite: "catalog:"
   vitest: 4.1.10
   shell-quote: 1.10.0
   "fast-uri@3": 3.1.4
   "fast-uri@4": 4.1.1
-  "brace-expansion@5": 5.0.8
+  "brace-expansion@5": 5.0.9
   "find-my-way@9": 9.7.0
 patchedDependencies:
-  "@earendil-works/pi-coding-agent@0.82.1": patches/@earendil-works__pi-coding-agent@0.82.1.patch
+  "@earendil-works/pi-coding-agent@0.83.0": patches/@earendil-works__pi-coding-agent@0.83.0.patch
 peerDependencyRules:
   allowAny:
     - vite

@@ -142,7 +142,7 @@ function createMessages(count: number): SessionState["messages"] {
 }
 
 async function showToolCalls(page: Page): Promise<void> {
-  const button = page.getByRole("button", { name: "Show tool calls" });
+  const button = page.getByRole("button", { name: "Show details" }).first();
   if (await button.isVisible()) {
     await button.click();
   }

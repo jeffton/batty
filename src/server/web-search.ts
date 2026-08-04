@@ -62,10 +62,12 @@ export interface WebSearchResult {
   };
 }
 
-let browserPromise: Promise<Browser> | null = null;
+let activeBrowser: Browser | null = null;
+let browserLaunchPromise: Promise<Browser> | null = null;
 
 export function resetWebSearchStateForTests(): void {
-  browserPromise = null;
+  activeBrowser = null;
+  browserLaunchPromise = null;
 }
 
 function htmlToMarkdown(html: string): string {
@@ -205,28 +207,49 @@ async function fetchPageViaHttp(url: string): Promise<PageFetchResult> {
   }
 }
 
-async function getBrowser(): Promise<Browser> {
-  if (!browserPromise) {
-    browserPromise = import("playwright")
-      .then(async ({ chromium }) => {
-        const browser = await chromium.launch({
-          headless: true,
-          args: ["--disable-dev-shm-usage"],
-        });
+async function launchBrowser(): Promise<Browser> {
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({
+    headless: true,
+    args: ["--disable-dev-shm-usage"],
+  });
 
-        if (!browser || typeof browser.newContext !== "function") {
-          throw new Error("Playwright did not return a browser instance");
-        }
-
-        return browser;
-      })
-      .catch((error) => {
-        browserPromise = null;
-        throw error;
-      });
+  if (!browser || typeof browser.newContext !== "function") {
+    throw new Error("Playwright did not return a browser instance");
   }
 
-  return browserPromise;
+  activeBrowser = browser;
+  browser.on("disconnected", () => {
+    if (activeBrowser === browser) {
+      activeBrowser = null;
+    }
+  });
+  return browser;
+}
+
+async function getBrowser(): Promise<Browser> {
+  if (activeBrowser?.isConnected()) {
+    return activeBrowser;
+  }
+
+  activeBrowser = null;
+  browserLaunchPromise ??= launchBrowser();
+  const launchPromise = browserLaunchPromise;
+
+  try {
+    return await launchPromise;
+  } finally {
+    if (browserLaunchPromise === launchPromise) {
+      browserLaunchPromise = null;
+    }
+  }
+}
+
+function isClosedBrowserError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /(?:target page, context or browser|browser) has been closed/i.test(error.message)
+  );
 }
 
 function createConcurrencyLimiter(limit: number): <T>(task: () => Promise<T>) => Promise<T> {
@@ -266,61 +289,76 @@ const withBrowserFallbackSlot = createConcurrencyLimiter(BROWSER_FALLBACK_CONCUR
 
 async function fetchPageViaBrowser(url: string): Promise<PageFetchResult> {
   return withBrowserFallbackSlot(async () => {
-    let context: Awaited<ReturnType<Browser["newContext"]>> | undefined;
+    let lastError: unknown;
 
-    try {
-      const browser = await getBrowser();
-      context = await browser.newContext({
-        userAgent: DEFAULT_USER_AGENT,
-        locale: "en-US",
-        extraHTTPHeaders: {
-          Accept: DEFAULT_ACCEPT,
-          "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
-        },
-      });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      let browser: Browser | undefined;
+      let context: Awaited<ReturnType<Browser["newContext"]>> | undefined;
 
-      const page = await context.newPage();
-      page.setDefaultNavigationTimeout(PAGE_FETCH_TIMEOUT_MS);
-      page.setDefaultTimeout(PAGE_FETCH_TIMEOUT_MS);
+      try {
+        browser = await getBrowser();
+        context = await browser.newContext({
+          userAgent: DEFAULT_USER_AGENT,
+          locale: "en-US",
+          extraHTTPHeaders: {
+            Accept: DEFAULT_ACCEPT,
+            "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
+          },
+        });
 
-      await page.route("**/*", async (route) => {
-        const resourceType = route.request().resourceType();
-        if (resourceType === "image" || resourceType === "media" || resourceType === "font") {
-          await route.abort();
-          return;
+        const page = await context.newPage();
+        page.setDefaultNavigationTimeout(PAGE_FETCH_TIMEOUT_MS);
+        page.setDefaultTimeout(PAGE_FETCH_TIMEOUT_MS);
+
+        await page.route("**/*", async (route) => {
+          const resourceType = route.request().resourceType();
+          if (resourceType === "image" || resourceType === "media" || resourceType === "font") {
+            await route.abort();
+            return;
+          }
+
+          await route.continue();
+        });
+
+        const response = await page.goto(url, { waitUntil: "domcontentloaded" });
+        await page
+          .waitForLoadState("networkidle", { timeout: BROWSER_SETTLE_TIMEOUT_MS })
+          .catch(() => {});
+        await page.waitForTimeout(250);
+
+        const contentType = response?.headers()["content-type"] ?? "text/html";
+        const body = isHtmlContentType(contentType)
+          ? await page.content()
+          : await (response?.text() ?? page.content());
+
+        return {
+          ok: true,
+          body,
+          contentType,
+          finalUrl: page.url(),
+          status: response?.status(),
+          statusText: response?.statusText(),
+        };
+      } catch (error) {
+        lastError = error;
+        const browserClosed = browser ? !browser.isConnected() : false;
+        if (attempt === 0 && (browserClosed || isClosedBrowserError(error))) {
+          if (activeBrowser === browser) {
+            activeBrowser = null;
+          }
+          continue;
         }
-
-        await route.continue();
-      });
-
-      const response = await page.goto(url, { waitUntil: "domcontentloaded" });
-      await page
-        .waitForLoadState("networkidle", { timeout: BROWSER_SETTLE_TIMEOUT_MS })
-        .catch(() => {});
-      await page.waitForTimeout(250);
-
-      const contentType = response?.headers()["content-type"] ?? "text/html";
-      const body = isHtmlContentType(contentType)
-        ? await page.content()
-        : await (response?.text() ?? page.content());
-
-      return {
-        ok: true,
-        body,
-        contentType,
-        finalUrl: page.url(),
-        status: response?.status(),
-        statusText: response?.statusText(),
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        finalUrl: url,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    } finally {
-      await context?.close();
+        break;
+      } finally {
+        await context?.close().catch(() => {});
+      }
     }
+
+    return {
+      ok: false,
+      finalUrl: url,
+      error: lastError instanceof Error ? lastError.message : String(lastError),
+    };
   });
 }
 

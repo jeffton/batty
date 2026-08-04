@@ -196,6 +196,8 @@ describe("runWebSearch", () => {
     };
 
     vi.mocked(chromium.launch).mockResolvedValue({
+      isConnected: vi.fn(() => true),
+      on: vi.fn(),
       newContext: vi.fn(async () => context),
     } as never);
 
@@ -210,5 +212,121 @@ describe("runWebSearch", () => {
     expect(result.text).toContain("Rendered content from the headless browser path.");
     expect(routeAbort).not.toHaveBeenCalled();
     expect(routeContinue).toHaveBeenCalled();
+  });
+
+  it("relaunches the shared browser when it closes before creating a context", async () => {
+    globalThis.fetch = vi.fn(
+      async () => new Response("Forbidden", { status: 403, statusText: "Forbidden" }),
+    ) as typeof fetch;
+
+    const page = {
+      setDefaultNavigationTimeout: vi.fn(),
+      setDefaultTimeout: vi.fn(),
+      route: vi.fn(async () => {}),
+      goto: vi.fn(async () => ({
+        headers: () => ({ "content-type": "text/html" }),
+        status: () => 200,
+        statusText: () => "OK",
+      })),
+      waitForLoadState: vi.fn(async () => {}),
+      waitForTimeout: vi.fn(async () => {}),
+      content: vi.fn(
+        async () =>
+          "<!doctype html><html><head><title>Recovered Article</title></head><body><main><article><h1>Recovered Article</h1><p>The replacement browser returned rendered content.</p><p>This paragraph makes the extracted fallback content sufficiently useful.</p></article></main></body></html>",
+      ),
+      url: vi.fn(() => "https://example.com/recovered"),
+    };
+    const context = {
+      newPage: vi.fn(async () => page),
+      close: vi.fn(async () => {}),
+    };
+    const closedBrowser = {
+      isConnected: vi.fn(() => true),
+      on: vi.fn(),
+      newContext: vi.fn(async () => {
+        throw new Error("browser.newContext: Target page, context or browser has been closed");
+      }),
+    };
+    const replacementBrowser = {
+      isConnected: vi.fn(() => true),
+      on: vi.fn(),
+      newContext: vi.fn(async () => context),
+    };
+    vi.mocked(chromium.launch)
+      .mockResolvedValueOnce(closedBrowser as never)
+      .mockResolvedValueOnce(replacementBrowser as never);
+
+    const result = await runWebSearch({
+      apiKey: "brave-key",
+      action: "content",
+      url: "https://example.com/protected",
+    });
+
+    expect(chromium.launch).toHaveBeenCalledTimes(2);
+    expect(closedBrowser.newContext).toHaveBeenCalledOnce();
+    expect(replacementBrowser.newContext).toHaveBeenCalledOnce();
+    expect(result.text).toContain("# Recovered Article");
+  });
+
+  it("replaces a cached browser after its disconnected event", async () => {
+    globalThis.fetch = vi.fn(
+      async () => new Response("Forbidden", { status: 403, statusText: "Forbidden" }),
+    ) as typeof fetch;
+
+    const page = {
+      setDefaultNavigationTimeout: vi.fn(),
+      setDefaultTimeout: vi.fn(),
+      route: vi.fn(async () => {}),
+      goto: vi.fn(async () => ({
+        headers: () => ({ "content-type": "text/html" }),
+        status: () => 200,
+        statusText: () => "OK",
+      })),
+      waitForLoadState: vi.fn(async () => {}),
+      waitForTimeout: vi.fn(async () => {}),
+      content: vi.fn(
+        async () =>
+          "<!doctype html><html><head><title>Cached Article</title></head><body><main><article><h1>Cached Article</h1><p>Rendered content from the shared browser.</p><p>This paragraph makes the extracted fallback content sufficiently useful.</p></article></main></body></html>",
+      ),
+      url: vi.fn(() => "https://example.com/cached"),
+    };
+    const context = {
+      newPage: vi.fn(async () => page),
+      close: vi.fn(async () => {}),
+    };
+    let disconnect: (() => void) | undefined;
+    const firstBrowser = {
+      isConnected: vi.fn(() => true),
+      on: vi.fn((event: string, listener: () => void) => {
+        if (event === "disconnected") {
+          disconnect = listener;
+        }
+      }),
+      newContext: vi.fn(async () => context),
+    };
+    const replacementBrowser = {
+      isConnected: vi.fn(() => true),
+      on: vi.fn(),
+      newContext: vi.fn(async () => context),
+    };
+    vi.mocked(chromium.launch)
+      .mockResolvedValueOnce(firstBrowser as never)
+      .mockResolvedValueOnce(replacementBrowser as never);
+
+    await runWebSearch({
+      apiKey: "brave-key",
+      action: "content",
+      url: "https://example.com/first",
+    });
+    disconnect?.();
+    await runWebSearch({
+      apiKey: "brave-key",
+      action: "content",
+      url: "https://example.com/second",
+    });
+
+    expect(chromium.launch).toHaveBeenCalledTimes(2);
+    expect(firstBrowser.newContext).toHaveBeenCalledOnce();
+    expect(replacementBrowser.newContext).toHaveBeenCalledOnce();
   });
 });

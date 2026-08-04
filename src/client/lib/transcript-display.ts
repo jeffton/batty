@@ -1,9 +1,20 @@
 import { easyModeMessage } from "@/client/lib/easy-mode";
+import { isAttachmentOutputToolCall } from "@/client/lib/transcript";
 import type { ToolDisplayState, TranscriptMessageView } from "@/client/lib/transcript";
 
+interface DetailsToggle {
+  sectionKey: string;
+  expanded: boolean;
+}
+
 export type TranscriptDisplayEntry =
-  | { kind: "message"; entry: TranscriptMessageView; showTimestamp: boolean }
-  | { kind: "details-toggle"; sectionKey: string; expanded: boolean };
+  | {
+      kind: "message";
+      entry: TranscriptMessageView;
+      showTimestamp: boolean;
+      detailsToggleBeforeReply?: DetailsToggle;
+    }
+  | ({ kind: "details-toggle" } & DetailsToggle);
 
 export interface TranscriptDisplayResult {
   entries: TranscriptDisplayEntry[];
@@ -119,12 +130,35 @@ function hidesExpandableDetails(
   );
 }
 
-function toggleEntry(section: TranscriptSection, expanded: boolean): TranscriptDisplayEntry {
+function detailsToggle(section: TranscriptSection, expanded: boolean): DetailsToggle {
   return {
-    kind: "details-toggle",
     sectionKey: section.key,
     expanded,
   };
+}
+
+function hasAssistantReply(entry: TranscriptMessageView | undefined): boolean {
+  if (!entry || entry.message.role !== "assistant") {
+    return false;
+  }
+
+  if (entry.message.stopReason === "error" || entry.message.errorMessage?.trim()) {
+    return true;
+  }
+
+  if (
+    entry.message.blocks.some((block) =>
+      isAttachmentOutputToolCall(block, entry.toolStatesByCallId),
+    )
+  ) {
+    return true;
+  }
+
+  const visibleBlocks = entry.message.blocks.filter(
+    (block) => !isAttachmentOutputToolCall(block, entry.toolStatesByCallId),
+  );
+  const lastBlock = visibleBlocks.at(-1);
+  return lastBlock?.type === "text" || lastBlock?.type === "image";
 }
 
 export function buildTranscriptDisplayEntries(
@@ -178,12 +212,20 @@ export function buildTranscriptDisplayEntries(
     }
 
     items.forEach((item, index) => {
+      const toggle = index === toggleAfterIndex ? detailsToggle(section, isExpanded) : undefined;
+      const placeToggleBeforeReply = toggle && hasAssistantReply(item.visibleEntry);
+
       if (item.visibleEntry) {
-        displayEntries.push({ kind: "message", entry: item.visibleEntry, showTimestamp: false });
+        displayEntries.push({
+          kind: "message",
+          entry: item.visibleEntry,
+          showTimestamp: false,
+          ...(placeToggleBeforeReply ? { detailsToggleBeforeReply: toggle } : {}),
+        });
       }
 
-      if (index === toggleAfterIndex) {
-        displayEntries.push(toggleEntry(section, isExpanded));
+      if (toggle && !placeToggleBeforeReply) {
+        displayEntries.push({ kind: "details-toggle", ...toggle });
       }
     });
   }

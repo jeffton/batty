@@ -319,6 +319,7 @@ onBeforeUnmount(() => {
         v-for="(segment, segmentIndex) in assistantSegments"
         :key="`${props.message.id}-segment-${segmentIndex}`"
       >
+        <slot v-if="segment.kind === 'bubble'" name="before-assistant-reply" />
         <div v-if="segment.kind === 'bubble' && props.showTimestamp" class="message__timestamp">
           {{ messageTimestampLabel }}
         </div>
@@ -384,6 +385,10 @@ onBeforeUnmount(() => {
         </div>
       </template>
 
+      <slot
+        v-if="attachedFiles.length > 0 && !hasTrailingAssistantBubble"
+        name="before-assistant-reply"
+      />
       <div
         v-if="attachedFiles.length > 0 && !hasTrailingAssistantBubble"
         class="message__segment message__segment--bubble"
@@ -392,6 +397,7 @@ onBeforeUnmount(() => {
       </div>
 
       <template v-if="showAssistantErrorBubble && assistantErrorText">
+        <slot v-if="attachedFiles.length === 0" name="before-assistant-reply" />
         <div v-if="props.showTimestamp" class="message__timestamp">{{ messageTimestampLabel }}</div>
         <div class="message__segment message__segment--bubble message__segment--error">
           <button

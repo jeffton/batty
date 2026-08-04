@@ -155,7 +155,7 @@ describe("ChatMessage", () => {
     expect(wrapper.find(".message__copy-button").exists()).toBe(false);
   });
 
-  it("does not show the copy button for attachment-only assistant messages", () => {
+  it("places reply-leading content before an attachment-only response", () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-attachment-only-1",
       role: "assistant",
@@ -196,8 +196,15 @@ describe("ChatMessage", () => {
         message,
         toolStatesByCallId,
       },
+      slots: {
+        "before-assistant-reply": '<button class="details-toggle">Show details</button>',
+      },
     });
 
+    const children = Array.from(wrapper.find(".message__body").element.children);
+    expect(children).toHaveLength(2);
+    expect(children[0]?.classList.contains("details-toggle")).toBe(true);
+    expect(children[1]?.classList.contains("message__segment--bubble")).toBe(true);
     expect(wrapper.find(".message__copy-button").exists()).toBe(false);
   });
 
@@ -289,6 +296,32 @@ describe("ChatMessage", () => {
     expect(wrapper.text()).toContain("subagent");
   });
 
+  it("renders reply-leading content between details and the response bubble", () => {
+    const message: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-details-1",
+      role: "assistant",
+      timestamp: 3,
+      blocks: [
+        { type: "thinking", thinking: "Inspecting the setup." },
+        { type: "text", text: "The setup is ready." },
+      ],
+    };
+
+    const wrapper = mount(ChatMessage, {
+      props: { message },
+      slots: {
+        "before-assistant-reply": '<button class="details-toggle">Collapse details</button>',
+      },
+    });
+
+    const children = Array.from(wrapper.find(".message__body").element.children);
+    expect(children).toHaveLength(3);
+    expect(children[0]?.textContent).toContain("Inspecting the setup.");
+    expect(children[1]?.classList.contains("details-toggle")).toBe(true);
+    expect(children[2]?.classList.contains("message__segment--bubble")).toBe(true);
+    expect(children[2]?.textContent).toContain("The setup is ready.");
+  });
+
   it("renders assistant errors as red bubbles", () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-error-1",
@@ -303,10 +336,15 @@ describe("ChatMessage", () => {
       props: {
         message,
       },
+      slots: {
+        "before-assistant-reply": '<button class="details-toggle">Show details</button>',
+      },
     });
 
+    const children = Array.from(wrapper.find(".message__body").element.children);
+    expect(children[0]?.classList.contains("details-toggle")).toBe(true);
+    expect(children[1]?.classList.contains("message__segment--error")).toBe(true);
     expect(wrapper.text()).toContain("Codex error: upstream overloaded");
-    expect(wrapper.find(".message__segment--error").exists()).toBe(true);
   });
 
   it("renders thinking before a failed response and keeps the error bubble", () => {

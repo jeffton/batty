@@ -75,7 +75,24 @@ defineExpose({
               :tool-states-by-call-id="displayEntry.entry.toolStatesByCallId"
               :show-timestamp="displayEntry.showTimestamp"
               :allow-session-popovers="props.allowSessionPopovers"
-            />
+            >
+              <template v-if="displayEntry.detailsToggleBeforeReply" #before-assistant-reply>
+                <div class="transcript__details-toggle-row">
+                  <button
+                    type="button"
+                    class="transcript__details-toggle-btn"
+                    :aria-pressed="displayEntry.detailsToggleBeforeReply.expanded"
+                    @click="emit('toggleDetails', displayEntry.detailsToggleBeforeReply.sectionKey)"
+                  >
+                    {{
+                      displayEntry.detailsToggleBeforeReply.expanded
+                        ? "Collapse details"
+                        : "Show details"
+                    }}
+                  </button>
+                </div>
+              </template>
+            </ChatMessage>
             <div v-else class="transcript__details-toggle-row">
               <button
                 type="button"
@@ -102,7 +119,24 @@ defineExpose({
             :tool-states-by-call-id="displayEntry.entry.toolStatesByCallId"
             :show-timestamp="displayEntry.showTimestamp"
             :allow-session-popovers="props.allowSessionPopovers"
-          />
+          >
+            <template v-if="displayEntry.detailsToggleBeforeReply" #before-assistant-reply>
+              <div class="transcript__details-toggle-row">
+                <button
+                  type="button"
+                  class="transcript__details-toggle-btn"
+                  :aria-pressed="displayEntry.detailsToggleBeforeReply.expanded"
+                  @click="emit('toggleDetails', displayEntry.detailsToggleBeforeReply.sectionKey)"
+                >
+                  {{
+                    displayEntry.detailsToggleBeforeReply.expanded
+                      ? "Collapse details"
+                      : "Show details"
+                  }}
+                </button>
+              </div>
+            </template>
+          </ChatMessage>
           <div v-else class="transcript__details-toggle-row">
             <button
               type="button"

@@ -9,8 +9,16 @@ releases_dir="${install_root}/releases"
 current_link="${install_root}/current"
 
 mkdir -p "$install_root" "$releases_dir"
-exec 9>"${install_root}/.install-release.lock"
-flock 9
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  lock_file="${install_root}/.install-release.lock"
+  if ! shlock -f "$lock_file" -p $$; then
+    printf 'Another Batty release installation is in progress\n' >&2
+    exit 1
+  fi
+else
+  exec 9>"${install_root}/.install-release.lock"
+  flock 9
+fi
 
 if [[ -e "$current_link" && ! -L "$current_link" ]]; then
   printf 'Refusing to replace non-symlink %s\n' "$current_link" >&2
@@ -25,6 +33,9 @@ next_current="${install_root}/.current.${release_name}.${suffix}"
 cleanup() {
   rm -rf "$staging_dir"
   rm -f "$next_current"
+  if [[ -n "${lock_file:-}" ]]; then
+    rm -f "$lock_file"
+  fi
 }
 trap cleanup EXIT
 
@@ -46,7 +57,11 @@ cp -R "$repo_dir/dist/server" "$staging_dir/dist/server"
 
 mv "$staging_dir" "$release_dir"
 ln -s "$release_dir" "$next_current"
-mv -Tf "$next_current" "$current_link"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  mv -fh "$next_current" "$current_link"
+else
+  mv -Tf "$next_current" "$current_link"
+fi
 
 printf 'Installed Batty release to %s\n' "$release_dir"
 printf 'Updated current symlink to %s\n' "$current_link"

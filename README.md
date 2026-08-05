@@ -287,6 +287,26 @@ The Linux deploy script installs Batty to `/opt/batty`:
 - service entrypoint `/opt/batty/current/dist/server/main.mjs`
 - CLI entrypoint `/opt/batty/current/dist/server/cli.mjs`
 
+### macOS deployment with launchd
+
+Run the deployment as the macOS login user, without `sudo`:
+
+```bash
+./scripts/deploy-macos.sh
+```
+
+The defaults use `~/Github` as both the Batty root and the workspace root. Override them when needed:
+
+```bash
+BATTY_ROOT="$HOME/Batty" \
+BATTY_WORKSPACES_ROOT="$HOME/Projects" \
+./scripts/deploy-macos.sh
+```
+
+The script builds and validates Batty, installs versioned releases under `~/Library/Application Support/Batty/app`, creates the `se.roybot.batty` launch agent, and installs the `batty` CLI in `~/.local/bin`. Logs are written under `~/Library/Logs/Batty`. The local app is served at `http://localhost:3147`; use that hostname rather than the numeric loopback address so passkeys work.
+
+On the first deployment, the script creates `<batty-root>/.batty/options.json` and starts Batty immediately. Later deployments hand the launchd reload to a delayed background process so an active Batty agent turn can finish cleanly.
+
 ### Windows deployment behind IIS
 
 This repo also includes a Windows deployment flow that runs Batty behind IIS with the ASP.NET Core Module acting as the reverse proxy to the Node process.

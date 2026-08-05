@@ -11,6 +11,7 @@
     "build:client": "vp build",
     "build:server": "vp pack",
     "start": "./scripts/start.sh",
+    "deploy:macos": "./scripts/deploy-macos.sh",
     "deploy:windows": "powershell -ExecutionPolicy Bypass -File ./scripts/deploy-windows.ps1",
     "add-user": "tsx src/server/add-user.ts",
     "batty": "tsx src/server/cli.ts",

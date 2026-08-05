@@ -77,7 +77,9 @@ describe("deployment scripts", () => {
       ),
     ).rejects.toThrow();
 
-    expect(await fs.realpath(path.join(fixture.installRoot, "current"))).toBe(fixture.oldRelease);
+    expect(await fs.realpath(path.join(fixture.installRoot, "current"))).toBe(
+      await fs.realpath(fixture.oldRelease),
+    );
     await expect(fs.readFile(path.join(fixture.oldRelease, "marker"), "utf8")).resolves.toBe(
       "old\n",
     );
@@ -108,6 +110,21 @@ describe("deployment scripts", () => {
     await expect(
       fs.readFile(path.join(current, "patches", "dependency.patch"), "utf8"),
     ).resolves.toBe("patch\n");
+  });
+
+  it("installs macOS deployments as a user launch agent with a delayed upgrade reload", async () => {
+    const [deployScript, handoffScript, restartScript] = await Promise.all([
+      fs.readFile(path.join(process.cwd(), "scripts", "deploy-macos.sh"), "utf8"),
+      fs.readFile(path.join(process.cwd(), "scripts", "handoff-restart-macos.sh"), "utf8"),
+      fs.readFile(path.join(process.cwd(), "scripts", "restart-services-macos.sh"), "utf8"),
+    ]);
+
+    expect(deployScript).toContain('label="se.roybot.batty"');
+    expect(deployScript).toContain('if [[ "$(id -u)" -eq 0 ]]');
+    expect(deployScript).toContain('webPushSubject: "mailto:batty@localhost"');
+    expect(deployScript).toContain('if [[ "$was_running" == true ]]');
+    expect(handoffScript).toContain('sleep "$1"');
+    expect(restartScript).toContain('launchctl bootstrap "$domain" "$plist"');
   });
 
   it("packages the pnpm workspace configuration in Windows releases", async () => {

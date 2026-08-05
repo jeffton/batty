@@ -18,10 +18,10 @@ Import-Module WebAdministration
 
 if (-not (Test-Path "IIS:\AppPools\$AppPoolName")) {
   New-WebAppPool -Name $AppPoolName | Out-Null
+  Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name processModel.identityType -Value "ApplicationPoolIdentity"
 }
 Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name managedRuntimeVersion -Value ""
 Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name managedPipelineMode -Value "Integrated"
-Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name processModel.identityType -Value "ApplicationPoolIdentity"
 
 $sitePath = "IIS:\Sites\$SiteName"
 if (-not (Test-Path $sitePath)) {

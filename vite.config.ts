@@ -71,7 +71,10 @@ export default defineConfig({
     },
   },
   lint: {
-    ignorePatterns: ["dist/**", "node_modules/**", ".batty/**"],
+    ignorePatterns: ["dist/**", "node_modules/**", ".batty/**", ".vite-plus/**"],
+  },
+  fmt: {
+    ignorePatterns: [".vite-plus/**"],
   },
   pack: {
     entry: ["src/server/main.ts", "src/server/add-user.ts", "src/server/cli.ts"],

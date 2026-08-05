@@ -30,6 +30,7 @@ $tmpDir = Join-Path $InstallRoot (".release-{0}.{1}" -f $ReleaseName, [System.Gu
 
 New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $releasesDir | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $InstallRoot "logs") | Out-Null
 if (Test-Path $tmpDir) {
   Remove-Item -Recurse -Force $tmpDir
 }
@@ -66,7 +67,7 @@ $webConfig = @"
         processPath="$(XmlEscape (Join-Path $currentDir "start-batty.cmd"))"
         arguments=""
         stdoutLogEnabled="true"
-        stdoutLogFile="$(XmlEscape (Join-Path $currentDir "logs\stdout"))"
+        stdoutLogFile="$(XmlEscape (Join-Path $InstallRoot "logs\stdout"))"
         hostingModel="OutOfProcess"
         requestTimeout="01:00:00" />
     </system.webServer>
@@ -83,14 +84,11 @@ Move-Item $tmpDir $releaseDir
 Push-Location $releaseDir
 try {
   & (Get-Command corepack).Source pnpm install --prod --frozen-lockfile --ignore-scripts
+  if ($LASTEXITCODE -ne 0) {
+    throw "Production dependency installation failed with exit code $LASTEXITCODE."
+  }
 } finally {
   Pop-Location
 }
 
-if (Test-Path $currentDir) {
-  cmd /c rmdir "$currentDir" | Out-Null
-}
-New-Item -ItemType Junction -Path $currentDir -Target $releaseDir | Out-Null
-
-Write-Host "Installed Batty release to $releaseDir"
-Write-Host "Updated current junction to $currentDir"
+Write-Host "Staged Batty release at $releaseDir"

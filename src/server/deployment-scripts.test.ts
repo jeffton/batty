@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 const execFileAsync = promisify(execFile);
+const linuxIt = process.platform === "win32" ? it.skip : it;
 const tempDirs: string[] = [];
 
 afterEach(async () => {
@@ -63,7 +64,7 @@ async function createInstallFixture(pnpmExitCode: number): Promise<{
 }
 
 describe("deployment scripts", () => {
-  it("keeps the active Linux release when same-name staging fails", async () => {
+  linuxIt("keeps the active Linux release when same-name staging fails", async () => {
     const fixture = await createInstallFixture(1);
 
     await expect(
@@ -82,7 +83,7 @@ describe("deployment scripts", () => {
     );
   });
 
-  it("publishes a complete Linux release without deleting the previous target", async () => {
+  linuxIt("publishes a complete Linux release without deleting the previous target", async () => {
     const fixture = await createInstallFixture(0);
 
     await execFileAsync(
@@ -122,12 +123,46 @@ describe("deployment scripts", () => {
     );
   });
 
-  it("writes the plural workspace-root schema in Windows deployments", async () => {
+  it("initializes Windows options once with the plural workspace-root schema", async () => {
     const script = await fs.readFile(
       path.join(process.cwd(), "scripts", "deploy-windows.ps1"),
       "utf8",
     );
-    expect(script).toContain("workspacesRoots = @($WorkspacesRoot)");
+    expect(script).toContain('(Get-Date).ToUniversalTime().ToString("yyyyMMddHHmmssfff")');
+    expect(script).toContain("if (-not (Test-Path $optionsPath)) {");
+    expect(script).toContain("workspacesRoots = @($WorkspacesRoots)");
+    expect(script).not.toContain("Get-Content $optionsPath");
+    expect(script).not.toContain("pnpm test");
     expect(script).not.toMatch(/\bworkspacesRoot\s*=/);
+  });
+
+  it("hands Windows activation to a detached process after a delay", async () => {
+    const [deployScript, handoffScript, workerScript] = await Promise.all([
+      fs.readFile(path.join(process.cwd(), "scripts", "deploy-windows.ps1"), "utf8"),
+      fs.readFile(path.join(process.cwd(), "scripts", "handoff-restart-windows.ps1"), "utf8"),
+      fs.readFile(path.join(process.cwd(), "scripts", "complete-deployment-windows.ps1"), "utf8"),
+    ]);
+
+    expect(deployScript).toContain('Step "Handing off deployment reload"');
+    expect(deployScript).toContain('Join-Path $scriptDir "handoff-restart-windows.ps1"');
+    expect(handoffScript).toContain("Invoke-CimMethod -ClassName Win32_Process");
+    expect(workerScript.indexOf("Start-Sleep")).toBeLessThan(
+      workerScript.indexOf("New-Item -ItemType Junction"),
+    );
+  });
+
+  it("preserves the identity of an existing IIS application pool", async () => {
+    const script = await fs.readFile(
+      path.join(process.cwd(), "scripts", "configure-iis-app.ps1"),
+      "utf8",
+    );
+    const poolCreationBlock = script.match(
+      /if \(-not \(Test-Path "IIS:\\AppPools\\\$AppPoolName"\)\) \{[\s\S]*?\r?\n\}/,
+    )?.[0];
+
+    expect(poolCreationBlock).toContain(
+      'Set-ItemProperty "IIS:\\AppPools\\$AppPoolName" -Name processModel.identityType -Value "ApplicationPoolIdentity"',
+    );
+    expect(script.match(/processModel\.identityType/g)).toHaveLength(1);
   });
 });

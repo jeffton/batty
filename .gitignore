@@ -3,6 +3,7 @@ dist/
 coverage/
 .batty/
 .vite/
+.vite-plus/
 playwright-report/
 test-results/
 *.swp

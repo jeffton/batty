@@ -304,7 +304,7 @@ Example deployment for `https://t14-dt-pc1028.cbrain.net/batty`:
 powershell -ExecutionPolicy Bypass -File .\scripts\deploy-windows.ps1 `
   -InstallRoot 'D:\Batty\app' `
   -BattyRoot 'D:\Batty\root' `
-  -WorkspacesRoot 'D:\projects' `
+  -WorkspacesRoots 'D:\projects','D:\github','D:\gitea' `
   -PublicOrigin 'https://t14-dt-pc1028.cbrain.net' `
   -BaseUrl '/batty' `
   -SiteName 'Default Web Site' `
@@ -314,12 +314,15 @@ powershell -ExecutionPolicy Bypass -File .\scripts\deploy-windows.ps1 `
 That flow:
 
 - installs dependencies
-- runs checks, tests, and a production build
-- writes `D:\Batty\root\.batty\options.json`
-- packages a versioned release under `D:\Batty\app\releases\<git-sha>`
-- updates `D:\Batty\app\current` as a junction
+- runs checks and a production build
+- initializes `D:\Batty\root\.batty\options.json` when it does not exist
+- packages a versioned release under `D:\Batty\app\releases\<git-sha>-<UTC-timestamp>`
+- hands activation to a detached process with a 20-second delay
+- updates `D:\Batty\app\current` as a junction after the delay
 - writes `web.config` for IIS out-of-process hosting
-- configures the IIS application automatically when run elevated
+- configures and reloads the IIS application automatically when run elevated
+- preserves the configured identity when the IIS application pool already exists
+- writes handoff output under `D:\Batty\app\deploy-logs`
 
 The generated IIS app serves Batty from the configured subpath and forwards requests to the Node server through a launcher script that sets:
 

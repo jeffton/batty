@@ -52,9 +52,9 @@ async function register(): Promise<void> {
 <template>
   <main class="login-view">
     <section class="login-card">
-      <img src="/favicon.png" alt="Batty" class="login-card__icon" />
+      <img src="/favicon.png" alt="" class="login-card__icon" />
       <div class="login-card__header">
-        <h1>Batty</h1>
+        <h1>{{ store.settings.appearance.title }}</h1>
         <p>Sign in with your passkey, or enter a setup code from the server terminal.</p>
       </div>
 

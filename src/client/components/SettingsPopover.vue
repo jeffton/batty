@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ExternalLink, LogOut, Pencil, Save, Settings2, X } from "@lucide/vue";
+import { Check, ExternalLink, LogOut, Palette, Pencil, Save, Settings2, X } from "@lucide/vue";
 import { computed, reactive, ref, watch } from "vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
+import { APP_COLOR_OPTIONS, type AppColor } from "@/shared/appearance";
 import { useAppStore } from "@/client/stores/app";
 
 const props = defineProps<{
@@ -27,6 +28,10 @@ const apiKeyInputs = reactive<Record<"google" | "openrouter", string>>({
   google: "",
   openrouter: "",
 });
+const appearanceTitle = ref("");
+const appearanceColor = ref<AppColor>("neutral");
+const appearanceSaving = ref(false);
+const appearanceError = ref("");
 const braveSearchInput = ref("");
 const braveSearchSaving = ref(false);
 const assistantWorkspaceSaving = ref(false);
@@ -222,6 +227,25 @@ async function saveApiKey(providerId: "google" | "openrouter"): Promise<void> {
   }
 }
 
+async function saveAppearance(): Promise<void> {
+  const title = appearanceTitle.value.trim();
+  if (!title) {
+    appearanceError.value = "Enter an app title";
+    return;
+  }
+
+  appearanceSaving.value = true;
+  appearanceError.value = "";
+  try {
+    await store.setAppearance({ title, color: appearanceColor.value });
+    appearanceTitle.value = store.settings.appearance.title;
+  } catch (error) {
+    appearanceError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    appearanceSaving.value = false;
+  }
+}
+
 async function saveBraveSearchKey(): Promise<void> {
   const apiKey = braveSearchInput.value.trim();
   if (!apiKey) {
@@ -255,6 +279,15 @@ async function updateAssistantWorkspace(event: Event): Promise<void> {
   }
 }
 
+watch(
+  () => store.settings.appearance,
+  (appearance) => {
+    appearanceTitle.value = appearance.title;
+    appearanceColor.value = appearance.color;
+  },
+  { immediate: true },
+);
+
 function logout(): void {
   closePopover();
   emit("logout");
@@ -269,6 +302,7 @@ watch(
     }
 
     authError.value = "";
+    appearanceError.value = "";
     braveSearchError.value = "";
     battyAgentsError.value = "";
     apiKeyErrors.google = "";
@@ -291,6 +325,67 @@ watch(
           <Settings2 :size="15" />
           <h2 class="settings-popover__section-title">Settings</h2>
         </div>
+      </div>
+    </section>
+
+    <section class="settings-popover__section">
+      <div class="settings-popover__section-title-row">
+        <Palette :size="15" />
+        <div class="settings-popover__group-title">Appearance</div>
+      </div>
+
+      <label class="settings-popover__field">
+        <span>App title</span>
+        <input
+          v-model="appearanceTitle"
+          class="settings-popover__input settings-popover__input--title"
+          type="text"
+          maxlength="40"
+          autocomplete="off"
+          :disabled="appearanceSaving"
+          @keydown.enter="saveAppearance"
+        />
+      </label>
+
+      <fieldset class="settings-popover__color-fieldset">
+        <legend>Color</legend>
+        <div class="settings-popover__colors">
+          <label
+            v-for="color in APP_COLOR_OPTIONS"
+            :key="color.id"
+            class="settings-popover__color-option"
+            :title="color.label"
+          >
+            <input
+              v-model="appearanceColor"
+              type="radio"
+              name="app-color"
+              :value="color.id"
+              :disabled="appearanceSaving"
+            />
+            <span
+              class="settings-popover__color-swatch"
+              :style="{
+                background: `linear-gradient(135deg, ${color.light} 50%, ${color.dark} 50%)`,
+              }"
+            >
+              <Check v-if="appearanceColor === color.id" :size="14" />
+            </span>
+            <span>{{ color.label }}</span>
+          </label>
+        </div>
+      </fieldset>
+
+      <button
+        class="settings-popover__action settings-popover__action--primary"
+        type="button"
+        :disabled="appearanceSaving || !appearanceTitle.trim()"
+        @click="saveAppearance"
+      >
+        <Save :size="14" /> {{ appearanceSaving ? "Saving…" : "Save appearance" }}
+      </button>
+      <div v-if="appearanceError" class="settings-popover__error" role="alert">
+        {{ appearanceError }}
       </div>
     </section>
 
@@ -622,6 +717,67 @@ watch(
 
 .settings-popover__input {
   font-family: var(--font-family-mono);
+}
+
+.settings-popover__input--title {
+  font-family: inherit;
+}
+
+.settings-popover__field,
+.settings-popover__color-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+}
+
+.settings-popover__colors {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(4.3rem, 1fr));
+  gap: 0.45rem;
+}
+
+.settings-popover__color-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.settings-popover__color-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.settings-popover__color-swatch {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  color: #ffffff;
+  filter: drop-shadow(0 0 0.18rem oklch(0 0 0 / 0.35));
+}
+
+.settings-popover__color-option input:checked + .settings-popover__color-swatch {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-bg-overlay);
+}
+
+.settings-popover__color-option input:focus-visible + .settings-popover__color-swatch {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
 }
 
 .settings-popover__textarea {

@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import type { AppColor } from "@/shared/appearance";
 import { ensureOptionsFile, stateDirPath, type DefaultThinkingLevel } from "./options";
 
 export interface AppConfig {
@@ -19,6 +20,8 @@ export interface AppConfig {
   defaultModel?: string;
   defaultThinkingLevel?: DefaultThinkingLevel;
   baseUrl: string;
+  appTitle: string;
+  appColor: AppColor;
   cookieName: string;
   authSecret: string;
 }
@@ -76,6 +79,8 @@ export async function loadConfig(battyDir: string): Promise<AppConfig> {
     defaultModel: options.defaultModel,
     defaultThinkingLevel: options.defaultThinkingLevel,
     baseUrl: options.baseUrl,
+    appTitle: options.appTitle,
+    appColor: options.appColor,
     cookieName: "batty-auth",
     authSecret: options.authSecret,
   };

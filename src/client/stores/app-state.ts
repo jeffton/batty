@@ -10,6 +10,7 @@ import type {
   WorkspaceInfo,
   WorkspaceUiSettings,
 } from "@/shared/types";
+import { DEFAULT_APP_COLOR, DEFAULT_APP_TITLE } from "@/shared/appearance";
 
 export interface AppStoreState {
   authenticated: boolean;
@@ -52,6 +53,10 @@ export const defaultProviderAuthStatus: ProviderAuthStatus = {
 
 export const defaultAppSettingsStatus: AppSettingsStatus = {
   braveSearchConfigured: false,
+  appearance: {
+    title: DEFAULT_APP_TITLE,
+    color: DEFAULT_APP_COLOR,
+  },
 };
 
 export function createAppState(): AppStoreState {

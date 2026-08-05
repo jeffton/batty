@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { battyAgentDir } from "../pi-paths";
-import { setAssistantWorkspace, setBraveSearchKey } from "../options";
+import type { AppColor } from "@/shared/appearance";
+import { setAppearance, setAssistantWorkspace, setBraveSearchKey } from "../options";
 import { listWorkspaceRoots, listWorkspaces, resolveWorkspace } from "../workspaces";
 import type { RouteContext } from "./context";
 import {
@@ -73,6 +74,20 @@ export function registerSettingsRoutes(context: RouteContext): void {
 
       const options = await setBraveSearchKey(config.battyDir, apiKey);
       config.braveSearchKey = options.braveSearchKey;
+      return appSettingsStatus(config);
+    },
+  );
+
+  app.post<{ Body: { title?: string; color?: AppColor } }>(
+    routePath("/api/settings/appearance"),
+    async (request) => {
+      const options = await setAppearance(
+        config.battyDir,
+        request.body?.title as string,
+        request.body?.color as AppColor,
+      );
+      config.appTitle = options.appTitle;
+      config.appColor = options.appColor;
       return appSettingsStatus(config);
     },
   );

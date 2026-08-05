@@ -20,6 +20,7 @@ import { registerSessionRoutes } from "./routes/sessions";
 import { registerSettingsRoutes } from "./routes/settings";
 import { registerWorkspaceRoutes } from "./routes/workspaces";
 import { WebPushService } from "./web-push";
+import { appColorOption } from "@/shared/appearance";
 import { listWorkspaces, resolveWorkspace } from "./workspaces";
 
 const config = await loadConfig(resolveBattyDir());
@@ -170,17 +171,52 @@ function stripBaseUrl(url: string): string | undefined {
   return pathname.slice(appBaseUrl.length);
 }
 
+function escapeHtmlText(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
+
 function renderClientHtml(): string {
   if (!clientIndexHtml) {
     throw new Error("Client build not available");
   }
 
+  const color = appColorOption(config.appColor);
   const configScript = `<script>window.__BATTY_BASE_URL__=${JSON.stringify(appBaseUrl).replace(/</g, "\\u003C")};</script>`;
-  return clientIndexHtml.replace(
-    "<head>",
-    `<head>\n    <base href="${appBaseHref}" />\n    ${configScript}`,
-  );
+  const appearanceStyle = `<style>:root{--color-instance-light:${color.light};--color-instance-dark:${color.dark}}</style>`;
+  return clientIndexHtml
+    .replace("<title>Batty</title>", `<title>${escapeHtmlText(config.appTitle)}</title>`)
+    .replace(
+      '<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />',
+      `<meta name="theme-color" content="${color.light}" media="(prefers-color-scheme: light)" />`,
+    )
+    .replace(
+      '<meta name="theme-color" content="#172128" media="(prefers-color-scheme: dark)" />',
+      `<meta name="theme-color" content="${color.dark}" media="(prefers-color-scheme: dark)" />`,
+    )
+    .replace(
+      "<head>",
+      `<head>\n    <base href="${appBaseHref}" />\n    ${configScript}\n    ${appearanceStyle}`,
+    );
 }
+
+app.get(routePath("/manifest.webmanifest"), async (_request, reply) => {
+  const color = appColorOption(config.appColor);
+  reply.type("application/manifest+json");
+  return {
+    name: config.appTitle,
+    short_name: config.appTitle,
+    description: "Browser UI for Pi Coding Agent",
+    theme_color: color.light,
+    background_color: color.light,
+    display: "standalone",
+    start_url: ".",
+    scope: ".",
+    icons: [
+      { src: "pwa-192.png", sizes: "192x192", type: "image/png" },
+      { src: "pwa-512.png", sizes: "512x512", type: "image/png" },
+    ],
+  };
+});
 
 if (hasBuiltClient) {
   await app.register(staticFiles, {

@@ -30,6 +30,7 @@ vi.mock("@/client/lib/api", () => ({
   openSessionById: vi.fn(),
   removeQueuedPrompt: vi.fn(),
   sendPrompt: vi.fn(),
+  setAppearance: vi.fn(),
   setBattyAgentsFile: vi.fn(),
   setBraveSearchApiKey: vi.fn(),
   setProviderApiKey: vi.fn(),

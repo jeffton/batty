@@ -1,3 +1,5 @@
+import type { AppAppearance } from "./appearance";
+
 export type UiContentBlock =
   | { type: "text"; text: string }
   | { type: "image"; mimeType: string; data?: string; url?: string; name?: string }
@@ -286,6 +288,7 @@ export interface ProviderAuthStartResponse {
 
 export interface AppSettingsStatus {
   braveSearchConfigured: boolean;
+  appearance: AppAppearance;
 }
 
 export interface WorkspaceUiSettings {

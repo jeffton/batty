@@ -3,12 +3,8 @@
 import { NOTIFICATION_NAVIGATION_MESSAGE_TYPE } from "@/client/lib/notification-navigation";
 import { clientsClaim } from "workbox-core";
 import { NavigationRoute, registerRoute } from "workbox-routing";
-import { StaleWhileRevalidate } from "workbox-strategies";
-import {
-  cleanupOutdatedCaches,
-  createHandlerBoundToURL,
-  precacheAndRoute,
-} from "workbox-precaching";
+import { NetworkFirst, StaleWhileRevalidate } from "workbox-strategies";
+import { cleanupOutdatedCaches, precacheAndRoute } from "workbox-precaching";
 
 declare let self: ServiceWorkerGlobalScope;
 
@@ -77,10 +73,35 @@ clientsClaim();
 cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST);
 const baseUrl = appBaseUrl();
+const appShellUrl = withBaseUrl("/index.html");
+const appShellCacheName = "app-shell";
+
+async function cacheAppShell(): Promise<void> {
+  const response = await fetch(appShellUrl, { cache: "no-store" });
+  const cache = await caches.open(appShellCacheName);
+  await cache.put(appShellUrl, response);
+}
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(cacheAppShell());
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "refresh-app-shell") {
+    event.waitUntil(cacheAppShell());
+  }
+});
+
 registerRoute(
-  new NavigationRoute(createHandlerBoundToURL(withBaseUrl("/index.html")), {
-    denylist: [new RegExp(`^${baseUrl === "/" ? "" : baseUrl}\\/api(?:\\/|$)`)],
-  }),
+  new NavigationRoute(
+    new NetworkFirst({
+      cacheName: appShellCacheName,
+      plugins: [{ cacheKeyWillBeUsed: async () => appShellUrl }],
+    }),
+    {
+      denylist: [new RegExp(`^${baseUrl === "/" ? "" : baseUrl}\\/api(?:\\/|$)`)],
+    },
+  ),
 );
 registerRoute(
   ({ url }) => url.pathname.startsWith(withBaseUrl("/assets/")),

@@ -6,6 +6,7 @@ import {
   ensureOptionsFile,
   optionsFilePath,
   readStoredOptions,
+  setAppearance,
   setAssistantWorkspace,
   setBraveSearchKey,
 } from "@/server/options";
@@ -42,6 +43,8 @@ describe("ensureOptionsFile", () => {
       defaultModel?: string;
       defaultThinkingLevel?: string;
       baseUrl?: string;
+      appTitle?: string;
+      appColor?: string;
     };
 
     expect(persisted.authSecret.length).toBeGreaterThan(0);
@@ -55,6 +58,8 @@ describe("ensureOptionsFile", () => {
     expect(persisted.defaultModel).toBeUndefined();
     expect(persisted.defaultThinkingLevel).toBeUndefined();
     expect(persisted.baseUrl).toBe("/");
+    expect(persisted.appTitle).toBe("Batty");
+    expect(persisted.appColor).toBe("neutral");
   });
 
   it("normalizes and persists configured options", async () => {
@@ -76,6 +81,8 @@ describe("ensureOptionsFile", () => {
           defaultModel: "  gpt-5.6-sol  ",
           defaultThinkingLevel: "medium",
           baseUrl: "batty/",
+          appTitle: "  Workshop Batty  ",
+          appColor: "violet",
         },
         null,
         2,
@@ -100,6 +107,8 @@ describe("ensureOptionsFile", () => {
     expect(options.defaultModel).toBe("gpt-5.6-sol");
     expect(options.defaultThinkingLevel).toBe("medium");
     expect(options.baseUrl).toBe("/batty");
+    expect(options.appTitle).toBe("Workshop Batty");
+    expect(options.appColor).toBe("violet");
     expect(persisted).toEqual(options);
   });
 
@@ -127,6 +136,47 @@ describe("ensureOptionsFile", () => {
 
     await setAssistantWorkspace(battyDir, undefined);
     expect((await readStoredOptions(battyDir))?.assistantWorkspaceId).toBeUndefined();
+  });
+
+  it("persists the app appearance", async () => {
+    const battyDir = await createBattyDir();
+
+    await fs.mkdir(path.dirname(optionsFilePath(battyDir)), { recursive: true });
+    await fs.writeFile(
+      optionsFilePath(battyDir),
+      `${JSON.stringify({
+        authSecret: "existing-secret",
+        workspacesRoots: ["/root/github"],
+        webPushSubject: "https://batty.roybot.se",
+      })}\n`,
+      "utf8",
+    );
+
+    await setAppearance(battyDir, "Home Batty", "teal");
+    expect(await readStoredOptions(battyDir)).toMatchObject({
+      appTitle: "Home Batty",
+      appColor: "teal",
+    });
+  });
+
+  it("rejects invalid appearance options", async () => {
+    const battyDir = await createBattyDir();
+
+    await fs.mkdir(path.dirname(optionsFilePath(battyDir)), { recursive: true });
+    await fs.writeFile(
+      optionsFilePath(battyDir),
+      `${JSON.stringify({
+        authSecret: "existing-secret",
+        workspacesRoots: ["/root/github"],
+        webPushSubject: "https://batty.roybot.se",
+        appColor: "orange",
+      })}\n`,
+      "utf8",
+    );
+
+    await expect(ensureOptionsFile(battyDir)).rejects.toThrow(
+      "Invalid appColor in options.json: orange",
+    );
   });
 
   it("persists the Brave Search API key", async () => {

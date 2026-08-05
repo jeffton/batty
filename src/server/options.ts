@@ -1,6 +1,12 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import {
+  APP_COLOR_OPTIONS,
+  DEFAULT_APP_COLOR,
+  DEFAULT_APP_TITLE,
+  type AppColor,
+} from "@/shared/appearance";
 
 export const DEFAULT_THINKING_LEVELS = [
   "off",
@@ -26,6 +32,8 @@ export interface StoredAppOptions {
   defaultModel?: string;
   defaultThinkingLevel?: DefaultThinkingLevel;
   baseUrl?: string;
+  appTitle?: string;
+  appColor?: AppColor;
 }
 
 export interface AppOptions {
@@ -40,6 +48,8 @@ export interface AppOptions {
   defaultModel?: string;
   defaultThinkingLevel?: DefaultThinkingLevel;
   baseUrl: string;
+  appTitle: string;
+  appColor: AppColor;
 }
 
 const DEFAULT_CRON_DAILY_SESSION_START_TIME = "04:00";
@@ -118,6 +128,28 @@ function normalizeOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
+function normalizeAppTitle(value: unknown): string {
+  if (value == null) {
+    return DEFAULT_APP_TITLE;
+  }
+  if (typeof value !== "string" || value.trim().length === 0 || value.trim().length > 40) {
+    throw new Error("Invalid appTitle in options.json. Expected 1–40 characters.");
+  }
+  return value.trim();
+}
+
+function normalizeAppColor(value: unknown): AppColor {
+  if (value == null) {
+    return DEFAULT_APP_COLOR;
+  }
+  if (APP_COLOR_OPTIONS.some((option) => option.id === value)) {
+    return value as AppColor;
+  }
+  throw new Error(
+    `Invalid appColor in options.json: ${String(value)}. Expected ${APP_COLOR_OPTIONS.map((option) => option.id).join(", ")}.`,
+  );
+}
+
 function normalizeThinkingLevel(value: unknown): DefaultThinkingLevel | undefined {
   if (value == null) {
     return undefined;
@@ -177,6 +209,8 @@ function normalizeStoredOptions(options: StoredAppOptions | undefined): StoredAp
     defaultModel: normalizeOptionalString(options?.defaultModel),
     defaultThinkingLevel: normalizeThinkingLevel(options?.defaultThinkingLevel),
     baseUrl: normalizeBaseUrl(options?.baseUrl),
+    appTitle: normalizeAppTitle(options?.appTitle),
+    appColor: normalizeAppColor(options?.appColor),
   };
 }
 
@@ -265,6 +299,22 @@ export async function setAssistantWorkspace(
   const nextOptions: AppOptions = {
     ...options,
     assistantWorkspaceId: workspaceId,
+  };
+
+  await writeStoredOptions(projectRoot, nextOptions);
+  return nextOptions;
+}
+
+export async function setAppearance(
+  projectRoot: string,
+  appTitle: string,
+  appColor: AppColor,
+): Promise<AppOptions> {
+  const options = await loadAppOptions(projectRoot);
+  const nextOptions: AppOptions = {
+    ...options,
+    appTitle: normalizeAppTitle(appTitle),
+    appColor: normalizeAppColor(appColor),
   };
 
   await writeStoredOptions(projectRoot, nextOptions);

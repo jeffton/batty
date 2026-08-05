@@ -2,6 +2,9 @@
 import { Cog, LoaderCircle, Search, Wifi, WifiOff, X } from "@lucide/vue";
 import SettingsPopover from "@/client/components/SettingsPopover.vue";
 import { nextTick, ref, watch } from "vue";
+import { useAppStore } from "@/client/stores/app";
+
+const store = useAppStore();
 
 const props = defineProps<{
   popoverId: string;
@@ -38,9 +41,9 @@ watch(
 <template>
   <header class="workspace-browser-header">
     <div class="workspace-browser-header__brand">
-      <img src="/favicon.png" alt="Batty" class="workspace-browser-header__brand-icon" />
+      <img src="/favicon.png" alt="" class="workspace-browser-header__brand-icon" />
       <div class="workspace-browser-header__brand-copy">
-        <h1>Batty</h1>
+        <h1>{{ store.settings.appearance.title }}</h1>
       </div>
     </div>
 

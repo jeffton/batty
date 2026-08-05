@@ -5,6 +5,7 @@ import type {
   RegistrationResponseJSON,
 } from "@simplewebauthn/browser";
 import { withBaseUrl } from "@/client/lib/base-url";
+import type { AppAppearance } from "@/shared/appearance";
 import type {
   AppSettingsStatus,
   BootstrapPayload,
@@ -175,6 +176,14 @@ export function setWorkspaceAssistant(workspaceId?: string): Promise<WorkspaceIn
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ workspaceId: workspaceId ?? null }),
+  });
+}
+
+export function setAppearance(appearance: AppAppearance): Promise<AppSettingsStatus> {
+  return request("/api/settings/appearance", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(appearance),
   });
 }
 

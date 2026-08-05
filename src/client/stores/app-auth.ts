@@ -1,13 +1,10 @@
 import { getBootstrap, getVersion, logout as logoutRequest } from "@/client/lib/api";
+import { applyAppAppearance } from "@/client/lib/appearance";
 import { readCachedBootstrap, writeCachedBootstrap } from "@/client/lib/cache";
 import { syncPushSubscription } from "@/client/lib/push-notifications";
 import { sortWorkspacesByRecentSession, uniqueWorkspaces } from "@/client/lib/workspaces";
 import type { BootstrapPayload } from "@/shared/types";
-import {
-  defaultAppSettingsStatus,
-  defaultProviderAuthStatus,
-  type AppActionContext,
-} from "./app-state";
+import { defaultProviderAuthStatus, type AppActionContext } from "./app-state";
 
 export const authBootstrapActions = {
   async bootstrap(this: AppActionContext): Promise<void> {
@@ -42,6 +39,7 @@ export const authBootstrapActions = {
     this.buildId = payload.buildId;
     this.providerAuth = payload.providerAuth;
     this.settings = payload.settings;
+    applyAppAppearance(payload.settings.appearance);
     this.workspaceRoots = payload.workspaceRoots;
     this.workspaces = sortWorkspacesByRecentSession(workspaces);
     this.workspaceUiSettings = payload.workspaceUiSettings;
@@ -59,7 +57,10 @@ export const authBootstrapActions = {
     } else {
       this.activeSession = undefined;
       this.providerAuth = defaultProviderAuthStatus;
-      this.settings = defaultAppSettingsStatus;
+      this.settings = {
+        ...payload.settings,
+        braveSearchConfigured: false,
+      };
       this.sessionsByWorkspace = {};
       this.cronJobsByWorkspace = {};
       this.runningCronJobsByWorkspace = {};
@@ -79,7 +80,10 @@ export const authBootstrapActions = {
     this.closeWorkspaceStream();
     this.authenticated = false;
     this.providerAuth = defaultProviderAuthStatus;
-    this.settings = defaultAppSettingsStatus;
+    this.settings = {
+      ...this.settings,
+      braveSearchConfigured: false,
+    };
     this.activeSession = undefined;
     this.sessionsByWorkspace = {};
     this.cronJobsByWorkspace = {};

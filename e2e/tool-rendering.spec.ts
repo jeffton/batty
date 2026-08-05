@@ -13,6 +13,7 @@ const workspace: WorkspaceInfo = {
   path: "/root/github/batty",
   kind: "workspace",
   isPinned: false,
+  isAssistant: false,
 };
 
 const summary: SessionSummary = {
@@ -94,9 +95,30 @@ async function installMocks(page: Page, session: SessionState): Promise<void> {
       contentType: "application/json",
       body: JSON.stringify({
         authenticated: true,
+        auth: {
+          passkeyCount: 1,
+          passkeyLoginAvailable: true,
+          registrationOpen: false,
+          setupRequired: false,
+        },
+        providerAuth: { providers: [] },
+        settings: {
+          braveSearchConfigured: false,
+          appearance: { title: "Batty", color: "neutral" },
+        },
+        buildId: "e2e",
+        workspaceRoots: ["/root/github"],
         workspaces: [workspace],
+        workspaceUiSettings: { [workspace.id]: { easyMode: false } },
         models: [],
       }),
+    });
+  });
+
+  await page.route("**/api/version", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ buildId: "e2e" }),
     });
   });
 

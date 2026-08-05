@@ -13,30 +13,10 @@ export default defineConfig({
       filename: "sw.ts",
       registerType: "autoUpdate",
       includeAssets: ["favicon.png", "apple-touch-icon.png"],
-      manifest: {
-        name: "Batty",
-        short_name: "Batty",
-        description: "Browser UI for Pi Coding Agent",
-        theme_color: "#ffffff",
-        background_color: "#ffffff",
-        display: "standalone",
-        start_url: ".",
-        scope: ".",
-        icons: [
-          {
-            src: "pwa-192.png",
-            sizes: "192x192",
-            type: "image/png",
-          },
-          {
-            src: "pwa-512.png",
-            sizes: "512x512",
-            type: "image/png",
-          },
-        ],
-      },
+      manifest: false,
       injectManifest: {
         globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],
+        globIgnores: ["index.html"],
       },
       devOptions: {
         enabled: true,

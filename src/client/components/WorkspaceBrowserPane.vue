@@ -8,6 +8,10 @@ import { formatShortDateTime } from "@/client/lib/formatting";
 import { usePaneTransition } from "@/client/lib/pane-transition";
 import { sessionRoutePath, workspaceRoutePath } from "@/client/lib/routes";
 import { sessionDisplayTitle } from "@/client/lib/daily-sessions";
+import {
+  sessionsForWorkspaceSearch,
+  workspaceSearchMatch,
+} from "@/client/lib/workspace-browser-search";
 import type { SessionSummary } from "@/shared/types";
 import { useAppStore } from "@/client/stores/app";
 
@@ -15,11 +19,13 @@ const PROVIDER_AUTH_POPOVER_ID = "workspace-provider-auth-popover";
 const PROVIDER_AUTH_POPOVER_ANCHOR = "--workspace-provider-auth-anchor";
 const CREATE_WORKSPACE_POPOVER_ID = "workspace-create-popover";
 const CREATE_WORKSPACE_POPOVER_ANCHOR = "--workspace-create-popover-anchor";
+const SEARCH_SESSION_LOAD_CONCURRENCY = 4;
 
 const store = useAppStore();
 const router = useRouter();
 const searchOpen = ref(false);
 const searchQuery = ref("");
+const searchSessionError = ref("");
 const createWorkspaceName = ref("");
 const createWorkspaceRootPath = ref("");
 const createWorkspaceError = ref("");
@@ -43,27 +49,35 @@ const createWorkspaceRootOptions = computed(() => store.workspaceRoots);
 
 const showCreateWorkspaceRootSelect = computed(() => createWorkspaceRootOptions.value.length > 1);
 
+const sessions = computed(() => store.workspaceSessions);
+
+function sessionsForWorkspace(workspaceId: string): SessionSummary[] {
+  return workspaceId === store.selectedWorkspaceId
+    ? sessions.value
+    : (store.sessionsByWorkspace[workspaceId] ?? []);
+}
+
 const filteredWorkspaces = computed(() => {
   const query = normalizedSearchQuery.value;
   if (!query) return store.workspaces;
 
-  return store.workspaces.filter((workspace) => {
-    if (workspace.id === store.selectedWorkspaceId) {
-      return true;
-    }
-
-    const haystack = `${workspace.label} ${workspace.path}`.toLowerCase();
-    return haystack.includes(query);
-  });
+  return store.workspaces.filter((workspace) =>
+    workspaceSearchMatch(workspace, sessionsForWorkspace(workspace.id), query, sessionLabel),
+  );
 });
-
-const sessions = computed(() => store.workspaceSessions);
 
 const filteredSessions = computed(() => {
   const query = normalizedSearchQuery.value;
   if (!query) return sessions.value;
-  return sessions.value.filter((session) => sessionLabel(session).toLowerCase().includes(query));
+
+  return sessionsForWorkspaceSearch(store.selectedWorkspace, sessions.value, query, sessionLabel);
 });
+
+const searchSessionLoading = computed(
+  () =>
+    searchOpen.value &&
+    store.workspaces.some((workspace) => store.loadingWorkspaceSessions[workspace.id]),
+);
 
 const sessionListLoading = computed(() => {
   const workspaceId = store.selectedWorkspaceId;
@@ -231,8 +245,27 @@ async function openSession(session: SessionSummary): Promise<void> {
   }
 }
 
-function openSearch(): void {
+async function openSearch(): Promise<void> {
   searchOpen.value = true;
+  searchSessionError.value = "";
+  const workspaceIds = store.workspaces
+    .filter(
+      (workspace) =>
+        !(workspace.id in store.sessionsByWorkspace) &&
+        !store.loadingWorkspaceSessions[workspace.id],
+    )
+    .map((workspace) => workspace.id);
+
+  try {
+    for (let index = 0; index < workspaceIds.length; index += SEARCH_SESSION_LOAD_CONCURRENCY) {
+      const workspaceBatch = workspaceIds.slice(index, index + SEARCH_SESSION_LOAD_CONCURRENCY);
+      await Promise.all(
+        workspaceBatch.map((workspaceId) => store.loadWorkspaceSessions(workspaceId)),
+      );
+    }
+  } catch (error) {
+    searchSessionError.value = `Session search failed: ${error instanceof Error ? error.message : String(error)}`;
+  }
 }
 
 function setSearchQuery(value: string): void {
@@ -241,6 +274,7 @@ function setSearchQuery(value: string): void {
 
 function closeSearch(): void {
   searchQuery.value = "";
+  searchSessionError.value = "";
   searchOpen.value = false;
 }
 
@@ -269,6 +303,9 @@ watch(
 
     <div v-if="actionsDisabled" class="workspace-browser-pane__notice">
       Offline or reconnecting — workspace and session actions are disabled.
+    </div>
+    <div v-if="searchSessionError" class="workspace-browser-pane__notice">
+      {{ searchSessionError }}
     </div>
 
     <div class="workspace-browser-pane__cols">
@@ -315,7 +352,12 @@ watch(
             </div>
 
             <div v-if="filteredWorkspaces.length === 0" class="workspace-browser-pane__empty">
-              No workspaces match.
+              <LoaderCircle
+                v-if="searchSessionLoading"
+                :size="18"
+                class="workspace-browser-pane__spinner"
+              />
+              <template v-else>No workspaces match.</template>
             </div>
           </div>
 

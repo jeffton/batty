@@ -840,7 +840,9 @@ watch(
 }
 
 .workspace-browser-pane__fab:disabled:not(.is-busy) {
-  opacity: 0.55;
+  background: var(--color-bg-elevated);
+  color: color-mix(in srgb, var(--color-text-subtle) 55%, var(--color-bg-elevated));
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.12);
   cursor: default;
 }
 

@@ -306,6 +306,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 1rem;
   padding: 0.9rem 1rem 0.75rem;
+  background: var(--color-bg-panel-strong);
   border-bottom: 1px solid var(--color-border-soft);
 }
 

@@ -11,7 +11,7 @@ import {
   mergeAttachmentCarrierIntoAssistant,
   toolStatesForMessage,
 } from "@/client/lib/transcript";
-import type { SessionState, UiContentBlock } from "@/shared/types";
+import type { SessionState, UiContentBlock, UiMessage } from "@/shared/types";
 import type { TranscriptDisplayEntry } from "@/client/lib/transcript-display";
 import type { TranscriptMessageView } from "@/client/lib/transcript";
 
@@ -30,6 +30,7 @@ type ChatTranscriptHandle = InstanceType<typeof ChatTranscript> & {
 const props = withDefaults(
   defineProps<{
     session?: SessionState;
+    optimisticMessages?: UiMessage[];
     loadOlderMessages: () => Promise<void>;
     loadingOlderMessages?: boolean;
     alwaysShowDetails?: boolean;
@@ -37,6 +38,7 @@ const props = withDefaults(
   }>(),
   {
     session: undefined,
+    optimisticMessages: () => [],
     loadingOlderMessages: false,
     alwaysShowDetails: false,
     allowSessionPopovers: true,
@@ -58,7 +60,7 @@ const toolStateLookup = computed(() =>
 );
 const transcriptMessages = computed(() =>
   buildTranscriptMessages(
-    props.session?.messages ?? [],
+    [...(props.session?.messages ?? []), ...props.optimisticMessages],
     toolStateLookup.value,
     props.session?.isStreaming ?? false,
   ),

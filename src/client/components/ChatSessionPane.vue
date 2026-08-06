@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import ChatHeader from "@/client/components/ChatHeader.vue";
 import MessageComposer from "@/client/components/MessageComposer.vue";
 import SessionTranscriptView from "@/client/components/SessionTranscriptView.vue";
 import { formatTokenCount } from "@/client/lib/formatting";
 import { resolveThinkingOptions } from "@/client/lib/thinking-levels";
 import { useAppStore } from "@/client/stores/app";
-import type { QueuedPrompt } from "@/shared/types";
+import type { QueuedPrompt, UiMessage } from "@/shared/types";
 
 const MODEL_POPOVER_ID = "chat-main-model-popover";
 const MODEL_POPOVER_ANCHOR = "--chat-main-model-anchor";
@@ -26,6 +26,21 @@ const store = useAppStore();
 const composer = ref<ComposerHandle | null>(null);
 const thinkingOptions = computed(() => resolveThinkingOptions(store.activeSession));
 const pendingIdlePromptSessionIds = new Set<string>();
+let optimisticMessageId = 0;
+type OptimisticUserMessage = Extract<UiMessage, { role: "user" }>;
+type PendingOptimisticMessage = {
+  message: OptimisticUserMessage;
+  submittedText: string;
+  submittedFileNames: string[];
+  baselineMessageIds: Set<string>;
+};
+const optimisticMessagesBySessionId = ref<Record<string, PendingOptimisticMessage[]>>({});
+const activeOptimisticMessages = computed(() => {
+  const sessionId = store.activeSession?.sessionId;
+  return sessionId
+    ? (optimisticMessagesBySessionId.value[sessionId] ?? []).map((item) => item.message)
+    : [];
+});
 const isUnavailable = computed(() => store.connectionState === "offline");
 const selectedWorkspaceLoading = computed(() => {
   const workspaceId = store.selectedWorkspaceId;
@@ -130,6 +145,119 @@ function setThinkingLevel(level: string): void {
   void store.setThinkingLevel(level);
 }
 
+function addOptimisticMessage(
+  sessionId: string,
+  text: string,
+  files: File[],
+  baselineMessages: UiMessage[],
+): string {
+  const submittedText = text.trim();
+  const submittedFileNames = files.map((file) => file.name);
+  const attachmentLabel =
+    submittedFileNames.length > 0 ? `Attached: ${submittedFileNames.join(", ")}` : "";
+  const displayText = [submittedText, attachmentLabel].filter(Boolean).join("\n\n");
+  const message: OptimisticUserMessage = {
+    id: `optimistic-user-${Date.now()}-${++optimisticMessageId}`,
+    role: "user",
+    timestamp: Date.now(),
+    blocks: [{ type: "text", text: displayText }],
+  };
+
+  optimisticMessagesBySessionId.value = {
+    ...optimisticMessagesBySessionId.value,
+    [sessionId]: [
+      ...(optimisticMessagesBySessionId.value[sessionId] ?? []),
+      {
+        message,
+        submittedText,
+        submittedFileNames,
+        baselineMessageIds: new Set(baselineMessages.map((candidate) => candidate.id)),
+      },
+    ],
+  };
+  return message.id;
+}
+
+function removeOptimisticMessage(sessionId: string, messageId: string): void {
+  const remainingForSession = (optimisticMessagesBySessionId.value[sessionId] ?? []).filter(
+    (pending) => pending.message.id !== messageId,
+  );
+  const next = { ...optimisticMessagesBySessionId.value };
+  if (remainingForSession.length > 0) {
+    next[sessionId] = remainingForSession;
+  } else {
+    delete next[sessionId];
+  }
+  optimisticMessagesBySessionId.value = next;
+}
+
+function authoritativeText(message: OptimisticUserMessage): string {
+  return message.blocks
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n\n");
+}
+
+function matchesOptimisticMessage(
+  authoritative: OptimisticUserMessage,
+  pending: PendingOptimisticMessage,
+): boolean {
+  if (pending.baselineMessageIds.has(authoritative.id)) {
+    return false;
+  }
+
+  const text = authoritativeText(authoritative);
+  if (
+    pending.submittedText &&
+    text !== pending.submittedText &&
+    !text.startsWith(`${pending.submittedText}\n\n`)
+  ) {
+    return false;
+  }
+
+  return pending.submittedFileNames.every((fileName) => {
+    const escapedFileName = fileName
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/</g, "&lt;");
+    return text.includes(fileName) || text.includes(escapedFileName);
+  });
+}
+
+function reconcileOptimisticMessage(): void {
+  const session = store.activeSession;
+  if (!session) {
+    return;
+  }
+
+  const pending = optimisticMessagesBySessionId.value[session.sessionId] ?? [];
+  const userMessages = session.messages.filter(
+    (message): message is OptimisticUserMessage => message.role === "user",
+  );
+  const unmatchedUserMessages = [...userMessages];
+  const remaining = pending.filter((candidate) => {
+    const matchIndex = unmatchedUserMessages.findIndex((message) =>
+      matchesOptimisticMessage(message, candidate),
+    );
+    if (matchIndex < 0) {
+      return true;
+    }
+    unmatchedUserMessages.splice(matchIndex, 1);
+    return false;
+  });
+  if (remaining.length === pending.length) {
+    return;
+  }
+
+  const next = { ...optimisticMessagesBySessionId.value };
+  if (remaining.length > 0) {
+    next[session.sessionId] = remaining;
+  } else {
+    delete next[session.sessionId];
+  }
+  optimisticMessagesBySessionId.value = next;
+}
+
 function shouldRestoreComposerAfterPromptError(
   before:
     | {
@@ -187,6 +315,9 @@ async function sendPrompt(text: string, files: File[]): Promise<void> {
   }
 
   composer.value?.clear();
+  const optimisticId = gateSessionId
+    ? addOptimisticMessage(gateSessionId, text, files, store.activeSession?.messages ?? [])
+    : undefined;
   if (gateSessionId) {
     pendingIdlePromptSessionIds.add(gateSessionId);
   }
@@ -194,6 +325,9 @@ async function sendPrompt(text: string, files: File[]): Promise<void> {
     await store.sendPrompt(text, files);
   } catch (error) {
     if (before && shouldRestoreComposerAfterPromptError(before)) {
+      if (optimisticId) {
+        removeOptimisticMessage(before.sessionId, optimisticId);
+      }
       composer.value?.restore(before.sessionId, text, files);
     }
     throw error;
@@ -203,6 +337,8 @@ async function sendPrompt(text: string, files: File[]): Promise<void> {
     }
   }
 }
+
+watch(() => store.activeSession?.messages, reconcileOptimisticMessage);
 
 async function removeQueuedPrompt(prompt: QueuedPrompt): Promise<void> {
   await store.removeQueuedPrompt(prompt.kind, prompt.index);
@@ -275,6 +411,7 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
     <template v-else>
       <SessionTranscriptView
         :session="store.activeSession"
+        :optimistic-messages="activeOptimisticMessages"
         :load-older-messages="() => store.loadOlderMessages()"
         :loading-older-messages="store.loadingOlderMessages"
       />

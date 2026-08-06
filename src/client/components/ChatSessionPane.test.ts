@@ -4,7 +4,7 @@ import { defineComponent, h, nextTick } from "vue";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import ChatSessionPane from "@/client/components/ChatSessionPane.vue";
 import { useAppStore } from "@/client/stores/app";
-import type { SessionState, SessionSummary } from "@/shared/types";
+import type { SessionState, SessionSummary, UiMessage } from "@/shared/types";
 
 const { sendPrompt } = vi.hoisted(() => ({
   sendPrompt: vi.fn(),
@@ -59,6 +59,28 @@ vi.mock("@/client/lib/push-notifications", () => ({
   syncPushSubscription: vi.fn(async () => undefined),
 }));
 
+const SessionTranscriptStub = defineComponent({
+  name: "SessionTranscriptView",
+  props: {
+    optimisticMessages: {
+      type: Array as () => UiMessage[],
+      default: () => [],
+    },
+  },
+  setup(props) {
+    return () =>
+      h(
+        "div",
+        { class: "optimistic-messages" },
+        props.optimisticMessages.flatMap((message) =>
+          "blocks" in message
+            ? message.blocks.map((block) => (block.type === "text" ? block.text : ""))
+            : [],
+        ),
+      );
+  },
+});
+
 const MessageComposerStub = defineComponent({
   name: "MessageComposer",
   emits: [
@@ -85,12 +107,18 @@ const MessageComposerStub = defineComponent({
   },
 });
 
-function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void } {
+function deferred<T = void>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason: unknown) => void;
+} {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((next) => {
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((next, fail) => {
     resolve = next;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function makeSession(sessionId: string, overrides: Partial<SessionState> = {}): SessionState {
@@ -137,7 +165,7 @@ describe("ChatSessionPane", () => {
         stubs: {
           ChatHeader: true,
           MessageComposer: MessageComposerStub,
-          SessionTranscriptView: true,
+          SessionTranscriptView: SessionTranscriptStub,
         },
       },
     });
@@ -160,5 +188,84 @@ describe("ChatSessionPane", () => {
     expect(sendPrompt).toHaveBeenCalledTimes(2);
 
     pendingSend.resolve(undefined);
+  });
+
+  it("shows an idle prompt optimistically and reconciles it with the server message", async () => {
+    const pendingSend = deferred();
+    sendPrompt.mockReturnValue(pendingSend.promise);
+    const store = useAppStore();
+    store.activeSession = makeSession("session-a");
+    store.selectedWorkspaceId = "batty";
+
+    const wrapper = shallowMount(ChatSessionPane, {
+      global: {
+        stubs: {
+          ChatHeader: true,
+          MessageComposer: MessageComposerStub,
+          SessionTranscriptView: SessionTranscriptStub,
+        },
+      },
+    });
+
+    await wrapper.get(".submit-prompt").trigger("click");
+
+    expect(wrapper.get(".optimistic-messages").text()).toBe("hello");
+    expect(store.activeSession.messages).toEqual([]);
+
+    const otherUserMessage: Extract<UiMessage, { role: "user" }> = {
+      id: "user-other-client",
+      role: "user",
+      timestamp: Date.now(),
+      blocks: [{ type: "text", text: "from another client" }],
+    };
+    store.activeSession = makeSession("session-a", { messages: [otherUserMessage] });
+    await nextTick();
+    expect(wrapper.get(".optimistic-messages").text()).toBe("hello");
+
+    store.activeSession = makeSession("session-a", {
+      messages: [
+        otherUserMessage,
+        {
+          id: "user-1",
+          role: "user",
+          timestamp: Date.now(),
+          blocks: [{ type: "text", text: "hello" }],
+        },
+      ],
+    });
+    await nextTick();
+
+    expect(wrapper.get(".optimistic-messages").text()).toBe("");
+    pendingSend.resolve(undefined);
+  });
+
+  it("removes the optimistic prompt when a failed send restores the draft", async () => {
+    const pendingSend = deferred();
+    sendPrompt.mockReturnValue(pendingSend.promise);
+    const store = useAppStore();
+    store.activeSession = makeSession("session-a");
+    store.selectedWorkspaceId = "batty";
+
+    const wrapper = shallowMount(ChatSessionPane, {
+      global: {
+        stubs: {
+          ChatHeader: true,
+          MessageComposer: MessageComposerStub,
+          SessionTranscriptView: SessionTranscriptStub,
+        },
+      },
+    });
+
+    const result = (
+      wrapper.vm as unknown as { sendPrompt: (text: string, files: File[]) => Promise<void> }
+    ).sendPrompt("hello", []);
+    await nextTick();
+    expect(wrapper.get(".optimistic-messages").text()).toBe("hello");
+
+    pendingSend.reject(new Error("Network error"));
+    await expect(result).rejects.toThrow("Network error");
+    await nextTick();
+
+    expect(wrapper.get(".optimistic-messages").text()).toBe("");
   });
 });

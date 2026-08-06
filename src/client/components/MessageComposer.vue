@@ -542,7 +542,7 @@ defineExpose({ clear, restore });
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
-  padding: 0 calc(var(--safe-area-right) + 0.8rem) 0 calc(var(--safe-area-left) + 0.8rem);
+  padding: 0.5rem calc(var(--safe-area-right) + 0.8rem) 0 calc(var(--safe-area-left) + 0.8rem);
 }
 
 .composer__chip {

@@ -1,4 +1,4 @@
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import CronPopover from "@/client/components/CronPopover.vue";
@@ -61,6 +61,7 @@ vi.mock("@/client/lib/push-notifications", () => ({
 const job: CronJob = {
   id: "cron-1",
   workspaceId: "batty",
+  enabled: true,
   prompt: "Original prompt",
   model: "openai/gpt-5",
   thinkingLevel: "medium",
@@ -86,7 +87,7 @@ describe("CronPopover", () => {
     }));
   });
 
-  it("saves and leaves edit mode even when nothing changed", async () => {
+  it("toggles, saves, and leaves edit mode even when nothing changed", async () => {
     const store = useAppStore();
     store.workspaces = [
       {
@@ -145,14 +146,20 @@ describe("CronPopover", () => {
       },
     });
 
+    const enabledSwitch = wrapper.find<HTMLInputElement>('[role="switch"]');
+    expect(enabledSwitch.element.checked).toBe(true);
+    await enabledSwitch.setValue(false);
+    await flushPromises();
+    expect(updateCronJob).toHaveBeenCalledWith("cron-1", { enabled: false });
+    updateCronJob.mockClear();
+
     await wrapper.find(".cron-popover__icon-btn").trigger("click");
 
     const saveButton = wrapper.find(".cron-popover__save");
     expect((saveButton.element as HTMLButtonElement).disabled).toBe(false);
 
     await saveButton.trigger("click");
-    await Promise.resolve();
-    await Promise.resolve();
+    await flushPromises();
 
     expect(updateCronJob).toHaveBeenCalledWith("cron-1", {
       prompt: "Original prompt",

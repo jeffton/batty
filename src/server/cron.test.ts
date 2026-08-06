@@ -50,7 +50,9 @@ describe("cron store", () => {
       schedule: { kind: "every", every: "1h" },
     });
 
+    expect(job.enabled).toBe(true);
     expect(job.session).toEqual({ kind: "new" });
+    expect(buildCronJobSummary(job)).toContain("Status: Enabled");
     expect(buildCronJobSummary(job)).toContain("Session: New per run");
   });
 
@@ -87,6 +89,67 @@ describe("cron store", () => {
       kind: "daily-detached",
       includePreviousContext: true,
     });
+  });
+
+  it("persists disabled jobs and defaults legacy jobs to enabled", async () => {
+    const config = await createConfig();
+    await fs.mkdir(path.join(config.workspacesRoots[0]!, "alpha"));
+    const store = new CronStore(config);
+
+    const job = await store.createJob({
+      workspaceId: "alpha",
+      enabled: false,
+      prompt: "Paused report",
+      model: "openai/gpt-5",
+      thinkingLevel: "medium",
+      schedule: { kind: "every", every: "1h" },
+    });
+
+    expect(job.enabled).toBe(false);
+    expect(job.state.nextRunAtMs).toBeUndefined();
+    expect(buildCronJobSummary(job)).toContain("Status: Disabled");
+
+    const enabled = await store.updateJob(job.id, { enabled: true });
+    expect(enabled.enabled).toBe(true);
+    expect(enabled.state.nextRunAtMs).toBeTypeOf("number");
+
+    const persisted = JSON.parse(await fs.readFile(store.filePath, "utf8")) as {
+      jobs: Array<Record<string, unknown>>;
+    };
+    delete persisted.jobs[0]?.enabled;
+    await fs.writeFile(store.filePath, `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
+
+    expect((await store.listJobs())[0]?.enabled).toBe(true);
+  });
+
+  it("rejects non-boolean enabled flags", async () => {
+    const config = await createConfig();
+    await fs.mkdir(path.join(config.workspacesRoots[0]!, "alpha"));
+    const store = new CronStore(config);
+
+    await expect(
+      store.createJob({
+        workspaceId: "alpha",
+        enabled: "false" as unknown as boolean,
+        prompt: "Invalid job",
+        model: "openai/gpt-5",
+        thinkingLevel: "medium",
+        schedule: { kind: "every", every: "1h" },
+      }),
+    ).rejects.toThrow("Enabled must be a boolean");
+    expect(await store.listJobs()).toEqual([]);
+
+    const job = await store.createJob({
+      workspaceId: "alpha",
+      prompt: "Valid job",
+      model: "openai/gpt-5",
+      thinkingLevel: "medium",
+      schedule: { kind: "every", every: "1h" },
+    });
+    await expect(
+      store.updateJob(job.id, { enabled: "false" as unknown as boolean }),
+    ).rejects.toThrow("Enabled must be a boolean");
+    expect((await store.listJobs())[0]?.enabled).toBe(true);
   });
 
   it("rejects unsupported cron store versions", async () => {

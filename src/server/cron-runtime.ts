@@ -219,6 +219,10 @@ export class CronService {
     this.scheduledHandles.clear();
 
     for (const job of this.jobs.values()) {
+      if (!job.enabled) {
+        continue;
+      }
+
       const nextAtMs = nextRunAtMs(job.schedule);
       if (nextAtMs == null) {
         if (job.schedule.kind === "at") {
@@ -299,7 +303,7 @@ export class CronService {
 
   private async triggerJob(jobId: string): Promise<void> {
     const current = this.jobs.get(jobId);
-    if (!current) {
+    if (!current?.enabled) {
       return;
     }
 

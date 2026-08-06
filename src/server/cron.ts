@@ -10,6 +10,7 @@ export function buildCronJobSummary(job: CronJob): string {
   const lines = [
     `Job: ${job.id}`,
     `Workspace: ${job.workspaceId}`,
+    `Status: ${job.enabled ? "Enabled" : "Disabled"}`,
     `Schedule: ${job.scheduleLabel}`,
     `Session: ${formatSessionLabel(job.session)}`,
     `Model: ${job.model}`,

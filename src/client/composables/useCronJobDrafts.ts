@@ -4,6 +4,7 @@ import type { useAppStore } from "@/client/stores/app";
 import type { CronJob } from "@/shared/types";
 
 export interface CronDraft {
+  enabled: boolean;
   prompt: string;
   model: string;
   thinkingLevel: string;
@@ -11,6 +12,7 @@ export interface CronDraft {
   includePreviousContext: boolean;
   editing: boolean;
   saving: boolean;
+  toggling: boolean;
   deleting: boolean;
   error: string;
 }
@@ -41,6 +43,7 @@ export function useCronJobDrafts(store: AppStore): {
   thinkingOptions: (job: CronJob) => string[];
   sessionLabel: (job: CronJob) => string;
   saveJob: (job: CronJob) => Promise<void>;
+  toggleJob: (job: CronJob) => Promise<void>;
   deleteJob: (job: CronJob) => Promise<void>;
 } {
   const drafts = reactive<Record<string, CronDraft>>({});
@@ -53,6 +56,7 @@ export function useCronJobDrafts(store: AppStore): {
     }
 
     const created: CronDraft = {
+      enabled: job.enabled,
       prompt: job.prompt,
       model: job.model,
       thinkingLevel: job.thinkingLevel,
@@ -60,6 +64,7 @@ export function useCronJobDrafts(store: AppStore): {
       includePreviousContext: includePreviousContextFor(job),
       editing: false,
       saving: false,
+      toggling: false,
       deleting: false,
       error: "",
     };
@@ -71,7 +76,8 @@ export function useCronJobDrafts(store: AppStore): {
     const activeIds = new Set(nextJobs.map((job) => job.id));
     for (const job of nextJobs) {
       const draft = ensureDraft(job);
-      if (!draft.saving) {
+      if (!draft.saving && !draft.toggling) {
+        draft.enabled = job.enabled;
         draft.prompt = job.prompt;
         draft.model = job.model;
         draft.thinkingLevel = job.thinkingLevel;
@@ -94,6 +100,7 @@ export function useCronJobDrafts(store: AppStore): {
 
   function resetDraft(job: CronJob): void {
     const draft = draftFor(job);
+    draft.enabled = job.enabled;
     draft.prompt = job.prompt;
     draft.model = job.model;
     draft.thinkingLevel = job.thinkingLevel;
@@ -164,6 +171,21 @@ export function useCronJobDrafts(store: AppStore): {
     }
   }
 
+  async function toggleJob(job: CronJob): Promise<void> {
+    const draft = draftFor(job);
+    draft.toggling = true;
+    draft.error = "";
+    try {
+      const updated = await store.updateCronJob(job.id, { enabled: draft.enabled });
+      draft.enabled = updated.enabled;
+    } catch (error) {
+      draft.enabled = job.enabled;
+      draft.error = error instanceof Error ? error.message : String(error);
+    } finally {
+      draft.toggling = false;
+    }
+  }
+
   async function deleteJob(job: CronJob): Promise<void> {
     const draft = draftFor(job);
     draft.deleting = true;
@@ -192,6 +214,7 @@ export function useCronJobDrafts(store: AppStore): {
     thinkingOptions,
     sessionLabel,
     saveJob,
+    toggleJob,
     deleteJob,
   };
 }

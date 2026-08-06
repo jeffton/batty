@@ -282,6 +282,7 @@ export function createCronTool({
           const defaults = resolveSubagentDefaults(ctx.sessionManager.getSessionId(), ctx);
           const input: CreateCronJobInput = {
             workspaceId,
+            enabled: typeof params.enabled === "boolean" ? params.enabled : undefined,
             prompt: String(params.prompt ?? ""),
             model:
               typeof params.model === "string" && params.model.trim().length > 0
@@ -311,6 +312,7 @@ export function createCronTool({
 
           const patch: UpdateCronJobInput = {
             workspaceId,
+            enabled: typeof params.enabled === "boolean" ? params.enabled : undefined,
             prompt: typeof params.prompt === "string" ? params.prompt : undefined,
             model: typeof params.model === "string" ? params.model : undefined,
             thinkingLevel:

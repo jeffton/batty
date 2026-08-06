@@ -177,6 +177,7 @@ export interface CronJobState {
 export interface CronJob {
   id: string;
   workspaceId: string;
+  enabled: boolean;
   prompt: string;
   model: string;
   thinkingLevel: string;
@@ -190,6 +191,7 @@ export interface CronJob {
 
 export interface CreateCronJobInput {
   workspaceId: string;
+  enabled?: boolean;
   prompt: string;
   model: string;
   thinkingLevel: string;
@@ -199,6 +201,7 @@ export interface CreateCronJobInput {
 
 export interface UpdateCronJobInput {
   workspaceId?: string;
+  enabled?: boolean;
   prompt?: string;
   model?: string;
   thinkingLevel?: string;

@@ -17,6 +17,7 @@ const emit = defineEmits<{
   edit: [];
   cancel: [];
   save: [];
+  toggle: [];
   delete: [];
 }>();
 </script>
@@ -26,7 +27,8 @@ const emit = defineEmits<{
     <div class="cron-popover__job-top">
       <div class="cron-popover__job-meta">
         <strong>{{ props.job.scheduleLabel }}</strong>
-        <span v-if="props.job.state.nextRunAtMs"
+        <span v-if="!props.job.enabled">Disabled</span>
+        <span v-else-if="props.job.state.nextRunAtMs"
           >Next: {{ formatShortDateTime(props.job.state.nextRunAtMs) }}</span
         >
         <span>Session: {{ props.sessionLabel }}</span>
@@ -40,6 +42,17 @@ const emit = defineEmits<{
       </div>
 
       <div class="cron-popover__job-actions">
+        <label class="cron-popover__switch" title="Enable cron job">
+          <input
+            v-model="props.draft.enabled"
+            type="checkbox"
+            role="switch"
+            aria-label="Enable cron job"
+            :disabled="props.draft.saving || props.draft.toggling || props.draft.deleting"
+            @change="emit('toggle')"
+          />
+          <span class="cron-popover__switch-track" aria-hidden="true" />
+        </label>
         <button
           class="cron-popover__icon-btn"
           type="button"
@@ -179,6 +192,63 @@ const emit = defineEmits<{
   display: inline-flex;
   align-items: center;
   gap: 0.15rem;
+}
+
+.cron-popover__switch {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.25rem;
+  cursor: pointer;
+}
+
+.cron-popover__switch input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.cron-popover__switch-track {
+  position: relative;
+  width: 1.9rem;
+  height: 1.05rem;
+  border-radius: 999px;
+  background: var(--color-border-soft);
+  transition: background 100ms ease;
+}
+
+.cron-popover__switch-track::after {
+  position: absolute;
+  top: 0.15rem;
+  left: 0.15rem;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  background: var(--color-bg-overlay);
+  box-shadow: 0 1px 2px color-mix(in srgb, black 30%, transparent);
+  content: "";
+  transition: transform 100ms ease;
+}
+
+.cron-popover__switch input:checked + .cron-popover__switch-track {
+  background: var(--color-accent);
+}
+
+.cron-popover__switch input:checked + .cron-popover__switch-track::after {
+  transform: translateX(0.85rem);
+}
+
+.cron-popover__switch input:focus-visible + .cron-popover__switch-track {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.cron-popover__switch input:disabled + .cron-popover__switch-track {
+  opacity: 0.5;
+}
+
+.cron-popover__switch:has(input:disabled) {
+  cursor: default;
 }
 
 .cron-popover__readonly {

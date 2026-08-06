@@ -13,8 +13,17 @@ const props = defineProps<{
 
 const store = useAppStore();
 const stoppingRunIds = ref(new Set<string>());
-const { jobs, draftFor, editJob, cancelEdit, thinkingOptions, sessionLabel, saveJob, deleteJob } =
-  useCronJobDrafts(store);
+const {
+  jobs,
+  draftFor,
+  editJob,
+  cancelEdit,
+  thinkingOptions,
+  sessionLabel,
+  saveJob,
+  toggleJob,
+  deleteJob,
+} = useCronJobDrafts(store);
 const runningJobs = computed(() => store.workspaceRunningCronJobs);
 
 function runPopoverId(runId: string): string {
@@ -106,6 +115,7 @@ watch(
         @edit="editJob(job)"
         @cancel="cancelEdit(job)"
         @save="saveJob(job)"
+        @toggle="toggleJob(job)"
         @delete="deleteJob(job)"
       />
 

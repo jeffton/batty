@@ -80,6 +80,9 @@ export const CronToolSchema = Type.Object(
     workspaceId: Type.Optional(
       Type.String({ description: "Target workspace id. Defaults to the current workspace." }),
     ),
+    enabled: Type.Optional(
+      Type.Boolean({ description: "Whether the cron job is enabled. Defaults to true." }),
+    ),
     prompt: Type.Optional(
       Type.String({ description: "Prompt the scheduled agent turn should run." }),
     ),

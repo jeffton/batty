@@ -46,6 +46,34 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 }
 
 describe("cron runtime", () => {
+  it("does not schedule or trigger disabled jobs", async () => {
+    const service = new CronService(await createConfig());
+    const run = vi.fn(async () => ({ sessionId: "session", sessionPath: "/tmp/session.jsonl" }));
+    service.setRunner({ run });
+    const job = await service.createJob({
+      workspaceId: "alpha",
+      enabled: false,
+      prompt: "Paused job",
+      model: "openai/gpt-5",
+      thinkingLevel: "medium",
+      schedule: { kind: "every", every: "1h" },
+    });
+    const internals = service as unknown as {
+      scheduledHandles: Map<string, unknown>;
+      triggerJob(jobId: string): Promise<void>;
+    };
+
+    expect(internals.scheduledHandles.has(job.id)).toBe(false);
+    await internals.triggerJob(job.id);
+    expect(run).not.toHaveBeenCalled();
+
+    await service.updateJob(job.id, { enabled: true });
+    expect(internals.scheduledHandles.has(job.id)).toBe(true);
+    await internals.triggerJob(job.id);
+    expect(run).toHaveBeenCalledOnce();
+    await service.dispose();
+  });
+
   it("keeps an overlapped run registered until its runner settles", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const service = new CronService(await createConfig());

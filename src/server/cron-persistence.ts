@@ -29,6 +29,7 @@ const CRON_STORE_VERSION = 2;
 export interface StoredCronJob {
   id: string;
   workspaceId: string;
+  enabled: boolean;
   prompt: string;
   model: string;
   thinkingLevel: string;
@@ -63,6 +64,26 @@ function requireStoredTimestamp(value: unknown, label: string): number {
   return value;
 }
 
+function normalizeStoredEnabled(value: unknown): boolean {
+  if (value === undefined) {
+    return true;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error("Invalid enabled flag");
+  }
+  return value;
+}
+
+function normalizeEnabledInput(value: unknown, defaultValue: boolean): boolean {
+  if (value === undefined) {
+    return defaultValue;
+  }
+  if (typeof value !== "boolean") {
+    throw createHttpError(400, "Enabled must be a boolean");
+  }
+  return value;
+}
+
 function normalizeStoredJob(value: unknown): StoredCronJob {
   if (!value || typeof value !== "object") {
     throw new Error("Invalid cron job");
@@ -72,6 +93,7 @@ function normalizeStoredJob(value: unknown): StoredCronJob {
   return {
     id: requireStoredString(job.id, "Job id"),
     workspaceId: requireStoredString(job.workspaceId, "Workspace"),
+    enabled: normalizeStoredEnabled(job.enabled),
     prompt: requireStoredString(job.prompt, "Prompt"),
     model: requireStoredString(job.model, "Model"),
     thinkingLevel: normalizeStoredThinkingLevel(job.thinkingLevel),
@@ -87,6 +109,7 @@ export function toCronJob(job: StoredCronJob): CronJob {
   return {
     id: job.id,
     workspaceId: job.workspaceId,
+    enabled: job.enabled,
     prompt: job.prompt,
     model: job.model,
     thinkingLevel: job.thinkingLevel,
@@ -97,7 +120,7 @@ export function toCronJob(job: StoredCronJob): CronJob {
     scheduleLabel: formatScheduleLabel(job.schedule),
     state: {
       ...job.state,
-      nextRunAtMs: nextRunAtMs(job.schedule),
+      nextRunAtMs: job.enabled ? nextRunAtMs(job.schedule) : undefined,
     },
   };
 }
@@ -146,6 +169,7 @@ export class CronStore {
     const job: StoredCronJob = {
       id: randomUUID(),
       workspaceId,
+      enabled: normalizeEnabledInput(input.enabled, true),
       prompt: normalizeNonEmptyString(input.prompt, "Prompt"),
       model: normalizeNonEmptyString(input.model, "Model"),
       thinkingLevel: normalizeThinkingLevel(input.thinkingLevel),
@@ -183,6 +207,7 @@ export class CronStore {
       const next: StoredCronJob = {
         ...current,
         workspaceId,
+        enabled: normalizeEnabledInput(patch.enabled, current.enabled),
         prompt:
           patch.prompt == null ? current.prompt : normalizeNonEmptyString(patch.prompt, "Prompt"),
         model: patch.model == null ? current.model : normalizeNonEmptyString(patch.model, "Model"),

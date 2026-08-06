@@ -2,6 +2,7 @@ import type { RouteContext } from "./context";
 
 interface CronJobRouteBody {
   workspaceId?: string;
+  enabled?: boolean;
   prompt?: string;
   model?: string;
   thinkingLevel?: string;
@@ -25,6 +26,7 @@ export function registerCronRoutes(context: RouteContext): void {
   app.post<{ Body: CronJobRouteBody }>(routePath("/api/cron-jobs"), async (request) => {
     return cronService.createJob({
       workspaceId: request.body?.workspaceId ?? "",
+      enabled: request.body?.enabled,
       prompt: request.body?.prompt ?? "",
       model: request.body?.model ?? "",
       thinkingLevel: request.body?.thinkingLevel ?? "",
@@ -38,6 +40,7 @@ export function registerCronRoutes(context: RouteContext): void {
     async (request) => {
       return cronService.updateJob(request.params.jobId, {
         workspaceId: request.body?.workspaceId,
+        enabled: request.body?.enabled,
         prompt: request.body?.prompt,
         model: request.body?.model,
         thinkingLevel: request.body?.thinkingLevel,

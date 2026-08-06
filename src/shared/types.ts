@@ -291,6 +291,8 @@ export interface ProviderAuthStartResponse {
 
 export interface AppSettingsStatus {
   braveSearchConfigured: boolean;
+  defaultProvider?: string;
+  defaultModel?: string;
   appearance: AppAppearance;
 }
 

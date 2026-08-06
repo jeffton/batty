@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { Check, ExternalLink, LogOut, Palette, Pencil, Save, Settings2, X } from "@lucide/vue";
+import { Bot, Check, ExternalLink, LogOut, Palette, Pencil, Save, Settings2, X } from "@lucide/vue";
 import { computed, reactive, ref, watch } from "vue";
+import ModelConfigPopover from "@/client/components/ModelConfigPopover.vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
 import { APP_COLOR_OPTIONS, type AppColor } from "@/shared/appearance";
 import { useAppStore } from "@/client/stores/app";
@@ -16,6 +17,8 @@ const emit = defineEmits<{
 
 const BRAVE_SEARCH_ITEM_ID = "brave-search";
 const AGENTS_ITEM_ID = "batty-agents";
+const DEFAULT_MODEL_POPOVER_ID = "settings-default-model-popover";
+const DEFAULT_MODEL_ANCHOR = "--settings-default-model-anchor";
 const store = useAppStore();
 const connectPending = ref(false);
 const completePending = ref(false);
@@ -32,6 +35,8 @@ const appearanceTitle = ref("");
 const appearanceColor = ref<AppColor>("neutral");
 const appearanceSaving = ref(false);
 const appearanceError = ref("");
+const defaultModelSaving = ref(false);
+const defaultModelError = ref("");
 const braveSearchInput = ref("");
 const braveSearchSaving = ref(false);
 const assistantWorkspaceSaving = ref(false);
@@ -68,6 +73,21 @@ const authExpiryLabel = computed(() =>
 );
 const assistantWorkspaceId = computed(
   () => store.workspaces.find((workspace) => workspace.isAssistant)?.id ?? "",
+);
+const defaultModelId = computed(() =>
+  store.settings.defaultProvider && store.settings.defaultModel
+    ? `${store.settings.defaultProvider}/${store.settings.defaultModel}`
+    : undefined,
+);
+const defaultModel = computed(() =>
+  store.models.find((model) => model.id === defaultModelId.value),
+);
+const defaultModelLabel = computed(
+  () =>
+    defaultModel.value?.label.split(" · ", 1)[0] ?? store.settings.defaultModel ?? "Select a model",
+);
+const defaultProviderLabel = computed(
+  () => defaultModel.value?.provider ?? store.settings.defaultProvider ?? "Default provider",
 );
 
 function isCodexProvider(providerId: string): boolean {
@@ -227,6 +247,19 @@ async function saveApiKey(providerId: "google" | "openrouter"): Promise<void> {
   }
 }
 
+async function saveDefaultModel(modelId: string): Promise<void> {
+  defaultModelSaving.value = true;
+  defaultModelError.value = "";
+  try {
+    await store.setDefaultModel(modelId);
+    document.getElementById(DEFAULT_MODEL_POPOVER_ID)?.hidePopover?.();
+  } catch (error) {
+    defaultModelError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    defaultModelSaving.value = false;
+  }
+}
+
 async function saveAppearance(): Promise<void> {
   const title = appearanceTitle.value.trim();
   if (!title) {
@@ -303,6 +336,7 @@ watch(
 
     authError.value = "";
     appearanceError.value = "";
+    defaultModelError.value = "";
     braveSearchError.value = "";
     battyAgentsError.value = "";
     apiKeyErrors.google = "";
@@ -386,6 +420,38 @@ watch(
       </button>
       <div v-if="appearanceError" class="settings-popover__error" role="alert">
         {{ appearanceError }}
+      </div>
+    </section>
+
+    <section class="settings-popover__section">
+      <div class="settings-popover__group-title">Default model</div>
+      <div class="settings-popover__help">Used when starting new sessions.</div>
+      <button
+        class="settings-popover__model-button"
+        type="button"
+        :style="{ 'anchor-name': DEFAULT_MODEL_ANCHOR }"
+        :popovertarget="DEFAULT_MODEL_POPOVER_ID"
+        :disabled="defaultModelSaving"
+        aria-label="Choose default model and provider"
+        @click="store.refreshModels"
+      >
+        <Bot :size="17" />
+        <span class="settings-popover__model-info">
+          <strong>{{ defaultModelLabel }}</strong>
+          <span>{{ defaultProviderLabel }}</span>
+        </span>
+      </button>
+      <ModelConfigPopover
+        :popover-id="DEFAULT_MODEL_POPOVER_ID"
+        :anchor-name="DEFAULT_MODEL_ANCHOR"
+        :models="store.models"
+        :current-model-id="defaultModelId"
+        current-thinking-level=""
+        :thinking-options="[]"
+        @set-model="saveDefaultModel"
+      />
+      <div v-if="defaultModelError" class="settings-popover__error" role="alert">
+        {{ defaultModelError }}
       </div>
     </section>
 
@@ -723,6 +789,44 @@ watch(
   font-family: inherit;
 }
 
+.settings-popover__model-button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.55rem;
+  background: var(--color-bg-app);
+  color: var(--color-text-muted);
+  text-align: left;
+}
+
+.settings-popover__model-info {
+  min-width: 0;
+  display: grid;
+  line-height: 1.15;
+}
+
+.settings-popover__model-info strong,
+.settings-popover__model-info span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-popover__model-info strong {
+  color: var(--color-text-strong);
+  font-size: 0.84rem;
+}
+
+.settings-popover__model-info span {
+  color: var(--color-text-subtle);
+  font-size: 0.72rem;
+  text-transform: capitalize;
+}
+
 .settings-popover__field,
 .settings-popover__color-fieldset {
   display: flex;
@@ -901,7 +1005,8 @@ watch(
 @media (hover: hover) {
   .settings-popover__action:hover,
   .settings-popover__link:hover,
-  .settings-popover__icon-btn:hover {
+  .settings-popover__icon-btn:hover,
+  .settings-popover__model-button:hover:not(:disabled) {
     background: var(--color-bg-hover);
   }
 
@@ -915,6 +1020,7 @@ watch(
 .settings-popover__link:disabled,
 .settings-popover__logout:disabled,
 .settings-popover__icon-btn:disabled,
+.settings-popover__model-button:disabled,
 .settings-popover__select:disabled,
 .settings-popover__input:disabled {
   opacity: 0.6;

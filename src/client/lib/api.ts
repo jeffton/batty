@@ -179,6 +179,14 @@ export function setWorkspaceAssistant(workspaceId?: string): Promise<WorkspaceIn
   });
 }
 
+export function setDefaultModel(modelId: string): Promise<AppSettingsStatus> {
+  return request("/api/settings/default-model", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ modelId }),
+  });
+}
+
 export function setAppearance(appearance: AppAppearance): Promise<AppSettingsStatus> {
   return request("/api/settings/appearance", {
     method: "POST",

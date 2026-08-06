@@ -305,6 +305,22 @@ export async function setAssistantWorkspace(
   return nextOptions;
 }
 
+export async function setDefaultModel(
+  projectRoot: string,
+  defaultProvider: string,
+  defaultModel: string,
+): Promise<AppOptions> {
+  const options = await loadAppOptions(projectRoot);
+  const nextOptions: AppOptions = {
+    ...options,
+    defaultProvider: normalizeOptionalString(defaultProvider),
+    defaultModel: normalizeOptionalString(defaultModel),
+  };
+
+  await writeStoredOptions(projectRoot, nextOptions);
+  return nextOptions;
+}
+
 export async function setAppearance(
   projectRoot: string,
   appTitle: string,

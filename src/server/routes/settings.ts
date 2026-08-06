@@ -2,7 +2,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { battyAgentDir } from "../pi-paths";
 import type { AppColor } from "@/shared/appearance";
-import { setAppearance, setAssistantWorkspace, setBraveSearchKey } from "../options";
+import {
+  setAppearance,
+  setAssistantWorkspace,
+  setBraveSearchKey,
+  setDefaultModel,
+} from "../options";
 import { listWorkspaceRoots, listWorkspaces, resolveWorkspace } from "../workspaces";
 import type { RouteContext } from "./context";
 import {
@@ -74,6 +79,24 @@ export function registerSettingsRoutes(context: RouteContext): void {
 
       const options = await setBraveSearchKey(config.battyDir, apiKey);
       config.braveSearchKey = options.braveSearchKey;
+      return appSettingsStatus(config);
+    },
+  );
+
+  app.post<{ Body: { modelId?: string } }>(
+    routePath("/api/settings/default-model"),
+    async (request) => {
+      const selected = (await service.listModels()).find(
+        (model) => model.id === request.body?.modelId,
+      );
+      if (!selected) {
+        throw new Error("Invalid default model");
+      }
+
+      const modelId = selected.id.slice(`${selected.provider}/`.length);
+      const options = await setDefaultModel(config.battyDir, selected.provider, modelId);
+      config.defaultProvider = options.defaultProvider;
+      config.defaultModel = options.defaultModel;
       return appSettingsStatus(config);
     },
   );

@@ -42,6 +42,8 @@ export function unauthenticatedAuthStatus() {
 export function appSettingsStatus(config: AppConfig): AppSettingsStatus {
   return {
     braveSearchConfigured: Boolean(config.braveSearchKey),
+    defaultProvider: config.defaultProvider,
+    defaultModel: config.defaultModel,
     appearance: {
       title: config.appTitle,
       color: config.appColor,

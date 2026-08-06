@@ -6,6 +6,7 @@ import {
   setAppearance as setAppearanceRequest,
   setBattyAgentsFile as setBattyAgentsFileRequest,
   setBraveSearchApiKey as setBraveSearchApiKeyRequest,
+  setDefaultModel as setDefaultModelRequest,
   setProviderApiKey,
   startOpenAICodexProviderAuth,
 } from "@/client/lib/api";
@@ -42,6 +43,10 @@ export const providerSettingsActions = {
   ): Promise<void> {
     this.providerAuth = await setProviderApiKey(providerId, apiKey);
     await this.bootstrap();
+  },
+
+  async setDefaultModel(this: AppActionContext, modelId: string): Promise<void> {
+    this.settings = await setDefaultModelRequest(modelId);
   },
 
   async setAppearance(this: AppActionContext, appearance: AppAppearance): Promise<void> {

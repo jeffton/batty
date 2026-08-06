@@ -9,6 +9,7 @@ import {
   setAppearance,
   setAssistantWorkspace,
   setBraveSearchKey,
+  setDefaultModel,
 } from "@/server/options";
 
 const tempDirs: string[] = [];
@@ -136,6 +137,27 @@ describe("ensureOptionsFile", () => {
 
     await setAssistantWorkspace(battyDir, undefined);
     expect((await readStoredOptions(battyDir))?.assistantWorkspaceId).toBeUndefined();
+  });
+
+  it("persists the default provider and model together", async () => {
+    const battyDir = await createBattyDir();
+
+    await fs.mkdir(path.dirname(optionsFilePath(battyDir)), { recursive: true });
+    await fs.writeFile(
+      optionsFilePath(battyDir),
+      `${JSON.stringify({
+        authSecret: "existing-secret",
+        workspacesRoots: ["/root/github"],
+        webPushSubject: "https://batty.roybot.se",
+      })}\n`,
+      "utf8",
+    );
+
+    await setDefaultModel(battyDir, " openai-codex ", " gpt-5.6-sol ");
+    expect(await readStoredOptions(battyDir)).toMatchObject({
+      defaultProvider: "openai-codex",
+      defaultModel: "gpt-5.6-sol",
+    });
   });
 
   it("persists the app appearance", async () => {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ChevronLeft, Wifi, WifiOff, LoaderCircle, Clock3 } from "@lucide/vue";
+import { ChevronLeft, LoaderCircle, Clock3 } from "@lucide/vue";
 import CronPopover from "@/client/components/CronPopover.vue";
+import SessionHeaderStatus from "@/client/components/SessionHeaderStatus.vue";
 
 const props = defineProps<{
   cronPopoverId: string;
@@ -9,11 +10,10 @@ const props = defineProps<{
   cwd?: string;
   workspaceSwitcherLoading: boolean;
   selectedWorkspaceId?: string;
-  contextUsageLabel: string;
-  contextArcClass: string;
-  contextArcStyle: Record<string, string>;
+  contextTokens?: number;
+  contextWindow?: number;
+  contextPercent?: number;
   connectionState: "online" | "connecting" | "offline";
-  connectionDescription: string;
 }>();
 
 const emit = defineEmits<{
@@ -58,40 +58,12 @@ const emit = defineEmits<{
 
     <div class="header__spacer" />
 
-    <div
-      class="header__context"
-      :aria-label="props.contextUsageLabel"
-      :title="props.contextUsageLabel"
-    >
-      <svg class="header__context-chart" viewBox="0 0 36 36" aria-hidden="true">
-        <circle class="header__context-track" cx="18" cy="18" r="15.9155" />
-        <circle
-          :class="['header__context-arc', props.contextArcClass]"
-          :style="props.contextArcStyle"
-          cx="18"
-          cy="18"
-          r="15.9155"
-        />
-      </svg>
-    </div>
-
-    <span
-      class="header__status"
-      :aria-label="props.connectionDescription"
-      :title="props.connectionDescription"
-    >
-      <Wifi
-        v-if="props.connectionState === 'online'"
-        :size="15"
-        class="header__status-icon header__status-icon--online"
-      />
-      <LoaderCircle
-        v-else-if="props.connectionState === 'connecting'"
-        :size="15"
-        class="header__status-icon header__status-icon--connecting header__status-icon--spin"
-      />
-      <WifiOff v-else :size="15" class="header__status-icon header__status-icon--offline" />
-    </span>
+    <SessionHeaderStatus
+      :context-tokens="props.contextTokens"
+      :context-window="props.contextWindow"
+      :context-percent="props.contextPercent"
+      :connection-state="props.connectionState"
+    />
   </header>
 </template>
 
@@ -249,71 +221,6 @@ const emit = defineEmits<{
 .header__spacer {
   flex: 1 1 auto;
   min-width: 0;
-}
-
-.header__context {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.6rem;
-  height: 1.6rem;
-  flex-shrink: 0;
-}
-
-.header__context-chart {
-  width: 1.15rem;
-  height: 1.15rem;
-  transform: rotate(-90deg);
-}
-
-.header__context-track,
-.header__context-arc {
-  fill: none;
-  stroke-width: 3.2;
-}
-
-.header__context-track {
-  stroke: var(--color-border-soft);
-}
-
-.header__context-arc {
-  stroke-linecap: round;
-  transition:
-    stroke-dasharray 180ms ease,
-    stroke 180ms ease;
-}
-
-.header__context-arc--good {
-  stroke: var(--color-success);
-}
-
-.header__context-arc--warn {
-  stroke: var(--color-warning);
-}
-
-.header__context-arc--danger {
-  stroke: var(--color-error);
-}
-
-.header__status {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.6rem;
-  height: 1.6rem;
-  flex-shrink: 0;
-}
-
-.header__status-icon--online {
-  color: var(--color-success);
-}
-
-.header__status-icon--connecting {
-  color: var(--color-text-subtle);
-}
-
-.header__status-icon--offline {
-  color: var(--color-warning);
 }
 
 .header__status-icon--spin {

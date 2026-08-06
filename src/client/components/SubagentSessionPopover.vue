@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { CircleAlert, LoaderCircle, X } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
+import SessionHeaderStatus from "@/client/components/SessionHeaderStatus.vue";
 import SessionTranscriptView from "@/client/components/SessionTranscriptView.vue";
-import { getSessionMessages, openSession } from "@/client/lib/api";
+import StreamingStopControl from "@/client/components/StreamingStopControl.vue";
+import { abortSession, getSessionMessages, openSession } from "@/client/lib/api";
 import { applyServerEvent } from "@/client/lib/session-events";
 import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
 import { sessionEventsPath } from "@/client/lib/session-stream";
@@ -27,14 +29,14 @@ const loading = ref(false);
 const loadingOlderMessages = ref(false);
 const errorMessage = ref<string | undefined>(undefined);
 const reconnecting = ref(false);
+const stopping = ref(false);
 let eventSource: EventSource | undefined;
 
-const subtitle = computed(() => {
-  if (!session.value) {
-    return "";
+const connectionState = computed<"online" | "connecting" | "offline">(() => {
+  if (errorMessage.value && !session.value) {
+    return "offline";
   }
-
-  return session.value.isStreaming ? "Streaming live" : "Read-only transcript";
+  return reconnecting.value || !session.value ? "connecting" : "online";
 });
 
 function closeStream(): void {
@@ -112,6 +114,22 @@ async function ensureSessionLoaded(): Promise<void> {
   }
 }
 
+async function stopSubagent(): Promise<void> {
+  const current = session.value;
+  if (!current?.isStreaming || stopping.value) {
+    return;
+  }
+
+  stopping.value = true;
+  errorMessage.value = undefined;
+  try {
+    await abortSession(current.id);
+  } catch (error) {
+    stopping.value = false;
+    errorMessage.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
 async function loadOlderMessages(): Promise<void> {
   const current = session.value;
   if (
@@ -163,6 +181,7 @@ watch(
     loadingOlderMessages.value = false;
     errorMessage.value = undefined;
     reconnecting.value = false;
+    stopping.value = false;
     if (popoverElement.value?.matches(":popover-open")) {
       void ensureSessionLoaded();
     }
@@ -174,6 +193,7 @@ watch(
   (isStreaming) => {
     if (isStreaming === false) {
       reconnecting.value = false;
+      stopping.value = false;
     }
   },
 );
@@ -193,24 +213,38 @@ onBeforeUnmount(() => {
   >
     <div class="subagent-session-popover__header">
       <div class="subagent-session-popover__title">{{ props.headerTitle }}</div>
-      <button
-        class="subagent-session-popover__close"
-        type="button"
-        @click="popoverElement?.hidePopover?.()"
-      >
-        <X :size="16" />
-      </button>
-    </div>
-
-    <div v-if="subtitle || reconnecting" class="subagent-session-popover__status-row">
-      <span v-if="subtitle" class="subagent-session-popover__status-pill">
-        <LoaderCircle
-          v-if="session?.isStreaming || reconnecting"
-          :size="14"
-          class="subagent-session-popover__spinner"
+      <div class="subagent-session-popover__header-actions">
+        <span
+          v-if="errorMessage && session"
+          class="subagent-session-popover__header-error"
+          role="alert"
+          :aria-label="errorMessage"
+          :title="errorMessage"
+        >
+          <CircleAlert :size="17" />
+        </span>
+        <StreamingStopControl
+          v-if="session?.isStreaming"
+          :disabled="stopping"
+          label="Stop subagent"
+          @stop="stopSubagent"
         />
-        {{ reconnecting ? "Reconnecting…" : subtitle }}
-      </span>
+        <SessionHeaderStatus
+          :context-tokens="session?.contextTokens"
+          :context-window="session?.contextWindow"
+          :context-percent="session?.contextPercent"
+          :connection-state="connectionState"
+        />
+        <button
+          class="subagent-session-popover__close"
+          type="button"
+          aria-label="Close subagent transcript"
+          title="Close"
+          @click="popoverElement?.hidePopover?.()"
+        >
+          <X :size="16" />
+        </button>
+      </div>
     </div>
 
     <div v-if="loading && !session" class="subagent-session-popover__empty">
@@ -259,7 +293,7 @@ onBeforeUnmount(() => {
 
 .subagent-session-popover:popover-open {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .subagent-session-popover::backdrop {
@@ -268,7 +302,7 @@ onBeforeUnmount(() => {
 
 .subagent-session-popover__header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
   padding: 0.9rem 1rem 0.75rem;
@@ -281,22 +315,21 @@ onBeforeUnmount(() => {
   color: var(--color-text-strong);
 }
 
-.subagent-session-popover__status-row {
+.subagent-session-popover__header-actions {
   display: flex;
-  gap: 0.5rem;
-  padding: 0.65rem 1rem 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  flex-shrink: 0;
 }
 
-.subagent-session-popover__status-pill {
+.subagent-session-popover__header-error {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.25rem 0.55rem;
-  border-radius: 999px;
-  background: var(--color-bg-inline-code);
-  color: var(--color-info);
-  font-size: 0.88rem;
-  font-weight: 600;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  color: var(--color-error);
 }
 
 .subagent-session-popover__close {

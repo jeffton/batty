@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { Bot, Compass, ListOrdered, Paperclip, SendHorizontal, Square } from "@lucide/vue";
+import { Bot, Compass, ListOrdered, Paperclip, SendHorizontal } from "@lucide/vue";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import ComposerQueuedPrompts from "@/client/components/ComposerQueuedPrompts.vue";
 import ModelConfigPopover from "@/client/components/ModelConfigPopover.vue";
+import StreamingStopControl from "@/client/components/StreamingStopControl.vue";
 import { clearSessionDraft, readSessionDraft, writeSessionDraft } from "@/client/lib/session-draft";
 import type { ModelOption, QueuedPrompt } from "@/shared/types";
 
@@ -173,7 +174,7 @@ function scheduleTextareaHeightSync(): void {
 
 let lastEarlyAction:
   | {
-      kind: "submit" | "steer" | "stop";
+      kind: "submit" | "steer";
       at: number;
     }
   | undefined;
@@ -250,29 +251,16 @@ function steer(): void {
   emit("steer", text.value, [...files.value]);
 }
 
-function stop(): void {
-  if (actionsDisabled.value) {
-    return;
-  }
-
-  emit("stop");
-}
-
-function runAction(kind: "submit" | "steer" | "stop"): void {
+function runAction(kind: "submit" | "steer"): void {
   if (kind === "submit") {
     submit();
     return;
   }
 
-  if (kind === "steer") {
-    steer();
-    return;
-  }
-
-  stop();
+  steer();
 }
 
-function triggerActionEarly(kind: "submit" | "steer" | "stop", event: PointerEvent): void {
+function triggerActionEarly(kind: "submit" | "steer", event: PointerEvent): void {
   if (event.pointerType === "mouse") {
     return;
   }
@@ -282,7 +270,7 @@ function triggerActionEarly(kind: "submit" | "steer" | "stop", event: PointerEve
   runAction(kind);
 }
 
-function triggerActionClick(kind: "submit" | "steer" | "stop"): void {
+function triggerActionClick(kind: "submit" | "steer"): void {
   if (lastEarlyAction?.kind === kind && Date.now() - lastEarlyAction.at < 1000) {
     lastEarlyAction = undefined;
     return;
@@ -422,19 +410,12 @@ defineExpose({ clear, restore });
           <Paperclip :size="18" />
         </button>
 
-        <div v-if="props.streaming" class="composer__stream-actions">
-          <span class="spinner composer__stream-spinner" aria-hidden="true" />
-          <button
-            class="composer__icon-button composer__stop"
-            type="button"
-            aria-label="Stop"
-            title="Stop"
-            @pointerdown="triggerActionEarly('stop', $event)"
-            @click="triggerActionClick('stop')"
-          >
-            <Square :size="16" />
-          </button>
-        </div>
+        <StreamingStopControl
+          v-if="props.streaming"
+          class="composer__stream-actions"
+          :disabled="actionsDisabled"
+          @stop="emit('stop')"
+        />
 
         <div class="composer__send-actions">
           <button
@@ -626,10 +607,6 @@ defineExpose({ clear, restore });
   display: block;
 }
 
-.composer__stop {
-  color: var(--color-error);
-}
-
 .composer__send {
   color: var(--color-accent-strong);
 }
@@ -712,11 +689,5 @@ defineExpose({ clear, restore });
 .composer__send-actions {
   justify-content: flex-end;
   justify-self: end;
-}
-
-.composer__stream-spinner {
-  width: 1rem;
-  height: 1rem;
-  border-width: 2px;
 }
 </style>

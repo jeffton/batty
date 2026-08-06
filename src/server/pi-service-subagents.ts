@@ -153,9 +153,11 @@ function buildDetachedSubagentResult(
     generatedMessagesOverride ?? newlyGeneratedSubagentMessages(messages, seedMessageCount);
   const finalAssistant = finalAssistantOverride ?? findLastAssistantMessage(generatedMessages);
   const assistantError =
-    finalAssistant?.stopReason === "error" || finalAssistant?.stopReason === "aborted"
-      ? finalAssistant.errorMessage || "Subagent failed"
-      : undefined;
+    finalAssistant?.stopReason === "aborted"
+      ? finalAssistant.errorMessage || "Subagent stopped by user"
+      : finalAssistant?.stopReason === "error"
+        ? finalAssistant.errorMessage || "Subagent failed"
+        : undefined;
   const errorMessage = errorOverride || assistantError;
   const text = errorMessage || extractAssistantText(finalAssistant) || "";
   const details = buildSubagentDetails(

@@ -3,7 +3,6 @@ import { computed, ref, watch } from "vue";
 import ChatHeader from "@/client/components/ChatHeader.vue";
 import MessageComposer from "@/client/components/MessageComposer.vue";
 import SessionTranscriptView from "@/client/components/SessionTranscriptView.vue";
-import { formatTokenCount } from "@/client/lib/formatting";
 import { resolveThinkingOptions } from "@/client/lib/thinking-levels";
 import { useAppStore } from "@/client/stores/app";
 import type { QueuedPrompt, UiMessage } from "@/shared/types";
@@ -54,57 +53,6 @@ const workspaceSwitcherLoading = computed(() =>
   Boolean(store.routeLoadingWorkspaceId || selectedWorkspaceLoading.value),
 );
 const sessionLoading = computed(() => Boolean(store.routeLoadingSessionId));
-const connectionDescription = computed(() => {
-  switch (store.connectionState) {
-    case "online":
-      return "Connected";
-    case "connecting":
-      return "Connecting";
-    default:
-      return "Offline";
-  }
-});
-const contextUsageLabel = computed(() => {
-  const session = store.activeSession;
-  if (!session) {
-    return "ctx ?/? · ?";
-  }
-
-  const tokens = session.contextTokens;
-  const window = session.contextWindow;
-  const percent = session.contextPercent;
-  const tokensLabel = tokens == null ? "?" : formatTokenCount(tokens);
-  const windowLabel = window == null ? "?" : formatTokenCount(window);
-  const percentLabel = percent == null ? "?" : `${percent.toFixed(1)}%`;
-
-  return `ctx ${tokensLabel}/${windowLabel} · ${percentLabel}`;
-});
-const contextPercentValue = computed(() => {
-  const percent = store.activeSession?.contextPercent;
-  if (typeof percent !== "number" || !Number.isFinite(percent)) {
-    return 0;
-  }
-  return Math.min(100, Math.max(0, percent));
-});
-const contextArcStyle = computed(() => {
-  const radius = 15.9155;
-  const circumference = 2 * Math.PI * radius;
-  const progress = circumference * (contextPercentValue.value / 100);
-
-  return {
-    strokeDasharray: `${progress} ${circumference}`,
-    strokeDashoffset: "0",
-  };
-});
-const contextArcClass = computed(() => {
-  if (contextPercentValue.value >= 90) {
-    return "header__context-arc--danger";
-  }
-  if (contextPercentValue.value >= 70) {
-    return "header__context-arc--warn";
-  }
-  return "header__context-arc--good";
-});
 const currentModelOption = computed(() =>
   store.models.find((model) => model.id === store.activeSession?.model),
 );
@@ -348,11 +296,10 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
       :cwd="store.activeSession?.cwd"
       :workspace-switcher-loading="workspaceSwitcherLoading"
       :selected-workspace-id="store.selectedWorkspaceId"
-      :context-usage-label="contextUsageLabel"
-      :context-arc-class="contextArcClass"
-      :context-arc-style="contextArcStyle"
+      :context-tokens="store.activeSession?.contextTokens"
+      :context-window="store.activeSession?.contextWindow"
+      :context-percent="store.activeSession?.contextPercent"
       :connection-state="store.connectionState"
-      :connection-description="connectionDescription"
       @back="emit('back')"
     />
 

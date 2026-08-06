@@ -827,6 +827,105 @@ describe("runDetachedSubagentSession", () => {
     });
   });
 
+  it("propagates a user-stopped child session as an error to the parent", async () => {
+    const sessionMessages: AgentMessage[] = [];
+    let subscriber: ((event: { type: string; [key: string]: unknown }) => void) | undefined;
+    let resolvePrompt!: () => void;
+    let notifyPromptStarted!: () => void;
+    const promptStarted = new Promise<void>((resolve) => {
+      notifyPromptStarted = resolve;
+    });
+    const promptPending = new Promise<void>((resolve) => {
+      resolvePrompt = resolve;
+    });
+
+    const subagentSession = {
+      sessionId: "subagent-session-user-stop",
+      sessionFile: "/tmp/subagent-session-user-stop.jsonl",
+      messages: sessionMessages,
+      isStreaming: true,
+      agent: { state: { messages: sessionMessages } },
+      sessionManager: {
+        appendCustomEntry() {
+          return undefined;
+        },
+        appendMessage() {
+          return undefined;
+        },
+      },
+      subscribe(callback: (event: { type: string; [key: string]: unknown }) => void) {
+        subscriber = callback;
+        return () => undefined;
+      },
+      async prompt() {
+        notifyPromptStarted();
+        await promptPending;
+      },
+      abortCompaction() {
+        return undefined;
+      },
+      async abort() {
+        const finalAssistant = {
+          ...createAssistantMessage("", 1),
+          stopReason: "aborted",
+        } satisfies AssistantMessage;
+        sessionMessages.push(finalAssistant as AgentMessage);
+        subscriber?.({ type: "message_end", message: finalAssistant });
+        resolvePrompt();
+      },
+    } as unknown as AgentSession;
+
+    let attachedSession: AgentSession | undefined;
+    const resultPromise = runDetachedSubagentSession(
+      {
+        async createPiAgentSession() {
+          return { session: subagentSession };
+        },
+        attachSession(workspace, session) {
+          attachedSession = session;
+          return {
+            id: "web-subagent-user-stop",
+            workspace,
+            session,
+            subscribers: new Set(),
+            activeTools: new Map(),
+            openedAt: 0,
+            ephemeral: true,
+          };
+        },
+        disposeWebSession: vi.fn(),
+        workspaceSessionDir: "/tmp",
+      },
+      {
+        workspace: {
+          id: "batty",
+          label: "Batty",
+          path: "/root/github/batty",
+          kind: "workspace",
+          isPinned: true,
+          isAssistant: false,
+        },
+        parentSessionId: "parent-session-user-stop",
+        prompt: "Inspect the issue",
+        modelId: "openai/gpt-5",
+        thinkingLevel: "medium",
+        includeSessionContext: false,
+        respondIn: "tool-call",
+      },
+    );
+
+    await promptStarted;
+    await attachedSession?.abort();
+    const result = await resultPromise;
+
+    expect(result).toMatchObject({
+      isError: true,
+      errorMessage: "Subagent stopped by user",
+      text: "Subagent stopped by user",
+      finalAssistant: { stopReason: "aborted" },
+    });
+  });
+
   it("propagates a terminal assistant failure after prompt settlement", async () => {
     const sessionMessages: AgentMessage[] = [];
     let subscriber: ((event: { type: string; [key: string]: unknown }) => void) | undefined;

@@ -400,10 +400,10 @@ watch(
             <span
               class="settings-popover__color-swatch"
               :style="{
-                background: `linear-gradient(135deg, ${color.light} 50%, ${color.dark} 50%)`,
+                backgroundImage: `linear-gradient(135deg, ${color.light} 50%, ${color.dark} 50%)`,
               }"
             >
-              <Check v-if="appearanceColor === color.id" :size="14" />
+              <Check v-if="appearanceColor === color.id" :size="15" :stroke-width="3" />
             </span>
             <span>{{ color.label }}</span>
           </label>
@@ -870,8 +870,17 @@ watch(
   overflow: hidden;
   border: 2px solid transparent;
   border-radius: 999px;
+  background-origin: border-box;
   color: #ffffff;
   filter: drop-shadow(0 0 0.18rem oklch(0 0 0 / 0.35));
+}
+
+.settings-popover__color-swatch svg {
+  box-sizing: content-box;
+  padding: 0.12rem;
+  border-radius: 999px;
+  background: oklch(0.2 0 0 / 0.72);
+  box-shadow: 0 0 0 1px oklch(1 0 0 / 0.35);
 }
 
 .settings-popover__color-option input:checked + .settings-popover__color-swatch {

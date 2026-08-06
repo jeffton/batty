@@ -108,3 +108,78 @@ index c99a78f..5e2dd30 100644
              this._autoCompactionAbortController = undefined;
          }
      }
+diff --git a/dist/core/agent-session.d.ts b/dist/core/agent-session.d.ts
+--- a/dist/core/agent-session.d.ts
++++ b/dist/core/agent-session.d.ts
+@@ -155,6 +155,8 @@ export interface PromptOptions {
+     expandPromptTemplates?: boolean;
+     /** Image attachments */
+     images?: ImageContent[];
++    /** Client-generated ID used to correlate the persisted user message with its submission. */
++    clientMessageId?: string;
+     /** When streaming, how to queue the message: "steer" (interrupt) or "followUp" (wait). Required if streaming. */
+     streamingBehavior?: "steer" | "followUp";
+     /** Source of input for extension input event handlers. Defaults to "interactive". */
+diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
+--- a/dist/core/agent-session.js
++++ b/dist/core/agent-session.js
+@@ -889,6 +889,7 @@ export class AgentSession {
+                 role: "user",
+                 content: userContent,
+                 timestamp: Date.now(),
++                clientMessageId: options?.clientMessageId,
+             });
+             // Inject any pending "nextTurn" messages as context alongside the user message
+             for (const msg of this._pendingNextTurnMessages) {
+diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
+--- a/dist/core/agent-session.js
++++ b/dist/core/agent-session.js
+@@ -844,9 +844,9 @@ export class AgentSession {
+                 }
+                 if (options.streamingBehavior === "followUp") {
+-                    await this._queueFollowUp(expandedText, currentImages);
++                    await this._queueFollowUp(expandedText, currentImages, options.clientMessageId);
+                 }
+                 else {
+-                    await this._queueSteer(expandedText, currentImages);
++                    await this._queueSteer(expandedText, currentImages, options.clientMessageId);
+                 }
+                 preflightResult?.(true);
+                 return;
+@@ -1025,32 +1025,34 @@ export class AgentSession {
+     /**
+      * Internal: Queue a steering message (already expanded, no extension command check).
+      */
+-    async _queueSteer(text, images) {
++    async _queueSteer(text, images, clientMessageId) {
+         this._steeringMessages.push(text);
+         this._emitQueueUpdate();
+         const content = [{ type: "text", text }];
+         if (images) {
+             content.push(...images);
+         }
+         this.agent.steer({
+             role: "user",
+             content,
+             timestamp: Date.now(),
++            clientMessageId,
+         });
+     }
+     /**
+      * Internal: Queue a follow-up message (already expanded, no extension command check).
+      */
+-    async _queueFollowUp(text, images) {
++    async _queueFollowUp(text, images, clientMessageId) {
+         this._followUpMessages.push(text);
+         this._emitQueueUpdate();
+         const content = [{ type: "text", text }];
+         if (images) {
+             content.push(...images);
+         }
+         this.agent.followUp({
+             role: "user",
+             content,
+             timestamp: Date.now(),
++            clientMessageId,
+         });
+     }

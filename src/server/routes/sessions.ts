@@ -7,6 +7,15 @@ import { resolveUploadedFile } from "../pi-service-uploads";
 import type { UploadedFile } from "../pi-service";
 import type { RouteContext } from "./context";
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function parseClientMessageId(value: string | undefined): string {
+  if (!value || !UUID_PATTERN.test(value)) {
+    throw Object.assign(new Error("A valid clientMessageId is required"), { statusCode: 400 });
+  }
+  return value;
+}
+
 function formatContentDisposition(filename: string, disposition: "attachment" | "inline"): string {
   const fallback = filename.replace(/[^\x20-\x7e]+/g, "_").replace(/"/g, "");
   const encoded = encodeURIComponent(filename).replace(
@@ -167,6 +176,7 @@ export function registerSessionRoutes(context: RouteContext): void {
     async (request, reply) => {
       const files: UploadedFile[] = [];
       let text = "";
+      let clientMessageId: string | undefined;
       let streamingBehavior: "steer" | "followUp" | undefined;
 
       const parts = request.parts();
@@ -178,6 +188,8 @@ export function registerSessionRoutes(context: RouteContext): void {
           });
         } else if (part.fieldname === "text") {
           text = String(part.value ?? "");
+        } else if (part.fieldname === "clientMessageId") {
+          clientMessageId = String(part.value ?? "");
         } else if (part.fieldname === "streamingBehavior") {
           const value = String(part.value ?? "");
           if (value === "steer" || value === "followUp") {
@@ -186,7 +198,13 @@ export function registerSessionRoutes(context: RouteContext): void {
         }
       }
 
-      await service.prompt(request.params.sessionId, text, files, streamingBehavior);
+      await service.prompt(
+        request.params.sessionId,
+        text,
+        files,
+        parseClientMessageId(clientMessageId),
+        streamingBehavior,
+      );
       reply.send({ ok: true });
     },
   );

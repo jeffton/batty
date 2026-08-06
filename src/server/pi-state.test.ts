@@ -43,6 +43,23 @@ describe("createSessionState", () => {
 });
 
 describe("normalizeMessage", () => {
+  it("preserves client message IDs on user messages", () => {
+    const normalized = normalizeMessage(
+      {
+        role: "user",
+        content: [{ type: "text", text: "hello" }],
+        timestamp: 1,
+        clientMessageId: "client-message-1",
+      } as unknown as AgentMessage,
+      0,
+    );
+
+    expect(normalized).toMatchObject({
+      role: "user",
+      clientMessageId: "client-message-1",
+    });
+  });
+
   it("strips terminal formatting from bash execution output", () => {
     const message = {
       role: "bashExecution",

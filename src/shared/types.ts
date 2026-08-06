@@ -28,6 +28,7 @@ export type UiMessage =
       id: string;
       role: "user";
       timestamp: number;
+      clientMessageId?: string;
       blocks: UiContentBlock[];
     }
   | {

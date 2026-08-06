@@ -141,6 +141,7 @@ describe("prompt uploads", () => {
     const message = {
       role: "user",
       timestamp: 1,
+      clientMessageId: "client-message-1",
       content: [
         { type: "text", text: "Look at this" },
         { type: "image", mimeType: "image/png", data: imageData },
@@ -174,7 +175,10 @@ describe("prompt uploads", () => {
         url: expect.stringContaining("/batty/api/uploads/session-1/"),
       },
     ]);
+    expect(message.clientMessageId).toBe("client-message-1");
     expect(JSON.stringify(message)).not.toContain(imageData);
-    expect(await readFile(sessionFile, "utf8")).not.toContain(imageData!);
+    const persisted = await readFile(sessionFile, "utf8");
+    expect(persisted).toContain('"clientMessageId":"client-message-1"');
+    expect(persisted).not.toContain(imageData!);
   });
 });

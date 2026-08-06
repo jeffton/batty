@@ -677,6 +677,7 @@ export class PiService {
     sessionId: string,
     text: string,
     files: UploadedFile[],
+    clientMessageId: string,
     streamingBehavior?: "steer" | "followUp",
   ): Promise<void> {
     const webSession = this.requireSession(sessionId);
@@ -687,6 +688,7 @@ export class PiService {
 
     await webSession.session.prompt(promptText, {
       images: prepared.images,
+      clientMessageId,
       ...(streamingBehavior ? { streamingBehavior } : {}),
     });
     externalizeUploadedImagesInSession(webSession.session, prepared.uploadedImages);

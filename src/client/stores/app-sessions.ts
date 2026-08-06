@@ -310,7 +310,12 @@ export const sessionActions = {
     }
   },
 
-  async sendPrompt(this: AppActionContext, text: string, files: File[]): Promise<void> {
+  async sendPrompt(
+    this: AppActionContext,
+    text: string,
+    files: File[],
+    clientMessageId: string,
+  ): Promise<void> {
     if (!this.activeSession) {
       return;
     }
@@ -323,11 +328,17 @@ export const sessionActions = {
       this.activeSession.id,
       text,
       files,
+      clientMessageId,
       this.activeSession.isStreaming ? "followUp" : undefined,
     );
   },
 
-  async steerPrompt(this: AppActionContext, text: string, files: File[]): Promise<void> {
+  async steerPrompt(
+    this: AppActionContext,
+    text: string,
+    files: File[],
+    clientMessageId: string,
+  ): Promise<void> {
     if (!this.activeSession) {
       return;
     }
@@ -336,7 +347,7 @@ export const sessionActions = {
         void syncPushSubscription(false);
       }
     });
-    await sendPrompt(this.activeSession.id, text, files, "steer");
+    await sendPrompt(this.activeSession.id, text, files, clientMessageId, "steer");
   },
 
   async removeQueuedPrompt(

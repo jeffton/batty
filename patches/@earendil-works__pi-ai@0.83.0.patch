@@ -1,0 +1,12 @@
+diff --git a/dist/types.d.ts b/dist/types.d.ts
+--- a/dist/types.d.ts
++++ b/dist/types.d.ts
+@@ -283,6 +283,8 @@ export interface UserMessage {
+     role: "user";
+     content: string | (TextContent | ImageContent)[];
+     timestamp: number;
++    /** Client-generated ID used to correlate this message with its submission. */
++    clientMessageId?: string;
+ }
+ export interface AssistantMessage {
+     role: "assistant";

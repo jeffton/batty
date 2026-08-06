@@ -30,9 +30,7 @@ let optimisticMessageId = 0;
 type OptimisticUserMessage = Extract<UiMessage, { role: "user" }>;
 type PendingOptimisticMessage = {
   message: OptimisticUserMessage;
-  submittedText: string;
-  submittedFileNames: string[];
-  baselineMessageIds: Set<string>;
+  clientMessageId: string;
 };
 const optimisticMessagesBySessionId = ref<Record<string, PendingOptimisticMessage[]>>({});
 const activeOptimisticMessages = computed(() => {
@@ -147,9 +145,9 @@ function setThinkingLevel(level: string): void {
 
 function addOptimisticMessage(
   sessionId: string,
+  clientMessageId: string,
   text: string,
   files: File[],
-  baselineMessages: UiMessage[],
 ): string {
   const submittedText = text.trim();
   const submittedFileNames = files.map((file) => file.name);
@@ -160,6 +158,7 @@ function addOptimisticMessage(
     id: `optimistic-user-${Date.now()}-${++optimisticMessageId}`,
     role: "user",
     timestamp: Date.now(),
+    clientMessageId,
     blocks: [{ type: "text", text: displayText }],
   };
 
@@ -167,12 +166,7 @@ function addOptimisticMessage(
     ...optimisticMessagesBySessionId.value,
     [sessionId]: [
       ...(optimisticMessagesBySessionId.value[sessionId] ?? []),
-      {
-        message,
-        submittedText,
-        submittedFileNames,
-        baselineMessageIds: new Set(baselineMessages.map((candidate) => candidate.id)),
-      },
+      { message, clientMessageId },
     ],
   };
   return message.id;
@@ -191,39 +185,6 @@ function removeOptimisticMessage(sessionId: string, messageId: string): void {
   optimisticMessagesBySessionId.value = next;
 }
 
-function authoritativeText(message: OptimisticUserMessage): string {
-  return message.blocks
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("\n\n");
-}
-
-function matchesOptimisticMessage(
-  authoritative: OptimisticUserMessage,
-  pending: PendingOptimisticMessage,
-): boolean {
-  if (pending.baselineMessageIds.has(authoritative.id)) {
-    return false;
-  }
-
-  const text = authoritativeText(authoritative);
-  if (
-    pending.submittedText &&
-    text !== pending.submittedText &&
-    !text.startsWith(`${pending.submittedText}\n\n`)
-  ) {
-    return false;
-  }
-
-  return pending.submittedFileNames.every((fileName) => {
-    const escapedFileName = fileName
-      .replace(/&/g, "&amp;")
-      .replace(/"/g, "&quot;")
-      .replace(/</g, "&lt;");
-    return text.includes(fileName) || text.includes(escapedFileName);
-  });
-}
-
 function reconcileOptimisticMessage(): void {
   const session = store.activeSession;
   if (!session) {
@@ -234,17 +195,12 @@ function reconcileOptimisticMessage(): void {
   const userMessages = session.messages.filter(
     (message): message is OptimisticUserMessage => message.role === "user",
   );
-  const unmatchedUserMessages = [...userMessages];
-  const remaining = pending.filter((candidate) => {
-    const matchIndex = unmatchedUserMessages.findIndex((message) =>
-      matchesOptimisticMessage(message, candidate),
-    );
-    if (matchIndex < 0) {
-      return true;
-    }
-    unmatchedUserMessages.splice(matchIndex, 1);
-    return false;
-  });
+  const authoritativeClientMessageIds = new Set(
+    userMessages.flatMap((message) => (message.clientMessageId ? [message.clientMessageId] : [])),
+  );
+  const remaining = pending.filter(
+    (candidate) => !authoritativeClientMessageIds.has(candidate.clientMessageId),
+  );
   if (remaining.length === pending.length) {
     return;
   }
@@ -315,14 +271,16 @@ async function sendPrompt(text: string, files: File[]): Promise<void> {
   }
 
   composer.value?.clear();
-  const optimisticId = gateSessionId
-    ? addOptimisticMessage(gateSessionId, text, files, store.activeSession?.messages ?? [])
-    : undefined;
+  const clientMessageId = crypto.randomUUID();
+  const optimisticId =
+    gateSessionId && !text.trimStart().startsWith("/")
+      ? addOptimisticMessage(gateSessionId, clientMessageId, text, files)
+      : undefined;
   if (gateSessionId) {
     pendingIdlePromptSessionIds.add(gateSessionId);
   }
   try {
-    await store.sendPrompt(text, files);
+    await store.sendPrompt(text, files, clientMessageId);
   } catch (error) {
     if (before && shouldRestoreComposerAfterPromptError(before)) {
       if (optimisticId) {
@@ -362,11 +320,12 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
   }
 
   composer.value?.clear();
+  const clientMessageId = crypto.randomUUID();
   if (gateSessionId) {
     pendingIdlePromptSessionIds.add(gateSessionId);
   }
   try {
-    await store.steerPrompt(text, files);
+    await store.steerPrompt(text, files, clientMessageId);
   } catch (error) {
     if (before && shouldRestoreComposerAfterPromptError(before)) {
       composer.value?.restore(before.sessionId, text, files);

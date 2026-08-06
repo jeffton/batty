@@ -179,6 +179,7 @@ export function normalizeMessage(
       id: messageId("user", message.timestamp, index),
       role: "user",
       timestamp: message.timestamp,
+      clientMessageId: message.clientMessageId,
       blocks: [...normalizeBlocks(message.content, options), ...normalizeBattyAttachments(message)],
     };
   }

@@ -344,10 +344,12 @@ export async function sendPrompt(
   sessionId: string,
   text: string,
   files: File[],
+  clientMessageId: string,
   streamingBehavior?: "steer" | "followUp",
 ): Promise<void> {
   const formData = new FormData();
   formData.set("text", text);
+  formData.set("clientMessageId", clientMessageId);
   if (streamingBehavior) {
     formData.set("streamingBehavior", streamingBehavior);
   }

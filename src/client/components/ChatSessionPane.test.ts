@@ -172,14 +172,26 @@ describe("ChatSessionPane", () => {
 
     await wrapper.get(".submit-prompt").trigger("click");
     expect(sendPrompt).toHaveBeenCalledTimes(1);
-    expect(sendPrompt).toHaveBeenLastCalledWith("web-session-a", "hello", [], undefined);
+    expect(sendPrompt).toHaveBeenLastCalledWith(
+      "web-session-a",
+      "hello",
+      [],
+      expect.any(String),
+      undefined,
+    );
 
     store.activeSession = makeSession("session-b");
     await nextTick();
     await wrapper.get(".submit-prompt").trigger("click");
 
     expect(sendPrompt).toHaveBeenCalledTimes(2);
-    expect(sendPrompt).toHaveBeenLastCalledWith("web-session-b", "hello", [], undefined);
+    expect(sendPrompt).toHaveBeenLastCalledWith(
+      "web-session-b",
+      "hello",
+      [],
+      expect.any(String),
+      undefined,
+    );
 
     store.activeSession = makeSession("session-a");
     await nextTick();
@@ -211,12 +223,14 @@ describe("ChatSessionPane", () => {
 
     expect(wrapper.get(".optimistic-messages").text()).toBe("hello");
     expect(store.activeSession.messages).toEqual([]);
+    const clientMessageId = sendPrompt.mock.calls[0]?.[3] as string;
 
     const otherUserMessage: Extract<UiMessage, { role: "user" }> = {
       id: "user-other-client",
       role: "user",
       timestamp: Date.now(),
-      blocks: [{ type: "text", text: "from another client" }],
+      clientMessageId: crypto.randomUUID(),
+      blocks: [{ type: "text", text: "hello" }],
     };
     store.activeSession = makeSession("session-a", { messages: [otherUserMessage] });
     await nextTick();
@@ -229,7 +243,8 @@ describe("ChatSessionPane", () => {
           id: "user-1",
           role: "user",
           timestamp: Date.now(),
-          blocks: [{ type: "text", text: "hello" }],
+          clientMessageId,
+          blocks: [{ type: "text", text: "server-transformed content" }],
         },
       ],
     });
@@ -237,6 +252,33 @@ describe("ChatSessionPane", () => {
 
     expect(wrapper.get(".optimistic-messages").text()).toBe("");
     pendingSend.resolve(undefined);
+  });
+
+  it("does not leave an optimistic message for slash commands", async () => {
+    const pendingSend = deferred();
+    sendPrompt.mockReturnValue(pendingSend.promise);
+    const store = useAppStore();
+    store.activeSession = makeSession("session-a");
+    store.selectedWorkspaceId = "batty";
+
+    const wrapper = shallowMount(ChatSessionPane, {
+      global: {
+        stubs: {
+          ChatHeader: true,
+          MessageComposer: MessageComposerStub,
+          SessionTranscriptView: SessionTranscriptStub,
+        },
+      },
+    });
+
+    const result = (
+      wrapper.vm as unknown as { sendPrompt: (text: string, files: File[]) => Promise<void> }
+    ).sendPrompt("/command", []);
+    await nextTick();
+
+    expect(wrapper.get(".optimistic-messages").text()).toBe("");
+    pendingSend.resolve(undefined);
+    await result;
   });
 
   it("removes the optimistic prompt when a failed send restores the draft", async () => {

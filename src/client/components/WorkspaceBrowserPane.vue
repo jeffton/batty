@@ -49,12 +49,23 @@ const createWorkspaceRootOptions = computed(() => store.workspaceRoots);
 
 const showCreateWorkspaceRootSelect = computed(() => createWorkspaceRootOptions.value.length > 1);
 
-const sessions = computed(() => store.workspaceSessions);
+function sessionIsVisible(session: SessionSummary, workspaceId: string | undefined): boolean {
+  return (
+    session.dailySession?.exists !== false ||
+    store.workspaces.some((workspace) => workspace.id === workspaceId && workspace.isAssistant)
+  );
+}
+
+const sessions = computed(() =>
+  store.workspaceSessions.filter((session) => sessionIsVisible(session, store.selectedWorkspaceId)),
+);
 
 function sessionsForWorkspace(workspaceId: string): SessionSummary[] {
   return workspaceId === store.selectedWorkspaceId
     ? sessions.value
-    : (store.sessionsByWorkspace[workspaceId] ?? []);
+    : (store.sessionsByWorkspace[workspaceId] ?? []).filter((session) =>
+        sessionIsVisible(session, workspaceId),
+      );
 }
 
 const filteredWorkspaces = computed(() => {

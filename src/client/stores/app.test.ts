@@ -160,14 +160,19 @@ describe("app store session streams", () => {
     const session = makeSession("session-a");
 
     store.openWorkspaceStream("batty");
-    const workspaceStream = MockEventSource.instances[0];
-    expect(store.workspaceConnectionState).toBe("connecting");
+    const firstWorkspaceStream = MockEventSource.instances[0];
+    firstWorkspaceStream?.onopen?.(new Event("open"));
+
+    store.openWorkspaceStream("other");
+    const workspaceStream = MockEventSource.instances[1];
+    expect(firstWorkspaceStream?.closed).toBe(true);
+    expect(store.workspaceConnectionState).toBe("online");
     workspaceStream?.onopen?.(new Event("open"));
     expect(store.workspaceConnectionState).toBe("online");
 
     store.activeSession = session;
     store.openStream(session);
-    const sessionStream = MockEventSource.instances[1];
+    const sessionStream = MockEventSource.instances[2];
     expect(store.connectionState).toBe("connecting");
     expect(store.workspaceConnectionState).toBe("online");
 

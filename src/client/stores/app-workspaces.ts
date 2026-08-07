@@ -181,7 +181,6 @@ export const workspaceActions = {
     }
 
     this.closeWorkspaceStream();
-    this.workspaceConnectionState = "connecting";
     const source = new EventSource(workspaceEventsPath(workspaceId));
     workspaceEventSource = source;
     source.onopen = () => {

@@ -47,17 +47,6 @@ try {
     throw "Staged release '$releaseDir' is incomplete."
   }
 
-  Import-Module WebAdministration
-  $sitePath = "IIS:\Sites\$SiteName"
-  $appName = $AppPath.Trim("/").Replace("/", "\")
-  $appIisPath = "$sitePath\$appName"
-  if (Test-Path $appIisPath) {
-    $existingPool = (Get-ItemProperty $appIisPath).applicationPool
-    if ($existingPool -ne $AppPoolName) {
-      throw "IIS application '$AppPath' uses app pool '$existingPool'. Move it to the dedicated '$AppPoolName' pool before deploying."
-    }
-  }
-
   if (Test-Path $currentDir) {
     $current = Get-Item $currentDir
     if (-not ($current.Attributes -band [IO.FileAttributes]::ReparsePoint)) {

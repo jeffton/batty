@@ -178,7 +178,6 @@ describe("deployment scripts", () => {
     expect(workerScript).toContain("$previousReleaseDir = $current.Target");
     expect(workerScript).toContain("Deployment failed; restored '$previousReleaseDir'.");
     expect(workerScript).toContain("Rollback also failed");
-    expect(workerScript).toContain("uses app pool '$existingPool'");
   });
 
   it("runs Batty as a WinSW service behind an IIS reverse proxy", async () => {

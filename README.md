@@ -346,4 +346,4 @@ The deployment:
 - configures IIS as a reverse proxy and verifies both local and public health endpoints
 - writes service logs under `D:\Batty\app\logs` and handoff logs under `D:\Batty\app\deploy-logs`
 
-Inspect the service with `Get-Service Batty`. The service runs as LocalSystem and must be able to access the configured Batty root and workspace roots.
+Inspect the service with `Get-Service Batty`. A new service initially runs as LocalSystem; deployment updates preserve any account configured through Windows Services. That account must be able to access the configured Batty root and workspace roots.

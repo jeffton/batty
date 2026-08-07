@@ -193,6 +193,11 @@ describe("deployment scripts", () => {
     );
     expect(serviceScript).toContain('<env name="BATTY_PORT" value="$Port" />');
     expect(serviceScript).toContain('<onfailure action="restart" delay="10 sec" />');
+    expect(serviceScript).toContain(
+      "if (-not (Get-Service -Name Batty -ErrorAction SilentlyContinue)) {",
+    );
+    expect(serviceScript).not.toContain("serviceaccount");
+    expect(serviceScript).not.toContain("uninstall");
     expect(releaseScript).toContain('<rule name="Batty reverse proxy" stopProcessing="true">');
     expect(releaseScript).not.toContain("AspNetCoreModuleV2");
     expect(releaseScript).not.toContain("%ASPNETCORE_PORT%");

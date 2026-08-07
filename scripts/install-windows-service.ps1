@@ -68,6 +68,7 @@ $xml = @"
 "@
 Set-Content -Path $serviceConfig -Value $xml -NoNewline
 
+# Install once so later deployments preserve the service account configured in Windows.
 if (-not (Get-Service -Name Batty -ErrorAction SilentlyContinue)) {
   & $serviceExe install
   if ($LASTEXITCODE -ne 0) {

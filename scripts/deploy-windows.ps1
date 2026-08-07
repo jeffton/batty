@@ -5,7 +5,9 @@ param(
   [string]$PublicOrigin = "https://t14-dt-pc1028.cbrain.net",
   [string]$BaseUrl = "/batty",
   [string]$SiteName = "Default Web Site",
-  [string]$AppPath = "batty"
+  [string]$AppPath = "batty",
+  [string]$AppPoolName = "BattyProxy",
+  [int]$BackendPort = 3147
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,6 +19,21 @@ function Step([string]$message) {
 
 function Ensure-Directory([string]$path) {
   New-Item -ItemType Directory -Force -Path $path | Out-Null
+}
+
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+  [Security.Principal.WindowsBuiltInRole]::Administrator
+)
+if (-not $isAdmin) {
+  throw "Windows deployment must run from an elevated PowerShell session."
+}
+
+Import-Module WebAdministration
+if (-not (Get-WebGlobalModule -Name RewriteModule -ErrorAction SilentlyContinue)) {
+  throw "IIS URL Rewrite 2 is required."
+}
+if (-not (Get-WebGlobalModule -Name ApplicationRequestRouting -ErrorAction SilentlyContinue)) {
+  throw "IIS Application Request Routing 3 is required."
 }
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -66,29 +83,25 @@ Step "Packaging release"
 & (Join-Path $scriptDir "install-release.ps1") `
   -InstallRoot $InstallRoot `
   -ReleaseName $releaseName `
-  -BattyRoot $BattyRoot
+  -BaseUrl $BaseUrl `
+  -BackendPort $BackendPort
 
-$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
-  [Security.Principal.WindowsBuiltInRole]::Administrator
-)
+Step "Configuring Windows service"
+& (Join-Path $scriptDir "install-windows-service.ps1") `
+  -InstallRoot $InstallRoot `
+  -BattyRoot $BattyRoot `
+  -Port $BackendPort
 
 Step "Handing off deployment reload"
-$handoffParameters = @{
-  InstallRoot = $InstallRoot
-  ReleaseName = $releaseName
-  SiteName = $SiteName
-  AppPath = $AppPath
-  ConfigureIis = $isAdmin
-}
-& (Join-Path $scriptDir "handoff-restart-windows.ps1") @handoffParameters
+& (Join-Path $scriptDir "handoff-restart-windows.ps1") `
+  -InstallRoot $InstallRoot `
+  -ReleaseName $releaseName `
+  -SiteName $SiteName `
+  -AppPath $AppPath `
+  -AppPoolName $AppPoolName `
+  -PublicOrigin $PublicOrigin `
+  -BaseUrl $BaseUrl `
+  -BackendPort $BackendPort
 
 Write-Host ""
-if ($isAdmin) {
-  Write-Host "Deployment to $PublicOrigin$BaseUrl will activate after the handoff delay."
-  exit 0
-}
-
-Write-Host "The release will be activated after the handoff delay."
-Write-Host "Finish the IIS step from an elevated PowerShell session afterward:"
-Write-Host "  powershell -ExecutionPolicy Bypass -File '$scriptDir\configure-iis-app.ps1' -SiteName '$SiteName' -AppPath '$AppPath' -PhysicalPath '$InstallRoot\current'"
-exit 2
+Write-Host "Deployment to $PublicOrigin$BaseUrl will activate after the handoff delay."

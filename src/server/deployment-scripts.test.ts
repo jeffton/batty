@@ -146,9 +146,11 @@ describe("deployment scripts", () => {
       "utf8",
     );
     expect(script).toContain('(Get-Date).ToUniversalTime().ToString("yyyyMMddHHmmssfff")');
-    expect(script).toContain("if (-not (Test-Path $optionsPath)) {");
+    expect(script).toContain("if (Test-Path $optionsPath) {");
     expect(script).toContain("workspacesRoots = @($WorkspacesRoots)");
-    expect(script).not.toContain("Get-Content $optionsPath");
+    expect(script).toContain("Get-Content -Raw $optionsPath | ConvertFrom-Json");
+    expect(script).toContain("IIS AppPath '$AppPath' and Batty BaseUrl '$BaseUrl'");
+    expect(script).toContain("is configured for baseUrl '$configuredBaseUrl'");
     expect(script).not.toContain("pnpm test");
     expect(script).not.toMatch(/\bworkspacesRoot\s*=/);
   });
@@ -173,6 +175,10 @@ describe("deployment scripts", () => {
     expect(workerScript.indexOf("New-Item -ItemType Junction")).toBeLessThan(
       workerScript.indexOf("Start-Service -Name Batty"),
     );
+    expect(workerScript).toContain("$previousReleaseDir = $current.Target");
+    expect(workerScript).toContain("Deployment failed; restored '$previousReleaseDir'.");
+    expect(workerScript).toContain("Rollback also failed");
+    expect(workerScript).toContain("uses app pool '$existingPool'");
   });
 
   it("runs Batty as a WinSW service behind an IIS reverse proxy", async () => {
@@ -191,6 +197,7 @@ describe("deployment scripts", () => {
     expect(releaseScript).toContain('<rule name="Batty reverse proxy" stopProcessing="true">');
     expect(releaseScript).not.toContain("AspNetCoreModuleV2");
     expect(releaseScript).not.toContain("%ASPNETCORE_PORT%");
+    expect(releaseScript).not.toContain('<webSocket enabled="true" />');
     expect(iisScript).toContain("Get-WebGlobalModule -Name RewriteModule");
     expect(iisScript).toContain("Get-WebGlobalModule -Name ApplicationRequestRouting");
     expect(iisScript).toContain('-Filter "system.webServer/proxy" -Name "enabled" -Value $true');

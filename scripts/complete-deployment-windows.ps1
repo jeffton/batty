@@ -28,6 +28,17 @@ function Wait-ForUrl([string]$url) {
   }
 }
 
+function Remove-Junction([string]$path) {
+  cmd /d /c rmdir "$path" | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Could not remove current junction (exit code $LASTEXITCODE)."
+  }
+}
+
+$activationStarted = $false
+$previousReleaseDir = $null
+$currentDir = Join-Path $InstallRoot "current"
+
 try {
   Start-Sleep -Seconds $DelaySeconds
 
@@ -42,27 +53,27 @@ try {
   $appIisPath = "$sitePath\$appName"
   if (Test-Path $appIisPath) {
     $existingPool = (Get-ItemProperty $appIisPath).applicationPool
-    if ((Get-WebAppPoolState -Name $existingPool).Value -ne "Stopped") {
-      Stop-WebAppPool -Name $existingPool
+    if ($existingPool -ne $AppPoolName) {
+      throw "IIS application '$AppPath' uses app pool '$existingPool'. Move it to the dedicated '$AppPoolName' pool before deploying."
     }
   }
 
-  $service = Get-Service -Name Batty
-  if ($service.Status -ne "Stopped") {
-    Stop-Service -Name Batty
-    (Get-Service -Name Batty).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(30))
-  }
-
-  $currentDir = Join-Path $InstallRoot "current"
   if (Test-Path $currentDir) {
     $current = Get-Item $currentDir
     if (-not ($current.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
       throw "Refusing to replace non-junction '$currentDir'."
     }
-    cmd /d /c rmdir "$currentDir" | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-      throw "Could not remove current junction (exit code $LASTEXITCODE)."
-    }
+    $previousReleaseDir = $current.Target
+  }
+
+  $activationStarted = $true
+  if ((Get-Service -Name Batty).Status -ne "Stopped") {
+    Stop-Service -Name Batty
+    (Get-Service -Name Batty).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(30))
+  }
+
+  if (Test-Path $currentDir) {
+    Remove-Junction $currentDir
   }
   New-Item -ItemType Junction -Path $currentDir -Target $releaseDir | Out-Null
 
@@ -83,6 +94,31 @@ try {
   Wait-ForUrl "$($PublicOrigin.TrimEnd('/'))$backendPath/healthz"
 
   Write-Host "Activated Batty release $ReleaseName"
+} catch {
+  $deploymentError = $_
+  if ($activationStarted -and $previousReleaseDir) {
+    try {
+      if ((Get-Service -Name Batty).Status -ne "Stopped") {
+        Stop-Service -Name Batty
+        (Get-Service -Name Batty).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(30))
+      }
+      if (Test-Path $currentDir) {
+        Remove-Junction $currentDir
+      }
+      New-Item -ItemType Junction -Path $currentDir -Target $previousReleaseDir | Out-Null
+      & (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "configure-iis-app.ps1") `
+        -SiteName $SiteName `
+        -AppPath $AppPath `
+        -PhysicalPath $currentDir `
+        -AppPoolName $AppPoolName
+      Start-Service -Name Batty
+      (Get-Service -Name Batty).WaitForStatus("Running", [TimeSpan]::FromSeconds(30))
+      Write-Warning "Deployment failed; restored '$previousReleaseDir'."
+    } catch {
+      throw "Deployment failed: $deploymentError Rollback also failed: $_"
+    }
+  }
+  throw $deploymentError
 } finally {
   Stop-Transcript | Out-Null
 }

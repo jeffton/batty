@@ -21,6 +21,20 @@ function Ensure-Directory([string]$path) {
   New-Item -ItemType Directory -Force -Path $path | Out-Null
 }
 
+function Normalize-BaseUrl([string]$path) {
+  $normalized = "/" + $path.Trim().Trim("/").Replace("\", "/")
+  if ($normalized -eq "/") {
+    return "/"
+  }
+  return $normalized
+}
+
+$BaseUrl = Normalize-BaseUrl $BaseUrl
+$applicationBaseUrl = Normalize-BaseUrl $AppPath
+if ($applicationBaseUrl -ne $BaseUrl) {
+  throw "IIS AppPath '$AppPath' and Batty BaseUrl '$BaseUrl' must identify the same URL path."
+}
+
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
   [Security.Principal.WindowsBuiltInRole]::Administrator
 )
@@ -66,7 +80,12 @@ try {
   Pop-Location
 }
 
-if (-not (Test-Path $optionsPath)) {
+if (Test-Path $optionsPath) {
+  $configuredBaseUrl = Normalize-BaseUrl ((Get-Content -Raw $optionsPath | ConvertFrom-Json).baseUrl)
+  if ($configuredBaseUrl -ne $BaseUrl) {
+    throw "Batty root '$BattyRoot' is configured for baseUrl '$configuredBaseUrl', not '$BaseUrl'."
+  }
+} else {
   Step "Initializing Batty root configuration"
   Ensure-Directory $optionsDir
   [ordered]@{

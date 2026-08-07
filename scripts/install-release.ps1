@@ -55,7 +55,6 @@ $webConfig = @"
         </rule>
       </rules>
     </rewrite>
-    <webSocket enabled="true" />
   </system.webServer>
 </configuration>
 "@

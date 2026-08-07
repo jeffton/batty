@@ -1,11 +1,11 @@
 import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
-import type { ServerResponse } from "node:http";
 import { listWorkspaces, resolveWorkspace } from "../workspaces";
 import { resolveSentFile } from "../send-files";
 import { resolveUploadedFile } from "../pi-service-uploads";
 import type { UploadedFile } from "../pi-service";
 import type { RouteContext } from "./context";
+import { startEventStream } from "./event-stream";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -65,17 +65,6 @@ function parseRangeHeader(
     start,
     end: Math.min(end, size - 1),
   };
-}
-
-export function startEventStream(
-  response: Pick<ServerResponse, "writeHead" | "flushHeaders">,
-): void {
-  response.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache, no-transform",
-    Connection: "keep-alive",
-  });
-  response.flushHeaders();
 }
 
 async function ensureSessionLoaded(

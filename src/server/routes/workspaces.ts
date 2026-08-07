@@ -2,6 +2,7 @@ import type { WorkspaceSnapshot } from "@/shared/types";
 import { setAssistantWorkspace, setWorkspacePinned } from "../options";
 import { createWorkspace, listWorkspaces, resolveWorkspace } from "../workspaces";
 import type { RouteContext } from "./context";
+import { startEventStream } from "./event-stream";
 
 export function registerWorkspaceRoutes(
   context: RouteContext,
@@ -65,13 +66,8 @@ export function registerWorkspaceRoutes(
   app.get<{ Params: { workspaceId: string } }>(
     routePath("/api/workspaces/:workspaceId/events"),
     async (request, reply) => {
+      startEventStream(reply.raw);
       const snapshot = await workspaceSnapshot(request.params.workspaceId);
-
-      reply.raw.writeHead(200, {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive",
-      });
 
       const send = (payload: WorkspaceSnapshot) => {
         reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);

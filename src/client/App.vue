@@ -129,6 +129,8 @@ async function syncRouteToStore(): Promise<void> {
 
   const workspaceId = routeWorkspaceId ?? store.selectedWorkspaceId ?? store.workspaces[0]?.id;
   const sessionId = typeof route.params.sessionId === "string" ? route.params.sessionId : undefined;
+  const routeIsOffline = () =>
+    (sessionId ? store.connectionState : store.workspaceConnectionState) === "offline";
 
   if (!workspaceId) {
     store.clearRouteLoading();
@@ -150,7 +152,7 @@ async function syncRouteToStore(): Promise<void> {
       store.clearActiveSession();
     }
 
-    if (store.connectionState === "offline") {
+    if (routeIsOffline()) {
       const hydrated = await hydrateRouteFromCache(
         workspaceId,
         sessionId,
@@ -165,7 +167,7 @@ async function syncRouteToStore(): Promise<void> {
     try {
       if (sessionId) {
         void store.loadWorkspaceSessions(workspaceId).catch((error) => {
-          if (!navigator.onLine || store.connectionState === "offline") {
+          if (!navigator.onLine || routeIsOffline()) {
             store.markOffline();
             return;
           }
@@ -179,7 +181,7 @@ async function syncRouteToStore(): Promise<void> {
         ]);
       }
     } catch (error) {
-      if (!navigator.onLine || store.connectionState === "offline") {
+      if (!navigator.onLine || routeIsOffline()) {
         store.markOffline();
         const hydrated = await hydrateRouteFromCache(
           workspaceId,

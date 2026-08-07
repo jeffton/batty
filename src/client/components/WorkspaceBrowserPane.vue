@@ -36,7 +36,7 @@ const startingDailySession = ref(false);
 const openingSessionId = ref<string>();
 const createWorkspaceInput = ref<HTMLInputElement | null>(null);
 const createWorkspacePopover = ref<HTMLElement | null>(null);
-const actionsDisabled = computed(() => store.connectionState !== "online");
+const actionsDisabled = computed(() => store.workspaceConnectionState !== "online");
 const { setPaneTransition } = usePaneTransition();
 
 const assistantWorkspace = computed(() =>
@@ -104,7 +104,7 @@ const sessionListLoading = computed(() => {
 });
 
 const connectionDescription = computed(() => {
-  switch (store.connectionState) {
+  switch (store.workspaceConnectionState) {
     case "online":
       return "Connected";
     case "connecting":
@@ -302,7 +302,7 @@ watch(
     <WorkspaceBrowserHeader
       :popover-id="PROVIDER_AUTH_POPOVER_ID"
       :popover-anchor="PROVIDER_AUTH_POPOVER_ANCHOR"
-      :connection-state="store.connectionState"
+      :connection-state="store.workspaceConnectionState"
       :connection-description="connectionDescription"
       :search-open="searchOpen"
       :search-query="searchQuery"

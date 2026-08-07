@@ -96,7 +96,7 @@ describe("loadConfig", () => {
     const config = await loadConfig(battyDir);
 
     expect(config.selfPath).toBe("/opt/batty/current");
-    expect(config.publicDir).toBe("/opt/batty/current/dist/client");
+    expect(config.publicDir).toBe(path.join("/opt/batty/current", "dist", "client"));
     expect(config.sentFilesDir).toBe(path.join(battyDir, ".batty", "sent-files"));
   });
 });

@@ -164,9 +164,11 @@ describe("pi-paths", () => {
   });
 
   it("stores sessions under <batty-root>/.batty/sessions/<workspace>", () => {
-    expect(battySessionRootDir({ battyDir: "/tmp/root" })).toBe("/tmp/root/.batty/sessions");
-    expect(workspaceSessionDir({ battyDir: "/tmp/root" }, "demo")).toBe(
-      "/tmp/root/.batty/sessions/demo",
+    const battyDir = path.join("tmp", "root");
+
+    expect(battySessionRootDir({ battyDir })).toBe(path.join(battyDir, ".batty", "sessions"));
+    expect(workspaceSessionDir({ battyDir }, "demo")).toBe(
+      path.join(battyDir, ".batty", "sessions", "demo"),
     );
   });
 });

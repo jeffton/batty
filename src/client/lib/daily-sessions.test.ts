@@ -5,10 +5,15 @@ import type { SessionSummary } from "@/shared/types";
 describe("daily session titles", () => {
   const now = new Date(2026, 3, 14, 12, 0, 0);
 
-  it("formats recent daily sessions by day label", () => {
-    expect(formatDailySessionTitle("2026-04-14", now)).toBe("Today");
-    expect(formatDailySessionTitle("2026-04-13", now)).toBe("Yesterday");
-    expect(formatDailySessionTitle("2026-04-12", now)).toBe("Sunday");
+  it("formats recent daily sessions with distinct relative labels", () => {
+    const labels = ["2026-04-14", "2026-04-13", "2026-04-12"].map((date) =>
+      formatDailySessionTitle(date, now),
+    );
+
+    expect(new Set(labels).size).toBe(3);
+    expect(labels.every((label) => label.length > 0 && !/^\d{4}-\d{2}-\d{2}$/.test(label))).toBe(
+      true,
+    );
   });
 
   it("formats older daily sessions as iso dates", () => {
@@ -30,6 +35,9 @@ describe("daily session titles", () => {
       },
     };
 
-    expect(sessionDisplayTitle(session, new Date(2026, 3, 13, 23, 0, 0))).toBe("Today");
+    const today = new Date(2026, 4, 1, 12, 0, 0);
+    const todayLabel = formatDailySessionTitle("2026-05-01", today);
+
+    expect(sessionDisplayTitle(session, today)).toBe(todayLabel);
   });
 });

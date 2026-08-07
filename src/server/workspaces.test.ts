@@ -117,18 +117,18 @@ describe("workspaces", () => {
     await fs.mkdir(path.join(secondRoot, "alpha"));
     await fs.mkdir(path.join(config.workspacesRoots[0]!, "beta"));
 
-    const created = await createWorkspace(config, "aardvark", secondRoot);
+    const created = await createWorkspace(config, "delta", secondRoot);
     const workspaces = await listWorkspaces(config);
 
     expect(workspaces.map((workspace) => workspace.label)).toEqual([
-      "aardvark",
       "alpha",
       "beta",
+      "delta",
       "zeta",
     ]);
     expect(workspaces.every((workspace) => workspace.rootPath)).toBe(true);
     expect(workspaces.find((workspace) => workspace.label === "alpha")?.rootPath).toBe(secondRoot);
-    const stats = await fs.stat(path.join(secondRoot, "aardvark"));
+    const stats = await fs.stat(path.join(secondRoot, "delta"));
     expect(created.rootPath).toBe(secondRoot);
     expect(stats.isDirectory()).toBe(true);
   });

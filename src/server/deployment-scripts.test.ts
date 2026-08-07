@@ -146,40 +146,64 @@ describe("deployment scripts", () => {
       "utf8",
     );
     expect(script).toContain('(Get-Date).ToUniversalTime().ToString("yyyyMMddHHmmssfff")');
-    expect(script).toContain("if (-not (Test-Path $optionsPath)) {");
+    expect(script).toContain("if (Test-Path $optionsPath) {");
     expect(script).toContain("workspacesRoots = @($WorkspacesRoots)");
-    expect(script).not.toContain("Get-Content $optionsPath");
+    expect(script).toContain("Get-Content -Raw $optionsPath | ConvertFrom-Json");
+    expect(script).toContain("IIS AppPath '$AppPath' and Batty BaseUrl '$BaseUrl'");
+    expect(script).toContain("is configured for baseUrl '$configuredBaseUrl'");
     expect(script).not.toContain("pnpm test");
     expect(script).not.toMatch(/\bworkspacesRoot\s*=/);
   });
 
-  it("hands Windows activation to a detached process after a delay", async () => {
+  it("hands Windows service activation to a detached process after a delay", async () => {
     const [deployScript, handoffScript, workerScript] = await Promise.all([
       fs.readFile(path.join(process.cwd(), "scripts", "deploy-windows.ps1"), "utf8"),
       fs.readFile(path.join(process.cwd(), "scripts", "handoff-restart-windows.ps1"), "utf8"),
       fs.readFile(path.join(process.cwd(), "scripts", "complete-deployment-windows.ps1"), "utf8"),
     ]);
 
+    expect(deployScript).toContain('Step "Configuring Windows service"');
     expect(deployScript).toContain('Step "Handing off deployment reload"');
     expect(deployScript).toContain('Join-Path $scriptDir "handoff-restart-windows.ps1"');
     expect(handoffScript).toContain("Invoke-CimMethod -ClassName Win32_Process");
     expect(workerScript.indexOf("Start-Sleep")).toBeLessThan(
+      workerScript.indexOf("Stop-Service -Name Batty"),
+    );
+    expect(workerScript.indexOf("Stop-Service -Name Batty")).toBeLessThan(
       workerScript.indexOf("New-Item -ItemType Junction"),
     );
+    expect(workerScript.indexOf("New-Item -ItemType Junction")).toBeLessThan(
+      workerScript.indexOf("Start-Service -Name Batty"),
+    );
+    expect(workerScript).toContain("$previousReleaseDir = $current.Target");
+    expect(workerScript).toContain("Deployment failed; restored '$previousReleaseDir'.");
+    expect(workerScript).toContain("Rollback also failed");
   });
 
-  it("preserves the identity of an existing IIS application pool", async () => {
-    const script = await fs.readFile(
-      path.join(process.cwd(), "scripts", "configure-iis-app.ps1"),
-      "utf8",
-    );
-    const poolCreationBlock = script.match(
-      /if \(-not \(Test-Path "IIS:\\AppPools\\\$AppPoolName"\)\) \{[\s\S]*?\r?\n\}/,
-    )?.[0];
+  it("runs Batty as a WinSW service behind an IIS reverse proxy", async () => {
+    const [serviceScript, releaseScript, iisScript] = await Promise.all([
+      fs.readFile(path.join(process.cwd(), "scripts", "install-windows-service.ps1"), "utf8"),
+      fs.readFile(path.join(process.cwd(), "scripts", "install-release.ps1"), "utf8"),
+      fs.readFile(path.join(process.cwd(), "scripts", "configure-iis-app.ps1"), "utf8"),
+    ]);
 
-    expect(poolCreationBlock).toContain(
-      'Set-ItemProperty "IIS:\\AppPools\\$AppPoolName" -Name processModel.identityType -Value "ApplicationPoolIdentity"',
+    expect(serviceScript).toContain('$winSwVersion = "2.12.0"');
+    expect(serviceScript).toContain(
+      '$winSwSha256 = "05b82d46ad331cc16bdc00de5c6332c1ef818df8ceefcd49c726553209b3a0da"',
     );
-    expect(script.match(/processModel\.identityType/g)).toHaveLength(1);
+    expect(serviceScript).toContain('<env name="BATTY_PORT" value="$Port" />');
+    expect(serviceScript).toContain('<onfailure action="restart" delay="10 sec" />');
+    expect(serviceScript).toContain(
+      "if (-not (Get-Service -Name Batty -ErrorAction SilentlyContinue)) {",
+    );
+    expect(serviceScript).not.toContain("serviceaccount");
+    expect(serviceScript).not.toContain("uninstall");
+    expect(releaseScript).toContain('<rule name="Batty reverse proxy" stopProcessing="true">');
+    expect(releaseScript).not.toContain("AspNetCoreModuleV2");
+    expect(releaseScript).not.toContain("%ASPNETCORE_PORT%");
+    expect(releaseScript).not.toContain('<webSocket enabled="true" />');
+    expect(iisScript).toContain("Get-WebGlobalModule -Name RewriteModule");
+    expect(iisScript).toContain("Get-WebGlobalModule -Name ApplicationRequestRouting");
+    expect(iisScript).toContain('-Filter "system.webServer/proxy" -Name "enabled" -Value $true');
   });
 });

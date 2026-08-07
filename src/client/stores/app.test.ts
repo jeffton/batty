@@ -155,6 +155,28 @@ describe("app store session streams", () => {
     expect(store.connectionState).toBe("online");
   });
 
+  it("tracks workspace and session stream connections independently", () => {
+    const store = useAppStore();
+    const session = makeSession("session-a");
+
+    store.openWorkspaceStream("batty");
+    const workspaceStream = MockEventSource.instances[0];
+    expect(store.workspaceConnectionState).toBe("connecting");
+    workspaceStream?.onopen?.(new Event("open"));
+    expect(store.workspaceConnectionState).toBe("online");
+
+    store.activeSession = session;
+    store.openStream(session);
+    const sessionStream = MockEventSource.instances[1];
+    expect(store.connectionState).toBe("connecting");
+    expect(store.workspaceConnectionState).toBe("online");
+
+    sessionStream?.onopen?.(new Event("open"));
+    workspaceStream?.onerror?.(new Event("error"));
+    expect(store.connectionState).toBe("online");
+    expect(store.workspaceConnectionState).toBe("connecting");
+  });
+
   it("keeps one stream when the same session is selected again", () => {
     const store = useAppStore();
     const session = makeSession("session-a", { revision: 12 });

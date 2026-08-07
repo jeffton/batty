@@ -1,9 +1,8 @@
 param(
   [string]$InstallRoot = "D:\Batty\app",
   [string]$ReleaseName,
-  [string]$BattyRoot = "D:\Batty\root",
-  [string]$NodePath = "",
-  [string]$BindHost = "127.0.0.1"
+  [string]$BaseUrl = "/batty",
+  [int]$BackendPort = 3147
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,17 +14,12 @@ if ([string]::IsNullOrWhiteSpace($ReleaseName)) {
   $ReleaseName = (git -C $repoDir rev-parse --short HEAD).Trim()
 }
 
-if ([string]::IsNullOrWhiteSpace($NodePath)) {
-  $NodePath = (Get-Command node).Source
-}
-
 function XmlEscape([string]$value) {
   return [System.Security.SecurityElement]::Escape($value)
 }
 
 $releasesDir = Join-Path $InstallRoot "releases"
 $releaseDir = Join-Path $releasesDir $ReleaseName
-$currentDir = Join-Path $InstallRoot "current"
 $tmpDir = Join-Path $InstallRoot (".release-{0}.{1}" -f $ReleaseName, [System.Guid]::NewGuid().ToString("N"))
 
 New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
@@ -43,35 +37,25 @@ Copy-Item (Join-Path $repoDir "pnpm-workspace.yaml") (Join-Path $tmpDir "pnpm-wo
 Copy-Item -Recurse (Join-Path $repoDir "patches") (Join-Path $tmpDir "patches")
 Copy-Item -Recurse (Join-Path $repoDir "dist\client") (Join-Path $tmpDir "dist\client")
 Copy-Item -Recurse (Join-Path $repoDir "dist\server") (Join-Path $tmpDir "dist\server")
-New-Item -ItemType Directory -Force -Path (Join-Path $tmpDir "logs") | Out-Null
 
-$startScript = @"
-@echo off
-setlocal
-set BATTY_HOST=$BindHost
-set BATTY_PORT=%ASPNETCORE_PORT%
-set BATTY_SELF_PATH=$currentDir
-"$NodePath" "$currentDir\dist\server\main.mjs" "$BattyRoot"
-"@
-Set-Content -Path (Join-Path $tmpDir "start-batty.cmd") -Value $startScript -NoNewline
-
+$backendPath = $BaseUrl.TrimEnd("/")
+if ($backendPath -eq "/") {
+  $backendPath = ""
+}
+$proxyUrl = "http://127.0.0.1:$BackendPort$backendPath/{R:1}"
 $webConfig = @"
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
-  <location path="." inheritInChildApplications="false">
-    <system.webServer>
-      <handlers>
-        <add name="aspNetCore" path="*" verb="*" modules="AspNetCoreModuleV2" resourceType="Unspecified" />
-      </handlers>
-      <aspNetCore
-        processPath="$(XmlEscape (Join-Path $currentDir "start-batty.cmd"))"
-        arguments=""
-        stdoutLogEnabled="true"
-        stdoutLogFile="$(XmlEscape (Join-Path $InstallRoot "logs\stdout"))"
-        hostingModel="OutOfProcess"
-        requestTimeout="01:00:00" />
-    </system.webServer>
-  </location>
+  <system.webServer>
+    <rewrite>
+      <rules>
+        <rule name="Batty reverse proxy" stopProcessing="true">
+          <match url="(.*)" />
+          <action type="Rewrite" url="$(XmlEscape $proxyUrl)" />
+        </rule>
+      </rules>
+    </rewrite>
+  </system.webServer>
 </configuration>
 "@
 Set-Content -Path (Join-Path $tmpDir "web.config") -Value $webConfig -NoNewline

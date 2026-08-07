@@ -82,7 +82,7 @@ export const workspaceActions = {
 
   selectWorkspace(this: AppActionContext, workspaceId: string): void {
     this.selectedWorkspaceId = workspaceId;
-    if (this.connectionState === "offline") {
+    if (this.workspaceConnectionState === "offline") {
       this.closeWorkspaceStream();
     } else {
       this.openWorkspaceStream(workspaceId);
@@ -181,6 +181,7 @@ export const workspaceActions = {
     }
 
     this.closeWorkspaceStream();
+    this.workspaceConnectionState = "connecting";
     const source = new EventSource(workspaceEventsPath(workspaceId));
     workspaceEventSource = source;
     source.onopen = () => {
@@ -188,6 +189,7 @@ export const workspaceActions = {
         return;
       }
 
+      this.workspaceConnectionState = "online";
       void this.checkForClientUpdate();
     };
     source.onmessage = (message) => {
@@ -219,6 +221,7 @@ export const workspaceActions = {
         return;
       }
 
+      this.workspaceConnectionState = navigator.onLine ? "connecting" : "offline";
       if (!navigator.onLine) {
         this.closeWorkspaceStream();
       }

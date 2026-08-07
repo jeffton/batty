@@ -3,7 +3,10 @@ param(
   [string]$ReleaseName,
   [string]$SiteName = "Default Web Site",
   [string]$AppPath = "batty",
-  [bool]$ConfigureIis = $false,
+  [string]$AppPoolName = "BattyProxy",
+  [string]$PublicOrigin = "https://t14-dt-pc1028.cbrain.net",
+  [string]$BaseUrl = "/batty",
+  [int]$BackendPort = 3147,
   [int]$DelaySeconds = 20
 )
 
@@ -50,12 +53,13 @@ $arguments = @(
   "-ReleaseName $(Quote-Argument $ReleaseName)",
   "-SiteName $(Quote-Argument $SiteName)",
   "-AppPath $(Quote-Argument $AppPath)",
+  "-AppPoolName $(Quote-Argument $AppPoolName)",
+  "-PublicOrigin $(Quote-Argument $PublicOrigin)",
+  "-BaseUrl $(Quote-Argument $BaseUrl)",
+  "-BackendPort $BackendPort",
   "-DelaySeconds $DelaySeconds",
   "-LogPath $(Quote-Argument $logPath)"
 )
-if ($ConfigureIis) {
-  $arguments += "-ConfigureIis"
-}
 $commandLine = "$(Quote-Argument $powershell) $($arguments -join ' ')"
 $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine }
 if ($result.ReturnValue -ne 0) {

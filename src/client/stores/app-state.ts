@@ -12,6 +12,8 @@ import type {
 } from "@/shared/types";
 import { DEFAULT_APP_COLOR, DEFAULT_APP_TITLE } from "@/shared/appearance";
 
+export type ConnectionState = "online" | "offline" | "connecting";
+
 export interface AppStoreState {
   authenticated: boolean;
   bootstrapped: boolean;
@@ -19,7 +21,8 @@ export interface AppStoreState {
   auth: AuthStatus;
   providerAuth: ProviderAuthStatus;
   settings: AppSettingsStatus;
-  connectionState: "online" | "offline" | "connecting";
+  connectionState: ConnectionState;
+  workspaceConnectionState: ConnectionState;
   workspaceRoots: string[];
   workspaces: WorkspaceInfo[];
   models: ModelOption[];
@@ -68,6 +71,7 @@ export function createAppState(): AppStoreState {
     providerAuth: defaultProviderAuthStatus,
     settings: defaultAppSettingsStatus,
     connectionState: "online",
+    workspaceConnectionState: "online",
     workspaceRoots: [],
     workspaces: [],
     models: [],

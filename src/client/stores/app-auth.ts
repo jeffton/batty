@@ -9,6 +9,7 @@ import { defaultProviderAuthStatus, type AppActionContext } from "./app-state";
 export const authBootstrapActions = {
   async bootstrap(this: AppActionContext): Promise<void> {
     this.connectionState = navigator.onLine ? "online" : "offline";
+    this.workspaceConnectionState = this.connectionState;
     try {
       const payload = await getBootstrap();
       this.applyBootstrap(payload);
@@ -20,6 +21,7 @@ export const authBootstrapActions = {
       const cached = await readCachedBootstrap();
       if (cached) {
         this.connectionState = "offline";
+        this.workspaceConnectionState = "offline";
         this.applyBootstrap(cached);
         this.closeWorkspaceStream();
         this.lastError = error instanceof Error ? error.message : String(error);
@@ -51,7 +53,7 @@ export const authBootstrapActions = {
         : this.workspaces[0]?.id;
     if (payload.authenticated) {
       this.authError = undefined;
-      if (this.selectedWorkspaceId && this.connectionState !== "offline") {
+      if (this.selectedWorkspaceId && this.workspaceConnectionState !== "offline") {
         this.openWorkspaceStream(this.selectedWorkspaceId);
       }
     } else {
@@ -106,10 +108,12 @@ export const authBootstrapActions = {
 
   markOffline(this: AppActionContext): void {
     this.connectionState = "offline";
+    this.workspaceConnectionState = "offline";
   },
 
   markOnline(this: AppActionContext): void {
     this.connectionState = "online";
+    this.workspaceConnectionState = "online";
     if (this.selectedWorkspaceId) {
       this.openWorkspaceStream(this.selectedWorkspaceId);
     }

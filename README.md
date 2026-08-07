@@ -311,14 +311,16 @@ On the first deployment, the script creates `<batty-root>/.batty/options.json` a
 
 ### Windows deployment behind IIS
 
-This repo also includes a Windows deployment flow that runs Batty behind IIS with the ASP.NET Core Module acting as the reverse proxy to the Node process.
+The Windows deployment runs Batty as an automatically restarting Windows service on `127.0.0.1:3147`. IIS terminates HTTPS and reverse-proxies the configured application path to that service.
 
 Requirements:
 
 - IIS site with HTTPS already configured
-- ASP.NET Core Module V2 installed on the machine
+- IIS URL Rewrite 2 and Application Request Routing 3
+- the IIS WebSocket Protocol feature
+- .NET Framework 4.6.1 or later for WinSW
 - Node.js available at `node.exe`
-- an elevated PowerShell session for the IIS application setup step
+- an elevated PowerShell session
 
 Example deployment for `https://t14-dt-pc1028.cbrain.net/batty`:
 
@@ -333,30 +335,15 @@ powershell -ExecutionPolicy Bypass -File .\scripts\deploy-windows.ps1 `
   -AppPath 'batty'
 ```
 
-That flow:
+The deployment:
 
-- installs dependencies
-- runs checks and a production build
+- installs dependencies, runs checks, and builds Batty
 - initializes `D:\Batty\root\.batty\options.json` when it does not exist
-- packages a versioned release under `D:\Batty\app\releases\<git-sha>-<UTC-timestamp>`
-- hands activation to a detached process with a 20-second delay
-- updates `D:\Batty\app\current` as a junction after the delay
-- writes `web.config` for IIS out-of-process hosting
-- configures and reloads the IIS application automatically when run elevated
-- preserves the configured identity when the IIS application pool already exists
-- writes handoff output under `D:\Batty\app\deploy-logs`
+- packages versioned releases under `D:\Batty\app\releases`
+- installs the pinned WinSW wrapper as the automatic `Batty` Windows service
+- hands service restart and release activation to a detached process with a 20-second delay
+- updates `D:\Batty\app\current` as a junction
+- configures IIS as a reverse proxy and verifies both local and public health endpoints
+- writes service logs under `D:\Batty\app\logs` and handoff logs under `D:\Batty\app\deploy-logs`
 
-The generated IIS app serves Batty from the configured subpath and forwards requests to the Node server through a launcher script that sets:
-
-- `BATTY_HOST=127.0.0.1`
-- `BATTY_PORT=%ASPNETCORE_PORT%`
-- `BATTY_SELF_PATH=<install-root>\current`
-
-If the main deploy script is run without elevation, finish the IIS step from an elevated PowerShell session:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\configure-iis-app.ps1 `
-  -SiteName 'Default Web Site' `
-  -AppPath 'batty' `
-  -PhysicalPath 'D:\Batty\app\current'
-```
+Inspect the service with `Get-Service Batty`. A new service initially runs as LocalSystem; deployment updates preserve any account configured through Windows Services. That account must be able to access the configured Batty root and workspace roots.

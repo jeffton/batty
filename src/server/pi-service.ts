@@ -579,8 +579,9 @@ export class PiService {
       thinkingLevel: webSession.session.thinkingLevel,
       availableThinkingLevels: webSession.session.getAvailableThinkingLevels(),
       isStreaming:
-        webSession.session.isStreaming ||
-        [...webSession.activeTools.values()].some((tool) => tool.status === "running"),
+        !webSession.agentCompleted &&
+        (webSession.session.isStreaming ||
+          [...webSession.activeTools.values()].some((tool) => tool.status === "running")),
       pendingMessageCount: webSession.session.pendingMessageCount,
       queuedPrompts: getQueuedPrompts(webSession),
       updatedAt: sessionUpdatedAt(webSession.session, webSession.openedAt),
@@ -621,8 +622,9 @@ export class PiService {
         thinkingLevel: webSession.session.thinkingLevel,
         availableThinkingLevels: webSession.session.getAvailableThinkingLevels(),
         isStreaming:
-          webSession.session.isStreaming ||
-          [...webSession.activeTools.values()].some((tool) => tool.status === "running"),
+          !webSession.agentCompleted &&
+          (webSession.session.isStreaming ||
+            [...webSession.activeTools.values()].some((tool) => tool.status === "running")),
         pendingMessageCount: webSession.session.pendingMessageCount,
         queuedPrompts: getQueuedPrompts(webSession),
         updatedAt: sessionUpdatedAt(webSession.session, webSession.openedAt),

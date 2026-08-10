@@ -9,17 +9,13 @@ export function usePaneTransition() {
     paneTransitionName.value = name;
   }
 
-  function clearPaneTransitionSoon(): void {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        paneTransitionName.value = "";
-      });
-    });
+  function clearPaneTransition(): void {
+    paneTransitionName.value = "";
   }
 
   return {
     paneTransitionName,
     setPaneTransition,
-    clearPaneTransitionSoon,
+    clearPaneTransition,
   };
 }

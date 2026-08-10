@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import type { SessionState, WorkspaceInfo } from "@/shared/types";
+import type { ServerEvent, SessionState, WorkspaceInfo } from "@/shared/types";
 import { handleAgentEvent, publish, subscribeToSession } from "./pi-service-sessions";
 import type { WebSession } from "./pi-service-types";
 
@@ -393,6 +393,69 @@ describe("handleAgentEvent", () => {
     );
   });
 
+  it("keeps terminal state idle after later lifecycle events", async () => {
+    const published: SessionState[] = [];
+    const webSession = {
+      id: "web-1",
+      workspace,
+      session: { sessionId: "session-1", isStreaming: true },
+      subscribers: new Set(),
+      activeAssistant: undefined,
+      activeTools: new Map([
+        [
+          "tool-1",
+          {
+            toolCallId: "tool-1",
+            toolName: "bash",
+            args: {},
+            blocks: [],
+            status: "running",
+            isError: false,
+          },
+        ],
+      ]),
+      openedAt: 1,
+      ephemeral: false,
+    } as unknown as WebSession;
+    const deps = {
+      getState: () =>
+        createState(
+          {
+            isStreaming:
+              !webSession.agentCompleted &&
+              (webSession.session.isStreaming ||
+                [...webSession.activeTools.values()].some((tool) => tool.status === "running")),
+            activeTools: [...webSession.activeTools.values()],
+          },
+          webSession,
+          [],
+        ),
+      getStateMetadata: vi.fn(),
+      publish: (_webSession: WebSession, event: ServerEvent) => {
+        if (event.type === "reset") published.push(event.state);
+      },
+      notifyWorkspaceUpdated: vi.fn(async () => undefined),
+      disposeWebSession: vi.fn(),
+    };
+
+    await handleAgentEvent(deps, webSession, {
+      type: "agent_end",
+      messages: [],
+    } as unknown as AgentSessionEvent);
+    await handleAgentEvent(deps, webSession, {
+      type: "turn_end",
+      turn: [],
+    } as unknown as AgentSessionEvent);
+
+    expect(webSession.agentCompleted).toBe(true);
+    expect(webSession.activeTools.size).toBe(0);
+    expect(published).toHaveLength(2);
+    expect(published).toEqual([
+      expect.objectContaining({ isStreaming: false, activeTools: [] }),
+      expect.objectContaining({ isStreaming: false, activeTools: [] }),
+    ]);
+  });
+
   it("defers completion hooks when agent_end announces a pending retry", async () => {
     const onAgentCompleted = vi.fn();
     const notifyWorkspaceUpdated = vi.fn(async () => undefined);
@@ -483,6 +546,7 @@ describe("handleAgentEvent", () => {
     );
 
     expect(onAgentCompleted).not.toHaveBeenCalled();
+    expect(webSession.agentCompleted).not.toBe(true);
 
     await handleAgentEvent(
       {
@@ -504,6 +568,7 @@ describe("handleAgentEvent", () => {
 
     expect(onAgentCompleted).toHaveBeenCalledTimes(1);
     expect(notifyWorkspaceUpdated).toHaveBeenCalledTimes(1);
+    expect(webSession.agentCompleted).toBe(true);
 
     await handleAgentEvent(
       {

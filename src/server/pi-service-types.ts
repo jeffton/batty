@@ -37,6 +37,7 @@ export interface WebSession {
   modelFallbackMessage?: string | undefined;
   ephemeral: boolean;
   autoRetryActive?: boolean;
+  agentCompleted?: boolean;
   suppressNextAgentEndCompletion?: boolean;
   revision?: number;
   eventLog?: Array<{ revision: number; event: ServerEvent }>;

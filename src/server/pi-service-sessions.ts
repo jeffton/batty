@@ -334,6 +334,7 @@ export async function handleAgentEvent(
     }
     case "agent_start":
       webSession.activeTools.clear();
+      webSession.agentCompleted = false;
       webSession.suppressNextAgentEndCompletion = false;
       deps.publish(webSession, { type: "tools", tools: [] });
       deps.publish(webSession, { type: "state", state: deps.getStateMetadata(webSession) });
@@ -351,24 +352,34 @@ export async function handleAgentEvent(
       }
       if (event.type === "agent_end") {
         webSession.activeAssistant = undefined;
+        if (!agentEndWillRetry && !webSession.autoRetryActive) {
+          webSession.agentCompleted = true;
+          webSession.activeTools.clear();
+        }
+      }
+      if (event.type === "auto_retry_end") {
+        webSession.autoRetryActive = false;
+        if (!event.success) {
+          webSession.agentCompleted = true;
+          webSession.activeTools.clear();
+        }
       }
       const state = deps.getState(webSession.id);
-      const publishedState =
-        event.type === "agent_end" && !agentEndWillRetry
-          ? {
-              ...state,
-              isStreaming: false,
-              pendingMessageCount: 0,
-              activeAssistant: undefined,
-            }
-          : state;
+      const publishedState = webSession.agentCompleted
+        ? {
+            ...state,
+            isStreaming: false,
+            pendingMessageCount: 0,
+            activeAssistant: undefined,
+            activeTools: [],
+          }
+        : state;
       deps.publish(webSession, { type: "reset", state: publishedState });
 
       if (event.type === "auto_retry_end") {
-        webSession.autoRetryActive = false;
-        if (!state.isStreaming) {
+        if (!event.success) {
           webSession.suppressNextAgentEndCompletion = true;
-          await runCompletionHook(deps, webSession, state);
+          await runCompletionHook(deps, webSession, publishedState);
         }
         break;
       }

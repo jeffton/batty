@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted } from "vue";
+import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import ChatSessionPane from "@/client/components/ChatSessionPane.vue";
 import WorkspaceBrowserPane from "@/client/components/WorkspaceBrowserPane.vue";
@@ -10,13 +10,9 @@ import { useAppStore } from "@/client/stores/app";
 const store = useAppStore();
 const route = useRoute();
 const router = useRouter();
-const { paneTransitionName, setPaneTransition, clearPaneTransitionSoon } = usePaneTransition();
+const { paneTransitionName, setPaneTransition, clearPaneTransition } = usePaneTransition();
 
 const isWorkspaceBrowserRoute = computed(() => route.name !== "session");
-
-const removeAfterEach = router.afterEach(() => {
-  clearPaneTransitionSoon();
-});
 
 function normalizedHistoryPath(path: string | undefined): string {
   return (path ?? "").split("#", 1)[0]?.split("?", 1)[0] ?? "";
@@ -46,19 +42,15 @@ async function goBackToWorkspaceBrowser(): Promise<void> {
 
   await router.push(targetPath);
 }
-
-onUnmounted(() => {
-  removeAfterEach();
-});
 </script>
 
 <template>
   <main class="chat-shell">
-    <Transition :name="paneTransitionName">
+    <Transition :name="paneTransitionName" @after-enter="clearPaneTransition">
       <WorkspaceBrowserPane v-show="isWorkspaceBrowserRoute" class="chat-shell__pane" />
     </Transition>
 
-    <Transition :name="paneTransitionName">
+    <Transition :name="paneTransitionName" @after-enter="clearPaneTransition">
       <ChatSessionPane
         v-show="!isWorkspaceBrowserRoute"
         class="chat-shell__pane"

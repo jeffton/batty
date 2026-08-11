@@ -284,35 +284,20 @@ export class PiService {
   private async findSessionPath(workspace: WorkspaceInfo, sessionId: string): Promise<string> {
     const sessionDir = workspaceSessionDir(this.config, workspace.id);
     const sessionFileSuffix = `_${sessionId}.jsonl`;
-
-    async function searchDir(dir: string): Promise<string | undefined> {
-      const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
-      for (const entry of entries) {
-        const entryPath = path.join(dir, entry.name);
-        if (entry.isFile() && entry.name.endsWith(sessionFileSuffix)) {
-          return entryPath;
-        }
-        if (entry.isDirectory()) {
-          const match = await searchDir(entryPath);
-          if (match) {
-            return match;
-          }
-        }
-      }
-      return undefined;
-    }
-
-    const sessionPath = await searchDir(sessionDir);
-    if (!sessionPath) {
+    const entries = await fs
+      .readdir(sessionDir, { recursive: true, withFileTypes: true })
+      .catch(() => []);
+    const match = entries.find((entry) => entry.isFile() && entry.name.endsWith(sessionFileSuffix));
+    if (!match) {
       throw new Error(`Session not found: ${sessionId}`);
     }
-    return sessionPath;
+    return path.join(match.parentPath, match.name);
   }
 
   async openSessionById(workspace: WorkspaceInfo, sessionId: string): Promise<SessionState> {
     const existing = this.sessions.get(sessionId);
     if (existing && existing.workspace.id === workspace.id) {
-      return this.getState(existing.id);
+      return this.getState(existing.id, { messagesDetailLevel: "summary" });
     }
     return this.openSession(workspace, await this.findSessionPath(workspace, sessionId));
   }
@@ -323,7 +308,7 @@ export class PiService {
       (candidate) => candidate.session.sessionFile === canonicalPath,
     );
     if (existing) {
-      return this.getState(existing.id);
+      return this.getState(existing.id, { messagesDetailLevel: "summary" });
     }
 
     const pending = this.sessionOpenPromises.get(canonicalPath);
@@ -340,7 +325,7 @@ export class PiService {
         hasSubagentSessionMarker(result.session.sessionManager.getEntries()) ||
           hasParentedCronRunSessionMarker(result.session.sessionManager.getEntries()),
       );
-      return this.getState(webSession.id);
+      return this.getState(webSession.id, { messagesDetailLevel: "summary" });
     })();
     this.sessionOpenPromises.set(canonicalPath, opening);
 
@@ -553,12 +538,17 @@ export class PiService {
       sessionId,
       subscriber,
       afterRevision,
+      "summary",
     );
   }
 
   getState(
     sessionId: string,
-    options?: { beforeMessageId?: string; limit?: number },
+    options?: {
+      beforeMessageId?: string;
+      limit?: number;
+      messagesDetailLevel?: "summary" | "full";
+    },
   ): SessionState {
     const webSession = this.requireSession(sessionId);
     const contextUsage = getSessionContextUsage(webSession.session);
@@ -591,6 +581,7 @@ export class PiService {
       totalMessageCount: messagePage.totalMessageCount,
       hasMoreMessages: messagePage.hasMoreMessages,
       messageIndexOffset: messagePage.messageIndexOffset,
+      messagesDetailLevel: options?.messagesDetailLevel ?? "full",
       messages: messagePage.messages,
       activeAssistant: webSession.activeAssistant ?? undefined,
       activeTools: [...webSession.activeTools.values()],

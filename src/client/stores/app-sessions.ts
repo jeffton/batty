@@ -30,6 +30,8 @@ let eventSource: EventSource | undefined;
 let eventSourceSessionId: string | undefined;
 let eventSourceOwnerState: unknown;
 const sessionOpenRequests = new Map<string, Promise<SessionState>>();
+const sessionDetailRequests = new Map<string, Promise<void>>();
+const sessionDetailTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let modelUpdateVersion = 0;
 let thinkingLevelUpdateVersion = 0;
 let sessionConfigurationUpdateQueue = Promise.resolve();
@@ -82,7 +84,6 @@ export const sessionActions = {
       throw new Error("Failed to create session");
     }
     await this.selectSession(session);
-    await this.loadWorkspaceSessions(workspaceId);
     return session;
   },
 
@@ -92,7 +93,6 @@ export const sessionActions = {
       throw new Error("Failed to open daily session");
     }
     await this.selectSession(session);
-    await this.loadWorkspaceSessions(workspaceId);
     return session;
   },
 
@@ -163,6 +163,9 @@ export const sessionActions = {
       this.closeStream();
     }
     await writeCachedSession(session);
+    if (session.messagesDetailLevel === "summary") {
+      this.scheduleSessionEnhancement(session);
+    }
   },
 
   clearActiveSession(this: AppActionContext): void {
@@ -223,6 +226,9 @@ export const sessionActions = {
       }
 
       this.activeSession = nextSession;
+      if (nextSession.messagesDetailLevel === "summary") {
+        this.scheduleSessionEnhancement(nextSession);
+      }
       if (shouldUpdateSessionSummary(event)) {
         this.updateSessionSummary(nextSession);
       }
@@ -257,6 +263,71 @@ export const sessionActions = {
     this.activeSession = session;
     this.updateSessionSummary(session);
     await writeCachedSession(session);
+  },
+
+  scheduleSessionEnhancement(
+    this: AppActionContext,
+    session: Pick<SessionState, "id" | "sessionId">,
+  ): void {
+    const existingTimer = sessionDetailTimers.get(session.sessionId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+    const timer = setTimeout(() => {
+      sessionDetailTimers.delete(session.sessionId);
+      void this.enhanceSessionMessages(session);
+    }, 500);
+    sessionDetailTimers.set(session.sessionId, timer);
+  },
+
+  async enhanceSessionMessages(
+    this: AppActionContext,
+    session: Pick<SessionState, "id" | "sessionId">,
+  ): Promise<void> {
+    const existing = sessionDetailRequests.get(session.sessionId);
+    if (existing) {
+      return existing;
+    }
+
+    let revisionChanged = false;
+    const request = (async () => {
+      try {
+        const detailed = normalizeSessionState(await getSession(session.id));
+        const currentSession = this.activeSession;
+        if (!detailed || !currentSession || currentSession.sessionId !== session.sessionId) {
+          return;
+        }
+        if (detailed.revision !== currentSession.revision) {
+          revisionChanged = true;
+          return;
+        }
+
+        const enhanced = mergeSessionState(detailed, currentSession);
+        if (!enhanced) {
+          return;
+        }
+        this.activeSession = enhanced;
+        await writeCachedSession(enhanced);
+      } catch (error) {
+        console.error("Failed to load session tool details", error);
+      }
+    })();
+    sessionDetailRequests.set(session.sessionId, request);
+    try {
+      await request;
+    } finally {
+      if (sessionDetailRequests.get(session.sessionId) === request) {
+        sessionDetailRequests.delete(session.sessionId);
+      }
+      const activeSession = this.activeSession;
+      if (
+        revisionChanged &&
+        activeSession?.sessionId === session.sessionId &&
+        activeSession.messagesDetailLevel === "summary"
+      ) {
+        this.scheduleSessionEnhancement(activeSession);
+      }
+    }
   },
 
   async loadOlderMessages(this: AppActionContext): Promise<void> {

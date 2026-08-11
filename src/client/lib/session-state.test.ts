@@ -302,4 +302,69 @@ describe("normalizeSessionState", () => {
 
     expect(mergeSessionState(incoming, previous)?.activeTools).toEqual([]);
   });
+
+  it("retains detailed tool blocks while merging a summary reset", () => {
+    const previous = {
+      id: "web-1",
+      sessionId: "session-1",
+      workspaceId: "batty",
+      cwd: "/tmp/batty",
+      thinkingLevel: "medium",
+      availableThinkingLevels: ["medium"],
+      isStreaming: false,
+      pendingMessageCount: 0,
+      updatedAt: 200,
+      contextTokens: null,
+      contextWindow: null,
+      contextPercent: null,
+      totalMessageCount: 2,
+      hasMoreMessages: false,
+      messagesDetailLevel: "full",
+      messages: [
+        {
+          id: "assistant-100-0",
+          role: "assistant",
+          timestamp: 100,
+          blocks: [
+            { type: "text", text: "Checking" },
+            { type: "toolCall", id: "call-1", name: "read", arguments: { path: "file" } },
+          ],
+        },
+        {
+          id: "tool-101-1",
+          role: "toolResult",
+          timestamp: 101,
+          toolCallId: "call-1",
+          toolName: "read",
+          blocks: [{ type: "text", text: "result" }],
+          isError: false,
+        },
+      ],
+      activeTools: [],
+    } as SessionState;
+    const incoming = {
+      ...previous,
+      revision: 2,
+      messagesDetailLevel: "summary",
+      messages: [
+        {
+          id: "assistant-100-0",
+          role: "assistant",
+          timestamp: 100,
+          blocks: [{ type: "text", text: "Checking complete" }],
+        },
+      ],
+    } as SessionState;
+
+    const merged = mergeSessionState(incoming, previous);
+
+    expect(merged?.messagesDetailLevel).toBe("summary");
+    expect(merged?.messages).toHaveLength(2);
+    expect(merged?.messages[0]).toMatchObject({
+      blocks: [
+        { type: "text", text: "Checking complete" },
+        { type: "toolCall", id: "call-1" },
+      ],
+    });
+  });
 });

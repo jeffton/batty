@@ -40,6 +40,55 @@ describe("createSessionState", () => {
 
     expect(state.messages.map((message) => message.id)).toEqual(["assistant-2-1", "assistant-3-2"]);
   });
+
+  it("omits tool calls and results from summary message payloads", () => {
+    const state = createSessionState({
+      id: "web-1",
+      sessionId: "session-1",
+      workspaceId: "batty",
+      cwd: "/tmp/batty",
+      thinkingLevel: "medium",
+      availableThinkingLevels: ["medium"],
+      isStreaming: false,
+      pendingMessageCount: 0,
+      updatedAt: 2,
+      contextTokens: null,
+      contextWindow: null,
+      contextPercent: null,
+      totalMessageCount: 2,
+      hasMoreMessages: false,
+      messagesDetailLevel: "summary",
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Checking it." },
+            { type: "toolCall", id: "call-1", name: "read", arguments: { path: "large" } },
+          ],
+          timestamp: 1,
+        },
+        {
+          role: "toolResult",
+          toolCallId: "call-1",
+          toolName: "read",
+          content: [{ type: "text", text: "large result" }],
+          details: { diff: "large diff" },
+          isError: false,
+          timestamp: 2,
+        },
+      ] as unknown as AgentMessage[],
+      activeTools: [],
+    });
+
+    expect(state.messagesDetailLevel).toBe("summary");
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0]).toMatchObject({
+      role: "assistant",
+      blocks: [{ type: "text", text: "Checking it." }],
+    });
+    expect(JSON.stringify(state)).not.toContain("large result");
+    expect(JSON.stringify(state)).not.toContain("large diff");
+  });
 });
 
 describe("normalizeMessage", () => {

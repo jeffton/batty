@@ -236,6 +236,7 @@ export interface SessionState {
   contextPercent: number | null;
   totalMessageCount: number;
   hasMoreMessages: boolean;
+  messagesDetailLevel?: "summary" | "full";
   messages: UiMessage[];
   activeAssistant?: Extract<UiMessage, { role: "assistant" }>;
   activeTools: ActiveToolRun[];
@@ -246,7 +247,7 @@ export interface SessionState {
 
 export type SessionStateMetadata = Omit<
   SessionState,
-  "messages" | "activeAssistant" | "activeTools"
+  "messages" | "messagesDetailLevel" | "activeAssistant" | "activeTools"
 >;
 
 export interface SessionMessagesPage {

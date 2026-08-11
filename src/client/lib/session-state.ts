@@ -44,6 +44,30 @@ function mergeRetainedActiveTools(
   return [...incoming.activeTools, ...retained];
 }
 
+function messageIndex(message: UiMessage): number {
+  const separator = message.id.lastIndexOf("-");
+  return Number.parseInt(message.id.slice(separator + 1), 10);
+}
+
+function mergeSummaryMessages(incoming: UiMessage[], previous: UiMessage[]): UiMessage[] {
+  const messages = new Map(previous.map((message) => [message.id, message]));
+  for (const message of incoming) {
+    const existing = messages.get(message.id);
+    if (message.role === "assistant" && existing?.role === "assistant") {
+      messages.set(message.id, {
+        ...message,
+        blocks: [
+          ...message.blocks,
+          ...existing.blocks.filter((block) => block.type === "toolCall"),
+        ],
+      });
+    } else {
+      messages.set(message.id, message);
+    }
+  }
+  return [...messages.values()].sort((left, right) => messageIndex(left) - messageIndex(right));
+}
+
 function mergeSessionMessages(incoming: SessionState, previous?: SessionState): UiMessage[] {
   if (!previous || previous.sessionId !== incoming.sessionId || previous.messages.length === 0) {
     return incoming.messages;
@@ -96,9 +120,16 @@ export function mergeSessionState(
     return normalizedIncoming;
   }
 
+  const retainDetailedMessages =
+    normalizedIncoming.messagesDetailLevel === "summary" &&
+    normalizedPrevious.messagesDetailLevel !== "summary";
+
   return normalizeSessionState({
     ...normalizedIncoming,
-    messages: mergeSessionMessages(normalizedIncoming, normalizedPrevious),
+    messagesDetailLevel: normalizedIncoming.messagesDetailLevel,
+    messages: retainDetailedMessages
+      ? mergeSummaryMessages(normalizedIncoming.messages, normalizedPrevious.messages)
+      : mergeSessionMessages(normalizedIncoming, normalizedPrevious),
     activeTools: mergeRetainedActiveTools(normalizedIncoming, normalizedPrevious),
   });
 }

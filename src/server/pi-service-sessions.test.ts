@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { ServerEvent, SessionState, WorkspaceInfo } from "@/shared/types";
-import { handleAgentEvent, publish, subscribeToSession } from "./pi-service-sessions";
+import {
+  handleAgentEvent,
+  publish,
+  subscribeToSession,
+  summarizeResetEvent,
+} from "./pi-service-sessions";
 import type { WebSession } from "./pi-service-types";
 
 const workspace: WorkspaceInfo = {
@@ -41,6 +46,64 @@ function createState(
     ...partial,
   };
 }
+
+describe("summary reset events", () => {
+  it("keeps tool payloads out of reset snapshots", () => {
+    const webSession = {
+      id: "web-summary",
+      workspace,
+      session: { sessionId: "session-summary" },
+    } as unknown as WebSession;
+    const state = createState(
+      {
+        messagesDetailLevel: "full",
+        activeTools: [
+          {
+            toolCallId: "call-1",
+            toolName: "read",
+            args: { path: "large" },
+            blocks: [{ type: "text", text: "active output" }],
+            status: "running",
+            isError: false,
+            details: { diff: "active diff" },
+          },
+        ],
+      },
+      webSession,
+      [
+        {
+          id: "assistant-1-0",
+          role: "assistant",
+          timestamp: 1,
+          blocks: [
+            { type: "text", text: "Checking it." },
+            { type: "toolCall", id: "call-1", name: "read", arguments: { path: "large" } },
+          ],
+        },
+        {
+          id: "tool-2-1",
+          role: "toolResult",
+          timestamp: 2,
+          toolCallId: "call-1",
+          toolName: "read",
+          blocks: [{ type: "text", text: "large result" }],
+          isError: false,
+          details: { diff: "large diff" },
+        },
+      ],
+    );
+
+    const summarized = summarizeResetEvent({ type: "reset", state });
+
+    expect(summarized.type).toBe("reset");
+    expect(summarized.type === "reset" ? summarized.state.messagesDetailLevel : undefined).toBe(
+      "summary",
+    );
+    expect(JSON.stringify(summarized)).not.toContain("large result");
+    expect(JSON.stringify(summarized)).not.toContain("active output");
+    expect(JSON.stringify(summarized)).not.toContain("toolCall");
+  });
+});
 
 describe("session event replay", () => {
   it("skips the duplicate snapshot and replays only missed events", () => {

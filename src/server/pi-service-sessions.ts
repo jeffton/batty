@@ -56,6 +56,42 @@ export function attachSession(
 
 const MAX_REPLAY_EVENTS = 500;
 
+export function summarizeResetEvent(event: ServerEvent): ServerEvent {
+  if (event.type !== "reset" || event.state.messagesDetailLevel === "summary") {
+    return event;
+  }
+
+  const summarizeAssistant = (
+    assistant: SessionState["activeAssistant"],
+  ): SessionState["activeAssistant"] =>
+    assistant
+      ? {
+          ...assistant,
+          blocks: assistant.blocks.filter((block) => block.type !== "toolCall"),
+        }
+      : undefined;
+
+  return {
+    ...event,
+    state: {
+      ...event.state,
+      messagesDetailLevel: "summary",
+      messages: event.state.messages
+        .filter((message) => message.role !== "toolResult")
+        .map((message) =>
+          message.role === "assistant"
+            ? {
+                ...message,
+                blocks: message.blocks.filter((block) => block.type !== "toolCall"),
+              }
+            : message,
+        ),
+      activeAssistant: summarizeAssistant(event.state.activeAssistant),
+      activeTools: [],
+    },
+  };
+}
+
 function withRevision(event: ServerEvent, revision: number): ServerEvent {
   if (event.type === "reset") {
     return { ...event, revision, state: { ...event.state, revision } };
@@ -69,7 +105,7 @@ function withRevision(event: ServerEvent, revision: number): ServerEvent {
 export function publish(webSession: WebSession, event: ServerEvent): void {
   const revision = (webSession.revision ?? 0) + 1;
   webSession.revision = revision;
-  const versionedEvent = withRevision(event, revision);
+  const versionedEvent = withRevision(summarizeResetEvent(event), revision);
   const eventLog = (webSession.eventLog ??= []);
   if (versionedEvent.type === "reset") {
     eventLog.length = 0;
@@ -87,13 +123,18 @@ export function publish(webSession: WebSession, event: ServerEvent): void {
 export function getStateMetadata(
   getState: (
     sessionId: string,
-    options?: { beforeMessageId?: string; limit?: number },
+    options?: {
+      beforeMessageId?: string;
+      limit?: number;
+      messagesDetailLevel?: "summary" | "full";
+    },
   ) => SessionState,
   webSession: WebSession,
 ): SessionStateMetadata {
   const state = getState(webSession.id, { limit: 1 });
   const {
     messages: _messages,
+    messagesDetailLevel: _messagesDetailLevel,
     activeAssistant: _activeAssistant,
     activeTools: _activeTools,
     ...rest
@@ -201,7 +242,11 @@ export async function handleAgentEvent(
   deps: {
     getState: (
       sessionId: string,
-      options?: { beforeMessageId?: string; limit?: number },
+      options?: {
+        beforeMessageId?: string;
+        limit?: number;
+        messagesDetailLevel?: "summary" | "full";
+      },
     ) => SessionState;
     getStateMetadata: (webSession: WebSession) => SessionStateMetadata;
     publish: (webSession: WebSession, event: ServerEvent) => void;
@@ -412,12 +457,17 @@ export function subscribeToSession(
   requireSession: (sessionId: string) => WebSession,
   getState: (
     sessionId: string,
-    options?: { beforeMessageId?: string; limit?: number },
+    options?: {
+      beforeMessageId?: string;
+      limit?: number;
+      messagesDetailLevel?: "summary" | "full";
+    },
   ) => SessionState,
   disposeWebSession: (webSession: WebSession) => void,
   sessionId: string,
   subscriber: SessionSubscriber,
   afterRevision?: number,
+  initialMessagesDetailLevel: "summary" | "full" = "full",
 ): () => void {
   const webSession = requireSession(sessionId);
   webSession.subscribers.add(subscriber);
@@ -425,7 +475,13 @@ export function subscribeToSession(
   const currentRevision = webSession.revision ?? 0;
   if (afterRevision === undefined) {
     subscriber(
-      withRevision({ type: "reset", state: getState(sessionId) }, currentRevision),
+      withRevision(
+        {
+          type: "reset",
+          state: getState(sessionId, { messagesDetailLevel: initialMessagesDetailLevel }),
+        },
+        currentRevision,
+      ),
       currentRevision,
     );
   } else if (afterRevision !== currentRevision) {
@@ -442,7 +498,13 @@ export function subscribeToSession(
       }
     } else {
       subscriber(
-        withRevision({ type: "reset", state: getState(sessionId) }, currentRevision),
+        withRevision(
+          {
+            type: "reset",
+            state: getState(sessionId, { messagesDetailLevel: initialMessagesDetailLevel }),
+          },
+          currentRevision,
+        ),
         currentRevision,
       );
     }

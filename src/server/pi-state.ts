@@ -12,6 +12,7 @@ export type UiImageResolver = (image: {
 
 interface NormalizeOptions {
   imageResolver?: UiImageResolver;
+  includeToolDetails?: boolean;
 }
 
 interface AssistantLikeMessage {
@@ -144,17 +145,19 @@ export function normalizeBlocks(
           ? [{ type: "thinking", thinking: candidate.thinking }]
           : [];
       case "toolCall":
-        return [
-          {
-            type: "toolCall",
-            id: typeof candidate.id === "string" ? candidate.id : `tool-${index}`,
-            name: typeof candidate.name === "string" ? candidate.name : "tool",
-            arguments:
-              candidate.arguments && typeof candidate.arguments === "object"
-                ? (candidate.arguments as Record<string, unknown>)
-                : {},
-          },
-        ];
+        return options.includeToolDetails === false
+          ? []
+          : [
+              {
+                type: "toolCall",
+                id: typeof candidate.id === "string" ? candidate.id : `tool-${index}`,
+                name: typeof candidate.name === "string" ? candidate.name : "tool",
+                arguments:
+                  candidate.arguments && typeof candidate.arguments === "object"
+                    ? (candidate.arguments as Record<string, unknown>)
+                    : {},
+              },
+            ];
       default:
         return [];
     }
@@ -199,6 +202,9 @@ export function normalizeMessage(
   }
 
   if (message.role === "toolResult") {
+    if (options.includeToolDetails === false) {
+      return undefined;
+    }
     const toolResult = message as ToolResultLikeMessage;
     const blocks = normalizeBlocks(toolResult.content, options);
     return {
@@ -322,6 +328,7 @@ export interface SessionStateInput {
   totalMessageCount: number;
   hasMoreMessages: boolean;
   messageIndexOffset?: number;
+  messagesDetailLevel?: "summary" | "full";
   messages: AgentMessage[];
   activeAssistant?: AgentMessage;
   title?: string;
@@ -337,6 +344,7 @@ export function createSessionState(input: SessionStateInput): SessionState {
     input.activeAssistant && input.activeAssistant.role === "assistant"
       ? (normalizeMessage(input.activeAssistant, Number.MAX_SAFE_INTEGER, {
           imageResolver: input.imageResolver,
+          includeToolDetails: input.messagesDetailLevel !== "summary",
         }) as Extract<UiMessage, { role: "assistant" }> | undefined)
       : undefined;
 
@@ -360,11 +368,13 @@ export function createSessionState(input: SessionStateInput): SessionState {
     contextPercent: input.contextPercent,
     totalMessageCount: input.totalMessageCount,
     hasMoreMessages: input.hasMoreMessages,
+    messagesDetailLevel: input.messagesDetailLevel ?? "full",
     messages: normalizeMessages(input.messages, input.messageIndexOffset ?? 0, {
       imageResolver: input.imageResolver,
+      includeToolDetails: input.messagesDetailLevel !== "summary",
     }),
     activeAssistant,
-    activeTools: input.activeTools,
+    activeTools: input.messagesDetailLevel === "summary" ? [] : input.activeTools,
     title: input.title,
     isSubagentSession: input.isSubagentSession,
     isCronSession: input.isCronSession,

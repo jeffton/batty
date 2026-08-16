@@ -367,4 +367,59 @@ describe("normalizeSessionState", () => {
       ],
     });
   });
+
+  it("does not retain tool state from an older active assistant", () => {
+    const previous = {
+      id: "web-1",
+      sessionId: "session-1",
+      workspaceId: "batty",
+      cwd: "/tmp/batty",
+      thinkingLevel: "medium",
+      availableThinkingLevels: ["medium"],
+      isStreaming: true,
+      pendingMessageCount: 0,
+      updatedAt: 100,
+      contextTokens: null,
+      contextWindow: null,
+      contextPercent: null,
+      totalMessageCount: 0,
+      hasMoreMessages: false,
+      messagesDetailLevel: "full",
+      messages: [],
+      activeAssistant: {
+        id: "assistant-old",
+        role: "assistant",
+        timestamp: 100,
+        blocks: [{ type: "toolCall", id: "call-old", name: "bash", arguments: { command: "old" } }],
+      },
+      activeTools: [
+        {
+          toolCallId: "call-old",
+          toolName: "bash",
+          args: { command: "old" },
+          blocks: [{ type: "text", text: "stale output" }],
+          status: "running",
+          isError: false,
+        },
+      ],
+    } as SessionState;
+    const incoming = {
+      ...previous,
+      revision: 2,
+      updatedAt: 200,
+      messagesDetailLevel: "summary",
+      activeAssistant: {
+        id: "assistant-new",
+        role: "assistant",
+        timestamp: 200,
+        blocks: [{ type: "text", text: "New response" }],
+      },
+      activeTools: [],
+    } as SessionState;
+
+    const merged = mergeSessionState(incoming, previous);
+
+    expect(merged?.activeAssistant).toEqual(incoming.activeAssistant);
+    expect(merged?.activeTools).toEqual([]);
+  });
 });

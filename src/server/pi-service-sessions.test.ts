@@ -1,12 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { ServerEvent, SessionState, WorkspaceInfo } from "@/shared/types";
-import {
-  handleAgentEvent,
-  publish,
-  subscribeToSession,
-  summarizeResetEvent,
-} from "./pi-service-sessions";
+import { handleAgentEvent, publish, subscribeToSession } from "./pi-service-sessions";
 import type { WebSession } from "./pi-service-types";
 
 const workspace: WorkspaceInfo = {
@@ -47,12 +42,16 @@ function createState(
   };
 }
 
-describe("summary reset events", () => {
-  it("keeps tool payloads out of reset snapshots", () => {
+describe("live reset events", () => {
+  it("keeps tool payloads in published reset snapshots", () => {
+    const subscriber = vi.fn();
     const webSession = {
       id: "web-summary",
       workspace,
       session: { sessionId: "session-summary" },
+      subscribers: new Set([subscriber]),
+      revision: 0,
+      eventLog: [],
     } as unknown as WebSession;
     const state = createState(
       {
@@ -93,19 +92,67 @@ describe("summary reset events", () => {
       ],
     );
 
-    const summarized = summarizeResetEvent({ type: "reset", state });
+    publish(webSession, { type: "reset", state });
 
-    expect(summarized.type).toBe("reset");
-    expect(summarized.type === "reset" ? summarized.state.messagesDetailLevel : undefined).toBe(
-      "summary",
+    const published = subscriber.mock.calls[0]?.[0] as ServerEvent;
+    expect(published.type).toBe("reset");
+    expect(published.type === "reset" ? published.state.messagesDetailLevel : undefined).toBe(
+      "full",
     );
-    expect(JSON.stringify(summarized)).not.toContain("large result");
-    expect(JSON.stringify(summarized)).not.toContain("active output");
-    expect(JSON.stringify(summarized)).not.toContain("toolCall");
+    expect(JSON.stringify(published)).toContain("large result");
+    expect(JSON.stringify(published)).toContain("active output");
+    expect(JSON.stringify(published)).toContain("toolCall");
   });
 });
 
 describe("session event replay", () => {
+  it("sends a lightweight initial snapshot before full live resets", () => {
+    const webSession = {
+      id: "web-progressive",
+      workspace,
+      session: { sessionId: "session-progressive", isStreaming: false },
+      subscribers: new Set(),
+      activeTools: new Map(),
+      openedAt: 1,
+      ephemeral: false,
+      revision: 0,
+      eventLog: [],
+    } as unknown as WebSession;
+    const getState = vi.fn(
+      (_sessionId: string, options?: { messagesDetailLevel?: "summary" | "full" }) =>
+        createState(
+          { isStreaming: false, messagesDetailLevel: options?.messagesDetailLevel ?? "full" },
+          webSession,
+          [],
+        ),
+    );
+    const subscriber = vi.fn();
+
+    const unsubscribe = subscribeToSession(
+      () => webSession,
+      getState,
+      vi.fn(),
+      webSession.id,
+      subscriber,
+      undefined,
+      "summary",
+    );
+    publish(webSession, {
+      type: "reset",
+      state: createState({ isStreaming: true, messagesDetailLevel: "full" }, webSession, []),
+    });
+
+    expect(subscriber.mock.calls[0]?.[0]).toMatchObject({
+      type: "reset",
+      state: { messagesDetailLevel: "summary" },
+    });
+    expect(subscriber.mock.calls[1]?.[0]).toMatchObject({
+      type: "reset",
+      state: { messagesDetailLevel: "full" },
+    });
+    unsubscribe();
+  });
+
   it("skips the duplicate snapshot and replays only missed events", () => {
     const webSession = {
       id: "web-replay",

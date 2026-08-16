@@ -298,6 +298,86 @@ test.describe("tool rendering", () => {
     );
   });
 
+  test("keeps a running tool visible across a lightweight reset", async ({ page }) => {
+    await installMocks(page, createSession({ messages: [] }));
+
+    await page.goto(`/workspaces/${workspace.id}/sessions/${summary.sessionId}`);
+    await expect(page.locator(".transcript")).toBeVisible();
+
+    await page.evaluate(() => {
+      window.__emitSse({
+        type: "assistant",
+        assistant: {
+          id: "assistant-1",
+          role: "assistant",
+          timestamp: 3,
+          blocks: [
+            { type: "text", text: "Running command" },
+            {
+              type: "toolCall",
+              id: "call-1",
+              name: "bash",
+              arguments: { command: "git status --short" },
+            },
+          ],
+        },
+      });
+      window.__emitSse({
+        type: "tools",
+        tools: [
+          {
+            toolCallId: "call-1",
+            toolName: "bash",
+            args: { command: "git status --short" },
+            blocks: [{ type: "text", text: "M src/client/App.vue" }],
+            status: "running",
+            isError: false,
+          },
+        ],
+      });
+    });
+
+    await showToolCalls(page);
+    await expect(page.locator(".tool-call")).toHaveCount(1);
+    await expect(page.locator(".tool-call")).toContainText("M src/client/App.vue");
+
+    await page.evaluate(() => {
+      window.__emitSse({
+        type: "reset",
+        state: {
+          id: "web-1",
+          sessionId: "session-1",
+          workspaceId: "batty",
+          cwd: "/root/github/batty",
+          path: "/tmp/session-1.jsonl",
+          thinkingLevel: "medium",
+          availableThinkingLevels: ["medium"],
+          isStreaming: true,
+          pendingMessageCount: 0,
+          updatedAt: 4,
+          contextTokens: 100,
+          contextWindow: 1000,
+          contextPercent: 10,
+          totalMessageCount: 1,
+          hasMoreMessages: false,
+          messagesDetailLevel: "summary",
+          messages: [
+            {
+              id: "assistant-3-0",
+              role: "assistant",
+              timestamp: 3,
+              blocks: [{ type: "text", text: "Running command" }],
+            },
+          ],
+          activeTools: [],
+        },
+      });
+    });
+
+    await expect(page.locator(".tool-call")).toHaveCount(1);
+    await expect(page.locator(".tool-call")).toContainText("M src/client/App.vue");
+  });
+
   test("keeps the completed bash result attached to the same block", async ({ page }) => {
     await installMocks(page, createSession({ messages: [] }));
 

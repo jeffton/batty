@@ -56,42 +56,6 @@ export function attachSession(
 
 const MAX_REPLAY_EVENTS = 500;
 
-export function summarizeResetEvent(event: ServerEvent): ServerEvent {
-  if (event.type !== "reset" || event.state.messagesDetailLevel === "summary") {
-    return event;
-  }
-
-  const summarizeAssistant = (
-    assistant: SessionState["activeAssistant"],
-  ): SessionState["activeAssistant"] =>
-    assistant
-      ? {
-          ...assistant,
-          blocks: assistant.blocks.filter((block) => block.type !== "toolCall"),
-        }
-      : undefined;
-
-  return {
-    ...event,
-    state: {
-      ...event.state,
-      messagesDetailLevel: "summary",
-      messages: event.state.messages
-        .filter((message) => message.role !== "toolResult")
-        .map((message) =>
-          message.role === "assistant"
-            ? {
-                ...message,
-                blocks: message.blocks.filter((block) => block.type !== "toolCall"),
-              }
-            : message,
-        ),
-      activeAssistant: summarizeAssistant(event.state.activeAssistant),
-      activeTools: [],
-    },
-  };
-}
-
 function withRevision(event: ServerEvent, revision: number): ServerEvent {
   if (event.type === "reset") {
     return { ...event, revision, state: { ...event.state, revision } };
@@ -105,7 +69,7 @@ function withRevision(event: ServerEvent, revision: number): ServerEvent {
 export function publish(webSession: WebSession, event: ServerEvent): void {
   const revision = (webSession.revision ?? 0) + 1;
   webSession.revision = revision;
-  const versionedEvent = withRevision(summarizeResetEvent(event), revision);
+  const versionedEvent = withRevision(event, revision);
   const eventLog = (webSession.eventLog ??= []);
   if (versionedEvent.type === "reset") {
     eventLog.length = 0;

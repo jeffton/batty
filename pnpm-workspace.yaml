@@ -1,6 +1,8 @@
 minimumReleaseAge: 4320
 minimumReleaseAgeExclude:
   - "@earendil-works/pi-*"
+  # Security release fixing GHSA-62qx-hpj5-j6hc and GHSA-vmph-573x-85f6.
+  - "@fastify/multipart@10.1.1"
   - vite-plus
   - "@voidzero-dev/*"
   - "@oxc-project/*"
@@ -18,22 +20,22 @@ allowBuilds:
   koffi: false
   protobufjs: false
 catalog:
-  vite: npm:@voidzero-dev/vite-plus-core@0.2.8
-  vite-plus: 0.2.8
+  vite: npm:@voidzero-dev/vite-plus-core@0.2.9
+  vite-plus: 0.2.9
 overrides:
   vite: "catalog:"
   vitest: 4.1.10
   shell-quote: 1.10.0
   "fast-uri@3": 3.1.5
   "fast-uri@4": 4.1.2
-  "nanoid@3": 3.3.17
+  "nanoid@3": 3.3.18
   postcss: 8.5.26
   "brace-expansion@2": 2.1.4
   "brace-expansion@5": 5.0.9
   "find-my-way@9": 9.7.0
 patchedDependencies:
-  "@earendil-works/pi-ai@0.84.1": patches/@earendil-works__pi-ai@0.84.1.patch
-  "@earendil-works/pi-coding-agent@0.84.1": patches/@earendil-works__pi-coding-agent@0.84.1.patch
+  "@earendil-works/pi-ai@0.84.2": patches/@earendil-works__pi-ai@0.84.2.patch
+  "@earendil-works/pi-coding-agent@0.84.2": patches/@earendil-works__pi-coding-agent@0.84.2.patch
 peerDependencyRules:
   allowAny:
     - vite

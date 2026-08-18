@@ -131,6 +131,9 @@ const app = fastify({
   trustProxy: ["127.0.0.1", "::1"],
   bodyLimit: 1024 * 1024 * 100,
 });
+app.addHook("onClose", async () => {
+  await Promise.all([service.dispose(), cronService.dispose()]);
+});
 
 if (bootstrapSetupCode) {
   console.log(`Setup code: ${formatSetupCode(bootstrapSetupCode.code)}`);

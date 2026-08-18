@@ -23,6 +23,7 @@ import type {
   WorkspaceInfo,
 } from "@/shared/types";
 import type { AppConfig } from "./config";
+import { ModelConfigWatcher } from "./model-config-watcher";
 import { getSessionContextUsage } from "./pi-context-usage";
 import {
   createPiAgentSession as createPiAgentSessionImpl,
@@ -93,6 +94,7 @@ function leafBeforeCurrentTurn(branch: SessionEntry[]): string | null | undefine
 export class PiService {
   private readonly config: AppConfig;
   private readonly modelRuntime: ModelRuntime;
+  private readonly modelConfigWatcher: ModelConfigWatcher;
   private readonly providerAuthService: ProviderAuthService;
   private readonly sessions = new Map<string, WebSession>();
   private readonly liveSessions = new Map<string, LiveSession>();
@@ -107,12 +109,14 @@ export class PiService {
     config: AppConfig,
     cronService: CronService,
     modelRuntime: ModelRuntime,
+    modelConfigWatcher: ModelConfigWatcher,
     onAgentCompleted?: (session: SessionState) => Promise<void>,
     onWorkspaceUpdated?: (workspaceId: string) => Promise<void>,
   ) {
     this.config = config;
     this.cronService = cronService;
     this.modelRuntime = modelRuntime;
+    this.modelConfigWatcher = modelConfigWatcher;
     this.onAgentCompleted = onAgentCompleted;
     this.onWorkspaceUpdated = onWorkspaceUpdated;
     const authPath = path.join(battyAgentDir(config), "auth.json");
@@ -128,11 +132,25 @@ export class PiService {
     onWorkspaceUpdated?: (workspaceId: string) => Promise<void>,
   ): Promise<PiService> {
     const agentDir = battyAgentDir(config);
+    const modelsPath = path.join(agentDir, "models.json");
     const modelRuntime = await ModelRuntime.create({
       authPath: path.join(agentDir, "auth.json"),
-      modelsPath: path.join(agentDir, "models.json"),
+      modelsPath,
     });
-    return new PiService(config, cronService, modelRuntime, onAgentCompleted, onWorkspaceUpdated);
+    const modelConfigWatcher = new ModelConfigWatcher(modelsPath, modelRuntime);
+    await modelConfigWatcher.initialize();
+    return new PiService(
+      config,
+      cronService,
+      modelRuntime,
+      modelConfigWatcher,
+      onAgentCompleted,
+      onWorkspaceUpdated,
+    );
+  }
+
+  async dispose(): Promise<void> {
+    await this.modelConfigWatcher.dispose();
   }
 
   private registerLiveSession(workspace: WorkspaceInfo, session: AgentSession): void {

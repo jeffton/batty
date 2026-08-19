@@ -3,13 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import SubagentSessionPopover from "./SubagentSessionPopover.vue";
 import type { SessionState } from "@/shared/types";
 
-const { abortSession, openSession } = vi.hoisted(() => ({
+const { abortSession, getSession, openSession } = vi.hoisted(() => ({
   abortSession: vi.fn(),
+  getSession: vi.fn(),
   openSession: vi.fn(),
 }));
 
 vi.mock("@/client/lib/api", () => ({
   abortSession,
+  getSession,
   getSessionMessages: vi.fn(),
   openSession,
 }));
@@ -48,6 +50,7 @@ describe("SubagentSessionPopover", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     openSession.mockResolvedValue(session);
+    getSession.mockResolvedValue(session);
     abortSession.mockResolvedValue({ ok: true });
     vi.stubGlobal("EventSource", EventSourceStub);
   });
@@ -82,6 +85,74 @@ describe("SubagentSessionPopover", () => {
 
     expect(abortSession).toHaveBeenCalledWith("web-subagent-1");
     expect(wrapper.get('[aria-label="Stop subagent"]').attributes("disabled")).toBeDefined();
+  });
+
+  it("hydrates summary-only popovers with full session details", async () => {
+    const summarySession: SessionState = {
+      ...session,
+      revision: 3,
+      messagesDetailLevel: "summary",
+      totalMessageCount: 2,
+      messages: [
+        {
+          id: "assistant-1",
+          role: "assistant",
+          timestamp: 1,
+          blocks: [{ type: "text", text: "Checking" }],
+        },
+      ],
+    };
+    const detailedSession: SessionState = {
+      ...summarySession,
+      revision: 2,
+      messagesDetailLevel: "full",
+      messages: [
+        {
+          id: "assistant-1",
+          role: "assistant",
+          timestamp: 1,
+          blocks: [
+            { type: "text", text: "Checking" },
+            { type: "toolCall", id: "call-1", name: "read", arguments: { path: "file" } },
+          ],
+        },
+        {
+          id: "tool-2",
+          role: "toolResult",
+          timestamp: 2,
+          toolCallId: "call-1",
+          toolName: "read",
+          blocks: [{ type: "text", text: "result" }],
+          isError: false,
+        },
+      ],
+    };
+    openSession.mockResolvedValue(summarySession);
+    getSession.mockResolvedValue(detailedSession);
+    const wrapper = mount(SubagentSessionPopover, {
+      props: {
+        popoverId: "subagent-popover",
+        workspaceId: "batty",
+        sessionPath: session.path!,
+      },
+      global: {
+        stubs: {
+          SessionTranscriptView: {
+            props: ["session"],
+            template:
+              '<div class="transcript-stub">{{ session.messagesDetailLevel }}:{{ session.messages.length }}</div>',
+          },
+        },
+      },
+    });
+
+    const toggle = new Event("toggle") as Event & { newState?: "open" | "closed" };
+    toggle.newState = "open";
+    wrapper.get(".subagent-session-popover").element.dispatchEvent(toggle);
+    await flushPromises();
+
+    expect(getSession).toHaveBeenCalledWith("web-subagent-1");
+    expect(wrapper.get(".transcript-stub").text()).toBe("full:2");
   });
 
   it("shows a stop-request error in the header without hiding the transcript", async () => {

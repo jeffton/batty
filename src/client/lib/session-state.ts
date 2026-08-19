@@ -141,7 +141,10 @@ export function normalizeSessionState(session: SessionState | undefined): Sessio
   return {
     ...session,
     availableThinkingLevels: [...new Set(session.availableThinkingLevels)],
-    hasMoreMessages: session.hasMoreMessages || session.totalMessageCount > session.messages.length,
+    hasMoreMessages:
+      session.hasMoreMessages ||
+      (session.messagesDetailLevel !== "summary" &&
+        session.totalMessageCount > session.messages.length),
   };
 }
 

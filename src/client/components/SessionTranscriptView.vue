@@ -452,6 +452,7 @@ async function maybeLoadOlderMessages(): Promise<void> {
     !element ||
     !session ||
     props.loadingOlderMessages ||
+    session.messagesDetailLevel === "summary" ||
     !session.hasMoreMessages ||
     element.scrollTop > TRANSCRIPT_LOAD_OLDER_THRESHOLD
   ) {

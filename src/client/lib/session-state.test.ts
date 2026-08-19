@@ -1,8 +1,42 @@
 import { describe, expect, it } from "vite-plus/test";
-import { mergeSessionState } from "@/client/lib/session-state";
+import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
 import type { SessionState } from "@/shared/types";
 
 describe("normalizeSessionState", () => {
+  it("trusts summary pagination metadata when tool messages are omitted", () => {
+    const summary = {
+      id: "web-1",
+      sessionId: "session-1",
+      workspaceId: "batty",
+      cwd: "/tmp/batty",
+      thinkingLevel: "medium",
+      availableThinkingLevels: ["medium"],
+      isStreaming: false,
+      pendingMessageCount: 0,
+      updatedAt: 200,
+      contextTokens: null,
+      contextWindow: null,
+      contextPercent: null,
+      totalMessageCount: 2,
+      hasMoreMessages: false,
+      messagesDetailLevel: "summary",
+      messages: [
+        {
+          id: "assistant-100-0",
+          role: "assistant",
+          timestamp: 100,
+          blocks: [{ type: "text", text: "done" }],
+        },
+      ],
+      activeTools: [],
+    } as SessionState;
+
+    expect(normalizeSessionState(summary)?.hasMoreMessages).toBe(false);
+    expect(
+      normalizeSessionState({ ...summary, messagesDetailLevel: "full" })?.hasMoreMessages,
+    ).toBe(true);
+  });
+
   it("merges paginated snapshots into an already loaded history", () => {
     const previous = {
       id: "web-1",

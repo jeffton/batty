@@ -23,6 +23,7 @@ const TIMESTAMP_GROUP_WINDOW_MS = 10 * 60 * 1000;
 
 type ChatTranscriptHandle = InstanceType<typeof ChatTranscript> & {
   rootElement: () => HTMLElement | null;
+  topElement: () => HTMLElement | null;
   tailElement: () => HTMLElement | null;
   bottomElement: () => HTMLElement | null;
 };
@@ -50,8 +51,13 @@ const isTranscriptPinnedToBottom = ref(true);
 const openDetailsSectionKey = ref<string | null>(null);
 const collapsedDetailsSectionKey = ref<string | null>(null);
 let transcriptScrollElement: HTMLElement | null = null;
+let transcriptTopObserver: IntersectionObserver | null = null;
 let transcriptTailObserver: ResizeObserver | null = null;
 let transcriptViewportObserver: ResizeObserver | null = null;
+let olderMessagesLoadPromise: Promise<void> | null = null;
+let olderMessagesLoadSessionId: string | null = null;
+let olderMessagesRetrySessionId: string | null = null;
+let transcriptNearTop = false;
 let followTranscriptToken = 0;
 let lastUserScrollIntentAt = 0;
 
@@ -212,6 +218,10 @@ function transcriptRootElement(): HTMLElement | null {
   return transcriptPane.value?.rootElement() ?? null;
 }
 
+function transcriptTopElement(): HTMLElement | null {
+  return transcriptPane.value?.topElement() ?? null;
+}
+
 function transcriptTailElement(): HTMLElement | null {
   return transcriptPane.value?.tailElement() ?? null;
 }
@@ -322,10 +332,31 @@ function bindTranscriptScrollListener(): void {
 }
 
 function bindTranscriptObservers(): void {
+  transcriptTopObserver?.disconnect();
+  transcriptTopObserver = null;
+  transcriptNearTop = false;
+
+  const transcriptElement = transcriptRootElement();
+  const topElement = transcriptTopElement();
+  if (transcriptElement && topElement && typeof IntersectionObserver !== "undefined") {
+    transcriptTopObserver = new IntersectionObserver(
+      (entries) => {
+        transcriptNearTop = entries.some((entry) => entry.isIntersecting);
+        if (transcriptNearTop) {
+          void maybeLoadOlderMessages();
+        }
+      },
+      {
+        root: transcriptElement,
+        rootMargin: `${TRANSCRIPT_LOAD_OLDER_THRESHOLD}px 0px 0px`,
+      },
+    );
+    transcriptTopObserver.observe(topElement);
+  }
+
   transcriptViewportObserver?.disconnect();
   transcriptViewportObserver = null;
 
-  const transcriptElement = transcriptRootElement();
   if (transcriptElement && typeof ResizeObserver !== "undefined") {
     transcriptViewportObserver = new ResizeObserver(() => {
       if (isTranscriptPinnedToBottom.value) {
@@ -338,6 +369,7 @@ function bindTranscriptObservers(): void {
       }
 
       updateTranscriptPinnedState();
+      void maybeLoadOlderMessages();
     });
     transcriptViewportObserver.observe(transcriptElement);
   }
@@ -445,38 +477,108 @@ async function followTranscriptWhilePinned(behavior: ScrollBehavior = "auto"): P
   }
 }
 
-async function maybeLoadOlderMessages(): Promise<void> {
-  const element = transcriptRootElement();
+function canLoadOlderMessages(element: HTMLElement): boolean {
   const session = props.session;
-  if (
-    !element ||
-    !session ||
-    props.loadingOlderMessages ||
-    session.messagesDetailLevel === "summary" ||
-    !session.hasMoreMessages ||
-    element.scrollTop > TRANSCRIPT_LOAD_OLDER_THRESHOLD
-  ) {
+  return Boolean(
+    session &&
+    !props.loadingOlderMessages &&
+    session.messagesDetailLevel !== "summary" &&
+    session.hasMoreMessages &&
+    (transcriptNearTop || element.scrollTop <= TRANSCRIPT_LOAD_OLDER_THRESHOLD),
+  );
+}
+
+async function restorePrependAnchor(
+  element: HTMLElement,
+  sessionId: string,
+  previousScrollTop: number,
+  previousScrollHeight: number,
+): Promise<void> {
+  let previousMeasuredHeight = -1;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await waitForTranscriptLayout();
+    const currentElement = transcriptRootElement();
+    if (currentElement !== element || props.session?.sessionId !== sessionId) {
+      return;
+    }
+
+    const currentHeight = element.scrollHeight;
+    const addedHeight = Math.max(0, currentHeight - previousScrollHeight);
+    element.scrollTop = previousScrollTop + addedHeight;
+    if (currentHeight === previousMeasuredHeight) {
+      return;
+    }
+    previousMeasuredHeight = currentHeight;
+  }
+}
+
+async function loadOlderMessagesWhileNeeded(sessionId: string): Promise<void> {
+  while (props.session?.sessionId === sessionId) {
+    const element = transcriptRootElement();
+    if (!element || !canLoadOlderMessages(element)) {
+      return;
+    }
+
+    const requestedSessionId = props.session.sessionId;
+    const previousOldestMessageId = props.session?.messages[0]?.id;
+    const previousScrollTop = element.scrollTop;
+    const previousScrollHeight = element.scrollHeight;
+    await props.loadOlderMessages();
+    if (props.session?.sessionId !== requestedSessionId) {
+      return;
+    }
+    await restorePrependAnchor(
+      element,
+      requestedSessionId,
+      previousScrollTop,
+      previousScrollHeight,
+    );
+    updateTranscriptPinnedState();
+
+    const nextElement = transcriptRootElement();
+    const session = props.session;
+    if (
+      !nextElement ||
+      !session ||
+      session.sessionId !== requestedSessionId ||
+      session.messages[0]?.id === previousOldestMessageId ||
+      !session.hasMoreMessages
+    ) {
+      return;
+    }
+
+    const scrollRange = Math.max(0, nextElement.scrollHeight - nextElement.clientHeight);
+    if (scrollRange > TRANSCRIPT_LOAD_OLDER_THRESHOLD || !canLoadOlderMessages(nextElement)) {
+      return;
+    }
+  }
+}
+
+async function maybeLoadOlderMessages(): Promise<void> {
+  const sessionId = props.session?.sessionId;
+  if (!sessionId) {
     return;
   }
 
-  const previousScrollTop = element.scrollTop;
-  const previousScrollHeight = element.scrollHeight;
-  await props.loadOlderMessages();
-  await waitForTranscriptLayout();
-
-  const nextElement = transcriptRootElement();
-  if (!nextElement) {
-    return;
+  if (olderMessagesLoadPromise) {
+    if (olderMessagesLoadSessionId !== sessionId) {
+      olderMessagesRetrySessionId = sessionId;
+    }
+    return olderMessagesLoadPromise;
   }
 
-  const addedHeight = nextElement.scrollHeight - previousScrollHeight;
-  if (addedHeight > 0) {
-    nextElement.scrollTop = previousScrollTop + addedHeight;
-  }
-  updateTranscriptPinnedState();
-
-  if (nextElement.scrollHeight <= nextElement.clientHeight && props.session?.hasMoreMessages) {
-    await maybeLoadOlderMessages();
+  olderMessagesLoadSessionId = sessionId;
+  olderMessagesLoadPromise = loadOlderMessagesWhileNeeded(sessionId);
+  try {
+    await olderMessagesLoadPromise;
+  } finally {
+    olderMessagesLoadPromise = null;
+    olderMessagesLoadSessionId = null;
+    const retrySessionId = olderMessagesRetrySessionId;
+    olderMessagesRetrySessionId = null;
+    if (retrySessionId && props.session?.sessionId === retrySessionId) {
+      void maybeLoadOlderMessages();
+    }
   }
 }
 
@@ -533,6 +635,7 @@ onUnmounted(() => {
   transcriptScrollElement?.removeEventListener("touchstart", handleTranscriptTouchStart);
   transcriptScrollElement?.removeEventListener("touchmove", handleTranscriptTouchMove);
   transcriptScrollElement = null;
+  transcriptTopObserver?.disconnect();
   transcriptViewportObserver?.disconnect();
   transcriptTailObserver?.disconnect();
 });
@@ -551,6 +654,24 @@ watch(
       collapsedDetailsSectionKey.value = null;
     }
   },
+);
+
+watch(
+  [
+    () => props.session?.id,
+    () => props.session?.messagesDetailLevel,
+    () => props.session?.hasMoreMessages,
+    () => props.session?.messages[0]?.id,
+    () => props.loadingOlderMessages,
+    () => transcriptEntries.value.length,
+    () => openDetailsSectionKey.value,
+    () => collapsedDetailsSectionKey.value,
+  ],
+  async () => {
+    await waitForTranscriptLayout();
+    await maybeLoadOlderMessages();
+  },
+  { flush: "post" },
 );
 
 watch(

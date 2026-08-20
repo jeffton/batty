@@ -222,6 +222,125 @@ test.describe("tool rendering", () => {
     await expect(page.locator(".message")).toContainText(["oldest prompt", "latest reply"]);
   });
 
+  test("keeps loading older pages until a short transcript fills the viewport", async ({
+    page,
+  }) => {
+    let pageRequestCount = 0;
+    await page.route("**/api/sessions/web-1/messages**", async (route) => {
+      pageRequestCount += 1;
+      const isLastPage = pageRequestCount === 2;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          messages: [
+            {
+              id: isLastPage ? "user-1" : "assistant-2",
+              role: isLastPage ? "user" : "assistant",
+              timestamp: isLastPage ? 1 : 2,
+              blocks: [{ type: "text", text: isLastPage ? "oldest prompt" : "older reply" }],
+            },
+          ],
+          totalMessageCount: 3,
+          hasMoreMessages: !isLastPage,
+        }),
+      });
+    });
+
+    await installMocks(
+      page,
+      createSession({
+        totalMessageCount: 3,
+        hasMoreMessages: true,
+        messages: [
+          {
+            id: "assistant-3",
+            role: "assistant",
+            timestamp: 3,
+            blocks: [{ type: "text", text: "latest reply" }],
+          },
+        ],
+      }),
+    );
+
+    await page.goto(`/workspaces/${workspace.id}/sessions/${summary.sessionId}`);
+
+    await expect(page.locator(".message")).toContainText(["oldest prompt", "latest reply"]);
+    expect(pageRequestCount).toBe(2);
+  });
+
+  test("loads older messages when progressive details finish at the top", async ({ page }) => {
+    let pageRequestCount = 0;
+    await page.route("**/api/sessions/web-1/messages**", async (route) => {
+      pageRequestCount += 1;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          messages: [
+            {
+              id: "user-1",
+              role: "user",
+              timestamp: 1,
+              blocks: [{ type: "text", text: "oldest prompt" }],
+            },
+          ],
+          totalMessageCount: 2,
+          hasMoreMessages: false,
+        }),
+      });
+    });
+    const latestMessage: SessionState["messages"][number] = {
+      id: "assistant-2",
+      role: "assistant",
+      timestamp: 2,
+      blocks: [{ type: "text", text: "latest reply" }],
+    };
+
+    await installMocks(
+      page,
+      createSession({
+        messagesDetailLevel: "summary",
+        totalMessageCount: 2,
+        hasMoreMessages: true,
+        messages: [latestMessage],
+      }),
+    );
+    await page.goto(`/workspaces/${workspace.id}/sessions/${summary.sessionId}`);
+    await expect(page.locator(".transcript")).toBeVisible();
+    expect(pageRequestCount).toBe(0);
+
+    await page.evaluate(
+      ({ latest, workspaceId, sessionPath }) => {
+        window.__emitSse({
+          type: "reset",
+          state: {
+            id: "web-1",
+            sessionId: "session-1",
+            workspaceId,
+            cwd: "/root/github/batty",
+            path: sessionPath,
+            thinkingLevel: "medium",
+            availableThinkingLevels: ["medium"],
+            isStreaming: false,
+            pendingMessageCount: 0,
+            updatedAt: 2,
+            contextTokens: 100,
+            contextWindow: 1000,
+            contextPercent: 10,
+            totalMessageCount: 2,
+            hasMoreMessages: true,
+            messagesDetailLevel: "full",
+            messages: [latest],
+            activeTools: [],
+          },
+        });
+      },
+      { latest: latestMessage, workspaceId: workspace.id, sessionPath: summary.path },
+    );
+
+    await expect(page.locator(".message")).toContainText(["oldest prompt", "latest reply"]);
+    expect(pageRequestCount).toBe(1);
+  });
+
   test("renders standalone bash tool results", async ({ page }) => {
     await installMocks(
       page,

@@ -28,6 +28,7 @@ type TranscriptHistoryHandle = InstanceType<typeof Virtualizer>;
 
 const transcript = ref<HTMLElement | null>(null);
 const transcriptHistory = ref<TranscriptHistoryHandle | null>(null);
+const transcriptTop = ref<HTMLElement | null>(null);
 const transcriptTail = ref<HTMLElement | null>(null);
 const transcriptBottom = ref<HTMLElement | null>(null);
 
@@ -41,6 +42,10 @@ function rootElement(): HTMLElement | null {
   return transcript.value;
 }
 
+function topElement(): HTMLElement | null {
+  return transcriptTop.value;
+}
+
 function tailElement(): HTMLElement | null {
   return transcriptTail.value;
 }
@@ -51,6 +56,7 @@ function bottomElement(): HTMLElement | null {
 
 defineExpose({
   rootElement,
+  topElement,
   tailElement,
   bottomElement,
 });
@@ -59,6 +65,7 @@ defineExpose({
 <template>
   <div class="transcript-shell">
     <div ref="transcript" class="transcript" tabindex="0" aria-label="Session transcript">
+      <div ref="transcriptTop" class="transcript__top" aria-hidden="true" />
       <Virtualizer
         v-if="props.historyEntries.length > 0"
         ref="transcriptHistory"
@@ -192,6 +199,7 @@ defineExpose({
   padding-bottom: 0.8rem;
 }
 
+.transcript__top,
 .transcript__bottom {
   width: 100%;
   height: 1px;

@@ -29,6 +29,22 @@ describe("session-stream", () => {
     ).toBe("/api/sessions/session-123/events?workspaceId=batty&afterRevision=42");
   });
 
+  it("can request full reset details for popover transcripts", () => {
+    expect(
+      sessionEventsPath(
+        {
+          id: "session-123",
+          workspaceId: "batty",
+          path: undefined,
+          revision: 42,
+        },
+        "full",
+      ),
+    ).toBe(
+      "/api/sessions/session-123/events?workspaceId=batty&afterRevision=42&messagesDetailLevel=full",
+    );
+  });
+
   it("prefixes the event stream with the configured base url", () => {
     window.__BATTY_BASE_URL__ = "/batty";
 

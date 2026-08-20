@@ -105,14 +105,21 @@ export function registerSessionRoutes(context: RouteContext): void {
     return service.createOrOpenDailySession(workspace);
   });
 
-  app.post<{ Body: { workspaceId: string; sessionPath: string } }>(
-    routePath("/api/sessions/open"),
-    async (request) => {
-      const workspaces = await listWorkspaces(config);
-      const workspace = resolveWorkspace(workspaces, request.body.workspaceId);
-      return service.openSession(workspace, request.body.sessionPath);
-    },
-  );
+  app.post<{
+    Body: {
+      workspaceId: string;
+      sessionPath: string;
+      messagesDetailLevel?: "summary" | "full";
+    };
+  }>(routePath("/api/sessions/open"), async (request) => {
+    const workspaces = await listWorkspaces(config);
+    const workspace = resolveWorkspace(workspaces, request.body.workspaceId);
+    return service.openSession(
+      workspace,
+      request.body.sessionPath,
+      request.body.messagesDetailLevel,
+    );
+  });
 
   app.post<{ Body: { workspaceId: string; sessionId: string } }>(
     routePath("/api/sessions/open-by-id"),
@@ -215,7 +222,12 @@ export function registerSessionRoutes(context: RouteContext): void {
 
   app.get<{
     Params: { sessionId: string };
-    Querystring: { workspaceId?: string; sessionPath?: string; afterRevision?: string };
+    Querystring: {
+      workspaceId?: string;
+      sessionPath?: string;
+      afterRevision?: string;
+      messagesDetailLevel?: "summary" | "full";
+    };
   }>(routePath("/api/sessions/:sessionId/events"), async (request, reply) => {
     await ensureSessionLoaded(context, request.params.sessionId, {
       ...(request.query.workspaceId ? { workspaceId: request.query.workspaceId } : {}),
@@ -237,6 +249,7 @@ export function registerSessionRoutes(context: RouteContext): void {
       request.params.sessionId,
       send,
       Number.isFinite(parsedRevision) && parsedRevision >= 0 ? parsedRevision : undefined,
+      request.query.messagesDetailLevel,
     );
     const heartbeat = setInterval(() => {
       reply.raw.write(": keep-alive\n\n");

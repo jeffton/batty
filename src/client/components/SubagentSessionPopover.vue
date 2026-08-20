@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import SessionHeaderStatus from "@/client/components/SessionHeaderStatus.vue";
 import SessionTranscriptView from "@/client/components/SessionTranscriptView.vue";
 import StreamingStopControl from "@/client/components/StreamingStopControl.vue";
-import { abortSession, getSession, getSessionMessages, openSession } from "@/client/lib/api";
+import { abortSession, getSessionMessages, openSession } from "@/client/lib/api";
 import { applyServerEvent } from "@/client/lib/session-events";
 import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
 import { sessionEventsPath } from "@/client/lib/session-stream";
@@ -31,11 +31,7 @@ const errorMessage = ref<string | undefined>(undefined);
 const reconnecting = ref(false);
 const stopping = ref(false);
 let eventSource: EventSource | undefined;
-let detailsTimer: ReturnType<typeof setTimeout> | undefined;
-let detailsRequest: Promise<void> | undefined;
-let detailsRetryRequested = false;
 let loadGeneration = 0;
-let popoverOpen = false;
 
 const connectionState = computed<"online" | "connecting" | "offline">(() => {
   if (errorMessage.value && !session.value) {
@@ -56,73 +52,6 @@ function closeStream(): void {
   eventSource = undefined;
 }
 
-function clearDetailsTimer(): void {
-  if (detailsTimer) {
-    clearTimeout(detailsTimer);
-    detailsTimer = undefined;
-  }
-}
-
-function scheduleSessionDetails(sessionId: string, generation: number, delay = 300): void {
-  if (detailsRequest) {
-    detailsRetryRequested = true;
-    return;
-  }
-  clearDetailsTimer();
-  detailsTimer = setTimeout(() => {
-    detailsTimer = undefined;
-    void loadSessionDetails(sessionId, generation);
-  }, delay);
-}
-
-async function loadSessionDetails(sessionId: string, generation: number): Promise<void> {
-  if (detailsRequest) {
-    return detailsRequest;
-  }
-
-  detailsRetryRequested = false;
-  const request = (async () => {
-    try {
-      const detailed = normalizeSessionState(await getSession(sessionId));
-      const current = session.value;
-      if (
-        generation !== loadGeneration ||
-        !popoverOpen ||
-        !detailed ||
-        !current ||
-        current.id !== sessionId
-      ) {
-        return;
-      }
-
-      const detailedIsCurrent =
-        current.revision === undefined ||
-        (detailed.revision !== undefined && detailed.revision >= current.revision);
-      const enhanced = detailedIsCurrent
-        ? mergeSessionState(detailed, current)
-        : mergeSessionState(current, detailed);
-      session.value = enhanced ? { ...enhanced, messagesDetailLevel: "full" } : enhanced;
-    } catch (error) {
-      console.error("Failed to load popover session tool details", error);
-    }
-  })();
-  detailsRequest = request;
-  try {
-    await request;
-  } finally {
-    if (detailsRequest === request) {
-      detailsRequest = undefined;
-    }
-    if (detailsRetryRequested) {
-      detailsRetryRequested = false;
-      const current = session.value;
-      if (popoverOpen && current?.messagesDetailLevel === "summary") {
-        scheduleSessionDetails(current.id, loadGeneration, 0);
-      }
-    }
-  }
-}
-
 function applyEvent(event: ServerEvent): void {
   const nextSession = applyServerEvent(session.value, event);
   if (!nextSession) {
@@ -130,9 +59,6 @@ function applyEvent(event: ServerEvent): void {
   }
 
   session.value = nextSession;
-  if (nextSession.messagesDetailLevel === "summary") {
-    scheduleSessionDetails(nextSession.id, loadGeneration);
-  }
 }
 
 function openStream(): void {
@@ -142,7 +68,7 @@ function openStream(): void {
 
   closeStream();
   reconnecting.value = true;
-  const source = new EventSource(sessionEventsPath(session.value));
+  const source = new EventSource(sessionEventsPath(session.value, "full"));
   eventSource = source;
   source.onopen = () => {
     if (eventSource !== source) {
@@ -179,18 +105,15 @@ async function ensureSessionLoaded(): Promise<void> {
   loading.value = true;
   errorMessage.value = undefined;
   try {
-    const opened = normalizeSessionState(await openSession(workspaceId, sessionPath));
+    const opened = normalizeSessionState(await openSession(workspaceId, sessionPath, "full"));
     if (!opened) {
       throw new Error("Failed to open session");
     }
-    if (generation !== loadGeneration || !popoverOpen) {
+    if (generation !== loadGeneration) {
       return;
     }
     session.value = mergeSessionState(opened, session.value);
     openStream();
-    if (session.value?.messagesDetailLevel === "summary") {
-      scheduleSessionDetails(session.value.id, generation, 0);
-    }
   } catch (error) {
     if (generation === loadGeneration) {
       errorMessage.value = error instanceof Error ? error.message : String(error);
@@ -263,14 +186,12 @@ async function loadOlderMessages(): Promise<void> {
 
 function handlePopoverToggle(event: Event): void {
   const nextState = (event as Event & { newState?: "open" | "closed" }).newState;
-  popoverOpen = nextState === "open";
-  if (popoverOpen) {
+  if (nextState === "open") {
     void ensureSessionLoaded();
     return;
   }
 
   loadGeneration += 1;
-  clearDetailsTimer();
   closeStream();
   loading.value = false;
   reconnecting.value = false;
@@ -280,7 +201,6 @@ watch(
   () => [props.workspaceId, props.sessionPath] as const,
   () => {
     loadGeneration += 1;
-    clearDetailsTimer();
     closeStream();
     session.value = undefined;
     loading.value = false;
@@ -306,7 +226,6 @@ watch(
 
 onBeforeUnmount(() => {
   loadGeneration += 1;
-  clearDetailsTimer();
   closeStream();
 });
 </script>

@@ -271,11 +271,15 @@ export function createOrOpenDailySession(workspaceId: string): Promise<SessionSt
   });
 }
 
-export function openSession(workspaceId: string, sessionPath: string): Promise<SessionState> {
+export function openSession(
+  workspaceId: string,
+  sessionPath: string,
+  messagesDetailLevel: "summary" | "full" = "summary",
+): Promise<SessionState> {
   return request("/api/sessions/open", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ workspaceId, sessionPath }),
+    body: JSON.stringify({ workspaceId, sessionPath, messagesDetailLevel }),
   });
 }
 

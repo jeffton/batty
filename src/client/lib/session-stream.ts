@@ -3,6 +3,7 @@ import type { SessionState } from "@/shared/types";
 
 export function sessionEventsPath(
   session: Pick<SessionState, "id" | "workspaceId" | "path" | "revision">,
+  messagesDetailLevel: "summary" | "full" = "summary",
 ): string {
   const params = new URLSearchParams();
   params.set("workspaceId", session.workspaceId);
@@ -11,6 +12,9 @@ export function sessionEventsPath(
   }
   if (session.path) {
     params.set("sessionPath", session.path);
+  }
+  if (messagesDetailLevel === "full") {
+    params.set("messagesDetailLevel", messagesDetailLevel);
   }
 
   const query = params.toString();

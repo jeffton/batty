@@ -320,18 +320,23 @@ export class PiService {
     return this.openSession(workspace, await this.findSessionPath(workspace, sessionId));
   }
 
-  async openSession(workspace: WorkspaceInfo, sessionPath: string): Promise<SessionState> {
+  async openSession(
+    workspace: WorkspaceInfo,
+    sessionPath: string,
+    messagesDetailLevel: "summary" | "full" = "summary",
+  ): Promise<SessionState> {
     const canonicalPath = path.resolve(sessionPath);
     const existing = [...this.sessions.values()].find(
       (candidate) => candidate.session.sessionFile === canonicalPath,
     );
     if (existing) {
-      return this.getState(existing.id, { messagesDetailLevel: "summary" });
+      return this.getState(existing.id, { messagesDetailLevel });
     }
 
     const pending = this.sessionOpenPromises.get(canonicalPath);
     if (pending) {
-      return pending;
+      const opened = await pending;
+      return this.getState(opened.id, { messagesDetailLevel });
     }
 
     const opening = (async () => {
@@ -348,7 +353,8 @@ export class PiService {
     this.sessionOpenPromises.set(canonicalPath, opening);
 
     try {
-      return await opening;
+      const opened = await opening;
+      return this.getState(opened.id, { messagesDetailLevel });
     } finally {
       if (this.sessionOpenPromises.get(canonicalPath) === opening) {
         this.sessionOpenPromises.delete(canonicalPath);
@@ -548,7 +554,12 @@ export class PiService {
     return this.sessions.has(sessionId);
   }
 
-  subscribe(sessionId: string, subscriber: SessionSubscriber, afterRevision?: number): () => void {
+  subscribe(
+    sessionId: string,
+    subscriber: SessionSubscriber,
+    afterRevision?: number,
+    messagesDetailLevel: "summary" | "full" = "summary",
+  ): () => void {
     return subscribeToSession(
       (sessionId) => this.requireSession(sessionId),
       (sessionId, options) => this.getState(sessionId, options),
@@ -556,7 +567,7 @@ export class PiService {
       sessionId,
       subscriber,
       afterRevision,
-      "summary",
+      messagesDetailLevel,
     );
   }
 

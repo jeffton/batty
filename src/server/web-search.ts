@@ -126,9 +126,37 @@ function isUsefulContent(content: string): boolean {
   return withoutHeading.length >= 40;
 }
 
+function getMediaType(contentType: string | undefined): string | undefined {
+  return contentType?.split(";", 1)[0]?.trim().toLowerCase() || undefined;
+}
+
 function isHtmlContentType(contentType: string | undefined): boolean {
-  const mediaType = contentType?.split(";", 1)[0]?.trim().toLowerCase();
+  const mediaType = getMediaType(contentType);
   return mediaType === "text/html" || mediaType === "application/xhtml+xml";
+}
+
+function isTextContentType(contentType: string | undefined): boolean {
+  const mediaType = getMediaType(contentType);
+  return (
+    mediaType?.startsWith("text/") === true ||
+    mediaType === "application/json" ||
+    mediaType?.endsWith("+json") === true ||
+    mediaType === "application/xml" ||
+    mediaType?.endsWith("+xml") === true ||
+    mediaType === "application/javascript" ||
+    mediaType === "application/ecmascript" ||
+    mediaType === "application/x-javascript" ||
+    mediaType === "application/graphql" ||
+    mediaType === "application/toml" ||
+    mediaType === "application/sql" ||
+    mediaType === "application/yaml" ||
+    mediaType === "application/x-yaml" ||
+    mediaType === "application/x-www-form-urlencoded"
+  );
+}
+
+function formatUnsupportedContentType(contentType: string | undefined): string {
+  return `(Unsupported content type: ${getMediaType(contentType) ?? "unknown"})`;
 }
 
 function extractContent(result: Extract<PageFetchResult, { ok: true }>): string {
@@ -190,10 +218,13 @@ async function fetchPageViaHttp(url: string): Promise<PageFetchResult> {
       };
     }
 
+    const contentType = response.headers.get("content-type") || undefined;
     return {
       ok: true,
-      body: await response.text(),
-      contentType: response.headers.get("content-type") || undefined,
+      body: isTextContentType(contentType)
+        ? await response.text()
+        : formatUnsupportedContentType(contentType),
+      contentType,
       finalUrl: response.url || url,
       status: response.status,
       statusText: response.statusText,
@@ -326,10 +357,12 @@ async function fetchPageViaBrowser(url: string): Promise<PageFetchResult> {
           .catch(() => {});
         await page.waitForTimeout(250);
 
-        const contentType = response?.headers()["content-type"] ?? "text/html";
+        const contentType = response?.headers()["content-type"];
         const body = isHtmlContentType(contentType)
           ? await page.content()
-          : await (response?.text() ?? page.content());
+          : isTextContentType(contentType)
+            ? await (response?.text() ?? page.content())
+            : formatUnsupportedContentType(contentType);
 
         return {
           ok: true,

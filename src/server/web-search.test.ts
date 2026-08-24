@@ -119,6 +119,64 @@ describe("runWebSearch", () => {
     expect(chromium.launch).not.toHaveBeenCalled();
   });
 
+  it("does not decode PDF bytes as text", async () => {
+    const pdfBytes = new Uint8Array([
+      0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37, 0x0a, 0x00, 0xff, 0x80,
+    ]);
+
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(pdfBytes, {
+          status: 200,
+          headers: { "Content-Type": "application/pdf" },
+        }),
+    ) as typeof fetch;
+
+    const result = await runWebSearch({
+      apiKey: "brave-key",
+      action: "content",
+      url: "https://example.com/document.pdf",
+    });
+
+    expect(result.text).toBe("(Unsupported content type: application/pdf)");
+    expect(result.text).not.toContain("�");
+    expect(chromium.launch).not.toHaveBeenCalled();
+  });
+
+  it("rejects responses whose content type is unknown", async () => {
+    const response = new Response("headerless content", { status: 200 });
+    response.headers.delete("content-type");
+    globalThis.fetch = vi.fn(async () => response) as typeof fetch;
+
+    const result = await runWebSearch({
+      apiKey: "brave-key",
+      action: "content",
+      url: "https://example.com/download",
+    });
+
+    expect(result.text).toBe("(Unsupported content type: unknown)");
+    expect(chromium.launch).not.toHaveBeenCalled();
+  });
+
+  it("rejects binary responses with content type parameters", async () => {
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
+          status: 200,
+          headers: { "Content-Type": "image/png; name=preview.png" },
+        }),
+    ) as typeof fetch;
+
+    const result = await runWebSearch({
+      apiKey: "brave-key",
+      action: "content",
+      url: "https://example.com/preview.png",
+    });
+
+    expect(result.text).toBe("(Unsupported content type: image/png)");
+    expect(chromium.launch).not.toHaveBeenCalled();
+  });
+
   it("extracts readable markdown content from pages", async () => {
     globalThis.fetch = vi.fn(
       async () =>
@@ -212,6 +270,87 @@ describe("runWebSearch", () => {
     expect(result.text).toContain("Rendered content from the headless browser path.");
     expect(routeAbort).not.toHaveBeenCalled();
     expect(routeContinue).toHaveBeenCalled();
+  });
+
+  it("does not decode binary navigation responses in the browser fallback", async () => {
+    globalThis.fetch = vi.fn(
+      async () => new Response("Forbidden", { status: 403, statusText: "Forbidden" }),
+    ) as typeof fetch;
+
+    const responseText = vi.fn(async () => "binary data");
+    const pageContent = vi.fn(async () => "rendered data");
+    const page = {
+      setDefaultNavigationTimeout: vi.fn(),
+      setDefaultTimeout: vi.fn(),
+      route: vi.fn(async () => {}),
+      goto: vi.fn(async () => ({
+        headers: () => ({ "content-type": "application/pdf" }),
+        status: () => 200,
+        statusText: () => "OK",
+        text: responseText,
+      })),
+      waitForLoadState: vi.fn(async () => {}),
+      waitForTimeout: vi.fn(async () => {}),
+      content: pageContent,
+      url: vi.fn(() => "https://example.com/document.pdf"),
+    };
+    const context = {
+      newPage: vi.fn(async () => page),
+      close: vi.fn(async () => {}),
+    };
+
+    vi.mocked(chromium.launch).mockResolvedValue({
+      isConnected: vi.fn(() => true),
+      on: vi.fn(),
+      newContext: vi.fn(async () => context),
+    } as never);
+
+    const result = await runWebSearch({
+      apiKey: "brave-key",
+      action: "content",
+      url: "https://example.com/protected-document.pdf",
+    });
+
+    expect(result.text).toBe("(Unsupported content type: application/pdf)");
+    expect(responseText).not.toHaveBeenCalled();
+    expect(pageContent).not.toHaveBeenCalled();
+  });
+
+  it("rejects browser navigation responses whose content type is unknown", async () => {
+    globalThis.fetch = vi.fn(
+      async () => new Response("Forbidden", { status: 403, statusText: "Forbidden" }),
+    ) as typeof fetch;
+
+    const pageContent = vi.fn(async () => "rendered data");
+    const page = {
+      setDefaultNavigationTimeout: vi.fn(),
+      setDefaultTimeout: vi.fn(),
+      route: vi.fn(async () => {}),
+      goto: vi.fn(async () => null),
+      waitForLoadState: vi.fn(async () => {}),
+      waitForTimeout: vi.fn(async () => {}),
+      content: pageContent,
+      url: vi.fn(() => "https://example.com/download"),
+    };
+    const context = {
+      newPage: vi.fn(async () => page),
+      close: vi.fn(async () => {}),
+    };
+
+    vi.mocked(chromium.launch).mockResolvedValue({
+      isConnected: vi.fn(() => true),
+      on: vi.fn(),
+      newContext: vi.fn(async () => context),
+    } as never);
+
+    const result = await runWebSearch({
+      apiKey: "brave-key",
+      action: "content",
+      url: "https://example.com/protected-download",
+    });
+
+    expect(result.text).toBe("(Unsupported content type: unknown)");
+    expect(pageContent).not.toHaveBeenCalled();
   });
 
   it("relaunches the shared browser when it closes before creating a context", async () => {

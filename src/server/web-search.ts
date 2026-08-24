@@ -1,3 +1,4 @@
+import { Worker } from "node:worker_threads";
 import { Readability } from "@mozilla/readability";
 import { JSDOM } from "jsdom";
 import type { Browser } from "playwright";
@@ -7,6 +8,58 @@ import { gfm } from "turndown-plugin-gfm";
 const PAGE_FETCH_TIMEOUT_MS = 15_000;
 const BROWSER_SETTLE_TIMEOUT_MS = 3_000;
 const BROWSER_FALLBACK_CONCURRENCY = 2;
+const PDF_EXTRACTION_CONCURRENCY = 2;
+const MAX_PDF_BYTES = 25 * 1024 * 1024;
+const MAX_PDF_PAGES = 250;
+const MAX_PDF_IMAGE_PIXELS = 16_777_216;
+const MAX_PDF_TEXT_CHARACTERS = 2_000_000;
+const PDF_EXTRACTION_TIMEOUT_MS = 15_000;
+const PDF_WORKER_SOURCE = String.raw`
+const { parentPort, workerData } = require("node:worker_threads");
+
+(async () => {
+  const { getDocumentProxy } = await import("unpdf");
+  const pdf = await getDocumentProxy(new Uint8Array(workerData.data), {
+    maxImageSize: workerData.maxImagePixels,
+    verbosity: 0,
+  });
+  try {
+    if (pdf.numPages > workerData.maxPages) {
+      throw new Error("PDF exceeds the " + workerData.maxPages + "-page limit");
+    }
+
+    let text = "";
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      for (const item of content.items) {
+        if (item.str == null) continue;
+        text += item.str + (item.hasEOL ? "\n" : "");
+        if (text.length > workerData.maxTextCharacters) {
+          throw new Error(
+            "PDF text exceeds the " + workerData.maxTextCharacters + "-character limit",
+          );
+        }
+      }
+      if (pageNumber < pdf.numPages) text += "\n";
+    }
+
+    text = text
+      .replace(/[^\S\n]+/g, " ")
+      .replace(/ ?\n ?/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    parentPort.postMessage({ ok: true, text: text || "Could not extract text from this PDF." });
+  } finally {
+    await pdf.loadingTask.destroy();
+  }
+})().catch((error) => {
+  parentPort.postMessage({
+    ok: false,
+    error: error instanceof Error ? error.message : String(error),
+  });
+});
+`;
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const DEFAULT_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
@@ -135,6 +188,10 @@ function isHtmlContentType(contentType: string | undefined): boolean {
   return mediaType === "text/html" || mediaType === "application/xhtml+xml";
 }
 
+function isPdfContentType(contentType: string | undefined): boolean {
+  return getMediaType(contentType) === "application/pdf";
+}
+
 function isTextContentType(contentType: string | undefined): boolean {
   const mediaType = getMediaType(contentType);
   return (
@@ -157,6 +214,55 @@ function isTextContentType(contentType: string | undefined): boolean {
 
 function formatUnsupportedContentType(contentType: string | undefined): string {
   return `(Unsupported content type: ${getMediaType(contentType) ?? "unknown"})`;
+}
+
+function formatPdfExtractionFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return `Error: Failed to extract PDF content: ${message}`;
+}
+
+function assertPdfContentLength(contentLength: string | undefined): void {
+  if (contentLength && Number(contentLength) > MAX_PDF_BYTES) {
+    throw new Error(`PDF exceeds the ${MAX_PDF_BYTES / 1024 / 1024} MB size limit`);
+  }
+}
+
+async function readPdfResponse(response: Response): Promise<Uint8Array> {
+  if (!response.body) {
+    throw new Error("PDF response has no body");
+  }
+
+  try {
+    assertPdfContentLength(response.headers.get("content-length") || undefined);
+  } catch (error) {
+    await response.body.cancel();
+    throw error;
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    byteLength += value.byteLength;
+    if (byteLength > MAX_PDF_BYTES) {
+      await reader.cancel();
+      throw new Error(`PDF exceeds the ${MAX_PDF_BYTES / 1024 / 1024} MB size limit`);
+    }
+    chunks.push(value);
+  }
+
+  const data = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    data.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return data;
 }
 
 function extractContent(result: Extract<PageFetchResult, { ok: true }>): string {
@@ -219,11 +325,22 @@ async function fetchPageViaHttp(url: string): Promise<PageFetchResult> {
     }
 
     const contentType = response.headers.get("content-type") || undefined;
+    let body: string;
+    if (isPdfContentType(contentType)) {
+      try {
+        body = await extractPdfContent(await readPdfResponse(response));
+      } catch (error) {
+        body = formatPdfExtractionFailure(error);
+      }
+    } else {
+      body = isTextContentType(contentType)
+        ? await response.text()
+        : formatUnsupportedContentType(contentType);
+    }
+
     return {
       ok: true,
-      body: isTextContentType(contentType)
-        ? await response.text()
-        : formatUnsupportedContentType(contentType),
+      body,
       contentType,
       finalUrl: response.url || url,
       status: response.status,
@@ -317,6 +434,68 @@ function createConcurrencyLimiter(limit: number): <T>(task: () => Promise<T>) =>
 }
 
 const withBrowserFallbackSlot = createConcurrencyLimiter(BROWSER_FALLBACK_CONCURRENCY);
+const withPdfExtractionSlot = createConcurrencyLimiter(PDF_EXTRACTION_CONCURRENCY);
+
+async function extractPdfContent(data: Uint8Array): Promise<string> {
+  if (data.byteLength > MAX_PDF_BYTES) {
+    throw new Error(`PDF exceeds the ${MAX_PDF_BYTES / 1024 / 1024} MB size limit`);
+  }
+
+  return withPdfExtractionSlot(
+    () =>
+      new Promise<string>((resolve, reject) => {
+        const worker = new Worker(PDF_WORKER_SOURCE, {
+          eval: true,
+          workerData: {
+            data: data.buffer,
+            maxImagePixels: MAX_PDF_IMAGE_PIXELS,
+            maxPages: MAX_PDF_PAGES,
+            maxTextCharacters: MAX_PDF_TEXT_CHARACTERS,
+          },
+          transferList: [data.buffer as ArrayBuffer],
+          resourceLimits: {
+            maxOldGenerationSizeMb: 192,
+            maxYoungGenerationSizeMb: 32,
+            stackSizeMb: 4,
+          },
+        });
+        let settling = false;
+        const settle = async (result: { text: string } | { error: Error }) => {
+          if (settling) {
+            return;
+          }
+          settling = true;
+          clearTimeout(timeout);
+          worker.removeAllListeners();
+          await worker.terminate().catch(() => {});
+          if ("text" in result) {
+            resolve(result.text);
+          } else {
+            reject(result.error);
+          }
+        };
+        const timeout = setTimeout(() => {
+          void settle({ error: new Error("PDF text extraction timed out") });
+        }, PDF_EXTRACTION_TIMEOUT_MS);
+
+        worker.once("message", (message: { ok: boolean; text?: string; error?: string }) => {
+          void settle(
+            message.ok
+              ? { text: message.text! }
+              : { error: new Error(message.error ?? "Unknown PDF extraction failure") },
+          );
+        });
+        worker.once("error", (error) => {
+          void settle({ error: error instanceof Error ? error : new Error(String(error)) });
+        });
+        worker.once("exit", (code) => {
+          void settle({
+            error: new Error(`PDF extraction worker exited without a result (code ${code})`),
+          });
+        });
+      }),
+  );
+}
 
 async function fetchPageViaBrowser(url: string): Promise<PageFetchResult> {
   return withBrowserFallbackSlot(async () => {
@@ -352,17 +531,21 @@ async function fetchPageViaBrowser(url: string): Promise<PageFetchResult> {
         });
 
         const response = await page.goto(url, { waitUntil: "domcontentloaded" });
-        await page
-          .waitForLoadState("networkidle", { timeout: BROWSER_SETTLE_TIMEOUT_MS })
-          .catch(() => {});
-        await page.waitForTimeout(250);
-
         const contentType = response?.headers()["content-type"];
-        const body = isHtmlContentType(contentType)
-          ? await page.content()
-          : isTextContentType(contentType)
-            ? await (response?.text() ?? page.content())
-            : formatUnsupportedContentType(contentType);
+        let body: string;
+        if (isPdfContentType(contentType) && response) {
+          body = "Error: PDF text extraction is unavailable through the browser fallback";
+        } else {
+          await page
+            .waitForLoadState("networkidle", { timeout: BROWSER_SETTLE_TIMEOUT_MS })
+            .catch(() => {});
+          await page.waitForTimeout(250);
+          body = isHtmlContentType(contentType)
+            ? await page.content()
+            : isTextContentType(contentType)
+              ? await (response?.text() ?? page.content())
+              : formatUnsupportedContentType(contentType);
+        }
 
         return {
           ok: true,

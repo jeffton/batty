@@ -10,6 +10,32 @@ vi.mock("playwright", () => ({
 
 const originalFetch = globalThis.fetch;
 
+function createTextPdf(text: string): ArrayBuffer {
+  const stream = `BT /F1 18 Tf 50 150 Td (${text}) Tj ET`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(pdf.length);
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xrefOffset = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += "0000000000 65535 f \n";
+  pdf += offsets
+    .slice(1)
+    .map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`)
+    .join("");
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  return new TextEncoder().encode(pdf).buffer as ArrayBuffer;
+}
+
 afterEach(() => {
   globalThis.fetch = originalFetch;
   resetWebSearchStateForTests();
@@ -119,14 +145,10 @@ describe("runWebSearch", () => {
     expect(chromium.launch).not.toHaveBeenCalled();
   });
 
-  it("does not decode PDF bytes as text", async () => {
-    const pdfBytes = new Uint8Array([
-      0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37, 0x0a, 0x00, 0xff, 0x80,
-    ]);
-
+  it("extracts text from PDFs without decoding their bytes as text", async () => {
     globalThis.fetch = vi.fn(
       async () =>
-        new Response(pdfBytes, {
+        new Response(createTextPdf("Hello from PDF search"), {
           status: 200,
           headers: { "Content-Type": "application/pdf" },
         }),
@@ -138,8 +160,53 @@ describe("runWebSearch", () => {
       url: "https://example.com/document.pdf",
     });
 
-    expect(result.text).toBe("(Unsupported content type: application/pdf)");
+    expect(result.text).toContain("Hello from PDF search");
+    expect(result.text).not.toContain("%PDF");
     expect(result.text).not.toContain("�");
+    expect(chromium.launch).not.toHaveBeenCalled();
+  });
+
+  it("reports PDF extraction errors without exposing binary content", async () => {
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(new TextEncoder().encode("%PDF-invalid"), {
+          status: 200,
+          headers: { "Content-Type": "application/pdf" },
+        }),
+    ) as typeof fetch;
+
+    const result = await runWebSearch({
+      apiKey: "brave-key",
+      action: "content",
+      url: "https://example.com/broken.pdf",
+    });
+
+    expect(result.text).toMatch(/^Error: Failed to extract PDF content:/);
+    expect(result.text).not.toContain("%PDF-invalid");
+    expect(chromium.launch).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized PDFs before reading their response body", async () => {
+    const response = new Response(createTextPdf("Too large"), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Length": String(26 * 1024 * 1024),
+      },
+    });
+    const getReader = vi.spyOn(response.body!, "getReader");
+    globalThis.fetch = vi.fn(async () => response) as typeof fetch;
+
+    const result = await runWebSearch({
+      apiKey: "brave-key",
+      action: "content",
+      url: "https://example.com/oversized.pdf",
+    });
+
+    expect(result.text).toBe(
+      "Error: Failed to extract PDF content: PDF exceeds the 25 MB size limit",
+    );
+    expect(getReader).not.toHaveBeenCalled();
     expect(chromium.launch).not.toHaveBeenCalled();
   });
 
@@ -272,25 +339,33 @@ describe("runWebSearch", () => {
     expect(routeContinue).toHaveBeenCalled();
   });
 
-  it("does not decode binary navigation responses in the browser fallback", async () => {
+  it("does not buffer PDFs returned by the browser fallback", async () => {
     globalThis.fetch = vi.fn(
       async () => new Response("Forbidden", { status: 403, statusText: "Forbidden" }),
     ) as typeof fetch;
 
     const responseText = vi.fn(async () => "binary data");
+    const browserPdf = createTextPdf("Browser PDF text");
+    const responseBody = vi.fn(async () => Buffer.from(browserPdf));
     const pageContent = vi.fn(async () => "rendered data");
+    const waitForLoadState = vi.fn(async () => {});
+    const waitForTimeout = vi.fn(async () => {});
     const page = {
       setDefaultNavigationTimeout: vi.fn(),
       setDefaultTimeout: vi.fn(),
       route: vi.fn(async () => {}),
       goto: vi.fn(async () => ({
-        headers: () => ({ "content-type": "application/pdf" }),
+        headers: () => ({
+          "content-type": "application/pdf",
+          "content-length": String(browserPdf.byteLength),
+        }),
         status: () => 200,
         statusText: () => "OK",
         text: responseText,
+        body: responseBody,
       })),
-      waitForLoadState: vi.fn(async () => {}),
-      waitForTimeout: vi.fn(async () => {}),
+      waitForLoadState,
+      waitForTimeout,
       content: pageContent,
       url: vi.fn(() => "https://example.com/document.pdf"),
     };
@@ -311,9 +386,14 @@ describe("runWebSearch", () => {
       url: "https://example.com/protected-document.pdf",
     });
 
-    expect(result.text).toBe("(Unsupported content type: application/pdf)");
+    expect(result.text).toBe(
+      "Error: PDF text extraction is unavailable through the browser fallback",
+    );
+    expect(responseBody).not.toHaveBeenCalled();
     expect(responseText).not.toHaveBeenCalled();
     expect(pageContent).not.toHaveBeenCalled();
+    expect(waitForLoadState).not.toHaveBeenCalled();
+    expect(waitForTimeout).not.toHaveBeenCalled();
   });
 
   it("rejects browser navigation responses whose content type is unknown", async () => {

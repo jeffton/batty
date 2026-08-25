@@ -1,5 +1,5 @@
 diff --git a/dist/core/agent-session.d.ts b/dist/core/agent-session.d.ts
-index f37d1cc..2547f67 100644
+index 528a246ee77895d72dfb51c2946444e1760bc049..a3d25c9c4b6957eda4f0ab92ec67a901d26d4442 100644
 --- a/dist/core/agent-session.d.ts
 +++ b/dist/core/agent-session.d.ts
 @@ -156,6 +156,8 @@ export interface PromptOptions {
@@ -12,10 +12,10 @@ index f37d1cc..2547f67 100644
      streamingBehavior?: "steer" | "followUp";
      /** Source of input for extension input event handlers. Defaults to "interactive". */
 diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
-index ce8a9a2..8e8b3e8 100644
+index f4fd9f37d9826a3e791f25c9ec748645a33d5616..79f49b89ee19305164af1750b3a98838b216fa7d 100644
 --- a/dist/core/agent-session.js
 +++ b/dist/core/agent-session.js
-@@ -278,7 +278,38 @@ export class AgentSession {
+@@ -276,7 +276,39 @@ export class AgentSession {
                  : undefined);
          this.agent.prepareNextTurnWithContext = async (turn, signal) => {
              const previousSnapshot = await previousPrepareNextTurnWithContext?.(turn, signal);
@@ -33,6 +33,7 @@ index ce8a9a2..8e8b3e8 100644
 +                    ? undefined
 +                    : previousContext.messages[estimate.lastUsageIndex];
 +                const usageIsAfterCompaction = !compactionEntry ||
++                    estimate.lastUsageIndex === null ||
 +                    (usageMessage?.role === "assistant" &&
 +                        usageMessage.timestamp > new Date(compactionEntry.timestamp).getTime());
 +                if (!signal?.aborted &&
@@ -55,7 +56,7 @@ index ce8a9a2..8e8b3e8 100644
              return {
                  ...previousSnapshot,
                  context: {
-@@ -833,10 +864,10 @@ export class AgentSession {
+@@ -836,10 +868,10 @@ export class AgentSession {
                      throw new Error("Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.");
                  }
                  if (options.streamingBehavior === "followUp") {
@@ -68,7 +69,7 @@ index ce8a9a2..8e8b3e8 100644
                  }
                  preflightResult?.(true);
                  return;
-@@ -875,6 +906,7 @@ export class AgentSession {
+@@ -878,6 +910,7 @@ export class AgentSession {
                  role: "user",
                  content: userContent,
                  timestamp: Date.now(),
@@ -76,7 +77,7 @@ index ce8a9a2..8e8b3e8 100644
              });
              // Inject any pending "nextTurn" messages as context alongside the user message
              for (const msg of this._pendingNextTurnMessages) {
-@@ -1013,7 +1045,7 @@ export class AgentSession {
+@@ -1016,7 +1049,7 @@ export class AgentSession {
      /**
       * Internal: Queue a steering message (already expanded, no extension command check).
       */
@@ -85,7 +86,7 @@ index ce8a9a2..8e8b3e8 100644
          this._steeringMessages.push(text);
          this._emitQueueUpdate();
          const content = [{ type: "text", text }];
-@@ -1024,12 +1056,13 @@ export class AgentSession {
+@@ -1027,12 +1060,13 @@ export class AgentSession {
              role: "user",
              content,
              timestamp: Date.now(),
@@ -100,7 +101,7 @@ index ce8a9a2..8e8b3e8 100644
          this._followUpMessages.push(text);
          this._emitQueueUpdate();
          const content = [{ type: "text", text }];
-@@ -1040,6 +1073,7 @@ export class AgentSession {
+@@ -1043,6 +1077,7 @@ export class AgentSession {
              role: "user",
              content,
              timestamp: Date.now(),
@@ -108,14 +109,15 @@ index ce8a9a2..8e8b3e8 100644
          });
      }
      /**
-@@ -1592,14 +1626,18 @@ export class AgentSession {
-     /**
-      * Internal: Run auto-compaction with events.
+@@ -1662,15 +1697,19 @@ export class AgentSession {
+      * @param willRetry Whether to continue the interrupted turn after overflow compaction
+      * @returns Whether the post-run loop should call `agent.continue()`
       */
 -    async _runAutoCompaction(reason, willRetry) {
 +    async _runAutoCompaction(reason, willRetry, signal) {
          const settings = this.settingsManager.getCompactionSettings();
          let started = false;
+         let fromExtension = false;
 +        const abortCompaction = () => this._autoCompactionAbortController?.abort();
          try {
 -            if (!this.model) {
@@ -129,15 +131,15 @@ index ce8a9a2..8e8b3e8 100644
              const pathEntries = this.sessionManager.getBranch();
              const preparation = prepareCompaction(pathEntries, settings);
              if (!preparation) {
-@@ -1607,6 +1645,7 @@ export class AgentSession {
+@@ -1678,6 +1717,7 @@ export class AgentSession {
              }
              this._emit({ type: "compaction_start", reason });
              this._autoCompactionAbortController = new AbortController();
 +            signal?.addEventListener("abort", abortCompaction, { once: true });
              started = true;
              let extensionCompaction;
-             let fromExtension = false;
-@@ -1725,6 +1764,7 @@ export class AgentSession {
+             if (this._extensionRunner.hasHandlers("session_before_compact")) {
+@@ -1815,6 +1855,7 @@ export class AgentSession {
              return false;
          }
          finally {
@@ -146,7 +148,7 @@ index ce8a9a2..8e8b3e8 100644
          }
      }
 diff --git a/dist/core/compaction/compaction.js b/dist/core/compaction/compaction.js
-index e7ffee7..0c0e3a4 100644
+index d27179c8c357ee9384a815a657818f2a43fc4186..c8bdd9cfaa990b0c45941c555fc348cac72ac36b 100644
 --- a/dist/core/compaction/compaction.js
 +++ b/dist/core/compaction/compaction.js
 @@ -321,13 +321,20 @@ export function findCutPoint(entries, startIndex, endIndex, keepRecentTokens) {

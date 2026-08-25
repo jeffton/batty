@@ -184,6 +184,71 @@ describe("Pi between-turn compaction patch", () => {
     expect(result?.context.messages).toStrictEqual(compactedMessages);
   });
 
+  it("compacts usage-less context after an earlier compaction", async () => {
+    const compactedMessages = [{ role: "compactionSummary", summary: "Preserved work again" }];
+    let branch: unknown[] = [
+      {
+        type: "compaction",
+        id: "compaction-1",
+        parentId: "previous-tool-result",
+        timestamp: new Date(2).toISOString(),
+        summary: "Earlier work",
+        firstKeptEntryId: "previous-tool-result",
+        tokensBefore: 95,
+      },
+    ];
+    const runAutoCompaction = vi.fn(async () => {
+      branch = [
+        ...branch,
+        {
+          type: "compaction",
+          id: "compaction-2",
+          parentId: "current-tool-result",
+          timestamp: new Date(4).toISOString(),
+          summary: "Preserved work again",
+          firstKeptEntryId: "current-tool-result",
+          tokensBefore: 95,
+        },
+      ];
+      session.agent.state.messages = compactedMessages;
+      return false;
+    });
+    const session: CompactionTestSession = {
+      agent: {
+        state: {
+          messages: [],
+          tools: [],
+          model: { provider: "openai", id: "test-model", contextWindow: 100 },
+          thinkingLevel: "medium",
+        },
+      },
+      model: { provider: "openai", id: "test-model", contextWindow: 100 },
+      settingsManager: {
+        getCompactionSettings: () => ({
+          enabled: true,
+          reserveTokens: 20,
+          keepRecentTokens: 10,
+        }),
+      },
+      sessionManager: { getBranch: () => branch },
+      _runAutoCompaction: runAutoCompaction,
+      abortCompaction: vi.fn(),
+      _baseSystemPrompt: "system",
+    };
+    installNextTurnCompaction(session);
+
+    const result = await session.agent.prepareNextTurnWithContext?.({
+      context: {
+        messages: [{ role: "user", content: "x".repeat(400), timestamp: 3 }],
+        systemPrompt: "old",
+        tools: [],
+      },
+    });
+
+    expect(runAutoCompaction).toHaveBeenCalledWith("threshold", false, undefined);
+    expect(result?.context.messages).toStrictEqual(compactedMessages);
+  });
+
   it("stops before an oversized model request when compaction fails", async () => {
     const session: CompactionTestSession = {
       agent: {

@@ -32,11 +32,11 @@ overrides:
   "brace-expansion@5": 5.0.9
   "find-my-way@9": 9.7.0
   vite@*: "catalog:"
-patchedDependencies:
-  "@earendil-works/pi-ai@0.84.2": patches/@earendil-works__pi-ai@0.84.2.patch
-  "@earendil-works/pi-coding-agent@0.84.2": patches/@earendil-works__pi-coding-agent@0.84.2.patch
 peerDependencyRules:
   allowAny:
     - vite
   allowedVersions:
     vite: "*"
+patchedDependencies:
+  "@earendil-works/pi-ai@0.84.3": patches/@earendil-works__pi-ai@0.84.3.patch
+  "@earendil-works/pi-coding-agent@0.84.3": patches/@earendil-works__pi-coding-agent@0.84.3.patch

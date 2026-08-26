@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Check, CircleAlert, LoaderCircle } from "@lucide/vue";
+import { isPiShellToolName } from "@/shared/pi-tools";
 
 const props = defineProps<{
   name: string;
@@ -12,7 +13,7 @@ const props = defineProps<{
 <template>
   <header class="tool-call__header">
     <strong class="tool-call__name">{{ props.name }}</strong>
-    <span v-if="props.name === 'bash' && props.timeout" class="tool-call__timeout">
+    <span v-if="isPiShellToolName(props.name) && props.timeout" class="tool-call__timeout">
       {{ props.timeout }}
     </span>
     <code v-if="props.path" class="tool-call__path">{{ props.path }}</code>

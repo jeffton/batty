@@ -4,6 +4,7 @@ import css from "highlight.js/lib/languages/css";
 import javascript from "highlight.js/lib/languages/javascript";
 import json from "highlight.js/lib/languages/json";
 import markdown from "highlight.js/lib/languages/markdown";
+import powershell from "highlight.js/lib/languages/powershell";
 import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 import yaml from "highlight.js/lib/languages/yaml";
@@ -13,6 +14,7 @@ hljs.registerLanguage("css", css);
 hljs.registerLanguage("javascript", javascript);
 hljs.registerLanguage("json", json);
 hljs.registerLanguage("markdown", markdown);
+hljs.registerLanguage("powershell", powershell);
 hljs.registerLanguage("typescript", typescript);
 hljs.registerLanguage("xml", xml);
 hljs.registerLanguage("yaml", yaml);
@@ -23,6 +25,7 @@ const AUTO_DETECT_LANGUAGES = [
   "javascript",
   "json",
   "markdown",
+  "powershell",
   "typescript",
   "xml",
   "yaml",
@@ -53,6 +56,9 @@ function normalizeLanguage(language?: string): string | undefined {
     case "sh":
     case "bash":
       return "bash";
+    case "powershell":
+    case "ps1":
+      return "powershell";
     default:
       return AUTO_DETECT_LANGUAGES.includes(language) ? language : undefined;
   }
@@ -101,6 +107,9 @@ export function languageFromPath(path?: string): string | undefined {
   }
   if (lower.endsWith(".sh") || lower.endsWith(".bash")) {
     return "bash";
+  }
+  if (lower.endsWith(".ps1") || lower.endsWith(".psm1") || lower.endsWith(".psd1")) {
+    return "powershell";
   }
   return undefined;
 }

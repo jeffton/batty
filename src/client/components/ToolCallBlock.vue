@@ -12,6 +12,7 @@ import ToolCallMeta from "@/client/components/ToolCallMeta.vue";
 import { formatValue, languageFromPath } from "@/client/lib/code-format";
 import { createHeadView, createTailView } from "@/client/lib/tool-output";
 import { hasToolResultContent } from "@/client/lib/transcript";
+import { isPiShellToolName } from "@/shared/pi-tools";
 import type { SentFileDescriptor, ToolExecutionDetails, UiContentBlock } from "@/shared/types";
 
 // Keep this in sync with .tool-call-code__output-window--collapsed in ToolCallCodeOutput.vue.
@@ -127,8 +128,8 @@ const hasResultContent = computed(() =>
     props.suppressSentFiles ? { ...props.resultDetails, sentFiles: [] } : props.resultDetails,
   ),
 );
-const bashTextOutput = computed(() =>
-  props.name !== "bash"
+const shellTextOutput = computed(() =>
+  !isPiShellToolName(props.name)
     ? ""
     : props.resultBlocks
         .filter(
@@ -137,7 +138,8 @@ const bashTextOutput = computed(() =>
         .map((block) => block.text)
         .join("\n"),
 );
-const bashTailView = computed(() => createTailView(bashTextOutput.value, OUTPUT_TAIL_LINE_COUNT));
+const shellTailView = computed(() => createTailView(shellTextOutput.value, OUTPUT_TAIL_LINE_COUNT));
+const shellLanguage = computed(() => (props.name === "powershell" ? "powershell" : "bash"));
 const writeTailView = computed(() =>
   createTailView(contentValue.value ?? "", OUTPUT_TAIL_LINE_COUNT),
 );
@@ -178,7 +180,7 @@ const webSearchHeadView = computed(() =>
 );
 const canExpandOutput = computed(
   () =>
-    (props.name === "bash" && bashTailView.value.isTrimmed) ||
+    (isPiShellToolName(props.name) && shellTailView.value.isTrimmed) ||
     (props.name === "write" && writeTailView.value.isTrimmed) ||
     (props.name === "read" && readTailView.value.isTrimmed) ||
     (props.name === "cron" && cronHeadView.value.isTrimmed) ||
@@ -193,16 +195,15 @@ const expandButtonLabel = computed(() => {
     return "Collapse output";
   }
 
-  const hiddenLineCount =
-    props.name === "bash"
-      ? bashTailView.value.hiddenLineCount
-      : props.name === "write"
-        ? writeTailView.value.hiddenLineCount
-        : props.name === "read"
-          ? readTailView.value.hiddenLineCount
-          : props.name === "cron"
-            ? cronHeadView.value.hiddenLineCount
-            : webSearchHeadView.value.hiddenLineCount;
+  const hiddenLineCount = isPiShellToolName(props.name)
+    ? shellTailView.value.hiddenLineCount
+    : props.name === "write"
+      ? writeTailView.value.hiddenLineCount
+      : props.name === "read"
+        ? readTailView.value.hiddenLineCount
+        : props.name === "cron"
+          ? cronHeadView.value.hiddenLineCount
+          : webSearchHeadView.value.hiddenLineCount;
   return `Show full output (+${hiddenLineCount} lines)`;
 });
 const visibleWriteContent = computed(() => {
@@ -211,8 +212,8 @@ const visibleWriteContent = computed(() => {
   }
   return isExpanded.value ? contentValue.value : writeTailView.value.text;
 });
-const visibleBashOutput = computed(() =>
-  isExpanded.value ? bashTextOutput.value : bashTailView.value.text,
+const visibleShellOutput = computed(() =>
+  isExpanded.value ? shellTextOutput.value : shellTailView.value.text,
 );
 const visibleReadOutput = computed(() =>
   isExpanded.value ? readTextOutput.value : readTailView.value.text,
@@ -223,8 +224,8 @@ const visibleCronOutput = computed(() =>
 const visibleWebSearchOutput = computed(() =>
   isExpanded.value ? webSearchTextOutput.value : webSearchHeadView.value.text,
 );
-const showCollapsedBashWindow = computed(
-  () => props.name === "bash" && !isExpanded.value && bashTailView.value.isTrimmed,
+const showCollapsedShellWindow = computed(
+  () => isPiShellToolName(props.name) && !isExpanded.value && shellTailView.value.isTrimmed,
 );
 const showCollapsedWriteWindow = computed(
   () => props.name === "write" && !isExpanded.value && writeTailView.value.isTrimmed,
@@ -271,7 +272,7 @@ const visibleResultBlocks = computed(() => {
     return props.resultBlocks.filter((block) => block.type !== "text");
   }
 
-  if (props.name === "bash") {
+  if (isPiShellToolName(props.name)) {
     if (commandValue.value) {
       return props.resultBlocks.filter((block) => block.type !== "text");
     }
@@ -330,7 +331,7 @@ const showResultSection = computed(() => {
     return props.status === "error" ? visibleResultBlocks.value.length > 0 : false;
   }
 
-  if (props.name === "bash") {
+  if (isPiShellToolName(props.name)) {
     return !commandValue.value ? hasResultContent.value : visibleResultBlocks.value.length > 0;
   }
 
@@ -425,11 +426,11 @@ const genericEntries = computed(() => {
     </template>
 
     <ToolCallCodeOutput
-      v-else-if="props.name === 'bash' && commandValue"
-      :code="visibleBashOutput"
-      language="bash"
+      v-else-if="isPiShellToolName(props.name) && commandValue"
+      :code="visibleShellOutput"
+      :language="shellLanguage"
       :compact="props.compact"
-      :collapsed="showCollapsedBashWindow"
+      :collapsed="showCollapsedShellWindow"
       :can-expand="canExpandOutput"
       :expand-button-label="expandButtonLabel"
       :command="commandValue"
@@ -477,9 +478,12 @@ const genericEntries = computed(() => {
     <div v-if="showResultSection" class="tool-call__result">
       <template v-for="(block, index) in visibleResultBlocks" :key="`${props.name}-${index}`">
         <CodeBlock
-          v-if="block.type === 'text' && ['bash', 'find', 'grep'].includes(props.name)"
+          v-if="
+            block.type === 'text' &&
+            (isPiShellToolName(props.name) || ['find', 'grep'].includes(props.name))
+          "
           :code="block.text"
-          :language="props.name === 'bash' ? 'bash' : undefined"
+          :language="isPiShellToolName(props.name) ? shellLanguage : undefined"
           :compact="props.compact"
         />
         <MarkdownBlock

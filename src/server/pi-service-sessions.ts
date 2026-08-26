@@ -1,4 +1,5 @@
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import { isPiShellToolName } from "@/shared/pi-tools";
 import type {
   ServerEvent,
   SessionState,
@@ -307,8 +308,9 @@ export async function handleAgentEvent(
         const normalizedBlocks = normalizeBlocks(event.partialResult.content ?? [], {
           imageResolver: webSession.resolveUiImage,
         });
-        const blocks =
-          current.toolName === "bash" ? sanitizeTerminalBlocks(normalizedBlocks) : normalizedBlocks;
+        const blocks = isPiShellToolName(current.toolName)
+          ? sanitizeTerminalBlocks(normalizedBlocks)
+          : normalizedBlocks;
         const details = normalizeToolDetails(event.partialResult.details);
         const deltas = appendOnlyBlockDeltas(current.blocks, blocks);
         const next = { ...current, blocks, details };
@@ -332,7 +334,9 @@ export async function handleAgentEvent(
         const blocks = normalizeBlocks(event.result.content ?? [], {
           imageResolver: webSession.resolveUiImage,
         });
-        current.blocks = current.toolName === "bash" ? sanitizeTerminalBlocks(blocks) : blocks;
+        current.blocks = isPiShellToolName(current.toolName)
+          ? sanitizeTerminalBlocks(blocks)
+          : blocks;
         current.status = event.isError ? "error" : "success";
         current.isError = event.isError;
         current.details = normalizeToolDetails(event.result.details);

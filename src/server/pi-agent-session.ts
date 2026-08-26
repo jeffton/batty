@@ -9,6 +9,7 @@ import {
   type AgentSession,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { battyActivePiToolNames, isPiShellToolName } from "@/shared/pi-tools";
 import type { WorkspaceInfo } from "@/shared/types";
 import { type AppConfig, loadEnvironmentFile } from "./config";
 import {
@@ -27,15 +28,13 @@ import {
 import type { PiModel, WebSession } from "./pi-service-types";
 import { modelKey } from "./pi-service-types";
 
-const DEFAULT_BATTY_PI_TOOL_NAMES = ["read", "bash", "edit", "write", "grep", "find"];
-
 export function createEnvironmentReloadExtension(battyDir: string): InlineExtension {
   return {
     name: "batty-environment",
     hidden: true,
     factory: (pi) => {
       pi.on("tool_call", async (event) => {
-        if (event.toolName === "bash") {
+        if (isPiShellToolName(event.toolName)) {
           await loadEnvironmentFile(battyDir);
         }
       });
@@ -118,11 +117,12 @@ export async function createPiAgentSession({
     ...(model ? { model: model as never } : {}),
     ...(thinkingLevel ? { thinkingLevel: thinkingLevel as AgentSession["thinkingLevel"] } : {}),
     customTools: customTools as never,
+    noTools: "builtin",
   });
 
-  result.session.setActiveToolsByName([
-    ...new Set([...result.session.getActiveToolNames(), ...DEFAULT_BATTY_PI_TOOL_NAMES]),
-  ]);
+  result.session.setActiveToolsByName(
+    battyActivePiToolNames(result.session.getActiveToolNames(), process.platform),
+  );
 
   if (!persistedPrompt) {
     const restoredContext = sessionManager.buildSessionContext();

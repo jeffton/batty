@@ -30,12 +30,12 @@ const emit = defineEmits<{
 
 <template>
   <div
-    :class="props.buttonPlacement === 'overlay' ? 'tool-call__overlay-output' : 'tool-call__bash'"
+    :class="props.buttonPlacement === 'overlay' ? 'tool-call__overlay-output' : 'tool-call__shell'"
   >
     <CodeBlock
       v-if="props.command"
-      :code="`$ ${props.command}`"
-      language="bash"
+      :code="`${props.language === 'powershell' ? 'PS>' : '$'} ${props.command}`"
+      :language="props.language"
       :compact="props.compact"
     />
 
@@ -73,7 +73,7 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
-.tool-call__bash {
+.tool-call__shell {
   display: grid;
   gap: 0.4rem;
 }

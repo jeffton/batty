@@ -1,5 +1,6 @@
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { isPiShellToolName } from "@/shared/pi-tools";
 import type { SessionState, ToolExecutionDetails, UiContentBlock, UiMessage } from "@/shared/types";
 import { sanitizeTerminalBlocks, stripTerminalFormatting } from "./terminal-output";
 
@@ -213,7 +214,7 @@ export function normalizeMessage(
       timestamp: toolResult.timestamp,
       toolCallId: toolResult.toolCallId,
       toolName: toolResult.toolName,
-      blocks: toolResult.toolName === "bash" ? sanitizeTerminalBlocks(blocks) : blocks,
+      blocks: isPiShellToolName(toolResult.toolName) ? sanitizeTerminalBlocks(blocks) : blocks,
       isError: toolResult.isError,
       details: normalizeToolDetails(toolResult.details),
     };

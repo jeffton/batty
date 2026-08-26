@@ -67,4 +67,36 @@ describe("Batty environment extension", () => {
     );
     expect(await invokeBash("second")).toBe("second");
   });
+
+  it("reloads environment.json before each PowerShell tool invocation", async () => {
+    const battyDir = await createEnvironmentFile("first");
+    const resourceLoader = new DefaultResourceLoader({
+      cwd: battyDir,
+      agentDir: path.join(battyDir, ".agent"),
+      noExtensions: true,
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      extensionFactories: [createEnvironmentReloadExtension(battyDir)],
+    });
+    await resourceLoader.reload();
+
+    const handler = resourceLoader.getExtensions().extensions[0]?.handlers.get("tool_call")?.[0];
+    await handler?.(
+      { type: "tool_call", toolCallId: "first", toolName: "powershell", input: {} },
+      {},
+    );
+    expect(process.env[testEnvKey]).toBe("first");
+
+    await fs.writeFile(
+      environmentFilePath(battyDir),
+      `${JSON.stringify({ [testEnvKey]: "second" }, null, 2)}\n`,
+      "utf8",
+    );
+    await handler?.(
+      { type: "tool_call", toolCallId: "second", toolName: "powershell", input: {} },
+      {},
+    );
+    expect(process.env[testEnvKey]).toBe("second");
+  });
 });

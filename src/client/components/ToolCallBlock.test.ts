@@ -51,10 +51,13 @@ describe("ToolCallBlock", () => {
     expect(wrapper.text()).toContain("src/client/components/ToolCallBlock.test.ts");
   });
 
-  it("tails bash output and expands to the full output on demand", async () => {
+  it.each([
+    ["bash", "$"],
+    ["powershell", "PS>"],
+  ])("tails %s output and expands to the full output on demand", async (name, prompt) => {
     const wrapper = mount(ToolCallBlock, {
       props: {
-        name: "bash",
+        name,
         arguments: {
           command: "pnpm test",
         },
@@ -64,7 +67,7 @@ describe("ToolCallBlock", () => {
     });
 
     const blocks = wrapper.findAll("pre.code-block");
-    expect(blocks[0]?.text()).toContain("$ pnpm test");
+    expect(blocks[0]?.text()).toContain(`${prompt} pnpm test`);
     expect(blocks[1]?.text()).toContain("line-30");
     expect(blocks[1]?.text()).toContain("line-11");
     expect(blocks[1]?.text()).not.toContain("line-10");

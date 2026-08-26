@@ -324,6 +324,58 @@ describe("handleAgentEvent", () => {
     });
   });
 
+  it("sanitizes streamed and final PowerShell output", async () => {
+    const publishEvent = vi.fn();
+    const current = {
+      toolCallId: "call-powershell",
+      toolName: "powershell",
+      args: { command: "Write-Output ok" },
+      blocks: [],
+      status: "running" as const,
+      isError: false,
+    };
+    const webSession = {
+      id: "web-powershell",
+      workspace,
+      session: { sessionId: "session-powershell" },
+      subscribers: new Set(),
+      activeTools: new Map([[current.toolCallId, current]]),
+      openedAt: 1,
+      ephemeral: false,
+    } as unknown as WebSession;
+    const deps = {
+      getState: vi.fn(),
+      getStateMetadata: vi.fn(),
+      publish: publishEvent,
+      notifyWorkspaceUpdated: vi.fn(async () => undefined),
+      disposeWebSession: vi.fn(),
+    };
+
+    await handleAgentEvent(deps, webSession, {
+      type: "tool_execution_update",
+      toolCallId: current.toolCallId,
+      toolName: current.toolName,
+      args: current.args,
+      partialResult: { content: [{ type: "text", text: "\u001b[32mok\u001b[0m" }] },
+    } as unknown as AgentSessionEvent);
+
+    expect(webSession.activeTools.get(current.toolCallId)?.blocks).toEqual([
+      { type: "text", text: "ok" },
+    ]);
+
+    await handleAgentEvent(deps, webSession, {
+      type: "tool_execution_end",
+      toolCallId: current.toolCallId,
+      toolName: current.toolName,
+      result: { content: [{ type: "text", text: "\u001b[32mdone\u001b[0m" }] },
+      isError: false,
+    } as unknown as AgentSessionEvent);
+
+    expect(webSession.activeTools.get(current.toolCallId)?.blocks).toEqual([
+      { type: "text", text: "done" },
+    ]);
+  });
+
   it("keeps a tool-call assistant active when message_end arrives before the message is persisted", async () => {
     const published: Array<{ type: string; state?: SessionState }> = [];
     const assistantMessage = {

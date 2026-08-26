@@ -127,11 +127,11 @@ describe("normalizeMessage", () => {
     );
   });
 
-  it("strips terminal formatting from bash tool results", () => {
+  it.each(["bash", "powershell"])("strips terminal formatting from %s tool results", (toolName) => {
     const message = {
       role: "toolResult",
       toolCallId: "call-1",
-      toolName: "bash",
+      toolName,
       content: [{ type: "text", text: "[1m[94mpass:[39m all good" }],
       isError: false,
       timestamp: 2,

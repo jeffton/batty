@@ -114,6 +114,34 @@ describe("ToolCallBlock", () => {
     expect(wrapper.find(".tool-call__output-window--collapsed").exists()).toBe(false);
   });
 
+  it("shows cron arguments before output and expands to the full output on demand", async () => {
+    const wrapper = mount(ToolCallBlock, {
+      props: {
+        name: "cron",
+        arguments: {
+          action: "add",
+          prompt: "Run the report",
+          schedule: { kind: "every", every: "1h" },
+        },
+        resultBlocks: [{ type: "text", text: lines(30) }],
+        status: "success",
+      },
+    });
+
+    const text = wrapper.text();
+    expect(text.indexOf("ACTION")).toBeLessThan(text.indexOf("line-1"));
+    expect(wrapper.findAll(".tool-call__meta-row")).toHaveLength(3);
+    expect(wrapper.find("pre.code-block").text()).toContain("line-1");
+    expect(wrapper.find("pre.code-block").text()).toContain("line-20");
+    expect(wrapper.find("pre.code-block").text()).not.toContain("line-21");
+    expect(wrapper.text()).toContain("Show full output");
+
+    await wrapper.get(".tool-call__expand-btn").trigger("click");
+
+    expect(wrapper.find("pre.code-block").text()).toContain("line-30");
+    expect(wrapper.text()).toContain("Collapse output");
+  });
+
   it("shows web-search arguments before output and expands to the full output on demand", async () => {
     const wrapper = mount(ToolCallBlock, {
       props: {

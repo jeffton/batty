@@ -390,6 +390,7 @@ const genericEntries = computed(() => {
     />
 
     <ToolCallMeta :entries="readEntries" inline />
+    <ToolCallMeta :entries="genericEntries" />
 
     <template
       v-if="
@@ -448,8 +449,6 @@ const genericEntries = computed(() => {
         @toggle-expanded="isExpanded = !isExpanded"
       />
     </template>
-
-    <ToolCallMeta :entries="genericEntries" />
 
     <div v-if="canOpenSubagentSession" class="tool-call__subagent-row">
       <button type="button" class="tool-call__subagent-btn" :popovertarget="subagentPopoverId">

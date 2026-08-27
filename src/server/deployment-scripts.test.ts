@@ -198,12 +198,21 @@ describe("deployment scripts", () => {
     );
     expect(serviceScript).not.toContain("serviceaccount");
     expect(serviceScript).not.toContain("uninstall");
-    expect(releaseScript).toContain('<rule name="Batty reverse proxy" stopProcessing="true">');
+    expect(releaseScript).toContain(
+      '<rule name="Batty HTTPS reverse proxy" stopProcessing="true">',
+    );
+    expect(releaseScript).toContain('<rule name="Batty HTTP reverse proxy" stopProcessing="true">');
+    expect(releaseScript).toContain('<set name="HTTP_X_FORWARDED_HOST" value="{HTTP_HOST}" />');
+    expect(releaseScript).toContain('<set name="HTTP_X_FORWARDED_PROTO" value="https" />');
+    expect(releaseScript).toContain('<set name="HTTP_X_FORWARDED_PROTO" value="http" />');
     expect(releaseScript).not.toContain("AspNetCoreModuleV2");
     expect(releaseScript).not.toContain("%ASPNETCORE_PORT%");
     expect(releaseScript).not.toContain('<webSocket enabled="true" />');
     expect(iisScript).toContain("Get-WebGlobalModule -Name RewriteModule");
     expect(iisScript).toContain("Get-WebGlobalModule -Name ApplicationRequestRouting");
     expect(iisScript).toContain('-Filter "system.webServer/proxy" -Name "enabled" -Value $true');
+    expect(iisScript).toContain("system.webServer/rewrite/allowedServerVariables");
+    expect(iisScript).toContain('"HTTP_X_FORWARDED_HOST"');
+    expect(iisScript).toContain('"HTTP_X_FORWARDED_PROTO"');
   });
 });

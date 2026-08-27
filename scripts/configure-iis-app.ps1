@@ -27,6 +27,24 @@ Set-WebConfigurationProperty -PSPath "MACHINE/WEBROOT/APPHOST" -Filter "system.w
 Set-WebConfigurationProperty -PSPath "MACHINE/WEBROOT/APPHOST" -Filter "system.webServer/proxy" -Name "preserveHostHeader" -Value $true
 Set-WebConfigurationProperty -PSPath "MACHINE/WEBROOT/APPHOST" -Filter "system.webServer/proxy" -Name "reverseRewriteHostInResponseHeaders" -Value $false
 
+$forwardedServerVariables = @("HTTP_X_FORWARDED_HOST", "HTTP_X_FORWARDED_PROTO")
+$allowedServerVariables = @(
+  Get-WebConfigurationProperty `
+    -PSPath "MACHINE/WEBROOT/APPHOST" `
+    -Filter "system.webServer/rewrite/allowedServerVariables/add" `
+    -Name "name" |
+    ForEach-Object Value
+)
+foreach ($serverVariable in $forwardedServerVariables) {
+  if ($allowedServerVariables -notcontains $serverVariable) {
+    Add-WebConfigurationProperty `
+      -PSPath "MACHINE/WEBROOT/APPHOST" `
+      -Filter "system.webServer/rewrite/allowedServerVariables" `
+      -Name "." `
+      -Value @{ name = $serverVariable }
+  }
+}
+
 if (-not (Test-Path "IIS:\AppPools\$AppPoolName")) {
   New-WebAppPool -Name $AppPoolName | Out-Null
 }

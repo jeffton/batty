@@ -4,12 +4,7 @@ import { createAuthToken } from "../auth";
 import type { RouteContext } from "./context";
 
 export function requestOrigin(request: FastifyRequest): string {
-  const header = request.headers["x-forwarded-host"] ?? request.headers.host;
-  const host = (Array.isArray(header) ? header[0] : header)?.split(",", 1)[0]?.trim();
-  if (!host) {
-    throw new Error("Missing host header");
-  }
-  return new URL(`${request.protocol}://${host}`).origin;
+  return new URL(`${request.protocol}://${request.host}`).origin;
 }
 
 export function requestRpId(request: FastifyRequest): string {

@@ -49,8 +49,23 @@ $webConfig = @"
   <system.webServer>
     <rewrite>
       <rules>
-        <rule name="Batty reverse proxy" stopProcessing="true">
+        <rule name="Batty HTTPS reverse proxy" stopProcessing="true">
           <match url="(.*)" />
+          <conditions>
+            <add input="{HTTPS}" pattern="^on$" ignoreCase="true" />
+          </conditions>
+          <serverVariables>
+            <set name="HTTP_X_FORWARDED_HOST" value="{HTTP_HOST}" />
+            <set name="HTTP_X_FORWARDED_PROTO" value="https" />
+          </serverVariables>
+          <action type="Rewrite" url="$(XmlEscape $proxyUrl)" />
+        </rule>
+        <rule name="Batty HTTP reverse proxy" stopProcessing="true">
+          <match url="(.*)" />
+          <serverVariables>
+            <set name="HTTP_X_FORWARDED_HOST" value="{HTTP_HOST}" />
+            <set name="HTTP_X_FORWARDED_PROTO" value="http" />
+          </serverVariables>
           <action type="Rewrite" url="$(XmlEscape $proxyUrl)" />
         </rule>
       </rules>

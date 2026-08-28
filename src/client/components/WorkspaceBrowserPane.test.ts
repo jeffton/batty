@@ -48,6 +48,7 @@ describe("WorkspaceBrowserPane", () => {
     const store = useAppStore();
     store.workspaces = [makeWorkspace("assistant", true), makeWorkspace("project", false)];
     store.selectedWorkspaceId = "project";
+    store.activeSession = { sessionId: "regular" } as never;
     store.sessionsByWorkspace = {
       project: [
         makeSession("today-placeholder", "project", {
@@ -85,6 +86,10 @@ describe("WorkspaceBrowserPane", () => {
     expect(startDailySession).toHaveBeenCalledWith("assistant");
 
     expect(wrapper.findAll(".workspace-browser-pane__item--session")).toHaveLength(2);
+    expect(wrapper.findAll(".workspace-browser-pane__item-row--session")).toHaveLength(2);
+    expect(wrapper.find(".workspace-browser-pane__item-row--session.is-active").text()).toContain(
+      "Session regular",
+    );
     expect(wrapper.text()).toContain("Session regular");
     expect(wrapper.findAll(".workspace-browser-pane__session-icon")).toHaveLength(1);
     expect(wrapper.find(".workspace-browser-pane__session-icon").attributes("title")).toBe(

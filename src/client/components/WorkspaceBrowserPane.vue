@@ -457,38 +457,42 @@ watch(
               </div>
             </template>
             <template v-else>
-              <button
+              <div
                 v-for="session in filteredSessions"
                 :key="session.id"
                 :class="[
-                  'workspace-browser-pane__item',
-                  'workspace-browser-pane__item--session',
+                  'workspace-browser-pane__item-row',
+                  'workspace-browser-pane__item-row--session',
                   session.sessionId === store.activeSession?.sessionId ? 'is-active' : '',
                 ]"
-                :disabled="actionsDisabled"
-                @click="openSession(session)"
               >
-                <span class="workspace-browser-pane__session-main">
-                  <span class="workspace-browser-pane__session-copy">
-                    <span class="workspace-browser-pane__item-label">{{
-                      sessionLabel(session)
-                    }}</span>
-                    <span v-if="sessionMeta(session)" class="workspace-browser-pane__item-meta">
-                      {{ sessionMeta(session) }}
+                <button
+                  class="workspace-browser-pane__item workspace-browser-pane__item--session"
+                  :disabled="actionsDisabled"
+                  @click="openSession(session)"
+                >
+                  <span class="workspace-browser-pane__session-main">
+                    <span class="workspace-browser-pane__session-copy">
+                      <span class="workspace-browser-pane__item-label">{{
+                        sessionLabel(session)
+                      }}</span>
+                      <span v-if="sessionMeta(session)" class="workspace-browser-pane__item-meta">
+                        {{ sessionMeta(session) }}
+                      </span>
+                    </span>
+                    <span
+                      v-if="session.dailySession"
+                      class="workspace-browser-pane__session-icon"
+                      :title="session.dailySession.exists ? 'Daily session' : 'Start daily session'"
+                      :aria-label="
+                        session.dailySession.exists ? 'Daily session' : 'Start daily session'
+                      "
+                    >
+                      <CalendarDays :size="16" />
                     </span>
                   </span>
-                  <span
-                    v-if="session.dailySession"
-                    class="workspace-browser-pane__session-icon"
-                    :title="session.dailySession.exists ? 'Daily session' : 'Start daily session'"
-                    :aria-label="
-                      session.dailySession.exists ? 'Daily session' : 'Start daily session'
-                    "
-                  >
-                    <CalendarDays :size="16" />
-                  </span>
-                </span>
-              </button>
+                </button>
+              </div>
 
               <div v-if="filteredSessions.length === 0" class="workspace-browser-pane__empty">
                 {{ normalizedSearchQuery ? "No sessions match." : "No sessions yet." }}
@@ -713,7 +717,7 @@ watch(
 }
 
 .workspace-browser-pane__item--session {
-  flex: 0 0 auto;
+  flex: 1;
 }
 
 .workspace-browser-pane__session-main {
@@ -755,7 +759,6 @@ watch(
   white-space: nowrap;
 }
 
-.workspace-browser-pane__item.is-active .workspace-browser-pane__item-meta,
 .workspace-browser-pane__item-row.is-active .workspace-browser-pane__item-meta {
   color: var(--color-user-text);
   opacity: 0.76;
@@ -793,7 +796,7 @@ watch(
   color: var(--color-text-strong);
 }
 
-.workspace-browser-pane__item.is-active .workspace-browser-pane__session-icon {
+.workspace-browser-pane__item-row.is-active .workspace-browser-pane__session-icon {
   color: var(--color-user-text);
   opacity: 0.76;
 }

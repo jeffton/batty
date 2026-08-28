@@ -74,6 +74,37 @@ describe("ChatMessage", () => {
     expect(wrapper.find(".message__segment--bubble .attached-files__card").exists()).toBe(true);
   });
 
+  it("renders user images and lists other user attachments", () => {
+    const message: Extract<UiMessage, { role: "user" }> = {
+      id: "user-1",
+      role: "user",
+      timestamp: 1,
+      blocks: [
+        { type: "text", text: "Review these" },
+        { type: "image", mimeType: "image/png", url: "/photo.png", name: "photo.png" },
+        {
+          type: "attachment",
+          file: {
+            id: "/notes.txt",
+            name: "notes.txt",
+            size: 42,
+            mimeType: "text/plain",
+            kind: "file",
+            downloadUrl: "/notes.txt",
+          },
+        },
+      ],
+    };
+
+    const wrapper = mount(ChatMessage, { props: { message } });
+
+    expect(wrapper.find('img[src="/photo.png"]').exists()).toBe(true);
+    expect(wrapper.findAll(".attached-files__card")).toHaveLength(1);
+    expect(wrapper.text()).toContain("notes.txt");
+    expect(wrapper.text()).toContain("text/plain · 42 B");
+    expect(wrapper.text()).not.toContain("<file");
+  });
+
   it("copies assistant reply markdown", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {

@@ -428,6 +428,12 @@ onBeforeUnmount(() => {
           loading="lazy"
           decoding="async"
         />
+        <AttachedFilesList
+          v-else-if="block.type === 'attachment'"
+          :files="[block.file]"
+          :preview="false"
+          compact
+        />
         <MarkdownBlock
           v-else-if="block.type === 'thinking'"
           :text="block.thinking"

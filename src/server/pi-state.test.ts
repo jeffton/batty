@@ -189,6 +189,73 @@ describe("normalizeMessage", () => {
     });
   });
 
+  it("hides uploaded file XML and lists non-image attachments", () => {
+    const normalized = normalizeMessage(
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: 'Review this\n\n<file name="notes &amp; data.txt" mimeType="text/plain" size="42" path="/tmp/notes.txt" url="/api/uploads/session/batch/notes.txt"></file>',
+          },
+        ],
+        timestamp: 1,
+      } as unknown as AgentMessage,
+      0,
+    );
+
+    expect(normalized && "blocks" in normalized ? normalized.blocks : undefined).toEqual([
+      { type: "text", text: "Review this" },
+      {
+        type: "attachment",
+        file: {
+          id: "/api/uploads/session/batch/notes.txt",
+          name: "notes & data.txt",
+          size: 42,
+          mimeType: "text/plain",
+          kind: "file",
+          downloadUrl: "/api/uploads/session/batch/notes.txt",
+        },
+      },
+    ]);
+    expect(JSON.stringify(normalized)).not.toContain("<file");
+  });
+
+  it("hides uploaded image XML while retaining the rendered image", () => {
+    const normalized = normalizeMessage(
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: '<file name="photo.png" mimeType="image/png" size="123" path="/tmp/photo.png" url="/api/uploads/session/batch/photo.png"></file>',
+          },
+        ],
+        timestamp: 1,
+        battyAttachments: [
+          {
+            kind: "image",
+            name: "photo.png",
+            mimeType: "image/png",
+            size: 123,
+            url: "/api/uploads/session/batch/photo.png",
+          },
+        ],
+      } as unknown as AgentMessage,
+      0,
+    );
+
+    expect(normalized && "blocks" in normalized ? normalized.blocks : undefined).toEqual([
+      {
+        type: "image",
+        name: "photo.png",
+        mimeType: "image/png",
+        url: "/api/uploads/session/batch/photo.png",
+      },
+    ]);
+    expect(JSON.stringify(normalized)).not.toContain("<file");
+  });
+
   it("strips terminal formatting from bash execution output", () => {
     const message = {
       role: "bashExecution",

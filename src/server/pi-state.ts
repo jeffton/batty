@@ -1,7 +1,13 @@
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { isPiShellToolName } from "@/shared/pi-tools";
-import type { SessionState, ToolExecutionDetails, UiContentBlock, UiMessage } from "@/shared/types";
+import type {
+  SentFileDescriptor,
+  SessionState,
+  ToolExecutionDetails,
+  UiContentBlock,
+  UiMessage,
+} from "@/shared/types";
 import { sanitizeTerminalBlocks, stripTerminalFormatting } from "./terminal-output";
 
 type AgentMessage = AgentSession["messages"][number];
@@ -66,6 +72,63 @@ function normalizeCustomData(data: unknown): CustomMessageData | undefined {
   return data && typeof data === "object" && !Array.isArray(data)
     ? (data as CustomMessageData)
     : undefined;
+}
+
+const UPLOADED_FILE_REFERENCE_PATTERN =
+  /<file name="([^"]*)" mimeType="([^"]*)" size="(\d+)" path="[^"]*" url="([^"]*)"><\/file>/g;
+
+function decodeXmlAttribute(value: string): string {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&amp;/g, "&");
+}
+
+function normalizeUserText(text: string): UiContentBlock[] {
+  const matches = [...text.matchAll(UPLOADED_FILE_REFERENCE_PATTERN)];
+  if (matches.length === 0) {
+    return [{ type: "text", text }];
+  }
+
+  const blocks: UiContentBlock[] = [];
+  let textStart = 0;
+
+  for (const match of matches) {
+    const matchIndex = match.index;
+    const visibleText = text.slice(textStart, matchIndex).trim();
+    if (visibleText) {
+      blocks.push({ type: "text", text: visibleText });
+    }
+
+    const mimeType = decodeXmlAttribute(match[2] as string);
+    if (!mimeType.startsWith("image/")) {
+      const downloadUrl = decodeXmlAttribute(match[4] as string);
+      const file: SentFileDescriptor = {
+        id: downloadUrl,
+        name: decodeXmlAttribute(match[1] as string),
+        size: Number(match[3]),
+        mimeType,
+        kind: mimeType.startsWith("video/") ? "video" : "file",
+        downloadUrl,
+      };
+      blocks.push({ type: "attachment", file });
+    }
+
+    textStart = matchIndex + match[0].length;
+  }
+
+  const trailingText = text.slice(textStart).trim();
+  if (trailingText) {
+    blocks.push({ type: "text", text: trailingText });
+  }
+
+  return blocks;
+}
+
+function normalizeUserBlocks(content: unknown, options: NormalizeOptions): UiContentBlock[] {
+  return normalizeBlocks(content, options).flatMap((block) =>
+    block.type === "text" ? normalizeUserText(block.text) : [block],
+  );
 }
 
 function normalizeBattyAttachments(message: unknown): UiContentBlock[] {
@@ -213,7 +276,10 @@ export function normalizeMessage(
       role: "user",
       timestamp: message.timestamp,
       clientMessageId: message.clientMessageId,
-      blocks: [...normalizeBlocks(message.content, options), ...normalizeBattyAttachments(message)],
+      blocks: [
+        ...normalizeUserBlocks(message.content, options),
+        ...normalizeBattyAttachments(message),
+      ],
     };
   }
 

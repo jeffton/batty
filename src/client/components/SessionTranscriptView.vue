@@ -209,6 +209,8 @@ function blockContentSize(block: UiContentBlock): number {
       return block.thinking.length;
     case "image":
       return block.data?.length ?? block.url?.length ?? 0;
+    case "attachment":
+      return block.file.name.length + block.file.downloadUrl.length;
     case "toolCall":
       return block.id.length + block.name.length;
   }

@@ -11,6 +11,7 @@ const props = withDefaults(
     expandButtonLabel?: string;
     command?: string;
     buttonPlacement?: "before" | "after" | "overlay";
+    collapsedAlignment?: "start" | "end";
   }>(),
   {
     language: undefined,
@@ -20,6 +21,7 @@ const props = withDefaults(
     expandButtonLabel: "",
     command: undefined,
     buttonPlacement: "after",
+    collapsedAlignment: "end",
   },
 );
 
@@ -59,6 +61,9 @@ const emit = defineEmits<{
       :class="[
         'tool-call__output-window',
         props.collapsed ? 'tool-call__output-window--collapsed' : '',
+        props.collapsed && props.collapsedAlignment === 'start'
+          ? 'tool-call__output-window--collapsed-start'
+          : '',
       ]"
     >
       <CodeBlock :code="props.code" :language="props.language" :compact="props.compact" />
@@ -92,10 +97,14 @@ const emit = defineEmits<{
   align-items: flex-end;
   /* Keep this in sync with OUTPUT_TAIL_LINE_COUNT in ToolCallBlock.vue.
      20lh reserves exactly 20 visible line boxes for the truncated output so the
-     transcript height does not bob while the tail window drops old lines and adds new ones. */
+     transcript height does not bob while the output window changes. */
   min-height: 20lh;
   max-height: 20lh;
   overflow: hidden;
+}
+
+.tool-call__output-window--collapsed-start {
+  align-items: flex-start;
 }
 
 .tool-call__overlay-control,

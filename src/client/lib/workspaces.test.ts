@@ -53,12 +53,20 @@ describe("uniqueWorkspaces", () => {
 });
 
 describe("sortWorkspacesByRecentSession", () => {
-  it("orders workspaces alphabetically when nothing is pinned", () => {
+  it("orders workspaces alphabetically without regard to case when nothing is pinned", () => {
     const workspaces: WorkspaceInfo[] = [
       {
         id: "zeta",
-        label: "zeta",
+        label: "Zeta",
         path: "/root/github/zeta",
+        kind: "workspace",
+        isPinned: false,
+        isAssistant: false,
+      },
+      {
+        id: "alpha-upper",
+        label: "Alpha",
+        path: "/root/github/Alpha",
         kind: "workspace",
         isPinned: false,
         isAssistant: false,
@@ -73,7 +81,7 @@ describe("sortWorkspacesByRecentSession", () => {
       },
       {
         id: "beta",
-        label: "beta",
+        label: "Beta",
         path: "/root/github/beta",
         kind: "workspace",
         isPinned: false,
@@ -82,6 +90,7 @@ describe("sortWorkspacesByRecentSession", () => {
     ];
 
     expect(sortWorkspacesByRecentSession(workspaces).map(({ id }) => id)).toEqual([
+      "alpha-upper",
       "alpha",
       "beta",
       "zeta",

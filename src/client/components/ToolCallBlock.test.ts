@@ -80,18 +80,47 @@ describe("ToolCallBlock", () => {
     expect(wrapper.text()).toContain("Collapse output");
   });
 
-  it.each(["find", "grep"])("renders %s output as monospaced code", (name) => {
+  it.each(["find", "grep"])(
+    "heads %s output and expands to the full monospaced output on demand",
+    async (name) => {
+      const wrapper = mount(ToolCallBlock, {
+        props: {
+          name,
+          arguments: {},
+          resultBlocks: [{ type: "text", text: lines(30) }],
+          status: "success",
+        },
+      });
+
+      expect(wrapper.get("pre.code-block").text()).toContain("line-1");
+      expect(wrapper.get("pre.code-block").text()).toContain("line-20");
+      expect(wrapper.get("pre.code-block").text()).not.toContain("line-21");
+      expect(wrapper.find(".tool-call__text").exists()).toBe(false);
+      expect(wrapper.find(".tool-call__output-window--collapsed").exists()).toBe(true);
+      expect(wrapper.find(".tool-call__output-window--collapsed-start").exists()).toBe(true);
+      expect(wrapper.text()).toContain("Show full output (+10 lines)");
+
+      await wrapper.get(".tool-call__expand-btn").trigger("click");
+
+      expect(wrapper.get("pre.code-block").text()).toContain("line-30");
+      expect(wrapper.find(".tool-call__output-window--collapsed").exists()).toBe(false);
+      expect(wrapper.text()).toContain("Collapse output");
+    },
+  );
+
+  it("also truncates failed grep output", () => {
     const wrapper = mount(ToolCallBlock, {
       props: {
-        name,
+        name: "grep",
         arguments: {},
-        resultBlocks: [{ type: "text", text: "src/example.ts:12:match" }],
-        status: "success",
+        resultBlocks: [{ type: "text", text: lines(30) }],
+        status: "error",
       },
     });
 
-    expect(wrapper.get("pre.code-block").text()).toBe("src/example.ts:12:match");
-    expect(wrapper.find(".tool-call__text").exists()).toBe(false);
+    expect(wrapper.get("pre.code-block").text()).toContain("line-1");
+    expect(wrapper.get("pre.code-block").text()).not.toContain("line-21");
+    expect(wrapper.text()).toContain("Show full output (+10 lines)");
   });
 
   it("tails write content and expands to the full buffer on demand", async () => {

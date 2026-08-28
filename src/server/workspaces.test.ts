@@ -38,15 +38,22 @@ async function createConfig(): Promise<AppConfig> {
 }
 
 describe("workspaces", () => {
-  it("includes discovered visible child folders", async () => {
+  it("includes discovered visible child folders in case-insensitive alphabetical order", async () => {
     const config = await createConfig();
+    await fs.mkdir(path.join(config.workspacesRoots[0]!, "Alpha"));
     await fs.mkdir(path.join(config.workspacesRoots[0]!, "alpha"));
-    await fs.mkdir(path.join(config.workspacesRoots[0]!, "beta"));
+    await fs.mkdir(path.join(config.workspacesRoots[0]!, "Beta"));
+    await fs.mkdir(path.join(config.workspacesRoots[0]!, "charlie"));
     await fs.mkdir(path.join(config.workspacesRoots[0]!, ".batty"));
 
     const workspaces = await listWorkspaces(config);
 
-    expect(workspaces.map((workspace) => workspace.label)).toEqual(["alpha", "beta"]);
+    expect(workspaces.map((workspace) => workspace.label)).toEqual([
+      "Alpha",
+      "alpha",
+      "Beta",
+      "charlie",
+    ]);
   });
 
   it("orders pinned workspaces first and then alphabetically", async () => {

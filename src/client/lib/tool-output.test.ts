@@ -1,5 +1,27 @@
 import { describe, expect, it } from "vite-plus/test";
-import { createTailView } from "@/client/lib/tool-output";
+import { createHeadView, createTailView } from "@/client/lib/tool-output";
+
+describe("createHeadView", () => {
+  it("returns the original text when it fits within the window", () => {
+    expect(createHeadView("one\ntwo\nthree", 3)).toEqual({
+      text: "one\ntwo\nthree",
+      hiddenLineCount: 0,
+      totalLineCount: 3,
+      isTrimmed: false,
+    });
+  });
+
+  it("keeps only the first lines once the output exceeds the window", () => {
+    const text = Array.from({ length: 30 }, (_, index) => `line-${index + 1}`).join("\n");
+
+    expect(createHeadView(text, 5)).toEqual({
+      text: ["line-1", "line-2", "line-3", "line-4", "line-5"].join("\n"),
+      hiddenLineCount: 25,
+      totalLineCount: 30,
+      isTrimmed: true,
+    });
+  });
+});
 
 describe("createTailView", () => {
   it("returns the original text when it fits within the window", () => {

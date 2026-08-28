@@ -178,13 +178,27 @@ const webSearchTextOutput = computed(() =>
 const webSearchHeadView = computed(() =>
   createHeadView(webSearchTextOutput.value, OUTPUT_TAIL_LINE_COUNT),
 );
+const grepFindTextOutput = computed(() =>
+  props.name !== "grep" && props.name !== "find"
+    ? ""
+    : props.resultBlocks
+        .filter(
+          (block): block is Extract<UiContentBlock, { type: "text" }> => block.type === "text",
+        )
+        .map((block) => block.text)
+        .join("\n"),
+);
+const grepFindHeadView = computed(() =>
+  createHeadView(grepFindTextOutput.value, OUTPUT_TAIL_LINE_COUNT),
+);
 const canExpandOutput = computed(
   () =>
     (isPiShellToolName(props.name) && shellTailView.value.isTrimmed) ||
     (props.name === "write" && writeTailView.value.isTrimmed) ||
     (props.name === "read" && readTailView.value.isTrimmed) ||
     (props.name === "cron" && cronHeadView.value.isTrimmed) ||
-    (props.name === "web-search" && webSearchHeadView.value.isTrimmed),
+    (props.name === "web-search" && webSearchHeadView.value.isTrimmed) ||
+    ((props.name === "grep" || props.name === "find") && grepFindHeadView.value.isTrimmed),
 );
 const expandButtonLabel = computed(() => {
   if (!canExpandOutput.value) {
@@ -203,7 +217,9 @@ const expandButtonLabel = computed(() => {
         ? readTailView.value.hiddenLineCount
         : props.name === "cron"
           ? cronHeadView.value.hiddenLineCount
-          : webSearchHeadView.value.hiddenLineCount;
+          : props.name === "web-search"
+            ? webSearchHeadView.value.hiddenLineCount
+            : grepFindHeadView.value.hiddenLineCount;
   return `Show full output (+${hiddenLineCount} lines)`;
 });
 const visibleWriteContent = computed(() => {
@@ -224,6 +240,9 @@ const visibleCronOutput = computed(() =>
 const visibleWebSearchOutput = computed(() =>
   isExpanded.value ? webSearchTextOutput.value : webSearchHeadView.value.text,
 );
+const visibleGrepFindOutput = computed(() =>
+  isExpanded.value ? grepFindTextOutput.value : grepFindHeadView.value.text,
+);
 const showCollapsedShellWindow = computed(
   () => isPiShellToolName(props.name) && !isExpanded.value && shellTailView.value.isTrimmed,
 );
@@ -239,8 +258,18 @@ const showCollapsedCronWindow = computed(
 const showCollapsedWebSearchWindow = computed(
   () => props.name === "web-search" && !isExpanded.value && webSearchHeadView.value.isTrimmed,
 );
+const showCollapsedGrepFindWindow = computed(
+  () =>
+    (props.name === "grep" || props.name === "find") &&
+    !isExpanded.value &&
+    grepFindHeadView.value.isTrimmed,
+);
 const visibleResultBlocks = computed(() => {
-  if ((props.name === "read" || props.name === "cron") && props.status !== "error") {
+  if (
+    ((props.name === "read" || props.name === "cron") && props.status !== "error") ||
+    props.name === "grep" ||
+    props.name === "find"
+  ) {
     return props.resultBlocks.filter((block) => block.type !== "text");
   }
 
@@ -321,6 +350,10 @@ const showResultSection = computed(() => {
 
   if (props.name === "cron") {
     return props.status === "error" || visibleResultBlocks.value.length > 0;
+  }
+
+  if (props.name === "grep" || props.name === "find") {
+    return visibleResultBlocks.value.length > 0;
   }
 
   if (props.name === "edit") {
@@ -419,6 +452,7 @@ const genericEntries = computed(() => {
         language="json"
         :compact="props.compact"
         :collapsed="showCollapsedCronWindow"
+        collapsed-alignment="start"
         :can-expand="canExpandOutput"
         :expand-button-label="expandButtonLabel"
         @toggle-expanded="isExpanded = !isExpanded"
@@ -469,6 +503,23 @@ const genericEntries = computed(() => {
         language="markdown"
         :compact="props.compact"
         :collapsed="showCollapsedWebSearchWindow"
+        collapsed-alignment="start"
+        :can-expand="canExpandOutput"
+        :expand-button-label="expandButtonLabel"
+        @toggle-expanded="isExpanded = !isExpanded"
+      />
+    </template>
+
+    <template
+      v-if="
+        (props.name === 'grep' || props.name === 'find') && visibleGrepFindOutput.trim().length > 0
+      "
+    >
+      <ToolCallCodeOutput
+        :code="visibleGrepFindOutput"
+        :compact="props.compact"
+        :collapsed="showCollapsedGrepFindWindow"
+        collapsed-alignment="start"
         :can-expand="canExpandOutput"
         :expand-button-label="expandButtonLabel"
         @toggle-expanded="isExpanded = !isExpanded"

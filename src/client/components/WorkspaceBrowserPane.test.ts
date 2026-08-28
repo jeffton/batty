@@ -8,7 +8,13 @@ import WorkspaceBrowserPane from "@/client/components/WorkspaceBrowserPane.vue";
 import { useAppStore } from "@/client/stores/app";
 import type { SessionSummary, WorkspaceInfo } from "@/shared/types";
 
+const mockRoute = vi.hoisted(() => ({
+  name: "workspace",
+  params: {} as Record<string, string>,
+}));
+
 vi.mock("vue-router", () => ({
+  useRoute: () => mockRoute,
   useRouter: () => ({ push: vi.fn() }),
 }));
 
@@ -42,6 +48,8 @@ function makeSession(
 describe("WorkspaceBrowserPane", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+    mockRoute.name = "workspace";
+    mockRoute.params = {};
   });
 
   it("only shows the session-list creation entry in the assistant workspace", async () => {
@@ -87,8 +95,8 @@ describe("WorkspaceBrowserPane", () => {
 
     expect(wrapper.findAll(".workspace-browser-pane__item--session")).toHaveLength(2);
     expect(wrapper.findAll(".workspace-browser-pane__item-row--session")).toHaveLength(2);
-    expect(wrapper.find(".workspace-browser-pane__item-row--session.is-active").text()).toContain(
-      "Session regular",
+    expect(wrapper.find(".workspace-browser-pane__item-row--session.is-active").exists()).toBe(
+      false,
     );
     expect(wrapper.text()).toContain("Session regular");
     expect(wrapper.findAll(".workspace-browser-pane__session-icon")).toHaveLength(1);
@@ -111,6 +119,24 @@ describe("WorkspaceBrowserPane", () => {
     expect(wrapper.text()).toContain("Today");
     expect(wrapper.find(".workspace-browser-pane__session-icon").attributes("title")).toBe(
       "Start daily session",
+    );
+  });
+
+  it("only marks a session active while its session route is selected", () => {
+    const store = useAppStore();
+    store.workspaces = [makeWorkspace("project", false)];
+    store.selectedWorkspaceId = "project";
+    store.activeSession = { sessionId: "previous" } as never;
+    store.sessionsByWorkspace = {
+      project: [makeSession("selected", "project"), makeSession("previous", "project")],
+    };
+    mockRoute.name = "session";
+    mockRoute.params = { workspaceId: "project", sessionId: "selected" };
+
+    const wrapper = shallowMount(WorkspaceBrowserPane);
+
+    expect(wrapper.find(".workspace-browser-pane__item-row--session.is-active").text()).toContain(
+      "Session selected",
     );
   });
 });

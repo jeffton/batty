@@ -3,7 +3,7 @@ import { Plus, LoaderCircle, Star, CalendarDays } from "@lucide/vue";
 import WorkspaceBrowserFooter from "@/client/components/WorkspaceBrowserFooter.vue";
 import WorkspaceBrowserHeader from "@/client/components/WorkspaceBrowserHeader.vue";
 import { computed, nextTick, ref, watch } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { formatShortDateTime } from "@/client/lib/formatting";
 import { usePaneTransition } from "@/client/lib/pane-transition";
 import { sessionRoutePath, workspaceRoutePath } from "@/client/lib/routes";
@@ -22,6 +22,7 @@ const CREATE_WORKSPACE_POPOVER_ANCHOR = "--workspace-create-popover-anchor";
 const SEARCH_SESSION_LOAD_CONCURRENCY = 4;
 
 const store = useAppStore();
+const route = useRoute();
 const router = useRouter();
 const searchOpen = ref(false);
 const searchQuery = ref("");
@@ -83,6 +84,12 @@ const filteredSessions = computed(() => {
 
   return sessionsForWorkspaceSearch(store.selectedWorkspace, sessions.value, query, sessionLabel);
 });
+
+const activeRouteSessionId = computed(() =>
+  route.name === "session" && typeof route.params.sessionId === "string"
+    ? route.params.sessionId
+    : undefined,
+);
 
 const searchSessionLoading = computed(
   () =>
@@ -463,7 +470,7 @@ watch(
                 :class="[
                   'workspace-browser-pane__item-row',
                   'workspace-browser-pane__item-row--session',
-                  session.sessionId === store.activeSession?.sessionId ? 'is-active' : '',
+                  session.sessionId === activeRouteSessionId ? 'is-active' : '',
                 ]"
               >
                 <button

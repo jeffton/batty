@@ -58,7 +58,14 @@ function mergeSummaryMessages(incoming: UiMessage[], previous: UiMessage[]): UiM
         ...message,
         blocks: [
           ...message.blocks,
-          ...existing.blocks.filter((block) => block.type === "toolCall"),
+          ...existing.blocks.filter(
+            (block) =>
+              block.type === "toolCall" &&
+              !message.blocks.some(
+                (incomingBlock) =>
+                  incomingBlock.type === "toolCall" && incomingBlock.id === block.id,
+              ),
+          ),
         ],
       });
     } else {
@@ -66,45 +73,6 @@ function mergeSummaryMessages(incoming: UiMessage[], previous: UiMessage[]): UiM
     }
   }
   return [...messages.values()].sort((left, right) => messageIndex(left) - messageIndex(right));
-}
-
-function withoutPersistedActiveAssistant(
-  messages: UiMessage[],
-  activeAssistant: SessionState["activeAssistant"],
-): UiMessage[] {
-  if (!activeAssistant) {
-    return messages;
-  }
-
-  return messages.filter(
-    (message) => message.role !== "assistant" || message.timestamp !== activeAssistant.timestamp,
-  );
-}
-
-function mergeSummaryAssistant(
-  incoming: SessionState["activeAssistant"],
-  previous: SessionState["activeAssistant"],
-): SessionState["activeAssistant"] {
-  if (!incoming) {
-    return previous;
-  }
-  if (!previous || incoming.timestamp !== previous.timestamp) {
-    return incoming;
-  }
-
-  return {
-    ...incoming,
-    blocks: [
-      ...incoming.blocks,
-      ...previous.blocks.filter(
-        (block) =>
-          block.type === "toolCall" &&
-          !incoming.blocks.some(
-            (incomingBlock) => incomingBlock.type === "toolCall" && incomingBlock.id === block.id,
-          ),
-      ),
-    ],
-  };
 }
 
 function mergeSessionMessages(incoming: SessionState, previous?: SessionState): UiMessage[] {
@@ -165,16 +133,10 @@ export function mergeSessionState(
   const summaryReset = normalizedIncoming.messagesDetailLevel === "summary";
   const retainDetailedMessages =
     summaryReset && normalizedPrevious.messagesDetailLevel !== "summary";
-  const retainLiveToolState = summaryReset && normalizedIncoming.isStreaming;
-  let messages = retainDetailedMessages
+  const messages = retainDetailedMessages
     ? mergeSummaryMessages(normalizedIncoming.messages, normalizedPrevious.messages)
     : mergeSessionMessages(normalizedIncoming, normalizedPrevious);
-  if (retainLiveToolState && !normalizedIncoming.activeAssistant) {
-    messages = withoutPersistedActiveAssistant(messages, normalizedPrevious.activeAssistant);
-  }
-  const activeAssistant = retainLiveToolState
-    ? mergeSummaryAssistant(normalizedIncoming.activeAssistant, normalizedPrevious.activeAssistant)
-    : normalizedIncoming.activeAssistant;
+  const activeAssistant = normalizedIncoming.activeAssistant;
 
   return normalizeSessionState({
     ...normalizedIncoming,

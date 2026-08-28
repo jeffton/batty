@@ -385,7 +385,10 @@ describe("normalizeSessionState", () => {
           id: "assistant-100-0",
           role: "assistant",
           timestamp: 100,
-          blocks: [{ type: "text", text: "Checking complete" }],
+          blocks: [
+            { type: "text", text: "Checking complete" },
+            { type: "toolCall", id: "call-1", name: "read", arguments: { path: "file" } },
+          ],
         },
       ],
     } as SessionState;

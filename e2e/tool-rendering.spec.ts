@@ -418,7 +418,19 @@ test.describe("tool rendering", () => {
   });
 
   test("keeps a running tool visible across a lightweight reset", async ({ page }) => {
-    await installMocks(page, createSession({ messages: [] }));
+    await installMocks(
+      page,
+      createSession({
+        messages: [
+          {
+            id: "user-2-0",
+            role: "user",
+            timestamp: 2,
+            blocks: [{ type: "text", text: "Check the repository" }],
+          },
+        ],
+      }),
+    );
 
     await page.goto(`/workspaces/${workspace.id}/sessions/${summary.sessionId}`);
     await expect(page.locator(".transcript")).toBeVisible();
@@ -431,7 +443,7 @@ test.describe("tool rendering", () => {
           role: "assistant",
           timestamp: 3,
           blocks: [
-            { type: "text", text: "Running command" },
+            { type: "thinking", thinking: "Planning command" },
             {
               type: "toolCall",
               id: "call-1",
@@ -459,6 +471,7 @@ test.describe("tool rendering", () => {
     await showToolCalls(page);
     await expect(page.locator(".tool-call")).toHaveCount(1);
     await expect(page.locator(".tool-call")).toContainText("M src/client/App.vue");
+    await expect(page.locator(".markdown-body--thinking")).toHaveCount(1);
 
     await page.evaluate(() => {
       window.__emitSse({
@@ -477,15 +490,29 @@ test.describe("tool rendering", () => {
           contextTokens: 100,
           contextWindow: 1000,
           contextPercent: 10,
-          totalMessageCount: 1,
+          totalMessageCount: 2,
           hasMoreMessages: false,
           messagesDetailLevel: "summary",
           messages: [
             {
-              id: "assistant-3-0",
+              id: "user-2-0",
+              role: "user",
+              timestamp: 2,
+              blocks: [{ type: "text", text: "Check the repository" }],
+            },
+            {
+              id: "assistant-3-1",
               role: "assistant",
               timestamp: 3,
-              blocks: [{ type: "text", text: "Running command" }],
+              blocks: [
+                { type: "thinking", thinking: "Planning command" },
+                {
+                  type: "toolCall",
+                  id: "call-1",
+                  name: "bash",
+                  arguments: { command: "git status --short" },
+                },
+              ],
             },
           ],
           activeTools: [],
@@ -495,6 +522,7 @@ test.describe("tool rendering", () => {
 
     await expect(page.locator(".tool-call")).toHaveCount(1);
     await expect(page.locator(".tool-call")).toContainText("M src/client/App.vue");
+    await expect(page.locator(".markdown-body--thinking")).toHaveCount(1);
   });
 
   test("keeps the completed bash result attached to the same block", async ({ page }) => {

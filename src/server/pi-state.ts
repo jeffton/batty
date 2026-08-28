@@ -14,6 +14,7 @@ export type UiImageResolver = (image: {
 interface NormalizeOptions {
   imageResolver?: UiImageResolver;
   includeToolDetails?: boolean;
+  includedToolCallIds?: ReadonlySet<string>;
 }
 
 interface AssistantLikeMessage {
@@ -146,7 +147,10 @@ export function normalizeBlocks(
           ? [{ type: "thinking", thinking: candidate.thinking }]
           : [];
       case "toolCall":
-        return options.includeToolDetails === false
+        return options.includeToolDetails === false &&
+          !options.includedToolCallIds?.has(
+            typeof candidate.id === "string" ? candidate.id : `tool-${index}`,
+          )
           ? []
           : [
               {
@@ -163,6 +167,31 @@ export function normalizeBlocks(
         return [];
     }
   });
+}
+
+function assistantToolCallIds(message: AgentMessage | undefined): Set<string> {
+  if (!message || message.role !== "assistant") {
+    return new Set();
+  }
+
+  return new Set(
+    normalizeBlocks((message as AssistantLikeMessage).content).flatMap((block) =>
+      block.type === "toolCall" ? [block.id] : [],
+    ),
+  );
+}
+
+function hasPersistedActiveAssistant(
+  messages: AgentMessage[],
+  activeAssistant: AgentMessage | undefined,
+): boolean {
+  const activeToolCallIds = assistantToolCallIds(activeAssistant);
+  return (
+    activeToolCallIds.size > 0 &&
+    messages.some((message) =>
+      [...assistantToolCallIds(message)].some((toolCallId) => activeToolCallIds.has(toolCallId)),
+    )
+  );
 }
 
 function messageId(prefix: string, timestamp: number, index: number): string {
@@ -341,11 +370,15 @@ export interface SessionStateInput {
 }
 
 export function createSessionState(input: SessionStateInput): SessionState {
+  const activeAssistantPersisted = hasPersistedActiveAssistant(
+    input.messages,
+    input.activeAssistant,
+  );
+  const activeToolCallIds = assistantToolCallIds(input.activeAssistant);
   const activeAssistant =
-    input.activeAssistant && input.activeAssistant.role === "assistant"
+    !activeAssistantPersisted && input.activeAssistant?.role === "assistant"
       ? (normalizeMessage(input.activeAssistant, Number.MAX_SAFE_INTEGER, {
           imageResolver: input.imageResolver,
-          includeToolDetails: input.messagesDetailLevel !== "summary",
         }) as Extract<UiMessage, { role: "assistant" }> | undefined)
       : undefined;
 
@@ -373,6 +406,7 @@ export function createSessionState(input: SessionStateInput): SessionState {
     messages: normalizeMessages(input.messages, input.messageIndexOffset ?? 0, {
       imageResolver: input.imageResolver,
       includeToolDetails: input.messagesDetailLevel !== "summary",
+      includedToolCallIds: activeAssistantPersisted ? activeToolCallIds : undefined,
     }),
     activeAssistant,
     activeTools: input.messagesDetailLevel === "summary" ? [] : input.activeTools,

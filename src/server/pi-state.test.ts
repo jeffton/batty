@@ -89,6 +89,86 @@ describe("createSessionState", () => {
     expect(JSON.stringify(state)).not.toContain("large result");
     expect(JSON.stringify(state)).not.toContain("large diff");
   });
+
+  it.each(["summary", "full"] as const)(
+    "does not expose a persisted tool-call assistant as active in %s state",
+    (messagesDetailLevel) => {
+      const persistedAssistant = {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "Inspecting the project." },
+          { type: "toolCall", id: "call-1", name: "read", arguments: { path: "README.md" } },
+        ],
+        timestamp: 1,
+      } as unknown as AgentMessage;
+      const state = createSessionState({
+        id: "web-1",
+        sessionId: "session-1",
+        workspaceId: "batty",
+        cwd: "/tmp/batty",
+        thinkingLevel: "medium",
+        availableThinkingLevels: ["medium"],
+        isStreaming: true,
+        pendingMessageCount: 0,
+        updatedAt: 2,
+        contextTokens: null,
+        contextWindow: null,
+        contextPercent: null,
+        totalMessageCount: 1,
+        hasMoreMessages: false,
+        messagesDetailLevel,
+        messages: [persistedAssistant],
+        activeAssistant: persistedAssistant,
+        activeTools: [],
+      });
+
+      expect(state.messages).toHaveLength(1);
+      expect(state.activeAssistant).toBeUndefined();
+      expect(state.messages[0]).toMatchObject({
+        role: "assistant",
+        blocks: [
+          { type: "thinking", thinking: "Inspecting the project." },
+          { type: "toolCall", id: "call-1" },
+        ],
+      });
+    },
+  );
+
+  it("keeps a different tool-call assistant active", () => {
+    const state = createSessionState({
+      id: "web-1",
+      sessionId: "session-1",
+      workspaceId: "batty",
+      cwd: "/tmp/batty",
+      thinkingLevel: "medium",
+      availableThinkingLevels: ["medium"],
+      isStreaming: true,
+      pendingMessageCount: 0,
+      updatedAt: 2,
+      contextTokens: null,
+      contextWindow: null,
+      contextPercent: null,
+      totalMessageCount: 1,
+      hasMoreMessages: false,
+      messagesDetailLevel: "summary",
+      messages: [
+        {
+          role: "assistant",
+          content: [{ type: "toolCall", id: "call-1", name: "read", arguments: {} }],
+          timestamp: 1,
+        },
+      ] as unknown as AgentMessage[],
+      activeAssistant: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "call-2", name: "read", arguments: {} }],
+        timestamp: 1,
+      } as unknown as AgentMessage,
+      activeTools: [],
+    });
+
+    expect(state.messages[0]).toMatchObject({ role: "assistant", blocks: [] });
+    expect(state.activeAssistant?.blocks).toMatchObject([{ type: "toolCall", id: "call-2" }]);
+  });
 });
 
 describe("normalizeMessage", () => {

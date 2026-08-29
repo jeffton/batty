@@ -30,6 +30,10 @@ interface CompactionTestSession {
     willRetry: boolean,
     signal?: AbortSignal,
   ) => Promise<boolean>;
+  _compactBeforeNextAssistantResponse?: (
+    context: { messages: unknown[]; systemPrompt: string; tools: unknown[] },
+    signal?: AbortSignal,
+  ) => Promise<{ messages: unknown[]; systemPrompt: string; tools: unknown[] }>;
   abortCompaction: () => void;
   _systemPromptOverride?: string;
   _baseSystemPrompt: string;
@@ -63,12 +67,14 @@ function assistant(totalTokens: number): AssistantMessage {
 }
 
 function installNextTurnCompaction(session: CompactionTestSession): void {
-  const install = (
-    AgentSession.prototype as unknown as {
-      _installAgentNextTurnRefresh: (this: CompactionTestSession) => void;
-    }
-  )._installAgentNextTurnRefresh;
-  install.call(session);
+  const prototype = AgentSession.prototype as unknown as {
+    _compactBeforeNextAssistantResponse: NonNullable<
+      CompactionTestSession["_compactBeforeNextAssistantResponse"]
+    >;
+    _installAgentNextTurnRefresh: (this: CompactionTestSession) => void;
+  };
+  session._compactBeforeNextAssistantResponse = prototype._compactBeforeNextAssistantResponse;
+  prototype._installAgentNextTurnRefresh.call(session);
 }
 
 describe("Pi between-turn compaction patch", () => {

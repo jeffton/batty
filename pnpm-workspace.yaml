@@ -38,5 +38,5 @@ peerDependencyRules:
   allowedVersions:
     vite: "*"
 patchedDependencies:
-  "@earendil-works/pi-ai@0.84.3": patches/@earendil-works__pi-ai@0.84.3.patch
-  "@earendil-works/pi-coding-agent@0.84.3": patches/@earendil-works__pi-coding-agent@0.84.3.patch
+  "@earendil-works/pi-ai@0.84.4": patches/@earendil-works__pi-ai@0.84.4.patch
+  "@earendil-works/pi-coding-agent@0.84.4": patches/@earendil-works__pi-coding-agent@0.84.4.patch

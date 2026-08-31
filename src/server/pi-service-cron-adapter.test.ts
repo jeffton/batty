@@ -142,6 +142,61 @@ describe("runCronJobSession", () => {
     expect(notifyWorkspaceUpdated).toHaveBeenCalledWith("roy");
   });
 
+  it("does not deliver a successful NO_REPLY result to the daily parent", async () => {
+    const parent = createWebSession("daily-session-id", "/tmp/daily-session.jsonl");
+    const cron = createWebSession("cron-session-id", "/tmp/cron-session.jsonl");
+
+    const result = await runCronJobSession(
+      {
+        createCronSession: vi.fn(async () => ({ id: cron.id }) as never),
+        promptCron: vi.fn(async () => {
+          cron.session.agent.state.messages = [
+            {
+              role: "assistant",
+              content: [{ type: "text", text: "  NO_REPLY  " }],
+              api: "openai-codex-responses",
+              provider: "openai-codex",
+              model: "gpt-5.5",
+              usage: ZERO_USAGE,
+              stopReason: "stop",
+              timestamp: 10,
+            } as AgentMessage,
+          ];
+        }),
+        resolveOrCreateDailySession: vi.fn(
+          async () => ({ id: parent.id, sessionId: parent.id }) as never,
+        ),
+        requireSession: vi.fn((sessionId) => (sessionId === cron.id ? cron : parent)),
+        requireSessionPath: vi.fn((sessionId) =>
+          sessionId === cron.id ? cron.session.sessionFile! : parent.session.sessionFile!,
+        ),
+        prepareSessionForContextCopy: vi.fn(async () => undefined),
+        runSubagentSerial: async (_sessionId, run) => run(),
+        getState: vi.fn((sessionId) => ({ id: sessionId, workspaceId: "roy" }) as never),
+        publishReset: vi.fn(),
+        setThinkingLevel: vi.fn(),
+        setModel: vi.fn(),
+        onAgentCompleted: vi.fn(async () => undefined),
+        notifyWorkspaceUpdated: vi.fn(async () => undefined),
+      },
+      {
+        jobId: "job-1",
+        runId: "run-no-reply",
+        workspace: parent.workspace,
+        prompt: "Run heartbeat",
+        model: "openai-codex/gpt-5.5",
+        thinkingLevel: "medium",
+        session: { kind: "daily-detached", includePreviousContext: false },
+        scheduleLabel: "Every hour",
+        signal: new AbortController().signal,
+        onSessionStarted: vi.fn(),
+      },
+    );
+
+    expect(result.sessionId).toBe("cron-session-id");
+    expect(parent.session.messages).toHaveLength(0);
+  });
+
   it("delivers cron errors to the parent before rejecting", async () => {
     const parent = createWebSession("daily-session-id", "/tmp/daily-session.jsonl");
     const cron = createWebSession("cron-session-id", "/tmp/cron-session.jsonl");

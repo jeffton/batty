@@ -47,7 +47,8 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 
 describe("cron runtime", () => {
   it("does not schedule or trigger disabled jobs", async () => {
-    const service = new CronService(await createConfig());
+    const config = await createConfig();
+    const service = new CronService(config);
     const run = vi.fn(async () => ({ sessionId: "session", sessionPath: "/tmp/session.jsonl" }));
     service.setRunner({ run });
     const job = await service.createJob({
@@ -71,6 +72,66 @@ describe("cron runtime", () => {
     expect(internals.scheduledHandles.has(job.id)).toBe(true);
     await internals.triggerJob(job.id);
     expect(run).toHaveBeenCalledOnce();
+    expect(service.listRecentRunLogs("alpha")).toEqual([
+      expect.objectContaining({
+        runId: expect.any(String),
+        jobId: job.id,
+        status: "success",
+        sessionPath: "/tmp/session.jsonl",
+      }),
+    ]);
+
+    const restarted = new CronService(config);
+    await restarted.initialize();
+    expect(restarted.listRecentRunLogs("alpha")).toEqual([
+      expect.objectContaining({ jobId: job.id, status: "success" }),
+    ]);
+    await restarted.dispose();
+    await service.dispose();
+  });
+
+  it("marks persisted running logs as interrupted after a restart", async () => {
+    const config = await createConfig();
+    const service = new CronService(config);
+    const result = deferred<{ sessionId: string; sessionPath: string }>();
+    service.setRunner({
+      run: async (_job, context) => {
+        await context.onSessionStarted({
+          sessionId: "interrupted-session",
+          sessionPath: "/tmp/interrupted.jsonl",
+        });
+        return result.promise;
+      },
+    });
+    const job = await service.createJob({
+      workspaceId: "alpha",
+      prompt: "Long-running job",
+      model: "openai/gpt-5",
+      thinkingLevel: "medium",
+      schedule: { kind: "every", every: "1h" },
+    });
+    const pending = (service as unknown as { triggerJob(jobId: string): Promise<void> }).triggerJob(
+      job.id,
+    );
+    await vi.waitFor(() =>
+      expect(service.listRecentRunLogs("alpha")[0]).toMatchObject({
+        status: "running",
+        sessionPath: "/tmp/interrupted.jsonl",
+      }),
+    );
+
+    const restarted = new CronService(config);
+    await restarted.initialize();
+    expect(restarted.listRecentRunLogs("alpha")[0]).toMatchObject({
+      status: "error",
+      sessionId: "interrupted-session",
+      sessionPath: "/tmp/interrupted.jsonl",
+      error: "Batty stopped before this cron run completed",
+    });
+
+    result.resolve({ sessionId: "interrupted-session", sessionPath: "/tmp/interrupted.jsonl" });
+    await pending;
+    await restarted.dispose();
     await service.dispose();
   });
 
@@ -101,6 +162,14 @@ describe("cron runtime", () => {
 
     expect(runSignal?.aborted).toBe(true);
     expect(service.listRunningJobs()).toHaveLength(1);
+    expect(service.listRecentRunLogs("alpha")).toEqual([
+      expect.objectContaining({ status: "running", jobId: job.id }),
+      expect.objectContaining({
+        status: "error",
+        jobId: job.id,
+        error: expect.stringContaining("skipped"),
+      }),
+    ]);
     await trigger(job.id);
     expect(run).toHaveBeenCalledTimes(1);
 
@@ -109,6 +178,25 @@ describe("cron runtime", () => {
 
     expect(service.listRunningJobs()).toHaveLength(0);
     expect(service.listJobs()[0]?.state.lastStatus).toBe("error");
+    const recentLogs = service.listRecentRunLogs("alpha");
+    expect(recentLogs).toHaveLength(3);
+    expect(recentLogs.slice(0, 2)).toEqual([
+      expect.objectContaining({
+        status: "error",
+        jobId: job.id,
+        error: expect.stringContaining("skipped"),
+      }),
+      expect.objectContaining({
+        status: "error",
+        jobId: job.id,
+        error: expect.stringContaining("skipped"),
+      }),
+    ]);
+    expect(recentLogs[2]).toMatchObject({
+      status: "error",
+      jobId: job.id,
+      error: "Cron run cancelled because a newer run started",
+    });
     await service.dispose();
   });
 });

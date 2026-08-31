@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { createSubagentTool, spillToolOutputToTempFile } from "./pi-service-tools";
+import { createCronTool, createSubagentTool, spillToolOutputToTempFile } from "./pi-service-tools";
 
 describe("spillToolOutputToTempFile", () => {
   it("stores oversized output in a temp file and returns a truncated tail", async () => {
@@ -26,6 +26,46 @@ describe("spillToolOutputToTempFile", () => {
     await expect(fs.readFile(String(result.details.fullOutputPath), "utf8")).resolves.toBe(
       fullText,
     );
+  });
+});
+
+describe("createCronTool", () => {
+  it("lists recent run logs with detached session paths", async () => {
+    const tool = createCronTool({
+      workspace: { id: "batty", path: "/root/github/batty" } as any,
+      cronService: {
+        listRecentRunLogs: vi.fn(() => [
+          {
+            runId: "run-1",
+            jobId: "job-1",
+            workspaceId: "batty",
+            prompt: "Inspect CI",
+            model: "openai/gpt-5",
+            thinkingLevel: "medium",
+            session: { kind: "new" },
+            scheduleLabel: "Every hour",
+            startedAtMs: Date.parse("2026-08-31T12:00:00Z"),
+            status: "success",
+            completedAtMs: Date.parse("2026-08-31T12:01:00Z"),
+            sessionPath: "/tmp/cron/run-1.jsonl",
+          },
+        ]),
+      } as any,
+      resolveSubagentDefaults: () => ({ modelId: "openai/gpt-5", thinkingLevel: "medium" }),
+    });
+
+    const result = await tool.execute(
+      "tool-call-1",
+      { action: "list-run-logs", limit: 10 },
+      undefined,
+      undefined,
+      { sessionManager: { getSessionId: () => "parent" } } as any,
+    );
+
+    expect(result.content[0]).toEqual(
+      expect.objectContaining({ text: expect.stringContaining("/tmp/cron/run-1.jsonl") }),
+    );
+    expect(result.details).toMatchObject({ count: 1, workspaceId: "batty" });
   });
 });
 

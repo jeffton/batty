@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { CircleAlert, LoaderCircle, X } from "@lucide/vue";
+import { CircleAlert, LoaderCircle } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
+import FullPopover from "@/client/components/FullPopover.vue";
 import SessionHeaderStatus from "@/client/components/SessionHeaderStatus.vue";
 import SessionTranscriptView from "@/client/components/SessionTranscriptView.vue";
 import StreamingStopControl from "@/client/components/StreamingStopControl.vue";
@@ -23,7 +24,6 @@ const props = withDefaults(
   },
 );
 
-const popoverElement = ref<HTMLElement | null>(null);
 const session = ref<SessionState | undefined>(undefined);
 const loading = ref(false);
 const loadingOlderMessages = ref(false);
@@ -208,7 +208,7 @@ watch(
     errorMessage.value = undefined;
     reconnecting.value = false;
     stopping.value = false;
-    if (popoverElement.value?.matches(":popover-open")) {
+    if (document.getElementById(props.popoverId)?.matches(":popover-open")) {
       void ensureSessionLoaded();
     }
   },
@@ -231,126 +231,65 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div
-    :id="props.popoverId"
-    ref="popoverElement"
+  <FullPopover
     class="subagent-session-popover"
-    popover="auto"
+    :popover-id="props.popoverId"
+    :title="props.headerTitle"
+    close-label="Close subagent transcript"
     @toggle="handlePopoverToggle"
   >
-    <div class="subagent-session-popover__header">
-      <div class="subagent-session-popover__title">{{ props.headerTitle }}</div>
-      <div class="subagent-session-popover__header-actions">
-        <span
-          v-if="errorMessage && session"
-          class="subagent-session-popover__header-error"
-          role="alert"
-          :aria-label="errorMessage"
-          :title="errorMessage"
-        >
-          <CircleAlert :size="17" />
-        </span>
-        <StreamingStopControl
-          v-if="session?.isStreaming"
-          :disabled="stopping"
-          label="Stop subagent"
-          @stop="stopSubagent"
-        />
-        <SessionHeaderStatus
-          :context-tokens="session?.contextTokens"
-          :context-window="session?.contextWindow"
-          :context-percent="session?.contextPercent"
-          :connection-state="connectionState"
-        />
-        <button
-          class="subagent-session-popover__close"
-          type="button"
-          aria-label="Close subagent transcript"
-          title="Close"
-          @click="popoverElement?.hidePopover?.()"
-        >
-          <X :size="16" />
-        </button>
+    <template #header-actions>
+      <span
+        v-if="errorMessage && session"
+        class="subagent-session-popover__header-error"
+        role="alert"
+        :aria-label="errorMessage"
+        :title="errorMessage"
+      >
+        <CircleAlert :size="17" />
+      </span>
+      <StreamingStopControl
+        v-if="session?.isStreaming"
+        :disabled="stopping"
+        label="Stop subagent"
+        @stop="stopSubagent"
+      />
+      <SessionHeaderStatus
+        :context-tokens="session?.contextTokens"
+        :context-window="session?.contextWindow"
+        :context-percent="session?.contextPercent"
+        :connection-state="connectionState"
+      />
+    </template>
+
+    <div class="subagent-session-popover__body">
+      <div v-if="loading && !session" class="subagent-session-popover__empty">
+        <LoaderCircle :size="18" class="subagent-session-popover__spinner" />
+        <span>Loading session…</span>
       </div>
-    </div>
 
-    <div v-if="loading && !session" class="subagent-session-popover__empty">
-      <LoaderCircle :size="18" class="subagent-session-popover__spinner" />
-      <span>Loading session…</span>
-    </div>
+      <div
+        v-else-if="errorMessage && !session"
+        class="subagent-session-popover__empty subagent-session-popover__empty--error"
+      >
+        <CircleAlert :size="18" />
+        <span>{{ errorMessage }}</span>
+      </div>
 
-    <div
-      v-else-if="errorMessage && !session"
-      class="subagent-session-popover__empty subagent-session-popover__empty--error"
-    >
-      <CircleAlert :size="18" />
-      <span>{{ errorMessage }}</span>
+      <SessionTranscriptView
+        v-else-if="session"
+        class="subagent-session-popover__transcript"
+        :session="session"
+        :load-older-messages="loadOlderMessages"
+        :loading-older-messages="loadingOlderMessages"
+        always-show-details
+        :allow-session-popovers="false"
+      />
     </div>
-
-    <SessionTranscriptView
-      v-else-if="session"
-      class="subagent-session-popover__transcript"
-      :session="session"
-      :load-older-messages="loadOlderMessages"
-      :loading-older-messages="loadingOlderMessages"
-      always-show-details
-      :allow-session-popovers="false"
-    />
-  </div>
+  </FullPopover>
 </template>
 
 <style scoped>
-.subagent-session-popover {
-  inset: calc(var(--safe-area-top) + 1rem) calc(var(--safe-area-right) + 1rem)
-    calc(var(--safe-area-bottom) + 1rem) calc(var(--safe-area-left) + 1rem);
-  width: auto;
-  max-width: none;
-  height: auto;
-  max-height: none;
-  margin: 0;
-  padding: 0;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.9rem;
-  background: var(--color-bg-panel);
-  color: var(--color-text);
-  box-shadow: var(--color-shadow-popover);
-  overflow: hidden;
-  overscroll-behavior: contain;
-}
-
-.subagent-session-popover:popover-open {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-}
-
-.subagent-session-popover::backdrop {
-  background: rgb(0 0 0 / 0.22);
-}
-
-.subagent-session-popover__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.9rem 1rem 0.75rem;
-  background: var(--color-bg-panel-strong);
-  border-bottom: 1px solid var(--color-border-soft);
-}
-
-.subagent-session-popover__title {
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--color-text-strong);
-}
-
-.subagent-session-popover__header-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 0.35rem;
-  flex-shrink: 0;
-}
-
 .subagent-session-popover__header-error {
   display: inline-flex;
   align-items: center;
@@ -360,24 +299,10 @@ onBeforeUnmount(() => {
   color: var(--color-error);
 }
 
-.subagent-session-popover__close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  padding: 0;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.5rem;
-  background: var(--color-bg-panel);
-  color: var(--color-text);
-  cursor: pointer;
-}
-
-@media (hover: hover) {
-  .subagent-session-popover__close:hover {
-    background: var(--color-bg-elevated-soft);
-  }
+.subagent-session-popover__body {
+  display: grid;
+  height: 100%;
+  min-height: 0;
 }
 
 .subagent-session-popover__empty {

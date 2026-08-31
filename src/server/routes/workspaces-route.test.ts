@@ -56,11 +56,12 @@ describe("workspace event stream", () => {
       sessions: [],
       cronJobs: [],
       runningCronJobs: [],
+      cronRunLogs: [],
       uiSettings: { easyMode: false },
     });
     await pending;
     expect(write).toHaveBeenCalledWith(
-      'data: {"workspaceId":"batty","sessions":[],"cronJobs":[],"runningCronJobs":[],"uiSettings":{"easyMode":false}}\n\n',
+      'data: {"workspaceId":"batty","sessions":[],"cronJobs":[],"runningCronJobs":[],"cronRunLogs":[],"uiSettings":{"easyMode":false}}\n\n',
     );
 
     closeHandler?.();

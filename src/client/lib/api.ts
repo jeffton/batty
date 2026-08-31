@@ -11,6 +11,7 @@ import type {
   BootstrapPayload,
   CreateCronJobInput,
   CronJob,
+  CronRunLog,
   RunningCronJob,
   ModelOption,
   ProviderAuthStartResponse,
@@ -225,6 +226,10 @@ export function listWorkspaceCronJobs(workspaceId: string): Promise<CronJob[]> {
 
 export function listWorkspaceCronRuns(workspaceId: string): Promise<RunningCronJob[]> {
   return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/cron-runs`);
+}
+
+export function listWorkspaceCronRunLogs(workspaceId: string): Promise<CronRunLog[]> {
+  return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/cron-run-logs`);
 }
 
 export function createCronJob(input: CreateCronJobInput): Promise<CronJob> {

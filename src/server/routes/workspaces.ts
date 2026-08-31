@@ -111,4 +111,13 @@ export function registerWorkspaceRoutes(
       return cronService.listRunningJobs(workspace.id);
     },
   );
+
+  app.get<{ Params: { workspaceId: string } }>(
+    routePath("/api/workspaces/:workspaceId/cron-run-logs"),
+    async (request) => {
+      const workspaces = await listWorkspaces(config);
+      const workspace = resolveWorkspace(workspaces, request.params.workspaceId);
+      return cronService.listRecentRunLogs(workspace.id);
+    },
+  );
 }

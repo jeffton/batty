@@ -3,16 +3,21 @@ import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import CronPopover from "@/client/components/CronPopover.vue";
 import { useAppStore } from "@/client/stores/app";
-import type { CronJob, SessionSummary } from "@/shared/types";
+import type { CronJob, CronRunLog, SessionSummary } from "@/shared/types";
 
-const { updateCronJob, listWorkspaceCronJobs, listWorkspaceCronRuns, stopCronRun } = vi.hoisted(
-  () => ({
-    updateCronJob: vi.fn(),
-    listWorkspaceCronJobs: vi.fn(),
-    listWorkspaceCronRuns: vi.fn(),
-    stopCronRun: vi.fn(),
-  }),
-);
+const {
+  updateCronJob,
+  listWorkspaceCronJobs,
+  listWorkspaceCronRunLogs,
+  listWorkspaceCronRuns,
+  stopCronRun,
+} = vi.hoisted(() => ({
+  updateCronJob: vi.fn(),
+  listWorkspaceCronJobs: vi.fn(),
+  listWorkspaceCronRunLogs: vi.fn(),
+  listWorkspaceCronRuns: vi.fn(),
+  stopCronRun: vi.fn(),
+}));
 
 vi.mock("@/client/lib/api", () => ({
   abortSession: vi.fn(),
@@ -27,6 +32,7 @@ vi.mock("@/client/lib/api", () => ({
   getSessionMessages: vi.fn(),
   getVersion: vi.fn(async () => ({ buildId: "build-1" })),
   listWorkspaceCronJobs,
+  listWorkspaceCronRunLogs,
   listWorkspaceCronRuns,
   listWorkspaceSessions: vi.fn(async (): Promise<SessionSummary[]> => []),
   listWorkspaces: vi.fn(async () => []),
@@ -78,6 +84,7 @@ describe("CronPopover", () => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
     listWorkspaceCronJobs.mockResolvedValue([job]);
+    listWorkspaceCronRunLogs.mockResolvedValue([]);
     listWorkspaceCronRuns.mockResolvedValue([]);
     updateCronJob.mockImplementation(async (_jobId: string, patch: Partial<CronJob>) => ({
       ...job,
@@ -169,5 +176,75 @@ describe("CronPopover", () => {
     });
     expect(wrapper.find("textarea").exists()).toBe(false);
     expect(wrapper.text()).toContain("Original prompt");
+  });
+
+  it("closes from the header button", async () => {
+    const wrapper = mount(CronPopover, {
+      props: { popoverId: "cron-popover", anchorName: "--cron-anchor" },
+    });
+    const hidePopover = vi.fn();
+    (wrapper.element as HTMLElement & { hidePopover: () => void }).hidePopover = hidePopover;
+
+    await wrapper.find('[aria-label="Close cron popover"]').trigger("click");
+
+    expect(hidePopover).toHaveBeenCalledOnce();
+  });
+
+  it("shows running and completed logs and opens their sessions", async () => {
+    const store = useAppStore();
+    store.workspaces = [
+      {
+        id: "batty",
+        label: "batty",
+        path: "/root/github/batty",
+        kind: "workspace",
+        isPinned: false,
+        isAssistant: false,
+      },
+    ];
+    store.selectedWorkspaceId = "batty";
+    const logs: CronRunLog[] = [
+      {
+        runId: "run-live",
+        jobId: "cron-1",
+        workspaceId: "batty",
+        prompt: "Check heartbeat",
+        model: "openai/gpt-5",
+        thinkingLevel: "medium",
+        session: { kind: "new" },
+        scheduleLabel: "Every five minutes",
+        startedAtMs: 2,
+        sessionPath: "/tmp/live.jsonl",
+        status: "running",
+      },
+      {
+        runId: "run-done",
+        jobId: "cron-1",
+        workspaceId: "batty",
+        prompt: "Check heartbeat",
+        model: "openai/gpt-5",
+        thinkingLevel: "medium",
+        session: { kind: "new" },
+        scheduleLabel: "Every five minutes",
+        startedAtMs: 1,
+        completedAtMs: 2,
+        durationMs: 1,
+        sessionPath: "/tmp/done.jsonl",
+        status: "success",
+      },
+    ];
+    store.cronRunLogsByWorkspace = { batty: logs };
+    listWorkspaceCronRunLogs.mockResolvedValue(logs);
+
+    const wrapper = mount(CronPopover, {
+      props: { popoverId: "cron-popover", anchorName: "--cron-anchor" },
+      global: { stubs: { SubagentSessionPopover: true } },
+    });
+    await wrapper.findAll('[role="tab"]')[1]!.trigger("click");
+
+    expect(wrapper.findAll(".cron-popover__run")).toHaveLength(2);
+    expect(wrapper.text()).toContain("Running");
+    expect(wrapper.text()).toContain("Completed");
+    expect(wrapper.findAll('[aria-label="Open cron run session"]')).toHaveLength(2);
   });
 });

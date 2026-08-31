@@ -1,7 +1,7 @@
 import type { CronJob } from "@/shared/types";
 import { formatSessionLabel } from "./cron-state";
 
-export { cronJobsFilePath, CronStore } from "./cron-persistence";
+export { cronJobsFilePath, CronStore, RECENT_CRON_RUN_LOG_LIMIT } from "./cron-persistence";
 export type { StoredCronJob } from "./cron-persistence";
 export { CronService } from "./cron-runtime";
 export type { CronJobRunner } from "./cron-runtime";

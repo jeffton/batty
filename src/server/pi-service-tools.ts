@@ -247,6 +247,7 @@ export function createCronTool({
       'Use schedule.kind="at" with schedule.in for relative times like 10m or 2h.',
       'Use schedule.kind="cron" with a standard cron expression and optional timezone for recurring schedules.',
       'Use schedule.kind="every" with durations like 15m, 2h, or 1d for interval schedules.',
+      'Use action="list-run-logs" to inspect recent running and completed runs, including detached session paths.',
     ],
     parameters: CronToolSchema,
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
@@ -366,6 +367,25 @@ export function createCronTool({
           return {
             content: [{ type: "text", text }],
             details: { count: running.length, workspaceId, running },
+          };
+        }
+        case "list-run-logs": {
+          const logs = cronService.listRecentRunLogs(
+            workspaceId,
+            typeof params.limit === "number" ? params.limit : undefined,
+          );
+          const text =
+            logs.length === 0
+              ? `No recent cron run logs found for workspace ${workspaceId}.`
+              : logs
+                  .map(
+                    (run) =>
+                      `${run.status === "running" ? "Running" : run.status === "success" ? "Completed" : "Failed"} ${run.runId} · job ${run.jobId}\nStarted: ${new Date(run.startedAtMs).toISOString()}${run.completedAtMs == null ? "" : `\nCompleted: ${new Date(run.completedAtMs).toISOString()}`}\nSession: ${run.sessionPath ?? "starting…"}${run.error ? `\nError: ${run.error}` : ""}\nPrompt: ${run.prompt}`,
+                  )
+                  .join("\n\n---\n\n");
+          return {
+            content: [{ type: "text", text }],
+            details: { count: logs.length, workspaceId, logs },
           };
         }
         case "stop-running": {

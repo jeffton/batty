@@ -68,7 +68,7 @@ const CronSessionSchema = Type.Union(
 export const CronToolSchema = Type.Object(
   {
     action: StringEnum(
-      ["list", "add", "update", "remove", "list-running", "stop-running"] as const,
+      ["list", "add", "update", "remove", "list-running", "list-run-logs", "stop-running"] as const,
       {
         description: "Which cron action to perform.",
       },
@@ -77,6 +77,13 @@ export const CronToolSchema = Type.Object(
       Type.String({ description: "Job id for update, remove, or stopping a running job." }),
     ),
     runId: Type.Optional(Type.String({ description: "Running cron run id for stop-running." })),
+    limit: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: 100,
+        description: "Maximum number of recent cron run logs to return. Defaults to 100.",
+      }),
+    ),
     workspaceId: Type.Optional(
       Type.String({ description: "Target workspace id. Defaults to the current workspace." }),
     ),

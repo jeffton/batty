@@ -2,7 +2,13 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import lockfile from "proper-lockfile";
-import type { CreateCronJobInput, CronJob, CronJobState, UpdateCronJobInput } from "@/shared/types";
+import type {
+  CreateCronJobInput,
+  CronJob,
+  CronJobState,
+  CronRunLog,
+  UpdateCronJobInput,
+} from "@/shared/types";
 import type { AppConfig } from "./config";
 import { createHttpError, normalizeNonEmptyString } from "./cron-http";
 import {
@@ -25,6 +31,7 @@ import {
 import { listWorkspaces } from "./workspaces";
 
 const CRON_STORE_VERSION = 2;
+export const RECENT_CRON_RUN_LOG_LIMIT = 100;
 
 export interface StoredCronJob {
   id: string;
@@ -43,11 +50,13 @@ export interface StoredCronJob {
 interface PersistedCronStore {
   version: typeof CRON_STORE_VERSION;
   jobs: StoredCronJob[];
+  runs: CronRunLog[];
 }
 
 interface RawPersistedCronStore {
   version: number;
   jobs: unknown[];
+  runs?: unknown[];
 }
 
 function requireStoredString(value: unknown, label: string): string {
@@ -82,6 +91,61 @@ function normalizeEnabledInput(value: unknown, defaultValue: boolean): boolean {
     throw createHttpError(400, "Enabled must be a boolean");
   }
   return value;
+}
+
+function normalizeStoredRunLog(value: unknown): CronRunLog {
+  if (!value || typeof value !== "object") {
+    throw new Error("Invalid cron run log");
+  }
+
+  const run = value as Partial<CronRunLog>;
+  if (run.status !== "running" && run.status !== "success" && run.status !== "error") {
+    throw new Error("Invalid cron run log status");
+  }
+  const normalized: CronRunLog = {
+    runId: requireStoredString(run.runId, "Run id"),
+    jobId: requireStoredString(run.jobId, "Job id"),
+    workspaceId: requireStoredString(run.workspaceId, "Workspace"),
+    prompt: requireStoredString(run.prompt, "Prompt"),
+    model: requireStoredString(run.model, "Model"),
+    thinkingLevel: normalizeStoredThinkingLevel(run.thinkingLevel),
+    session: normalizeStoredSession(run.session),
+    scheduleLabel: requireStoredString(run.scheduleLabel, "Schedule label"),
+    startedAtMs: requireStoredTimestamp(run.startedAtMs, "Started timestamp"),
+    status: run.status,
+  };
+  for (const [key, field] of [
+    ["completedAtMs", run.completedAtMs],
+    ["durationMs", run.durationMs],
+  ] as const) {
+    if (field !== undefined) {
+      normalized[key] = requireStoredTimestamp(field, key);
+    }
+  }
+  for (const [key, field] of [
+    ["sessionId", run.sessionId],
+    ["sessionPath", run.sessionPath],
+    ["error", run.error],
+  ] as const) {
+    if (field !== undefined) {
+      normalized[key] = requireStoredString(field, key);
+    }
+  }
+  return normalized;
+}
+
+function compareRunLogs(left: CronRunLog, right: CronRunLog): number {
+  if (left.status === "running" && right.status !== "running") {
+    return -1;
+  }
+  if (left.status !== "running" && right.status === "running") {
+    return 1;
+  }
+  return right.startedAtMs - left.startedAtMs;
+}
+
+function boundRunLogs(runs: CronRunLog[]): CronRunLog[] {
+  return runs.sort(compareRunLogs).slice(0, RECENT_CRON_RUN_LOG_LIMIT);
 }
 
 function normalizeStoredJob(value: unknown): StoredCronJob {
@@ -161,6 +225,37 @@ export class CronStore {
     return this.withStoreLock(async () => (await this.loadStoreUnlocked()).jobs);
   }
 
+  async readStoredRunLogs(): Promise<CronRunLog[]> {
+    return this.withStoreLock(async () => (await this.loadStoreUnlocked()).runs);
+  }
+
+  async startRun(run: CronRunLog): Promise<CronRunLog> {
+    return this.withStoreLock(async () => {
+      const store = await this.loadStoreUnlocked();
+      store.runs = boundRunLogs([
+        run,
+        ...store.runs.filter((candidate) => candidate.runId !== run.runId),
+      ]);
+      await this.writeStoreUnlocked(store.jobs, store.runs);
+      return run;
+    });
+  }
+
+  async updateRun(runId: string, patch: Partial<CronRunLog>): Promise<CronRunLog | undefined> {
+    return this.withStoreLock(async () => {
+      const store = await this.loadStoreUnlocked();
+      const index = store.runs.findIndex((run) => run.runId === runId);
+      if (index < 0) {
+        return undefined;
+      }
+      const next = normalizeStoredRunLog({ ...store.runs[index], ...patch });
+      store.runs[index] = next;
+      store.runs = boundRunLogs(store.runs);
+      await this.writeStoreUnlocked(store.jobs, store.runs);
+      return next;
+    });
+  }
+
   async createJob(input: CreateCronJobInput): Promise<CronJob> {
     const workspaceId = normalizeNonEmptyString(input.workspaceId, "Workspace");
     await this.requireWorkspace(workspaceId);
@@ -181,16 +276,17 @@ export class CronStore {
     };
 
     return this.withStoreLock(async () => {
-      const jobs = (await this.loadStoreUnlocked()).jobs;
-      jobs.push(job);
-      await this.writeStoreUnlocked(jobs);
+      const store = await this.loadStoreUnlocked();
+      store.jobs.push(job);
+      await this.writeStoreUnlocked(store.jobs, store.runs);
       return toCronJob(job);
     });
   }
 
   async updateJob(jobId: string, patch: UpdateCronJobInput): Promise<CronJob> {
     return this.withStoreLock(async () => {
-      const jobs = (await this.loadStoreUnlocked()).jobs;
+      const store = await this.loadStoreUnlocked();
+      const jobs = store.jobs;
       const index = jobs.findIndex((job) => job.id === jobId);
       if (index < 0) {
         throw createHttpError(404, `Unknown cron job: ${jobId}`);
@@ -221,27 +317,32 @@ export class CronStore {
       };
 
       jobs[index] = next;
-      await this.writeStoreUnlocked(jobs);
+      await this.writeStoreUnlocked(jobs, store.runs);
       return toCronJob(next);
     });
   }
 
   async deleteJob(jobId: string): Promise<CronJob> {
     return this.withStoreLock(async () => {
-      const jobs = (await this.loadStoreUnlocked()).jobs;
+      const store = await this.loadStoreUnlocked();
+      const jobs = store.jobs;
       const job = jobs.find((candidate) => candidate.id === jobId);
       if (!job) {
         throw createHttpError(404, `Unknown cron job: ${jobId}`);
       }
 
-      await this.writeStoreUnlocked(jobs.filter((candidate) => candidate.id !== jobId));
+      await this.writeStoreUnlocked(
+        jobs.filter((candidate) => candidate.id !== jobId),
+        store.runs,
+      );
       return toCronJob(job);
     });
   }
 
   async setJobState(jobId: string, state: Partial<CronJobState>): Promise<CronJob | undefined> {
     return this.withStoreLock(async () => {
-      const jobs = (await this.loadStoreUnlocked()).jobs;
+      const store = await this.loadStoreUnlocked();
+      const jobs = store.jobs;
       const index = jobs.findIndex((job) => job.id === jobId);
       if (index < 0) {
         return undefined;
@@ -258,7 +359,7 @@ export class CronStore {
       };
 
       jobs[index] = next;
-      await this.writeStoreUnlocked(jobs);
+      await this.writeStoreUnlocked(jobs, store.runs);
       return toCronJob(next);
     });
   }
@@ -275,26 +376,35 @@ export class CronStore {
     if (persisted.version !== CRON_STORE_VERSION) {
       throw new Error(`Unsupported cron store version: ${persisted.version}`);
     }
+    const runs = Array.isArray(persisted.runs) ? persisted.runs.map(normalizeStoredRunLog) : [];
     return {
       version: CRON_STORE_VERSION,
       jobs: persisted.jobs.map(normalizeStoredJob),
+      runs: boundRunLogs(runs),
     };
   }
 
   private async readStoreFile(): Promise<RawPersistedCronStore> {
     try {
       const content = await fs.readFile(this.filePath, "utf8");
-      const parsed = JSON.parse(content) as { version?: unknown; jobs?: unknown };
+      const parsed = JSON.parse(content) as {
+        version?: unknown;
+        jobs?: unknown;
+        runs?: unknown;
+      };
       if (!Array.isArray(parsed.jobs)) {
         throw new Error("Invalid cron jobs");
+      }
+      if (parsed.runs !== undefined && !Array.isArray(parsed.runs)) {
+        throw new Error("Invalid cron run logs");
       }
       if (typeof parsed.version !== "number" || !Number.isInteger(parsed.version)) {
         throw new Error(`Invalid cron store version: ${String(parsed.version)}`);
       }
-      return { version: parsed.version, jobs: parsed.jobs };
+      return { version: parsed.version, jobs: parsed.jobs, runs: parsed.runs ?? [] };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return { version: CRON_STORE_VERSION, jobs: [] };
+        return { version: CRON_STORE_VERSION, jobs: [], runs: [] };
       }
       throw error;
     }
@@ -314,10 +424,11 @@ export class CronStore {
     }
   }
 
-  private async writeStoreUnlocked(jobs: StoredCronJob[]): Promise<void> {
+  private async writeStoreUnlocked(jobs: StoredCronJob[], runs: CronRunLog[]): Promise<void> {
     const payload: PersistedCronStore = {
       version: CRON_STORE_VERSION,
       jobs,
+      runs: boundRunLogs(runs),
     };
     const tempPath = `${this.filePath}.${process.pid}.${randomUUID()}.tmp`;
     await fs.writeFile(tempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");

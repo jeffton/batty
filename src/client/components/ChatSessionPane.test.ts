@@ -24,6 +24,7 @@ vi.mock("@/client/lib/api", () => ({
   getSessionMessages: vi.fn(),
   getVersion: vi.fn(async () => ({ buildId: "build-1" })),
   listWorkspaceCronJobs: vi.fn(),
+  listWorkspaceCronRunLogs: vi.fn(),
   listWorkspaceCronRuns: vi.fn(),
   listWorkspaceSessions: vi.fn(async (): Promise<SessionSummary[]> => []),
   listWorkspaces: vi.fn(async () => []),

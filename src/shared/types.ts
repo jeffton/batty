@@ -166,6 +166,13 @@ export interface RunningCronJob {
   sessionPath?: string;
 }
 
+export interface CronRunLog extends RunningCronJob {
+  status: "running" | "success" | "error";
+  completedAtMs?: number;
+  durationMs?: number;
+  error?: string;
+}
+
 export interface CronJobState {
   nextRunAtMs?: number;
   lastRunAtMs?: number;
@@ -321,6 +328,7 @@ export interface WorkspaceSnapshot {
   sessions: SessionSummary[];
   cronJobs: CronJob[];
   runningCronJobs: RunningCronJob[];
+  cronRunLogs: CronRunLog[];
   uiSettings: WorkspaceUiSettings;
 }
 

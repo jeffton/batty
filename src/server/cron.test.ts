@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
+import type { CronRunLog } from "@/shared/types";
 import { buildCronJobSummary, CronStore } from "./cron";
 import type { AppConfig } from "./config";
 
@@ -150,6 +151,61 @@ describe("cron store", () => {
       store.updateJob(job.id, { enabled: "false" as unknown as boolean }),
     ).rejects.toThrow("Enabled must be a boolean");
     expect((await store.listJobs())[0]?.enabled).toBe(true);
+  });
+
+  it("persists and orders recent run logs with running runs first", async () => {
+    const config = await createConfig();
+    const store = new CronStore(config);
+    const base = {
+      jobId: "job-1",
+      workspaceId: "alpha",
+      prompt: "Inspect",
+      model: "openai/gpt-5",
+      thinkingLevel: "medium",
+      session: { kind: "new" as const },
+      scheduleLabel: "Every hour",
+    };
+    const completedOld: CronRunLog = {
+      ...base,
+      runId: "run-old",
+      startedAtMs: 100,
+      status: "success",
+      completedAtMs: 110,
+      durationMs: 10,
+      sessionPath: "/tmp/old.jsonl",
+    };
+    const running: CronRunLog = {
+      ...base,
+      runId: "run-running",
+      startedAtMs: 50,
+      status: "running",
+    };
+    const completedNew: CronRunLog = {
+      ...base,
+      runId: "run-new",
+      startedAtMs: 200,
+      status: "error",
+      completedAtMs: 210,
+      durationMs: 10,
+      error: "failed",
+    };
+
+    await store.startRun(completedOld);
+    await store.startRun(running);
+    await store.startRun(completedNew);
+
+    expect(await store.readStoredRunLogs()).toEqual([running, completedNew, completedOld]);
+    await store.updateRun(running.runId, {
+      status: "success",
+      completedAtMs: 250,
+      durationMs: 200,
+      sessionPath: "/tmp/running.jsonl",
+    });
+    expect((await store.readStoredRunLogs()).map((run) => run.runId)).toEqual([
+      "run-new",
+      "run-old",
+      "run-running",
+    ]);
   });
 
   it("rejects unsupported cron store versions", async () => {

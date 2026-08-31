@@ -21,7 +21,7 @@ export type CronJobRun = {
   session: CronJobSession;
   scheduleLabel: string;
   signal: AbortSignal;
-  onSessionStarted(session: { sessionId: string; sessionPath: string }): void;
+  onSessionStarted(session: { sessionId: string; sessionPath: string }): void | Promise<void>;
 };
 
 export type PiServiceCronAdapterContext = {
@@ -118,7 +118,7 @@ export async function runCronJobSession(
   });
   const cronWebSession = context.requireSession(cronSession.id);
   const cronSessionPath = context.requireSessionPath(cronWebSession.id);
-  job.onSessionStarted({
+  await job.onSessionStarted({
     sessionId: cronWebSession.session.sessionId,
     sessionPath: cronSessionPath,
   });
@@ -143,12 +143,14 @@ export async function runCronJobSession(
     job.signal.removeEventListener("abort", abortListener);
   }
 
-  if (parent) {
-    await deliverCronRun(context, parent.id, cronNotice, job, cronWebSession.session);
-  }
-
   const finalAssistant = findLastAssistantMessage(cronWebSession.session.messages);
   const errorMessage = finalAssistantError(finalAssistant);
+  if (
+    parent &&
+    !(errorMessage === undefined && extractAssistantText(finalAssistant) === "NO_REPLY")
+  ) {
+    await deliverCronRun(context, parent.id, cronNotice, job, cronWebSession.session);
+  }
   if (errorMessage) {
     throw new Error(errorMessage);
   }
@@ -175,7 +177,7 @@ async function runInlineCronJob(
     context.setThinkingLevel(session.id, job.thinkingLevel);
     await context.setModel(session.id, job.model);
     context.publishReset(webSession, context.getState(webSession.id));
-    job.onSessionStarted({
+    await job.onSessionStarted({
       sessionId: webSession.session.sessionId,
       sessionPath: context.requireSessionPath(webSession.id),
     });

@@ -54,6 +54,7 @@ async function workspaceSnapshot(workspaceId: string): Promise<WorkspaceSnapshot
     sessions: await service.listSessionSummaries(workspace),
     cronJobs: cronService.listJobs(workspaceId),
     runningCronJobs: cronService.listRunningJobs(workspaceId),
+    cronRunLogs: cronService.listRecentRunLogs(workspaceId),
     uiSettings: getWorkspaceUiSettings(workspaceId),
   };
 }
@@ -116,7 +117,7 @@ cronService.setRunner({
         session: job.session,
         scheduleLabel: job.scheduleLabel,
         jobId: job.id,
-        runId: `skipped-${skippedContext.skippedAtMs}`,
+        runId: skippedContext.runId,
       },
       skippedContext,
     );

@@ -178,6 +178,18 @@ describe("CronPopover", () => {
     expect(wrapper.text()).toContain("Original prompt");
   });
 
+  it("closes from the header button", async () => {
+    const wrapper = mount(CronPopover, {
+      props: { popoverId: "cron-popover", anchorName: "--cron-anchor" },
+    });
+    const hidePopover = vi.fn();
+    (wrapper.element as HTMLElement & { hidePopover: () => void }).hidePopover = hidePopover;
+
+    await wrapper.find('[aria-label="Close cron popover"]').trigger("click");
+
+    expect(hidePopover).toHaveBeenCalledOnce();
+  });
+
   it("shows running and completed logs and opens their sessions", async () => {
     const store = useAppStore();
     store.workspaces = [

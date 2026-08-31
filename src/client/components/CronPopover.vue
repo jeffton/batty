@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { PanelRightOpen, Square } from "@lucide/vue";
+import { PanelRightOpen, Square, X } from "@lucide/vue";
 import CronJobCard from "@/client/components/CronJobCard.vue";
 import SubagentSessionPopover from "@/client/components/SubagentSessionPopover.vue";
 import { useCronJobDrafts } from "@/client/composables/useCronJobDrafts";
@@ -13,6 +13,7 @@ const props = defineProps<{
 }>();
 
 const store = useAppStore();
+const popoverElement = ref<HTMLElement | null>(null);
 const activeTab = ref<"jobs" | "logs">("jobs");
 const stoppingRunIds = ref(new Set<string>());
 const {
@@ -76,6 +77,7 @@ watch(
 <template>
   <div
     :id="props.popoverId"
+    ref="popoverElement"
     class="cron-popover"
     :style="{ 'position-anchor': props.anchorName }"
     popover="auto"
@@ -87,6 +89,15 @@ watch(
           Current workspace: {{ store.selectedWorkspace?.label }}
         </div>
       </div>
+      <button
+        type="button"
+        class="cron-popover__close"
+        aria-label="Close cron popover"
+        title="Close"
+        @click="popoverElement?.hidePopover?.()"
+      >
+        <X :size="16" />
+      </button>
     </div>
 
     <div class="cron-popover__tabs" role="tablist" aria-label="Cron views">
@@ -243,6 +254,26 @@ watch(
 .cron-popover__subtitle {
   font-size: 0.78rem;
   color: var(--color-text-subtle);
+}
+
+.cron-popover__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.5rem;
+  background: var(--color-bg-panel);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .cron-popover__close:hover {
+    background: var(--color-bg-elevated-soft);
+  }
 }
 
 .cron-popover__tabs {

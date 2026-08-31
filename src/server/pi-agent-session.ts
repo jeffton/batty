@@ -2,6 +2,8 @@ import path from "node:path";
 import {
   createAgentSession,
   DefaultResourceLoader,
+  createFindToolDefinition,
+  type FindToolOptions,
   type InlineExtension,
   type ModelRuntime,
   SessionManager,
@@ -9,6 +11,7 @@ import {
   type AgentSession,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { battyActivePiToolNames, isPiShellToolName } from "@/shared/pi-tools";
 import type { WorkspaceInfo } from "@/shared/types";
 import { type AppConfig, loadEnvironmentFile } from "./config";
@@ -37,6 +40,49 @@ export function createEnvironmentReloadExtension(battyDir: string): InlineExtens
         if (isPiShellToolName(event.toolName)) {
           await loadEnvironmentFile(battyDir);
         }
+      });
+    },
+  };
+}
+
+export const BATTY_FIND_DEFAULT_LIMIT = 100;
+
+const battyFindSchema = Type.Object({
+  pattern: Type.String({
+    description: "Glob pattern to match files, e.g. '*.ts', '**/*.json', or 'src/**/*.spec.ts'",
+  }),
+  path: Type.Optional(
+    Type.String({ description: "Directory to search in (default: current directory)" }),
+  ),
+  limit: Type.Optional(
+    Type.Number({
+      description: `Maximum number of results (default: ${BATTY_FIND_DEFAULT_LIMIT})`,
+    }),
+  ),
+});
+
+export function createFindDefaultsExtension(
+  cwd: string,
+  options?: FindToolOptions,
+): InlineExtension {
+  return {
+    name: "batty-find-defaults",
+    hidden: true,
+    factory: (pi) => {
+      const findTool = createFindToolDefinition(cwd, options);
+      pi.registerTool({
+        ...findTool,
+        description: `Search for files by glob pattern. Returns matching file paths relative to the search directory. Respects .gitignore. Output is truncated to ${BATTY_FIND_DEFAULT_LIMIT} results or 50KB (whichever is hit first).`,
+        parameters: battyFindSchema,
+        execute(toolCallId, params, signal, onUpdate, ctx) {
+          return findTool.execute(
+            toolCallId,
+            { ...params, limit: params.limit ?? BATTY_FIND_DEFAULT_LIMIT },
+            signal,
+            onUpdate,
+            ctx,
+          );
+        },
       });
     },
   };
@@ -86,7 +132,10 @@ export async function createPiAgentSession({
     noPromptTemplates: true,
     noThemes: true,
     additionalExtensionPaths: resourcePaths.extensions,
-    extensionFactories: [createEnvironmentReloadExtension(config.battyDir)],
+    extensionFactories: [
+      createEnvironmentReloadExtension(config.battyDir),
+      createFindDefaultsExtension(workspace.path),
+    ],
     additionalSkillPaths: resourcePaths.skills,
     additionalPromptTemplatePaths: resourcePaths.prompts,
     additionalThemePaths: resourcePaths.themes,

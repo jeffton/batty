@@ -4,7 +4,11 @@ import path from "node:path";
 import { createBashTool, DefaultResourceLoader } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import { environmentFilePath } from "@/server/config";
-import { createEnvironmentReloadExtension } from "@/server/pi-agent-session";
+import {
+  BATTY_FIND_DEFAULT_LIMIT,
+  createEnvironmentReloadExtension,
+  createFindDefaultsExtension,
+} from "@/server/pi-agent-session";
 
 const tempDirs: string[] = [];
 const testEnvKey = `BATTY_DYNAMIC_ENV_TEST_${process.pid}`;
@@ -30,6 +34,55 @@ async function createEnvironmentFile(value: string): Promise<string> {
   );
   return battyDir;
 }
+
+describe("Batty find defaults extension", () => {
+  it("overrides the built-in find default while preserving explicit limits", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "batty-find-defaults-"));
+    tempDirs.push(cwd);
+    const requestedLimits: number[] = [];
+    const resourceLoader = new DefaultResourceLoader({
+      cwd,
+      agentDir: path.join(cwd, ".agent"),
+      noExtensions: true,
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      extensionFactories: [
+        createFindDefaultsExtension(cwd, {
+          operations: {
+            exists: () => true,
+            glob: (_pattern, _searchPath, options) => {
+              requestedLimits.push(options.limit);
+              return Array.from({ length: options.limit }, (_, index) => `file-${index + 1}.ts`);
+            },
+          },
+        }),
+      ],
+    });
+    await resourceLoader.reload();
+
+    const extension = resourceLoader.getExtensions().extensions[0];
+    const findTool = extension?.tools.get("find")?.definition;
+    expect(extension?.hidden).toBe(true);
+    expect(findTool).toBeDefined();
+    expect(findTool!.description).toContain(`${BATTY_FIND_DEFAULT_LIMIT} results`);
+    expect(
+      (findTool!.parameters as { properties: { limit: { description?: string } } }).properties.limit
+        .description,
+    ).toBe(`Maximum number of results (default: ${BATTY_FIND_DEFAULT_LIMIT})`);
+
+    await findTool!.execute("default", { pattern: "*.ts" }, undefined, undefined, {} as never);
+    await findTool!.execute(
+      "explicit",
+      { pattern: "*.ts", limit: 7 },
+      undefined,
+      undefined,
+      {} as never,
+    );
+
+    expect(requestedLimits).toEqual([BATTY_FIND_DEFAULT_LIMIT, 7]);
+  });
+});
 
 describe("Batty environment extension", () => {
   it("reloads environment.json before each bash tool invocation", async () => {

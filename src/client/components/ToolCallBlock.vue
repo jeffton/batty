@@ -153,7 +153,7 @@ const readTextOutput = computed(() =>
         .map((block) => block.text)
         .join("\n"),
 );
-const readTailView = computed(() => createTailView(readTextOutput.value, OUTPUT_TAIL_LINE_COUNT));
+const readHeadView = computed(() => createHeadView(readTextOutput.value, OUTPUT_TAIL_LINE_COUNT));
 const cronTextOutput = computed(() =>
   props.name !== "cron"
     ? ""
@@ -195,7 +195,7 @@ const canExpandOutput = computed(
   () =>
     (isPiShellToolName(props.name) && shellTailView.value.isTrimmed) ||
     (props.name === "write" && writeTailView.value.isTrimmed) ||
-    (props.name === "read" && readTailView.value.isTrimmed) ||
+    (props.name === "read" && readHeadView.value.isTrimmed) ||
     (props.name === "cron" && cronHeadView.value.isTrimmed) ||
     (props.name === "web-search" && webSearchHeadView.value.isTrimmed) ||
     ((props.name === "grep" || props.name === "find") && grepFindHeadView.value.isTrimmed),
@@ -214,7 +214,7 @@ const expandButtonLabel = computed(() => {
     : props.name === "write"
       ? writeTailView.value.hiddenLineCount
       : props.name === "read"
-        ? readTailView.value.hiddenLineCount
+        ? readHeadView.value.hiddenLineCount
         : props.name === "cron"
           ? cronHeadView.value.hiddenLineCount
           : props.name === "web-search"
@@ -232,7 +232,7 @@ const visibleShellOutput = computed(() =>
   isExpanded.value ? shellTextOutput.value : shellTailView.value.text,
 );
 const visibleReadOutput = computed(() =>
-  isExpanded.value ? readTextOutput.value : readTailView.value.text,
+  isExpanded.value ? readTextOutput.value : readHeadView.value.text,
 );
 const visibleCronOutput = computed(() =>
   isExpanded.value ? cronTextOutput.value : cronHeadView.value.text,
@@ -250,7 +250,7 @@ const showCollapsedWriteWindow = computed(
   () => props.name === "write" && !isExpanded.value && writeTailView.value.isTrimmed,
 );
 const showCollapsedReadWindow = computed(
-  () => props.name === "read" && !isExpanded.value && readTailView.value.isTrimmed,
+  () => props.name === "read" && !isExpanded.value && readHeadView.value.isTrimmed,
 );
 const showCollapsedCronWindow = computed(
   () => props.name === "cron" && !isExpanded.value && cronHeadView.value.isTrimmed,
@@ -266,7 +266,8 @@ const showCollapsedGrepFindWindow = computed(
 );
 const visibleResultBlocks = computed(() => {
   if (
-    ((props.name === "read" || props.name === "cron") && props.status !== "error") ||
+    props.name === "read" ||
+    (props.name === "cron" && props.status !== "error") ||
     props.name === "grep" ||
     props.name === "find"
   ) {
@@ -426,16 +427,13 @@ const genericEntries = computed(() => {
     <ToolCallMeta :entries="readEntries" inline />
     <ToolCallMeta :entries="genericEntries" />
 
-    <template
-      v-if="
-        props.name === 'read' && props.status !== 'error' && visibleReadOutput.trim().length > 0
-      "
-    >
+    <template v-if="props.name === 'read' && visibleReadOutput.trim().length > 0">
       <ToolCallCodeOutput
         :code="visibleReadOutput"
         :language="codeLanguage"
         :compact="props.compact"
         :collapsed="showCollapsedReadWindow"
+        collapsed-alignment="start"
         :can-expand="canExpandOutput"
         :expand-button-label="expandButtonLabel"
         @toggle-expanded="isExpanded = !isExpanded"

@@ -25,6 +25,49 @@ describe("ToolCallBlock", () => {
     expect(wrapper.findAll(".tool-call__meta-row")).toHaveLength(0);
   });
 
+  it("heads read output and expands to the full output on demand", async () => {
+    const wrapper = mount(ToolCallBlock, {
+      props: {
+        name: "read",
+        arguments: {
+          path: "src/server/main.ts",
+        },
+        resultBlocks: [{ type: "text", text: lines(30) }],
+        status: "success",
+      },
+    });
+
+    expect(wrapper.get("pre.code-block").text()).toContain("line-1");
+    expect(wrapper.get("pre.code-block").text()).toContain("line-20");
+    expect(wrapper.get("pre.code-block").text()).not.toContain("line-21");
+    expect(wrapper.find(".tool-call__output-window--collapsed-start").exists()).toBe(true);
+    expect(wrapper.text()).toContain("Show full output (+10 lines)");
+
+    await wrapper.get(".tool-call__expand-btn").trigger("click");
+
+    expect(wrapper.get("pre.code-block").text()).toContain("line-30");
+    expect(wrapper.find(".tool-call__output-window--collapsed").exists()).toBe(false);
+    expect(wrapper.text()).toContain("Collapse output");
+  });
+
+  it("also truncates failed read output at the end", () => {
+    const wrapper = mount(ToolCallBlock, {
+      props: {
+        name: "read",
+        arguments: {
+          path: "src/server/main.ts",
+        },
+        resultBlocks: [{ type: "text", text: lines(30) }],
+        status: "error",
+      },
+    });
+
+    expect(wrapper.get("pre.code-block").text()).toContain("line-1");
+    expect(wrapper.get("pre.code-block").text()).toContain("line-20");
+    expect(wrapper.get("pre.code-block").text()).not.toContain("line-21");
+    expect(wrapper.text()).toContain("Show full output (+10 lines)");
+  });
+
   it("hides edit arguments when a diff is available", () => {
     const wrapper = mount(ToolCallBlock, {
       props: {
@@ -108,7 +151,7 @@ describe("ToolCallBlock", () => {
     },
   );
 
-  it("also truncates failed grep output", () => {
+  it("also truncates failed grep output at the end", () => {
     const wrapper = mount(ToolCallBlock, {
       props: {
         name: "grep",
@@ -119,6 +162,7 @@ describe("ToolCallBlock", () => {
     });
 
     expect(wrapper.get("pre.code-block").text()).toContain("line-1");
+    expect(wrapper.get("pre.code-block").text()).toContain("line-20");
     expect(wrapper.get("pre.code-block").text()).not.toContain("line-21");
     expect(wrapper.text()).toContain("Show full output (+10 lines)");
   });

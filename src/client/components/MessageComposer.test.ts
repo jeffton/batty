@@ -19,6 +19,17 @@ describe("MessageComposer", () => {
     window.localStorage.clear();
   });
 
+  it("disables browser autofill without disabling writing assistance", () => {
+    const wrapper = shallowMount(MessageComposer, {
+      props: { ...requiredProps, sessionKey: "session-a" },
+    });
+    const textarea = wrapper.get("textarea");
+
+    expect(textarea.attributes("autocomplete")).toBe("off");
+    expect(textarea.attributes("autocorrect")).toBe("on");
+    expect(textarea.attributes("spellcheck")).toBe("true");
+  });
+
   it("restores a failed prompt only into its originating session", async () => {
     writeSessionDraft("session-b", "draft B");
     const wrapper = shallowMount(MessageComposer, {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { PanelRightOpen, Square, X } from "@lucide/vue";
+import { PanelRightOpen, Square } from "@lucide/vue";
 import CronJobCard from "@/client/components/CronJobCard.vue";
+import FullPopover from "@/client/components/FullPopover.vue";
 import SubagentSessionPopover from "@/client/components/SubagentSessionPopover.vue";
 import { useCronJobDrafts } from "@/client/composables/useCronJobDrafts";
 import { useAppStore } from "@/client/stores/app";
@@ -13,7 +14,6 @@ const props = defineProps<{
 }>();
 
 const store = useAppStore();
-const popoverElement = ref<HTMLElement | null>(null);
 const activeTab = ref<"jobs" | "logs">("jobs");
 const stoppingRunIds = ref(new Set<string>());
 const {
@@ -75,205 +75,132 @@ watch(
 </script>
 
 <template>
-  <div
-    :id="props.popoverId"
-    ref="popoverElement"
+  <FullPopover
     class="cron-popover"
-    :style="{ 'position-anchor': props.anchorName }"
-    popover="auto"
+    :popover-id="props.popoverId"
+    :anchor-name="props.anchorName"
+    title="Cron"
+    :subtitle="`Current workspace: ${store.selectedWorkspace?.label ?? ''}`"
+    close-label="Close cron popover"
   >
-    <div class="cron-popover__header">
-      <div>
-        <div class="cron-popover__title">Cron</div>
-        <div class="cron-popover__subtitle">
-          Current workspace: {{ store.selectedWorkspace?.label }}
-        </div>
+    <div class="cron-popover__body">
+      <div class="cron-popover__tabs" role="tablist" aria-label="Cron views">
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'jobs'"
+          :tabindex="activeTab === 'jobs' ? 0 : -1"
+          class="cron-popover__tab"
+          @click="activeTab = 'jobs'"
+        >
+          Jobs
+        </button>
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'logs'"
+          :tabindex="activeTab === 'logs' ? 0 : -1"
+          class="cron-popover__tab"
+          @click="activeTab = 'logs'"
+        >
+          Logs
+          <span
+            v-if="runLogs.some((run) => run.status === 'running')"
+            class="cron-popover__live-dot"
+          />
+        </button>
       </div>
-      <button
-        type="button"
-        class="cron-popover__close"
-        aria-label="Close cron popover"
-        title="Close"
-        @click="popoverElement?.hidePopover?.()"
-      >
-        <X :size="16" />
-      </button>
-    </div>
 
-    <div class="cron-popover__tabs" role="tablist" aria-label="Cron views">
-      <button
-        type="button"
-        role="tab"
-        :aria-selected="activeTab === 'jobs'"
-        :tabindex="activeTab === 'jobs' ? 0 : -1"
-        class="cron-popover__tab"
-        @click="activeTab = 'jobs'"
-      >
-        Jobs
-      </button>
-      <button
-        type="button"
-        role="tab"
-        :aria-selected="activeTab === 'logs'"
-        :tabindex="activeTab === 'logs' ? 0 : -1"
-        class="cron-popover__tab"
-        @click="activeTab = 'logs'"
-      >
-        Logs
-        <span
-          v-if="runLogs.some((run) => run.status === 'running')"
-          class="cron-popover__live-dot"
+      <div v-if="activeTab === 'jobs'" class="cron-popover__pane" role="tabpanel">
+        <CronJobCard
+          v-for="job in jobs"
+          :key="job.id"
+          :job="job"
+          :draft="draftFor(job)"
+          :models="store.models"
+          :session-label="sessionLabel(job)"
+          :thinking-options="thinkingOptions(job)"
+          @edit="editJob(job)"
+          @cancel="cancelEdit(job)"
+          @save="saveJob(job)"
+          @toggle="toggleJob(job)"
+          @delete="deleteJob(job)"
         />
-      </button>
-    </div>
 
-    <div v-if="activeTab === 'jobs'" class="cron-popover__pane" role="tabpanel">
-      <CronJobCard
-        v-for="job in jobs"
-        :key="job.id"
-        :job="job"
-        :draft="draftFor(job)"
-        :models="store.models"
-        :session-label="sessionLabel(job)"
-        :thinking-options="thinkingOptions(job)"
-        @edit="editJob(job)"
-        @cancel="cancelEdit(job)"
-        @save="saveJob(job)"
-        @toggle="toggleJob(job)"
-        @delete="deleteJob(job)"
-      />
-
-      <div v-if="jobs.length === 0" class="cron-popover__empty">
-        No cron jobs in this workspace yet. Create them with the <code>cron</code> tool or the
-        <code>batty cron</code> CLI.
-      </div>
-    </div>
-
-    <div v-else class="cron-popover__pane" role="tabpanel">
-      <article
-        v-for="run in runLogs"
-        :key="run.runId"
-        class="cron-popover__run"
-        :class="`cron-popover__run--${run.status}`"
-      >
-        <div class="cron-popover__run-content">
-          <div class="cron-popover__run-heading">
-            <span class="cron-popover__status">{{ statusLabel(run) }}</span>
-            <strong>{{ run.scheduleLabel }}</strong>
-          </div>
-          <div class="cron-popover__run-prompt">{{ run.prompt }}</div>
-          <div class="cron-popover__run-details">
-            <span>{{ formatTimestamp(run.startedAtMs) }}</span>
-            <span v-if="formatDuration(run.durationMs)">{{ formatDuration(run.durationMs) }}</span>
-            <span>{{ run.session.kind }}</span>
-          </div>
-          <div v-if="run.error" class="cron-popover__run-error">{{ run.error }}</div>
+        <div v-if="jobs.length === 0" class="cron-popover__empty">
+          No cron jobs in this workspace yet. Create them with the <code>cron</code> tool or the
+          <code>batty cron</code> CLI.
         </div>
-        <div class="cron-popover__run-actions">
-          <button
+      </div>
+
+      <div v-else class="cron-popover__pane" role="tabpanel">
+        <article
+          v-for="run in runLogs"
+          :key="run.runId"
+          class="cron-popover__run"
+          :class="`cron-popover__run--${run.status}`"
+        >
+          <div class="cron-popover__run-content">
+            <div class="cron-popover__run-heading">
+              <span class="cron-popover__status">{{ statusLabel(run) }}</span>
+              <strong>{{ run.scheduleLabel }}</strong>
+            </div>
+            <div class="cron-popover__run-prompt">{{ run.prompt }}</div>
+            <div class="cron-popover__run-details">
+              <span>{{ formatTimestamp(run.startedAtMs) }}</span>
+              <span v-if="formatDuration(run.durationMs)">{{
+                formatDuration(run.durationMs)
+              }}</span>
+              <span>{{ run.session.kind }}</span>
+            </div>
+            <div v-if="run.error" class="cron-popover__run-error">{{ run.error }}</div>
+          </div>
+          <div class="cron-popover__run-actions">
+            <button
+              v-if="run.sessionPath"
+              type="button"
+              class="cron-popover__icon-btn"
+              :popovertarget="runPopoverId(run.runId)"
+              aria-label="Open cron run session"
+              title="Open session"
+            >
+              <PanelRightOpen :size="16" />
+            </button>
+            <button
+              v-if="run.status === 'running'"
+              type="button"
+              class="cron-popover__icon-btn cron-popover__icon-btn--danger"
+              :disabled="stoppingRunIds.has(run.runId)"
+              aria-label="Stop cron run"
+              title="Stop run"
+              @click.stop.prevent="stopRun(run.runId)"
+            >
+              <Square :size="14" />
+            </button>
+          </div>
+          <SubagentSessionPopover
             v-if="run.sessionPath"
-            type="button"
-            class="cron-popover__icon-btn"
-            :popovertarget="runPopoverId(run.runId)"
-            aria-label="Open cron run session"
-            title="Open session"
-          >
-            <PanelRightOpen :size="16" />
-          </button>
-          <button
-            v-if="run.status === 'running'"
-            type="button"
-            class="cron-popover__icon-btn cron-popover__icon-btn--danger"
-            :disabled="stoppingRunIds.has(run.runId)"
-            aria-label="Stop cron run"
-            title="Stop run"
-            @click.stop.prevent="stopRun(run.runId)"
-          >
-            <Square :size="14" />
-          </button>
-        </div>
-        <SubagentSessionPopover
-          v-if="run.sessionPath"
-          :popover-id="runPopoverId(run.runId)"
-          header-title="Cron run"
-          :workspace-id="run.workspaceId"
-          :session-path="run.sessionPath"
-        />
-      </article>
+            :popover-id="runPopoverId(run.runId)"
+            header-title="Cron run"
+            :workspace-id="run.workspaceId"
+            :session-path="run.sessionPath"
+          />
+        </article>
 
-      <div v-if="runLogs.length === 0" class="cron-popover__empty">
-        No cron runs have been logged in this workspace yet.
+        <div v-if="runLogs.length === 0" class="cron-popover__empty">
+          No cron runs have been logged in this workspace yet.
+        </div>
       </div>
     </div>
-  </div>
+  </FullPopover>
 </template>
 
 <style scoped>
-.cron-popover {
-  inset: calc(var(--safe-area-top) + 1rem) calc(var(--safe-area-right) + 1rem)
-    calc(var(--safe-area-bottom) + 1rem) calc(var(--safe-area-left) + 1rem);
-  width: auto;
-  max-width: none;
-  height: auto;
-  max-height: none;
-  margin: 0;
-  padding: 0;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.9rem;
-  background: var(--color-bg-panel);
-  color: var(--color-text);
-  box-shadow: var(--color-shadow-popover);
-  overflow: hidden;
-  overscroll-behavior: contain;
-}
-
-.cron-popover:popover-open {
+.cron-popover__body {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
-}
-
-.cron-popover::backdrop {
-  background: rgb(0 0 0 / 0.22);
-}
-
-.cron-popover__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.9rem 1rem 0.75rem;
-  background: var(--color-bg-panel-strong);
-}
-
-.cron-popover__title {
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--color-text-strong);
-}
-
-.cron-popover__subtitle {
-  font-size: 0.78rem;
-  color: var(--color-text-subtle);
-}
-
-.cron-popover__close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  padding: 0;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.5rem;
-  background: var(--color-bg-panel);
-  color: var(--color-text);
-  cursor: pointer;
-}
-
-@media (hover: hover) {
-  .cron-popover__close:hover {
-    background: var(--color-bg-elevated-soft);
-  }
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
 }
 
 .cron-popover__tabs {

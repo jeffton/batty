@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { Bot, Check, ExternalLink, LogOut, Palette, Pencil, Save, Settings2, X } from "@lucide/vue";
+import { Bot, Check, ExternalLink, LogOut, Palette, Pencil, Save, X } from "@lucide/vue";
 import { computed, reactive, ref, watch } from "vue";
+import FullPopover from "@/client/components/FullPopover.vue";
 import ModelConfigPopover from "@/client/components/ModelConfigPopover.vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
 import { APP_COLOR_OPTIONS, type AppColor } from "@/shared/appearance";
@@ -326,412 +327,393 @@ function logout(): void {
   emit("logout");
 }
 
-watch(
-  () => document.getElementById(props.popoverId)?.matches(":popover-open"),
-  (open) => {
-    if (!open) {
-      expandedItemId.value = undefined;
-      return;
-    }
+function handlePopoverToggle(event: Event): void {
+  const open = (event as Event & { newState?: "open" | "closed" }).newState === "open";
+  if (!open) {
+    expandedItemId.value = undefined;
+    return;
+  }
 
-    authError.value = "";
-    appearanceError.value = "";
-    defaultModelError.value = "";
-    braveSearchError.value = "";
-    battyAgentsError.value = "";
-    apiKeyErrors.google = "";
-    apiKeyErrors.openrouter = "";
-    void store.refreshProviderAuthStatus();
-  },
-);
+  authError.value = "";
+  appearanceError.value = "";
+  defaultModelError.value = "";
+  braveSearchError.value = "";
+  battyAgentsError.value = "";
+  apiKeyErrors.google = "";
+  apiKeyErrors.openrouter = "";
+  void store.refreshProviderAuthStatus();
+}
 </script>
 
 <template>
-  <div
-    :id="props.popoverId"
+  <FullPopover
     class="settings-popover"
-    :style="{ 'position-anchor': props.anchorName }"
-    popover="auto"
+    :popover-id="props.popoverId"
+    :anchor-name="props.anchorName"
+    title="Settings"
+    close-label="Close settings"
+    @toggle="handlePopoverToggle"
   >
-    <section class="settings-popover__section">
-      <div class="settings-popover__section-header">
+    <div class="settings-popover__body">
+      <section class="settings-popover__section">
         <div class="settings-popover__section-title-row">
-          <Settings2 :size="15" />
-          <h2 class="settings-popover__section-title">Settings</h2>
-        </div>
-      </div>
-    </section>
-
-    <section class="settings-popover__section">
-      <div class="settings-popover__section-title-row">
-        <Palette :size="15" />
-        <div class="settings-popover__group-title">Appearance</div>
-      </div>
-
-      <label class="settings-popover__field">
-        <span>App title</span>
-        <input
-          v-model="appearanceTitle"
-          class="settings-popover__input settings-popover__input--title"
-          type="text"
-          maxlength="40"
-          autocomplete="off"
-          :disabled="appearanceSaving"
-          @keydown.enter="saveAppearance"
-        />
-      </label>
-
-      <fieldset class="settings-popover__color-fieldset">
-        <legend>Color</legend>
-        <div class="settings-popover__colors">
-          <label
-            v-for="color in APP_COLOR_OPTIONS"
-            :key="color.id"
-            class="settings-popover__color-option"
-            :title="color.label"
-          >
-            <input
-              v-model="appearanceColor"
-              type="radio"
-              name="app-color"
-              :value="color.id"
-              :disabled="appearanceSaving"
-            />
-            <span
-              class="settings-popover__color-swatch"
-              :style="{
-                backgroundImage: `linear-gradient(135deg, ${color.light} 50%, ${color.dark} 50%)`,
-              }"
-            >
-              <Check v-if="appearanceColor === color.id" :size="15" :stroke-width="3" />
-            </span>
-            <span>{{ color.label }}</span>
-          </label>
-        </div>
-      </fieldset>
-
-      <button
-        class="settings-popover__action settings-popover__action--primary"
-        type="button"
-        :disabled="appearanceSaving || !appearanceTitle.trim()"
-        @click="saveAppearance"
-      >
-        <Save :size="14" /> {{ appearanceSaving ? "Saving…" : "Save appearance" }}
-      </button>
-      <div v-if="appearanceError" class="settings-popover__error" role="alert">
-        {{ appearanceError }}
-      </div>
-    </section>
-
-    <section class="settings-popover__section">
-      <div class="settings-popover__group-title">Default model</div>
-      <div class="settings-popover__help">Used when starting new sessions.</div>
-      <button
-        class="settings-popover__model-button"
-        type="button"
-        :style="{ 'anchor-name': DEFAULT_MODEL_ANCHOR }"
-        :popovertarget="DEFAULT_MODEL_POPOVER_ID"
-        :disabled="defaultModelSaving"
-        aria-label="Choose default model and provider"
-        @click="store.refreshModels"
-      >
-        <Bot :size="17" />
-        <span class="settings-popover__model-info">
-          <strong>{{ defaultModelLabel }}</strong>
-          <span>{{ defaultProviderLabel }}</span>
-        </span>
-      </button>
-      <ModelConfigPopover
-        :popover-id="DEFAULT_MODEL_POPOVER_ID"
-        :anchor-name="DEFAULT_MODEL_ANCHOR"
-        :models="store.models"
-        :current-model-id="defaultModelId"
-        current-thinking-level=""
-        :thinking-options="[]"
-        @set-model="saveDefaultModel"
-      />
-      <div v-if="defaultModelError" class="settings-popover__error" role="alert">
-        {{ defaultModelError }}
-      </div>
-    </section>
-
-    <section class="settings-popover__section">
-      <div class="settings-popover__group-title">Assistant workspace</div>
-      <select
-        class="settings-popover__select"
-        :value="assistantWorkspaceId"
-        :disabled="assistantWorkspaceSaving"
-        @change="updateAssistantWorkspace"
-      >
-        <option value="">None</option>
-        <option v-for="workspace in store.workspaces" :key="workspace.id" :value="workspace.id">
-          {{ workspace.label }}
-        </option>
-      </select>
-    </section>
-
-    <section class="settings-popover__section">
-      <div class="settings-popover__group-title">Batty AGENTS file</div>
-
-      <article class="settings-popover__item">
-        <div class="settings-popover__item-top">
-          <div class="settings-popover__item-meta">
-            <strong>AGENTS.md</strong>
-            <div class="settings-popover__help">Edit <code>.batty/AGENTS.md</code>.</div>
-          </div>
-
-          <button
-            class="settings-popover__icon-btn"
-            type="button"
-            :disabled="battyAgentsLoading || battyAgentsSaving"
-            @click="toggleBattyAgentsEditor"
-          >
-            <component :is="isExpanded(AGENTS_ITEM_ID) ? X : Pencil" :size="14" />
-          </button>
+          <Palette :size="15" />
+          <div class="settings-popover__group-title">Appearance</div>
         </div>
 
-        <div v-if="isExpanded(AGENTS_ITEM_ID)" class="settings-popover__editor">
-          <textarea
-            v-model="battyAgentsInput"
-            class="settings-popover__input settings-popover__textarea"
-            rows="12"
-            spellcheck="false"
-            placeholder="Write AGENTS instructions"
-            :disabled="battyAgentsLoading || battyAgentsSaving"
+        <label class="settings-popover__field">
+          <span>App title</span>
+          <input
+            v-model="appearanceTitle"
+            class="settings-popover__input settings-popover__input--title"
+            type="text"
+            maxlength="40"
+            autocomplete="off"
+            :disabled="appearanceSaving"
+            @keydown.enter="saveAppearance"
           />
-          <div class="settings-popover__editor-actions">
+        </label>
+
+        <fieldset class="settings-popover__color-fieldset">
+          <legend>Color</legend>
+          <div class="settings-popover__colors">
+            <label
+              v-for="color in APP_COLOR_OPTIONS"
+              :key="color.id"
+              class="settings-popover__color-option"
+              :title="color.label"
+            >
+              <input
+                v-model="appearanceColor"
+                type="radio"
+                name="app-color"
+                :value="color.id"
+                :disabled="appearanceSaving"
+              />
+              <span
+                class="settings-popover__color-swatch"
+                :style="{
+                  backgroundImage: `linear-gradient(135deg, ${color.light} 50%, ${color.dark} 50%)`,
+                }"
+              >
+                <Check v-if="appearanceColor === color.id" :size="15" :stroke-width="3" />
+              </span>
+              <span>{{ color.label }}</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <button
+          class="settings-popover__action settings-popover__action--primary"
+          type="button"
+          :disabled="appearanceSaving || !appearanceTitle.trim()"
+          @click="saveAppearance"
+        >
+          <Save :size="14" /> {{ appearanceSaving ? "Saving…" : "Save appearance" }}
+        </button>
+        <div v-if="appearanceError" class="settings-popover__error" role="alert">
+          {{ appearanceError }}
+        </div>
+      </section>
+
+      <section class="settings-popover__section">
+        <div class="settings-popover__group-title">Default model</div>
+        <div class="settings-popover__help">Used when starting new sessions.</div>
+        <button
+          class="settings-popover__model-button"
+          type="button"
+          :style="{ 'anchor-name': DEFAULT_MODEL_ANCHOR }"
+          :popovertarget="DEFAULT_MODEL_POPOVER_ID"
+          :disabled="defaultModelSaving"
+          aria-label="Choose default model and provider"
+          @click="store.refreshModels"
+        >
+          <Bot :size="17" />
+          <span class="settings-popover__model-info">
+            <strong>{{ defaultModelLabel }}</strong>
+            <span>{{ defaultProviderLabel }}</span>
+          </span>
+        </button>
+        <ModelConfigPopover
+          :popover-id="DEFAULT_MODEL_POPOVER_ID"
+          :anchor-name="DEFAULT_MODEL_ANCHOR"
+          :models="store.models"
+          :current-model-id="defaultModelId"
+          current-thinking-level=""
+          :thinking-options="[]"
+          @set-model="saveDefaultModel"
+        />
+        <div v-if="defaultModelError" class="settings-popover__error" role="alert">
+          {{ defaultModelError }}
+        </div>
+      </section>
+
+      <section class="settings-popover__section">
+        <div class="settings-popover__group-title">Assistant workspace</div>
+        <select
+          class="settings-popover__select"
+          :value="assistantWorkspaceId"
+          :disabled="assistantWorkspaceSaving"
+          @change="updateAssistantWorkspace"
+        >
+          <option value="">None</option>
+          <option v-for="workspace in store.workspaces" :key="workspace.id" :value="workspace.id">
+            {{ workspace.label }}
+          </option>
+        </select>
+      </section>
+
+      <section class="settings-popover__section">
+        <div class="settings-popover__group-title">Batty AGENTS file</div>
+
+        <article class="settings-popover__item">
+          <div class="settings-popover__item-top">
+            <div class="settings-popover__item-meta">
+              <strong>AGENTS.md</strong>
+              <div class="settings-popover__help">Edit <code>.batty/AGENTS.md</code>.</div>
+            </div>
+
             <button
-              class="settings-popover__action settings-popover__action--primary"
+              class="settings-popover__icon-btn"
               type="button"
               :disabled="battyAgentsLoading || battyAgentsSaving"
-              @click="saveBattyAgentsFile"
+              @click="toggleBattyAgentsEditor"
             >
-              <Save :size="14" />
-              {{ battyAgentsLoading ? "Loading…" : battyAgentsSaving ? "Saving…" : "Save" }}
+              <component :is="isExpanded(AGENTS_ITEM_ID) ? X : Pencil" :size="14" />
             </button>
           </div>
-          <div v-if="battyAgentsError" class="settings-popover__error">{{ battyAgentsError }}</div>
-        </div>
-      </article>
-    </section>
 
-    <section class="settings-popover__section">
-      <div class="settings-popover__group-title">Auth</div>
-
-      <article class="settings-popover__item">
-        <div class="settings-popover__item-top">
-          <div class="settings-popover__item-meta">
-            <strong>{{ itemTitle(BRAVE_SEARCH_ITEM_ID) }}</strong>
-            <div class="settings-popover__item-status-row">
-              <span
-                :class="[
-                  'settings-popover__badge',
-                  itemConnected(BRAVE_SEARCH_ITEM_ID)
-                    ? 'settings-popover__badge--connected'
-                    : 'settings-popover__badge--disconnected',
-                ]"
-              >
-                {{ itemStatusLabel(BRAVE_SEARCH_ITEM_ID) }}
-              </span>
-            </div>
-          </div>
-
-          <button
-            class="settings-popover__icon-btn"
-            type="button"
-            :disabled="braveSearchSaving"
-            @click="toggleExpanded(BRAVE_SEARCH_ITEM_ID)"
-          >
-            <component :is="isExpanded(BRAVE_SEARCH_ITEM_ID) ? X : Pencil" :size="14" />
-          </button>
-        </div>
-
-        <div v-if="isExpanded(BRAVE_SEARCH_ITEM_ID)" class="settings-popover__editor">
-          <input
-            v-model="braveSearchInput"
-            class="settings-popover__input"
-            type="text"
-            autocomplete="off"
-            placeholder="Paste Brave Search API key"
-            :disabled="braveSearchSaving"
-          />
-          <div class="settings-popover__editor-actions">
-            <button
-              class="settings-popover__action settings-popover__action--primary"
-              type="button"
-              :disabled="braveSearchSaving"
-              @click="saveBraveSearchKey"
-            >
-              <Save :size="14" /> {{ braveSearchSaving ? "Saving…" : "Save" }}
-            </button>
-          </div>
-          <div v-if="braveSearchError" class="settings-popover__error">{{ braveSearchError }}</div>
-        </div>
-      </article>
-
-      <article v-for="provider in providerOrder" :key="provider.id" class="settings-popover__item">
-        <div class="settings-popover__item-top">
-          <div class="settings-popover__item-meta">
-            <strong>{{ itemTitle(provider.id) }}</strong>
-            <div class="settings-popover__item-status-row">
-              <span
-                :class="[
-                  'settings-popover__badge',
-                  itemConnected(provider.id)
-                    ? 'settings-popover__badge--connected'
-                    : 'settings-popover__badge--disconnected',
-                ]"
-              >
-                {{ itemStatusLabel(provider.id) }}
-              </span>
-            </div>
-          </div>
-
-          <button
-            class="settings-popover__icon-btn"
-            type="button"
-            :disabled="
-              provider.id === 'openai-codex'
-                ? connectPending || completePending
-                : apiKeySaving[provider.id]
-            "
-            @click="toggleExpanded(provider.id)"
-          >
-            <component :is="isExpanded(provider.id) ? X : Pencil" :size="14" />
-          </button>
-        </div>
-
-        <div v-if="isExpanded(provider.id)" class="settings-popover__editor">
-          <template v-if="isCodexProvider(provider.id)">
-            <div class="settings-popover__help">
-              Sign in with your ChatGPT/Codex subscription to use <code>openai-codex/*</code>
-              models.
-            </div>
-
-            <button
-              class="settings-popover__action"
-              type="button"
-              :disabled="connectPending || completePending"
-              @click="startOpenAICodexAuth"
-            >
-              {{
-                connectPending
-                  ? "Starting…"
-                  : hasOpenAICodexAttempt
-                    ? "Restart connect flow"
-                    : provider.connected
-                      ? "Reconnect account"
-                      : "Connect ChatGPT/Codex"
-              }}
-            </button>
-
-            <div v-if="hasOpenAICodexAttempt" class="settings-popover__attempt">
-              <div v-if="authInstructions" class="settings-popover__help">
-                {{ authInstructions }}
-              </div>
-              <div class="settings-popover__help">
-                Open the sign-in page, finish login in the browser, then paste the localhost
-                callback URL or just the authorization code here.
-              </div>
-              <div v-if="authExpiryLabel" class="settings-popover__help">
-                Expires: {{ authExpiryLabel }}
-              </div>
-
-              <a
-                class="settings-popover__link"
-                :href="authUrl"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <ExternalLink :size="14" /> Open sign-in page
-              </a>
-
-              <textarea
-                v-model="authInput"
-                class="settings-popover__input settings-popover__textarea"
-                rows="4"
-                placeholder="Paste the localhost callback URL or the authorization code"
-                :disabled="completePending"
-              />
-
-              <button
-                class="settings-popover__action settings-popover__action--primary"
-                type="button"
-                :disabled="completePending || !authInput.trim()"
-                @click="completeOpenAICodexAuth"
-              >
-                {{ completePending ? "Completing…" : "Complete connection" }}
-              </button>
-            </div>
-
-            <div v-if="authError" class="settings-popover__error">{{ authError }}</div>
-          </template>
-
-          <template v-else>
-            <input
-              v-model="apiKeyInputs[provider.id as 'google' | 'openrouter']"
-              class="settings-popover__input"
-              type="text"
-              autocomplete="off"
-              :placeholder="apiKeyPlaceholder(provider.id as 'google' | 'openrouter')"
-              :disabled="apiKeySaving[provider.id]"
+          <div v-if="isExpanded(AGENTS_ITEM_ID)" class="settings-popover__editor">
+            <textarea
+              v-model="battyAgentsInput"
+              class="settings-popover__input settings-popover__textarea"
+              rows="12"
+              spellcheck="false"
+              placeholder="Write AGENTS instructions"
+              :disabled="battyAgentsLoading || battyAgentsSaving"
             />
             <div class="settings-popover__editor-actions">
               <button
                 class="settings-popover__action settings-popover__action--primary"
                 type="button"
-                :disabled="apiKeySaving[provider.id]"
-                @click="saveApiKey(provider.id as 'google' | 'openrouter')"
+                :disabled="battyAgentsLoading || battyAgentsSaving"
+                @click="saveBattyAgentsFile"
               >
-                <Save :size="14" /> {{ apiKeySaving[provider.id] ? "Saving…" : "Save" }}
+                <Save :size="14" />
+                {{ battyAgentsLoading ? "Loading…" : battyAgentsSaving ? "Saving…" : "Save" }}
               </button>
             </div>
-            <div v-if="apiKeyErrors[provider.id]" class="settings-popover__error">
-              {{ apiKeyErrors[provider.id] }}
+            <div v-if="battyAgentsError" class="settings-popover__error">
+              {{ battyAgentsError }}
             </div>
-          </template>
-        </div>
-      </article>
-    </section>
+          </div>
+        </article>
+      </section>
 
-    <section class="settings-popover__section settings-popover__section--logout">
-      <button class="settings-popover__logout" type="button" @click="logout">
-        <LogOut :size="14" /> Log out
-      </button>
-    </section>
-  </div>
+      <section class="settings-popover__section">
+        <div class="settings-popover__group-title">Auth</div>
+
+        <article class="settings-popover__item">
+          <div class="settings-popover__item-top">
+            <div class="settings-popover__item-meta">
+              <strong>{{ itemTitle(BRAVE_SEARCH_ITEM_ID) }}</strong>
+              <div class="settings-popover__item-status-row">
+                <span
+                  :class="[
+                    'settings-popover__badge',
+                    itemConnected(BRAVE_SEARCH_ITEM_ID)
+                      ? 'settings-popover__badge--connected'
+                      : 'settings-popover__badge--disconnected',
+                  ]"
+                >
+                  {{ itemStatusLabel(BRAVE_SEARCH_ITEM_ID) }}
+                </span>
+              </div>
+            </div>
+
+            <button
+              class="settings-popover__icon-btn"
+              type="button"
+              :disabled="braveSearchSaving"
+              @click="toggleExpanded(BRAVE_SEARCH_ITEM_ID)"
+            >
+              <component :is="isExpanded(BRAVE_SEARCH_ITEM_ID) ? X : Pencil" :size="14" />
+            </button>
+          </div>
+
+          <div v-if="isExpanded(BRAVE_SEARCH_ITEM_ID)" class="settings-popover__editor">
+            <input
+              v-model="braveSearchInput"
+              class="settings-popover__input"
+              type="text"
+              autocomplete="off"
+              placeholder="Paste Brave Search API key"
+              :disabled="braveSearchSaving"
+            />
+            <div class="settings-popover__editor-actions">
+              <button
+                class="settings-popover__action settings-popover__action--primary"
+                type="button"
+                :disabled="braveSearchSaving"
+                @click="saveBraveSearchKey"
+              >
+                <Save :size="14" /> {{ braveSearchSaving ? "Saving…" : "Save" }}
+              </button>
+            </div>
+            <div v-if="braveSearchError" class="settings-popover__error">
+              {{ braveSearchError }}
+            </div>
+          </div>
+        </article>
+
+        <article
+          v-for="provider in providerOrder"
+          :key="provider.id"
+          class="settings-popover__item"
+        >
+          <div class="settings-popover__item-top">
+            <div class="settings-popover__item-meta">
+              <strong>{{ itemTitle(provider.id) }}</strong>
+              <div class="settings-popover__item-status-row">
+                <span
+                  :class="[
+                    'settings-popover__badge',
+                    itemConnected(provider.id)
+                      ? 'settings-popover__badge--connected'
+                      : 'settings-popover__badge--disconnected',
+                  ]"
+                >
+                  {{ itemStatusLabel(provider.id) }}
+                </span>
+              </div>
+            </div>
+
+            <button
+              class="settings-popover__icon-btn"
+              type="button"
+              :disabled="
+                provider.id === 'openai-codex'
+                  ? connectPending || completePending
+                  : apiKeySaving[provider.id]
+              "
+              @click="toggleExpanded(provider.id)"
+            >
+              <component :is="isExpanded(provider.id) ? X : Pencil" :size="14" />
+            </button>
+          </div>
+
+          <div v-if="isExpanded(provider.id)" class="settings-popover__editor">
+            <template v-if="isCodexProvider(provider.id)">
+              <div class="settings-popover__help">
+                Sign in with your ChatGPT/Codex subscription to use <code>openai-codex/*</code>
+                models.
+              </div>
+
+              <button
+                class="settings-popover__action"
+                type="button"
+                :disabled="connectPending || completePending"
+                @click="startOpenAICodexAuth"
+              >
+                {{
+                  connectPending
+                    ? "Starting…"
+                    : hasOpenAICodexAttempt
+                      ? "Restart connect flow"
+                      : provider.connected
+                        ? "Reconnect account"
+                        : "Connect ChatGPT/Codex"
+                }}
+              </button>
+
+              <div v-if="hasOpenAICodexAttempt" class="settings-popover__attempt">
+                <div v-if="authInstructions" class="settings-popover__help">
+                  {{ authInstructions }}
+                </div>
+                <div class="settings-popover__help">
+                  Open the sign-in page, finish login in the browser, then paste the localhost
+                  callback URL or just the authorization code here.
+                </div>
+                <div v-if="authExpiryLabel" class="settings-popover__help">
+                  Expires: {{ authExpiryLabel }}
+                </div>
+
+                <a
+                  class="settings-popover__link"
+                  :href="authUrl"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <ExternalLink :size="14" /> Open sign-in page
+                </a>
+
+                <textarea
+                  v-model="authInput"
+                  class="settings-popover__input settings-popover__textarea"
+                  rows="4"
+                  placeholder="Paste the localhost callback URL or the authorization code"
+                  :disabled="completePending"
+                />
+
+                <button
+                  class="settings-popover__action settings-popover__action--primary"
+                  type="button"
+                  :disabled="completePending || !authInput.trim()"
+                  @click="completeOpenAICodexAuth"
+                >
+                  {{ completePending ? "Completing…" : "Complete connection" }}
+                </button>
+              </div>
+
+              <div v-if="authError" class="settings-popover__error">{{ authError }}</div>
+            </template>
+
+            <template v-else>
+              <input
+                v-model="apiKeyInputs[provider.id as 'google' | 'openrouter']"
+                class="settings-popover__input"
+                type="text"
+                autocomplete="off"
+                :placeholder="apiKeyPlaceholder(provider.id as 'google' | 'openrouter')"
+                :disabled="apiKeySaving[provider.id]"
+              />
+              <div class="settings-popover__editor-actions">
+                <button
+                  class="settings-popover__action settings-popover__action--primary"
+                  type="button"
+                  :disabled="apiKeySaving[provider.id]"
+                  @click="saveApiKey(provider.id as 'google' | 'openrouter')"
+                >
+                  <Save :size="14" /> {{ apiKeySaving[provider.id] ? "Saving…" : "Save" }}
+                </button>
+              </div>
+              <div v-if="apiKeyErrors[provider.id]" class="settings-popover__error">
+                {{ apiKeyErrors[provider.id] }}
+              </div>
+            </template>
+          </div>
+        </article>
+      </section>
+
+      <section class="settings-popover__section settings-popover__section--logout">
+        <button class="settings-popover__logout" type="button" @click="logout">
+          <LogOut :size="14" /> Log out
+        </button>
+      </section>
+    </div>
+  </FullPopover>
 </template>
 
 <style scoped>
-.settings-popover {
-  display: none;
-}
-
-.settings-popover:popover-open {
-  position: fixed;
-  position-area: block-end span-inline-end;
-  position-try-fallbacks:
-    block-end span-inline-start,
-    block-start span-inline-end,
-    block-start span-inline-start;
-  width: min(30rem, calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 1rem));
-  max-width: calc(100vw - var(--safe-area-left) - var(--safe-area-right) - 1rem);
+.settings-popover__body {
   display: flex;
+  height: 100%;
+  min-height: 0;
   flex-direction: column;
   gap: 0.7rem;
-  margin: 0;
-  padding: 0.65rem;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.75rem;
-  background: var(--color-bg-overlay);
-  color: inherit;
-  box-shadow: var(--color-shadow-popover);
-  max-height: min(40rem, calc(100dvh - var(--safe-area-top) - var(--safe-area-bottom) - 2rem));
+  padding: 0.75rem 1rem 1rem;
   overflow-y: auto;
-}
-
-.settings-popover::backdrop {
-  background: var(--color-backdrop);
+  overscroll-behavior: contain;
 }
 
 .settings-popover__section {

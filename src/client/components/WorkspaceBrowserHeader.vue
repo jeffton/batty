@@ -135,7 +135,7 @@ watch(
     calc(var(--safe-area-left) + 1rem);
   border-bottom: 1px solid var(--color-border-soft);
   background: var(--color-bg-panel-strong);
-  box-shadow: 0 0.35rem 0.75rem oklch(0.15 0.02 240 / 0.08);
+  box-shadow: var(--color-shadow-header);
 }
 
 .workspace-browser-header__brand {

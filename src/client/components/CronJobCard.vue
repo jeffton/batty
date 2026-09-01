@@ -152,10 +152,12 @@ const emit = defineEmits<{
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
-  padding: 0.55rem;
-  border-radius: 0.65rem;
-  background: var(--color-bg-panel);
-  border: 1px solid var(--color-border-soft);
+  padding: 0.75rem 1rem;
+  background: transparent;
+}
+
+.cron-popover__job:not(:last-of-type) {
+  border-bottom: 1px solid var(--color-border-soft);
 }
 
 .cron-popover__job-top {

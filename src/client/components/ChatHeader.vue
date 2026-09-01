@@ -79,7 +79,7 @@ const emit = defineEmits<{
     calc(var(--safe-area-left) + 0.6rem);
   background: var(--color-bg-panel-strong);
   border-bottom: 1px solid var(--color-border-soft);
-  box-shadow: 0 0.35rem 0.75rem oklch(0.15 0.02 240 / 0.08);
+  box-shadow: var(--color-shadow-header);
 }
 
 .header__icon {

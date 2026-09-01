@@ -195,11 +195,21 @@ watch(
 </template>
 
 <style scoped>
+.cron-popover {
+  background: var(--color-bg-panel-strong);
+}
+
 .cron-popover__body {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
   min-height: 0;
+  background: var(--color-bg-app);
+}
+
+.cron-popover :deep(.full-popover__header) {
+  border-bottom: 0;
+  background: var(--color-bg-panel-strong);
 }
 
 .cron-popover__tabs {
@@ -207,7 +217,7 @@ watch(
   gap: 0.25rem;
   padding: 0 1rem;
   border-bottom: 1px solid var(--color-border-soft);
-  background: var(--color-bg-panel-strong);
+  background: transparent;
 }
 
 .cron-popover__tab {
@@ -241,8 +251,6 @@ watch(
   display: flex;
   min-height: 0;
   flex-direction: column;
-  gap: 0.6rem;
-  padding: 0.75rem 1rem 1rem;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -252,10 +260,12 @@ watch(
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.75rem;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.65rem;
-  background: var(--color-bg-panel-strong);
+  padding: 0.75rem 1rem;
+  background: transparent;
+}
+
+.cron-popover__run:not(:last-of-type) {
+  border-bottom: 1px solid var(--color-border-soft);
 }
 
 .cron-popover__run-content {

@@ -705,25 +705,34 @@ function handlePopoverToggle(event: Event): void {
 </template>
 
 <style scoped>
+.settings-popover {
+  background: var(--color-bg-panel-strong);
+}
+
+.settings-popover :deep(.full-popover__header) {
+  border-bottom: 0;
+  background: var(--color-bg-panel-strong);
+}
+
 .settings-popover__body {
   display: flex;
   height: 100%;
   min-height: 0;
   flex-direction: column;
-  gap: 0.7rem;
-  padding: 0.75rem 1rem 1rem;
   overflow-y: auto;
   overscroll-behavior: contain;
+  background: var(--color-bg-app);
 }
 
 .settings-popover__section {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
+  padding: 0.75rem 1rem;
 }
 
 .settings-popover__section + .settings-popover__section {
-  padding-top: 0.7rem;
+  border-top: 1px solid var(--color-border-soft);
 }
 
 .settings-popover__section-header,
@@ -883,10 +892,14 @@ function handlePopoverToggle(event: Event): void {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
-  padding: 0.55rem;
-  border-radius: 0.65rem;
-  background: var(--color-bg-panel);
-  border: 1px solid var(--color-border-soft);
+  margin-inline: -1rem;
+  padding: 0.55rem 1rem;
+  background: transparent;
+}
+
+.settings-popover__item + .settings-popover__item {
+  margin-top: -0.55rem;
+  border-top: 1px solid var(--color-border-soft);
 }
 
 .settings-popover__item-meta {

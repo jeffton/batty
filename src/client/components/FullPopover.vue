@@ -86,6 +86,8 @@ const popoverElement = ref<HTMLElement | null>(null);
 }
 
 .full-popover__header {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -93,6 +95,7 @@ const popoverElement = ref<HTMLElement | null>(null);
   padding: 0.9rem 1rem 0.75rem;
   border-bottom: 1px solid var(--color-border-soft);
   background: var(--color-bg-panel-strong);
+  box-shadow: var(--color-shadow-header);
 }
 
 .full-popover__heading {

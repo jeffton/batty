@@ -78,6 +78,13 @@ export const authBootstrapActions = {
         },
       ]),
     );
+    this.workspaceRevisionByWorkspace = Object.fromEntries(
+      (payload.workspaceSnapshots ?? []).map((snapshot) => [
+        snapshot.workspaceId,
+        snapshot.revision ?? 0,
+      ]),
+    );
+    this.workspaceSnapshotStreamId = payload.workspaceSnapshots?.[0]?.streamId;
     this.models = payload.models;
     this.selectedWorkspaceId =
       this.selectedWorkspaceId &&
@@ -87,9 +94,7 @@ export const authBootstrapActions = {
     if (payload.authenticated) {
       this.authError = undefined;
       if (this.workspaceConnectionState !== "offline") {
-        for (const workspace of this.workspaces) {
-          this.openWorkspaceStream(workspace.id);
-        }
+        this.openWorkspaceStream();
       }
     } else {
       this.activeSession = undefined;
@@ -103,6 +108,8 @@ export const authBootstrapActions = {
       this.runningCronJobsByWorkspace = {};
       this.workspaceUiSettings = {};
       this.workspaceStatusByWorkspace = {};
+      this.workspaceRevisionByWorkspace = {};
+      this.workspaceSnapshotStreamId = undefined;
       this.closeStream();
       this.closeWorkspaceStream();
     }
@@ -128,6 +135,8 @@ export const authBootstrapActions = {
     this.runningCronJobsByWorkspace = {};
     this.workspaceUiSettings = {};
     this.workspaceStatusByWorkspace = {};
+    this.workspaceRevisionByWorkspace = {};
+    this.workspaceSnapshotStreamId = undefined;
   },
 
   async checkForClientUpdate(this: AppActionContext): Promise<void> {
@@ -151,9 +160,7 @@ export const authBootstrapActions = {
   markOnline(this: AppActionContext): void {
     this.connectionState = "online";
     this.workspaceConnectionState = "online";
-    for (const workspace of this.workspaces) {
-      this.openWorkspaceStream(workspace.id);
-    }
+    this.openWorkspaceStream();
     if (this.activeSession) {
       this.openStream(this.activeSession);
     }

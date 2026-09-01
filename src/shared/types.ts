@@ -329,6 +329,8 @@ export interface BootstrapPayload {
 
 export interface WorkspaceSnapshot {
   workspaceId: string;
+  streamId?: string;
+  revision?: number;
   sessions: SessionSummary[];
   cronJobs: CronJob[];
   runningCronJobs: RunningCronJob[];

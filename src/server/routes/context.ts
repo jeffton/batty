@@ -23,6 +23,7 @@ export interface RouteContext {
   buildId: string;
   routePath: (route: string) => string;
   workspaceSnapshot: (workspaceId: string) => Promise<WorkspaceSnapshot>;
+  workspaceSnapshots: () => Promise<WorkspaceSnapshot[]>;
   getWorkspaceUiSettings: (workspaceId: string) => WorkspaceUiSettings;
   setWorkspaceUiSettings: (
     workspaceId: string,

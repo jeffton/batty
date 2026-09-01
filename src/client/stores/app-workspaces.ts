@@ -15,24 +15,18 @@ import { sortWorkspacesByRecentSession, uniqueWorkspaces } from "@/client/lib/wo
 import type { SessionState, WorkspaceSnapshot } from "@/shared/types";
 import { closeEventSource, type AppActionContext } from "./app-state";
 
-const workspaceEventSources = new Map<string, EventSource>();
+let workspaceEventSource: EventSource | undefined;
+let workspaceEventSourceOwnerState: unknown;
 
 export const workspaceActions = {
   sortWorkspaces(this: AppActionContext): void {
     this.workspaces = sortWorkspacesByRecentSession(uniqueWorkspaces(this.workspaces));
   },
 
-  closeWorkspaceStream(workspaceId?: string): void {
-    if (workspaceId) {
-      closeEventSource(workspaceEventSources.get(workspaceId));
-      workspaceEventSources.delete(workspaceId);
-      return;
-    }
-
-    for (const source of workspaceEventSources.values()) {
-      closeEventSource(source);
-    }
-    workspaceEventSources.clear();
+  closeWorkspaceStream(): void {
+    closeEventSource(workspaceEventSource);
+    workspaceEventSource = undefined;
+    workspaceEventSourceOwnerState = undefined;
   },
 
   async loadWorkspaceSessions(this: AppActionContext, workspaceId: string): Promise<void> {
@@ -97,7 +91,7 @@ export const workspaceActions = {
   selectWorkspace(this: AppActionContext, workspaceId: string): void {
     this.selectedWorkspaceId = workspaceId;
     if (this.workspaceConnectionState !== "offline") {
-      this.openWorkspaceStream(workspaceId);
+      this.openWorkspaceStream();
     }
   },
 
@@ -188,26 +182,28 @@ export const workspaceActions = {
       ...this.workspaceStatusByWorkspace,
       [workspace.id]: { isInProgress: false, hasUnread: false },
     };
+    this.workspaceRevisionByWorkspace = {
+      ...this.workspaceRevisionByWorkspace,
+      [workspace.id]: 0,
+    };
     this.sortWorkspaces();
     this.selectWorkspace(workspace.id);
     await this.loadWorkspaceCronJobs(workspace.id);
     return this.startSession(workspace.id);
   },
 
-  openWorkspaceStream(this: AppActionContext, workspaceId: string): void {
-    if (!workspaceId) {
-      this.closeWorkspaceStream();
+  openWorkspaceStream(this: AppActionContext): void {
+    if (workspaceEventSource && workspaceEventSourceOwnerState === this.$state) {
       return;
     }
 
-    if (workspaceEventSources.has(workspaceId)) {
-      return;
-    }
-
-    const source = new EventSource(workspaceEventsPath(workspaceId));
-    workspaceEventSources.set(workspaceId, source);
+    closeEventSource(workspaceEventSource);
+    this.workspaceConnectionState = "connecting";
+    const source = new EventSource(workspaceEventsPath());
+    workspaceEventSource = source;
+    workspaceEventSourceOwnerState = this.$state;
     source.onopen = () => {
-      if (workspaceEventSources.get(workspaceId) !== source) {
+      if (workspaceEventSource !== source) {
         return;
       }
 
@@ -215,11 +211,23 @@ export const workspaceActions = {
       void this.checkForClientUpdate();
     };
     source.onmessage = (message) => {
-      if (workspaceEventSources.get(workspaceId) !== source) {
+      if (workspaceEventSource !== source) {
         return;
       }
 
       const snapshot = JSON.parse(message.data) as WorkspaceSnapshot;
+      if (snapshot.streamId && snapshot.streamId !== this.workspaceSnapshotStreamId) {
+        this.workspaceSnapshotStreamId = snapshot.streamId;
+        this.workspaceRevisionByWorkspace = {};
+      }
+      const revision = snapshot.revision ?? 0;
+      if (revision <= (this.workspaceRevisionByWorkspace[snapshot.workspaceId] ?? -1)) {
+        return;
+      }
+      this.workspaceRevisionByWorkspace = {
+        ...this.workspaceRevisionByWorkspace,
+        [snapshot.workspaceId]: revision,
+      };
       this.sessionsByWorkspace = {
         ...this.sessionsByWorkspace,
         [snapshot.workspaceId]: snapshot.sessions,
@@ -250,7 +258,7 @@ export const workspaceActions = {
       this.sortWorkspaces();
     };
     source.onerror = () => {
-      if (workspaceEventSources.get(workspaceId) !== source) {
+      if (workspaceEventSource !== source) {
         return;
       }
 

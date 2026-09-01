@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import fastify from "fastify";
@@ -29,8 +30,11 @@ const bootstrapSetupCode = await passkeys.initialize();
 const webPush = new WebPushService(config);
 await webPush.initialize();
 const cronService = new CronService(config);
-const workspaceSubscribers = new Map<string, Set<(snapshot: WorkspaceSnapshot) => void>>();
+const workspaceSubscribers = new Set<(snapshot: WorkspaceSnapshot) => void>();
 const workspaceUiSettings = new Map<string, WorkspaceUiSettings>();
+const workspaceSnapshotRevisions = new Map<string, number>();
+const workspaceSnapshotBuildLocks = new Map<string, Promise<void>>();
+const workspaceSnapshotStreamId = randomUUID();
 
 function getWorkspaceUiSettings(workspaceId: string): WorkspaceUiSettings {
   return workspaceUiSettings.get(workspaceId) ?? { easyMode: false };
@@ -46,13 +50,17 @@ async function setWorkspaceUiSettings(
   return next;
 }
 
-async function workspaceSnapshot(workspaceId: string): Promise<WorkspaceSnapshot> {
+async function buildWorkspaceSnapshot(workspaceId: string): Promise<WorkspaceSnapshot> {
+  const revision = (workspaceSnapshotRevisions.get(workspaceId) ?? 0) + 1;
+  workspaceSnapshotRevisions.set(workspaceId, revision);
   const workspaces = await listWorkspaces(config);
   const workspace = resolveWorkspace(workspaces, workspaceId);
   const sessions = await service.listSessionSummaries(workspace);
   const runningCronJobs = cronService.listRunningJobs(workspaceId);
   return {
     workspaceId,
+    streamId: workspaceSnapshotStreamId,
+    revision,
     sessions,
     cronJobs: cronService.listJobs(workspaceId),
     runningCronJobs,
@@ -63,14 +71,37 @@ async function workspaceSnapshot(workspaceId: string): Promise<WorkspaceSnapshot
   };
 }
 
+async function workspaceSnapshot(workspaceId: string): Promise<WorkspaceSnapshot> {
+  const previousBuild = workspaceSnapshotBuildLocks.get(workspaceId) ?? Promise.resolve();
+  let releaseBuild!: () => void;
+  const buildLock = new Promise<void>((resolve) => {
+    releaseBuild = resolve;
+  });
+  workspaceSnapshotBuildLocks.set(workspaceId, buildLock);
+
+  await previousBuild;
+  try {
+    return await buildWorkspaceSnapshot(workspaceId);
+  } finally {
+    releaseBuild();
+    if (workspaceSnapshotBuildLocks.get(workspaceId) === buildLock) {
+      workspaceSnapshotBuildLocks.delete(workspaceId);
+    }
+  }
+}
+
+async function workspaceSnapshots(): Promise<WorkspaceSnapshot[]> {
+  const workspaces = await listWorkspaces(config);
+  return Promise.all(workspaces.map((workspace) => workspaceSnapshot(workspace.id)));
+}
+
 async function publishWorkspace(workspaceId: string): Promise<void> {
-  const subscribers = workspaceSubscribers.get(workspaceId);
-  if (!subscribers || subscribers.size === 0) {
+  if (workspaceSubscribers.size === 0) {
     return;
   }
 
   const snapshot = await workspaceSnapshot(workspaceId);
-  for (const subscriber of subscribers) {
+  for (const subscriber of workspaceSubscribers) {
     subscriber(snapshot);
   }
 }
@@ -310,6 +341,7 @@ const routeContext: RouteContext = {
   buildId,
   routePath,
   workspaceSnapshot,
+  workspaceSnapshots,
   getWorkspaceUiSettings,
   setWorkspaceUiSettings,
 };

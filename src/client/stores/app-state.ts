@@ -33,6 +33,8 @@ export interface AppStoreState {
   cronRunLogsByWorkspace: Record<string, CronRunLog[]>;
   workspaceUiSettings: Record<string, WorkspaceUiSettings>;
   workspaceStatusByWorkspace: Record<string, { isInProgress: boolean; hasUnread: boolean }>;
+  workspaceRevisionByWorkspace: Record<string, number>;
+  workspaceSnapshotStreamId: string | undefined;
   activeSession: SessionState | undefined;
   selectedWorkspaceId: string | undefined;
   authError: string | undefined;
@@ -84,6 +86,8 @@ export function createAppState(): AppStoreState {
     cronRunLogsByWorkspace: {},
     workspaceUiSettings: {},
     workspaceStatusByWorkspace: {},
+    workspaceRevisionByWorkspace: {},
+    workspaceSnapshotStreamId: undefined,
     activeSession: undefined,
     selectedWorkspaceId: undefined,
     authError: undefined,

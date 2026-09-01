@@ -6,15 +6,13 @@ afterEach(() => {
 });
 
 describe("workspace-stream", () => {
-  it("builds workspace event routes with encoded ids", () => {
-    expect(workspaceEventsPath("batty/workspace")).toBe("/api/workspaces/batty%2Fworkspace/events");
+  it("builds the multiplexed workspace event route", () => {
+    expect(workspaceEventsPath()).toBe("/api/workspaces/events");
   });
 
   it("prefixes workspace event routes with the configured base url", () => {
     window.__BATTY_BASE_URL__ = "/batty";
 
-    expect(workspaceEventsPath("batty/workspace")).toBe(
-      "/batty/api/workspaces/batty%2Fworkspace/events",
-    );
+    expect(workspaceEventsPath()).toBe("/batty/api/workspaces/events");
   });
 });

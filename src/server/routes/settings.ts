@@ -41,9 +41,7 @@ export function registerSettingsRoutes(context: RouteContext): void {
   app.get(routePath("/api/bootstrap"), async (request) => {
     const authenticated = request.auth;
     const workspaces = authenticated ? await listWorkspaces(config) : [];
-    const workspaceSnapshots = authenticated
-      ? await Promise.all(workspaces.map((workspace) => context.workspaceSnapshot(workspace.id)))
-      : [];
+    const workspaceSnapshots = authenticated ? await context.workspaceSnapshots() : [];
 
     return {
       authenticated,

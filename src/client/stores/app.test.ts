@@ -158,24 +158,68 @@ describe("app store session streams", () => {
     expect(store.connectionState).toBe("online");
   });
 
-  it("tracks multiple workspace streams and the session stream independently", () => {
+  it("multiplexes workspace updates independently of the session stream", async () => {
     const store = useAppStore();
     const session = makeSession("session-a");
 
-    store.openWorkspaceStream("batty");
-    const firstWorkspaceStream = MockEventSource.instances[0];
-    firstWorkspaceStream?.onopen?.(new Event("open"));
-
-    store.openWorkspaceStream("other");
-    const workspaceStream = MockEventSource.instances[1];
-    expect(firstWorkspaceStream?.closed).toBe(false);
-    expect(store.workspaceConnectionState).toBe("online");
+    store.openWorkspaceStream();
+    store.openWorkspaceStream();
+    const workspaceStream = MockEventSource.instances[0];
+    expect(MockEventSource.instances).toHaveLength(1);
     workspaceStream?.onopen?.(new Event("open"));
     expect(store.workspaceConnectionState).toBe("online");
 
+    await workspaceStream?.onmessage?.({
+      data: JSON.stringify({
+        workspaceId: "other",
+        streamId: "process-1",
+        revision: 2,
+        sessions: [],
+        cronJobs: [],
+        runningCronJobs: [],
+        cronRunLogs: [],
+        uiSettings: { easyMode: false },
+        isInProgress: true,
+        hasUnread: false,
+      }),
+    } as MessageEvent<string>);
+    expect(store.workspaceStatusByWorkspace.other?.isInProgress).toBe(true);
+
+    await workspaceStream?.onmessage?.({
+      data: JSON.stringify({
+        workspaceId: "other",
+        streamId: "process-1",
+        revision: 1,
+        sessions: [],
+        cronJobs: [],
+        runningCronJobs: [],
+        cronRunLogs: [],
+        uiSettings: { easyMode: false },
+        isInProgress: false,
+        hasUnread: false,
+      }),
+    } as MessageEvent<string>);
+    expect(store.workspaceStatusByWorkspace.other?.isInProgress).toBe(true);
+
+    await workspaceStream?.onmessage?.({
+      data: JSON.stringify({
+        workspaceId: "other",
+        streamId: "process-2",
+        revision: 1,
+        sessions: [],
+        cronJobs: [],
+        runningCronJobs: [],
+        cronRunLogs: [],
+        uiSettings: { easyMode: false },
+        isInProgress: false,
+        hasUnread: false,
+      }),
+    } as MessageEvent<string>);
+    expect(store.workspaceStatusByWorkspace.other?.isInProgress).toBe(false);
+
     store.activeSession = session;
     store.openStream(session);
-    const sessionStream = MockEventSource.instances[2];
+    const sessionStream = MockEventSource.instances[1];
     expect(store.connectionState).toBe("connecting");
     expect(store.workspaceConnectionState).toBe("online");
 

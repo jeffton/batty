@@ -27,7 +27,10 @@ const {
   toggleJob,
   deleteJob,
 } = useCronJobDrafts(store);
-const runLogs = computed(() => store.workspaceCronRunLogs);
+const runLogs = computed(() => {
+  const runningById = new Map(store.workspaceRunningCronJobs.map((run) => [run.runId, run]));
+  return store.workspaceCronRunLogs.map((run) => ({ ...run, ...runningById.get(run.runId) }));
+});
 
 function runPopoverId(runId: string): string {
   return `cron-run-popover-${runId.replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
@@ -138,7 +141,6 @@ watch(
           v-for="run in runLogs"
           :key="run.runId"
           class="cron-popover__run"
-          :class="`cron-popover__run--${run.status}`"
         >
           <div class="cron-popover__run-content">
             <div class="cron-popover__run-heading">
@@ -157,16 +159,6 @@ watch(
           </div>
           <div class="cron-popover__run-actions">
             <button
-              v-if="run.sessionPath"
-              type="button"
-              class="cron-popover__icon-btn"
-              :popovertarget="runPopoverId(run.runId)"
-              aria-label="Open cron run session"
-              title="Open session"
-            >
-              <PanelRightOpen :size="16" />
-            </button>
-            <button
               v-if="run.status === 'running'"
               type="button"
               class="cron-popover__icon-btn cron-popover__icon-btn--danger"
@@ -176,6 +168,17 @@ watch(
               @click.stop.prevent="stopRun(run.runId)"
             >
               <Square :size="14" />
+            </button>
+            <button
+              v-if="run.sessionPath || run.status === 'running'"
+              type="button"
+              class="cron-popover__icon-btn"
+              :disabled="!run.sessionPath"
+              :popovertarget="run.sessionPath ? runPopoverId(run.runId) : undefined"
+              aria-label="Open cron run session"
+              :title="run.sessionPath ? 'Open session' : 'Session is starting'"
+            >
+              <PanelRightOpen :size="16" />
             </button>
           </div>
           <SubagentSessionPopover
@@ -255,21 +258,8 @@ watch(
   gap: 0.75rem;
   padding: 0.75rem;
   border: 1px solid var(--color-border-soft);
-  border-left-width: 3px;
   border-radius: 0.65rem;
   background: var(--color-bg-panel-strong);
-}
-
-.cron-popover__run--running {
-  border-left-color: var(--color-accent);
-}
-
-.cron-popover__run--success {
-  border-left-color: var(--color-success);
-}
-
-.cron-popover__run--error {
-  border-left-color: var(--color-error);
 }
 
 .cron-popover__run-content {

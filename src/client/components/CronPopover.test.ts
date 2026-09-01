@@ -214,7 +214,18 @@ describe("CronPopover", () => {
         session: { kind: "new" },
         scheduleLabel: "Every five minutes",
         startedAtMs: 2,
-        sessionPath: "/tmp/live.jsonl",
+        status: "running",
+      },
+      {
+        runId: "run-starting",
+        jobId: "cron-1",
+        workspaceId: "batty",
+        prompt: "Check heartbeat",
+        model: "openai/gpt-5",
+        thinkingLevel: "medium",
+        session: { kind: "new" },
+        scheduleLabel: "Every five minutes",
+        startedAtMs: 3,
         status: "running",
       },
       {
@@ -233,7 +244,10 @@ describe("CronPopover", () => {
         status: "success",
       },
     ];
+    const running = [{ ...logs[0]!, sessionPath: "/tmp/live.jsonl" }];
+    store.runningCronJobsByWorkspace = { batty: running };
     store.cronRunLogsByWorkspace = { batty: logs };
+    listWorkspaceCronRuns.mockResolvedValue(running);
     listWorkspaceCronRunLogs.mockResolvedValue(logs);
 
     const wrapper = mount(CronPopover, {
@@ -242,9 +256,17 @@ describe("CronPopover", () => {
     });
     await wrapper.findAll('[role="tab"]')[1]!.trigger("click");
 
-    expect(wrapper.findAll(".cron-popover__run")).toHaveLength(2);
+    expect(wrapper.findAll(".cron-popover__run")).toHaveLength(3);
     expect(wrapper.text()).toContain("Running");
     expect(wrapper.text()).toContain("Completed");
-    expect(wrapper.findAll('[aria-label="Open cron run session"]')).toHaveLength(2);
+    expect(wrapper.findAll('[aria-label="Open cron run session"]')).toHaveLength(3);
+    expect(wrapper.findAll('[aria-label="Open cron run session"]:disabled')).toHaveLength(1);
+    expect(wrapper.findAll('[aria-label="Stop cron run"]')).toHaveLength(2);
+    expect(
+      wrapper
+        .findAll(".cron-popover__run")[0]!
+        .findAll(".cron-popover__run-actions button")
+        .map((button) => button.attributes("aria-label")),
+    ).toEqual(["Stop cron run", "Open cron run session"]);
   });
 });

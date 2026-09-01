@@ -80,14 +80,14 @@ function truncateText(
 
   if (direction === "head") {
     let end = maxBytes;
-    while (end > 0 && (buffer[end] & 0xc0) === 0x80) {
+    while (end > 0 && (buffer[end]! & 0xc0) === 0x80) {
       end -= 1;
     }
     return buffer.subarray(0, end).toString("utf8");
   }
 
   let start = buffer.byteLength - maxBytes;
-  while (start < buffer.byteLength && (buffer[start] & 0xc0) === 0x80) {
+  while (start < buffer.byteLength && (buffer[start]! & 0xc0) === 0x80) {
     start += 1;
   }
   return buffer.subarray(start).toString("utf8");

@@ -137,11 +137,7 @@ watch(
       </div>
 
       <div v-else class="cron-popover__pane" role="tabpanel">
-        <article
-          v-for="run in runLogs"
-          :key="run.runId"
-          class="cron-popover__run"
-        >
+        <article v-for="run in runLogs" :key="run.runId" class="cron-popover__run">
           <div class="cron-popover__run-content">
             <div class="cron-popover__run-heading">
               <span class="cron-popover__status">{{ statusLabel(run) }}</span>

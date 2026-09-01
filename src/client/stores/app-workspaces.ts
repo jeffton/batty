@@ -15,16 +15,24 @@ import { sortWorkspacesByRecentSession, uniqueWorkspaces } from "@/client/lib/wo
 import type { SessionState, WorkspaceSnapshot } from "@/shared/types";
 import { closeEventSource, type AppActionContext } from "./app-state";
 
-let workspaceEventSource: EventSource | undefined;
+const workspaceEventSources = new Map<string, EventSource>();
 
 export const workspaceActions = {
   sortWorkspaces(this: AppActionContext): void {
     this.workspaces = sortWorkspacesByRecentSession(uniqueWorkspaces(this.workspaces));
   },
 
-  closeWorkspaceStream(): void {
-    closeEventSource(workspaceEventSource);
-    workspaceEventSource = undefined;
+  closeWorkspaceStream(workspaceId?: string): void {
+    if (workspaceId) {
+      closeEventSource(workspaceEventSources.get(workspaceId));
+      workspaceEventSources.delete(workspaceId);
+      return;
+    }
+
+    for (const source of workspaceEventSources.values()) {
+      closeEventSource(source);
+    }
+    workspaceEventSources.clear();
   },
 
   async loadWorkspaceSessions(this: AppActionContext, workspaceId: string): Promise<void> {
@@ -88,9 +96,7 @@ export const workspaceActions = {
 
   selectWorkspace(this: AppActionContext, workspaceId: string): void {
     this.selectedWorkspaceId = workspaceId;
-    if (this.workspaceConnectionState === "offline") {
-      this.closeWorkspaceStream();
-    } else {
+    if (this.workspaceConnectionState !== "offline") {
       this.openWorkspaceStream(workspaceId);
     }
   },
@@ -178,6 +184,10 @@ export const workspaceActions = {
       ...this.workspaceUiSettings,
       [workspace.id]: { easyMode: false },
     };
+    this.workspaceStatusByWorkspace = {
+      ...this.workspaceStatusByWorkspace,
+      [workspace.id]: { isInProgress: false, hasUnread: false },
+    };
     this.sortWorkspaces();
     this.selectWorkspace(workspace.id);
     await this.loadWorkspaceCronJobs(workspace.id);
@@ -190,11 +200,14 @@ export const workspaceActions = {
       return;
     }
 
-    this.closeWorkspaceStream();
+    if (workspaceEventSources.has(workspaceId)) {
+      return;
+    }
+
     const source = new EventSource(workspaceEventsPath(workspaceId));
-    workspaceEventSource = source;
+    workspaceEventSources.set(workspaceId, source);
     source.onopen = () => {
-      if (workspaceEventSource !== source) {
+      if (workspaceEventSources.get(workspaceId) !== source) {
         return;
       }
 
@@ -202,7 +215,7 @@ export const workspaceActions = {
       void this.checkForClientUpdate();
     };
     source.onmessage = (message) => {
-      if (workspaceEventSource !== source) {
+      if (workspaceEventSources.get(workspaceId) !== source) {
         return;
       }
 
@@ -227,10 +240,17 @@ export const workspaceActions = {
         ...this.workspaceUiSettings,
         [snapshot.workspaceId]: snapshot.uiSettings,
       };
+      this.workspaceStatusByWorkspace = {
+        ...this.workspaceStatusByWorkspace,
+        [snapshot.workspaceId]: {
+          isInProgress: Boolean(snapshot.isInProgress),
+          hasUnread: Boolean(snapshot.hasUnread),
+        },
+      };
       this.sortWorkspaces();
     };
     source.onerror = () => {
-      if (workspaceEventSource !== source) {
+      if (workspaceEventSources.get(workspaceId) !== source) {
         return;
       }
 

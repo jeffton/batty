@@ -42,6 +42,38 @@ function createState(
   };
 }
 
+describe("workspace activity updates", () => {
+  it("publishes a workspace update when an agent starts", async () => {
+    const notifyWorkspaceUpdated = vi.fn(async () => undefined);
+    const webSession = {
+      id: "web-start",
+      workspace,
+      session: { sessionId: "session-start" },
+      subscribers: new Set(),
+      activeTools: new Map(),
+      agentCompleted: true,
+      suppressNextAgentEndCompletion: false,
+      revision: 0,
+      eventLog: [],
+    } as unknown as WebSession;
+
+    await handleAgentEvent(
+      {
+        getState: vi.fn(),
+        getStateMetadata: () => createState({}, webSession, []),
+        publish: vi.fn(),
+        notifyWorkspaceUpdated,
+        disposeWebSession: vi.fn(),
+      },
+      webSession,
+      { type: "agent_start" } as unknown as AgentSessionEvent,
+    );
+
+    expect(webSession.agentCompleted).toBe(false);
+    expect(notifyWorkspaceUpdated).toHaveBeenCalledWith(workspace.id);
+  });
+});
+
 describe("live reset events", () => {
   it("keeps tool payloads in published reset snapshots", () => {
     const subscriber = vi.fn();

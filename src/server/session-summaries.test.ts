@@ -156,7 +156,8 @@ describe("session summaries", () => {
       {
         type: "message",
         id: "assistant-1",
-        message: { role: "assistant", content: "hello" },
+        timestamp: "2026-03-25T11:59:00Z",
+        message: { role: "assistant", content: "hello", timestamp: 123 },
       },
     ]);
 
@@ -166,6 +167,7 @@ describe("session summaries", () => {
       const sessions = await listSessionSummaries(config, workspace);
 
       expect(sessions[1]?.firstMessage).toBe("(no messages)");
+      expect(sessions[1]?.lastAssistantReplyAt).toBe(123);
     } finally {
       vi.useRealTimers();
     }

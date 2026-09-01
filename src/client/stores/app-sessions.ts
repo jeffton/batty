@@ -4,6 +4,7 @@ import {
   createSession,
   getSession,
   getSessionMessages,
+  markSessionRead,
   openSession,
   openSessionById,
   removeQueuedPrompt as removeQueuedPromptRequest,
@@ -43,6 +44,21 @@ async function runSessionConfigurationUpdate<T>(update: () => Promise<T>): Promi
     () => undefined,
   );
   return result;
+}
+
+function latestAssistantReplyAt(session: SessionState): number | undefined {
+  return session.messages.reduce<number | undefined>(
+    (latest, message) =>
+      message.role === "assistant" ? Math.max(latest ?? 0, message.timestamp) : latest,
+    undefined,
+  );
+}
+
+async function acknowledgeVisibleReplies(session: SessionState): Promise<void> {
+  const readThrough = latestAssistantReplyAt(session);
+  if (readThrough != null) {
+    await markSessionRead(session.workspaceId, session.sessionId, readThrough);
+  }
 }
 
 function prependUniqueMessages(
@@ -162,7 +178,7 @@ export const sessionActions = {
     } else {
       this.closeStream();
     }
-    await writeCachedSession(session);
+    await Promise.all([writeCachedSession(session), acknowledgeVisibleReplies(session)]);
     if (session.messagesDetailLevel === "summary") {
       this.scheduleSessionEnhancement(session);
     }
@@ -234,6 +250,9 @@ export const sessionActions = {
       }
       if (shouldWriteSessionCache(event)) {
         await writeCachedSession(nextSession);
+      }
+      if (event.type === "reset" && !nextSession.isStreaming) {
+        await acknowledgeVisibleReplies(nextSession);
       }
       this.connectionState = "online";
     };

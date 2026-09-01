@@ -41,6 +41,9 @@ export function registerSettingsRoutes(context: RouteContext): void {
   app.get(routePath("/api/bootstrap"), async (request) => {
     const authenticated = request.auth;
     const workspaces = authenticated ? await listWorkspaces(config) : [];
+    const workspaceSnapshots = authenticated
+      ? await Promise.all(workspaces.map((workspace) => context.workspaceSnapshot(workspace.id)))
+      : [];
 
     return {
       authenticated,
@@ -55,6 +58,7 @@ export function registerSettingsRoutes(context: RouteContext): void {
       workspaceUiSettings: Object.fromEntries(
         workspaces.map((workspace) => [workspace.id, context.getWorkspaceUiSettings(workspace.id)]),
       ),
+      workspaceSnapshots,
       models: authenticated ? await service.listModels() : [],
     };
   });

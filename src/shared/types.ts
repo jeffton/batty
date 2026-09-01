@@ -102,6 +102,9 @@ export interface SessionSummary {
   messageCount: number;
   workspaceId: string;
   model?: string;
+  lastAssistantReplyAt?: number;
+  isInProgress?: boolean;
+  hasUnread?: boolean;
   dailySession?: {
     date: string;
     isToday: boolean;
@@ -321,6 +324,7 @@ export interface BootstrapPayload {
   workspaceUiSettings: Record<string, WorkspaceUiSettings>;
   models: ModelOption[];
   activeSession?: SessionState;
+  workspaceSnapshots?: WorkspaceSnapshot[];
 }
 
 export interface WorkspaceSnapshot {
@@ -330,6 +334,8 @@ export interface WorkspaceSnapshot {
   runningCronJobs: RunningCronJob[];
   cronRunLogs: CronRunLog[];
   uiSettings: WorkspaceUiSettings;
+  isInProgress?: boolean;
+  hasUnread?: boolean;
 }
 
 export type ServerEvent = (

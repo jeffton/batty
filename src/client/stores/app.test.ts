@@ -28,6 +28,7 @@ vi.mock("@/client/lib/api", () => ({
   listWorkspaceSessions: vi.fn(async (): Promise<SessionSummary[]> => []),
   listWorkspaces: vi.fn(async () => []),
   logout: vi.fn(),
+  markSessionRead: vi.fn(),
   openSession: vi.fn(),
   openSessionById: vi.fn(),
   removeQueuedPrompt: vi.fn(),
@@ -157,7 +158,7 @@ describe("app store session streams", () => {
     expect(store.connectionState).toBe("online");
   });
 
-  it("tracks workspace and session stream connections independently", () => {
+  it("tracks multiple workspace streams and the session stream independently", () => {
     const store = useAppStore();
     const session = makeSession("session-a");
 
@@ -167,7 +168,7 @@ describe("app store session streams", () => {
 
     store.openWorkspaceStream("other");
     const workspaceStream = MockEventSource.instances[1];
-    expect(firstWorkspaceStream?.closed).toBe(true);
+    expect(firstWorkspaceStream?.closed).toBe(false);
     expect(store.workspaceConnectionState).toBe("online");
     workspaceStream?.onopen?.(new Event("open"));
     expect(store.workspaceConnectionState).toBe("online");

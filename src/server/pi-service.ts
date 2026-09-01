@@ -78,6 +78,8 @@ import type { CronService } from "./cron";
 import { deliverSkippedCronJobRun, runCronJobSession } from "./pi-service-cron-adapter";
 import { createPiServiceTools } from "./pi-service-tool-factory";
 import type { RuntimeNotice } from "./runtime-notices";
+import { SessionReadStateStore } from "./session-read-state";
+import { listWorkspaces } from "./workspaces";
 
 export type { UploadedFile } from "./pi-service-types";
 
@@ -104,12 +106,14 @@ export class PiService {
   private readonly onAgentCompleted: ((session: SessionState) => Promise<void>) | undefined;
   private readonly onWorkspaceUpdated: ((workspaceId: string) => Promise<void>) | undefined;
   private readonly cronService: CronService;
+  private readonly sessionReadState: SessionReadStateStore;
 
   private constructor(
     config: AppConfig,
     cronService: CronService,
     modelRuntime: ModelRuntime,
     modelConfigWatcher: ModelConfigWatcher,
+    sessionReadState: SessionReadStateStore,
     onAgentCompleted?: (session: SessionState) => Promise<void>,
     onWorkspaceUpdated?: (workspaceId: string) => Promise<void>,
   ) {
@@ -117,6 +121,7 @@ export class PiService {
     this.cronService = cronService;
     this.modelRuntime = modelRuntime;
     this.modelConfigWatcher = modelConfigWatcher;
+    this.sessionReadState = sessionReadState;
     this.onAgentCompleted = onAgentCompleted;
     this.onWorkspaceUpdated = onWorkspaceUpdated;
     const authPath = path.join(battyAgentDir(config), "auth.json");
@@ -139,11 +144,18 @@ export class PiService {
     });
     const modelConfigWatcher = new ModelConfigWatcher(modelsPath, modelRuntime);
     await modelConfigWatcher.initialize();
+    const sessionReadState = await SessionReadStateStore.create(config.battyDir);
+    const workspaces = await listWorkspaces(config);
+    const existingSessions = (
+      await Promise.all(workspaces.map((workspace) => listFastSessionSummaries(config, workspace)))
+    ).flat();
+    await sessionReadState.initializeBaseline(existingSessions);
     return new PiService(
       config,
       cronService,
       modelRuntime,
       modelConfigWatcher,
+      sessionReadState,
       onAgentCompleted,
       onWorkspaceUpdated,
     );
@@ -190,7 +202,54 @@ export class PiService {
   }
 
   async listSessionSummaries(workspace: WorkspaceInfo): Promise<SessionSummary[]> {
-    return listFastSessionSummaries(this.config, workspace);
+    const summaries = await listFastSessionSummaries(this.config, workspace);
+    const jobsById = new Map(
+      this.cronService.listJobs(workspace.id).map((job) => [job.id, job] as const),
+    );
+    const inlineCronSessionIds = new Set(
+      this.cronService
+        .listRunningJobs(workspace.id)
+        .filter((run) => jobsById.get(run.jobId)?.session.kind === "daily-inline")
+        .map((run) => run.sessionId)
+        .filter((sessionId): sessionId is string => Boolean(sessionId)),
+    );
+    return summaries.map((summary) => {
+      const webSession = this.sessions.get(summary.sessionId);
+      const isInProgress = Boolean(
+        webSession &&
+        !webSession.ephemeral &&
+        !inlineCronSessionIds.has(summary.sessionId) &&
+        !webSession.agentCompleted &&
+        (webSession.session.isStreaming ||
+          [...webSession.activeTools.values()].some((tool) => tool.status === "running")),
+      );
+      const hasUnread = this.sessionReadState.hasUnread(
+        summary.sessionId,
+        summary.lastAssistantReplyAt,
+      );
+      return {
+        ...summary,
+        ...(isInProgress ? { isInProgress: true } : {}),
+        ...(hasUnread ? { hasUnread: true } : {}),
+      };
+    });
+  }
+
+  async markSessionRead(
+    workspace: WorkspaceInfo,
+    sessionId: string,
+    readThrough: number,
+  ): Promise<void> {
+    const summary = (await listFastSessionSummaries(this.config, workspace)).find(
+      (candidate) => candidate.sessionId === sessionId,
+    );
+    if (summary?.lastAssistantReplyAt != null) {
+      await this.sessionReadState.markRead(
+        sessionId,
+        Math.min(readThrough, summary.lastAssistantReplyAt),
+      );
+      await this.notifyWorkspaceUpdated(workspace.id);
+    }
   }
 
   async createSession(

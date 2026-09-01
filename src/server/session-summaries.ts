@@ -14,7 +14,6 @@ import { isSubagentSessionEntry } from "./subagent";
 
 const DEFAULT_SESSION_LABEL = "(no messages)";
 const SESSION_SUMMARY_READ_CONCURRENCY = 16;
-const SESSION_SUMMARY_HEADER_LINE_LIMIT = 128;
 const CRON_RUNTIME_NOTICE_CUSTOM_TYPE = "batty-runtime-notice:cron";
 
 type SessionSummaryCacheEntry = {
@@ -95,11 +94,12 @@ function extractCronRuntimeNoticePrompt(content: unknown): string {
   );
 }
 
-async function readSessionHeaderAndFirstUserMessage(filePath: string): Promise<{
+async function readSessionMetadata(filePath: string): Promise<{
   sessionId?: string;
   firstMessage: string;
   dailySessionDate?: string;
   isHiddenSession: boolean;
+  lastAssistantReplyAt?: number;
 }> {
   const stream = createReadStream(filePath, { encoding: "utf8" });
   const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
@@ -108,16 +108,10 @@ async function readSessionHeaderAndFirstUserMessage(filePath: string): Promise<{
   let firstMessage = "";
   let dailySessionDate: string | undefined;
   let isHiddenSession = false;
-
-  let scannedLines = 0;
+  let lastAssistantReplyAt: number | undefined;
 
   try {
     for await (const line of lines) {
-      scannedLines += 1;
-      if (scannedLines > SESSION_SUMMARY_HEADER_LINE_LIMIT) {
-        break;
-      }
-
       if (!line.trim()) {
         continue;
       }
@@ -140,7 +134,8 @@ async function readSessionHeaderAndFirstUserMessage(filePath: string): Promise<{
         data?: unknown;
         parentSession?: unknown;
         content?: unknown;
-        message?: { role?: unknown; content?: unknown };
+        timestamp?: unknown;
+        message?: { role?: unknown; content?: unknown; timestamp?: unknown };
       };
 
       if (!sessionId && candidate.type === "session" && typeof candidate.id === "string") {
@@ -150,6 +145,20 @@ async function readSessionHeaderAndFirstUserMessage(filePath: string): Promise<{
 
       if (candidate.type === "message" && candidate.message?.role === "user" && !firstMessage) {
         firstMessage = extractMessageText(candidate.message.content);
+      }
+
+      if (candidate.type === "message" && candidate.message?.role === "assistant") {
+        const timestamp =
+          typeof candidate.message.timestamp === "number"
+            ? candidate.message.timestamp
+            : typeof candidate.timestamp === "string"
+              ? Date.parse(candidate.timestamp)
+              : undefined;
+        if (timestamp != null && Number.isFinite(timestamp)) {
+          lastAssistantReplyAt = Math.max(lastAssistantReplyAt ?? 0, timestamp);
+        } else {
+          lastAssistantReplyAt = Number.NaN;
+        }
       }
 
       if (
@@ -176,17 +185,13 @@ async function readSessionHeaderAndFirstUserMessage(filePath: string): Promise<{
           dailySessionDate = binding.date;
         }
       }
-
-      if (sessionId && firstMessage && (dailySessionDate || scannedLines >= 16)) {
-        break;
-      }
     }
   } finally {
     lines.close();
     stream.destroy();
   }
 
-  return { sessionId, firstMessage, dailySessionDate, isHiddenSession };
+  return { sessionId, firstMessage, dailySessionDate, isHiddenSession, lastAssistantReplyAt };
 }
 
 async function buildSessionSummary(
@@ -196,8 +201,8 @@ async function buildSessionSummary(
   stats: { mtime: Date },
 ): Promise<SessionSummary | undefined> {
   try {
-    const { sessionId, firstMessage, dailySessionDate, isHiddenSession } =
-      await readSessionHeaderAndFirstUserMessage(filePath);
+    const { sessionId, firstMessage, dailySessionDate, isHiddenSession, lastAssistantReplyAt } =
+      await readSessionMetadata(filePath);
 
     if (!sessionId || isHiddenSession) {
       return undefined;
@@ -211,6 +216,13 @@ async function buildSessionSummary(
       updatedAt: stats.mtime.getTime(),
       messageCount: 0,
       workspaceId,
+      ...(lastAssistantReplyAt != null
+        ? {
+            lastAssistantReplyAt: Number.isNaN(lastAssistantReplyAt)
+              ? stats.mtime.getTime()
+              : lastAssistantReplyAt,
+          }
+        : {}),
       ...(dailySessionDate
         ? {
             dailySession: {

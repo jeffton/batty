@@ -67,16 +67,27 @@ export function registerWorkspaceRoutes(
     routePath("/api/workspaces/:workspaceId/events"),
     async (request, reply) => {
       startEventStream(reply.raw);
-      const snapshot = await workspaceSnapshot(request.params.workspaceId);
-
-      const send = (payload: WorkspaceSnapshot) => {
+      let initializing = true;
+      let pendingSnapshot: WorkspaceSnapshot | undefined;
+      const writeSnapshot = (payload: WorkspaceSnapshot) => {
         reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+      };
+      const send = (payload: WorkspaceSnapshot) => {
+        if (initializing) {
+          pendingSnapshot = payload;
+          return;
+        }
+        writeSnapshot(payload);
       };
 
       const subscribers = workspaceSubscribers.get(request.params.workspaceId) ?? new Set();
       subscribers.add(send);
       workspaceSubscribers.set(request.params.workspaceId, subscribers);
-      send(snapshot);
+      writeSnapshot(await workspaceSnapshot(request.params.workspaceId));
+      initializing = false;
+      if (pendingSnapshot) {
+        writeSnapshot(pendingSnapshot);
+      }
 
       const heartbeat = setInterval(() => {
         reply.raw.write(": keep-alive\n\n");

@@ -220,6 +220,18 @@ export function listWorkspaceSessions(workspaceId: string): Promise<SessionSumma
   return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/sessions`);
 }
 
+export function markSessionRead(
+  workspaceId: string,
+  sessionId: string,
+  readThrough: number,
+): Promise<{ ok: true }> {
+  return request(`/api/sessions/${encodeURIComponent(sessionId)}/read`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workspaceId, readThrough }),
+  });
+}
+
 export function listWorkspaceCronJobs(workspaceId: string): Promise<CronJob[]> {
   return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/cron-jobs`);
 }

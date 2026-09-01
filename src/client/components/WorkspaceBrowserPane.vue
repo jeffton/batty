@@ -137,6 +137,15 @@ function isWorkspacePinned(workspaceId: string): boolean {
   return store.workspaces.some((workspace) => workspace.id === workspaceId && workspace.isPinned);
 }
 
+function workspaceStatus(workspaceId: string): { isInProgress: boolean; hasUnread: boolean } {
+  return (
+    store.workspaceStatusByWorkspace[workspaceId] ?? {
+      isInProgress: false,
+      hasUnread: false,
+    }
+  );
+}
+
 async function toggleWorkspacePin(workspaceId: string): Promise<void> {
   try {
     await store.toggleWorkspacePin(workspaceId);
@@ -354,6 +363,25 @@ watch(
                 <span class="workspace-browser-pane__item-meta">{{ workspace.path }}</span>
               </button>
 
+              <span
+                v-if="
+                  workspaceStatus(workspace.id).isInProgress ||
+                  workspaceStatus(workspace.id).hasUnread
+                "
+                class="workspace-browser-pane__activity-indicator"
+                role="status"
+                :aria-label="
+                  workspaceStatus(workspace.id).isInProgress ? 'Working' : 'Unread reply'
+                "
+              >
+                <LoaderCircle
+                  v-if="workspaceStatus(workspace.id).isInProgress"
+                  :size="16"
+                  class="workspace-browser-pane__spinner"
+                />
+                <span v-else class="workspace-browser-pane__unread-dot" />
+              </span>
+
               <button
                 class="workspace-browser-pane__pin-btn"
                 type="button"
@@ -499,6 +527,19 @@ watch(
                     </span>
                   </span>
                 </button>
+                <span
+                  v-if="session.isInProgress || session.hasUnread"
+                  class="workspace-browser-pane__activity-indicator"
+                  role="status"
+                  :aria-label="session.isInProgress ? 'Working' : 'Unread reply'"
+                >
+                  <LoaderCircle
+                    v-if="session.isInProgress"
+                    :size="16"
+                    class="workspace-browser-pane__spinner"
+                  />
+                  <span v-else class="workspace-browser-pane__unread-dot" />
+                </span>
               </div>
 
               <div v-if="filteredSessions.length === 0" class="workspace-browser-pane__empty">
@@ -677,6 +718,7 @@ watch(
 }
 
 .workspace-browser-pane__item-row {
+  position: relative;
   display: flex;
   align-items: stretch;
   gap: 0.2rem;
@@ -790,6 +832,33 @@ watch(
   -webkit-appearance: none;
   background-clip: padding-box;
   transition: color 80ms ease;
+}
+
+.workspace-browser-pane__activity-indicator {
+  position: absolute;
+  top: 0.1rem;
+  right: calc(var(--workspace-browser-pane-safe-end) + 0.25rem);
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  padding: 0;
+  color: var(--color-text-subtle);
+  pointer-events: none;
+}
+
+.workspace-browser-pane__unread-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.workspace-browser-pane__item-row.is-active .workspace-browser-pane__activity-indicator {
+  color: var(--color-user-text);
+  opacity: 0.76;
 }
 
 @media (hover: hover) {

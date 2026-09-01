@@ -48,6 +48,8 @@ describe("session-summary", () => {
       messageCount: 1,
       workspaceId: "batty",
       model: "anthropic/claude-sonnet-4",
+      isInProgress: false,
+      hasUnread: false,
     });
   });
 
@@ -73,6 +75,8 @@ describe("session-summary", () => {
       messageCount: 1,
       workspaceId: "batty",
       model: "anthropic/claude-sonnet-4",
+      isInProgress: true,
+      hasUnread: true,
     };
 
     const merged = mergeSessionSummaries([persisted], [toSessionSummary(baseSession)]);
@@ -88,6 +92,8 @@ describe("session-summary", () => {
         messageCount: 1,
         workspaceId: "batty",
         model: "anthropic/claude-sonnet-4",
+        isInProgress: false,
+        hasUnread: false,
       },
     ]);
   });

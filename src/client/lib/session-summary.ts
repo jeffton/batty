@@ -51,6 +51,8 @@ export function toSessionSummary(session: SessionState): SessionSummary {
     messageCount: session.totalMessageCount,
     workspaceId: session.workspaceId,
     model: session.model,
+    isInProgress: session.isStreaming,
+    hasUnread: false,
   };
 }
 

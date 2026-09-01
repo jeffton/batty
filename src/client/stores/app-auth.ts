@@ -45,6 +45,39 @@ export const authBootstrapActions = {
     this.workspaceRoots = payload.workspaceRoots;
     this.workspaces = sortWorkspacesByRecentSession(workspaces);
     this.workspaceUiSettings = payload.workspaceUiSettings;
+    this.sessionsByWorkspace = Object.fromEntries(
+      (payload.workspaceSnapshots ?? []).map((snapshot) => [
+        snapshot.workspaceId,
+        snapshot.sessions,
+      ]),
+    );
+    this.cronJobsByWorkspace = Object.fromEntries(
+      (payload.workspaceSnapshots ?? []).map((snapshot) => [
+        snapshot.workspaceId,
+        snapshot.cronJobs,
+      ]),
+    );
+    this.runningCronJobsByWorkspace = Object.fromEntries(
+      (payload.workspaceSnapshots ?? []).map((snapshot) => [
+        snapshot.workspaceId,
+        snapshot.runningCronJobs,
+      ]),
+    );
+    this.cronRunLogsByWorkspace = Object.fromEntries(
+      (payload.workspaceSnapshots ?? []).map((snapshot) => [
+        snapshot.workspaceId,
+        snapshot.cronRunLogs,
+      ]),
+    );
+    this.workspaceStatusByWorkspace = Object.fromEntries(
+      (payload.workspaceSnapshots ?? []).map((snapshot) => [
+        snapshot.workspaceId,
+        {
+          isInProgress: Boolean(snapshot.isInProgress),
+          hasUnread: Boolean(snapshot.hasUnread),
+        },
+      ]),
+    );
     this.models = payload.models;
     this.selectedWorkspaceId =
       this.selectedWorkspaceId &&
@@ -53,8 +86,10 @@ export const authBootstrapActions = {
         : this.workspaces[0]?.id;
     if (payload.authenticated) {
       this.authError = undefined;
-      if (this.selectedWorkspaceId && this.workspaceConnectionState !== "offline") {
-        this.openWorkspaceStream(this.selectedWorkspaceId);
+      if (this.workspaceConnectionState !== "offline") {
+        for (const workspace of this.workspaces) {
+          this.openWorkspaceStream(workspace.id);
+        }
       }
     } else {
       this.activeSession = undefined;
@@ -67,6 +102,7 @@ export const authBootstrapActions = {
       this.cronJobsByWorkspace = {};
       this.runningCronJobsByWorkspace = {};
       this.workspaceUiSettings = {};
+      this.workspaceStatusByWorkspace = {};
       this.closeStream();
       this.closeWorkspaceStream();
     }
@@ -91,6 +127,7 @@ export const authBootstrapActions = {
     this.cronJobsByWorkspace = {};
     this.runningCronJobsByWorkspace = {};
     this.workspaceUiSettings = {};
+    this.workspaceStatusByWorkspace = {};
   },
 
   async checkForClientUpdate(this: AppActionContext): Promise<void> {
@@ -114,8 +151,8 @@ export const authBootstrapActions = {
   markOnline(this: AppActionContext): void {
     this.connectionState = "online";
     this.workspaceConnectionState = "online";
-    if (this.selectedWorkspaceId) {
-      this.openWorkspaceStream(this.selectedWorkspaceId);
+    for (const workspace of this.workspaces) {
+      this.openWorkspaceStream(workspace.id);
     }
     if (this.activeSession) {
       this.openStream(this.activeSession);

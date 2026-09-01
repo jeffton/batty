@@ -351,6 +351,7 @@ export async function handleAgentEvent(
       webSession.suppressNextAgentEndCompletion = false;
       deps.publish(webSession, { type: "tools", tools: [] });
       deps.publish(webSession, { type: "state", state: deps.getStateMetadata(webSession) });
+      await deps.notifyWorkspaceUpdated(webSession.workspace.id);
       break;
     case "auto_retry_start":
       webSession.autoRetryActive = true;

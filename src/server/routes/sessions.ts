@@ -137,6 +137,16 @@ export function registerSessionRoutes(context: RouteContext): void {
     },
   );
 
+  app.post<{
+    Params: { sessionId: string };
+    Body: { workspaceId: string; readThrough: number };
+  }>(routePath("/api/sessions/:sessionId/read"), async (request) => {
+    const workspaces = await listWorkspaces(config);
+    const workspace = resolveWorkspace(workspaces, request.body.workspaceId);
+    await service.markSessionRead(workspace, request.params.sessionId, request.body.readThrough);
+    return { ok: true };
+  });
+
   app.get<{
     Params: { sessionId: string };
     Querystring: { before?: string; limit?: string; workspaceId?: string; sessionPath?: string };

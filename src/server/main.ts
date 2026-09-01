@@ -49,13 +49,17 @@ async function setWorkspaceUiSettings(
 async function workspaceSnapshot(workspaceId: string): Promise<WorkspaceSnapshot> {
   const workspaces = await listWorkspaces(config);
   const workspace = resolveWorkspace(workspaces, workspaceId);
+  const sessions = await service.listSessionSummaries(workspace);
+  const runningCronJobs = cronService.listRunningJobs(workspaceId);
   return {
     workspaceId,
-    sessions: await service.listSessionSummaries(workspace),
+    sessions,
     cronJobs: cronService.listJobs(workspaceId),
-    runningCronJobs: cronService.listRunningJobs(workspaceId),
+    runningCronJobs,
     cronRunLogs: cronService.listRecentRunLogs(workspaceId),
     uiSettings: getWorkspaceUiSettings(workspaceId),
+    isInProgress: runningCronJobs.length > 0 || sessions.some((session) => session.isInProgress),
+    hasUnread: sessions.some((session) => session.hasUnread),
   };
 }
 

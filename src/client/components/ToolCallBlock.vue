@@ -10,7 +10,7 @@ import ToolCallCodeOutput from "@/client/components/ToolCallCodeOutput.vue";
 import ToolCallHeader from "@/client/components/ToolCallHeader.vue";
 import ToolCallMeta from "@/client/components/ToolCallMeta.vue";
 import { formatValue, languageFromPath } from "@/client/lib/code-format";
-import { createHeadView, createTailView } from "@/client/lib/tool-output";
+import { createToolOutputView } from "@/client/lib/tool-output";
 import { hasToolResultContent } from "@/client/lib/transcript";
 import { isPiShellToolName } from "@/shared/pi-tools";
 import type { SentFileDescriptor, ToolExecutionDetails, UiContentBlock } from "@/shared/types";
@@ -138,10 +138,16 @@ const shellTextOutput = computed(() =>
         .map((block) => block.text)
         .join("\n"),
 );
-const shellTailView = computed(() => createTailView(shellTextOutput.value, OUTPUT_TAIL_LINE_COUNT));
+const shellTailView = computed(() =>
+  createToolOutputView(
+    props.name === "powershell" ? "powershell" : "bash",
+    shellTextOutput.value,
+    OUTPUT_TAIL_LINE_COUNT,
+  ),
+);
 const shellLanguage = computed(() => (props.name === "powershell" ? "powershell" : "bash"));
 const writeTailView = computed(() =>
-  createTailView(contentValue.value ?? "", OUTPUT_TAIL_LINE_COUNT),
+  createToolOutputView("write", contentValue.value ?? "", OUTPUT_TAIL_LINE_COUNT),
 );
 const readTextOutput = computed(() =>
   props.name !== "read"
@@ -153,7 +159,9 @@ const readTextOutput = computed(() =>
         .map((block) => block.text)
         .join("\n"),
 );
-const readHeadView = computed(() => createHeadView(readTextOutput.value, OUTPUT_TAIL_LINE_COUNT));
+const readHeadView = computed(() =>
+  createToolOutputView("read", readTextOutput.value, OUTPUT_TAIL_LINE_COUNT),
+);
 const cronTextOutput = computed(() =>
   props.name !== "cron"
     ? ""
@@ -164,7 +172,9 @@ const cronTextOutput = computed(() =>
         .map((block) => block.text)
         .join("\n"),
 );
-const cronHeadView = computed(() => createHeadView(cronTextOutput.value, OUTPUT_TAIL_LINE_COUNT));
+const cronHeadView = computed(() =>
+  createToolOutputView("cron", cronTextOutput.value, OUTPUT_TAIL_LINE_COUNT),
+);
 const webSearchTextOutput = computed(() =>
   props.name !== "web-search"
     ? ""
@@ -176,7 +186,7 @@ const webSearchTextOutput = computed(() =>
         .join("\n"),
 );
 const webSearchHeadView = computed(() =>
-  createHeadView(webSearchTextOutput.value, OUTPUT_TAIL_LINE_COUNT),
+  createToolOutputView("web-search", webSearchTextOutput.value, OUTPUT_TAIL_LINE_COUNT),
 );
 const grepFindTextOutput = computed(() =>
   props.name !== "grep" && props.name !== "find"
@@ -189,7 +199,11 @@ const grepFindTextOutput = computed(() =>
         .join("\n"),
 );
 const grepFindHeadView = computed(() =>
-  createHeadView(grepFindTextOutput.value, OUTPUT_TAIL_LINE_COUNT),
+  createToolOutputView(
+    props.name === "grep" ? "grep" : "find",
+    grepFindTextOutput.value,
+    OUTPUT_TAIL_LINE_COUNT,
+  ),
 );
 const canExpandOutput = computed(
   () =>

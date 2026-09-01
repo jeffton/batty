@@ -4,7 +4,23 @@ import {
   battyPiToolNamesForPlatform,
   isPiShellToolName,
   piShellToolNameForPlatform,
+  TOOL_OUTPUT_TRUNCATION_DIRECTIONS,
 } from "@/shared/pi-tools";
+
+describe("tool output truncation directions", () => {
+  it("uses tails for command-like tools and heads for document-like tools", () => {
+    expect(TOOL_OUTPUT_TRUNCATION_DIRECTIONS).toEqual({
+      bash: "tail",
+      powershell: "tail",
+      write: "tail",
+      read: "head",
+      cron: "head",
+      "web-search": "head",
+      grep: "head",
+      find: "head",
+    });
+  });
+});
 
 describe("Pi shell tools", () => {
   it("selects PowerShell on Windows", () => {

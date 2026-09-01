@@ -1,4 +1,18 @@
 export type PiShellToolName = "bash" | "powershell";
+export type ToolOutputTruncationDirection = "head" | "tail";
+
+export const TOOL_OUTPUT_TRUNCATION_DIRECTIONS = {
+  bash: "tail",
+  powershell: "tail",
+  write: "tail",
+  read: "head",
+  cron: "head",
+  "web-search": "head",
+  grep: "head",
+  find: "head",
+} as const satisfies Record<string, ToolOutputTruncationDirection>;
+
+export type TruncatedToolName = keyof typeof TOOL_OUTPUT_TRUNCATION_DIRECTIONS;
 
 export function isPiShellToolName(name: string): name is PiShellToolName {
   return name === "bash" || name === "powershell";

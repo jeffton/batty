@@ -3,22 +3,29 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { createCronTool, createSubagentTool, spillToolOutputToTempFile } from "./pi-service-tools";
 
 describe("spillToolOutputToTempFile", () => {
-  it("stores oversized output in a temp file and returns a truncated tail", async () => {
+  it("stores oversized output in a temp file and returns a truncated head", async () => {
     const fullText = Array.from({ length: 2_010 }, (_, index) => `line ${index + 1}`).join("\n");
 
-    const result = await spillToolOutputToTempFile("web-search-output", "tool/call:1", {
-      text: fullText,
-      details: {
-        action: "content",
-        content: fullText,
-        results: [{ title: "Result", content: fullText }],
+    const result = await spillToolOutputToTempFile(
+      "web-search-output",
+      "tool/call:1",
+      {
+        text: fullText,
+        details: {
+          action: "content",
+          content: fullText,
+          results: [{ title: "Result", content: fullText }],
+        },
       },
-    });
+      "web-search",
+    );
 
+    expect(result.text).toContain("Showing the first 2000 lines");
     expect(result.text).toContain("Full output saved to: ");
     expect(result.text).toContain("Use the read tool on that path if you need more.");
-    expect(result.text).not.toContain("line 1\n");
-    expect(result.text).toContain("line 2010");
+    expect(result.text).toContain("line 1\n");
+    expect(result.text).toContain("line 2000");
+    expect(result.text).not.toContain("line 2001");
     expect(result.details.truncated).toBe(true);
     expect(result.details.fullOutputPath).toEqual(expect.stringMatching(/tool-call-1\.txt$/));
     expect(result.details.content).toBeUndefined();
@@ -26,6 +33,53 @@ describe("spillToolOutputToTempFile", () => {
     await expect(fs.readFile(String(result.details.fullOutputPath), "utf8")).resolves.toBe(
       fullText,
     );
+  });
+
+  it("uses UI line-ending semantics for head truncation", async () => {
+    const fullText = Array.from({ length: 2_010 }, (_, index) => `line ${index + 1}`).join("\r");
+
+    const result = await spillToolOutputToTempFile(
+      "web-search-output",
+      "carriage-returns",
+      { text: fullText, details: {} },
+      "web-search",
+    );
+
+    expect(result.text).toContain("Showing the first 2000 lines");
+    expect(result.text).toContain("line 1\nline 2");
+    expect(result.text).not.toContain("line 2001");
+  });
+
+  it("respects tail truncation and UTF-8 character boundaries", async () => {
+    const fullText = `first\n${"🦇".repeat(13_000)}\nlast`;
+
+    const result = await spillToolOutputToTempFile(
+      "tool-output",
+      "tail",
+      { text: fullText, details: {} },
+      "write",
+    );
+
+    expect(result.text).toContain("Showing the last");
+    expect(result.text).not.toContain("�");
+    expect(result.text).not.toContain("first");
+    expect(result.text).toContain("last");
+  });
+
+  it("respects head truncation and UTF-8 character boundaries", async () => {
+    const fullText = `first\n${"🦇".repeat(13_000)}\nlast`;
+
+    const result = await spillToolOutputToTempFile(
+      "web-search-output",
+      "head",
+      { text: fullText, details: {} },
+      "web-search",
+    );
+
+    expect(result.text).toContain("Showing the first");
+    expect(result.text).not.toContain("�");
+    expect(result.text).toContain("first");
+    expect(result.text).not.toContain("last");
   });
 });
 

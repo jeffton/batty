@@ -2,6 +2,11 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import {
+  TOOL_OUTPUT_TRUNCATION_DIRECTIONS,
+  type ToolOutputTruncationDirection,
+  type TruncatedToolName,
+} from "@/shared/pi-tools";
 import type {
   CreateCronJobInput,
   ToolExecutionDetails,
@@ -41,24 +46,51 @@ interface SpillableToolOutput {
   details: ToolExecutionDetails;
 }
 
+function normalizeLineEndings(text: string): string {
+  return text.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
+}
+
 function countLines(text: string): number {
   if (text.length === 0) {
     return 0;
   }
 
-  return text.split("\n").length;
+  return normalizeLineEndings(text).split("\n").length;
 }
 
-function tailText(text: string, maxLines: number, maxBytes: number): string {
-  const lines = text.split("\n");
-  let tail = lines.length > maxLines ? lines.slice(-maxLines).join("\n") : text;
-  const buffer = Buffer.from(tail, "utf8");
+function truncateText(
+  text: string,
+  maxLines: number,
+  maxBytes: number,
+  direction: ToolOutputTruncationDirection,
+): string {
+  const normalizedText = normalizeLineEndings(text);
+  const lines = normalizedText.split("\n");
+  const selectedLines =
+    lines.length <= maxLines
+      ? normalizedText
+      : direction === "head"
+        ? lines.slice(0, maxLines).join("\n")
+        : lines.slice(-maxLines).join("\n");
+  const buffer = Buffer.from(selectedLines, "utf8");
 
-  if (buffer.byteLength > maxBytes) {
-    tail = buffer.subarray(buffer.byteLength - maxBytes).toString("utf8");
+  if (buffer.byteLength <= maxBytes) {
+    return selectedLines;
   }
 
-  return tail;
+  if (direction === "head") {
+    let end = maxBytes;
+    while (end > 0 && (buffer[end] & 0xc0) === 0x80) {
+      end -= 1;
+    }
+    return buffer.subarray(0, end).toString("utf8");
+  }
+
+  let start = buffer.byteLength - maxBytes;
+  while (start < buffer.byteLength && (buffer[start] & 0xc0) === 0x80) {
+    start += 1;
+  }
+  return buffer.subarray(start).toString("utf8");
 }
 
 function scrubWebSearchDetails(details: ToolExecutionDetails): ToolExecutionDetails {
@@ -86,7 +118,9 @@ export async function spillToolOutputToTempFile(
   label: string,
   toolCallId: string,
   output: SpillableToolOutput,
+  toolName: TruncatedToolName,
 ): Promise<SpillableToolOutput> {
+  const direction = TOOL_OUTPUT_TRUNCATION_DIRECTIONS[toolName];
   const lineCount = countLines(output.text);
   const byteCount = Buffer.byteLength(output.text, "utf8");
   if (lineCount <= TOOL_OUTPUT_MAX_LINES && byteCount <= TOOL_OUTPUT_MAX_BYTES) {
@@ -97,10 +131,15 @@ export async function spillToolOutputToTempFile(
   const filePath = path.join(dir, `${toolCallId.replace(/[^a-zA-Z0-9._-]/g, "-") || "output"}.txt`);
   await fs.writeFile(filePath, output.text, "utf8");
 
-  const truncatedText = tailText(output.text, TOOL_OUTPUT_MAX_LINES, TOOL_OUTPUT_MAX_BYTES);
+  const truncatedText = truncateText(
+    output.text,
+    TOOL_OUTPUT_MAX_LINES,
+    TOOL_OUTPUT_MAX_BYTES,
+    direction,
+  );
   const message = [
     `Output exceeded ${TOOL_OUTPUT_MAX_LINES} lines or ${TOOL_OUTPUT_MAX_BYTES} bytes.`,
-    `Showing the last ${countLines(truncatedText)} lines / ${Buffer.byteLength(truncatedText, "utf8")} bytes.`,
+    `Showing the ${direction === "head" ? "first" : "last"} ${countLines(truncatedText)} lines / ${Buffer.byteLength(truncatedText, "utf8")} bytes.`,
     `Full output saved to: ${filePath}`,
     "Use the read tool on that path if you need more.",
   ].join("\n");
@@ -436,10 +475,15 @@ export function createWebSearchTool(config: AppConfig): ToolDefinition<typeof We
         country: typeof params.country === "string" ? params.country : undefined,
         freshness: typeof params.freshness === "string" ? params.freshness : undefined,
       });
-      const output = await spillToolOutputToTempFile("web-search-output", toolCallId, {
-        text: result.text,
-        details: result.details,
-      });
+      const output = await spillToolOutputToTempFile(
+        "web-search-output",
+        toolCallId,
+        {
+          text: result.text,
+          details: result.details,
+        },
+        "web-search",
+      );
       return {
         content: [{ type: "text", text: output.text }],
         details: output.details,

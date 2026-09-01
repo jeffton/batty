@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { createHeadView, createTailView } from "@/client/lib/tool-output";
+import { createHeadView, createTailView, createToolOutputView } from "@/client/lib/tool-output";
 
 describe("createHeadView", () => {
   it("returns the original text when it fits within the window", () => {
@@ -20,6 +20,15 @@ describe("createHeadView", () => {
       totalLineCount: 30,
       isTrimmed: true,
     });
+  });
+});
+
+describe("createToolOutputView", () => {
+  it("uses the shared direction for each tool", () => {
+    const text = "first\nmiddle\nlast";
+
+    expect(createToolOutputView("web-search", text, 1).text).toBe("first");
+    expect(createToolOutputView("bash", text, 1).text).toBe("last");
   });
 });
 

@@ -1,3 +1,5 @@
+import { TOOL_OUTPUT_TRUNCATION_DIRECTIONS, type TruncatedToolName } from "@/shared/pi-tools";
+
 export interface TailView {
   text: string;
   hiddenLineCount: number;
@@ -54,4 +56,14 @@ export function createHeadView(text: string, windowSize = 25): HeadView {
     totalLineCount: lines.length,
     isTrimmed: true,
   };
+}
+
+export function createToolOutputView(
+  toolName: TruncatedToolName,
+  text: string,
+  windowSize = 25,
+): HeadView | TailView {
+  return TOOL_OUTPUT_TRUNCATION_DIRECTIONS[toolName] === "head"
+    ? createHeadView(text, windowSize)
+    : createTailView(text, windowSize);
 }

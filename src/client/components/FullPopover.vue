@@ -50,6 +50,9 @@ const popoverElement = ref<HTMLElement | null>(null);
           <X :size="16" />
         </button>
       </div>
+      <div v-if="$slots['header-content']" class="full-popover__header-content">
+        <slot name="header-content" />
+      </div>
     </header>
     <div class="full-popover__body">
       <slot />
@@ -88,10 +91,10 @@ const popoverElement = ref<HTMLElement | null>(null);
 .full-popover__header {
   position: relative;
   z-index: 1;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
+  gap: 0.5rem 1rem;
   padding: 0.9rem 1rem 0.75rem;
   border-bottom: 1px solid var(--color-border-soft);
   background: var(--color-bg-panel-strong);
@@ -122,6 +125,11 @@ const popoverElement = ref<HTMLElement | null>(null);
   justify-content: flex-end;
   gap: 0.35rem;
   flex-shrink: 0;
+}
+
+.full-popover__header-content {
+  grid-column: 1 / -1;
+  min-width: 0;
 }
 
 .full-popover__close {

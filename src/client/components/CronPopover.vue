@@ -86,7 +86,7 @@ watch(
     :subtitle="`Current workspace: ${store.selectedWorkspace?.label ?? ''}`"
     close-label="Close cron popover"
   >
-    <div class="cron-popover__body">
+    <template #header-content>
       <div class="cron-popover__tabs" role="tablist" aria-label="Cron views">
         <button
           type="button"
@@ -113,7 +113,9 @@ watch(
           />
         </button>
       </div>
+    </template>
 
+    <div class="cron-popover__body">
       <div v-if="activeTab === 'jobs'" class="cron-popover__pane" role="tabpanel">
         <CronJobCard
           v-for="job in jobs"
@@ -200,8 +202,6 @@ watch(
 }
 
 .cron-popover__body {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   background: var(--color-bg-app);
@@ -215,8 +215,7 @@ watch(
 .cron-popover__tabs {
   display: flex;
   gap: 0.25rem;
-  padding: 0 1rem;
-  border-bottom: 1px solid var(--color-border-soft);
+  margin-bottom: -0.75rem;
   background: transparent;
 }
 
@@ -249,6 +248,7 @@ watch(
 
 .cron-popover__pane {
   display: flex;
+  height: 100%;
   min-height: 0;
   flex-direction: column;
   overflow-y: auto;

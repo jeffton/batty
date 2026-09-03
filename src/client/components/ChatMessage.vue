@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { Check, Cog, Copy, PanelRightOpen } from "@lucide/vue";
+import { Check, Cog, Copy, FileDiff, PanelRightOpen } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref } from "vue";
 import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE } from "@/server/runtime-notices";
+import AgentTurnDiffPopover from "@/client/components/AgentTurnDiffPopover.vue";
 import AttachedFilesList from "@/client/components/AttachedFilesList.vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
 import MarkdownBlock from "@/client/components/MarkdownBlock.vue";
@@ -199,7 +200,7 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
       continue;
     }
 
-    if (block.name !== "attach-files" && block.name !== "subagent") {
+    if (block.name !== "attach-files") {
       continue;
     }
 
@@ -220,6 +221,16 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
 
   return files;
 });
+
+const fileChanges = computed(() =>
+  props.message.role === "assistant" ? (props.message.fileChanges ?? []) : [],
+);
+const hasReplyArtifacts = computed(
+  () => attachedFiles.value.length > 0 || fileChanges.value.length > 0,
+);
+const diffPopoverId = computed(
+  () => `agent-turn-diff-${props.message.id.replace(/[^a-zA-Z0-9_-]+/g, "-")}`,
+);
 
 const assistantMarkdown = computed(() => {
   if (props.message.role !== "assistant") {
@@ -374,30 +385,59 @@ onBeforeUnmount(() => {
             />
           </template>
 
-          <AttachedFilesList
+          <div
             v-if="
-              attachedFiles.length > 0 &&
+              hasReplyArtifacts &&
               segmentIndex === assistantSegments.length - 1 &&
               segment.kind === 'bubble'
             "
-            :files="attachedFiles"
-          />
+            class="message__artifacts"
+          >
+            <AttachedFilesList v-if="attachedFiles.length > 0" :files="attachedFiles" />
+            <button
+              v-if="fileChanges.length > 0"
+              type="button"
+              class="message__diff-button"
+              :popovertarget="diffPopoverId"
+            >
+              <FileDiff :size="16" />
+              View changes
+              <span class="message__diff-count">{{ fileChanges.length }}</span>
+            </button>
+            <AgentTurnDiffPopover
+              v-if="fileChanges.length > 0"
+              :popover-id="diffPopoverId"
+              :files="fileChanges"
+            />
+          </div>
         </div>
       </template>
 
-      <slot
-        v-if="attachedFiles.length > 0 && !hasTrailingAssistantBubble"
-        name="before-assistant-reply"
-      />
+      <slot v-if="hasReplyArtifacts && !hasTrailingAssistantBubble" name="before-assistant-reply" />
       <div
-        v-if="attachedFiles.length > 0 && !hasTrailingAssistantBubble"
-        class="message__segment message__segment--bubble"
+        v-if="hasReplyArtifacts && !hasTrailingAssistantBubble"
+        class="message__segment message__segment--bubble message__artifacts"
       >
-        <AttachedFilesList :files="attachedFiles" />
+        <AttachedFilesList v-if="attachedFiles.length > 0" :files="attachedFiles" />
+        <button
+          v-if="fileChanges.length > 0"
+          type="button"
+          class="message__diff-button"
+          :popovertarget="diffPopoverId"
+        >
+          <FileDiff :size="16" />
+          View changes
+          <span class="message__diff-count">{{ fileChanges.length }}</span>
+        </button>
+        <AgentTurnDiffPopover
+          v-if="fileChanges.length > 0"
+          :popover-id="diffPopoverId"
+          :files="fileChanges"
+        />
       </div>
 
       <template v-if="showAssistantErrorBubble && assistantErrorText">
-        <slot v-if="attachedFiles.length === 0" name="before-assistant-reply" />
+        <slot v-if="!hasReplyArtifacts" name="before-assistant-reply" />
         <div v-if="props.showTimestamp" class="message__timestamp">{{ messageTimestampLabel }}</div>
         <div class="message__segment message__segment--bubble message__segment--error">
           <button
@@ -628,6 +668,47 @@ onBeforeUnmount(() => {
   font: inherit;
   font-size: 0.82rem;
   cursor: pointer;
+}
+
+.message__artifacts {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+
+.message__segment.message__artifacts {
+  margin-top: 0;
+}
+
+.message__diff-button {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.42rem 0.65rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  background: var(--color-bg-panel);
+  color: var(--color-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.message__diff-count {
+  min-width: 1.35rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  background: var(--color-bg-elevated-soft);
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+@media (hover: hover) {
+  .message__diff-button:hover {
+    background: var(--color-bg-elevated-soft);
+  }
 }
 
 img {

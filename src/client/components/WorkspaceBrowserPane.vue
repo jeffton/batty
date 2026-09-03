@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Plus, LoaderCircle, Star, CalendarDays } from "@lucide/vue";
+import BasePopover from "@/client/components/BasePopover.vue";
 import WorkspaceBrowserFooter from "@/client/components/WorkspaceBrowserFooter.vue";
 import WorkspaceBrowserHeader from "@/client/components/WorkspaceBrowserHeader.vue";
 import { computed, nextTick, ref, watch } from "vue";
@@ -36,7 +37,7 @@ const startingSession = ref(false);
 const startingDailySession = ref(false);
 const openingSessionId = ref<string>();
 const createWorkspaceInput = ref<HTMLInputElement | null>(null);
-const createWorkspacePopover = ref<HTMLElement | null>(null);
+const createWorkspacePopover = ref<InstanceType<typeof BasePopover> | null>(null);
 const actionsDisabled = computed(() => store.workspaceConnectionState !== "online");
 const { setPaneTransition } = usePaneTransition();
 
@@ -419,12 +420,12 @@ watch(
             <Plus :size="22" />
           </button>
 
-          <form
+          <BasePopover
             :id="CREATE_WORKSPACE_POPOVER_ID"
             ref="createWorkspacePopover"
+            as="form"
             class="workspace-browser-pane__create-popover"
             :style="{ 'position-anchor': CREATE_WORKSPACE_POPOVER_ANCHOR }"
-            popover="auto"
             @submit.prevent="submitCreateWorkspace"
             @toggle="handleCreateWorkspacePopoverToggle"
           >
@@ -475,7 +476,7 @@ watch(
             <p v-if="createWorkspaceError" class="workspace-browser-pane__error">
               {{ createWorkspaceError }}
             </p>
-          </form>
+          </BasePopover>
         </div>
       </section>
 

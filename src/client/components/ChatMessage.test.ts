@@ -1,4 +1,4 @@
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE } from "@/server/runtime-notices";
 import ChatMessage from "@/client/components/ChatMessage.vue";
@@ -72,6 +72,31 @@ describe("ChatMessage", () => {
       "/api/sent-files/workspace/session/call/video-1",
     );
     expect(wrapper.find(".message__segment--bubble .attached-files__card").exists()).toBe(true);
+  });
+
+  it("shows a code changes button alongside reply attachments", async () => {
+    const message: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-diff-1",
+      role: "assistant",
+      timestamp: 1,
+      blocks: [{ type: "text", text: "Implemented." }],
+      fileChanges: [
+        {
+          path: "/work/other/src/value.ts",
+          patch:
+            "--- /work/other/src/value.ts\n+++ /work/other/src/value.ts\n@@ -1,1 +1,1 @@\n-export const value = 1;\n+export const value = 2;\n",
+        },
+      ],
+    };
+
+    const wrapper = mount(ChatMessage, { props: { message } });
+
+    await flushPromises();
+    const button = wrapper.find(".message__diff-button");
+    expect(button.text()).toContain("View changes");
+    expect(button.text()).toContain("1");
+    expect(button.attributes("popovertarget")).toBe("agent-turn-diff-assistant-diff-1");
+    expect(wrapper.find(".message__segment--bubble .message__diff-button").exists()).toBe(true);
   });
 
   it("renders user images and lists other user attachments", () => {
@@ -239,7 +264,7 @@ describe("ChatMessage", () => {
     expect(wrapper.find(".message__copy-button").exists()).toBe(false);
   });
 
-  it("renders subagent attachments at the end of the outer assistant response", () => {
+  it("renders propagated subagent attachments at the end of the outer assistant response", () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-2",
       role: "assistant",
@@ -249,8 +274,8 @@ describe("ChatMessage", () => {
         {
           type: "toolCall",
           id: "subagent-1",
-          name: "subagent",
-          arguments: { prompt: "Build the morning report" },
+          name: "attach-files",
+          arguments: {},
         },
       ],
     };
@@ -259,7 +284,7 @@ describe("ChatMessage", () => {
         "subagent-1",
         {
           status: "success",
-          resultBlocks: [],
+          resultBlocks: [{ type: "text", text: "Report complete." }],
           resultDetails: {
             sentFiles: [
               {
@@ -293,6 +318,7 @@ describe("ChatMessage", () => {
     });
 
     expect(wrapper.text()).toContain("Morning report");
+    expect(wrapper.text()).not.toContain("Report complete.");
     expect(wrapper.findAll(".attached-files__card")).toHaveLength(1);
     expect(wrapper.find("img.attached-files__preview").attributes("src")).toBe(
       "/api/sent-files/workspace/session/call/image-1",

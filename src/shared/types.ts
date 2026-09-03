@@ -7,6 +7,11 @@ export type UiContentBlock =
   | { type: "thinking"; thinking: string }
   | { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> };
 
+export interface AgentTurnFileChange {
+  path: string;
+  patch: string;
+}
+
 export interface SentFileDescriptor {
   id: string;
   name: string;
@@ -41,6 +46,7 @@ export type UiMessage =
       provider?: string;
       stopReason?: string;
       errorMessage?: string;
+      fileChanges?: AgentTurnFileChange[];
     }
   | {
       id: string;

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import { createSessionState, normalizeMessage } from "./pi-state";
+import {
+  createSessionState,
+  normalizeMessage,
+  transcriptMessagesFromSessionEntries,
+} from "./pi-state";
 
 type AgentMessage = AgentSession["messages"][number];
 
@@ -342,5 +346,39 @@ describe("normalizeMessage", () => {
       diff: " 1 const before = true;\n-2 const value = 1;\n+2 const value = 2;",
       firstChangedLine: 2,
     });
+  });
+});
+
+describe("transcriptMessagesFromSessionEntries", () => {
+  it("associates persisted file changes with their assistant reply", () => {
+    const messages = transcriptMessagesFromSessionEntries(
+      [
+        {
+          type: "message",
+          id: "reply-1",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Done" }],
+            timestamp: 1,
+          },
+        },
+      ],
+      [
+        {
+          type: "custom",
+          customType: "batty-agent-turn-file-changes",
+          data: {
+            version: 1,
+            replyEntryId: "reply-1",
+            files: [{ path: "/repo/a.ts", patch: "patch" }],
+          },
+        },
+      ],
+    );
+
+    const normalized = normalizeMessage(messages[0]!, 0);
+    expect(normalized?.role === "assistant" ? normalized.fileChanges : undefined).toEqual([
+      { path: "/repo/a.ts", patch: "patch" },
+    ]);
   });
 });

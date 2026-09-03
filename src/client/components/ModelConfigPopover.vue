@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ModelOption } from "@/shared/types";
+import BasePopover from "@/client/components/BasePopover.vue";
 import ThinkingLevelPicker from "@/client/components/ThinkingLevelPicker.vue";
 import { Search } from "@lucide/vue";
 import { computed, ref, watch } from "vue";
@@ -53,11 +54,10 @@ watch(
 </script>
 
 <template>
-  <div
+  <BasePopover
     :id="props.popoverId"
     :class="['mc-popover', props.placement === 'up' ? 'mc-popover--up' : '']"
     :style="{ 'position-anchor': props.anchorName }"
-    popover="auto"
   >
     <ThinkingLevelPicker
       v-if="props.thinkingOptions.length > 0"
@@ -89,7 +89,7 @@ watch(
       </button>
       <div v-if="filteredModels.length === 0" class="mc-popover__empty">No models match.</div>
     </div>
-  </div>
+  </BasePopover>
 </template>
 
 <style scoped>

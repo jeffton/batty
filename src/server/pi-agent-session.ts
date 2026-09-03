@@ -29,6 +29,7 @@ import {
   workspaceSessionDir,
 } from "./pi-paths";
 import type { PiModel, WebSession } from "./pi-service-types";
+import type { AgentTurnFileChangeTracker } from "./agent-turn-file-changes";
 import { modelKey } from "./pi-service-types";
 
 export function createEnvironmentReloadExtension(battyDir: string): InlineExtension {
@@ -96,6 +97,7 @@ export interface CreatePiAgentSessionOptions {
   customTools: Array<ToolDefinition<any>>;
   model?: PiModel;
   thinkingLevel?: string;
+  fileChangeTracker?: AgentTurnFileChangeTracker;
 }
 
 export async function createPiAgentSession({
@@ -106,6 +108,7 @@ export async function createPiAgentSession({
   customTools,
   model,
   thinkingLevel,
+  fileChangeTracker,
 }: CreatePiAgentSessionOptions): Promise<Awaited<ReturnType<typeof createAgentSession>>> {
   const agentDir = battyAgentDir(config);
   const settings = await loadBattySettings(config, workspace.path);
@@ -135,6 +138,7 @@ export async function createPiAgentSession({
     extensionFactories: [
       createEnvironmentReloadExtension(config.battyDir),
       createFindDefaultsExtension(workspace.path),
+      ...(fileChangeTracker ? [fileChangeTracker.createExtension(workspace.path)] : []),
     ],
     additionalSkillPaths: resourcePaths.skills,
     additionalPromptTemplatePaths: resourcePaths.prompts,

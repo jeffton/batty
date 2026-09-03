@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { X } from "@lucide/vue";
 import { ref } from "vue";
+import BasePopover from "@/client/components/BasePopover.vue";
 
 const props = withDefaults(
   defineProps<{
@@ -21,16 +22,15 @@ const emit = defineEmits<{
   toggle: [event: Event];
 }>();
 
-const popoverElement = ref<HTMLElement | null>(null);
+const popoverElement = ref<InstanceType<typeof BasePopover> | null>(null);
 </script>
 
 <template>
-  <div
+  <BasePopover
     :id="props.popoverId"
     ref="popoverElement"
     class="full-popover"
     :style="props.anchorName ? { 'position-anchor': props.anchorName } : undefined"
-    popover="auto"
     @toggle="emit('toggle', $event)"
   >
     <header class="full-popover__header">
@@ -45,7 +45,7 @@ const popoverElement = ref<HTMLElement | null>(null);
           class="full-popover__close"
           :aria-label="props.closeLabel"
           title="Close"
-          @click="popoverElement?.hidePopover?.()"
+          @click="popoverElement?.hidePopover()"
         >
           <X :size="16" />
         </button>
@@ -57,7 +57,7 @@ const popoverElement = ref<HTMLElement | null>(null);
     <div class="full-popover__body">
       <slot />
     </div>
-  </div>
+  </BasePopover>
 </template>
 
 <style scoped>
@@ -76,7 +76,6 @@ const popoverElement = ref<HTMLElement | null>(null);
   color: var(--color-text);
   box-shadow: var(--color-shadow-popover);
   overflow: hidden;
-  overscroll-behavior: contain;
 }
 
 .full-popover:popover-open {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ExternalLink, KeyRound, Save } from "@lucide/vue";
 import { computed, reactive, ref, watch } from "vue";
+import BasePopover from "@/client/components/BasePopover.vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
 import { useAppStore } from "@/client/stores/app";
 import type { ProviderAuthProviderStatus } from "@/shared/types";
@@ -141,11 +142,10 @@ watch(
 </script>
 
 <template>
-  <div
+  <BasePopover
     :id="props.popoverId"
     class="provider-auth-popover"
     :style="{ 'position-anchor': props.anchorName }"
-    popover="auto"
   >
     <section
       v-for="provider in providerOrder"
@@ -291,7 +291,7 @@ watch(
         </div>
       </template>
     </section>
-  </div>
+  </BasePopover>
 </template>
 
 <style scoped>

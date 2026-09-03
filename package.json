@@ -31,6 +31,7 @@
     "@lucide/vue": "1.35.0",
     "@mozilla/readability": "0.6.0",
     "@oddbird/css-anchor-positioning": "0.10.2",
+    "@pierre/diffs": "1.3.6",
     "@simplewebauthn/browser": "13.3.0",
     "@simplewebauthn/server": "13.3.3",
     "@vue/devtools-api": "8.2.1",

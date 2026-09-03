@@ -346,6 +346,69 @@ describe("transcript tool state merging", () => {
     ]);
   });
 
+  it("propagates attachments from a nonempty subagent result to the parent reply", () => {
+    const subagentAssistant: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-subagent",
+      role: "assistant",
+      timestamp: 3,
+      blocks: [
+        {
+          type: "toolCall",
+          id: "subagent-1",
+          name: "subagent",
+          arguments: { prompt: "Build the report" },
+        },
+      ],
+    };
+    const subagentResult: Extract<UiMessage, { role: "toolResult" }> = {
+      id: "tool-subagent",
+      role: "toolResult",
+      timestamp: 4,
+      toolCallId: "subagent-1",
+      toolName: "subagent",
+      blocks: [{ type: "text", text: "Report complete." }],
+      details: {
+        sentFiles: [
+          {
+            id: "file-1",
+            name: "report.csv",
+            size: 42,
+            mimeType: "text/csv",
+            kind: "file",
+            downloadUrl: "/api/sent-files/file-1?download=1",
+          },
+        ],
+      },
+      isError: false,
+    };
+    const finalAssistant: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-final",
+      role: "assistant",
+      timestamp: 5,
+      blocks: [{ type: "text", text: "Here is the report." }],
+    };
+
+    const messages: SessionState["messages"] = [subagentAssistant, subagentResult, finalAssistant];
+    const lookup = buildToolStateLookup(messages, []);
+    const transcript = buildTranscriptMessages(messages, lookup);
+
+    expect(transcript).toHaveLength(2);
+    expect(transcript[0]?.message).toEqual(subagentAssistant);
+    expect(transcript[0]?.toolStatesByCallId.get("subagent-1")?.resultBlocks).toEqual([
+      { type: "text", text: "Report complete." },
+    ]);
+    expect(transcript[1]?.message).toEqual({
+      ...finalAssistant,
+      blocks: [
+        ...finalAssistant.blocks,
+        { type: "toolCall", id: "subagent-1", name: "attach-files", arguments: {} },
+      ],
+    });
+    expect(transcript[1]?.toolStatesByCallId.get("subagent-1")?.resultDetails).toEqual(
+      subagentResult.details,
+    );
+  });
+
   it("moves standalone attachment tool results into the following assistant response", () => {
     const attachmentResult: Extract<UiMessage, { role: "toolResult" }> = {
       id: "tool-attach",

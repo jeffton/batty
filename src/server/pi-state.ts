@@ -2,6 +2,7 @@ import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { isPiShellToolName } from "@/shared/pi-tools";
 import type {
+  AgentTurnFileChange,
   SentFileDescriptor,
   SessionState,
   ToolExecutionDetails,
@@ -9,6 +10,7 @@ import type {
   UiMessage,
 } from "@/shared/types";
 import { sanitizeTerminalBlocks, stripTerminalFormatting } from "./terminal-output";
+import { agentTurnFileChangesByReplyEntryId } from "./agent-turn-file-changes";
 
 type AgentMessage = AgentSession["messages"][number];
 
@@ -31,6 +33,7 @@ interface AssistantLikeMessage {
   provider?: string;
   stopReason?: string;
   errorMessage?: string;
+  battyFileChanges?: AgentTurnFileChange[];
 }
 
 interface ToolResultLikeMessage {
@@ -294,6 +297,7 @@ export function normalizeMessage(
       provider: assistant.provider,
       stopReason: assistant.stopReason,
       errorMessage: assistant.errorMessage,
+      fileChanges: assistant.battyFileChanges,
     };
   }
 
@@ -363,19 +367,31 @@ export function normalizeMessages(
     .filter((message): message is UiMessage => Boolean(message));
 }
 
+type TranscriptSessionEntry = {
+  type?: unknown;
+  id?: unknown;
+  message?: unknown;
+  customType?: unknown;
+  content?: unknown;
+  timestamp?: unknown;
+  data?: unknown;
+};
+
 export function transcriptMessagesFromSessionEntries(
-  entries: Array<{
-    type?: unknown;
-    message?: unknown;
-    customType?: unknown;
-    content?: unknown;
-    timestamp?: unknown;
-    data?: unknown;
-  }>,
+  entries: TranscriptSessionEntry[],
+  metadataEntries: TranscriptSessionEntry[] = entries,
 ): AgentMessage[] {
+  const fileChangesByReplyId = agentTurnFileChangesByReplyEntryId(metadataEntries);
   return entries.flatMap((entry) => {
     if (entry?.type === "message" && entry.message) {
-      return [entry.message as AgentMessage];
+      const message = entry.message as AgentMessage;
+      const fileChanges =
+        message.role === "assistant" && typeof entry.id === "string"
+          ? fileChangesByReplyId.get(entry.id)
+          : undefined;
+      return fileChanges
+        ? [{ ...message, battyFileChanges: fileChanges } as unknown as AgentMessage]
+        : [message];
     }
 
     if (

@@ -720,7 +720,6 @@ function handlePopoverToggle(event: Event): void {
   min-height: 0;
   flex-direction: column;
   overflow-y: auto;
-  overscroll-behavior: contain;
   background: var(--color-bg-app);
 }
 

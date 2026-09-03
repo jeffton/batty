@@ -39,7 +39,12 @@ export function easyModeMessage(
     return undefined;
   }
 
-  if (blocks.length === 0 && !next.errorMessage && next.stopReason !== "error") {
+  if (
+    blocks.length === 0 &&
+    (next.fileChanges?.length ?? 0) === 0 &&
+    !next.errorMessage &&
+    next.stopReason !== "error"
+  ) {
     return undefined;
   }
 

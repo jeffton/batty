@@ -113,9 +113,7 @@ export function isAttachmentOutputToolCall(
     return false;
   }
 
-  return (
-    block.name === "attach-files" || (block.name === "subagent" && state.resultBlocks.length === 0)
-  );
+  return block.name === "attach-files";
 }
 
 function attachmentCarrierBlocks(
@@ -174,6 +172,7 @@ function hiddenAssistantErrorIds(messages: UiMessage[], isStreaming: boolean): S
 function hasRenderableContent(message: Extract<UiMessage, { role: "assistant" }>): boolean {
   return (
     assistantHasError(message) ||
+    (message.fileChanges?.length ?? 0) > 0 ||
     message.blocks.some((block) => block.type !== "thinking" || block.thinking.trim().length > 0)
   );
 }
@@ -187,10 +186,9 @@ function attachmentBlockFromToolResult(
     resultDetails: message.details,
   };
   if (
-    !isAttachmentOutputToolCall(
-      { type: "toolCall", id: message.toolCallId, name: message.toolName, arguments: {} },
-      new Map([[message.toolCallId, state]]),
-    )
+    state.status !== "success" ||
+    !hasSentFiles(state) ||
+    (message.toolName !== "attach-files" && message.toolName !== "subagent")
   ) {
     return undefined;
   }
@@ -198,7 +196,7 @@ function attachmentBlockFromToolResult(
   return {
     type: "toolCall",
     id: message.toolCallId,
-    name: message.toolName,
+    name: "attach-files",
     arguments: {},
   };
 }
@@ -230,17 +228,20 @@ export function buildTranscriptMessages(
 
   for (const message of messages) {
     if (message.role === "toolResult") {
-      if (toolStateLookup.referencedToolCallIds.has(message.toolCallId)) {
-        continue;
-      }
-
+      const isReferenced = toolStateLookup.referencedToolCallIds.has(message.toolCallId);
       const attachmentBlock = attachmentBlockFromToolResult(message);
-      if (attachmentBlock) {
+      const propagatesReferencedAttachment = isReferenced && message.toolName === "subagent";
+
+      if (attachmentBlock && (!isReferenced || propagatesReferencedAttachment)) {
         if (pendingAttachmentBlocks.length === 0) {
           pendingAttachmentId = message.id;
           pendingAttachmentTimestamp = message.timestamp;
         }
         pendingAttachmentBlocks = [...pendingAttachmentBlocks, attachmentBlock];
+        continue;
+      }
+
+      if (isReferenced) {
         continue;
       }
     }

@@ -252,7 +252,6 @@ watch(
   min-height: 0;
   flex-direction: column;
   overflow-y: auto;
-  overscroll-behavior: contain;
 }
 
 .cron-popover__run {

@@ -409,6 +409,10 @@ export async function handleAgentEvent(
       }
       break;
     }
+    case "agent_settled":
+      await waitForSessionStateFlush();
+      deps.publish(webSession, { type: "reset", state: deps.getState(webSession.id) });
+      break;
     default:
       break;
   }

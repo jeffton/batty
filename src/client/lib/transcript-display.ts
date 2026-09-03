@@ -142,7 +142,11 @@ function hasAssistantReply(entry: TranscriptMessageView | undefined): boolean {
     return false;
   }
 
-  if (entry.message.stopReason === "error" || entry.message.errorMessage?.trim()) {
+  if (
+    entry.message.stopReason === "error" ||
+    entry.message.errorMessage?.trim() ||
+    (entry.message.fileChanges?.length ?? 0) > 0
+  ) {
     return true;
   }
 

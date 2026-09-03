@@ -87,6 +87,7 @@ export function getSessionMessagePage(
 ): SessionMessagePage {
   const allMessages = transcriptMessagesFromSessionEntries(
     transcriptEntriesForPage(session.sessionManager.getBranch()),
+    session.sessionManager.getEntries(),
   );
   const totalMessageCount = allMessages.length;
   const limit = clampMessagePageSize(options?.limit);

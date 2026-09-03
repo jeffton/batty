@@ -11,6 +11,7 @@ function makeSessionFromEntries(entries: unknown[]): never {
   return {
     sessionManager: {
       getBranch: () => entries,
+      getEntries: () => entries,
     },
   } as never;
 }

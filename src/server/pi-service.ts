@@ -79,6 +79,7 @@ import { deliverSkippedCronJobRun, runCronJobSession } from "./pi-service-cron-a
 import { createPiServiceTools } from "./pi-service-tool-factory";
 import type { RuntimeNotice } from "./runtime-notices";
 import { SessionReadStateStore } from "./session-read-state";
+import { AgentTurnFileChangeTracker } from "./agent-turn-file-changes";
 import { listWorkspaces } from "./workspaces";
 
 export type { UploadedFile } from "./pi-service-types";
@@ -103,6 +104,7 @@ export class PiService {
   private readonly subagentQueues = new Map<string, Promise<void>>();
   private readonly cronSessionResolutions = new Map<string, Promise<SessionState>>();
   private readonly sessionOpenPromises = new Map<string, Promise<SessionState>>();
+  private readonly fileChangeTrackers = new Map<string, AgentTurnFileChangeTracker>();
   private readonly onAgentCompleted: ((session: SessionState) => Promise<void>) | undefined;
   private readonly onWorkspaceUpdated: ((workspaceId: string) => Promise<void>) | undefined;
   private readonly cronService: CronService;
@@ -542,7 +544,10 @@ export class PiService {
     return runDetachedSubagentSession(
       {
         createPiAgentSession: (workspace, sessionManager, createOptions) =>
-          this.createPiAgentSession(workspace, sessionManager, createOptions),
+          this.createPiAgentSession(workspace, sessionManager, {
+            ...createOptions,
+            parentSessionId: options.parentSessionId,
+          }),
         attachSession: (workspace, session, modelFallbackMessage, ephemeral) =>
           this.attachSession(workspace, session, modelFallbackMessage, ephemeral),
         disposeWebSession: (webSession) => this.disposeWebSession(webSession),
@@ -797,16 +802,21 @@ export class PiService {
   private async createPiAgentSession(
     workspace: WorkspaceInfo,
     sessionManager: SessionManager,
-    options?: { modelId?: string; thinkingLevel?: string },
+    options?: { modelId?: string; thinkingLevel?: string; parentSessionId?: string },
   ): ReturnType<typeof createPiAgentSessionImpl> {
     const model = options?.modelId ? await this.resolveModel(options.modelId) : undefined;
-    return createPiAgentSessionImpl({
+    const parentTracker = options?.parentSessionId
+      ? this.fileChangeTrackers.get(options.parentSessionId)
+      : undefined;
+    const fileChangeTracker = new AgentTurnFileChangeTracker(parentTracker?.aggregateForChild());
+    const result = await createPiAgentSessionImpl({
       config: this.config,
       workspace,
       sessionManager,
       modelRuntime: this.modelRuntime,
       model,
       thinkingLevel: options?.thinkingLevel,
+      fileChangeTracker,
       customTools: createPiServiceTools(
         {
           config: this.config,
@@ -817,9 +827,12 @@ export class PiService {
         workspace,
       ),
     });
+    this.fileChangeTrackers.set(result.session.sessionId, fileChangeTracker);
+    return result;
   }
 
   private disposeWebSession(webSession: WebSession): void {
+    this.fileChangeTrackers.delete(webSession.id);
     disposeWebSession(
       this.sessions,
       (sessionId) => this.unregisterLiveSession(sessionId),

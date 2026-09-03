@@ -50,6 +50,24 @@ describe("ToolCallBlock", () => {
     expect(wrapper.text()).toContain("Collapse output");
   });
 
+  it.each(["read", "write"])("syntax-highlights TypeScript %s output", (name) => {
+    const source = "const answer: number = 42;";
+    const wrapper = mount(ToolCallBlock, {
+      props: {
+        name,
+        arguments: {
+          path: "src/example.ts",
+          ...(name === "write" ? { content: source } : {}),
+        },
+        resultBlocks: name === "read" ? [{ type: "text", text: source }] : [],
+        status: "success",
+      },
+    });
+
+    expect(wrapper.get(".hljs-keyword").text()).toBe("const");
+    expect(wrapper.get(".hljs-number").text()).toBe("42");
+  });
+
   it("also truncates failed read output at the end", () => {
     const wrapper = mount(ToolCallBlock, {
       props: {
@@ -92,6 +110,29 @@ describe("ToolCallBlock", () => {
     expect(wrapper.text()).not.toContain("oldText");
     expect(wrapper.text()).not.toContain("newText");
     expect(wrapper.text()).toContain("src/client/components/ToolCallBlock.test.ts");
+  });
+
+  it("syntax-highlights edit output while preserving diff emphasis", () => {
+    const wrapper = mount(ToolCallBlock, {
+      props: {
+        name: "edit",
+        arguments: {
+          path: "src/example.ts",
+          oldText: 'const answer = "before";',
+          newText: 'const answer = "after";',
+        },
+        resultDetails: {
+          diff: '@@ -1 +1 @@\n- const answer = "before";\n+ const answer = "after";',
+        },
+        status: "success",
+      },
+    });
+
+    expect(wrapper.get(".diff-block .hljs-keyword").text()).toBe("const");
+    expect(wrapper.findAll(".diff-block__inline-change")).toHaveLength(2);
+    expect(wrapper.findAll(".hljs-string .diff-block__inline-change")).toHaveLength(2);
+    expect(wrapper.find(".diff-block__line--remove").exists()).toBe(true);
+    expect(wrapper.find(".diff-block__line--add").exists()).toBe(true);
   });
 
   it.each([

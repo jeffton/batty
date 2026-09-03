@@ -590,6 +590,7 @@ const genericEntries = computed(() => {
         :diff="props.resultDetails?.diff"
         :old-text="typeof props.resultDetails?.diff === 'string' ? undefined : oldTextValue"
         :new-text="typeof props.resultDetails?.diff === 'string' ? undefined : newTextValue"
+        :language="codeLanguage"
         :compact="props.compact"
       />
     </div>

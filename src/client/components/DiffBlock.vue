@@ -1,18 +1,22 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { highlightCode, highlightDiffCode } from "@/client/lib/code-format";
 import { createEditPreviewLines, parseRenderedDiff } from "@/client/lib/tool-diff";
+import type { DiffLineView } from "@/client/lib/tool-diff";
 
 const props = withDefaults(
   defineProps<{
     diff?: string;
     oldText?: string;
     newText?: string;
+    language?: string;
     compact?: boolean;
   }>(),
   {
     diff: undefined,
     oldText: undefined,
     newText: undefined,
+    language: undefined,
     compact: false,
   },
 );
@@ -29,6 +33,18 @@ const lines = computed(() => {
   return [];
 });
 
+function renderLine(line: DiffLineView): string {
+  if (!line.inlineChange) {
+    return highlightCode(line.text, props.language);
+  }
+
+  return highlightDiffCode(line.text, props.language, line.inlineChange);
+}
+
+const renderedLines = computed(() =>
+  lines.value.map((line) => ({ ...line, html: renderLine(line) })),
+);
+
 const lineNumberWidth = computed(() =>
   Math.max(
     1,
@@ -43,7 +59,7 @@ const lineNumberWidth = computed(() =>
     :style="{ '--diff-line-number-width': `${lineNumberWidth}ch` }"
   >
     <div
-      v-for="(line, index) in lines"
+      v-for="(line, index) in renderedLines"
       :key="index"
       :class="['diff-block__line', `diff-block__line--${line.kind}`]"
     >
@@ -131,5 +147,46 @@ const lineNumberWidth = computed(() =>
 .diff-block__content :deep(.diff-block__inline-change) {
   background: var(--color-diff-inline);
   border-radius: 0.2rem;
+}
+
+.diff-block__content :deep(.hljs-comment),
+.diff-block__content :deep(.hljs-quote) {
+  color: var(--color-code-comment);
+}
+
+.diff-block__content :deep(.hljs-keyword),
+.diff-block__content :deep(.hljs-selector-tag),
+.diff-block__content :deep(.hljs-literal),
+.diff-block__content :deep(.hljs-section),
+.diff-block__content :deep(.hljs-link) {
+  color: var(--color-code-keyword);
+}
+
+.diff-block__content :deep(.hljs-string),
+.diff-block__content :deep(.hljs-attr),
+.diff-block__content :deep(.hljs-template-tag),
+.diff-block__content :deep(.hljs-template-variable) {
+  color: var(--color-code-string);
+}
+
+.diff-block__content :deep(.hljs-number),
+.diff-block__content :deep(.hljs-symbol),
+.diff-block__content :deep(.hljs-bullet),
+.diff-block__content :deep(.hljs-variable),
+.diff-block__content :deep(.hljs-literal) {
+  color: var(--color-code-number);
+}
+
+.diff-block__content :deep(.hljs-title),
+.diff-block__content :deep(.hljs-title.class_),
+.diff-block__content :deep(.hljs-title.function_) {
+  color: var(--color-code-title);
+}
+
+.diff-block__content :deep(.hljs-tag),
+.diff-block__content :deep(.hljs-name),
+.diff-block__content :deep(.hljs-selector-id),
+.diff-block__content :deep(.hljs-selector-class) {
+  color: var(--color-code-tag);
 }
 </style>

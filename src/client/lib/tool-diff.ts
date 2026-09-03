@@ -3,7 +3,11 @@ export interface DiffLineView {
   prefix: string;
   oldNumber?: string;
   newNumber?: string;
-  html: string;
+  text: string;
+  inlineChange?: {
+    start: number;
+    end: number;
+  };
 }
 
 type LineOp =
@@ -11,15 +15,6 @@ type LineOp =
   | { kind: "add"; text: string; newNumber: number }
   | { kind: "remove"; text: string; oldNumber: number }
   | { kind: "ellipsis" };
-
-function escapeHtml(text: string): string {
-  return text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
 
 function commonPrefixLength(left: string, right: string): number {
   const limit = Math.min(left.length, right.length);
@@ -43,29 +38,23 @@ function commonSuffixLength(left: string, right: string, prefixLength: number): 
   return index;
 }
 
-function renderInlineDiff(oldText: string, newText: string): { oldHtml: string; newHtml: string } {
+function inlineChangeRanges(
+  oldText: string,
+  newText: string,
+): {
+  oldRange?: { start: number; end: number };
+  newRange?: { start: number; end: number };
+} {
   const prefixLength = commonPrefixLength(oldText, newText);
   const suffixLength = commonSuffixLength(oldText, newText, prefixLength);
   const oldChangedEnd = oldText.length - suffixLength;
   const newChangedEnd = newText.length - suffixLength;
-  const oldChanged = oldText.slice(prefixLength, oldChangedEnd);
-  const newChanged = newText.slice(prefixLength, newChangedEnd);
-
-  if (!oldChanged && !newChanged) {
-    return {
-      oldHtml: escapeHtml(oldText),
-      newHtml: escapeHtml(newText),
-    };
-  }
-
-  const prefix = escapeHtml(oldText.slice(0, prefixLength));
-  const oldMiddle = `<span class="diff-block__inline-change">${escapeHtml(oldChanged)}</span>`;
-  const newMiddle = `<span class="diff-block__inline-change">${escapeHtml(newChanged)}</span>`;
-  const suffix = suffixLength > 0 ? escapeHtml(oldText.slice(oldChangedEnd)) : "";
 
   return {
-    oldHtml: `${prefix}${oldMiddle}${suffix}`,
-    newHtml: `${prefix}${newMiddle}${suffix}`,
+    oldRange:
+      oldChangedEnd > prefixLength ? { start: prefixLength, end: oldChangedEnd } : undefined,
+    newRange:
+      newChangedEnd > prefixLength ? { start: prefixLength, end: newChangedEnd } : undefined,
   };
 }
 
@@ -186,7 +175,7 @@ function collapseContext(operations: LineOp[], contextLines: number): LineOp[] {
 
 function toLineView(operation: LineOp): DiffLineView {
   if (operation.kind === "ellipsis") {
-    return { kind: "ellipsis", prefix: "…", html: "..." };
+    return { kind: "ellipsis", prefix: "…", text: "..." };
   }
 
   if (operation.kind === "context") {
@@ -195,7 +184,7 @@ function toLineView(operation: LineOp): DiffLineView {
       prefix: " ",
       oldNumber: String(operation.oldNumber),
       newNumber: String(operation.newNumber),
-      html: escapeHtml(operation.text),
+      text: operation.text,
     };
   }
 
@@ -204,7 +193,7 @@ function toLineView(operation: LineOp): DiffLineView {
       kind: "remove",
       prefix: "-",
       oldNumber: String(operation.oldNumber),
-      html: escapeHtml(operation.text),
+      text: operation.text,
     };
   }
 
@@ -212,20 +201,11 @@ function toLineView(operation: LineOp): DiffLineView {
     kind: "add",
     prefix: "+",
     newNumber: String(operation.newNumber),
-    html: escapeHtml(operation.text),
+    text: operation.text,
   };
 }
 
-function decodeHtml(text: string): string {
-  return text
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">")
-    .replaceAll("&quot;", '"')
-    .replaceAll("&#39;", "'")
-    .replaceAll("&amp;", "&");
-}
-
-function enhanceInlinePairsFromText(lines: DiffLineView[]): DiffLineView[] {
+function enhanceInlinePairs(lines: DiffLineView[]): DiffLineView[] {
   const enhanced: DiffLineView[] = [];
 
   for (let index = 0; index < lines.length; index += 1) {
@@ -233,12 +213,9 @@ function enhanceInlinePairsFromText(lines: DiffLineView[]): DiffLineView[] {
     const next = lines[index + 1];
 
     if (current?.kind === "remove" && next?.kind === "add") {
-      const { oldHtml, newHtml } = renderInlineDiff(
-        decodeHtml(current.html),
-        decodeHtml(next.html),
-      );
-      enhanced.push({ ...current, html: oldHtml });
-      enhanced.push({ ...next, html: newHtml });
+      const { oldRange, newRange } = inlineChangeRanges(current.text, next.text);
+      enhanced.push({ ...current, inlineChange: oldRange });
+      enhanced.push({ ...next, inlineChange: newRange });
       index += 1;
       continue;
     }
@@ -260,7 +237,7 @@ export function createEditPreviewLines(
     buildLineDiff(splitLines(oldText), splitLines(newText)),
     contextLines,
   );
-  return enhanceInlinePairsFromText(operations.map(toLineView));
+  return enhanceInlinePairs(operations.map(toLineView));
 }
 
 function parseDiffLine(
@@ -289,12 +266,12 @@ export function parseRenderedDiff(diffText: string): DiffLineView[] {
 
     const parsed = parseDiffLine(rawLine);
     if (!parsed) {
-      lines.push({ kind: "meta", prefix: "", html: escapeHtml(rawLine) });
+      lines.push({ kind: "meta", prefix: "", text: rawLine });
       continue;
     }
 
     if (parsed.prefix === " " && parsed.text === "...") {
-      lines.push({ kind: "ellipsis", prefix: "…", html: "..." });
+      lines.push({ kind: "ellipsis", prefix: "…", text: "..." });
       continue;
     }
 
@@ -303,7 +280,7 @@ export function parseRenderedDiff(diffText: string): DiffLineView[] {
         kind: "remove",
         prefix: "-",
         oldNumber: parsed.lineNumber,
-        html: escapeHtml(parsed.text),
+        text: parsed.text,
       });
       continue;
     }
@@ -313,7 +290,7 @@ export function parseRenderedDiff(diffText: string): DiffLineView[] {
         kind: "add",
         prefix: "+",
         newNumber: parsed.lineNumber,
-        html: escapeHtml(parsed.text),
+        text: parsed.text,
       });
       continue;
     }
@@ -323,9 +300,9 @@ export function parseRenderedDiff(diffText: string): DiffLineView[] {
       prefix: " ",
       oldNumber: parsed.lineNumber,
       newNumber: parsed.lineNumber,
-      html: escapeHtml(parsed.text),
+      text: parsed.text,
     });
   }
 
-  return enhanceInlinePairsFromText(lines);
+  return enhanceInlinePairs(lines);
 }

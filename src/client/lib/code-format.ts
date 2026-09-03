@@ -73,6 +73,91 @@ export function highlightCode(code: string, language?: string): string {
   return value;
 }
 
+function encodedTextLength(html: string): number {
+  let length = 0;
+  for (let index = 0; index < html.length; index += 1) {
+    if (html[index] === "&") {
+      const entity = html.slice(index).match(/^&(?:#\d+|#x[\da-f]+|[a-z][\w]+);/i)?.[0];
+      if (entity) {
+        index += entity.length - 1;
+      }
+    }
+    length += 1;
+  }
+  return length;
+}
+
+function encodedIndexAtOffset(html: string, targetOffset: number): number {
+  let offset = 0;
+  let index = 0;
+
+  while (index < html.length && offset < targetOffset) {
+    if (html[index] === "&") {
+      const entity = html.slice(index).match(/^&(?:#\d+|#x[\da-f]+|[a-z][\w]+);/i)?.[0];
+      if (entity) {
+        index += entity.length;
+        offset += 1;
+        continue;
+      }
+    }
+
+    index += 1;
+    offset += 1;
+  }
+
+  return index;
+}
+
+export function highlightDiffCode(
+  code: string,
+  language: string | undefined,
+  range: { start: number; end: number },
+): string {
+  const highlighted = highlightCode(code, language);
+  if (range.start >= range.end) {
+    return highlighted;
+  }
+
+  const tagPattern = /<[^>]+>/g;
+  let htmlOffset = 0;
+  let codeOffset = 0;
+  let result = "";
+
+  for (const match of highlighted.matchAll(tagPattern)) {
+    const tagOffset = match.index;
+    const text = highlighted.slice(htmlOffset, tagOffset);
+    const textLength = encodedTextLength(text);
+    const changeStart = Math.max(0, range.start - codeOffset);
+    const changeEnd = Math.min(textLength, range.end - codeOffset);
+
+    if (changeStart < changeEnd) {
+      const startIndex = encodedIndexAtOffset(text, changeStart);
+      const endIndex = encodedIndexAtOffset(text, changeEnd);
+      result += `${text.slice(0, startIndex)}<span class="diff-block__inline-change">${text.slice(startIndex, endIndex)}</span>${text.slice(endIndex)}`;
+    } else {
+      result += text;
+    }
+
+    result += match[0];
+    htmlOffset = tagOffset + match[0].length;
+    codeOffset += textLength;
+  }
+
+  const text = highlighted.slice(htmlOffset);
+  const textLength = encodedTextLength(text);
+  const changeStart = Math.max(0, range.start - codeOffset);
+  const changeEnd = Math.min(textLength, range.end - codeOffset);
+  if (changeStart < changeEnd) {
+    const startIndex = encodedIndexAtOffset(text, changeStart);
+    const endIndex = encodedIndexAtOffset(text, changeEnd);
+    result += `${text.slice(0, startIndex)}<span class="diff-block__inline-change">${text.slice(startIndex, endIndex)}</span>${text.slice(endIndex)}`;
+  } else {
+    result += text;
+  }
+
+  return result;
+}
+
 export function languageFromPath(path?: string): string | undefined {
   if (!path) {
     return undefined;

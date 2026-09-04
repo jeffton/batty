@@ -30,6 +30,18 @@ const options: CodeViewOptions = {
     [data-line] span {
       font-weight: 500 !important;
     }
+
+    [data-line-type="change-addition"] {
+      --diffs-computed-diff-line-bg: var(--color-diff-add-bg);
+    }
+
+    [data-line-type="change-deletion"] {
+      --diffs-computed-diff-line-bg: var(--color-diff-remove-bg);
+    }
+
+    [data-diff-span] {
+      background-color: var(--color-diff-inline);
+    }
   `,
 };
 

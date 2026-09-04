@@ -50,6 +50,10 @@ describe("AgentTurnDiffPopover", () => {
         ),
       }),
     );
+    const unsafeCSS = pierre.create.mock.calls[0]?.[0]?.unsafeCSS as string;
+    expect(unsafeCSS).toContain("--diffs-computed-diff-line-bg: var(--color-diff-add-bg)");
+    expect(unsafeCSS).toContain("--diffs-computed-diff-line-bg: var(--color-diff-remove-bg)");
+    expect(unsafeCSS).toContain("background-color: var(--color-diff-inline)");
     expect(pierre.parsePatchFiles).toHaveBeenCalledWith(
       expect.stringContaining("-export const value = 1;\n+export const value = 2;"),
       "changes-1:0",

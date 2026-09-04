@@ -218,6 +218,7 @@ export async function handleAgentEvent(
     notifyWorkspaceUpdated: (workspaceId: string) => Promise<void>;
     disposeWebSession: (webSession: WebSession) => void;
     onAgentCompleted?: (session: SessionState) => Promise<void>;
+    onAgentSettled?: (webSession: WebSession) => Promise<void>;
   },
   webSession: WebSession,
   event: AgentSessionEvent,
@@ -410,6 +411,7 @@ export async function handleAgentEvent(
       break;
     }
     case "agent_settled":
+      await deps.onAgentSettled?.(webSession);
       await waitForSessionStateFlush();
       deps.publish(webSession, { type: "reset", state: deps.getState(webSession.id) });
       break;

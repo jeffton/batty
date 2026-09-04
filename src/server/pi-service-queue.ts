@@ -16,23 +16,10 @@ export function getQueuedPrompts(webSession: WebSession): SessionState["queuedPr
   ];
 }
 
-export async function removeQueuedPrompt(
+export function removeQueuedPrompt(
   webSession: WebSession,
   kind: "steer" | "followUp",
   index: number,
-): Promise<void> {
-  const queued = webSession.session.clearQueue();
-  const steering = queued.steering.filter(
-    (_, candidateIndex) => kind !== "steer" || candidateIndex !== index,
-  );
-  const followUp = queued.followUp.filter(
-    (_, candidateIndex) => kind !== "followUp" || candidateIndex !== index,
-  );
-
-  for (const message of steering) {
-    await webSession.session.steer(message);
-  }
-  for (const message of followUp) {
-    await webSession.session.followUp(message);
-  }
+): void {
+  webSession.session.removeQueuedPrompt(kind, index);
 }

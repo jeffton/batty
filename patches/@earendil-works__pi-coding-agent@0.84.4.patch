@@ -1,6 +1,8 @@
+diff --git a/dist/core/agent-session.d.ts b/dist/core/agent-session.d.ts
+index 8c7cfec6fc0ec004f17c08c52a58c354b28b3978..7aa42249ab01791e61ffb9a338b8d4efc5ac5313 100644
 --- a/dist/core/agent-session.d.ts
 +++ b/dist/core/agent-session.d.ts
-@@ -156,6 +156,8 @@
+@@ -156,12 +156,19 @@ export interface PromptOptions {
      expandPromptTemplates?: boolean;
      /** Image attachments */
      images?: ImageContent[];
@@ -9,9 +11,50 @@
      /** When streaming, how to queue the message: "steer" (interrupt) or "followUp" (wait). Required if streaming. */
      streamingBehavior?: "steer" | "followUp";
      /** Source of input for extension input event handlers. Defaults to "interactive". */
+     source?: InputSource;
+     /** Internal hook used by RPC mode to observe prompt preflight acceptance or rejection. */
+-    preflightResult?: (success: boolean) => void;
++    preflightResult?: (success: boolean, prepared?: {
++        text: string;
++        images?: ImageContent[];
++        messages?: AgentMessage[];
++        systemPrompt?: string;
++    }) => void | Promise<void>;
+ }
+ /** Options for model/thinking mutations. */
+ export interface ModelMutationOptions {
+@@ -362,6 +369,17 @@ export declare class AgentSession {
+      * @throws Error if no model selected or no API key available (when not streaming)
+      */
+     prompt(text: string, options?: PromptOptions): Promise<void>;
++    /** Continue an interrupted persisted turn without appending another user message. */
++    resumeInterruptedTurn(): Promise<void>;
++    /** Restore a prepared queued prompt without rerunning input handlers or template expansion. */
++    restoreQueuedPrompt(text: string, options: Pick<PromptOptions, "images" | "clientMessageId"> & {
++        streamingBehavior: "steer" | "followUp";
++    }): Promise<void>;
++    /** Restart a prompt whose journal was committed before its user message was persisted. */
++    resumeInterruptedPrompt(text: string, options?: Pick<PromptOptions, "images" | "clientMessageId"> & {
++        messages?: AgentMessage[];
++        systemPrompt?: string;
++    }): Promise<void>;
+     private _tryExecuteExtensionCommand;
+     /**
+      * Expand skill commands (/skill:name args) to their full content.
+@@ -436,6 +454,8 @@ export declare class AgentSession {
+         steering: string[];
+         followUp: string[];
+     };
++    /** Remove one queued message without rebuilding the queues or losing message metadata. */
++    removeQueuedPrompt(kind: "steer" | "followUp", index: number): boolean;
+     /** Number of pending messages (includes both steering and follow-up) */
+     get pendingMessageCount(): number;
+     /** Get pending steering messages (read-only) */
+diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
+index fd82b71cf332715f185d07459429f04ed7491ce9..786c1a33b7c935224fcaa4ba7ae3f50f2ea4c342 100644
 --- a/dist/core/agent-session.js
 +++ b/dist/core/agent-session.js
-@@ -271,15 +271,24 @@
+@@ -271,15 +271,24 @@ export class AgentSession {
              };
          };
      }
@@ -39,7 +82,7 @@
          return {
              ...context,
              messages: this.agent.state.messages.slice(),
-@@ -291,7 +300,7 @@
+@@ -291,7 +300,7 @@ export class AgentSession {
                  ? async (_turn, signal) => await this.agent.prepareNextTurn?.(signal)
                  : undefined);
          this.agent.prepareNextTurnWithContext = async (turn, signal) => {
@@ -48,9 +91,96 @@
              const previousSnapshot = await previousPrepareNextTurnWithContext?.({ ...turn, context }, signal);
              const nextContext = previousSnapshot?.context ?? context;
              return {
-@@ -862,10 +871,10 @@
+@@ -784,6 +793,58 @@ export class AgentSession {
+             await this._emitAgentSettled();
+         }
+     }
++    /** Continue an interrupted persisted turn without appending another user message. */
++    async resumeInterruptedTurn() {
++        if (this.isStreaming) {
++            throw new Error("Agent is already processing");
++        }
++        this._isAgentRunActive = true;
++        try {
++            await this.agent.continue();
++            while (await this._handlePostAgentRun()) {
++                await this.agent.continue();
++            }
++        }
++        finally {
++            this._systemPromptOverride = undefined;
++            this._flushPendingBashMessages();
++            this._flushPendingCustomMessages();
++            await this._emitAgentSettled();
++        }
++    }
++    /** Restore a prepared queued prompt without rerunning input handlers or template expansion. */
++    async restoreQueuedPrompt(text, options) {
++        if (options.streamingBehavior === "steer") {
++            await this._queueSteer(text, options.images, options.clientMessageId);
++        }
++        else {
++            await this._queueFollowUp(text, options.images, options.clientMessageId);
++        }
++    }
++    /** Restart a prompt whose journal was committed before its user message was persisted. */
++    async resumeInterruptedPrompt(text, options) {
++        if (this.isStreaming) {
++            throw new Error("Agent is already processing");
++        }
++        let messages = options?.messages;
++        if (!messages) {
++            const content = [{ type: "text", text }];
++            if (options?.images) {
++                content.push(...options.images);
++            }
++            messages = [{
++                    role: "user",
++                    content,
++                    timestamp: Date.now(),
++                    clientMessageId: options?.clientMessageId,
++                }];
++        }
++        if (options?.systemPrompt !== undefined) {
++            this._systemPromptOverride = options.systemPrompt;
++            this.agent.state.systemPrompt = options.systemPrompt;
++        }
++        await this._runAgentPrompt(messages);
++    }
+     async _handlePostAgentRun() {
+         const msg = this._lastAssistantMessage;
+         this._lastAssistantMessage = undefined;
+@@ -822,6 +883,7 @@ export class AgentSession {
+         const expandPromptTemplates = options?.expandPromptTemplates ?? true;
+         const preflightResult = options?.preflightResult;
+         let messages;
++        let preparedPrompt;
+         try {
+             // Handle extension commands first (execute immediately, even during streaming)
+             // Extension commands manage their own LLM interaction via pi.sendMessage()
+@@ -829,7 +891,7 @@ export class AgentSession {
+                 const handled = await this._tryExecuteExtensionCommand(text);
+                 if (handled) {
+                     // Extension command executed, no prompt to send
+-                    preflightResult?.(true);
++                    await preflightResult?.(true);
+                     return;
+                 }
+             }
+@@ -842,7 +904,7 @@ export class AgentSession {
+             if (this._extensionRunner.hasHandlers("input")) {
+                 const inputResult = await this._extensionRunner.emitInput(currentText, currentImages, options?.source ?? "interactive", this.isStreaming ? options?.streamingBehavior : undefined);
+                 if (inputResult.action === "handled") {
+-                    preflightResult?.(true);
++                    await preflightResult?.(true);
+                     return;
+                 }
+                 if (inputResult.action === "transform") {
+@@ -861,13 +923,13 @@ export class AgentSession {
+                 if (!options?.streamingBehavior) {
                      throw new Error("Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.");
                  }
++                await preflightResult?.(true, { text: expandedText, images: currentImages });
                  if (options.streamingBehavior === "followUp") {
 -                    await this._queueFollowUp(expandedText, currentImages);
 +                    await this._queueFollowUp(expandedText, currentImages, options.clientMessageId);
@@ -59,9 +189,11 @@
 -                    await this._queueSteer(expandedText, currentImages);
 +                    await this._queueSteer(expandedText, currentImages, options.clientMessageId);
                  }
-                 preflightResult?.(true);
+-                preflightResult?.(true);
                  return;
-@@ -905,6 +914,7 @@
+             }
+             // Flush any pending bash and custom messages before the new prompt
+@@ -905,6 +967,7 @@ export class AgentSession {
                  role: "user",
                  content: userContent,
                  timestamp: Date.now(),
@@ -69,7 +201,30 @@
              });
              // Inject any pending "nextTurn" messages as context alongside the user message
              for (const msg of this._pendingNextTurnMessages) {
-@@ -1043,7 +1053,7 @@
+@@ -937,15 +1000,20 @@ export class AgentSession {
+                 this._systemPromptOverride = undefined;
+                 this.agent.state.systemPrompt = this._baseSystemPrompt;
+             }
++            preparedPrompt = { text: expandedText, images: currentImages };
+         }
+         catch (error) {
+-            preflightResult?.(false);
++            await preflightResult?.(false);
+             throw error;
+         }
+         if (!messages) {
+             return;
+         }
+-        preflightResult?.(true);
++        await preflightResult?.(true, {
++            ...preparedPrompt,
++            messages,
++            systemPrompt: this.agent.state.systemPrompt,
++        });
+         await this._runAgentPrompt(messages);
+     }
+     /**
+@@ -1043,7 +1111,7 @@ export class AgentSession {
      /**
       * Internal: Queue a steering message (already expanded, no extension command check).
       */
@@ -78,7 +233,7 @@
          this._steeringMessages.push(text);
          this._emitQueueUpdate();
          const content = [{ type: "text", text }];
-@@ -1054,12 +1064,13 @@
+@@ -1054,12 +1122,13 @@ export class AgentSession {
              role: "user",
              content,
              timestamp: Date.now(),
@@ -93,7 +248,7 @@
          this._followUpMessages.push(text);
          this._emitQueueUpdate();
          const content = [{ type: "text", text }];
-@@ -1070,6 +1081,7 @@
+@@ -1070,6 +1139,7 @@ export class AgentSession {
              role: "user",
              content,
              timestamp: Date.now(),
@@ -101,7 +256,26 @@
          });
      }
      /**
-@@ -1730,15 +1742,19 @@
+@@ -1201,6 +1271,18 @@ export class AgentSession {
+         this._emitQueueUpdate();
+         return { steering, followUp };
+     }
++    /** Remove one queued message without rebuilding the queues or losing message metadata. */
++    removeQueuedPrompt(kind, index) {
++        const displayQueue = kind === "steer" ? this._steeringMessages : this._followUpMessages;
++        const agentQueue = kind === "steer" ? this.agent.steeringQueue : this.agent.followUpQueue;
++        if (index < 0 || index >= displayQueue.length || index >= agentQueue.messages.length) {
++            return false;
++        }
++        displayQueue.splice(index, 1);
++        agentQueue.messages.splice(index, 1);
++        this._emitQueueUpdate();
++        return true;
++    }
+     /** Number of pending messages (includes both steering and follow-up) */
+     get pendingMessageCount() {
+         return this._steeringMessages.length + this._followUpMessages.length;
+@@ -1730,15 +1812,19 @@ export class AgentSession {
       * @param willRetry Whether to continue the interrupted turn after overflow compaction
       * @returns Whether the post-run loop should call `agent.continue()`
       */
@@ -123,7 +297,7 @@
              const pathEntries = this.sessionManager.getBranch();
              const preparation = prepareCompaction(pathEntries, settings);
              if (!preparation) {
-@@ -1746,6 +1762,7 @@
+@@ -1746,6 +1832,7 @@ export class AgentSession {
              }
              this._emit({ type: "compaction_start", reason });
              this._autoCompactionAbortController = new AbortController();
@@ -131,7 +305,7 @@
              started = true;
              let extensionCompaction;
              if (this._extensionRunner.hasHandlers("session_before_compact")) {
-@@ -1883,6 +1900,7 @@
+@@ -1883,6 +1970,7 @@ export class AgentSession {
              return false;
          }
          finally {
@@ -139,9 +313,11 @@
              this._autoCompactionAbortController = undefined;
          }
      }
+diff --git a/dist/core/compaction/compaction.js b/dist/core/compaction/compaction.js
+index e936db7dc2617b5c0ff43ea11942c5a79b672dc6..8ab320a95aca95ff82da06333dee5fdcee395329 100644
 --- a/dist/core/compaction/compaction.js
 +++ b/dist/core/compaction/compaction.js
-@@ -321,13 +321,20 @@
+@@ -321,13 +321,20 @@ export function findCutPoint(entries, startIndex, endIndex, keepRecentTokens) {
          accumulatedTokens += messageTokens;
          // Check if we've exceeded the budget
          if (accumulatedTokens >= keepRecentTokens) {
@@ -161,4 +337,35 @@
 +            }
              break;
          }
+     }
+diff --git a/dist/core/session-manager.d.ts b/dist/core/session-manager.d.ts
+index 8cdfbdec42f696b8cd6b762a92180a81ec142433..4d5c3a07bab1f9cb95e458105cb6964a02d4a554 100644
+--- a/dist/core/session-manager.d.ts
++++ b/dist/core/session-manager.d.ts
+@@ -201,6 +201,8 @@ export declare class SessionManager {
+     private _buildIndex;
+     private _rewriteFile;
+     isPersisted(): boolean;
++    /** Ensure the current in-memory session tree has been written to disk. */
++    flush(): void;
+     getCwd(): string;
+     getSessionDir(): string;
+     usesDefaultSessionDir(): boolean;
+diff --git a/dist/core/session-manager.js b/dist/core/session-manager.js
+index f887c04976596f8956bc04c16ca59c4030e09f92..a7db0f153a5b01646431bd55b9a10bfe833b4b62 100644
+--- a/dist/core/session-manager.js
++++ b/dist/core/session-manager.js
+@@ -708,6 +708,13 @@ export class SessionManager {
+     isPersisted() {
+         return this.persist;
+     }
++    /** Ensure the current in-memory session tree has been written to disk. */
++    flush() {
++        if (!this.persist || !this.sessionFile || this.flushed)
++            return;
++        this._rewriteFile();
++        this.flushed = true;
++    }
+     getCwd() {
+         return this.cwd;
      }

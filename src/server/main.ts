@@ -159,6 +159,7 @@ cronService.setRunner({
   },
 });
 await cronService.initialize();
+await service.recoverActiveInteractiveTurns();
 
 const authAttemptLimiter = createLoginRateLimiter();
 

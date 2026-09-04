@@ -337,8 +337,8 @@ onBeforeUnmount(() => {
         <div
           :class="[
             'message__segment',
+            'message__segment--bubble',
             {
-              'message__segment--bubble': segment.kind === 'bubble',
               'message__segment--error': segment.kind === 'bubble' && assistantHasError,
             },
           ]"

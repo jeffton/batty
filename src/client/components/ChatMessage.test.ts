@@ -349,6 +349,7 @@ describe("ChatMessage", () => {
 
     expect(wrapper.text()).toContain("Inspecting the setup.");
     expect(wrapper.find(".markdown-body--thinking").exists()).toBe(true);
+    expect(wrapper.find(".message__segment--bubble").exists()).toBe(true);
     expect(wrapper.find(".message__copy-button").exists()).toBe(false);
     expect(wrapper.text()).toContain("subagent");
   });
@@ -373,6 +374,7 @@ describe("ChatMessage", () => {
 
     const children = Array.from(wrapper.find(".message__body").element.children);
     expect(children).toHaveLength(3);
+    expect(children[0]?.classList.contains("message__segment--bubble")).toBe(true);
     expect(children[0]?.textContent).toContain("Inspecting the setup.");
     expect(children[1]?.classList.contains("details-toggle")).toBe(true);
     expect(children[2]?.classList.contains("message__segment--bubble")).toBe(true);

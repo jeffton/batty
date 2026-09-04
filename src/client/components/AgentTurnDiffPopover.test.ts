@@ -46,7 +46,7 @@ describe("AgentTurnDiffPopover", () => {
       expect.objectContaining({
         overflow: "wrap",
         unsafeCSS: expect.stringMatching(
-          /--diffs-font-family: var\(--font-family-mono\)[\s\S]*--diffs-header-font-family: var\(--font-family-mono\)[\s\S]*font-weight: 500/,
+          /--diffs-font-family: var\(--font-family-mono\)[\s\S]*--diffs-header-font-family: var\(--font-family-mono\)[\s\S]*font-weight: 400/,
         ),
       }),
     );

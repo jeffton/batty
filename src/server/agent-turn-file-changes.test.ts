@@ -20,7 +20,7 @@ afterEach(async () => {
 });
 
 async function makeTemporaryDirectory(): Promise<string> {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "batty-turn-diff-"));
+  const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "batty-turn-diff-")));
   temporaryDirectories.push(directory);
   return directory;
 }

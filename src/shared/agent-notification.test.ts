@@ -29,6 +29,7 @@ function createSession(markdown: string): SessionState {
       {
         id: "assistant-1",
         role: "assistant",
+        turnPhase: "final",
         timestamp: 100,
         blocks: [{ type: "text", text: markdown }],
       },

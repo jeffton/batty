@@ -176,6 +176,66 @@ describe("createSessionState", () => {
 });
 
 describe("normalizeMessage", () => {
+  it("classifies assistant turn phases from stop reasons and tool blocks", () => {
+    const cases = [
+      {
+        name: "toolUse",
+        message: {
+          role: "assistant",
+          content: [{ type: "toolCall", id: "call-1", name: "read", arguments: {} }],
+          stopReason: "toolUse",
+          timestamp: 1,
+        },
+        expected: "intermediate",
+      },
+      {
+        name: "toolUse summary",
+        message: {
+          role: "assistant",
+          content: [{ type: "toolCall", id: "call-2", name: "read", arguments: {} }],
+          stopReason: "toolUse",
+          timestamp: 2,
+        },
+        options: { includeToolDetails: false },
+        expected: "intermediate",
+      },
+      {
+        name: "pending without tool",
+        message: { role: "assistant", content: [], stopReason: "pending", timestamp: 3 },
+        expected: "pending",
+      },
+      {
+        name: "pending with tool",
+        message: {
+          role: "assistant",
+          content: [{ type: "toolCall", id: "call-3", name: "read", arguments: {} }],
+          stopReason: "pending",
+          timestamp: 4,
+        },
+        expected: "intermediate",
+      },
+      {
+        name: "stop",
+        message: { role: "assistant", content: [], stopReason: "stop", timestamp: 5 },
+        expected: "final",
+      },
+      {
+        name: "error",
+        message: { role: "assistant", content: [], stopReason: "error", timestamp: 6 },
+        expected: "final",
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const normalized = normalizeMessage(
+        testCase.message as unknown as AgentMessage,
+        0,
+        "options" in testCase ? testCase.options : undefined,
+      );
+      expect(normalized, testCase.name).toMatchObject({ turnPhase: testCase.expected });
+    }
+  });
+
   it("preserves client message IDs on user messages", () => {
     const normalized = normalizeMessage(
       {

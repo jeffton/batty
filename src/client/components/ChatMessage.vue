@@ -80,28 +80,11 @@ const assistantSegments = computed<AssistantSegment[]>(() => {
     return [];
   }
 
-  const blocks = props.message.blocks.filter(showAssistantBlock);
-  if (blocks.length === 0) {
-    return [];
-  }
-
-  let trailingReplyStart = blocks.length;
-
-  while (
-    trailingReplyStart > 0 &&
-    isBubbleBlock(blocks[trailingReplyStart - 1] as UiContentBlock)
-  ) {
-    trailingReplyStart -= 1;
-  }
-
-  if (trailingReplyStart === 0) {
-    return [{ kind: "reply", blocks }];
-  }
-
   const segments: AssistantSegment[] = [];
+  const bubbleKind = props.message.turnPhase === "final" ? "reply" : "interim";
 
-  for (const block of blocks.slice(0, trailingReplyStart)) {
-    const kind = isBubbleBlock(block) ? "interim" : "plain";
+  for (const block of props.message.blocks.filter(showAssistantBlock)) {
+    const kind = isBubbleBlock(block) ? bubbleKind : "plain";
     const previousSegment = segments.at(-1);
 
     if (previousSegment?.kind === kind) {
@@ -109,10 +92,6 @@ const assistantSegments = computed<AssistantSegment[]>(() => {
     } else {
       segments.push({ kind, blocks: [block] });
     }
-  }
-
-  if (trailingReplyStart < blocks.length) {
-    segments.push({ kind: "reply", blocks: blocks.slice(trailingReplyStart) });
   }
 
   return segments;
@@ -167,17 +146,21 @@ const assistantHasError = computed(
   () => props.message.role === "assistant" && typeof assistantErrorText.value === "string",
 );
 
-const showAssistantErrorBubble = computed(
-  () => props.message.role === "assistant" && !hasTrailingAssistantBubble.value,
+const replySegmentIndex = computed(() =>
+  assistantSegments.value.findIndex((segment) => segment.kind === "reply"),
 );
 
-const hasTrailingAssistantBubble = computed(() => {
-  const lastSegment = assistantSegments.value.at(-1);
-  return lastSegment?.kind === "reply";
-});
+const lastReplySegmentIndex = computed(() =>
+  assistantSegments.value.findLastIndex((segment) => segment.kind === "reply"),
+);
 
-const copyButtonSegmentIndex = computed(() =>
-  assistantSegments.value.findIndex((segment) => segment.kind === "reply"),
+const hasAssistantReplySegment = computed(() => replySegmentIndex.value >= 0);
+
+const showAssistantErrorBubble = computed(
+  () =>
+    props.message.role === "assistant" &&
+    props.message.turnPhase === "final" &&
+    !hasAssistantReplySegment.value,
 );
 
 const messageTimestampLabel = computed(() => {
@@ -340,8 +323,11 @@ onBeforeUnmount(() => {
         v-for="(segment, segmentIndex) in assistantSegments"
         :key="`${props.message.id}-segment-${segmentIndex}`"
       >
-        <slot v-if="segment.kind === 'reply'" name="before-assistant-reply" />
-        <div v-if="segment.kind === 'reply' && props.showTimestamp" class="message__timestamp">
+        <slot v-if="segmentIndex === replySegmentIndex" name="before-assistant-reply" />
+        <div
+          v-if="segmentIndex === replySegmentIndex && props.showTimestamp"
+          class="message__timestamp"
+        >
           {{ messageTimestampLabel }}
         </div>
         <div
@@ -354,7 +340,7 @@ onBeforeUnmount(() => {
           ]"
         >
           <button
-            v-if="segmentIndex === copyButtonSegmentIndex"
+            v-if="segmentIndex === replySegmentIndex"
             type="button"
             class="message__copy-button"
             :aria-label="copied ? 'Copied reply markdown' : 'Copy reply as markdown'"
@@ -396,11 +382,7 @@ onBeforeUnmount(() => {
           </template>
 
           <div
-            v-if="
-              hasReplyArtifacts &&
-              segmentIndex === assistantSegments.length - 1 &&
-              segment.kind === 'reply'
-            "
+            v-if="hasReplyArtifacts && segmentIndex === lastReplySegmentIndex"
             class="message__artifacts"
           >
             <AttachedFilesList v-if="attachedFiles.length > 0" :files="attachedFiles" />
@@ -423,9 +405,9 @@ onBeforeUnmount(() => {
         </div>
       </template>
 
-      <slot v-if="hasReplyArtifacts && !hasTrailingAssistantBubble" name="before-assistant-reply" />
+      <slot v-if="hasReplyArtifacts && !hasAssistantReplySegment" name="before-assistant-reply" />
       <div
-        v-if="hasReplyArtifacts && !hasTrailingAssistantBubble"
+        v-if="hasReplyArtifacts && !hasAssistantReplySegment"
         class="message__segment message__segment--bubble message__artifacts"
       >
         <AttachedFilesList v-if="attachedFiles.length > 0" :files="attachedFiles" />

@@ -211,6 +211,7 @@ export function mergeAttachmentCarrierIntoAssistant(
 function acceptsPendingAttachmentBlocks(message: UiMessage): boolean {
   return (
     message.role === "assistant" &&
+    message.turnPhase === "final" &&
     message.blocks.some((block) => block.type === "text" || block.type === "image")
   );
 }
@@ -273,6 +274,7 @@ export function buildTranscriptMessages(
         id: `${pendingAttachmentId}:attachments`,
         role: "assistant",
         timestamp: pendingAttachmentTimestamp,
+        turnPhase: "final",
         blocks: pendingAttachmentBlocks,
       };
       entries.push({
@@ -314,6 +316,7 @@ export function buildTranscriptMessages(
       id: `${pendingAttachmentId}:attachments`,
       role: "assistant",
       timestamp: pendingAttachmentTimestamp,
+      turnPhase: "final",
       blocks: pendingAttachmentBlocks,
     };
     entries.push({

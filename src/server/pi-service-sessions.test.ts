@@ -105,6 +105,7 @@ describe("live reset events", () => {
         {
           id: "assistant-1-0",
           role: "assistant",
+          turnPhase: "final",
           timestamp: 1,
           blocks: [
             { type: "text", text: "Checking it." },
@@ -471,6 +472,7 @@ describe("handleAgentEvent", () => {
       {
         id: "assistant-1",
         role: "assistant",
+        turnPhase: "intermediate",
         timestamp: 1,
         blocks: [
           { type: "toolCall", id: "call-1", name: "subagent", arguments: { prompt: "Search" } },

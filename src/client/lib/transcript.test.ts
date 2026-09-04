@@ -9,6 +9,7 @@ import type { SessionState, UiContentBlock, UiMessage } from "@/shared/types";
 const assistantMessage: Extract<UiMessage, { role: "assistant" }> = {
   id: "assistant-1",
   role: "assistant",
+  turnPhase: "final",
   timestamp: 1,
   blocks: [
     { type: "text", text: "Running a command" },
@@ -50,6 +51,7 @@ describe("transcript tool state merging", () => {
     const attachmentAssistant: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-attach",
       role: "assistant",
+      turnPhase: "intermediate",
       timestamp: 3,
       blocks: [
         {
@@ -84,6 +86,7 @@ describe("transcript tool state merging", () => {
     const finalAssistant: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-final",
       role: "assistant",
+      turnPhase: "final",
       timestamp: 5,
       blocks: [{ type: "text", text: "Here is the report." }],
     };
@@ -112,6 +115,7 @@ describe("transcript tool state merging", () => {
     const attachmentAssistant: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-attach",
       role: "assistant",
+      turnPhase: "intermediate",
       timestamp: 3,
       blocks: [
         { type: "thinking", thinking: "I should attach the latest image." },
@@ -148,6 +152,7 @@ describe("transcript tool state merging", () => {
     const finalAssistant: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-final",
       role: "assistant",
+      turnPhase: "final",
       timestamp: 5,
       blocks: [{ type: "text", text: "Here is the report." }],
     };
@@ -177,6 +182,7 @@ describe("transcript tool state merging", () => {
     const attachmentAssistant: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-attach",
       role: "assistant",
+      turnPhase: "intermediate",
       timestamp: 3,
       blocks: [
         { type: "thinking", thinking: "Attaching the image." },
@@ -228,6 +234,7 @@ describe("transcript tool state merging", () => {
     const thinkingAssistant: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-thinking",
       role: "assistant",
+      turnPhase: "final",
       timestamp: 3,
       blocks: [{ type: "thinking", thinking: "Inspecting the setup." }],
     };
@@ -243,6 +250,7 @@ describe("transcript tool state merging", () => {
     const attachmentAssistant: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-attach",
       role: "assistant",
+      turnPhase: "intermediate",
       timestamp: 3,
       blocks: [
         {
@@ -293,6 +301,7 @@ describe("transcript tool state merging", () => {
     const commitAssistant: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-commit",
       role: "assistant",
+      turnPhase: "intermediate",
       timestamp: 6,
       blocks: [
         {
@@ -315,6 +324,7 @@ describe("transcript tool state merging", () => {
     const finalAssistant: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-final",
       role: "assistant",
+      turnPhase: "final",
       timestamp: 8,
       blocks: [{ type: "text", text: "Here is the image." }],
     };
@@ -350,6 +360,7 @@ describe("transcript tool state merging", () => {
     const subagentAssistant: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-subagent",
       role: "assistant",
+      turnPhase: "intermediate",
       timestamp: 3,
       blocks: [
         {
@@ -384,6 +395,7 @@ describe("transcript tool state merging", () => {
     const finalAssistant: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-final",
       role: "assistant",
+      turnPhase: "final",
       timestamp: 5,
       blocks: [{ type: "text", text: "Here is the report." }],
     };
@@ -434,6 +446,7 @@ describe("transcript tool state merging", () => {
     const finalAssistant: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-final",
       role: "assistant",
+      turnPhase: "final",
       timestamp: 5,
       blocks: [{ type: "text", text: "Here is the report." }],
     };
@@ -458,6 +471,7 @@ describe("transcript tool state merging", () => {
     const errorAssistant: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-error",
       role: "assistant",
+      turnPhase: "final",
       timestamp: 3,
       blocks: [],
       stopReason: "error",
@@ -475,6 +489,7 @@ describe("transcript tool state merging", () => {
     const failedAttempt: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-error",
       role: "assistant",
+      turnPhase: "final",
       timestamp: 3,
       blocks: [],
       stopReason: "error",
@@ -483,6 +498,7 @@ describe("transcript tool state merging", () => {
     const recoveredAssistant: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-recovered",
       role: "assistant",
+      turnPhase: "final",
       timestamp: 4,
       blocks: [{ type: "text", text: "Recovered" }],
     };
@@ -498,6 +514,7 @@ describe("transcript tool state merging", () => {
     const historicalError: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-old-error",
       role: "assistant",
+      turnPhase: "final",
       timestamp: 3,
       blocks: [],
       stopReason: "error",
@@ -512,6 +529,7 @@ describe("transcript tool state merging", () => {
     const activeError: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-active-error",
       role: "assistant",
+      turnPhase: "final",
       timestamp: 5,
       blocks: [],
       stopReason: "error",

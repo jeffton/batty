@@ -8,6 +8,7 @@ describe("easy mode", () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-1",
       role: "assistant",
+      turnPhase: "final",
       timestamp: 1,
       blocks: [
         { type: "thinking", thinking: "I will attach the file." },

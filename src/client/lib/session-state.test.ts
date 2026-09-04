@@ -24,6 +24,7 @@ describe("normalizeSessionState", () => {
         {
           id: "assistant-100-0",
           role: "assistant",
+          turnPhase: "final",
           timestamp: 100,
           blocks: [{ type: "text", text: "done" }],
         },
@@ -63,6 +64,7 @@ describe("normalizeSessionState", () => {
         {
           id: "assistant-101-1",
           role: "assistant",
+          turnPhase: "final",
           timestamp: 101,
           blocks: [{ type: "text", text: "two" }],
         },
@@ -75,6 +77,7 @@ describe("normalizeSessionState", () => {
         {
           id: "assistant-103-3",
           role: "assistant",
+          turnPhase: "final",
           timestamp: 103,
           blocks: [{ type: "text", text: "four" }],
         },
@@ -134,6 +137,7 @@ describe("normalizeSessionState", () => {
         {
           id: "assistant-101-1",
           role: "assistant",
+          turnPhase: "final",
           timestamp: 101,
           blocks: [{ type: "text", text: "two" }],
         },
@@ -156,6 +160,7 @@ describe("normalizeSessionState", () => {
         {
           id: "assistant-201-1",
           role: "assistant",
+          turnPhase: "final",
           timestamp: 201,
           blocks: [{ type: "text", text: "replacement" }],
         },
@@ -185,6 +190,7 @@ describe("normalizeSessionState", () => {
         {
           id: "assistant-1",
           role: "assistant",
+          turnPhase: "intermediate",
           timestamp: 100,
           blocks: [
             { type: "text", text: "Deploying" },
@@ -239,6 +245,7 @@ describe("normalizeSessionState", () => {
         {
           id: "assistant-1",
           role: "assistant",
+          turnPhase: "intermediate",
           timestamp: 100,
           blocks: [
             {
@@ -291,6 +298,7 @@ describe("normalizeSessionState", () => {
         {
           id: "assistant-1",
           role: "assistant",
+          turnPhase: "intermediate",
           timestamp: 100,
           blocks: [
             {
@@ -358,6 +366,7 @@ describe("normalizeSessionState", () => {
         {
           id: "assistant-100-0",
           role: "assistant",
+          turnPhase: "intermediate",
           timestamp: 100,
           blocks: [
             { type: "text", text: "Checking" },
@@ -384,6 +393,7 @@ describe("normalizeSessionState", () => {
         {
           id: "assistant-100-0",
           role: "assistant",
+          turnPhase: "intermediate",
           timestamp: 100,
           blocks: [
             { type: "text", text: "Checking complete" },
@@ -426,6 +436,7 @@ describe("normalizeSessionState", () => {
       activeAssistant: {
         id: "assistant-old",
         role: "assistant",
+        turnPhase: "intermediate",
         timestamp: 100,
         blocks: [{ type: "toolCall", id: "call-old", name: "bash", arguments: { command: "old" } }],
       },
@@ -448,6 +459,7 @@ describe("normalizeSessionState", () => {
       activeAssistant: {
         id: "assistant-new",
         role: "assistant",
+        turnPhase: "final",
         timestamp: 200,
         blocks: [{ type: "text", text: "New response" }],
       },

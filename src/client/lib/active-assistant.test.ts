@@ -8,6 +8,7 @@ function createAssistant(
   return {
     id: "assistant-1",
     role: "assistant",
+    turnPhase: "pending",
     timestamp: 1,
     blocks,
   };

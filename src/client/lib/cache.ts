@@ -2,7 +2,7 @@ import { get, set } from "idb-keyval";
 import { RECENT_SESSION_MESSAGE_WINDOW } from "@/shared/session-history";
 import type { BootstrapPayload, SessionState } from "@/shared/types";
 
-const CACHE_VERSION = "v2";
+const CACHE_VERSION = "v3";
 const BOOTSTRAP_KEY = `batty:${CACHE_VERSION}:bootstrap`;
 
 function sessionCacheKey(sessionId: string): string {

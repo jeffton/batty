@@ -161,6 +161,7 @@ describe("applyServerEvent", () => {
         {
           id: "assistant-1",
           role: "assistant",
+          turnPhase: "intermediate",
           timestamp: 1,
           blocks: [
             {
@@ -198,6 +199,7 @@ describe("applyServerEvent", () => {
       assistant: {
         id: "assistant-1",
         role: "assistant",
+        turnPhase: "pending",
         timestamp: 1,
         blocks: [{ type: "text", text: "hello from batty" }],
       },
@@ -213,6 +215,7 @@ describe("applyServerEvent", () => {
         activeAssistant: {
           id: "assistant-1",
           role: "assistant",
+          turnPhase: "pending",
           timestamp: 1,
           blocks: [{ type: "text", text: "hello" }],
         },
@@ -237,6 +240,7 @@ describe("applyServerEvent", () => {
       activeAssistant: {
         id: "assistant-1",
         role: "assistant" as const,
+        turnPhase: "final" as const,
         timestamp: 1,
         blocks: [{ type: "text" as const, text: "complete" }],
       },

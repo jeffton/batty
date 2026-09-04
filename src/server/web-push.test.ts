@@ -203,6 +203,7 @@ describe("WebPushService", () => {
       {
         id: "assistant-1",
         role: "assistant",
+        turnPhase: "final",
         timestamp: Date.now(),
         blocks: [{ type: "text", text: "NO_REPLY" }],
       },
@@ -231,6 +232,7 @@ describe("WebPushService", () => {
       {
         id: "assistant-1",
         role: "assistant",
+        turnPhase: "final",
         timestamp: Date.now(),
         blocks: [{ type: "text", text: "NO_REPLY" }],
       },

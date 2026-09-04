@@ -29,6 +29,21 @@ export interface ToolExecutionDetails {
   [key: string]: unknown;
 }
 
+export type UiAssistantTurnPhase = "pending" | "intermediate" | "final";
+
+export interface UiAssistantMessage {
+  id: string;
+  role: "assistant";
+  timestamp: number;
+  turnPhase: UiAssistantTurnPhase;
+  blocks: UiContentBlock[];
+  model?: string;
+  provider?: string;
+  stopReason?: string;
+  errorMessage?: string;
+  fileChanges?: AgentTurnFileChange[];
+}
+
 export type UiMessage =
   | {
       id: string;
@@ -37,17 +52,7 @@ export type UiMessage =
       clientMessageId?: string;
       blocks: UiContentBlock[];
     }
-  | {
-      id: string;
-      role: "assistant";
-      timestamp: number;
-      blocks: UiContentBlock[];
-      model?: string;
-      provider?: string;
-      stopReason?: string;
-      errorMessage?: string;
-      fileChanges?: AgentTurnFileChange[];
-    }
+  | UiAssistantMessage
   | {
       id: string;
       role: "toolResult";

@@ -10,6 +10,7 @@ function replyEntry(): TranscriptDisplayEntry {
       message: {
         id: "assistant-1",
         role: "assistant",
+        turnPhase: "final",
         timestamp: 1,
         blocks: [
           { type: "thinking", thinking: "Checking the result." },

@@ -120,6 +120,7 @@ function canShowTimestamp(entry: TranscriptMessageView): boolean {
 
   return (
     message.role === "assistant" &&
+    message.turnPhase === "final" &&
     message.blocks.some((block) => block.type === "text" || block.type === "image")
   );
 }

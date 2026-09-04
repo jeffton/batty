@@ -158,11 +158,15 @@ function hasAssistantReply(entry: TranscriptMessageView | undefined): boolean {
     return true;
   }
 
-  const visibleBlocks = entry.message.blocks.filter(
-    (block) => !isAttachmentOutputToolCall(block, entry.toolStatesByCallId),
+  if (entry.message.turnPhase !== "final") {
+    return false;
+  }
+
+  return entry.message.blocks.some(
+    (block) =>
+      !isAttachmentOutputToolCall(block, entry.toolStatesByCallId) &&
+      (block.type === "text" || block.type === "image"),
   );
-  const lastBlock = visibleBlocks.at(-1);
-  return lastBlock?.type === "text" || lastBlock?.type === "image";
 }
 
 export function buildTranscriptDisplayEntries(

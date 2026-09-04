@@ -26,6 +26,7 @@ function assistantWithTool(id: string, toolCallId: string): TranscriptMessageVie
   return view({
     id,
     role: "assistant",
+    turnPhase: "final",
     timestamp: 2,
     blocks: [
       { type: "toolCall", id: toolCallId, name: "bash", arguments: { command: "echo hi" } },
@@ -38,6 +39,7 @@ function assistantToolOnly(id: string, toolCallId: string): TranscriptMessageVie
   return view({
     id,
     role: "assistant",
+    turnPhase: "intermediate",
     timestamp: 2,
     blocks: [{ type: "toolCall", id: toolCallId, name: "bash", arguments: { command: "echo hi" } }],
   });
@@ -47,6 +49,7 @@ function assistantText(id: string): TranscriptMessageView {
   return view({
     id,
     role: "assistant",
+    turnPhase: "final",
     timestamp: 3,
     blocks: [{ type: "text", text: `reply ${id}` }],
   });
@@ -56,6 +59,7 @@ function assistantThinkingAndText(id: string): TranscriptMessageView {
   return view({
     id,
     role: "assistant",
+    turnPhase: "final",
     timestamp: 3,
     blocks: [
       { type: "thinking", thinking: "reasoning summary" },
@@ -68,6 +72,7 @@ function assistantThinkingOnly(id: string): TranscriptMessageView {
   return view({
     id,
     role: "assistant",
+    turnPhase: "final",
     timestamp: 3,
     blocks: [{ type: "thinking", thinking: "reasoning summary" }],
   });
@@ -77,6 +82,7 @@ function assistantThinkingAndImage(id: string): TranscriptMessageView {
   return view({
     id,
     role: "assistant",
+    turnPhase: "final",
     timestamp: 3,
     blocks: [
       { type: "thinking", thinking: "reasoning summary" },
@@ -89,6 +95,7 @@ function assistantThinkingError(id: string): TranscriptMessageView {
   return view({
     id,
     role: "assistant",
+    turnPhase: "final",
     timestamp: 3,
     blocks: [{ type: "thinking", thinking: "reasoning summary" }],
     stopReason: "error",
@@ -242,6 +249,7 @@ describe("buildTranscriptDisplayEntries", () => {
       message: {
         id: "assistant-1",
         role: "assistant",
+        turnPhase: "final",
         timestamp: 3,
         blocks: [
           { type: "thinking", thinking: "preparing report" },

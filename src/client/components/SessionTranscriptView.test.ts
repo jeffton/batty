@@ -25,6 +25,7 @@ function createSession(sessionId: string): SessionState {
       {
         id: `assistant-${sessionId}-1`,
         role: "assistant",
+        turnPhase: "final",
         timestamp: 1,
         blocks: [{ type: "text", text: `Latest ${sessionId}` }],
       },
@@ -40,6 +41,92 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   });
   return { promise, resolve };
 }
+
+describe("SessionTranscriptView assistant phases", () => {
+  it("moves a streamed response from pending through intermediate to final semantics", async () => {
+    const userMessage = {
+      id: "user-1",
+      role: "user" as const,
+      timestamp: 1,
+      blocks: [{ type: "text" as const, text: "Inspect the repository" }],
+    };
+    const session = {
+      ...createSession("session-phases"),
+      isStreaming: true,
+      hasMoreMessages: false,
+      totalMessageCount: 1,
+      messages: [userMessage],
+      activeAssistant: {
+        id: "assistant-pending",
+        role: "assistant" as const,
+        turnPhase: "pending" as const,
+        timestamp: 2,
+        blocks: [{ type: "text" as const, text: "I will inspect it." }],
+      },
+    };
+    const wrapper = mount(SessionTranscriptView, {
+      props: {
+        session,
+        loadOlderMessages: vi.fn(async () => undefined),
+      },
+    });
+
+    expect(wrapper.find(".message__segment--bubble").exists()).toBe(true);
+    expect(wrapper.find(".message__copy-button").exists()).toBe(false);
+    expect(wrapper.findAll(".message__timestamp")).toHaveLength(1);
+
+    await wrapper.setProps({
+      session: {
+        ...session,
+        activeAssistant: {
+          ...session.activeAssistant,
+          turnPhase: "intermediate",
+          blocks: [
+            { type: "text" as const, text: "I will inspect it." },
+            { type: "thinking" as const, thinking: "Checking files." },
+            {
+              type: "toolCall" as const,
+              id: "call-1",
+              name: "read",
+              arguments: { path: "README.md" },
+            },
+          ],
+        },
+      },
+    });
+
+    expect(wrapper.find(".message__copy-button").exists()).toBe(false);
+    expect(wrapper.findAll(".message__timestamp")).toHaveLength(1);
+    expect(wrapper.find(".markdown-body--thinking").exists()).toBe(true);
+
+    await wrapper.setProps({
+      session: {
+        ...session,
+        isStreaming: false,
+        totalMessageCount: 2,
+        messages: [
+          userMessage,
+          {
+            id: "assistant-final",
+            role: "assistant",
+            turnPhase: "final",
+            timestamp: 10 * 60 * 1000 + 1,
+            blocks: [
+              { type: "text", text: "The repository is ready." },
+              { type: "thinking", thinking: "Finished checking files." },
+            ],
+          },
+        ],
+        activeAssistant: undefined,
+      },
+    });
+    await flushPromises();
+
+    expect(wrapper.find(".message__copy-button").exists()).toBe(true);
+    expect(wrapper.findAll(".message__timestamp")).toHaveLength(2);
+    expect(wrapper.find(".transcript__details-toggle-btn").exists()).toBe(true);
+  });
+});
 
 describe("SessionTranscriptView pagination", () => {
   it("retries pagination for a new session after an older request settles", async () => {

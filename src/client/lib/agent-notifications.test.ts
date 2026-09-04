@@ -27,6 +27,7 @@ const baseSession: SessionState = {
     {
       id: "assistant-1",
       role: "assistant",
+      turnPhase: "final",
       timestamp: 100,
       blocks: [{ type: "text", text: "Done shipping the feature." }],
     },

@@ -6,6 +6,7 @@ import type {
   SentFileDescriptor,
   SessionState,
   ToolExecutionDetails,
+  UiAssistantTurnPhase,
   UiContentBlock,
   UiMessage,
 } from "@/shared/types";
@@ -247,6 +248,20 @@ function assistantToolCallIds(message: AgentMessage | undefined): Set<string> {
   );
 }
 
+function assistantTurnPhase(message: AssistantLikeMessage): UiAssistantTurnPhase {
+  if (message.stopReason === "toolUse") {
+    return "intermediate";
+  }
+
+  if (message.stopReason !== "pending") {
+    return "final";
+  }
+
+  return normalizeBlocks(message.content).some((block) => block.type === "toolCall")
+    ? "intermediate"
+    : "pending";
+}
+
 function hasPersistedActiveAssistant(
   messages: AgentMessage[],
   activeAssistant: AgentMessage | undefined,
@@ -292,6 +307,7 @@ export function normalizeMessage(
       id: messageId("assistant", assistant.timestamp, index),
       role: "assistant",
       timestamp: assistant.timestamp,
+      turnPhase: assistantTurnPhase(assistant),
       blocks: normalizeBlocks(assistant.content, options),
       model: assistant.model,
       provider: assistant.provider,

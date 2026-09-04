@@ -25,6 +25,7 @@ const state: SessionState = {
   activeAssistant: {
     id: "assistant-1",
     role: "assistant",
+    turnPhase: "pending",
     timestamp: 1,
     blocks: [{ type: "text", text: "streaming" }],
   },

@@ -10,6 +10,7 @@ describe("ChatMessage", () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-1",
       role: "assistant",
+      turnPhase: "final",
       timestamp: 1,
       blocks: [
         { type: "text", text: "Here you go." },
@@ -78,6 +79,7 @@ describe("ChatMessage", () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-diff-1",
       role: "assistant",
+      turnPhase: "final",
       timestamp: 1,
       blocks: [{ type: "text", text: "Implemented." }],
       fileChanges: [
@@ -139,6 +141,7 @@ describe("ChatMessage", () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-copy-1",
       role: "assistant",
+      turnPhase: "final",
       timestamp: 2,
       blocks: [
         { type: "text", text: "# Done\n\nHere you go." },
@@ -191,6 +194,7 @@ describe("ChatMessage", () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-tool-only-1",
       role: "assistant",
+      turnPhase: "intermediate",
       timestamp: 2,
       blocks: [
         {
@@ -215,6 +219,7 @@ describe("ChatMessage", () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-attachment-only-1",
       role: "assistant",
+      turnPhase: "intermediate",
       timestamp: 2,
       blocks: [
         {
@@ -268,6 +273,7 @@ describe("ChatMessage", () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-2",
       role: "assistant",
+      turnPhase: "final",
       timestamp: 2,
       blocks: [
         { type: "text", text: "Morning report" },
@@ -329,6 +335,7 @@ describe("ChatMessage", () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-thinking-1",
       role: "assistant",
+      turnPhase: "intermediate",
       timestamp: 3,
       blocks: [
         { type: "thinking", thinking: "Inspecting the setup." },
@@ -358,6 +365,7 @@ describe("ChatMessage", () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-interim-1",
       role: "assistant",
+      turnPhase: "intermediate",
       timestamp: 3,
       blocks: [
         { type: "thinking", thinking: "Checking the repository." },
@@ -388,6 +396,7 @@ describe("ChatMessage", () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-details-1",
       role: "assistant",
+      turnPhase: "final",
       timestamp: 3,
       blocks: [
         { type: "thinking", thinking: "Inspecting the setup." },
@@ -411,10 +420,38 @@ describe("ChatMessage", () => {
     expect(children[2]?.textContent).toContain("The setup is ready.");
   });
 
+  it("uses the turn phase instead of block position to identify the final reply", () => {
+    const message: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-final-before-thinking-1",
+      role: "assistant",
+      turnPhase: "final",
+      timestamp: 3,
+      blocks: [
+        { type: "text", text: "The setup is ready." },
+        { type: "thinking", thinking: "Finished checking the setup." },
+      ],
+    };
+
+    const wrapper = mount(ChatMessage, {
+      props: { message },
+      slots: {
+        "before-assistant-reply": '<button class="details-toggle">Collapse details</button>',
+      },
+    });
+
+    const segments = wrapper.findAll(".message__segment");
+    expect(segments).toHaveLength(2);
+    expect(segments[0]?.classes()).toContain("message__segment--bubble");
+    expect(segments[0]?.find(".message__copy-button").exists()).toBe(true);
+    expect(segments[1]?.classes()).not.toContain("message__segment--bubble");
+    expect(wrapper.findAll(".details-toggle")).toHaveLength(1);
+  });
+
   it("renders assistant errors as red bubbles", () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-error-1",
       role: "assistant",
+      turnPhase: "final",
       timestamp: 3,
       blocks: [],
       stopReason: "error",
@@ -440,6 +477,7 @@ describe("ChatMessage", () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-thinking-error-1",
       role: "assistant",
+      turnPhase: "final",
       timestamp: 4,
       blocks: [{ type: "thinking", thinking: "Retrying the request." }],
       stopReason: "error",
@@ -461,6 +499,7 @@ describe("ChatMessage", () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-error-2",
       role: "assistant",
+      turnPhase: "final",
       timestamp: 4,
       blocks: [{ type: "text", text: "Codex error: upstream overloaded" }],
       stopReason: "error",

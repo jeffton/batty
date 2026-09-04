@@ -349,9 +349,39 @@ describe("ChatMessage", () => {
 
     expect(wrapper.text()).toContain("Inspecting the setup.");
     expect(wrapper.find(".markdown-body--thinking").exists()).toBe(true);
-    expect(wrapper.find(".message__segment--bubble").exists()).toBe(true);
+    expect(wrapper.find(".message__segment--bubble").exists()).toBe(false);
     expect(wrapper.find(".message__copy-button").exists()).toBe(false);
     expect(wrapper.text()).toContain("subagent");
+  });
+
+  it("styles interim agent messages as replies without styling thinking or tools", () => {
+    const message: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-interim-1",
+      role: "assistant",
+      timestamp: 3,
+      blocks: [
+        { type: "thinking", thinking: "Checking the repository." },
+        { type: "text", text: "I found the file and will update it." },
+        {
+          type: "toolCall",
+          id: "call-1",
+          name: "bash",
+          arguments: { command: "git status" },
+        },
+      ],
+    };
+
+    const wrapper = mount(ChatMessage, {
+      props: { message },
+    });
+
+    const segments = wrapper.findAll(".message__segment");
+    expect(segments).toHaveLength(3);
+    expect(segments[0]?.classes()).not.toContain("message__segment--bubble");
+    expect(segments[1]?.classes()).toContain("message__segment--bubble");
+    expect(segments[1]?.text()).toContain("I found the file and will update it.");
+    expect(segments[2]?.classes()).not.toContain("message__segment--bubble");
+    expect(wrapper.find(".message__copy-button").exists()).toBe(false);
   });
 
   it("renders reply-leading content between details and the response bubble", () => {
@@ -374,7 +404,7 @@ describe("ChatMessage", () => {
 
     const children = Array.from(wrapper.find(".message__body").element.children);
     expect(children).toHaveLength(3);
-    expect(children[0]?.classList.contains("message__segment--bubble")).toBe(true);
+    expect(children[0]?.classList.contains("message__segment--bubble")).toBe(false);
     expect(children[0]?.textContent).toContain("Inspecting the setup.");
     expect(children[1]?.classList.contains("details-toggle")).toBe(true);
     expect(children[2]?.classList.contains("message__segment--bubble")).toBe(true);

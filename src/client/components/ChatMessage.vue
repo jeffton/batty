@@ -13,7 +13,7 @@ import type { ToolDisplayState } from "@/client/lib/transcript";
 import type { SentFileDescriptor, UiContentBlock, UiMessage } from "@/shared/types";
 
 type AssistantSegment = {
-  kind: "bubble" | "plain";
+  kind: "reply" | "interim" | "plain";
   blocks: UiContentBlock[];
 };
 
@@ -85,27 +85,37 @@ const assistantSegments = computed<AssistantSegment[]>(() => {
     return [];
   }
 
-  let trailingBubbleStart = blocks.length;
+  let trailingReplyStart = blocks.length;
 
   while (
-    trailingBubbleStart > 0 &&
-    isBubbleBlock(blocks[trailingBubbleStart - 1] as UiContentBlock)
+    trailingReplyStart > 0 &&
+    isBubbleBlock(blocks[trailingReplyStart - 1] as UiContentBlock)
   ) {
-    trailingBubbleStart -= 1;
+    trailingReplyStart -= 1;
   }
 
-  if (trailingBubbleStart === 0) {
-    return [{ kind: "bubble", blocks }];
+  if (trailingReplyStart === 0) {
+    return [{ kind: "reply", blocks }];
   }
 
-  if (trailingBubbleStart === blocks.length) {
-    return [{ kind: "plain", blocks }];
+  const segments: AssistantSegment[] = [];
+
+  for (const block of blocks.slice(0, trailingReplyStart)) {
+    const kind = isBubbleBlock(block) ? "interim" : "plain";
+    const previousSegment = segments.at(-1);
+
+    if (previousSegment?.kind === kind) {
+      previousSegment.blocks.push(block);
+    } else {
+      segments.push({ kind, blocks: [block] });
+    }
   }
 
-  return [
-    { kind: "plain", blocks: blocks.slice(0, trailingBubbleStart) },
-    { kind: "bubble", blocks: blocks.slice(trailingBubbleStart) },
-  ];
+  if (trailingReplyStart < blocks.length) {
+    segments.push({ kind: "reply", blocks: blocks.slice(trailingReplyStart) });
+  }
+
+  return segments;
 });
 
 const isRuntimeNotice = computed(
@@ -163,11 +173,11 @@ const showAssistantErrorBubble = computed(
 
 const hasTrailingAssistantBubble = computed(() => {
   const lastSegment = assistantSegments.value.at(-1);
-  return lastSegment?.kind === "bubble";
+  return lastSegment?.kind === "reply";
 });
 
 const copyButtonSegmentIndex = computed(() =>
-  assistantSegments.value.findIndex((segment) => segment.kind === "bubble"),
+  assistantSegments.value.findIndex((segment) => segment.kind === "reply"),
 );
 
 const messageTimestampLabel = computed(() => {
@@ -330,16 +340,16 @@ onBeforeUnmount(() => {
         v-for="(segment, segmentIndex) in assistantSegments"
         :key="`${props.message.id}-segment-${segmentIndex}`"
       >
-        <slot v-if="segment.kind === 'bubble'" name="before-assistant-reply" />
-        <div v-if="segment.kind === 'bubble' && props.showTimestamp" class="message__timestamp">
+        <slot v-if="segment.kind === 'reply'" name="before-assistant-reply" />
+        <div v-if="segment.kind === 'reply' && props.showTimestamp" class="message__timestamp">
           {{ messageTimestampLabel }}
         </div>
         <div
           :class="[
             'message__segment',
-            'message__segment--bubble',
             {
-              'message__segment--error': segment.kind === 'bubble' && assistantHasError,
+              'message__segment--bubble': segment.kind !== 'plain',
+              'message__segment--error': segment.kind === 'reply' && assistantHasError,
             },
           ]"
         >
@@ -389,7 +399,7 @@ onBeforeUnmount(() => {
             v-if="
               hasReplyArtifacts &&
               segmentIndex === assistantSegments.length - 1 &&
-              segment.kind === 'bubble'
+              segment.kind === 'reply'
             "
             class="message__artifacts"
           >

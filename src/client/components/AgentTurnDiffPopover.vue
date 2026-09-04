@@ -28,7 +28,7 @@ const options: CodeViewOptions = {
 
     [data-line],
     [data-line] span {
-      font-weight: 400 !important;
+      font-weight: 400;
     }
 
     [data-line-type="change-addition"] {

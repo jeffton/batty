@@ -342,6 +342,7 @@ describe("Pi between-turn compaction patch", () => {
       sessionManager: { getBranch },
       _getSummarizationRequestAuth: vi.fn(async () => authenticationPending),
       _autoCompactionAbortController: undefined,
+      _resolveIdleWaitIfIdle: vi.fn(),
     };
     const runAutoCompaction = (
       AgentSession.prototype as unknown as {

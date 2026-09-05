@@ -1,6 +1,7 @@
 minimumReleaseAge: 4320
 minimumReleaseAgeExclude:
   - "@earendil-works/pi-*"
+  - "@earendil-works/chord"
   # Security release fixing GHSA-62qx-hpj5-j6hc and GHSA-vmph-573x-85f6.
   - "@fastify/multipart@10.1.1"
   - vite-plus
@@ -38,5 +39,5 @@ peerDependencyRules:
   allowedVersions:
     vite: "*"
 patchedDependencies:
-  "@earendil-works/pi-ai@0.84.4": patches/@earendil-works__pi-ai@0.84.4.patch
-  "@earendil-works/pi-coding-agent@0.84.4": patches/@earendil-works__pi-coding-agent@0.84.4.patch
+  "@earendil-works/pi-ai@0.85.1": patches/@earendil-works__pi-ai@0.85.1.patch
+  "@earendil-works/pi-coding-agent@0.85.1": patches/@earendil-works__pi-coding-agent@0.85.1.patch

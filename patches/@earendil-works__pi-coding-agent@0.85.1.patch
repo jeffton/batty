@@ -1,8 +1,8 @@
 diff --git a/dist/core/agent-session.d.ts b/dist/core/agent-session.d.ts
-index 8c7cfec6fc0ec004f17c08c52a58c354b28b3978..7aa42249ab01791e61ffb9a338b8d4efc5ac5313 100644
+index 89f96e8769496a952cbf29efded4dd52b7eaad97..3b60da33f7fac8ed4c36a45042fffbbf61abe7b2 100644
 --- a/dist/core/agent-session.d.ts
 +++ b/dist/core/agent-session.d.ts
-@@ -156,12 +156,19 @@ export interface PromptOptions {
+@@ -151,12 +151,19 @@ export interface PromptOptions {
      expandPromptTemplates?: boolean;
      /** Image attachments */
      images?: ImageContent[];
@@ -23,7 +23,7 @@ index 8c7cfec6fc0ec004f17c08c52a58c354b28b3978..7aa42249ab01791e61ffb9a338b8d4ef
  }
  /** Options for model/thinking mutations. */
  export interface ModelMutationOptions {
-@@ -362,6 +369,17 @@ export declare class AgentSession {
+@@ -357,6 +364,17 @@ export declare class AgentSession {
       * @throws Error if no model selected or no API key available (when not streaming)
       */
      prompt(text: string, options?: PromptOptions): Promise<void>;
@@ -41,7 +41,7 @@ index 8c7cfec6fc0ec004f17c08c52a58c354b28b3978..7aa42249ab01791e61ffb9a338b8d4ef
      private _tryExecuteExtensionCommand;
      /**
       * Expand skill commands (/skill:name args) to their full content.
-@@ -436,6 +454,8 @@ export declare class AgentSession {
+@@ -431,6 +449,8 @@ export declare class AgentSession {
          steering: string[];
          followUp: string[];
      };
@@ -51,7 +51,7 @@ index 8c7cfec6fc0ec004f17c08c52a58c354b28b3978..7aa42249ab01791e61ffb9a338b8d4ef
      get pendingMessageCount(): number;
      /** Get pending steering messages (read-only) */
 diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
-index fd82b71cf332715f185d07459429f04ed7491ce9..786c1a33b7c935224fcaa4ba7ae3f50f2ea4c342 100644
+index 66e874efd252470d00d3cdaad2e2b4b6121de15b..c8679f1bae135d5c701144cd50a43e9239bfbb22 100644
 --- a/dist/core/agent-session.js
 +++ b/dist/core/agent-session.js
 @@ -271,15 +271,24 @@ export class AgentSession {
@@ -275,7 +275,7 @@ index fd82b71cf332715f185d07459429f04ed7491ce9..786c1a33b7c935224fcaa4ba7ae3f50f
      /** Number of pending messages (includes both steering and follow-up) */
      get pendingMessageCount() {
          return this._steeringMessages.length + this._followUpMessages.length;
-@@ -1730,15 +1812,19 @@ export class AgentSession {
+@@ -1736,15 +1818,19 @@ export class AgentSession {
       * @param willRetry Whether to continue the interrupted turn after overflow compaction
       * @returns Whether the post-run loop should call `agent.continue()`
       */
@@ -297,7 +297,7 @@ index fd82b71cf332715f185d07459429f04ed7491ce9..786c1a33b7c935224fcaa4ba7ae3f50f
              const pathEntries = this.sessionManager.getBranch();
              const preparation = prepareCompaction(pathEntries, settings);
              if (!preparation) {
-@@ -1746,6 +1832,7 @@ export class AgentSession {
+@@ -1752,6 +1838,7 @@ export class AgentSession {
              }
              this._emit({ type: "compaction_start", reason });
              this._autoCompactionAbortController = new AbortController();
@@ -305,14 +305,14 @@ index fd82b71cf332715f185d07459429f04ed7491ce9..786c1a33b7c935224fcaa4ba7ae3f50f
              started = true;
              let extensionCompaction;
              if (this._extensionRunner.hasHandlers("session_before_compact")) {
-@@ -1883,6 +1970,7 @@ export class AgentSession {
+@@ -1889,6 +1976,7 @@ export class AgentSession {
              return false;
          }
          finally {
 +            signal?.removeEventListener("abort", abortCompaction);
              this._autoCompactionAbortController = undefined;
+             this._resolveIdleWaitIfIdle();
          }
-     }
 diff --git a/dist/core/compaction/compaction.js b/dist/core/compaction/compaction.js
 index e936db7dc2617b5c0ff43ea11942c5a79b672dc6..8ab320a95aca95ff82da06333dee5fdcee395329 100644
 --- a/dist/core/compaction/compaction.js
@@ -339,10 +339,10 @@ index e936db7dc2617b5c0ff43ea11942c5a79b672dc6..8ab320a95aca95ff82da06333dee5fdc
          }
      }
 diff --git a/dist/core/session-manager.d.ts b/dist/core/session-manager.d.ts
-index 8cdfbdec42f696b8cd6b762a92180a81ec142433..4d5c3a07bab1f9cb95e458105cb6964a02d4a554 100644
+index a8d14157e590b439bbe83bacb24d4449d9ea54cb..7126299afe73953b375776bcb4b14b26899cf200 100644
 --- a/dist/core/session-manager.d.ts
 +++ b/dist/core/session-manager.d.ts
-@@ -201,6 +201,8 @@ export declare class SessionManager {
+@@ -202,6 +202,8 @@ export declare class SessionManager {
      private _buildIndex;
      private _rewriteFile;
      isPersisted(): boolean;
@@ -352,10 +352,10 @@ index 8cdfbdec42f696b8cd6b762a92180a81ec142433..4d5c3a07bab1f9cb95e458105cb6964a
      getSessionDir(): string;
      usesDefaultSessionDir(): boolean;
 diff --git a/dist/core/session-manager.js b/dist/core/session-manager.js
-index f887c04976596f8956bc04c16ca59c4030e09f92..a7db0f153a5b01646431bd55b9a10bfe833b4b62 100644
+index fbb784f771553c21e993cf82200a80a854261437..6b04f8489bbe89aab56bae3057d80c29ccd01ab8 100644
 --- a/dist/core/session-manager.js
 +++ b/dist/core/session-manager.js
-@@ -708,6 +708,13 @@ export class SessionManager {
+@@ -721,6 +721,13 @@ export class SessionManager {
      isPersisted() {
          return this.persist;
      }

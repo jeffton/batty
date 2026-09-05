@@ -24,6 +24,7 @@ import type {
 } from "@/shared/types";
 import type { AppConfig } from "./config";
 import { ModelConfigWatcher } from "./model-config-watcher";
+import { resolveModel } from "./model-resolution";
 import { getSessionContextUsage } from "./pi-context-usage";
 import {
   createPiAgentSession as createPiAgentSessionImpl,
@@ -980,6 +981,9 @@ export class PiService {
         {
           config: this.config,
           cronService: this.cronService,
+          validateModel: (modelId) => {
+            this.resolveModel(modelId);
+          },
           resolveSubagentDefaults: (sessionId, ctx) => this.resolveSubagentDefaults(sessionId, ctx),
           runDetachedSubagentSession: (request) => this.runDetachedSubagentSession(request),
         },
@@ -1061,18 +1065,8 @@ export class PiService {
     await refreshBattySystemPrompt(this.config, webSession);
   }
 
-  private async resolveModel(modelId: string): Promise<PiModel> {
-    const [provider, ...rest] = modelId.split("/");
-    if (!provider || rest.length === 0) {
-      throw new Error(`Invalid model id: ${modelId}`);
-    }
-
-    const resolved = this.modelRuntime.getModel(provider, rest.join("/"));
-    if (!resolved) {
-      throw new Error(`Model not found: ${modelId}`);
-    }
-
-    return resolved;
+  private resolveModel(modelId: string): PiModel {
+    return resolveModel(this.modelRuntime, modelId);
   }
 
   private requireSession(sessionId: string): WebSession {

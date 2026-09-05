@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 import path from "node:path";
-import { loadConfig, resolveBattyDir } from "./config";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { loadConfig, resolveBattyDir, type AppConfig } from "./config";
 import { buildCronJobSummary, CronStore } from "./cron";
+import { resolveModel } from "./model-resolution";
 import { formatSetupCode, PasskeyAuthService } from "./passkeys";
+import { battyAgentDir } from "./pi-paths";
 import type {
   CreateCronJobInput,
   CronJobScheduleInput,
@@ -232,6 +235,15 @@ async function handleCronList(root: string, parsed: ParsedArgs): Promise<void> {
   console.log(jobs.map(buildCronJobSummary).join("\n\n---\n\n"));
 }
 
+async function validateSelectedModel(config: AppConfig, modelId: string): Promise<void> {
+  const agentDir = battyAgentDir(config);
+  const modelRuntime = await ModelRuntime.create({
+    authPath: path.join(agentDir, "auth.json"),
+    modelsPath: path.join(agentDir, "models.json"),
+  });
+  resolveModel(modelRuntime, modelId);
+}
+
 async function handleCronAdd(root: string, parsed: ParsedArgs): Promise<void> {
   const config = await loadConfig(root);
   const store = new CronStore(config);
@@ -248,6 +260,7 @@ async function handleCronAdd(root: string, parsed: ParsedArgs): Promise<void> {
       })(),
   };
 
+  await validateSelectedModel(config, input.model);
   const job = await store.createJob(input);
   console.log(`Created cron job.\n\n${buildCronJobSummary(job)}`);
 }
@@ -277,6 +290,9 @@ async function handleCronEdit(root: string, parsed: ParsedArgs): Promise<void> {
     throw new Error("No changes provided for cron edit");
   }
 
+  if (patch.model != null) {
+    await validateSelectedModel(config, patch.model);
+  }
   const job = await store.updateJob(jobId, patch);
   console.log(`Updated cron job.\n\n${buildCronJobSummary(job)}`);
 }

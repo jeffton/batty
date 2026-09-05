@@ -13,6 +13,7 @@ import {
 export type PiServiceToolFactoryContext = {
   config: AppConfig;
   cronService: CronService;
+  validateModel: (modelId: string) => void;
   resolveSubagentDefaults: (
     sessionId: string,
     ctx: ExtensionContext,
@@ -57,6 +58,7 @@ export function createPiServiceTools(
     createCronTool({
       workspace,
       cronService: context.cronService,
+      validateModel: context.validateModel,
       resolveSubagentDefaults: context.resolveSubagentDefaults,
     }),
     createWebSearchTool(context.config),

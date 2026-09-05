@@ -195,6 +195,7 @@ export interface SubagentToolDependencies extends CommonToolDependencies {
 export interface CronToolDependencies {
   workspace: WorkspaceInfo;
   cronService: CronService;
+  validateModel: (modelId: string) => void;
   resolveSubagentDefaults: ResolveSubagentDefaults;
 }
 
@@ -268,6 +269,7 @@ export function createSubagentTool({
 export function createCronTool({
   workspace,
   cronService,
+  validateModel,
   resolveSubagentDefaults,
 }: CronToolDependencies): ToolDefinition<typeof CronToolSchema> {
   return {
@@ -338,6 +340,7 @@ export function createCronTool({
                 : undefined,
             schedule: (params.schedule ?? {}) as CreateCronJobInput["schedule"],
           };
+          validateModel(input.model);
           const job = await cronService.createJob(input);
           return {
             content: [{ type: "text", text: `Created cron job.\n\n${buildCronJobSummary(job)}` }],
@@ -354,7 +357,7 @@ export function createCronTool({
             workspaceId,
             enabled: typeof params.enabled === "boolean" ? params.enabled : undefined,
             prompt: typeof params.prompt === "string" ? params.prompt : undefined,
-            model: typeof params.model === "string" ? params.model : undefined,
+            model: typeof params.model === "string" ? params.model.trim() : undefined,
             thinkingLevel:
               typeof params.thinkingLevel === "string" ? params.thinkingLevel : undefined,
             session:
@@ -370,6 +373,9 @@ export function createCronTool({
             delete patch.workspaceId;
           }
 
+          if (patch.model != null) {
+            validateModel(patch.model);
+          }
           const job = await cronService.updateJob(jobId, patch);
           return {
             content: [{ type: "text", text: `Updated cron job.\n\n${buildCronJobSummary(job)}` }],

@@ -105,6 +105,7 @@ describe("createCronTool", () => {
           },
         ]),
       } as any,
+      validateModel: vi.fn(),
       resolveSubagentDefaults: () => ({ modelId: "openai/gpt-5", thinkingLevel: "medium" }),
     });
 
@@ -120,6 +121,62 @@ describe("createCronTool", () => {
       expect.objectContaining({ text: expect.stringContaining("/tmp/cron/run-1.jsonl") }),
     );
     expect(result.details).toMatchObject({ count: 1, workspaceId: "batty" });
+  });
+
+  it("validates the selected model before creating a job", async () => {
+    const createJob = vi.fn();
+    const validateModel = vi.fn(() => {
+      throw new Error("Model not found: missing/model");
+    });
+    const tool = createCronTool({
+      workspace: { id: "batty", path: "/root/github/batty" } as any,
+      cronService: { createJob } as any,
+      validateModel,
+      resolveSubagentDefaults: () => ({ modelId: "openai/gpt-5", thinkingLevel: "medium" }),
+    });
+
+    await expect(
+      tool.execute(
+        "tool-call-2",
+        {
+          action: "add",
+          prompt: "Inspect CI",
+          model: "missing/model",
+          thinkingLevel: "medium",
+          schedule: { kind: "every", every: "1h" },
+        },
+        undefined,
+        undefined,
+        { sessionManager: { getSessionId: () => "parent" } } as any,
+      ),
+    ).rejects.toThrow("Model not found: missing/model");
+    expect(validateModel).toHaveBeenCalledWith("missing/model");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("validates a changed model before updating a job", async () => {
+    const updateJob = vi.fn();
+    const validateModel = vi.fn(() => {
+      throw new Error("Model not found: missing/model");
+    });
+    const tool = createCronTool({
+      workspace: { id: "batty", path: "/root/github/batty" } as any,
+      cronService: { updateJob } as any,
+      validateModel,
+      resolveSubagentDefaults: () => ({ modelId: "openai/gpt-5", thinkingLevel: "medium" }),
+    });
+
+    await expect(
+      tool.execute(
+        "tool-call-3",
+        { action: "update", jobId: "job-1", model: " missing/model " },
+        undefined,
+        undefined,
+        { sessionManager: { getSessionId: () => "parent" } } as any,
+      ),
+    ).rejects.toThrow("Model not found: missing/model");
+    expect(validateModel).toHaveBeenCalledWith("missing/model");
+    expect(updateJob).not.toHaveBeenCalled();
   });
 });
 

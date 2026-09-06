@@ -82,11 +82,8 @@ import type { RuntimeNotice } from "./runtime-notices";
 import { SessionReadStateStore } from "./session-read-state";
 import { AgentTurnFileChangeTracker } from "./agent-turn-file-changes";
 import { listWorkspaces, resolveWorkspace } from "./workspaces";
-import {
-  ActiveInteractiveTurnJournal,
-  type PreparedInteractiveTurnSubmission,
-} from "./active-interactive-turn-journal";
-import { prepareInteractiveTurnRecovery } from "./interactive-turn-recovery";
+import { ActiveInteractiveTurnJournal } from "./active-interactive-turn-journal";
+import { prepareInteractiveTurnRecovery, resumeInteractiveTurn } from "./interactive-turn-recovery";
 
 export type { UploadedFile } from "./pi-service-types";
 
@@ -110,7 +107,6 @@ export class PiService {
   private readonly subagentQueues = new Map<string, Promise<void>>();
   private readonly cronSessionResolutions = new Map<string, Promise<SessionState>>();
   private readonly sessionOpenPromises = new Map<string, Promise<SessionState>>();
-  private readonly activeInteractiveTurnRecoveries = new Map<string, Promise<void>>();
   private readonly fileChangeTrackers = new Map<string, AgentTurnFileChangeTracker>();
   private readonly onAgentCompleted: ((session: SessionState) => Promise<void>) | undefined;
   private readonly onWorkspaceUpdated: ((workspaceId: string) => Promise<void>) | undefined;
@@ -194,7 +190,7 @@ export class PiService {
           );
         }
         const webSession = this.requireSession(entry.sessionId);
-        const plan = prepareInteractiveTurnRecovery(webSession.session, entry.submissions);
+        const plan = prepareInteractiveTurnRecovery(webSession.session.sessionManager.getBranch());
         if (plan.action === "complete") {
           await this.activeInteractiveTurns.deleteSession(entry.sessionId);
           continue;
@@ -202,15 +198,8 @@ export class PiService {
         console.info("Recovering interrupted interactive turn", {
           sessionId: entry.sessionId,
           workspaceId: entry.workspaceId,
-          queuedPromptCount: plan.pendingSubmissions.length,
         });
-        const recovery = this.runRecoveredInteractiveTurn(webSession, plan).finally(() => {
-          if (this.activeInteractiveTurnRecoveries.get(entry.sessionId) === recovery) {
-            this.activeInteractiveTurnRecoveries.delete(entry.sessionId);
-          }
-        });
-        this.activeInteractiveTurnRecoveries.set(entry.sessionId, recovery);
-        void recovery.catch((error) => {
+        void this.runRecoveredInteractiveTurn(webSession, plan).catch((error) => {
           console.error("Failed to recover interrupted interactive turn", {
             sessionId: entry.sessionId,
             workspaceId: entry.workspaceId,
@@ -229,35 +218,10 @@ export class PiService {
 
   private async runRecoveredInteractiveTurn(
     webSession: WebSession,
-    plan: ReturnType<typeof prepareInteractiveTurnRecovery>,
+    plan: Extract<ReturnType<typeof prepareInteractiveTurnRecovery>, { action: "resume" }>,
   ): Promise<void> {
-    const pending = [...plan.pendingSubmissions];
-    const first = plan.action === "prompt" ? pending.shift() : undefined;
-    if (plan.action === "prompt" && !first) {
-      throw new Error(`Interrupted turn ${webSession.id} has no prompt to recover`);
-    }
-
-    for (const submission of pending) {
-      await webSession.session.restoreQueuedPrompt(submission.text, {
-        images: submission.images,
-        clientMessageId: submission.clientMessageId,
-        streamingBehavior: submission.streamingBehavior ?? "followUp",
-      });
-    }
-
     try {
-      if (first) {
-        await webSession.session.resumeInterruptedPrompt(first.text, {
-          images: first.images,
-          clientMessageId: first.clientMessageId,
-          ...(first.messages !== undefined
-            ? { messages: first.messages as AgentSession["messages"] }
-            : {}),
-          ...(first.systemPrompt !== undefined ? { systemPrompt: first.systemPrompt } : {}),
-        });
-      } else {
-        await webSession.session.resumeInterruptedTurn();
-      }
+      await resumeInteractiveTurn(webSession.session, plan);
     } finally {
       externalizeInlineImagesInSession(
         webSession.session,
@@ -869,50 +833,20 @@ export class PiService {
   ): Promise<void> {
     const webSession = this.requireSession(sessionId);
     await this.waitForSubagentQueue(sessionId);
-    await this.activeInteractiveTurnRecoveries.get(sessionId);
     const prepared = await this.preparePromptFiles(sessionId, files);
     const parts = [text.trim(), prepared.text.trim()].filter(Boolean);
     const promptText = parts.join("\n\n").trim() || "Please inspect the attached files.";
-    let journaled = false;
-    try {
-      await webSession.session.prompt(promptText, {
-        images: prepared.images,
-        clientMessageId,
-        ...(streamingBehavior ? { streamingBehavior } : {}),
-        preflightResult: async (success, accepted) => {
-          if (!success || !accepted) return;
-          const submission: PreparedInteractiveTurnSubmission = {
-            text: accepted.text,
-            images: accepted.images ?? [],
-            clientMessageId,
-            ...(streamingBehavior ? { streamingBehavior } : {}),
-            ...(accepted.messages !== undefined ? { messages: accepted.messages } : {}),
-            ...(accepted.systemPrompt !== undefined ? { systemPrompt: accepted.systemPrompt } : {}),
-          };
-          if (webSession.session.isStreaming) {
-            if (this.activeInteractiveTurns.get(sessionId)) {
-              await this.activeInteractiveTurns.appendQueuedSubmission(sessionId, submission);
-              journaled = true;
-            }
-            return;
-          }
-          await this.activeInteractiveTurns.upsertInitialEntry({
-            workspaceId: webSession.workspace.id,
-            sessionId,
-            sessionPath: this.requireSessionPath(sessionId),
-            submissions: [submission],
-            startedAtMs: Date.now(),
-          });
-          webSession.session.sessionManager.flush();
-          journaled = true;
-        },
-      });
-    } catch (error) {
-      if (journaled && this.activeInteractiveTurns.get(sessionId)) {
-        await this.activeInteractiveTurns.removeSubmission(sessionId, clientMessageId);
-      }
-      throw error;
-    }
+    await webSession.session.prompt(promptText, {
+      images: prepared.images,
+      clientMessageId,
+      ...(streamingBehavior ? { streamingBehavior } : {}),
+      onTurnStarted: () =>
+        this.activeInteractiveTurns.set({
+          workspaceId: webSession.workspace.id,
+          sessionId,
+          sessionPath: this.requireSessionPath(sessionId),
+        }),
+    });
     externalizeUploadedImagesInSession(webSession.session, prepared.uploadedImages);
     this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
   }
@@ -923,28 +857,6 @@ export class PiService {
     index: number,
   ): Promise<SessionState> {
     const webSession = this.requireSession(sessionId);
-    const journalEntry = this.activeInteractiveTurns.get(sessionId);
-    if (journalEntry) {
-      const persistedClientMessageIds = new Set(
-        webSession.session.sessionManager
-          .getBranch()
-          .flatMap((entry) =>
-            entry.type === "message" &&
-            entry.message.role === "user" &&
-            entry.message.clientMessageId
-              ? [entry.message.clientMessageId]
-              : [],
-          ),
-      );
-      const submission = journalEntry.submissions.filter(
-        (candidate) =>
-          candidate.streamingBehavior === kind &&
-          !persistedClientMessageIds.has(candidate.clientMessageId),
-      )[index];
-      if (submission) {
-        await this.activeInteractiveTurns.removeSubmission(sessionId, submission.clientMessageId);
-      }
-    }
     await removeQueuedPrompt(webSession, kind, index);
     const state = this.getState(sessionId);
     this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
@@ -953,9 +865,7 @@ export class PiService {
 
   async abort(sessionId: string): Promise<void> {
     const webSession = this.requireSession(sessionId);
-    if (this.activeInteractiveTurns.get(sessionId)) {
-      await this.activeInteractiveTurns.deleteSession(sessionId);
-    }
+    await this.activeInteractiveTurns.deleteSession(sessionId);
     await webSession.session.abort();
     this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
   }
@@ -1048,9 +958,7 @@ export class PiService {
         disposeWebSession: (webSession) => this.disposeWebSession(webSession),
         onAgentCompleted: this.onAgentCompleted,
         onAgentSettled: async (webSession) => {
-          if (this.activeInteractiveTurns.get(webSession.id)) {
-            await this.activeInteractiveTurns.deleteSession(webSession.id);
-          }
+          await this.activeInteractiveTurns.deleteSession(webSession.id);
         },
       },
       webSession,

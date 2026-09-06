@@ -1,8 +1,7 @@
 diff --git a/dist/core/agent-session.d.ts b/dist/core/agent-session.d.ts
-index 89f96e8769496a952cbf29efded4dd52b7eaad97..3b60da33f7fac8ed4c36a45042fffbbf61abe7b2 100644
 --- a/dist/core/agent-session.d.ts
 +++ b/dist/core/agent-session.d.ts
-@@ -151,12 +151,19 @@ export interface PromptOptions {
+@@ -151,12 +151,16 @@
      expandPromptTemplates?: boolean;
      /** Image attachments */
      images?: ImageContent[];
@@ -13,35 +12,22 @@ index 89f96e8769496a952cbf29efded4dd52b7eaad97..3b60da33f7fac8ed4c36a45042fffbbf
      /** Source of input for extension input event handlers. Defaults to "interactive". */
      source?: InputSource;
      /** Internal hook used by RPC mode to observe prompt preflight acceptance or rejection. */
--    preflightResult?: (success: boolean) => void;
-+    preflightResult?: (success: boolean, prepared?: {
-+        text: string;
-+        images?: ImageContent[];
-+        messages?: AgentMessage[];
-+        systemPrompt?: string;
-+    }) => void | Promise<void>;
+     preflightResult?: (success: boolean) => void;
++    /** Called after the user message has been persisted, before model work starts. */
++    onTurnStarted?: () => void | Promise<void>;
  }
  /** Options for model/thinking mutations. */
  export interface ModelMutationOptions {
-@@ -357,6 +364,17 @@ export declare class AgentSession {
+@@ -357,6 +361,8 @@
       * @throws Error if no model selected or no API key available (when not streaming)
       */
      prompt(text: string, options?: PromptOptions): Promise<void>;
 +    /** Continue an interrupted persisted turn without appending another user message. */
 +    resumeInterruptedTurn(): Promise<void>;
-+    /** Restore a prepared queued prompt without rerunning input handlers or template expansion. */
-+    restoreQueuedPrompt(text: string, options: Pick<PromptOptions, "images" | "clientMessageId"> & {
-+        streamingBehavior: "steer" | "followUp";
-+    }): Promise<void>;
-+    /** Restart a prompt whose journal was committed before its user message was persisted. */
-+    resumeInterruptedPrompt(text: string, options?: Pick<PromptOptions, "images" | "clientMessageId"> & {
-+        messages?: AgentMessage[];
-+        systemPrompt?: string;
-+    }): Promise<void>;
      private _tryExecuteExtensionCommand;
      /**
       * Expand skill commands (/skill:name args) to their full content.
-@@ -431,6 +449,8 @@ export declare class AgentSession {
+@@ -431,6 +437,8 @@
          steering: string[];
          followUp: string[];
      };
@@ -51,10 +37,9 @@ index 89f96e8769496a952cbf29efded4dd52b7eaad97..3b60da33f7fac8ed4c36a45042fffbbf
      get pendingMessageCount(): number;
      /** Get pending steering messages (read-only) */
 diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
-index 66e874efd252470d00d3cdaad2e2b4b6121de15b..c8679f1bae135d5c701144cd50a43e9239bfbb22 100644
 --- a/dist/core/agent-session.js
 +++ b/dist/core/agent-session.js
-@@ -271,15 +271,24 @@ export class AgentSession {
+@@ -271,15 +271,24 @@
              };
          };
      }
@@ -82,7 +67,7 @@ index 66e874efd252470d00d3cdaad2e2b4b6121de15b..c8679f1bae135d5c701144cd50a43e92
          return {
              ...context,
              messages: this.agent.state.messages.slice(),
-@@ -291,7 +300,7 @@ export class AgentSession {
+@@ -291,7 +300,7 @@
                  ? async (_turn, signal) => await this.agent.prepareNextTurn?.(signal)
                  : undefined);
          this.agent.prepareNextTurnWithContext = async (turn, signal) => {
@@ -91,10 +76,37 @@ index 66e874efd252470d00d3cdaad2e2b4b6121de15b..c8679f1bae135d5c701144cd50a43e92
              const previousSnapshot = await previousPrepareNextTurnWithContext?.({ ...turn, context }, signal);
              const nextContext = previousSnapshot?.context ?? context;
              return {
-@@ -784,6 +793,58 @@ export class AgentSession {
-             await this._emitAgentSettled();
+@@ -348,4 +357,5 @@
+     // Track last assistant message for auto-compaction check
+     _lastAssistantMessage = undefined;
++    _turnStartedHooks = new WeakMap();
+     /** Internal handler for agent events - shared by subscribe and reconnect */
+     _handleAgentEvent = async (event) => {
+@@ -398,6 +408,14 @@
+                 this.sessionManager.appendMessage(event.message);
+             }
+             // Other message types (bashExecution, compactionSummary, branchSummary) are persisted elsewhere
++            const onTurnStarted = event.message.role === "user"
++                ? this._turnStartedHooks.get(event.message)
++                : undefined;
++            if (onTurnStarted) {
++                this._turnStartedHooks.delete(event.message);
++                this.sessionManager.persistNow();
++                await onTurnStarted();
++            }
+             // Track assistant message for auto-compaction (checked on agent_end)
+             if (event.message.role === "assistant") {
+                 this._lastAssistantMessage = event.message;
+@@ -778,6 +796,25 @@
+             }
          }
-     }
+         finally {
++            this._systemPromptOverride = undefined;
++            this._flushPendingBashMessages();
++            this._flushPendingCustomMessages();
++            await this._emitAgentSettled();
++        }
++    }
 +    /** Continue an interrupted persisted turn without appending another user message. */
 +    async resumeInterruptedTurn() {
 +        if (this.isStreaming) {
@@ -108,155 +120,82 @@ index 66e874efd252470d00d3cdaad2e2b4b6121de15b..c8679f1bae135d5c701144cd50a43e92
 +            }
 +        }
 +        finally {
-+            this._systemPromptOverride = undefined;
-+            this._flushPendingBashMessages();
-+            this._flushPendingCustomMessages();
-+            await this._emitAgentSettled();
-+        }
-+    }
-+    /** Restore a prepared queued prompt without rerunning input handlers or template expansion. */
-+    async restoreQueuedPrompt(text, options) {
-+        if (options.streamingBehavior === "steer") {
-+            await this._queueSteer(text, options.images, options.clientMessageId);
-+        }
-+        else {
-+            await this._queueFollowUp(text, options.images, options.clientMessageId);
-+        }
-+    }
-+    /** Restart a prompt whose journal was committed before its user message was persisted. */
-+    async resumeInterruptedPrompt(text, options) {
-+        if (this.isStreaming) {
-+            throw new Error("Agent is already processing");
-+        }
-+        let messages = options?.messages;
-+        if (!messages) {
-+            const content = [{ type: "text", text }];
-+            if (options?.images) {
-+                content.push(...options.images);
-+            }
-+            messages = [{
-+                    role: "user",
-+                    content,
-+                    timestamp: Date.now(),
-+                    clientMessageId: options?.clientMessageId,
-+                }];
-+        }
-+        if (options?.systemPrompt !== undefined) {
-+            this._systemPromptOverride = options.systemPrompt;
-+            this.agent.state.systemPrompt = options.systemPrompt;
-+        }
-+        await this._runAgentPrompt(messages);
-+    }
-     async _handlePostAgentRun() {
-         const msg = this._lastAssistantMessage;
-         this._lastAssistantMessage = undefined;
-@@ -822,6 +883,7 @@ export class AgentSession {
-         const expandPromptTemplates = options?.expandPromptTemplates ?? true;
-         const preflightResult = options?.preflightResult;
-         let messages;
-+        let preparedPrompt;
-         try {
-             // Handle extension commands first (execute immediately, even during streaming)
-             // Extension commands manage their own LLM interaction via pi.sendMessage()
-@@ -829,7 +891,7 @@ export class AgentSession {
-                 const handled = await this._tryExecuteExtensionCommand(text);
-                 if (handled) {
-                     // Extension command executed, no prompt to send
--                    preflightResult?.(true);
-+                    await preflightResult?.(true);
-                     return;
-                 }
-             }
-@@ -842,7 +904,7 @@ export class AgentSession {
-             if (this._extensionRunner.hasHandlers("input")) {
-                 const inputResult = await this._extensionRunner.emitInput(currentText, currentImages, options?.source ?? "interactive", this.isStreaming ? options?.streamingBehavior : undefined);
-                 if (inputResult.action === "handled") {
--                    preflightResult?.(true);
-+                    await preflightResult?.(true);
-                     return;
-                 }
-                 if (inputResult.action === "transform") {
-@@ -861,13 +923,13 @@ export class AgentSession {
-                 if (!options?.streamingBehavior) {
+             this._systemPromptOverride = undefined;
+             this._flushPendingBashMessages();
+             this._flushPendingCustomMessages();
+@@ -862,10 +899,10 @@
                      throw new Error("Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.");
                  }
-+                await preflightResult?.(true, { text: expandedText, images: currentImages });
                  if (options.streamingBehavior === "followUp") {
 -                    await this._queueFollowUp(expandedText, currentImages);
-+                    await this._queueFollowUp(expandedText, currentImages, options.clientMessageId);
++                    await this._queueFollowUp(expandedText, currentImages, options.clientMessageId, options.onTurnStarted);
                  }
                  else {
 -                    await this._queueSteer(expandedText, currentImages);
-+                    await this._queueSteer(expandedText, currentImages, options.clientMessageId);
++                    await this._queueSteer(expandedText, currentImages, options.clientMessageId, options.onTurnStarted);
                  }
--                preflightResult?.(true);
+                 preflightResult?.(true);
                  return;
-             }
-             // Flush any pending bash and custom messages before the new prompt
-@@ -905,6 +967,7 @@ export class AgentSession {
+@@ -904,5 +941,10 @@
+-            messages.push({
++            const userMessage = {
                  role: "user",
                  content: userContent,
                  timestamp: Date.now(),
+-            });
 +                clientMessageId: options?.clientMessageId,
-             });
-             // Inject any pending "nextTurn" messages as context alongside the user message
-             for (const msg of this._pendingNextTurnMessages) {
-@@ -937,15 +1000,20 @@ export class AgentSession {
-                 this._systemPromptOverride = undefined;
-                 this.agent.state.systemPrompt = this._baseSystemPrompt;
-             }
-+            preparedPrompt = { text: expandedText, images: currentImages };
-         }
-         catch (error) {
--            preflightResult?.(false);
-+            await preflightResult?.(false);
-             throw error;
-         }
-         if (!messages) {
-             return;
-         }
--        preflightResult?.(true);
-+        await preflightResult?.(true, {
-+            ...preparedPrompt,
-+            messages,
-+            systemPrompt: this.agent.state.systemPrompt,
-+        });
-         await this._runAgentPrompt(messages);
-     }
-     /**
-@@ -1043,7 +1111,7 @@ export class AgentSession {
++            };
++            if (options?.onTurnStarted) {
++                this._turnStartedHooks.set(userMessage, options.onTurnStarted);
++            }
++            messages.push(userMessage);
+@@ -1043,7 +1085,7 @@
      /**
       * Internal: Queue a steering message (already expanded, no extension command check).
       */
 -    async _queueSteer(text, images) {
-+    async _queueSteer(text, images, clientMessageId) {
++    async _queueSteer(text, images, clientMessageId, onTurnStarted) {
          this._steeringMessages.push(text);
          this._emitQueueUpdate();
          const content = [{ type: "text", text }];
-@@ -1054,12 +1122,13 @@ export class AgentSession {
+@@ -1054,13 +1096,18 @@
+-        this.agent.steer({
++        const userMessage = {
              role: "user",
              content,
              timestamp: Date.now(),
+-        });
 +            clientMessageId,
-         });
++        };
++        if (onTurnStarted) {
++            this._turnStartedHooks.set(userMessage, onTurnStarted);
++        }
++        this.agent.steer(userMessage);
      }
      /**
       * Internal: Queue a follow-up message (already expanded, no extension command check).
       */
 -    async _queueFollowUp(text, images) {
-+    async _queueFollowUp(text, images, clientMessageId) {
++    async _queueFollowUp(text, images, clientMessageId, onTurnStarted) {
          this._followUpMessages.push(text);
          this._emitQueueUpdate();
          const content = [{ type: "text", text }];
-@@ -1070,6 +1139,7 @@ export class AgentSession {
+@@ -1070,7 +1118,12 @@
+-        this.agent.followUp({
++        const userMessage = {
              role: "user",
              content,
              timestamp: Date.now(),
+-        });
 +            clientMessageId,
-         });
++        };
++        if (onTurnStarted) {
++            this._turnStartedHooks.set(userMessage, onTurnStarted);
++        }
++        this.agent.followUp(userMessage);
      }
      /**
-@@ -1201,6 +1271,18 @@ export class AgentSession {
+@@ -1201,6 +1255,18 @@
          this._emitQueueUpdate();
          return { steering, followUp };
      }
@@ -275,7 +214,7 @@ index 66e874efd252470d00d3cdaad2e2b4b6121de15b..c8679f1bae135d5c701144cd50a43e92
      /** Number of pending messages (includes both steering and follow-up) */
      get pendingMessageCount() {
          return this._steeringMessages.length + this._followUpMessages.length;
-@@ -1736,15 +1818,19 @@ export class AgentSession {
+@@ -1736,15 +1802,19 @@
       * @param willRetry Whether to continue the interrupted turn after overflow compaction
       * @returns Whether the post-run loop should call `agent.continue()`
       */
@@ -297,7 +236,7 @@ index 66e874efd252470d00d3cdaad2e2b4b6121de15b..c8679f1bae135d5c701144cd50a43e92
              const pathEntries = this.sessionManager.getBranch();
              const preparation = prepareCompaction(pathEntries, settings);
              if (!preparation) {
-@@ -1752,6 +1838,7 @@ export class AgentSession {
+@@ -1752,6 +1822,7 @@
              }
              this._emit({ type: "compaction_start", reason });
              this._autoCompactionAbortController = new AbortController();
@@ -305,7 +244,7 @@ index 66e874efd252470d00d3cdaad2e2b4b6121de15b..c8679f1bae135d5c701144cd50a43e92
              started = true;
              let extensionCompaction;
              if (this._extensionRunner.hasHandlers("session_before_compact")) {
-@@ -1889,6 +1976,7 @@ export class AgentSession {
+@@ -1889,6 +1960,7 @@
              return false;
          }
          finally {
@@ -313,11 +252,39 @@ index 66e874efd252470d00d3cdaad2e2b4b6121de15b..c8679f1bae135d5c701144cd50a43e92
              this._autoCompactionAbortController = undefined;
              this._resolveIdleWaitIfIdle();
          }
+diff --git a/dist/core/session-manager.d.ts b/dist/core/session-manager.d.ts
+--- a/dist/core/session-manager.d.ts
++++ b/dist/core/session-manager.d.ts
+@@ -202,6 +202,8 @@ export declare class SessionManager {
+     private _buildIndex;
+     private _rewriteFile;
+     isPersisted(): boolean;
++    /** Write all buffered entries to the session file. */
++    persistNow(): void;
+     getCwd(): string;
+     getSessionDir(): string;
+     usesDefaultSessionDir(): boolean;
+diff --git a/dist/core/session-manager.js b/dist/core/session-manager.js
+--- a/dist/core/session-manager.js
++++ b/dist/core/session-manager.js
+@@ -721,6 +721,13 @@
+     isPersisted() {
+         return this.persist;
+     }
++    /** Write all buffered entries to the session file. */
++    persistNow() {
++        if (!this.persist || !this.sessionFile || this.flushed)
++            return;
++        this._rewriteFile();
++        this.flushed = true;
++    }
+     getCwd() {
+         return this.cwd;
+     }
 diff --git a/dist/core/compaction/compaction.js b/dist/core/compaction/compaction.js
-index e936db7dc2617b5c0ff43ea11942c5a79b672dc6..8ab320a95aca95ff82da06333dee5fdcee395329 100644
 --- a/dist/core/compaction/compaction.js
 +++ b/dist/core/compaction/compaction.js
-@@ -321,13 +321,20 @@ export function findCutPoint(entries, startIndex, endIndex, keepRecentTokens) {
+@@ -321,13 +321,20 @@
          accumulatedTokens += messageTokens;
          // Check if we've exceeded the budget
          if (accumulatedTokens >= keepRecentTokens) {
@@ -337,35 +304,4 @@ index e936db7dc2617b5c0ff43ea11942c5a79b672dc6..8ab320a95aca95ff82da06333dee5fdc
 +            }
              break;
          }
-     }
-diff --git a/dist/core/session-manager.d.ts b/dist/core/session-manager.d.ts
-index a8d14157e590b439bbe83bacb24d4449d9ea54cb..7126299afe73953b375776bcb4b14b26899cf200 100644
---- a/dist/core/session-manager.d.ts
-+++ b/dist/core/session-manager.d.ts
-@@ -202,6 +202,8 @@ export declare class SessionManager {
-     private _buildIndex;
-     private _rewriteFile;
-     isPersisted(): boolean;
-+    /** Ensure the current in-memory session tree has been written to disk. */
-+    flush(): void;
-     getCwd(): string;
-     getSessionDir(): string;
-     usesDefaultSessionDir(): boolean;
-diff --git a/dist/core/session-manager.js b/dist/core/session-manager.js
-index fbb784f771553c21e993cf82200a80a854261437..6b04f8489bbe89aab56bae3057d80c29ccd01ab8 100644
---- a/dist/core/session-manager.js
-+++ b/dist/core/session-manager.js
-@@ -721,6 +721,13 @@ export class SessionManager {
-     isPersisted() {
-         return this.persist;
-     }
-+    /** Ensure the current in-memory session tree has been written to disk. */
-+    flush() {
-+        if (!this.persist || !this.sessionFile || this.flushed)
-+            return;
-+        this._rewriteFile();
-+        this.flushed = true;
-+    }
-     getCwd() {
-         return this.cwd;
      }

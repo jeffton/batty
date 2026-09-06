@@ -42,6 +42,12 @@ Batty adds a browser-native layer on top:
 - web search
 - passkey login
 
+### Restart recovery
+
+Batty records active interactive sessions in `<batty-root>/.batty/active-interactive-turns.json` after their initial user message is saved. At startup, it continues interrupted turns from their session transcripts and skips turns with a saved final response. Tool calls without saved results receive an uncertain-outcome result so the agent can inspect their effects before retrying.
+
+Prompts that have not reached the transcript, including queued steering and follow-up messages, do not survive restart. Recovery uses the reopened session's context. Completed, failed, and user-aborted runs clear their active marker; failed recovery is not automatically retried on subsequent restarts.
+
 ## Quick start
 
 Create a Batty root directory. Batty stores its own state in `<batty-root>/.batty/` and lists workspaces from the configured `workspacesRoots`.

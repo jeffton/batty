@@ -21,6 +21,7 @@ const {
   draftFor,
   editJob,
   cancelEdit,
+  setDraftModel,
   thinkingOptions,
   sessionLabel,
   saveJob,
@@ -127,6 +128,7 @@ watch(
           :thinking-options="thinkingOptions(job)"
           @edit="editJob(job)"
           @cancel="cancelEdit(job)"
+          @model-change="setDraftModel(job, $event)"
           @save="saveJob(job)"
           @toggle="toggleJob(job)"
           @delete="deleteJob(job)"

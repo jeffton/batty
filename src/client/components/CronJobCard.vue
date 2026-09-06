@@ -2,13 +2,13 @@
 import ThinkingLevelPicker from "@/client/components/ThinkingLevelPicker.vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
 import type { CronDraft } from "@/client/composables/useCronJobDrafts";
-import type { CronJob, ModelInfo } from "@/shared/types";
+import type { CronJob, ModelOption } from "@/shared/types";
 import { Pencil, Save, Trash2, X } from "@lucide/vue";
 
 const props = defineProps<{
   job: CronJob;
   draft: CronDraft;
-  models: ModelInfo[];
+  models: ModelOption[];
   sessionLabel: string;
   thinkingOptions: string[];
 }>();
@@ -16,10 +16,15 @@ const props = defineProps<{
 const emit = defineEmits<{
   edit: [];
   cancel: [];
+  modelChange: [modelId: string];
   save: [];
   toggle: [];
   delete: [];
 }>();
+
+function changeModel(event: Event): void {
+  emit("modelChange", (event.target as HTMLSelectElement).value);
+}
 </script>
 
 <template>
@@ -87,10 +92,17 @@ const emit = defineEmits<{
 
       <div class="cron-popover__edit-fields">
         <select
-          v-model="props.draft.model"
+          :value="props.draft.model"
           class="cron-popover__select"
           :disabled="props.draft.saving || props.draft.deleting"
+          @change="changeModel"
         >
+          <option
+            v-if="!props.models.some((model) => model.id === props.draft.model)"
+            :value="props.draft.model"
+          >
+            {{ props.draft.model }} (unavailable)
+          </option>
           <option v-for="model in props.models" :key="model.id" :value="model.id">
             {{ model.label }}
           </option>

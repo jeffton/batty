@@ -1,4 +1,4 @@
-import type { SessionState } from "@/shared/types";
+import type { ModelOption, SessionState } from "@/shared/types";
 
 function sanitizeLevels(levels: string[] | undefined): string[] {
   return Array.isArray(levels)
@@ -14,4 +14,14 @@ export function resolveThinkingOptions(
   }
 
   return [...new Set(sanitizeLevels(session.availableThinkingLevels))];
+}
+
+export function resolveModelThinkingOptions(
+  model: Pick<ModelOption, "thinkingLevels"> | undefined,
+): string[] {
+  if (!model) {
+    return [];
+  }
+
+  return [...new Set(sanitizeLevels(model.thinkingLevels))];
 }

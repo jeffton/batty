@@ -836,9 +836,10 @@ export class PiService {
     return this.getState(sessionId);
   }
 
-  setThinkingLevel(sessionId: string, thinkingLevel: string): SessionState {
+  async setThinkingLevel(sessionId: string, thinkingLevel: string): Promise<SessionState> {
     const webSession = this.requireSession(sessionId);
     webSession.session.setThinkingLevel(thinkingLevel as AgentSession["thinkingLevel"]);
+    await this.refreshBattySystemPrompt(webSession);
     this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
     return this.getState(sessionId);
   }

@@ -47,7 +47,7 @@ export type PiServiceCronAdapterContext = {
   runSubagentSerial: <T>(sessionId: string, run: () => Promise<T>) => Promise<T>;
   getState: (sessionId: string) => SessionState;
   publishReset: (webSession: WebSession, state: SessionState) => void;
-  setThinkingLevel: (sessionId: string, thinkingLevel: string) => SessionState;
+  setThinkingLevel: (sessionId: string, thinkingLevel: string) => Promise<SessionState>;
   setModel: (sessionId: string, modelId: string) => Promise<SessionState>;
   onAgentCompleted?: (session: SessionState) => Promise<void>;
   notifyWorkspaceUpdated: (workspaceId: string) => Promise<void>;
@@ -174,8 +174,8 @@ async function runInlineCronJob(
 
   return context.runSubagentSerial(webSession.session.sessionId, async () => {
     await webSession.session.agent.waitForIdle();
-    context.setThinkingLevel(session.id, job.thinkingLevel);
     await context.setModel(session.id, job.model);
+    await context.setThinkingLevel(session.id, job.thinkingLevel);
     context.publishReset(webSession, context.getState(webSession.id));
     await job.onSessionStarted({
       sessionId: webSession.session.sessionId,

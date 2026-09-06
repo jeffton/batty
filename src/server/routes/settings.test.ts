@@ -26,6 +26,7 @@ function createContext(battyDir: string, models: Array<{ id: string; provider: s
           ...model,
           label: model.id,
           reasoning: true,
+          thinkingLevels: ["minimal", "low", "medium", "high"],
           supportsImages: false,
         })),
       ),

@@ -283,6 +283,7 @@ export interface ModelOption {
   label: string;
   provider: string;
   reasoning: boolean;
+  thinkingLevels: string[];
   supportsImages: boolean;
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { resolveThinkingOptions } from "@/client/lib/thinking-levels";
+import { resolveModelThinkingOptions, resolveThinkingOptions } from "@/client/lib/thinking-levels";
 import type { SessionState } from "@/shared/types";
 
 function session(overrides: Partial<SessionState>): SessionState {
@@ -56,5 +56,18 @@ describe("resolveThinkingOptions", () => {
         }),
       ),
     ).toEqual(["high", "xhigh"]);
+  });
+});
+
+describe("resolveModelThinkingOptions", () => {
+  it("uses and deduplicates the selected model's thinking levels", () => {
+    expect(resolveModelThinkingOptions({ thinkingLevels: ["minimal", "high", "high"] })).toEqual([
+      "minimal",
+      "high",
+    ]);
+  });
+
+  it("returns no options when the model is unavailable", () => {
+    expect(resolveModelThinkingOptions(undefined)).toEqual([]);
   });
 });

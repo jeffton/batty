@@ -1,3 +1,4 @@
+import { getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type {
   ActiveToolRun,
@@ -56,12 +57,13 @@ export function modelKey(model: PiModel): string {
   return `${model.provider}/${model.id}`;
 }
 
-export function toModelOption(model: PiModel): ModelOption {
+export function toModelOption(model: Model<Api>): ModelOption {
   return {
     id: modelKey(model),
     label: `${model.name} · ${model.provider}`,
     provider: model.provider,
-    reasoning: Boolean(model.reasoning),
+    reasoning: model.reasoning,
+    thinkingLevels: getSupportedThinkingLevels(model),
     supportsImages: model.input.includes("image"),
   };
 }

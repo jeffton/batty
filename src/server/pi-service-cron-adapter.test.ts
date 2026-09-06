@@ -142,6 +142,52 @@ describe("runCronJobSession", () => {
     expect(notifyWorkspaceUpdated).toHaveBeenCalledWith("roy");
   });
 
+  it("applies an inline cron job's effort after switching to its model", async () => {
+    const daily = createWebSession("daily-session-id", "/tmp/daily-session.jsonl");
+    const calls: string[] = [];
+
+    await runCronJobSession(
+      {
+        createCronSession: vi.fn(),
+        promptCron: vi.fn(async () => {
+          calls.push("prompt");
+        }),
+        resolveOrCreateDailySession: vi.fn(
+          async () => ({ id: daily.id, sessionId: daily.id }) as never,
+        ),
+        requireSession: vi.fn(() => daily),
+        requireSessionPath: vi.fn(() => daily.session.sessionFile!),
+        prepareSessionForContextCopy: vi.fn(async () => undefined),
+        runSubagentSerial: async (_sessionId, run) => run(),
+        getState: vi.fn((sessionId) => ({ id: sessionId, workspaceId: "roy" }) as never),
+        publishReset: vi.fn(),
+        setThinkingLevel: vi.fn(async (_sessionId, level) => {
+          calls.push(`effort:${level}`);
+          return { id: daily.id, workspaceId: "roy" } as never;
+        }),
+        setModel: vi.fn(async (_sessionId, modelId) => {
+          calls.push(`model:${modelId}`);
+          return { id: daily.id, workspaceId: "roy" } as never;
+        }),
+        notifyWorkspaceUpdated: vi.fn(async () => undefined),
+      },
+      {
+        jobId: "job-1",
+        runId: "run-inline",
+        workspace: daily.workspace,
+        prompt: "Run heartbeat",
+        model: "openai-codex/gpt-6-astra",
+        thinkingLevel: "max",
+        session: { kind: "daily-inline" },
+        scheduleLabel: "Every hour",
+        signal: new AbortController().signal,
+        onSessionStarted: vi.fn(),
+      },
+    );
+
+    expect(calls).toEqual(["model:openai-codex/gpt-6-astra", "effort:max", "prompt"]);
+  });
+
   it("does not deliver a successful NO_REPLY result to the daily parent", async () => {
     const parent = createWebSession("daily-session-id", "/tmp/daily-session.jsonl");
     const cron = createWebSession("cron-session-id", "/tmp/cron-session.jsonl");

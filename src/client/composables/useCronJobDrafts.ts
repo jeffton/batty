@@ -1,5 +1,5 @@
 import { computed, reactive, watch, type ComputedRef } from "vue";
-import { resolveThinkingOptions } from "@/client/lib/thinking-levels";
+import { resolveModelThinkingOptions } from "@/client/lib/thinking-levels";
 import type { useAppStore } from "@/client/stores/app";
 import type { CronJob } from "@/shared/types";
 
@@ -40,6 +40,7 @@ export function useCronJobDrafts(store: AppStore): {
   draftFor: (job: CronJob) => CronDraft;
   editJob: (job: CronJob) => void;
   cancelEdit: (job: CronJob) => void;
+  setDraftModel: (job: CronJob, modelId: string) => void;
   thinkingOptions: (job: CronJob) => string[];
   sessionLabel: (job: CronJob) => string;
   saveJob: (job: CronJob) => Promise<void>;
@@ -114,7 +115,9 @@ export function useCronJobDrafts(store: AppStore): {
       draft.editing = jobId === job.id;
     }
     resetDraft(job);
-    draftFor(job).editing = true;
+    const draft = draftFor(job);
+    normalizeDraftThinking(draft);
+    draft.editing = true;
   }
 
   function cancelEdit(job: CronJob): void {
@@ -123,12 +126,25 @@ export function useCronJobDrafts(store: AppStore): {
   }
 
   function thinkingOptions(job: CronJob): string[] {
-    const draft = draftFor(job);
-    if (store.activeSession?.model !== draft.model) {
-      return [];
-    }
+    const modelId = draftFor(job).model;
+    return resolveModelThinkingOptions(store.models.find((model) => model.id === modelId));
+  }
 
-    return resolveThinkingOptions(store.activeSession);
+  function normalizeDraftThinking(draft: CronDraft): void {
+    const model = store.models.find((candidate) => candidate.id === draft.model);
+    if (!model) {
+      return;
+    }
+    const options = resolveModelThinkingOptions(model);
+    if (!options.includes(draft.thinkingLevel)) {
+      draft.thinkingLevel = options[0] ?? "off";
+    }
+  }
+
+  function setDraftModel(job: CronJob, modelId: string): void {
+    const draft = draftFor(job);
+    draft.model = modelId;
+    normalizeDraftThinking(draft);
   }
 
   function sessionLabel(job: CronJob): string {
@@ -146,6 +162,7 @@ export function useCronJobDrafts(store: AppStore): {
 
   async function saveJob(job: CronJob): Promise<void> {
     const draft = draftFor(job);
+    normalizeDraftThinking(draft);
     const patch = {
       prompt: draft.prompt,
       model: draft.model,
@@ -211,6 +228,7 @@ export function useCronJobDrafts(store: AppStore): {
     draftFor,
     editJob,
     cancelEdit,
+    setDraftModel,
     thinkingOptions,
     sessionLabel,
     saveJob,

@@ -114,6 +114,7 @@ describe("CronPopover", () => {
         label: "GPT-5",
         provider: "openai",
         reasoning: true,
+        thinkingLevels: ["medium", "high"],
         supportsImages: true,
       },
     ];
@@ -176,6 +177,124 @@ describe("CronPopover", () => {
     });
     expect(wrapper.find("textarea").exists()).toBe(false);
     expect(wrapper.text()).toContain("Original prompt");
+  });
+
+  it("uses the selected model's effort levels and resets unsupported effort on model change", async () => {
+    const astraJob: CronJob = {
+      ...job,
+      model: "openai-codex/gpt-6-astra",
+      thinkingLevel: "off",
+    };
+    listWorkspaceCronJobs.mockResolvedValue([astraJob]);
+    updateCronJob.mockImplementation(async (_jobId: string, patch: Partial<CronJob>) => ({
+      ...astraJob,
+      ...patch,
+      session: patch.session ?? astraJob.session,
+      updatedAt: 2,
+    }));
+
+    const store = useAppStore();
+    store.workspaces = [
+      {
+        id: "batty",
+        label: "batty",
+        path: "/root/github/batty",
+        kind: "workspace",
+        isPinned: false,
+        isAssistant: false,
+      },
+    ];
+    store.selectedWorkspaceId = "batty";
+    store.cronJobsByWorkspace = { batty: [astraJob] };
+    store.models = [
+      {
+        id: "openai-codex/gpt-6-astra",
+        label: "GPT-6 Astra",
+        provider: "openai-codex",
+        reasoning: true,
+        thinkingLevels: ["minimal", "low", "medium", "high", "xhigh", "max"],
+        supportsImages: true,
+      },
+      {
+        id: "openai/gpt-text",
+        label: "GPT Text",
+        provider: "openai",
+        reasoning: false,
+        thinkingLevels: ["off"],
+        supportsImages: false,
+      },
+    ];
+
+    const wrapper = mount(CronPopover, {
+      props: { popoverId: "cron-popover", anchorName: "--cron-anchor" },
+    });
+    await flushPromises();
+    await wrapper.find(".cron-popover__icon-btn").trigger("click");
+
+    expect(wrapper.find(".cron-popover__thinking-unavailable").exists()).toBe(false);
+    expect(wrapper.findAll(".thinking-picker__btn").map((button) => button.text())).toEqual([
+      "Minimal",
+      "Low",
+      "Medium",
+      "High",
+      "XHigh",
+      "Max",
+    ]);
+    expect(wrapper.find(".thinking-picker__btn").classes()).toContain("is-active");
+
+    await wrapper.find<HTMLSelectElement>(".cron-popover__select").setValue("openai/gpt-text");
+    expect(wrapper.findAll(".thinking-picker__btn").map((button) => button.text())).toEqual([
+      "Off",
+    ]);
+    expect(wrapper.find(".thinking-picker__btn").classes()).toContain("is-active");
+
+    await wrapper.find(".cron-popover__save").trigger("click");
+    await flushPromises();
+    expect(updateCronJob).toHaveBeenCalledWith("cron-1", {
+      prompt: "Original prompt",
+      model: "openai/gpt-text",
+      thinkingLevel: "off",
+      session: { kind: "new" },
+    });
+  });
+
+  it("keeps an unavailable saved model explicit while editing", async () => {
+    const unavailableJob: CronJob = { ...job, model: "retired/model" };
+    listWorkspaceCronJobs.mockResolvedValue([unavailableJob]);
+
+    const store = useAppStore();
+    store.workspaces = [
+      {
+        id: "batty",
+        label: "batty",
+        path: "/root/github/batty",
+        kind: "workspace",
+        isPinned: false,
+        isAssistant: false,
+      },
+    ];
+    store.selectedWorkspaceId = "batty";
+    store.cronJobsByWorkspace = { batty: [unavailableJob] };
+    store.models = [
+      {
+        id: "openai/gpt-5",
+        label: "GPT-5",
+        provider: "openai",
+        reasoning: true,
+        thinkingLevels: ["minimal", "low", "medium", "high"],
+        supportsImages: true,
+      },
+    ];
+
+    const wrapper = mount(CronPopover, {
+      props: { popoverId: "cron-popover", anchorName: "--cron-anchor" },
+    });
+    await flushPromises();
+    await wrapper.find(".cron-popover__icon-btn").trigger("click");
+
+    const modelSelect = wrapper.find<HTMLSelectElement>(".cron-popover__select");
+    expect(modelSelect.element.value).toBe("retired/model");
+    expect(modelSelect.text()).toContain("retired/model (unavailable)");
   });
 
   it("closes from the header button", async () => {

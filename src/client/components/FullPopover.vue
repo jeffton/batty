@@ -1,6 +1,12 @@
+<script lang="ts">
+import { ref } from "vue";
+
+const openPopovers = ref<symbol[]>([]);
+</script>
+
 <script setup lang="ts">
 import { X } from "@lucide/vue";
-import { ref } from "vue";
+import { computed, onBeforeUnmount } from "vue";
 import BasePopover from "@/client/components/BasePopover.vue";
 
 const props = withDefaults(
@@ -23,6 +29,22 @@ const emit = defineEmits<{
 }>();
 
 const popoverElement = ref<InstanceType<typeof BasePopover> | null>(null);
+const stackId = Symbol();
+const stackOffset = computed(() => `${Math.max(0, openPopovers.value.indexOf(stackId)) * 6}px`);
+
+function removeFromStack(): void {
+  openPopovers.value = openPopovers.value.filter((id) => id !== stackId);
+}
+
+function onToggle(event: Event): void {
+  removeFromStack();
+  if ((event as ToggleEvent).newState === "open") {
+    openPopovers.value.push(stackId);
+  }
+  emit("toggle", event);
+}
+
+onBeforeUnmount(removeFromStack);
 </script>
 
 <template>
@@ -30,8 +52,11 @@ const popoverElement = ref<InstanceType<typeof BasePopover> | null>(null);
     :id="props.popoverId"
     ref="popoverElement"
     class="full-popover"
-    :style="props.anchorName ? { 'position-anchor': props.anchorName } : undefined"
-    @toggle="emit('toggle', $event)"
+    :style="{
+      'position-anchor': props.anchorName,
+      '--full-popover-stack-offset': stackOffset,
+    }"
+    @toggle="onToggle"
   >
     <header class="full-popover__header">
       <div class="full-popover__heading">
@@ -62,8 +87,9 @@ const popoverElement = ref<InstanceType<typeof BasePopover> | null>(null);
 
 <style scoped>
 .full-popover {
-  inset: calc(var(--safe-area-top) + 1rem) calc(var(--safe-area-right) + 1rem)
-    calc(var(--safe-area-bottom) + 1rem) calc(var(--safe-area-left) + 1rem);
+  inset: calc(var(--safe-area-top) + 1rem + var(--full-popover-stack-offset))
+    calc(var(--safe-area-right) + 1rem) calc(var(--safe-area-bottom) + 1rem)
+    calc(var(--safe-area-left) + 1rem);
   width: auto;
   max-width: none;
   height: auto;

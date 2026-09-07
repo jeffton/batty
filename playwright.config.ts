@@ -13,7 +13,7 @@ export default defineConfig({
   },
   webServer: {
     command:
-      "pnpm exec tsx e2e/prepare.ts && BATTY_SELF_PATH=$PWD BATTY_PORT=33147 pnpm start -- .",
+      "pnpm exec tsx e2e/prepare.ts && BATTY_SELF_PATH=$PWD BATTY_PORT=33147 pnpm start -- ./.batty/e2e-state",
     url: "http://127.0.0.1:33147/healthz",
     reuseExistingServer: false,
     timeout: 120_000,

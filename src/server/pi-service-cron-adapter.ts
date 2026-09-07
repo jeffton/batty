@@ -1,15 +1,12 @@
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { BACKGROUND_CONTEXT as nativeContext, getOrThrow } from "@earendil-works/pi-agent-core";
+import { CRON_RUN_SESSION_CUSTOM_TYPE, type CronRunSessionBinding } from "./cron-session";
+import { appendResultDelivery } from "./session-result-delivery";
+import type { HarnessController as AgentSession } from "./harness-controller";
 import type { CronJobSession, RunningCronJob, SessionState, WorkspaceInfo } from "@/shared/types";
 import { buildCronRuntimeNotice, type RuntimeNotice } from "./runtime-notices";
-import { appendMessages } from "./pi-service-subagents";
 import type { WebSession } from "./pi-service-types";
-import {
-  extractAssistantText,
-  findLastAssistantMessage,
-  stripThinkingFromAssistantMessage,
-  ZERO_USAGE,
-} from "./subagent";
+import { extractAssistantText, stripThinkingFromAssistantMessage, ZERO_USAGE } from "./subagent";
 
 export type CronJobRun = {
   jobId: string;
@@ -36,7 +33,7 @@ export type PiServiceCronAdapterContext = {
       copySessionPath?: string;
     },
   ) => Promise<SessionState>;
-  promptCron: (sessionId: string, notice: RuntimeNotice) => Promise<void>;
+  promptCron: (sessionId: string, notice: RuntimeNotice, operationId: string) => Promise<void>;
   resolveOrCreateDailySession: (
     workspace: WorkspaceInfo,
     options?: { modelId?: string; thinkingLevel?: string },
@@ -52,6 +49,99 @@ export type PiServiceCronAdapterContext = {
   onAgentCompleted?: (session: SessionState) => Promise<void>;
   notifyWorkspaceUpdated: (workspaceId: string) => Promise<void>;
 };
+
+/** The scheduler's run ID is the native operation ID, not a second execution journal. */
+export async function executeCronOperation(
+  session: AgentSession,
+  notice: RuntimeNotice,
+  operationId: string,
+  recover = false,
+): Promise<void> {
+  let result = await cronOperationResult(session, operationId);
+  if (!result) {
+    const execution = await session.lane.inspectExecution(nativeContext);
+    if (execution.current && execution.current.id !== operationId) {
+      throw new Error(`Cron operation ${operationId} does not own this session`);
+    }
+    if (!execution.current) {
+      if (recover) throw new Error("Batty stopped before this cron operation was admitted");
+      getOrThrow(
+        await session.lane.accept(
+          {
+            kind: "prompt",
+            operationId,
+            prompt: cronNoticeMessage(notice, { runId: operationId }, Date.now()),
+          },
+          nativeContext,
+        ),
+      );
+    }
+    await session.resume();
+    result = await cronOperationResult(session, operationId);
+  }
+  if (!result) throw new Error(`Cron operation ${operationId} has no terminal result`);
+  if (result.status !== "completed") {
+    throw new Error(result.error?.message ?? `Cron run ${result.status}`);
+  }
+}
+
+export async function recoverCronJobSession(
+  context: PiServiceCronAdapterContext & {
+    openSession(workspace: WorkspaceInfo, sessionPath: string): Promise<SessionState>;
+    openSessionById(workspace: WorkspaceInfo, sessionId: string): Promise<SessionState>;
+  },
+  job: CronJobRun & { sessionPath: string; startedAtMs: number },
+): Promise<{ sessionId: string; sessionPath: string }> {
+  const restored = await context.openSession(job.workspace, job.sessionPath);
+  const child = context.requireSession(restored.id).session;
+  const notice = buildCronRuntimeNotice({
+    scheduleLabel: job.scheduleLabel,
+    prompt: job.prompt,
+    now: new Date(job.startedAtMs),
+  });
+  const marker = child.sessionManager
+    .getEntries()
+    .findLast(
+      (entry) =>
+        entry.type === "custom" &&
+        entry.customType === CRON_RUN_SESSION_CUSTOM_TYPE &&
+        (entry.data as unknown as CronRunSessionBinding).runId === job.runId,
+    );
+  const binding =
+    marker?.type === "custom" ? (marker.data as unknown as CronRunSessionBinding) : undefined;
+  if (job.session.kind === "daily-detached" && !binding?.parentSessionId) {
+    throw new Error(`Cron run ${job.runId} has no persisted parent binding`);
+  }
+  const parent =
+    job.session.kind === "daily-detached"
+      ? await context.openSessionById(job.workspace, binding!.parentSessionId!)
+      : undefined;
+  const abort = () => {
+    void child.lane
+      .requestAbort(job.runId, nativeContext)
+      .catch((error) => console.error("Failed to stop recovered cron operation", error));
+  };
+  job.signal.addEventListener("abort", abort, { once: true });
+  if (job.signal.aborted) abort();
+  let error: unknown;
+  try {
+    await executeCronOperation(child, notice, job.runId, true);
+  } catch (caught) {
+    // An open operation belongs to Pi recovery, even if the process is shutting down.
+    if (!(await cronOperationResult(child, job.runId))) throw caught;
+    error = caught;
+  } finally {
+    job.signal.removeEventListener("abort", abort);
+  }
+  if (
+    parent &&
+    (error || extractAssistantText(await lastCronAssistant(child, job.runId)) !== "NO_REPLY")
+  ) {
+    await deliverCronRun(context, parent.id, notice, job, child, error);
+  }
+  if (error) throw error;
+  return { sessionId: child.sessionId, sessionPath: child.sessionFile };
+}
 
 export async function deliverSkippedCronJobRun(
   context: PiServiceCronAdapterContext,
@@ -71,13 +161,15 @@ export async function deliverSkippedCronJobRun(
 
   await context.runSubagentSerial(session.id, async () => {
     const parent = context.requireSession(session.id);
-    appendCronErrorDelivery(parent.session, notice, job, skipped.reason, skipped.skippedAtMs);
-    const state = {
-      ...context.getState(parent.id),
-      isStreaming: false,
-      pendingMessageCount: 0,
-      activeAssistant: undefined,
-    };
+    const appended = await appendCronErrorDelivery(
+      parent.session,
+      notice,
+      job,
+      skipped.reason,
+      skipped.skippedAtMs,
+    );
+    if (!appended) return;
+    const state = context.getState(parent.id);
     context.publishReset(parent, state);
     await context.onAgentCompleted?.(state);
     await context.notifyWorkspaceUpdated(parent.workspace.id);
@@ -124,7 +216,9 @@ export async function runCronJobSession(
   });
 
   const abortListener = () => {
-    void cronWebSession.session.abort();
+    void cronWebSession.session.lane
+      .requestAbort(job.runId, nativeContext)
+      .catch((error) => console.error("Failed to stop cron operation", error));
   };
   if (job.signal.aborted) {
     abortListener();
@@ -133,7 +227,8 @@ export async function runCronJobSession(
   }
 
   try {
-    await context.promptCron(cronWebSession.id, cronNotice);
+    job.signal.throwIfAborted();
+    await context.promptCron(cronWebSession.id, cronNotice, job.runId);
   } catch (error) {
     if (parent) {
       await deliverCronRun(context, parent.id, cronNotice, job, cronWebSession.session, error);
@@ -143,7 +238,7 @@ export async function runCronJobSession(
     job.signal.removeEventListener("abort", abortListener);
   }
 
-  const finalAssistant = findLastAssistantMessage(cronWebSession.session.messages);
+  const finalAssistant = await lastCronAssistant(cronWebSession.session, job.runId);
   const errorMessage = finalAssistantError(finalAssistant);
   if (
     parent &&
@@ -173,7 +268,7 @@ async function runInlineCronJob(
   const webSession = context.requireSession(session.id);
 
   return context.runSubagentSerial(webSession.session.sessionId, async () => {
-    await webSession.session.agent.waitForIdle();
+    await webSession.session.waitForIdle();
     await context.setModel(session.id, job.model);
     await context.setThinkingLevel(session.id, job.thinkingLevel);
     context.publishReset(webSession, context.getState(webSession.id));
@@ -183,7 +278,9 @@ async function runInlineCronJob(
     });
 
     const abortListener = () => {
-      void webSession.session.abort();
+      void webSession.session.lane
+        .requestAbort(job.runId, nativeContext)
+        .catch((error) => console.error("Failed to stop inline cron operation", error));
     };
     if (job.signal.aborted) {
       abortListener();
@@ -192,7 +289,8 @@ async function runInlineCronJob(
     }
 
     try {
-      await context.promptCron(session.id, cronNotice);
+      job.signal.throwIfAborted();
+      await context.promptCron(session.id, cronNotice, job.runId);
     } finally {
       job.signal.removeEventListener("abort", abortListener);
     }
@@ -211,33 +309,36 @@ async function deliverCronRun(
   cronSession: AgentSession,
   error?: unknown,
 ): Promise<void> {
+  // Capture the child's durable result before waiting on the parent. Completion hooks
+  // can release an unobserved ephemeral harness while the parent is still busy.
+  const delivery = {
+    sessionId: cronSession.sessionId,
+    sessionPath: cronSession.sessionFile,
+    finalAssistant: await lastCronAssistant(cronSession, job.runId),
+  };
   await context.runSubagentSerial(parentSessionId, async () => {
     const parent = context.requireSession(parentSessionId);
-    await parent.session.agent.waitForIdle();
-    appendCronRunDelivery(parent.session, cronNotice, job, cronSession, error);
-    const state = {
-      ...context.getState(parent.id),
-      isStreaming: false,
-      pendingMessageCount: 0,
-      activeAssistant: undefined,
-    };
+    await parent.session.waitForIdle();
+    const appended = await appendCronRunDelivery(parent.session, cronNotice, job, delivery, error);
+    if (!appended) return;
+    const state = context.getState(parent.id);
     context.publishReset(parent, state);
     await context.onAgentCompleted?.(state);
     await context.notifyWorkspaceUpdated(parent.workspace.id);
   });
 }
 
-function appendCronErrorDelivery(
+async function appendCronErrorDelivery(
   parent: AgentSession,
   cronNotice: RuntimeNotice,
   job: Pick<CronJobRun, "jobId" | "runId" | "workspace" | "prompt">,
   errorMessage: string,
   timestamp = Date.now(),
-): void {
+): Promise<boolean> {
   const jobId = job.jobId;
   const runId = job.runId;
   const workspaceId = job.workspace.id;
-  appendMessages(parent, [
+  return appendResultDelivery(parent, `cron:${runId}`, [
     cronNoticeMessage(
       cronNotice,
       {
@@ -252,28 +353,32 @@ function appendCronErrorDelivery(
   ]);
 }
 
-function appendCronRunDelivery(
+async function appendCronRunDelivery(
   parent: AgentSession,
   cronNotice: RuntimeNotice,
   job: CronJobRun,
-  cronSession: AgentSession,
+  delivery: {
+    sessionId: string;
+    sessionPath: string;
+    finalAssistant?: AssistantMessage;
+  },
   error?: unknown,
-): void {
+): Promise<boolean> {
   const timestamp = Date.now();
-  appendMessages(parent, [
+  return appendResultDelivery(parent, `cron:${job.runId}`, [
     cronNoticeMessage(
       cronNotice,
       {
         jobId: job.jobId,
         runId: job.runId,
         workspaceId: job.workspace.id,
-        sessionId: cronSession.sessionId,
-        sessionPath: cronSession.sessionFile,
+        sessionId: delivery.sessionId,
+        sessionPath: delivery.sessionPath,
         prompt: job.prompt,
       },
       timestamp,
     ),
-    deliveredAssistant(parent, cronSession, timestamp + 1, error),
+    deliveredAssistant(parent, delivery.finalAssistant, timestamp + 1, error),
   ]);
 }
 
@@ -324,15 +429,42 @@ function errorAssistant(
   };
 }
 
+function cronOperationResult(session: AgentSession, operationId: string) {
+  // Pi's watch materializes the committed result before completion hooks run.
+  // This view survives disposal; only historical operations need a live lane read.
+  const result = session.snapshot.lastResult;
+  return result?.operationId === operationId
+    ? Promise.resolve(result)
+    : session.lane.getResult(operationId, nativeContext);
+}
+
+async function lastCronAssistant(
+  session: AgentSession,
+  operationId: string,
+): Promise<AssistantMessage | undefined> {
+  const result = await cronOperationResult(session, operationId);
+  if (!result) return undefined;
+  // The presentation index retains immutable entries after the native session closes.
+  const entries = new Map(session.sessionManager.getEntries().map((entry) => [entry.id, entry]));
+  // Bound delivery to this operation, even if the session has since accepted another turn.
+  let id = result.tipId;
+  while (id && id !== result.fromTipId) {
+    const entry = entries.get(id);
+    if (!entry) throw new Error(`Missing cron result entry ${id}`);
+    if (entry.type === "message" && entry.message.role === "assistant")
+      return entry.message as AssistantMessage;
+    id = entry.parentId;
+  }
+  return undefined;
+}
+
 function deliveredAssistant(
   parent: AgentSession,
-  cronSession: AgentSession,
+  message: AssistantMessage | undefined,
   timestamp: number,
   error?: unknown,
 ): AssistantMessage {
-  const finalAssistant = stripThinkingFromAssistantMessage(
-    findLastAssistantMessage(cronSession.messages),
-  );
+  const finalAssistant = stripThinkingFromAssistantMessage(message);
   if (!error && finalAssistant && assistantHasRenderableContent(finalAssistant)) {
     return {
       ...finalAssistant,

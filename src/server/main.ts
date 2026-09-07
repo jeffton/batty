@@ -124,6 +124,15 @@ cronService.subscribe((workspaceIds) => {
   }
 });
 cronService.setRunner({
+  recover: async (run, runContext) => {
+    const workspace = resolveWorkspace(await listWorkspaces(config), run.workspaceId);
+    return service.recoverCronJobSession({
+      ...run,
+      ...runContext,
+      workspace,
+      sessionPath: run.sessionPath!,
+    });
+  },
   run: async (job, runContext) => {
     const workspaces = await listWorkspaces(config);
     const workspace = resolveWorkspace(workspaces, job.workspaceId);
@@ -159,7 +168,7 @@ cronService.setRunner({
   },
 });
 await cronService.initialize();
-await service.recoverActiveInteractiveTurns();
+await service.recoverOpenOperations();
 
 const authAttemptLimiter = createLoginRateLimiter();
 

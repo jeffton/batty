@@ -1,9 +1,9 @@
 import { type AssistantMessage, type Message } from "@earendil-works/pi-ai";
-import {
-  SessionManager,
-  type AgentSession,
-  type ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { HarnessClosed, HarnessFault } from "@earendil-works/pi-agent-core";
+import { appendResultDelivery } from "./session-result-delivery";
+import { HarnessSessionStore as SessionManager } from "./harness-session-store";
+import type { HarnessController as AgentSession } from "./harness-controller";
 import type {
   SessionState,
   SessionSummary,
@@ -30,6 +30,9 @@ import {
   hasSubagentSessionMarker,
   newlyGeneratedSubagentMessages,
   SUBAGENT_SESSION_CUSTOM_TYPE,
+  stripThinkingFromAssistantMessage,
+  ZERO_USAGE,
+  type SubagentToolDetails,
 } from "./subagent";
 import type { PiModel, WebSession } from "./pi-service-types";
 import { modelKey } from "./pi-service-types";
@@ -41,12 +44,12 @@ export function waitForSubagentQueue(
   return (subagentQueues.get(sessionId) ?? Promise.resolve()).catch(() => undefined);
 }
 
-export function appendRuntimeNoticeMessage(
+export async function appendRuntimeNoticeMessage(
   session: AgentSession,
   notice: RuntimeNotice,
   timestamp = Date.now(),
-): void {
-  appendMessages(session, [buildRuntimeNoticeMessage(notice, timestamp) as Message]);
+): Promise<void> {
+  await appendMessages(session, [buildRuntimeNoticeMessage(notice, timestamp) as Message]);
 }
 
 export async function runSubagentSerial<T>(
@@ -59,17 +62,15 @@ export async function runSubagentSerial<T>(
   const current = new Promise<void>((resolve) => {
     release = resolve;
   });
-  subagentQueues.set(
-    sessionId,
-    previous.catch(() => undefined).then(() => current),
-  );
+  const queued = previous.catch(() => undefined).then(() => current);
+  subagentQueues.set(sessionId, queued);
 
   await previous.catch(() => undefined);
   try {
     return await run();
   } finally {
     release?.();
-    if (subagentQueues.get(sessionId) === current) {
+    if (subagentQueues.get(sessionId) === queued) {
       subagentQueues.delete(sessionId);
     }
   }
@@ -96,6 +97,8 @@ export function resolveSubagentDefaults(
 }
 
 export interface DetachedSubagentOptions {
+  sessionId?: string;
+  recoverOnly?: boolean;
   workspace: WorkspaceInfo;
   parentSessionId: string;
   parentSessionPath?: string;
@@ -112,6 +115,22 @@ export interface DetachedSubagentOptions {
     content: Array<{ type: "text"; text: string }>;
     details: ToolExecutionDetails;
   }) => void;
+}
+
+export function findDetachedSubagentDeliveryRequest(
+  entries: ReturnType<SessionManager["getEntries"]>,
+  sessionId: string,
+): DetachedSubagentOptions | undefined {
+  const marker = entries.findLast(
+    (entry) => entry.type === "custom" && entry.customType === SUBAGENT_SESSION_CUSTOM_TYPE,
+  );
+  if (marker?.type !== "custom") return undefined;
+  const data = marker.data as unknown as {
+    sessionId: string;
+    respondIn: string;
+    request?: DetachedSubagentOptions;
+  };
+  return data.sessionId === sessionId && data.respondIn === "session" ? data.request : undefined;
 }
 
 export interface DetachedSubagentResult {
@@ -138,6 +157,10 @@ export interface RunDetachedSubagentDeps {
   ) => WebSession;
   disposeWebSession: (webSession: WebSession) => void;
   workspaceSessionDir: string;
+  deliverResultToParent?: (
+    options: DetachedSubagentOptions,
+    result: DetachedSubagentResult,
+  ) => Promise<void>;
 }
 
 function buildDetachedSubagentResult(
@@ -205,50 +228,51 @@ function resolveDetachedContextLeafId(
     return options.contextBranchLeafId ?? undefined;
   }
 
-  const leafEntry = sessionManager.getLeafEntry() as
-    | {
-        id: string;
-        parentId: string | null;
-        type?: unknown;
-        message?: { role?: unknown; content?: unknown };
-      }
-    | undefined;
-  if (
-    options.currentToolCallId &&
-    leafEntry?.type === "message" &&
-    leafEntry.message?.role === "assistant" &&
-    Array.isArray(leafEntry.message.content) &&
-    leafEntry.message.content.some((block) =>
-      isToolCallBlockForId(block, options.currentToolCallId!),
-    )
-  ) {
-    return leafEntry.parentId ?? undefined;
+  if (options.currentToolCallId) {
+    const invocation = sessionManager
+      .getBranch()
+      .findLast(
+        (entry) =>
+          entry.type === "message" &&
+          entry.message.role === "assistant" &&
+          entry.message.content.some((block) =>
+            isToolCallBlockForId(block, options.currentToolCallId!),
+          ),
+      );
+    if (!invocation) throw new Error(`Parent tool call not found: ${options.currentToolCallId}`);
+    return invocation.parentId ?? undefined;
   }
 
   return sessionManager.getLeafId() ?? undefined;
 }
 
-function createDetachedSubagentSessionManager(
+async function createDetachedSubagentSessionManager(
   deps: RunDetachedSubagentDeps,
   options: DetachedSubagentOptions,
-): SessionManager {
+): Promise<SessionManager> {
+  if (options.sessionId) {
+    const existing = await SessionManager.existing(
+      options.workspace.path,
+      deps.workspaceSessionDir,
+      options.sessionId,
+    );
+    if (existing) return existing;
+  }
   if (!options.includeSessionContext) {
-    return SessionManager.create(options.workspace.path, deps.workspaceSessionDir);
+    return SessionManager.create(
+      options.workspace.path,
+      deps.workspaceSessionDir,
+      options.parentSessionId,
+      options.sessionId,
+    );
   }
   if (!options.parentSessionPath) {
     throw new Error("Cannot include session context without a persisted parent session");
   }
 
-  const sourceManager = SessionManager.open(options.parentSessionPath);
+  const sourceManager = await SessionManager.open(options.parentSessionPath);
   const leafId = resolveDetachedContextLeafId(sourceManager, options);
-  if (!leafId) {
-    const sessionManager = SessionManager.create(options.workspace.path, deps.workspaceSessionDir);
-    sessionManager.newSession({ parentSession: options.parentSessionPath });
-    return sessionManager;
-  }
-
-  sourceManager.createBranchedSession(leafId);
-  return sourceManager;
+  return sourceManager.fork(deps.workspaceSessionDir, leafId ?? null, options.sessionId);
 }
 
 function subagentUpdateContent(
@@ -264,19 +288,42 @@ export async function runDetachedSubagentSession(
   deps: RunDetachedSubagentDeps,
   options: DetachedSubagentOptions,
 ): Promise<DetachedSubagentResult> {
+  const manager = await createDetachedSubagentSessionManager(deps, options);
+  const existing = manager
+    .getEntries()
+    .some(
+      (entry) =>
+        entry.type === "custom" &&
+        entry.customType === SUBAGENT_SESSION_CUSTOM_TYPE &&
+        (entry.data as { parentSessionId?: string })?.parentSessionId === options.parentSessionId,
+    );
   const result = await deps.createPiAgentSession(
     options.workspace,
-    createDetachedSubagentSessionManager(deps, options),
-    {
-      modelId: options.modelId,
-      thinkingLevel: options.thinkingLevel,
-    },
+    manager,
+    existing
+      ? undefined
+      : {
+          modelId: options.modelId,
+          thinkingLevel: options.thinkingLevel,
+        },
   );
   const subagentSession = result.session;
-  subagentSession.sessionManager.appendCustomEntry(SUBAGENT_SESSION_CUSTOM_TYPE, {
-    parentSessionId: options.parentSessionId,
-    respondIn: options.respondIn,
-  });
+  if (!existing)
+    await subagentSession.sessionManager.appendCustomEntry(SUBAGENT_SESSION_CUSTOM_TYPE, {
+      sessionId: subagentSession.sessionId,
+      parentSessionId: options.parentSessionId,
+      respondIn: options.respondIn,
+      request: {
+        workspace: options.workspace,
+        parentSessionId: options.parentSessionId,
+        ...(options.parentSessionPath ? { parentSessionPath: options.parentSessionPath } : {}),
+        prompt: options.prompt,
+        modelId: options.modelId,
+        thinkingLevel: options.thinkingLevel,
+        includeSessionContext: options.includeSessionContext,
+        respondIn: options.respondIn,
+      },
+    });
   const webSubagentSession = deps.attachSession(
     options.workspace,
     subagentSession,
@@ -290,16 +337,17 @@ export async function runDetachedSubagentSession(
   const preludeMessages = preludeNotices.map((notice, index) =>
     buildRuntimeNoticeMessage(notice, initialTimestamp + index),
   );
-  if (preludeMessages.length > 0) {
-    appendMessages(subagentSession, preludeMessages as Message[]);
+  if (!existing && preludeMessages.length > 0) {
+    await appendMessages(subagentSession, preludeMessages as Message[]);
   }
   const seedMessageCount = subagentSession.messages.length;
 
-  appendRuntimeNoticeMessage(
-    subagentSession,
-    subagentNotice,
-    initialTimestamp + preludeMessages.length,
-  );
+  if (!existing)
+    await appendRuntimeNoticeMessage(
+      subagentSession,
+      subagentNotice,
+      initialTimestamp + preludeMessages.length,
+    );
   options.onUpdate?.({
     content: [],
     details: buildSubagentDetails(
@@ -326,23 +374,9 @@ export async function runDetachedSubagentSession(
 
   let lastText = "";
   let observedFinalAssistant: AssistantMessage | undefined;
-  let lifecycleError: string | undefined;
   const observedGeneratedMessages: AgentSession["messages"] = [];
 
   const unsubscribe = subagentSession.subscribe((event) => {
-    if (event.type === "compaction_start" && options.signal?.aborted) {
-      subagentSession.abortCompaction();
-      queueMicrotask(() => subagentSession.abortCompaction());
-      return;
-    }
-    if (event.type === "auto_retry_end" && event.success === false) {
-      lifecycleError = event.finalError || "Subagent retry failed";
-      return;
-    }
-    if (event.type === "compaction_end" && event.errorMessage) {
-      lifecycleError = event.errorMessage;
-      return;
-    }
     if (
       event.type !== "message_start" &&
       event.type !== "message_update" &&
@@ -360,9 +394,6 @@ export async function runDetachedSubagentSession(
     const finalAssistant = event.message as AssistantMessage;
     if (event.type === "message_end") {
       observedFinalAssistant = structuredClone(finalAssistant);
-      if (finalAssistant.stopReason !== "error" && finalAssistant.stopReason !== "aborted") {
-        lifecycleError = undefined;
-      }
     }
 
     const text = extractAssistantText(finalAssistant);
@@ -394,8 +425,11 @@ export async function runDetachedSubagentSession(
   });
 
   const abortListener = () => {
-    subagentSession.abortCompaction();
-    void subagentSession.abort().catch(() => undefined);
+    const closing =
+      options.signal?.reason instanceof HarnessClosed ||
+      options.signal?.reason instanceof HarnessFault;
+    const operation = closing ? subagentSession.dispose() : subagentSession.abort();
+    void operation.catch((error) => console.error("Failed to stop subagent", error));
   };
   if (options.signal) {
     if (options.signal.aborted) {
@@ -405,26 +439,57 @@ export async function runDetachedSubagentSession(
     }
   }
 
+  let deliveringResult = false;
   try {
     if (options.signal?.aborted) {
       throw options.signal.reason instanceof Error
         ? options.signal.reason
         : new Error("Subagent aborted");
     }
-    await subagentSession.prompt(options.prompt);
+    if (subagentSession.isStreaming) await subagentSession.resume();
+    else if (!subagentSession.snapshot.lastResult) {
+      if (options.recoverOnly)
+        throw new Error("Batty stopped before this subagent operation was admitted");
+      await subagentSession.prompt(options.prompt);
+    }
+    const branch = subagentSession.sessionManager.getBranch();
+    const marker = branch.findLastIndex(
+      (entry) => entry.type === "custom" && entry.customType === SUBAGENT_SESSION_CUSTOM_TYPE,
+    );
+    const generated = branch
+      .slice(marker + 1)
+      .flatMap((entry) => (entry.type === "message" ? [entry.message] : []));
     const result = buildDetachedSubagentResult(
       subagentSession,
       options,
       seedMessageCount,
-      lifecycleError,
+      subagentSession.snapshot.lastResult?.status === "failed"
+        ? subagentSession.snapshot.lastResult.error!.message
+        : subagentSession.snapshot.lastResult?.status === "aborted"
+          ? "Subagent stopped by user"
+          : undefined,
       observedFinalAssistant,
-      observedGeneratedMessages.length > 0 ? observedGeneratedMessages : undefined,
+      generated,
     );
+    if (options.respondIn === "session") {
+      deliveringResult = true;
+      if (!deps.deliverResultToParent)
+        throw new Error("Subagent parent delivery is not configured");
+      await deps.deliverResultToParent(options, result);
+    }
     return {
       ...result,
       text: result.text || lastText,
     };
   } catch (error) {
+    if (error instanceof HarnessClosed || error instanceof HarnessFault) throw error;
+    // Delivery failures remain retryable; they must not replace the child's native result.
+    if (
+      deliveringResult ||
+      subagentSession.isStreaming ||
+      (options.recoverOnly && !subagentSession.snapshot.lastResult)
+    )
+      throw error;
     const result = buildDetachedSubagentResult(
       subagentSession,
       options,
@@ -433,6 +498,11 @@ export async function runDetachedSubagentSession(
       observedFinalAssistant,
       observedGeneratedMessages.length > 0 ? observedGeneratedMessages : undefined,
     );
+    if (options.respondIn === "session" && subagentSession.snapshot.lastResult) {
+      if (!deps.deliverResultToParent)
+        throw new Error("Subagent parent delivery is not configured");
+      await deps.deliverResultToParent(options, result);
+    }
     return {
       ...result,
       text: result.text || lastText || (error instanceof Error ? error.message : String(error)),
@@ -450,11 +520,42 @@ export async function runDetachedSubagentSession(
   }
 }
 
-export function appendMessages(session: AgentSession, messages: Message[]): void {
-  session.agent.state.messages = [...session.messages, ...messages];
-  for (const message of messages) {
-    session.sessionManager.appendMessage(message);
-  }
+export async function deliverDetachedSubagentResult(
+  parent: AgentSession,
+  result: DetachedSubagentResult,
+): Promise<boolean> {
+  if (!result.isError && result.text.trim() === "NO_REPLY") return false;
+  const child = (result.details as SubagentToolDetails).subagent;
+  const timestamp = Date.now();
+  const finalAssistant = stripThinkingFromAssistantMessage(result.finalAssistant);
+  return appendResultDelivery(parent, `subagent:${child.sessionId}`, [
+    {
+      role: "custom",
+      customType: "batty-subagent-result",
+      content: `Subagent result\n\nDetached session: ${child.sessionPath}`,
+      data: { subagent: child },
+      timestamp,
+    } as unknown as Message,
+    {
+      ...(finalAssistant ?? {
+        role: "assistant",
+        api: parent.model!.api,
+        provider: parent.model!.provider,
+        model: parent.model!.id,
+      }),
+      ...(result.isError || !finalAssistant
+        ? { content: [{ type: "text", text: result.text || "(no output)" }] }
+        : {}),
+      usage: ZERO_USAGE,
+      stopReason: result.isError ? "error" : "stop",
+      ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
+      timestamp: timestamp + 1,
+    } as AssistantMessage,
+  ]);
+}
+
+export async function appendMessages(session: AgentSession, messages: Message[]): Promise<void> {
+  for (const message of messages) await session.sessionManager.appendMessage(message);
 }
 
 export interface ResolveDailySessionDeps {
@@ -512,7 +613,7 @@ export async function resolveOrCreateDailySession(
       );
       const entries = loaded
         ? loaded.session.sessionManager.getEntries()
-        : SessionManager.open(sessionPath).getEntries();
+        : (await SessionManager.read(sessionPath)).entries;
       if (hasSubagentSessionMarker(entries)) {
         continue;
       }
@@ -527,7 +628,7 @@ export async function resolveOrCreateDailySession(
       ...(options?.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
     });
     const webSession = deps.requireSession(session.id);
-    webSession.session.sessionManager.appendCustomEntry(
+    await webSession.session.sessionManager.appendCustomEntry(
       CRON_SESSION_CUSTOM_TYPE,
       buildDailyCronSessionBinding(now, deps.config.cronDailySessionStartTime),
     );

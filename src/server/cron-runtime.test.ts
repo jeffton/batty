@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { AppConfig } from "./config";
 import { CronService } from "./cron-runtime";
+import { CronStore } from "./cron-persistence";
 
 const tempDirs: string[] = [];
 
@@ -133,6 +134,90 @@ describe("cron runtime", () => {
     await pending;
     await restarted.dispose();
     await service.dispose();
+  });
+
+  it.each(["success", "error"] as const)(
+    "reconstructs a deleted one-shot run waiter and records recovered %s",
+    async (status) => {
+      const config = await createConfig();
+      const store = new CronStore(config);
+      const log = {
+        runId: "durable-run",
+        jobId: "deleted-one-shot",
+        workspaceId: "alpha",
+        prompt: "Original prompt",
+        model: "openai/gpt-5",
+        thinkingLevel: "medium",
+        session: { kind: "daily-detached" as const, includePreviousContext: false },
+        scheduleLabel: "Yesterday",
+        startedAtMs: Date.now() - 1000,
+        status: "running" as const,
+        sessionId: "durable-session",
+        sessionPath: "/tmp/durable-session.jsonl",
+      };
+      await store.startRun(log);
+      const service = new CronService(config);
+      const completed = deferred<void>();
+      let signal!: AbortSignal;
+      const recover = vi.fn(async (_run, context) => {
+        signal = context.signal;
+        await completed.promise;
+        if (status === "error") throw new Error("native operation failed");
+        return { sessionId: log.sessionId, sessionPath: log.sessionPath };
+      });
+      const run = vi.fn();
+      service.setRunner({ run, recover });
+      await service.initialize();
+      expect(service.listRunningJobs()).toEqual([expect.objectContaining({ runId: log.runId })]);
+      expect(service.listRecentRunLogs()[0]?.status).toBe("running");
+      expect(recover).toHaveBeenCalledWith(log, expect.anything());
+      expect(run).not.toHaveBeenCalled();
+      service.stopRunningJob({ runId: log.runId });
+      expect(signal.aborted).toBe(true);
+      completed.resolve();
+      await vi.waitFor(() => expect(service.listRecentRunLogs()[0]?.status).toBe(status));
+      expect(service.listRunningJobs()).toHaveLength(0);
+      expect((await store.readStoredRunLogs())[0]).toMatchObject({
+        status,
+        completedAtMs: expect.any(Number),
+        durationMs: expect.any(Number),
+        sessionPath: log.sessionPath,
+        ...(status === "error" ? { error: "native operation failed" } : {}),
+      });
+      await service.dispose();
+    },
+  );
+
+  it("leaves in-flight logs recoverable during shutdown", async () => {
+    const config = await createConfig();
+    const service = new CronService(config);
+    const completed = deferred<{ sessionId: string; sessionPath: string }>();
+    service.setRunner({
+      run: async (_job, context) => {
+        await context.onSessionStarted({
+          sessionId: "native-session",
+          sessionPath: "/tmp/native.jsonl",
+        });
+        return completed.promise;
+      },
+    });
+    const job = await service.createJob({
+      workspaceId: "alpha",
+      prompt: "Work",
+      model: "openai/gpt-5",
+      thinkingLevel: "medium",
+      schedule: { kind: "every", every: "1h" },
+    });
+    const pending = (service as unknown as { triggerJob(id: string): Promise<void> }).triggerJob(
+      job.id,
+    );
+    await vi.waitFor(() =>
+      expect(service.listRecentRunLogs()[0]?.sessionPath).toBe("/tmp/native.jsonl"),
+    );
+    await service.dispose();
+    completed.resolve({ sessionId: "native-session", sessionPath: "/tmp/native.jsonl" });
+    await pending;
+    expect((await new CronStore(config).readStoredRunLogs())[0]?.status).toBe("running");
   });
 
   it("keeps an overlapped run registered until its runner settles", async () => {

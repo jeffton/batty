@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import type { AppConfig } from "@/server/config";
 import { latestSessionUpdatedAt, listSessionSummaries } from "@/server/session-summaries";
 import { workspaceSessionDir } from "@/server/pi-paths";
@@ -62,7 +63,36 @@ async function writeSession(
   await fs.mkdir(sessionDir, { recursive: true });
   const sessionPath = path.join(sessionDir, fileName);
   await fs.mkdir(path.dirname(sessionPath), { recursive: true });
-  await fs.writeFile(sessionPath, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+  let parentId: string | null = null;
+  const normalized = entries.map((raw) => {
+    const entry = raw as Record<string, any>;
+    if (entry.type === "session") return { cwd: workspaceInfo(config, workspaceId).path, ...entry };
+    const result: Record<string, any> = {
+      id: crypto.randomUUID(),
+      parentId,
+      timestamp: updatedAt,
+      ...entry,
+    };
+    parentId = result.id;
+    if (entry.message) {
+      result.message = { timestamp: Date.parse(updatedAt), ...entry.message };
+      if (entry.message.role === "assistant")
+        result.message = {
+          ...fauxAssistantMessage(entry.message.content),
+          ...result.message,
+          content:
+            typeof entry.message.content === "string"
+              ? [{ type: "text", text: entry.message.content }]
+              : entry.message.content,
+        };
+    }
+    if (entry.type === "custom_message") result.display = true;
+    return result;
+  });
+  await fs.writeFile(
+    sessionPath,
+    `${normalized.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+  );
   const date = new Date(updatedAt);
   await fs.utimes(sessionPath, date, date);
   return sessionPath;

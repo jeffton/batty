@@ -1,366 +1,116 @@
-import { describe, expect, it, vi } from "vite-plus/test";
-import { AgentSession, findCutPoint, type SessionEntry } from "@earendil-works/pi-coding-agent";
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import { afterEach, describe, expect, it } from "vite-plus/test";
+import {
+  findCutPoint,
+  type Entry,
+  BACKGROUND_CONTEXT as context,
+} from "@earendil-works/pi-agent-core";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
+import { createHarnessFixture } from "./harness-test-fixture";
 
-interface CompactionTestSession {
-  agent: {
-    prepareNextTurnWithContext?: (
-      turn: { context: { messages: unknown[]; systemPrompt: string; tools: unknown[] } },
-      signal?: AbortSignal,
-    ) => Promise<{ context: { messages: unknown[]; systemPrompt: string; tools: unknown[] } }>;
-    prepareNextTurn?: undefined;
-    state: {
-      messages: unknown[];
-      tools: unknown[];
-      model: { provider: string; id: string; contextWindow: number };
-      thinkingLevel: string;
-    };
-  };
-  model: { provider: string; id: string; contextWindow: number };
-  settingsManager: {
-    getCompactionSettings: () => {
-      enabled: boolean;
-      reserveTokens: number;
-      keepRecentTokens: number;
-    };
-  };
-  sessionManager: { getBranch: () => unknown[] };
-  _runAutoCompaction: (
-    reason: string,
-    willRetry: boolean,
-    signal?: AbortSignal,
-  ) => Promise<boolean>;
-  _compactBeforeNextAssistantResponse?: (
-    context: { messages: unknown[]; systemPrompt: string; tools: unknown[] },
-    signal?: AbortSignal,
-  ) => Promise<{ messages: unknown[]; systemPrompt: string; tools: unknown[] }>;
-  abortCompaction: () => void;
-  _systemPromptOverride?: string;
-  _baseSystemPrompt: string;
-}
+const fixtures: Awaited<ReturnType<typeof createHarnessFixture>>[] = [];
+afterEach(async () => {
+  for (const fixture of fixtures.splice(0)) await fixture.cleanup();
+});
 
-function assistant(totalTokens: number): AssistantMessage {
-  return {
-    role: "assistant",
-    content: [
+async function setup() {
+  const f = await createHarnessFixture({
+    compaction: { enabled: true, reserveTokens: 20, keepRecentTokens: 20 },
+    retry: { enabled: false, maxRetries: 0, baseDelayMs: 0 },
+    tools: [
       {
-        type: "toolCall",
-        id: "call-1",
         name: "read",
-        arguments: { path: "large.txt" },
+        label: "read",
+        description: "read",
+        parameters: Type.Object({}),
+        replay: "safe",
+        async execute() {
+          return { content: [{ type: "text", text: "x".repeat(10000) }], details: {} };
+        },
       },
     ],
-    api: "openai-responses",
-    provider: "openai",
-    model: "test-model",
-    usage: {
-      input: totalTokens,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-    },
-    stopReason: "toolUse",
-    timestamp: 1,
-  };
+  });
+  f.faux.getModel().contextWindow = 1000;
+  fixtures.push(f);
+  return f;
 }
 
-function installNextTurnCompaction(session: CompactionTestSession): void {
-  const prototype = AgentSession.prototype as unknown as {
-    _compactBeforeNextAssistantResponse: NonNullable<
-      CompactionTestSession["_compactBeforeNextAssistantResponse"]
-    >;
-    _installAgentNextTurnRefresh: (this: CompactionTestSession) => void;
-  };
-  session._compactBeforeNextAssistantResponse = prototype._compactBeforeNextAssistantResponse;
-  prototype._installAgentNextTurnRefresh.call(session);
-}
-
-describe("Pi between-turn compaction patch", () => {
-  it("keeps an assistant tool call when trailing results exceed the retention budget", () => {
-    const entry = (id: string, message: unknown): SessionEntry =>
-      ({
-        type: "message",
-        id,
-        parentId: null,
-        timestamp: new Date().toISOString(),
-        message,
-      }) as SessionEntry;
+describe("native Pi compaction", () => {
+  it("retains the preceding assistant call when trailing results exceed the retention budget", () => {
+    const messageEntry = (id: string, message: unknown): Entry =>
+      ({ type: "message", id, parentId: null, seq: 1, timestamp: 1, message }) as Entry;
     const entries = [
-      {
-        type: "model_change",
-        id: "model",
-        parentId: null,
-        timestamp: new Date().toISOString(),
-        provider: "openai",
-        modelId: "test-model",
-      } as SessionEntry,
-      entry("user", { role: "user", content: "Investigate", timestamp: 1 }),
-      entry("assistant", {
-        ...assistant(100),
-        content: [
-          { type: "toolCall", id: "call-1", name: "read", arguments: { path: "one.txt" } },
-          { type: "toolCall", id: "call-2", name: "read", arguments: { path: "two.txt" } },
-        ],
-      }),
-      entry("tool-result-1", {
-        role: "toolResult",
-        toolCallId: "call-1",
-        toolName: "read",
-        content: [{ type: "text", text: "x".repeat(80) }],
-        isError: false,
-        timestamp: 2,
-      }),
-      entry("tool-result-2", {
-        role: "toolResult",
-        toolCallId: "call-2",
-        toolName: "read",
-        content: [{ type: "text", text: "y".repeat(80) }],
-        isError: false,
-        timestamp: 3,
-      }),
+      messageEntry("user", { role: "user", content: "Investigate", timestamp: 1 }),
+      messageEntry(
+        "assistant",
+        fauxAssistantMessage([
+          { type: "toolCall", id: "one", name: "read", arguments: {} },
+          { type: "toolCall", id: "two", name: "read", arguments: {} },
+        ]),
+      ),
+      ...["one", "two"].map((id) =>
+        messageEntry(id, {
+          role: "toolResult",
+          toolCallId: id,
+          toolName: "read",
+          content: [{ type: "text", text: "x".repeat(80) }],
+          isError: false,
+          timestamp: 2,
+        }),
+      ),
     ];
-
-    expect(findCutPoint(entries, 0, entries.length, 30)).toStrictEqual({
-      firstKeptEntryIndex: 2,
-      turnStartIndex: 1,
+    expect(findCutPoint(entries, 0, entries.length, 30)).toEqual({
+      firstKeptEntryIndex: 1,
+      turnStartIndex: 0,
       isSplitTurn: true,
     });
   });
 
-  it("compacts before the next model request when tool results cross the threshold", async () => {
-    const compactedMessages = [{ role: "compactionSummary", summary: "Preserved work" }];
-    let branch: unknown[] = [];
-    const runAutoCompaction = vi.fn(async () => {
-      branch = [
-        {
-          type: "compaction",
-          id: "compaction-1",
-          parentId: "tool-result-1",
-          timestamp: new Date(2).toISOString(),
-          summary: "Preserved work",
-          firstKeptEntryId: "tool-result-1",
-          tokensBefore: 95,
+  it("compacts at the tool boundary before the next assistant request", async () => {
+    const f = await setup();
+    let summaries = 0;
+    f.session.harness.hooks.on("before_compaction", ({ preparation }) => {
+      summaries++;
+      return {
+        compaction: {
+          summary: "Read complete",
+          retainedTail: [],
+          tokensBefore: preparation.tokensBefore,
         },
-      ];
-      session.agent.state.messages = compactedMessages;
-      return false;
+      };
     });
-    const session: CompactionTestSession = {
-      agent: {
-        state: {
-          messages: [],
-          tools: [],
-          model: { provider: "openai", id: "test-model", contextWindow: 100 },
-          thinkingLevel: "medium",
-        },
+    f.faux.setResponses([
+      fauxAssistantMessage([{ type: "toolCall", id: "read", name: "read", arguments: {} }]),
+      (providerContext) => {
+        expect(JSON.stringify(providerContext.messages)).toContain("Read complete");
+        expect(JSON.stringify(providerContext.messages)).not.toContain("x".repeat(100));
+        return fauxAssistantMessage("done");
       },
-      model: { provider: "openai", id: "test-model", contextWindow: 100 },
-      settingsManager: {
-        getCompactionSettings: () => ({
-          enabled: true,
-          reserveTokens: 20,
-          keepRecentTokens: 10,
-        }),
-      },
-      sessionManager: { getBranch: () => branch },
-      _runAutoCompaction: runAutoCompaction,
-      abortCompaction: vi.fn(),
-      _baseSystemPrompt: "system",
-    };
-    installNextTurnCompaction(session);
-
-    const messages = [
-      assistant(75),
-      {
-        role: "toolResult",
-        toolCallId: "call-1",
-        toolName: "read",
-        content: [{ type: "text", text: "x".repeat(100) }],
-        isError: false,
-        timestamp: 2,
-      },
-    ];
-    const result = await session.agent.prepareNextTurnWithContext?.({
-      context: { messages, systemPrompt: "old", tools: [] },
-    });
-
-    expect(runAutoCompaction).toHaveBeenCalledWith("threshold", false, undefined);
-    expect(result?.context.messages).toStrictEqual(compactedMessages);
+    ]);
+    await f.session.prompt("inspect");
+    expect(summaries).toBe(1);
+    expect(f.session.sessionManager.getEntries().some((entry) => entry.type === "compaction")).toBe(
+      true,
+    );
   });
 
-  it("compacts usage-less context after an earlier compaction", async () => {
-    const compactedMessages = [{ role: "compactionSummary", summary: "Preserved work again" }];
-    let branch: unknown[] = [
-      {
-        type: "compaction",
-        id: "compaction-1",
-        parentId: "previous-tool-result",
-        timestamp: new Date(2).toISOString(),
-        summary: "Earlier work",
-        firstKeptEntryId: "previous-tool-result",
-        tokensBefore: 95,
-      },
-    ];
-    const runAutoCompaction = vi.fn(async () => {
-      branch = [
-        ...branch,
-        {
-          type: "compaction",
-          id: "compaction-2",
-          parentId: "current-tool-result",
-          timestamp: new Date(4).toISOString(),
-          summary: "Preserved work again",
-          firstKeptEntryId: "current-tool-result",
-          tokensBefore: 95,
-        },
-      ];
-      session.agent.state.messages = compactedMessages;
-      return false;
-    });
-    const session: CompactionTestSession = {
-      agent: {
-        state: {
-          messages: [],
-          tools: [],
-          model: { provider: "openai", id: "test-model", contextWindow: 100 },
-          thinkingLevel: "medium",
-        },
-      },
-      model: { provider: "openai", id: "test-model", contextWindow: 100 },
-      settingsManager: {
-        getCompactionSettings: () => ({
-          enabled: true,
-          reserveTokens: 20,
-          keepRecentTokens: 10,
-        }),
-      },
-      sessionManager: { getBranch: () => branch },
-      _runAutoCompaction: runAutoCompaction,
-      abortCompaction: vi.fn(),
-      _baseSystemPrompt: "system",
-    };
-    installNextTurnCompaction(session);
-
-    const result = await session.agent.prepareNextTurnWithContext?.({
-      context: {
-        messages: [{ role: "user", content: "x".repeat(400), timestamp: 3 }],
-        systemPrompt: "old",
-        tools: [],
-      },
-    });
-
-    expect(runAutoCompaction).toHaveBeenCalledWith("threshold", false, undefined);
-    expect(result?.context.messages).toStrictEqual(compactedMessages);
+  it("stops instead of dispatching an oversized request after failed compaction", async () => {
+    const f = await setup();
+    f.faux.setResponses([
+      fauxAssistantMessage([{ type: "toolCall", id: "read", name: "read", arguments: {} }]),
+      fauxAssistantMessage("", { stopReason: "error", errorMessage: "summary failed" }),
+    ]);
+    await expect(f.session.prompt("inspect")).rejects.toThrow();
+    expect(f.faux.state.callCount).toBe(2);
+    expect(f.session.snapshot.lastResult?.status).toBe("failed");
   });
 
-  it("stops before an oversized model request when compaction fails", async () => {
-    const session: CompactionTestSession = {
-      agent: {
-        state: {
-          messages: [],
-          tools: [],
-          model: { provider: "openai", id: "test-model", contextWindow: 100 },
-          thinkingLevel: "medium",
-        },
-      },
-      model: { provider: "openai", id: "test-model", contextWindow: 100 },
-      settingsManager: {
-        getCompactionSettings: () => ({
-          enabled: true,
-          reserveTokens: 20,
-          keepRecentTokens: 10,
-        }),
-      },
-      sessionManager: { getBranch: () => [] },
-      _runAutoCompaction: vi.fn(async () => false),
-      abortCompaction: vi.fn(),
-      _baseSystemPrompt: "system",
-    };
-    installNextTurnCompaction(session);
-
-    await expect(
-      session.agent.prepareNextTurnWithContext?.({
-        context: { messages: [assistant(95)], systemPrompt: "old", tools: [] },
-      }),
-    ).rejects.toThrow("Auto-compaction failed before the next model request");
-  });
-
-  it("leaves normal turns to the standard agent loop", async () => {
-    const runAutoCompaction = vi.fn(async () => false);
-    const session: CompactionTestSession = {
-      agent: {
-        state: {
-          messages: [],
-          tools: [],
-          model: { provider: "openai", id: "test-model", contextWindow: 100 },
-          thinkingLevel: "medium",
-        },
-      },
-      model: { provider: "openai", id: "test-model", contextWindow: 100 },
-      settingsManager: {
-        getCompactionSettings: () => ({
-          enabled: true,
-          reserveTokens: 20,
-          keepRecentTokens: 10,
-        }),
-      },
-      sessionManager: { getBranch: () => [] },
-      _runAutoCompaction: runAutoCompaction,
-      abortCompaction: vi.fn(),
-      _baseSystemPrompt: "system",
-    };
-    installNextTurnCompaction(session);
-    const messages = [assistant(10)];
-
-    const result = await session.agent.prepareNextTurnWithContext?.({
-      context: { messages, systemPrompt: "old", tools: [] },
-    });
-
-    expect(runAutoCompaction).not.toHaveBeenCalled();
-    expect(result?.context.messages).toBe(messages);
-  });
-
-  it("does not start summarization when the run is aborted during authentication", async () => {
-    let finishAuthentication!: (auth: { apiKey: string }) => void;
-    const authenticationPending = new Promise<{ apiKey: string }>((resolve) => {
-      finishAuthentication = resolve;
-    });
-    const getBranch = vi.fn(() => []);
-    const controller = new AbortController();
-    const session = {
-      model: { provider: "openai", id: "test-model", contextWindow: 100 },
-      agent: { streamFunction: vi.fn() },
-      settingsManager: {
-        getCompactionSettings: () => ({
-          enabled: true,
-          reserveTokens: 20,
-          keepRecentTokens: 10,
-        }),
-      },
-      sessionManager: { getBranch },
-      _getSummarizationRequestAuth: vi.fn(async () => authenticationPending),
-      _autoCompactionAbortController: undefined,
-      _resolveIdleWaitIfIdle: vi.fn(),
-    };
-    const runAutoCompaction = (
-      AgentSession.prototype as unknown as {
-        _runAutoCompaction: (
-          this: typeof session,
-          reason: string,
-          willRetry: boolean,
-          signal?: AbortSignal,
-        ) => Promise<boolean>;
-      }
-    )._runAutoCompaction;
-
-    const resultPromise = runAutoCompaction.call(session, "threshold", false, controller.signal);
-    await Promise.resolve();
-    controller.abort();
-    finishAuthentication({ apiKey: "test-key" });
-
-    await expect(resultPromise).resolves.toBe(false);
-    expect(getBranch).not.toHaveBeenCalled();
+  it("cancels a durable manual compaction without starting summary generation", async () => {
+    const f = await setup();
+    await f.session.lane.appendMessage({ role: "user", content: "history", timestamp: 1 }, context);
+    const accepted = await f.session.lane.accept({ kind: "compaction" }, context);
+    expect(accepted.ok).toBe(true);
+    await f.session.abort();
+    expect(f.faux.state.callCount).toBe(0);
   });
 });

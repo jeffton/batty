@@ -50,6 +50,10 @@ export interface CronJobRunner {
     job: CronJob,
     context: CronJobRunnerContext,
   ): Promise<{ sessionId: string; sessionPath: string }>;
+  recover?(
+    run: CronRunLog,
+    context: CronJobRunnerContext,
+  ): Promise<{ sessionId: string; sessionPath: string }>;
   onSkipped?(job: CronJob, context: CronJobSkippedContext): Promise<void>;
 }
 
@@ -109,6 +113,7 @@ export class CronService {
   private runner: CronJobRunner | undefined;
   private watcher: FSWatcher | undefined;
   private reloadTimer: NodeJS.Timeout | undefined;
+  private disposed = false;
 
   constructor(config: AppConfig) {
     this.store = new CronStore(config);
@@ -126,16 +131,42 @@ export class CronService {
   }
 
   async initialize(): Promise<void> {
-    await this.reloadFromDisk();
+    await this.reloadFromDisk(false);
     const interruptedAtMs = Date.now();
-    for (const run of this.runLogs.filter((candidate) => candidate.status === "running")) {
-      await this.updateRunLog(run.runId, {
-        status: "error",
-        completedAtMs: interruptedAtMs,
-        durationMs: Math.max(0, interruptedAtMs - run.startedAtMs),
-        error: "Batty stopped before this cron run completed",
+    const recoveries: Array<{ run: ActiveCronRun; log: CronRunLog }> = [];
+    for (const log of this.runLogs.filter((candidate) => candidate.status === "running")) {
+      if (log.sessionPath && this.runner?.recover) {
+        const {
+          status: _status,
+          completedAtMs: _completed,
+          durationMs: _duration,
+          error: _error,
+          ...run
+        } = log;
+        const active = {
+          ...run,
+          abortController: new AbortController(),
+          cancelledByOverlap: false,
+        };
+        this.runningJobs.set(log.runId, active);
+        recoveries.push({ run: active, log });
+      } else {
+        await this.updateRunLog(log.runId, {
+          status: "error",
+          completedAtMs: interruptedAtMs,
+          durationMs: Math.max(0, interruptedAtMs - log.startedAtMs),
+          error: "Batty stopped before this cron run completed",
+        });
+      }
+    }
+    // Register every recovered run before overdue jobs can trigger overlap checks.
+    for (const recovery of recoveries) {
+      void this.recoverRun(recovery.run, recovery.log).catch((error) => {
+        console.error("Failed to recover cron run", { runId: recovery.run.runId, error });
       });
     }
+    this.rescheduleAll();
+    this.notifyChanged([...new Set(recoveries.map(({ run }) => run.workspaceId))]);
     await fs.mkdir(path.dirname(this.store.filePath), { recursive: true });
     this.watcher = watch(path.dirname(this.store.filePath), (_eventType, fileName) => {
       if (fileName && fileName !== path.basename(this.store.filePath)) {
@@ -152,6 +183,7 @@ export class CronService {
   }
 
   async dispose(): Promise<void> {
+    this.disposed = true;
     clearTimeout(this.reloadTimer);
     this.reloadTimer = undefined;
     this.watcher?.close();
@@ -247,7 +279,7 @@ export class CronService {
     }
   }
 
-  private async reloadFromDisk(): Promise<void> {
+  private async reloadFromDisk(schedule = true): Promise<void> {
     const previousWorkspaceIds = new Set([...this.jobs.values()].map((job) => job.workspaceId));
     const [jobs, runLogs] = await Promise.all([
       this.store.readStoredJobs(),
@@ -259,7 +291,7 @@ export class CronService {
       this.jobs.set(job.id, job);
       previousWorkspaceIds.add(job.workspaceId);
     }
-    this.rescheduleAll();
+    if (schedule && !this.disposed) this.rescheduleAll();
     this.notifyChanged([...previousWorkspaceIds]);
   }
 
@@ -372,7 +404,56 @@ export class CronService {
     this.notifyChanged([job.workspaceId]);
   }
 
+  private async recoverRun(running: ActiveCronRun, log: CronRunLog): Promise<void> {
+    let result: { sessionId: string; sessionPath: string } | undefined;
+    let failure: unknown;
+    try {
+      result = await this.runner!.recover!(log, {
+        runId: running.runId,
+        signal: running.abortController.signal,
+        onSessionStarted: async (session) => {
+          Object.assign(running, session);
+          await this.updateRunLog(running.runId, session);
+        },
+      });
+    } catch (error) {
+      failure = error;
+    }
+    if (this.disposed) return;
+    try {
+      const error = running.cancelledByOverlap
+        ? "Cron run cancelled because a newer run started"
+        : failure !== undefined
+          ? failure instanceof Error
+            ? failure.message
+            : String(failure)
+          : undefined;
+      const completedAtMs = Date.now();
+      await this.updateRunLog(running.runId, {
+        status: error ? "error" : "success",
+        completedAtMs,
+        durationMs: Math.max(0, completedAtMs - running.startedAtMs),
+        ...result,
+        error,
+      });
+      const job = this.jobs.get(running.jobId);
+      if (job && !running.cancelledByOverlap && job.schedule.kind !== "at") {
+        await this.store.setJobState(
+          job.id,
+          error
+            ? markJobRunFailed(job.state, running.startedAtMs, error)
+            : markJobRunSucceeded(job.state, running.startedAtMs, result!),
+        );
+        await this.reloadFromDisk();
+      }
+    } finally {
+      this.runningJobs.delete(running.runId);
+      this.notifyChanged([running.workspaceId]);
+    }
+  }
+
   private async triggerJob(jobId: string): Promise<void> {
+    if (this.disposed) return;
     const current = this.jobs.get(jobId);
     if (!current?.enabled) {
       return;
@@ -431,6 +512,7 @@ export class CronService {
           this.notifyChanged([running.workspaceId]);
         },
       });
+      if (this.disposed) return;
       await this.updateRunLog(running.runId, {
         status: running.cancelledByOverlap ? "error" : "success",
         completedAtMs: Date.now(),
@@ -450,6 +532,7 @@ export class CronService {
         await this.reloadFromDisk();
       }
     } catch (error) {
+      if (this.disposed) return;
       console.error("Cron job failed", { jobId, error });
       if (runLogPersisted) {
         await this.updateRunLog(running.runId, {

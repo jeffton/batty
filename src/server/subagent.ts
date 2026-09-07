@@ -1,4 +1,4 @@
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 import type { SentFileDescriptor } from "@/shared/types";
 
@@ -54,8 +54,6 @@ export const ZERO_USAGE: Usage = {
     total: 0,
   },
 };
-
-type AgentMessage = AgentSession["messages"][number];
 
 function isToolCallBlock(value: unknown): value is { type: "toolCall"; id: string } {
   return (
@@ -222,7 +220,13 @@ export function buildSubagentDetails(
   },
 ): SubagentToolDetails {
   const sentFiles = collectSentFiles(options?.generatedMessages ?? []);
+  const fileChanges = (options?.generatedMessages ?? []).flatMap((message) =>
+    message.role === "toolResult"
+      ? ((message.details as { battyFileChanges?: unknown[] })?.battyFileChanges ?? [])
+      : [],
+  );
   return {
+    ...(fileChanges.length ? { battyFileChanges: fileChanges } : {}),
     subagent: {
       prompt: input.prompt,
       model: input.model,

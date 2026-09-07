@@ -497,6 +497,7 @@ watch(
               >
                 <button
                   class="workspace-browser-pane__item workspace-browser-pane__item--session"
+                  :data-session-id="session.sessionId"
                   :disabled="actionsDisabled"
                   @click="openSession(session)"
                 >

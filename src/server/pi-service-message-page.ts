@@ -1,4 +1,4 @@
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { HarnessController as AgentSession } from "./harness-controller";
 import {
   RECENT_SESSION_MESSAGE_WINDOW,
   SESSION_MESSAGE_PAGE_BYTE_BUDGET,

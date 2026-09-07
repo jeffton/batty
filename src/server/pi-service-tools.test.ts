@@ -182,7 +182,15 @@ describe("createCronTool", () => {
 
 describe("createSubagentTool", () => {
   function createContext() {
+    const memos = new Map<string, unknown>();
     return {
+      invocation: {
+        getMemo: async (name: string) => memos.get(name),
+        setMemo: async (name: string, value: unknown) => {
+          memos.set(name, value);
+        },
+      },
+      childSessionId: () => crypto.randomUUID(),
       sessionManager: {
         getEntries: () => [],
         getSessionId: () => "parent-session",

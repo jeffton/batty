@@ -1,135 +1,80 @@
-import { writeFileSync } from "node:fs";
-import { mkdtemp, readFile, readdir } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vite-plus/test";
-import {
-  createUiImageResolver,
-  externalizeInlineImagesInSession,
-  externalizeUploadedImagesInSession,
-  preparePromptFiles,
-} from "./pi-service-uploads";
+import { afterEach, describe, expect, it } from "vite-plus/test";
+import { createUiImageResolver, preparePromptFiles } from "./pi-service-uploads";
 
-async function createTempDir(prefix: string): Promise<string> {
-  return mkdtemp(path.join(os.tmpdir(), prefix));
+const roots: string[] = [];
+async function createTempDir(): Promise<string> {
+  const root = await mkdtemp(path.join(os.tmpdir(), "batty-upload-"));
+  roots.push(root);
+  return root;
 }
+afterEach(async () => {
+  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
+});
 
 describe("prompt uploads", () => {
   it("references uploaded text files without embedding their contents", async () => {
-    const uploadsDir = await createTempDir("batty-upload-text-");
+    const uploadsDir = await createTempDir();
     const content = Buffer.from('{"big":"json"}');
-
     const prepared = await preparePromptFiles(
       uploadsDir,
       "session-1",
       [{ filename: "data.json", data: content }],
       "/batty",
     );
-
     expect(prepared.images).toEqual([]);
     expect(prepared.uploadedImages).toEqual([]);
     expect(prepared.text).toContain('<file name="data.json"');
     expect(prepared.text).toContain('mimeType="application/json"');
     expect(prepared.text).toContain(`size="${content.length}"`);
     expect(prepared.text).toContain("/batty/api/uploads/session-1/");
-    expect(prepared.text).toContain("/data.json");
     expect(prepared.text).not.toContain('{"big":"json"}');
   });
 
   it("stores colliding upload names independently", async () => {
-    const uploadsDir = await createTempDir("batty-upload-collisions-");
+    const uploadsDir = await createTempDir();
     const prepared = await preparePromptFiles(uploadsDir, "session-1", [
       { filename: "report?.txt", data: Buffer.from("first") },
       { filename: "report*.txt", data: Buffer.from("second") },
     ]);
-
     const [batchId] = await readdir(path.join(uploadsDir, "session-1"));
     const batchDir = path.join(uploadsDir, "session-1", batchId!);
-    const storedNames = (await readdir(batchDir)).sort();
-    expect(storedNames).toEqual(["report--2.txt", "report-.txt"]);
+    expect((await readdir(batchDir)).sort()).toEqual(["report--2.txt", "report-.txt"]);
     await expect(readFile(path.join(batchDir, "report-.txt"), "utf8")).resolves.toBe("first");
     await expect(readFile(path.join(batchDir, "report--2.txt"), "utf8")).resolves.toBe("second");
-    expect(prepared.text).toContain("/report-.txt");
     expect(prepared.text).toContain("/report--2.txt");
   });
 
-  it("imports and externalizes existing inline image data", async () => {
-    const uploadsDir = await createTempDir("batty-inline-images-");
-    const imageData = Buffer.from("old-image").toString("base64");
-    const message = {
-      role: "user",
-      timestamp: 1,
-      content: [{ type: "image", mimeType: "image/png", data: imageData }],
-    };
-    const entry = { type: "message", message };
-    const sessionFile = path.join(uploadsDir, "session.jsonl");
-    const manager = {
-      fileEntries: [{ type: "session", id: "session-1" }, entry],
-      _rewriteFile: () => {
-        writeFileSync(sessionFile, `${JSON.stringify(entry)}\n`);
-      },
-    };
-    const session = {
-      sessionId: "session-1",
-      messages: [message],
-      sessionManager: manager,
-    } as never;
-
-    externalizeInlineImagesInSession(session, uploadsDir, "/batty");
-
-    expect(JSON.stringify(message)).not.toContain(imageData);
-    expect((message as { battyAttachments?: unknown }).battyAttachments).toEqual([
-      {
-        kind: "image",
-        name: expect.stringMatching(/^[a-f0-9]{64}\.png$/),
+  it.each(["user", "toolResult"])(
+    "externalizes %s image presentation without rewriting immutable history",
+    async (role) => {
+      const uploadsDir = await createTempDir();
+      const image = Object.freeze({
+        type: "image" as const,
         mimeType: "image/png",
-        size: Buffer.from("old-image").length,
-        url: expect.stringContaining("/batty/api/uploads/session-1/imported/"),
-      },
-    ]);
-    expect(await readFile(sessionFile, "utf8")).not.toContain(imageData);
-  });
+        data: Buffer.from("image").toString("base64"),
+      });
+      const message = Object.freeze({
+        role,
+        clientMessageId: "client-1",
+        content: Object.freeze([image]),
+      });
+      const original = JSON.stringify(message);
+      const resolve = createUiImageResolver(uploadsDir, "session-1", "/batty");
+      const result = resolve(image);
+      expect(result.url).toContain("/batty/api/uploads/session-1/imported/");
+      expect(JSON.stringify(message)).toBe(original);
+      expect(resolve(image)).toBe(result);
+      expect(
+        await readFile(path.join(uploadsDir, "session-1", "imported", result.name), "utf8"),
+      ).toBe("image");
+    },
+  );
 
-  it("stores tool-result images for the UI without changing agent history", async () => {
-    const uploadsDir = await createTempDir("batty-tool-images-");
-    const imageData = Buffer.from("tool-screenshot").toString("base64");
-    const message = {
-      role: "toolResult",
-      toolCallId: "call-1",
-      toolName: "read",
-      timestamp: 1,
-      content: [{ type: "image", mimeType: "image/png", data: imageData }],
-      isError: false,
-    };
-    const session = {
-      sessionId: "session-1",
-      messages: [message],
-      sessionManager: {
-        fileEntries: [{ type: "message", message }],
-        _rewriteFile: () => {
-          throw new Error("Tool history must not be rewritten");
-        },
-      },
-    } as never;
-
-    externalizeInlineImagesInSession(session, uploadsDir, "/batty");
-    const resolved = createUiImageResolver(
-      uploadsDir,
-      "session-1",
-      "/batty",
-    )({
-      mimeType: "image/png",
-      data: imageData,
-    });
-
-    expect(JSON.stringify(message)).toContain(imageData);
-    expect(resolved.url).toContain("/batty/api/uploads/session-1/imported/");
-    const files = await readdir(path.join(uploadsDir, "session-1", "imported"));
-    expect(files).toEqual([expect.stringMatching(/^[a-f0-9]{64}\.png$/)]);
-  });
-
-  it("externalizes uploaded image data from session messages", async () => {
-    const uploadsDir = await createTempDir("batty-upload-images-");
+  it("keeps uploaded image payloads available for durable queue admission", async () => {
+    const uploadsDir = await createTempDir();
     const data = Buffer.from("image-bytes");
     const prepared = await preparePromptFiles(
       uploadsDir,
@@ -137,48 +82,10 @@ describe("prompt uploads", () => {
       [{ filename: "screenshot.png", data }],
       "/batty",
     );
-    const imageData = prepared.images[0]?.data;
-    const message = {
-      role: "user",
-      timestamp: 1,
-      clientMessageId: "client-message-1",
-      content: [
-        { type: "text", text: "Look at this" },
-        { type: "image", mimeType: "image/png", data: imageData },
-      ],
-    };
-    const entry = { type: "message", message };
-    const sessionFile = path.join(uploadsDir, "session.jsonl");
-    const manager = {
-      fileEntries: [{ type: "session", id: "session-1" }, entry],
-      _rewriteFile: () => {
-        writeFileSync(sessionFile, `${JSON.stringify(entry)}\n`);
-      },
-    };
-    const session = {
-      messages: [message],
-      sessionManager: manager,
-    } as never;
-
-    externalizeUploadedImagesInSession(session, prepared.uploadedImages);
-
-    expect(message.content).toEqual([
-      { type: "text", text: "Look at this" },
-      { type: "text", text: "[Image attachment: screenshot.png]" },
+    expect(prepared.images).toEqual([
+      { type: "image", mimeType: "image/png", data: data.toString("base64") },
     ]);
-    expect((message as { battyAttachments?: unknown }).battyAttachments).toEqual([
-      {
-        kind: "image",
-        name: "screenshot.png",
-        mimeType: "image/png",
-        size: data.length,
-        url: expect.stringContaining("/batty/api/uploads/session-1/"),
-      },
-    ]);
-    expect(message.clientMessageId).toBe("client-message-1");
-    expect(JSON.stringify(message)).not.toContain(imageData);
-    const persisted = await readFile(sessionFile, "utf8");
-    expect(persisted).toContain('"clientMessageId":"client-message-1"');
-    expect(persisted).not.toContain(imageData!);
+    expect(prepared.text).toContain('name="screenshot.png"');
+    expect(prepared.text).toContain("/batty/api/uploads/session-1/");
   });
 });

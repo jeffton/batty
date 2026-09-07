@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Page } from "@playwright/test";
-import { E2E_BASE_URL } from "./env";
+import { E2E_BASE_URL, E2E_BATTY_ROOT } from "./env";
 
 interface OptionsFile {
   authSecret?: string;
@@ -23,7 +23,7 @@ function createAuthToken(secret: string, ttlMs = 1000 * 60 * 60 * 24 * 30): stri
 }
 
 async function readE2eAuthSecret(): Promise<string> {
-  const optionsPath = path.join(process.cwd(), ".batty", "options.json");
+  const optionsPath = path.join(E2E_BATTY_ROOT, ".batty", "options.json");
   const options = JSON.parse(await fs.readFile(optionsPath, "utf8")) as OptionsFile;
 
   if (!options.authSecret) {

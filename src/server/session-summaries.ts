@@ -1,243 +1,97 @@
-import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import readline from "node:readline";
 import type { SessionSummary, WorkspaceInfo } from "@/shared/types";
 import type { AppConfig } from "./config";
 import { workspaceSessionDir } from "./pi-paths";
-import {
-  CRON_SESSION_CUSTOM_TYPE,
-  findLatestDailyCronSessionBinding,
-  toLocalIsoDate,
-} from "./cron-session";
+import { findLatestDailyCronSessionBinding, toLocalIsoDate } from "./cron-session";
 import { isSubagentSessionEntry } from "./subagent";
+import { HarnessSessionStore } from "./harness-session-store";
 
 const DEFAULT_SESSION_LABEL = "(no messages)";
 const SESSION_SUMMARY_READ_CONCURRENCY = 16;
 const CRON_RUNTIME_NOTICE_CUSTOM_TYPE = "batty-runtime-notice:cron";
-
-type SessionSummaryCacheEntry = {
-  mtimeMs: number;
-  size: number;
-  summary: SessionSummary | undefined;
-};
-
-type SessionSummaryCache = {
-  entries: Map<string, SessionSummaryCacheEntry>;
-};
-
-const sessionSummaryCaches = new Map<string, SessionSummaryCache>();
-
-function cacheKey(config: Pick<AppConfig, "battyDir">, workspaceId: string): string {
-  return `${config.battyDir}:${workspaceId}`;
-}
-
-function cloneSummaryForToday(
-  summary: SessionSummary | undefined,
-  todayDate: string,
-): SessionSummary | undefined {
-  if (!summary) {
-    return undefined;
-  }
-
-  return {
-    ...summary,
-    ...(summary.dailySession
-      ? {
-          dailySession: {
-            ...summary.dailySession,
-            isToday: summary.dailySession.date === todayDate,
-          },
-        }
-      : {}),
-  };
-}
+type CacheEntry = { mtimeMs: number; size: number; summary: SessionSummary | undefined };
+const sessionSummaryCaches = new Map<string, Map<string, CacheEntry>>();
 
 function extractMessageText(content: unknown): string {
-  if (typeof content === "string") {
-    return content.replace(/\s+/g, " ").trim();
-  }
-
-  if (!Array.isArray(content)) {
-    return "";
-  }
-
+  if (typeof content === "string") return content.replace(/\s+/g, " ").trim();
+  if (!Array.isArray(content)) return "";
   return content
-    .map((block) => {
-      if (!block || typeof block !== "object") {
-        return "";
-      }
-
-      const candidate = block as { type?: unknown; text?: unknown; thinking?: unknown };
-      if (candidate.type === "text" && typeof candidate.text === "string") {
-        return candidate.text;
-      }
-      if (candidate.type === "thinking" && typeof candidate.thinking === "string") {
-        return candidate.thinking;
-      }
-      return "";
-    })
+    .map((block) =>
+      block?.type === "text" ? block.text : block?.type === "thinking" ? block.thinking : "",
+    )
     .join("\n")
     .replace(/\s+/g, " ")
     .trim();
 }
-
 function extractCronRuntimeNoticePrompt(content: unknown): string {
-  if (typeof content !== "string") {
-    return "";
-  }
-
+  if (typeof content !== "string") return "";
   const marker = "\nPrompt:\n";
-  const markerIndex = content.indexOf(marker);
-  return extractMessageText(
-    markerIndex >= 0 ? content.slice(markerIndex + marker.length) : content,
-  );
-}
-
-async function readSessionMetadata(filePath: string): Promise<{
-  sessionId?: string;
-  firstMessage: string;
-  dailySessionDate?: string;
-  isHiddenSession: boolean;
-  lastAssistantReplyAt?: number;
-}> {
-  const stream = createReadStream(filePath, { encoding: "utf8" });
-  const lines = readline.createInterface({ input: stream, crlfDelay: Infinity });
-
-  let sessionId: string | undefined;
-  let firstMessage = "";
-  let dailySessionDate: string | undefined;
-  let isHiddenSession = false;
-  let lastAssistantReplyAt: number | undefined;
-
-  try {
-    for await (const line of lines) {
-      if (!line.trim()) {
-        continue;
-      }
-
-      let entry: unknown;
-      try {
-        entry = JSON.parse(line);
-      } catch {
-        continue;
-      }
-
-      if (!entry || typeof entry !== "object") {
-        continue;
-      }
-
-      const candidate = entry as {
-        type?: unknown;
-        id?: unknown;
-        customType?: unknown;
-        data?: unknown;
-        parentSession?: unknown;
-        content?: unknown;
-        timestamp?: unknown;
-        message?: { role?: unknown; content?: unknown; timestamp?: unknown };
-      };
-
-      if (!sessionId && candidate.type === "session" && typeof candidate.id === "string") {
-        sessionId = candidate.id;
-        isHiddenSession = typeof candidate.parentSession === "string";
-      }
-
-      if (candidate.type === "message" && candidate.message?.role === "user" && !firstMessage) {
-        firstMessage = extractMessageText(candidate.message.content);
-      }
-
-      if (candidate.type === "message" && candidate.message?.role === "assistant") {
-        const timestamp =
-          typeof candidate.message.timestamp === "number"
-            ? candidate.message.timestamp
-            : typeof candidate.timestamp === "string"
-              ? Date.parse(candidate.timestamp)
-              : undefined;
-        if (timestamp != null && Number.isFinite(timestamp)) {
-          lastAssistantReplyAt = Math.max(lastAssistantReplyAt ?? 0, timestamp);
-        } else {
-          lastAssistantReplyAt = Number.NaN;
-        }
-      }
-
-      if (
-        candidate.type === "custom_message" &&
-        candidate.customType === CRON_RUNTIME_NOTICE_CUSTOM_TYPE &&
-        !firstMessage
-      ) {
-        firstMessage = extractCronRuntimeNoticePrompt(candidate.content);
-      }
-
-      if (isSubagentSessionEntry(candidate)) {
-        isHiddenSession = true;
-      }
-
-      if (candidate.type === "custom" && candidate.customType === CRON_SESSION_CUSTOM_TYPE) {
-        const binding = findLatestDailyCronSessionBinding([
-          {
-            type: "custom",
-            customType: candidate.customType,
-            data: candidate.data,
-          },
-        ]);
-        if (binding) {
-          dailySessionDate = binding.date;
-        }
-      }
-    }
-  } finally {
-    lines.close();
-    stream.destroy();
-  }
-
-  return { sessionId, firstMessage, dailySessionDate, isHiddenSession, lastAssistantReplyAt };
+  const index = content.indexOf(marker);
+  return extractMessageText(index >= 0 ? content.slice(index + marker.length) : content);
 }
 
 async function buildSessionSummary(
   filePath: string,
   workspaceId: string,
   todayDate: string,
-  stats: { mtime: Date },
+  mtimeMs: number,
 ): Promise<SessionSummary | undefined> {
-  try {
-    const { sessionId, firstMessage, dailySessionDate, isHiddenSession, lastAssistantReplyAt } =
-      await readSessionMetadata(filePath);
-
-    if (!sessionId || isHiddenSession) {
-      return undefined;
-    }
-
-    return {
-      id: filePath,
-      sessionId,
-      path: filePath,
-      firstMessage: firstMessage || DEFAULT_SESSION_LABEL,
-      updatedAt: stats.mtime.getTime(),
-      messageCount: 0,
-      workspaceId,
-      ...(lastAssistantReplyAt != null
-        ? {
-            lastAssistantReplyAt: Number.isNaN(lastAssistantReplyAt)
-              ? stats.mtime.getTime()
-              : lastAssistantReplyAt,
-          }
-        : {}),
-      ...(dailySessionDate
-        ? {
-            dailySession: {
-              date: dailySessionDate,
-              isToday: dailySessionDate === todayDate,
-              exists: true,
-            },
-          }
-        : {}),
-    };
-  } catch {
+  const { metadata, entries } = await HarnessSessionStore.read(filePath);
+  if (
+    metadata.parentSessionId ||
+    metadata.legacyParentSessionPath ||
+    entries.some(isSubagentSessionEntry)
+  )
     return undefined;
+  let firstMessage = "";
+  let lastAssistantReplyAt: number | undefined;
+  for (const entry of entries) {
+    if (entry.type !== "message") continue;
+    const message = entry.message;
+    if (!firstMessage && message.role === "user")
+      firstMessage = extractMessageText(message.content);
+    if (
+      !firstMessage &&
+      message.role === "custom" &&
+      message.customType === CRON_RUNTIME_NOTICE_CUSTOM_TYPE
+    )
+      firstMessage = extractCronRuntimeNoticePrompt(message.content);
+    if (message.role === "assistant")
+      lastAssistantReplyAt = Math.max(lastAssistantReplyAt ?? 0, message.timestamp);
   }
+  const daily = findLatestDailyCronSessionBinding(entries);
+  return {
+    id: filePath,
+    sessionId: metadata.id,
+    path: filePath,
+    firstMessage: firstMessage || DEFAULT_SESSION_LABEL,
+    updatedAt: mtimeMs,
+    messageCount: 0,
+    workspaceId,
+    ...(lastAssistantReplyAt !== undefined ? { lastAssistantReplyAt } : {}),
+    ...(daily
+      ? { dailySession: { date: daily.date, isToday: daily.date === todayDate, exists: true } }
+      : {}),
+  };
 }
 
+async function sessionFiles(sessionDir: string): Promise<string[]> {
+  const entries = await fs
+    .readdir(sessionDir, { recursive: true, withFileTypes: true })
+    .catch((error) => {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    });
+  return entries
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        entry.name.endsWith(".jsonl") &&
+        !path.relative(sessionDir, entry.parentPath).split(path.sep).includes("cron"),
+    )
+    .map((entry) => path.join(entry.parentPath, entry.name));
+}
 async function mapWithConcurrency<T, R>(
   items: T[],
   concurrency: number,
@@ -245,21 +99,14 @@ async function mapWithConcurrency<T, R>(
 ): Promise<R[]> {
   const results = Array.from<R>({ length: items.length });
   let nextIndex = 0;
-
-  async function worker(): Promise<void> {
-    while (nextIndex < items.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      results[index] = await mapper(items[index]!);
-    }
-  }
-
   await Promise.all(
     Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-      await worker();
+      while (nextIndex < items.length) {
+        const index = nextIndex++;
+        results[index] = await mapper(items[index]!);
+      }
     }),
   );
-
   return results;
 }
 
@@ -267,61 +114,44 @@ export async function listSessionSummaries(
   config: Pick<AppConfig, "battyDir" | "cronDailySessionStartTime">,
   workspace: WorkspaceInfo,
 ): Promise<SessionSummary[]> {
-  const sessionDir = workspaceSessionDir(config, workspace.id);
-  const entries = await fs.readdir(sessionDir, { withFileTypes: true }).catch(() => []);
-  const sessionFiles = entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
-    .map((entry) => path.join(sessionDir, entry.name));
-
+  const files = await sessionFiles(workspaceSessionDir(config, workspace.id));
   const todayDate = toLocalIsoDate(new Date(), config.cronDailySessionStartTime);
-  const cache = sessionSummaryCaches.get(cacheKey(config, workspace.id)) ?? { entries: new Map() };
-  sessionSummaryCaches.set(cacheKey(config, workspace.id), cache);
-  const seenPaths = new Set(sessionFiles);
-  for (const cachedPath of cache.entries.keys()) {
-    if (!seenPaths.has(cachedPath)) {
-      cache.entries.delete(cachedPath);
-    }
-  }
-
-  const fileStats = await mapWithConcurrency(
-    sessionFiles,
+  const key = `${config.battyDir}:${workspace.id}`;
+  const cache = sessionSummaryCaches.get(key) ?? new Map<string, CacheEntry>();
+  sessionSummaryCaches.set(key, cache);
+  const seenPaths = new Set(files);
+  for (const cachedPath of cache.keys()) if (!seenPaths.has(cachedPath)) cache.delete(cachedPath);
+  const summaries = await mapWithConcurrency(
+    files,
     SESSION_SUMMARY_READ_CONCURRENCY,
     async (filePath) => {
-      try {
-        return { filePath, stats: await fs.stat(filePath) };
-      } catch {
-        return undefined;
-      }
-    },
-  );
-
-  const summaries = await mapWithConcurrency(
-    fileStats.filter((item): item is NonNullable<typeof item> => Boolean(item)),
-    SESSION_SUMMARY_READ_CONCURRENCY,
-    async ({ filePath, stats }) => {
-      const cached = cache.entries.get(filePath);
+      const stats = await fs.stat(filePath);
+      const cached = cache.get(filePath);
       if (cached && cached.mtimeMs === stats.mtimeMs && cached.size === stats.size) {
-        return cloneSummaryForToday(cached.summary, todayDate);
+        const summary = cached.summary;
+        return summary
+          ? {
+              ...summary,
+              ...(summary.dailySession
+                ? {
+                    dailySession: {
+                      ...summary.dailySession,
+                      isToday: summary.dailySession.date === todayDate,
+                    },
+                  }
+                : {}),
+            }
+          : undefined;
       }
-
-      const summary = await buildSessionSummary(filePath, workspace.id, todayDate, stats);
-      cache.entries.set(filePath, {
-        mtimeMs: stats.mtimeMs,
-        size: stats.size,
-        summary,
-      });
+      const summary = await buildSessionSummary(filePath, workspace.id, todayDate, stats.mtimeMs);
+      cache.set(filePath, { mtimeMs: stats.mtimeMs, size: stats.size, summary });
       return summary;
     },
   );
-
   const sessions = summaries.filter((session): session is SessionSummary => Boolean(session));
-
   sessions.sort((a, b) => b.updatedAt - a.updatedAt);
-  const todayDailySession = sessions.find((session) => session.dailySession?.date === todayDate);
-  if (todayDailySession) {
-    return [todayDailySession, ...sessions.filter((session) => session !== todayDailySession)];
-  }
-
+  const daily = sessions.find((session) => session.dailySession?.date === todayDate);
+  if (daily) return [daily, ...sessions.filter((session) => session !== daily)];
   return [
     {
       id: `daily:${workspace.id}:${todayDate}`,
@@ -330,11 +160,7 @@ export async function listSessionSummaries(
       updatedAt: Date.now(),
       messageCount: 0,
       workspaceId: workspace.id,
-      dailySession: {
-        date: todayDate,
-        isToday: true,
-        exists: false,
-      },
+      dailySession: { date: todayDate, isToday: true, exists: false },
     },
     ...sessions,
   ];
@@ -344,22 +170,9 @@ export async function latestSessionUpdatedAt(
   config: Pick<AppConfig, "battyDir">,
   workspaceId: string,
 ): Promise<number | undefined> {
-  const sessionDir = workspaceSessionDir(config, workspaceId);
-  const entries = await fs.readdir(sessionDir, { withFileTypes: true }).catch(() => []);
-  const sessionFiles = entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
-    .map((entry) => path.join(sessionDir, entry.name));
-
-  if (sessionFiles.length === 0) {
-    return undefined;
-  }
-
+  const files = await sessionFiles(workspaceSessionDir(config, workspaceId));
   const mtimes = await Promise.all(
-    sessionFiles.map((filePath) => fs.stat(filePath).then((stats) => stats.mtime.getTime())),
+    files.map((file) => fs.stat(file).then((stats) => stats.mtimeMs)),
   );
-
-  return mtimes.reduce<number | undefined>(
-    (latest, updatedAt) => (latest == null || updatedAt > latest ? updatedAt : latest),
-    undefined,
-  );
+  return mtimes.length ? Math.max(...mtimes) : undefined;
 }

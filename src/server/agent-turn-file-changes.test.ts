@@ -1,184 +1,103 @@
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
-import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 import {
   AGENT_TURN_FILE_CHANGES_CUSTOM_TYPE,
-  AgentTurnFileChangeTracker,
   agentTurnFileChangesByReplyEntryId,
 } from "./agent-turn-file-changes";
 
-const temporaryDirectories: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(
-    temporaryDirectories
-      .splice(0)
-      .map((directory) => fs.rm(directory, { recursive: true, force: true })),
-  );
-});
-
-async function makeTemporaryDirectory(): Promise<string> {
-  const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "batty-turn-diff-")));
-  temporaryDirectories.push(directory);
-  return directory;
-}
-
-function loadExtension(tracker: AgentTurnFileChangeTracker, cwd: string) {
-  const tools = new Map<string, ToolDefinition<any>>();
-  const handlers = new Map<string, (...args: any[]) => unknown>();
-  const appendEntry = vi.fn();
-
-  const extension = tracker.createExtension(cwd) as unknown as {
-    factory: (pi: ExtensionAPI) => void;
-  };
-  extension.factory({
-    registerTool(tool: ToolDefinition<any>) {
-      tools.set(tool.name, tool);
+const message = (id: string, value: object) => ({ id, type: "message", message: value });
+const mutation = (id: string, before: string | null, after: string) =>
+  message(id, {
+    role: "toolResult",
+    details: {
+      battyFileChanges: [{ path: "/work/file.txt", before, after, patch: "per-tool patch" }],
     },
-    on(name: string, handler: (...args: any[]) => unknown) {
-      handlers.set(name, handler);
-    },
-    appendEntry,
-  } as never);
+  });
+const reply = (id: string) =>
+  message(id, { role: "assistant", content: [{ type: "text", text: "done" }] });
 
-  return { tools, handlers, appendEntry };
-}
-
-function completedRunContext(replyEntryId: string) {
-  return {
-    sessionManager: {
-      getBranch: () => [{ type: "message", id: replyEntryId, message: { role: "assistant" } }],
-    },
-  };
-}
-
-async function start(extension: ReturnType<typeof loadExtension>): Promise<void> {
-  await extension.handlers.get("agent_start")!({}, {});
-}
-
-async function completeRun(
-  extension: ReturnType<typeof loadExtension>,
-  replyEntryId: string,
-): Promise<void> {
-  await extension.handlers.get("agent_end")!({}, completedRunContext(replyEntryId));
-}
-
-async function writeFile(
-  extension: ReturnType<typeof loadExtension>,
-  filePath: string,
-  content: string,
-): Promise<void> {
-  await extension.tools
-    .get("write")!
-    .execute("write-call", { path: filePath, content }, undefined, undefined, {} as never);
-}
-
-describe("AgentTurnFileChangeTracker", () => {
-  it("captures files outside the session workspace and collapses repeated writes", async () => {
-    const workspace = await makeTemporaryDirectory();
-    const otherWorkspace = await makeTemporaryDirectory();
-    const filePath = path.join(otherWorkspace, "src", "value.ts");
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, "export const value = 1;\n");
-
-    const extension = loadExtension(new AgentTurnFileChangeTracker(), workspace);
-    await start(extension);
-    await writeFile(extension, filePath, "export const value = 2;\n");
-    await writeFile(extension, filePath, "export const value = 3;\n");
-    await completeRun(extension, "reply-main");
-
-    expect(extension.appendEntry).toHaveBeenCalledWith(
-      AGENT_TURN_FILE_CHANGES_CUSTOM_TYPE,
-      expect.objectContaining({
-        version: 1,
-        replyEntryId: "reply-main",
-        files: [
-          {
-            path: filePath,
-            patch: expect.stringContaining("-export const value = 1;\n+export const value = 3;"),
-          },
-        ],
-      }),
-    );
+describe("durable file change projection", () => {
+  it("aggregates repeated writes and subagent results into one final per-file diff", () => {
+    const entries = [
+      message("user", { role: "user" }),
+      mutation("write", "before\n", "intermediate\n"),
+      mutation("subagent", "intermediate\n", "after\n"),
+      reply("reply"),
+    ];
+    const original = JSON.stringify(entries);
+    const changes = agentTurnFileChangesByReplyEntryId(entries).get("reply")!;
+    expect(changes).toHaveLength(1);
+    expect(changes[0]!.patch).toContain("-before");
+    expect(changes[0]!.patch).toContain("+after");
+    expect(changes[0]!.patch).not.toContain("intermediate");
+    expect(JSON.stringify(entries)).toBe(original);
   });
 
-  it("associates consecutive runs with their own assistant replies", async () => {
-    const workspace = await makeTemporaryDirectory();
-    const filePath = path.join(workspace, "value.ts");
-    const extension = loadExtension(new AgentTurnFileChangeTracker(), workspace);
+  it("omits net-zero changes and resets at the durable reply", () => {
+    const entries = [
+      mutation("first", "before", "after"),
+      mutation("revert", "after", "before"),
+      reply("reply"),
+      message("user", { role: "user" }),
+      reply("next"),
+    ];
+    const changes = agentTurnFileChangesByReplyEntryId(entries);
+    expect(changes.get("reply")).toEqual([]);
+    expect(changes.has("next")).toBe(false);
+  });
 
-    await start(extension);
-    await writeFile(extension, filePath, "first\n");
-    await completeRun(extension, "reply-first");
-    await start(extension);
-    await writeFile(extension, filePath, "second\n");
-    await completeRun(extension, "reply-second");
-
-    expect(extension.appendEntry.mock.calls.map((call) => call[1])).toMatchObject([
-      {
-        replyEntryId: "reply-first",
-        files: [{ path: filePath, patch: expect.stringContaining("+first") }],
-      },
-      {
-        replyEntryId: "reply-second",
-        files: [{ path: filePath, patch: expect.stringContaining("-first\n+second") }],
-      },
+  it("keeps changes across steering user entries and isolates later replies", () => {
+    const changes = agentTurnFileChangesByReplyEntryId([
+      mutation("first", "before\n", "middle\n"),
+      message("steer", { role: "user" }),
+      mutation("second", "middle\n", "after\n"),
+      reply("first-reply"),
+      message("follow-up", { role: "user" }),
+      mutation("third", "after\n", "last\n"),
+      reply("second-reply"),
+      message("next-user", { role: "user" }),
+      reply("empty-reply"),
     ]);
+    expect(changes.get("first-reply")?.[0]?.patch).toContain("-before");
+    expect(changes.get("first-reply")?.[0]?.patch).toContain("+after");
+    expect(changes.get("second-reply")?.[0]?.patch).toContain("-after");
+    expect(changes.get("second-reply")?.[0]?.patch).toContain("+last");
+    expect(changes.has("empty-reply")).toBe(false);
   });
 
-  it("includes child writes in the parent while keeping the child entry filtered", async () => {
-    const workspace = await makeTemporaryDirectory();
-    const parentFile = path.join(workspace, "parent.ts");
-    const childFile = path.join(workspace, "child.ts");
-    const parentTracker = new AgentTurnFileChangeTracker();
-    const parent = loadExtension(parentTracker, workspace);
-    await start(parent);
-    const child = loadExtension(
-      new AgentTurnFileChangeTracker(parentTracker.aggregateForChild()),
-      workspace,
-    );
-    await start(child);
-
-    await writeFile(parent, parentFile, "parent\n");
-    await writeFile(child, childFile, "child\n");
-    await completeRun(child, "reply-child");
-    await completeRun(parent, "reply-main");
-
-    expect(child.appendEntry.mock.calls[0]?.[1]).toMatchObject({
-      replyEntryId: "reply-child",
-      files: [{ path: childFile, patch: expect.stringContaining("+child") }],
-    });
-    expect(parent.appendEntry.mock.calls[0]?.[1]).toMatchObject({
-      replyEntryId: "reply-main",
-      files: [
-        { path: childFile, patch: expect.stringContaining("+child") },
-        { path: parentFile, patch: expect.stringContaining("+parent") },
-      ],
-    });
+  it("retains mutations across a retry response and subsequent steering", () => {
+    const changes = agentTurnFileChangesByReplyEntryId([
+      mutation("first", "before\n", "middle\n"),
+      message("failed-attempt", { role: "assistant", content: [], stopReason: "error" }),
+      message("retry-call", { role: "assistant", content: [{ type: "toolCall", name: "edit" }] }),
+      mutation("retry-result", "middle\n", "after\n"),
+      message("steer", { role: "user" }),
+      reply("final-reply"),
+    ]);
+    expect(changes.get("final-reply")?.[0]?.patch).toContain("-before");
+    expect(changes.get("final-reply")?.[0]?.patch).toContain("+after");
   });
-});
 
-describe("agentTurnFileChangesByReplyEntryId", () => {
-  it("returns valid entries and ignores malformed entries", () => {
-    const result = agentTurnFileChangesByReplyEntryId([
-      {
-        type: "custom",
-        customType: AGENT_TURN_FILE_CHANGES_CUSTOM_TYPE,
-        data: {
-          version: 1,
-          replyEntryId: "reply-1",
-          files: [{ path: "/repo/a.ts", patch: "patch" }],
+  it("attaches changes to terminal replies instead of tool-call messages", () => {
+    const entries = [
+      mutation("write", null, "new file\n"),
+      message("call", { role: "assistant", content: [{ type: "toolCall", name: "read" }] }),
+      reply("reply"),
+    ];
+    const changes = agentTurnFileChangesByReplyEntryId(entries);
+    expect(changes.has("call")).toBe(false);
+    expect(changes.get("reply")?.[0]?.patch).toContain("+new file");
+  });
+
+  it("preserves imported historical per-turn metadata", () => {
+    const files = [{ path: "/file", patch: "historical diff" }];
+    expect(
+      agentTurnFileChangesByReplyEntryId([
+        {
+          type: "custom",
+          customType: AGENT_TURN_FILE_CHANGES_CUSTOM_TYPE,
+          data: { version: 1, replyEntryId: "reply", files },
         },
-      },
-      {
-        type: "custom",
-        customType: AGENT_TURN_FILE_CHANGES_CUSTOM_TYPE,
-        data: { version: 2, replyEntryId: "reply-2", files: [] },
-      },
-    ]);
-
-    expect(result).toEqual(new Map([["reply-1", [{ path: "/repo/a.ts", patch: "patch" }]]]));
+      ]).get("reply"),
+    ).toEqual(files);
   });
 });

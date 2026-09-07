@@ -1,4 +1,4 @@
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 export const BATTY_RUNTIME_NOTICE_CUSTOM_TYPE = "batty-runtime-notice";
 
@@ -38,16 +38,13 @@ export function buildSubagentRuntimeNotice(): RuntimeNotice {
   };
 }
 
-export function buildRuntimeNoticeMessage(
-  notice: RuntimeNotice,
-  timestamp: number,
-): AgentSession["messages"][number] {
+export function buildRuntimeNoticeMessage(notice: RuntimeNotice, timestamp: number): AgentMessage {
   return {
     role: "custom",
     customType: `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:${notice.kind}`,
     content: notice.text,
     timestamp,
-  } as AgentSession["messages"][number];
+  } as AgentMessage;
 }
 
 function formatLocalDateTime(date: Date): string {

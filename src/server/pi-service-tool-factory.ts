@@ -19,6 +19,7 @@ export type PiServiceToolFactoryContext = {
     ctx: ExtensionContext,
   ) => { modelId?: string; thinkingLevel: string };
   runDetachedSubagentSession: (request: {
+    sessionId?: string;
     workspace: WorkspaceInfo;
     parentSessionId: string;
     parentSessionPath?: string;

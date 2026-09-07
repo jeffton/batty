@@ -1,5 +1,5 @@
 import { getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { HarnessController as AgentSession } from "./harness-controller";
 import type {
   ActiveToolRun,
   ModelOption,

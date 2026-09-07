@@ -1,4 +1,5 @@
-import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type { HarnessController as AgentSession } from "./harness-controller";
 import { isPiShellToolName } from "@/shared/pi-tools";
 import type {
   ServerEvent,
@@ -11,14 +12,23 @@ import { sanitizeTerminalBlocks } from "./terminal-output";
 import type { SessionSubscriber, WebSession } from "./pi-service-types";
 import { normalizeToolDetails } from "./pi-service-types";
 
+const disposingSessions = new WeakSet<WebSession>();
+
 export function disposeWebSession(
   sessions: Map<string, WebSession>,
   unregisterLiveSession: (sessionId: string) => void,
   webSession: WebSession,
 ): void {
-  sessions.delete(webSession.id);
-  unregisterLiveSession(webSession.id);
-  webSession.session.dispose();
+  if (disposingSessions.has(webSession)) return;
+  disposingSessions.add(webSession);
+  void webSession.session
+    .waitForIdle()
+    .then(() => webSession.session.dispose())
+    .then(() => {
+      sessions.delete(webSession.id);
+      unregisterLiveSession(webSession.id);
+    })
+    .catch((error) => console.error("Failed to close Pi harness", error));
 }
 
 export function attachSession(
@@ -45,11 +55,19 @@ export function attachSession(
     resolveUiImage,
   };
 
-  session.subscribe((event) => {
-    void handleAgentEvent(webSession, event).catch((error) => {
-      console.error("Failed to handle agent event", error);
+  webSession.activeAssistant = session.snapshot.operation?.streamingMessage;
+  for (const tool of session.snapshot.operation?.runningTools ?? []) {
+    webSession.activeTools.set(tool.toolCallId, {
+      toolCallId: tool.toolCallId,
+      toolName: tool.toolName,
+      args: tool.args as Record<string, unknown>,
+      blocks: normalizeBlocks(tool.result?.content ?? [], { imageResolver: resolveUiImage }),
+      details: normalizeToolDetails(tool.result?.details),
+      status: tool.status === "running" ? "running" : tool.isError ? "error" : "success",
+      isError: tool.status === "settled" && tool.isError,
     });
-  });
+  }
+  session.subscribe((event) => handleAgentEvent(webSession, event));
   sessions.set(webSession.id, webSession);
   registerLiveSession(workspace, session);
   return webSession;
@@ -353,6 +371,9 @@ export async function handleAgentEvent(
       deps.publish(webSession, { type: "tools", tools: [] });
       deps.publish(webSession, { type: "state", state: deps.getStateMetadata(webSession) });
       await deps.notifyWorkspaceUpdated(webSession.workspace.id);
+      break;
+    case "queue_update":
+      deps.publish(webSession, { type: "state", state: deps.getStateMetadata(webSession) });
       break;
     case "auto_retry_start":
       webSession.autoRetryActive = true;

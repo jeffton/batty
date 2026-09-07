@@ -20,6 +20,6 @@ export function removeQueuedPrompt(
   webSession: WebSession,
   kind: "steer" | "followUp",
   index: number,
-): void {
-  webSession.session.removeQueuedPrompt(kind, index);
+): Promise<void> {
+  return webSession.session.removeQueuedPrompt(kind, index);
 }

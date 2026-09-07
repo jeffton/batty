@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { HarnessController as AgentSession } from "./harness-controller";
 import type { WebSession } from "./pi-service-types";
 import { runCronJobSession } from "./pi-service-cron-adapter";
 
@@ -16,7 +16,7 @@ type AgentMessage = AgentSession["messages"][number];
 
 function createSession(id: string, sessionFile: string): AgentSession {
   const messages: AgentMessage[] = [];
-  return {
+  const session = {
     sessionId: id,
     sessionFile,
     model: { api: "openai-codex-responses", provider: "openai-codex", id: "gpt-5.5" },
@@ -24,16 +24,40 @@ function createSession(id: string, sessionFile: string): AgentSession {
       return (this as unknown as { agent: { state: { messages: AgentMessage[] } } }).agent.state
         .messages;
     },
-    agent: {
-      state: { messages },
-      waitForIdle: vi.fn(async () => undefined),
+    agent: { state: { messages } },
+    waitForIdle: vi.fn(async () => undefined),
+    snapshot: { queues: [] },
+    lane: {
+      appendMessage: async (message: AgentMessage) => {
+        messages.push(message);
+      },
+      getResult: async () => ({
+        tipId: session.messages.length ? String(session.messages.length - 1) : null,
+        fromTipId: null,
+      }),
     },
     sessionManager: {
+      getEntries: () =>
+        session.messages.map((message, index) => ({
+          id: String(index),
+          type: "message",
+          message,
+          parentId: index > 0 ? String(index - 1) : null,
+        })),
+      native: {
+        findEntries: async () => messages.map((message) => ({ type: "message", message })),
+        getEntry: async (id: string) => ({
+          type: "message",
+          message: session.messages[Number(id)],
+          parentId: Number(id) > 0 ? String(Number(id) - 1) : null,
+        }),
+      },
       appendMessage(message: AgentMessage) {
         messages.push(message);
       },
     },
   } as unknown as AgentSession;
+  return session;
 }
 
 function createWebSession(id: string, sessionFile: string): WebSession {
@@ -69,7 +93,7 @@ describe("runCronJobSession", () => {
       {
         createCronSession: vi.fn(async () => ({ id: cron.id }) as never),
         promptCron: vi.fn(async () => {
-          cron.session.agent.state.messages = [
+          (cron.session as any).agent.state.messages = [
             ...cron.session.messages,
             {
               role: "assistant",
@@ -136,7 +160,7 @@ describe("runCronJobSession", () => {
       content: [{ type: "text", text: "Heartbeat ok" }],
       stopReason: "stop",
     });
-    expect(parent.session.agent.waitForIdle).toHaveBeenCalled();
+    expect(parent.session.waitForIdle).toHaveBeenCalled();
     expect(publishReset).toHaveBeenCalled();
     expect(onAgentCompleted).toHaveBeenCalled();
     expect(notifyWorkspaceUpdated).toHaveBeenCalledWith("roy");
@@ -196,7 +220,7 @@ describe("runCronJobSession", () => {
       {
         createCronSession: vi.fn(async () => ({ id: cron.id }) as never),
         promptCron: vi.fn(async () => {
-          cron.session.agent.state.messages = [
+          (cron.session as any).agent.state.messages = [
             {
               role: "assistant",
               content: [{ type: "text", text: "  NO_REPLY  " }],

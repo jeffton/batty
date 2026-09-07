@@ -43,8 +43,9 @@ test.describe("workspace and session routing", () => {
     await expect(page.locator(".workspace-browser-pane")).toHaveAttribute("aria-hidden", "false");
     await expect(page.locator(".chat-session-pane")).toHaveAttribute("aria-hidden", "true");
 
+    const sessionId = decodeURIComponent(new URL(sessionUrl).pathname.split("/").at(-1)!);
     const sessionItem = page.locator(
-      ".workspace-browser-pane__sessions .workspace-browser-pane__item--session",
+      `.workspace-browser-pane__sessions [data-session-id="${sessionId}"]`,
     );
     await expect(sessionItem).toHaveCount(1);
     await sessionItem.click();

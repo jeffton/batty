@@ -1,9 +1,5 @@
-import {
-  calculateContextTokens,
-  estimateTokens,
-  getLatestCompactionEntry,
-  type AgentSession,
-} from "@earendil-works/pi-coding-agent";
+import { calculateContextTokens, estimateTokens } from "@earendil-works/pi-agent-core";
+import type { HarnessController as AgentSession } from "./harness-controller";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 
 interface ContextUsage {
@@ -44,7 +40,9 @@ export function getSessionContextUsage(session: SessionLike): ContextUsage | und
     return undefined;
   }
 
-  const latestCompaction = getLatestCompactionEntry(session.sessionManager.getBranch());
+  const latestCompaction = session.sessionManager
+    .getBranch()
+    .findLast((entry) => entry.type === "compaction");
   const compactionBoundaryTimestamp = latestCompaction
     ? new Date(latestCompaction.timestamp).getTime()
     : null;

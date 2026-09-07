@@ -3,10 +3,7 @@ import path from "node:path";
 import {
   ModelRuntime,
   readStoredCredential,
-  SessionManager,
-  type AgentSession,
   type ExtensionContext,
-  type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import type {
   CronJobSession,
@@ -42,12 +39,7 @@ import {
 import { hasSubagentSessionMarker } from "./subagent";
 import { getSessionMessagePage } from "./pi-service-message-page";
 import { getQueuedPrompts, removeQueuedPrompt } from "./pi-service-queue";
-import {
-  createUiImageResolver,
-  externalizeInlineImagesInSession,
-  externalizeUploadedImagesInSession,
-  preparePromptFiles,
-} from "./pi-service-uploads";
+import { createUiImageResolver, preparePromptFiles } from "./pi-service-uploads";
 import {
   attachSession,
   disposeWebSession,
@@ -62,6 +54,8 @@ import {
   resolveOrCreateDailySession,
   resolveSubagentDefaults,
   runDetachedSubagentSession,
+  deliverDetachedSubagentResult,
+  findDetachedSubagentDeliveryRequest,
   runSubagentSerial,
   waitForSubagentQueue,
 } from "./pi-service-subagents";
@@ -76,14 +70,19 @@ import {
   type WebSession,
 } from "./pi-service-types";
 import type { CronService } from "./cron";
-import { deliverSkippedCronJobRun, runCronJobSession } from "./pi-service-cron-adapter";
+import {
+  deliverSkippedCronJobRun,
+  runCronJobSession,
+  recoverCronJobSession,
+  executeCronOperation,
+} from "./pi-service-cron-adapter";
 import { createPiServiceTools } from "./pi-service-tool-factory";
 import type { RuntimeNotice } from "./runtime-notices";
 import { SessionReadStateStore } from "./session-read-state";
-import { AgentTurnFileChangeTracker } from "./agent-turn-file-changes";
-import { listWorkspaces, resolveWorkspace } from "./workspaces";
-import { ActiveInteractiveTurnJournal } from "./active-interactive-turn-journal";
-import { prepareInteractiveTurnRecovery, resumeInteractiveTurn } from "./interactive-turn-recovery";
+import { listWorkspaces } from "./workspaces";
+import { HarnessSessionStore as SessionManager } from "./harness-session-store";
+import type { HarnessController as AgentSession } from "./harness-controller";
+import type { Entry as SessionEntry } from "@earendil-works/pi-agent-core";
 
 export type { UploadedFile } from "./pi-service-types";
 
@@ -107,12 +106,14 @@ export class PiService {
   private readonly subagentQueues = new Map<string, Promise<void>>();
   private readonly cronSessionResolutions = new Map<string, Promise<SessionState>>();
   private readonly sessionOpenPromises = new Map<string, Promise<SessionState>>();
-  private readonly fileChangeTrackers = new Map<string, AgentTurnFileChangeTracker>();
+  private readonly sessionControllers = new Map<
+    string,
+    ReturnType<typeof createPiAgentSessionImpl>
+  >();
   private readonly onAgentCompleted: ((session: SessionState) => Promise<void>) | undefined;
   private readonly onWorkspaceUpdated: ((workspaceId: string) => Promise<void>) | undefined;
   private readonly cronService: CronService;
   private readonly sessionReadState: SessionReadStateStore;
-  private readonly activeInteractiveTurns: ActiveInteractiveTurnJournal;
 
   private constructor(
     config: AppConfig,
@@ -120,7 +121,6 @@ export class PiService {
     modelRuntime: ModelRuntime,
     modelConfigWatcher: ModelConfigWatcher,
     sessionReadState: SessionReadStateStore,
-    activeInteractiveTurns: ActiveInteractiveTurnJournal,
     onAgentCompleted?: (session: SessionState) => Promise<void>,
     onWorkspaceUpdated?: (workspaceId: string) => Promise<void>,
   ) {
@@ -129,7 +129,6 @@ export class PiService {
     this.modelRuntime = modelRuntime;
     this.modelConfigWatcher = modelConfigWatcher;
     this.sessionReadState = sessionReadState;
-    this.activeInteractiveTurns = activeInteractiveTurns;
     this.onAgentCompleted = onAgentCompleted;
     this.onWorkspaceUpdated = onWorkspaceUpdated;
     const authPath = path.join(battyAgentDir(config), "auth.json");
@@ -153,7 +152,6 @@ export class PiService {
     const modelConfigWatcher = new ModelConfigWatcher(modelsPath, modelRuntime);
     await modelConfigWatcher.initialize();
     const sessionReadState = await SessionReadStateStore.create(config.battyDir);
-    const activeInteractiveTurns = await ActiveInteractiveTurnJournal.create(config.battyDir);
     const workspaces = await listWorkspaces(config);
     const existingSessions = (
       await Promise.all(workspaces.map((workspace) => listFastSessionSummaries(config, workspace)))
@@ -165,7 +163,6 @@ export class PiService {
       modelRuntime,
       modelConfigWatcher,
       sessionReadState,
-      activeInteractiveTurns,
       onAgentCompleted,
       onWorkspaceUpdated,
     );
@@ -173,61 +170,47 @@ export class PiService {
 
   async dispose(): Promise<void> {
     await this.modelConfigWatcher.dispose();
+    await Promise.all([...this.liveSessions.values()].map(({ session }) => session.dispose()));
   }
 
-  async recoverActiveInteractiveTurns(): Promise<void> {
-    const entries = this.activeInteractiveTurns.list();
-    if (entries.length === 0) return;
-
-    const workspaces = await listWorkspaces(this.config);
-    for (const entry of entries) {
-      try {
-        const workspace = resolveWorkspace(workspaces, entry.workspaceId);
-        const opened = await this.openSession(workspace, entry.sessionPath);
-        if (opened.sessionId !== entry.sessionId) {
-          throw new Error(
-            `Session id mismatch for interrupted turn: expected ${entry.sessionId}, got ${opened.sessionId}`,
-          );
-        }
-        const webSession = this.requireSession(entry.sessionId);
-        const plan = prepareInteractiveTurnRecovery(webSession.session.sessionManager.getBranch());
-        if (plan.action === "complete") {
-          await this.activeInteractiveTurns.deleteSession(entry.sessionId);
-          continue;
-        }
-        console.info("Recovering interrupted interactive turn", {
-          sessionId: entry.sessionId,
-          workspaceId: entry.workspaceId,
+  async recoverOpenOperations(): Promise<void> {
+    for (const workspace of await listWorkspaces(this.config)) {
+      const root = workspaceSessionDir(this.config, workspace.id);
+      const files = await fs
+        .readdir(root, { recursive: true, withFileTypes: true })
+        .catch((error) => {
+          if (error.code === "ENOENT") return [];
+          throw error;
         });
-        void this.runRecoveredInteractiveTurn(webSession, plan).catch((error) => {
-          console.error("Failed to recover interrupted interactive turn", {
-            sessionId: entry.sessionId,
-            workspaceId: entry.workspaceId,
+      for (const file of files.filter((file) => file.isFile() && file.name.endsWith(".jsonl"))) {
+        const filePath = path.join(file.parentPath, file.name);
+        try {
+          const stored = await SessionManager.read(filePath);
+          const delivery = findDetachedSubagentDeliveryRequest(stored.entries, stored.metadata.id);
+          if (delivery && !this.sessionControllers.has(stored.metadata.id)) {
+            void this.runDetachedSubagentSession({
+              ...delivery,
+              workspace,
+              sessionId: stored.metadata.id,
+              recoverOnly: true,
+            }).catch((error) =>
+              console.error("Failed to recover detached subagent delivery", {
+                sessionId: stored.metadata.id,
+                error,
+              }),
+            );
+            continue;
+          }
+          if (stored.currentOperationId && !this.sessionControllers.has(stored.metadata.id))
+            await this.openSession(workspace, filePath);
+        } catch (error) {
+          console.error("Failed to recover Pi session", {
+            workspaceId: workspace.id,
+            sessionPath: filePath,
             error,
           });
-        });
-      } catch (error) {
-        console.error("Failed to prepare interrupted interactive turn recovery", {
-          sessionId: entry.sessionId,
-          workspaceId: entry.workspaceId,
-          error,
-        });
+        }
       }
-    }
-  }
-
-  private async runRecoveredInteractiveTurn(
-    webSession: WebSession,
-    plan: Extract<ReturnType<typeof prepareInteractiveTurnRecovery>, { action: "resume" }>,
-  ): Promise<void> {
-    try {
-      await resumeInteractiveTurn(webSession.session, plan);
-    } finally {
-      externalizeInlineImagesInSession(
-        webSession.session,
-        this.config.uploadsDir,
-        this.config.baseUrl,
-      );
     }
   }
 
@@ -236,6 +219,7 @@ export class PiService {
   }
 
   private unregisterLiveSession(sessionId: string): void {
+    this.sessionControllers.delete(sessionId);
     this.liveSessions.delete(sessionId);
   }
 
@@ -328,7 +312,7 @@ export class PiService {
     };
     const result = await this.createPiAgentSession(
       workspace,
-      SessionManager.create(workspace.path, workspaceSessionDir(this.config, workspace.id)),
+      await SessionManager.create(workspace.path, workspaceSessionDir(this.config, workspace.id)),
       sessionOptions,
     );
 
@@ -361,14 +345,14 @@ export class PiService {
           workspace,
           sessionDir,
           options.copySessionPath,
-          this.resolveCronContextCopyLeafId(options.parentSessionId, options.copySessionPath),
+          await this.resolveCronContextCopyLeafId(options.parentSessionId, options.copySessionPath),
         )
-      : SessionManager.create(workspace.path, sessionDir);
+      : await SessionManager.create(workspace.path, sessionDir);
     const result = await this.createPiAgentSession(workspace, sessionManager, {
       modelId: options.modelId,
       thinkingLevel: options.thinkingLevel,
     });
-    result.session.sessionManager.appendCustomEntry(
+    await result.session.sessionManager.appendCustomEntry(
       CRON_RUN_SESSION_CUSTOM_TYPE,
       buildCronRunSessionBinding({
         jobId: options.jobId,
@@ -386,10 +370,10 @@ export class PiService {
     return this.getState(webSession.id);
   }
 
-  private resolveCronContextCopyLeafId(
+  private async resolveCronContextCopyLeafId(
     parentSessionId: string | undefined,
     sourceSessionPath: string,
-  ): string | null {
+  ): Promise<string | null> {
     const webSession = parentSessionId
       ? (this.sessions.get(parentSessionId) ??
         [...this.sessions.values()].find(
@@ -397,7 +381,7 @@ export class PiService {
         ))
       : undefined;
     const sessionManager =
-      webSession?.session.sessionManager ?? SessionManager.open(sourceSessionPath);
+      webSession?.session.sessionManager ?? (await SessionManager.open(sourceSessionPath));
 
     if (!webSession?.session.isStreaming) {
       return sessionManager.getLeafId();
@@ -412,16 +396,8 @@ export class PiService {
     sourceSessionPath: string,
     leafId: string | null,
   ): Promise<SessionManager> {
-    await fs.mkdir(sessionDir, { recursive: true });
-    if (!leafId) {
-      const sessionManager = SessionManager.create(workspace.path, sessionDir);
-      sessionManager.newSession({ parentSession: sourceSessionPath });
-      return sessionManager;
-    }
-
-    const sessionManager = SessionManager.open(sourceSessionPath, sessionDir, workspace.path);
-    sessionManager.createBranchedSession(leafId);
-    return sessionManager;
+    const source = await SessionManager.open(sourceSessionPath);
+    return source.fork(sessionDir, leafId);
   }
 
   private async findSessionPath(workspace: WorkspaceInfo, sessionId: string): Promise<string> {
@@ -465,7 +441,10 @@ export class PiService {
     }
 
     const opening = (async () => {
-      const result = await this.createPiAgentSession(workspace, SessionManager.open(canonicalPath));
+      const result = await this.createPiAgentSession(
+        workspace,
+        await SessionManager.open(canonicalPath),
+      );
       const webSession = this.attachSession(
         workspace,
         result.session,
@@ -473,6 +452,13 @@ export class PiService {
         hasSubagentSessionMarker(result.session.sessionManager.getEntries()) ||
           hasParentedCronRunSessionMarker(result.session.sessionManager.getEntries()),
       );
+      if (result.session.isStreaming) {
+        void result.session
+          .resume()
+          .catch((error) =>
+            console.error("Failed to resume Pi operation", { sessionId: webSession.id, error }),
+          );
+      }
       return this.getState(webSession.id, { messagesDetailLevel: "summary" });
     })();
     this.sessionOpenPromises.set(canonicalPath, opening);
@@ -502,7 +488,36 @@ export class PiService {
     return runCronJobSession(
       {
         createCronSession: (workspace, options) => this.createCronSession(workspace, options),
-        promptCron: (sessionId, notice) => this.promptCron(sessionId, notice),
+        promptCron: (sessionId, notice, operationId) =>
+          this.promptCron(sessionId, notice, operationId),
+        resolveOrCreateDailySession: (workspace, options) =>
+          this.resolveOrCreateDailySession(workspace, options),
+        requireSession: (sessionId) => this.requireSession(sessionId),
+        requireSessionPath: (sessionId) => this.requireSessionPath(sessionId),
+        prepareSessionForContextCopy: (sessionId) => this.prepareSessionForContextCopy(sessionId),
+        runSubagentSerial: (sessionId, run) => this.runSubagentSerial(sessionId, run),
+        getState: (sessionId) => this.getState(sessionId),
+        publishReset: (webSession, state) => this.publish(webSession, { type: "reset", state }),
+        setThinkingLevel: (sessionId, thinkingLevel) =>
+          this.setThinkingLevel(sessionId, thinkingLevel),
+        setModel: (sessionId, modelId) => this.setModel(sessionId, modelId),
+        onAgentCompleted: this.onAgentCompleted,
+        notifyWorkspaceUpdated: (workspaceId) => this.notifyWorkspaceUpdated(workspaceId),
+      },
+      job,
+    );
+  }
+
+  async recoverCronJobSession(
+    job: Parameters<typeof recoverCronJobSession>[1],
+  ): Promise<{ sessionId: string; sessionPath: string }> {
+    return recoverCronJobSession(
+      {
+        createCronSession: (workspace, options) => this.createCronSession(workspace, options),
+        promptCron: (sessionId, notice, operationId) =>
+          this.promptCron(sessionId, notice, operationId),
+        openSession: (workspace, sessionPath) => this.openSession(workspace, sessionPath),
+        openSessionById: (workspace, sessionId) => this.openSessionById(workspace, sessionId),
         resolveOrCreateDailySession: (workspace, options) =>
           this.resolveOrCreateDailySession(workspace, options),
         requireSession: (sessionId) => this.requireSession(sessionId),
@@ -537,7 +552,8 @@ export class PiService {
     return deliverSkippedCronJobRun(
       {
         createCronSession: (workspace, options) => this.createCronSession(workspace, options),
-        promptCron: (sessionId, notice) => this.promptCron(sessionId, notice),
+        promptCron: (sessionId, notice, operationId) =>
+          this.promptCron(sessionId, notice, operationId),
         resolveOrCreateDailySession: (workspace, options) =>
           this.resolveOrCreateDailySession(workspace, options),
         requireSession: (sessionId) => this.requireSession(sessionId),
@@ -588,6 +604,8 @@ export class PiService {
   }
 
   private async runDetachedSubagentSession(options: {
+    sessionId?: string;
+    recoverOnly?: boolean;
     workspace: WorkspaceInfo;
     parentSessionId: string;
     parentSessionPath?: string;
@@ -616,6 +634,17 @@ export class PiService {
           this.attachSession(workspace, session, modelFallbackMessage, ephemeral),
         disposeWebSession: (webSession) => this.disposeWebSession(webSession),
         workspaceSessionDir: workspaceSessionDir(this.config, options.workspace.id),
+        deliverResultToParent: async (request, result) => {
+          const opened = await this.openSessionById(request.workspace, request.parentSessionId);
+          await this.runSubagentSerial(opened.id, async () => {
+            const parent = this.requireSession(opened.id);
+            if (!(await deliverDetachedSubagentResult(parent.session, result))) return;
+            const state = this.getState(parent.id);
+            this.publish(parent, { type: "reset", state });
+            await this.onAgentCompleted?.(state);
+            await this.notifyWorkspaceUpdated(parent.workspace.id);
+          });
+        },
       },
       options,
     );
@@ -654,7 +683,7 @@ export class PiService {
   private async prepareSessionForContextCopy(sessionId: string): Promise<void> {
     await this.runSubagentSerial(sessionId, async () => {
       const webSession = this.requireSession(sessionId);
-      await webSession.session.agent.waitForIdle();
+      await webSession.session.waitForIdle();
       const contextUsage = getSessionContextUsage(webSession.session);
       if (contextUsage?.tokens == null) {
         return;
@@ -802,23 +831,15 @@ export class PiService {
 
   async setThinkingLevel(sessionId: string, thinkingLevel: string): Promise<SessionState> {
     const webSession = this.requireSession(sessionId);
-    webSession.session.setThinkingLevel(thinkingLevel as AgentSession["thinkingLevel"]);
+    await webSession.session.setThinkingLevel(thinkingLevel as AgentSession["thinkingLevel"]);
     await this.refreshBattySystemPrompt(webSession);
     this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
     return this.getState(sessionId);
   }
 
-  async promptCron(sessionId: string, notice: RuntimeNotice): Promise<void> {
+  async promptCron(sessionId: string, notice: RuntimeNotice, operationId: string): Promise<void> {
     const webSession = this.requireSession(sessionId);
-    await webSession.session.sendCustomMessage(
-      {
-        customType: `batty-runtime-notice:${notice.kind}`,
-        content: notice.text,
-        display: true,
-        details: undefined,
-      },
-      { triggerTurn: true },
-    );
+    await executeCronOperation(webSession.session, notice, operationId);
     if (this.hasSession(sessionId)) {
       this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
     }
@@ -840,14 +861,7 @@ export class PiService {
       images: prepared.images,
       clientMessageId,
       ...(streamingBehavior ? { streamingBehavior } : {}),
-      onTurnStarted: () =>
-        this.activeInteractiveTurns.set({
-          workspaceId: webSession.workspace.id,
-          sessionId,
-          sessionPath: this.requireSessionPath(sessionId),
-        }),
     });
-    externalizeUploadedImagesInSession(webSession.session, prepared.uploadedImages);
     this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
   }
 
@@ -865,7 +879,6 @@ export class PiService {
 
   async abort(sessionId: string): Promise<void> {
     const webSession = this.requireSession(sessionId);
-    await this.activeInteractiveTurns.deleteSession(sessionId);
     await webSession.session.abort();
     this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
   }
@@ -875,38 +888,47 @@ export class PiService {
     sessionManager: SessionManager,
     options?: { modelId?: string; thinkingLevel?: string; parentSessionId?: string },
   ): ReturnType<typeof createPiAgentSessionImpl> {
-    const model = options?.modelId ? await this.resolveModel(options.modelId) : undefined;
-    const parentTracker = options?.parentSessionId
-      ? this.fileChangeTrackers.get(options.parentSessionId)
-      : undefined;
-    const fileChangeTracker = new AgentTurnFileChangeTracker(parentTracker?.aggregateForChild());
-    const result = await createPiAgentSessionImpl({
-      config: this.config,
-      workspace,
-      sessionManager,
-      modelRuntime: this.modelRuntime,
-      model,
-      thinkingLevel: options?.thinkingLevel,
-      fileChangeTracker,
-      customTools: createPiServiceTools(
-        {
-          config: this.config,
-          cronService: this.cronService,
-          validateModel: (modelId) => {
-            this.resolveModel(modelId);
-          },
-          resolveSubagentDefaults: (sessionId, ctx) => this.resolveSubagentDefaults(sessionId, ctx),
-          runDetachedSubagentSession: (request) => this.runDetachedSubagentSession(request),
-        },
+    const id = sessionManager.getSessionId();
+    const existing = this.sessionControllers.get(id);
+    if (existing) return existing;
+    const creating = (async () => {
+      const model = options?.modelId ? await this.resolveModel(options.modelId) : undefined;
+      const result = await createPiAgentSessionImpl({
+        config: this.config,
         workspace,
-      ),
-    });
-    this.fileChangeTrackers.set(result.session.sessionId, fileChangeTracker);
-    return result;
+        sessionManager,
+        modelRuntime: this.modelRuntime,
+        model,
+        thinkingLevel: options?.thinkingLevel,
+        customTools: createPiServiceTools(
+          {
+            config: this.config,
+            cronService: this.cronService,
+            validateModel: (modelId) => {
+              this.resolveModel(modelId);
+            },
+            resolveSubagentDefaults: (sessionId, ctx) =>
+              this.resolveSubagentDefaults(sessionId, ctx),
+            runDetachedSubagentSession: (request) => this.runDetachedSubagentSession(request),
+          },
+          workspace,
+        ),
+      });
+      return result;
+    })();
+    this.sessionControllers.set(id, creating);
+    try {
+      return await creating;
+    } catch (error) {
+      this.sessionControllers.delete(id);
+      const { BACKGROUND_CONTEXT } = await import("@earendil-works/pi-agent-core");
+      await sessionManager.native.close(BACKGROUND_CONTEXT);
+      sessionManager.release();
+      throw error;
+    }
   }
 
   private disposeWebSession(webSession: WebSession): void {
-    this.fileChangeTrackers.delete(webSession.id);
     disposeWebSession(
       this.sessions,
       (sessionId) => this.unregisterLiveSession(sessionId),
@@ -920,7 +942,8 @@ export class PiService {
     modelFallbackMessage?: string,
     ephemeral = false,
   ): WebSession {
-    externalizeInlineImagesInSession(session, this.config.uploadsDir, this.config.baseUrl);
+    const existing = this.sessions.get(session.sessionId);
+    if (existing) return existing;
     return attachSession(
       this.sessions,
       (workspace, session) => this.registerLiveSession(workspace, session),
@@ -957,9 +980,6 @@ export class PiService {
         notifyWorkspaceUpdated: (workspaceId) => this.notifyWorkspaceUpdated(workspaceId),
         disposeWebSession: (webSession) => this.disposeWebSession(webSession),
         onAgentCompleted: this.onAgentCompleted,
-        onAgentSettled: async (webSession) => {
-          await this.activeInteractiveTurns.deleteSession(webSession.id);
-        },
       },
       webSession,
       event,

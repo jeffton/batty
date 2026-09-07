@@ -22,6 +22,7 @@
     "check:fix": "vp check --fix"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "0.85.1",
     "@earendil-works/pi-ai": "0.85.1",
     "@earendil-works/pi-coding-agent": "0.85.1",
     "@fastify/cookie": "11.1.2",

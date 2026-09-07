@@ -1,5 +1,5 @@
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { isPiShellToolName } from "@/shared/pi-tools";
 import type {
   AgentTurnFileChange,
@@ -12,8 +12,6 @@ import type {
 } from "@/shared/types";
 import { sanitizeTerminalBlocks, stripTerminalFormatting } from "./terminal-output";
 import { agentTurnFileChangesByReplyEntryId } from "./agent-turn-file-changes";
-
-type AgentMessage = AgentSession["messages"][number];
 
 export type UiImageResolver = (image: {
   mimeType: string;

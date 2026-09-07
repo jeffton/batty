@@ -23,13 +23,13 @@ Batty is a web UI for [Pi Coding Agent](https://pi.dev). It keeps Pi's workspace
 
 ## How it works
 
-Batty runs a Fastify server and a Vue client, while Pi still owns the actual agent behavior:
+Batty runs a Fastify server and a Vue client. Pi AgentHarness owns agent execution and durable session state:
 
 - models come from Pi's model registry
 - global agent resources come from `<batty-root>/.batty/`
 - workspace agent resources come from `<workspace>/.batty/`
 - instructions come from `<batty-root>/.batty/AGENTS.md` plus project `AGENTS.md`
-- session history is stored in `<workspace>/.batty/sessions/`
+- session history is stored in `<batty-root>/.batty/sessions/<workspace-id>/`
 
 Batty adds a browser-native layer on top:
 
@@ -44,9 +44,13 @@ Batty adds a browser-native layer on top:
 
 ### Restart recovery
 
-Batty records active interactive sessions in `<batty-root>/.batty/active-interactive-turns.json` after their initial user message is saved. At startup, it continues interrupted turns from their session transcripts and skips turns with a saved final response. Tool calls without saved results receive an uncertain-outcome result so the agent can inspect their effects before retrying.
+Pi durably accepts prompts before model execution. Its session files contain operation checkpoints, steering and follow-up queues, image payloads, retry state, deferred provider handles, and tool invocation records. Batty discovers open operations at startup and asks Pi to drive them. Recovered operations retain their original user messages and queue entries.
 
-Prompts that have not reached the transcript, including queued steering and follow-up messages, do not survive restart. Recovery uses the reopened session's context. Completed, failed, and user-aborted runs clear their active marker; failed recovery is not automatically retried on subsequent restarts.
+Read-only tools may be replayed. Uncertain mutating tool calls receive Pi's uncertain-outcome result instead of being repeated. Detached subagent tools persist their child-session identity in Pi invocation memos and reconnect to that session on replay.
+
+Pi's built-in importer opens legacy v3 sessions and normalizes them through a native commit. Batty preserves its application metadata and UI attachment projections without rewriting committed messages. Coding-agent extensions require migration to native harness hooks/tools; configured legacy extensions produce an explicit error.
+
+Cron scheduling and run logs remain Batty-owned. Admitted cron operations can resume through Pi. Scheduler run logs are marked interrupted, and detached parent-result delivery is not reattached after restart. See [the harness integration](docs/pi-agent-harness.md) for implementation boundaries.
 
 ## Quick start
 
@@ -230,6 +234,8 @@ Example model defaults:
   "defaultThinkingLevel": "medium"
 }
 ```
+
+Creating a harness session requires an explicit model selection or a configured default provider/model pair.
 
 Other global Pi settings can be placed in `<batty-root>/.batty/settings.json`. Model defaults in that file are ignored because `options.json` is authoritative. A workspace can override model defaults and other Pi settings in `<workspace>/.batty/settings.json`.
 

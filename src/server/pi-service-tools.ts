@@ -169,6 +169,7 @@ function subagentToolContent(
 }
 
 interface DetachedSubagentRequest {
+  sessionId?: string;
   workspace: WorkspaceInfo;
   parentSessionId: string;
   parentSessionPath?: string;
@@ -242,7 +243,19 @@ export function createSubagentTool({
       }
 
       const includeSessionContext = params.includeSessionContext === true;
+      const replay = ctx as unknown as {
+        invocation: import("@earendil-works/pi-agent-core").AgentHarnessToolInvocation;
+        childSessionId: () => string;
+      };
+      let childSessionId = (await replay.invocation.getMemo("child-session-id")) as
+        | string
+        | undefined;
+      if (!childSessionId) {
+        childSessionId = replay.childSessionId();
+        await replay.invocation.setMemo("child-session-id", childSessionId);
+      }
       const result = await runDetachedSubagentSession({
+        sessionId: childSessionId,
         workspace,
         parentSessionId: sessionId,
         parentSessionPath: (

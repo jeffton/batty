@@ -52,22 +52,44 @@ describe("default model settings route", () => {
     const response = await app.inject({
       method: "POST",
       url: "/api/settings/default-model",
-      payload: { modelId: "openai-codex/gpt-5.6-sol" },
+      payload: { modelId: "openai-codex/gpt-5.6-sol", thinkingLevel: "medium" },
     });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       defaultProvider: "openai-codex",
       defaultModel: "gpt-5.6-sol",
+      defaultThinkingLevel: "medium",
     });
     expect(config).toMatchObject({
       defaultProvider: "openai-codex",
       defaultModel: "gpt-5.6-sol",
+      defaultThinkingLevel: "medium",
     });
     expect(await readStoredOptions(battyDir)).toMatchObject({
       defaultProvider: "openai-codex",
       defaultModel: "gpt-5.6-sol",
+      defaultThinkingLevel: "medium",
     });
+
+    await app.close();
+  });
+
+  it("rejects a thinking level unsupported by the selected model", async () => {
+    const battyDir = await fs.mkdtemp(path.join(os.tmpdir(), "batty-settings-route-"));
+    tempDirs.push(battyDir);
+    const { app } = createContext(battyDir, [
+      { id: "openai-codex/gpt-5.6-sol", provider: "openai-codex" },
+    ]);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/settings/default-model",
+      payload: { modelId: "openai-codex/gpt-5.6-sol", thinkingLevel: "max" },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toMatchObject({ message: "Invalid default thinking level" });
 
     await app.close();
   });

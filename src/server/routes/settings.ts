@@ -85,7 +85,7 @@ export function registerSettingsRoutes(context: RouteContext): void {
     },
   );
 
-  app.post<{ Body: { modelId?: string } }>(
+  app.post<{ Body: { modelId?: string; thinkingLevel?: string } }>(
     routePath("/api/settings/default-model"),
     async (request) => {
       const selected = (await service.listModels()).find(
@@ -94,11 +94,20 @@ export function registerSettingsRoutes(context: RouteContext): void {
       if (!selected) {
         throw new Error("Invalid default model");
       }
+      if (!selected.thinkingLevels.includes(request.body?.thinkingLevel ?? "")) {
+        throw new Error("Invalid default thinking level");
+      }
 
       const modelId = selected.id.slice(`${selected.provider}/`.length);
-      const options = await setDefaultModel(config.battyDir, selected.provider, modelId);
+      const options = await setDefaultModel(
+        config.battyDir,
+        selected.provider,
+        modelId,
+        request.body?.thinkingLevel ?? "",
+      );
       config.defaultProvider = options.defaultProvider;
       config.defaultModel = options.defaultModel;
+      config.defaultThinkingLevel = options.defaultThinkingLevel;
       return appSettingsStatus(config);
     },
   );

@@ -153,10 +153,11 @@ describe("ensureOptionsFile", () => {
       "utf8",
     );
 
-    await setDefaultModel(battyDir, " openai-codex ", " gpt-5.6-sol ");
+    await setDefaultModel(battyDir, " openai-codex ", " gpt-5.6-sol ", " medium ");
     expect(await readStoredOptions(battyDir)).toMatchObject({
       defaultProvider: "openai-codex",
       defaultModel: "gpt-5.6-sol",
+      defaultThinkingLevel: "medium",
     });
   });
 

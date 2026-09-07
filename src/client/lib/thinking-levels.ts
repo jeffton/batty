@@ -25,3 +25,11 @@ export function resolveModelThinkingOptions(
 
   return [...new Set(sanitizeLevels(model.thinkingLevels))];
 }
+
+export function normalizeModelThinkingLevel(
+  model: Pick<ModelOption, "thinkingLevels"> | undefined,
+  thinkingLevel: string | undefined,
+): string {
+  const options = resolveModelThinkingOptions(model);
+  return thinkingLevel && options.includes(thinkingLevel) ? thinkingLevel : (options[0] ?? "off");
+}

@@ -45,8 +45,12 @@ export const providerSettingsActions = {
     await this.bootstrap();
   },
 
-  async setDefaultModel(this: AppActionContext, modelId: string): Promise<void> {
-    this.settings = await setDefaultModelRequest(modelId);
+  async setDefaultModel(
+    this: AppActionContext,
+    modelId: string,
+    thinkingLevel: string,
+  ): Promise<void> {
+    this.settings = await setDefaultModelRequest(modelId, thinkingLevel);
   },
 
   async setAppearance(this: AppActionContext, appearance: AppAppearance): Promise<void> {

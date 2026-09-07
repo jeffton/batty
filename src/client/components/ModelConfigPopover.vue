@@ -12,6 +12,7 @@ const props = defineProps<{
   currentModelId?: string;
   currentThinkingLevel: string;
   thinkingOptions: string[];
+  disabled?: boolean;
   placement?: "down" | "up";
 }>();
 
@@ -63,6 +64,7 @@ watch(
       v-if="props.thinkingOptions.length > 0"
       :options="props.thinkingOptions"
       :current="props.currentThinkingLevel"
+      :disabled="props.disabled"
       @change="emit('setThinkingLevel', $event)"
     />
 
@@ -73,6 +75,7 @@ watch(
         class="mc-popover__search"
         type="text"
         placeholder="Filter models…"
+        :disabled="props.disabled"
       />
     </div>
 
@@ -82,6 +85,7 @@ watch(
         :key="model.id"
         type="button"
         :class="['mc-popover__model', model.id === props.currentModelId ? 'is-active' : '']"
+        :disabled="props.disabled"
         @click="emit('setModel', model.id)"
       >
         <span class="mc-popover__model-name">{{ shortModelLabel(model) }}</span>

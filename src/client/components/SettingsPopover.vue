@@ -4,6 +4,10 @@ import { computed, reactive, ref, watch } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import ModelConfigPopover from "@/client/components/ModelConfigPopover.vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
+import {
+  normalizeModelThinkingLevel,
+  resolveModelThinkingOptions,
+} from "@/client/lib/thinking-levels";
 import { APP_COLOR_OPTIONS, type AppColor } from "@/shared/appearance";
 import { useAppStore } from "@/client/stores/app";
 
@@ -82,6 +86,10 @@ const defaultModelId = computed(() =>
 );
 const defaultModel = computed(() =>
   store.models.find((model) => model.id === defaultModelId.value),
+);
+const defaultThinkingOptions = computed(() => resolveModelThinkingOptions(defaultModel.value));
+const defaultThinkingLevel = computed(() =>
+  normalizeModelThinkingLevel(defaultModel.value, store.settings.defaultThinkingLevel),
 );
 const defaultModelLabel = computed(
   () =>
@@ -249,11 +257,33 @@ async function saveApiKey(providerId: "google" | "openrouter"): Promise<void> {
 }
 
 async function saveDefaultModel(modelId: string): Promise<void> {
+  const model = store.models.find((candidate) => candidate.id === modelId);
+  await saveDefaultModelConfig(
+    modelId,
+    normalizeModelThinkingLevel(model, store.settings.defaultThinkingLevel),
+    false,
+  );
+}
+
+async function saveDefaultThinkingLevel(thinkingLevel: string): Promise<void> {
+  if (!defaultModelId.value) {
+    return;
+  }
+  await saveDefaultModelConfig(defaultModelId.value, thinkingLevel, true);
+}
+
+async function saveDefaultModelConfig(
+  modelId: string,
+  thinkingLevel: string,
+  closePopover: boolean,
+): Promise<void> {
   defaultModelSaving.value = true;
   defaultModelError.value = "";
   try {
-    await store.setDefaultModel(modelId);
-    document.getElementById(DEFAULT_MODEL_POPOVER_ID)?.hidePopover?.();
+    await store.setDefaultModel(modelId, thinkingLevel);
+    if (closePopover) {
+      document.getElementById(DEFAULT_MODEL_POPOVER_ID)?.hidePopover?.();
+    }
   } catch (error) {
     defaultModelError.value = error instanceof Error ? error.message : String(error);
   } finally {
@@ -439,9 +469,11 @@ function handlePopoverToggle(event: Event): void {
           :anchor-name="DEFAULT_MODEL_ANCHOR"
           :models="store.models"
           :current-model-id="defaultModelId"
-          current-thinking-level=""
-          :thinking-options="[]"
+          :current-thinking-level="defaultThinkingLevel"
+          :thinking-options="defaultThinkingOptions"
+          :disabled="defaultModelSaving"
           @set-model="saveDefaultModel"
+          @set-thinking-level="saveDefaultThinkingLevel"
         />
         <div v-if="defaultModelError" class="settings-popover__error" role="alert">
           {{ defaultModelError }}

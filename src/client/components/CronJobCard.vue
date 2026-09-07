@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import ThinkingLevelPicker from "@/client/components/ThinkingLevelPicker.vue";
+import ModelConfigPopover from "@/client/components/ModelConfigPopover.vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
 import type { CronDraft } from "@/client/composables/useCronJobDrafts";
 import type { CronJob, ModelOption } from "@/shared/types";
-import { Pencil, Save, Trash2, X } from "@lucide/vue";
+import { Bot, Pencil, Save, Trash2, X } from "@lucide/vue";
 
 const props = defineProps<{
   job: CronJob;
@@ -22,8 +22,19 @@ const emit = defineEmits<{
   delete: [];
 }>();
 
-function changeModel(event: Event): void {
-  emit("modelChange", (event.target as HTMLSelectElement).value);
+function modelPopoverId(): string {
+  return `cron-model-popover-${props.job.id.replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
+}
+
+function modelPopoverAnchor(): string {
+  return `--cron-model-anchor-${props.job.id.replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
+}
+
+function modelLabel(): string {
+  return (
+    props.models.find((model) => model.id === props.draft.model)?.label ??
+    `${props.draft.model} (unavailable)`
+  );
 }
 </script>
 
@@ -91,32 +102,36 @@ function changeModel(event: Event): void {
       />
 
       <div class="cron-popover__edit-fields">
-        <select
-          :value="props.draft.model"
-          class="cron-popover__select"
+        <button
+          class="cron-popover__model-button"
+          type="button"
+          :style="{ 'anchor-name': modelPopoverAnchor() }"
+          :popovertarget="modelPopoverId()"
           :disabled="props.draft.saving || props.draft.deleting"
-          @change="changeModel"
+          aria-label="Choose cron model and effort"
         >
-          <option
-            v-if="!props.models.some((model) => model.id === props.draft.model)"
-            :value="props.draft.model"
-          >
-            {{ props.draft.model }} (unavailable)
-          </option>
-          <option v-for="model in props.models" :key="model.id" :value="model.id">
-            {{ model.label }}
-          </option>
-        </select>
-
-        <ThinkingLevelPicker
-          v-if="props.thinkingOptions.length > 0"
-          class="cron-popover__thinking-picker"
-          :options="props.thinkingOptions"
-          :current="props.draft.thinkingLevel"
-          :disabled="props.draft.saving || props.draft.deleting"
-          @change="props.draft.thinkingLevel = $event"
+          <Bot :size="17" />
+          <span class="cron-popover__model-info">
+            <strong>{{ modelLabel() }}</strong>
+            <span>{{
+              props.thinkingOptions.length > 0 ? props.draft.thinkingLevel : "Effort unavailable"
+            }}</span>
+          </span>
+        </button>
+        <ModelConfigPopover
+          v-if="!props.draft.saving && !props.draft.deleting"
+          :popover-id="modelPopoverId()"
+          :anchor-name="modelPopoverAnchor()"
+          :models="props.models"
+          :current-model-id="props.draft.model"
+          :current-thinking-level="props.draft.thinkingLevel"
+          :thinking-options="props.thinkingOptions"
+          @set-model="emit('modelChange', $event)"
+          @set-thinking-level="props.draft.thinkingLevel = $event"
         />
-        <div v-else class="cron-popover__thinking-unavailable">Effort unavailable</div>
+        <div v-if="props.thinkingOptions.length === 0" class="cron-popover__thinking-unavailable">
+          Effort unavailable
+        </div>
 
         <select
           v-model="props.draft.sessionKind"
@@ -317,7 +332,8 @@ function changeModel(event: Event): void {
 }
 
 .cron-popover__prompt:focus,
-.cron-popover__select:focus {
+.cron-popover__select:focus,
+.cron-popover__model-button:focus {
   border-color: var(--color-accent);
 }
 
@@ -331,8 +347,41 @@ function changeModel(event: Event): void {
   padding: 0.55rem 0.65rem;
 }
 
-.cron-popover__thinking-picker {
+.cron-popover__model-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
   width: 100%;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.6rem;
+  background: var(--color-bg-app);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.cron-popover__model-info {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.cron-popover__model-info strong,
+.cron-popover__model-info span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cron-popover__model-info strong {
+  font-size: 0.84rem;
+}
+
+.cron-popover__model-info span {
+  color: var(--color-text-subtle);
+  font-size: 0.76rem;
 }
 
 .cron-popover__thinking-unavailable {

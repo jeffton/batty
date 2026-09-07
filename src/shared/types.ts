@@ -318,6 +318,7 @@ export interface AppSettingsStatus {
   braveSearchConfigured: boolean;
   defaultProvider?: string;
   defaultModel?: string;
+  defaultThinkingLevel?: string;
   appearance: AppAppearance;
 }
 

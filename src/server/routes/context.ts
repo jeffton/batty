@@ -45,6 +45,7 @@ export function appSettingsStatus(config: AppConfig): AppSettingsStatus {
     braveSearchConfigured: Boolean(config.braveSearchKey),
     defaultProvider: config.defaultProvider,
     defaultModel: config.defaultModel,
+    defaultThinkingLevel: config.defaultThinkingLevel,
     appearance: {
       title: config.appTitle,
       color: config.appColor,

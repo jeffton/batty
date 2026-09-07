@@ -180,11 +180,14 @@ export function setWorkspaceAssistant(workspaceId?: string): Promise<WorkspaceIn
   });
 }
 
-export function setDefaultModel(modelId: string): Promise<AppSettingsStatus> {
+export function setDefaultModel(
+  modelId: string,
+  thinkingLevel: string,
+): Promise<AppSettingsStatus> {
   return request("/api/settings/default-model", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ modelId }),
+    body: JSON.stringify({ modelId, thinkingLevel }),
   });
 }
 

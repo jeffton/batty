@@ -7,12 +7,14 @@ import type { CronJob, CronRunLog, SessionSummary } from "@/shared/types";
 
 const {
   updateCronJob,
+  deleteCronJob,
   listWorkspaceCronJobs,
   listWorkspaceCronRunLogs,
   listWorkspaceCronRuns,
   stopCronRun,
 } = vi.hoisted(() => ({
   updateCronJob: vi.fn(),
+  deleteCronJob: vi.fn(),
   listWorkspaceCronJobs: vi.fn(),
   listWorkspaceCronRunLogs: vi.fn(),
   listWorkspaceCronRuns: vi.fn(),
@@ -25,7 +27,7 @@ vi.mock("@/client/lib/api", () => ({
   createOrOpenDailySession: vi.fn(),
   createSession: vi.fn(),
   createWorkspace: vi.fn(),
-  deleteCronJob: vi.fn(),
+  deleteCronJob,
   getBootstrap: vi.fn(),
   getProviderAuthStatus: vi.fn(),
   getSession: vi.fn(),
@@ -242,7 +244,14 @@ describe("CronPopover", () => {
     ]);
     expect(wrapper.find(".thinking-picker__btn").classes()).toContain("is-active");
 
-    await wrapper.find<HTMLSelectElement>(".cron-popover__select").setValue("openai/gpt-text");
+    const modelButton = wrapper.find('[aria-label="Choose cron model and effort"]');
+    expect(modelButton.attributes("popovertarget")).toBe("cron-model-popover-cron-1");
+    await modelButton.trigger("click");
+    await wrapper
+      .findAll(".mc-popover__model")
+      .find((button) => button.text().includes("GPT Text"))!
+      .trigger("click");
+
     expect(wrapper.findAll(".thinking-picker__btn").map((button) => button.text())).toEqual([
       "Off",
     ]);
@@ -292,9 +301,58 @@ describe("CronPopover", () => {
     await flushPromises();
     await wrapper.find(".cron-popover__icon-btn").trigger("click");
 
-    const modelSelect = wrapper.find<HTMLSelectElement>(".cron-popover__select");
-    expect(modelSelect.element.value).toBe("retired/model");
-    expect(modelSelect.text()).toContain("retired/model (unavailable)");
+    const modelButton = wrapper.find('[aria-label="Choose cron model and effort"]');
+    expect(modelButton.text()).toContain("retired/model (unavailable)");
+    expect(wrapper.find(".cron-popover__thinking-unavailable").text()).toBe("Effort unavailable");
+  });
+
+  it("removes model configuration controls while deleting", async () => {
+    const store = useAppStore();
+    store.workspaces = [
+      {
+        id: "batty",
+        label: "batty",
+        path: "/root/github/batty",
+        kind: "workspace",
+        isPinned: false,
+        isAssistant: false,
+      },
+    ];
+    store.selectedWorkspaceId = "batty";
+    store.cronJobsByWorkspace = { batty: [job] };
+    store.models = [
+      {
+        id: "openai/gpt-5",
+        label: "GPT-5",
+        provider: "openai",
+        reasoning: true,
+        thinkingLevels: ["medium", "high"],
+        supportsImages: true,
+      },
+    ];
+    let finishDelete: () => void;
+    deleteCronJob.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishDelete = resolve;
+        }),
+    );
+
+    const wrapper = mount(CronPopover, {
+      props: { popoverId: "cron-popover", anchorName: "--cron-anchor" },
+    });
+    await flushPromises();
+    await wrapper.findAll(".cron-popover__icon-btn")[0]!.trigger("click");
+    expect(wrapper.find(".mc-popover").exists()).toBe(true);
+
+    await wrapper.findAll(".cron-popover__icon-btn")[1]!.trigger("click");
+    expect(wrapper.find(".mc-popover").exists()).toBe(false);
+    expect(
+      wrapper.find('[aria-label="Choose cron model and effort"]').attributes("disabled"),
+    ).toBeDefined();
+
+    finishDelete!();
+    await flushPromises();
   });
 
   it("closes from the header button", async () => {

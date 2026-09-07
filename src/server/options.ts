@@ -309,12 +309,14 @@ export async function setDefaultModel(
   projectRoot: string,
   defaultProvider: string,
   defaultModel: string,
+  defaultThinkingLevel: string,
 ): Promise<AppOptions> {
   const options = await loadAppOptions(projectRoot);
   const nextOptions: AppOptions = {
     ...options,
     defaultProvider: normalizeOptionalString(defaultProvider),
     defaultModel: normalizeOptionalString(defaultModel),
+    defaultThinkingLevel: normalizeThinkingLevel(defaultThinkingLevel),
   };
 
   await writeStoredOptions(projectRoot, nextOptions);

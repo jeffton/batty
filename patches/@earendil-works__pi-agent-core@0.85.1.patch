@@ -1,8 +1,8 @@
 diff --git a/dist/harness/compaction/compaction.js b/dist/harness/compaction/compaction.js
+index d430a3f966cc9624cc2e78638fd207a83a75b312..0b66e68d06cda0a9a7c461d97c5b2081c94662b4 100644
 --- a/dist/harness/compaction/compaction.js
 +++ b/dist/harness/compaction/compaction.js
-@@ -263,13 +263,19 @@
-             continue;
+@@ -264,12 +264,18 @@ export function findCutPoint(entries, startIndex, endIndex, keepRecentTokens) {
          const messageTokens = estimateTokens(entry.message);
          accumulatedTokens += messageTokens;
          if (accumulatedTokens >= keepRecentTokens) {
@@ -21,3 +21,17 @@ diff --git a/dist/harness/compaction/compaction.js b/dist/harness/compaction/com
              break;
          }
      }
+diff --git a/dist/harness/session/jsonl/legacy-v3.js b/dist/harness/session/jsonl/legacy-v3.js
+index 550508d3f2ed229529eb4c513aea8cdc0faea64b..9c7ecca744b8437c3a9da23db055ad39344416f3 100644
+--- a/dist/harness/session/jsonl/legacy-v3.js
++++ b/dist/harness/session/jsonl/legacy-v3.js
+@@ -361,7 +361,8 @@ function aggregateImportedUsage(entries) {
+ }
+ /** Normalize the currently supported v3 records without touching their source file. */
+ export function normalizeLegacyV3Records(recordLines) {
+-    const entries = recordLines.map((line, index) => parseLegacyV3Entry(line, index + 2));
++    // Legacy writers may leave blank lines; preserve physical line numbers for errors.
++    const entries = recordLines.flatMap((line, index) => line.trim() === "" ? [] : [parseLegacyV3Entry(line, index + 2)]);
+     const entriesById = new Map();
+     for (const entry of entries) {
+         if (entriesById.has(entry.id))

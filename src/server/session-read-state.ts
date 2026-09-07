@@ -4,6 +4,7 @@ import { stateDirPath } from "./options";
 
 interface StoredSessionReadState {
   baselineInitialized: boolean;
+  undiscoveredBaselineReadAt?: number;
   readAtBySessionId: Record<string, number>;
 }
 
@@ -11,6 +12,7 @@ export class SessionReadStateStore {
   private readonly filePath: string;
   private readonly readAtBySessionId = new Map<string, number>();
   private baselineInitialized = false;
+  private undiscoveredBaselineReadAt = 0;
   private writeQueue = Promise.resolve();
 
   private constructor(battyDir: string) {
@@ -26,6 +28,11 @@ export class SessionReadStateStore {
       const readAtBySessionId = "readAtBySessionId" in stored ? stored.readAtBySessionId : stored;
       store.baselineInitialized =
         "baselineInitialized" in stored && stored.baselineInitialized === true;
+      if (
+        "undiscoveredBaselineReadAt" in stored &&
+        typeof stored.undiscoveredBaselineReadAt === "number"
+      )
+        store.undiscoveredBaselineReadAt = stored.undiscoveredBaselineReadAt;
       for (const [sessionId, readAt] of Object.entries(readAtBySessionId)) {
         if (Number.isFinite(readAt)) {
           store.readAtBySessionId.set(sessionId, readAt);
@@ -41,6 +48,7 @@ export class SessionReadStateStore {
 
   async initializeBaseline(
     sessions: Iterable<{ sessionId: string; lastAssistantReplyAt?: number }>,
+    undiscoveredBaselineReadAt = 0,
   ): Promise<void> {
     if (this.baselineInitialized) {
       return;
@@ -58,18 +66,20 @@ export class SessionReadStateStore {
       }
     }
     this.baselineInitialized = true;
+    this.undiscoveredBaselineReadAt = undiscoveredBaselineReadAt;
     await this.persist();
   }
 
   hasUnread(sessionId: string, lastAssistantReplyAt?: number): boolean {
     return (
       lastAssistantReplyAt != null &&
-      lastAssistantReplyAt > (this.readAtBySessionId.get(sessionId) ?? 0)
+      lastAssistantReplyAt >
+        (this.readAtBySessionId.get(sessionId) ?? this.undiscoveredBaselineReadAt)
     );
   }
 
   async markRead(sessionId: string, readAt = Date.now()): Promise<void> {
-    if (readAt <= (this.readAtBySessionId.get(sessionId) ?? 0)) {
+    if (readAt <= (this.readAtBySessionId.get(sessionId) ?? this.undiscoveredBaselineReadAt)) {
       return;
     }
 
@@ -82,6 +92,7 @@ export class SessionReadStateStore {
       await fs.mkdir(path.dirname(this.filePath), { recursive: true });
       const stored: StoredSessionReadState = {
         baselineInitialized: this.baselineInitialized,
+        undiscoveredBaselineReadAt: this.undiscoveredBaselineReadAt,
         readAtBySessionId: Object.fromEntries(this.readAtBySessionId),
       };
       await fs.writeFile(this.filePath, `${JSON.stringify(stored, null, 2)}\n`, "utf8");

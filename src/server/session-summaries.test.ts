@@ -5,8 +5,19 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import type { AppConfig } from "@/server/config";
-import { latestSessionUpdatedAt, listSessionSummaries } from "@/server/session-summaries";
-import { workspaceSessionDir } from "@/server/pi-paths";
+import {
+  latestSessionUpdatedAt,
+  listSessionSummaries,
+  getSessionSummaryIndex,
+  disposeSessionSummaryIndex,
+  SessionSummaryIndex,
+} from "@/server/session-summaries";
+import { HarnessSessionStore } from "./harness-session-store";
+import { HarnessController } from "./harness-controller";
+import { createModels, fauxProvider } from "@earendil-works/pi-ai";
+import { DefaultResourceLoader, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { BACKGROUND_CONTEXT } from "@earendil-works/pi-agent-core";
+import { battyAgentDir, workspaceSessionDir } from "@/server/pi-paths";
 import { CRON_RUN_SESSION_CUSTOM_TYPE, CRON_SESSION_CUSTOM_TYPE } from "@/server/cron-session";
 import { SUBAGENT_SESSION_CUSTOM_TYPE } from "@/server/subagent";
 import type { WorkspaceInfo } from "@/shared/types";
@@ -14,7 +25,11 @@ import type { WorkspaceInfo } from "@/shared/types";
 const tempDirs: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
+  vi.restoreAllMocks();
+  for (const battyDir of tempDirs.splice(0)) {
+    await disposeSessionSummaryIndex({ battyDir });
+    await fs.rm(battyDir, { recursive: true, force: true });
+  }
 });
 
 async function createConfig(): Promise<AppConfig> {
@@ -58,6 +73,7 @@ async function writeSession(
   fileName: string,
   updatedAt: string,
   entries: unknown[],
+  resetIndex = true,
 ): Promise<string> {
   const sessionDir = workspaceSessionDir(config, workspaceId);
   await fs.mkdir(sessionDir, { recursive: true });
@@ -95,6 +111,10 @@ async function writeSession(
   );
   const date = new Date(updatedAt);
   await fs.utimes(sessionPath, date, date);
+  if (resetIndex) {
+    await disposeSessionSummaryIndex(config);
+    await fs.rm(path.join(battyAgentDir(config), "session-summary-index.json"), { force: true });
+  }
   return sessionPath;
 }
 
@@ -503,5 +523,323 @@ describe("session summaries", () => {
     expect(await latestSessionUpdatedAt(config, workspace.id)).toBe(
       new Date("2026-03-25T12:00:00Z").getTime(),
     );
+  });
+});
+
+const legacyHeader = (id: string) => ({
+  type: "session",
+  version: 3,
+  id,
+  timestamp: "2026-03-25T12:00:00Z",
+});
+
+describe("persistent session summary index", () => {
+  it("serves warm and restarted lists without directory scans, stats, or transcript reads", async () => {
+    const config = await createConfig();
+    const workspace = workspaceInfo(config, "warm");
+    await writeSession(config, workspace.id, "one.jsonl", "2026-03-25T12:00:00Z", [
+      legacyHeader("one"),
+    ]);
+    const index = await getSessionSummaryIndex(config);
+    await index.ensureInitialized(workspace.id);
+    await index.flush();
+    const readdir = vi.spyOn(fs, "readdir");
+    const stat = vi.spyOn(fs, "stat");
+    const read = vi.spyOn(HarnessSessionStore, "read");
+    const readFile = vi.spyOn(fs, "readFile");
+    for (let i = 0; i < 5; i++) {
+      expect((await listSessionSummaries(config, workspace))[1]?.sessionId).toBe("one");
+      expect(await latestSessionUpdatedAt(config, workspace.id)).toBe(
+        Date.parse("2026-03-25T12:00:00Z"),
+      );
+    }
+    expect(readFile).not.toHaveBeenCalled();
+    await disposeSessionSummaryIndex(config);
+    expect((await listSessionSummaries(config, workspace))[1]?.sessionId).toBe("one");
+    expect(readFile).toHaveBeenCalledTimes(1);
+    expect(String(readFile.mock.calls[0]?.[0])).toMatch(/session-summary-index\.json$/);
+    expect(readdir).not.toHaveBeenCalled();
+    expect(stat).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("discovers each workspace once and shares concurrent initial discovery", async () => {
+    const config = await createConfig();
+    const index = await getSessionSummaryIndex(config);
+    await index.ensureInitialized("empty");
+    await disposeSessionSummaryIndex(config);
+    const restored = await getSessionSummaryIndex(config);
+    const readdir = vi.spyOn(fs, "readdir");
+    await restored.ensureInitialized("empty");
+    expect(readdir).not.toHaveBeenCalled();
+
+    await writeSession(
+      config,
+      "new",
+      "one.jsonl",
+      "2026-03-25T12:00:00Z",
+      [legacyHeader("one")],
+      false,
+    );
+    const read = vi.spyOn(HarnessSessionStore, "read");
+    await Promise.all([restored.ensureInitialized("new"), restored.ensureInitialized("new")]);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(restored.list("new", "2026-03-25")[1]?.sessionId).toBe("one");
+    await restored.ensureInitialized("new");
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["malformed JSON", "{not JSON"],
+    ["unsupported version", JSON.stringify({ version: 2, entries: {} })],
+    ["invalid index structure", JSON.stringify({ version: 1, entries: {} })],
+    [
+      "invalid index structure",
+      JSON.stringify({ version: 1, entries: { broken: null }, completedWorkspaces: [] }),
+    ],
+  ])("invalidates a %s cache and rebuilds it", async (_reason, content) => {
+    const config = await createConfig();
+    const workspace = workspaceInfo(config, "invalid-cache");
+    await writeSession(
+      config,
+      workspace.id,
+      "one.jsonl",
+      "2026-03-25T12:00:00Z",
+      [legacyHeader("one")],
+      false,
+    );
+    const indexFile = path.join(battyAgentDir(config), "session-summary-index.json");
+    await fs.mkdir(path.dirname(indexFile), { recursive: true });
+    await fs.writeFile(indexFile, content);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const index = await getSessionSummaryIndex(config);
+    expect(error).toHaveBeenCalledWith(
+      "Invalid session summary index; rebuilding",
+      expect.objectContaining({ file: indexFile, reason: _reason, error: expect.any(Error) }),
+    );
+    expect(await fs.readFile(indexFile, "utf8").catch(() => undefined)).toBeUndefined();
+    expect(
+      (await fs.readdir(path.dirname(indexFile))).some((file) =>
+        file.startsWith("session-summary-index.json.invalid-"),
+      ),
+    ).toBe(true);
+    await index.ensureInitialized(workspace.id);
+    expect(index.list(workspace.id, "2026-03-25")[1]?.sessionId).toBe("one");
+    await index.flush();
+    expect(JSON.parse(await fs.readFile(indexFile, "utf8"))).toMatchObject({ version: 1 });
+  });
+
+  it("surfaces persistence failures and allows the next flush to save the index", async () => {
+    const config = await createConfig();
+    const workspace = workspaceInfo(config, "persistence");
+    const index = await getSessionSummaryIndex(config);
+    const store = await HarnessSessionStore.create(
+      workspace.path,
+      workspaceSessionDir(config, workspace.id),
+    );
+    vi.spyOn(fs, "rename").mockRejectedValueOnce(new Error("disk failure"));
+    await expect(index.flush()).rejects.toThrow("disk failure");
+    await expect(index.flush()).resolves.toBeUndefined();
+    await store.native.close(BACKGROUND_CONTEXT);
+    store.release();
+    await disposeSessionSummaryIndex(config);
+    expect((await listSessionSummaries(config, workspace))[1]?.sessionId).toBe(
+      store.getSessionId(),
+    );
+  });
+
+  it("does not let Pi repair a torn transcript during initial indexing", async () => {
+    const config = await createConfig();
+    const workspace = workspaceInfo(config, "torn");
+    const store = await HarnessSessionStore.create(
+      workspace.path,
+      workspaceSessionDir(config, workspace.id),
+    );
+    const file = store.getSessionFile();
+    await store.native.close(BACKGROUND_CONTEXT);
+    store.release();
+    const torn = `${await fs.readFile(file, "utf8")}{`;
+    await fs.writeFile(file, torn);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const index = await getSessionSummaryIndex(config);
+    await expect(index.ensureInitialized(workspace.id)).rejects.toThrow(
+      "Session discovery is incomplete",
+    );
+    expect(errors).toHaveBeenCalledWith(
+      "Failed to index session summary",
+      expect.objectContaining({ file, error: expect.any(Error) }),
+    );
+    expect(await fs.readFile(file, "utf8")).toBe(torn);
+  });
+
+  it("prunes nested cron directories before traversal and isolates broken sessions", async () => {
+    const config = await createConfig();
+    const workspace = workspaceInfo(config, "pruning");
+    await writeSession(
+      config,
+      workspace.id,
+      "nested/cron/job/run/broken.jsonl",
+      "2026-03-25T12:00:00Z",
+      [],
+      false,
+    );
+    await writeSession(
+      config,
+      workspace.id,
+      "good.jsonl",
+      "2026-03-25T12:00:00Z",
+      [legacyHeader("good")],
+      false,
+    );
+    const bad = await writeSession(
+      config,
+      workspace.id,
+      "bad.jsonl",
+      "2026-03-25T12:00:00Z",
+      [],
+      false,
+    );
+    const readdir = vi.spyOn(fs, "readdir");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const index = await getSessionSummaryIndex(config);
+    await expect(index.ensureInitialized(workspace.id)).rejects.toThrow(
+      "Session discovery is incomplete",
+    );
+    expect(
+      readdir.mock.calls.every(
+        ([directory]) => !String(directory).split(path.sep).includes("cron"),
+      ),
+    ).toBe(true);
+    expect(error).toHaveBeenCalledWith(
+      "Failed to index session summary",
+      expect.objectContaining({ file: bad, error: expect.any(Error) }),
+    );
+    expect(index.list(workspace.id, "2026-03-25")[1]?.sessionId).toBe("good");
+    readdir.mockRejectedValueOnce(Object.assign(new Error("denied"), { code: "EACCES" }));
+    await expect(index.ensureInitialized("unreadable")).rejects.toThrow("denied");
+  });
+
+  it("updates create, messages, daily metadata, and hidden forks directly from Batty events", async () => {
+    const config = await createConfig();
+    const workspace = workspaceInfo(config, "events");
+    const index = await getSessionSummaryIndex(config);
+    const store = await HarnessSessionStore.create(
+      workspace.path,
+      workspaceSessionDir(config, workspace.id),
+    );
+    expect((await listSessionSummaries(config, workspace))[1]?.sessionId).toBe(
+      store.getSessionId(),
+    );
+    const faux = fauxProvider();
+    const models = createModels();
+    models.setProvider(faux.provider);
+    const settings = SettingsManager.inMemory({ compaction: { enabled: false } });
+    const resources = new DefaultResourceLoader({
+      cwd: config.battyDir,
+      agentDir: config.battyDir,
+      noExtensions: true,
+      noSkills: true,
+      noThemes: true,
+      noPromptTemplates: true,
+    });
+    const controller = await HarnessController.create(
+      store,
+      { models, model: faux.getModel() },
+      settings,
+      resources,
+    );
+    try {
+      const read = vi.spyOn(HarnessSessionStore, "read");
+      const readdir = vi.spyOn(fs, "readdir");
+      await store.appendMessage({ role: "user", content: "live first message", timestamp: 100 });
+      await store.appendMessage({ ...fauxAssistantMessage("reply"), timestamp: 200 });
+      await store.appendCustomEntry(CRON_SESSION_CUSTOM_TYPE, {
+        version: 1,
+        kind: "daily",
+        date: "2026-03-25",
+      });
+      const summary = index.list(workspace.id, "2026-03-25")[0];
+      expect(summary).toMatchObject({
+        sessionId: store.getSessionId(),
+        firstMessage: "live first message",
+        lastAssistantReplyAt: 200,
+        dailySession: { isToday: true, exists: true },
+      });
+      expect(index.list(workspace.id, "2026-03-26")[1]?.dailySession?.isToday).toBe(false);
+      const child = await store.fork(workspaceSessionDir(config, workspace.id));
+      expect(index.list(workspace.id, "2026-03-25")).toHaveLength(1);
+      await child.native.close(BACKGROUND_CONTEXT);
+      child.release();
+      expect(read).not.toHaveBeenCalled();
+      expect(readdir).not.toHaveBeenCalled();
+      await index.flush();
+    } finally {
+      await controller.dispose();
+    }
+    await disposeSessionSummaryIndex(config);
+    expect(
+      (await getSessionSummaryIndex(config)).list(workspace.id, "2026-03-25")[0]
+        ?.lastAssistantReplyAt,
+    ).toBe(200);
+  });
+
+  it("does not replace a live update with an older in-flight initial snapshot", async () => {
+    const config = await createConfig();
+    const workspace = workspaceInfo(config, "race");
+    const store = await HarnessSessionStore.create(
+      workspace.path,
+      workspaceSessionDir(config, workspace.id),
+    );
+    const index = await getSessionSummaryIndex(config);
+    const original = HarnessSessionStore.read.bind(HarnessSessionStore);
+    vi.spyOn(HarnessSessionStore, "read").mockImplementationOnce(async (file, options) => {
+      const stale = await original(file, options);
+      store.observe({
+        type: "message",
+        id: "live",
+        parentId: null,
+        timestamp: 100,
+        message: { role: "user", content: "new live message", timestamp: 100 },
+      } as never);
+      return stale;
+    });
+    await index.ensureInitialized(workspace.id);
+    expect((await listSessionSummaries(config, workspace))[1]?.firstMessage).toBe(
+      "new live message",
+    );
+    await store.native.close(BACKGROUND_CONTEXT);
+    store.release();
+  });
+
+  it("does not replace writes received while loading the persisted index", async () => {
+    const config = await createConfig();
+    const workspace = workspaceInfo(config, "load-race");
+    const index = await getSessionSummaryIndex(config);
+    const store = await HarnessSessionStore.create(
+      workspace.path,
+      workspaceSessionDir(config, workspace.id),
+    );
+    await index.flush();
+    await disposeSessionSummaryIndex(config);
+    const original = fs.readFile.bind(fs);
+    vi.spyOn(fs, "readFile").mockImplementationOnce(
+      async (...args: Parameters<typeof fs.readFile>) => {
+        const saved = await original(...args);
+        store.observe({
+          type: "message",
+          id: "live",
+          parentId: null,
+          timestamp: 100,
+          message: { role: "user", content: "during load", timestamp: 100 },
+        } as never);
+        return saved;
+      },
+    );
+    const restored = await SessionSummaryIndex.create(config);
+    expect(restored.list(workspace.id, "2026-03-25")[1]?.firstMessage).toBe("during load");
+    await restored.dispose();
+    await store.native.close(BACKGROUND_CONTEXT);
+    store.release();
   });
 });

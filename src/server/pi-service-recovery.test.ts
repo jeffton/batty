@@ -15,6 +15,7 @@ import { createPiAgentSession } from "./pi-agent-session";
 import { HarnessSessionStore } from "./harness-session-store";
 import { PiService } from "./pi-service";
 import { workspaceSessionDir } from "./pi-paths";
+import { getSessionSummaryIndex } from "./session-summaries";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -24,6 +25,49 @@ afterEach(async () => {
 });
 
 describe("startup operation recovery", () => {
+  it("builds an absent index on startup and recovers without rereading archived histories", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-service-index-startup-"));
+    cleanups.push(() => fs.rm(root, { recursive: true, force: true }));
+    const faux = fauxProvider();
+    const models = createModels();
+    models.setProvider(faux.provider);
+    vi.spyOn(ModelRuntime, "create").mockResolvedValue(models as unknown as ModelRuntime);
+    const config = {
+      battyDir: path.join(root, "data"),
+      selfPath: root,
+      workspacesRoots: [path.join(root, "workspaces")],
+      uploadsDir: path.join(root, "uploads"),
+      baseUrl: "http://localhost",
+      defaultProvider: "faux",
+      defaultModel: faux.getModel().id,
+      defaultThinkingLevel: "off",
+      cronDailySessionStartTime: "00:00",
+    } as AppConfig;
+    const workspacePath = path.join(config.workspacesRoots[0]!, "archive");
+    await fs.mkdir(workspacePath, { recursive: true });
+    const store = await HarnessSessionStore.create(
+      workspacePath,
+      workspaceSessionDir(config, "archive"),
+    );
+    await store.native.close(context);
+    store.release();
+    const read = vi.spyOn(HarnessSessionStore, "read");
+    const readdir = vi.spyOn(fs, "readdir");
+    const service = await PiService.create(config, {} as CronService);
+    cleanups.push(() => service.dispose());
+    expect(read).toHaveBeenCalledExactlyOnceWith(store.getSessionFile(), { readOnly: true });
+    read.mockClear();
+    readdir.mockClear();
+    await service.recoverOpenOperations();
+    expect(read).not.toHaveBeenCalled();
+    expect(
+      readdir.mock.calls.every(([directory]) => !String(directory).includes(`${path.sep}sessions`)),
+    ).toBe(true);
+    const index = await getSessionSummaryIndex(config);
+    await index.ensureInitialized("archive");
+    expect(index.list("archive", "2026-03-25")[1]?.sessionId).toBe(store.getSessionId());
+  });
+
   it.each(["model", "resource", "storage"])(
     "reports a session %s failure and recovers the following session",
     async (failure) => {

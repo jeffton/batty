@@ -17,6 +17,20 @@ afterEach(async () => {
 });
 
 describe("SessionReadStateStore", () => {
+  it("baselines histories discovered later without marking new live replies read", async () => {
+    const battyDir = await createBattyDir();
+    const store = await SessionReadStateStore.create(battyDir);
+    await store.initializeBaseline([], 100);
+    expect(store.hasUnread("discovered-later", 99)).toBe(false);
+    expect(store.hasUnread("live", 101)).toBe(true);
+    await store.markRead("discovered-later", 50);
+    expect(store.hasUnread("discovered-later", 99)).toBe(false);
+    const restored = await SessionReadStateStore.create(battyDir);
+    await restored.initializeBaseline([], 200);
+    expect(restored.hasUnread("discovered-later", 99)).toBe(false);
+    expect(restored.hasUnread("live", 101)).toBe(true);
+  });
+
   it("marks the initial session baseline as read exactly once", async () => {
     const battyDir = await createBattyDir();
     const store = await SessionReadStateStore.create(battyDir);

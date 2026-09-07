@@ -257,6 +257,7 @@ Batty stores local state in `<batty-root>/.batty/`, including:
 - `setup-code.json`
 - `uploads/`
 - `cron/jobs.json`
+- `session-summary-index.json`
 - `web-push/vapid-keys.json`
 - `web-push/subscriptions.json`
 
@@ -268,6 +269,8 @@ Batty stores local state in `<batty-root>/.batty/`, including:
 - Non-image attachments are injected into the prompt as `<file>` blocks.
 - Image attachments are sent as image inputs and also referenced as file placeholders.
 - Session state is kept in Pi's session files, with Batty caching recent snapshots locally in the browser.
+- Session lists use `session-summary-index.json`, a rebuildable metadata index loaded at startup. Batty's session events update the index in memory immediately; atomic disk writes are coalesced over 100 ms and flushed on shutdown. Indexed workspaces are listed without scanning directories, checking file metadata, or opening transcripts.
+- A missing or invalid index is rebuilt through Pi's read-only decoder; newly discovered workspaces are indexed once, excluding `cron` directories. Initial discovery finishes before listing sessions, resolving daily sessions, or recovering indexed operations. There is no polling for external transcript changes. To rebuild after external changes, stop Batty, remove `session-summary-index.json`, and start Batty. Deleting the file while Batty is running does not clear its in-memory index.
 
 ## Hot reloading Batty itself
 

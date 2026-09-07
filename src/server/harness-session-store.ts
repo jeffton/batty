@@ -15,7 +15,23 @@ import {
 } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 
-interface SessionRead {
+// Initial index rebuilds use Pi's decoder without repairing or modifying transcripts.
+class SessionIndexReadEnv extends NodeExecutionEnv {
+  override async writeFile(): Promise<never> {
+    throw new Error("Session index reads cannot modify transcript files");
+  }
+  override async appendFile(): Promise<never> {
+    throw new Error("Session index reads cannot modify transcript files");
+  }
+  override async renameFile(): Promise<never> {
+    throw new Error("Session index reads cannot modify transcript files");
+  }
+  override async remove(): Promise<never> {
+    throw new Error("Session index reads cannot modify transcript files");
+  }
+}
+
+export interface SessionRead {
   metadata: JsonlSessionMetadata;
   entries: Entry[];
   currentOperationId?: string;
@@ -44,6 +60,26 @@ export class HarnessSessionStore {
   private lane?: AgentLane;
   private static readonly owners = new Map<string, Promise<HarnessSessionStore>>();
   private static readonly reads = new Map<string, Promise<SessionRead>>();
+  private static readonly listeners = new Set<(file: string, snapshot?: SessionRead) => void>();
+  private currentOperationId?: string;
+
+  static subscribe(listener: (file: string, snapshot?: SessionRead) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  publishSummary(updatedAt = Date.now()): void {
+    const snapshot = {
+      metadata: { ...this.native.metadata, modifiedAt: updatedAt },
+      entries: this.getEntries(),
+      currentOperationId: this.currentOperationId,
+    };
+    for (const listener of HarnessSessionStore.listeners) listener(this.getSessionFile(), snapshot);
+  }
+
+  setCurrentOperation(operationId: string | undefined): void {
+    this.currentOperationId = operationId;
+  }
 
   private constructor(
     readonly native: Session<JsonlSessionMetadata>,
@@ -60,6 +96,7 @@ export class HarnessSessionStore {
     const native = await repo.create({ cwd, parentSessionId, id }, context);
     const store = new HarnessSessionStore(native, repo);
     this.owners.set(native.metadata.path, Promise.resolve(store));
+    store.publishSummary();
     return store;
   }
 
@@ -130,8 +167,27 @@ export class HarnessSessionStore {
     }
   }
 
-  static async read(file: string): Promise<SessionRead> {
+  static async read(file: string, options: { readOnly?: boolean } = {}): Promise<SessionRead> {
     file = await fs.realpath(file);
+    if (options.readOnly) {
+      const metadata = await readHarnessSessionMetadata(file);
+      const repo = new JsonlSessionRepo({
+        sessionsRoot: path.dirname(file),
+        fileSystem: new SessionIndexReadEnv({ cwd: path.dirname(file) }),
+      });
+      const native = await repo.open(metadata, context);
+      try {
+        return {
+          metadata,
+          entries: await native.findEntries({ order: "asc" }, context),
+          currentOperationId:
+            (await native.getValue(laneState("main"), context))?.value.currentOperationId ??
+            undefined,
+        };
+      } finally {
+        await native.close(context);
+      }
+    }
     const owner = this.owners.get(file);
     if (owner) {
       const store = await owner;
@@ -178,10 +234,15 @@ export class HarnessSessionStore {
     this.entries = await this.native.findEntries({ order: "asc" }, context);
     this.tip = (await this.native.getValue(branchTip("main"), context))?.value ?? null;
     this.remappedReplyIds = (await this.native.getValue(importedReplyIds, context))?.value ?? {};
+    this.currentOperationId =
+      (await this.native.getValue(laneState("main"), context))?.value.currentOperationId ??
+      undefined;
+    this.publishSummary((await fs.stat(this.getSessionFile())).mtimeMs);
   }
   observe(entry: Entry): void {
     if (!this.entries.some((candidate) => candidate.id === entry.id)) this.entries.push(entry);
     this.tip = entry.id;
+    this.publishSummary();
   }
   setTip(tip: string | null): void {
     this.tip = tip;

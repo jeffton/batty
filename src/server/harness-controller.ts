@@ -154,7 +154,19 @@ export class HarnessController {
       this.snapshot = await this.watch.resnapshot(context);
       await this.sessionManager.refresh();
     }
+    this.sessionManager.setCurrentOperation(this.snapshot.operation?.id);
     if (event.type === "entry_added") this.sessionManager.observe(event.entry);
+    else if (
+      [
+        "run_start",
+        "run_end",
+        "operation_abort",
+        "value_update",
+        "config_update",
+        "queue_update",
+      ].includes(event.type)
+    )
+      this.sessionManager.publishSummary();
     this.sessionManager.setTip(this.snapshot.tipId);
     if (event.type === "value_update" && event.value === "session_name") this.name = event.name;
     if (event.type === "fault") throw new Error(`Pi harness fault ${event.code}: ${event.message}`);

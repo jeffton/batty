@@ -29,7 +29,11 @@ import {
 } from "./pi-agent-session";
 import { createSessionState } from "./pi-state";
 import { battyAgentDir, workspaceCronSessionDir, workspaceSessionDir } from "./pi-paths";
-import { listSessionSummaries as listFastSessionSummaries } from "./session-summaries";
+import {
+  listSessionSummaries as listFastSessionSummaries,
+  getSessionSummaryIndex,
+  disposeSessionSummaryIndex,
+} from "./session-summaries";
 import { ProviderAuthService } from "./provider-auth";
 import {
   hasParentedCronRunSessionMarker,
@@ -152,11 +156,12 @@ export class PiService {
     const modelConfigWatcher = new ModelConfigWatcher(modelsPath, modelRuntime);
     await modelConfigWatcher.initialize();
     const sessionReadState = await SessionReadStateStore.create(config.battyDir);
+    await getSessionSummaryIndex(config);
     const workspaces = await listWorkspaces(config);
     const existingSessions = (
       await Promise.all(workspaces.map((workspace) => listFastSessionSummaries(config, workspace)))
     ).flat();
-    await sessionReadState.initializeBaseline(existingSessions);
+    await sessionReadState.initializeBaseline(existingSessions, Date.now());
     return new PiService(
       config,
       cronService,
@@ -171,19 +176,14 @@ export class PiService {
   async dispose(): Promise<void> {
     await this.modelConfigWatcher.dispose();
     await Promise.all([...this.liveSessions.values()].map(({ session }) => session.dispose()));
+    await disposeSessionSummaryIndex(this.config);
   }
 
   async recoverOpenOperations(): Promise<void> {
+    const index = await getSessionSummaryIndex(this.config);
     for (const workspace of await listWorkspaces(this.config)) {
-      const root = workspaceSessionDir(this.config, workspace.id);
-      const files = await fs
-        .readdir(root, { recursive: true, withFileTypes: true })
-        .catch((error) => {
-          if (error.code === "ENOENT") return [];
-          throw error;
-        });
-      for (const file of files.filter((file) => file.isFile() && file.name.endsWith(".jsonl"))) {
-        const filePath = path.join(file.parentPath, file.name);
+      await index.ensureInitialized(workspace.id);
+      for (const filePath of index.recoveryPaths(workspace.id)) {
         try {
           const stored = await SessionManager.read(filePath);
           const delivery = findDetachedSubagentDeliveryRequest(stored.entries, stored.metadata.id);
@@ -654,6 +654,7 @@ export class PiService {
     workspace: WorkspaceInfo,
     options?: { modelId?: string; thinkingLevel?: string },
   ): Promise<SessionState> {
+    await (await getSessionSummaryIndex(this.config)).ensureInitialized(workspace.id);
     return resolveOrCreateDailySession(
       {
         config: this.config,

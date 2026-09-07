@@ -31,10 +31,13 @@ export function buildCronRuntimeNotice({
   };
 }
 
-export function buildSubagentRuntimeNotice(): RuntimeNotice {
+export function buildSubagentRuntimeNotice(depth: number): RuntimeNotice {
   return {
     kind: "subagent",
-    text: "Subagent run started. Do not call the subagent tool from this session.",
+    text:
+      depth < 2
+        ? "Subagent run started. You can delegate to subagents, but subagents you create cannot delegate further."
+        : "Subagent run started. Do not call the subagent tool from this session.",
   };
 }
 

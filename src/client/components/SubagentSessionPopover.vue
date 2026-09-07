@@ -283,7 +283,7 @@ onBeforeUnmount(() => {
         :load-older-messages="loadOlderMessages"
         :loading-older-messages="loadingOlderMessages"
         always-show-details
-        :allow-session-popovers="false"
+        :allow-session-popovers="true"
       />
     </div>
   </FullPopover>

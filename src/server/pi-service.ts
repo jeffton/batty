@@ -609,6 +609,7 @@ export class PiService {
     workspace: WorkspaceInfo;
     parentSessionId: string;
     parentSessionPath?: string;
+    parentSubagentDepth: number;
     contextBranchLeafId?: string | null;
     prompt: string;
     modelId: string;

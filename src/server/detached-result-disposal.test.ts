@@ -244,6 +244,7 @@ describe("detached result delivery after ephemeral harness disposal", () => {
       {
         workspace,
         parentSessionId: parent.session.sessionId,
+        parentSubagentDepth: 0,
         prompt: "Child work",
         modelId: "faux/faux-1",
         thinkingLevel: "off",

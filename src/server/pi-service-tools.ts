@@ -17,7 +17,7 @@ import type { AppConfig } from "./config";
 import { buildCronJobSummary, type CronService } from "./cron";
 import { storeSentFiles } from "./send-files";
 import { runWebSearch } from "./web-search";
-import { hasSubagentSessionMarker, SUBAGENT_TOOL_NAME } from "./subagent";
+import { getSubagentSessionDepth, MAX_SUBAGENT_DEPTH, SUBAGENT_TOOL_NAME } from "./subagent";
 import {
   AttachFilesToolSchema,
   CronToolSchema,
@@ -173,6 +173,7 @@ interface DetachedSubagentRequest {
   workspace: WorkspaceInfo;
   parentSessionId: string;
   parentSessionPath?: string;
+  parentSubagentDepth: number;
   prompt: string;
   modelId: string;
   thinkingLevel: string;
@@ -219,8 +220,9 @@ export function createSubagentTool({
     ],
     parameters: SubagentToolSchema,
     execute: async (toolCallId, params, signal, onUpdate, ctx) => {
-      if (hasSubagentSessionMarker(ctx.sessionManager.getEntries())) {
-        throw new Error("subagent tool cannot be called from inside a subagent session");
+      const parentSubagentDepth = getSubagentSessionDepth(ctx.sessionManager.getEntries());
+      if (parentSubagentDepth >= MAX_SUBAGENT_DEPTH) {
+        throw new Error("subagent tool cannot be called more than two levels deep");
       }
 
       const sessionId = ctx.sessionManager.getSessionId();
@@ -261,6 +263,7 @@ export function createSubagentTool({
         parentSessionPath: (
           ctx.sessionManager as { getSessionFile?: () => string | undefined }
         ).getSessionFile?.(),
+        parentSubagentDepth,
         prompt,
         modelId,
         thinkingLevel,

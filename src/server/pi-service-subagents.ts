@@ -102,6 +102,7 @@ export interface DetachedSubagentOptions {
   workspace: WorkspaceInfo;
   parentSessionId: string;
   parentSessionPath?: string;
+  parentSubagentDepth: number;
   contextBranchLeafId?: string | null;
   prompt: string;
   modelId: string;
@@ -312,11 +313,13 @@ export async function runDetachedSubagentSession(
     await subagentSession.sessionManager.appendCustomEntry(SUBAGENT_SESSION_CUSTOM_TYPE, {
       sessionId: subagentSession.sessionId,
       parentSessionId: options.parentSessionId,
+      depth: options.parentSubagentDepth + 1,
       respondIn: options.respondIn,
       request: {
         workspace: options.workspace,
         parentSessionId: options.parentSessionId,
         ...(options.parentSessionPath ? { parentSessionPath: options.parentSessionPath } : {}),
+        parentSubagentDepth: options.parentSubagentDepth,
         prompt: options.prompt,
         modelId: options.modelId,
         thinkingLevel: options.thinkingLevel,
@@ -331,7 +334,7 @@ export async function runDetachedSubagentSession(
     true,
   );
 
-  const subagentNotice = buildSubagentRuntimeNotice();
+  const subagentNotice = buildSubagentRuntimeNotice(options.parentSubagentDepth + 1);
   const preludeNotices = options.preludeNotices ?? [];
   const initialTimestamp = Date.now();
   const preludeMessages = preludeNotices.map((notice, index) =>

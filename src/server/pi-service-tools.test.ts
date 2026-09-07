@@ -181,7 +181,7 @@ describe("createCronTool", () => {
 });
 
 describe("createSubagentTool", () => {
-  function createContext() {
+  function createContext(subagentDepth?: number) {
     const memos = new Map<string, unknown>();
     return {
       invocation: {
@@ -192,7 +192,16 @@ describe("createSubagentTool", () => {
       },
       childSessionId: () => crypto.randomUUID(),
       sessionManager: {
-        getEntries: () => [],
+        getEntries: () =>
+          subagentDepth === undefined
+            ? []
+            : [
+                {
+                  type: "custom",
+                  customType: "batty-subagent-session",
+                  data: { depth: subagentDepth },
+                },
+              ],
         getSessionId: () => "parent-session",
       },
     } as any;
@@ -231,6 +240,7 @@ describe("createSubagentTool", () => {
     expect(runDetachedSubagentSession).toHaveBeenCalledWith(
       expect.objectContaining({
         parentSessionId: "parent-session",
+        parentSubagentDepth: 0,
         prompt: "Inspect",
         modelId: "openai/gpt-5",
         thinkingLevel: "medium",
@@ -244,6 +254,47 @@ describe("createSubagentTool", () => {
       isError: false,
     });
     expect(result).not.toHaveProperty("terminate");
+  });
+
+  it("allows a first-level subagent to delegate once", async () => {
+    const runDetachedSubagentSession = vi.fn(async () => ({
+      text: "done",
+      details: { subagent: {} },
+      isError: false,
+    }));
+    const tool = createSubagentTool({
+      workspace: { id: "batty", path: "/root/github/batty" } as any,
+      config: {} as any,
+      resolveSubagentDefaults: () => ({ modelId: "openai/gpt-5", thinkingLevel: "medium" }),
+      runDetachedSubagentSession,
+    });
+
+    await tool.execute(
+      "tool-call-1",
+      { prompt: "Inspect" },
+      undefined,
+      undefined,
+      createContext(1),
+    );
+
+    expect(runDetachedSubagentSession).toHaveBeenCalledWith(
+      expect.objectContaining({ parentSubagentDepth: 1 }),
+    );
+  });
+
+  it("rejects subagent calls at the maximum nesting depth", async () => {
+    const runDetachedSubagentSession = vi.fn();
+    const tool = createSubagentTool({
+      workspace: { id: "batty", path: "/root/github/batty" } as any,
+      config: {} as any,
+      resolveSubagentDefaults: () => ({ modelId: "openai/gpt-5", thinkingLevel: "medium" }),
+      runDetachedSubagentSession,
+    });
+
+    await expect(
+      tool.execute("tool-call-1", { prompt: "Inspect" }, undefined, undefined, createContext(2)),
+    ).rejects.toThrow("subagent tool cannot be called more than two levels deep");
+    expect(runDetachedSubagentSession).not.toHaveBeenCalled();
   });
 
   it("returns a normal tool error result after a failed detached subagent run", async () => {

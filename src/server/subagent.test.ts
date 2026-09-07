@@ -9,6 +9,7 @@ import {
   findLastAssistantMessage,
   newlyGeneratedSubagentMessages,
   stripThinkingFromAssistantMessage,
+  getSubagentSessionDepth,
   hasSubagentSessionMarker,
   SUBAGENT_SESSION_CUSTOM_TYPE,
 } from "./subagent";
@@ -134,7 +135,7 @@ describe("cloneMessagesForSubagent", () => {
 });
 
 describe("subagent session markers", () => {
-  it("detects persisted subagent sessions", () => {
+  it("detects persisted subagent sessions and their depth", () => {
     expect(
       hasSubagentSessionMarker([
         { type: "custom", customType: SUBAGENT_SESSION_CUSTOM_TYPE },
@@ -142,6 +143,13 @@ describe("subagent session markers", () => {
       ]),
     ).toBe(true);
     expect(hasSubagentSessionMarker([{ type: "custom", customType: "other" }])).toBe(false);
+    expect(getSubagentSessionDepth([])).toBe(0);
+    expect(
+      getSubagentSessionDepth([
+        { type: "custom", customType: SUBAGENT_SESSION_CUSTOM_TYPE, data: { depth: 1 } },
+        { type: "custom", customType: SUBAGENT_SESSION_CUSTOM_TYPE, data: { depth: 2 } },
+      ]),
+    ).toBe(2);
   });
 });
 

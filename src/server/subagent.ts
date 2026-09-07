@@ -4,6 +4,7 @@ import type { SentFileDescriptor } from "@/shared/types";
 
 export const SUBAGENT_TOOL_NAME = "subagent";
 export const SUBAGENT_SESSION_CUSTOM_TYPE = "batty-subagent-session";
+export const MAX_SUBAGENT_DEPTH = 2;
 export const SUBAGENT_EFFORT_LEVELS = [
   "off",
   "minimal",
@@ -254,4 +255,11 @@ export function hasSubagentSessionMarker(
   entries: Array<{ type?: unknown; customType?: unknown }>,
 ): boolean {
   return entries.some((entry) => isSubagentSessionEntry(entry));
+}
+
+export function getSubagentSessionDepth(
+  entries: Array<{ type?: unknown; customType?: unknown; data?: unknown }>,
+): number {
+  const marker = entries.findLast((entry) => isSubagentSessionEntry(entry));
+  return marker ? (marker.data as { depth: number }).depth : 0;
 }

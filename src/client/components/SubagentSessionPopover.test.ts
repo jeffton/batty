@@ -84,6 +84,31 @@ describe("SubagentSessionPopover", () => {
     expect(wrapper.get('[aria-label="Stop subagent"]').attributes("disabled")).toBeDefined();
   });
 
+  it("allows subagent session popovers in its transcript", async () => {
+    const wrapper = mount(SubagentSessionPopover, {
+      props: {
+        popoverId: "subagent-popover",
+        workspaceId: "batty",
+        sessionPath: session.path!,
+      },
+      global: {
+        stubs: {
+          SessionTranscriptView: {
+            props: ["allowSessionPopovers"],
+            template: '<div v-if="allowSessionPopovers" class="transcript-stub" />',
+          },
+        },
+      },
+    });
+
+    const toggle = new Event("toggle") as Event & { newState?: "open" | "closed" };
+    toggle.newState = "open";
+    wrapper.get(".subagent-session-popover").element.dispatchEvent(toggle);
+    await flushPromises();
+
+    expect(wrapper.find(".transcript-stub").exists()).toBe(true);
+  });
+
   it("requests full details when opening a popover transcript", async () => {
     openSession.mockResolvedValue({ ...session, messagesDetailLevel: "full" });
     const wrapper = mount(SubagentSessionPopover, {

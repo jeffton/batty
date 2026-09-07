@@ -74,6 +74,7 @@ async function setup() {
     workspace,
     parentSessionId: parent.session.sessionId,
     parentSessionPath: parent.session.sessionFile,
+    parentSubagentDepth: 0,
     prompt: "Child work",
     modelId: "faux/faux-1",
     thinkingLevel: "off",
@@ -88,6 +89,7 @@ describe("detached harness subagents", () => {
     const { parent, deps, options, children } = await setup();
     await parent.session.sessionManager.appendCustomEntry("batty-subagent-session", {
       parentSessionId: "grandparent",
+      depth: 1,
     });
     await parent.session.sessionManager.appendCustomEntry(BATTY_SYSTEM_PROMPT_CUSTOM_TYPE, {
       appendedPrompt: "parent prompt",
@@ -132,6 +134,33 @@ describe("detached harness subagents", () => {
       }),
     );
   });
+
+  it.each([false, true])(
+    "persists depth for nested children with includeSessionContext=%s",
+    async (includeSessionContext) => {
+      const { parent, deps, options, children } = await setup();
+      await parent.session.sessionManager.appendCustomEntry("batty-subagent-session", {
+        parentSessionId: "root",
+        depth: 1,
+      });
+      parent.faux.setResponses([fauxAssistantMessage("done")]);
+
+      await runDetachedSubagentSession(deps, {
+        ...options,
+        parentSubagentDepth: 1,
+        includeSessionContext,
+      });
+
+      expect(
+        children
+          .get(options.sessionId!)!
+          .sessionManager.getEntries()
+          .findLast(
+            (entry) => entry.type === "custom" && entry.customType === "batty-subagent-session",
+          ),
+      ).toMatchObject({ data: { parentSessionId: parent.session.sessionId, depth: 2 } });
+    },
+  );
 
   it("publishes the durable child identity before streaming text", async () => {
     const { parent, deps, options } = await setup();

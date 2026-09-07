@@ -24,8 +24,15 @@ describe("runtime notices", () => {
     });
   });
 
-  it("builds subagent notices", () => {
-    expect(buildSubagentRuntimeNotice()).toEqual({
+  it("builds subagent notices for the permitted child depth", () => {
+    expect(buildSubagentRuntimeNotice(1)).toEqual({
+      kind: "subagent",
+      text: "Subagent run started. You can delegate to subagents, but subagents you create cannot delegate further.",
+    });
+  });
+
+  it("builds subagent notices for the maximum depth", () => {
+    expect(buildSubagentRuntimeNotice(2)).toEqual({
       kind: "subagent",
       text: "Subagent run started. Do not call the subagent tool from this session.",
     });
@@ -87,7 +94,7 @@ describe("runtime notices", () => {
       },
       {
         type: "message",
-        message: buildRuntimeNoticeMessage(buildSubagentRuntimeNotice(), 2),
+        message: buildRuntimeNoticeMessage(buildSubagentRuntimeNotice(2), 2),
       },
       {
         type: "custom",

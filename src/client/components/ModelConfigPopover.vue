@@ -167,6 +167,7 @@ watch(
   min-height: min(14rem, calc(100dvh - var(--safe-area-top) - var(--safe-area-bottom) - 12rem));
   max-height: min(22rem, calc(100dvh - var(--safe-area-top) - var(--safe-area-bottom) - 12rem));
   overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 1px;

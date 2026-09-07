@@ -49,8 +49,7 @@ defineExpose({ element, showPopover, hidePopover, togglePopover });
 </template>
 
 <style scoped>
-.base-popover,
-.base-popover :deep(*) {
+.base-popover {
   overscroll-behavior: contain;
 }
 </style>

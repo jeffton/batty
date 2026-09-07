@@ -104,6 +104,7 @@ onBeforeUnmount(() => {
   height: 100%;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   background: var(--color-bg-panel);
 }
 </style>

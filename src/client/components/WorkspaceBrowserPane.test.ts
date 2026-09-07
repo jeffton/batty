@@ -5,17 +5,21 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import WorkspaceBrowserFooter from "@/client/components/WorkspaceBrowserFooter.vue";
 import WorkspaceBrowserHeader from "@/client/components/WorkspaceBrowserHeader.vue";
 import WorkspaceBrowserPane from "@/client/components/WorkspaceBrowserPane.vue";
+import { paneTransitionPending } from "@/client/lib/pane-transition";
 import { useAppStore } from "@/client/stores/app";
 import type { SessionSummary, WorkspaceInfo } from "@/shared/types";
 
-const mockRoute = vi.hoisted(() => ({
-  name: "workspace",
-  params: {} as Record<string, string>,
+const { mockRoute, router } = vi.hoisted(() => ({
+  mockRoute: {
+    name: "workspace",
+    params: {} as Record<string, string>,
+  },
+  router: { push: vi.fn(async (_path: string) => undefined) },
 }));
 
 vi.mock("vue-router", () => ({
   useRoute: () => mockRoute,
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => router,
 }));
 
 function makeWorkspace(id: string, isAssistant: boolean): WorkspaceInfo {
@@ -50,6 +54,8 @@ describe("WorkspaceBrowserPane", () => {
     setActivePinia(createPinia());
     mockRoute.name = "workspace";
     mockRoute.params = {};
+    router.push.mockReset();
+    router.push.mockResolvedValue(undefined);
   });
 
   it("only shows the session-list creation entry in the assistant workspace", async () => {
@@ -120,6 +126,23 @@ describe("WorkspaceBrowserPane", () => {
     expect(wrapper.find(".workspace-browser-pane__session-icon").attributes("title")).toBe(
       "Start daily session",
     );
+  });
+
+  it("opts into a pane transition before opening a session", async () => {
+    const store = useAppStore();
+    store.workspaces = [makeWorkspace("project", false)];
+    store.selectedWorkspaceId = "project";
+    store.sessionsByWorkspace = { project: [makeSession("selected", "project")] };
+    router.push.mockImplementation(async (path: string) => {
+      expect(path).toBe("/workspaces/project/sessions/selected");
+      expect(paneTransitionPending()).toBe(true);
+    });
+
+    const wrapper = shallowMount(WorkspaceBrowserPane);
+    await wrapper.find('[data-session-id="selected"]').trigger("click");
+
+    expect(router.push).toHaveBeenCalledWith("/workspaces/project/sessions/selected");
+    expect(paneTransitionPending()).toBe(false);
   });
 
   it("only marks a session active while its session route is selected", () => {

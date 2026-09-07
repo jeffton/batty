@@ -1,16 +1,39 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import ChatSessionPane from "@/client/components/ChatSessionPane.vue";
 import WorkspaceBrowserPane from "@/client/components/WorkspaceBrowserPane.vue";
+import {
+  clearPaneTransition,
+  consumePaneTransition,
+  startPaneTransition,
+} from "@/client/lib/pane-transition";
 import { workspaceRoutePath } from "@/client/lib/routes";
 import { useAppStore } from "@/client/stores/app";
 
 const store = useAppStore();
 const route = useRoute();
 const router = useRouter();
+const isPaneTransitioning = ref(false);
 
 const isWorkspaceBrowserRoute = computed(() => route.name !== "session");
+
+watch(
+  () => (isWorkspaceBrowserRoute.value ? "browser" : "session"),
+  (pane) => {
+    // Native history swipes already animate; only app controls opt into a slide.
+    isPaneTransitioning.value = consumePaneTransition(pane);
+  },
+  { flush: "sync" },
+);
+
+function clearPaneTransitionAnimation(event?: TransitionEvent): void {
+  if (event && (event.target !== event.currentTarget || event.propertyName !== "transform")) {
+    return;
+  }
+
+  isPaneTransitioning.value = false;
+}
 
 function normalizedHistoryPath(path: string | undefined): string {
   return (path ?? "").split("#", 1)[0]?.split("?", 1)[0] ?? "";
@@ -31,12 +54,17 @@ async function goBackToWorkspaceBrowser(): Promise<void> {
       ? normalizedHistoryPath(window.history.state.back)
       : "";
 
+  startPaneTransition("browser");
   if (backPath === targetPath) {
-    await router.back();
+    router.back();
     return;
   }
 
-  await router.push(targetPath);
+  try {
+    await router.push(targetPath);
+  } finally {
+    clearPaneTransition();
+  }
 }
 </script>
 
@@ -46,21 +74,29 @@ async function goBackToWorkspaceBrowser(): Promise<void> {
       :class="[
         'chat-shell__pane',
         'chat-shell__pane--browser',
-        { 'chat-shell__pane--active': isWorkspaceBrowserRoute },
+        {
+          'chat-shell__pane--active': isWorkspaceBrowserRoute,
+          'chat-shell__pane--transitioning': isPaneTransitioning,
+        },
       ]"
       :inert="!isWorkspaceBrowserRoute"
       :aria-hidden="!isWorkspaceBrowserRoute"
+      @transitionend="clearPaneTransitionAnimation"
     />
 
     <ChatSessionPane
       :class="[
         'chat-shell__pane',
         'chat-shell__pane--session',
-        { 'chat-shell__pane--active': !isWorkspaceBrowserRoute },
+        {
+          'chat-shell__pane--active': !isWorkspaceBrowserRoute,
+          'chat-shell__pane--transitioning': isPaneTransitioning,
+        },
       ]"
       :inert="isWorkspaceBrowserRoute"
       :aria-hidden="isWorkspaceBrowserRoute"
       @back="goBackToWorkspaceBrowser"
+      @transitionend="clearPaneTransitionAnimation"
     />
   </main>
 </template>
@@ -82,7 +118,6 @@ async function goBackToWorkspaceBrowser(): Promise<void> {
   height: 100%;
   min-height: 0;
   pointer-events: none;
-  transition: transform 0.25s ease-out;
 }
 
 .chat-shell__pane--browser {
@@ -100,8 +135,12 @@ async function goBackToWorkspaceBrowser(): Promise<void> {
   transform: translateX(0);
 }
 
+.chat-shell__pane--transitioning {
+  transition: transform 0.25s ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .chat-shell__pane {
+  .chat-shell__pane--transitioning {
     transition-duration: 0.01ms;
   }
 }

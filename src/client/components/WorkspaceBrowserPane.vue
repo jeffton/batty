@@ -6,6 +6,7 @@ import WorkspaceBrowserHeader from "@/client/components/WorkspaceBrowserHeader.v
 import { computed, nextTick, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { formatShortDateTime } from "@/client/lib/formatting";
+import { clearPaneTransition, startPaneTransition } from "@/client/lib/pane-transition";
 import { sessionRoutePath, workspaceRoutePath } from "@/client/lib/routes";
 import { sessionDisplayTitle } from "@/client/lib/daily-sessions";
 import {
@@ -180,6 +181,15 @@ async function handleCreateWorkspacePopoverToggle(event: Event): Promise<void> {
   createWorkspaceInput.value?.focus();
 }
 
+async function pushSessionRoute(path: string): Promise<void> {
+  startPaneTransition("session");
+  try {
+    await router.push(path);
+  } finally {
+    clearPaneTransition();
+  }
+}
+
 async function submitCreateWorkspace(): Promise<void> {
   if (actionsDisabled.value) {
     return;
@@ -198,7 +208,7 @@ async function submitCreateWorkspace(): Promise<void> {
   try {
     const session = await store.createWorkspace(name, createWorkspaceRootPath.value);
     closeCreateWorkspacePopover();
-    await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
+    await pushSessionRoute(sessionRoutePath(session.workspaceId, session.sessionId));
   } catch (error) {
     createWorkspaceError.value = error instanceof Error ? error.message : String(error);
   } finally {
@@ -227,7 +237,7 @@ async function startSession(): Promise<void> {
   startingSession.value = true;
   try {
     const session = await store.startSession(store.selectedWorkspaceId);
-    await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
+    await pushSessionRoute(sessionRoutePath(session.workspaceId, session.sessionId));
   } finally {
     startingSession.value = false;
   }
@@ -241,7 +251,7 @@ async function openTodaySession(): Promise<void> {
   startingDailySession.value = true;
   try {
     const session = await store.startDailySession(assistantWorkspace.value.id);
-    await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
+    await pushSessionRoute(sessionRoutePath(session.workspaceId, session.sessionId));
   } finally {
     startingDailySession.value = false;
   }
@@ -256,11 +266,11 @@ async function openSession(session: SessionSummary): Promise<void> {
   try {
     if (session.dailySession && !session.dailySession.exists) {
       const openedSession = await store.startDailySession(session.workspaceId);
-      await router.push(sessionRoutePath(openedSession.workspaceId, openedSession.sessionId));
+      await pushSessionRoute(sessionRoutePath(openedSession.workspaceId, openedSession.sessionId));
       return;
     }
 
-    await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
+    await pushSessionRoute(sessionRoutePath(session.workspaceId, session.sessionId));
   } finally {
     openingSessionId.value = undefined;
   }

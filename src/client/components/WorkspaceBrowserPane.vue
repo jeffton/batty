@@ -6,7 +6,6 @@ import WorkspaceBrowserHeader from "@/client/components/WorkspaceBrowserHeader.v
 import { computed, nextTick, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { formatShortDateTime } from "@/client/lib/formatting";
-import { usePaneTransition } from "@/client/lib/pane-transition";
 import { sessionRoutePath, workspaceRoutePath } from "@/client/lib/routes";
 import { sessionDisplayTitle } from "@/client/lib/daily-sessions";
 import {
@@ -39,7 +38,6 @@ const openingSessionId = ref<string>();
 const createWorkspaceInput = ref<HTMLInputElement | null>(null);
 const createWorkspacePopover = ref<InstanceType<typeof BasePopover> | null>(null);
 const actionsDisabled = computed(() => store.workspaceConnectionState !== "online");
-const { setPaneTransition } = usePaneTransition();
 
 const assistantWorkspace = computed(() =>
   store.workspaces.find((workspace) => workspace.isAssistant),
@@ -200,7 +198,6 @@ async function submitCreateWorkspace(): Promise<void> {
   try {
     const session = await store.createWorkspace(name, createWorkspaceRootPath.value);
     closeCreateWorkspacePopover();
-    setPaneTransition("slide-from-right");
     await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
   } catch (error) {
     createWorkspaceError.value = error instanceof Error ? error.message : String(error);
@@ -230,7 +227,6 @@ async function startSession(): Promise<void> {
   startingSession.value = true;
   try {
     const session = await store.startSession(store.selectedWorkspaceId);
-    setPaneTransition("slide-from-right");
     await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
   } finally {
     startingSession.value = false;
@@ -245,7 +241,6 @@ async function openTodaySession(): Promise<void> {
   startingDailySession.value = true;
   try {
     const session = await store.startDailySession(assistantWorkspace.value.id);
-    setPaneTransition("slide-from-right");
     await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
   } finally {
     startingDailySession.value = false;
@@ -261,12 +256,10 @@ async function openSession(session: SessionSummary): Promise<void> {
   try {
     if (session.dailySession && !session.dailySession.exists) {
       const openedSession = await store.startDailySession(session.workspaceId);
-      setPaneTransition("slide-from-right");
       await router.push(sessionRoutePath(openedSession.workspaceId, openedSession.sessionId));
       return;
     }
 
-    setPaneTransition("slide-from-right");
     await router.push(sessionRoutePath(session.workspaceId, session.sessionId));
   } finally {
     openingSessionId.value = undefined;

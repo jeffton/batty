@@ -2,7 +2,6 @@ import { shallowMount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { nextTick, reactive } from "vue";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { usePaneTransition } from "@/client/lib/pane-transition";
 import ChatView from "./ChatView.vue";
 
 const { route, router } = vi.hoisted(() => ({
@@ -11,7 +10,6 @@ const { route, router } = vi.hoisted(() => ({
     params: {} as Record<string, string>,
   },
   router: {
-    afterEach: vi.fn(),
     back: vi.fn(async () => undefined),
     push: vi.fn(async () => undefined),
   },
@@ -29,11 +27,9 @@ describe("ChatView", () => {
     setActivePinia(createPinia());
     reactiveRoute.name = "workspace";
     reactiveRoute.params = {};
-    usePaneTransition().clearPaneTransition();
   });
 
-  it("keeps pane transition styles until the entering pane has finished", async () => {
-    usePaneTransition().setPaneTransition("slide-from-right");
+  it("derives the active and interactive pane directly from the route", async () => {
     const wrapper = shallowMount(ChatView, {
       global: {
         stubs: {
@@ -43,18 +39,24 @@ describe("ChatView", () => {
       },
     });
 
+    const workspacePane = wrapper.find('[data-pane="workspace"]');
+    const sessionPane = wrapper.find('[data-pane="session"]');
+
+    expect(workspacePane.classes()).toContain("chat-shell__pane--active");
+    expect(workspacePane.attributes("inert")).toBeUndefined();
+    expect(workspacePane.attributes("aria-hidden")).toBe("false");
+    expect(sessionPane.classes()).not.toContain("chat-shell__pane--active");
+    expect(sessionPane.attributes("inert")).toBe("");
+    expect(sessionPane.attributes("aria-hidden")).toBe("true");
+
     reactiveRoute.name = "session";
     await nextTick();
 
-    const transitions = wrapper.findAllComponents({ name: "Transition" });
-    expect(transitions).toHaveLength(2);
-    expect(transitions[0]?.props("name")).toBe("slide-from-right");
-    expect(transitions[1]?.props("name")).toBe("slide-from-right");
-    expect(router.afterEach).not.toHaveBeenCalled();
-
-    transitions[1]?.vm.$emit("after-enter");
-    await nextTick();
-
-    expect(usePaneTransition().paneTransitionName.value).toBe("");
+    expect(workspacePane.classes()).not.toContain("chat-shell__pane--active");
+    expect(workspacePane.attributes("inert")).toBe("");
+    expect(workspacePane.attributes("aria-hidden")).toBe("true");
+    expect(sessionPane.classes()).toContain("chat-shell__pane--active");
+    expect(sessionPane.attributes("inert")).toBeUndefined();
+    expect(sessionPane.attributes("aria-hidden")).toBe("false");
   });
 });

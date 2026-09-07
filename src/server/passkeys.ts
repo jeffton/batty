@@ -9,7 +9,6 @@ import {
 } from "@simplewebauthn/server";
 import type {
   AuthenticationResponseJSON,
-  AuthenticatorTransportFuture,
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
   WebAuthnCredential,
@@ -21,7 +20,7 @@ export interface StoredPasskeyCredential {
   id: string;
   publicKey: string;
   counter: number;
-  transports?: AuthenticatorTransportFuture[] | undefined;
+  transports?: string[] | undefined;
   deviceType: "singleDevice" | "multiDevice";
   backedUp: boolean;
   createdAt: number;
@@ -140,7 +139,7 @@ function sameValue(left: string, right: string): boolean {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-function isTransportList(value: unknown): value is AuthenticatorTransportFuture[] {
+function isTransportList(value: unknown): value is string[] {
   return (
     Array.isArray(value) &&
     value.every(

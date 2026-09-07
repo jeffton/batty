@@ -40,10 +40,14 @@ test.describe("workspace and session routing", () => {
     await page.goBack();
     await expect(page).toHaveURL(/\/workspaces\/batty(?:\?e2e=\d+)?$/);
     await expect(page.locator(".workspace-browser-pane")).toBeVisible();
+    await expect(page.locator(".workspace-browser-pane")).toHaveAttribute("aria-hidden", "false");
+    await expect(page.locator(".chat-session-pane")).toHaveAttribute("aria-hidden", "true");
 
-    await page
-      .locator(".workspace-browser-pane__sessions .workspace-browser-pane__item.is-active")
-      .click();
+    const sessionItem = page.locator(
+      ".workspace-browser-pane__sessions .workspace-browser-pane__item--session",
+    );
+    await expect(sessionItem).toHaveCount(1);
+    await sessionItem.click();
     await expect(page).toHaveURL(sessionUrl);
 
     await page.reload();

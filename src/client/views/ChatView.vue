@@ -3,14 +3,12 @@ import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import ChatSessionPane from "@/client/components/ChatSessionPane.vue";
 import WorkspaceBrowserPane from "@/client/components/WorkspaceBrowserPane.vue";
-import { usePaneTransition } from "@/client/lib/pane-transition";
 import { workspaceRoutePath } from "@/client/lib/routes";
 import { useAppStore } from "@/client/stores/app";
 
 const store = useAppStore();
 const route = useRoute();
 const router = useRouter();
-const { paneTransitionName, setPaneTransition, clearPaneTransition } = usePaneTransition();
 
 const isWorkspaceBrowserRoute = computed(() => route.name !== "session");
 
@@ -33,8 +31,6 @@ async function goBackToWorkspaceBrowser(): Promise<void> {
       ? normalizedHistoryPath(window.history.state.back)
       : "";
 
-  setPaneTransition("slide-from-left");
-
   if (backPath === targetPath) {
     await router.back();
     return;
@@ -46,17 +42,26 @@ async function goBackToWorkspaceBrowser(): Promise<void> {
 
 <template>
   <main class="chat-shell">
-    <Transition :name="paneTransitionName" @after-enter="clearPaneTransition">
-      <WorkspaceBrowserPane v-show="isWorkspaceBrowserRoute" class="chat-shell__pane" />
-    </Transition>
+    <WorkspaceBrowserPane
+      :class="[
+        'chat-shell__pane',
+        'chat-shell__pane--browser',
+        { 'chat-shell__pane--active': isWorkspaceBrowserRoute },
+      ]"
+      :inert="!isWorkspaceBrowserRoute"
+      :aria-hidden="!isWorkspaceBrowserRoute"
+    />
 
-    <Transition :name="paneTransitionName" @after-enter="clearPaneTransition">
-      <ChatSessionPane
-        v-show="!isWorkspaceBrowserRoute"
-        class="chat-shell__pane"
-        @back="goBackToWorkspaceBrowser"
-      />
-    </Transition>
+    <ChatSessionPane
+      :class="[
+        'chat-shell__pane',
+        'chat-shell__pane--session',
+        { 'chat-shell__pane--active': !isWorkspaceBrowserRoute },
+      ]"
+      :inert="isWorkspaceBrowserRoute"
+      :aria-hidden="isWorkspaceBrowserRoute"
+      @back="goBackToWorkspaceBrowser"
+    />
   </main>
 </template>
 
@@ -76,47 +81,27 @@ async function goBackToWorkspaceBrowser(): Promise<void> {
   width: 100%;
   height: 100%;
   min-height: 0;
-}
-
-.slide-from-right-enter-active,
-.slide-from-right-leave-active,
-.slide-from-left-enter-active,
-.slide-from-left-leave-active {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  pointer-events: none;
   transition: transform 0.25s ease-out;
 }
 
-.slide-from-right-enter-from {
-  transform: translateX(100%);
-}
-
-.slide-from-right-leave-to {
+.chat-shell__pane--browser {
+  z-index: 0;
   transform: translateX(-30%);
 }
 
-.slide-from-left-enter-from {
-  transform: translateX(-30%);
-}
-
-.slide-from-left-leave-to {
+.chat-shell__pane--session {
+  z-index: 1;
   transform: translateX(100%);
 }
 
-.slide-from-right-enter-to,
-.slide-from-right-leave-from,
-.slide-from-left-enter-to,
-.slide-from-left-leave-from {
+.chat-shell__pane--active {
+  pointer-events: auto;
   transform: translateX(0);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .slide-from-right-enter-active,
-  .slide-from-right-leave-active,
-  .slide-from-left-enter-active,
-  .slide-from-left-leave-active {
+  .chat-shell__pane {
     transition-duration: 0.01ms;
   }
 }

@@ -98,6 +98,39 @@ describe("session-summary", () => {
     ]);
   });
 
+  it("prefers a later idle summary when timestamps tie", () => {
+    const working: SessionSummary = {
+      id: "session-1",
+      sessionId: "session-1",
+      firstMessage: "prompt",
+      updatedAt: 200,
+      messageCount: 2,
+      workspaceId: "batty",
+      isInProgress: true,
+      hasUnread: true,
+      dailySession: { date: "2026-09-07", isToday: true, exists: true },
+    };
+    const idle = { ...working, isInProgress: false, hasUnread: false };
+
+    expect(mergeSessionSummaries([working], [idle])).toEqual([idle]);
+  });
+
+  it("prefers a later working summary when timestamps tie", () => {
+    const idle: SessionSummary = {
+      id: "session-1",
+      sessionId: "session-1",
+      firstMessage: "prompt",
+      updatedAt: 200,
+      messageCount: 2,
+      workspaceId: "batty",
+      isInProgress: false,
+      hasUnread: false,
+    };
+    const working = { ...idle, isInProgress: true, hasUnread: true };
+
+    expect(mergeSessionSummaries([idle], [working])).toEqual([working]);
+  });
+
   it("keeps the newest sessions first", () => {
     const older: SessionSummary = {
       id: "older",

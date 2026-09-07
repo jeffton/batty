@@ -195,6 +195,11 @@ async function runCompletionHook(
   session: SessionState,
 ): Promise<void> {
   try {
+    await deps.notifyWorkspaceUpdated(session.workspaceId);
+  } catch (error) {
+    console.error("Failed to publish workspace update", error);
+  }
+  try {
     console.info("Running agent completion hook", {
       sessionId: session.sessionId,
       workspaceId: session.workspaceId,
@@ -202,11 +207,6 @@ async function runCompletionHook(
     await deps.onAgentCompleted?.(session);
   } catch (error) {
     console.error("Failed to run agent completion hook", error);
-  }
-  try {
-    await deps.notifyWorkspaceUpdated(session.workspaceId);
-  } catch (error) {
-    console.error("Failed to publish workspace update", error);
   }
   if (webSession.ephemeral && webSession.subscribers.size === 0) {
     deps.disposeWebSession(webSession);

@@ -589,6 +589,50 @@ describe("handleAgentEvent", () => {
     );
   });
 
+  it("publishes the workspace idle update before awaiting a slow completion hook", async () => {
+    let resolveCompletion!: () => void;
+    const onAgentCompleted = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveCompletion = resolve;
+        }),
+    );
+    const notifyWorkspaceUpdated = vi.fn(async () => undefined);
+    const webSession = {
+      id: "web-slow-completion",
+      workspace,
+      session: { sessionId: "session-slow-completion" },
+      subscribers: new Set(),
+      activeAssistant: undefined,
+      activeTools: new Map(),
+      openedAt: 1,
+      ephemeral: false,
+    } as unknown as WebSession;
+
+    const handling = handleAgentEvent(
+      {
+        getState: () => createState({ isStreaming: true }, webSession, []),
+        getStateMetadata: vi.fn(),
+        publish: vi.fn(),
+        notifyWorkspaceUpdated,
+        disposeWebSession: vi.fn(),
+        onAgentCompleted,
+      },
+      webSession,
+      { type: "agent_end", messages: [] } as unknown as AgentSessionEvent,
+    );
+
+    expect(notifyWorkspaceUpdated).toHaveBeenCalledWith(workspace.id);
+    expect(onAgentCompleted).not.toHaveBeenCalled();
+
+    await Promise.resolve();
+    expect(onAgentCompleted).toHaveBeenCalledTimes(1);
+    expect(notifyWorkspaceUpdated).toHaveBeenCalledTimes(1);
+
+    resolveCompletion();
+    await handling;
+  });
+
   it("keeps terminal state idle after later lifecycle events", async () => {
     const published: SessionState[] = [];
     const webSession = {

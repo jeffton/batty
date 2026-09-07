@@ -57,7 +57,7 @@ export function toSessionSummary(session: SessionState): SessionSummary {
 }
 
 function mergePair(left: SessionSummary, right: SessionSummary): SessionSummary {
-  const newer = left.updatedAt >= right.updatedAt ? left : right;
+  const newer = left.updatedAt > right.updatedAt ? left : right;
   const older = newer === left ? right : left;
 
   return {

@@ -259,6 +259,34 @@ describe("app store session streams", () => {
     expect(store.activeSession?.pendingMessageCount).toBe(2);
   });
 
+  it("marks the active session summary idle when a reset shares its final-message timestamp", async () => {
+    const store = useAppStore();
+    const working = makeSession("session-a", { isStreaming: true, updatedAt: 10 });
+    store.activeSession = working;
+    store.sessionsByWorkspace = {
+      batty: [
+        {
+          id: working.path!,
+          sessionId: working.sessionId,
+          path: working.path,
+          firstMessage: "prompt",
+          updatedAt: working.updatedAt,
+          messageCount: working.totalMessageCount,
+          workspaceId: working.workspaceId,
+          isInProgress: true,
+          hasUnread: false,
+        },
+      ],
+    };
+    store.openStream(working);
+
+    await MockEventSource.instances[0]?.onmessage?.({
+      data: JSON.stringify({ type: "reset", state: { ...working, isStreaming: false } }),
+    } as MessageEvent<string>);
+
+    expect(store.sessionsByWorkspace.batty?.[0]?.isInProgress).toBe(false);
+  });
+
   it("does not roll session state back when the current stream reconnects", () => {
     const store = useAppStore();
     const session = makeSession("session-a", { isStreaming: true, pendingMessageCount: 2 });

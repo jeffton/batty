@@ -171,6 +171,52 @@ async function showToolCalls(page: Page): Promise<void> {
 }
 
 test.describe("tool rendering", () => {
+  test("keeps the mobile document non-scrollable while the transcript scrolls", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await installMocks(
+      page,
+      createSession({
+        messages: Array.from({ length: 30 }, (_, index) => ({
+          id: `user-${index}`,
+          role: "user" as const,
+          timestamp: index,
+          blocks: [{ type: "text" as const, text: `Message ${index}\n`.repeat(10) }],
+        })),
+      }),
+    );
+    await page.goto(`/workspaces/${workspace.id}/sessions/${summary.sessionId}`);
+    const transcript = page.locator(".transcript");
+    await expect(transcript).toBeVisible();
+    await expect
+      .poll(() => transcript.evaluate((element) => element.scrollHeight > element.clientHeight))
+      .toBe(true);
+
+    for (const selector of ["html", "body", "#app", ".app-shell"]) {
+      await expect(page.locator(selector)).toHaveCSS("overflow", "clip");
+      expect(
+        await page.locator(selector).evaluate((element) => {
+          element.scrollTop = 100;
+          return element.scrollTop;
+        }),
+      ).toBe(0);
+    }
+    await expect(page.locator("html")).toHaveCSS("overscroll-behavior", "none");
+    expect(
+      await page.evaluate(() => {
+        const root = document.documentElement;
+        return root.scrollHeight <= root.clientHeight;
+      }),
+    ).toBe(true);
+    expect(
+      await transcript.evaluate((element) => {
+        element.scrollTop = 100;
+        return element.scrollTop;
+      }),
+    ).toBe(100);
+  });
+
   test("loads older messages when the initial transcript is paginated", async ({ page }) => {
     await page.route("**/api/sessions/web-1/messages**", async (route) => {
       await route.fulfill({

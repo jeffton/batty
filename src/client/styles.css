@@ -199,16 +199,15 @@ body,
   height: 100%;
   min-height: 100%;
   margin: 0;
+  /* The document is not a scroll container; scrolling belongs to inner panes. */
+  overflow: clip;
+  overscroll-behavior: none;
   background: var(--color-bg-panel-strong);
 }
 
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
-}
-
-body {
-  overflow: visible;
 }
 
 button,
@@ -238,7 +237,7 @@ textarea {
   height: 100vh;
   height: 100dvh;
   min-height: 100dvh;
-  overflow: hidden;
+  overflow: clip;
   background: var(--color-bg-panel-strong);
 }
 

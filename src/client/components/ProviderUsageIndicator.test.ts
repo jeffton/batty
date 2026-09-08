@@ -22,7 +22,14 @@ describe("ProviderUsageIndicator", () => {
     expect(wrapper.get("g").attributes("transform")).toBe("translate(3, 10)");
     expect(wrapper.get(".usage__fill").attributes("width")).toBe("16.5");
     expect(wrapper.get("path").attributes("transform")).toBe("translate(11, 5)");
-    expect(wrapper.attributes("aria-label")).toContain("75% remaining");
+    const button = wrapper.get("button");
+    const popover = wrapper.get("[popover]");
+    expect(button.attributes("aria-label")).toBe("Usage limits");
+    expect(button.attributes("popovertarget")).toBe(popover.attributes("id"));
+    expect(popover.attributes("popover")).toBe("auto");
+    expect(popover.text()).toContain("75% remaining");
+    expect(popover.text()).toContain("resets");
+    expect(wrapper.find("[title]").exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -40,7 +47,8 @@ describe("ProviderUsageIndicator", () => {
     await wrapper.setProps({ model: "other/model" });
     expect(wrapper.find("svg").exists()).toBe(false);
     await flushPromises();
-    expect(wrapper.find("span").exists()).toBe(false);
+    expect(wrapper.find("button").exists()).toBe(false);
+    expect(wrapper.find("[popover]").exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -51,7 +59,8 @@ describe("ProviderUsageIndicator", () => {
     await flushPromises();
     vi.mocked(getProviderUsage).mockRejectedValue(new Error("Quota endpoint unavailable"));
     await vi.advanceTimersByTimeAsync(60000);
-    expect(wrapper.attributes("title")).toContain("Quota endpoint unavailable");
+    expect(wrapper.get("[popover]").text()).toContain("Quota endpoint unavailable");
+    expect(wrapper.get("button").attributes("aria-label")).toBe("Usage limits unavailable");
     expect(wrapper.find("svg").exists()).toBe(false);
     wrapper.unmount();
   });

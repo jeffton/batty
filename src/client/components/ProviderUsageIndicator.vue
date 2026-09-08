@@ -104,9 +104,9 @@ onUnmounted(() => clearInterval(clock));
     <div class="usage-details__heading">Usage limits</div>
     <p v-if="error" class="usage-details__error">{{ error }}</p>
     <div v-for="row in rows" :key="row.id" class="usage-details__window">
-      {{ row.label }}
+      <div>{{ row.label }} · {{ row.paceLabel }}</div>
+      <div class="usage-details__reset">{{ row.resetLabel }}</div>
     </div>
-    <p v-if="rows.length" class="usage-details__pace">Triangles mark on-pace remaining usage.</p>
   </BasePopover>
 </template>
 
@@ -178,8 +178,7 @@ onUnmounted(() => clearInterval(clock));
 .usage-details__window {
   line-height: 1.5;
 }
-.usage-details__pace {
-  margin: 0;
+.usage-details__reset {
   color: var(--color-text-subtle);
   font-size: 0.75rem;
 }

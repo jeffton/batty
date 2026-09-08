@@ -28,7 +28,9 @@ describe("ProviderUsageIndicator", () => {
     expect(button.attributes("popovertarget")).toBe(popover.attributes("id"));
     expect(popover.attributes("popover")).toBe("auto");
     expect(popover.text()).toContain("75% remaining");
-    expect(popover.text()).toContain("resets");
+    expect(popover.text()).toContain("25% surplus");
+    expect(popover.text()).toContain("Resets in 0h 30m");
+    expect(popover.text()).not.toContain("Triangles mark");
     expect(wrapper.find("[title]").exists()).toBe(false);
     wrapper.unmount();
   });

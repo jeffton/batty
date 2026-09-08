@@ -51,7 +51,21 @@ export function agentTurnFileChangesByReplyEntryId(
         role: string;
         content?: unknown;
         details?: { battyFileChanges?: DurableFileChange[] };
+        battyDelivery?: { id: string; part: number };
+        battyDeliveredFileChanges?: AgentTurnFileChange[];
       };
+      // Delivered background results are not turns in this session. Their edits
+      // belong to the child, and must not consume or inherit the parent's aggregate.
+      if (message.battyDelivery) {
+        if (
+          message.role === "assistant" &&
+          typeof entry.id === "string" &&
+          message.battyDeliveredFileChanges
+        ) {
+          result.set(entry.id, message.battyDeliveredFileChanges);
+        }
+        continue;
+      }
       if (message.role === "user" && hasReply) {
         changes.clear();
         hasReply = false;

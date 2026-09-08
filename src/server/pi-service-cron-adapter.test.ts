@@ -14,7 +14,11 @@ const ZERO_USAGE = {
 
 type AgentMessage = AgentSession["messages"][number];
 
-function createSession(id: string, sessionFile: string): AgentSession {
+function createSession(
+  id: string,
+  sessionFile: string,
+  operationBaseEntryId: string | null = null,
+): AgentSession {
   const messages: AgentMessage[] = [];
   const session = {
     sessionId: id,
@@ -33,7 +37,7 @@ function createSession(id: string, sessionFile: string): AgentSession {
       },
       getResult: async () => ({
         tipId: session.messages.length ? String(session.messages.length - 1) : null,
-        fromTipId: null,
+        fromTipId: operationBaseEntryId,
       }),
     },
     sessionManager: {
@@ -60,7 +64,11 @@ function createSession(id: string, sessionFile: string): AgentSession {
   return session;
 }
 
-function createWebSession(id: string, sessionFile: string): WebSession {
+function createWebSession(
+  id: string,
+  sessionFile: string,
+  operationBaseEntryId: string | null = null,
+): WebSession {
   return {
     id,
     workspace: {
@@ -71,7 +79,7 @@ function createWebSession(id: string, sessionFile: string): WebSession {
       isPinned: true,
       isAssistant: false,
     },
-    session: createSession(id, sessionFile),
+    session: createSession(id, sessionFile, operationBaseEntryId),
     subscribers: new Set(),
     activeTools: new Map(),
     openedAt: 0,
@@ -82,7 +90,7 @@ function createWebSession(id: string, sessionFile: string): WebSession {
 describe("runCronJobSession", () => {
   it("runs detached daily cron jobs in a cron session and delivers the result to the parent", async () => {
     const parent = createWebSession("daily-session-id", "/tmp/daily-session.jsonl");
-    const cron = createWebSession("cron-session-id", "/tmp/cron-session.jsonl");
+    const cron = createWebSession("cron-session-id", "/tmp/cron-session.jsonl", "2");
     const publishReset = vi.fn();
     const onAgentCompleted = vi.fn(async () => undefined);
     const notifyWorkspaceUpdated = vi.fn(async () => undefined);
@@ -94,10 +102,43 @@ describe("runCronJobSession", () => {
         createCronSession: vi.fn(async () => ({ id: cron.id }) as never),
         promptCron: vi.fn(async () => {
           (cron.session as any).agent.state.messages = [
-            ...cron.session.messages,
+            { role: "user", content: "Inherited context", timestamp: 1 },
+            {
+              role: "toolResult",
+              toolCallId: "inherited-tool",
+              toolName: "write",
+              content: [{ type: "text", text: "inherited" }],
+              details: {
+                battyFileChanges: [{ path: "inherited.txt", before: "", after: "old" }],
+              },
+              timestamp: 2,
+            },
             {
               role: "assistant",
-              content: [{ type: "text", text: "Heartbeat ok" }],
+              content: [{ type: "text", text: "Earlier result" }],
+              api: "openai-codex-responses",
+              provider: "openai-codex",
+              model: "gpt-5.5",
+              usage: ZERO_USAGE,
+              stopReason: "stop",
+              timestamp: 3,
+            },
+            {
+              role: "toolResult",
+              toolCallId: "child-tool",
+              toolName: "write",
+              content: [{ type: "text", text: "child" }],
+              details: {
+                battyFileChanges: [{ path: "child.txt", before: "", after: "new" }],
+              },
+              timestamp: 9,
+            },
+            {
+              role: "assistant",
+              content: [
+                { type: "thinking", thinking: "internal" },
+                { type: "text", text: "Heartbeat ok" },
+              ],
               api: "openai-codex-responses",
               provider: "openai-codex",
               model: "gpt-5.5",
@@ -159,6 +200,13 @@ describe("runCronJobSession", () => {
       role: "assistant",
       content: [{ type: "text", text: "Heartbeat ok" }],
       stopReason: "stop",
+      battyDeliveredFileChanges: [
+        {
+          path: "child.txt",
+          patch:
+            "--- child.txt\n+++ child.txt\n@@ -0,0 +1,1 @@\n+new\n\\ No newline at end of file\n",
+        },
+      ],
     });
     expect(parent.session.waitForIdle).toHaveBeenCalled();
     expect(publishReset).toHaveBeenCalled();

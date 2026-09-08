@@ -88,6 +88,52 @@ describe("durable file change projection", () => {
     expect(changes.get("reply")?.[0]?.patch).toContain("+new file");
   });
 
+  it("isolates delivered cron diffs from parent turns and other deliveries", () => {
+    const files = [{ path: "/cron/file.txt", patch: "child diff" }];
+    const delivered = (id: string, fileChanges?: typeof files) =>
+      message(id, {
+        role: "assistant",
+        content: [{ type: "text", text: "cron result" }],
+        battyDelivery: { id: `cron:${id}`, part: 1 },
+        ...(fileChanges ? { battyDeliveredFileChanges: fileChanges } : {}),
+      });
+    const changes = agentTurnFileChangesByReplyEntryId([
+      mutation("parent-write", "before\n", "after\n"),
+      reply("parent-reply"),
+      message("notice", {
+        role: "custom",
+        battyDelivery: { id: "cron:child", part: 0 },
+      }),
+      delivered("child", files),
+      delivered("empty-child", []),
+      delivered("error-or-historical-child"),
+      message("next-user", { role: "user" }),
+      reply("next-reply"),
+    ]);
+    expect(changes.get("parent-reply")?.[0]?.patch).toContain("+after");
+    expect(changes.get("child")).toEqual(files);
+    expect(changes.get("empty-child")).toEqual([]);
+    expect(changes.has("error-or-historical-child")).toBe(false);
+    expect(changes.has("next-reply")).toBe(false);
+  });
+
+  it("does not let a background delivery consume pending parent edits", () => {
+    const changes = agentTurnFileChangesByReplyEntryId([
+      mutation("parent-write", "before\n", "middle\n"),
+      message("child", {
+        role: "assistant",
+        content: [{ type: "text", text: "cron result" }],
+        battyDelivery: { id: "cron:child", part: 1 },
+        battyDeliveredFileChanges: [],
+      }),
+      message("steer", { role: "user" }),
+      mutation("parent-write-again", "middle\n", "after\n"),
+      reply("parent-reply"),
+    ]);
+    expect(changes.get("parent-reply")?.[0]?.patch).toContain("-before");
+    expect(changes.get("parent-reply")?.[0]?.patch).toContain("+after");
+  });
+
   it("preserves imported historical per-turn metadata", () => {
     const files = [{ path: "/file", patch: "historical diff" }];
     expect(

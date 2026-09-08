@@ -7,6 +7,8 @@ import type { CronJobSession, RunningCronJob, SessionState, WorkspaceInfo } from
 import { buildCronRuntimeNotice, type RuntimeNotice } from "./runtime-notices";
 import type { WebSession } from "./pi-service-types";
 import { extractAssistantText, stripThinkingFromAssistantMessage, ZERO_USAGE } from "./subagent";
+import { agentTurnFileChangesByReplyEntryId } from "./agent-turn-file-changes";
+import type { AgentTurnFileChange } from "@/shared/types";
 
 export type CronJobRun = {
   jobId: string;
@@ -446,16 +448,26 @@ async function lastCronAssistant(
   if (!result) return undefined;
   // The presentation index retains immutable entries after the native session closes.
   const entries = new Map(session.sessionManager.getEntries().map((entry) => [entry.id, entry]));
-  // Bound delivery to this operation, even if the session has since accepted another turn.
+  // Bound delivery to this operation, even if the session was copied from a parent or
+  // has since accepted another turn. The base entry itself belongs to earlier context.
+  const operationEntries: ReturnType<typeof session.sessionManager.getEntries> = [];
   let id = result.tipId;
   while (id && id !== result.fromTipId) {
     const entry = entries.get(id);
     if (!entry) throw new Error(`Missing cron result entry ${id}`);
-    if (entry.type === "message" && entry.message.role === "assistant")
-      return entry.message as AssistantMessage;
+    operationEntries.unshift(entry);
     id = entry.parentId;
   }
-  return undefined;
+
+  const fileChangesByReplyEntryId = agentTurnFileChangesByReplyEntryId(operationEntries);
+  const finalEntry = operationEntries.findLast(
+    (entry) => entry.type === "message" && entry.message.role === "assistant",
+  );
+  if (!finalEntry || finalEntry.type !== "message") return undefined;
+  return {
+    ...finalEntry.message,
+    battyDeliveredFileChanges: fileChangesByReplyEntryId.get(finalEntry.id) ?? [],
+  } as AssistantMessage & { battyDeliveredFileChanges: AgentTurnFileChange[] };
 }
 
 function deliveredAssistant(
@@ -465,6 +477,13 @@ function deliveredAssistant(
   error?: unknown,
 ): AssistantMessage {
   const finalAssistant = stripThinkingFromAssistantMessage(message);
+  const deliveredFileChanges = (
+    finalAssistant as
+      | (AssistantMessage & {
+          battyDeliveredFileChanges?: AgentTurnFileChange[];
+        })
+      | undefined
+  )?.battyDeliveredFileChanges;
   if (!error && finalAssistant && assistantHasRenderableContent(finalAssistant)) {
     return {
       ...finalAssistant,
@@ -490,6 +509,9 @@ function deliveredAssistant(
     stopReason: errorMessage ? "error" : "stop",
     errorMessage,
     timestamp,
+    ...(deliveredFileChanges === undefined
+      ? {}
+      : { battyDeliveredFileChanges: deliveredFileChanges }),
   };
 }
 

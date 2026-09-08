@@ -16,6 +16,7 @@ import type {
   ModelOption,
   ProviderAuthStartResponse,
   ProviderAuthStatus,
+  ProviderUsage,
   SessionMessagesPage,
   SessionState,
   SessionSummary,
@@ -50,6 +51,11 @@ export function getVersion(): Promise<{ buildId: string }> {
 
 export function getModels(): Promise<ModelOption[]> {
   return request("/api/models");
+}
+
+export function getProviderUsage(provider: string, model: string): Promise<ProviderUsage> {
+  const query = new URLSearchParams({ provider, model });
+  return request(`/api/provider-usage?${query}`);
 }
 
 export function getProviderAuthStatus(): Promise<ProviderAuthStatus> {

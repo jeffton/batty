@@ -255,6 +255,7 @@ onBeforeUnmount(() => {
         @stop="stopSubagent"
       />
       <SessionHeaderStatus
+        :model="session?.model"
         :context-tokens="session?.contextTokens"
         :context-window="session?.contextWindow"
         :context-percent="session?.contextPercent"

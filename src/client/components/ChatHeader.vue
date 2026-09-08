@@ -10,6 +10,7 @@ const props = defineProps<{
   cwd?: string;
   workspaceSwitcherLoading: boolean;
   selectedWorkspaceId?: string;
+  model?: string;
   contextTokens?: number;
   contextWindow?: number;
   contextPercent?: number;
@@ -59,6 +60,7 @@ const emit = defineEmits<{
     <div class="header__spacer" />
 
     <SessionHeaderStatus
+      :model="props.model"
       :context-tokens="props.contextTokens"
       :context-window="props.contextWindow"
       :context-percent="props.contextPercent"

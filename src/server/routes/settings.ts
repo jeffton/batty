@@ -71,6 +71,17 @@ export function registerSettingsRoutes(context: RouteContext): void {
     return service.getProviderAuthStatus();
   });
 
+  app.get<{ Querystring: { provider?: string; model?: string } }>(
+    routePath("/api/provider-usage"),
+    async (request) => {
+      const { provider, model } = request.query;
+      if (!provider || !model) {
+        throw new Error("Missing provider or model");
+      }
+      return service.getProviderUsage(provider, model);
+    },
+  );
+
   app.post<{ Body: { apiKey?: string } }>(
     routePath("/api/settings/brave-search"),
     async (request) => {

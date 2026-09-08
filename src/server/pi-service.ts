@@ -11,6 +11,7 @@ import type {
   ModelOption,
   ProviderAuthStartResponse,
   ProviderAuthStatus,
+  ProviderUsage,
   ServerEvent,
   SessionMessagesPage,
   SessionState,
@@ -35,6 +36,7 @@ import {
   disposeSessionSummaryIndex,
 } from "./session-summaries";
 import { ProviderAuthService } from "./provider-auth";
+import { ProviderUsageService } from "./provider-usage";
 import {
   hasParentedCronRunSessionMarker,
   buildCronRunSessionBinding,
@@ -105,6 +107,7 @@ export class PiService {
   private readonly modelRuntime: ModelRuntime;
   private readonly modelConfigWatcher: ModelConfigWatcher;
   private readonly providerAuthService: ProviderAuthService;
+  private readonly providerUsageService: ProviderUsageService;
   private readonly sessions = new Map<string, WebSession>();
   private readonly liveSessions = new Map<string, LiveSession>();
   private readonly subagentQueues = new Map<string, Promise<void>>();
@@ -137,6 +140,9 @@ export class PiService {
     this.onWorkspaceUpdated = onWorkspaceUpdated;
     const authPath = path.join(battyAgentDir(config), "auth.json");
     this.providerAuthService = new ProviderAuthService(modelRuntime, (providerId) =>
+      readStoredCredential(providerId, authPath),
+    );
+    this.providerUsageService = new ProviderUsageService(modelRuntime, (providerId) =>
       readStoredCredential(providerId, authPath),
     );
   }
@@ -229,6 +235,10 @@ export class PiService {
 
   async startProviderAuth(providerId: "openai-codex"): Promise<ProviderAuthStartResponse> {
     return this.providerAuthService.start(providerId);
+  }
+
+  async getProviderUsage(provider: string, model: string): Promise<ProviderUsage> {
+    return this.providerUsageService.getUsage(provider, model);
   }
 
   async completeProviderAuth(

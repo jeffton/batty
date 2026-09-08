@@ -296,6 +296,7 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
       :cwd="store.activeSession?.cwd"
       :workspace-switcher-loading="workspaceSwitcherLoading"
       :selected-workspace-id="store.selectedWorkspaceId"
+      :model="store.activeSession?.model"
       :context-tokens="store.activeSession?.contextTokens"
       :context-window="store.activeSession?.contextWindow"
       :context-percent="store.activeSession?.contextPercent"

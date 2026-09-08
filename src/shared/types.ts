@@ -314,6 +314,17 @@ export interface ProviderAuthStartResponse {
   expiresAt: number;
 }
 
+export interface ProviderUsageWindow {
+  id: string;
+  usedPercent: number;
+  windowSeconds: number;
+  resetsAt: number;
+}
+
+export interface ProviderUsage {
+  windows: ProviderUsageWindow[];
+}
+
 export interface AppSettingsStatus {
   braveSearchConfigured: boolean;
   defaultProvider?: string;

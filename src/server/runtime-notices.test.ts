@@ -68,7 +68,7 @@ describe("runtime notices", () => {
   it("builds subagent notices for the permitted child depth", () => {
     expect(buildSubagentRuntimeNotice(1, "  Child work  ")).toEqual({
       kind: "subagent",
-      text: "Subagent run started. You can delegate to subagents, but subagents you create cannot delegate further.\n\nPrompt:\nChild work",
+      text: "Subagent run started. Subagents you create cannot delegate further.\n\nPrompt:\nChild work",
     });
   });
 

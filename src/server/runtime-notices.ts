@@ -71,7 +71,7 @@ export function buildSubagentRuntimeNotice(depth: number, prompt: string): Runti
     kind: "subagent",
     text: [
       depth < 2
-        ? "Subagent run started. You can delegate to subagents, but subagents you create cannot delegate further."
+        ? "Subagent run started. Subagents you create cannot delegate further."
         : "Subagent run started. Do not call the subagent tool from this session.",
       "",
       "Prompt:",

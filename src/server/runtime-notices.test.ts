@@ -16,13 +16,54 @@ describe("runtime notices", () => {
       buildCronRuntimeNotice({
         scheduleLabel: "0 9 * * 1-5",
         prompt: "Check CI",
+        session: { kind: "new" },
         now: new Date("2026-04-19T08:58:37"),
       }),
     ).toEqual({
       kind: "cron",
-      text: "Cron run triggered. Current time: 2026-04-19 08:58:37. Schedule: 0 9 * * 1-5\n\nPrompt:\nCheck CI",
+      text: expect.stringMatching(
+        /^Cron run triggered\. Current time: 2026-04-19 08:58:37\. Schedule: 0 9 \* \* 1-5\n\nSession mode: new\.[\s\S]*\n\nPrompt:\nCheck CI$/,
+      ),
     });
   });
+
+  it.each([false, true, undefined])(
+    "explains detached context with includePreviousContext=%s",
+    (includePreviousContext) => {
+      const { text } = buildCronRuntimeNotice({
+        scheduleLabel: "every 1h",
+        prompt: "Research",
+        session: { kind: "daily-detached", includePreviousContext },
+      });
+      expect(text).toContain("Each run gets a separate session");
+      expect(text).toContain(
+        includePreviousContext ? "fixed snapshot of the daily context" : "You start fresh",
+      );
+      expect(text).not.toContain(
+        includePreviousContext ? "You start fresh" : "You have a fixed snapshot",
+      );
+      expect(text).toContain("Detailed work and tool calls stay here");
+      expect(text).toContain("your final response or an error returns");
+      expect(text).toContain("NO_REPLY for a silent successful run");
+      expect(text).toContain("This isolation protects daily context");
+    },
+  );
+
+  it.each(["delivery", "skipped"] as const)(
+    "distinguishes %s notices from execution instructions",
+    (phase) => {
+      const { text } = buildCronRuntimeNotice({
+        scheduleLabel: "every 1h",
+        prompt: "Research",
+        session: { kind: "daily-detached", includePreviousContext: true },
+        phase,
+      });
+      expect(text).toContain(phase === "delivery" ? "Detached cron result." : "run was skipped.");
+      expect(text).toContain("Scheduled prompt (for reference):\nResearch");
+      expect(text).not.toContain("You have a fixed snapshot");
+      expect(text).not.toContain("Cron run triggered");
+    },
+  );
 
   it("builds subagent notices for the permitted child depth", () => {
     expect(buildSubagentRuntimeNotice(1)).toEqual({
@@ -43,6 +84,7 @@ describe("runtime notices", () => {
       buildCronRuntimeNotice({
         scheduleLabel: "every 1h",
         prompt: "Inspect workspace",
+        session: { kind: "daily-inline" },
         now: new Date("2026-04-19T08:58:37"),
       }),
       42,
@@ -51,8 +93,7 @@ describe("runtime notices", () => {
     expect(message).toMatchObject({
       role: "custom",
       customType: `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:cron`,
-      content:
-        "Cron run triggered. Current time: 2026-04-19 08:58:37. Schedule: every 1h\n\nPrompt:\nInspect workspace",
+      content: expect.stringContaining("Session mode: daily-inline."),
       timestamp: 42,
     });
   });

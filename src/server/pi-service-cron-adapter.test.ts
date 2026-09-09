@@ -196,6 +196,12 @@ describe("runCronJobSession", () => {
       ),
       data: { cron: { jobId: "job-1", runId: "run-1", sessionPath: "/tmp/cron-session.jsonl" } },
     });
+    expect(parent.session.messages[0]).toMatchObject({
+      content: expect.stringContaining("Cron result delivered."),
+    });
+    expect(parent.session.messages[0]).toMatchObject({
+      content: expect.not.stringContaining("You have a fixed snapshot"),
+    });
     expect(parent.session.messages[1]).toMatchObject({
       role: "assistant",
       content: [{ type: "text", text: "Heartbeat ok" }],

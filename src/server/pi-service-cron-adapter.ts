@@ -99,6 +99,7 @@ export async function recoverCronJobSession(
   const notice = buildCronRuntimeNotice({
     scheduleLabel: job.scheduleLabel,
     prompt: job.prompt,
+    session: job.session,
     now: new Date(job.startedAtMs),
   });
   const marker = child.sessionManager
@@ -139,7 +140,7 @@ export async function recoverCronJobSession(
     parent &&
     (error || extractAssistantText(await lastCronAssistant(child, job.runId)) !== "NO_REPLY")
   ) {
-    await deliverCronRun(context, parent.id, notice, job, child, error);
+    await deliverCronRun(context, parent.id, job, child, error);
   }
   if (error) throw error;
   return { sessionId: child.sessionId, sessionPath: child.sessionFile };
@@ -158,6 +159,8 @@ export async function deliverSkippedCronJobRun(
   const notice = buildCronRuntimeNotice({
     scheduleLabel: job.scheduleLabel,
     prompt: job.prompt,
+    session: job.session,
+    phase: "skipped",
     now: new Date(skipped.skippedAtMs),
   });
 
@@ -185,6 +188,7 @@ export async function runCronJobSession(
   const cronNotice = buildCronRuntimeNotice({
     scheduleLabel: job.scheduleLabel,
     prompt: job.prompt,
+    session: job.session,
   });
 
   if (job.session.kind === "daily-inline") {
@@ -233,7 +237,7 @@ export async function runCronJobSession(
     await context.promptCron(cronWebSession.id, cronNotice, job.runId);
   } catch (error) {
     if (parent) {
-      await deliverCronRun(context, parent.id, cronNotice, job, cronWebSession.session, error);
+      await deliverCronRun(context, parent.id, job, cronWebSession.session, error);
     }
     throw error;
   } finally {
@@ -246,7 +250,7 @@ export async function runCronJobSession(
     parent &&
     !(errorMessage === undefined && extractAssistantText(finalAssistant) === "NO_REPLY")
   ) {
-    await deliverCronRun(context, parent.id, cronNotice, job, cronWebSession.session);
+    await deliverCronRun(context, parent.id, job, cronWebSession.session);
   }
   if (errorMessage) {
     throw new Error(errorMessage);
@@ -306,7 +310,6 @@ async function runInlineCronJob(
 async function deliverCronRun(
   context: PiServiceCronAdapterContext,
   parentSessionId: string,
-  cronNotice: RuntimeNotice,
   job: CronJobRun,
   cronSession: AgentSession,
   error?: unknown,
@@ -321,7 +324,7 @@ async function deliverCronRun(
   await context.runSubagentSerial(parentSessionId, async () => {
     const parent = context.requireSession(parentSessionId);
     await parent.session.waitForIdle();
-    const appended = await appendCronRunDelivery(parent.session, cronNotice, job, delivery, error);
+    const appended = await appendCronRunDelivery(parent.session, job, delivery, error);
     if (!appended) return;
     const state = context.getState(parent.id);
     context.publishReset(parent, state);
@@ -357,7 +360,6 @@ async function appendCronErrorDelivery(
 
 async function appendCronRunDelivery(
   parent: AgentSession,
-  cronNotice: RuntimeNotice,
   job: CronJobRun,
   delivery: {
     sessionId: string;
@@ -369,7 +371,13 @@ async function appendCronRunDelivery(
   const timestamp = Date.now();
   return appendResultDelivery(parent, `cron:${job.runId}`, [
     cronNoticeMessage(
-      cronNotice,
+      buildCronRuntimeNotice({
+        scheduleLabel: job.scheduleLabel,
+        prompt: job.prompt,
+        session: job.session,
+        phase: "delivery",
+        now: new Date(timestamp),
+      }),
       {
         jobId: job.jobId,
         runId: job.runId,

@@ -11,7 +11,11 @@ const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
-const notice = buildCronRuntimeNotice({ scheduleLabel: "Every hour", prompt: "Heartbeat" });
+const notice = buildCronRuntimeNotice({
+  scheduleLabel: "Every hour",
+  prompt: "Heartbeat",
+  session: { kind: "new" },
+});
 
 describe("native cron operation recovery", () => {
   it("rejoins admission and reads the same terminal result without submitting another prompt", async () => {

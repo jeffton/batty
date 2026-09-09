@@ -710,7 +710,7 @@ export class PiService {
       }
 
       await webSession.session.compact(
-        "Prepare this daily session for a detached cron run that includes previous context. Preserve operational facts, recent decisions, current state, scheduled work, and anything needed by future Roy heartbeats.",
+        "Prepare this daily session for a detached cron run that includes previous context. Preserve operational facts, recent decisions, current state, scheduled work, and anything needed by future scheduled runs.",
       );
       const state = this.getState(webSession.id);
       this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });

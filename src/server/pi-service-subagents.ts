@@ -1,6 +1,11 @@
 import { type AssistantMessage, type Message } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { HarnessClosed, HarnessFault } from "@earendil-works/pi-agent-core";
+import {
+  BACKGROUND_CONTEXT as nativeContext,
+  getOrThrow,
+  HarnessClosed,
+  HarnessFault,
+} from "@earendil-works/pi-agent-core";
 import { appendResultDelivery } from "./session-result-delivery";
 import { HarnessSessionStore as SessionManager } from "./harness-session-store";
 import type { HarnessController as AgentSession } from "./harness-controller";
@@ -334,7 +339,10 @@ export async function runDetachedSubagentSession(
     true,
   );
 
-  const subagentNotice = buildSubagentRuntimeNotice(options.parentSubagentDepth + 1);
+  const subagentNotice = buildSubagentRuntimeNotice(
+    options.parentSubagentDepth + 1,
+    options.prompt,
+  );
   const preludeNotices = options.preludeNotices ?? [];
   const initialTimestamp = Date.now();
   const preludeMessages = preludeNotices.map((notice, index) =>
@@ -345,12 +353,6 @@ export async function runDetachedSubagentSession(
   }
   const seedMessageCount = subagentSession.messages.length;
 
-  if (!existing)
-    await appendRuntimeNoticeMessage(
-      subagentSession,
-      subagentNotice,
-      initialTimestamp + preludeMessages.length,
-    );
   options.onUpdate?.({
     content: [],
     details: buildSubagentDetails(
@@ -453,7 +455,16 @@ export async function runDetachedSubagentSession(
     else if (!subagentSession.snapshot.lastResult) {
       if (options.recoverOnly)
         throw new Error("Batty stopped before this subagent operation was admitted");
-      await subagentSession.prompt(options.prompt);
+      getOrThrow(
+        await subagentSession.lane.accept(
+          {
+            kind: "prompt",
+            prompt: buildRuntimeNoticeMessage(subagentNotice, Date.now()),
+          },
+          nativeContext,
+        ),
+      );
+      await subagentSession.resume();
     }
     const branch = subagentSession.sessionManager.getBranch();
     const marker = branch.findLastIndex(

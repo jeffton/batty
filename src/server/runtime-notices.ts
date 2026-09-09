@@ -66,13 +66,17 @@ function cronSessionInstructions(session: CronJobSession): string[] {
   }
 }
 
-export function buildSubagentRuntimeNotice(depth: number): RuntimeNotice {
+export function buildSubagentRuntimeNotice(depth: number, prompt: string): RuntimeNotice {
   return {
     kind: "subagent",
-    text:
+    text: [
       depth < 2
         ? "Subagent run started. You can delegate to subagents, but subagents you create cannot delegate further."
         : "Subagent run started. Do not call the subagent tool from this session.",
+      "",
+      "Prompt:",
+      prompt.trim(),
+    ].join("\n"),
   };
 }
 

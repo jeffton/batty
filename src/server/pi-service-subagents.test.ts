@@ -15,6 +15,7 @@ import {
 import { createHarnessFixture } from "./harness-test-fixture";
 import { BATTY_SYSTEM_PROMPT_CUSTOM_TYPE } from "./batty-system-prompt";
 import type { WebSession } from "./pi-service-types";
+import { buildRuntimeNoticeMessage, buildSubagentRuntimeNotice } from "./runtime-notices";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -85,6 +86,26 @@ async function setup() {
 }
 
 describe("detached harness subagents", () => {
+  it.each([false, true])(
+    "sends the task only in a runtime notice with includeSessionContext=%s",
+    async (includeSessionContext) => {
+      const { parent, deps, options } = await setup();
+      parent.faux.setResponses([fauxAssistantMessage("done")]);
+      const result = await runDetachedSubagentSession(deps, {
+        ...options,
+        includeSessionContext,
+      });
+      expect(result.isError).toBe(false);
+      expect(result.generatedMessages).toEqual([
+        expect.objectContaining({
+          role: "custom",
+          customType: "batty-runtime-notice:subagent",
+          content: buildSubagentRuntimeNotice(1, options.prompt).text,
+        }),
+        expect.objectContaining({ role: "assistant" }),
+      ]);
+    },
+  );
   it("forks before the invoking tool call and preserves the prompt snapshot", async () => {
     const { parent, deps, options, children } = await setup();
     await parent.session.sessionManager.appendCustomEntry("batty-subagent-session", {
@@ -186,7 +207,10 @@ describe("detached harness subagents", () => {
     const replayed = await runDetachedSubagentSession(deps, options);
     expect(replayed.text).toBe(first.text);
     expect(parent.faux.state.callCount).toBe(1);
-    expect(replayed.generatedMessages.filter((message) => message.role === "user")).toHaveLength(1);
+    expect(replayed.generatedMessages.filter((message) => message.role === "user")).toHaveLength(0);
+    expect(replayed.generatedMessages.filter((message) => message.role === "custom")).toHaveLength(
+      1,
+    );
   });
 
   it("resumes an admitted child operation after reopening without repeating the child prompt", async () => {
@@ -197,14 +221,24 @@ describe("detached harness subagents", () => {
       signal: AbortSignal.abort(new Error("not started")),
     });
     const child = children.get(options.sessionId!)!;
-    const admission = await child.lane.accept({ kind: "prompt", prompt: options.prompt }, context);
+    const admission = await child.lane.accept(
+      {
+        kind: "prompt",
+        prompt: buildRuntimeNoticeMessage(
+          buildSubagentRuntimeNotice(1, options.prompt),
+          Date.now(),
+        ),
+      },
+      context,
+    );
     expect(admission.ok).toBe(true);
     await child.dispose();
     children.delete(child.sessionId);
     parent.faux.setResponses([fauxAssistantMessage("recovered child")]);
     const result = await runDetachedSubagentSession(deps, options);
     expect(result.text).toBe("recovered child");
-    expect(result.generatedMessages.filter((message) => message.role === "user")).toHaveLength(1);
+    expect(result.generatedMessages.filter((message) => message.role === "user")).toHaveLength(0);
+    expect(result.generatedMessages.filter((message) => message.role === "custom")).toHaveLength(1);
     expect(parent.faux.state.callCount).toBe(1);
   });
 

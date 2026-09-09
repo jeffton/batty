@@ -70,11 +70,12 @@ export function buildSubagentRuntimeNotice(depth: number, prompt: string): Runti
   return {
     kind: "subagent",
     text: [
+      "You are a subagent carrying out a task assigned by a parent agent. Your final response will be returned to that agent.",
       depth < 2
-        ? "Subagent run started. Subagents you create cannot delegate further."
-        : "Subagent run started. Do not call the subagent tool from this session.",
+        ? "Subagents you create cannot delegate further."
+        : "Do not call the subagent tool from this session.",
       "",
-      "Prompt:",
+      "Assigned task:",
       prompt.trim(),
     ].join("\n"),
   };

@@ -68,14 +68,14 @@ describe("runtime notices", () => {
   it("builds subagent notices for the permitted child depth", () => {
     expect(buildSubagentRuntimeNotice(1, "  Child work  ")).toEqual({
       kind: "subagent",
-      text: "Subagent run started. Subagents you create cannot delegate further.\n\nPrompt:\nChild work",
+      text: "You are a subagent carrying out a task assigned by a parent agent. Your final response will be returned to that agent.\nSubagents you create cannot delegate further.\n\nAssigned task:\nChild work",
     });
   });
 
   it("builds subagent notices for the maximum depth", () => {
     expect(buildSubagentRuntimeNotice(2, "Nested work")).toEqual({
       kind: "subagent",
-      text: "Subagent run started. Do not call the subagent tool from this session.\n\nPrompt:\nNested work",
+      text: "You are a subagent carrying out a task assigned by a parent agent. Your final response will be returned to that agent.\nDo not call the subagent tool from this session.\n\nAssigned task:\nNested work",
     });
   });
 
@@ -154,7 +154,7 @@ describe("runtime notices", () => {
         role: "custom",
         customType: `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:subagent`,
         content:
-          "Subagent run started. Do not call the subagent tool from this session.\n\nPrompt:\nNested work",
+          "You are a subagent carrying out a task assigned by a parent agent. Your final response will be returned to that agent.\nDo not call the subagent tool from this session.\n\nAssigned task:\nNested work",
         timestamp: 2,
       },
     ]);

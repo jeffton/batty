@@ -153,7 +153,8 @@ describe("runtime notices", () => {
       {
         role: "custom",
         customType: `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:subagent`,
-        content: "Subagent run started. Do not call the subagent tool from this session.\n\nPrompt:\nNested work",
+        content:
+          "Subagent run started. Do not call the subagent tool from this session.\n\nPrompt:\nNested work",
         timestamp: 2,
       },
     ]);

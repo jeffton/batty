@@ -35,3 +35,28 @@ index 550508d3f2ed229529eb4c513aea8cdc0faea64b..9c7ecca744b8437c3a9da23db055ad39
      const entriesById = new Map();
      for (const entry of entries) {
          if (entriesById.has(entry.id))
+diff --git a/dist/harness/tools/read.js b/dist/harness/tools/read.js
+index c78086d084b5dacd2021aec15ec919c9f7f45ad7..d57aa09314c2d04c994eed7a049b8e868c6dd59c 100644
+--- a/dist/harness/tools/read.js
++++ b/dist/harness/tools/read.js
+@@ -12,7 +12,7 @@ export function createReadTool(options) {
+     return {
+         name: "read",
+         label: "read",
+-        description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.`,
++        description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, reads without an explicit limit are truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). An explicit limit sets the maximum lines returned and removes the byte cap. Use offset/limit for large files. When you need the full file, continue with offset until complete.`,
+         parameters: readSchema,
+         async execute(_toolCallId, { path, offset, limit }, _onUpdate, { env }, _invocation, context) {
+             const absolutePath = await resolveReadToolPath(env, path, context);
+@@ -73,7 +73,10 @@ export function createReadTool(options) {
+             else {
+                 selectedContent = allLines.slice(startLine).join("\n");
+             }
+-            const truncation = truncateHead(selectedContent);
++            const truncation = truncateHead(selectedContent, {
++                maxBytes: limit !== undefined ? Infinity : DEFAULT_MAX_BYTES,
++                maxLines: limit !== undefined ? Infinity : DEFAULT_MAX_LINES,
++            });
+             let outputText;
+             let details;
+             if (truncation.firstLineExceedsLimit) {

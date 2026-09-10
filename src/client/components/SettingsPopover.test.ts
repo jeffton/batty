@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { useAppStore } from "@/client/stores/app";
 import ModelConfigPopover from "./ModelConfigPopover.vue";
 import SettingsPopover from "./SettingsPopover.vue";
+import ModelConfigSelector from "./ModelConfigSelector.vue";
 
 describe("SettingsPopover", () => {
   beforeEach(() => {
@@ -34,12 +35,14 @@ describe("SettingsPopover", () => {
     });
     const modelConfig = wrapper.findComponent(ModelConfigPopover);
 
+    expect(wrapper.findComponent(ModelConfigSelector).exists()).toBe(true);
+    expect(wrapper.get(".model-config-selector__effort-label").text()).toBe("medium");
     expect(modelConfig.props("currentModelId")).toBe("openai-codex/gpt-5.6-sol");
     expect(modelConfig.props("currentThinkingLevel")).toBe("medium");
     expect(modelConfig.props("thinkingOptions")).toEqual(["low", "medium", "high"]);
   });
 
-  it("saves a selected default effort with the current model", async () => {
+  it("keeps the selector open when choosing effort before model", async () => {
     const store = useAppStore();
     store.models = [
       {
@@ -57,14 +60,26 @@ describe("SettingsPopover", () => {
       defaultModel: "gpt-5.6-sol",
       defaultThinkingLevel: "medium",
     };
-    const setDefaultModel = vi.spyOn(store, "setDefaultModel").mockResolvedValue();
+    const setDefaultModel = vi
+      .spyOn(store, "setDefaultModel")
+      .mockImplementation(async (_modelId, thinkingLevel) => {
+        store.settings.defaultThinkingLevel = thinkingLevel;
+      });
     const wrapper = mount(SettingsPopover, {
+      attachTo: document.body,
       props: { popoverId: "settings-popover", anchorName: "--settings-anchor" },
     });
+    const modelConfig = wrapper.findComponent(ModelConfigPopover);
+    const hidePopover = vi.fn();
+    (modelConfig.element as HTMLElement).hidePopover = hidePopover;
 
-    await wrapper.findComponent(ModelConfigPopover).vm.$emit("setThinkingLevel", "high");
-
+    await modelConfig.findAll(".thinking-picker__btn")[2]!.trigger("click");
     expect(setDefaultModel).toHaveBeenCalledWith("openai-codex/gpt-5.6-sol", "high");
+    expect(wrapper.get(".model-config-selector__effort-label").text()).toBe("high");
+    await modelConfig.get(".mc-popover__model").trigger("click");
+    expect(setDefaultModel).toHaveBeenLastCalledWith("openai-codex/gpt-5.6-sol", "high");
+    expect(hidePopover).not.toHaveBeenCalled();
+    wrapper.unmount();
   });
 
   it("normalizes and saves effort when changing the default model", async () => {
@@ -151,7 +166,7 @@ describe("SettingsPopover", () => {
     await modelConfig.findAll(".thinking-picker__btn")[2]!.trigger("click");
 
     expect(setDefaultModel).toHaveBeenLastCalledWith("openai-codex/gpt-5.6-sol", "high");
-    expect(hidePopover).toHaveBeenCalledOnce();
+    expect(hidePopover).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 

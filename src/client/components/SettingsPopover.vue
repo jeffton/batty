@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { Bot, Check, ExternalLink, LogOut, Palette, Pencil, Save, X } from "@lucide/vue";
+import { Check, ExternalLink, LogOut, Palette, Pencil, Save, X } from "@lucide/vue";
 import { computed, reactive, ref, watch } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
-import ModelConfigPopover from "@/client/components/ModelConfigPopover.vue";
+import ModelConfigSelector from "@/client/components/ModelConfigSelector.vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
 import {
   normalizeModelThinkingLevel,
@@ -94,9 +94,6 @@ const defaultThinkingLevel = computed(() =>
 const defaultModelLabel = computed(
   () =>
     defaultModel.value?.label.split(" · ", 1)[0] ?? store.settings.defaultModel ?? "Select a model",
-);
-const defaultProviderLabel = computed(
-  () => defaultModel.value?.provider ?? store.settings.defaultProvider ?? "Default provider",
 );
 
 function isCodexProvider(providerId: string): boolean {
@@ -261,7 +258,6 @@ async function saveDefaultModel(modelId: string): Promise<void> {
   await saveDefaultModelConfig(
     modelId,
     normalizeModelThinkingLevel(model, store.settings.defaultThinkingLevel),
-    false,
   );
 }
 
@@ -269,21 +265,14 @@ async function saveDefaultThinkingLevel(thinkingLevel: string): Promise<void> {
   if (!defaultModelId.value) {
     return;
   }
-  await saveDefaultModelConfig(defaultModelId.value, thinkingLevel, true);
+  await saveDefaultModelConfig(defaultModelId.value, thinkingLevel);
 }
 
-async function saveDefaultModelConfig(
-  modelId: string,
-  thinkingLevel: string,
-  closePopover: boolean,
-): Promise<void> {
+async function saveDefaultModelConfig(modelId: string, thinkingLevel: string): Promise<void> {
   defaultModelSaving.value = true;
   defaultModelError.value = "";
   try {
     await store.setDefaultModel(modelId, thinkingLevel);
-    if (closePopover) {
-      document.getElementById(DEFAULT_MODEL_POPOVER_ID)?.hidePopover?.();
-    }
   } catch (error) {
     defaultModelError.value = error instanceof Error ? error.message : String(error);
   } finally {
@@ -449,22 +438,13 @@ function handlePopoverToggle(event: Event): void {
       <section class="settings-popover__section">
         <div class="settings-popover__group-title">Default model</div>
         <div class="settings-popover__help">Used when starting new sessions.</div>
-        <button
-          class="settings-popover__model-button"
-          type="button"
-          :style="{ 'anchor-name': DEFAULT_MODEL_ANCHOR }"
-          :popovertarget="DEFAULT_MODEL_POPOVER_ID"
-          :disabled="defaultModelSaving"
-          aria-label="Choose default model and provider"
-          @click="store.refreshModels"
-        >
-          <Bot :size="17" />
-          <span class="settings-popover__model-info">
-            <strong>{{ defaultModelLabel }}</strong>
-            <span>{{ defaultProviderLabel }}</span>
-          </span>
-        </button>
-        <ModelConfigPopover
+        <ModelConfigSelector
+          :model-label="defaultModelLabel"
+          :effort-label="
+            defaultThinkingOptions.length > 0 ? defaultThinkingLevel : 'Effort unavailable'
+          "
+          aria-label="Choose default model and effort"
+          @refresh-models="store.refreshModels"
           :popover-id="DEFAULT_MODEL_POPOVER_ID"
           :anchor-name="DEFAULT_MODEL_ANCHOR"
           :models="store.models"
@@ -811,44 +791,6 @@ function handlePopoverToggle(event: Event): void {
   font-family: inherit;
 }
 
-.settings-popover__model-button {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.55rem 0.65rem;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.55rem;
-  background: var(--color-bg-app);
-  color: var(--color-text-muted);
-  text-align: left;
-}
-
-.settings-popover__model-info {
-  min-width: 0;
-  display: grid;
-  line-height: 1.15;
-}
-
-.settings-popover__model-info strong,
-.settings-popover__model-info span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.settings-popover__model-info strong {
-  color: var(--color-text-strong);
-  font-size: 0.84rem;
-}
-
-.settings-popover__model-info span {
-  color: var(--color-text-subtle);
-  font-size: 0.72rem;
-  text-transform: capitalize;
-}
-
 .settings-popover__field,
 .settings-popover__color-fieldset {
   display: flex;
@@ -1040,8 +982,7 @@ function handlePopoverToggle(event: Event): void {
 @media (hover: hover) {
   .settings-popover__action:hover,
   .settings-popover__link:hover,
-  .settings-popover__icon-btn:hover,
-  .settings-popover__model-button:hover:not(:disabled) {
+  .settings-popover__icon-btn:hover {
     background: var(--color-bg-hover);
   }
 
@@ -1055,7 +996,6 @@ function handlePopoverToggle(event: Event): void {
 .settings-popover__link:disabled,
 .settings-popover__logout:disabled,
 .settings-popover__icon-btn:disabled,
-.settings-popover__model-button:disabled,
 .settings-popover__select:disabled,
 .settings-popover__input:disabled {
   opacity: 0.6;

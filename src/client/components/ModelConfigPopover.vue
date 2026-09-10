@@ -19,7 +19,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   setModel: [modelId: string];
   setThinkingLevel: [thinkingLevel: string];
-  close: [];
 }>();
 
 const modelFilter = ref("");

@@ -12,6 +12,7 @@ const {
   listWorkspaceCronRunLogs,
   listWorkspaceCronRuns,
   stopCronRun,
+  getModels,
 } = vi.hoisted(() => ({
   updateCronJob: vi.fn(),
   deleteCronJob: vi.fn(),
@@ -19,6 +20,7 @@ const {
   listWorkspaceCronRunLogs: vi.fn(),
   listWorkspaceCronRuns: vi.fn(),
   stopCronRun: vi.fn(),
+  getModels: vi.fn(),
 }));
 
 vi.mock("@/client/lib/api", () => ({
@@ -29,6 +31,7 @@ vi.mock("@/client/lib/api", () => ({
   createWorkspace: vi.fn(),
   deleteCronJob,
   getBootstrap: vi.fn(),
+  getModels,
   getProviderAuthStatus: vi.fn(),
   getSession: vi.fn(),
   getSessionMessages: vi.fn(),
@@ -88,6 +91,7 @@ describe("CronPopover", () => {
     listWorkspaceCronJobs.mockResolvedValue([job]);
     listWorkspaceCronRunLogs.mockResolvedValue([]);
     listWorkspaceCronRuns.mockResolvedValue([]);
+    getModels.mockResolvedValue([]);
     updateCronJob.mockImplementation(async (_jobId: string, patch: Partial<CronJob>) => ({
       ...job,
       ...patch,
@@ -246,6 +250,7 @@ describe("CronPopover", () => {
 
     const modelButton = wrapper.find('[aria-label="Choose cron model and effort"]');
     expect(modelButton.attributes("popovertarget")).toBe("cron-model-popover-cron-1");
+    getModels.mockResolvedValue(store.models);
     await modelButton.trigger("click");
     await wrapper
       .findAll(".mc-popover__model")
@@ -306,7 +311,7 @@ describe("CronPopover", () => {
     expect(wrapper.find(".cron-popover__thinking-unavailable").text()).toBe("Effort unavailable");
   });
 
-  it("removes model configuration controls while deleting", async () => {
+  it("keeps disabled model configuration controls mounted while deleting", async () => {
     const store = useAppStore();
     store.workspaces = [
       {
@@ -346,7 +351,7 @@ describe("CronPopover", () => {
     expect(wrapper.find(".mc-popover").exists()).toBe(true);
 
     await wrapper.findAll(".cron-popover__icon-btn")[1]!.trigger("click");
-    expect(wrapper.find(".mc-popover").exists()).toBe(false);
+    expect(wrapper.find(".mc-popover").exists()).toBe(true);
     expect(
       wrapper.find('[aria-label="Choose cron model and effort"]').attributes("disabled"),
     ).toBeDefined();

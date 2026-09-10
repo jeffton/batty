@@ -56,6 +56,10 @@ function formatDuration(durationMs?: number): string | undefined {
   return `${Math.round(durationMs / 60_000)} min`;
 }
 
+function refreshModels(): void {
+  void store.refreshModels();
+}
+
 async function stopRun(runId: string): Promise<void> {
   stoppingRunIds.value = new Set([...stoppingRunIds.value, runId]);
   try {
@@ -129,6 +133,7 @@ watch(
           @edit="editJob(job)"
           @cancel="cancelEdit(job)"
           @model-change="setDraftModel(job, $event)"
+          @refresh-models="refreshModels"
           @save="saveJob(job)"
           @toggle="toggleJob(job)"
           @delete="deleteJob(job)"

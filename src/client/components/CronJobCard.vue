@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import ModelConfigPopover from "@/client/components/ModelConfigPopover.vue";
+import ModelConfigSelector from "@/client/components/ModelConfigSelector.vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
 import type { CronDraft } from "@/client/composables/useCronJobDrafts";
 import type { CronJob, ModelOption } from "@/shared/types";
-import { Bot, Pencil, Save, Trash2, X } from "@lucide/vue";
+import { Pencil, Save, Trash2, X } from "@lucide/vue";
 
 const props = defineProps<{
   job: CronJob;
@@ -17,6 +17,7 @@ const emit = defineEmits<{
   edit: [];
   cancel: [];
   modelChange: [modelId: string];
+  refreshModels: [];
   save: [];
   toggle: [];
   delete: [];
@@ -31,10 +32,10 @@ function modelPopoverAnchor(): string {
 }
 
 function modelLabel(): string {
-  return (
+  const label =
     props.models.find((model) => model.id === props.draft.model)?.label ??
-    `${props.draft.model} (unavailable)`
-  );
+    `${props.draft.model} (unavailable)`;
+  return label.split(" · ", 1)[0] ?? label;
 }
 </script>
 
@@ -102,30 +103,20 @@ function modelLabel(): string {
       />
 
       <div class="cron-popover__edit-fields">
-        <button
-          class="cron-popover__model-button"
-          type="button"
-          :style="{ 'anchor-name': modelPopoverAnchor() }"
-          :popovertarget="modelPopoverId()"
-          :disabled="props.draft.saving || props.draft.deleting"
-          aria-label="Choose cron model and effort"
-        >
-          <Bot :size="17" />
-          <span class="cron-popover__model-info">
-            <strong>{{ modelLabel() }}</strong>
-            <span>{{
-              props.thinkingOptions.length > 0 ? props.draft.thinkingLevel : "Effort unavailable"
-            }}</span>
-          </span>
-        </button>
-        <ModelConfigPopover
-          v-if="!props.draft.saving && !props.draft.deleting"
+        <ModelConfigSelector
           :popover-id="modelPopoverId()"
           :anchor-name="modelPopoverAnchor()"
           :models="props.models"
           :current-model-id="props.draft.model"
           :current-thinking-level="props.draft.thinkingLevel"
           :thinking-options="props.thinkingOptions"
+          :disabled="props.draft.saving || props.draft.deleting"
+          :model-label="modelLabel()"
+          :effort-label="
+            props.thinkingOptions.length > 0 ? props.draft.thinkingLevel : 'Effort unavailable'
+          "
+          aria-label="Choose cron model and effort"
+          @refresh-models="emit('refreshModels')"
           @set-model="emit('modelChange', $event)"
           @set-thinking-level="props.draft.thinkingLevel = $event"
         />
@@ -332,8 +323,7 @@ function modelLabel(): string {
 }
 
 .cron-popover__prompt:focus,
-.cron-popover__select:focus,
-.cron-popover__model-button:focus {
+.cron-popover__select:focus {
   border-color: var(--color-accent);
 }
 
@@ -345,43 +335,6 @@ function modelLabel(): string {
 
 .cron-popover__select {
   padding: 0.55rem 0.65rem;
-}
-
-.cron-popover__model-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.55rem;
-  width: 100%;
-  padding: 0.55rem 0.65rem;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.6rem;
-  background: var(--color-bg-app);
-  color: inherit;
-  font: inherit;
-  text-align: left;
-}
-
-.cron-popover__model-info {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-}
-
-.cron-popover__model-info strong,
-.cron-popover__model-info span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cron-popover__model-info strong {
-  font-size: 0.84rem;
-}
-
-.cron-popover__model-info span {
-  color: var(--color-text-subtle);
-  font-size: 0.76rem;
 }
 
 .cron-popover__thinking-unavailable {

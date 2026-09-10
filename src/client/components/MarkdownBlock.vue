@@ -46,6 +46,7 @@ const html = computed(() =>
 .markdown-body {
   min-width: 0;
   max-width: 100%;
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 

@@ -1,5 +1,6 @@
 import { generateUnifiedPatch } from "@earendil-works/pi-coding-agent";
 import type { AgentTurnFileChange } from "@/shared/types";
+import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE } from "./runtime-notices";
 
 export const AGENT_TURN_FILE_CHANGES_CUSTOM_TYPE = "batty-agent-turn-file-changes";
 
@@ -49,6 +50,7 @@ export function agentTurnFileChangesByReplyEntryId(
     if (entry.type === "message" && entry.message) {
       const message = entry.message as {
         role: string;
+        customType?: string;
         content?: unknown;
         details?: { battyFileChanges?: DurableFileChange[] };
         battyDelivery?: { id: string; part: number };
@@ -66,7 +68,12 @@ export function agentTurnFileChangesByReplyEntryId(
         }
         continue;
       }
-      if (message.role === "user" && hasReply) {
+      // Cron prompts start their own operation, including in copied daily context.
+      // Delivery notices were skipped above and must not reset the parent's edits.
+      const isCronPrompt =
+        message.role === "custom" &&
+        message.customType === `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:cron`;
+      if (isCronPrompt || (message.role === "user" && hasReply)) {
         changes.clear();
         hasReply = false;
       }

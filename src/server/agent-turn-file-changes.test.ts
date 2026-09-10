@@ -88,6 +88,27 @@ describe("durable file change projection", () => {
     expect(changes.get("reply")?.[0]?.patch).toContain("+new file");
   });
 
+  it("isolates cron replies from copied context and preceding inline turns", () => {
+    const cronPrompt = (id: string) =>
+      message(id, { role: "custom", customType: "batty-runtime-notice:cron" });
+    const changes = agentTurnFileChangesByReplyEntryId([
+      mutation("parent-write", "before\n", "parent\n"),
+      reply("parent-reply"),
+      cronPrompt("read-only-cron"),
+      reply("read-only-reply"),
+      cronPrompt("editing-cron"),
+      mutation("cron-write", "parent\n", "child\n"),
+      reply("cron-reply"),
+      cronPrompt("next-cron"),
+      reply("next-reply"),
+    ]);
+    expect(changes.get("parent-reply")?.[0]?.patch).toContain("-before");
+    expect(changes.has("read-only-reply")).toBe(false);
+    expect(changes.get("cron-reply")?.[0]?.patch).toContain("-parent");
+    expect(changes.get("cron-reply")?.[0]?.patch).toContain("+child");
+    expect(changes.has("next-reply")).toBe(false);
+  });
+
   it("isolates delivered cron diffs from parent turns and other deliveries", () => {
     const files = [{ path: "/cron/file.txt", patch: "child diff" }];
     const delivered = (id: string, fileChanges?: typeof files) =>
@@ -102,6 +123,7 @@ describe("durable file change projection", () => {
       reply("parent-reply"),
       message("notice", {
         role: "custom",
+        customType: "batty-runtime-notice:cron",
         battyDelivery: { id: "cron:child", part: 0 },
       }),
       delivered("child", files),

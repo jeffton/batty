@@ -7,6 +7,7 @@ import type {
   CronJob,
   CronJobState,
   CronRunLog,
+  PendingCronRunDelivery,
   UpdateCronJobInput,
 } from "@/shared/types";
 import type { AppConfig } from "./config";
@@ -131,6 +132,21 @@ function normalizeStoredRunLog(value: unknown): CronRunLog {
       normalized[key] = requireStoredString(field, key);
     }
   }
+  if (run.pendingDelivery !== undefined) {
+    if (!run.pendingDelivery || typeof run.pendingDelivery !== "object") {
+      throw new Error("Invalid pending cron run delivery");
+    }
+    normalized.pendingDelivery = {
+      parentSessionId: requireStoredString(
+        run.pendingDelivery.parentSessionId,
+        "Delivery parent session id",
+      ),
+      queuedAtMs: requireStoredTimestamp(
+        run.pendingDelivery.queuedAtMs,
+        "Delivery queued timestamp",
+      ),
+    };
+  }
   return normalized;
 }
 
@@ -145,7 +161,14 @@ function compareRunLogs(left: CronRunLog, right: CronRunLog): number {
 }
 
 function boundRunLogs(runs: CronRunLog[]): CronRunLog[] {
-  return runs.sort(compareRunLogs).slice(0, RECENT_CRON_RUN_LOG_LIMIT);
+  const sorted = runs.sort(compareRunLogs);
+  const protectedRuns = sorted.filter(
+    (run) => run.status === "running" || run.pendingDelivery !== undefined,
+  );
+  const recentRuns = sorted
+    .filter((run) => run.status !== "running" && run.pendingDelivery === undefined)
+    .slice(0, RECENT_CRON_RUN_LOG_LIMIT);
+  return [...protectedRuns, ...recentRuns].sort(compareRunLogs);
 }
 
 function normalizeStoredJob(value: unknown): StoredCronJob {
@@ -253,6 +276,43 @@ export class CronStore {
       store.runs = boundRunLogs(store.runs);
       await this.writeStoreUnlocked(store.jobs, store.runs);
       return next;
+    });
+  }
+
+  async queueRunDelivery(
+    runId: string,
+    parentSessionId: string,
+    queuedAtMs = Date.now(),
+  ): Promise<CronRunLog> {
+    return this.withStoreLock(async () => {
+      const store = await this.loadStoreUnlocked();
+      const index = store.runs.findIndex((run) => run.runId === runId);
+      if (index < 0) throw new Error(`Unknown cron run: ${runId}`);
+      const current = store.runs[index]!;
+      if (current.pendingDelivery && current.pendingDelivery.parentSessionId !== parentSessionId) {
+        throw new Error(`Cron run ${runId} is queued for a different parent session`);
+      }
+      const pendingDelivery: PendingCronRunDelivery = current.pendingDelivery ?? {
+        parentSessionId,
+        queuedAtMs,
+      };
+      const next = normalizeStoredRunLog({ ...current, pendingDelivery });
+      store.runs[index] = next;
+      await this.writeStoreUnlocked(store.jobs, boundRunLogs(store.runs));
+      return next;
+    });
+  }
+
+  async completeRunDelivery(runId: string): Promise<CronRunLog | undefined> {
+    return this.withStoreLock(async () => {
+      const store = await this.loadStoreUnlocked();
+      const index = store.runs.findIndex((run) => run.runId === runId);
+      if (index < 0) return undefined;
+      const { pendingDelivery: _pendingDelivery, ...next } = store.runs[index]!;
+      const normalized = normalizeStoredRunLog(next);
+      store.runs[index] = normalized;
+      await this.writeStoreUnlocked(store.jobs, boundRunLogs(store.runs));
+      return normalized;
     });
   }
 

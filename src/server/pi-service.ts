@@ -77,10 +77,12 @@ import {
 } from "./pi-service-types";
 import type { CronService } from "./cron";
 import {
+  deliverCronJobRun,
   deliverSkippedCronJobRun,
   runCronJobSession,
   recoverCronJobSession,
   executeCronOperation,
+  type PiServiceCronAdapterContext,
 } from "./pi-service-cron-adapter";
 import { createPiServiceTools } from "./pi-service-tool-factory";
 import type { RuntimeNotice } from "./runtime-notices";
@@ -431,6 +433,20 @@ export class PiService {
     return this.openSession(workspace, await this.findSessionPath(workspace, sessionId));
   }
 
+  async openSessionForDelivery(
+    workspace: WorkspaceInfo,
+    sessionPath: string,
+  ): Promise<{ state: SessionState; owned: boolean }> {
+    const canonicalPath = path.resolve(sessionPath);
+    const existing = [...this.sessions.values()].find(
+      (candidate) => candidate.session.sessionFile === canonicalPath,
+    );
+    if (existing || this.sessionOpenPromises.has(canonicalPath)) {
+      return { state: await this.openSession(workspace, canonicalPath), owned: false };
+    }
+    return { state: await this.openSession(workspace, canonicalPath), owned: true };
+  }
+
   async openSession(
     workspace: WorkspaceInfo,
     sessionPath: string,
@@ -483,6 +499,28 @@ export class PiService {
     }
   }
 
+  private cronAdapterContext(): PiServiceCronAdapterContext {
+    return {
+      createCronSession: (workspace, options) => this.createCronSession(workspace, options),
+      promptCron: (sessionId, notice, operationId) =>
+        this.promptCron(sessionId, notice, operationId),
+      resolveOrCreateDailySession: (workspace, options) =>
+        this.resolveOrCreateDailySession(workspace, options),
+      requireSession: (sessionId) => this.requireSession(sessionId),
+      requireSessionPath: (sessionId) => this.requireSessionPath(sessionId),
+      prepareSessionForContextCopy: (sessionId, copy) =>
+        this.prepareSessionForContextCopy(sessionId, copy),
+      runSubagentSerial: (sessionId, run) => this.runSubagentSerial(sessionId, run),
+      getState: (sessionId) => this.getState(sessionId),
+      publishReset: (webSession, state) => this.publish(webSession, { type: "reset", state }),
+      setThinkingLevel: (sessionId, thinkingLevel) =>
+        this.setThinkingLevel(sessionId, thinkingLevel),
+      setModel: (sessionId, modelId) => this.setModel(sessionId, modelId),
+      onAgentCompleted: this.onAgentCompleted,
+      notifyWorkspaceUpdated: (workspaceId) => this.notifyWorkspaceUpdated(workspaceId),
+    };
+  }
+
   async runCronJobSession(job: {
     workspace: WorkspaceInfo;
     prompt: string;
@@ -494,28 +532,9 @@ export class PiService {
     runId: string;
     signal: AbortSignal;
     onSessionStarted(session: { sessionId: string; sessionPath: string }): void;
+    queueResultDelivery(parentSessionId: string): Promise<void>;
   }): Promise<{ sessionId: string; sessionPath: string }> {
-    return runCronJobSession(
-      {
-        createCronSession: (workspace, options) => this.createCronSession(workspace, options),
-        promptCron: (sessionId, notice, operationId) =>
-          this.promptCron(sessionId, notice, operationId),
-        resolveOrCreateDailySession: (workspace, options) =>
-          this.resolveOrCreateDailySession(workspace, options),
-        requireSession: (sessionId) => this.requireSession(sessionId),
-        requireSessionPath: (sessionId) => this.requireSessionPath(sessionId),
-        prepareSessionForContextCopy: (sessionId) => this.prepareSessionForContextCopy(sessionId),
-        runSubagentSerial: (sessionId, run) => this.runSubagentSerial(sessionId, run),
-        getState: (sessionId) => this.getState(sessionId),
-        publishReset: (webSession, state) => this.publish(webSession, { type: "reset", state }),
-        setThinkingLevel: (sessionId, thinkingLevel) =>
-          this.setThinkingLevel(sessionId, thinkingLevel),
-        setModel: (sessionId, modelId) => this.setModel(sessionId, modelId),
-        onAgentCompleted: this.onAgentCompleted,
-        notifyWorkspaceUpdated: (workspaceId) => this.notifyWorkspaceUpdated(workspaceId),
-      },
-      job,
-    );
+    return runCronJobSession(this.cronAdapterContext(), job);
   }
 
   async recoverCronJobSession(
@@ -523,26 +542,30 @@ export class PiService {
   ): Promise<{ sessionId: string; sessionPath: string }> {
     return recoverCronJobSession(
       {
-        createCronSession: (workspace, options) => this.createCronSession(workspace, options),
-        promptCron: (sessionId, notice, operationId) =>
-          this.promptCron(sessionId, notice, operationId),
+        ...this.cronAdapterContext(),
         openSession: (workspace, sessionPath) => this.openSession(workspace, sessionPath),
-        openSessionById: (workspace, sessionId) => this.openSessionById(workspace, sessionId),
-        resolveOrCreateDailySession: (workspace, options) =>
-          this.resolveOrCreateDailySession(workspace, options),
-        requireSession: (sessionId) => this.requireSession(sessionId),
-        requireSessionPath: (sessionId) => this.requireSessionPath(sessionId),
-        prepareSessionForContextCopy: (sessionId) => this.prepareSessionForContextCopy(sessionId),
-        runSubagentSerial: (sessionId, run) => this.runSubagentSerial(sessionId, run),
-        getState: (sessionId) => this.getState(sessionId),
-        publishReset: (webSession, state) => this.publish(webSession, { type: "reset", state }),
-        setThinkingLevel: (sessionId, thinkingLevel) =>
-          this.setThinkingLevel(sessionId, thinkingLevel),
-        setModel: (sessionId, modelId) => this.setModel(sessionId, modelId),
-        onAgentCompleted: this.onAgentCompleted,
-        notifyWorkspaceUpdated: (workspaceId) => this.notifyWorkspaceUpdated(workspaceId),
       },
       job,
+    );
+  }
+
+  async deliverCronJobRun(
+    job: Parameters<typeof deliverCronJobRun>[1],
+    delivery: Parameters<typeof deliverCronJobRun>[2],
+  ): Promise<void> {
+    return deliverCronJobRun(
+      {
+        ...this.cronAdapterContext(),
+        openSessionById: (workspace, sessionId) => this.openSessionById(workspace, sessionId),
+        openSessionForDelivery: (workspace, sessionPath) =>
+          this.openSessionForDelivery(workspace, sessionPath),
+        disposeSession: (sessionId) => {
+          const session = this.requireSession(sessionId);
+          if (session.subscribers.size === 0) this.disposeWebSession(session);
+        },
+      },
+      job,
+      delivery,
     );
   }
 
@@ -559,28 +582,7 @@ export class PiService {
     },
     skipped: { skippedAtMs: number; activeRun: RunningCronJob; reason: string },
   ): Promise<void> {
-    return deliverSkippedCronJobRun(
-      {
-        createCronSession: (workspace, options) => this.createCronSession(workspace, options),
-        promptCron: (sessionId, notice, operationId) =>
-          this.promptCron(sessionId, notice, operationId),
-        resolveOrCreateDailySession: (workspace, options) =>
-          this.resolveOrCreateDailySession(workspace, options),
-        requireSession: (sessionId) => this.requireSession(sessionId),
-        requireSessionPath: (sessionId) => this.requireSessionPath(sessionId),
-        prepareSessionForContextCopy: (sessionId) => this.prepareSessionForContextCopy(sessionId),
-        runSubagentSerial: (sessionId, run) => this.runSubagentSerial(sessionId, run),
-        getState: (sessionId) => this.getState(sessionId),
-        publishReset: (webSession, state) => this.publish(webSession, { type: "reset", state }),
-        setThinkingLevel: (sessionId, thinkingLevel) =>
-          this.setThinkingLevel(sessionId, thinkingLevel),
-        setModel: (sessionId, modelId) => this.setModel(sessionId, modelId),
-        onAgentCompleted: this.onAgentCompleted,
-        notifyWorkspaceUpdated: (workspaceId) => this.notifyWorkspaceUpdated(workspaceId),
-      },
-      job,
-      skipped,
-    );
+    return deliverSkippedCronJobRun(this.cronAdapterContext(), job, skipped);
   }
 
   async createOrOpenDailySession(workspace: WorkspaceInfo): Promise<SessionState> {
@@ -692,30 +694,30 @@ export class PiService {
     return sessionPath;
   }
 
-  private async prepareSessionForContextCopy(sessionId: string): Promise<void> {
-    await this.runSubagentSerial(sessionId, async () => {
+  private async prepareSessionForContextCopy<T>(
+    sessionId: string,
+    copy: () => Promise<T>,
+  ): Promise<T> {
+    return this.runSubagentSerial(sessionId, async () => {
       const webSession = this.requireSession(sessionId);
       await webSession.session.waitForIdle();
       const contextUsage = getSessionContextUsage(webSession.session);
-      if (contextUsage?.tokens == null) {
-        return;
+      if (contextUsage?.tokens != null) {
+        const compactionSettings = webSession.session.settingsManager.getCompactionSettings();
+        if (
+          compactionSettings.enabled &&
+          contextUsage.tokens > contextUsage.contextWindow - compactionSettings.reserveTokens
+        ) {
+          await webSession.session.compact(
+            "Prepare this daily session for a detached cron run that includes previous context. Preserve operational facts, recent decisions, current state, scheduled work, and anything needed by future scheduled runs.",
+          );
+          const state = this.getState(webSession.id);
+          this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
+          await this.onAgentCompleted?.(state);
+          await this.notifyWorkspaceUpdated(webSession.workspace.id);
+        }
       }
-
-      const compactionSettings = webSession.session.settingsManager.getCompactionSettings();
-      if (
-        !compactionSettings.enabled ||
-        contextUsage.tokens <= contextUsage.contextWindow - compactionSettings.reserveTokens
-      ) {
-        return;
-      }
-
-      await webSession.session.compact(
-        "Prepare this daily session for a detached cron run that includes previous context. Preserve operational facts, recent decisions, current state, scheduled work, and anything needed by future scheduled runs.",
-      );
-      const state = this.getState(webSession.id);
-      this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
-      await this.onAgentCompleted?.(state);
-      await this.notifyWorkspaceUpdated(webSession.workspace.id);
+      return copy();
     });
   }
 

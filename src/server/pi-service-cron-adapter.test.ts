@@ -95,11 +95,25 @@ describe("runCronJobSession", () => {
     const onAgentCompleted = vi.fn(async () => undefined);
     const notifyWorkspaceUpdated = vi.fn(async () => undefined);
     const onSessionStarted = vi.fn();
-    const prepareSessionForContextCopy = vi.fn(async () => undefined);
+    const queueResultDelivery = vi.fn(async () => undefined);
+    const prepareSessionForContextCopy = vi.fn();
+    let preparingContext = false;
+    const copyPreparedSession = async <T>(sessionId: string, copy: () => Promise<T>) => {
+      prepareSessionForContextCopy(sessionId, copy);
+      preparingContext = true;
+      try {
+        return await copy();
+      } finally {
+        preparingContext = false;
+      }
+    };
 
     const result = await runCronJobSession(
       {
-        createCronSession: vi.fn(async () => ({ id: cron.id }) as never),
+        createCronSession: vi.fn(async () => {
+          expect(preparingContext).toBe(true);
+          return { id: cron.id } as never;
+        }),
         promptCron: vi.fn(async () => {
           (cron.session as any).agent.state.messages = [
             { role: "user", content: "Inherited context", timestamp: 1 },
@@ -155,7 +169,7 @@ describe("runCronJobSession", () => {
         requireSessionPath: vi.fn((sessionId) =>
           sessionId === cron.id ? cron.session.sessionFile! : parent.session.sessionFile!,
         ),
-        prepareSessionForContextCopy,
+        prepareSessionForContextCopy: copyPreparedSession,
         runSubagentSerial: async (_sessionId, run) => run(),
         getState: vi.fn((sessionId) => ({ id: sessionId, workspaceId: "roy" }) as never),
         publishReset,
@@ -175,6 +189,7 @@ describe("runCronJobSession", () => {
         scheduleLabel: "Every hour",
         signal: new AbortController().signal,
         onSessionStarted,
+        queueResultDelivery,
       },
     );
 
@@ -182,47 +197,25 @@ describe("runCronJobSession", () => {
       sessionId: "cron-session-id",
       sessionPath: "/tmp/cron-session.jsonl",
     });
-    expect(prepareSessionForContextCopy).toHaveBeenCalledWith(parent.id);
+    expect(prepareSessionForContextCopy).toHaveBeenCalledWith(parent.id, expect.any(Function));
     expect(onSessionStarted).toHaveBeenCalledWith({
       sessionId: "cron-session-id",
       sessionPath: "/tmp/cron-session.jsonl",
     });
-    expect(parent.session.messages).toHaveLength(2);
-    expect(parent.session.messages[0]).toMatchObject({
-      role: "custom",
-      customType: "batty-runtime-notice:cron",
-      content: expect.stringContaining(
-        "The detailed work and tool calls for this cron run are in that detached session.",
-      ),
-      data: { cron: { jobId: "job-1", runId: "run-1", sessionPath: "/tmp/cron-session.jsonl" } },
-    });
-    expect(parent.session.messages[0]).toMatchObject({
-      content: expect.stringContaining("Cron result delivered."),
-    });
-    expect(parent.session.messages[0]).toMatchObject({
-      content: expect.not.stringContaining("You have a fixed snapshot"),
-    });
-    expect(parent.session.messages[1]).toMatchObject({
-      role: "assistant",
-      content: [{ type: "text", text: "Heartbeat ok" }],
-      stopReason: "stop",
-      battyDeliveredFileChanges: [
-        {
-          path: "child.txt",
-          patch:
-            "--- child.txt\n+++ child.txt\n@@ -0,0 +1,1 @@\n+new\n\\ No newline at end of file\n",
-        },
-      ],
-    });
-    expect(parent.session.waitForIdle).toHaveBeenCalled();
-    expect(publishReset).toHaveBeenCalled();
-    expect(onAgentCompleted).toHaveBeenCalled();
-    expect(notifyWorkspaceUpdated).toHaveBeenCalledWith("roy");
+    expect(queueResultDelivery).toHaveBeenCalledWith(parent.session.sessionId);
+    expect(parent.session.messages).toHaveLength(0);
+    expect(parent.session.waitForIdle).not.toHaveBeenCalled();
+    expect(publishReset).not.toHaveBeenCalled();
+    expect(onAgentCompleted).not.toHaveBeenCalled();
+    expect(notifyWorkspaceUpdated).not.toHaveBeenCalled();
   });
 
   it("applies an inline cron job's effort after switching to its model", async () => {
     const daily = createWebSession("daily-session-id", "/tmp/daily-session.jsonl");
     const calls: string[] = [];
+    vi.mocked(daily.session.waitForIdle).mockImplementation(async () => {
+      calls.push("wait");
+    });
 
     await runCronJobSession(
       {
@@ -235,7 +228,7 @@ describe("runCronJobSession", () => {
         ),
         requireSession: vi.fn(() => daily),
         requireSessionPath: vi.fn(() => daily.session.sessionFile!),
-        prepareSessionForContextCopy: vi.fn(async () => undefined),
+        prepareSessionForContextCopy: async (_sessionId, copy) => copy(),
         runSubagentSerial: async (_sessionId, run) => run(),
         getState: vi.fn((sessionId) => ({ id: sessionId, workspaceId: "roy" }) as never),
         publishReset: vi.fn(),
@@ -259,11 +252,20 @@ describe("runCronJobSession", () => {
         session: { kind: "daily-inline" },
         scheduleLabel: "Every hour",
         signal: new AbortController().signal,
-        onSessionStarted: vi.fn(),
+        onSessionStarted: vi.fn(async () => {
+          calls.push("started");
+        }),
+        queueResultDelivery: vi.fn(async () => undefined),
       },
     );
 
-    expect(calls).toEqual(["model:openai-codex/gpt-6-astra", "effort:max", "prompt"]);
+    expect(calls).toEqual([
+      "started",
+      "wait",
+      "model:openai-codex/gpt-6-astra",
+      "effort:max",
+      "prompt",
+    ]);
   });
 
   it("does not deliver a successful NO_REPLY result to the daily parent", async () => {
@@ -294,7 +296,7 @@ describe("runCronJobSession", () => {
         requireSessionPath: vi.fn((sessionId) =>
           sessionId === cron.id ? cron.session.sessionFile! : parent.session.sessionFile!,
         ),
-        prepareSessionForContextCopy: vi.fn(async () => undefined),
+        prepareSessionForContextCopy: async (_sessionId, copy) => copy(),
         runSubagentSerial: async (_sessionId, run) => run(),
         getState: vi.fn((sessionId) => ({ id: sessionId, workspaceId: "roy" }) as never),
         publishReset: vi.fn(),
@@ -314,6 +316,7 @@ describe("runCronJobSession", () => {
         scheduleLabel: "Every hour",
         signal: new AbortController().signal,
         onSessionStarted: vi.fn(),
+        queueResultDelivery: vi.fn(async () => undefined),
       },
     );
 
@@ -321,10 +324,11 @@ describe("runCronJobSession", () => {
     expect(parent.session.messages).toHaveLength(0);
   });
 
-  it("delivers cron errors to the parent before rejecting", async () => {
+  it("queues cron errors for parent delivery when rejecting", async () => {
     const parent = createWebSession("daily-session-id", "/tmp/daily-session.jsonl");
     const cron = createWebSession("cron-session-id", "/tmp/cron-session.jsonl");
 
+    const queueResultDelivery = vi.fn(async () => undefined);
     await expect(
       runCronJobSession(
         {
@@ -339,7 +343,7 @@ describe("runCronJobSession", () => {
           requireSessionPath: vi.fn((sessionId) =>
             sessionId === cron.id ? cron.session.sessionFile! : parent.session.sessionFile!,
           ),
-          prepareSessionForContextCopy: vi.fn(async () => undefined),
+          prepareSessionForContextCopy: async (_sessionId, copy) => copy(),
           runSubagentSerial: async (_sessionId, run) => run(),
           getState: vi.fn((sessionId) => ({ id: sessionId, workspaceId: "roy" }) as never),
           publishReset: vi.fn(),
@@ -358,20 +362,12 @@ describe("runCronJobSession", () => {
           scheduleLabel: "Every hour",
           signal: new AbortController().signal,
           onSessionStarted: vi.fn(),
+          queueResultDelivery,
         },
       ),
     ).rejects.toThrow("detached exploded");
 
-    expect(parent.session.messages).toHaveLength(2);
-    expect(parent.session.messages[0]).toMatchObject({
-      role: "custom",
-      content: expect.stringContaining("/tmp/cron-session.jsonl"),
-    });
-    expect(parent.session.messages[1]).toMatchObject({
-      role: "assistant",
-      content: [{ type: "text", text: "detached exploded" }],
-      stopReason: "error",
-      errorMessage: "detached exploded",
-    });
+    expect(queueResultDelivery).toHaveBeenCalledWith(parent.session.sessionId);
+    expect(parent.session.messages).toHaveLength(0);
   });
 });

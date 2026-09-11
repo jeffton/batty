@@ -136,6 +136,44 @@ describe("cron runtime", () => {
     await service.dispose();
   });
 
+  it("restarts a persisted run that stopped before creating its session", async () => {
+    const config = await createConfig();
+    const store = new CronStore(config);
+    const log = {
+      runId: "unstarted-run",
+      jobId: "inline-job",
+      workspaceId: "alpha",
+      prompt: "Queued inline work",
+      model: "openai/gpt-5",
+      thinkingLevel: "medium",
+      session: { kind: "daily-inline" as const },
+      scheduleLabel: "Every hour",
+      startedAtMs: Date.now() - 1_000,
+      status: "running" as const,
+    };
+    await store.startRun(log);
+    const restart = vi.fn(async (_run, context) => {
+      await context.onSessionStarted({
+        sessionId: "daily-session",
+        sessionPath: "/tmp/daily-session.jsonl",
+      });
+      return { sessionId: "daily-session", sessionPath: "/tmp/daily-session.jsonl" };
+    });
+    const service = new CronService(config);
+    service.setRunner({ run: vi.fn(), restart });
+
+    await service.initialize();
+    await vi.waitFor(() =>
+      expect(service.listRecentRunLogs()[0]).toMatchObject({
+        runId: log.runId,
+        status: "success",
+        sessionId: "daily-session",
+      }),
+    );
+    expect(restart).toHaveBeenCalledOnce();
+    await service.dispose();
+  });
+
   it.each(["success", "error"] as const)(
     "reconstructs a deleted one-shot run waiter and records recovered %s",
     async (status) => {
@@ -218,6 +256,200 @@ describe("cron runtime", () => {
     completed.resolve({ sessionId: "native-session", sessionPath: "/tmp/native.jsonl" });
     await pending;
     expect((await new CronStore(config).readStoredRunLogs())[0]?.status).toBe("running");
+  });
+
+  it("keeps a completed run recoverable until its delivery queue entry is durable", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const config = await createConfig();
+    const service = new CronService(config);
+    const internals = service as unknown as {
+      store: CronStore;
+      queueRetryWaiters: Set<{ resolve(): void }>;
+      triggerJob(jobId: string): Promise<void>;
+    };
+    const persistDelivery = vi
+      .spyOn(internals.store, "queueRunDelivery")
+      .mockRejectedValueOnce(new Error("disk unavailable"));
+    service.setRunner({
+      run: async (_job, context) => {
+        await context.onSessionStarted({
+          sessionId: "cron-session",
+          sessionPath: "/tmp/cron-session.jsonl",
+        });
+        await context.queueResultDelivery("parent-session");
+        return { sessionId: "cron-session", sessionPath: "/tmp/cron-session.jsonl" };
+      },
+    });
+    const job = await service.createJob({
+      workspaceId: "alpha",
+      prompt: "Detached work",
+      model: "openai/gpt-5",
+      thinkingLevel: "medium",
+      session: { kind: "daily-detached" },
+      schedule: { kind: "every", every: "1h" },
+    });
+    const triggered = internals.triggerJob(job.id);
+    await vi.waitFor(() => expect(persistDelivery).toHaveBeenCalledOnce());
+    expect(service.listRecentRunLogs()[0]?.status).toBe("running");
+
+    [...internals.queueRetryWaiters][0]!.resolve();
+    await triggered;
+    expect(persistDelivery).toHaveBeenCalledTimes(2);
+    expect(service.listRecentRunLogs()[0]).toMatchObject({
+      status: "success",
+      pendingDelivery: { parentSessionId: "parent-session" },
+    });
+    await service.dispose();
+  });
+
+  it("retries terminal state persistence before delivering a queued result", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const config = await createConfig();
+    const service = new CronService(config);
+    const internals = service as unknown as {
+      store: CronStore;
+      queueRetryWaiters: Set<{ resolve(): void }>;
+      triggerJob(jobId: string): Promise<void>;
+    };
+    const updateRun = internals.store.updateRun.bind(internals.store);
+    let failedTerminalWrite = false;
+    vi.spyOn(internals.store, "updateRun").mockImplementation((runId, patch) => {
+      if (!failedTerminalWrite && patch.status === "success") {
+        failedTerminalWrite = true;
+        return Promise.reject(new Error("disk unavailable"));
+      }
+      return updateRun(runId, patch);
+    });
+    service.setRunner({
+      run: async (_job, context) => {
+        await context.onSessionStarted({
+          sessionId: "cron-session",
+          sessionPath: "/tmp/cron-session.jsonl",
+        });
+        await context.queueResultDelivery("parent-session");
+        return { sessionId: "cron-session", sessionPath: "/tmp/cron-session.jsonl" };
+      },
+    });
+    const job = await service.createJob({
+      workspaceId: "alpha",
+      prompt: "Detached work",
+      model: "openai/gpt-5",
+      thinkingLevel: "medium",
+      session: { kind: "daily-detached" },
+      schedule: { kind: "every", every: "1h" },
+    });
+    const triggered = internals.triggerJob(job.id);
+    await vi.waitFor(() => expect(internals.queueRetryWaiters.size).toBe(1));
+    expect(service.listRecentRunLogs()[0]).toMatchObject({
+      status: "running",
+      pendingDelivery: { parentSessionId: "parent-session" },
+    });
+
+    [...internals.queueRetryWaiters][0]!.resolve();
+    await triggered;
+    expect(service.listRecentRunLogs()[0]).toMatchObject({
+      status: "success",
+      pendingDelivery: { parentSessionId: "parent-session" },
+    });
+    await service.dispose();
+  });
+
+  it("persists queued delivery and resumes it after restart", async () => {
+    const config = await createConfig();
+    const first = new CronService(config);
+    const blockedDelivery = deferred<void>();
+    const firstDelivery = vi.fn(() => blockedDelivery.promise);
+    first.setRunner({
+      run: async (_job, context) => {
+        await context.onSessionStarted({
+          sessionId: "cron-session",
+          sessionPath: "/tmp/cron-session.jsonl",
+        });
+        await context.queueResultDelivery("parent-session");
+        return { sessionId: "cron-session", sessionPath: "/tmp/cron-session.jsonl" };
+      },
+      deliver: firstDelivery,
+    });
+    const job = await first.createJob({
+      workspaceId: "alpha",
+      prompt: "Detached work",
+      model: "openai/gpt-5",
+      thinkingLevel: "medium",
+      session: { kind: "daily-detached" },
+      schedule: { kind: "every", every: "1h" },
+    });
+    await (first as unknown as { triggerJob(jobId: string): Promise<void> }).triggerJob(job.id);
+
+    expect(first.listRunningJobs()).toHaveLength(0);
+    await vi.waitFor(() => expect(firstDelivery).toHaveBeenCalledOnce());
+    expect(first.listRecentRunLogs()[0]).toMatchObject({
+      status: "success",
+      pendingDelivery: { parentSessionId: "parent-session", queuedAtMs: expect.any(Number) },
+    });
+    await first.dispose();
+
+    const delivered = vi.fn(async () => undefined);
+    const restarted = new CronService(config);
+    restarted.setRunner({ run: vi.fn(), deliver: delivered });
+    await restarted.initialize();
+    await vi.waitFor(() => expect(delivered).toHaveBeenCalledOnce());
+    expect(delivered).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: expect.any(String), status: "success" }),
+      expect.objectContaining({ parentSessionId: "parent-session" }),
+    );
+    await vi.waitFor(() =>
+      expect(restarted.listRecentRunLogs()[0]?.pendingDelivery).toBeUndefined(),
+    );
+    expect((await new CronStore(config).readStoredRunLogs())[0]?.pendingDelivery).toBeUndefined();
+    blockedDelivery.resolve(undefined);
+    await restarted.dispose();
+  });
+
+  it.each([
+    { name: "inline", session: { kind: "daily-inline" as const } },
+    {
+      name: "detached context snapshot",
+      session: { kind: "daily-detached" as const, includePreviousContext: true },
+    },
+  ])("queues $name runs instead of skipping while the parent is busy", async ({ session }) => {
+    const service = new CronService(await createConfig());
+    const results = [
+      deferred<{ sessionId: string; sessionPath: string }>(),
+      deferred<{ sessionId: string; sessionPath: string }>(),
+    ];
+    const signals: AbortSignal[] = [];
+    const run = vi.fn(async (_job, context: { signal: AbortSignal }) => {
+      signals.push(context.signal);
+      return results[signals.length - 1]!.promise;
+    });
+    service.setRunner({ run });
+    const job = await service.createJob({
+      workspaceId: "alpha",
+      prompt: "Parent-bound work",
+      model: "openai/gpt-5",
+      thinkingLevel: "medium",
+      session,
+      schedule: { kind: "every", every: "1h" },
+    });
+    const trigger = (
+      service as unknown as { triggerJob(jobId: string): Promise<void> }
+    ).triggerJob.bind(service);
+
+    const first = trigger(job.id);
+    await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
+    const second = trigger(job.id);
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+    expect(signals.every((signal) => !signal.aborted)).toBe(true);
+    expect(service.listRecentRunLogs()).toEqual([
+      expect.objectContaining({ status: "running", jobId: job.id }),
+      expect.objectContaining({ status: "running", jobId: job.id }),
+    ]);
+
+    results[0]!.resolve({ sessionId: "session-1", sessionPath: "/tmp/session-1.jsonl" });
+    results[1]!.resolve({ sessionId: "session-2", sessionPath: "/tmp/session-2.jsonl" });
+    await Promise.all([first, second]);
+    expect(service.listRecentRunLogs().map((log) => log.status)).toEqual(["success", "success"]);
+    await service.dispose();
   });
 
   it("keeps an overlapped run registered until its runner settles", async () => {

@@ -3,7 +3,14 @@ import { BACKGROUND_CONTEXT as nativeContext, getOrThrow } from "@earendil-works
 import { CRON_RUN_SESSION_CUSTOM_TYPE, type CronRunSessionBinding } from "./cron-session";
 import { appendResultDelivery } from "./session-result-delivery";
 import type { HarnessController as AgentSession } from "./harness-controller";
-import type { CronJobSession, RunningCronJob, SessionState, WorkspaceInfo } from "@/shared/types";
+import type {
+  CronJobSession,
+  CronRunLog,
+  PendingCronRunDelivery,
+  RunningCronJob,
+  SessionState,
+  WorkspaceInfo,
+} from "@/shared/types";
 import { buildCronRuntimeNotice, type RuntimeNotice } from "./runtime-notices";
 import type { WebSession } from "./pi-service-types";
 import { extractAssistantText, stripThinkingFromAssistantMessage, ZERO_USAGE } from "./subagent";
@@ -21,6 +28,7 @@ export type CronJobRun = {
   scheduleLabel: string;
   signal: AbortSignal;
   onSessionStarted(session: { sessionId: string; sessionPath: string }): void | Promise<void>;
+  queueResultDelivery(parentSessionId: string): Promise<void>;
 };
 
 export type PiServiceCronAdapterContext = {
@@ -42,7 +50,7 @@ export type PiServiceCronAdapterContext = {
   ) => Promise<SessionState>;
   requireSession: (sessionId: string) => WebSession;
   requireSessionPath: (sessionId: string) => string;
-  prepareSessionForContextCopy: (sessionId: string) => Promise<void>;
+  prepareSessionForContextCopy: <T>(sessionId: string, run: () => Promise<T>) => Promise<T>;
   runSubagentSerial: <T>(sessionId: string, run: () => Promise<T>) => Promise<T>;
   getState: (sessionId: string) => SessionState;
   publishReset: (webSession: WebSession, state: SessionState) => void;
@@ -90,7 +98,6 @@ export async function executeCronOperation(
 export async function recoverCronJobSession(
   context: PiServiceCronAdapterContext & {
     openSession(workspace: WorkspaceInfo, sessionPath: string): Promise<SessionState>;
-    openSessionById(workspace: WorkspaceInfo, sessionId: string): Promise<SessionState>;
   },
   job: CronJobRun & { sessionPath: string; startedAtMs: number },
 ): Promise<{ sessionId: string; sessionPath: string }> {
@@ -102,23 +109,22 @@ export async function recoverCronJobSession(
     session: job.session,
     now: new Date(job.startedAtMs),
   });
-  const marker = child.sessionManager
-    .getEntries()
-    .findLast(
-      (entry) =>
-        entry.type === "custom" &&
-        entry.customType === CRON_RUN_SESSION_CUSTOM_TYPE &&
-        (entry.data as unknown as CronRunSessionBinding).runId === job.runId,
-    );
-  const binding =
-    marker?.type === "custom" ? (marker.data as unknown as CronRunSessionBinding) : undefined;
+  const binding = cronRunBinding(child, job.runId);
+  if (job.session.kind === "daily-inline") {
+    return runCronJobSession(context, job, { parent: restored, cronNotice: notice });
+  }
+  if (
+    job.session.kind === "daily-detached" &&
+    !binding?.parentSessionId &&
+    job.session.includePreviousContext
+  ) {
+    return runCronJobSession(context, job, { parent: restored, cronNotice: notice });
+  }
   if (job.session.kind === "daily-detached" && !binding?.parentSessionId) {
     throw new Error(`Cron run ${job.runId} has no persisted parent binding`);
   }
-  const parent =
-    job.session.kind === "daily-detached"
-      ? await context.openSessionById(job.workspace, binding!.parentSessionId!)
-      : undefined;
+  const parentSessionId =
+    job.session.kind === "daily-detached" ? binding!.parentSessionId : undefined;
   const abort = () => {
     void child.lane
       .requestAbort(job.runId, nativeContext)
@@ -137,10 +143,10 @@ export async function recoverCronJobSession(
     job.signal.removeEventListener("abort", abort);
   }
   if (
-    parent &&
+    parentSessionId &&
     (error || extractAssistantText(await lastCronAssistant(child, job.runId)) !== "NO_REPLY")
   ) {
-    await deliverCronRun(context, parent.id, job, child, error);
+    await job.queueResultDelivery(parentSessionId);
   }
   if (error) throw error;
   return { sessionId: child.sessionId, sessionPath: child.sessionFile };
@@ -148,7 +154,7 @@ export async function recoverCronJobSession(
 
 export async function deliverSkippedCronJobRun(
   context: PiServiceCronAdapterContext,
-  job: Omit<CronJobRun, "signal" | "onSessionStarted">,
+  job: Omit<CronJobRun, "signal" | "onSessionStarted" | "queueResultDelivery">,
   skipped: { skippedAtMs: number; activeRun: RunningCronJob; reason: string },
 ): Promise<void> {
   if (job.session.kind === "new") {
@@ -184,36 +190,48 @@ export async function deliverSkippedCronJobRun(
 export async function runCronJobSession(
   context: PiServiceCronAdapterContext,
   job: CronJobRun,
+  recovery?: { parent: SessionState; cronNotice: RuntimeNotice },
 ): Promise<{ sessionId: string; sessionPath: string }> {
-  const cronNotice = buildCronRuntimeNotice({
-    scheduleLabel: job.scheduleLabel,
-    prompt: job.prompt,
-    session: job.session,
-  });
+  const cronNotice =
+    recovery?.cronNotice ??
+    buildCronRuntimeNotice({
+      scheduleLabel: job.scheduleLabel,
+      prompt: job.prompt,
+      session: job.session,
+    });
 
   if (job.session.kind === "daily-inline") {
-    return runInlineCronJob(context, job, cronNotice);
+    return runInlineCronJob(context, job, cronNotice, recovery?.parent);
   }
 
   const parent =
-    job.session.kind === "daily-detached"
+    recovery?.parent ??
+    (job.session.kind === "daily-detached"
       ? await context.resolveOrCreateDailySession(job.workspace)
-      : undefined;
+      : undefined);
   const includePreviousContext =
     job.session.kind === "daily-detached" && job.session.includePreviousContext === true;
+  const createCronSession = () =>
+    context.createCronSession(job.workspace, {
+      jobId: job.jobId,
+      runId: job.runId,
+      modelId: job.model,
+      thinkingLevel: job.thinkingLevel,
+      ...(parent ? { parentSessionId: parent.sessionId } : {}),
+      ...(parent && includePreviousContext
+        ? { copySessionPath: context.requireSessionPath(parent.id) }
+        : {}),
+    });
+  let cronSession: SessionState;
   if (parent && includePreviousContext) {
-    await context.prepareSessionForContextCopy(parent.id);
+    await job.onSessionStarted({
+      sessionId: parent.sessionId,
+      sessionPath: context.requireSessionPath(parent.id),
+    });
+    cronSession = await context.prepareSessionForContextCopy(parent.id, createCronSession);
+  } else {
+    cronSession = await createCronSession();
   }
-  const parentSessionPath =
-    parent && includePreviousContext ? context.requireSessionPath(parent.id) : undefined;
-  const cronSession = await context.createCronSession(job.workspace, {
-    jobId: job.jobId,
-    runId: job.runId,
-    modelId: job.model,
-    thinkingLevel: job.thinkingLevel,
-    ...(parent ? { parentSessionId: parent.sessionId } : {}),
-    ...(parentSessionPath ? { copySessionPath: parentSessionPath } : {}),
-  });
   const cronWebSession = context.requireSession(cronSession.id);
   const cronSessionPath = context.requireSessionPath(cronWebSession.id);
   await job.onSessionStarted({
@@ -237,7 +255,7 @@ export async function runCronJobSession(
     await context.promptCron(cronWebSession.id, cronNotice, job.runId);
   } catch (error) {
     if (parent) {
-      await deliverCronRun(context, parent.id, job, cronWebSession.session, error);
+      await job.queueResultDelivery(parent.sessionId);
     }
     throw error;
   } finally {
@@ -250,7 +268,7 @@ export async function runCronJobSession(
     parent &&
     !(errorMessage === undefined && extractAssistantText(finalAssistant) === "NO_REPLY")
   ) {
-    await deliverCronRun(context, parent.id, job, cronWebSession.session);
+    await job.queueResultDelivery(parent.sessionId);
   }
   if (errorMessage) {
     throw new Error(errorMessage);
@@ -266,22 +284,25 @@ async function runInlineCronJob(
   context: PiServiceCronAdapterContext,
   job: CronJobRun,
   cronNotice: RuntimeNotice,
+  restored?: SessionState,
 ): Promise<{ sessionId: string; sessionPath: string }> {
-  const session = await context.resolveOrCreateDailySession(job.workspace, {
-    modelId: job.model,
-    thinkingLevel: job.thinkingLevel,
-  });
+  const session =
+    restored ??
+    (await context.resolveOrCreateDailySession(job.workspace, {
+      modelId: job.model,
+      thinkingLevel: job.thinkingLevel,
+    }));
   const webSession = context.requireSession(session.id);
+  await job.onSessionStarted({
+    sessionId: webSession.session.sessionId,
+    sessionPath: context.requireSessionPath(webSession.id),
+  });
 
   return context.runSubagentSerial(webSession.session.sessionId, async () => {
     await webSession.session.waitForIdle();
     await context.setModel(session.id, job.model);
     await context.setThinkingLevel(session.id, job.thinkingLevel);
     context.publishReset(webSession, context.getState(webSession.id));
-    await job.onSessionStarted({
-      sessionId: webSession.session.sessionId,
-      sessionPath: context.requireSessionPath(webSession.id),
-    });
 
     const abortListener = () => {
       void webSession.session.lane
@@ -307,30 +328,67 @@ async function runInlineCronJob(
   });
 }
 
-async function deliverCronRun(
-  context: PiServiceCronAdapterContext,
-  parentSessionId: string,
-  job: CronJobRun,
-  cronSession: AgentSession,
-  error?: unknown,
+export async function deliverCronJobRun(
+  context: PiServiceCronAdapterContext & {
+    openSessionById(workspace: WorkspaceInfo, sessionId: string): Promise<SessionState>;
+    openSessionForDelivery(
+      workspace: WorkspaceInfo,
+      sessionPath: string,
+    ): Promise<{ state: SessionState; owned: boolean }>;
+    disposeSession(sessionId: string): void;
+  },
+  job: CronRunLog & {
+    workspace: WorkspaceInfo;
+    sessionId: string;
+    sessionPath: string;
+  },
+  delivery: PendingCronRunDelivery,
 ): Promise<void> {
-  // Capture the child's durable result before waiting on the parent. Completion hooks
-  // can release an unobserved ephemeral harness while the parent is still busy.
-  const delivery = {
-    sessionId: cronSession.sessionId,
-    sessionPath: cronSession.sessionFile,
-    finalAssistant: await lastCronAssistant(cronSession, job.runId),
+  const opened = await context.openSessionForDelivery(job.workspace, job.sessionPath);
+  let captured: {
+    sessionId: string;
+    sessionPath: string;
+    finalAssistant?: AssistantMessage;
   };
-  await context.runSubagentSerial(parentSessionId, async () => {
-    const parent = context.requireSession(parentSessionId);
+  try {
+    const child = context.requireSession(opened.state.id).session;
+    const binding = cronRunBinding(child, job.runId);
+    if (binding?.parentSessionId !== delivery.parentSessionId) {
+      throw new Error(`Cron run ${job.runId} has an invalid persisted parent binding`);
+    }
+    captured = {
+      sessionId: child.sessionId,
+      sessionPath: child.sessionFile,
+      finalAssistant: await lastCronAssistant(child, job.runId),
+    };
+  } finally {
+    if (opened.owned) context.disposeSession(opened.state.id);
+  }
+
+  if (!job.error && extractAssistantText(captured.finalAssistant) === "NO_REPLY") return;
+  const parentState = await context.openSessionById(job.workspace, delivery.parentSessionId);
+  await context.runSubagentSerial(parentState.id, async () => {
+    const parent = context.requireSession(parentState.id);
     await parent.session.waitForIdle();
-    const appended = await appendCronRunDelivery(parent.session, job, delivery, error);
+    const appended = await appendCronRunDelivery(parent.session, job, captured, job.error);
     if (!appended) return;
     const state = context.getState(parent.id);
     context.publishReset(parent, state);
     await context.onAgentCompleted?.(state);
     await context.notifyWorkspaceUpdated(parent.workspace.id);
   });
+}
+
+function cronRunBinding(session: AgentSession, runId: string): CronRunSessionBinding | undefined {
+  const marker = session.sessionManager
+    .getEntries()
+    .findLast(
+      (entry) =>
+        entry.type === "custom" &&
+        entry.customType === CRON_RUN_SESSION_CUSTOM_TYPE &&
+        (entry.data as unknown as CronRunSessionBinding).runId === runId,
+    );
+  return marker?.type === "custom" ? (marker.data as unknown as CronRunSessionBinding) : undefined;
 }
 
 async function appendCronErrorDelivery(
@@ -360,7 +418,7 @@ async function appendCronErrorDelivery(
 
 async function appendCronRunDelivery(
   parent: AgentSession,
-  job: CronJobRun,
+  job: Pick<CronJobRun, "jobId" | "runId" | "workspace" | "prompt" | "scheduleLabel" | "session">,
   delivery: {
     sessionId: string;
     sessionPath: string;

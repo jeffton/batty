@@ -180,11 +180,17 @@ export interface RunningCronJob {
   sessionPath?: string;
 }
 
+export interface PendingCronRunDelivery {
+  parentSessionId: string;
+  queuedAtMs: number;
+}
+
 export interface CronRunLog extends RunningCronJob {
   status: "running" | "success" | "error";
   completedAtMs?: number;
   durationMs?: number;
   error?: string;
+  pendingDelivery?: PendingCronRunDelivery;
 }
 
 export interface CronJobState {

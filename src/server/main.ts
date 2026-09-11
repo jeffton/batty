@@ -124,6 +124,14 @@ cronService.subscribe((workspaceIds) => {
   }
 });
 cronService.setRunner({
+  restart: async (run, runContext) => {
+    const workspace = resolveWorkspace(await listWorkspaces(config), run.workspaceId);
+    return service.runCronJobSession({
+      ...run,
+      ...runContext,
+      workspace,
+    });
+  },
   recover: async (run, runContext) => {
     const workspace = resolveWorkspace(await listWorkspaces(config), run.workspaceId);
     return service.recoverCronJobSession({
@@ -147,7 +155,15 @@ cronService.setRunner({
       runId: runContext.runId,
       signal: runContext.signal,
       onSessionStarted: runContext.onSessionStarted,
+      queueResultDelivery: runContext.queueResultDelivery,
     });
+  },
+  deliver: async (run, delivery) => {
+    const workspace = resolveWorkspace(await listWorkspaces(config), run.workspaceId);
+    await service.deliverCronJobRun(
+      { ...run, workspace, sessionId: run.sessionId!, sessionPath: run.sessionPath! },
+      delivery,
+    );
   },
   onSkipped: async (job, skippedContext) => {
     const workspaces = await listWorkspaces(config);

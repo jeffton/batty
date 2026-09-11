@@ -13,6 +13,7 @@ import { createHarnessFixture } from "./harness-test-fixture";
 import { attachSession, disposeWebSession, handleAgentEvent } from "./pi-service-sessions";
 import type { WebSession } from "./pi-service-types";
 import {
+  deliverCronJobRun,
   executeCronOperation,
   recoverCronJobSession,
   runCronJobSession,
@@ -96,7 +97,7 @@ describe("detached result delivery after ephemeral harness disposal", () => {
       });
       cleanups.push(child.cleanup);
       const lifecycle = completionLifecycle(workspace);
-      const webChild = lifecycle.attach(child.session);
+      let webChild = lifecycle.attach(child.session);
       const childId = child.session.sessionId;
       const childPath = child.session.sessionFile;
       await child.session.sessionManager.appendCustomEntry(
@@ -145,6 +146,7 @@ describe("detached result delivery after ephemeral harness disposal", () => {
         scheduleLabel: "Every hour",
         signal: new AbortController().signal,
         onSessionStarted: vi.fn(),
+        queueResultDelivery: vi.fn(async () => undefined),
       };
       if (mode === "recovered") {
         getOrThrow(
@@ -160,7 +162,6 @@ describe("detached result delivery after ephemeral harness disposal", () => {
               {
                 ...adapter,
                 openSession: async () => lifecycle.state(childId),
-                openSessionById: async () => lifecycle.state(parent.session.sessionId),
               },
               { ...job, sessionPath: childPath, startedAtMs: 1 },
             )
@@ -179,12 +180,49 @@ describe("detached result delivery after ephemeral harness disposal", () => {
       expect(child.session.snapshot.lastResult?.status).toBe(
         mode === "failed" ? "failed" : "completed",
       );
-      await parent.session.resume();
       expect(await outcome).toEqual(
         mode === "failed"
           ? { error: expect.objectContaining({ message: "provider refused" }) }
           : { result: { sessionId: childId, sessionPath: childPath } },
       );
+      expect(job.queueResultDelivery).toHaveBeenCalledTimes(mode === "NO_REPLY" ? 0 : 1);
+      if (mode !== "NO_REPLY") {
+        expect(job.queueResultDelivery).toHaveBeenCalledWith(parent.session.sessionId);
+      }
+      expect(queues.size).toBe(0);
+      await parent.session.resume();
+      if (mode !== "NO_REPLY") {
+        await deliverCronJobRun(
+          {
+            ...adapter,
+            openSessionForDelivery: async () => {
+              await child.reopen();
+              webChild = lifecycle.attach(child.session);
+              return { state: lifecycle.state(childId), owned: true };
+            },
+            openSessionById: async () => lifecycle.state(parent.session.sessionId),
+            disposeSession: (id) => lifecycle.dispose(adapter.requireSession(id)),
+          },
+          {
+            jobId: job.jobId,
+            runId: job.runId,
+            workspaceId: workspace.id,
+            workspace,
+            prompt: job.prompt,
+            model: job.model,
+            thinkingLevel: job.thinkingLevel,
+            session: job.session,
+            scheduleLabel: job.scheduleLabel,
+            startedAtMs: 1,
+            status: mode === "failed" ? "error" : "success",
+            sessionId: childId,
+            sessionPath: childPath,
+            ...(mode === "failed" ? { error: "provider refused" } : {}),
+          },
+          { parentSessionId: parent.session.sessionId, queuedAtMs: 2 },
+        );
+        expect(lifecycle.sessions.has(childId)).toBe(false);
+      }
       await parent.reopen();
       expect(parent.session.messages).toHaveLength(mode === "NO_REPLY" ? 2 : 4);
       if (mode !== "NO_REPLY") {

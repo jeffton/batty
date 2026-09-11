@@ -208,6 +208,53 @@ describe("cron store", () => {
     ]);
   });
 
+  it("persists pending deliveries until completion and protects them from retention", async () => {
+    const config = await createConfig();
+    const store = new CronStore(config);
+    const base = {
+      jobId: "job",
+      workspaceId: "alpha",
+      prompt: "Inspect",
+      model: "openai/gpt-5",
+      thinkingLevel: "medium",
+      session: { kind: "daily-detached" as const, includePreviousContext: false },
+      scheduleLabel: "Every hour",
+    };
+    await store.startRun({
+      ...base,
+      runId: "pending",
+      startedAtMs: 1,
+      status: "success",
+      sessionPath: "/tmp/pending.jsonl",
+    });
+    const queued = await store.queueRunDelivery("pending", "parent", 10);
+    expect(queued.pendingDelivery).toEqual({ parentSessionId: "parent", queuedAtMs: 10 });
+    expect(await store.queueRunDelivery("pending", "parent", 20)).toMatchObject({
+      pendingDelivery: { parentSessionId: "parent", queuedAtMs: 10 },
+    });
+    await expect(store.queueRunDelivery("pending", "other-parent")).rejects.toThrow(
+      "different parent session",
+    );
+
+    await store.completeRunDelivery("pending");
+    const completed = (await store.readStoredRunLogs()).find((run) => run.runId === "pending");
+    expect(completed).toBeDefined();
+    expect(completed?.pendingDelivery).toBeUndefined();
+    await store.queueRunDelivery("pending", "parent", 30);
+
+    for (let index = 0; index <= 100; index += 1) {
+      await store.startRun({
+        ...base,
+        runId: `ordinary-${index}`,
+        startedAtMs: index + 2,
+        status: "success",
+      });
+    }
+    expect((await store.readStoredRunLogs()).find((run) => run.runId === "pending")).toMatchObject({
+      pendingDelivery: { parentSessionId: "parent", queuedAtMs: 30 },
+    });
+  });
+
   it("rejects unsupported cron store versions", async () => {
     const config = await createConfig();
     const store = new CronStore(config);

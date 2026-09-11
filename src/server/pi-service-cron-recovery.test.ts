@@ -81,7 +81,7 @@ describe("native cron operation recovery", () => {
   });
 
   it.each(["Delivered answer", "NO_REPLY"])(
-    "recovers detached completion %s into its original parent exactly once",
+    "queues recovered detached completion %s for its original parent",
     async (answer) => {
       const child = await createHarnessFixture();
       const parent = await createHarnessFixture();
@@ -147,16 +147,21 @@ describe("native cron operation recovery", () => {
         sessionPath: child.session.sessionFile,
         signal: new AbortController().signal,
         onSessionStarted: vi.fn(),
+        queueResultDelivery: vi.fn(async () => undefined),
       };
       await recoverCronJobSession(adapter, run);
       await child.reopen();
       await parent.reopen();
       await recoverCronJobSession(adapter, run);
-      expect(openParent).toHaveBeenCalledWith(workspace, parent.session.sessionId);
+      expect(openParent).not.toHaveBeenCalled();
+      expect(run.queueResultDelivery).toHaveBeenCalledTimes(answer === "NO_REPLY" ? 0 : 2);
+      if (answer !== "NO_REPLY") {
+        expect(run.queueResultDelivery).toHaveBeenCalledWith(parent.session.sessionId);
+      }
       expect(adapter.resolveOrCreateDailySession).not.toHaveBeenCalled();
       expect(adapter.promptCron).not.toHaveBeenCalled();
-      expect(parent.session.messages).toHaveLength(answer === "NO_REPLY" ? 0 : 2);
-      expect(notify).toHaveBeenCalledTimes(answer === "NO_REPLY" ? 0 : 1);
+      expect(parent.session.messages).toHaveLength(0);
+      expect(notify).not.toHaveBeenCalled();
       expect(child.faux.state.callCount).toBe(1);
     },
   );

@@ -7,6 +7,7 @@ import type {
   CreateCronJobInput,
   CronJob,
   CronRunLog,
+  PendingCronRunDelivery,
   RunningCronJob,
   UpdateCronJobInput,
 } from "@/shared/types";
@@ -22,6 +23,8 @@ import { nextEveryRunAtMs, nextRunAtMs } from "./cron-schedule";
 import { markJobRunFailed, markJobRunSucceeded } from "./cron-state";
 
 const WATCH_DEBOUNCE_MS = 150;
+const DELIVERY_RETRY_MS = 5_000;
+const MAX_DELIVERY_RETRY_MS = 60 * 60 * 1_000;
 
 interface ScheduledHandle {
   stop(): void;
@@ -36,6 +39,7 @@ export interface CronJobRunnerContext {
   runId: string;
   signal: AbortSignal;
   onSessionStarted(session: { sessionId: string; sessionPath: string }): void | Promise<void>;
+  queueResultDelivery(parentSessionId: string): Promise<void>;
 }
 
 export interface CronJobSkippedContext {
@@ -50,16 +54,31 @@ export interface CronJobRunner {
     job: CronJob,
     context: CronJobRunnerContext,
   ): Promise<{ sessionId: string; sessionPath: string }>;
+  restart?(
+    run: CronRunLog,
+    context: CronJobRunnerContext,
+  ): Promise<{ sessionId: string; sessionPath: string }>;
   recover?(
     run: CronRunLog,
     context: CronJobRunnerContext,
   ): Promise<{ sessionId: string; sessionPath: string }>;
+  deliver?(run: CronRunLog, delivery: PendingCronRunDelivery): Promise<void>;
   onSkipped?(job: CronJob, context: CronJobSkippedContext): Promise<void>;
 }
 
 function toRunLog(run: ActiveCronRun, status: CronRunLog["status"]): CronRunLog {
   const { abortController: _abortController, cancelledByOverlap: _cancelled, ...publicRun } = run;
   return { ...publicRun, status };
+}
+
+function boundRuntimeRunLogs(runs: CronRunLog[]): CronRunLog[] {
+  const protectedRuns = runs.filter(
+    (run) => run.status === "running" || run.pendingDelivery !== undefined,
+  );
+  const recentRuns = runs
+    .filter((run) => run.status !== "running" && run.pendingDelivery === undefined)
+    .slice(0, RECENT_CRON_RUN_LOG_LIMIT);
+  return [...protectedRuns, ...recentRuns];
 }
 
 function createEveryHandle(job: StoredCronJob, onTrigger: () => void): ScheduledHandle {
@@ -108,6 +127,13 @@ export class CronService {
   private readonly scheduledHandles = new Map<string, ScheduledHandle>();
   private readonly jobs = new Map<string, StoredCronJob>();
   private readonly runningJobs = new Map<string, ActiveCronRun>();
+  private readonly deliveringRuns = new Set<string>();
+  private readonly deliveryRetryTimers = new Map<string, NodeJS.Timeout>();
+  private readonly deliveryRetryAttempts = new Map<string, number>();
+  private readonly queueRetryWaiters = new Set<{
+    timer: NodeJS.Timeout;
+    resolve(): void;
+  }>();
   private runLogs: CronRunLog[] = [];
   private readonly changeListeners = new Set<(workspaceIds: string[]) => void>();
   private runner: CronJobRunner | undefined;
@@ -134,8 +160,10 @@ export class CronService {
     await this.reloadFromDisk(false);
     const interruptedAtMs = Date.now();
     const recoveries: Array<{ run: ActiveCronRun; log: CronRunLog }> = [];
-    for (const log of this.runLogs.filter((candidate) => candidate.status === "running")) {
-      if (log.sessionPath && this.runner?.recover) {
+    for (const log of this.runLogs
+      .filter((candidate) => candidate.status === "running")
+      .sort((left, right) => left.startedAtMs - right.startedAtMs)) {
+      if ((log.sessionPath && this.runner?.recover) || (!log.sessionPath && this.runner?.restart)) {
         const {
           status: _status,
           completedAtMs: _completed,
@@ -151,7 +179,7 @@ export class CronService {
         this.runningJobs.set(log.runId, active);
         recoveries.push({ run: active, log });
       } else {
-        await this.updateRunLog(log.runId, {
+        await this.persistTerminalRun(log.runId, {
           status: "error",
           completedAtMs: interruptedAtMs,
           durationMs: Math.max(0, interruptedAtMs - log.startedAtMs),
@@ -165,6 +193,7 @@ export class CronService {
         console.error("Failed to recover cron run", { runId: recovery.run.runId, error });
       });
     }
+    this.schedulePendingDeliveries();
     this.rescheduleAll();
     this.notifyChanged([...new Set(recoveries.map(({ run }) => run.workspaceId))]);
     await fs.mkdir(path.dirname(this.store.filePath), { recursive: true });
@@ -192,6 +221,14 @@ export class CronService {
       handle.stop();
     }
     this.scheduledHandles.clear();
+    for (const timer of this.deliveryRetryTimers.values()) clearTimeout(timer);
+    this.deliveryRetryTimers.clear();
+    this.deliveryRetryAttempts.clear();
+    for (const waiter of this.queueRetryWaiters) {
+      clearTimeout(waiter.timer);
+      waiter.resolve();
+    }
+    this.queueRetryWaiters.clear();
   }
 
   listJobs(workspaceId?: string): CronJob[] {
@@ -263,13 +300,12 @@ export class CronService {
     } else {
       this.runLogs[index] = run;
     }
-    this.runLogs = this.runLogs
-      .sort((left, right) => {
-        if (left.status === "running" && right.status !== "running") return -1;
-        if (left.status !== "running" && right.status === "running") return 1;
-        return right.startedAtMs - left.startedAtMs;
-      })
-      .slice(0, RECENT_CRON_RUN_LOG_LIMIT);
+    this.runLogs.sort((left, right) => {
+      if (left.status === "running" && right.status !== "running") return -1;
+      if (left.status !== "running" && right.status === "running") return 1;
+      return right.startedAtMs - left.startedAtMs;
+    });
+    this.runLogs = boundRuntimeRunLogs(this.runLogs);
   }
 
   private async updateRunLog(runId: string, patch: Partial<CronRunLog>): Promise<void> {
@@ -277,6 +313,19 @@ export class CronService {
     if (updated) {
       this.replaceRunLog(updated);
     }
+  }
+
+  private async persistTerminalRun(runId: string, patch: Partial<CronRunLog>): Promise<boolean> {
+    while (!this.disposed) {
+      try {
+        await this.updateRunLog(runId, patch);
+        return true;
+      } catch (error) {
+        console.error("Failed to persist terminal cron run", { runId, error });
+        await this.waitForPersistenceRetry();
+      }
+    }
+    return false;
   }
 
   private async reloadFromDisk(schedule = true): Promise<void> {
@@ -291,8 +340,97 @@ export class CronService {
       this.jobs.set(job.id, job);
       previousWorkspaceIds.add(job.workspaceId);
     }
-    if (schedule && !this.disposed) this.rescheduleAll();
+    if (schedule && !this.disposed) {
+      this.schedulePendingDeliveries();
+      this.rescheduleAll();
+    }
     this.notifyChanged([...previousWorkspaceIds]);
+  }
+
+  private async queueRunDelivery(runId: string, parentSessionId: string): Promise<void> {
+    while (!this.disposed) {
+      try {
+        const updated = await this.store.queueRunDelivery(runId, parentSessionId);
+        this.replaceRunLog(updated);
+        this.notifyChanged([updated.workspaceId]);
+        return;
+      } catch (error) {
+        console.error("Failed to persist queued cron delivery", { runId, error });
+        await this.waitForPersistenceRetry();
+      }
+    }
+    throw new Error(`Cron delivery queue stopped before run ${runId} was persisted`);
+  }
+
+  private waitForPersistenceRetry(): Promise<void> {
+    return new Promise((resolve) => {
+      const waiter = {
+        timer: setTimeout(() => {
+          this.queueRetryWaiters.delete(waiter);
+          resolve();
+        }, DELIVERY_RETRY_MS),
+        resolve,
+      };
+      waiter.timer.unref?.();
+      this.queueRetryWaiters.add(waiter);
+    });
+  }
+
+  private schedulePendingDeliveries(): void {
+    if (this.disposed || !this.runner?.deliver) return;
+    for (const run of this.runLogs
+      .filter((candidate) => candidate.status !== "running" && candidate.pendingDelivery)
+      .sort(
+        (left, right) => left.pendingDelivery!.queuedAtMs - right.pendingDelivery!.queuedAtMs,
+      )) {
+      this.scheduleRunDelivery(run);
+    }
+  }
+
+  private scheduleRunDelivery(run: CronRunLog): void {
+    if (
+      this.disposed ||
+      !this.runner?.deliver ||
+      !run.pendingDelivery ||
+      run.status === "running" ||
+      this.deliveringRuns.has(run.runId) ||
+      this.deliveryRetryTimers.has(run.runId)
+    ) {
+      return;
+    }
+
+    this.deliveringRuns.add(run.runId);
+    void this.runner
+      .deliver(run, run.pendingDelivery)
+      .then(async () => {
+        if (this.disposed) return;
+        const updated = await this.store.completeRunDelivery(run.runId);
+        if (updated) {
+          this.deliveryRetryAttempts.delete(run.runId);
+          this.replaceRunLog(updated);
+          this.notifyChanged([updated.workspaceId]);
+        }
+      })
+      .catch((error) => {
+        if (this.disposed) return;
+        const attempt = (this.deliveryRetryAttempts.get(run.runId) ?? 0) + 1;
+        this.deliveryRetryAttempts.set(run.runId, attempt);
+        const retryMs = Math.min(
+          DELIVERY_RETRY_MS * 2 ** Math.min(attempt - 1, 10),
+          MAX_DELIVERY_RETRY_MS,
+        );
+        console.error("Failed to deliver cron result", { runId: run.runId, retryMs, error });
+        const timer = setTimeout(() => {
+          this.deliveryRetryTimers.delete(run.runId);
+          const current = this.runLogs.find((candidate) => candidate.runId === run.runId);
+          if (current) this.scheduleRunDelivery(current);
+        }, retryMs);
+        timer.unref?.();
+        this.deliveryRetryTimers.set(run.runId, timer);
+      })
+      .finally(() => {
+        this.deliveringRuns.delete(run.runId);
+      });
   }
 
   private rescheduleAll(): void {
@@ -408,13 +546,16 @@ export class CronService {
     let result: { sessionId: string; sessionPath: string } | undefined;
     let failure: unknown;
     try {
-      result = await this.runner!.recover!(log, {
+      const resume = log.sessionPath ? this.runner!.recover! : this.runner!.restart!;
+      result = await resume(log, {
         runId: running.runId,
         signal: running.abortController.signal,
         onSessionStarted: async (session) => {
           Object.assign(running, session);
           await this.updateRunLog(running.runId, session);
         },
+        queueResultDelivery: (parentSessionId) =>
+          this.queueRunDelivery(running.runId, parentSessionId),
       });
     } catch (error) {
       failure = error;
@@ -429,13 +570,17 @@ export class CronService {
             : String(failure)
           : undefined;
       const completedAtMs = Date.now();
-      await this.updateRunLog(running.runId, {
-        status: error ? "error" : "success",
-        completedAtMs,
-        durationMs: Math.max(0, completedAtMs - running.startedAtMs),
-        ...result,
-        error,
-      });
+      if (
+        !(await this.persistTerminalRun(running.runId, {
+          status: error ? "error" : "success",
+          completedAtMs,
+          durationMs: Math.max(0, completedAtMs - running.startedAtMs),
+          ...result,
+          error,
+        }))
+      ) {
+        return;
+      }
       const job = this.jobs.get(running.jobId);
       if (job && !running.cancelledByOverlap && job.schedule.kind !== "at") {
         await this.store.setJobState(
@@ -448,6 +593,7 @@ export class CronService {
       }
     } finally {
       this.runningJobs.delete(running.runId);
+      this.schedulePendingDeliveries();
       this.notifyChanged([running.workspaceId]);
     }
   }
@@ -460,7 +606,10 @@ export class CronService {
     }
 
     const activeRun = [...this.runningJobs.values()].find((run) => run.jobId === jobId);
-    if (activeRun) {
+    const waitsForParent =
+      current.session.kind === "daily-inline" ||
+      (current.session.kind === "daily-detached" && current.session.includePreviousContext);
+    if (activeRun && !waitsForParent) {
       await this.skipOverlappingRun(current, activeRun);
       return;
     }
@@ -511,18 +660,24 @@ export class CronService {
           });
           this.notifyChanged([running.workspaceId]);
         },
+        queueResultDelivery: (parentSessionId) =>
+          this.queueRunDelivery(running.runId, parentSessionId),
       });
       if (this.disposed) return;
-      await this.updateRunLog(running.runId, {
-        status: running.cancelledByOverlap ? "error" : "success",
-        completedAtMs: Date.now(),
-        durationMs: Date.now() - startedAt,
-        sessionId: result.sessionId,
-        sessionPath: result.sessionPath,
-        error: running.cancelledByOverlap
-          ? "Cron run cancelled because a newer run started"
-          : undefined,
-      });
+      if (
+        !(await this.persistTerminalRun(running.runId, {
+          status: running.cancelledByOverlap ? "error" : "success",
+          completedAtMs: Date.now(),
+          durationMs: Date.now() - startedAt,
+          sessionId: result.sessionId,
+          sessionPath: result.sessionPath,
+          error: running.cancelledByOverlap
+            ? "Cron run cancelled because a newer run started"
+            : undefined,
+        }))
+      ) {
+        return;
+      }
       if (
         this.runningJobs.get(running.runId) === running &&
         !running.cancelledByOverlap &&
@@ -534,15 +689,18 @@ export class CronService {
     } catch (error) {
       if (this.disposed) return;
       console.error("Cron job failed", { jobId, error });
-      if (runLogPersisted) {
-        await this.updateRunLog(running.runId, {
+      if (
+        runLogPersisted &&
+        !(await this.persistTerminalRun(running.runId, {
           status: "error",
           completedAtMs: Date.now(),
           durationMs: Date.now() - startedAt,
           sessionId: running.sessionId,
           sessionPath: running.sessionPath,
           error: error instanceof Error ? error.message : String(error),
-        });
+        }))
+      ) {
+        return;
       }
       if (
         this.runningJobs.get(running.runId) === running &&
@@ -556,6 +714,7 @@ export class CronService {
       if (this.runningJobs.get(running.runId) === running) {
         this.runningJobs.delete(running.runId);
       }
+      this.schedulePendingDeliveries();
       this.notifyChanged([current.workspaceId]);
     }
   }

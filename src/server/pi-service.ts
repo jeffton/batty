@@ -21,6 +21,8 @@ import type {
   WorkspaceInfo,
 } from "@/shared/types";
 import type { AppConfig } from "./config";
+import { BrowserService } from "./browser-service";
+import { closeSharedBrowser } from "./browser-runtime";
 import { ModelConfigWatcher } from "./model-config-watcher";
 import { resolveModel } from "./model-resolution";
 import { getSessionContextUsage } from "./pi-context-usage";
@@ -110,6 +112,7 @@ export class PiService {
   private readonly modelConfigWatcher: ModelConfigWatcher;
   private readonly providerAuthService: ProviderAuthService;
   private readonly providerUsageService: ProviderUsageService;
+  private readonly browserService = new BrowserService();
   private readonly sessions = new Map<string, WebSession>();
   private readonly liveSessions = new Map<string, LiveSession>();
   private readonly subagentQueues = new Map<string, Promise<void>>();
@@ -184,6 +187,8 @@ export class PiService {
   async dispose(): Promise<void> {
     await this.modelConfigWatcher.dispose();
     await Promise.all([...this.liveSessions.values()].map(({ session }) => session.dispose()));
+    await this.browserService.dispose();
+    await closeSharedBrowser();
     await disposeSessionSummaryIndex(this.config);
   }
 
@@ -917,6 +922,7 @@ export class PiService {
         customTools: createPiServiceTools(
           {
             config: this.config,
+            browserService: this.browserService,
             cronService: this.cronService,
             validateModel: (modelId) => {
               this.resolveModel(modelId);
@@ -943,6 +949,9 @@ export class PiService {
   }
 
   private disposeWebSession(webSession: WebSession): void {
+    void this.browserService
+      .closeSession(webSession.id)
+      .catch((error) => console.error("Failed to close browser session", error));
     disposeWebSession(
       this.sessions,
       (sessionId) => this.unregisterLiveSession(sessionId),

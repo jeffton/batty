@@ -14,12 +14,14 @@ import type {
   WorkspaceInfo,
 } from "@/shared/types";
 import type { AppConfig } from "./config";
+import type { BrowserService } from "./browser-service";
 import { buildCronJobSummary, type CronService } from "./cron";
 import { storeSentFiles } from "./send-files";
 import { runWebSearch } from "./web-search";
 import { getSubagentSessionDepth, MAX_SUBAGENT_DEPTH, SUBAGENT_TOOL_NAME } from "./subagent";
 import {
   AttachFilesToolSchema,
+  BrowserToolSchema,
   CronToolSchema,
   SubagentToolSchema,
   WebSearchToolSchema,
@@ -467,6 +469,57 @@ export function createCronTool({
         default:
           throw new Error(`Unknown cron action: ${action}`);
       }
+    },
+  };
+}
+
+export function createBrowserTool(
+  browserService: BrowserService,
+): ToolDefinition<typeof BrowserToolSchema> {
+  return {
+    name: "browser",
+    label: "Browser",
+    description:
+      "Open and interact with JavaScript-driven web pages using a session-scoped headless Chromium browser.",
+    promptSnippet: "Browse and interact with dynamic web pages using Playwright.",
+    promptGuidelines: [
+      "Use this tool when a page requires JavaScript or multi-step interaction that web-search content cannot handle.",
+      "Start with action=open. Browser state and cookies persist within the current Batty session only.",
+      'Selectors use Playwright locator syntax, for example input[name=q], text=Submit, or button:has-text("Next").',
+      "Each action returns an accessibility snapshot of the resulting page. Use action=snapshot to inspect it again.",
+      "Use action=wait with a selector when a dynamic page needs time to render the next state.",
+      "Ask for explicit user approval before actions that submit forms, make bookings or purchases, or send messages.",
+      "Use action=close when the browser state is no longer needed.",
+    ],
+    parameters: BrowserToolSchema,
+    execute: async (toolCallId, params, signal, _onUpdate, ctx) => {
+      signal?.throwIfAborted();
+      const result = await browserService.execute(
+        ctx.sessionManager.getSessionId(),
+        {
+          action: params.action,
+          url: typeof params.url === "string" ? params.url : undefined,
+          selector: typeof params.selector === "string" ? params.selector : undefined,
+          value: typeof params.value === "string" ? params.value : undefined,
+          values: Array.isArray(params.values)
+            ? params.values.filter((value): value is string => typeof value === "string")
+            : undefined,
+          key: typeof params.key === "string" ? params.key : undefined,
+          state: params.state,
+          timeoutMs: typeof params.timeoutMs === "number" ? params.timeoutMs : undefined,
+        },
+        signal,
+      );
+      const output = await spillToolOutputToTempFile(
+        "browser-output",
+        toolCallId,
+        { text: result.text, details: result.details },
+        "browser",
+      );
+      return {
+        content: [{ type: "text", text: output.text }],
+        details: output.details,
+      };
     },
   };
 }

@@ -17,7 +17,7 @@ Batty uses the pinned Pi 0.85.1 AgentHarness API. There is one execution backend
 
 Native read, write, edit, and bash run through a shared execution environment. Find, grep, PowerShell, and Batty tools have invocation adapters. Environment-file values and `PI_*` session metadata are supplied to shell calls.
 
-Read, find, grep, and web search are replay-safe. Mutating tools use never-replay policy. Subagent replay is safe because the invocation memo durably identifies one child session: replay resumes it or reads its terminal result.
+Read, find, grep, and web search are replay-safe. Mutating and stateful browser tools use never-replay policy. Browser pages use isolated contexts scoped to the live Batty session and are closed when that session is disposed. Subagent replay is safe because the invocation memo durably identifies one child session: replay resumes it or reads its terminal result.
 
 Write/edit mutation snapshots are committed inside tool-result details. Per-turn file diffs are a read-only aggregation of those snapshots, including child results. They do not require a parallel journal or transcript rewriting.
 

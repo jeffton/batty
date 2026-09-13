@@ -160,6 +160,41 @@ export const WebSearchToolSchema = Type.Object(
   },
 );
 
+export const BrowserToolSchema = Type.Object(
+  {
+    action: StringEnum(
+      ["open", "snapshot", "click", "fill", "press", "select", "wait", "close"] as const,
+      { description: "Browser action to perform." },
+    ),
+    url: Type.Optional(Type.String({ description: "HTTP or HTTPS URL for action=open." })),
+    selector: Type.Optional(
+      Type.String({ description: "Playwright locator selector for page element actions." }),
+    ),
+    value: Type.Optional(
+      Type.String({ description: "Text for fill or a single option value for select." }),
+    ),
+    values: Type.Optional(
+      Type.Array(Type.String(), { description: "Option values for a multi-select." }),
+    ),
+    key: Type.Optional(Type.String({ description: "Key name for press, such as Enter." })),
+    state: Type.Optional(
+      StringEnum(["attached", "detached", "visible", "hidden"] as const, {
+        description: "Desired element state for wait. Defaults to visible.",
+      }),
+    ),
+    timeoutMs: Type.Optional(
+      Type.Integer({
+        minimum: 1_000,
+        maximum: 60_000,
+        description: "Action timeout in milliseconds. Defaults to 30000.",
+      }),
+    ),
+  },
+  {
+    additionalProperties: false,
+  },
+);
+
 export const AttachFilesToolSchema = Type.Object(
   {
     paths: Type.Array(Type.String({ description: "Path to a file to attach for the user." }), {

@@ -256,12 +256,24 @@ describe("Batty native harness tools", () => {
   });
 
   it("advertises explicit replay policy and Batty's complete tool set", async () => {
-    const { session } = await setup();
+    const { session } = await setup([
+      {
+        name: "browser",
+        label: "Browser",
+        description: "Browser",
+        parameters: Type.Object({}),
+        execute: async () => ({
+          content: [{ type: "text" as const, text: "ok" }],
+          details: {},
+        }),
+      },
+    ]);
     const tools = await session.harness.getTools(context);
     expect(session.getActiveToolNames()).toEqual(
-      expect.arrayContaining(["read", "write", "edit", "bash", "find", "grep"]),
+      expect.arrayContaining(["read", "write", "edit", "bash", "find", "grep", "browser"]),
     );
     expect(tools.find((tool) => tool.name === "read")?.replay).toBe("safe");
     expect(tools.find((tool) => tool.name === "find")?.replay).toBe("safe");
+    expect(tools.find((tool) => tool.name === "browser")?.replay).toBe("never");
   });
 });

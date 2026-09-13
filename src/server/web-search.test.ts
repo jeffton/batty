@@ -460,6 +460,7 @@ describe("runWebSearch", () => {
       close: vi.fn(async () => {}),
     };
     const closedBrowser = {
+      close: vi.fn(async () => {}),
       isConnected: vi.fn(() => true),
       on: vi.fn(),
       newContext: vi.fn(async () => {

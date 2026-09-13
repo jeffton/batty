@@ -4,6 +4,12 @@ import { JSDOM } from "jsdom";
 import type { Browser } from "playwright";
 import TurndownService from "turndown";
 import { gfm } from "turndown-plugin-gfm";
+import {
+  discardSharedBrowser,
+  getSharedBrowser,
+  isClosedBrowserError,
+  resetSharedBrowserStateForTests,
+} from "./browser-runtime";
 
 const PAGE_FETCH_TIMEOUT_MS = 15_000;
 const BROWSER_SETTLE_TIMEOUT_MS = 3_000;
@@ -115,12 +121,8 @@ export interface WebSearchResult {
   };
 }
 
-let activeBrowser: Browser | null = null;
-let browserLaunchPromise: Promise<Browser> | null = null;
-
 export function resetWebSearchStateForTests(): void {
-  activeBrowser = null;
-  browserLaunchPromise = null;
+  resetSharedBrowserStateForTests();
 }
 
 function htmlToMarkdown(html: string): string {
@@ -355,51 +357,6 @@ async function fetchPageViaHttp(url: string): Promise<PageFetchResult> {
   }
 }
 
-async function launchBrowser(): Promise<Browser> {
-  const { chromium } = await import("playwright");
-  const browser = await chromium.launch({
-    headless: true,
-    args: ["--disable-dev-shm-usage"],
-  });
-
-  if (!browser || typeof browser.newContext !== "function") {
-    throw new Error("Playwright did not return a browser instance");
-  }
-
-  activeBrowser = browser;
-  browser.on("disconnected", () => {
-    if (activeBrowser === browser) {
-      activeBrowser = null;
-    }
-  });
-  return browser;
-}
-
-async function getBrowser(): Promise<Browser> {
-  if (activeBrowser?.isConnected()) {
-    return activeBrowser;
-  }
-
-  activeBrowser = null;
-  browserLaunchPromise ??= launchBrowser();
-  const launchPromise = browserLaunchPromise;
-
-  try {
-    return await launchPromise;
-  } finally {
-    if (browserLaunchPromise === launchPromise) {
-      browserLaunchPromise = null;
-    }
-  }
-}
-
-function isClosedBrowserError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    /(?:target page, context or browser|browser) has been closed/i.test(error.message)
-  );
-}
-
 function createConcurrencyLimiter(limit: number): <T>(task: () => Promise<T>) => Promise<T> {
   let activeCount = 0;
   const queue: Array<() => void> = [];
@@ -506,7 +463,7 @@ async function fetchPageViaBrowser(url: string): Promise<PageFetchResult> {
       let context: Awaited<ReturnType<Browser["newContext"]>> | undefined;
 
       try {
-        browser = await getBrowser();
+        browser = await getSharedBrowser();
         context = await browser.newContext({
           userAgent: DEFAULT_USER_AGENT,
           locale: "en-US",
@@ -559,9 +516,7 @@ async function fetchPageViaBrowser(url: string): Promise<PageFetchResult> {
         lastError = error;
         const browserClosed = browser ? !browser.isConnected() : false;
         if (attempt === 0 && (browserClosed || isClosedBrowserError(error))) {
-          if (activeBrowser === browser) {
-            activeBrowser = null;
-          }
+          if (browser) await discardSharedBrowser(browser);
           continue;
         }
         break;

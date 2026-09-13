@@ -16,6 +16,7 @@ describe("tool output truncation directions", () => {
       read: "head",
       cron: "head",
       "web-search": "head",
+      browser: "head",
       grep: "head",
       find: "head",
     });

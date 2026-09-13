@@ -8,6 +8,7 @@ export const TOOL_OUTPUT_TRUNCATION_DIRECTIONS = {
   read: "head",
   cron: "head",
   "web-search": "head",
+  browser: "head",
   grep: "head",
   find: "head",
 } as const satisfies Record<string, ToolOutputTruncationDirection>;

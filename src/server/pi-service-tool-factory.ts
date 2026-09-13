@@ -2,9 +2,11 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { ToolExecutionDetails, WorkspaceInfo } from "@/shared/types";
 import type { AppConfig } from "./config";
+import type { BrowserService } from "./browser-service";
 import type { CronService } from "./cron";
 import {
   createAttachFilesTool,
+  createBrowserTool,
   createCronTool,
   createSubagentTool,
   createWebSearchTool,
@@ -12,6 +14,7 @@ import {
 
 export type PiServiceToolFactoryContext = {
   config: AppConfig;
+  browserService: BrowserService;
   cronService: CronService;
   validateModel: (modelId: string) => void;
   resolveSubagentDefaults: (
@@ -64,6 +67,7 @@ export function createPiServiceTools(
       resolveSubagentDefaults: context.resolveSubagentDefaults,
     }),
     createWebSearchTool(context.config),
+    createBrowserTool(context.browserService),
     createAttachFilesTool({
       workspace,
       config: context.config,

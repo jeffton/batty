@@ -58,6 +58,7 @@ export default defineConfig({
     ignorePatterns: [".vite-plus/**"],
   },
   pack: {
+    deps: { resolveDepSubpath: true },
     entry: ["src/server/main.ts", "src/server/add-user.ts", "src/server/cli.ts"],
     outDir: "dist/server",
     format: ["esm"],

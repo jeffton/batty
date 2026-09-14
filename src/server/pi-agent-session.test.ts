@@ -27,7 +27,7 @@ async function setup(
   customTools: Parameters<typeof createPiAgentSession>[0]["customTools"] = [],
   prepare?: (root: string, config: AppConfig) => Promise<void>,
 ) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-harness-tools-"));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "batty-harness-tools-")));
   roots.push(root);
   const faux = fauxProvider();
   const models = createModels();

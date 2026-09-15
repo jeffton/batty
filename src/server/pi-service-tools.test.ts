@@ -35,6 +35,26 @@ describe("spillToolOutputToTempFile", () => {
     );
   });
 
+  it("stores oversized browser output in a temp file and returns a truncated head", async () => {
+    const fullText = Array.from({ length: 2_010 }, (_, index) => `node ${index + 1}`).join("\n");
+
+    const result = await spillToolOutputToTempFile(
+      "browser-output",
+      "browser-call",
+      { text: fullText, details: { action: "snapshot" } },
+      "browser",
+    );
+
+    expect(result.text).toContain("Showing the first 2000 lines");
+    expect(result.text).toContain("node 1\n");
+    expect(result.text).toContain("node 2000");
+    expect(result.text).not.toContain("node 2001");
+    expect(result.details.fullOutputPath).toEqual(expect.stringMatching(/browser-call\.txt$/));
+    await expect(fs.readFile(String(result.details.fullOutputPath), "utf8")).resolves.toBe(
+      fullText,
+    );
+  });
+
   it("uses UI line-ending semantics for head truncation", async () => {
     const fullText = Array.from({ length: 2_010 }, (_, index) => `line ${index + 1}`).join("\r");
 

@@ -487,6 +487,7 @@ export function createBrowserTool(
       "Start with action=open. Browser state and cookies persist within the current Batty session only.",
       'Selectors use Playwright locator syntax, for example input[name=q], text=Submit, or button:has-text("Next").',
       "Each action returns an accessibility snapshot of the resulting page. Use action=snapshot to inspect it again.",
+      "Large outputs are truncated and written to a temp file; use the read tool on the reported path when you need the full snapshot.",
       "Use action=wait with a selector when a dynamic page needs time to render the next state.",
       "Ask for explicit user approval before actions that submit forms, make bookings or purchases, or send messages.",
       "Use action=close when the browser state is no longer needed.",

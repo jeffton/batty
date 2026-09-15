@@ -175,8 +175,8 @@ const cronTextOutput = computed(() =>
 const cronHeadView = computed(() =>
   createToolOutputView("cron", cronTextOutput.value, OUTPUT_TAIL_LINE_COUNT),
 );
-const webSearchTextOutput = computed(() =>
-  props.name !== "web-search"
+const browserTextOutput = computed(() =>
+  props.name !== "web-search" && props.name !== "browser"
     ? ""
     : props.resultBlocks
         .filter(
@@ -185,8 +185,12 @@ const webSearchTextOutput = computed(() =>
         .map((block) => block.text)
         .join("\n"),
 );
-const webSearchHeadView = computed(() =>
-  createToolOutputView("web-search", webSearchTextOutput.value, OUTPUT_TAIL_LINE_COUNT),
+const browserHeadView = computed(() =>
+  createToolOutputView(
+    props.name === "browser" ? "browser" : "web-search",
+    browserTextOutput.value,
+    OUTPUT_TAIL_LINE_COUNT,
+  ),
 );
 const grepFindTextOutput = computed(() =>
   props.name !== "grep" && props.name !== "find"
@@ -211,7 +215,8 @@ const canExpandOutput = computed(
     (props.name === "write" && writeTailView.value.isTrimmed) ||
     (props.name === "read" && readHeadView.value.isTrimmed) ||
     (props.name === "cron" && cronHeadView.value.isTrimmed) ||
-    (props.name === "web-search" && webSearchHeadView.value.isTrimmed) ||
+    ((props.name === "web-search" || props.name === "browser") &&
+      browserHeadView.value.isTrimmed) ||
     ((props.name === "grep" || props.name === "find") && grepFindHeadView.value.isTrimmed),
 );
 const expandButtonLabel = computed(() => {
@@ -231,8 +236,8 @@ const expandButtonLabel = computed(() => {
         ? readHeadView.value.hiddenLineCount
         : props.name === "cron"
           ? cronHeadView.value.hiddenLineCount
-          : props.name === "web-search"
-            ? webSearchHeadView.value.hiddenLineCount
+          : props.name === "web-search" || props.name === "browser"
+            ? browserHeadView.value.hiddenLineCount
             : grepFindHeadView.value.hiddenLineCount;
   return `Show full output (+${hiddenLineCount} lines)`;
 });
@@ -251,8 +256,8 @@ const visibleReadOutput = computed(() =>
 const visibleCronOutput = computed(() =>
   isExpanded.value ? cronTextOutput.value : cronHeadView.value.text,
 );
-const visibleWebSearchOutput = computed(() =>
-  isExpanded.value ? webSearchTextOutput.value : webSearchHeadView.value.text,
+const visibleBrowserOutput = computed(() =>
+  isExpanded.value ? browserTextOutput.value : browserHeadView.value.text,
 );
 const visibleGrepFindOutput = computed(() =>
   isExpanded.value ? grepFindTextOutput.value : grepFindHeadView.value.text,
@@ -269,8 +274,11 @@ const showCollapsedReadWindow = computed(
 const showCollapsedCronWindow = computed(
   () => props.name === "cron" && !isExpanded.value && cronHeadView.value.isTrimmed,
 );
-const showCollapsedWebSearchWindow = computed(
-  () => props.name === "web-search" && !isExpanded.value && webSearchHeadView.value.isTrimmed,
+const showCollapsedBrowserWindow = computed(
+  () =>
+    (props.name === "web-search" || props.name === "browser") &&
+    !isExpanded.value &&
+    browserHeadView.value.isTrimmed,
 );
 const showCollapsedGrepFindWindow = computed(
   () =>
@@ -324,7 +332,7 @@ const visibleResultBlocks = computed(() => {
     return props.resultBlocks;
   }
 
-  if (props.name === "web-search") {
+  if (props.name === "web-search" || props.name === "browser") {
     return props.resultBlocks.filter((block) => block.type !== "text");
   }
 
@@ -509,12 +517,17 @@ const genericEntries = computed(() => {
       />
     </div>
 
-    <template v-if="props.name === 'web-search' && visibleWebSearchOutput.trim().length > 0">
+    <template
+      v-if="
+        (props.name === 'web-search' || props.name === 'browser') &&
+        visibleBrowserOutput.trim().length > 0
+      "
+    >
       <ToolCallCodeOutput
-        :code="visibleWebSearchOutput"
-        language="markdown"
+        :code="visibleBrowserOutput"
+        :language="props.name === 'web-search' ? 'markdown' : undefined"
         :compact="props.compact"
-        :collapsed="showCollapsedWebSearchWindow"
+        :collapsed="showCollapsedBrowserWindow"
         collapsed-alignment="start"
         :can-expand="canExpandOutput"
         :expand-button-label="expandButtonLabel"

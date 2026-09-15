@@ -259,15 +259,14 @@ describe("ToolCallBlock", () => {
     expect(wrapper.text()).toContain("Collapse output");
   });
 
-  it("shows web-search arguments before output and expands to the full output on demand", async () => {
+  it.each([
+    ["web-search", { action: "search", query: "batty", count: 10 }],
+    ["browser", { action: "snapshot" }],
+  ])("shows %s arguments before monospace output and expands from the head", async (name, args) => {
     const wrapper = mount(ToolCallBlock, {
       props: {
-        name: "web-search",
-        arguments: {
-          action: "search",
-          query: "batty",
-          count: 10,
-        },
+        name,
+        arguments: args,
         resultBlocks: [{ type: "text", text: lines(30) }],
         status: "success",
       },
@@ -278,7 +277,8 @@ describe("ToolCallBlock", () => {
     expect(wrapper.find("pre.code-block").text()).toContain("line-1");
     expect(wrapper.find("pre.code-block").text()).toContain("line-20");
     expect(wrapper.find("pre.code-block").text()).not.toContain("line-21");
-    expect(wrapper.text()).toContain("Show full output");
+    expect(wrapper.find(".tool-call__output-window--collapsed-start").exists()).toBe(true);
+    expect(wrapper.text()).toContain("Show full output (+10 lines)");
 
     await wrapper.get(".tool-call__expand-btn").trigger("click");
 

@@ -67,7 +67,11 @@ export function createPiServiceTools(
       resolveSubagentDefaults: context.resolveSubagentDefaults,
     }),
     createWebSearchTool(context.config),
-    createBrowserTool(context.browserService),
+    createBrowserTool({
+      browserService: context.browserService,
+      workspace,
+      config: context.config,
+    }),
     createAttachFilesTool({
       workspace,
       config: context.config,

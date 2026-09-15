@@ -473,9 +473,13 @@ export function createCronTool({
   };
 }
 
-export function createBrowserTool(
-  browserService: BrowserService,
-): ToolDefinition<typeof BrowserToolSchema> {
+export function createBrowserTool({
+  browserService,
+  workspace,
+  config,
+}: CommonToolDependencies & { browserService: BrowserService }): ToolDefinition<
+  typeof BrowserToolSchema
+> {
   return {
     name: "browser",
     label: "Browser",
@@ -485,10 +489,15 @@ export function createBrowserTool(
     promptGuidelines: [
       "Use this tool when a page requires JavaScript or multi-step interaction that web-search content cannot handle.",
       "Start with action=open. Browser state and cookies persist within the current Batty session only.",
+      "Use action=pages to list tabs and popups, action=switch with pageId to activate one, and newPage=true on open to create a tab.",
+      "Use action=frames to list frame IDs, then pass frameId to target an iframe.",
       'Selectors use Playwright locator syntax, for example input[name=q], text=Submit, or button:has-text("Next").',
+      "Use action=upload with selector and paths for file inputs, and action=download with a selector that triggers a download.",
+      "Use action=scroll with a selector to reveal an element, or deltaX/deltaY to scroll by pixels.",
       "Page actions return an accessibility snapshot. Use action=snapshot to inspect the page again.",
       "Use action=screenshot to capture the visible viewport, or set fullPage=true to capture the full scrollable page.",
       "Set viewport to control the browser width and height. Prefer setting it on open before the page loads.",
+      "Use action=evaluate with a JavaScript expression when direct page inspection or manipulation is more efficient.",
       "Large text outputs are truncated and written to a temp file; use the read tool on the reported path when you need the full snapshot.",
       "Use action=wait with a selector when a dynamic page needs time to render the next state.",
       "Ask for explicit user approval before actions that submit forms, make bookings or purchases, or send messages.",
@@ -502,13 +511,25 @@ export function createBrowserTool(
         {
           action: params.action,
           url: typeof params.url === "string" ? params.url : undefined,
+          pageId: typeof params.pageId === "string" ? params.pageId : undefined,
+          frameId: typeof params.frameId === "string" ? params.frameId : undefined,
+          newPage: typeof params.newPage === "boolean" ? params.newPage : undefined,
           selector: typeof params.selector === "string" ? params.selector : undefined,
           value: typeof params.value === "string" ? params.value : undefined,
           values: Array.isArray(params.values)
             ? params.values.filter((value): value is string => typeof value === "string")
             : undefined,
+          paths: Array.isArray(params.paths)
+            ? params.paths
+                .filter((value): value is string => typeof value === "string")
+                .map((value) => path.resolve(workspace.path, value))
+            : undefined,
           key: typeof params.key === "string" ? params.key : undefined,
           state: params.state,
+          script: typeof params.script === "string" ? params.script : undefined,
+          args: params.args,
+          deltaX: typeof params.deltaX === "number" ? params.deltaX : undefined,
+          deltaY: typeof params.deltaY === "number" ? params.deltaY : undefined,
           viewport: params.viewport,
           fullPage: typeof params.fullPage === "boolean" ? params.fullPage : undefined,
           timeoutMs: typeof params.timeoutMs === "number" ? params.timeoutMs : undefined,
@@ -521,12 +542,28 @@ export function createBrowserTool(
         { text: result.text, details: result.details },
         "browser",
       );
+      const sessionFile = ctx.sessionManager.getSessionFile();
+      const sessionId =
+        typeof sessionFile === "string" && sessionFile.length > 0
+          ? path.basename(sessionFile, path.extname(sessionFile))
+          : "ephemeral-session";
+      const sentFiles = result.downloadPaths
+        ? await storeSentFiles({
+            rootDir: config.sentFilesDir,
+            baseUrl: config.baseUrl,
+            workspaceId: workspace.id,
+            sessionId,
+            toolCallId,
+            cwd: workspace.path,
+            paths: result.downloadPaths,
+          })
+        : [];
       return {
         content: [
           { type: "text" as const, text: output.text },
           ...(result.image ? [{ type: "image" as const, ...result.image }] : []),
         ],
-        details: output.details,
+        details: { ...output.details, ...(sentFiles.length > 0 ? { sentFiles } : {}) },
       };
     },
   };

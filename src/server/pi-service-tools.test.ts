@@ -1,4 +1,6 @@
 import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
   createBrowserTool,
@@ -115,7 +117,11 @@ describe("createBrowserTool", () => {
       details: { action: "screenshot" as const, url: "https://example.com/" },
       image: { mimeType: "image/png" as const, data: "cG5n" },
     }));
-    const tool = createBrowserTool({ execute } as any);
+    const tool = createBrowserTool({
+      browserService: { execute } as any,
+      workspace: { id: "batty", path: "/workspace" } as any,
+      config: { sentFilesDir: "/tmp/sent-files" } as any,
+    });
 
     const result = await tool.execute(
       "browser-call",
@@ -126,7 +132,12 @@ describe("createBrowserTool", () => {
       },
       undefined,
       undefined,
-      { sessionManager: { getSessionId: () => "session-1" } } as any,
+      {
+        sessionManager: {
+          getSessionId: () => "session-1",
+          getSessionFile: () => "/sessions/session-1.jsonl",
+        },
+      } as any,
     );
 
     expect(execute).toHaveBeenCalledWith(
@@ -141,6 +152,44 @@ describe("createBrowserTool", () => {
     expect(result.content).toEqual([
       { type: "text", text: "Screenshot captured." },
       { type: "image", mimeType: "image/png", data: "cG5n" },
+    ]);
+  });
+
+  it("resolves uploads from the workspace and exposes downloads as sent files", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-browser-tool-test-"));
+    const downloadPath = path.join(root, "report.csv");
+    await fs.writeFile(downloadPath, "a,b\n1,2\n");
+    const execute = vi.fn(async () => ({
+      text: `Downloaded report.csv.\nSaved to: ${downloadPath}`,
+      details: { action: "download" as const },
+      downloadPaths: [downloadPath],
+    }));
+    const tool = createBrowserTool({
+      browserService: { execute } as any,
+      workspace: { id: "batty", path: "/workspace" } as any,
+      config: { sentFilesDir: path.join(root, "sent"), baseUrl: "/" } as any,
+    });
+
+    const result = await tool.execute(
+      "browser-download",
+      { action: "download", selector: "text=Export", paths: ["fixtures/input.txt"] },
+      undefined,
+      undefined,
+      {
+        sessionManager: {
+          getSessionId: () => "session-1",
+          getSessionFile: () => "/sessions/session-1.jsonl",
+        },
+      } as any,
+    );
+
+    expect(execute).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({ paths: ["/workspace/fixtures/input.txt"] }),
+      undefined,
+    );
+    expect((result.details as any).sentFiles).toEqual([
+      expect.objectContaining({ name: "report.csv", mimeType: "text/csv" }),
     ]);
   });
 });

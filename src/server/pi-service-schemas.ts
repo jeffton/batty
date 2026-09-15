@@ -165,18 +165,38 @@ export const BrowserToolSchema = Type.Object(
     action: StringEnum(
       [
         "open",
+        "pages",
+        "switch",
+        "close-page",
+        "frames",
         "snapshot",
         "screenshot",
         "click",
         "fill",
         "press",
         "select",
+        "upload",
+        "download",
         "wait",
+        "scroll",
+        "hover",
+        "back",
+        "reload",
+        "evaluate",
         "close",
       ] as const,
       { description: "Browser action to perform." },
     ),
     url: Type.Optional(Type.String({ description: "HTTP or HTTPS URL for action=open." })),
+    pageId: Type.Optional(
+      Type.String({ description: "Page to target. Defaults to the active page." }),
+    ),
+    frameId: Type.Optional(
+      Type.String({ description: "Frame to target. Defaults to the page's main frame." }),
+    ),
+    newPage: Type.Optional(
+      Type.Boolean({ description: "Open the URL in a new page and make it active." }),
+    ),
     selector: Type.Optional(
       Type.String({ description: "Playwright locator selector for page element actions." }),
     ),
@@ -186,12 +206,29 @@ export const BrowserToolSchema = Type.Object(
     values: Type.Optional(
       Type.Array(Type.String(), { description: "Option values for a multi-select." }),
     ),
+    paths: Type.Optional(
+      Type.Array(Type.String(), {
+        minItems: 1,
+        description: "Local file paths for action=upload.",
+      }),
+    ),
     key: Type.Optional(Type.String({ description: "Key name for press, such as Enter." })),
     state: Type.Optional(
       StringEnum(["attached", "detached", "visible", "hidden"] as const, {
         description: "Desired element state for wait. Defaults to visible.",
       }),
     ),
+    script: Type.Optional(
+      Type.String({
+        description:
+          "JavaScript expression or function source for action=evaluate. Functions receive args.",
+      }),
+    ),
+    args: Type.Optional(
+      Type.Unknown({ description: "JSON-serializable value passed to an evaluated function." }),
+    ),
+    deltaX: Type.Optional(Type.Number({ description: "Horizontal pixels for action=scroll." })),
+    deltaY: Type.Optional(Type.Number({ description: "Vertical pixels for action=scroll." })),
     viewport: Type.Optional(
       Type.Object(
         {

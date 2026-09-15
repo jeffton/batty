@@ -1,4 +1,8 @@
-import type { BrowserContext, Page } from "playwright";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { inspect } from "node:util";
+import type { BrowserContext, Frame, Page } from "playwright";
 import { getSharedBrowser } from "./browser-runtime";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -6,13 +10,24 @@ const MAX_BROWSER_SESSIONS = 8;
 
 export type BrowserAction =
   | "open"
+  | "pages"
+  | "switch"
+  | "close-page"
+  | "frames"
   | "snapshot"
   | "screenshot"
   | "click"
   | "fill"
   | "press"
   | "select"
+  | "upload"
+  | "download"
   | "wait"
+  | "scroll"
+  | "hover"
+  | "back"
+  | "reload"
+  | "evaluate"
   | "close";
 
 export interface BrowserViewport {
@@ -23,38 +38,84 @@ export interface BrowserViewport {
 export interface BrowserActionInput {
   action: BrowserAction;
   url?: string;
+  pageId?: string;
+  frameId?: string;
+  newPage?: boolean;
   selector?: string;
   value?: string;
   values?: string[];
+  paths?: string[];
   key?: string;
   state?: "attached" | "detached" | "visible" | "hidden";
+  script?: string;
+  args?: unknown;
+  deltaX?: number;
+  deltaY?: number;
   viewport?: BrowserViewport;
   fullPage?: boolean;
   timeoutMs?: number;
+}
+
+interface BrowserPageDetails {
+  id: string;
+  url: string;
+  title: string;
+  active: boolean;
+}
+
+interface BrowserFrameDetails {
+  id: string;
+  name: string;
+  url: string;
+  parentId?: string;
 }
 
 export interface BrowserActionResult {
   text: string;
   details: {
     action: BrowserAction;
+    pageId?: string;
+    frameId?: string;
     url?: string;
     title?: string;
+    pages?: BrowserPageDetails[];
+    frames?: BrowserFrameDetails[];
+    downloadPaths?: string[];
   };
   image?: {
     data: string;
     mimeType: "image/png";
   };
+  downloadPaths?: string[];
 }
 
 interface BrowserSession {
   context: BrowserContext;
-  page: Page;
+  pages: Map<string, Page>;
+  pageIds: WeakMap<Page, string>;
+  frames: Map<string, Frame>;
+  frameIds: WeakMap<Frame, string>;
+  activePageId?: string;
+  nextPageNumber: number;
+  nextFrameNumber: number;
+  downloadDirs: Set<string>;
+}
+
+interface ActionOutput {
+  image?: Buffer;
+  text?: string;
+  downloadPaths?: string[];
 }
 
 function required(value: string | undefined, name: string, action: BrowserAction): string {
   const trimmed = value?.trim();
   if (!trimmed) throw new Error(`${name} is required for browser ${action}`);
   return trimmed;
+}
+
+function present(value: string | undefined, name: string, action: BrowserAction): string {
+  if (value == null) throw new Error(`${name} is required for browser ${action}`);
+  return value;
 }
 
 function validateUrl(value: string): string {
@@ -67,6 +128,22 @@ function validateUrl(value: string): string {
 
 function timeout(input: BrowserActionInput): number {
   return Math.min(Math.max(Math.floor(input.timeoutMs ?? DEFAULT_TIMEOUT_MS), 1_000), 60_000);
+}
+
+function safeDownloadName(name: string): string {
+  return path.basename(name).replace(/[^a-zA-Z0-9._-]+/g, "-") || "download";
+}
+
+function formatEvaluationResult(value: unknown): string {
+  return typeof value === "string"
+    ? value
+    : inspect(value, {
+        breakLength: 120,
+        compact: false,
+        depth: null,
+        maxArrayLength: null,
+        maxStringLength: null,
+      });
 }
 
 export class BrowserService {
@@ -100,33 +177,43 @@ export class BrowserService {
           }
 
           let session = this.sessions.get(sessionId);
-          let image: Buffer | undefined;
           if (input.action === "open") {
             const url = validateUrl(required(input.url, "url", input.action));
-            if (session?.page.isClosed()) {
-              await this.closeSessionNow(sessionId);
-              session = undefined;
-            }
-            if (session) {
-              if (input.viewport) await session.page.setViewportSize(input.viewport);
-            } else {
-              session = await this.createSession(sessionId, input.viewport);
-            }
-            signal?.throwIfAborted();
-            session.page.setDefaultTimeout(timeout(input));
-            session.page.setDefaultNavigationTimeout(timeout(input));
-            await session.page.goto(url, { waitUntil: "domcontentloaded" });
-          } else {
-            if (!session || session.page.isClosed()) {
-              throw new Error('No active browser page. Start with action="open".');
-            }
-            session.page.setDefaultTimeout(timeout(input));
-            session.page.setDefaultNavigationTimeout(timeout(input));
-            if (input.viewport) await session.page.setViewportSize(input.viewport);
-            image = await this.performPageAction(session.page, input);
+            const created = !session;
+            session ??= await this.createSession(sessionId, input.viewport);
+            const page = await this.pageForOpen(session, input, created);
+            this.configurePage(page, input);
+            await page.goto(url, { waitUntil: "domcontentloaded" });
+            return await this.snapshotResult(session, input, page);
           }
 
-          return await this.snapshot(input.action, session.page, image);
+          if (!session) {
+            throw new Error('No active browser page. Start with action="open".');
+          }
+
+          if (input.action === "pages") return await this.pagesResult(session, input.action);
+
+          const page = this.resolvePage(session, input.pageId);
+          this.configurePage(page, input);
+          if (input.viewport) await page.setViewportSize(input.viewport);
+
+          if (input.action === "switch") {
+            session.activePageId = this.pageId(session, page);
+            return await this.snapshotResult(session, input, page);
+          }
+          if (input.action === "close-page") {
+            const closedPageId = this.pageId(session, page);
+            await page.close();
+            return await this.pagesResult(session, input.action, `Closed page ${closedPageId}.`);
+          }
+          if (input.action === "frames") return this.framesResult(session, input, page);
+
+          const frame = this.resolveFrame(session, page, input.frameId);
+          const output = await this.performPageAction(session, page, frame, input);
+          if (output.text != null) {
+            return await this.textResult(session, input, page, frame, output);
+          }
+          return await this.snapshotResult(session, input, page, frame, output.image);
         } catch (error) {
           if (signal?.aborted) await this.closeSessionNow(sessionId);
           throw error;
@@ -155,84 +242,339 @@ export class BrowserService {
     }
     const browser = await getSharedBrowser();
     const context = await browser.newContext({
-      acceptDownloads: false,
+      acceptDownloads: true,
       locale: "en-US",
       permissions: [],
       ...(viewport ? { viewport } : {}),
     });
-    let page: Page;
+    const session: BrowserSession = {
+      context,
+      pages: new Map(),
+      pageIds: new WeakMap(),
+      frames: new Map(),
+      frameIds: new WeakMap(),
+      nextPageNumber: 1,
+      nextFrameNumber: 1,
+      downloadDirs: new Set(),
+    };
+    context.on("page", (page) => this.registerPage(session, page, false));
     try {
-      page = await context.newPage();
+      const page = await context.newPage();
+      this.registerPage(session, page, true);
     } catch (error) {
       await context.close().catch(() => {});
       throw error;
     }
-    const session = { context, page };
     this.sessions.set(sessionId, session);
     return session;
   }
 
-  private async performPageAction(
-    page: Page,
+  private registerPage(session: BrowserSession, page: Page, activate: boolean): string {
+    const existingId = session.pageIds.get(page);
+    if (existingId) {
+      if (activate) session.activePageId = existingId;
+      return existingId;
+    }
+
+    const pageId = `page-${session.nextPageNumber++}`;
+    session.pageIds.set(page, pageId);
+    session.pages.set(pageId, page);
+    if (activate || !session.activePageId) session.activePageId = pageId;
+    for (const frame of page.frames()) this.registerFrame(session, frame);
+    page.on("frameattached", (frame) => this.registerFrame(session, frame));
+    page.on("framedetached", (frame) => this.unregisterFrame(session, frame));
+    page.on("close", () => {
+      session.pages.delete(pageId);
+      for (const [frameId, frame] of session.frames) {
+        if (frame.page() === page) session.frames.delete(frameId);
+      }
+      if (session.activePageId === pageId) {
+        session.activePageId = session.pages.keys().next().value;
+      }
+    });
+    return pageId;
+  }
+
+  private registerFrame(session: BrowserSession, frame: Frame): string {
+    const existingId = session.frameIds.get(frame);
+    if (existingId) return existingId;
+    const frameId = `frame-${session.nextFrameNumber++}`;
+    session.frameIds.set(frame, frameId);
+    session.frames.set(frameId, frame);
+    return frameId;
+  }
+
+  private unregisterFrame(session: BrowserSession, frame: Frame): void {
+    const frameId = session.frameIds.get(frame);
+    if (frameId) session.frames.delete(frameId);
+  }
+
+  private async pageForOpen(
+    session: BrowserSession,
     input: BrowserActionInput,
-  ): Promise<Buffer | undefined> {
+    sessionCreated: boolean,
+  ): Promise<Page> {
+    if ((input.newPage && !sessionCreated) || session.pages.size === 0) {
+      const page = await session.context.newPage();
+      this.registerPage(session, page, true);
+      if (input.viewport) await page.setViewportSize(input.viewport);
+      return page;
+    }
+    const page = this.resolvePage(session, input.pageId);
+    if (input.viewport && !sessionCreated) await page.setViewportSize(input.viewport);
+    return page;
+  }
+
+  private resolvePage(session: BrowserSession, requestedPageId?: string): Page {
+    const pageId = requestedPageId ?? session.activePageId;
+    const page = pageId ? session.pages.get(pageId) : undefined;
+    if (!page || page.isClosed()) throw new Error(`Unknown browser page: ${pageId ?? "(none)"}`);
+    return page;
+  }
+
+  private resolveFrame(session: BrowserSession, page: Page, requestedFrameId?: string): Frame {
+    for (const frame of page.frames()) this.registerFrame(session, frame);
+    if (!requestedFrameId) return page.mainFrame();
+    const frame = session.frames.get(requestedFrameId);
+    if (!frame || frame.page() !== page)
+      throw new Error(`Unknown browser frame: ${requestedFrameId}`);
+    return frame;
+  }
+
+  private pageId(session: BrowserSession, page: Page): string {
+    return session.pageIds.get(page)!;
+  }
+
+  private frameId(session: BrowserSession, frame: Frame): string {
+    return this.registerFrame(session, frame);
+  }
+
+  private configurePage(page: Page, input: BrowserActionInput): void {
+    page.setDefaultTimeout(timeout(input));
+    page.setDefaultNavigationTimeout(timeout(input));
+  }
+
+  private async performPageAction(
+    session: BrowserSession,
+    page: Page,
+    frame: Frame,
+    input: BrowserActionInput,
+  ): Promise<ActionOutput> {
     switch (input.action) {
       case "snapshot":
-        return;
+        return {};
       case "screenshot":
-        return page.screenshot({ fullPage: input.fullPage ?? false, type: "png" });
+        return { image: await page.screenshot({ fullPage: input.fullPage ?? false, type: "png" }) };
       case "click":
-        await page.locator(required(input.selector, "selector", input.action)).click();
-        return;
+        await frame.locator(required(input.selector, "selector", input.action)).click();
+        return {};
       case "fill":
-        await page
+        await frame
           .locator(required(input.selector, "selector", input.action))
-          .fill(required(input.value, "value", input.action));
-        return;
+          .fill(present(input.value, "value", input.action));
+        return {};
       case "press":
-        await page
+        await frame
           .locator(required(input.selector, "selector", input.action))
           .press(required(input.key, "key", input.action));
-        return;
+        return {};
       case "select": {
         const values = input.values ?? (input.value == null ? [] : [input.value]);
         if (values.length === 0) throw new Error("value or values is required for browser select");
-        await page.locator(required(input.selector, "selector", input.action)).selectOption(values);
-        return;
+        await frame
+          .locator(required(input.selector, "selector", input.action))
+          .selectOption(values);
+        return {};
+      }
+      case "upload": {
+        const paths = input.paths ?? [];
+        if (paths.length === 0) throw new Error("paths is required for browser upload");
+        await frame
+          .locator(required(input.selector, "selector", input.action))
+          .setInputFiles(paths);
+        return {};
+      }
+      case "download": {
+        const [download] = await Promise.all([
+          page.waitForEvent("download"),
+          frame.locator(required(input.selector, "selector", input.action)).click(),
+        ]);
+        const dir = await fs.mkdtemp(path.join(os.tmpdir(), "batty-browser-download-"));
+        session.downloadDirs.add(dir);
+        const downloadPath = path.join(dir, safeDownloadName(download.suggestedFilename()));
+        await download.saveAs(downloadPath);
+        return {
+          text: `Downloaded ${download.suggestedFilename()}.\nSaved to: ${downloadPath}`,
+          downloadPaths: [downloadPath],
+        };
       }
       case "wait":
-        await page.locator(required(input.selector, "selector", input.action)).waitFor({
+        await frame.locator(required(input.selector, "selector", input.action)).waitFor({
           state: input.state ?? "visible",
           timeout: timeout(input),
         });
-        return;
+        return {};
+      case "scroll":
+        if (input.selector) {
+          await frame.locator(input.selector).scrollIntoViewIfNeeded();
+        } else {
+          await frame.evaluate(({ deltaX, deltaY }) => window.scrollBy(deltaX, deltaY), {
+            deltaX: input.deltaX ?? 0,
+            deltaY: input.deltaY ?? 0,
+          });
+        }
+        return {};
+      case "hover":
+        await frame.locator(required(input.selector, "selector", input.action)).hover();
+        return {};
+      case "back":
+        await page.goBack({ waitUntil: "domcontentloaded" });
+        return {};
+      case "reload":
+        await page.reload({ waitUntil: "domcontentloaded" });
+        return {};
+      case "evaluate": {
+        const script = required(input.script, "script", input.action);
+        const result = await frame.evaluate(
+          ({ script, args }) => {
+            // eslint-disable-next-line no-eval -- This browser action intentionally evaluates page JavaScript.
+            const value = globalThis.eval(script);
+            return typeof value === "function" ? value(args) : value;
+          },
+          { script, args: input.args },
+        );
+        return { text: `Evaluation result:\n${formatEvaluationResult(result)}` };
+      }
       case "open":
+      case "pages":
+      case "switch":
+      case "close-page":
+      case "frames":
       case "close":
         throw new Error(`Unexpected browser action: ${input.action}`);
     }
   }
 
-  private async snapshot(
+  private async pageDetails(session: BrowserSession): Promise<BrowserPageDetails[]> {
+    return Promise.all(
+      [...session.pages].map(async ([id, page]) => ({
+        id,
+        url: page.url(),
+        title: await page.title(),
+        active: id === session.activePageId,
+      })),
+    );
+  }
+
+  private async pagesResult(
+    session: BrowserSession,
     action: BrowserAction,
-    page: Page,
-    image?: Buffer,
+    prefix?: string,
   ): Promise<BrowserActionResult> {
+    const pages = await this.pageDetails(session);
+    const listing =
+      pages.length === 0
+        ? "No open pages."
+        : pages
+            .map(
+              (page) =>
+                `${page.id}${page.active ? " (active)" : ""}\nTitle: ${page.title || "(untitled)"}\nURL: ${page.url}`,
+            )
+            .join("\n\n");
+    return {
+      text: prefix ? `${prefix}\n\n${listing}` : listing,
+      details: { action, pages },
+    };
+  }
+
+  private framesResult(
+    session: BrowserSession,
+    input: BrowserActionInput,
+    page: Page,
+  ): BrowserActionResult {
+    const pageId = this.pageId(session, page);
+    const frames = page.frames().map((frame) => ({
+      id: this.frameId(session, frame),
+      name: frame.name(),
+      url: frame.url(),
+      parentId: frame.parentFrame() ? this.frameId(session, frame.parentFrame()!) : undefined,
+    }));
+    return {
+      text: frames
+        .map(
+          (frame) =>
+            `${frame.id}${frame.parentId ? ` (parent ${frame.parentId})` : " (main)"}\nName: ${frame.name || "(unnamed)"}\nURL: ${frame.url}`,
+        )
+        .join("\n\n"),
+      details: { action: input.action, pageId, frames },
+    };
+  }
+
+  private async textResult(
+    session: BrowserSession,
+    input: BrowserActionInput,
+    page: Page,
+    frame: Frame,
+    output: ActionOutput,
+  ): Promise<BrowserActionResult> {
+    const pageId = this.pageId(session, page);
+    const frameId = this.frameId(session, frame);
     const title = await page.title();
     const url = page.url();
+    const downloadPaths = output.downloadPaths;
+    return {
+      text: [
+        `Page: ${title || "(untitled)"}`,
+        `Page ID: ${pageId}`,
+        `Frame ID: ${frameId}${frame === page.mainFrame() ? " (main)" : ""}`,
+        `URL: ${url}`,
+        "",
+        output.text,
+      ].join("\n"),
+      details: {
+        action: input.action,
+        pageId,
+        frameId,
+        url,
+        title,
+        downloadPaths,
+      },
+      downloadPaths,
+    };
+  }
+
+  private async snapshotResult(
+    session: BrowserSession,
+    input: BrowserActionInput,
+    page: Page,
+    frame = page.mainFrame(),
+    image?: Buffer,
+  ): Promise<BrowserActionResult> {
+    const pageId = this.pageId(session, page);
+    const frameId = this.frameId(session, frame);
+    const title = await page.title();
+    const url = page.url();
+    const pages = await this.pageDetails(session);
+    const header = [
+      `Page: ${title || "(untitled)"}`,
+      `Page ID: ${pageId}${pageId === session.activePageId ? " (active)" : ""}`,
+      `Frame ID: ${frameId}${frame === page.mainFrame() ? " (main)" : ""}`,
+      `URL: ${url}`,
+      ...(pages.length > 1 ? [`Open pages: ${pages.map((entry) => entry.id).join(", ")}`] : []),
+      "",
+    ];
     if (image) {
       return {
-        text: [`Page: ${title || "(untitled)"}`, `URL: ${url}`, "", "Screenshot captured."].join(
-          "\n",
-        ),
-        details: { action, url, title },
+        text: [...header, "Screenshot captured."].join("\n"),
+        details: { action: input.action, pageId, frameId, url, title, pages },
         image: { data: image.toString("base64"), mimeType: "image/png" },
       };
     }
 
-    const ariaSnapshot = await page.locator("body").ariaSnapshot();
+    const ariaSnapshot = await frame.locator("body").ariaSnapshot();
     return {
-      text: [`Page: ${title || "(untitled)"}`, `URL: ${url}`, "", ariaSnapshot].join("\n"),
-      details: { action, url, title },
+      text: [...header, ariaSnapshot].join("\n"),
+      details: { action: input.action, pageId, frameId, url, title, pages },
     };
   }
 
@@ -241,6 +583,9 @@ export class BrowserService {
     if (!session) return;
     this.sessions.delete(sessionId);
     await session.context.close();
+    await Promise.all(
+      [...session.downloadDirs].map((dir) => fs.rm(dir, { recursive: true, force: true })),
+    );
   }
 
   private async serialized<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {

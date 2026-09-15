@@ -26,6 +26,7 @@ export interface StoredAppOptions {
   webPushSubject?: string;
   cronDailySessionStartTime?: string;
   braveSearchKey?: string;
+  browserTailscaleSshDestination?: string;
   pinnedWorkspaceIds?: string[];
   assistantWorkspaceId?: string;
   defaultProvider?: string;
@@ -42,6 +43,7 @@ export interface AppOptions {
   webPushSubject: string;
   cronDailySessionStartTime: string;
   braveSearchKey?: string;
+  browserTailscaleSshDestination?: string;
   pinnedWorkspaceIds: string[];
   assistantWorkspaceId?: string;
   defaultProvider?: string;
@@ -199,6 +201,9 @@ function normalizeStoredOptions(options: StoredAppOptions | undefined): StoredAp
       typeof options?.webPushSubject === "string" ? options.webPushSubject.trim() : "",
     cronDailySessionStartTime: normalizeDailySessionStartTime(options?.cronDailySessionStartTime),
     braveSearchKey: normalizeOptionalString(options?.braveSearchKey),
+    browserTailscaleSshDestination: normalizeOptionalString(
+      options?.browserTailscaleSshDestination,
+    ),
     pinnedWorkspaceIds: Array.isArray(options?.pinnedWorkspaceIds)
       ? options.pinnedWorkspaceIds.filter(
           (value): value is string => typeof value === "string" && value.trim().length > 0,

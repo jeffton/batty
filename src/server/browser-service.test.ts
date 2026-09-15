@@ -137,6 +137,66 @@ describe("BrowserService", () => {
     });
   });
 
+  it("routes an opted-in session through the configured SSH proxy", async () => {
+    const fixture = createFixture();
+    const proxy = {
+      ensureStarted: vi.fn(async () => "socks5://127.0.0.1:34567"),
+      dispose: vi.fn(async () => undefined),
+    };
+    const service = new BrowserService(proxy);
+
+    await service.execute("session-1", {
+      action: "open",
+      url: "https://example.com",
+      useTailscale: true,
+    });
+    await service.execute("session-1", { action: "snapshot" });
+
+    expect(proxy.ensureStarted).toHaveBeenCalledTimes(2);
+    expect(fixture.browser.newContext).toHaveBeenCalledWith({
+      acceptDownloads: true,
+      locale: "en-US",
+      permissions: [],
+      proxy: { server: "socks5://127.0.0.1:34567", bypass: "<-loopback>" },
+    });
+
+    await service.dispose();
+    expect(proxy.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed when Tailscale routing is requested without configuration", async () => {
+    createFixture();
+    const service = new BrowserService();
+
+    await expect(
+      service.execute("session-1", {
+        action: "open",
+        url: "https://example.com",
+        useTailscale: true,
+      }),
+    ).rejects.toThrow("browserTailscaleSshDestination");
+    expect(chromium.launch).not.toHaveBeenCalled();
+  });
+
+  it("requires closing a browser session before changing its routing", async () => {
+    createFixture();
+    const proxy = {
+      ensureStarted: vi.fn(async () => "socks5://127.0.0.1:34567"),
+      dispose: vi.fn(async () => undefined),
+    };
+    const service = new BrowserService(proxy);
+    await service.execute("session-1", { action: "open", url: "https://example.com" });
+
+    await expect(
+      service.execute("session-1", {
+        action: "open",
+        url: "https://example.org",
+        useTailscale: true,
+      }),
+    ).rejects.toThrow("routing is fixed");
+    expect(proxy.ensureStarted).not.toHaveBeenCalled();
+  });
+
   it("sets the initial viewport before opening a page", async () => {
     const fixture = createFixture();
     const service = new BrowserService();

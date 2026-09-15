@@ -4,6 +4,7 @@ import path from "node:path";
 import { inspect } from "node:util";
 import type { BrowserContext, Frame, Page } from "playwright";
 import { getSharedBrowser } from "./browser-runtime";
+import type { BrowserProxy } from "./ssh-socks-proxy";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_BROWSER_SESSIONS = 8;
@@ -54,6 +55,7 @@ export interface BrowserActionInput {
   viewport?: BrowserViewport;
   fullPage?: boolean;
   timeoutMs?: number;
+  useTailscale?: boolean;
 }
 
 interface BrowserPageDetails {
@@ -91,6 +93,7 @@ export interface BrowserActionResult {
 
 interface BrowserSession {
   context: BrowserContext;
+  useTailscale: boolean;
   pages: Map<string, Page>;
   pageIds: WeakMap<Page, string>;
   frames: Map<string, Frame>;
@@ -150,6 +153,8 @@ export class BrowserService {
   private readonly sessions = new Map<string, BrowserSession>();
   private readonly queues = new Map<string, Promise<void>>();
 
+  constructor(private readonly tailscaleProxy?: BrowserProxy) {}
+
   async execute(
     sessionId: string,
     input: BrowserActionInput,
@@ -177,10 +182,25 @@ export class BrowserService {
           }
 
           let session = this.sessions.get(sessionId);
+          if (
+            session &&
+            input.useTailscale != null &&
+            input.useTailscale !== session.useTailscale
+          ) {
+            throw new Error(
+              'Browser routing is fixed for the session. Use action="close", then open a new session.',
+            );
+          }
+          if (session?.useTailscale) await this.requireTailscaleProxy();
+
           if (input.action === "open") {
             const url = validateUrl(required(input.url, "url", input.action));
             const created = !session;
-            session ??= await this.createSession(sessionId, input.viewport);
+            session ??= await this.createSession(
+              sessionId,
+              input.viewport,
+              input.useTailscale ?? false,
+            );
             const page = await this.pageForOpen(session, input, created);
             this.configurePage(page, input);
             await page.goto(url, { waitUntil: "domcontentloaded" });
@@ -230,25 +250,33 @@ export class BrowserService {
 
   async dispose(): Promise<void> {
     const sessionIds = [...this.sessions.keys()];
-    await Promise.all(sessionIds.map((sessionId) => this.closeSession(sessionId)));
+    try {
+      await Promise.all(sessionIds.map((sessionId) => this.closeSession(sessionId)));
+    } finally {
+      await this.tailscaleProxy?.dispose();
+    }
   }
 
   private async createSession(
     sessionId: string,
-    viewport?: BrowserViewport,
+    viewport: BrowserViewport | undefined,
+    useTailscale: boolean,
   ): Promise<BrowserSession> {
     if (this.sessions.size >= MAX_BROWSER_SESSIONS) {
       throw new Error(`Browser session limit reached (${MAX_BROWSER_SESSIONS})`);
     }
+    const proxyServer = useTailscale ? await this.requireTailscaleProxy() : undefined;
     const browser = await getSharedBrowser();
     const context = await browser.newContext({
       acceptDownloads: true,
       locale: "en-US",
       permissions: [],
+      ...(proxyServer ? { proxy: { server: proxyServer, bypass: "<-loopback>" } } : {}),
       ...(viewport ? { viewport } : {}),
     });
     const session: BrowserSession = {
       context,
+      useTailscale,
       pages: new Map(),
       pageIds: new WeakMap(),
       frames: new Map(),
@@ -576,6 +604,15 @@ export class BrowserService {
       text: [...header, ariaSnapshot].join("\n"),
       details: { action: input.action, pageId, frameId, url, title, pages },
     };
+  }
+
+  private async requireTailscaleProxy(): Promise<string> {
+    if (!this.tailscaleProxy) {
+      throw new Error(
+        "Tailscale browser routing is not configured. Set browserTailscaleSshDestination in options.json.",
+      );
+    }
+    return this.tailscaleProxy.ensureStarted();
   }
 
   private async closeSessionNow(sessionId: string): Promise<void> {

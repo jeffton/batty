@@ -489,6 +489,7 @@ export function createBrowserTool({
     promptGuidelines: [
       "Use this tool when a page requires JavaScript or multi-step interaction that web-search content cannot handle.",
       "Start with action=open. Browser state and cookies persist within the current Batty session only.",
+      "Set useTailscale=true on the initial open to route that browser session through the configured SSH destination. Close the session before changing its routing.",
       "Use action=pages to list tabs and popups, action=switch with pageId to activate one, and newPage=true on open to create a tab.",
       "Use action=frames to list frame IDs, then pass frameId to target an iframe.",
       'Selectors use Playwright locator syntax, for example input[name=q], text=Submit, or button:has-text("Next").',
@@ -514,6 +515,7 @@ export function createBrowserTool({
           pageId: typeof params.pageId === "string" ? params.pageId : undefined,
           frameId: typeof params.frameId === "string" ? params.frameId : undefined,
           newPage: typeof params.newPage === "boolean" ? params.newPage : undefined,
+          useTailscale: typeof params.useTailscale === "boolean" ? params.useTailscale : undefined,
           selector: typeof params.selector === "string" ? params.selector : undefined,
           value: typeof params.value === "string" ? params.value : undefined,
           values: Array.isArray(params.values)

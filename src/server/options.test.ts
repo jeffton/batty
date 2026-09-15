@@ -38,6 +38,7 @@ describe("ensureOptionsFile", () => {
       webPushSubject: string;
       cronDailySessionStartTime: string;
       braveSearchKey?: string;
+      browserTailscaleSshDestination?: string;
       pinnedWorkspaceIds?: string[];
       assistantWorkspaceId?: string;
       defaultProvider?: string;
@@ -53,6 +54,7 @@ describe("ensureOptionsFile", () => {
     expect(persisted.webPushSubject).toBe("");
     expect(persisted.cronDailySessionStartTime).toBe("04:00");
     expect(persisted.braveSearchKey).toBeUndefined();
+    expect(persisted.browserTailscaleSshDestination).toBeUndefined();
     expect(persisted.pinnedWorkspaceIds).toEqual([]);
     expect(persisted.assistantWorkspaceId).toBeUndefined();
     expect(persisted.defaultProvider).toBeUndefined();
@@ -76,6 +78,7 @@ describe("ensureOptionsFile", () => {
           webPushSubject: "https://batty.roybot.se",
           cronDailySessionStartTime: "4:00",
           braveSearchKey: "  brave-key  ",
+          browserTailscaleSshDestination: "  david@summerhouse-pi  ",
           pinnedWorkspaceIds: ["batty", "", 123, "kladde"],
           assistantWorkspaceId: "  batty  ",
           defaultProvider: "  openai-codex  ",
@@ -102,6 +105,7 @@ describe("ensureOptionsFile", () => {
     expect(options.webPushSubject).toBe("https://batty.roybot.se");
     expect(options.cronDailySessionStartTime).toBe("04:00");
     expect(options.braveSearchKey).toBe("brave-key");
+    expect(options.browserTailscaleSshDestination).toBe("david@summerhouse-pi");
     expect(options.pinnedWorkspaceIds).toEqual(["batty", "kladde"]);
     expect(options.assistantWorkspaceId).toBe("batty");
     expect(options.defaultProvider).toBe("openai-codex");

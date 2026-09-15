@@ -220,6 +220,7 @@ Fields:
 - `webPushSubject` — required VAPID subject; use a real `https:` origin or valid `mailto:` URI
 - `cronDailySessionStartTime` — local rollover time for daily cron session reuse, formatted as `HH:MM`; defaults to `04:00`
 - `braveSearchKey` — optional Brave Search API key used by Batty's built-in `web-search` tool
+- `browserTailscaleSshDestination` — optional OpenSSH destination used for browser sessions opened with `useTailscale: true`, such as `user@100.64.0.1` or a Tailscale hostname
 - `appTitle` — installation title shown in the UI, browser title, and PWA manifest; defaults to `Batty`
 - `appColor` — installation color used for light and dark app chrome; one of `neutral`, `blue`, `teal`, `green`, `amber`, `rose`, or `violet`
 - `defaultProvider` — optional default Pi model provider for new sessions, such as `openai-codex`
@@ -237,6 +238,35 @@ Example model defaults:
 ```
 
 Creating a harness session requires an explicit model selection or a configured default provider/model pair.
+
+### Browser routing through a Tailscale node
+
+Configure an SSH destination reachable from the Batty server over Tailscale:
+
+```json
+{
+  "browserTailscaleSshDestination": "david@summerhouse-pi"
+}
+```
+
+Open a routed browser session by passing `useTailscale: true` with its initial `open` action. Routing defaults to direct when the argument is omitted or false. A session's routing cannot be changed after its browser context is created; close it before opening it with different routing.
+
+Batty starts and supervises an on-demand OpenSSH dynamic SOCKS tunnel bound to an ephemeral loopback port. Only browser contexts opened with `useTailscale: true` use that proxy. If SSH is unavailable, routed requests fail rather than falling back to the Batty host's connection.
+
+The Batty server requires:
+
+- the `ssh` command
+- non-interactive key-based access to the configured destination
+- the destination host key in the Batty service account's `known_hosts` file
+- Tailscale connectivity to the destination
+
+The destination node requires:
+
+- Tailscale connected and reachable from the Batty server
+- an SSH server with TCP forwarding enabled (`AllowTcpForwarding yes`, normally the default)
+- working outbound internet and DNS access
+
+The destination does not need a SOCKS server, browser, public inbound port, or Tailscale exit-node configuration. The SSH daemon makes the outgoing connections, so sites see the destination node's public IP.
 
 Other global Pi settings can be placed in `<batty-root>/.batty/settings.json`. Model defaults in that file are ignored because `options.json` is authoritative. A workspace can override model defaults and other Pi settings in `<workspace>/.batty/settings.json`.
 

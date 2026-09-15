@@ -197,6 +197,12 @@ export const BrowserToolSchema = Type.Object(
     newPage: Type.Optional(
       Type.Boolean({ description: "Open the URL in a new page and make it active." }),
     ),
+    useTailscale: Type.Optional(
+      Type.Boolean({
+        description:
+          "Route this browser session through the configured Tailscale SSH destination. Set only on the initial open. Defaults to false.",
+      }),
+    ),
     selector: Type.Optional(
       Type.String({ description: "Playwright locator selector for page element actions." }),
     ),

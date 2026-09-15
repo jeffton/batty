@@ -8,7 +8,11 @@ async function launchBrowser(): Promise<Browser> {
   const { chromium } = await import("playwright");
   const browser = await chromium.launch({
     headless: true,
-    args: ["--disable-dev-shm-usage"],
+    args: [
+      "--disable-dev-shm-usage",
+      "--disable-quic",
+      "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+    ],
   });
 
   if (!browser || typeof browser.newContext !== "function") {

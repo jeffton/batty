@@ -129,6 +129,7 @@ describe("createBrowserTool", () => {
         action: "screenshot",
         viewport: { width: 1280, height: 720 },
         fullPage: true,
+        useTailscale: true,
       },
       undefined,
       undefined,
@@ -146,6 +147,7 @@ describe("createBrowserTool", () => {
         action: "screenshot",
         viewport: { width: 1280, height: 720 },
         fullPage: true,
+        useTailscale: true,
       }),
       undefined,
     );

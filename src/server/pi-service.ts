@@ -39,6 +39,7 @@ import {
 } from "./session-summaries";
 import { ProviderAuthService } from "./provider-auth";
 import { ProviderUsageService } from "./provider-usage";
+import { SshSocksProxy } from "./ssh-socks-proxy";
 import {
   hasParentedCronRunSessionMarker,
   buildCronRunSessionBinding,
@@ -112,7 +113,7 @@ export class PiService {
   private readonly modelConfigWatcher: ModelConfigWatcher;
   private readonly providerAuthService: ProviderAuthService;
   private readonly providerUsageService: ProviderUsageService;
-  private readonly browserService = new BrowserService();
+  private readonly browserService: BrowserService;
   private readonly sessions = new Map<string, WebSession>();
   private readonly liveSessions = new Map<string, LiveSession>();
   private readonly subagentQueues = new Map<string, Promise<void>>();
@@ -143,6 +144,11 @@ export class PiService {
     this.sessionReadState = sessionReadState;
     this.onAgentCompleted = onAgentCompleted;
     this.onWorkspaceUpdated = onWorkspaceUpdated;
+    this.browserService = new BrowserService(
+      config.browserTailscaleSshDestination
+        ? new SshSocksProxy(config.browserTailscaleSshDestination)
+        : undefined,
+    );
     const authPath = path.join(battyAgentDir(config), "auth.json");
     this.providerAuthService = new ProviderAuthService(modelRuntime, (providerId) =>
       readStoredCredential(providerId, authPath),

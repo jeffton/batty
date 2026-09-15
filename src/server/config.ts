@@ -16,6 +16,7 @@ export interface AppConfig {
   webPushSubject: string;
   cronDailySessionStartTime: string;
   braveSearchKey?: string;
+  browserTailscaleSshDestination?: string;
   defaultProvider?: string;
   defaultModel?: string;
   defaultThinkingLevel?: DefaultThinkingLevel;
@@ -75,6 +76,7 @@ export async function loadConfig(battyDir: string): Promise<AppConfig> {
     webPushSubject: options.webPushSubject,
     cronDailySessionStartTime: options.cronDailySessionStartTime,
     braveSearchKey: options.braveSearchKey,
+    browserTailscaleSshDestination: options.browserTailscaleSshDestination,
     defaultProvider: options.defaultProvider,
     defaultModel: options.defaultModel,
     defaultThinkingLevel: options.defaultThinkingLevel,

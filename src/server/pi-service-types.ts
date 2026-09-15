@@ -38,6 +38,7 @@ export interface WebSession {
   modelFallbackMessage?: string | undefined;
   ephemeral: boolean;
   autoRetryActive?: boolean;
+  isCompacting?: boolean;
   agentCompleted?: boolean;
   suppressNextAgentEndCompletion?: boolean;
   revision?: number;

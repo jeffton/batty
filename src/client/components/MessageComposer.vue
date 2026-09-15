@@ -13,6 +13,7 @@ const props = defineProps<{
   disabled?: boolean;
   actionsDisabled?: boolean;
   streaming?: boolean;
+  compacting?: boolean;
   offline?: boolean;
   sessionKey?: string;
   queuedPrompts?: QueuedPrompt[];
@@ -412,6 +413,7 @@ defineExpose({ clear, restore });
           v-if="props.streaming"
           class="composer__stream-actions"
           :disabled="actionsDisabled"
+          :compacting="props.compacting"
           @stop="emit('stop')"
         />
 

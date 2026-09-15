@@ -105,6 +105,29 @@ describe("native Pi compaction", () => {
     expect(f.session.snapshot.lastResult?.status).toBe("failed");
   });
 
+  it("emits the compaction lifecycle through the controller", async () => {
+    const f = await setup();
+    await f.session.lane.appendMessage({ role: "user", content: "history", timestamp: 1 }, context);
+    f.session.harness.hooks.on("before_compaction", ({ preparation }) => ({
+      compaction: {
+        summary: "History",
+        retainedTail: [],
+        tokensBefore: preparation.tokensBefore,
+      },
+    }));
+    const events: string[] = [];
+    f.session.subscribe((event) => {
+      if (event.type === "compaction_start" || event.type === "compaction_end") {
+        events.push(event.type);
+      }
+    });
+
+    await f.session.compact();
+
+    expect(events).toEqual(["compaction_start", "compaction_end"]);
+    expect(f.session.isCompacting).toBe(false);
+  });
+
   it("cancels a durable manual compaction without starting summary generation", async () => {
     const f = await setup();
     await f.session.lane.appendMessage({ role: "user", content: "history", timestamp: 1 }, context);

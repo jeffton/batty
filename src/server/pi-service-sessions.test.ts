@@ -72,6 +72,57 @@ describe("workspace activity updates", () => {
     expect(webSession.agentCompleted).toBe(false);
     expect(notifyWorkspaceUpdated).toHaveBeenCalledWith(workspace.id);
   });
+
+  it("publishes compaction activity in session metadata", async () => {
+    const webSession = {
+      id: "web-compaction",
+      workspace,
+      session: { sessionId: "session-compaction" },
+      subscribers: new Set(),
+      activeTools: new Map(),
+    } as unknown as WebSession;
+    const publishEvent = vi.fn();
+    const deps = {
+      getState: () =>
+        createState({ isCompacting: Boolean(webSession.isCompacting) }, webSession, []),
+      getStateMetadata: () =>
+        createState({ isCompacting: Boolean(webSession.isCompacting) }, webSession, []),
+      publish: publishEvent,
+      notifyWorkspaceUpdated: vi.fn(async () => undefined),
+      disposeWebSession: vi.fn(),
+    };
+
+    await handleAgentEvent(deps, webSession, {
+      type: "compaction_start",
+      reason: "threshold",
+    });
+
+    expect(webSession.isCompacting).toBe(true);
+    expect(publishEvent).toHaveBeenLastCalledWith(
+      webSession,
+      expect.objectContaining({
+        type: "state",
+        state: expect.objectContaining({ isCompacting: true }),
+      }),
+    );
+
+    await handleAgentEvent(deps, webSession, {
+      type: "compaction_end",
+      reason: "threshold",
+      result: undefined,
+      aborted: false,
+      willRetry: false,
+    });
+
+    expect(webSession.isCompacting).toBe(false);
+    expect(publishEvent).toHaveBeenLastCalledWith(
+      webSession,
+      expect.objectContaining({
+        type: "reset",
+        state: expect.objectContaining({ isCompacting: false }),
+      }),
+    );
+  });
 });
 
 describe("live reset events", () => {

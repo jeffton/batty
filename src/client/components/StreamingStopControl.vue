@@ -4,6 +4,7 @@ import { Square } from "@lucide/vue";
 const props = defineProps<{
   disabled?: boolean;
   label?: string;
+  compacting?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -37,6 +38,7 @@ function triggerClick(): void {
 
 <template>
   <div class="streaming-stop-control">
+    <span v-if="props.compacting" class="streaming-stop-control__status">Compacting</span>
     <span class="spinner streaming-stop-control__spinner" aria-hidden="true" />
     <button
       class="streaming-stop-control__button"
@@ -60,6 +62,16 @@ function triggerClick(): void {
   flex-shrink: 0;
 }
 
+.streaming-stop-control__status {
+  padding: 0.35rem 0.55rem;
+  border-radius: 0.5rem;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .streaming-stop-control__spinner {
   width: 1rem;
   height: 1rem;
@@ -74,7 +86,7 @@ function triggerClick(): void {
   min-height: 2.5rem;
   padding: 0;
   border: 0;
-  border-radius: 50%;
+  border-radius: 0.5rem;
   background: transparent;
   color: var(--color-error);
   cursor: pointer;

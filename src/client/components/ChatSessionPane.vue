@@ -326,6 +326,7 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
       <MessageComposer
         ref="composer"
         :streaming="store.activeSession.isStreaming"
+        :compacting="store.activeSession.isCompacting"
         :session-key="store.activeSession.sessionId"
         :offline="isUnavailable"
         :actions-disabled="isUnavailable"

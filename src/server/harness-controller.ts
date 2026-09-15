@@ -105,6 +105,9 @@ export class HarnessController {
   get isStreaming(): boolean {
     return this.snapshot.operation !== null;
   }
+  get isCompacting(): boolean {
+    return this.snapshot.operation?.kind === "compaction";
+  }
   get pendingMessageCount(): number {
     return this.snapshot.queues.filter((item) => item.kind === "steer" || item.kind === "followUp")
       .length;
@@ -313,6 +316,17 @@ function adaptHarnessEvent(event: HarnessEvent): AgentSessionEvent | undefined {
       return { ...event, type: "tool_execution_end" };
     case "queue_update":
       return { type: "queue_update", steering: [], followUp: [] } as AgentSessionEvent;
+    case "compaction_start":
+      return { type: "compaction_start", reason: event.reason };
+    case "compaction_end":
+      return {
+        type: "compaction_end",
+        reason: event.reason,
+        result: undefined,
+        aborted: event.status === "aborted",
+        willRetry: false,
+        ...(event.status === "failed" ? { errorMessage: event.error.message } : {}),
+      };
     default:
       return undefined;
   }

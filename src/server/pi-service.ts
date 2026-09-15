@@ -783,6 +783,7 @@ export class PiService {
         !webSession.agentCompleted &&
         (webSession.session.isStreaming ||
           [...webSession.activeTools.values()].some((tool) => tool.status === "running")),
+      isCompacting: Boolean(webSession.isCompacting),
       pendingMessageCount: webSession.session.pendingMessageCount,
       queuedPrompts: getQueuedPrompts(webSession),
       updatedAt: sessionUpdatedAt(webSession.session, webSession.openedAt),
@@ -827,6 +828,7 @@ export class PiService {
           !webSession.agentCompleted &&
           (webSession.session.isStreaming ||
             [...webSession.activeTools.values()].some((tool) => tool.status === "running")),
+        isCompacting: Boolean(webSession.isCompacting),
         pendingMessageCount: webSession.session.pendingMessageCount,
         queuedPrompts: getQueuedPrompts(webSession),
         updatedAt: sessionUpdatedAt(webSession.session, webSession.openedAt),

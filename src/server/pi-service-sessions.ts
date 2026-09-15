@@ -50,6 +50,7 @@ export function attachSession(
     openedAt: Date.now(),
     modelFallbackMessage,
     ephemeral,
+    isCompacting: session.isCompacting,
     revision: 0,
     eventLog: [],
     resolveUiImage,
@@ -378,10 +379,18 @@ export async function handleAgentEvent(
     case "auto_retry_start":
       webSession.autoRetryActive = true;
       break;
+    case "compaction_start":
+      webSession.agentCompleted = false;
+      webSession.isCompacting = true;
+      deps.publish(webSession, { type: "state", state: deps.getStateMetadata(webSession) });
+      break;
     case "agent_end":
     case "turn_end":
     case "compaction_end":
     case "auto_retry_end": {
+      if (event.type === "compaction_end") {
+        webSession.isCompacting = false;
+      }
       const agentEndWillRetry = event.type === "agent_end" && event.willRetry;
       if (agentEndWillRetry) {
         webSession.autoRetryActive = true;

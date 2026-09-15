@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { chromium } from "playwright";
+import { chromium } from "patchright";
 import { resetWebSearchStateForTests, runWebSearch } from "@/server/web-search";
 
-vi.mock("playwright", () => ({
+vi.mock("patchright", () => ({
   chromium: {
     launch: vi.fn(),
   },

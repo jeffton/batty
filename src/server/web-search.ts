@@ -1,7 +1,7 @@
 import { Worker } from "node:worker_threads";
 import { Readability } from "@mozilla/readability";
 import { JSDOM } from "jsdom";
-import type { Browser } from "playwright";
+import type { Browser } from "patchright";
 import TurndownService from "turndown";
 import { gfm } from "turndown-plugin-gfm";
 import {

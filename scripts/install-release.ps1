@@ -86,6 +86,10 @@ try {
   if ($LASTEXITCODE -ne 0) {
     throw "Production dependency installation failed with exit code $LASTEXITCODE."
   }
+  & (Get-Command corepack).Source pnpm exec patchright install chromium
+  if ($LASTEXITCODE -ne 0) {
+    throw "Patchright Chromium installation failed with exit code $LASTEXITCODE."
+  }
 } finally {
   Pop-Location
 }

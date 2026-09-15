@@ -52,7 +52,7 @@ cp -R "$repo_dir/dist/server" "$staging_dir/dist/server"
 (
   cd "$staging_dir"
   pnpm install --prod --frozen-lockfile --ignore-scripts
-  pnpm exec playwright install chromium
+  pnpm exec patchright install chromium
 )
 
 mv "$staging_dir" "$release_dir"

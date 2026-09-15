@@ -16,7 +16,7 @@ Batty is a web UI for [Pi Coding Agent](https://pi.dev). It keeps Pi's workspace
 - Built-in cron jobs for scheduled agent turns
 - Built-in `subagent` tool for synchronous workspace-scoped delegation
 - Built-in `web-search` tool powered by Brave Search
-- Session-scoped Playwright browser tool for interactive JavaScript pages
+- Session-scoped Patchright browser tool with Playwright-compatible automation for interactive JavaScript pages
 - Passkey auth with one-time setup codes for enrolling devices
 - Web Push notifications when background runs finish
 - PWA install support with offline-friendly cached session snapshots

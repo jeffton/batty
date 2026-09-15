@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { inspect } from "node:util";
-import type { BrowserContext, CDPSession, Frame, Page } from "playwright";
+import type { BrowserContext, CDPSession, Frame, Page } from "patchright";
 import { getSharedBrowser } from "./browser-runtime";
 import type { BrowserProxy } from "./ssh-socks-proxy";
 
@@ -319,7 +319,7 @@ export class BrowserService {
       permissions: [],
       userAgent: identity.userAgent,
       ...(proxyServer ? { proxy: { server: proxyServer, bypass: "<-loopback>" } } : {}),
-      ...(viewport ? { viewport } : {}),
+      viewport: viewport ?? null,
     });
     const session: BrowserSession = {
       context,
@@ -534,6 +534,8 @@ export class BrowserService {
             return typeof value === "function" ? value(args) : value;
           },
           { script, args: input.args },
+          {},
+          false,
         );
         return { text: `Evaluation result:\n${formatEvaluationResult(result)}` };
       }

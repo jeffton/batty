@@ -1,10 +1,10 @@
 import fs from "node:fs/promises";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { chromium } from "playwright";
+import { chromium } from "patchright";
 import { BrowserService } from "@/server/browser-service";
 import { resetSharedBrowserStateForTests } from "@/server/browser-runtime";
 
-vi.mock("playwright", () => ({
+vi.mock("patchright", () => ({
   chromium: {
     launch: vi.fn(),
   },
@@ -128,6 +128,7 @@ describe("BrowserService", () => {
       permissions: [],
       userAgent:
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      viewport: null,
     });
     expect(fixture.cdpSession.send).toHaveBeenCalledWith("Emulation.setUserAgentOverride", {
       userAgent:
@@ -173,6 +174,7 @@ describe("BrowserService", () => {
       userAgent:
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
       proxy: { server: "socks5://127.0.0.1:34567", bypass: "<-loopback>" },
+      viewport: null,
     });
 
     await service.dispose();
@@ -375,10 +377,15 @@ describe("BrowserService", () => {
       args: { ready: true },
     });
 
-    expect(fixture.firstPage.frame.evaluate).toHaveBeenCalledWith(expect.any(Function), {
-      script: "(args) => ({ count: document.links.length, ready: args.ready })",
-      args: { ready: true },
-    });
+    expect(fixture.firstPage.frame.evaluate).toHaveBeenCalledWith(
+      expect.any(Function),
+      {
+        script: "(args) => ({ count: document.links.length, ready: args.ready })",
+        args: { ready: true },
+      },
+      {},
+      false,
+    );
     expect(result.text).toContain("Frame ID: frame-1 (main)");
     expect(result.text).toContain("count: 3");
     expect(result.text).toContain("ready: true");

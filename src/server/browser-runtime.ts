@@ -1,18 +1,18 @@
-import type { Browser } from "playwright";
+import type { Browser } from "patchright";
 
 let activeBrowser: Browser | null = null;
 let browserLaunchPromise: Promise<Browser> | null = null;
 let browserClosePromise: Promise<void> | null = null;
 
 async function launchBrowser(): Promise<Browser> {
-  const { chromium } = await import("playwright");
+  const { chromium } = await import("patchright");
   const browser = await chromium.launch({
     headless: true,
     args: [
       "--disable-dev-shm-usage",
-      "--disable-blink-features=AutomationControlled",
       "--disable-quic",
       "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+      "--window-size=1365,768",
     ],
   });
 

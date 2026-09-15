@@ -138,6 +138,7 @@ describe("deployment scripts", () => {
     expect(script).toContain(
       'Copy-Item -Recurse (Join-Path $repoDir "patches") (Join-Path $tmpDir "patches")',
     );
+    expect(script).toContain("pnpm exec patchright install chromium");
   });
 
   it("initializes Windows options once with the plural workspace-root schema", async () => {

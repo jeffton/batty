@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { chromium } from "playwright";
+import { chromium } from "patchright";
 import {
   closeSharedBrowser,
   discardSharedBrowser,
@@ -7,7 +7,7 @@ import {
   resetSharedBrowserStateForTests,
 } from "@/server/browser-runtime";
 
-vi.mock("playwright", () => ({
+vi.mock("patchright", () => ({
   chromium: {
     launch: vi.fn(),
   },
@@ -37,11 +37,6 @@ describe("shared browser runtime", () => {
       .mockResolvedValueOnce(replacement as never);
 
     expect(await getSharedBrowser()).toBe(browser);
-    expect(chromium.launch).toHaveBeenCalledWith(
-      expect.objectContaining({
-        args: expect.arrayContaining(["--disable-blink-features=AutomationControlled"]),
-      }),
-    );
     await discardSharedBrowser(browser as never);
     expect(await getSharedBrowser()).toBe(replacement);
     expect(browser.close).toHaveBeenCalledOnce();

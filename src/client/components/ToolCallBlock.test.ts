@@ -286,6 +286,25 @@ describe("ToolCallBlock", () => {
     expect(wrapper.text()).toContain("Collapse output");
   });
 
+  it("renders browser screenshots with their text result", () => {
+    const wrapper = mount(ToolCallBlock, {
+      props: {
+        name: "browser",
+        arguments: { action: "screenshot", viewport: { width: 1280, height: 720 } },
+        resultBlocks: [
+          { type: "text", text: "Screenshot captured." },
+          { type: "image", mimeType: "image/png", data: "cG5n" },
+        ],
+        status: "success",
+      },
+    });
+
+    expect(wrapper.get("pre.code-block").text()).toContain("Screenshot captured.");
+    expect(wrapper.get('img[alt="Tool output"]').attributes("src")).toBe(
+      "data:image/png;base64,cG5n",
+    );
+  });
+
   it("renders attached files as download links without inline previews", () => {
     const wrapper = mount(ToolCallBlock, {
       props: {

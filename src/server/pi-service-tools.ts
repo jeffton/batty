@@ -486,8 +486,10 @@ export function createBrowserTool(
       "Use this tool when a page requires JavaScript or multi-step interaction that web-search content cannot handle.",
       "Start with action=open. Browser state and cookies persist within the current Batty session only.",
       'Selectors use Playwright locator syntax, for example input[name=q], text=Submit, or button:has-text("Next").',
-      "Each action returns an accessibility snapshot of the resulting page. Use action=snapshot to inspect it again.",
-      "Large outputs are truncated and written to a temp file; use the read tool on the reported path when you need the full snapshot.",
+      "Page actions return an accessibility snapshot. Use action=snapshot to inspect the page again.",
+      "Use action=screenshot to capture the visible viewport, or set fullPage=true to capture the full scrollable page.",
+      "Set viewport to control the browser width and height. Prefer setting it on open before the page loads.",
+      "Large text outputs are truncated and written to a temp file; use the read tool on the reported path when you need the full snapshot.",
       "Use action=wait with a selector when a dynamic page needs time to render the next state.",
       "Ask for explicit user approval before actions that submit forms, make bookings or purchases, or send messages.",
       "Use action=close when the browser state is no longer needed.",
@@ -507,6 +509,8 @@ export function createBrowserTool(
             : undefined,
           key: typeof params.key === "string" ? params.key : undefined,
           state: params.state,
+          viewport: params.viewport,
+          fullPage: typeof params.fullPage === "boolean" ? params.fullPage : undefined,
           timeoutMs: typeof params.timeoutMs === "number" ? params.timeoutMs : undefined,
         },
         signal,
@@ -518,7 +522,10 @@ export function createBrowserTool(
         "browser",
       );
       return {
-        content: [{ type: "text", text: output.text }],
+        content: [
+          { type: "text" as const, text: output.text },
+          ...(result.image ? [{ type: "image" as const, ...result.image }] : []),
+        ],
         details: output.details,
       };
     },

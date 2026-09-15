@@ -7,12 +7,18 @@ const MAX_BROWSER_SESSIONS = 8;
 export type BrowserAction =
   | "open"
   | "snapshot"
+  | "screenshot"
   | "click"
   | "fill"
   | "press"
   | "select"
   | "wait"
   | "close";
+
+export interface BrowserViewport {
+  width: number;
+  height: number;
+}
 
 export interface BrowserActionInput {
   action: BrowserAction;
@@ -22,6 +28,8 @@ export interface BrowserActionInput {
   values?: string[];
   key?: string;
   state?: "attached" | "detached" | "visible" | "hidden";
+  viewport?: BrowserViewport;
+  fullPage?: boolean;
   timeoutMs?: number;
 }
 
@@ -31,6 +39,10 @@ export interface BrowserActionResult {
     action: BrowserAction;
     url?: string;
     title?: string;
+  };
+  image?: {
+    data: string;
+    mimeType: "image/png";
   };
 }
 
@@ -88,13 +100,18 @@ export class BrowserService {
           }
 
           let session = this.sessions.get(sessionId);
+          let image: Buffer | undefined;
           if (input.action === "open") {
             const url = validateUrl(required(input.url, "url", input.action));
             if (session?.page.isClosed()) {
               await this.closeSessionNow(sessionId);
               session = undefined;
             }
-            session ??= await this.createSession(sessionId);
+            if (session) {
+              if (input.viewport) await session.page.setViewportSize(input.viewport);
+            } else {
+              session = await this.createSession(sessionId, input.viewport);
+            }
             signal?.throwIfAborted();
             session.page.setDefaultTimeout(timeout(input));
             session.page.setDefaultNavigationTimeout(timeout(input));
@@ -105,10 +122,11 @@ export class BrowserService {
             }
             session.page.setDefaultTimeout(timeout(input));
             session.page.setDefaultNavigationTimeout(timeout(input));
-            await this.performPageAction(session.page, input);
+            if (input.viewport) await session.page.setViewportSize(input.viewport);
+            image = await this.performPageAction(session.page, input);
           }
 
-          return await this.snapshot(input.action, session.page);
+          return await this.snapshot(input.action, session.page, image);
         } catch (error) {
           if (signal?.aborted) await this.closeSessionNow(sessionId);
           throw error;
@@ -128,7 +146,10 @@ export class BrowserService {
     await Promise.all(sessionIds.map((sessionId) => this.closeSession(sessionId)));
   }
 
-  private async createSession(sessionId: string): Promise<BrowserSession> {
+  private async createSession(
+    sessionId: string,
+    viewport?: BrowserViewport,
+  ): Promise<BrowserSession> {
     if (this.sessions.size >= MAX_BROWSER_SESSIONS) {
       throw new Error(`Browser session limit reached (${MAX_BROWSER_SESSIONS})`);
     }
@@ -137,6 +158,7 @@ export class BrowserService {
       acceptDownloads: false,
       locale: "en-US",
       permissions: [],
+      ...(viewport ? { viewport } : {}),
     });
     let page: Page;
     try {
@@ -150,10 +172,15 @@ export class BrowserService {
     return session;
   }
 
-  private async performPageAction(page: Page, input: BrowserActionInput): Promise<void> {
+  private async performPageAction(
+    page: Page,
+    input: BrowserActionInput,
+  ): Promise<Buffer | undefined> {
     switch (input.action) {
       case "snapshot":
         return;
+      case "screenshot":
+        return page.screenshot({ fullPage: input.fullPage ?? false, type: "png" });
       case "click":
         await page.locator(required(input.selector, "selector", input.action)).click();
         return;
@@ -185,12 +212,24 @@ export class BrowserService {
     }
   }
 
-  private async snapshot(action: BrowserAction, page: Page): Promise<BrowserActionResult> {
-    const [title, ariaSnapshot] = await Promise.all([
-      page.title(),
-      page.locator("body").ariaSnapshot(),
-    ]);
+  private async snapshot(
+    action: BrowserAction,
+    page: Page,
+    image?: Buffer,
+  ): Promise<BrowserActionResult> {
+    const title = await page.title();
     const url = page.url();
+    if (image) {
+      return {
+        text: [`Page: ${title || "(untitled)"}`, `URL: ${url}`, "", "Screenshot captured."].join(
+          "\n",
+        ),
+        details: { action, url, title },
+        image: { data: image.toString("base64"), mimeType: "image/png" },
+      };
+    }
+
+    const ariaSnapshot = await page.locator("body").ariaSnapshot();
     return {
       text: [`Page: ${title || "(untitled)"}`, `URL: ${url}`, "", ariaSnapshot].join("\n"),
       details: { action, url, title },

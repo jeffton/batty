@@ -1,6 +1,11 @@
 import fs from "node:fs/promises";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { createCronTool, createSubagentTool, spillToolOutputToTempFile } from "./pi-service-tools";
+import {
+  createBrowserTool,
+  createCronTool,
+  createSubagentTool,
+  spillToolOutputToTempFile,
+} from "./pi-service-tools";
 
 describe("spillToolOutputToTempFile", () => {
   it("stores oversized output in a temp file and returns a truncated head", async () => {
@@ -100,6 +105,43 @@ describe("spillToolOutputToTempFile", () => {
     expect(result.text).not.toContain("�");
     expect(result.text).toContain("first");
     expect(result.text).not.toContain("last");
+  });
+});
+
+describe("createBrowserTool", () => {
+  it("passes screenshot options to the service and returns the captured image", async () => {
+    const execute = vi.fn(async () => ({
+      text: "Screenshot captured.",
+      details: { action: "screenshot" as const, url: "https://example.com/" },
+      image: { mimeType: "image/png" as const, data: "cG5n" },
+    }));
+    const tool = createBrowserTool({ execute } as any);
+
+    const result = await tool.execute(
+      "browser-call",
+      {
+        action: "screenshot",
+        viewport: { width: 1280, height: 720 },
+        fullPage: true,
+      },
+      undefined,
+      undefined,
+      { sessionManager: { getSessionId: () => "session-1" } } as any,
+    );
+
+    expect(execute).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({
+        action: "screenshot",
+        viewport: { width: 1280, height: 720 },
+        fullPage: true,
+      }),
+      undefined,
+    );
+    expect(result.content).toEqual([
+      { type: "text", text: "Screenshot captured." },
+      { type: "image", mimeType: "image/png", data: "cG5n" },
+    ]);
   });
 });
 

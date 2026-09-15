@@ -163,7 +163,17 @@ export const WebSearchToolSchema = Type.Object(
 export const BrowserToolSchema = Type.Object(
   {
     action: StringEnum(
-      ["open", "snapshot", "click", "fill", "press", "select", "wait", "close"] as const,
+      [
+        "open",
+        "snapshot",
+        "screenshot",
+        "click",
+        "fill",
+        "press",
+        "select",
+        "wait",
+        "close",
+      ] as const,
       { description: "Browser action to perform." },
     ),
     url: Type.Optional(Type.String({ description: "HTTP or HTTPS URL for action=open." })),
@@ -180,6 +190,31 @@ export const BrowserToolSchema = Type.Object(
     state: Type.Optional(
       StringEnum(["attached", "detached", "visible", "hidden"] as const, {
         description: "Desired element state for wait. Defaults to visible.",
+      }),
+    ),
+    viewport: Type.Optional(
+      Type.Object(
+        {
+          width: Type.Integer({
+            minimum: 1,
+            maximum: 10_000,
+            description: "Viewport width in CSS pixels.",
+          }),
+          height: Type.Integer({
+            minimum: 1,
+            maximum: 10_000,
+            description: "Viewport height in CSS pixels.",
+          }),
+        },
+        {
+          additionalProperties: false,
+          description: "Browser viewport size. Can be set on open or any active-page action.",
+        },
+      ),
+    ),
+    fullPage: Type.Optional(
+      Type.Boolean({
+        description: "Capture the full scrollable page for action=screenshot. Defaults to false.",
       }),
     ),
     timeoutMs: Type.Optional(

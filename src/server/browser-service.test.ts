@@ -22,8 +22,10 @@ function createFixture() {
     goto: vi.fn(async () => undefined),
     isClosed: vi.fn(() => false),
     locator: vi.fn(() => locator),
+    screenshot: vi.fn(async () => Buffer.from("png data")),
     setDefaultNavigationTimeout: vi.fn(),
     setDefaultTimeout: vi.fn(),
+    setViewportSize: vi.fn(async () => undefined),
     title: vi.fn(async () => "Example"),
     url: vi.fn(() => "https://example.com/"),
   };
@@ -69,6 +71,60 @@ describe("BrowserService", () => {
       action: "open",
       url: "https://example.com/",
       title: "Example",
+    });
+  });
+
+  it("sets the initial viewport before opening a page", async () => {
+    const fixture = createFixture();
+    const service = new BrowserService();
+
+    await service.execute("session-1", {
+      action: "open",
+      url: "https://example.com",
+      viewport: { width: 390, height: 844 },
+    });
+
+    expect(fixture.browser.newContext).toHaveBeenCalledWith({
+      acceptDownloads: false,
+      locale: "en-US",
+      permissions: [],
+      viewport: { width: 390, height: 844 },
+    });
+    expect(fixture.page.setViewportSize).not.toHaveBeenCalled();
+  });
+
+  it("resizes an active page before performing an action", async () => {
+    const fixture = createFixture();
+    const service = new BrowserService();
+    await service.execute("session-1", { action: "open", url: "https://example.com" });
+
+    await service.execute("session-1", {
+      action: "snapshot",
+      viewport: { width: 1440, height: 900 },
+    });
+
+    expect(fixture.page.setViewportSize).toHaveBeenCalledWith({ width: 1440, height: 900 });
+    expect(fixture.page.setViewportSize.mock.invocationCallOrder[0]).toBeLessThan(
+      fixture.locator.ariaSnapshot.mock.invocationCallOrder[1]!,
+    );
+  });
+
+  it("captures screenshots as PNG image results", async () => {
+    const fixture = createFixture();
+    const service = new BrowserService();
+    await service.execute("session-1", { action: "open", url: "https://example.com" });
+
+    const result = await service.execute("session-1", {
+      action: "screenshot",
+      fullPage: true,
+    });
+
+    expect(fixture.page.screenshot).toHaveBeenCalledWith({ fullPage: true, type: "png" });
+    expect(result.text).toContain("Screenshot captured.");
+    expect(result.text).not.toContain('heading "Example"');
+    expect(result.image).toEqual({
+      data: Buffer.from("png data").toString("base64"),
+      mimeType: "image/png",
     });
   });
 

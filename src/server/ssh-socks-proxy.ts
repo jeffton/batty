@@ -24,6 +24,25 @@ async function availableLoopbackPort(): Promise<number> {
   return address.port;
 }
 
+async function assertLoopbackPortAvailable(port: number): Promise<void> {
+  const server = net.createServer();
+  server.unref();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(port, "127.0.0.1", resolve);
+    });
+  } catch (error) {
+    throw new Error(`SOCKS port ${port} is unavailable`, { cause: error });
+  } finally {
+    if (server.listening) {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  }
+}
+
 async function acceptsSocksConnections(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = net.createConnection({ host: "127.0.0.1", port });
@@ -102,11 +121,20 @@ export class SshSocksProxy implements BrowserProxy {
 
     this.port ??= await this.allocatePort();
     const port = this.port;
+    try {
+      await assertLoopbackPortAvailable(port);
+    } catch (error) {
+      this.port = undefined;
+      throw error;
+    }
     let spawnError: Error | undefined;
     let stderr = "";
+    let forwardingReady = false;
+    const forwardingMessage = `Local forwarding listening on 127.0.0.1 port ${port}.`;
     const child = spawn(
       this.sshPath,
       [
+        "-v",
         "-NT",
         "-D",
         `127.0.0.1:${port}`,
@@ -130,6 +158,7 @@ export class SshSocksProxy implements BrowserProxy {
     child.stderr?.setEncoding("utf8");
     child.stderr?.on("data", (chunk: string) => {
       stderr = `${stderr}${chunk}`.slice(-4_000);
+      forwardingReady ||= stderr.includes(forwardingMessage);
     });
     child.once("error", (error) => {
       spawnError = error;
@@ -144,9 +173,8 @@ export class SshSocksProxy implements BrowserProxy {
       if (!isRunning(child)) {
         throw new Error(stderr.trim() || `SSH tunnel exited before becoming ready`);
       }
-      if (await acceptsSocksConnections(port)) {
-        await delay(100);
-        if (isRunning(child)) return this.serverUrl(port);
+      if (forwardingReady && (await acceptsSocksConnections(port))) {
+        return this.serverUrl(port);
       }
       await delay(50);
     }

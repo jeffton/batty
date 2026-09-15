@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import type { CronRunLog } from "@/shared/types";
 import type { AppConfig } from "./config";
 import { CronService } from "./cron-runtime";
 import { CronStore } from "./cron-persistence";
@@ -449,6 +450,66 @@ describe("cron runtime", () => {
     results[1]!.resolve({ sessionId: "session-2", sessionPath: "/tmp/session-2.jsonl" });
     await Promise.all([first, second]);
     expect(service.listRecentRunLogs().map((log) => log.status)).toEqual(["success", "success"]);
+    await service.dispose();
+  });
+
+  it("retries a disk reload when a newer run log is installed concurrently", async () => {
+    const config = await createConfig();
+    const service = new CronService(config);
+    const job = await service.createJob({
+      workspaceId: "alpha",
+      prompt: "Reload race",
+      model: "openai/gpt-5",
+      thinkingLevel: "medium",
+      schedule: { kind: "every", every: "1h" },
+    });
+    const store = new CronStore(config);
+    const startedLog: CronRunLog = {
+      runId: crypto.randomUUID(),
+      jobId: job.id,
+      workspaceId: job.workspaceId,
+      prompt: job.prompt,
+      model: job.model,
+      thinkingLevel: job.thinkingLevel,
+      session: job.session,
+      scheduleLabel: job.scheduleLabel,
+      startedAtMs: Date.now(),
+      status: "running",
+    };
+    await store.startRun(startedLog);
+
+    const internals = service as unknown as {
+      store: CronStore;
+      reloadFromDisk(schedule: boolean): Promise<void>;
+      replaceRunLog(run: CronRunLog): void;
+    };
+    await internals.reloadFromDisk(false);
+    const staleSnapshot = await store.readStoredSnapshot();
+    const snapshotStarted = deferred<void>();
+    const releaseSnapshot = deferred<void>();
+    const originalReadSnapshot = internals.store.readStoredSnapshot.bind(internals.store);
+    const readSnapshot = vi
+      .spyOn(internals.store, "readStoredSnapshot")
+      .mockImplementation(originalReadSnapshot)
+      .mockImplementationOnce(async () => {
+        snapshotStarted.resolve(undefined);
+        await releaseSnapshot.promise;
+        return staleSnapshot;
+      });
+
+    const reload = internals.reloadFromDisk(false);
+    await snapshotStarted.promise;
+    const completedLog = await store.updateRun(startedLog.runId, {
+      status: "success",
+      completedAtMs: Date.now(),
+      durationMs: 1,
+    });
+    internals.replaceRunLog(completedLog!);
+    releaseSnapshot.resolve(undefined);
+    await reload;
+
+    expect(readSnapshot).toHaveBeenCalledTimes(2);
+    expect(service.listRecentRunLogs()[0]?.status).toBe("success");
     await service.dispose();
   });
 

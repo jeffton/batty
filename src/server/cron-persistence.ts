@@ -252,6 +252,13 @@ export class CronStore {
     return this.withStoreLock(async () => (await this.loadStoreUnlocked()).runs);
   }
 
+  async readStoredSnapshot(): Promise<{ jobs: StoredCronJob[]; runs: CronRunLog[] }> {
+    return this.withStoreLock(async () => {
+      const { jobs, runs } = await this.loadStoreUnlocked();
+      return { jobs, runs };
+    });
+  }
+
   async startRun(run: CronRunLog): Promise<CronRunLog> {
     return this.withStoreLock(async () => {
       const store = await this.loadStoreUnlocked();

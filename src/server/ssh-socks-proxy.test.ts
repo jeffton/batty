@@ -35,7 +35,9 @@ const port = Number(address.split(":").at(-1));
 const server = net.createServer((socket) => {
   socket.once("data", () => socket.end(Buffer.from([0x05, 0x00])));
 });
-server.listen(port, "127.0.0.1");
+server.listen(port, "127.0.0.1", () => {
+  process.stderr.write(\`debug1: Local forwarding listening on 127.0.0.1 port \${port}.\\n\`);
+});
 process.on("SIGTERM", () => server.close(() => process.exit(0)));
 `,
     );
@@ -48,6 +50,7 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
 
     expect(first).toMatch(/^socks5:\/\/127\.0\.0\.1:\d+$/);
     expect(second).toBe(first);
+    expect(args).toContain("-v");
     expect(args).toContain("-NT");
     expect(args).toContain("ExitOnForwardFailure=yes");
     expect(args).toContain("StrictHostKeyChecking=yes");

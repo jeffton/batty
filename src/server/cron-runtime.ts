@@ -135,6 +135,7 @@ export class CronService {
     resolve(): void;
   }>();
   private runLogs: CronRunLog[] = [];
+  private stateRevision = 0;
   private readonly changeListeners = new Set<(workspaceIds: string[]) => void>();
   private runner: CronJobRunner | undefined;
   private watcher: FSWatcher | undefined;
@@ -306,6 +307,7 @@ export class CronService {
       return right.startedAtMs - left.startedAtMs;
     });
     this.runLogs = boundRuntimeRunLogs(this.runLogs);
+    this.stateRevision += 1;
   }
 
   private async updateRunLog(runId: string, patch: Partial<CronRunLog>): Promise<void> {
@@ -330,16 +332,21 @@ export class CronService {
 
   private async reloadFromDisk(schedule = true): Promise<void> {
     const previousWorkspaceIds = new Set([...this.jobs.values()].map((job) => job.workspaceId));
-    const [jobs, runLogs] = await Promise.all([
-      this.store.readStoredJobs(),
-      this.store.readStoredRunLogs(),
-    ]);
-    this.runLogs = runLogs;
+    let snapshot: { jobs: StoredCronJob[]; runs: CronRunLog[] };
+
+    while (true) {
+      const revision = this.stateRevision;
+      snapshot = await this.store.readStoredSnapshot();
+      if (revision === this.stateRevision) break;
+    }
+
+    this.runLogs = snapshot.runs;
     this.jobs.clear();
-    for (const job of jobs) {
+    for (const job of snapshot.jobs) {
       this.jobs.set(job.id, job);
       previousWorkspaceIds.add(job.workspaceId);
     }
+    this.stateRevision += 1;
     if (schedule && !this.disposed) {
       this.schedulePendingDeliveries();
       this.rescheduleAll();

@@ -13,8 +13,10 @@ vi.mock("playwright", () => ({
 function createFixture() {
   const pages: any[] = [];
   const contextHandlers = new Map<string, Array<(value: any) => void>>();
+  const cdpSession = { send: vi.fn(async () => undefined) };
   const context = {
     close: vi.fn(async () => undefined),
+    newCDPSession: vi.fn(async () => cdpSession),
     newPage: vi.fn(async () => createPage()),
     on: vi.fn((event: string, handler: (value: any) => void) => {
       const handlers = contextHandlers.get(event) ?? [];
@@ -85,6 +87,7 @@ function createFixture() {
   const browser = {
     isConnected: vi.fn(() => true),
     newContext: vi.fn(async () => context),
+    version: vi.fn(() => "153.0.8010.12"),
     on: vi.fn(),
   };
   vi.mocked(chromium.launch).mockResolvedValue(browser as never);
@@ -92,6 +95,7 @@ function createFixture() {
   return {
     browser,
     context,
+    cdpSession,
     firstPage,
     pages,
     createPopup(options: { title?: string; url?: string } = {}) {
@@ -122,6 +126,15 @@ describe("BrowserService", () => {
       acceptDownloads: true,
       locale: "en-US",
       permissions: [],
+      userAgent:
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+    });
+    expect(fixture.cdpSession.send).toHaveBeenCalledWith("Emulation.setUserAgentOverride", {
+      userAgent:
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
+      userAgentMetadata: expect.objectContaining({
+        brands: expect.arrayContaining([{ brand: "Google Chrome", version: "153" }]),
+      }),
     });
     expect(fixture.firstPage.goto).toHaveBeenCalledWith("https://example.com/", {
       waitUntil: "domcontentloaded",
@@ -157,6 +170,8 @@ describe("BrowserService", () => {
       acceptDownloads: true,
       locale: "en-US",
       permissions: [],
+      userAgent:
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
       proxy: { server: "socks5://127.0.0.1:34567", bypass: "<-loopback>" },
     });
 
@@ -211,6 +226,8 @@ describe("BrowserService", () => {
       acceptDownloads: true,
       locale: "en-US",
       permissions: [],
+      userAgent:
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36",
       viewport: { width: 390, height: 844 },
     });
     expect(fixture.firstPage.setViewportSize).not.toHaveBeenCalled();

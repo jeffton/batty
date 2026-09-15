@@ -10,6 +10,7 @@ async function launchBrowser(): Promise<Browser> {
     headless: true,
     args: [
       "--disable-dev-shm-usage",
+      "--disable-blink-features=AutomationControlled",
       "--disable-quic",
       "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
     ],

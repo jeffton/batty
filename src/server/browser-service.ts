@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { inspect } from "node:util";
-import type { BrowserContext, Frame, Page } from "playwright";
+import type { BrowserContext, CDPSession, Frame, Page } from "playwright";
 import { getSharedBrowser } from "./browser-runtime";
 import type { BrowserProxy } from "./ssh-socks-proxy";
 
@@ -91,9 +91,27 @@ export interface BrowserActionResult {
   downloadPaths?: string[];
 }
 
+interface BrowserIdentity {
+  userAgent: string;
+  userAgentMetadata: {
+    brands: Array<{ brand: string; version: string }>;
+    fullVersionList: Array<{ brand: string; version: string }>;
+    platform: string;
+    platformVersion: string;
+    architecture: string;
+    model: string;
+    mobile: boolean;
+    bitness: string;
+    wow64: boolean;
+  };
+}
+
 interface BrowserSession {
   context: BrowserContext;
   useTailscale: boolean;
+  identity: BrowserIdentity;
+  cdpSessions: Set<CDPSession>;
+  pageIdentityPromises: WeakMap<Page, Promise<void>>;
   pages: Map<string, Page>;
   pageIds: WeakMap<Page, string>;
   frames: Map<string, Frame>;
@@ -119,6 +137,33 @@ function required(value: string | undefined, name: string, action: BrowserAction
 function present(value: string | undefined, name: string, action: BrowserAction): string {
   if (value == null) throw new Error(`${name} is required for browser ${action}`);
   return value;
+}
+
+function browserIdentity(version: string): BrowserIdentity {
+  const majorVersion = version.split(".")[0]!;
+  const brands = [
+    { brand: "Not_A Brand", version: "8" },
+    { brand: "Google Chrome", version: majorVersion },
+    { brand: "Chromium", version: majorVersion },
+  ];
+  return {
+    userAgent: `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${majorVersion}.0.0.0 Safari/537.36`,
+    userAgentMetadata: {
+      brands,
+      fullVersionList: [
+        { brand: "Not_A Brand", version: "8.0.0.0" },
+        { brand: "Google Chrome", version },
+        { brand: "Chromium", version },
+      ],
+      platform: "Linux",
+      platformVersion: "",
+      architecture: "x86",
+      model: "",
+      mobile: false,
+      bitness: "64",
+      wow64: false,
+    },
+  };
 }
 
 function validateUrl(value: string): string {
@@ -202,7 +247,7 @@ export class BrowserService {
               input.useTailscale ?? false,
             );
             const page = await this.pageForOpen(session, input, created);
-            this.configurePage(page, input);
+            await this.configurePage(session, page, input);
             await page.goto(url, { waitUntil: "domcontentloaded" });
             return await this.snapshotResult(session, input, page);
           }
@@ -214,7 +259,7 @@ export class BrowserService {
           if (input.action === "pages") return await this.pagesResult(session, input.action);
 
           const page = this.resolvePage(session, input.pageId);
-          this.configurePage(page, input);
+          await this.configurePage(session, page, input);
           if (input.viewport) await page.setViewportSize(input.viewport);
 
           if (input.action === "switch") {
@@ -267,16 +312,21 @@ export class BrowserService {
     }
     const proxyServer = useTailscale ? await this.requireTailscaleProxy() : undefined;
     const browser = await getSharedBrowser();
+    const identity = browserIdentity(browser.version());
     const context = await browser.newContext({
       acceptDownloads: true,
       locale: "en-US",
       permissions: [],
+      userAgent: identity.userAgent,
       ...(proxyServer ? { proxy: { server: proxyServer, bypass: "<-loopback>" } } : {}),
       ...(viewport ? { viewport } : {}),
     });
     const session: BrowserSession = {
       context,
       useTailscale,
+      identity,
+      cdpSessions: new Set(),
+      pageIdentityPromises: new WeakMap(),
       pages: new Map(),
       pageIds: new WeakMap(),
       frames: new Map(),
@@ -305,6 +355,9 @@ export class BrowserService {
     }
 
     const pageId = `page-${session.nextPageNumber++}`;
+    const identityPromise = this.configureBrowserIdentity(session, page);
+    void identityPromise.catch(() => {});
+    session.pageIdentityPromises.set(page, identityPromise);
     session.pageIds.set(page, pageId);
     session.pages.set(pageId, page);
     if (activate || !session.activePageId) session.activePageId = pageId;
@@ -377,7 +430,18 @@ export class BrowserService {
     return this.registerFrame(session, frame);
   }
 
-  private configurePage(page: Page, input: BrowserActionInput): void {
+  private async configureBrowserIdentity(session: BrowserSession, page: Page): Promise<void> {
+    const cdpSession = await session.context.newCDPSession(page);
+    session.cdpSessions.add(cdpSession);
+    await cdpSession.send("Emulation.setUserAgentOverride", session.identity);
+  }
+
+  private async configurePage(
+    session: BrowserSession,
+    page: Page,
+    input: BrowserActionInput,
+  ): Promise<void> {
+    await session.pageIdentityPromises.get(page);
     page.setDefaultTimeout(timeout(input));
     page.setDefaultNavigationTimeout(timeout(input));
   }

@@ -37,6 +37,11 @@ describe("shared browser runtime", () => {
       .mockResolvedValueOnce(replacement as never);
 
     expect(await getSharedBrowser()).toBe(browser);
+    expect(chromium.launch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: expect.arrayContaining(["--disable-blink-features=AutomationControlled"]),
+      }),
+    );
     await discardSharedBrowser(browser as never);
     expect(await getSharedBrowser()).toBe(replacement);
     expect(browser.close).toHaveBeenCalledOnce();

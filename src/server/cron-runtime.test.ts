@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import type { CronRunLog } from "@/shared/types";
+import type { CronRunLog, PendingCronRunDelivery } from "@/shared/types";
 import type { AppConfig } from "./config";
 import { CronService } from "./cron-runtime";
 import { CronStore } from "./cron-persistence";
@@ -137,129 +137,7 @@ describe("cron runtime", () => {
     await service.dispose();
   });
 
-  it("restarts a persisted run that stopped before creating its session", async () => {
-    const config = await createConfig();
-    const store = new CronStore(config);
-    const log = {
-      runId: "unstarted-run",
-      jobId: "inline-job",
-      workspaceId: "alpha",
-      prompt: "Queued inline work",
-      model: "openai/gpt-5",
-      thinkingLevel: "medium",
-      session: { kind: "daily-inline" as const },
-      scheduleLabel: "Every hour",
-      startedAtMs: Date.now() - 1_000,
-      status: "running" as const,
-    };
-    await store.startRun(log);
-    const restart = vi.fn(async (_run, context) => {
-      await context.onSessionStarted({
-        sessionId: "daily-session",
-        sessionPath: "/tmp/daily-session.jsonl",
-      });
-      return { sessionId: "daily-session", sessionPath: "/tmp/daily-session.jsonl" };
-    });
-    const service = new CronService(config);
-    service.setRunner({ run: vi.fn(), restart });
-
-    await service.initialize();
-    await vi.waitFor(() =>
-      expect(service.listRecentRunLogs()[0]).toMatchObject({
-        runId: log.runId,
-        status: "success",
-        sessionId: "daily-session",
-      }),
-    );
-    expect(restart).toHaveBeenCalledOnce();
-    await service.dispose();
-  });
-
-  it.each(["success", "error"] as const)(
-    "reconstructs a deleted one-shot run waiter and records recovered %s",
-    async (status) => {
-      const config = await createConfig();
-      const store = new CronStore(config);
-      const log = {
-        runId: "durable-run",
-        jobId: "deleted-one-shot",
-        workspaceId: "alpha",
-        prompt: "Original prompt",
-        model: "openai/gpt-5",
-        thinkingLevel: "medium",
-        session: { kind: "daily-detached" as const, includePreviousContext: false },
-        scheduleLabel: "Yesterday",
-        startedAtMs: Date.now() - 1000,
-        status: "running" as const,
-        sessionId: "durable-session",
-        sessionPath: "/tmp/durable-session.jsonl",
-      };
-      await store.startRun(log);
-      const service = new CronService(config);
-      const completed = deferred<void>();
-      let signal!: AbortSignal;
-      const recover = vi.fn(async (_run, context) => {
-        signal = context.signal;
-        await completed.promise;
-        if (status === "error") throw new Error("native operation failed");
-        return { sessionId: log.sessionId, sessionPath: log.sessionPath };
-      });
-      const run = vi.fn();
-      service.setRunner({ run, recover });
-      await service.initialize();
-      expect(service.listRunningJobs()).toEqual([expect.objectContaining({ runId: log.runId })]);
-      expect(service.listRecentRunLogs()[0]?.status).toBe("running");
-      expect(recover).toHaveBeenCalledWith(log, expect.anything());
-      expect(run).not.toHaveBeenCalled();
-      service.stopRunningJob({ runId: log.runId });
-      expect(signal.aborted).toBe(true);
-      completed.resolve();
-      await vi.waitFor(() => expect(service.listRecentRunLogs()[0]?.status).toBe(status));
-      expect(service.listRunningJobs()).toHaveLength(0);
-      expect((await store.readStoredRunLogs())[0]).toMatchObject({
-        status,
-        completedAtMs: expect.any(Number),
-        durationMs: expect.any(Number),
-        sessionPath: log.sessionPath,
-        ...(status === "error" ? { error: "native operation failed" } : {}),
-      });
-      await service.dispose();
-    },
-  );
-
-  it("leaves in-flight logs recoverable during shutdown", async () => {
-    const config = await createConfig();
-    const service = new CronService(config);
-    const completed = deferred<{ sessionId: string; sessionPath: string }>();
-    service.setRunner({
-      run: async (_job, context) => {
-        await context.onSessionStarted({
-          sessionId: "native-session",
-          sessionPath: "/tmp/native.jsonl",
-        });
-        return completed.promise;
-      },
-    });
-    const job = await service.createJob({
-      workspaceId: "alpha",
-      prompt: "Work",
-      model: "openai/gpt-5",
-      thinkingLevel: "medium",
-      schedule: { kind: "every", every: "1h" },
-    });
-    const pending = (service as unknown as { triggerJob(id: string): Promise<void> }).triggerJob(
-      job.id,
-    );
-    await vi.waitFor(() =>
-      expect(service.listRecentRunLogs()[0]?.sessionPath).toBe("/tmp/native.jsonl"),
-    );
-    await service.dispose();
-    completed.resolve({ sessionId: "native-session", sessionPath: "/tmp/native.jsonl" });
-    await pending;
-    expect((await new CronStore(config).readStoredRunLogs())[0]?.status).toBe("running");
-  });
-
-  it("keeps a completed run recoverable until its delivery queue entry is durable", async () => {
+  it("keeps a completed run active until its delivery queue entry is durable", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const config = await createConfig();
     const service = new CronService(config);
@@ -355,7 +233,7 @@ describe("cron runtime", () => {
     await service.dispose();
   });
 
-  it("persists queued delivery and resumes it after restart", async () => {
+  it("persists queued delivery without resuming it after restart", async () => {
     const config = await createConfig();
     const first = new CronService(config);
     const blockedDelivery = deferred<void>();
@@ -393,17 +271,149 @@ describe("cron runtime", () => {
     const restarted = new CronService(config);
     restarted.setRunner({ run: vi.fn(), deliver: delivered });
     await restarted.initialize();
-    await vi.waitFor(() => expect(delivered).toHaveBeenCalledOnce());
-    expect(delivered).toHaveBeenCalledWith(
-      expect.objectContaining({ runId: expect.any(String), status: "success" }),
+    expect(delivered).not.toHaveBeenCalled();
+    expect(restarted.listRecentRunLogs()[0]?.pendingDelivery).toEqual(
       expect.objectContaining({ parentSessionId: "parent-session" }),
     );
-    await vi.waitFor(() =>
-      expect(restarted.listRecentRunLogs()[0]?.pendingDelivery).toBeUndefined(),
-    );
-    expect((await new CronStore(config).readStoredRunLogs())[0]?.pendingDelivery).toBeUndefined();
     blockedDelivery.resolve(undefined);
     await restarted.dispose();
+  });
+
+  it("does not deliver archived queue entries after reloads or a later run completes", async () => {
+    const config = await createConfig();
+    const store = new CronStore(config);
+    await store.startRun({
+      runId: "archived-delivery",
+      jobId: "deleted-job",
+      workspaceId: "alpha",
+      prompt: "Archived detached work",
+      model: "openai/gpt-5",
+      thinkingLevel: "medium",
+      session: { kind: "daily-detached", includePreviousContext: false },
+      scheduleLabel: "Every hour",
+      startedAtMs: Date.now() - 1_000,
+      status: "success",
+      completedAtMs: Date.now() - 500,
+      durationMs: 500,
+    });
+    await store.queueRunDelivery("archived-delivery", "archived-parent");
+
+    const delivered = vi.fn(
+      async (_run: CronRunLog, _delivery: PendingCronRunDelivery) => undefined,
+    );
+    const service = new CronService(config);
+    service.setRunner({
+      run: async (_job, context) => {
+        await context.queueResultDelivery("current-parent");
+        return { sessionId: "current-session", sessionPath: "/tmp/current.jsonl" };
+      },
+      deliver: delivered,
+    });
+    await service.initialize();
+    const job = await service.createJob({
+      workspaceId: "alpha",
+      prompt: "Current detached work",
+      model: "openai/gpt-5",
+      thinkingLevel: "medium",
+      session: { kind: "daily-detached" },
+      schedule: { kind: "every", every: "1h" },
+    });
+    await service.updateJob(job.id, { prompt: "Edited current detached work" });
+    expect(delivered).not.toHaveBeenCalled();
+
+    await (service as unknown as { triggerJob(jobId: string): Promise<void> }).triggerJob(job.id);
+    await vi.waitFor(() => expect(delivered).toHaveBeenCalledOnce());
+    expect(delivered.mock.calls[0]?.[0]).not.toMatchObject({ runId: "archived-delivery" });
+    expect(
+      service.listRecentRunLogs().find((run) => run.runId === "archived-delivery"),
+    ).toMatchObject({
+      pendingDelivery: { parentSessionId: "archived-parent" },
+    });
+    await service.dispose();
+  });
+
+  it("drains admitted runs and deliveries without admitting new cron work", async () => {
+    const service = new CronService(await createConfig());
+    const runResult = deferred<{ sessionId: string; sessionPath: string }>();
+    const deliveryResult = deferred<void>();
+    const run = vi.fn(async (_job, context) => {
+      await context.queueResultDelivery("parent-session");
+      return runResult.promise;
+    });
+    const deliver = vi.fn(() => deliveryResult.promise);
+    service.setRunner({ run, deliver });
+    const job = await service.createJob({
+      workspaceId: "alpha",
+      prompt: "Drain work",
+      model: "openai/gpt-5",
+      thinkingLevel: "medium",
+      session: { kind: "daily-detached" },
+      schedule: { kind: "every", every: "1h" },
+    });
+    const trigger = (service as unknown as { triggerJob(jobId: string): Promise<void> }).triggerJob(
+      job.id,
+    );
+    await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
+    expect(service.activeTurns).toBe(1);
+
+    service.beginDrain();
+    expect(
+      (service as unknown as { scheduledHandles: Map<string, unknown> }).scheduledHandles.size,
+    ).toBe(0);
+    await (service as unknown as { triggerJob(jobId: string): Promise<void> }).triggerJob(job.id);
+    expect(run).toHaveBeenCalledOnce();
+
+    runResult.resolve({ sessionId: "cron-session", sessionPath: "/tmp/cron-session.jsonl" });
+    await trigger;
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalledOnce());
+    expect(service.activeTurns).toBe(1);
+    deliveryResult.resolve(undefined);
+    await vi.waitFor(() => expect(service.activeTurns).toBe(0));
+    await service.dispose();
+  });
+
+  it("keeps admitted delivery work active through retries while draining", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.useFakeTimers();
+    try {
+      const service = new CronService(await createConfig());
+      const runResult = deferred<{ sessionId: string; sessionPath: string }>();
+      const deliver = vi
+        .fn<(run: CronRunLog, delivery: PendingCronRunDelivery) => Promise<void>>()
+        .mockRejectedValueOnce(new Error("delivery unavailable"))
+        .mockResolvedValueOnce(undefined);
+      service.setRunner({
+        run: async (_job, context) => {
+          await context.queueResultDelivery("parent-session");
+          return runResult.promise;
+        },
+        deliver,
+      });
+      const job = await service.createJob({
+        workspaceId: "alpha",
+        prompt: "Drain retry work",
+        model: "openai/gpt-5",
+        thinkingLevel: "medium",
+        session: { kind: "daily-detached" },
+        schedule: { kind: "every", every: "1h" },
+      });
+      const trigger = (
+        service as unknown as { triggerJob(jobId: string): Promise<void> }
+      ).triggerJob(job.id);
+      await vi.waitFor(() => expect(service.activeTurns).toBe(1));
+      service.beginDrain();
+      runResult.resolve({ sessionId: "cron-session", sessionPath: "/tmp/cron-session.jsonl" });
+      await trigger;
+      await vi.waitFor(() => expect(deliver).toHaveBeenCalledOnce());
+      expect(service.activeTurns).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(service.activeTurns).toBe(0));
+      await service.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([

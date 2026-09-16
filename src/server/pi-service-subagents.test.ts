@@ -7,7 +7,6 @@ import { HarnessController } from "./harness-controller";
 import {
   runDetachedSubagentSession,
   deliverDetachedSubagentResult,
-  findDetachedSubagentDeliveryRequest,
   runSubagentSerial,
   type RunDetachedSubagentDeps,
   type DetachedSubagentOptions,
@@ -213,9 +212,8 @@ describe("detached harness subagents", () => {
     );
   });
 
-  it("resumes an admitted child operation after reopening without repeating the child prompt", async () => {
+  it("does not resume an admitted child operation after reopening", async () => {
     const { parent, deps, options, children } = await setup();
-    // Persist the invocation-owned child and its request before operation admission.
     await runDetachedSubagentSession(deps, {
       ...options,
       signal: AbortSignal.abort(new Error("not started")),
@@ -234,12 +232,11 @@ describe("detached harness subagents", () => {
     expect(admission.ok).toBe(true);
     await child.dispose();
     children.delete(child.sessionId);
-    parent.faux.setResponses([fauxAssistantMessage("recovered child")]);
+
     const result = await runDetachedSubagentSession(deps, options);
-    expect(result.text).toBe("recovered child");
-    expect(result.generatedMessages.filter((message) => message.role === "user")).toHaveLength(0);
-    expect(result.generatedMessages.filter((message) => message.role === "custom")).toHaveLength(1);
-    expect(parent.faux.state.callCount).toBe(1);
+
+    expect(result.text).toBe("Subagent stopped by user");
+    expect(parent.faux.state.callCount).toBe(0);
   });
 
   it("reports durable provider failure to the parent", async () => {
@@ -269,18 +266,10 @@ describe("detached harness subagents", () => {
       const request = { ...options, respondIn: "session" as const };
       await runDetachedSubagentSession(deps, request);
       const child = children.get(options.sessionId!)!;
-      const recovery = findDetachedSubagentDeliveryRequest(
-        child.sessionManager.getEntries(),
-        child.sessionId,
-      )!;
-      expect(recovery.parentSessionId).toBe(parent.session.sessionId);
-      expect(
-        findDetachedSubagentDeliveryRequest(child.sessionManager.getEntries(), "forked-child"),
-      ).toBeUndefined();
       await child.dispose();
       children.delete(child.sessionId);
       await parent.reopen();
-      await runDetachedSubagentSession(deps, { ...recovery, sessionId: options.sessionId });
+      await runDetachedSubagentSession(deps, request);
       expect(parent.faux.state.callCount).toBe(1);
       expect(parent.session.messages).toHaveLength(answer === "NO_REPLY" ? 0 : 2);
       expect(queues.size).toBe(0);
@@ -313,10 +302,6 @@ describe("detached harness subagents", () => {
     const result = await runDetachedSubagentSession(deps, { ...options, signal });
     expect(result.isError).toBe(true);
     expect(result.errorMessage).toContain("cancelled");
-    expect(parent.faux.state.callCount).toBe(0);
-    await expect(
-      runDetachedSubagentSession(deps, { ...options, recoverOnly: true }),
-    ).rejects.toThrow("before this subagent operation was admitted");
     expect(parent.faux.state.callCount).toBe(0);
   });
 });

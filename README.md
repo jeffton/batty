@@ -43,15 +43,11 @@ Batty adds a browser-native layer on top:
 - web search
 - passkey login
 
-### Restart recovery
+### Restart behavior
 
-Pi durably accepts prompts before model execution. Its session files contain operation checkpoints, steering and follow-up queues, image payloads, retry state, deferred provider handles, and tool invocation records. Batty discovers open operations at startup and asks Pi to drive them. Recovered operations retain their original user messages and queue entries.
-
-Read-only tools may be replayed. Uncertain mutating tool calls receive Pi's uncertain-outcome result instead of being repeated. Detached subagent tools persist their child-session identity in Pi invocation memos and reconnect to that session on replay.
+A coordinated deployment drains active turns: it rejects new turns and pauses cron scheduling while active descendants and result deliveries finish. After a crash or interrupted restart, opening a session aborts its open turn; Batty does not resume operations after startup. See [the harness integration](docs/pi-agent-harness.md) for implementation boundaries.
 
 Pi's built-in importer opens legacy v3 sessions and normalizes them through a native commit. Batty preserves its application metadata and UI attachment projections without rewriting committed messages. Coding-agent extensions require migration to native harness hooks/tools; configured legacy extensions produce an explicit error.
-
-Cron scheduling and run logs remain Batty-owned. Admitted cron operations can resume through Pi. Scheduler run logs are marked interrupted, and detached parent-result delivery is not reattached after restart. See [the harness integration](docs/pi-agent-harness.md) for implementation boundaries.
 
 ## Quick start
 
@@ -126,7 +122,7 @@ batty --root /path/to/batty-root auth code
 
 ## Batty CLI
 
-Batty includes a small CLI for auth and cron jobs.
+Batty includes a small CLI for auth, deployment control, and cron jobs.
 
 After deployment, `./scripts/deploy.sh` installs it as:
 
@@ -144,6 +140,7 @@ pnpm batty -- --root /path/to/batty-root <command>
 
 ```text
 batty auth code
+batty drain
 batty cron list [--workspace ID] [--json]
 batty cron add --workspace ID --prompt TEXT --model ID --thinking LEVEL (--in DUR | --at ISO | --every DUR | --cron EXPR) [--tz IANA] [--session new|daily-inline|daily-detached] [--daily-context include|omit]
 batty cron edit <jobId> [--workspace ID] [--prompt TEXT] [--model ID] [--thinking LEVEL] [--in DUR | --at ISO | --every DUR | --cron EXPR] [--tz IANA] [--session new|daily-inline|daily-detached] [--daily-context include|omit]
@@ -154,6 +151,7 @@ batty cron rm <jobId>
 
 ```bash
 batty --root /path/to/batty-root auth code
+batty --root /path/to/batty-root drain
 batty --root /path/to/batty-root cron list --workspace batty
 batty --root /path/to/batty-root cron add --workspace batty --prompt "Check CI and summarize failures" --model openai-codex/gpt-5.6-sol --thinking medium --every 1h --session daily-detached --daily-context include
 batty --root /path/to/batty-root cron add --workspace batty --prompt "Morning summary" --model openai-codex/gpt-5.6-sol --thinking low --cron "0 8 * * 1-5" --tz Europe/Copenhagen --session daily-inline
@@ -301,7 +299,7 @@ Batty stores local state in `<batty-root>/.batty/`, including:
 - Image attachments are sent as image inputs and also referenced as file placeholders.
 - Session state is kept in Pi's session files, with Batty caching recent snapshots locally in the browser.
 - Session lists use `session-summary-index.json`, a rebuildable metadata index loaded at startup. Batty's session events update the index in memory immediately; atomic disk writes are coalesced over 100 ms and flushed on shutdown. Indexed workspaces are listed without scanning directories, checking file metadata, or opening transcripts.
-- A missing or invalid index is rebuilt through Pi's read-only decoder; newly discovered workspaces are indexed once, excluding `cron` directories. Initial discovery finishes before listing sessions, resolving daily sessions, or recovering indexed operations. There is no polling for external transcript changes. To rebuild after external changes, stop Batty, remove `session-summary-index.json`, and start Batty. Deleting the file while Batty is running does not clear its in-memory index.
+- A missing or invalid index is rebuilt through Pi's read-only decoder; newly discovered workspaces are indexed once, excluding `cron` directories. Initial discovery finishes before listing sessions or resolving daily sessions. There is no polling for external transcript changes. To rebuild after external changes, stop Batty, remove `session-summary-index.json`, and start Batty. Deleting the file while Batty is running does not clear its in-memory index.
 
 ## Hot reloading Batty itself
 
@@ -311,7 +309,7 @@ When working inside the Batty repo, use:
 ./scripts/reload-self.sh
 ```
 
-That flow is designed to let the current agent turn finish cleanly before the service reload happens.
+That flow drains active turns before reloading. For an initial upgrade from a server without deployment IPC, use `BATTY_SKIP_DRAIN=1 ./scripts/reload-self.sh`.
 
 ## Deployment
 
@@ -335,6 +333,8 @@ The Linux deploy script installs Batty to `/opt/batty`:
 - service entrypoint `/opt/batty/current/dist/server/main.mjs`
 - CLI entrypoint `/opt/batty/current/dist/server/cli.mjs`
 
+When replacing a running service, the detached restart worker uses local IPC to put the server into deployment drain mode and waits for active turns to finish before restarting it. Normal deployments wait without a timeout. For an initial upgrade from a server without deployment IPC, use `sudo BATTY_SKIP_DRAIN=1 ./scripts/deploy.sh`. This explicitly skips draining.
+
 ### macOS deployment with launchd
 
 Run the deployment as the macOS login user, without `sudo`:
@@ -353,7 +353,7 @@ BATTY_WORKSPACES_ROOT="$HOME/Projects" \
 
 The script builds and validates Batty, installs versioned releases under `~/Library/Application Support/Batty/app`, creates the `se.roybot.batty` launch agent, and installs the `batty` CLI in `~/.local/bin`. Logs are written under `~/Library/Logs/Batty`. The local app is served at `http://localhost:3147`; use that hostname rather than the numeric loopback address so passkeys work.
 
-On the first deployment, the script creates `<batty-root>/.batty/options.json` and starts Batty immediately. Later deployments hand the launchd reload to a delayed background process so an active Batty agent turn can finish cleanly.
+On the first deployment, the script creates `<batty-root>/.batty/options.json` and starts Batty immediately. Later deployments hand the launchd reload to a detached background process, which runs the prepared release's CLI over local IPC, puts the server into deployment drain mode, and waits for active agent turns to finish before restarting it. Set `BATTY_SKIP_DRAIN=1` to explicitly skip draining, including the first upgrade from a server without deployment IPC.
 
 ### Windows deployment behind IIS
 
@@ -387,9 +387,10 @@ The deployment:
 - initializes `D:\Batty\root\.batty\options.json` when it does not exist
 - packages versioned releases under `D:\Batty\app\releases`
 - installs the pinned WinSW wrapper as the automatic `Batty` Windows service
-- hands service restart and release activation to a detached process with a 20-second delay
+- hands service restart and release activation to a detached process without a fixed delay
+- runs the staged release's CLI over local IPC, puts a running service into deployment drain mode, and waits for active agent turns to finish before activation
 - updates `D:\Batty\app\current` as a junction
 - configures IIS as a reverse proxy and verifies both local and public health endpoints
 - writes service logs under `D:\Batty\app\logs` and handoff logs under `D:\Batty\app\deploy-logs`
 
-Inspect the service with `Get-Service Batty`. A new service initially runs as LocalSystem; deployment updates preserve any account configured through Windows Services. That account must be able to access the configured Batty root and workspace roots.
+Inspect the service with `Get-Service Batty`. A new service initially runs as LocalSystem; deployment updates preserve any account configured through Windows Services. That account must be able to access the configured Batty root and workspace roots. Add `-Force` to `deploy-windows.ps1` to skip the drain wait.

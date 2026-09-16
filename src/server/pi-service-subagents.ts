@@ -1,11 +1,6 @@
 import { type AssistantMessage, type Message } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import {
-  BACKGROUND_CONTEXT as nativeContext,
-  getOrThrow,
-  HarnessClosed,
-  HarnessFault,
-} from "@earendil-works/pi-agent-core";
+import { HarnessClosed, HarnessFault } from "@earendil-works/pi-agent-core";
 import { appendResultDelivery } from "./session-result-delivery";
 import { HarnessSessionStore as SessionManager } from "./harness-session-store";
 import type { HarnessController as AgentSession } from "./harness-controller";
@@ -103,7 +98,6 @@ export function resolveSubagentDefaults(
 
 export interface DetachedSubagentOptions {
   sessionId?: string;
-  recoverOnly?: boolean;
   workspace: WorkspaceInfo;
   parentSessionId: string;
   parentSessionPath?: string;
@@ -121,22 +115,6 @@ export interface DetachedSubagentOptions {
     content: Array<{ type: "text"; text: string }>;
     details: ToolExecutionDetails;
   }) => void;
-}
-
-export function findDetachedSubagentDeliveryRequest(
-  entries: ReturnType<SessionManager["getEntries"]>,
-  sessionId: string,
-): DetachedSubagentOptions | undefined {
-  const marker = entries.findLast(
-    (entry) => entry.type === "custom" && entry.customType === SUBAGENT_SESSION_CUSTOM_TYPE,
-  );
-  if (marker?.type !== "custom") return undefined;
-  const data = marker.data as unknown as {
-    sessionId: string;
-    respondIn: string;
-    request?: DetachedSubagentOptions;
-  };
-  return data.sessionId === sessionId && data.respondIn === "session" ? data.request : undefined;
 }
 
 export interface DetachedSubagentResult {
@@ -320,17 +298,6 @@ export async function runDetachedSubagentSession(
       parentSessionId: options.parentSessionId,
       depth: options.parentSubagentDepth + 1,
       respondIn: options.respondIn,
-      request: {
-        workspace: options.workspace,
-        parentSessionId: options.parentSessionId,
-        ...(options.parentSessionPath ? { parentSessionPath: options.parentSessionPath } : {}),
-        parentSubagentDepth: options.parentSubagentDepth,
-        prompt: options.prompt,
-        modelId: options.modelId,
-        thinkingLevel: options.thinkingLevel,
-        includeSessionContext: options.includeSessionContext,
-        respondIn: options.respondIn,
-      },
     });
   const webSubagentSession = deps.attachSession(
     options.workspace,
@@ -451,20 +418,19 @@ export async function runDetachedSubagentSession(
         ? options.signal.reason
         : new Error("Subagent aborted");
     }
-    if (subagentSession.isStreaming) await subagentSession.resume();
-    else if (!subagentSession.snapshot.lastResult) {
-      if (options.recoverOnly)
-        throw new Error("Batty stopped before this subagent operation was admitted");
-      getOrThrow(
-        await subagentSession.lane.accept(
-          {
-            kind: "prompt",
-            prompt: buildRuntimeNoticeMessage(subagentNotice, Date.now()),
-          },
-          nativeContext,
-        ),
+    if (subagentSession.isStreaming) {
+      // Another live caller owns this operation; wait for its normal driver to finish.
+      await subagentSession.waitForIdle();
+    } else if (!subagentSession.snapshot.lastResult) {
+      if (existing) throw new Error("Detached subagent operation was interrupted");
+      await subagentSession.sendCustomMessage(
+        {
+          customType: `batty-runtime-notice:${subagentNotice.kind}`,
+          content: subagentNotice.text,
+          display: true,
+        },
+        { triggerTurn: true },
       );
-      await subagentSession.resume();
     }
     const branch = subagentSession.sessionManager.getBranch();
     const marker = branch.findLastIndex(
@@ -498,12 +464,7 @@ export async function runDetachedSubagentSession(
   } catch (error) {
     if (error instanceof HarnessClosed || error instanceof HarnessFault) throw error;
     // Delivery failures remain retryable; they must not replace the child's native result.
-    if (
-      deliveringResult ||
-      subagentSession.isStreaming ||
-      (options.recoverOnly && !subagentSession.snapshot.lastResult)
-    )
-      throw error;
+    if (deliveringResult || subagentSession.isStreaming) throw error;
     const result = buildDetachedSubagentResult(
       subagentSession,
       options,

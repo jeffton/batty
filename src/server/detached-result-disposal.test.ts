@@ -15,7 +15,6 @@ import type { WebSession } from "./pi-service-types";
 import {
   deliverCronJobRun,
   executeCronOperation,
-  recoverCronJobSession,
   runCronJobSession,
   type PiServiceCronAdapterContext,
 } from "./pi-service-cron-adapter";
@@ -88,7 +87,7 @@ async function busyParent() {
 }
 
 describe("detached result delivery after ephemeral harness disposal", () => {
-  it.each(["fresh", "recovered", "disposed-before-return", "failed", "NO_REPLY"])(
+  it.each(["fresh", "disposed-before-return", "failed", "NO_REPLY"])(
     "preserves a %s cron result while its parent is busy",
     async (mode) => {
       const { parent, workspace } = await busyParent();
@@ -148,24 +147,7 @@ describe("detached result delivery after ephemeral harness disposal", () => {
         onSessionStarted: vi.fn(),
         queueResultDelivery: vi.fn(async () => undefined),
       };
-      if (mode === "recovered") {
-        getOrThrow(
-          await child.session.lane.accept(
-            { kind: "prompt", prompt: job.prompt, operationId: job.runId },
-            context,
-          ),
-        );
-      }
-      const running =
-        mode === "recovered"
-          ? recoverCronJobSession(
-              {
-                ...adapter,
-                openSession: async () => lifecycle.state(childId),
-              },
-              { ...job, sessionPath: childPath, startedAtMs: 1 },
-            )
-          : runCronJobSession(adapter, job);
+      const running = runCronJobSession(adapter, job);
       // Observe rejection immediately so a regression cannot escape as an unhandled rejection.
       const outcome = running.then(
         (result) => ({ result }),
@@ -190,7 +172,7 @@ describe("detached result delivery after ephemeral harness disposal", () => {
         expect(job.queueResultDelivery).toHaveBeenCalledWith(parent.session.sessionId);
       }
       expect(queues.size).toBe(0);
-      await parent.session.resume();
+      await parent.session.driveOperation("parent-turn");
       if (mode !== "NO_REPLY") {
         await deliverCronJobRun(
           {
@@ -300,7 +282,7 @@ describe("detached result delivery after ephemeral harness disposal", () => {
     await expect(
       child.lane.getResult(child.snapshot.lastResult!.operationId, context),
     ).rejects.toBeInstanceOf(HarnessClosed);
-    await parent.session.resume();
+    await parent.session.driveOperation("parent-turn");
     expect(await outcome).toMatchObject({ result: { text: "Child answer", isError: false } });
     await parent.reopen();
     expect(parent.session.messages).toHaveLength(4);

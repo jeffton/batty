@@ -38,14 +38,15 @@ When replacing a running instance, the deployment flow avoids that by:
 1. preparing and packaging the release before restarting the service
 2. handing the restart off to the platform-specific handoff script
 3. scheduling the actual restart through the platform's detached service-manager handoff
-4. waiting before restart so the current assistant turn can finish and persist its summary
+4. running `batty drain` over local IPC to pause new work and wait for admitted turns, subagents, and result delivery to finish
 5. letting the browser reconnect to the restored session after restart
 6. letting the client auto-refresh itself when the deployed build id changes
 
 ## Important operational rules
 
-- Keep the delayed restart in the platform-specific `handoff-restart*` script; it is intentional.
-- Do not shorten or remove that delay unless you are explicitly reworking the self-deploy flow.
+- Keep the restart detached in the platform-specific `handoff-restart*` script. Start draining immediately; do not add a fixed handoff delay.
+- Restart workers must run the prepared CLI's `drain` before restarting. Do not wait for drain in the foreground agent tool call: it would wait for its own turn.
+- Normal drains have no timeout. `BATTY_SKIP_DRAIN=1` (Unix) / `-Force` (Windows) explicitly skips draining, including the first upgrade from a server without deployment IPC.
 - Do not add post-restart verification commands in the same self-deploy turn if they depend on the old foreground session surviving the restart.
 - If you need verification, put it in the applicable `restart-services*` script or run it in a separate turn after the restart has happened.
 - The reconnect flow depends on the client keeping `workspaceId` and `sessionPath` in the SSE URL so the server can reopen the session after process restart.
@@ -56,7 +57,7 @@ When replacing a running instance, the deployment flow avoids that by:
 1. Run the full deployment command listed above for the current platform.
 2. If replacing a running instance, wait for the script to report that reload was handed off.
 3. Finish the assistant response immediately after handoff so the summary is persisted before restart.
-4. Allow the delayed restart to happen.
+4. The detached worker restarts once all admitted work has finished.
 5. Expect the browser to refresh onto the new client build and reconnect to the same session.
 
 If this flow breaks, inspect these files first:

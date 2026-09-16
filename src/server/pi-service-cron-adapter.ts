@@ -65,7 +65,6 @@ export async function executeCronOperation(
   session: AgentSession,
   notice: RuntimeNotice,
   operationId: string,
-  recover = false,
 ): Promise<void> {
   let result = await cronOperationResult(session, operationId);
   if (!result) {
@@ -74,7 +73,6 @@ export async function executeCronOperation(
       throw new Error(`Cron operation ${operationId} does not own this session`);
     }
     if (!execution.current) {
-      if (recover) throw new Error("Batty stopped before this cron operation was admitted");
       getOrThrow(
         await session.lane.accept(
           {
@@ -86,70 +84,13 @@ export async function executeCronOperation(
         ),
       );
     }
-    await session.resume();
+    await session.driveOperation(operationId);
     result = await cronOperationResult(session, operationId);
   }
   if (!result) throw new Error(`Cron operation ${operationId} has no terminal result`);
   if (result.status !== "completed") {
     throw new Error(result.error?.message ?? `Cron run ${result.status}`);
   }
-}
-
-export async function recoverCronJobSession(
-  context: PiServiceCronAdapterContext & {
-    openSession(workspace: WorkspaceInfo, sessionPath: string): Promise<SessionState>;
-  },
-  job: CronJobRun & { sessionPath: string; startedAtMs: number },
-): Promise<{ sessionId: string; sessionPath: string }> {
-  const restored = await context.openSession(job.workspace, job.sessionPath);
-  const child = context.requireSession(restored.id).session;
-  const notice = buildCronRuntimeNotice({
-    scheduleLabel: job.scheduleLabel,
-    prompt: job.prompt,
-    session: job.session,
-    now: new Date(job.startedAtMs),
-  });
-  const binding = cronRunBinding(child, job.runId);
-  if (job.session.kind === "daily-inline") {
-    return runCronJobSession(context, job, { parent: restored, cronNotice: notice });
-  }
-  if (
-    job.session.kind === "daily-detached" &&
-    !binding?.parentSessionId &&
-    job.session.includePreviousContext
-  ) {
-    return runCronJobSession(context, job, { parent: restored, cronNotice: notice });
-  }
-  if (job.session.kind === "daily-detached" && !binding?.parentSessionId) {
-    throw new Error(`Cron run ${job.runId} has no persisted parent binding`);
-  }
-  const parentSessionId =
-    job.session.kind === "daily-detached" ? binding!.parentSessionId : undefined;
-  const abort = () => {
-    void child.lane
-      .requestAbort(job.runId, nativeContext)
-      .catch((error) => console.error("Failed to stop recovered cron operation", error));
-  };
-  job.signal.addEventListener("abort", abort, { once: true });
-  if (job.signal.aborted) abort();
-  let error: unknown;
-  try {
-    await executeCronOperation(child, notice, job.runId, true);
-  } catch (caught) {
-    // An open operation belongs to Pi recovery, even if the process is shutting down.
-    if (!(await cronOperationResult(child, job.runId))) throw caught;
-    error = caught;
-  } finally {
-    job.signal.removeEventListener("abort", abort);
-  }
-  if (
-    parentSessionId &&
-    (error || extractAssistantText(await lastCronAssistant(child, job.runId)) !== "NO_REPLY")
-  ) {
-    await job.queueResultDelivery(parentSessionId);
-  }
-  if (error) throw error;
-  return { sessionId: child.sessionId, sessionPath: child.sessionFile };
 }
 
 export async function deliverSkippedCronJobRun(
@@ -190,25 +131,21 @@ export async function deliverSkippedCronJobRun(
 export async function runCronJobSession(
   context: PiServiceCronAdapterContext,
   job: CronJobRun,
-  recovery?: { parent: SessionState; cronNotice: RuntimeNotice },
 ): Promise<{ sessionId: string; sessionPath: string }> {
-  const cronNotice =
-    recovery?.cronNotice ??
-    buildCronRuntimeNotice({
-      scheduleLabel: job.scheduleLabel,
-      prompt: job.prompt,
-      session: job.session,
-    });
+  const cronNotice = buildCronRuntimeNotice({
+    scheduleLabel: job.scheduleLabel,
+    prompt: job.prompt,
+    session: job.session,
+  });
 
   if (job.session.kind === "daily-inline") {
-    return runInlineCronJob(context, job, cronNotice, recovery?.parent);
+    return runInlineCronJob(context, job, cronNotice);
   }
 
   const parent =
-    recovery?.parent ??
-    (job.session.kind === "daily-detached"
+    job.session.kind === "daily-detached"
       ? await context.resolveOrCreateDailySession(job.workspace)
-      : undefined);
+      : undefined;
   const includePreviousContext =
     job.session.kind === "daily-detached" && job.session.includePreviousContext === true;
   const createCronSession = () =>
@@ -284,14 +221,11 @@ async function runInlineCronJob(
   context: PiServiceCronAdapterContext,
   job: CronJobRun,
   cronNotice: RuntimeNotice,
-  restored?: SessionState,
 ): Promise<{ sessionId: string; sessionPath: string }> {
-  const session =
-    restored ??
-    (await context.resolveOrCreateDailySession(job.workspace, {
-      modelId: job.model,
-      thinkingLevel: job.thinkingLevel,
-    }));
+  const session = await context.resolveOrCreateDailySession(job.workspace, {
+    modelId: job.model,
+    thinkingLevel: job.thinkingLevel,
+  });
   const webSession = context.requireSession(session.id);
   await job.onSessionStarted({
     sessionId: webSession.session.sessionId,

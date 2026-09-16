@@ -22,6 +22,7 @@ import type {
 } from "@/shared/types";
 import type { AppConfig } from "./config";
 import { BrowserService } from "./browser-service";
+import { TurnDrain } from "./turn-drain";
 import { closeSharedBrowser } from "./browser-runtime";
 import { ModelConfigWatcher } from "./model-config-watcher";
 import { resolveModel } from "./model-resolution";
@@ -64,7 +65,6 @@ import {
   resolveSubagentDefaults,
   runDetachedSubagentSession,
   deliverDetachedSubagentResult,
-  findDetachedSubagentDeliveryRequest,
   runSubagentSerial,
   waitForSubagentQueue,
 } from "./pi-service-subagents";
@@ -83,7 +83,6 @@ import {
   deliverCronJobRun,
   deliverSkippedCronJobRun,
   runCronJobSession,
-  recoverCronJobSession,
   executeCronOperation,
   type PiServiceCronAdapterContext,
 } from "./pi-service-cron-adapter";
@@ -108,6 +107,7 @@ function leafBeforeCurrentTurn(branch: SessionEntry[]): string | null | undefine
 }
 
 export class PiService {
+  readonly turns = new TurnDrain();
   private readonly config: AppConfig;
   private readonly modelRuntime: ModelRuntime;
   private readonly modelConfigWatcher: ModelConfigWatcher;
@@ -196,41 +196,6 @@ export class PiService {
     await this.browserService.dispose();
     await closeSharedBrowser();
     await disposeSessionSummaryIndex(this.config);
-  }
-
-  async recoverOpenOperations(): Promise<void> {
-    const index = await getSessionSummaryIndex(this.config);
-    for (const workspace of await listWorkspaces(this.config)) {
-      await index.ensureInitialized(workspace.id);
-      for (const filePath of index.recoveryPaths(workspace.id)) {
-        try {
-          const stored = await SessionManager.read(filePath);
-          const delivery = findDetachedSubagentDeliveryRequest(stored.entries, stored.metadata.id);
-          if (delivery && !this.sessionControllers.has(stored.metadata.id)) {
-            void this.runDetachedSubagentSession({
-              ...delivery,
-              workspace,
-              sessionId: stored.metadata.id,
-              recoverOnly: true,
-            }).catch((error) =>
-              console.error("Failed to recover detached subagent delivery", {
-                sessionId: stored.metadata.id,
-                error,
-              }),
-            );
-            continue;
-          }
-          if (stored.currentOperationId && !this.sessionControllers.has(stored.metadata.id))
-            await this.openSession(workspace, filePath);
-        } catch (error) {
-          console.error("Failed to recover Pi session", {
-            workspaceId: workspace.id,
-            sessionPath: filePath,
-            error,
-          });
-        }
-      }
-    }
   }
 
   private registerLiveSession(workspace: WorkspaceInfo, session: AgentSession): void {
@@ -489,13 +454,6 @@ export class PiService {
         hasSubagentSessionMarker(result.session.sessionManager.getEntries()) ||
           hasParentedCronRunSessionMarker(result.session.sessionManager.getEntries()),
       );
-      if (result.session.isStreaming) {
-        void result.session
-          .resume()
-          .catch((error) =>
-            console.error("Failed to resume Pi operation", { sessionId: webSession.id, error }),
-          );
-      }
       return this.getState(webSession.id, { messagesDetailLevel: "summary" });
     })();
     this.sessionOpenPromises.set(canonicalPath, opening);
@@ -546,18 +504,6 @@ export class PiService {
     queueResultDelivery(parentSessionId: string): Promise<void>;
   }): Promise<{ sessionId: string; sessionPath: string }> {
     return runCronJobSession(this.cronAdapterContext(), job);
-  }
-
-  async recoverCronJobSession(
-    job: Parameters<typeof recoverCronJobSession>[1],
-  ): Promise<{ sessionId: string; sessionPath: string }> {
-    return recoverCronJobSession(
-      {
-        ...this.cronAdapterContext(),
-        openSession: (workspace, sessionPath) => this.openSession(workspace, sessionPath),
-      },
-      job,
-    );
   }
 
   async deliverCronJobRun(
@@ -628,7 +574,6 @@ export class PiService {
 
   private async runDetachedSubagentSession(options: {
     sessionId?: string;
-    recoverOnly?: boolean;
     workspace: WorkspaceInfo;
     parentSessionId: string;
     parentSessionPath?: string;
@@ -647,30 +592,34 @@ export class PiService {
       details: ToolExecutionDetails;
     }) => void;
   }): ReturnType<typeof runDetachedSubagentSession> {
-    return runDetachedSubagentSession(
-      {
-        createPiAgentSession: (workspace, sessionManager, createOptions) =>
-          this.createPiAgentSession(workspace, sessionManager, {
-            ...createOptions,
-            parentSessionId: options.parentSessionId,
-          }),
-        attachSession: (workspace, session, modelFallbackMessage, ephemeral) =>
-          this.attachSession(workspace, session, modelFallbackMessage, ephemeral),
-        disposeWebSession: (webSession) => this.disposeWebSession(webSession),
-        workspaceSessionDir: workspaceSessionDir(this.config, options.workspace.id),
-        deliverResultToParent: async (request, result) => {
-          const opened = await this.openSessionById(request.workspace, request.parentSessionId);
-          await this.runSubagentSerial(opened.id, async () => {
-            const parent = this.requireSession(opened.id);
-            if (!(await deliverDetachedSubagentResult(parent.session, result))) return;
-            const state = this.getState(parent.id);
-            this.publish(parent, { type: "reset", state });
-            await this.onAgentCompleted?.(state);
-            await this.notifyWorkspaceUpdated(parent.workspace.id);
-          });
-        },
-      },
-      options,
+    return this.turns.run(
+      () =>
+        runDetachedSubagentSession(
+          {
+            createPiAgentSession: (workspace, sessionManager, createOptions) =>
+              this.createPiAgentSession(workspace, sessionManager, {
+                ...createOptions,
+                parentSessionId: options.parentSessionId,
+              }),
+            attachSession: (workspace, session, modelFallbackMessage, ephemeral) =>
+              this.attachSession(workspace, session, modelFallbackMessage, ephemeral),
+            disposeWebSession: (webSession) => this.disposeWebSession(webSession),
+            workspaceSessionDir: workspaceSessionDir(this.config, options.workspace.id),
+            deliverResultToParent: async (request, result) => {
+              const opened = await this.openSessionById(request.workspace, request.parentSessionId);
+              await this.runSubagentSerial(opened.id, async () => {
+                const parent = this.requireSession(opened.id);
+                if (!(await deliverDetachedSubagentResult(parent.session, result))) return;
+                const state = this.getState(parent.id);
+                this.publish(parent, { type: "reset", state });
+                await this.onAgentCompleted?.(state);
+                await this.notifyWorkspaceUpdated(parent.workspace.id);
+              });
+            },
+          },
+          options,
+        ),
+      true,
     );
   }
 
@@ -879,17 +828,19 @@ export class PiService {
     clientMessageId: string,
     streamingBehavior?: "steer" | "followUp",
   ): Promise<void> {
-    const webSession = this.requireSession(sessionId);
-    await this.waitForSubagentQueue(sessionId);
-    const prepared = await this.preparePromptFiles(sessionId, files);
-    const parts = [text.trim(), prepared.text.trim()].filter(Boolean);
-    const promptText = parts.join("\n\n").trim() || "Please inspect the attached files.";
-    await webSession.session.prompt(promptText, {
-      images: prepared.images,
-      clientMessageId,
-      ...(streamingBehavior ? { streamingBehavior } : {}),
+    await this.turns.run(async () => {
+      const webSession = this.requireSession(sessionId);
+      await this.waitForSubagentQueue(sessionId);
+      const prepared = await this.preparePromptFiles(sessionId, files);
+      const parts = [text.trim(), prepared.text.trim()].filter(Boolean);
+      const promptText = parts.join("\n\n").trim() || "Please inspect the attached files.";
+      await webSession.session.prompt(promptText, {
+        images: prepared.images,
+        clientMessageId,
+        ...(streamingBehavior ? { streamingBehavior } : {}),
+      });
+      this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
     });
-    this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
   }
 
   async removeQueuedPrompt(

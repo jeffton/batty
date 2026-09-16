@@ -4,7 +4,6 @@ import {
   BACKGROUND_CONTEXT as context,
   JsonlSessionRepo,
   laneConfig,
-  laneState,
   branchTip,
   value,
   type AgentLane,
@@ -34,7 +33,6 @@ class SessionIndexReadEnv extends NodeExecutionEnv {
 export interface SessionRead {
   metadata: JsonlSessionMetadata;
   entries: Entry[];
-  currentOperationId?: string;
 }
 
 const importedReplyIds = value<Record<string, string>>("batty.imported-reply-ids");
@@ -61,7 +59,6 @@ export class HarnessSessionStore {
   private static readonly owners = new Map<string, Promise<HarnessSessionStore>>();
   private static readonly reads = new Map<string, Promise<SessionRead>>();
   private static readonly listeners = new Set<(file: string, snapshot?: SessionRead) => void>();
-  private currentOperationId?: string;
 
   static subscribe(listener: (file: string, snapshot?: SessionRead) => void): () => void {
     this.listeners.add(listener);
@@ -72,13 +69,8 @@ export class HarnessSessionStore {
     const snapshot = {
       metadata: { ...this.native.metadata, modifiedAt: updatedAt },
       entries: this.getEntries(),
-      currentOperationId: this.currentOperationId,
     };
     for (const listener of HarnessSessionStore.listeners) listener(this.getSessionFile(), snapshot);
-  }
-
-  setCurrentOperation(operationId: string | undefined): void {
-    this.currentOperationId = operationId;
   }
 
   private constructor(
@@ -180,9 +172,6 @@ export class HarnessSessionStore {
         return {
           metadata,
           entries: await native.findEntries({ order: "asc" }, context),
-          currentOperationId:
-            (await native.getValue(laneState("main"), context))?.value.currentOperationId ??
-            undefined,
         };
       } finally {
         await native.close(context);
@@ -194,9 +183,6 @@ export class HarnessSessionStore {
       return {
         metadata: store.native.metadata,
         entries: store.getEntries(),
-        currentOperationId:
-          (await store.native.getValue(laneState("main"), context))?.value.currentOperationId ??
-          undefined,
       };
     }
     const pending = this.reads.get(file);
@@ -209,9 +195,6 @@ export class HarnessSessionStore {
         return {
           metadata,
           entries: await native.findEntries({ order: "asc" }, context),
-          currentOperationId:
-            (await native.getValue(laneState("main"), context))?.value.currentOperationId ??
-            undefined,
         };
       } finally {
         await native.close(context);
@@ -234,9 +217,6 @@ export class HarnessSessionStore {
     this.entries = await this.native.findEntries({ order: "asc" }, context);
     this.tip = (await this.native.getValue(branchTip("main"), context))?.value ?? null;
     this.remappedReplyIds = (await this.native.getValue(importedReplyIds, context))?.value ?? {};
-    this.currentOperationId =
-      (await this.native.getValue(laneState("main"), context))?.value.currentOperationId ??
-      undefined;
     this.publishSummary((await fs.stat(this.getSessionFile())).mtimeMs);
   }
   observe(entry: Entry): void {

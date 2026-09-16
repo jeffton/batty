@@ -6,21 +6,24 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import { loadConfig } from "./config";
 import { CronStore } from "./cron";
+import { startDeploymentControl } from "./deployment-control";
 
 const execFileAsync = promisify(execFile);
 const tempDirs: string[] = [];
 const cliPath = path.resolve("src/server/cli.ts");
 const tsxPath = path.resolve("node_modules/.bin/tsx");
 
-async function createRoot(): Promise<string> {
+async function createRoot(options = true): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-cli-"));
   tempDirs.push(root);
   await fs.mkdir(path.join(root, ".batty"), { recursive: true });
   await fs.mkdir(path.join(root, "batty"));
-  await fs.writeFile(
-    path.join(root, ".batty", "options.json"),
-    JSON.stringify({ workspacesRoots: [root], webPushSubject: "mailto:test@example.com" }),
-  );
+  if (options) {
+    await fs.writeFile(
+      path.join(root, ".batty", "options.json"),
+      JSON.stringify({ workspacesRoots: [root], webPushSubject: "mailto:test@example.com" }),
+    );
+  }
   return root;
 }
 
@@ -39,6 +42,25 @@ async function runCli(root: string, args: string[]): Promise<{ code: number; out
 
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
+});
+
+describe("deployment CLI", () => {
+  it("drains without loading configuration", async () => {
+    const root = await createRoot(false);
+    let drained = false;
+    const control = await startDeploymentControl(root, async () => {
+      drained = true;
+    });
+
+    try {
+      const drain = await runCli(root, ["drain"]);
+      expect(drain).toMatchObject({ code: 0 });
+      expect(drain.output).toContain("All active turns have finished.");
+      expect(drained).toBe(true);
+    } finally {
+      await control.close();
+    }
+  });
 });
 
 describe("cron CLI model validation", () => {

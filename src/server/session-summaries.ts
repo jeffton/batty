@@ -13,7 +13,6 @@ interface IndexEntry {
   workspaceId: string;
   updatedAt: number;
   summary?: SessionSummary;
-  recovery: boolean;
 }
 interface StoredIndex {
   version: 1;
@@ -198,7 +197,6 @@ export class SessionSummaryIndex {
           entry &&
           typeof entry.workspaceId === "string" &&
           typeof entry.updatedAt === "number" &&
-          typeof entry.recovery === "boolean" &&
           (!entry.summary ||
             (typeof entry.summary.sessionId === "string" &&
               typeof entry.summary.path === "string" &&
@@ -213,9 +211,18 @@ export class SessionSummaryIndex {
       return;
     }
     for (const workspaceId of stored.completedWorkspaces) this.completedWorkspaces.add(workspaceId);
+    let removedRecoveryMetadata = false;
     for (const [file, entry] of Object.entries(stored.entries)) {
-      if (!this.revisions.has(file)) this.entries.set(file, entry);
+      if (this.revisions.has(file)) continue;
+      const normalized = {
+        workspaceId: entry.workspaceId,
+        updatedAt: entry.updatedAt,
+        ...(entry.summary ? { summary: entry.summary } : {}),
+      };
+      this.entries.set(file, normalized);
+      removedRecoveryMetadata ||= "recovery" in entry;
     }
+    if (removedRecoveryMetadata) this.changed();
   }
 
   private buildEntry(
@@ -224,22 +231,10 @@ export class SessionSummaryIndex {
     snapshot: SessionRead,
     updatedAt: number,
   ): IndexEntry {
-    const marker = snapshot.entries.findLast(isSubagentSessionEntry);
-    const detached =
-      marker?.type === "custom"
-        ? (marker.data as { sessionId?: string; respondIn?: string; request?: unknown })
-        : undefined;
     return {
       workspaceId,
       updatedAt,
       summary: buildSessionSummary(snapshot, file, workspaceId, updatedAt),
-      // Hidden detached sessions still need restart recovery; cron runs have their own index.
-      recovery: Boolean(
-        snapshot.currentOperationId ||
-        (detached?.sessionId === snapshot.metadata.id &&
-          detached.respondIn === "session" &&
-          detached.request),
-      ),
     };
   }
 
@@ -324,12 +319,6 @@ export class SessionSummaryIndex {
       .filter((entry) => entry.workspaceId === workspaceId)
       .map((entry) => entry.updatedAt);
     return times.length ? Math.max(...times) : undefined;
-  }
-
-  recoveryPaths(workspaceId: string): string[] {
-    return [...this.entries]
-      .filter(([, entry]) => entry.workspaceId === workspaceId && entry.recovery)
-      .map(([file]) => file);
   }
 
   /** Discover each workspace once, including workspaces added after startup. */

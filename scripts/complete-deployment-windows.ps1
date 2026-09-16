@@ -7,8 +7,9 @@ param(
   [string]$PublicOrigin,
   [string]$BaseUrl,
   [int]$BackendPort = 3147,
-  [int]$DelaySeconds = 20,
-  [string]$LogPath
+  [string]$LogPath,
+  [string]$BattyRoot,
+  [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,6 +29,13 @@ function Wait-ForUrl([string]$url) {
   }
 }
 
+function Wait-ForDeploymentDrain([string]$cliPath, [string]$battyRoot) {
+  & (Get-Command node).Source $cliPath --root $battyRoot drain
+  if ($LASTEXITCODE -ne 0) {
+    throw "Deployment drain failed with exit code $LASTEXITCODE."
+  }
+}
+
 function Remove-Junction([string]$path) {
   cmd /d /c rmdir "$path" | Out-Null
   if ($LASTEXITCODE -ne 0) {
@@ -40,11 +48,17 @@ $previousReleaseDir = $null
 $currentDir = Join-Path $InstallRoot "current"
 
 try {
-  Start-Sleep -Seconds $DelaySeconds
-
+  $backendPath = $BaseUrl.TrimEnd("/")
+  if ($backendPath -eq "/") {
+    $backendPath = ""
+  }
   $releaseDir = Join-Path (Join-Path $InstallRoot "releases") $ReleaseName
-  if (-not (Test-Path (Join-Path $releaseDir "dist\server\main.mjs"))) {
+  $cliPath = Join-Path $releaseDir "dist\server\cli.mjs"
+  if (-not (Test-Path (Join-Path $releaseDir "dist\server\main.mjs")) -or -not (Test-Path $cliPath)) {
     throw "Staged release '$releaseDir' is incomplete."
+  }
+  if ((Get-Service -Name Batty).Status -eq "Running" -and -not $Force) {
+    Wait-ForDeploymentDrain $cliPath $BattyRoot
   }
 
   if (Test-Path $currentDir) {
@@ -75,10 +89,6 @@ try {
   Start-Service -Name Batty
   (Get-Service -Name Batty).WaitForStatus("Running", [TimeSpan]::FromSeconds(30))
 
-  $backendPath = $BaseUrl.TrimEnd("/")
-  if ($backendPath -eq "/") {
-    $backendPath = ""
-  }
   Wait-ForUrl "http://127.0.0.1:$BackendPort$backendPath/healthz"
   Wait-ForUrl "$($PublicOrigin.TrimEnd('/'))$backendPath/healthz"
 

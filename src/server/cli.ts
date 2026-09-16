@@ -1,18 +1,12 @@
 #!/usr/bin/env node
 import path from "node:path";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { loadConfig, resolveBattyDir, type AppConfig } from "./config";
-import { buildCronJobSummary, CronStore } from "./cron";
-import { resolveModel } from "./model-resolution";
-import { formatSetupCode, PasskeyAuthService } from "./passkeys";
-import { battyAgentDir } from "./pi-paths";
+import type { AppConfig } from "./config";
 import type {
   CreateCronJobInput,
   CronJobScheduleInput,
   CronJobSession,
   UpdateCronJobInput,
 } from "@/shared/types";
-
 interface ParsedArgs {
   positionals: string[];
   flags: Record<string, string | boolean>;
@@ -89,6 +83,7 @@ function usage(): string {
     "",
     "Commands:",
     "  auth code                  Print a fresh one-time 8 char auth code",
+    "  drain                      Stop accepting new turns and wait for active turns",
     "  cron list [--workspace ID] [--json]",
     "  cron add --workspace ID --prompt TEXT --model ID --thinking LEVEL (--in DUR | --at ISO | --every DUR | --cron EXPR) [--tz IANA] [--session new|daily-inline|daily-detached] [--daily-context include|omit]",
     "  cron edit <jobId> [fields...] [--session new|daily-inline|daily-detached] [--daily-context include|omit]",
@@ -105,12 +100,12 @@ function usage(): string {
 function resolveRootFromParsedArgs(parsed: ParsedArgs): string {
   const explicitRoot = stringFlag(parsed.flags, "root");
   if (explicitRoot) {
-    return resolveBattyDir([explicitRoot]);
+    return path.resolve(explicitRoot);
   }
 
   const envRoot = process.env.BATTY_ROOT?.trim();
   if (envRoot) {
-    return resolveBattyDir([envRoot]);
+    return path.resolve(envRoot);
   }
 
   const cwd = process.cwd();
@@ -209,6 +204,10 @@ function buildSession(
 }
 
 async function handleAuthCode(root: string): Promise<void> {
+  const [{ loadConfig }, { formatSetupCode, PasskeyAuthService }] = await Promise.all([
+    import("./config"),
+    import("./passkeys"),
+  ]);
   const config = await loadConfig(root);
   const passkeys = new PasskeyAuthService(config.battyDir, config.authSecret);
   const setup = await passkeys.issueSetupCode("batty-cli");
@@ -217,6 +216,10 @@ async function handleAuthCode(root: string): Promise<void> {
 }
 
 async function handleCronList(root: string, parsed: ParsedArgs): Promise<void> {
+  const [{ loadConfig }, { buildCronJobSummary, CronStore }] = await Promise.all([
+    import("./config"),
+    import("./cron"),
+  ]);
   const config = await loadConfig(root);
   const store = new CronStore(config);
   const workspaceId = stringFlag(parsed.flags, "workspace");
@@ -236,6 +239,11 @@ async function handleCronList(root: string, parsed: ParsedArgs): Promise<void> {
 }
 
 async function validateSelectedModel(config: AppConfig, modelId: string): Promise<void> {
+  const [{ ModelRuntime }, { resolveModel }, { battyAgentDir }] = await Promise.all([
+    import("@earendil-works/pi-coding-agent"),
+    import("./model-resolution"),
+    import("./pi-paths"),
+  ]);
   const agentDir = battyAgentDir(config);
   const modelRuntime = await ModelRuntime.create({
     authPath: path.join(agentDir, "auth.json"),
@@ -245,6 +253,10 @@ async function validateSelectedModel(config: AppConfig, modelId: string): Promis
 }
 
 async function handleCronAdd(root: string, parsed: ParsedArgs): Promise<void> {
+  const [{ loadConfig }, { buildCronJobSummary, CronStore }] = await Promise.all([
+    import("./config"),
+    import("./cron"),
+  ]);
   const config = await loadConfig(root);
   const store = new CronStore(config);
   const input: CreateCronJobInput = {
@@ -267,6 +279,10 @@ async function handleCronAdd(root: string, parsed: ParsedArgs): Promise<void> {
 
 async function handleCronEdit(root: string, parsed: ParsedArgs): Promise<void> {
   const jobId = requireString(parsed.positionals[2], "jobId");
+  const [{ loadConfig }, { buildCronJobSummary, CronStore }] = await Promise.all([
+    import("./config"),
+    import("./cron"),
+  ]);
   const config = await loadConfig(root);
   const store = new CronStore(config);
   const schedule = buildSchedule(parsed.flags);
@@ -299,10 +315,17 @@ async function handleCronEdit(root: string, parsed: ParsedArgs): Promise<void> {
 
 async function handleCronRemove(root: string, parsed: ParsedArgs): Promise<void> {
   const jobId = requireString(parsed.positionals[2], "jobId");
+  const [{ loadConfig }, { CronStore }] = await Promise.all([import("./config"), import("./cron")]);
   const config = await loadConfig(root);
   const store = new CronStore(config);
   const job = await store.deleteJob(jobId);
   console.log(`Removed cron job ${job.id} from workspace ${job.workspaceId}.`);
+}
+
+async function handleDrain(root: string): Promise<void> {
+  const { drainDeployment } = await import("./deployment-control");
+  await drainDeployment(root);
+  console.log("All active turns have finished.");
 }
 
 async function main(): Promise<void> {
@@ -319,6 +342,11 @@ async function main(): Promise<void> {
 
   if (command === "auth" && subcommand === "code") {
     await handleAuthCode(root);
+    return;
+  }
+
+  if (command === "drain") {
+    await handleDrain(root);
     return;
   }
 

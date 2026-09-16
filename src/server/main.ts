@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import fastify from "fastify";
 import cookie from "@fastify/cookie";
 import multipart from "@fastify/multipart";
@@ -9,6 +10,7 @@ import { verifyAuthToken } from "./auth";
 import { readBuildId } from "./build-id";
 import { loadConfig, resolveBattyDir } from "./config";
 import { CronService } from "./cron";
+import { startDeploymentControl } from "./deployment-control";
 import { createLoginRateLimiter } from "./login-rate-limit";
 import { formatSetupCode, PasskeyAuthService } from "./passkeys";
 import { PiService } from "./pi-service";
@@ -124,23 +126,6 @@ cronService.subscribe((workspaceIds) => {
   }
 });
 cronService.setRunner({
-  restart: async (run, runContext) => {
-    const workspace = resolveWorkspace(await listWorkspaces(config), run.workspaceId);
-    return service.runCronJobSession({
-      ...run,
-      ...runContext,
-      workspace,
-    });
-  },
-  recover: async (run, runContext) => {
-    const workspace = resolveWorkspace(await listWorkspaces(config), run.workspaceId);
-    return service.recoverCronJobSession({
-      ...run,
-      ...runContext,
-      workspace,
-      sessionPath: run.sessionPath!,
-    });
-  },
   run: async (job, runContext) => {
     const workspaces = await listWorkspaces(config);
     const workspace = resolveWorkspace(workspaces, job.workspaceId);
@@ -184,7 +169,13 @@ cronService.setRunner({
   },
 });
 await cronService.initialize();
-await service.recoverOpenOperations();
+const deploymentControl = await startDeploymentControl(config.battyDir, async () => {
+  service.turns.beginDrain();
+  cronService.beginDrain();
+  while (service.turns.activeTurns + cronService.activeTurns > 0) {
+    await delay(250);
+  }
+});
 
 const authAttemptLimiter = createLoginRateLimiter();
 
@@ -194,6 +185,7 @@ const app = fastify({
   bodyLimit: 1024 * 1024 * 100,
 });
 app.addHook("onClose", async () => {
+  await deploymentControl.close();
   await Promise.all([service.dispose(), cronService.dispose()]);
 });
 

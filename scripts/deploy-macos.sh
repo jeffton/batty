@@ -116,7 +116,7 @@ plutil -lint "$plist"
 if [[ "$was_running" == true ]]; then
   step "Handing off launch agent reload"
   "$script_dir/handoff-restart-macos.sh"
-  printf '\nRelease %s will activate after the handoff delay.\n' "$release_name"
+  printf '\nRelease %s will activate once active turns finish.\n' "$release_name"
 else
   step "Starting launch agent"
   "$script_dir/restart-services-macos.sh"

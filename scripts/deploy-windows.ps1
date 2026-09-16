@@ -7,7 +7,8 @@ param(
   [string]$SiteName = "Default Web Site",
   [string]$AppPath = "batty",
   [string]$AppPoolName = "BattyProxy",
-  [int]$BackendPort = 3147
+  [int]$BackendPort = 3147,
+  [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
@@ -120,7 +121,9 @@ Step "Handing off deployment reload"
   -AppPoolName $AppPoolName `
   -PublicOrigin $PublicOrigin `
   -BaseUrl $BaseUrl `
-  -BackendPort $BackendPort
+  -BackendPort $BackendPort `
+  -BattyRoot $BattyRoot `
+  -Force:$Force
 
 Write-Host ""
-Write-Host "Deployment to $PublicOrigin$BaseUrl will activate after the handoff delay."
+Write-Host "Deployment to $PublicOrigin$BaseUrl will activate once active turns finish."

@@ -37,7 +37,7 @@ export interface HarnessPromptOptions {
   streamingBehavior?: "steer" | "followUp";
 }
 
-/** Application controller: Pi owns execution, queues, retries, compaction, and recovery. */
+/** Application controller: Pi owns execution, queues, retries, and compaction. */
 export class HarnessController {
   private readonly listeners = new Set<(event: AgentSessionEvent) => void | Promise<void>>();
   private watch!: WatchHandle<LaneSnapshot>;
@@ -62,9 +62,18 @@ export class HarnessController {
     settings: SettingsManager,
     resources: ResourceLoader,
   ): Promise<HarnessController> {
-    const { harness } = await AgentHarness.create({ ...options, session: store.native }, context);
+    const { harness, open } = await AgentHarness.create(
+      { ...options, session: store.native },
+      context,
+    );
     try {
       const lane = await harness.lane("main", context);
+      // A process crash leaves a durable operation without its driver.  Abort it through
+      // Pi before exposing the session, rather than pretending it is idle or resuming it.
+      if (open.some((operation) => operation.lane === "main")) {
+        const aborted = await lane.abort(context);
+        if (!aborted.ok && !(aborted.error instanceof NoActiveOperation)) throw aborted.error;
+      }
       await store.attach(lane);
       const controller = new HarnessController(
         harness,
@@ -157,7 +166,6 @@ export class HarnessController {
       this.snapshot = await this.watch.resnapshot(context);
       await this.sessionManager.refresh();
     }
-    this.sessionManager.setCurrentOperation(this.snapshot.operation?.id);
     if (event.type === "entry_added") this.sessionManager.observe(event.entry);
     else if (
       [
@@ -207,9 +215,8 @@ export class HarnessController {
     );
     await this.drive(admission.operationId);
   }
-  async resume(): Promise<void> {
-    const current = (await this.lane.inspectExecution(context)).current;
-    if (current) await this.drive(current.id);
+  async driveOperation(operationId: string): Promise<void> {
+    return this.drive(operationId);
   }
   private drive(operationId: string): Promise<void> {
     const existing = this.drivers.get(operationId);

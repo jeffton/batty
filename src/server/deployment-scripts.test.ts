@@ -112,7 +112,39 @@ describe("deployment scripts", () => {
     ).resolves.toBe("patch\n");
   });
 
-  it("installs macOS deployments as a user launch agent with a delayed upgrade reload", async () => {
+  it("drains Linux deployments through the prepared CLI", async () => {
+    const [deployScript, reloadScript, handoffScript, restartScript] = await Promise.all([
+      fs.readFile(path.join(process.cwd(), "scripts", "deploy.sh"), "utf8"),
+      fs.readFile(path.join(process.cwd(), "scripts", "reload-self.sh"), "utf8"),
+      fs.readFile(path.join(process.cwd(), "scripts", "handoff-restart.sh"), "utf8"),
+      fs.readFile(path.join(process.cwd(), "scripts", "restart-services.sh"), "utf8"),
+    ]);
+
+    expect(deployScript).toContain('"$repo_dir/scripts/handoff-restart.sh"');
+    expect(deployScript).not.toContain("--force");
+    expect(reloadScript).toContain('"$repo_dir/scripts/handoff-restart.sh"');
+    expect(reloadScript).not.toContain("--force");
+    expect(handoffScript).toContain("systemd-run \\");
+    expect(handoffScript).toContain('/bin/bash "$script_dir/restart-services.sh"');
+    expect(handoffScript).not.toMatch(/sleep|delay_seconds/);
+    expect(handoffScript).toContain('--setenv="BATTY_INSTALL_ROOT=$install_root"');
+    expect(handoffScript).toContain('--setenv="BATTY_ROOT=$batty_root"');
+    expect(handoffScript).toContain('--setenv="BATTY_PORT=$backend_port"');
+    expect(handoffScript).toContain('--setenv="BATTY_NODE=$node_path"');
+    expect(handoffScript).toContain('--setenv="BATTY_SKIP_DRAIN=${BATTY_SKIP_DRAIN:-}"');
+    expect(restartScript).toContain('node_path="${BATTY_NODE:-$(command -v node)}"');
+    expect(restartScript).toContain(
+      '"$install_root/current/dist/server/cli.mjs" --root "$batty_root" drain',
+    );
+    expect(restartScript).not.toContain("drain --wait");
+    expect(restartScript).toContain('[[ "${BATTY_SKIP_DRAIN:-}" != "1" ]]');
+    expect(restartScript).toContain('wait_for_url "http://127.0.0.1/"');
+    expect(restartScript).not.toContain('wait_for_url "http://127.0.0.1:${backend_port}/"');
+    expect(restartScript).not.toContain("deployment/drain");
+    expect(restartScript).not.toContain("authSecret");
+  });
+
+  it("installs macOS deployments as a user launch agent with an immediate detached reload", async () => {
     const [deployScript, handoffScript, restartScript] = await Promise.all([
       fs.readFile(path.join(process.cwd(), "scripts", "deploy-macos.sh"), "utf8"),
       fs.readFile(path.join(process.cwd(), "scripts", "handoff-restart-macos.sh"), "utf8"),
@@ -123,8 +155,23 @@ describe("deployment scripts", () => {
     expect(deployScript).toContain('if [[ "$(id -u)" -eq 0 ]]');
     expect(deployScript).toContain('webPushSubject: "mailto:batty@localhost"');
     expect(deployScript).toContain('if [[ "$was_running" == true ]]');
-    expect(handoffScript).toContain('sleep "$1"');
+    expect(handoffScript).toContain("nohup /usr/bin/env");
+    expect(handoffScript).toContain('/bin/bash "$script_dir/restart-services-macos.sh"');
+    expect(handoffScript).not.toMatch(/sleep|delay_seconds/);
+    expect(handoffScript).toContain('"BATTY_INSTALL_ROOT=$install_root"');
+    expect(handoffScript).toContain('"BATTY_ROOT=$batty_root"');
+    expect(handoffScript).toContain('"BATTY_PORT=$backend_port"');
+    expect(handoffScript).toContain('"BATTY_NODE=$node_path"');
+    expect(handoffScript).toContain('"BATTY_SKIP_DRAIN=${BATTY_SKIP_DRAIN:-}"');
     expect(restartScript).toContain('launchctl bootstrap "$domain" "$plist"');
+    expect(restartScript).toContain('node_path="${BATTY_NODE:-$(command -v node)}"');
+    expect(restartScript).toContain(
+      '"$install_root/current/dist/server/cli.mjs" --root "$batty_root" drain',
+    );
+    expect(restartScript).not.toContain("drain --wait");
+    expect(restartScript).toContain('[[ "${BATTY_SKIP_DRAIN:-}" != "1" ]]');
+    expect(restartScript).not.toContain("deployment/drain");
+    expect(restartScript).not.toContain("authSecret");
   });
 
   it("packages the pnpm workspace configuration in Windows releases", async () => {
@@ -156,7 +203,7 @@ describe("deployment scripts", () => {
     expect(script).not.toMatch(/\bworkspacesRoot\s*=/);
   });
 
-  it("hands Windows service activation to a detached process after a delay", async () => {
+  it("hands Windows service activation immediately to a detached process", async () => {
     const [deployScript, handoffScript, workerScript] = await Promise.all([
       fs.readFile(path.join(process.cwd(), "scripts", "deploy-windows.ps1"), "utf8"),
       fs.readFile(path.join(process.cwd(), "scripts", "handoff-restart-windows.ps1"), "utf8"),
@@ -166,10 +213,25 @@ describe("deployment scripts", () => {
     expect(deployScript).toContain('Step "Configuring Windows service"');
     expect(deployScript).toContain('Step "Handing off deployment reload"');
     expect(deployScript).toContain('Join-Path $scriptDir "handoff-restart-windows.ps1"');
+    expect(deployScript).toContain("[switch]$Force");
     expect(handoffScript).toContain("Invoke-CimMethod -ClassName Win32_Process");
-    expect(workerScript.indexOf("Start-Sleep")).toBeLessThan(
+    expect(handoffScript).toContain("-BattyRoot $(Quote-Argument $BattyRoot)");
+    expect(handoffScript).toContain('"-Force:$Force"');
+    expect(handoffScript).not.toContain("if ($Force)");
+    expect(handoffScript).not.toContain("DelaySeconds");
+    expect(workerScript).not.toContain("DelaySeconds");
+    expect(workerScript.match(/Start-Sleep/g)).toHaveLength(1);
+    expect(workerScript).toContain("Start-Sleep -Seconds 1");
+    expect(workerScript).toContain("function Wait-ForDeploymentDrain");
+    expect(workerScript).toContain("(Get-Command node).Source $cliPath --root $battyRoot drain");
+    expect(workerScript).toContain('$cliPath = Join-Path $releaseDir "dist\\server\\cli.mjs"');
+    expect(workerScript).toContain("-and -not $Force");
+    expect(workerScript).not.toContain("drain --wait");
+    expect(workerScript.indexOf("Wait-ForDeploymentDrain $cliPath $BattyRoot")).toBeLessThan(
       workerScript.indexOf("Stop-Service -Name Batty"),
     );
+    expect(workerScript).not.toContain("deployment/drain");
+    expect(workerScript).not.toContain("authSecret");
     expect(workerScript.indexOf("Stop-Service -Name Batty")).toBeLessThan(
       workerScript.indexOf("New-Item -ItemType Junction"),
     );

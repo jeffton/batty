@@ -7,16 +7,14 @@ param(
   [string]$PublicOrigin = "https://t14-dt-pc1028.cbrain.net",
   [string]$BaseUrl = "/batty",
   [int]$BackendPort = 3147,
-  [int]$DelaySeconds = 20
+  [string]$BattyRoot = "D:\Batty\root",
+  [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
 
 if ([string]::IsNullOrWhiteSpace($ReleaseName)) {
   throw "ReleaseName is required."
-}
-if ($DelaySeconds -lt 0) {
-  throw "DelaySeconds cannot be negative."
 }
 
 function Quote-Argument([string]$value) {
@@ -57,8 +55,9 @@ $arguments = @(
   "-PublicOrigin $(Quote-Argument $PublicOrigin)",
   "-BaseUrl $(Quote-Argument $BaseUrl)",
   "-BackendPort $BackendPort",
-  "-DelaySeconds $DelaySeconds",
-  "-LogPath $(Quote-Argument $logPath)"
+  "-LogPath $(Quote-Argument $logPath)",
+  "-BattyRoot $(Quote-Argument $BattyRoot)",
+  "-Force:$Force"
 )
 $commandLine = "$(Quote-Argument $powershell) $($arguments -join ' ')"
 $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine }

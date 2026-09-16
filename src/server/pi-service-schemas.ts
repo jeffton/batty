@@ -128,6 +128,13 @@ export const SubagentToolSchema = Type.Object(
           "Whether to include the current session context. Defaults to false. When false, the subagent still gets the workspace system prompts.",
       }),
     ),
+    async: Type.Optional(
+      Type.Boolean({
+        default: false,
+        description:
+          "Run in the background and deliver the result into the parent session. Defaults to false.",
+      }),
+    ),
   },
   {
     additionalProperties: false,

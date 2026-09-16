@@ -12,6 +12,36 @@ import {
   createWebSearchTool,
 } from "./pi-service-tools";
 
+type DetachedSubagentToolRequest = {
+  sessionId?: string;
+  workspace: WorkspaceInfo;
+  parentSessionId: string;
+  parentSessionPath?: string;
+  parentSubagentDepth: number;
+  contextBranchLeafId?: string | null;
+  prompt: string;
+  modelId: string;
+  thinkingLevel: string;
+  includeSessionContext: boolean;
+  respondIn: "tool-call" | "session";
+  deliveryMode?: "append" | "prompt";
+  preludeNotices?: Array<{ kind: "cron" | "subagent"; text: string }>;
+  currentToolCallId?: string;
+  signal?: AbortSignal;
+  onUpdate?: (partial: {
+    content: Array<{ type: "text"; text: string }>;
+    details: ToolExecutionDetails;
+  }) => void;
+};
+
+type DetachedSubagentToolResult = {
+  text: string;
+  details: ToolExecutionDetails;
+  finalAssistant?: AssistantMessage;
+  isError: boolean;
+  errorMessage?: string;
+};
+
 export type PiServiceToolFactoryContext = {
   config: AppConfig;
   browserService: BrowserService;
@@ -21,32 +51,12 @@ export type PiServiceToolFactoryContext = {
     sessionId: string,
     ctx: ExtensionContext,
   ) => { modelId?: string; thinkingLevel: string };
-  runDetachedSubagentSession: (request: {
-    sessionId?: string;
-    workspace: WorkspaceInfo;
-    parentSessionId: string;
-    parentSessionPath?: string;
-    parentSubagentDepth: number;
-    contextBranchLeafId?: string | null;
-    prompt: string;
-    modelId: string;
-    thinkingLevel: string;
-    includeSessionContext: boolean;
-    respondIn: "tool-call" | "session";
-    preludeNotices?: Array<{ kind: "cron" | "subagent"; text: string }>;
-    currentToolCallId?: string;
-    signal?: AbortSignal;
-    onUpdate?: (partial: {
-      content: Array<{ type: "text"; text: string }>;
-      details: ToolExecutionDetails;
-    }) => void;
-  }) => Promise<{
-    text: string;
-    details: ToolExecutionDetails;
-    finalAssistant?: AssistantMessage;
-    isError: boolean;
-    errorMessage?: string;
-  }>;
+  runDetachedSubagentSession: (
+    request: DetachedSubagentToolRequest,
+  ) => Promise<DetachedSubagentToolResult>;
+  startDetachedSubagentSession: (
+    request: DetachedSubagentToolRequest,
+  ) => Promise<DetachedSubagentToolResult>;
 };
 
 export function createPiServiceTools(
@@ -59,6 +69,7 @@ export function createPiServiceTools(
       config: context.config,
       resolveSubagentDefaults: context.resolveSubagentDefaults,
       runDetachedSubagentSession: context.runDetachedSubagentSession,
+      startDetachedSubagentSession: context.startDetachedSubagentSession,
     }),
     createCronTool({
       workspace,

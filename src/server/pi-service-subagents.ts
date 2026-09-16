@@ -108,9 +108,11 @@ export interface DetachedSubagentOptions {
   thinkingLevel: string;
   includeSessionContext: boolean;
   respondIn: "tool-call" | "session";
+  deliveryMode?: "append" | "prompt";
   preludeNotices?: RuntimeNotice[];
   currentToolCallId?: string;
   signal?: AbortSignal;
+  onReady?: (details: ToolExecutionDetails) => void;
   onUpdate?: (partial: {
     content: Array<{ type: "text"; text: string }>;
     details: ToolExecutionDetails;
@@ -174,6 +176,7 @@ function buildDetachedSubagentResult(
       effort: options.thinkingLevel,
       includeSessionContext: options.includeSessionContext,
       respondIn: options.respondIn,
+      async: options.deliveryMode === "prompt",
     },
     messages,
     finalAssistant,
@@ -298,6 +301,7 @@ export async function runDetachedSubagentSession(
       parentSessionId: options.parentSessionId,
       depth: options.parentSubagentDepth + 1,
       respondIn: options.respondIn,
+      deliveryMode: options.deliveryMode,
     });
   const webSubagentSession = deps.attachSession(
     options.workspace,
@@ -320,29 +324,26 @@ export async function runDetachedSubagentSession(
   }
   const seedMessageCount = subagentSession.messages.length;
 
-  options.onUpdate?.({
-    content: [],
-    details: buildSubagentDetails(
-      {
-        prompt: options.prompt,
-        model: options.modelId,
-        effort: options.thinkingLevel,
-        includeSessionContext: options.includeSessionContext,
-        respondIn: options.respondIn,
-      },
-      subagentSession.messages,
-      undefined,
-      {
-        generatedMessages: newlyGeneratedSubagentMessages(
-          subagentSession.messages,
-          seedMessageCount,
-        ),
-        workspaceId: options.workspace.id,
-        sessionId: subagentSession.sessionId,
-        sessionPath: subagentSession.sessionFile,
-      },
-    ),
-  });
+  const readyDetails = buildSubagentDetails(
+    {
+      prompt: options.prompt,
+      model: options.modelId,
+      effort: options.thinkingLevel,
+      includeSessionContext: options.includeSessionContext,
+      respondIn: options.respondIn,
+      async: options.deliveryMode === "prompt",
+    },
+    subagentSession.messages,
+    undefined,
+    {
+      generatedMessages: newlyGeneratedSubagentMessages(subagentSession.messages, seedMessageCount),
+      workspaceId: options.workspace.id,
+      sessionId: subagentSession.sessionId,
+      sessionPath: subagentSession.sessionFile,
+    },
+  );
+  options.onUpdate?.({ content: [], details: readyDetails });
+  options.onReady?.(readyDetails);
 
   let lastText = "";
   let observedFinalAssistant: AssistantMessage | undefined;
@@ -383,6 +384,7 @@ export async function runDetachedSubagentSession(
           effort: options.thinkingLevel,
           includeSessionContext: options.includeSessionContext,
           respondIn: options.respondIn,
+          async: options.deliveryMode === "prompt",
         },
         subagentSession.messages,
         finalAssistant,
@@ -473,7 +475,10 @@ export async function runDetachedSubagentSession(
       observedFinalAssistant,
       observedGeneratedMessages.length > 0 ? observedGeneratedMessages : undefined,
     );
-    if (options.respondIn === "session" && subagentSession.snapshot.lastResult) {
+    if (
+      options.respondIn === "session" &&
+      (subagentSession.snapshot.lastResult || options.deliveryMode === "prompt")
+    ) {
       if (!deps.deliverResultToParent)
         throw new Error("Subagent parent delivery is not configured");
       await deps.deliverResultToParent(options, result);
@@ -527,6 +532,35 @@ export async function deliverDetachedSubagentResult(
       timestamp: timestamp + 1,
     } as AssistantMessage,
   ]);
+}
+
+export async function deliverAsyncSubagentResult(
+  parent: AgentSession,
+  result: DetachedSubagentResult,
+): Promise<void> {
+  const child = (result.details as SubagentToolDetails).subagent;
+  const status = result.isError ? "failed" : "completed";
+  const output = result.text.trim() || "(no output)";
+  await parent.sendCustomMessage(
+    {
+      customType: "batty-runtime-notice:subagent",
+      content: [
+        `Async subagent ${status}.`,
+        "",
+        `Detached session: ${child.sessionPath}`,
+        "",
+        "Assigned task:",
+        child.prompt,
+        "",
+        result.isError ? "Error:" : "Result:",
+        output,
+      ].join("\n"),
+      display: true,
+      data: { subagent: child },
+      battyDelivery: { id: `subagent:${child.sessionId}`, part: 0 },
+    },
+    { triggerTurn: true, steerWhenBusy: true },
+  );
 }
 
 export async function appendMessages(session: AgentSession, messages: Message[]): Promise<void> {

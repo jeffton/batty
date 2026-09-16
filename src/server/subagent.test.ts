@@ -270,6 +270,7 @@ describe("subagent message helpers", () => {
         effort: "high",
         includeSessionContext: true,
         respondIn: "tool-call",
+        async: false,
         messageCount: 1,
         sessionId: "sub-123",
         sessionPath: "/tmp/sub-123.jsonl",

@@ -181,6 +181,7 @@ interface DetachedSubagentRequest {
   thinkingLevel: string;
   includeSessionContext: boolean;
   respondIn: "tool-call" | "session";
+  deliveryMode?: "append" | "prompt";
   currentToolCallId?: string;
   signal?: AbortSignal;
   onUpdate?: (partial: ToolUpdate) => void;
@@ -194,6 +195,9 @@ interface CommonToolDependencies {
 export interface SubagentToolDependencies extends CommonToolDependencies {
   resolveSubagentDefaults: ResolveSubagentDefaults;
   runDetachedSubagentSession: (request: DetachedSubagentRequest) => Promise<DetachedSubagentResult>;
+  startDetachedSubagentSession: (
+    request: DetachedSubagentRequest,
+  ) => Promise<DetachedSubagentResult>;
 }
 
 export interface CronToolDependencies {
@@ -207,18 +211,20 @@ export function createSubagentTool({
   workspace,
   resolveSubagentDefaults,
   runDetachedSubagentSession,
+  startDetachedSubagentSession,
 }: SubagentToolDependencies): ToolDefinition<typeof SubagentToolSchema> {
   return {
     name: SUBAGENT_TOOL_NAME,
     label: "Subagent",
     description:
-      "Run a synchronous subagent in the current workspace. The tool result is the subagent's reply.",
+      "Run a subagent in the current workspace. Synchronous runs return the reply directly; async runs deliver it into the parent session later.",
     promptSnippet:
-      "Run a synchronous subagent in the current workspace, optionally reusing the current session context.",
+      "Run a subagent in the current workspace, optionally in the background or with the current session context.",
     promptGuidelines: [
       "Use this tool to delegate focused work to another agent without leaving the current session.",
       "Prefer omitting model and effort so the subagent inherits the current session settings.",
       "Subagents start fresh by default and only get the workspace system prompts unless includeSessionContext=true is set.",
+      "Set async=true to continue working while the subagent runs. Its result will automatically start or steer a later parent turn.",
     ],
     parameters: SubagentToolSchema,
     execute: async (toolCallId, params, signal, onUpdate, ctx) => {
@@ -258,7 +264,7 @@ export function createSubagentTool({
         childSessionId = replay.childSessionId();
         await replay.invocation.setMemo("child-session-id", childSessionId);
       }
-      const result = await runDetachedSubagentSession({
+      const request: DetachedSubagentRequest = {
         sessionId: childSessionId,
         workspace,
         parentSessionId: sessionId,
@@ -270,11 +276,23 @@ export function createSubagentTool({
         modelId,
         thinkingLevel,
         includeSessionContext,
-        respondIn: "tool-call",
+        respondIn: params.async === true ? "session" : "tool-call",
         currentToolCallId: toolCallId,
-        signal,
-        onUpdate,
-      });
+      };
+      let result: DetachedSubagentResult;
+      if (params.async === true) {
+        signal?.throwIfAborted();
+        result = await startDetachedSubagentSession({
+          ...request,
+          deliveryMode: "prompt",
+        });
+      } else {
+        result = await runDetachedSubagentSession({
+          ...request,
+          signal,
+          onUpdate,
+        });
+      }
       return {
         content: subagentToolContent(result),
         details: result.details,

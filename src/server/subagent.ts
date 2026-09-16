@@ -21,6 +21,7 @@ export interface SubagentToolInput {
   model?: string;
   effort?: string;
   includeSessionContext?: boolean;
+  async?: boolean;
 }
 
 export type SubagentRespondIn = "tool-call" | "session";
@@ -32,6 +33,7 @@ export interface SubagentToolDetails extends Record<string, unknown> {
     effort: string;
     includeSessionContext: boolean;
     respondIn: SubagentRespondIn;
+    async: boolean;
     messageCount: number;
     workspaceId?: string;
     sessionId?: string;
@@ -210,6 +212,7 @@ export function buildSubagentDetails(
     effort: string;
     includeSessionContext: boolean;
     respondIn: SubagentRespondIn;
+    async?: boolean;
   },
   messages: AgentMessage[],
   finalAssistant: AssistantMessage | undefined,
@@ -234,6 +237,7 @@ export function buildSubagentDetails(
       effort: input.effort,
       includeSessionContext: input.includeSessionContext,
       respondIn: input.respondIn,
+      async: input.async === true,
       messageCount: messages.length,
       ...(options?.workspaceId ? { workspaceId: options.workspaceId } : {}),
       ...(options?.sessionId ? { sessionId: options.sessionId } : {}),

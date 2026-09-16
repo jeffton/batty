@@ -46,7 +46,7 @@ import {
   buildCronRunSessionBinding,
   CRON_RUN_SESSION_CUSTOM_TYPE,
 } from "./cron-session";
-import { hasSubagentSessionMarker } from "./subagent";
+import { hasSubagentSessionMarker, type SubagentToolDetails } from "./subagent";
 import { getSessionMessagePage } from "./pi-service-message-page";
 import { getQueuedPrompts, removeQueuedPrompt } from "./pi-service-queue";
 import { createUiImageResolver, preparePromptFiles } from "./pi-service-uploads";
@@ -64,6 +64,7 @@ import {
   resolveOrCreateDailySession,
   resolveSubagentDefaults,
   runDetachedSubagentSession,
+  deliverAsyncSubagentResult,
   deliverDetachedSubagentResult,
   runSubagentSerial,
   waitForSubagentQueue,
@@ -584,9 +585,11 @@ export class PiService {
     thinkingLevel: string;
     includeSessionContext: boolean;
     respondIn: "tool-call" | "session";
+    deliveryMode?: "append" | "prompt";
     preludeNotices?: Array<{ kind: "cron" | "subagent"; text: string }>;
     currentToolCallId?: string;
     signal?: AbortSignal;
+    onReady?: (details: ToolExecutionDetails) => void;
     onUpdate?: (partial: {
       content: Array<{ type: "text"; text: string }>;
       details: ToolExecutionDetails;
@@ -607,6 +610,10 @@ export class PiService {
             workspaceSessionDir: workspaceSessionDir(this.config, options.workspace.id),
             deliverResultToParent: async (request, result) => {
               const opened = await this.openSessionById(request.workspace, request.parentSessionId);
+              if (request.deliveryMode === "prompt") {
+                await deliverAsyncSubagentResult(this.requireSession(opened.id).session, result);
+                return;
+              }
               await this.runSubagentSerial(opened.id, async () => {
                 const parent = this.requireSession(opened.id);
                 if (!(await deliverDetachedSubagentResult(parent.session, result))) return;
@@ -621,6 +628,54 @@ export class PiService {
         ),
       true,
     );
+  }
+
+  private startDetachedSubagentSession(options: {
+    sessionId?: string;
+    workspace: WorkspaceInfo;
+    parentSessionId: string;
+    parentSessionPath?: string;
+    parentSubagentDepth: number;
+    contextBranchLeafId?: string | null;
+    prompt: string;
+    modelId: string;
+    thinkingLevel: string;
+    includeSessionContext: boolean;
+    respondIn: "tool-call" | "session";
+    deliveryMode?: "append" | "prompt";
+    preludeNotices?: Array<{ kind: "cron" | "subagent"; text: string }>;
+    currentToolCallId?: string;
+  }): Promise<{ text: string; details: ToolExecutionDetails; isError: boolean }> {
+    return new Promise((resolve, reject) => {
+      let ready = false;
+      const completion = this.runDetachedSubagentSession({
+        ...options,
+        onReady: (details) => {
+          ready = true;
+          const child = (details as SubagentToolDetails).subagent;
+          resolve({
+            text: [
+              "Subagent started asynchronously.",
+              "",
+              `Session: ${child.sessionPath}`,
+              "Its final result will be delivered automatically.",
+            ].join("\n"),
+            details,
+            isError: false,
+          });
+        },
+      });
+      void completion.catch((error) => {
+        if (!ready) {
+          reject(error);
+          return;
+        }
+        console.error("Async subagent failed after launch", {
+          sessionId: options.sessionId,
+          error,
+        });
+      });
+    });
   }
 
   private async resolveOrCreateDailySession(
@@ -889,6 +944,7 @@ export class PiService {
             resolveSubagentDefaults: (sessionId, ctx) =>
               this.resolveSubagentDefaults(sessionId, ctx),
             runDetachedSubagentSession: (request) => this.runDetachedSubagentSession(request),
+            startDetachedSubagentSession: (request) => this.startDetachedSubagentSession(request),
           },
           workspace,
         ),

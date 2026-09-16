@@ -402,6 +402,29 @@ describe("ToolCallBlock", () => {
     expect(wrapper.find("img.attached-files__preview").exists()).toBe(false);
   });
 
+  it("shows the launch acknowledgement for async session-mode subagents", () => {
+    const wrapper = mount(ToolCallBlock, {
+      props: {
+        name: "subagent",
+        arguments: { prompt: "Check the repo", async: true },
+        resultBlocks: [{ type: "text", text: "Started in /tmp/subagent-123.jsonl" }],
+        resultDetails: {
+          subagent: {
+            respondIn: "session",
+            async: true,
+            workspaceId: "workspace",
+            sessionId: "subagent-123",
+            sessionPath: "/tmp/subagent-123.jsonl",
+          },
+        },
+        status: "success",
+      },
+    });
+
+    expect(wrapper.text()).toContain("Started in /tmp/subagent-123.jsonl");
+    expect(wrapper.text()).toContain("Open session");
+  });
+
   it("hides subagent session buttons when session popovers are disabled", () => {
     const wrapper = mount(ToolCallBlock, {
       props: {

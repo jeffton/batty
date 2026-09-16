@@ -6,6 +6,7 @@ import { DefaultResourceLoader, SettingsManager } from "@earendil-works/pi-codin
 import { HarnessController } from "./harness-controller";
 import {
   runDetachedSubagentSession,
+  deliverAsyncSubagentResult,
   deliverDetachedSubagentResult,
   runSubagentSerial,
   type RunDetachedSubagentDeps,
@@ -275,6 +276,41 @@ describe("detached harness subagents", () => {
       expect(queues.size).toBe(0);
     },
   );
+
+  it("delivers an async result as a runtime notice and starts a parent turn", async () => {
+    const { parent, deps, options } = await setup();
+    parent.faux.setResponses([
+      fauxAssistantMessage("finished child"),
+      fauxAssistantMessage("parent handled result"),
+    ]);
+    deps.deliverResultToParent = async (_request, result) => {
+      await deliverAsyncSubagentResult(parent.session, result);
+    };
+
+    await runDetachedSubagentSession(deps, {
+      ...options,
+      respondIn: "session",
+      deliveryMode: "prompt",
+    });
+
+    expect(parent.session.messages).toEqual([
+      expect.objectContaining({
+        role: "custom",
+        customType: "batty-runtime-notice:subagent",
+        content: expect.stringContaining("finished child"),
+        data: {
+          subagent: expect.objectContaining({
+            async: true,
+            sessionId: options.sessionId,
+          }),
+        },
+      }),
+      expect.objectContaining({
+        role: "assistant",
+        content: [{ type: "text", text: "parent handled result" }],
+      }),
+    ]);
+  });
 
   it("retries a failed parent delivery without rerunning the child", async () => {
     const { parent, deps, options, children } = await setup();

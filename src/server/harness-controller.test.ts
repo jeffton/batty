@@ -1,5 +1,5 @@
 import fs from "node:fs/promises";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { BACKGROUND_CONTEXT as context, getOrThrow } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { createHarnessFixture } from "./harness-test-fixture";
@@ -91,6 +91,65 @@ describe("AgentHarness controller", () => {
     });
     await f.session.prompt("question");
     expect(observed).toEqual(["user", "assistant"]);
+  });
+
+  it("steers a custom trigger into a busy turn without stranding it after settlement", async () => {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage("after notice")]);
+    const admission = getOrThrow(
+      await f.session.lane.accept({ kind: "prompt", prompt: "initial" }, context),
+    );
+
+    const delivery = f.session.sendCustomMessage(
+      {
+        customType: "batty-runtime-notice:subagent",
+        content: "child result",
+        display: true,
+      },
+      { triggerTurn: true, steerWhenBusy: true },
+    );
+    await vi.waitFor(() => expect(f.session.pendingMessageCount).toBe(1));
+    await f.session.driveOperation(admission.operationId);
+    await delivery;
+
+    expect(f.session.pendingMessageCount).toBe(0);
+    expect(
+      f.session.messages.filter(
+        (message) =>
+          message.role === "custom" && message.customType === "batty-runtime-notice:subagent",
+      ),
+    ).toHaveLength(1);
+    expect(f.faux.state.callCount).toBe(1);
+  });
+
+  it("starts a new turn when an abort removes an unconsumed result steering message", async () => {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage("handled after abort")]);
+    await f.session.lane.accept({ kind: "prompt", prompt: "initial" }, context);
+
+    const delivery = f.session.sendCustomMessage(
+      {
+        customType: "batty-runtime-notice:subagent",
+        content: "child result",
+        display: true,
+        battyDelivery: { id: "subagent:child", part: 0 },
+      },
+      { triggerTurn: true, steerWhenBusy: true },
+    );
+    await vi.waitFor(() => expect(f.session.pendingMessageCount).toBe(1));
+    await f.session.abort();
+    await delivery;
+
+    expect(
+      f.session.messages.filter(
+        (message) =>
+          message.role === "custom" && message.customType === "batty-runtime-notice:subagent",
+      ),
+    ).toHaveLength(1);
+    expect(f.session.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "handled after abort" }],
+    });
   });
 
   it("durably aborts an accepted operation before any effect", async () => {

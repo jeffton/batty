@@ -22,6 +22,7 @@ const OUTPUT_TAIL_LINE_COUNT = 20;
 
 type SubagentResultDetails = {
   respondIn?: unknown;
+  async?: unknown;
   workspaceId?: unknown;
   sessionId?: unknown;
   sessionPath?: unknown;
@@ -296,7 +297,11 @@ const visibleResultBlocks = computed(() => {
     return props.resultBlocks.filter((block) => block.type !== "text");
   }
 
-  if (props.name === "subagent" && subagentRespondIn.value === "session") {
+  if (
+    props.name === "subagent" &&
+    subagentRespondIn.value === "session" &&
+    subagentDetails.value?.async !== true
+  ) {
     return props.status === "error" ? props.resultBlocks : [];
   }
 
@@ -395,7 +400,11 @@ const showResultSection = computed(() => {
     return props.status === "error" || hasVisibleSentFiles.value || hasResultContent.value;
   }
 
-  if (props.name === "subagent" && subagentRespondIn.value === "session") {
+  if (
+    props.name === "subagent" &&
+    subagentRespondIn.value === "session" &&
+    subagentDetails.value?.async !== true
+  ) {
     return props.status === "error";
   }
 

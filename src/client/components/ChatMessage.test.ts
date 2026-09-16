@@ -516,6 +516,30 @@ describe("ChatMessage", () => {
     expect(wrapper.find(".message__segment--error").exists()).toBe(true);
   });
 
+  it("links async subagent completion notices to their detached session", () => {
+    const message: Extract<UiMessage, { role: "custom" }> = {
+      id: "custom-subagent-1",
+      role: "custom",
+      timestamp: 4,
+      customType: `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:subagent`,
+      text: "Async subagent completed.",
+      data: {
+        subagent: {
+          workspaceId: "batty",
+          sessionId: "child-1",
+          sessionPath: "/tmp/child-1.jsonl",
+        },
+      },
+    };
+
+    const wrapper = mount(ChatMessage, { props: { message } });
+
+    expect(wrapper.find(".message__notice-btn").text()).toContain("Open subagent session");
+    expect(wrapper.find(".message__notice-btn").attributes("popovertarget")).toBe(
+      "subagent-notice-popover-child-1",
+    );
+  });
+
   it("hides cron session buttons when session popovers are disabled", () => {
     const message: Extract<UiMessage, { role: "custom" }> = {
       id: "custom-cron-1",

@@ -1,6 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import {
   AgentHarness,
+  LaneBusy,
   NoActiveOperation,
   BACKGROUND_CONTEXT as context,
   createCompactionSummaryMessage,
@@ -255,18 +256,58 @@ export class HarnessController {
     if (result.compaction.status === "failed") throw new Error(result.compaction.error!.message);
   }
   async sendCustomMessage(
-    message: { customType: string; content: string; display: boolean; details?: unknown },
-    options: { triggerTurn?: boolean } = {},
+    message: {
+      customType: string;
+      content: string;
+      display: boolean;
+      data?: unknown;
+      details?: unknown;
+      battyDelivery?: { id: string; part: number };
+    },
+    options: { triggerTurn?: boolean; steerWhenBusy?: boolean } = {},
   ): Promise<void> {
     const custom = { ...message, role: "custom", timestamp: Date.now() } as AgentMessage;
     if (!options.triggerTurn) {
       await this.sessionManager.appendMessage(custom);
       return;
     }
-    const admission = getOrThrow(
-      await this.lane.accept({ kind: "prompt", prompt: custom }, context),
+
+    const accepted = await this.lane.accept({ kind: "prompt", prompt: custom }, context);
+    if (accepted.ok) {
+      await this.drive(accepted.value.operationId);
+      return;
+    }
+    if (!(accepted.error instanceof LaneBusy) || !options.steerWhenBusy) throw accepted.error;
+
+    let queuedEntryId = getOrThrow(await this.lane.steer(custom, undefined, context)).entryId;
+    for (;;) {
+      await this.lane.runWhenIdle(() => undefined, context);
+      const cancellation = getOrThrow(await this.lane.cancelQueued(queuedEntryId, context));
+      if (
+        cancellation.kind !== "cancelled" &&
+        (!message.battyDelivery || this.hasDeliveryReceipt(message.battyDelivery))
+      ) {
+        return;
+      }
+
+      const admission = await this.lane.accept({ kind: "prompt", prompt: custom }, context);
+      if (admission.ok) {
+        await this.drive(admission.value.operationId);
+        return;
+      }
+      if (!(admission.error instanceof LaneBusy)) throw admission.error;
+      queuedEntryId = getOrThrow(await this.lane.steer(custom, undefined, context)).entryId;
+    }
+  }
+  private hasDeliveryReceipt(receipt: { id: string; part: number }): boolean {
+    return this.snapshot.transcript.some(
+      (entry) =>
+        entry.type === "message" &&
+        (entry.message as { battyDelivery?: { id: string; part: number } }).battyDelivery?.id ===
+          receipt.id &&
+        (entry.message as { battyDelivery?: { id: string; part: number } }).battyDelivery?.part ===
+          receipt.part,
     );
-    await this.drive(admission.operationId);
   }
   getSteeringMessages(): string[] {
     return this.queuedTexts("steer");

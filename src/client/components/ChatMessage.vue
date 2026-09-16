@@ -129,6 +129,31 @@ const cronNoticePopoverId = computed(() => {
   return `cron-notice-popover-${cronNoticeDetails.value.runId.replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
 });
 
+const subagentNoticeDetails = computed(() => {
+  if (props.message.role !== "custom") {
+    return undefined;
+  }
+  const subagent = props.message.data?.subagent;
+  if (!subagent || typeof subagent !== "object") {
+    return undefined;
+  }
+  const details = subagent as Record<string, unknown>;
+  return typeof details.workspaceId === "string" && typeof details.sessionPath === "string"
+    ? {
+        workspaceId: details.workspaceId,
+        sessionPath: details.sessionPath,
+        sessionId: typeof details.sessionId === "string" ? details.sessionId : props.message.id,
+      }
+    : undefined;
+});
+
+const subagentNoticePopoverId = computed(() => {
+  if (!subagentNoticeDetails.value) {
+    return undefined;
+  }
+  return `subagent-notice-popover-${subagentNoticeDetails.value.sessionId.replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
+});
+
 const assistantErrorText = computed(() => {
   if (props.message.role !== "assistant") {
     return undefined;
@@ -300,6 +325,25 @@ onBeforeUnmount(() => {
               header-title="Cron run"
               :workspace-id="cronNoticeDetails.workspaceId"
               :session-path="cronNoticeDetails.sessionPath"
+            />
+          </div>
+          <div
+            v-if="props.allowSessionPopovers && subagentNoticeDetails && subagentNoticePopoverId"
+            class="message__notice-actions"
+          >
+            <button
+              type="button"
+              class="message__notice-btn"
+              :popovertarget="subagentNoticePopoverId"
+            >
+              <PanelRightOpen :size="14" />
+              Open subagent session
+            </button>
+            <SubagentSessionPopover
+              :popover-id="subagentNoticePopoverId"
+              header-title="Subagent"
+              :workspace-id="subagentNoticeDetails.workspaceId"
+              :session-path="subagentNoticeDetails.sessionPath"
             />
           </div>
         </div>

@@ -23,6 +23,20 @@ function XmlEscape([string]$value) {
   return [System.Security.SecurityElement]::Escape($value)
 }
 
+function Get-Sha256([string]$path) {
+  $stream = [System.IO.File]::OpenRead($path)
+  try {
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+      return ([System.BitConverter]::ToString($sha256.ComputeHash($stream))).Replace("-", "")
+    } finally {
+      $sha256.Dispose()
+    }
+  } finally {
+    $stream.Dispose()
+  }
+}
+
 $winSwVersion = "2.12.0"
 $winSwSha256 = "05b82d46ad331cc16bdc00de5c6332c1ef818df8ceefcd49c726553209b3a0da"
 $winSwUrl = "https://github.com/winsw/winsw/releases/download/v$winSwVersion/WinSW-x64.exe"
@@ -37,13 +51,13 @@ New-Item -ItemType Directory -Force -Path $opsDir, $logsDir | Out-Null
 if (-not (Test-Path $serviceExe)) {
   $downloadPath = "$serviceExe.download"
   Invoke-WebRequest -UseBasicParsing -Uri $winSwUrl -OutFile $downloadPath
-  if ((Get-FileHash -Algorithm SHA256 $downloadPath).Hash -ne $winSwSha256) {
+  if ((Get-Sha256 $downloadPath) -ne $winSwSha256) {
     Remove-Item -Force $downloadPath
     throw "WinSW download failed SHA-256 verification."
   }
   Move-Item -Force $downloadPath $serviceExe
 }
-if ((Get-FileHash -Algorithm SHA256 $serviceExe).Hash -ne $winSwSha256) {
+if ((Get-Sha256 $serviceExe) -ne $winSwSha256) {
   throw "WinSW at '$serviceExe' does not match the expected SHA-256."
 }
 

@@ -21,7 +21,8 @@ function Quote-Argument([string]$value) {
   if ($value.Contains('"')) {
     throw "Deployment arguments cannot contain quotation marks."
   }
-  return "`"$value`""
+  $trailingBackslashes = [regex]::Match($value, "\\+$").Value
+  return "`"$value$trailingBackslashes`""
 }
 
 $releaseDir = Join-Path (Join-Path $InstallRoot "releases") $ReleaseName
@@ -40,7 +41,7 @@ Copy-Item -Force (Join-Path $scriptDir "configure-iis-app.ps1") (Join-Path $opsD
 
 $requestId = [System.Guid]::NewGuid().ToString("N")
 $logPath = Join-Path $logsDir "$requestId.log"
-$powershell = Join-Path $PSHOME "powershell.exe"
+$powershell = (Get-Command powershell.exe).Source
 $arguments = @(
   "-NoLogo",
   "-NoProfile",
@@ -56,9 +57,11 @@ $arguments = @(
   "-BaseUrl $(Quote-Argument $BaseUrl)",
   "-BackendPort $BackendPort",
   "-LogPath $(Quote-Argument $logPath)",
-  "-BattyRoot $(Quote-Argument $BattyRoot)",
-  "-Force:$Force"
+  "-BattyRoot $(Quote-Argument $BattyRoot)"
 )
+if ($Force) {
+  $arguments += "-Force"
+}
 $commandLine = "$(Quote-Argument $powershell) $($arguments -join ' ')"
 $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine }
 if ($result.ReturnValue -ne 0) {

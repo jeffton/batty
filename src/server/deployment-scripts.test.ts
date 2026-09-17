@@ -215,9 +215,15 @@ describe("deployment scripts", () => {
     expect(deployScript).toContain('Join-Path $scriptDir "handoff-restart-windows.ps1"');
     expect(deployScript).toContain("[switch]$Force");
     expect(handoffScript).toContain("Invoke-CimMethod -ClassName Win32_Process");
+    expect(handoffScript).toContain(
+      '$trailingBackslashes = [regex]::Match($value, "\\\\+$").Value',
+    );
+    expect(handoffScript).toContain('return "`"$value$trailingBackslashes`""');
+    expect(handoffScript).toContain("$powershell = (Get-Command powershell.exe).Source");
     expect(handoffScript).toContain("-BattyRoot $(Quote-Argument $BattyRoot)");
-    expect(handoffScript).toContain('"-Force:$Force"');
-    expect(handoffScript).not.toContain("if ($Force)");
+    expect(handoffScript).toContain("if ($Force)");
+    expect(handoffScript).toContain('$arguments += "-Force"');
+    expect(handoffScript).not.toContain('"-Force:$Force"');
     expect(handoffScript).not.toContain("DelaySeconds");
     expect(workerScript).not.toContain("DelaySeconds");
     expect(workerScript.match(/Start-Sleep/g)).toHaveLength(1);
@@ -251,6 +257,8 @@ describe("deployment scripts", () => {
     ]);
 
     expect(serviceScript).toContain('$winSwVersion = "2.12.0"');
+    expect(serviceScript).toContain("function Get-Sha256");
+    expect(serviceScript).not.toContain("Get-FileHash");
     expect(serviceScript).toContain(
       '$winSwSha256 = "05b82d46ad331cc16bdc00de5c6332c1ef818df8ceefcd49c726553209b3a0da"',
     );

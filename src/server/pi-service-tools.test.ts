@@ -111,10 +111,19 @@ describe("spillToolOutputToTempFile", () => {
 });
 
 describe("createBrowserTool", () => {
-  it("passes screenshot options to the service and returns the captured image", async () => {
+  it("passes screenshot options to the service and returns the image with its path", async () => {
+    const screenshotPath = path.join(
+      os.tmpdir(),
+      "batty-browser-screenshot-test",
+      "screenshot.png",
+    );
     const execute = vi.fn(async () => ({
-      text: "Screenshot captured.",
-      details: { action: "screenshot" as const, url: "https://example.com/" },
+      text: `Screenshot captured.\nSaved to: ${screenshotPath}`,
+      details: {
+        action: "screenshot" as const,
+        url: "https://example.com/",
+        screenshotPath,
+      },
       image: { mimeType: "image/png" as const, data: "cG5n" },
     }));
     const tool = createBrowserTool({
@@ -152,9 +161,10 @@ describe("createBrowserTool", () => {
       undefined,
     );
     expect(result.content).toEqual([
-      { type: "text", text: "Screenshot captured." },
+      { type: "text", text: `Screenshot captured.\nSaved to: ${screenshotPath}` },
       { type: "image", mimeType: "image/png", data: "cG5n" },
     ]);
+    expect((result.details as { screenshotPath: string }).screenshotPath).toBe(screenshotPath);
   });
 
   it("resolves uploads from the workspace and exposes downloads as sent files", async () => {

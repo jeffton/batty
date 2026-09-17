@@ -514,7 +514,7 @@ export function createBrowserTool({
       "Use action=upload with selector and paths for file inputs, and action=download with a selector that triggers a download.",
       "Use action=scroll with a selector to reveal an element, or deltaX/deltaY to scroll by pixels.",
       "Page actions return an accessibility snapshot. Use action=snapshot to inspect the page again.",
-      "Use action=screenshot to capture the visible viewport, or set fullPage=true to capture the full scrollable page.",
+      "Use action=screenshot to capture the visible viewport, or set fullPage=true to capture the full scrollable page. The result includes a local PNG path that remains available after the browser session closes.",
       "Set viewport to control the browser width and height. Prefer setting it on open before the page loads.",
       "Use action=evaluate with a JavaScript expression when direct page inspection or manipulation is more efficient.",
       "Large text outputs are truncated and written to a temp file; use the read tool on the reported path when you need the full snapshot.",

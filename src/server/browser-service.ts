@@ -8,6 +8,7 @@ import type { BrowserProxy } from "./ssh-socks-proxy";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_BROWSER_SESSIONS = 8;
+const SCREENSHOTS_DIR = path.join(os.tmpdir(), "batty-browser-screenshots");
 
 export type BrowserAction =
   | "open"
@@ -83,6 +84,7 @@ export interface BrowserActionResult {
     pages?: BrowserPageDetails[];
     frames?: BrowserFrameDetails[];
     downloadPaths?: string[];
+    screenshotPath?: string;
   };
   image?: {
     data: string;
@@ -124,6 +126,7 @@ interface BrowserSession {
 
 interface ActionOutput {
   image?: Buffer;
+  screenshotPath?: string;
   text?: string;
   downloadPaths?: string[];
 }
@@ -180,6 +183,12 @@ function timeout(input: BrowserActionInput): number {
 
 function safeDownloadName(name: string): string {
   return path.basename(name).replace(/[^a-zA-Z0-9._-]+/g, "-") || "download";
+}
+
+async function createScreenshotPath(): Promise<string> {
+  await fs.mkdir(SCREENSHOTS_DIR, { recursive: true });
+  const directory = await fs.mkdtemp(path.join(SCREENSHOTS_DIR, "screenshot-"));
+  return path.join(directory, "screenshot.png");
 }
 
 function formatEvaluationResult(value: unknown): string {
@@ -278,7 +287,7 @@ export class BrowserService {
           if (output.text != null) {
             return await this.textResult(session, input, page, frame, output);
           }
-          return await this.snapshotResult(session, input, page, frame, output.image);
+          return await this.snapshotResult(session, input, page, frame, output);
         } catch (error) {
           if (signal?.aborted) await this.closeSessionNow(sessionId);
           throw error;
@@ -455,8 +464,12 @@ export class BrowserService {
     switch (input.action) {
       case "snapshot":
         return {};
-      case "screenshot":
-        return { image: await page.screenshot({ fullPage: input.fullPage ?? false, type: "png" }) };
+      case "screenshot": {
+        const image = await page.screenshot({ fullPage: input.fullPage ?? false, type: "png" });
+        const screenshotPath = await createScreenshotPath();
+        await fs.writeFile(screenshotPath, image);
+        return { image, screenshotPath };
+      }
       case "click":
         await frame.locator(required(input.selector, "selector", input.action)).click();
         return {};
@@ -642,7 +655,7 @@ export class BrowserService {
     input: BrowserActionInput,
     page: Page,
     frame = page.mainFrame(),
-    image?: Buffer,
+    output: ActionOutput = {},
   ): Promise<BrowserActionResult> {
     const pageId = this.pageId(session, page);
     const frameId = this.frameId(session, frame);
@@ -657,11 +670,21 @@ export class BrowserService {
       ...(pages.length > 1 ? [`Open pages: ${pages.map((entry) => entry.id).join(", ")}`] : []),
       "",
     ];
-    if (image) {
+    if (output.image) {
       return {
-        text: [...header, "Screenshot captured."].join("\n"),
-        details: { action: input.action, pageId, frameId, url, title, pages },
-        image: { data: image.toString("base64"), mimeType: "image/png" },
+        text: ["Screenshot captured.", `Saved to: ${output.screenshotPath}`, "", ...header].join(
+          "\n",
+        ),
+        details: {
+          action: input.action,
+          pageId,
+          frameId,
+          url,
+          title,
+          pages,
+          screenshotPath: output.screenshotPath,
+        },
+        image: { data: output.image.toString("base64"), mimeType: "image/png" },
       };
     }
 

@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { chromium } from "patchright";
 import { BrowserService } from "@/server/browser-service";
@@ -411,6 +412,19 @@ describe("BrowserService", () => {
       data: Buffer.from("png data").toString("base64"),
       mimeType: "image/png",
     });
+    const screenshotPath = screenshot.details.screenshotPath!;
+    expect(screenshotPath).toMatch(
+      /batty-browser-screenshots[\\/]screenshot-.*[\\/]screenshot\.png$/,
+    );
+    expect(screenshot.text.split("\n").slice(0, 2)).toEqual([
+      "Screenshot captured.",
+      `Saved to: ${screenshotPath}`,
+    ]);
+    await expect(fs.readFile(screenshotPath)).resolves.toEqual(Buffer.from("png data"));
+
+    await service.closeSession("session-1");
+    await expect(fs.readFile(screenshotPath)).resolves.toEqual(Buffer.from("png data"));
+    await fs.rm(path.dirname(screenshotPath), { recursive: true, force: true });
   });
 
   it("allows fill to clear a field or preserve whitespace", async () => {

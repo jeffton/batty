@@ -26,7 +26,7 @@ async function socketIsActive(address: string): Promise<boolean> {
       resolve(true);
     });
     socket.once("error", (error: NodeJS.ErrnoException) => {
-      if (error.code === "ECONNREFUSED" || error.code === "ENOENT") {
+      if (error.code === "ECONNREFUSED" || error.code === "ENOENT" || error.code === "ENOTSOCK") {
         resolve(false);
         return;
       }

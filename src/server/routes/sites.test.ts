@@ -51,6 +51,7 @@ describe("site routes", () => {
     });
     expect(response.statusCode).toBe(200);
     expect(response.headers["content-type"]).toContain("text/html");
+    expect(response.headers["cache-control"]).toBe("no-store");
     expect(response.headers["content-security-policy"]).toContain("sandbox");
     expect(response.headers["content-security-policy"]).not.toContain("allow-same-origin");
 
@@ -78,6 +79,7 @@ describe("site routes", () => {
       headers: { cookie: cookieHeader },
     });
     expect(asset.statusCode).toBe(200);
+    expect(asset.headers["cache-control"]).toBe("no-store");
     expect(asset.body).toBe("window.ready = true");
     await app.close();
   });

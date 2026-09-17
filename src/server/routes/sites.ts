@@ -34,10 +34,7 @@ export function registerSiteRoutes({ app, config, routePath }: RouteContext): vo
     }
 
     const stats = await fs.stat(resolved.filePath);
-    reply.header(
-      "Cache-Control",
-      resolved.descriptor.public ? "public, no-cache" : "private, no-cache",
-    );
+    reply.header("Cache-Control", "no-store");
     reply.header("Content-Type", resolved.mimeType);
     reply.header("Content-Length", String(stats.size));
     reply.header("X-Content-Type-Options", "nosniff");

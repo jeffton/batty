@@ -1,5 +1,6 @@
 import { mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import FullPopover from "./FullPopover.vue";
 import SharedSitesList from "./SharedSitesList.vue";
 
 const { setSitePublic } = vi.hoisted(() => ({ setSitePublic: vi.fn() }));
@@ -45,6 +46,13 @@ describe("SharedSitesList", () => {
 
     await wrapper.get("button[aria-label='Copy site URL']").trigger("click");
     expect(writeText).toHaveBeenCalledWith("http://localhost:3000/sites/site-1/");
+
+    wrapper.findComponent(FullPopover).vm.$emit("toggle", { newState: "open" });
+    await wrapper.vm.$nextTick();
+    expect(wrapper.get("iframe").attributes("src")).toBe("/sites/site-1/?batty_preview=1");
+    wrapper.findComponent(FullPopover).vm.$emit("toggle", { newState: "open" });
+    await wrapper.vm.$nextTick();
+    expect(wrapper.get("iframe").attributes("src")).toBe("/sites/site-1/?batty_preview=2");
 
     await wrapper.get("input[role='switch']").setValue(true);
     expect(setSitePublic).toHaveBeenCalledWith("site-1", true);

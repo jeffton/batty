@@ -9,6 +9,7 @@ const props = defineProps<{ sites: SiteDescriptor[] }>();
 const publicById = ref<Record<string, boolean>>({});
 const savingId = ref<string>();
 const copiedId = ref<string>();
+const previewRevisionById = ref<Record<string, number>>({});
 let copiedTimeout: number | undefined;
 
 const displayedSites = computed(() =>
@@ -24,6 +25,21 @@ function popoverId(siteId: string): string {
 
 function absoluteUrl(url: string): string {
   return new URL(url, window.location.href).toString();
+}
+
+function previewUrl(site: SiteDescriptor): string {
+  const revision = previewRevisionById.value[site.id] ?? 0;
+  if (revision === 0) return site.url;
+  const separator = site.url.includes("?") ? "&" : "?";
+  return `${site.url}${separator}batty_preview=${revision}`;
+}
+
+function refreshPreview(site: SiteDescriptor, event: Event): void {
+  if ((event as ToggleEvent).newState !== "open") return;
+  previewRevisionById.value = {
+    ...previewRevisionById.value,
+    [site.id]: (previewRevisionById.value[site.id] ?? 0) + 1,
+  };
 }
 
 async function copyUrl(site: SiteDescriptor): Promise<void> {
@@ -71,6 +87,7 @@ onBeforeUnmount(() => {
         :popover-id="popoverId(site.id)"
         :title="site.name"
         :subtitle="absoluteUrl(site.url)"
+        @toggle="refreshPreview(site, $event)"
       >
         <template #header-actions>
           <label class="shared-sites__switch">
@@ -97,7 +114,7 @@ onBeforeUnmount(() => {
         </template>
         <iframe
           class="shared-sites__frame"
-          :src="site.url"
+          :src="previewUrl(site)"
           :title="site.name"
           sandbox="allow-downloads allow-forms allow-modals allow-popups allow-scripts"
         ></iframe>

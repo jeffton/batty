@@ -64,6 +64,20 @@ describe("site routes", () => {
     await app.close();
   });
 
+  it("redirects unauthenticated browser navigation to login and preserves the site URL", async () => {
+    const { app, site } = await fixture();
+    const response = await app.inject({
+      url: `${site.descriptor.url}?view=full`,
+      headers: { accept: "text/html,application/xhtml+xml" },
+    });
+
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe(
+      `/batty/login?returnTo=${encodeURIComponent(`${site.descriptor.url}?view=full`)}`,
+    );
+    await app.close();
+  });
+
   it("exchanges the browser capability for an HttpOnly site cookie", async () => {
     const { app, site } = await fixture();
     const entry = await app.inject(site.browserUrl);

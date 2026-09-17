@@ -5,6 +5,7 @@ import {
   NOTIFICATION_NAVIGATION_MESSAGE_TYPE,
   notificationPathFromUrl,
 } from "@/client/lib/notification-navigation";
+import { resolveAuthReturnTo } from "@/client/lib/auth-redirect";
 import { readCachedSession } from "@/client/lib/cache";
 import { workspaceRoutePath } from "@/client/lib/routes";
 import { useAppStore } from "@/client/stores/app";
@@ -112,6 +113,11 @@ async function syncRouteToStore(): Promise<void> {
 
   if (route.path === "/login") {
     store.clearRouteLoading();
+    const returnTo = resolveAuthReturnTo(route.query.returnTo);
+    if (returnTo) {
+      window.location.replace(returnTo);
+      return;
+    }
     await router.replace(WORKSPACES_ROUTE);
     return;
   }

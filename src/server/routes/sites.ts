@@ -30,6 +30,10 @@ export function registerSiteRoutes({ app, config, routePath }: RouteContext): vo
     const agentCookieName = `batty-site-${siteId}`;
     const hasAgentAccess = request.cookies[agentCookieName] === resolved.accessToken;
     if (!resolved.descriptor.public && !request.auth && !hasAgentAccess) {
+      if (request.headers.accept?.includes("text/html")) {
+        const loginUrl = `${routePath("/login")}?returnTo=${encodeURIComponent(request.url)}`;
+        return reply.redirect(loginUrl);
+      }
       return reply.code(401).send({ error: "Authentication required" });
     }
 

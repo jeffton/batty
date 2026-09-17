@@ -6,11 +6,12 @@ import AgentTurnDiffPopover from "@/client/components/AgentTurnDiffPopover.vue";
 import AttachedFilesList from "@/client/components/AttachedFilesList.vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
 import MarkdownBlock from "@/client/components/MarkdownBlock.vue";
+import SharedSitesList from "@/client/components/SharedSitesList.vue";
 import SubagentSessionPopover from "@/client/components/SubagentSessionPopover.vue";
 import ToolCallBlock from "@/client/components/ToolCallBlock.vue";
 import { isAttachmentOutputToolCall } from "@/client/lib/transcript";
 import type { ToolDisplayState } from "@/client/lib/transcript";
-import type { SentFileDescriptor, UiContentBlock, UiMessage } from "@/shared/types";
+import type { SentFileDescriptor, SiteDescriptor, UiContentBlock, UiMessage } from "@/shared/types";
 
 type AssistantSegment = {
   kind: "reply" | "interim" | "plain";
@@ -240,11 +241,42 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
   return files;
 });
 
+function isSiteDescriptor(candidate: unknown): candidate is SiteDescriptor {
+  return (
+    !!candidate &&
+    typeof candidate === "object" &&
+    typeof candidate.id === "string" &&
+    typeof candidate.name === "string" &&
+    typeof candidate.url === "string" &&
+    typeof candidate.public === "boolean"
+  );
+}
+
+const sharedSites = computed<SiteDescriptor[]>(() => {
+  if (props.message.role !== "assistant") return [];
+  const sites: SiteDescriptor[] = [];
+  const seen = new Set<string>();
+  for (const block of props.message.blocks) {
+    if (block.type !== "toolCall" || (block.name !== "sites" && block.name !== "attach-files")) {
+      continue;
+    }
+    const candidates = toolStateFor(block.id)?.resultDetails?.sites;
+    if (!Array.isArray(candidates)) continue;
+    for (const candidate of candidates) {
+      if (!isSiteDescriptor(candidate) || seen.has(candidate.id)) continue;
+      seen.add(candidate.id);
+      sites.push(candidate);
+    }
+  }
+  return sites;
+});
+
 const fileChanges = computed(() =>
   props.message.role === "assistant" ? (props.message.fileChanges ?? []) : [],
 );
 const hasReplyArtifacts = computed(
-  () => attachedFiles.value.length > 0 || fileChanges.value.length > 0,
+  () =>
+    attachedFiles.value.length > 0 || sharedSites.value.length > 0 || fileChanges.value.length > 0,
 );
 const diffPopoverId = computed(
   () => `agent-turn-diff-${props.message.id.replace(/[^a-zA-Z0-9_-]+/g, "-")}`,
@@ -265,9 +297,10 @@ const assistantMarkdown = computed(() => {
     .map((file) => `[${file.name}](${file.downloadUrl})`)
     .join("\n");
 
+  const siteMarkdown = sharedSites.value.map((site) => `[${site.name}](${site.url})`).join("\n");
   const errorMarkdown = markdown.length === 0 ? assistantErrorText.value : undefined;
 
-  return [markdown, attachmentMarkdown, errorMarkdown]
+  return [markdown, attachmentMarkdown, siteMarkdown, errorMarkdown]
     .filter((section): section is string => typeof section === "string" && section.length > 0)
     .join("\n\n");
 });
@@ -430,6 +463,7 @@ onBeforeUnmount(() => {
             class="message__artifacts"
           >
             <AttachedFilesList v-if="attachedFiles.length > 0" :files="attachedFiles" />
+            <SharedSitesList v-if="sharedSites.length > 0" :sites="sharedSites" />
             <button
               v-if="fileChanges.length > 0"
               type="button"
@@ -455,6 +489,7 @@ onBeforeUnmount(() => {
         class="message__segment message__segment--bubble message__artifacts"
       >
         <AttachedFilesList v-if="attachedFiles.length > 0" :files="attachedFiles" />
+        <SharedSitesList v-if="sharedSites.length > 0" :sites="sharedSites" />
         <button
           v-if="fileChanges.length > 0"
           type="button"

@@ -100,6 +100,10 @@ function hasSentFiles(state: ToolDisplayState | undefined): boolean {
   return Array.isArray(state?.resultDetails?.sentFiles) && state.resultDetails.sentFiles.length > 0;
 }
 
+function hasSites(state: ToolDisplayState | undefined): boolean {
+  return Array.isArray(state?.resultDetails?.sites) && state.resultDetails.sites.length > 0;
+}
+
 export function isAttachmentOutputToolCall(
   block: UiContentBlock,
   toolStatesByCallId: Map<string, ToolDisplayState>,
@@ -109,11 +113,11 @@ export function isAttachmentOutputToolCall(
   }
 
   const state = toolStatesByCallId.get(block.id);
-  if (state?.status !== "success" || !hasSentFiles(state)) {
-    return false;
-  }
-
-  return block.name === "attach-files";
+  if (state?.status !== "success") return false;
+  return (
+    (block.name === "attach-files" && hasSentFiles(state)) ||
+    (block.name === "sites" && hasSites(state))
+  );
 }
 
 function attachmentCarrierBlocks(
@@ -185,20 +189,17 @@ function attachmentBlockFromToolResult(
     resultBlocks: message.blocks,
     resultDetails: message.details,
   };
+  if (state.status !== "success") return undefined;
   if (
-    state.status !== "success" ||
-    !hasSentFiles(state) ||
-    (message.toolName !== "attach-files" && message.toolName !== "subagent")
+    hasSentFiles(state) &&
+    (message.toolName === "attach-files" || message.toolName === "subagent")
   ) {
-    return undefined;
+    return { type: "toolCall", id: message.toolCallId, name: "attach-files", arguments: {} };
   }
-
-  return {
-    type: "toolCall",
-    id: message.toolCallId,
-    name: "attach-files",
-    arguments: {},
-  };
+  if (hasSites(state) && (message.toolName === "sites" || message.toolName === "subagent")) {
+    return { type: "toolCall", id: message.toolCallId, name: "sites", arguments: {} };
+  }
+  return undefined;
 }
 
 export function mergeAttachmentCarrierIntoAssistant(
@@ -330,11 +331,12 @@ export function buildTranscriptMessages(
 
 export function hasToolResultContent(
   blocks: UiContentBlock[],
-  details?: { diff?: string; sentFiles?: unknown[] },
+  details?: { diff?: string; sentFiles?: unknown[]; sites?: unknown[] },
 ): boolean {
   return (
     blocks.length > 0 ||
     typeof details?.diff === "string" ||
-    (Array.isArray(details?.sentFiles) && details.sentFiles.length > 0)
+    (Array.isArray(details?.sentFiles) && details.sentFiles.length > 0) ||
+    (Array.isArray(details?.sites) && details.sites.length > 0)
   );
 }

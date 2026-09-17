@@ -17,12 +17,14 @@ import type { AppConfig } from "./config";
 import type { BrowserService } from "./browser-service";
 import { buildCronJobSummary, type CronService } from "./cron";
 import { storeSentFiles } from "./send-files";
+import { createSite, deleteSite, getSite } from "./sites";
 import { runWebSearch } from "./web-search";
 import { getSubagentSessionDepth, MAX_SUBAGENT_DEPTH, SUBAGENT_TOOL_NAME } from "./subagent";
 import {
   AttachFilesToolSchema,
   BrowserToolSchema,
   CronToolSchema,
+  SitesToolSchema,
   SubagentToolSchema,
   WebSearchToolSchema,
 } from "./pi-service-schemas";
@@ -627,6 +629,62 @@ export function createWebSearchTool(config: AppConfig): ToolDefinition<typeof We
       return {
         content: [{ type: "text", text: output.text }],
         details: output.details,
+      };
+    },
+  };
+}
+
+export function createSitesTool({
+  config,
+}: CommonToolDependencies): ToolDefinition<typeof SitesToolSchema> {
+  return {
+    name: "sites",
+    label: "Sites",
+    description:
+      "Create, share, and delete hosted HTML sites. Create allocates a directory; use file tools to build or change its contents.",
+    promptSnippet: "Create and share interactive HTML sites with the user.",
+    promptGuidelines: [
+      "Call create to allocate a site directory, then use write/edit tools to create index.html and its assets there.",
+      "After building and checking the site, call share so it appears in the final response.",
+      "Use the browser URL from the result with the browser tool to inspect the site without changing its public setting.",
+      "Use delete to permanently remove a site.",
+    ],
+    parameters: SitesToolSchema,
+    execute: async (_toolCallId, params) => {
+      if (params.action === "create") {
+        const name = typeof params.name === "string" ? params.name.trim() : "";
+        if (!name) throw new Error("name is required for sites create");
+        const site = await createSite(config.sitesDir, config.baseUrl, name);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Created site ${site.descriptor.id}.\nDirectory: ${site.directory}\nUser URL: ${site.descriptor.url}\nBrowser URL: ${site.browserUrl}`,
+            },
+          ],
+          details: {},
+        };
+      }
+
+      const siteId = typeof params.siteId === "string" ? params.siteId.trim() : "";
+      if (!siteId) throw new Error(`siteId is required for sites ${params.action}`);
+      if (params.action === "delete") {
+        await deleteSite(config.sitesDir, siteId);
+        return {
+          content: [{ type: "text", text: `Deleted site ${siteId}.` }],
+          details: {},
+        };
+      }
+
+      const site = await getSite(config.sitesDir, config.baseUrl, siteId);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Shared site ${site.descriptor.id}.\nDirectory: ${site.directory}\nUser URL: ${site.descriptor.url}\nBrowser URL: ${site.browserUrl}`,
+          },
+        ],
+        details: { sites: [site.descriptor] },
       };
     },
   };

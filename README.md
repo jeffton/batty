@@ -10,6 +10,7 @@ Batty is a web UI for [Pi Coding Agent](https://pi.dev). It keeps Pi's workspace
 - Session list per workspace, including resume and infinite scroll for older messages
 - Model and thinking-level switching from the chat header
 - Attachment support with drag and drop, file picker, and image rendering
+- Agent-created HTML sites with private previews and optional public links
 - Local draft saving while you type, including offline/reconnecting states
 - Queue follow-up prompts while a run is streaming, or send steer prompts mid-run
 - Rich tool rendering, including inline diffs for edits and readable bash output

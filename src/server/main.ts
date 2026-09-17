@@ -21,6 +21,7 @@ import type { RouteContext } from "./routes/context";
 import { registerPushRoutes } from "./routes/push";
 import { registerSessionRoutes } from "./routes/sessions";
 import { registerSettingsRoutes } from "./routes/settings";
+import { registerSiteRoutes } from "./routes/sites";
 import { registerWorkspaceRoutes } from "./routes/workspaces";
 import { WebPushService } from "./web-push";
 import { appColorOption } from "@/shared/appearance";
@@ -196,6 +197,7 @@ if (bootstrapSetupCode) {
 
 await fs.mkdir(config.uploadsDir, { recursive: true });
 await fs.mkdir(config.sentFilesDir, { recursive: true });
+await fs.mkdir(config.sitesDir, { recursive: true });
 
 await app.register(cookie);
 await app.register(multipart);
@@ -370,6 +372,7 @@ registerPushRoutes(routeContext);
 registerWorkspaceRoutes(routeContext, workspaceSubscribers);
 registerCronRoutes(routeContext);
 registerSessionRoutes(routeContext);
+registerSiteRoutes(routeContext);
 
 app.get("/healthz", async () => ({ ok: true }));
 if (appBaseUrl !== "/") {

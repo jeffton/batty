@@ -5,6 +5,7 @@ import {
   buildSubagentDetails,
   cloneMessagesForSubagent,
   collectSentFiles,
+  collectSites,
   extractAssistantText,
   findLastAssistantMessage,
   newlyGeneratedSubagentMessages,
@@ -320,6 +321,43 @@ describe("subagent message helpers", () => {
       },
     ]);
     expect(newlyGeneratedSubagentMessages(messages, 1)).toEqual([messages[1]]);
+  });
+
+  it("propagates shared sites from generated subagent messages", () => {
+    const generated = {
+      role: "toolResult",
+      toolCallId: "site-new",
+      toolName: "sites",
+      content: [{ type: "text", text: "Shared site." }],
+      details: {
+        sites: [
+          {
+            id: "site-1",
+            name: "Dashboard",
+            url: "/sites/site-1/",
+            public: false,
+          },
+        ],
+      },
+      isError: false,
+      timestamp: 2,
+    } as unknown as AgentMessage;
+
+    expect(collectSites([generated])).toHaveLength(1);
+    expect(
+      buildSubagentDetails(
+        {
+          prompt: "Build a dashboard",
+          model: "openai/gpt-5",
+          effort: "medium",
+          includeSessionContext: false,
+          respondIn: "tool-call",
+        },
+        [generated],
+        undefined,
+        { generatedMessages: [generated] },
+      ),
+    ).toMatchObject({ sites: [{ id: "site-1", name: "Dashboard" }] });
   });
 
   it("only propagates attachments from newly generated subagent messages", () => {

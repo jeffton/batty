@@ -22,10 +22,18 @@ export interface SentFileDescriptor {
   previewUrl?: string;
 }
 
+export interface SiteDescriptor {
+  id: string;
+  name: string;
+  url: string;
+  public: boolean;
+}
+
 export interface ToolExecutionDetails {
   diff?: string;
   firstChangedLine?: number;
   sentFiles?: SentFileDescriptor[];
+  sites?: SiteDescriptor[];
   [key: string]: unknown;
 }
 

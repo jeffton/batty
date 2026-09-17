@@ -5,9 +5,47 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import {
   createBrowserTool,
   createCronTool,
+  createSitesTool,
   createSubagentTool,
   spillToolOutputToTempFile,
 } from "./pi-service-tools";
+
+describe("createSitesTool", () => {
+  it("allocates, shares, and deletes a site", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-sites-tool-"));
+    const tool = createSitesTool({
+      workspace: { id: "batty", path: "/workspace" } as any,
+      config: { sitesDir: root, baseUrl: "/batty" } as any,
+    });
+
+    const created = await tool.execute(
+      "create",
+      { action: "create", name: "Demo" },
+      undefined,
+      undefined,
+      {} as any,
+    );
+    const text = (created.content[0] as { text: string }).text;
+    const siteId = /Created site ([0-9a-f-]+)/.exec(text)?.[1];
+    expect(siteId).toBeTruthy();
+    expect(created.details).toEqual({});
+
+    const shared = await tool.execute(
+      "share",
+      { action: "share", siteId },
+      undefined,
+      undefined,
+      {} as any,
+    );
+    expect(shared.details).toMatchObject({
+      sites: [{ id: siteId, name: "Demo", url: `/batty/sites/${siteId}/`, public: false }],
+    });
+
+    await tool.execute("delete", { action: "delete", siteId }, undefined, undefined, {} as any);
+    await expect(fs.access(path.join(root, siteId!))).rejects.toThrow();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+});
 
 describe("spillToolOutputToTempFile", () => {
   it("stores oversized output in a temp file and returns a truncated head", async () => {

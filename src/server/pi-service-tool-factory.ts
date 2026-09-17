@@ -8,6 +8,7 @@ import {
   createAttachFilesTool,
   createBrowserTool,
   createCronTool,
+  createSitesTool,
   createSubagentTool,
   createWebSearchTool,
 } from "./pi-service-tools";
@@ -83,6 +84,7 @@ export function createPiServiceTools(
       workspace,
       config: context.config,
     }),
+    createSitesTool({ workspace, config: context.config }),
     createAttachFilesTool({
       workspace,
       config: context.config,

@@ -467,6 +467,39 @@ describe("transcript tool state merging", () => {
     );
   });
 
+  it("moves shared sites into the following assistant response", () => {
+    const siteResult: Extract<UiMessage, { role: "toolResult" }> = {
+      id: "tool-site",
+      role: "toolResult",
+      timestamp: 4,
+      toolCallId: "site-1",
+      toolName: "sites",
+      blocks: [{ type: "text", text: "Shared site." }],
+      details: {
+        sites: [
+          { id: "published-1", name: "Dashboard", url: "/sites/published-1/", public: false },
+        ],
+      },
+      isError: false,
+    };
+    const finalAssistant: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-final",
+      role: "assistant",
+      turnPhase: "final",
+      timestamp: 5,
+      blocks: [{ type: "text", text: "Dashboard ready." }],
+    };
+
+    const messages: SessionState["messages"] = [siteResult, finalAssistant];
+    const lookup = buildToolStateLookup(messages, []);
+    const transcript = buildTranscriptMessages(messages, lookup);
+    const rendered = transcript[0]!.message as Extract<UiMessage, { role: "assistant" }>;
+    expect(rendered.blocks).toEqual([
+      { type: "text", text: "Dashboard ready." },
+      { type: "toolCall", id: "site-1", name: "sites", arguments: {} },
+    ]);
+  });
+
   it("keeps a settled empty assistant error for the red error bubble", () => {
     const errorAssistant: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-error",

@@ -141,6 +141,21 @@ export const SubagentToolSchema = Type.Object(
   },
 );
 
+export const SitesToolSchema = Type.Object(
+  {
+    action: StringEnum(["create", "share", "delete"] as const, {
+      description: "Create a site directory, share an existing site, or delete a site.",
+    }),
+    name: Type.Optional(
+      Type.String({ description: "Display name. Required when creating a site." }),
+    ),
+    siteId: Type.Optional(
+      Type.String({ description: "Site id. Required when sharing or deleting a site." }),
+    ),
+  },
+  { additionalProperties: false },
+);
+
 export const WebSearchToolSchema = Type.Object(
   {
     action: StringEnum(["search", "content"] as const, {

@@ -9,11 +9,17 @@ import type {
   PendingCronRunDelivery,
   RunningCronJob,
   SessionState,
+  SiteDescriptor,
   WorkspaceInfo,
 } from "@/shared/types";
 import { buildCronRuntimeNotice, type RuntimeNotice } from "./runtime-notices";
 import type { WebSession } from "./pi-service-types";
-import { extractAssistantText, stripThinkingFromAssistantMessage, ZERO_USAGE } from "./subagent";
+import {
+  collectSites,
+  extractAssistantText,
+  stripThinkingFromAssistantMessage,
+  ZERO_USAGE,
+} from "./subagent";
 import { agentTurnFileChangesByReplyEntryId } from "./agent-turn-file-changes";
 import type { AgentTurnFileChange } from "@/shared/types";
 
@@ -201,9 +207,16 @@ export async function runCronJobSession(
 
   const finalAssistant = await lastCronAssistant(cronWebSession.session, job.runId);
   const errorMessage = finalAssistantError(finalAssistant);
+  const sharedSites = (
+    finalAssistant as (AssistantMessage & { battyDeliveredSites?: SiteDescriptor[] }) | undefined
+  )?.battyDeliveredSites;
   if (
     parent &&
-    !(errorMessage === undefined && extractAssistantText(finalAssistant) === "NO_REPLY")
+    !(
+      errorMessage === undefined &&
+      extractAssistantText(finalAssistant) === "NO_REPLY" &&
+      !sharedSites?.length
+    )
   ) {
     await job.queueResultDelivery(parent.sessionId);
   }
@@ -299,7 +312,18 @@ export async function deliverCronJobRun(
     if (opened.owned) context.disposeSession(opened.state.id);
   }
 
-  if (!job.error && extractAssistantText(captured.finalAssistant) === "NO_REPLY") return;
+  const sharedSites = (
+    captured.finalAssistant as
+      | (AssistantMessage & { battyDeliveredSites?: SiteDescriptor[] })
+      | undefined
+  )?.battyDeliveredSites;
+  if (
+    !job.error &&
+    extractAssistantText(captured.finalAssistant) === "NO_REPLY" &&
+    !sharedSites?.length
+  ) {
+    return;
+  }
   const parentState = await context.openSessionById(job.workspace, delivery.parentSessionId);
   await context.runSubagentSerial(parentState.id, async () => {
     const parent = context.requireSession(parentState.id);
@@ -380,7 +404,8 @@ async function appendCronRunDelivery(
       },
       timestamp,
     ),
-    deliveredAssistant(parent, delivery.finalAssistant, timestamp + 1, error),
+    ...deliveredSitesMessage(delivery.finalAssistant, job.runId, timestamp + 1),
+    deliveredAssistant(parent, delivery.finalAssistant, timestamp + 2, error),
   ]);
 }
 
@@ -464,10 +489,41 @@ async function lastCronAssistant(
     (entry) => entry.type === "message" && entry.message.role === "assistant",
   );
   if (!finalEntry || finalEntry.type !== "message") return undefined;
+  const operationMessages = operationEntries.flatMap((entry) =>
+    entry.type === "message" ? [entry.message] : [],
+  );
   return {
     ...finalEntry.message,
     battyDeliveredFileChanges: fileChangesByReplyEntryId.get(finalEntry.id) ?? [],
-  } as AssistantMessage & { battyDeliveredFileChanges: AgentTurnFileChange[] };
+    battyDeliveredSites: collectSites(operationMessages),
+  } as AssistantMessage & {
+    battyDeliveredFileChanges: AgentTurnFileChange[];
+    battyDeliveredSites: SiteDescriptor[];
+  };
+}
+
+function deliveredSitesMessage(
+  message: AssistantMessage | undefined,
+  runId: string,
+  timestamp: number,
+): Message[] {
+  const sites = (
+    message as (AssistantMessage & { battyDeliveredSites?: SiteDescriptor[] }) | undefined
+  )?.battyDeliveredSites;
+  if (!sites?.length) return [];
+  return [
+    {
+      role: "toolResult",
+      toolCallId: `cron-sites:${runId}`,
+      toolName: "sites",
+      content: [
+        { type: "text", text: `Shared ${sites.length} site${sites.length === 1 ? "" : "s"}.` },
+      ],
+      details: { sites },
+      isError: false,
+      timestamp,
+    } as unknown as Message,
+  ];
 }
 
 function deliveredAssistant(

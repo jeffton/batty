@@ -1,6 +1,6 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
-import type { SentFileDescriptor } from "@/shared/types";
+import type { SentFileDescriptor, SiteDescriptor } from "@/shared/types";
 
 export const SUBAGENT_TOOL_NAME = "subagent";
 export const SUBAGENT_SESSION_CUSTOM_TYPE = "batty-subagent-session";
@@ -172,6 +172,17 @@ function isSentFileDescriptor(value: unknown): value is SentFileDescriptor {
   );
 }
 
+function isSiteDescriptor(value: unknown): value is SiteDescriptor {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { id?: unknown }).id === "string" &&
+    typeof (value as { name?: unknown }).name === "string" &&
+    typeof (value as { url?: unknown }).url === "string" &&
+    typeof (value as { public?: unknown }).public === "boolean"
+  );
+}
+
 export function collectSentFiles(messages: AgentMessage[]): SentFileDescriptor[] {
   const files: SentFileDescriptor[] = [];
   const seen = new Set<string>();
@@ -199,6 +210,22 @@ export function collectSentFiles(messages: AgentMessage[]): SentFileDescriptor[]
   return files;
 }
 
+export function collectSites(messages: AgentMessage[]): SiteDescriptor[] {
+  const sites: SiteDescriptor[] = [];
+  const seen = new Set<string>();
+  for (const message of messages) {
+    if (message.role !== "toolResult") continue;
+    const candidates = (message as { details?: { sites?: unknown } }).details?.sites;
+    if (!Array.isArray(candidates)) continue;
+    for (const site of candidates) {
+      if (!isSiteDescriptor(site) || seen.has(site.id)) continue;
+      seen.add(site.id);
+      sites.push(site);
+    }
+  }
+  return sites;
+}
+
 export function newlyGeneratedSubagentMessages(
   messages: AgentMessage[],
   seedMessageCount: number,
@@ -223,7 +250,9 @@ export function buildSubagentDetails(
     sessionPath?: string;
   },
 ): SubagentToolDetails {
-  const sentFiles = collectSentFiles(options?.generatedMessages ?? []);
+  const generatedMessages = options?.generatedMessages ?? [];
+  const sentFiles = collectSentFiles(generatedMessages);
+  const sites = collectSites(generatedMessages);
   const fileChanges = (options?.generatedMessages ?? []).flatMap((message) =>
     message.role === "toolResult"
       ? ((message.details as { battyFileChanges?: unknown[] })?.battyFileChanges ?? [])
@@ -246,6 +275,7 @@ export function buildSubagentDetails(
       errorMessage: finalAssistant?.errorMessage,
     },
     ...(sentFiles.length > 0 ? { sentFiles } : {}),
+    ...(sites.length > 0 ? { sites } : {}),
   };
 }
 

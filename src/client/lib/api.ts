@@ -13,6 +13,7 @@ import type {
   CronJob,
   CronRunLog,
   RunningCronJob,
+  SiteDescriptor,
   ModelOption,
   ProviderAuthStartResponse,
   ProviderAuthStatus,
@@ -39,6 +40,14 @@ async function request<T>(input: string, init?: RequestInit): Promise<T> {
   }
 
   return (await response.json()) as T;
+}
+
+export function setSitePublic(siteId: string, isPublic: boolean): Promise<SiteDescriptor> {
+  return request(`/api/sites/${encodeURIComponent(siteId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ public: isPublic }),
+  });
 }
 
 export function getBootstrap(): Promise<BootstrapPayload> {

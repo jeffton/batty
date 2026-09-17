@@ -39,6 +39,7 @@ describe("SharedSitesList", () => {
     expect(wrapper.get("button[popovertarget='site-preview-site-1']").text()).toContain(
       "Open site",
     );
+    expect(wrapper.find(".shared-sites__switch-track").exists()).toBe(true);
     expect(wrapper.get("iframe").attributes()).toMatchObject({
       src: "/sites/site-1/",
       sandbox: "allow-downloads allow-forms allow-modals allow-popups allow-scripts",

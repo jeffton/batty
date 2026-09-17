@@ -98,7 +98,7 @@ onBeforeUnmount(() => {
               :disabled="savingId === site.id"
               @change="togglePublic(site, $event)"
             />
-            <span aria-hidden="true"></span>
+            <span class="shared-sites__switch-track" aria-hidden="true"></span>
             Public
           </label>
           <button
@@ -192,41 +192,42 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-.shared-sites__switch span {
+.shared-sites__switch-track {
   position: relative;
   width: 2rem;
   height: 1.1rem;
   border-radius: 999px;
-  background: var(--color-border);
+  background: var(--color-border-strong);
   transition: background 120ms ease;
 }
 
-.shared-sites__switch span::after {
+.shared-sites__switch-track::after {
   position: absolute;
   top: 0.15rem;
   left: 0.15rem;
   width: 0.8rem;
   height: 0.8rem;
   border-radius: 50%;
-  background: white;
+  background: var(--color-bg-overlay);
+  box-shadow: 0 1px 2px color-mix(in srgb, black 30%, transparent);
   content: "";
   transition: transform 120ms ease;
 }
 
-.shared-sites__switch input:checked + span {
+.shared-sites__switch input:checked + .shared-sites__switch-track {
   background: var(--color-accent);
 }
 
-.shared-sites__switch input:checked + span::after {
+.shared-sites__switch input:checked + .shared-sites__switch-track::after {
   transform: translateX(0.9rem);
 }
 
-.shared-sites__switch input:focus-visible + span {
+.shared-sites__switch input:focus-visible + .shared-sites__switch-track {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
-.shared-sites__switch input:disabled + span {
+.shared-sites__switch input:disabled + .shared-sites__switch-track {
   opacity: 0.55;
 }
 

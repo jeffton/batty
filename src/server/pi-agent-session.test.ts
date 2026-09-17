@@ -239,6 +239,37 @@ describe("Batty native harness tools", () => {
     });
   });
 
+  it("stores tool images as files while preserving provider image input", async () => {
+    const imageData =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+XZRqWQAAAABJRU5ErkJggg==";
+    const { faux, session, reopen } = await setup([
+      {
+        name: "custom-image",
+        label: "custom-image",
+        description: "image",
+        parameters: Type.Object({}),
+        async execute() {
+          return {
+            content: [
+              { type: "text" as const, text: "image result" },
+              { type: "image" as const, mimeType: "image/png", data: imageData },
+            ],
+            details: {},
+          };
+        },
+      },
+    ]);
+    session.settingsManager.setImageAutoResize(false);
+    faux.setResponses([toolCall("custom-image", {}), fauxAssistantMessage("done")]);
+    await session.prompt("work");
+    const stored = await fs.readFile(session.sessionFile, "utf8");
+    expect(stored).toContain("batty-file:");
+    expect(stored).not.toContain(imageData);
+    expect(JSON.stringify(session.messages)).toContain('"type":"image"');
+    const restored = await reopen();
+    expect(JSON.stringify(restored.messages)).toContain('"type":"image"');
+  });
+
   it("blocks image transmission without removing durable prompt images", async () => {
     const { faux, session } = await setup();
     session.settingsManager.setBlockImages(true);
@@ -253,6 +284,9 @@ describe("Batty native harness tools", () => {
       images: [{ type: "image", mimeType: "image/png", data: "aGVsbG8=" }],
     });
     expect(JSON.stringify(session.messages)).toContain('"type":"image"');
+    const stored = await fs.readFile(session.sessionFile, "utf8");
+    expect(stored).toContain("batty-file:");
+    expect(stored).not.toContain("aGVsbG8=");
   });
 
   it("advertises explicit replay policy and Batty's complete tool set", async () => {

@@ -63,6 +63,9 @@ describe("AgentHarness controller", () => {
       ),
     );
     await f.session.lane.followUp("two", undefined, context);
+    const stored = await fs.readFile(f.session.sessionFile, "utf8");
+    expect(stored).toContain("batty-file:");
+    expect(stored).not.toContain("aGVsbG8=");
     const restored = await f.reopen();
     expect(restored.pendingMessageCount).toBe(2);
     expect(restored.snapshot.queues[0]).toMatchObject({

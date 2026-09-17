@@ -141,6 +141,33 @@ describe("native harness session storage", () => {
     ]);
   });
 
+  it("migrates legacy images during read-only index reads and forks", async () => {
+    const { f, file } = await legacyFile();
+    const lines = (await fs.readFile(file, "utf8")).trimEnd().split("\n");
+    const message = JSON.parse(lines[3]!) as {
+      message: { content: unknown };
+    };
+    message.message.content = [
+      { type: "text", text: "work" },
+      { type: "image", mimeType: "image/png", data: "aGVsbG8=" },
+    ];
+    lines[3] = JSON.stringify(message);
+    await fs.writeFile(file, `${lines.join("\n")}\n`);
+
+    await HarnessSessionStore.read(file, { readOnly: true });
+
+    const stored = await fs.readFile(file, "utf8");
+    expect(stored).toContain("batty-file:");
+    expect(stored).not.toContain("aGVsbG8=");
+
+    const parent = retain(await HarnessSessionStore.open(file));
+    const child = retain(await parent.fork(path.join(f.root, "children")));
+    const childStored = await fs.readFile(child.native.metadata.path, "utf8");
+    expect(childStored).toContain("batty-file:");
+    expect(childStored).not.toContain("aGVsbG8=");
+    expect(JSON.stringify(child.getEntries())).toContain("aGVsbG8=");
+  });
+
   it("keeps physical line numbers in legacy parse errors after blank lines", async () => {
     const { file } = await legacyFile();
     await fs.appendFile(file, "\n \t\n{not json}\n");

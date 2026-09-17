@@ -13,9 +13,10 @@ import {
   type Session,
 } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import { migrateSessionImages, SessionImageExecutionEnv } from "./session-images";
 
-// Initial index rebuilds use Pi's decoder without repairing or modifying transcripts.
-class SessionIndexReadEnv extends NodeExecutionEnv {
+// Index reads use Pi's decoder without allowing Pi to repair or modify transcripts.
+class SessionIndexReadEnv extends SessionImageExecutionEnv {
   override async writeFile(): Promise<never> {
     throw new Error("Session index reads cannot modify transcript files");
   }
@@ -43,7 +44,7 @@ function repository(root: string): JsonlSessionRepo {
   if (!repo) {
     repo = new JsonlSessionRepo({
       sessionsRoot: root,
-      fileSystem: new NodeExecutionEnv({ cwd: root }),
+      fileSystem: new SessionImageExecutionEnv({ cwd: root }),
     });
     repositories.set(root, repo);
   }
@@ -111,6 +112,7 @@ export class HarnessSessionStore {
     if (owner) return owner;
     let opened: Session<JsonlSessionMetadata> | undefined;
     const opening = (async () => {
+      await migrateSessionImages(file);
       const metadata = await readHarnessSessionMetadata(file);
       const repo = repository(path.dirname(file));
       opened = await repo.open(metadata, context);
@@ -161,7 +163,16 @@ export class HarnessSessionStore {
 
   static async read(file: string, options: { readOnly?: boolean } = {}): Promise<SessionRead> {
     file = await fs.realpath(file);
+    const owner = this.owners.get(file);
+    if (owner) {
+      const store = await owner;
+      return {
+        metadata: store.native.metadata,
+        entries: store.getEntries(),
+      };
+    }
     if (options.readOnly) {
+      await migrateSessionImages(file);
       const metadata = await readHarnessSessionMetadata(file);
       const repo = new JsonlSessionRepo({
         sessionsRoot: path.dirname(file),
@@ -177,17 +188,10 @@ export class HarnessSessionStore {
         await native.close(context);
       }
     }
-    const owner = this.owners.get(file);
-    if (owner) {
-      const store = await owner;
-      return {
-        metadata: store.native.metadata,
-        entries: store.getEntries(),
-      };
-    }
     const pending = this.reads.get(file);
     if (pending) return pending;
     const reading = (async () => {
+      await migrateSessionImages(file);
       const metadata = await readHarnessSessionMetadata(file);
       const repo = repository(path.dirname(file));
       const native = await repo.open(metadata, context);

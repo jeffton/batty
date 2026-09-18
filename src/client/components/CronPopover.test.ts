@@ -11,6 +11,7 @@ const {
   listWorkspaceCronJobs,
   listWorkspaceCronRunLogs,
   listWorkspaceCronRuns,
+  listRunningSubagents,
   stopCronRun,
   getModels,
 } = vi.hoisted(() => ({
@@ -19,6 +20,7 @@ const {
   listWorkspaceCronJobs: vi.fn(),
   listWorkspaceCronRunLogs: vi.fn(),
   listWorkspaceCronRuns: vi.fn(),
+  listRunningSubagents: vi.fn(),
   stopCronRun: vi.fn(),
   getModels: vi.fn(),
 }));
@@ -39,6 +41,7 @@ vi.mock("@/client/lib/api", () => ({
   listWorkspaceCronJobs,
   listWorkspaceCronRunLogs,
   listWorkspaceCronRuns,
+  listRunningSubagents,
   listWorkspaceSessions: vi.fn(async (): Promise<SessionSummary[]> => []),
   listWorkspaces: vi.fn(async () => []),
   logout: vi.fn(),
@@ -91,6 +94,7 @@ describe("CronPopover", () => {
     listWorkspaceCronJobs.mockResolvedValue([job]);
     listWorkspaceCronRunLogs.mockResolvedValue([]);
     listWorkspaceCronRuns.mockResolvedValue([]);
+    listRunningSubagents.mockResolvedValue([]);
     getModels.mockResolvedValue([]);
     updateCronJob.mockImplementation(async (_jobId: string, patch: Partial<CronJob>) => ({
       ...job,
@@ -367,9 +371,62 @@ describe("CronPopover", () => {
     const hidePopover = vi.fn();
     (wrapper.element as HTMLElement & { hidePopover: () => void }).hidePopover = hidePopover;
 
-    await wrapper.find('[aria-label="Close cron popover"]').trigger("click");
+    expect(wrapper.text()).toContain("Cron and subagents");
+    await wrapper.find('[aria-label="Close cron and subagents popover"]').trigger("click");
 
     expect(hidePopover).toHaveBeenCalledOnce();
+  });
+
+  it("shows running subagents for the current session and opens them", async () => {
+    const store = useAppStore();
+    store.activeSession = {
+      id: "web-parent",
+      sessionId: "parent-1",
+      workspaceId: "batty",
+      cwd: "/root/github/batty",
+      path: "/tmp/parent.jsonl",
+      thinkingLevel: "medium",
+      availableThinkingLevels: ["medium"],
+      isStreaming: true,
+      pendingMessageCount: 0,
+      updatedAt: 1,
+      contextTokens: 0,
+      contextWindow: 0,
+      contextPercent: 0,
+      totalMessageCount: 0,
+      hasMoreMessages: false,
+      messages: [],
+      activeTools: [],
+    };
+    listRunningSubagents.mockResolvedValue([
+      {
+        sessionId: "child-1",
+        sessionPath: "/tmp/child.jsonl",
+        workspaceId: "batty",
+        parentSessionId: "parent-1",
+        prompt: "Review the changes",
+        model: "openai/gpt-5",
+        thinkingLevel: "medium",
+        startedAtMs: 1,
+      },
+    ]);
+
+    const wrapper = mount(CronPopover, {
+      props: { popoverId: "cron-popover", anchorName: "--cron-anchor" },
+      global: { stubs: { SubagentSessionPopover: true } },
+    });
+    await wrapper.findAll('[role="tab"]')[2]!.trigger("click");
+    await flushPromises();
+
+    expect(listRunningSubagents).toHaveBeenCalledWith("parent-1");
+    expect(wrapper.findAll(".cron-popover__run")).toHaveLength(1);
+    expect(wrapper.text()).toContain("Review the changes");
+    const openButton = wrapper.find('[aria-label="Open subagent session"]');
+    expect(openButton.attributes("popovertarget")).toBe("running-subagent-popover-child-1");
+    expect(wrapper.findComponent({ name: "SubagentSessionPopover" }).attributes()).toMatchObject({
+      workspaceid: "batty",
+      sessionpath: "/tmp/child.jsonl",
+    });
   });
 
   it("shows running and completed logs and opens their sessions", async () => {

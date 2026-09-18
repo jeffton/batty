@@ -1,5 +1,30 @@
-import { describe, expect, it } from "vite-plus/test";
-import { parseClientMessageId } from "./sessions";
+import { describe, expect, it, vi } from "vite-plus/test";
+import { parseClientMessageId, registerSessionRoutes } from "./sessions";
+
+describe("session routes", () => {
+  it("lists running subagents for the requested parent session", async () => {
+    const app = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
+    const listRunningSubagents = vi.fn(() => [{ sessionId: "child-1" }]);
+    registerSessionRoutes({
+      app,
+      config: {},
+      service: { listRunningSubagents },
+      routePath: (path: string) => path,
+    } as never);
+
+    const registration = app.get.mock.calls.find(
+      ([path]) => path === "/api/sessions/:sessionId/subagents",
+    );
+    const handler = registration?.[1] as (request: {
+      params: { sessionId: string };
+    }) => Promise<unknown>;
+
+    await expect(handler({ params: { sessionId: "parent-1" } })).resolves.toEqual([
+      { sessionId: "child-1" },
+    ]);
+    expect(listRunningSubagents).toHaveBeenCalledWith("parent-1");
+  });
+});
 
 describe("parseClientMessageId", () => {
   it("accepts UUID client message IDs", () => {

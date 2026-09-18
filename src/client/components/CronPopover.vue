@@ -1,21 +1,28 @@
 <script setup lang="ts">
 import { PanelRightOpen, Square } from "@lucide/vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import CronJobCard from "@/client/components/CronJobCard.vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import SubagentSessionPopover from "@/client/components/SubagentSessionPopover.vue";
 import { useCronJobDrafts } from "@/client/composables/useCronJobDrafts";
+import { listRunningSubagents } from "@/client/lib/api";
 import { useAppStore } from "@/client/stores/app";
-import type { CronRunLog } from "@/shared/types";
-import { computed, ref, watch } from "vue";
+import type { CronRunLog, RunningSubagent } from "@/shared/types";
 
 const props = defineProps<{
   popoverId: string;
   anchorName: string;
 }>();
 
+type Tab = "jobs" | "logs" | "subagents";
+
 const store = useAppStore();
-const activeTab = ref<"jobs" | "logs">("jobs");
+const activeTab = ref<Tab>("jobs");
 const stoppingRunIds = ref(new Set<string>());
+const runningSubagents = ref<RunningSubagent[]>([]);
+const subagentError = ref("");
+let subagentLoadGeneration = 0;
+let subagentPoll: ReturnType<typeof setInterval> | undefined;
 const {
   jobs,
   draftFor,
@@ -35,6 +42,37 @@ const runLogs = computed(() => {
 
 function runPopoverId(runId: string): string {
   return `cron-run-popover-${runId.replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
+}
+
+function subagentPopoverId(sessionId: string): string {
+  return `running-subagent-popover-${sessionId.replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
+}
+
+function tabId(tab: Tab): string {
+  return `${props.popoverId}-${tab}-tab`;
+}
+
+function panelId(tab: Tab): string {
+  return `${props.popoverId}-${tab}-panel`;
+}
+
+function handleTabKeydown(event: KeyboardEvent): void {
+  const tabs: Tab[] = ["jobs", "logs", "subagents"];
+  const currentIndex = tabs.indexOf(activeTab.value);
+  const nextIndex =
+    event.key === "ArrowRight"
+      ? (currentIndex + 1) % tabs.length
+      : event.key === "ArrowLeft"
+        ? (currentIndex - 1 + tabs.length) % tabs.length
+        : event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? tabs.length - 1
+            : undefined;
+  if (nextIndex === undefined) return;
+  event.preventDefault();
+  activeTab.value = tabs[nextIndex]!;
+  document.getElementById(tabId(activeTab.value))?.focus();
 }
 
 function statusLabel(run: CronRunLog): string {
@@ -71,6 +109,59 @@ async function stopRun(runId: string): Promise<void> {
   }
 }
 
+async function refreshRunningSubagents(): Promise<void> {
+  const parentSessionId = store.activeSession?.sessionId;
+  const generation = ++subagentLoadGeneration;
+  if (!parentSessionId) {
+    runningSubagents.value = [];
+    subagentError.value = "";
+    return;
+  }
+
+  try {
+    const subagents = await listRunningSubagents(parentSessionId);
+    if (
+      generation !== subagentLoadGeneration ||
+      store.activeSession?.sessionId !== parentSessionId
+    ) {
+      return;
+    }
+    runningSubagents.value = subagents;
+    subagentError.value = "";
+  } catch (error) {
+    if (generation === subagentLoadGeneration) {
+      subagentError.value = error instanceof Error ? error.message : String(error);
+    }
+  }
+}
+
+function handlePopoverToggle(event: Event): void {
+  const isOpen = (event as ToggleEvent).newState === "open";
+  if (subagentPoll) {
+    clearInterval(subagentPoll);
+    subagentPoll = undefined;
+  }
+  if (isOpen) {
+    if (activeTab.value === "subagents") void refreshRunningSubagents();
+    subagentPoll = setInterval(() => {
+      if (activeTab.value === "subagents") void refreshRunningSubagents();
+    }, 1_500);
+  }
+}
+
+watch(activeTab, (tab) => {
+  if (tab === "subagents") void refreshRunningSubagents();
+});
+
+watch(
+  () => store.activeSession?.sessionId,
+  () => {
+    runningSubagents.value = [];
+    subagentError.value = "";
+    if (activeTab.value === "subagents") void refreshRunningSubagents();
+  },
+);
+
 watch(
   () => store.selectedWorkspaceId,
   (workspaceId) => {
@@ -80,6 +171,11 @@ watch(
   },
   { immediate: true },
 );
+
+onBeforeUnmount(() => {
+  subagentLoadGeneration += 1;
+  if (subagentPoll) clearInterval(subagentPoll);
+});
 </script>
 
 <template>
@@ -87,29 +183,36 @@ watch(
     class="cron-popover"
     :popover-id="props.popoverId"
     :anchor-name="props.anchorName"
-    title="Cron"
+    title="Cron and subagents"
     :subtitle="`Current workspace: ${store.selectedWorkspace?.label ?? ''}`"
-    close-label="Close cron popover"
+    close-label="Close cron and subagents popover"
+    @toggle="handlePopoverToggle"
   >
     <template #header-content>
-      <div class="cron-popover__tabs" role="tablist" aria-label="Cron views">
+      <div class="cron-popover__tabs" role="tablist" aria-label="Cron and subagent views">
         <button
+          :id="tabId('jobs')"
           type="button"
           role="tab"
           :aria-selected="activeTab === 'jobs'"
+          :aria-controls="panelId('jobs')"
           :tabindex="activeTab === 'jobs' ? 0 : -1"
           class="cron-popover__tab"
           @click="activeTab = 'jobs'"
+          @keydown="handleTabKeydown"
         >
           Jobs
         </button>
         <button
+          :id="tabId('logs')"
           type="button"
           role="tab"
           :aria-selected="activeTab === 'logs'"
+          :aria-controls="panelId('logs')"
           :tabindex="activeTab === 'logs' ? 0 : -1"
           class="cron-popover__tab"
           @click="activeTab = 'logs'"
+          @keydown="handleTabKeydown"
         >
           Logs
           <span
@@ -117,11 +220,31 @@ watch(
             class="cron-popover__live-dot"
           />
         </button>
+        <button
+          :id="tabId('subagents')"
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'subagents'"
+          :aria-controls="panelId('subagents')"
+          :tabindex="activeTab === 'subagents' ? 0 : -1"
+          class="cron-popover__tab"
+          @click="activeTab = 'subagents'"
+          @keydown="handleTabKeydown"
+        >
+          Subagents
+          <span v-if="runningSubagents.length > 0" class="cron-popover__live-dot" />
+        </button>
       </div>
     </template>
 
     <div class="cron-popover__body">
-      <div v-if="activeTab === 'jobs'" class="cron-popover__pane" role="tabpanel">
+      <div
+        v-if="activeTab === 'jobs'"
+        :id="panelId('jobs')"
+        class="cron-popover__pane"
+        role="tabpanel"
+        :aria-labelledby="tabId('jobs')"
+      >
         <CronJobCard
           v-for="job in jobs"
           :key="job.id"
@@ -145,7 +268,13 @@ watch(
         </div>
       </div>
 
-      <div v-else class="cron-popover__pane" role="tabpanel">
+      <div
+        v-else-if="activeTab === 'logs'"
+        :id="panelId('logs')"
+        class="cron-popover__pane"
+        role="tabpanel"
+        :aria-labelledby="tabId('logs')"
+      >
         <article v-for="run in runLogs" :key="run.runId" class="cron-popover__run">
           <div class="cron-popover__run-content">
             <div class="cron-popover__run-heading">
@@ -197,6 +326,56 @@ watch(
 
         <div v-if="runLogs.length === 0" class="cron-popover__empty">
           No cron runs have been logged in this workspace yet.
+        </div>
+      </div>
+
+      <div
+        v-else
+        :id="panelId('subagents')"
+        class="cron-popover__pane"
+        role="tabpanel"
+        :aria-labelledby="tabId('subagents')"
+      >
+        <article
+          v-for="subagent in runningSubagents"
+          :key="subagent.sessionId"
+          class="cron-popover__run"
+        >
+          <div class="cron-popover__run-content">
+            <div class="cron-popover__run-heading">
+              <span class="cron-popover__status">Running</span>
+              <strong>{{ subagent.model }} · {{ subagent.thinkingLevel }}</strong>
+            </div>
+            <div class="cron-popover__run-prompt">{{ subagent.prompt }}</div>
+            <div class="cron-popover__run-details">
+              <span>{{ formatTimestamp(subagent.startedAtMs) }}</span>
+              <span>{{ subagent.sessionId }}</span>
+            </div>
+          </div>
+          <div class="cron-popover__run-actions">
+            <button
+              type="button"
+              class="cron-popover__icon-btn"
+              :popovertarget="subagentPopoverId(subagent.sessionId)"
+              aria-label="Open subagent session"
+              title="Open session"
+            >
+              <PanelRightOpen :size="16" />
+            </button>
+          </div>
+          <SubagentSessionPopover
+            :popover-id="subagentPopoverId(subagent.sessionId)"
+            header-title="Subagent"
+            :workspace-id="subagent.workspaceId"
+            :session-path="subagent.sessionPath"
+          />
+        </article>
+
+        <div v-if="subagentError" class="cron-popover__empty cron-popover__empty--error">
+          {{ subagentError }}
+        </div>
+        <div v-else-if="runningSubagents.length === 0" class="cron-popover__empty">
+          No subagents are running for this session.
         </div>
       </div>
     </div>
@@ -364,6 +543,10 @@ watch(
   color: var(--color-text-subtle);
   font-size: 0.85rem;
   text-align: center;
+}
+
+.cron-popover__empty--error {
+  color: var(--color-error);
 }
 
 .cron-popover__empty code {

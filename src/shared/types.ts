@@ -174,6 +174,17 @@ export type CronJobSession =
       includePreviousContext?: boolean;
     };
 
+export interface RunningSubagent {
+  sessionId: string;
+  sessionPath: string;
+  workspaceId: string;
+  parentSessionId: string;
+  prompt: string;
+  model: string;
+  thinkingLevel: string;
+  startedAtMs: number;
+}
+
 export interface RunningCronJob {
   runId: string;
   jobId: string;

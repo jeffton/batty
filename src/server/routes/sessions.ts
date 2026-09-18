@@ -137,6 +137,11 @@ export function registerSessionRoutes(context: RouteContext): void {
     },
   );
 
+  app.get<{ Params: { sessionId: string } }>(
+    routePath("/api/sessions/:sessionId/subagents"),
+    async (request) => service.listRunningSubagents(request.params.sessionId),
+  );
+
   app.post<{
     Params: { sessionId: string };
     Body: { workspaceId: string; readThrough: number };

@@ -49,8 +49,8 @@ const emit = defineEmits<{
       :style="{ 'anchor-name': props.cronPopoverAnchor }"
       :disabled="!props.selectedWorkspaceId"
       :popovertarget="props.cronPopoverId"
-      aria-label="Cron jobs"
-      title="Cron jobs"
+      aria-label="Cron and subagents"
+      title="Cron and subagents"
     >
       <Clock3 :size="15" />
     </button>

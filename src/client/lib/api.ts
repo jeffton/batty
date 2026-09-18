@@ -13,6 +13,7 @@ import type {
   CronJob,
   CronRunLog,
   RunningCronJob,
+  RunningSubagent,
   SiteDescriptor,
   ModelOption,
   ProviderAuthStartResponse,
@@ -256,6 +257,10 @@ export function listWorkspaceCronJobs(workspaceId: string): Promise<CronJob[]> {
 
 export function listWorkspaceCronRuns(workspaceId: string): Promise<RunningCronJob[]> {
   return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/cron-runs`);
+}
+
+export function listRunningSubagents(sessionId: string): Promise<RunningSubagent[]> {
+  return request(`/api/sessions/${encodeURIComponent(sessionId)}/subagents`);
 }
 
 export function listWorkspaceCronRunLogs(workspaceId: string): Promise<CronRunLog[]> {

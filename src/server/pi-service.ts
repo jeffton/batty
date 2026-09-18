@@ -8,6 +8,7 @@ import {
 import type {
   CronJobSession,
   RunningCronJob,
+  RunningSubagent,
   ModelOption,
   ProviderAuthStartResponse,
   ProviderAuthStatus,
@@ -118,6 +119,7 @@ export class PiService {
   private readonly browserService: BrowserService;
   private readonly sessions = new Map<string, WebSession>();
   private readonly liveSessions = new Map<string, LiveSession>();
+  private readonly runningSubagents = new Map<string, RunningSubagent>();
   private readonly subagentQueues = new Map<string, Promise<void>>();
   private readonly cronSessionResolutions = new Map<string, Promise<SessionState>>();
   private readonly sessionOpenPromises = new Map<string, Promise<SessionState>>();
@@ -596,9 +598,11 @@ export class PiService {
       details: ToolExecutionDetails;
     }) => void;
   }): ReturnType<typeof runDetachedSubagentSession> {
-    return this.turns.run(
-      () =>
-        runDetachedSubagentSession(
+    const startedAtMs = Date.now();
+    let runningSubagent: RunningSubagent | undefined;
+    return this.turns.run(async () => {
+      try {
+        return await runDetachedSubagentSession(
           {
             createPiAgentSession: (workspace, sessionManager, createOptions) =>
               this.createPiAgentSession(workspace, sessionManager, {
@@ -625,10 +629,37 @@ export class PiService {
               });
             },
           },
-          options,
-        ),
-      true,
-    );
+          {
+            ...options,
+            onReady: (details) => {
+              const child = (details as SubagentToolDetails).subagent;
+              if (!child.sessionId || !child.sessionPath || !child.workspaceId) {
+                throw new Error("Running subagent details are incomplete");
+              }
+              runningSubagent = {
+                sessionId: child.sessionId,
+                sessionPath: child.sessionPath,
+                workspaceId: child.workspaceId,
+                parentSessionId: options.parentSessionId,
+                prompt: options.prompt,
+                model: options.modelId,
+                thinkingLevel: options.thinkingLevel,
+                startedAtMs,
+              };
+              this.runningSubagents.set(child.sessionId, runningSubagent);
+              options.onReady?.(details);
+            },
+          },
+        );
+      } finally {
+        if (
+          runningSubagent &&
+          this.runningSubagents.get(runningSubagent.sessionId) === runningSubagent
+        ) {
+          this.runningSubagents.delete(runningSubagent.sessionId);
+        }
+      }
+    }, true);
   }
 
   private startDetachedSubagentSession(options: {
@@ -780,6 +811,16 @@ export class PiService {
 
   hasSession(sessionId: string): boolean {
     return this.sessions.has(sessionId);
+  }
+
+  listRunningSubagents(parentSessionId: string): RunningSubagent[] {
+    return [...this.runningSubagents.values()]
+      .filter(
+        (subagent) =>
+          subagent.parentSessionId === parentSessionId &&
+          this.liveSessions.get(subagent.sessionId)?.session.isStreaming,
+      )
+      .sort((left, right) => left.startedAtMs - right.startedAtMs);
   }
 
   subscribe(

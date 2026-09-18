@@ -389,11 +389,13 @@ describe("createSubagentTool", () => {
       resolveSubagentDefaults: () => ({ modelId: "openai/gpt-5", thinkingLevel: "medium" }),
       runDetachedSubagentSession,
       startDetachedSubagentSession: vi.fn(),
+      stopSubagent: vi.fn(),
+      steerSubagent: vi.fn(),
     });
 
     const result = await tool.execute(
       "tool-call-1",
-      { prompt: "Inspect" },
+      { action: "run", prompt: "Inspect" },
       undefined,
       undefined,
       createContext(),
@@ -421,7 +423,7 @@ describe("createSubagentTool", () => {
   it("returns immediately from an async launch and delegates completion to the parent session", async () => {
     const runDetachedSubagentSession = vi.fn();
     const startDetachedSubagentSession = vi.fn(async () => ({
-      text: "Subagent started asynchronously.\n\nSession: /tmp/child.jsonl",
+      text: "Subagent started asynchronously.\n\nSession ID: child\nSession: /tmp/child.jsonl",
       details: {
         subagent: {
           prompt: "Inspect",
@@ -444,11 +446,13 @@ describe("createSubagentTool", () => {
       resolveSubagentDefaults: () => ({ modelId: "openai/gpt-5", thinkingLevel: "medium" }),
       runDetachedSubagentSession,
       startDetachedSubagentSession,
+      stopSubagent: vi.fn(),
+      steerSubagent: vi.fn(),
     });
 
     const result = await tool.execute(
       "tool-call-async",
-      { prompt: "Inspect", async: true },
+      { action: "run", prompt: "Inspect", async: true },
       undefined,
       undefined,
       createContext(),
@@ -464,7 +468,7 @@ describe("createSubagentTool", () => {
       }),
     );
     expect(result).toMatchObject({
-      content: [{ type: "text", text: expect.stringContaining("/tmp/child.jsonl") }],
+      content: [{ type: "text", text: expect.stringContaining("Session ID: child") }],
       details: { subagent: { async: true, sessionPath: "/tmp/child.jsonl" } },
       isError: false,
     });
@@ -482,11 +486,13 @@ describe("createSubagentTool", () => {
       resolveSubagentDefaults: () => ({ modelId: "openai/gpt-5", thinkingLevel: "medium" }),
       runDetachedSubagentSession,
       startDetachedSubagentSession: vi.fn(),
+      stopSubagent: vi.fn(),
+      steerSubagent: vi.fn(),
     });
 
     await tool.execute(
       "tool-call-1",
-      { prompt: "Inspect" },
+      { action: "run", prompt: "Inspect" },
       undefined,
       undefined,
       createContext(1),
@@ -505,10 +511,18 @@ describe("createSubagentTool", () => {
       resolveSubagentDefaults: () => ({ modelId: "openai/gpt-5", thinkingLevel: "medium" }),
       runDetachedSubagentSession,
       startDetachedSubagentSession: vi.fn(),
+      stopSubagent: vi.fn(),
+      steerSubagent: vi.fn(),
     });
 
     await expect(
-      tool.execute("tool-call-1", { prompt: "Inspect" }, undefined, undefined, createContext(2)),
+      tool.execute(
+        "tool-call-1",
+        { action: "run", prompt: "Inspect" },
+        undefined,
+        undefined,
+        createContext(2),
+      ),
     ).rejects.toThrow("subagent tool cannot be called more than two levels deep");
     expect(runDetachedSubagentSession).not.toHaveBeenCalled();
   });
@@ -519,6 +533,8 @@ describe("createSubagentTool", () => {
       config: {} as any,
       resolveSubagentDefaults: () => ({ modelId: "openai/gpt-5", thinkingLevel: "medium" }),
       startDetachedSubagentSession: vi.fn(),
+      stopSubagent: vi.fn(),
+      steerSubagent: vi.fn(),
       runDetachedSubagentSession: async () => ({
         text: "subagent failed",
         details: {
@@ -538,7 +554,7 @@ describe("createSubagentTool", () => {
 
     const result = await tool.execute(
       "tool-call-2",
-      { prompt: "Inspect" },
+      { action: "run", prompt: "Inspect" },
       undefined,
       undefined,
       createContext(),
@@ -549,6 +565,60 @@ describe("createSubagentTool", () => {
       isError: true,
     });
     expect(result).not.toHaveProperty("terminate");
+  });
+
+  it("stops a running async subagent by session id", async () => {
+    const stopSubagent = vi.fn(async () => undefined);
+    const tool = createSubagentTool({
+      workspace: { id: "batty", path: "/root/github/batty" } as any,
+      config: {} as any,
+      resolveSubagentDefaults: vi.fn(),
+      runDetachedSubagentSession: vi.fn(),
+      startDetachedSubagentSession: vi.fn(),
+      stopSubagent,
+      steerSubagent: vi.fn(),
+    });
+
+    const result = await tool.execute(
+      "tool-call-stop",
+      { action: "stop", sessionId: "child-session" },
+      undefined,
+      undefined,
+      createContext(),
+    );
+
+    expect(stopSubagent).toHaveBeenCalledWith("parent-session", "child-session");
+    expect(result.content).toEqual([{ type: "text", text: "Stopped subagent child-session." }]);
+  });
+
+  it("queues steering instructions for a running async subagent", async () => {
+    const steerSubagent = vi.fn(async () => undefined);
+    const tool = createSubagentTool({
+      workspace: { id: "batty", path: "/root/github/batty" } as any,
+      config: {} as any,
+      resolveSubagentDefaults: vi.fn(),
+      runDetachedSubagentSession: vi.fn(),
+      startDetachedSubagentSession: vi.fn(),
+      stopSubagent: vi.fn(),
+      steerSubagent,
+    });
+
+    const result = await tool.execute(
+      "tool-call-steer",
+      { action: "steer", sessionId: "child-session", prompt: "Focus on the failing test" },
+      undefined,
+      undefined,
+      createContext(),
+    );
+
+    expect(steerSubagent).toHaveBeenCalledWith(
+      "parent-session",
+      "child-session",
+      "Focus on the failing test",
+    );
+    expect(result.content).toEqual([
+      { type: "text", text: "Queued steering for subagent child-session." },
+    ]);
   });
 
   it("starts concurrent detached subagent runs without serializing on the parent session", async () => {
@@ -592,11 +662,13 @@ describe("createSubagentTool", () => {
       resolveSubagentDefaults: () => ({ modelId: "openai/gpt-5", thinkingLevel: "medium" }),
       runDetachedSubagentSession,
       startDetachedSubagentSession: vi.fn(),
+      stopSubagent: vi.fn(),
+      steerSubagent: vi.fn(),
     });
 
     const first = tool.execute(
       "tool-call-1",
-      { prompt: "Inspect A" },
+      { action: "run", prompt: "Inspect A" },
       undefined,
       undefined,
       createContext(),
@@ -604,7 +676,7 @@ describe("createSubagentTool", () => {
     await firstStarted;
     const second = tool.execute(
       "tool-call-2",
-      { prompt: "Inspect B" },
+      { action: "run", prompt: "Inspect B" },
       undefined,
       undefined,
       createContext(),

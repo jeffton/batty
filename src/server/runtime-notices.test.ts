@@ -5,6 +5,7 @@ import {
   buildCronRuntimeNotice,
   buildRuntimeNoticeMessage,
   buildSubagentRuntimeNotice,
+  buildSubagentSteeringRuntimeNotice,
 } from "./runtime-notices";
 import { transcriptMessagesFromSessionEntries } from "./pi-state";
 
@@ -76,6 +77,13 @@ describe("runtime notices", () => {
     expect(buildSubagentRuntimeNotice(2, "Nested work")).toEqual({
       kind: "subagent",
       text: "You are a subagent carrying out a task assigned by a parent agent. Your final response will be returned to that agent.\nDo not call the subagent tool from this session.\n\nAssigned task:\nNested work",
+    });
+  });
+
+  it("builds subagent steering notices", () => {
+    expect(buildSubagentSteeringRuntimeNotice("  Focus on tests  ")).toEqual({
+      kind: "subagent",
+      text: "Steering message from the parent agent:\n\nFocus on tests",
     });
   });
 

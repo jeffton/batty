@@ -198,6 +198,21 @@ describe("detached harness subagents", () => {
     expect(result.text).toBe("done");
   });
 
+  it("reports an async child ready only after its operation is running", async () => {
+    const { parent, deps, options, children } = await setup();
+    let streamingAtReady = false;
+    parent.faux.setResponses([fauxAssistantMessage("done")]);
+
+    await runDetachedSubagentSession(deps, {
+      ...options,
+      onReady: () => {
+        streamingAtReady = children.get(options.sessionId!)!.isStreaming;
+      },
+    });
+
+    expect(streamingAtReady).toBe(true);
+  });
+
   it("reuses a terminal child on replay without repeating its prompt or provider effect", async () => {
     const { parent, deps, options, children } = await setup();
     parent.faux.setResponses([fauxAssistantMessage("once")]);

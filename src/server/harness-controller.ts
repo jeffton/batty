@@ -248,6 +248,16 @@ export class HarnessController {
     const result = await this.lane.abort(context);
     if (!result.ok && !(result.error instanceof NoActiveOperation)) throw result.error;
   }
+  async queueCustomSteeringMessage(message: {
+    customType: string;
+    content: string;
+    display: boolean;
+    data?: unknown;
+    details?: unknown;
+  }): Promise<void> {
+    const custom = { ...message, role: "custom", timestamp: Date.now() } as AgentMessage;
+    getOrThrow(await this.lane.steer(custom, undefined, context));
+  }
   abortCompaction(): void {
     void this.abort().catch((error) => console.error("Failed to abort compaction", error));
   }
@@ -264,7 +274,11 @@ export class HarnessController {
       details?: unknown;
       battyDelivery?: { id: string; part: number };
     },
-    options: { triggerTurn?: boolean; steerWhenBusy?: boolean } = {},
+    options: {
+      triggerTurn?: boolean;
+      steerWhenBusy?: boolean;
+      onAccepted?: () => void;
+    } = {},
   ): Promise<void> {
     const custom = { ...message, role: "custom", timestamp: Date.now() } as AgentMessage;
     if (!options.triggerTurn) {
@@ -274,6 +288,7 @@ export class HarnessController {
 
     const accepted = await this.lane.accept({ kind: "prompt", prompt: custom }, context);
     if (accepted.ok) {
+      options.onAccepted?.();
       await this.drive(accepted.value.operationId);
       return;
     }

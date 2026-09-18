@@ -343,7 +343,6 @@ export async function runDetachedSubagentSession(
     },
   );
   options.onUpdate?.({ content: [], details: readyDetails });
-  options.onReady?.(readyDetails);
 
   let lastText = "";
   let observedFinalAssistant: AssistantMessage | undefined;
@@ -422,6 +421,7 @@ export async function runDetachedSubagentSession(
     }
     if (subagentSession.isStreaming) {
       // Another live caller owns this operation; wait for its normal driver to finish.
+      options.onReady?.(readyDetails);
       await subagentSession.waitForIdle();
     } else if (!subagentSession.snapshot.lastResult) {
       if (existing) throw new Error("Detached subagent operation was interrupted");
@@ -431,8 +431,10 @@ export async function runDetachedSubagentSession(
           content: subagentNotice.text,
           display: true,
         },
-        { triggerTurn: true },
+        { triggerTurn: true, onAccepted: () => options.onReady?.(readyDetails) },
       );
+    } else {
+      options.onReady?.(readyDetails);
     }
     const branch = subagentSession.sessionManager.getBranch();
     const marker = branch.findLastIndex(

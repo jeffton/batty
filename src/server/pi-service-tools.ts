@@ -200,6 +200,12 @@ export interface SubagentToolDependencies extends CommonToolDependencies {
   startDetachedSubagentSession: (
     request: DetachedSubagentRequest,
   ) => Promise<DetachedSubagentResult>;
+  stopSubagent: (parentSessionId: string, subagentSessionId: string) => Promise<void>;
+  steerSubagent: (
+    parentSessionId: string,
+    subagentSessionId: string,
+    prompt: string,
+  ) => Promise<void>;
 }
 
 export interface CronToolDependencies {
@@ -214,29 +220,56 @@ export function createSubagentTool({
   resolveSubagentDefaults,
   runDetachedSubagentSession,
   startDetachedSubagentSession,
+  stopSubagent,
+  steerSubagent,
 }: SubagentToolDependencies): ToolDefinition<typeof SubagentToolSchema> {
   return {
     name: SUBAGENT_TOOL_NAME,
     label: "Subagent",
     description:
-      "Run a subagent in the current workspace. Synchronous runs return the reply directly; async runs deliver it into the parent session later.",
+      "Run a subagent in the current workspace, stop a running subagent, or queue steering instructions for one. Synchronous runs return the reply directly; async runs deliver it into the parent session later.",
     promptSnippet:
-      "Run a subagent in the current workspace, optionally in the background or with the current session context.",
+      "Run, stop, or steer a subagent in the current workspace. Async runs can be managed by session id.",
     promptGuidelines: [
       "Use this tool to delegate focused work to another agent without leaving the current session.",
-      "Prefer omitting model and effort so the subagent inherits the current session settings.",
+      "Use action=run to start a subagent. Prefer omitting model and effort so it inherits the current session settings.",
       "Subagents start fresh by default and only get the workspace system prompts unless includeSessionContext=true is set.",
       "Set async=true to continue working while the subagent runs. Its result will automatically start or steer a later parent turn.",
+      "Use action=steer with sessionId and prompt to queue additional instructions for a running subagent.",
+      "Use action=stop with sessionId to stop a running subagent.",
     ],
     parameters: SubagentToolSchema,
     execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+      const parentSessionId = ctx.sessionManager.getSessionId();
+      if (params.action === "stop") {
+        const subagentSessionId = String(params.sessionId ?? "").trim();
+        if (!subagentSessionId) throw new Error("sessionId is required to stop a subagent");
+        await stopSubagent(parentSessionId, subagentSessionId);
+        return {
+          content: [{ type: "text", text: `Stopped subagent ${subagentSessionId}.` }],
+          details: {},
+          isError: false,
+        };
+      }
+      if (params.action === "steer") {
+        const subagentSessionId = String(params.sessionId ?? "").trim();
+        if (!subagentSessionId) throw new Error("sessionId is required to steer a subagent");
+        const prompt = String(params.prompt ?? "").trim();
+        if (!prompt) throw new Error("prompt is required to steer a subagent");
+        await steerSubagent(parentSessionId, subagentSessionId, prompt);
+        return {
+          content: [{ type: "text", text: `Queued steering for subagent ${subagentSessionId}.` }],
+          details: {},
+          isError: false,
+        };
+      }
+
       const parentSubagentDepth = getSubagentSessionDepth(ctx.sessionManager.getEntries());
       if (parentSubagentDepth >= MAX_SUBAGENT_DEPTH) {
         throw new Error("subagent tool cannot be called more than two levels deep");
       }
 
-      const sessionId = ctx.sessionManager.getSessionId();
-      const defaults = resolveSubagentDefaults(sessionId, ctx);
+      const defaults = resolveSubagentDefaults(parentSessionId, ctx);
       const modelId =
         typeof params.model === "string" && params.model.trim().length > 0
           ? params.model.trim()
@@ -269,7 +302,7 @@ export function createSubagentTool({
       const request: DetachedSubagentRequest = {
         sessionId: childSessionId,
         workspace,
-        parentSessionId: sessionId,
+        parentSessionId,
         parentSessionPath: (
           ctx.sessionManager as { getSessionFile?: () => string | undefined }
         ).getSessionFile?.(),

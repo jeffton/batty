@@ -81,6 +81,13 @@ export function buildSubagentRuntimeNotice(depth: number, prompt: string): Runti
   };
 }
 
+export function buildSubagentSteeringRuntimeNotice(prompt: string): RuntimeNotice {
+  return {
+    kind: "subagent",
+    text: ["Steering message from the parent agent:", "", prompt.trim()].join("\n"),
+  };
+}
+
 export function buildRuntimeNoticeMessage(notice: RuntimeNotice, timestamp: number): AgentMessage {
   return {
     role: "custom",

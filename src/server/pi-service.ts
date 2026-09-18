@@ -80,6 +80,7 @@ import {
   type WebSession,
 } from "./pi-service-types";
 import type { CronService } from "./cron";
+import { buildSubagentSteeringRuntimeNotice } from "./runtime-notices";
 import {
   deliverCronJobRun,
   deliverSkippedCronJobRun,
@@ -657,6 +658,7 @@ export class PiService {
             text: [
               "Subagent started asynchronously.",
               "",
+              `Session ID: ${child.sessionId}`,
               `Session: ${child.sessionPath}`,
               "Its final result will be delivered automatically.",
             ].join("\n"),
@@ -675,6 +677,46 @@ export class PiService {
           error,
         });
       });
+    });
+  }
+
+  private requireRunningOwnedSubagent(
+    parentSessionId: string,
+    subagentSessionId: string,
+  ): AgentSession {
+    const child = this.liveSessions.get(subagentSessionId)?.session;
+    if (!child?.isStreaming) throw new Error(`Subagent is not running: ${subagentSessionId}`);
+    const marker = child.sessionManager
+      .getEntries()
+      .findLast(
+        (entry) => entry.type === "custom" && entry.customType === "batty-subagent-session",
+      );
+    const markerData = marker?.type === "custom" ? marker.data : undefined;
+    if (
+      (markerData as { parentSessionId?: string } | undefined)?.parentSessionId !== parentSessionId
+    ) {
+      throw new Error(`Subagent does not belong to this session: ${subagentSessionId}`);
+    }
+    return child;
+  }
+
+  private async stopSubagent(parentSessionId: string, subagentSessionId: string): Promise<void> {
+    await this.requireRunningOwnedSubagent(parentSessionId, subagentSessionId).abort();
+  }
+
+  private async steerSubagent(
+    parentSessionId: string,
+    subagentSessionId: string,
+    prompt: string,
+  ): Promise<void> {
+    const notice = buildSubagentSteeringRuntimeNotice(prompt);
+    await this.requireRunningOwnedSubagent(
+      parentSessionId,
+      subagentSessionId,
+    ).queueCustomSteeringMessage({
+      customType: `batty-runtime-notice:${notice.kind}`,
+      content: notice.text,
+      display: true,
     });
   }
 
@@ -945,6 +987,10 @@ export class PiService {
               this.resolveSubagentDefaults(sessionId, ctx),
             runDetachedSubagentSession: (request) => this.runDetachedSubagentSession(request),
             startDetachedSubagentSession: (request) => this.startDetachedSubagentSession(request),
+            stopSubagent: (parentSessionId, subagentSessionId) =>
+              this.stopSubagent(parentSessionId, subagentSessionId),
+            steerSubagent: (parentSessionId, subagentSessionId, prompt) =>
+              this.steerSubagent(parentSessionId, subagentSessionId, prompt),
           },
           workspace,
         ),

@@ -16,8 +16,12 @@ export const SUBAGENT_EFFORT_LEVELS = [
 ] as const;
 export type SubagentEffort = (typeof SUBAGENT_EFFORT_LEVELS)[number];
 
+export type SubagentToolAction = "run" | "stop" | "steer";
+
 export interface SubagentToolInput {
-  prompt: string;
+  action: SubagentToolAction;
+  sessionId?: string;
+  prompt?: string;
   model?: string;
   effort?: string;
   includeSessionContext?: boolean;

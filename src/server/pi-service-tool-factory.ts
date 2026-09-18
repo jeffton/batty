@@ -58,6 +58,12 @@ export type PiServiceToolFactoryContext = {
   startDetachedSubagentSession: (
     request: DetachedSubagentToolRequest,
   ) => Promise<DetachedSubagentToolResult>;
+  stopSubagent: (parentSessionId: string, subagentSessionId: string) => Promise<void>;
+  steerSubagent: (
+    parentSessionId: string,
+    subagentSessionId: string,
+    prompt: string,
+  ) => Promise<void>;
 };
 
 export function createPiServiceTools(
@@ -71,6 +77,8 @@ export function createPiServiceTools(
       resolveSubagentDefaults: context.resolveSubagentDefaults,
       runDetachedSubagentSession: context.runDetachedSubagentSession,
       startDetachedSubagentSession: context.startDetachedSubagentSession,
+      stopSubagent: context.stopSubagent,
+      steerSubagent: context.steerSubagent,
     }),
     createCronTool({
       workspace,

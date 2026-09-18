@@ -96,6 +96,28 @@ describe("AgentHarness controller", () => {
     expect(observed).toEqual(["user", "assistant"]);
   });
 
+  it("queues custom steering messages without waiting for the active turn", async () => {
+    const f = await fixture();
+    await f.session.lane.accept({ kind: "prompt", prompt: "initial" }, context);
+
+    await f.session.queueCustomSteeringMessage({
+      customType: "batty-runtime-notice:subagent",
+      content: "Steering message from the parent agent:\n\nFocus on tests",
+      display: true,
+    });
+
+    expect(f.session.pendingMessageCount).toBe(1);
+    expect(f.session.snapshot.queues[0]).toMatchObject({
+      kind: "steer",
+      message: {
+        role: "custom",
+        customType: "batty-runtime-notice:subagent",
+        content: "Steering message from the parent agent:\n\nFocus on tests",
+        display: true,
+      },
+    });
+  });
+
   it("steers a custom trigger into a busy turn without stranding it after settlement", async () => {
     const f = await fixture();
     f.faux.setResponses([fauxAssistantMessage("after notice")]);

@@ -112,7 +112,15 @@ export const CronToolSchema = Type.Object(
 
 export const SubagentToolSchema = Type.Object(
   {
-    prompt: Type.String({ description: "Prompt the subagent should run." }),
+    action: StringEnum(["run", "stop", "steer"] as const, {
+      description: "Run a subagent, stop a running subagent, or steer a running subagent.",
+    }),
+    sessionId: Type.Optional(
+      Type.String({ description: "Subagent session id. Required for stop and steer." }),
+    ),
+    prompt: Type.Optional(
+      Type.String({ description: "Task for run, or additional instructions for steer." }),
+    ),
     model: Type.Optional(
       Type.String({ description: "Model id for the subagent, for example openai/gpt-5." }),
     ),

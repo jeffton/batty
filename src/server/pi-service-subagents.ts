@@ -3,8 +3,10 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { HarnessClosed, HarnessFault } from "@earendil-works/pi-agent-core";
 import { appendResultDelivery } from "./session-result-delivery";
 import { HarnessSessionStore as SessionManager } from "./harness-session-store";
+import { createSessionManagerWithPreviousContext } from "./previous-context";
 import type { HarnessController as AgentSession } from "./harness-controller";
 import type {
+  PreviousContextMode,
   SessionState,
   SessionSummary,
   ToolExecutionDetails,
@@ -106,7 +108,7 @@ export interface DetachedSubagentOptions {
   prompt: string;
   modelId: string;
   thinkingLevel: string;
-  includeSessionContext: boolean;
+  includePreviousContext: PreviousContextMode;
   respondIn: "tool-call" | "session";
   deliveryMode?: "append" | "prompt";
   preludeNotices?: RuntimeNotice[];
@@ -174,7 +176,7 @@ function buildDetachedSubagentResult(
       prompt: options.prompt,
       model: options.modelId,
       effort: options.thinkingLevel,
-      includeSessionContext: options.includeSessionContext,
+      includePreviousContext: options.includePreviousContext,
       respondIn: options.respondIn,
       async: options.deliveryMode === "prompt",
     },
@@ -236,30 +238,29 @@ function resolveDetachedContextLeafId(
 async function createDetachedSubagentSessionManager(
   deps: RunDetachedSubagentDeps,
   options: DetachedSubagentOptions,
-): Promise<SessionManager> {
+): Promise<{ manager: SessionManager; chatOnlyMessages?: Message[] }> {
   if (options.sessionId) {
     const existing = await SessionManager.existing(
       options.workspace.path,
       deps.workspaceSessionDir,
       options.sessionId,
     );
-    if (existing) return existing;
+    if (existing) return { manager: existing };
   }
-  if (!options.includeSessionContext) {
-    return SessionManager.create(
-      options.workspace.path,
-      deps.workspaceSessionDir,
-      options.parentSessionId,
-      options.sessionId,
-    );
-  }
-  if (!options.parentSessionPath) {
-    throw new Error("Cannot include session context without a persisted parent session");
-  }
-
-  const sourceManager = await SessionManager.open(options.parentSessionPath);
-  const leafId = resolveDetachedContextLeafId(sourceManager, options);
-  return sourceManager.fork(deps.workspaceSessionDir, leafId ?? null, options.sessionId);
+  const sourceManager =
+    options.includePreviousContext && options.parentSessionPath
+      ? await SessionManager.open(options.parentSessionPath)
+      : undefined;
+  const leafId = sourceManager ? resolveDetachedContextLeafId(sourceManager, options) : undefined;
+  return createSessionManagerWithPreviousContext({
+    cwd: options.workspace.path,
+    targetRoot: deps.workspaceSessionDir,
+    parentSessionId: options.parentSessionId,
+    sessionId: options.sessionId,
+    sourceSessionPath: options.parentSessionPath,
+    leafId,
+    mode: options.includePreviousContext,
+  });
 }
 
 function subagentUpdateContent(
@@ -275,7 +276,7 @@ export async function runDetachedSubagentSession(
   deps: RunDetachedSubagentDeps,
   options: DetachedSubagentOptions,
 ): Promise<DetachedSubagentResult> {
-  const manager = await createDetachedSubagentSessionManager(deps, options);
+  const { manager, chatOnlyMessages } = await createDetachedSubagentSessionManager(deps, options);
   const existing = manager
     .getEntries()
     .some(
@@ -295,6 +296,9 @@ export async function runDetachedSubagentSession(
         },
   );
   const subagentSession = result.session;
+  if (!existing && chatOnlyMessages) {
+    await appendMessages(subagentSession, chatOnlyMessages);
+  }
   if (!existing)
     await subagentSession.sessionManager.appendCustomEntry(SUBAGENT_SESSION_CUSTOM_TYPE, {
       sessionId: subagentSession.sessionId,
@@ -313,6 +317,7 @@ export async function runDetachedSubagentSession(
   const subagentNotice = buildSubagentRuntimeNotice(
     options.parentSubagentDepth + 1,
     options.prompt,
+    options.includePreviousContext,
   );
   const preludeNotices = options.preludeNotices ?? [];
   const initialTimestamp = Date.now();
@@ -329,7 +334,7 @@ export async function runDetachedSubagentSession(
       prompt: options.prompt,
       model: options.modelId,
       effort: options.thinkingLevel,
-      includeSessionContext: options.includeSessionContext,
+      includePreviousContext: options.includePreviousContext,
       respondIn: options.respondIn,
       async: options.deliveryMode === "prompt",
     },
@@ -381,7 +386,7 @@ export async function runDetachedSubagentSession(
           prompt: options.prompt,
           model: options.modelId,
           effort: options.thinkingLevel,
-          includeSessionContext: options.includeSessionContext,
+          includePreviousContext: options.includePreviousContext,
           respondIn: options.respondIn,
           async: options.deliveryMode === "prompt",
         },

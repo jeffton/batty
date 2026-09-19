@@ -1,6 +1,10 @@
 import { easyModeMessage } from "@/client/lib/easy-mode";
 import { isAttachmentOutputToolCall } from "@/client/lib/transcript";
 import type { ToolDisplayState, TranscriptMessageView } from "@/client/lib/transcript";
+import {
+  isTranscriptDetailsBlock,
+  isTranscriptDetailsMessageRole,
+} from "@/shared/chat-only-context";
 
 interface DetailsToggle {
   sectionKey: string;
@@ -91,16 +95,14 @@ function hasExpandableDetails(entry: TranscriptMessageView): boolean {
     return true;
   }
 
-  if (message.role === "toolResult" || message.role === "bashExecution") {
-    return true;
-  }
+  if (isTranscriptDetailsMessageRole(message.role)) return true;
 
   return (
     "blocks" in message &&
     message.blocks.some(
       (block) =>
-        block.type === "toolCall" ||
-        (block.type === "thinking" && block.thinking.trim().length > 0),
+        isTranscriptDetailsBlock(block) &&
+        (block.type !== "thinking" || block.thinking.trim().length > 0),
     )
   );
 }
@@ -124,9 +126,7 @@ function hidesExpandableDetails(
   }
 
   return originalMessage.blocks.some(
-    (block) =>
-      (block.type === "toolCall" || block.type === "thinking") &&
-      !collapsedMessage.blocks.includes(block),
+    (block) => isTranscriptDetailsBlock(block) && !collapsedMessage.blocks.includes(block),
   );
 }
 

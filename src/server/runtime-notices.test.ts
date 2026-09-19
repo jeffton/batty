@@ -50,6 +50,16 @@ describe("runtime notices", () => {
     },
   );
 
+  it("explains chat-only context to detached cron runs", () => {
+    const { text } = buildCronRuntimeNotice({
+      scheduleLabel: "every 1h",
+      prompt: "Research",
+      session: { kind: "daily-detached", includePreviousContext: "chat-only" },
+    });
+    expect(text).toContain("chat-only transcript of the daily context");
+    expect(text).toContain("Tool calls, tool results, thinking");
+  });
+
   it.each(["delivery", "skipped"] as const)(
     "distinguishes %s notices from execution instructions",
     (phase) => {
@@ -71,6 +81,12 @@ describe("runtime notices", () => {
       kind: "subagent",
       text: "You are a subagent carrying out a task assigned by a parent agent. Your final response will be returned to that agent.\nSubagents you create cannot delegate further.\n\nAssigned task:\nChild work",
     });
+  });
+
+  it("mentions chat-only parent context in subagent notices", () => {
+    expect(buildSubagentRuntimeNotice(1, "Child work", "chat-only").text).toContain(
+      "chat-only transcript of the parent session",
+    );
   });
 
   it("builds subagent notices for the maximum depth", () => {

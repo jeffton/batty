@@ -368,7 +368,7 @@ describe("createSubagentTool", () => {
     } as any;
   }
 
-  it("returns a normal tool result after a successful detached subagent run", async () => {
+  it("passes chat-only previous context to a detached subagent run", async () => {
     const runDetachedSubagentSession = vi.fn(async () => ({
       text: "done",
       details: {
@@ -376,7 +376,7 @@ describe("createSubagentTool", () => {
           prompt: "Inspect",
           model: "openai/gpt-5",
           effort: "medium",
-          includeSessionContext: false,
+          includePreviousContext: "chat-only",
           respondIn: "tool-call",
           messageCount: 1,
         },
@@ -395,7 +395,7 @@ describe("createSubagentTool", () => {
 
     const result = await tool.execute(
       "tool-call-1",
-      { action: "run", prompt: "Inspect" },
+      { action: "run", prompt: "Inspect", includePreviousContext: "chat-only" },
       undefined,
       undefined,
       createContext(),
@@ -408,7 +408,7 @@ describe("createSubagentTool", () => {
         prompt: "Inspect",
         modelId: "openai/gpt-5",
         thinkingLevel: "medium",
-        includeSessionContext: false,
+        includePreviousContext: "chat-only",
         respondIn: "tool-call",
         currentToolCallId: "tool-call-1",
       }),
@@ -429,7 +429,7 @@ describe("createSubagentTool", () => {
           prompt: "Inspect",
           model: "openai/gpt-5",
           effort: "medium",
-          includeSessionContext: false,
+          includePreviousContext: false,
           respondIn: "session",
           async: true,
           messageCount: 0,
@@ -542,7 +542,7 @@ describe("createSubagentTool", () => {
             prompt: "Inspect",
             model: "openai/gpt-5",
             effort: "medium",
-            includeSessionContext: false,
+            includePreviousContext: false,
             respondIn: "tool-call",
             messageCount: 1,
             errorMessage: "subagent failed",
@@ -648,7 +648,7 @@ describe("createSubagentTool", () => {
             prompt: "Inspect",
             model: "openai/gpt-5",
             effort: "medium",
-            includeSessionContext: false,
+            includePreviousContext: false,
             respondIn: "tool-call" as const,
             messageCount: 1,
           },

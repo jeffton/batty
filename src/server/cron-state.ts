@@ -1,4 +1,4 @@
-import type { CronJobSession, CronJobState } from "@/shared/types";
+import type { CronJobSession, CronJobState, PreviousContextMode } from "@/shared/types";
 import { createHttpError, normalizeNonEmptyString } from "./cron-http";
 
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
@@ -8,7 +8,7 @@ export type StoredCronJobSession =
   | { kind: "daily-inline" }
   | {
       kind: "daily-detached";
-      includePreviousContext: boolean;
+      includePreviousContext: PreviousContextMode;
     };
 
 export function normalizeThinkingLevel(value: string | undefined): string {
@@ -42,7 +42,10 @@ export function normalizeSession(value: CronJobSession | undefined): StoredCronJ
     case "daily-detached":
       return {
         kind: "daily-detached",
-        includePreviousContext: value.includePreviousContext === true,
+        includePreviousContext:
+          value.includePreviousContext === true || value.includePreviousContext === "chat-only"
+            ? value.includePreviousContext
+            : false,
       };
     default:
       throw createHttpError(
@@ -64,7 +67,10 @@ export function normalizeStoredSession(value: unknown): StoredCronJobSession {
     case "daily-inline":
       return { kind: "daily-inline" };
     case "daily-detached":
-      if (typeof session.includePreviousContext !== "boolean") {
+      if (
+        typeof session.includePreviousContext !== "boolean" &&
+        session.includePreviousContext !== "chat-only"
+      ) {
         throw new Error("Invalid daily detached context setting");
       }
       return {
@@ -98,8 +104,10 @@ export function formatSessionLabel(session: CronJobSession | StoredCronJobSessio
       return "Daily inline";
     case "daily-detached":
       return session.includePreviousContext === true
-        ? "Daily detached · with previous context"
-        : "Daily detached · fresh context";
+        ? "Daily detached · full previous context"
+        : session.includePreviousContext === "chat-only"
+          ? "Daily detached · chat-only previous context"
+          : "Daily detached · fresh context";
   }
 }
 

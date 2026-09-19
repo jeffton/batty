@@ -162,6 +162,8 @@ export type CronJobScheduleInput =
       timezone?: string;
     };
 
+export type PreviousContextMode = boolean | "chat-only";
+
 export type CronJobSession =
   | {
       kind: "new";
@@ -171,7 +173,7 @@ export type CronJobSession =
     }
   | {
       kind: "daily-detached";
-      includePreviousContext?: boolean;
+      includePreviousContext?: PreviousContextMode;
     };
 
 export interface RunningSubagent {

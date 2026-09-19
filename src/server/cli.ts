@@ -5,6 +5,7 @@ import type {
   CreateCronJobInput,
   CronJobScheduleInput,
   CronJobSession,
+  PreviousContextMode,
   UpdateCronJobInput,
 } from "@/shared/types";
 interface ParsedArgs {
@@ -85,8 +86,8 @@ function usage(): string {
     "  auth code                  Print a fresh one-time 8 char auth code",
     "  drain                      Stop accepting new turns and wait for active turns",
     "  cron list [--workspace ID] [--json]",
-    "  cron add --workspace ID --prompt TEXT --model ID --thinking LEVEL (--in DUR | --at ISO | --every DUR | --cron EXPR) [--tz IANA] [--session new|daily-inline|daily-detached] [--daily-context include|omit]",
-    "  cron edit <jobId> [fields...] [--session new|daily-inline|daily-detached] [--daily-context include|omit]",
+    "  cron add --workspace ID --prompt TEXT --model ID --thinking LEVEL (--in DUR | --at ISO | --every DUR | --cron EXPR) [--tz IANA] [--session new|daily-inline|daily-detached] [--daily-context include|chat-only|omit]",
+    "  cron edit <jobId> [fields...] [--session new|daily-inline|daily-detached] [--daily-context include|chat-only|omit]",
     "  cron rm <jobId>",
     "",
     "Examples:",
@@ -153,7 +154,7 @@ function buildSchedule(flags: Record<string, string | boolean>): CronJobSchedule
   };
 }
 
-function parseDailyContext(value: string | undefined): boolean | undefined {
+function parseDailyContext(value: string | undefined): PreviousContextMode | undefined {
   if (!value) {
     return undefined;
   }
@@ -161,10 +162,14 @@ function parseDailyContext(value: string | undefined): boolean | undefined {
   switch (value) {
     case "include":
       return true;
+    case "chat-only":
+      return "chat-only";
     case "omit":
       return false;
     default:
-      throw new Error(`Invalid --daily-context value: ${value}. Expected include or omit.`);
+      throw new Error(
+        `Invalid --daily-context value: ${value}. Expected include, chat-only, or omit.`,
+      );
   }
 }
 

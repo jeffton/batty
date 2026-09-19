@@ -268,7 +268,7 @@ describe("detached result delivery after ephemeral harness disposal", () => {
         prompt: "Child work",
         modelId: "faux/faux-1",
         thinkingLevel: "off",
-        includeSessionContext: false,
+        includePreviousContext: false,
         respondIn: "session",
       },
     );

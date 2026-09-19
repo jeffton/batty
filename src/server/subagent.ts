@@ -1,6 +1,6 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
-import type { SentFileDescriptor, SiteDescriptor } from "@/shared/types";
+import type { PreviousContextMode, SentFileDescriptor, SiteDescriptor } from "@/shared/types";
 
 export const SUBAGENT_TOOL_NAME = "subagent";
 export const SUBAGENT_SESSION_CUSTOM_TYPE = "batty-subagent-session";
@@ -24,7 +24,7 @@ export interface SubagentToolInput {
   prompt?: string;
   model?: string;
   effort?: string;
-  includeSessionContext?: boolean;
+  includePreviousContext?: PreviousContextMode;
   async?: boolean;
 }
 
@@ -35,7 +35,7 @@ export interface SubagentToolDetails extends Record<string, unknown> {
     prompt: string;
     model: string;
     effort: string;
-    includeSessionContext: boolean;
+    includePreviousContext: PreviousContextMode;
     respondIn: SubagentRespondIn;
     async: boolean;
     messageCount: number;
@@ -241,7 +241,7 @@ export function buildSubagentDetails(
   input: Required<Pick<SubagentToolInput, "prompt">> & {
     model: string;
     effort: string;
-    includeSessionContext: boolean;
+    includePreviousContext: PreviousContextMode;
     respondIn: SubagentRespondIn;
     async?: boolean;
   },
@@ -268,7 +268,7 @@ export function buildSubagentDetails(
       prompt: input.prompt,
       model: input.model,
       effort: input.effort,
-      includeSessionContext: input.includeSessionContext,
+      includePreviousContext: input.includePreviousContext,
       respondIn: input.respondIn,
       async: input.async === true,
       messageCount: messages.length,

@@ -81,15 +81,28 @@ describe("cron store", () => {
 
     expect(updated.session).toEqual({ kind: "daily-detached", includePreviousContext: true });
     expect(buildCronJobSummary(updated)).toContain(
-      "Session: Daily detached · with previous context",
+      "Session: Daily detached · full previous context",
+    );
+
+    const chatOnly = await store.updateJob(inline.id, {
+      session: { kind: "daily-detached", includePreviousContext: "chat-only" },
+    });
+    expect(chatOnly.session).toEqual({
+      kind: "daily-detached",
+      includePreviousContext: "chat-only",
+    });
+    expect(buildCronJobSummary(chatOnly)).toContain(
+      "Session: Daily detached · chat-only previous context",
     );
 
     const persisted = JSON.parse(await fs.readFile(store.filePath, "utf8")) as {
-      jobs: Array<{ session?: { kind?: string; includePreviousContext?: boolean } }>;
+      jobs: Array<{
+        session?: { kind?: string; includePreviousContext?: boolean | "chat-only" };
+      }>;
     };
     expect(persisted.jobs[0]?.session).toEqual({
       kind: "daily-detached",
-      includePreviousContext: true,
+      includePreviousContext: "chat-only",
     });
   });
 

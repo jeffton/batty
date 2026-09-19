@@ -1,5 +1,5 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { CronJobSession } from "@/shared/types";
+import type { CronJobSession, PreviousContextMode } from "@/shared/types";
 
 export const BATTY_RUNTIME_NOTICE_CUSTOM_TYPE = "batty-runtime-notice";
 
@@ -59,18 +59,29 @@ function cronSessionInstructions(session: CronJobSession): string[] {
         "Session mode: daily-detached. Each run gets a separate session alongside the daily conversation.",
         session.includePreviousContext === true
           ? "You have a fixed snapshot of the daily context, copied after pending work settles and possibly compacted."
-          : "You start fresh with workspace system instructions and the scheduled prompt.",
+          : session.includePreviousContext === "chat-only"
+            ? "You have a chat-only transcript of the daily context. Tool calls, tool results, thinking, and other transcript details were omitted."
+            : "You start fresh with workspace system instructions and the scheduled prompt.",
         "Detailed work and tool calls stay here; your final response or an error returns to the associated daily session. Make the final response self-contained. Use NO_REPLY for a silent successful run.",
         "This isolation protects daily context. Delegate for useful division of work; manage context usage locally.",
       ];
   }
 }
 
-export function buildSubagentRuntimeNotice(depth: number, prompt: string): RuntimeNotice {
+export function buildSubagentRuntimeNotice(
+  depth: number,
+  prompt: string,
+  includePreviousContext: PreviousContextMode = false,
+): RuntimeNotice {
   return {
     kind: "subagent",
     text: [
       "You are a subagent carrying out a task assigned by a parent agent. Your final response will be returned to that agent.",
+      ...(includePreviousContext === "chat-only"
+        ? [
+            "You received a chat-only transcript of the parent session. Tool calls, tool results, thinking, and other transcript details were omitted.",
+          ]
+        : []),
       depth < 2
         ? "Subagents you create cannot delegate further."
         : "Do not call the subagent tool from this session.",

@@ -9,6 +9,7 @@ import {
 } from "@/shared/pi-tools";
 import type {
   CreateCronJobInput,
+  PreviousContextMode,
   ToolExecutionDetails,
   UpdateCronJobInput,
   WorkspaceInfo,
@@ -181,7 +182,7 @@ interface DetachedSubagentRequest {
   prompt: string;
   modelId: string;
   thinkingLevel: string;
-  includeSessionContext: boolean;
+  includePreviousContext: PreviousContextMode;
   respondIn: "tool-call" | "session";
   deliveryMode?: "append" | "prompt";
   currentToolCallId?: string;
@@ -233,7 +234,7 @@ export function createSubagentTool({
     promptGuidelines: [
       "Use this tool to delegate focused work to another agent without leaving the current session.",
       "Use action=run to start a subagent. Prefer omitting model and effort so it inherits the current session settings.",
-      "Subagents start fresh by default and only get the workspace system prompts unless includeSessionContext=true is set.",
+      'Subagents start fresh by default. Set includePreviousContext=true for full context with prompt-cache reuse, or includePreviousContext="chat-only" for only user and assistant messages without transcript details.',
       "Set async=true to continue working while the subagent runs. Its result will automatically start or steer a later parent turn.",
       "Use action=steer with sessionId and prompt to queue additional instructions for a running subagent.",
       "Use action=stop with sessionId to stop a running subagent.",
@@ -287,7 +288,10 @@ export function createSubagentTool({
         throw new Error("prompt is required for subagent");
       }
 
-      const includeSessionContext = params.includeSessionContext === true;
+      const includePreviousContext =
+        params.includePreviousContext === true || params.includePreviousContext === "chat-only"
+          ? params.includePreviousContext
+          : false;
       const replay = ctx as unknown as {
         invocation: import("@earendil-works/pi-agent-core").AgentHarnessToolInvocation;
         childSessionId: () => string;
@@ -310,7 +314,7 @@ export function createSubagentTool({
         prompt,
         modelId,
         thinkingLevel,
-        includeSessionContext,
+        includePreviousContext,
         respondIn: params.async === true ? "session" : "tool-call",
         currentToolCallId: toolCallId,
       };
@@ -355,7 +359,7 @@ export function createCronTool({
       "Prefer omitting model and thinkingLevel so the cron job reuses the current session settings. Only set them explicitly if the user asks for different ones.",
       'Use session.kind="daily-inline" to run directly in one workspace daily session.',
       'Use session.kind="daily-detached" to run asynchronously beside one workspace daily session.',
-      "Daily detached runs start fresh by default and only reuse earlier daily-session context when session.includePreviousContext=true is set.",
+      'Daily detached runs start fresh by default. Set session.includePreviousContext=true for full context with prompt-cache reuse, or "chat-only" for only user and assistant messages without transcript details.',
       'Use schedule.kind="at" with schedule.in for relative times like 10m or 2h.',
       'Use schedule.kind="cron" with a standard cron expression and optional timezone for recurring schedules.',
       'Use schedule.kind="every" with durations like 15m, 2h, or 1d for interval schedules.',

@@ -1,6 +1,6 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { ToolExecutionDetails, WorkspaceInfo } from "@/shared/types";
+import type { PreviousContextMode, ToolExecutionDetails, WorkspaceInfo } from "@/shared/types";
 import type { AppConfig } from "./config";
 import type { BrowserService } from "./browser-service";
 import type { CronService } from "./cron";
@@ -23,7 +23,7 @@ type DetachedSubagentToolRequest = {
   prompt: string;
   modelId: string;
   thinkingLevel: string;
-  includeSessionContext: boolean;
+  includePreviousContext: PreviousContextMode;
   respondIn: "tool-call" | "session";
   deliveryMode?: "append" | "prompt";
   preludeNotices?: Array<{ kind: "cron" | "subagent"; text: string }>;

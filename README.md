@@ -143,8 +143,8 @@ pnpm batty -- --root /path/to/batty-root <command>
 batty auth code
 batty drain
 batty cron list [--workspace ID] [--json]
-batty cron add --workspace ID --prompt TEXT --model ID --thinking LEVEL (--in DUR | --at ISO | --every DUR | --cron EXPR) [--tz IANA] [--session new|daily-inline|daily-detached] [--daily-context include|omit]
-batty cron edit <jobId> [--workspace ID] [--prompt TEXT] [--model ID] [--thinking LEVEL] [--in DUR | --at ISO | --every DUR | --cron EXPR] [--tz IANA] [--session new|daily-inline|daily-detached] [--daily-context include|omit]
+batty cron add --workspace ID --prompt TEXT --model ID --thinking LEVEL (--in DUR | --at ISO | --every DUR | --cron EXPR) [--tz IANA] [--session new|daily-inline|daily-detached] [--daily-context include|chat-only|omit]
+batty cron edit <jobId> [--workspace ID] [--prompt TEXT] [--model ID] [--thinking LEVEL] [--in DUR | --at ISO | --every DUR | --cron EXPR] [--tz IANA] [--session new|daily-inline|daily-detached] [--daily-context include|chat-only|omit]
 batty cron rm <jobId>
 ```
 
@@ -173,11 +173,11 @@ Schedules supported by both the CLI and the built-in tool:
 - repeating interval schedules like `1h` or `1d`
 - cron expressions with an optional timezone
 - session mode `new`, `daily-inline`, or `daily-detached`
-- daily-detached context mode `include` or `omit`
+- daily-detached context mode `include`, `chat-only`, or `omit`
 
 If `--tz` / `timezone` is omitted for a cron expression, Batty uses the server's local timezone.
 
-Daily session reuse keeps one cron conversation per workspace day. `daily-inline` runs directly in that daily session like a regular session turn. `daily-detached` runs are stored as `subagent` tool calls in that session. Daily-detached runs start fresh from the workspace system prompts by default. `--daily-context include` / `session.includePreviousContext=true` reuses earlier daily-session context for daily-detached jobs. The day rollover defaults to `04:00` local time and can be changed in `options.json`.
+Daily session reuse keeps one cron conversation per workspace day. `daily-inline` runs directly in that daily session like a regular session turn. `daily-detached` runs are stored as `subagent` tool calls in that session and start fresh by default. `--daily-context include` / `session.includePreviousContext=true` copies full context and preserves prompt-cache reuse. `--daily-context chat-only` / `session.includePreviousContext="chat-only"` copies only user and assistant chat messages. The day rollover defaults to `04:00` local time and can be changed in `options.json`.
 
 Cron job state includes:
 

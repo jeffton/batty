@@ -13,6 +13,7 @@ import type {
   ProviderAuthStartResponse,
   ProviderAuthStatus,
   ProviderUsage,
+  PreviousContextMode,
   ServerEvent,
   SessionMessagesPage,
   SessionState,
@@ -28,6 +29,7 @@ import { closeSharedBrowser } from "./browser-runtime";
 import { ModelConfigWatcher } from "./model-config-watcher";
 import { resolveModel } from "./model-resolution";
 import { getSessionContextUsage } from "./pi-context-usage";
+import { createSessionManagerWithPreviousContext } from "./previous-context";
 import {
   createPiAgentSession as createPiAgentSessionImpl,
   refreshBattySystemPrompt,
@@ -326,24 +328,36 @@ export class PiService {
       modelId: string;
       thinkingLevel: string;
       parentSessionId?: string;
-      copySessionPath?: string;
+      previousContext?: {
+        sourceSessionPath: string;
+        mode: true | "chat-only";
+      };
     },
   ): Promise<SessionState> {
     const sessionDir = options.parentSessionId
       ? workspaceCronSessionDir(this.config, workspace.id, options.jobId, options.runId)
       : workspaceSessionDir(this.config, workspace.id);
-    const sessionManager = options.copySessionPath
-      ? await this.copySessionManager(
-          workspace,
-          sessionDir,
-          options.copySessionPath,
-          await this.resolveCronContextCopyLeafId(options.parentSessionId, options.copySessionPath),
+    const contextLeafId = options.previousContext
+      ? await this.resolveCronContextCopyLeafId(
+          options.parentSessionId,
+          options.previousContext.sourceSessionPath,
         )
-      : await SessionManager.create(workspace.path, sessionDir);
+      : null;
+    const { manager: sessionManager, chatOnlyMessages } =
+      await createSessionManagerWithPreviousContext({
+        cwd: workspace.path,
+        targetRoot: sessionDir,
+        sourceSessionPath: options.previousContext?.sourceSessionPath,
+        leafId: contextLeafId,
+        mode: options.previousContext?.mode ?? false,
+      });
     const result = await this.createPiAgentSession(workspace, sessionManager, {
       modelId: options.modelId,
       thinkingLevel: options.thinkingLevel,
     });
+    for (const message of chatOnlyMessages ?? []) {
+      await result.session.sessionManager.appendMessage(message);
+    }
     await result.session.sessionManager.appendCustomEntry(
       CRON_RUN_SESSION_CUSTOM_TYPE,
       buildCronRunSessionBinding({
@@ -380,16 +394,6 @@ export class PiService {
     }
 
     return leafBeforeCurrentTurn(sessionManager.getBranch()) ?? sessionManager.getLeafId();
-  }
-
-  private async copySessionManager(
-    workspace: WorkspaceInfo,
-    sessionDir: string,
-    sourceSessionPath: string,
-    leafId: string | null,
-  ): Promise<SessionManager> {
-    const source = await SessionManager.open(sourceSessionPath);
-    return source.fork(sessionDir, leafId);
   }
 
   private async findSessionPath(workspace: WorkspaceInfo, sessionId: string): Promise<string> {
@@ -586,7 +590,7 @@ export class PiService {
     prompt: string;
     modelId: string;
     thinkingLevel: string;
-    includeSessionContext: boolean;
+    includePreviousContext: PreviousContextMode;
     respondIn: "tool-call" | "session";
     deliveryMode?: "append" | "prompt";
     preludeNotices?: Array<{ kind: "cron" | "subagent"; text: string }>;
@@ -672,7 +676,7 @@ export class PiService {
     prompt: string;
     modelId: string;
     thinkingLevel: string;
-    includeSessionContext: boolean;
+    includePreviousContext: PreviousContextMode;
     respondIn: "tool-call" | "session";
     deliveryMode?: "append" | "prompt";
     preludeNotices?: Array<{ kind: "cron" | "subagent"; text: string }>;

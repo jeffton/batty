@@ -1,3 +1,4 @@
+import type { PreviousContextMode } from "@/shared/types";
 import type { RouteContext } from "./context";
 
 interface CronJobRouteBody {
@@ -8,7 +9,7 @@ interface CronJobRouteBody {
   thinkingLevel?: string;
   session?: {
     kind?: string;
-    includePreviousContext?: boolean;
+    includePreviousContext?: PreviousContextMode;
   };
   schedule?: {
     kind?: string;

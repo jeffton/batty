@@ -107,13 +107,14 @@ describe("runCronJobSession", () => {
         preparingContext = false;
       }
     };
+    const createCronSession = vi.fn(async () => {
+      expect(preparingContext).toBe(true);
+      return { id: cron.id } as never;
+    });
 
     const result = await runCronJobSession(
       {
-        createCronSession: vi.fn(async () => {
-          expect(preparingContext).toBe(true);
-          return { id: cron.id } as never;
-        }),
+        createCronSession,
         promptCron: vi.fn(async () => {
           (cron.session as any).agent.state.messages = [
             { role: "user", content: "Inherited context", timestamp: 1 },
@@ -198,6 +199,15 @@ describe("runCronJobSession", () => {
       sessionPath: "/tmp/cron-session.jsonl",
     });
     expect(prepareSessionForContextCopy).toHaveBeenCalledWith(parent.id, expect.any(Function));
+    expect(createCronSession).toHaveBeenCalledWith(
+      parent.workspace,
+      expect.objectContaining({
+        previousContext: {
+          sourceSessionPath: "/tmp/daily-session.jsonl",
+          mode: true,
+        },
+      }),
+    );
     expect(onSessionStarted).toHaveBeenCalledWith({
       sessionId: "cron-session-id",
       sessionPath: "/tmp/cron-session.jsonl",

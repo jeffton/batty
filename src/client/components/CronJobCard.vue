@@ -134,13 +134,17 @@ function modelLabel(): string {
           <option value="daily-detached">daily session · detached</option>
         </select>
 
-        <label v-if="props.draft.sessionKind === 'daily-detached'" class="cron-popover__checkbox">
-          <input
+        <label v-if="props.draft.sessionKind === 'daily-detached'">
+          <span class="cron-popover__field-label">Previous context</span>
+          <select
             v-model="props.draft.includePreviousContext"
-            type="checkbox"
+            class="cron-popover__select"
             :disabled="props.draft.saving || props.draft.deleting"
-          />
-          <span>Include previous context</span>
+          >
+            <option :value="false">none</option>
+            <option value="chat-only">chat-only</option>
+            <option :value="true">full · preserves prompt cache</option>
+          </select>
         </label>
       </div>
 
@@ -335,6 +339,13 @@ function modelLabel(): string {
 
 .cron-popover__select {
   padding: 0.55rem 0.65rem;
+}
+
+.cron-popover__field-label {
+  display: block;
+  margin-bottom: 0.3rem;
+  color: var(--color-text-subtle);
+  font-size: 0.78rem;
 }
 
 .cron-popover__thinking-unavailable {

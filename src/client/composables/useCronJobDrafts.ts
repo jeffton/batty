@@ -1,7 +1,7 @@
 import { computed, reactive, watch, type ComputedRef } from "vue";
 import { resolveModelThinkingOptions } from "@/client/lib/thinking-levels";
 import type { useAppStore } from "@/client/stores/app";
-import type { CronJob } from "@/shared/types";
+import type { CronJob, PreviousContextMode } from "@/shared/types";
 
 export interface CronDraft {
   enabled: boolean;
@@ -9,7 +9,7 @@ export interface CronDraft {
   model: string;
   thinkingLevel: string;
   sessionKind: CronJob["session"]["kind"];
-  includePreviousContext: boolean;
+  includePreviousContext: PreviousContextMode;
   editing: boolean;
   saving: boolean;
   toggling: boolean;
@@ -19,9 +19,9 @@ export interface CronDraft {
 
 type AppStore = ReturnType<typeof useAppStore>;
 
-function includePreviousContextFor(job: CronJob): boolean {
+function includePreviousContextFor(job: CronJob): PreviousContextMode {
   return job.session.kind === "daily-detached"
-    ? job.session.includePreviousContext === true
+    ? (job.session.includePreviousContext ?? false)
     : false;
 }
 
@@ -155,8 +155,10 @@ export function useCronJobDrafts(store: AppStore): {
         return "daily · inline";
       case "daily-detached":
         return job.session.includePreviousContext === true
-          ? "daily · detached · with previous context"
-          : "daily · detached · fresh context";
+          ? "daily · detached · full context"
+          : job.session.includePreviousContext === "chat-only"
+            ? "daily · detached · chat-only context"
+            : "daily · detached · fresh context";
     }
   }
 

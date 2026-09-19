@@ -46,7 +46,10 @@ export type PiServiceCronAdapterContext = {
       modelId: string;
       thinkingLevel: string;
       parentSessionId?: string;
-      copySessionPath?: string;
+      previousContext?: {
+        sourceSessionPath: string;
+        mode: true | "chat-only";
+      };
     },
   ) => Promise<SessionState>;
   promptCron: (sessionId: string, notice: RuntimeNotice, operationId: string) => Promise<void>;
@@ -153,7 +156,7 @@ export async function runCronJobSession(
       ? await context.resolveOrCreateDailySession(job.workspace)
       : undefined;
   const includePreviousContext =
-    job.session.kind === "daily-detached" && job.session.includePreviousContext === true;
+    job.session.kind === "daily-detached" ? (job.session.includePreviousContext ?? false) : false;
   const createCronSession = () =>
     context.createCronSession(job.workspace, {
       jobId: job.jobId,
@@ -162,7 +165,12 @@ export async function runCronJobSession(
       thinkingLevel: job.thinkingLevel,
       ...(parent ? { parentSessionId: parent.sessionId } : {}),
       ...(parent && includePreviousContext
-        ? { copySessionPath: context.requireSessionPath(parent.id) }
+        ? {
+            previousContext: {
+              sourceSessionPath: context.requireSessionPath(parent.id),
+              mode: includePreviousContext,
+            },
+          }
         : {}),
     });
   let cronSession: SessionState;

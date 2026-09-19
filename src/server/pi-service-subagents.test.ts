@@ -79,7 +79,7 @@ async function setup() {
     prompt: "Child work",
     modelId: "faux/faux-1",
     thinkingLevel: "off",
-    includeSessionContext: false,
+    includePreviousContext: false,
     respondIn: "tool-call",
   };
   return { parent, children, deps, options };
@@ -87,13 +87,13 @@ async function setup() {
 
 describe("detached harness subagents", () => {
   it.each([false, true])(
-    "sends the task only in a runtime notice with includeSessionContext=%s",
-    async (includeSessionContext) => {
+    "sends the task only in a runtime notice with includePreviousContext=%s",
+    async (includePreviousContext) => {
       const { parent, deps, options } = await setup();
       parent.faux.setResponses([fauxAssistantMessage("done")]);
       const result = await runDetachedSubagentSession(deps, {
         ...options,
-        includeSessionContext,
+        includePreviousContext,
       });
       expect(result.isError).toBe(false);
       expect(result.generatedMessages).toEqual([
@@ -130,7 +130,7 @@ describe("detached harness subagents", () => {
     parent.faux.setResponses([fauxAssistantMessage("child answer")]);
     const result = await runDetachedSubagentSession(deps, {
       ...options,
-      includeSessionContext: true,
+      includePreviousContext: true,
       currentToolCallId: "invoke-child",
     });
     expect(result.isError).toBe(false);
@@ -156,9 +156,70 @@ describe("detached harness subagents", () => {
     );
   });
 
+  it("copies a chat-only parent transcript without details or cache lineage", async () => {
+    const { parent, deps, options, children } = await setup();
+    await parent.session.sessionManager.appendCustomEntry(BATTY_SYSTEM_PROMPT_CUSTOM_TYPE, {
+      appendedPrompt: "parent prompt",
+    });
+    await parent.session.lane.appendMessage(
+      { role: "user", content: "parent question", timestamp: 1 },
+      context,
+    );
+    await parent.session.lane.appendMessage(
+      fauxAssistantMessage([
+        { type: "thinking", thinking: "private reasoning" },
+        { type: "text", text: "parent answer" },
+        { type: "toolCall", id: "read-1", name: "read", arguments: { path: "x" } },
+      ]),
+      context,
+    );
+    await parent.session.lane.appendMessage(
+      {
+        role: "toolResult",
+        toolCallId: "read-1",
+        toolName: "read",
+        content: [{ type: "text", text: "tool output" }],
+        isError: false,
+        timestamp: 2,
+      },
+      context,
+    );
+    await parent.session.lane.appendMessage(
+      fauxAssistantMessage([
+        { type: "toolCall", id: "invoke-child", name: "subagent", arguments: {} },
+      ]),
+      context,
+    );
+    parent.faux.setResponses([fauxAssistantMessage("child answer")]);
+
+    await runDetachedSubagentSession(deps, {
+      ...options,
+      includePreviousContext: "chat-only",
+      currentToolCallId: "invoke-child",
+    });
+
+    const child = children.get(options.sessionId!)!;
+    expect(child.messages).toContainEqual(
+      expect.objectContaining({ role: "user", content: "parent question" }),
+    );
+    expect(child.messages).toContainEqual(
+      expect.objectContaining({
+        role: "assistant",
+        content: [expect.objectContaining({ type: "text", text: "parent answer" })],
+      }),
+    );
+    expect(JSON.stringify(child.messages)).not.toContain("private reasoning");
+    expect(JSON.stringify(child.messages)).not.toContain("tool output");
+    expect(JSON.stringify(child.messages)).not.toContain("read-1");
+    expect(child.sessionManager.getEntries()).not.toContainEqual(
+      expect.objectContaining({ customType: BATTY_SYSTEM_PROMPT_CUSTOM_TYPE }),
+    );
+    expect(JSON.stringify(child.messages)).toContain("chat-only transcript of the parent session");
+  });
+
   it.each([false, true])(
-    "persists depth for nested children with includeSessionContext=%s",
-    async (includeSessionContext) => {
+    "persists depth for nested children with includePreviousContext=%s",
+    async (includePreviousContext) => {
       const { parent, deps, options, children } = await setup();
       await parent.session.sessionManager.appendCustomEntry("batty-subagent-session", {
         parentSessionId: "root",
@@ -169,7 +230,7 @@ describe("detached harness subagents", () => {
       await runDetachedSubagentSession(deps, {
         ...options,
         parentSubagentDepth: 1,
-        includeSessionContext,
+        includePreviousContext,
       });
 
       expect(

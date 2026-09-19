@@ -20,6 +20,11 @@ const CronScheduleSchema = Type.Object(
   },
 );
 
+const PreviousContextSchema = Type.Union([Type.Boolean(), Type.Literal("chat-only")], {
+  description:
+    'Previous context mode. false starts fresh, true copies full context and preserves prompt-cache reuse, and "chat-only" copies only user and assistant chat messages without transcript details.',
+});
+
 const CronSessionSchema = Type.Union(
   [
     Type.Object(
@@ -47,12 +52,7 @@ const CronSessionSchema = Type.Union(
         kind: Type.Literal("daily-detached", {
           description: "Run asynchronously beside one workspace daily session.",
         }),
-        includePreviousContext: Type.Optional(
-          Type.Boolean({
-            description:
-              "Whether the cron run should include previous daily-session context. Defaults to false.",
-          }),
-        ),
+        includePreviousContext: Type.Optional(PreviousContextSchema),
       },
       {
         additionalProperties: false,
@@ -61,7 +61,7 @@ const CronSessionSchema = Type.Union(
   ],
   {
     description:
-      'Use {kind:"new"} for a fresh session each run, {kind:"daily-inline"} to run directly in one workspace daily session, or {kind:"daily-detached"} to run asynchronously beside that daily session. Detached runs start fresh unless includePreviousContext:true is set.',
+      'Use {kind:"new"} for a fresh session each run, {kind:"daily-inline"} to run directly in one workspace daily session, or {kind:"daily-detached"} to run asynchronously beside that daily session. Detached runs start fresh; set includePreviousContext:true for full context or "chat-only" for only user and assistant chat messages.',
   },
 );
 
@@ -129,13 +129,7 @@ export const SubagentToolSchema = Type.Object(
         description: "Effort level for the subagent: off, minimal, low, medium, high, xhigh, max.",
       }),
     ),
-    includeSessionContext: Type.Optional(
-      Type.Boolean({
-        default: false,
-        description:
-          "Whether to include the current session context. Defaults to false. When false, the subagent still gets the workspace system prompts.",
-      }),
-    ),
+    includePreviousContext: Type.Optional(PreviousContextSchema),
     async: Type.Optional(
       Type.Boolean({
         default: false,

@@ -307,7 +307,7 @@ describe("ChatMessage", () => {
               prompt: "Build the morning report",
               model: "openai/gpt-5",
               effort: "medium",
-              includeSessionContext: true,
+              includePreviousContext: true,
               respondIn: "tool-call",
               messageCount: 3,
             },

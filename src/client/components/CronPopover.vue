@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { PanelRightOpen, Square } from "@lucide/vue";
+import { PanelRightOpen } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import CronJobCard from "@/client/components/CronJobCard.vue";
 import FullPopover from "@/client/components/FullPopover.vue";
@@ -14,11 +14,35 @@ const props = defineProps<{
   anchorName: string;
 }>();
 
-type Tab = "jobs" | "logs" | "subagents";
+type Tab = "jobs" | "subagents" | "logs";
+
+type ActivityLog =
+  | ({ kind: "cron" } & CronRunLog)
+  | {
+      kind: "subagent";
+      id: string;
+      workspaceId: string;
+      sessionPath: string;
+      prompt: string;
+      model: string;
+      thinkingLevel: string;
+      timestamp: number;
+      status: "running" | "success" | "error";
+    };
+
+interface SubagentDetails {
+  prompt?: unknown;
+  model?: unknown;
+  effort?: unknown;
+  workspaceId?: unknown;
+  sessionId?: unknown;
+  sessionPath?: unknown;
+  stopReason?: unknown;
+  errorMessage?: unknown;
+}
 
 const store = useAppStore();
 const activeTab = ref<Tab>("jobs");
-const stoppingRunIds = ref(new Set<string>());
 const runningSubagents = ref<RunningSubagent[]>([]);
 const subagentError = ref("");
 let subagentLoadGeneration = 0;
@@ -39,6 +63,90 @@ const runLogs = computed(() => {
   const runningById = new Map(store.workspaceRunningCronJobs.map((run) => [run.runId, run]));
   return store.workspaceCronRunLogs.map((run) => ({ ...run, ...runningById.get(run.runId) }));
 });
+const activityLogs = computed<ActivityLog[]>(() => {
+  const runningById = new Map(
+    runningSubagents.value.map((subagent) => [subagent.sessionId, subagent]),
+  );
+  const subagents = new Map<string, Extract<ActivityLog, { kind: "subagent" }>>();
+  const toolStartedAt = new Map<string, number>();
+
+  for (const message of store.activeSession?.messages ?? []) {
+    if (message.role === "assistant") {
+      for (const block of message.blocks) {
+        if (block.type === "toolCall" && block.name === "subagent") {
+          toolStartedAt.set(block.id, message.timestamp);
+        }
+      }
+      continue;
+    }
+
+    let details: SubagentDetails | undefined;
+    let failed = false;
+    let startedAt = message.timestamp;
+    if (message.role === "toolResult" && message.toolName === "subagent") {
+      details = message.details?.subagent as SubagentDetails | undefined;
+      failed = message.isError;
+      startedAt = toolStartedAt.get(message.toolCallId) ?? startedAt;
+    } else if (message.role === "custom") {
+      details = message.data?.subagent as SubagentDetails | undefined;
+    }
+    if (
+      !details ||
+      typeof details.sessionId !== "string" ||
+      typeof details.sessionPath !== "string" ||
+      typeof details.workspaceId !== "string"
+    ) {
+      continue;
+    }
+
+    const existing = subagents.get(details.sessionId);
+    subagents.set(details.sessionId, {
+      kind: "subagent",
+      id: details.sessionId,
+      workspaceId: details.workspaceId,
+      sessionPath: details.sessionPath,
+      prompt:
+        typeof details.prompt === "string" ? details.prompt : (existing?.prompt ?? "Subagent"),
+      model:
+        typeof details.model === "string" ? details.model : (existing?.model ?? "Unknown model"),
+      thinkingLevel:
+        typeof details.effort === "string" ? details.effort : (existing?.thinkingLevel ?? "off"),
+      timestamp: existing?.timestamp ?? startedAt,
+      status:
+        failed ||
+        details.errorMessage ||
+        details.stopReason === "error" ||
+        details.stopReason === "aborted"
+          ? "error"
+          : runningById.has(details.sessionId)
+            ? "running"
+            : "success",
+    });
+  }
+
+  for (const subagent of runningSubagents.value) {
+    subagents.set(subagent.sessionId, {
+      kind: "subagent",
+      id: subagent.sessionId,
+      workspaceId: subagent.workspaceId,
+      sessionPath: subagent.sessionPath,
+      prompt: subagent.prompt,
+      model: subagent.model,
+      thinkingLevel: subagent.thinkingLevel,
+      timestamp: subagent.startedAtMs,
+      status: "running",
+    });
+  }
+
+  return [
+    ...runLogs.value.map((run): ActivityLog => ({ kind: "cron", ...run })),
+    ...subagents.values(),
+  ].sort((left, right) => {
+    const leftTimestamp = left.kind === "cron" ? left.startedAtMs : left.timestamp;
+    const rightTimestamp = right.kind === "cron" ? right.startedAtMs : right.timestamp;
+    return rightTimestamp - leftTimestamp;
+  });
+});
 
 function runPopoverId(runId: string): string {
   return `cron-run-popover-${runId.replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
@@ -57,7 +165,7 @@ function panelId(tab: Tab): string {
 }
 
 function handleTabKeydown(event: KeyboardEvent): void {
-  const tabs: Tab[] = ["jobs", "logs", "subagents"];
+  const tabs: Tab[] = ["jobs", "subagents", "logs"];
   const currentIndex = tabs.indexOf(activeTab.value);
   const nextIndex =
     event.key === "ArrowRight"
@@ -75,9 +183,9 @@ function handleTabKeydown(event: KeyboardEvent): void {
   document.getElementById(tabId(activeTab.value))?.focus();
 }
 
-function statusLabel(run: CronRunLog): string {
-  if (run.status === "running") return "Running";
-  return run.status === "success" ? "Completed" : "Failed";
+function statusLabel(status: "running" | "success" | "error"): string {
+  if (status === "running") return "Running";
+  return status === "success" ? "Completed" : "Failed";
 }
 
 function formatTimestamp(timestamp: number): string {
@@ -96,17 +204,6 @@ function formatDuration(durationMs?: number): string | undefined {
 
 function refreshModels(): void {
   void store.refreshModels();
-}
-
-async function stopRun(runId: string): Promise<void> {
-  stoppingRunIds.value = new Set([...stoppingRunIds.value, runId]);
-  try {
-    await store.stopCronRun(runId);
-  } finally {
-    const next = new Set(stoppingRunIds.value);
-    next.delete(runId);
-    stoppingRunIds.value = next;
-  }
 }
 
 async function refreshRunningSubagents(): Promise<void> {
@@ -142,15 +239,15 @@ function handlePopoverToggle(event: Event): void {
     subagentPoll = undefined;
   }
   if (isOpen) {
-    if (activeTab.value === "subagents") void refreshRunningSubagents();
+    if (activeTab.value !== "jobs") void refreshRunningSubagents();
     subagentPoll = setInterval(() => {
-      if (activeTab.value === "subagents") void refreshRunningSubagents();
+      if (activeTab.value !== "jobs") void refreshRunningSubagents();
     }, 1_500);
   }
 }
 
 watch(activeTab, (tab) => {
-  if (tab === "subagents") void refreshRunningSubagents();
+  if (tab !== "jobs") void refreshRunningSubagents();
 });
 
 watch(
@@ -158,7 +255,7 @@ watch(
   () => {
     runningSubagents.value = [];
     subagentError.value = "";
-    if (activeTab.value === "subagents") void refreshRunningSubagents();
+    if (activeTab.value !== "jobs") void refreshRunningSubagents();
   },
 );
 
@@ -204,23 +301,6 @@ onBeforeUnmount(() => {
           Jobs
         </button>
         <button
-          :id="tabId('logs')"
-          type="button"
-          role="tab"
-          :aria-selected="activeTab === 'logs'"
-          :aria-controls="panelId('logs')"
-          :tabindex="activeTab === 'logs' ? 0 : -1"
-          class="cron-popover__tab"
-          @click="activeTab = 'logs'"
-          @keydown="handleTabKeydown"
-        >
-          Logs
-          <span
-            v-if="runLogs.some((run) => run.status === 'running')"
-            class="cron-popover__live-dot"
-          />
-        </button>
-        <button
           :id="tabId('subagents')"
           type="button"
           role="tab"
@@ -233,6 +313,23 @@ onBeforeUnmount(() => {
         >
           Subagents
           <span v-if="runningSubagents.length > 0" class="cron-popover__live-dot" />
+        </button>
+        <button
+          :id="tabId('logs')"
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'logs'"
+          :aria-controls="panelId('logs')"
+          :tabindex="activeTab === 'logs' ? 0 : -1"
+          class="cron-popover__tab"
+          @click="activeTab = 'logs'"
+          @keydown="handleTabKeydown"
+        >
+          Logs
+          <span
+            v-if="activityLogs.some((entry) => entry.status === 'running')"
+            class="cron-popover__live-dot"
+          />
         </button>
       </div>
     </template>
@@ -275,57 +372,72 @@ onBeforeUnmount(() => {
         role="tabpanel"
         :aria-labelledby="tabId('logs')"
       >
-        <article v-for="run in runLogs" :key="run.runId" class="cron-popover__run">
+        <article
+          v-for="entry in activityLogs"
+          :key="entry.kind === 'cron' ? `cron-${entry.runId}` : `subagent-${entry.id}`"
+          class="cron-popover__run"
+        >
           <div class="cron-popover__run-content">
             <div class="cron-popover__run-heading">
-              <span class="cron-popover__status">{{ statusLabel(run) }}</span>
-              <strong>{{ run.scheduleLabel }}</strong>
+              <span class="cron-popover__status">{{ statusLabel(entry.status) }}</span>
+              <strong>{{ entry.kind === "cron" ? entry.scheduleLabel : "Subagent" }}</strong>
             </div>
-            <div class="cron-popover__run-prompt">{{ run.prompt }}</div>
+            <div class="cron-popover__run-prompt">{{ entry.prompt }}</div>
             <div class="cron-popover__run-details">
-              <span>{{ formatTimestamp(run.startedAtMs) }}</span>
-              <span v-if="formatDuration(run.durationMs)">{{
-                formatDuration(run.durationMs)
+              <span>{{
+                formatTimestamp(entry.kind === "cron" ? entry.startedAtMs : entry.timestamp)
               }}</span>
-              <span>{{ run.session.kind }}</span>
+              <template v-if="entry.kind === 'cron'">
+                <span v-if="formatDuration(entry.durationMs)">{{
+                  formatDuration(entry.durationMs)
+                }}</span>
+                <span>{{ entry.session.kind }}</span>
+              </template>
+              <template v-else>
+                <span>{{ entry.model }}</span>
+                <span>{{ entry.thinkingLevel }}</span>
+              </template>
             </div>
-            <div v-if="run.error" class="cron-popover__run-error">{{ run.error }}</div>
+            <div v-if="entry.kind === 'cron' && entry.error" class="cron-popover__run-error">
+              {{ entry.error }}
+            </div>
           </div>
           <div class="cron-popover__run-actions">
             <button
-              v-if="run.status === 'running'"
-              type="button"
-              class="cron-popover__icon-btn cron-popover__icon-btn--danger"
-              :disabled="stoppingRunIds.has(run.runId)"
-              aria-label="Stop cron run"
-              title="Stop run"
-              @click.stop.prevent="stopRun(run.runId)"
-            >
-              <Square :size="14" />
-            </button>
-            <button
-              v-if="run.sessionPath || run.status === 'running'"
+              v-if="entry.kind === 'subagent' || entry.sessionPath || entry.status === 'running'"
               type="button"
               class="cron-popover__icon-btn"
-              :disabled="!run.sessionPath"
-              :popovertarget="run.sessionPath ? runPopoverId(run.runId) : undefined"
-              aria-label="Open cron run session"
-              :title="run.sessionPath ? 'Open session' : 'Session is starting'"
+              :disabled="entry.kind === 'cron' && !entry.sessionPath"
+              :popovertarget="
+                entry.kind === 'subagent'
+                  ? subagentPopoverId(entry.id)
+                  : entry.sessionPath
+                    ? runPopoverId(entry.runId)
+                    : undefined
+              "
+              :aria-label="
+                entry.kind === 'cron' ? 'Open cron run session' : 'Open subagent session'
+              "
+              :title="
+                entry.kind === 'cron' && !entry.sessionPath ? 'Session is starting' : 'Open session'
+              "
             >
               <PanelRightOpen :size="16" />
             </button>
           </div>
           <SubagentSessionPopover
-            v-if="run.sessionPath"
-            :popover-id="runPopoverId(run.runId)"
-            header-title="Cron run"
-            :workspace-id="run.workspaceId"
-            :session-path="run.sessionPath"
+            v-if="entry.kind === 'subagent' || entry.sessionPath"
+            :popover-id="
+              entry.kind === 'subagent' ? subagentPopoverId(entry.id) : runPopoverId(entry.runId)
+            "
+            :header-title="entry.kind === 'cron' ? 'Cron run' : 'Subagent'"
+            :workspace-id="entry.workspaceId"
+            :session-path="entry.sessionPath!"
           />
         </article>
 
-        <div v-if="runLogs.length === 0" class="cron-popover__empty">
-          No cron runs have been logged in this workspace yet.
+        <div v-if="activityLogs.length === 0" class="cron-popover__empty">
+          No cron or subagent runs have been logged yet.
         </div>
       </div>
 
@@ -523,10 +635,6 @@ onBeforeUnmount(() => {
   background: var(--color-bg-panel);
   color: var(--color-text);
   cursor: pointer;
-}
-
-.cron-popover__icon-btn--danger {
-  color: var(--color-danger);
 }
 
 .cron-popover__icon-btn:disabled {

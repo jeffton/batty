@@ -415,9 +415,14 @@ describe("CronPopover", () => {
       props: { popoverId: "cron-popover", anchorName: "--cron-anchor" },
       global: { stubs: { SubagentSessionPopover: true } },
     });
-    await wrapper.findAll('[role="tab"]')[2]!.trigger("click");
+    await wrapper.findAll('[role="tab"]')[1]!.trigger("click");
     await flushPromises();
 
+    expect(wrapper.findAll('[role="tab"]').map((tab) => tab.text().trim())).toEqual([
+      "Jobs",
+      "Subagents",
+      "Logs",
+    ]);
     expect(listRunningSubagents).toHaveBeenCalledWith("parent-1");
     expect(wrapper.findAll(".cron-popover__run")).toHaveLength(1);
     expect(wrapper.text()).toContain("Review the changes");
@@ -426,6 +431,100 @@ describe("CronPopover", () => {
     expect(wrapper.findComponent({ name: "SubagentSessionPopover" }).attributes()).toMatchObject({
       workspaceid: "batty",
       sessionpath: "/tmp/child.jsonl",
+    });
+  });
+
+  it("includes recent subagents from the current session in logs without duplicates", async () => {
+    const store = useAppStore();
+    store.activeSession = {
+      id: "web-parent",
+      sessionId: "parent-1",
+      workspaceId: "batty",
+      cwd: "/root/github/batty",
+      path: "/tmp/parent.jsonl",
+      thinkingLevel: "medium",
+      availableThinkingLevels: ["medium"],
+      isStreaming: false,
+      pendingMessageCount: 0,
+      updatedAt: 1,
+      contextTokens: 0,
+      contextWindow: 0,
+      contextPercent: 0,
+      totalMessageCount: 3,
+      hasMoreMessages: false,
+      messages: [
+        {
+          id: "assistant-1",
+          role: "assistant",
+          timestamp: 100,
+          turnPhase: "intermediate",
+          blocks: [
+            {
+              type: "toolCall",
+              id: "call-1",
+              name: "subagent",
+              arguments: { prompt: "Review recent changes" },
+            },
+          ],
+        },
+        {
+          id: "result-1",
+          role: "toolResult",
+          timestamp: 200,
+          toolCallId: "call-1",
+          toolName: "subagent",
+          blocks: [],
+          isError: false,
+          details: {
+            subagent: {
+              prompt: "Review recent changes",
+              model: "openai/gpt-5",
+              effort: "high",
+              workspaceId: "batty",
+              sessionId: "child-recent",
+              sessionPath: "/tmp/child-recent.jsonl",
+            },
+          },
+        },
+        {
+          id: "notice-1",
+          role: "custom",
+          timestamp: 300,
+          customType: "batty-runtime-notice:subagent",
+          text: "Subagent stopped",
+          data: {
+            subagent: {
+              prompt: "Review recent changes",
+              model: "openai/gpt-5",
+              effort: "high",
+              workspaceId: "batty",
+              sessionId: "child-recent",
+              sessionPath: "/tmp/child-recent.jsonl",
+              stopReason: "aborted",
+            },
+          },
+        },
+      ],
+      activeTools: [],
+    };
+
+    const wrapper = mount(CronPopover, {
+      props: { popoverId: "cron-popover", anchorName: "--cron-anchor" },
+      global: { stubs: { SubagentSessionPopover: true } },
+    });
+    await wrapper.findAll('[role="tab"]')[2]!.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.findAll(".cron-popover__run")).toHaveLength(1);
+    expect(wrapper.text()).toContain("Review recent changes");
+    expect(wrapper.text()).toContain("openai/gpt-5");
+    expect(wrapper.text()).toContain("Failed");
+    expect(wrapper.find('[aria-label="Open subagent session"]').attributes("popovertarget")).toBe(
+      "running-subagent-popover-child-recent",
+    );
+    expect(wrapper.findComponent({ name: "SubagentSessionPopover" }).attributes()).toMatchObject({
+      workspaceid: "batty",
+      sessionpath: "/tmp/child-recent.jsonl",
     });
   });
 
@@ -493,19 +592,19 @@ describe("CronPopover", () => {
       props: { popoverId: "cron-popover", anchorName: "--cron-anchor" },
       global: { stubs: { SubagentSessionPopover: true } },
     });
-    await wrapper.findAll('[role="tab"]')[1]!.trigger("click");
+    await wrapper.findAll('[role="tab"]')[2]!.trigger("click");
 
     expect(wrapper.findAll(".cron-popover__run")).toHaveLength(3);
     expect(wrapper.text()).toContain("Running");
     expect(wrapper.text()).toContain("Completed");
     expect(wrapper.findAll('[aria-label="Open cron run session"]')).toHaveLength(3);
     expect(wrapper.findAll('[aria-label="Open cron run session"]:disabled')).toHaveLength(1);
-    expect(wrapper.findAll('[aria-label="Stop cron run"]')).toHaveLength(2);
+    expect(wrapper.findAll('[aria-label="Stop cron run"]')).toHaveLength(0);
     expect(
       wrapper
         .findAll(".cron-popover__run")[0]!
         .findAll(".cron-popover__run-actions button")
         .map((button) => button.attributes("aria-label")),
-    ).toEqual(["Stop cron run", "Open cron run session"]);
+    ).toEqual(["Open cron run session"]);
   });
 });

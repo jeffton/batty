@@ -1,13 +1,17 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { err, FileError, ok, toError } from "@earendil-works/pi-agent-core";
+import { err, FileError, ok, toError, type FileSystem } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 
 const IMAGE_REFERENCE_PREFIX = "batty-file:";
 const migrations = new Map<string, Promise<void>>();
 
 type TransformDirection = "externalize" | "hydrate";
+type TextLineReader = Extract<
+  Awaited<ReturnType<FileSystem["openTextLineReader"]>>,
+  { ok: true }
+>["value"];
 
 class SessionImageStore {
   async transformText(
@@ -124,82 +128,151 @@ class SessionImageStore {
   }
 }
 
-export async function copySessionImages(
-  sourceSessionFile: string,
-  destinationDirectory: string,
-): Promise<void> {
-  const source = path.join(path.dirname(sourceSessionFile), ".batty-images");
-  const destination = path.join(destinationDirectory, ".batty-images");
-  if (path.resolve(source) === path.resolve(destination)) return;
-  try {
-    await fs.cp(source, destination, { recursive: true });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
+function isSessionStoragePath(filePath: string): boolean {
+  return /\.jsonl(?:\.|$)/.test(path.basename(filePath));
 }
 
-export class SessionImageExecutionEnv extends NodeExecutionEnv {
+function imageError(error: unknown, filePath: string): FileError {
+  const cause = toError(error);
+  return new FileError("unknown", cause.message, filePath, cause);
+}
+
+/** A Pi filesystem adapter that externalizes image payloads at the session-storage boundary. */
+export class SessionImageFileSystem implements FileSystem {
+  readonly cwd: string;
+  protected readonly fileSystem: FileSystem;
   private readonly images = new SessionImageStore();
 
-  override async readTextFile(
-    ...args: Parameters<NodeExecutionEnv["readTextFile"]>
-  ): ReturnType<NodeExecutionEnv["readTextFile"]> {
+  constructor(options: { cwd: string; fileSystem?: FileSystem }) {
+    this.fileSystem = options.fileSystem ?? new NodeExecutionEnv({ cwd: options.cwd });
+    this.cwd = this.fileSystem.cwd;
+  }
+
+  absolutePath(...args: Parameters<FileSystem["absolutePath"]>) {
+    return this.fileSystem.absolutePath(...args);
+  }
+  joinPath(...args: Parameters<FileSystem["joinPath"]>) {
+    return this.fileSystem.joinPath(...args);
+  }
+  readBinaryFile(...args: Parameters<FileSystem["readBinaryFile"]>) {
+    return this.fileSystem.readBinaryFile(...args);
+  }
+  renameFile(...args: Parameters<FileSystem["renameFile"]>) {
+    return this.fileSystem.renameFile(...args);
+  }
+  fileInfo(...args: Parameters<FileSystem["fileInfo"]>) {
+    return this.fileSystem.fileInfo(...args);
+  }
+  listDir(...args: Parameters<FileSystem["listDir"]>) {
+    return this.fileSystem.listDir(...args);
+  }
+  canonicalPath(...args: Parameters<FileSystem["canonicalPath"]>) {
+    return this.fileSystem.canonicalPath(...args);
+  }
+  exists(...args: Parameters<FileSystem["exists"]>) {
+    return this.fileSystem.exists(...args);
+  }
+  createDir(...args: Parameters<FileSystem["createDir"]>) {
+    return this.fileSystem.createDir(...args);
+  }
+  remove(...args: Parameters<FileSystem["remove"]>) {
+    return this.fileSystem.remove(...args);
+  }
+  createTempDir(...args: Parameters<FileSystem["createTempDir"]>) {
+    return this.fileSystem.createTempDir(...args);
+  }
+  createTempFile(...args: Parameters<FileSystem["createTempFile"]>) {
+    return this.fileSystem.createTempFile(...args);
+  }
+  cleanup(...args: Parameters<FileSystem["cleanup"]>) {
+    return this.fileSystem.cleanup(...args);
+  }
+
+  async readTextFile(
+    ...args: Parameters<FileSystem["readTextFile"]>
+  ): ReturnType<FileSystem["readTextFile"]> {
     const [filePath] = args;
-    const result = await super.readTextFile(...args);
-    if (!result.ok) return result;
+    const result = await this.fileSystem.readTextFile(...args);
+    if (!result.ok || !isSessionStoragePath(filePath)) return result;
     try {
       return ok<string, FileError>(
         await this.images.transformText(result.value, "hydrate", filePath),
       );
     } catch (error) {
-      return err(new FileError("unknown", toError(error).message, filePath, toError(error)));
+      return err(imageError(error, filePath));
     }
   }
 
-  override async readTextLines(
-    ...args: Parameters<NodeExecutionEnv["readTextLines"]>
-  ): ReturnType<NodeExecutionEnv["readTextLines"]> {
+  async readTextLines(
+    ...args: Parameters<FileSystem["readTextLines"]>
+  ): ReturnType<FileSystem["readTextLines"]> {
     const [filePath] = args;
-    const result = await super.readTextLines(...args);
-    if (!result.ok) return result;
+    const result = await this.fileSystem.readTextLines(...args);
+    if (!result.ok || !isSessionStoragePath(filePath)) return result;
     try {
       return ok<string[], FileError>(
         await this.images.transformLines(result.value, "hydrate", filePath),
       );
     } catch (error) {
-      return err(new FileError("unknown", toError(error).message, filePath, toError(error)));
+      return err(imageError(error, filePath));
     }
   }
 
-  override async writeFile(
-    ...args: Parameters<NodeExecutionEnv["writeFile"]>
-  ): ReturnType<NodeExecutionEnv["writeFile"]> {
+  async openTextLineReader(
+    ...args: Parameters<FileSystem["openTextLineReader"]>
+  ): ReturnType<FileSystem["openTextLineReader"]> {
+    const [filePath] = args;
+    const result = await this.fileSystem.openTextLineReader(...args);
+    if (!result.ok || !isSessionStoragePath(filePath)) return result;
+    const reader = result.value;
+    const images = this.images;
+    const transformedReader: TextLineReader = {
+      async readLine(context) {
+        const line = await reader.readLine(context);
+        if (!line.ok || line.value === undefined) return line;
+        try {
+          const [text] = await images.transformLines([line.value.text], "hydrate", filePath);
+          return ok({ ...line.value, text: text! });
+        } catch (error) {
+          return err(imageError(error, filePath));
+        }
+      },
+      close: (context) => reader.close(context),
+    };
+    return ok<TextLineReader, FileError>(transformedReader);
+  }
+
+  async writeFile(
+    ...args: Parameters<FileSystem["writeFile"]>
+  ): ReturnType<FileSystem["writeFile"]> {
     const [filePath, content, context] = args;
+    if (!isSessionStoragePath(filePath)) return this.fileSystem.writeFile(...args);
     try {
       const text = typeof content === "string" ? content : Buffer.from(content).toString("utf8");
-      return super.writeFile(
+      return this.fileSystem.writeFile(
         filePath,
         await this.images.transformText(text, "externalize", filePath),
         context,
       );
     } catch (error) {
-      return err(new FileError("unknown", toError(error).message, filePath, toError(error)));
+      return err(imageError(error, filePath));
     }
   }
 
-  override async appendFile(
-    ...args: Parameters<NodeExecutionEnv["appendFile"]>
-  ): ReturnType<NodeExecutionEnv["appendFile"]> {
+  async appendFile(
+    ...args: Parameters<FileSystem["appendFile"]>
+  ): ReturnType<FileSystem["appendFile"]> {
     const [filePath, content, context] = args;
+    if (!isSessionStoragePath(filePath)) return this.fileSystem.appendFile(...args);
     try {
       const text = typeof content === "string" ? content : Buffer.from(content).toString("utf8");
-      return super.appendFile(
+      return this.fileSystem.appendFile(
         filePath,
         await this.images.transformText(text, "externalize", filePath),
         context,
       );
     } catch (error) {
-      return err(new FileError("unknown", toError(error).message, filePath, toError(error)));
+      return err(imageError(error, filePath));
     }
   }
 }

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import { BACKGROUND_CONTEXT, getOrThrow } from "@earendil-works/pi-agent-core";
-import { migrateSessionImages, SessionImageExecutionEnv } from "./session-images";
+import { migrateSessionImages, SessionImageFileSystem } from "./session-images";
 
 const roots: string[] = [];
 
@@ -45,10 +45,18 @@ describe("session image storage", () => {
       "image bytes",
     );
 
-    const env = new SessionImageExecutionEnv({ cwd: root });
+    const env = new SessionImageFileSystem({ cwd: root });
     const hydrated = getOrThrow(await env.readTextFile(sessionFile, BACKGROUND_CONTEXT));
     expect(hydrated).toContain(imageData);
     expect(hydrated).not.toContain("batty-file:");
+
+    const reader = getOrThrow(await env.openTextLineReader(sessionFile, BACKGROUND_CONTEXT));
+    const header = getOrThrow(await reader.readLine(BACKGROUND_CONTEXT));
+    const entry = getOrThrow(await reader.readLine(BACKGROUND_CONTEXT));
+    await reader.close(BACKGROUND_CONTEXT);
+    expect(header?.text).not.toContain(imageData);
+    expect(entry?.text).toContain(imageData);
+    expect(entry?.text).not.toContain("batty-file:");
   });
 
   it("externalizes images on append without changing the in-memory payload", async () => {
@@ -56,7 +64,7 @@ describe("session image storage", () => {
     roots.push(root);
     const sessionFile = path.join(root, "session.jsonl");
     const imageData = Buffer.from("tool image").toString("base64");
-    const env = new SessionImageExecutionEnv({ cwd: root });
+    const env = new SessionImageFileSystem({ cwd: root });
     const line = `${JSON.stringify({
       kind: "value",
       value: { type: "image", mimeType: "image/jpeg", data: imageData },

@@ -148,6 +148,9 @@ describe("native harness session storage", () => {
     expect(childStored).toContain("batty-file:");
     expect(childStored).not.toContain("aGVsbG8=");
     expect(JSON.stringify(child.getEntries())).toContain("aGVsbG8=");
+    await expect(
+      fs.readdir(path.join(path.dirname(child.native.metadata.path), ".batty-images")),
+    ).resolves.toHaveLength(1);
 
     const grandchild = retain(await child.fork(path.join(f.root, "children")));
     expect(JSON.stringify(grandchild.getEntries())).toContain("aGVsbG8=");

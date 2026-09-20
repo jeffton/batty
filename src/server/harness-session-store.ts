@@ -13,14 +13,10 @@ import {
   type Session,
 } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import {
-  copySessionImages,
-  migrateSessionImages,
-  SessionImageExecutionEnv,
-} from "./session-images";
+import { migrateSessionImages, SessionImageFileSystem } from "./session-images";
 
 // Index reads use Pi's decoder without allowing Pi to repair or modify transcripts.
-class SessionIndexReadEnv extends SessionImageExecutionEnv {
+class SessionIndexReadFileSystem extends SessionImageFileSystem {
   override async writeFile(): Promise<never> {
     throw new Error("Session index reads cannot modify transcript files");
   }
@@ -48,7 +44,7 @@ function repository(root: string): JsonlSessionRepo {
   if (!repo) {
     repo = new JsonlSessionRepo({
       sessionsRoot: root,
-      fileSystem: new SessionImageExecutionEnv({ cwd: root }),
+      fileSystem: new SessionImageFileSystem({ cwd: root }),
     });
     repositories.set(root, repo);
   }
@@ -180,7 +176,7 @@ export class HarnessSessionStore {
       const metadata = await readHarnessSessionMetadata(file);
       const repo = new JsonlSessionRepo({
         sessionsRoot: path.dirname(file),
-        fileSystem: new SessionIndexReadEnv({ cwd: path.dirname(file) }),
+        fileSystem: new SessionIndexReadFileSystem({ cwd: path.dirname(file) }),
       });
       const native = await repo.open(metadata, context);
       try {
@@ -288,12 +284,6 @@ export class HarnessSessionStore {
     if (!leafId)
       return HarnessSessionStore.create(this.native.metadata.cwd!, root, this.getSessionId(), id);
     const repo = repository(root);
-    const cwd = this.native.metadata.cwd!;
-    const destinationDirectory = path.join(
-      path.resolve(root),
-      `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`,
-    );
-    await copySessionImages(this.getSessionFile(), destinationDirectory);
     const native = await repo.fork(
       this.native.metadata,
       { scope: "branch", branch: "main", entryId: leafId, id },

@@ -140,8 +140,16 @@ class SessionImageStore {
       try {
         await fs.rename(temporary, destination);
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        const existing = await fs.readFile(destination);
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "EEXIST" && !(process.platform === "win32" && code === "EPERM")) {
+          throw error;
+        }
+        let existing: Buffer;
+        try {
+          existing = await fs.readFile(destination);
+        } catch {
+          throw error;
+        }
         if (createHash("sha256").update(existing).digest("hex") !== hash) {
           await fs.rm(destination);
           await fs.rename(temporary, destination);
@@ -399,13 +407,30 @@ async function migrateSharedImages(file: string, parsed: unknown[]): Promise<voi
     const temporary = path.join(destinationDirectory, `.${name}.${randomUUID()}.tmp`);
     try {
       await fs.writeFile(temporary, sourceBytes, { flag: "wx" });
-      const handle = await fs.open(temporary, "r");
+      const handle = await fs.open(temporary, process.platform === "win32" ? "r+" : "r");
       try {
         await handle.sync();
       } finally {
         await handle.close();
       }
-      await fs.rename(temporary, destination);
+      try {
+        await fs.rename(temporary, destination);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "EEXIST" && !(process.platform === "win32" && code === "EPERM")) {
+          throw error;
+        }
+        let existing: Buffer;
+        try {
+          existing = await fs.readFile(destination);
+        } catch {
+          throw error;
+        }
+        if (!existing.equals(sourceBytes)) {
+          await fs.rm(destination);
+          await fs.rename(temporary, destination);
+        }
+      }
     } finally {
       await fs.rm(temporary, { force: true });
     }

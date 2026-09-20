@@ -32,7 +32,7 @@ function records(value: unknown): Record<string, unknown>[] {
 }
 
 async function syncFileAndDirectory(file: string): Promise<void> {
-  const handle = await fs.open(file, "r");
+  const handle = await fs.open(file, process.platform === "win32" ? "r+" : "r");
   try {
     await handle.sync();
   } finally {

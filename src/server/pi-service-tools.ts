@@ -548,6 +548,7 @@ export function createBrowserTool({
       "Start with action=open. Browser state and cookies persist within the current Batty session only.",
       "Set useTailscale=true on the initial open to route that browser session through the configured SSH destination. Close the session before changing its routing.",
       "Use action=pages to list tabs and popups, action=switch with pageId to activate one, and newPage=true on open to create a tab.",
+      "Reuse the active page for sequential research; use newPage=true only when comparing pages. Close rejected or finished research tabs immediately with action=close-page, and use action=pages periodically to keep the tab count low.",
       "Use action=frames to list frame IDs, then pass frameId to target an iframe.",
       'Selectors use Playwright locator syntax, for example input[name=q], text=Submit, or button:has-text("Next").',
       "Use action=upload with selector and paths for file inputs, and action=download with a selector that triggers a download.",

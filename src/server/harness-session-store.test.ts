@@ -123,24 +123,6 @@ describe("native harness session storage", () => {
     expect(child.native.metadata.parentSessionId).toBe(reopened.getSessionId());
   });
 
-  it("reads and imports legacy sessions with blank lines without losing entries", async () => {
-    const { file } = await legacyFile();
-    const original = await fs.readFile(file, "utf8");
-    const spaced = original.replaceAll("\n", "\n \t\n\n");
-    await fs.writeFile(file, spaced);
-    const summary = await HarnessSessionStore.read(file);
-    expect(summary.entries).toHaveLength(3);
-    expect(await fs.readFile(file, "utf8")).toBe(spaced);
-    const store = retain(await HarnessSessionStore.open(file));
-    expect(store.getEntries()).toHaveLength(3);
-    const assistant = store
-      .getBranch()
-      .find((entry) => entry.type === "message" && entry.message.role === "assistant")!;
-    expect(agentTurnFileChangesByReplyEntryId(store.getEntries()).get(assistant.id)).toEqual([
-      { path: "/file", patch: "legacy patch" },
-    ]);
-  });
-
   it("migrates legacy images during read-only index reads and forks", async () => {
     const { f, file } = await legacyFile();
     const lines = (await fs.readFile(file, "utf8")).trimEnd().split("\n");
@@ -169,15 +151,6 @@ describe("native harness session storage", () => {
 
     const grandchild = retain(await child.fork(path.join(f.root, "children")));
     expect(JSON.stringify(grandchild.getEntries())).toContain("aGVsbG8=");
-  });
-
-  it("keeps physical line numbers in legacy parse errors after blank lines", async () => {
-    const { file } = await legacyFile();
-    await fs.appendFile(file, "\n \t\n{not json}\n");
-    const before = await fs.readFile(file, "utf8");
-    await expect(HarnessSessionStore.read(file)).rejects.toThrow("line 10");
-    await expect(HarnessSessionStore.open(file)).rejects.toThrow("line 10");
-    expect(await fs.readFile(file, "utf8")).toBe(before);
   });
 
   it("coalesces concurrent opens into one native writer", async () => {

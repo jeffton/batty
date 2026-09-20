@@ -21,53 +21,6 @@ index d430a3f..0b66e68 100644
              break;
          }
      }
-diff --git a/dist/harness/session/jsonl/legacy-v3.js b/dist/harness/session/jsonl/legacy-v3.js
-index 083ad74..b26ae8d 100644
---- a/dist/harness/session/jsonl/legacy-v3.js
-+++ b/dist/harness/session/jsonl/legacy-v3.js
-@@ -35,13 +35,13 @@ export async function normalizeLegacyV3Header(fileSystem, header, context) {
-         ...(await metadataFromLegacyV3Header(fileSystem, header, context)),
-     };
- }
--function parseLegacyV3Entry(line) {
-+function parseLegacyV3Entry(line, lineNumber) {
-     let entry;
-     try {
-         entry = JSON.parse(line);
-     }
-     catch (error) {
--        throw new Error("Invalid legacy v3 JSONL record: not valid JSON", { cause: error });
-+        throw new Error(`Invalid legacy v3 JSONL record at line ${lineNumber}: not valid JSON`, { cause: error });
-     }
-     const recordType = entry?.type;
-     if (recordType !== "message" &&
-@@ -54,7 +54,7 @@ function parseLegacyV3Entry(line) {
-         recordType !== "active_tools_change" &&
-         recordType !== "session_info" &&
-         recordType !== "label") {
--        throw new Error(`Unsupported legacy v3 record type: ${String(recordType)}`);
-+        throw new Error(`Unsupported legacy v3 record type at line ${lineNumber}: ${String(recordType)}`);
-     }
-     return entry;
- }
-@@ -267,12 +267,15 @@ async function readLegacyV3Inventory(reader, context) {
-     let importedUsage = emptyUsage();
-     let name;
-     let finalId = null;
-+    let lineNumber = 1;
-     while (true) {
-         const line = fileValue(await reader.readLine(context), "Failed to read legacy v3 source");
-         if (line === undefined || !line.terminated)
-             break;
--        const lineNumber = entries.size + 2;
--        const entry = parseLegacyV3Entry(line.text);
-+        lineNumber++;
-+        if (line.text.trim() === "")
-+            continue;
-+        const entry = parseLegacyV3Entry(line.text, lineNumber);
-         if (entries.has(entry.id))
-             throw new Error(`Duplicate legacy v3 entry id: ${entry.id}`);
-         const indexed = indexLegacyV3Entry(entry, lineNumber, nextSeq, entries);
 diff --git a/dist/harness/tools/read.js b/dist/harness/tools/read.js
 index c78086d..d57aa09 100644
 --- a/dist/harness/tools/read.js
@@ -93,28 +46,3 @@ index c78086d..d57aa09 100644
              let outputText;
              let details;
              if (truncation.firstLineExceedsLimit) {
-diff --git a/dist/harness/session/jsonl/legacy-v3.js b/dist/harness/session/jsonl/legacy-v3.js
-index 083ad74..4a93c47 100644
---- a/dist/harness/session/jsonl/legacy-v3.js
-+++ b/dist/harness/session/jsonl/legacy-v3.js
-@@ -443,11 +443,16 @@ export class LegacyV3Source {
-                 parsed.header.cwd !== this.header.cwd) {
-                 throw new Error("Legacy v3 source header changed");
-             }
-+            let lineNumber = 1;
-             for (const indexed of this.entries.values()) {
--                const line = fileValue(await reader.readLine(context), "Failed to reread legacy v3 source");
--                if (line === undefined || !line.terminated)
--                    throw new Error("Legacy v3 source ended before captured entries");
--                const entry = parseLegacyV3Entry(line.text);
-+                let line;
-+                do {
-+                    line = fileValue(await reader.readLine(context), "Failed to reread legacy v3 source");
-+                    if (line === undefined || !line.terminated)
-+                        throw new Error("Legacy v3 source ended before captured entries");
-+                    lineNumber++;
-+                } while (line.text.trim() === "");
-+                const entry = parseLegacyV3Entry(line.text, lineNumber);
-                 if (entry.id !== indexed.id || entry.type !== indexed.type) {
-                     throw new Error("Legacy v3 source changed");
-                 }

@@ -25,7 +25,7 @@ overrides:
   vite@*: npm:@voidzero-dev/vite-plus-core@0.3.1
 
 patchedDependencies:
-  '@earendil-works/pi-agent-core@0.86.1': c6d82a468240ce23cf7e9ae204baefa07b350c3d055a47dc8adcb512ee96a199
+  '@earendil-works/pi-agent-core@0.86.1': 5a80148b1c3a7a322bc986eabc7d0dcc11c4516fb8280e6b9f0aa3f40a508d57
   '@earendil-works/pi-ai@0.86.1': 662741a8d08f323bccfa319b98953e7fe9a4082fdf05a87a24b28017db938abf
 
 importers:
@@ -34,7 +34,7 @@ importers:
     dependencies:
       '@earendil-works/pi-agent-core':
         specifier: 0.86.1
-        version: 0.86.1(patch_hash=c6d82a468240ce23cf7e9ae204baefa07b350c3d055a47dc8adcb512ee96a199)(supports-color@10.2.2)(ws@8.21.3)(zod@4.4.3)
+        version: 0.86.1(patch_hash=5a80148b1c3a7a322bc986eabc7d0dcc11c4516fb8280e6b9f0aa3f40a508d57)(supports-color@10.2.2)(ws@8.21.3)(zod@4.4.3)
       '@earendil-works/pi-ai':
         specifier: 0.86.1
         version: 0.86.1(patch_hash=662741a8d08f323bccfa319b98953e7fe9a4082fdf05a87a24b28017db938abf)(supports-color@10.2.2)(ws@8.21.3)(zod@4.4.3)
@@ -5623,7 +5623,7 @@ snapshots:
     dependencies:
       esbuild: 0.28.2
 
-  '@earendil-works/pi-agent-core@0.86.1(patch_hash=c6d82a468240ce23cf7e9ae204baefa07b350c3d055a47dc8adcb512ee96a199)(supports-color@10.2.2)(ws@8.21.3)(zod@4.4.3)':
+  '@earendil-works/pi-agent-core@0.86.1(patch_hash=5a80148b1c3a7a322bc986eabc7d0dcc11c4516fb8280e6b9f0aa3f40a508d57)(supports-color@10.2.2)(ws@8.21.3)(zod@4.4.3)':
     dependencies:
       '@earendil-works/chord': 0.86.1
       '@earendil-works/pi-ai': 0.86.1(patch_hash=662741a8d08f323bccfa319b98953e7fe9a4082fdf05a87a24b28017db938abf)(supports-color@10.2.2)(ws@8.21.3)(zod@4.4.3)
@@ -5665,7 +5665,7 @@ snapshots:
   '@earendil-works/pi-coding-agent@0.86.1(supports-color@10.2.2)(ws@8.21.3)(zod@4.4.3)':
     dependencies:
       '@earendil-works/chord': 0.86.1
-      '@earendil-works/pi-agent-core': 0.86.1(patch_hash=c6d82a468240ce23cf7e9ae204baefa07b350c3d055a47dc8adcb512ee96a199)(supports-color@10.2.2)(ws@8.21.3)(zod@4.4.3)
+      '@earendil-works/pi-agent-core': 0.86.1(patch_hash=5a80148b1c3a7a322bc986eabc7d0dcc11c4516fb8280e6b9f0aa3f40a508d57)(supports-color@10.2.2)(ws@8.21.3)(zod@4.4.3)
       '@earendil-works/pi-ai': 0.86.1(patch_hash=662741a8d08f323bccfa319b98953e7fe9a4082fdf05a87a24b28017db938abf)(supports-color@10.2.2)(ws@8.21.3)(zod@4.4.3)
       '@earendil-works/pi-tui': 0.86.1
       '@silvia-odwyer/photon-node': 0.3.4

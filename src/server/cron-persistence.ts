@@ -57,7 +57,7 @@ interface PersistedCronStore {
 interface RawPersistedCronStore {
   version: number;
   jobs: unknown[];
-  runs?: unknown[];
+  runs: unknown[];
 }
 
 function requireStoredString(value: unknown, label: string): string {
@@ -74,12 +74,9 @@ function requireStoredTimestamp(value: unknown, label: string): number {
   return value;
 }
 
-function normalizeStoredEnabled(value: unknown): boolean {
-  if (value === undefined) {
-    return true;
-  }
+function requireStoredBoolean(value: unknown, label: string): boolean {
   if (typeof value !== "boolean") {
-    throw new Error("Invalid enabled flag");
+    throw new Error(`Invalid ${label.toLowerCase()}`);
   }
   return value;
 }
@@ -180,7 +177,7 @@ function normalizeStoredJob(value: unknown): StoredCronJob {
   return {
     id: requireStoredString(job.id, "Job id"),
     workspaceId: requireStoredString(job.workspaceId, "Workspace"),
-    enabled: normalizeStoredEnabled(job.enabled),
+    enabled: requireStoredBoolean(job.enabled, "Enabled flag"),
     prompt: requireStoredString(job.prompt, "Prompt"),
     model: requireStoredString(job.model, "Model"),
     thinkingLevel: normalizeStoredThinkingLevel(job.thinkingLevel),
@@ -443,11 +440,10 @@ export class CronStore {
     if (persisted.version !== CRON_STORE_VERSION) {
       throw new Error(`Unsupported cron store version: ${persisted.version}`);
     }
-    const runs = Array.isArray(persisted.runs) ? persisted.runs.map(normalizeStoredRunLog) : [];
     return {
       version: CRON_STORE_VERSION,
       jobs: persisted.jobs.map(normalizeStoredJob),
-      runs: boundRunLogs(runs),
+      runs: boundRunLogs(persisted.runs.map(normalizeStoredRunLog)),
     };
   }
 
@@ -462,13 +458,13 @@ export class CronStore {
       if (!Array.isArray(parsed.jobs)) {
         throw new Error("Invalid cron jobs");
       }
-      if (parsed.runs !== undefined && !Array.isArray(parsed.runs)) {
+      if (!Array.isArray(parsed.runs)) {
         throw new Error("Invalid cron run logs");
       }
       if (typeof parsed.version !== "number" || !Number.isInteger(parsed.version)) {
         throw new Error(`Invalid cron store version: ${String(parsed.version)}`);
       }
-      return { version: parsed.version, jobs: parsed.jobs, runs: parsed.runs ?? [] };
+      return { version: parsed.version, jobs: parsed.jobs, runs: parsed.runs };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return { version: CRON_STORE_VERSION, jobs: [], runs: [] };

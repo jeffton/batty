@@ -5,7 +5,6 @@ import {
   JsonlSessionRepo,
   laneConfig,
   branchTip,
-  value,
   type AgentLane,
   type AgentMessage,
   type Entry,
@@ -13,7 +12,7 @@ import {
   type Session,
 } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import { migrateSessionImages, SessionImageFileSystem } from "./session-images";
+import { SessionImageFileSystem } from "./session-images";
 
 // Index reads use Pi's decoder without allowing Pi to repair or modify transcripts.
 class SessionIndexReadFileSystem extends SessionImageFileSystem {
@@ -36,7 +35,6 @@ export interface SessionRead {
   entries: Entry[];
 }
 
-const importedReplyIds = value<Record<string, string>>("batty.imported-reply-ids");
 const repositories = new Map<string, JsonlSessionRepo>();
 function repository(root: string): JsonlSessionRepo {
   root = path.resolve(root);
@@ -55,7 +53,6 @@ function repository(root: string): JsonlSessionRepo {
 export class HarnessSessionStore {
   private entries: Entry[] = [];
   private tip: string | null = null;
-  private remappedReplyIds: Record<string, string> = {};
   private lane?: AgentLane;
   private static readonly owners = new Map<string, Promise<HarnessSessionStore>>();
   private static readonly reads = new Map<string, Promise<SessionRead>>();
@@ -112,40 +109,11 @@ export class HarnessSessionStore {
     if (owner) return owner;
     let opened: Session<JsonlSessionMetadata> | undefined;
     const opening = (async () => {
-      await migrateSessionImages(file);
       const metadata = await readHarnessSessionMetadata(file);
       const repo = repository(path.dirname(file));
       opened = await repo.open(metadata, context);
       const store = new HarnessSessionStore(opened, repo);
       await store.refresh();
-      if (!("v" in metadata)) {
-        const legacy = (await fs.readFile(file, "utf8"))
-          .split("\n")
-          .filter((line) => line.trim())
-          .map((line) => JSON.parse(line));
-        const retained = legacy.filter((entry) =>
-          ["message", "custom_message", "custom", "compaction", "branch_summary"].includes(
-            entry.type,
-          ),
-        );
-        if (retained.length !== store.entries.length)
-          throw new Error("Pi legacy import entry correspondence changed");
-        const ids = new Map(retained.map((entry, index) => [entry.id, store.entries[index]!.id]));
-        const mapping: Record<string, string> = {};
-        for (const entry of retained) {
-          if (
-            entry.type === "custom" &&
-            entry.customType === "batty-agent-turn-file-changes" &&
-            typeof entry.data?.replyEntryId === "string"
-          ) {
-            const remapped = ids.get(entry.data.replyEntryId);
-            if (remapped) mapping[entry.data.replyEntryId] = remapped;
-          }
-        }
-        // This ordinary Pi commit atomically persists the built-in v3 normalization.
-        await store.native.setValue(importedReplyIds, mapping, context);
-        store.remappedReplyIds = mapping;
-      }
       return store;
     })();
     this.owners.set(file, opening);
@@ -172,7 +140,6 @@ export class HarnessSessionStore {
       };
     }
     if (options.readOnly) {
-      await migrateSessionImages(file);
       const metadata = await readHarnessSessionMetadata(file);
       const repo = new JsonlSessionRepo({
         sessionsRoot: path.dirname(file),
@@ -191,7 +158,6 @@ export class HarnessSessionStore {
     const pending = this.reads.get(file);
     if (pending) return pending;
     const reading = (async () => {
-      await migrateSessionImages(file);
       const metadata = await readHarnessSessionMetadata(file);
       const repo = repository(path.dirname(file));
       const native = await repo.open(metadata, context);
@@ -220,7 +186,6 @@ export class HarnessSessionStore {
   async refresh(): Promise<void> {
     this.entries = await this.native.findEntries({ order: "asc" }, context);
     this.tip = (await this.native.getValue(branchTip("main"), context))?.value ?? null;
-    this.remappedReplyIds = (await this.native.getValue(importedReplyIds, context))?.value ?? {};
     this.publishSummary((await fs.stat(this.getSessionFile())).mtimeMs);
   }
   observe(entry: Entry): void {
@@ -231,15 +196,8 @@ export class HarnessSessionStore {
   setTip(tip: string | null): void {
     this.tip = tip;
   }
-  private presentationEntry(entry: Entry): Entry {
-    if (entry.type !== "custom" || entry.customType !== "batty-agent-turn-file-changes")
-      return entry;
-    const data = entry.data as { replyEntryId: string };
-    const remapped = this.remappedReplyIds[data.replyEntryId];
-    return remapped ? { ...entry, data: { ...data, replyEntryId: remapped } } : entry;
-  }
   getEntries(): Entry[] {
-    return this.entries.map((entry) => this.presentationEntry(entry));
+    return [...this.entries];
   }
   getBranch(): Entry[] {
     const entries = new Map(this.entries.map((entry) => [entry.id, entry]));
@@ -251,7 +209,7 @@ export class HarnessSessionStore {
       result.push(entry);
       id = entry.parentId;
     }
-    return result.reverse().map((entry) => this.presentationEntry(entry));
+    return result.reverse();
   }
   getLeafId(): string | null {
     return this.tip;
@@ -289,7 +247,6 @@ export class HarnessSessionStore {
       { scope: "branch", branch: "main", entryId: leafId, id },
       context,
     );
-    await native.setValue(importedReplyIds, this.remappedReplyIds, context);
     const store = new HarnessSessionStore(native, repo);
     await store.refresh();
     HarnessSessionStore.owners.set(native.metadata.path, Promise.resolve(store));
@@ -300,25 +257,13 @@ export class HarnessSessionStore {
   }
 }
 
-/** Only header discovery is host-owned; repo.open invokes Pi's v3 importer. */
+/** Read the native session header without opening the repository. */
 export async function readHarnessSessionMetadata(file: string): Promise<JsonlSessionMetadata> {
   const env = new NodeExecutionEnv({ cwd: path.dirname(file) });
   const lines = await env.readTextLines(file, { maxLines: 1 }, context);
   if (!lines.ok) throw lines.error;
   const header = JSON.parse(lines.value[0]!);
-  const stats = await fs.stat(file);
-  if (header.v === 4 && header.kind === "header") {
-    return { ...header, path: file, modifiedAt: stats.mtimeMs };
-  }
-  if (header.type !== "session" || header.version !== 3)
+  if (header.v !== 4 || header.kind !== "header")
     throw new Error(`Unsupported session format: ${file}`);
-  return {
-    id: header.id,
-    cwd: header.cwd,
-    createdAt: Date.parse(header.timestamp),
-    storageVersion: 1,
-    path: file,
-    modifiedAt: stats.mtimeMs,
-    ...(header.parentSession ? { legacyParentSessionPath: header.parentSession } : {}),
-  };
+  return { ...header, path: file, modifiedAt: (await fs.stat(file)).mtimeMs };
 }

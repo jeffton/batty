@@ -45,12 +45,7 @@ function buildSessionSummary(
   workspaceId: string,
   updatedAt: number,
 ): SessionSummary | undefined {
-  if (
-    metadata.parentSessionId ||
-    metadata.legacyParentSessionPath ||
-    entries.some(isSubagentSessionEntry)
-  )
-    return undefined;
+  if (metadata.parentSessionId || entries.some(isSubagentSessionEntry)) return undefined;
   let firstMessage = "";
   let lastAssistantReplyAt: number | undefined;
   for (const entry of entries) {
@@ -211,18 +206,9 @@ export class SessionSummaryIndex {
       return;
     }
     for (const workspaceId of stored.completedWorkspaces) this.completedWorkspaces.add(workspaceId);
-    let removedRecoveryMetadata = false;
     for (const [file, entry] of Object.entries(stored.entries)) {
-      if (this.revisions.has(file)) continue;
-      const normalized = {
-        workspaceId: entry.workspaceId,
-        updatedAt: entry.updatedAt,
-        ...(entry.summary ? { summary: entry.summary } : {}),
-      };
-      this.entries.set(file, normalized);
-      removedRecoveryMetadata ||= "recovery" in entry;
+      if (!this.revisions.has(file)) this.entries.set(file, entry);
     }
-    if (removedRecoveryMetadata) this.changed();
   }
 
   private buildEntry(
@@ -340,7 +326,7 @@ export class SessionSummaryIndex {
     const unchanged = (file: string) => this.revisions.get(file) === revisions.get(file);
     const files = await sessionFiles(workspaceSessionDir(this.config, workspaceId));
     const errors: unknown[] = [];
-    // One Pi reader at a time bounds legacy import memory and yields between large histories.
+    // One Pi reader at a time bounds memory and yields between large histories.
     for (const file of files) {
       try {
         if (this.revisions.has(file)) continue;

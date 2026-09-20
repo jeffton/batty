@@ -107,7 +107,7 @@ describe("cron store", () => {
     });
   });
 
-  it("persists disabled jobs and defaults legacy jobs to enabled", async () => {
+  it("persists disabled jobs", async () => {
     const config = await createConfig();
     await fs.mkdir(path.join(config.workspacesRoots[0]!, "alpha"));
     const store = new CronStore(config);
@@ -128,12 +128,6 @@ describe("cron store", () => {
     const enabled = await store.updateJob(job.id, { enabled: true });
     expect(enabled.enabled).toBe(true);
     expect(enabled.state.nextRunAtMs).toBeTypeOf("number");
-
-    const persisted = JSON.parse(await fs.readFile(store.filePath, "utf8")) as {
-      jobs: Array<Record<string, unknown>>;
-    };
-    delete persisted.jobs[0]?.enabled;
-    await fs.writeFile(store.filePath, `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
 
     expect((await store.listJobs())[0]?.enabled).toBe(true);
   });
@@ -277,7 +271,7 @@ describe("cron store", () => {
     await fs.mkdir(path.dirname(store.filePath), { recursive: true });
     await fs.writeFile(
       store.filePath,
-      `${JSON.stringify({ version: 999, jobs: [] }, null, 2)}\n`,
+      `${JSON.stringify({ version: 999, jobs: [], runs: [] }, null, 2)}\n`,
       "utf8",
     );
 

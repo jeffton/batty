@@ -12,11 +12,9 @@ node_path="${BATTY_NODE:-$(command -v node)}"
 if launchctl print "${domain}/${label}" >/dev/null 2>&1; then
   if [[ "${BATTY_SKIP_DRAIN:-}" != "1" ]]; then
     "$node_path" "$install_root/current/dist/server/cli.mjs" --root "$batty_root" drain
-    "$node_path" "$install_root/current/dist/server/cli.mjs" --root "$batty_root" migrate-sessions
   fi
   launchctl kickstart -k "${domain}/${label}"
 else
-  "$node_path" "$install_root/current/dist/server/cli.mjs" --root "$batty_root" migrate-sessions
   launchctl bootstrap "$domain" "$plist"
   launchctl enable "${domain}/${label}"
   launchctl kickstart -k "${domain}/${label}"

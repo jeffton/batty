@@ -8,11 +8,8 @@ node_path="${BATTY_NODE:-$(command -v node)}"
 
 systemctl daemon-reload
 service_state="$(systemctl is-active batty.service 2>/dev/null || true)"
-if [[ "$service_state" == "inactive" || "$service_state" == "failed" ]]; then
-  "$node_path" "$install_root/current/dist/server/cli.mjs" --root "$batty_root" migrate-sessions
-elif [[ "${BATTY_SKIP_DRAIN:-}" != "1" ]]; then
+if [[ "$service_state" != "inactive" && "$service_state" != "failed" && "${BATTY_SKIP_DRAIN:-}" != "1" ]]; then
   "$node_path" "$install_root/current/dist/server/cli.mjs" --root "$batty_root" drain
-  "$node_path" "$install_root/current/dist/server/cli.mjs" --root "$batty_root" migrate-sessions
 fi
 
 systemctl enable batty.service >/dev/null

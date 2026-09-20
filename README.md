@@ -48,7 +48,7 @@ Batty adds a browser-native layer on top:
 
 A coordinated deployment drains active turns: it rejects new turns and pauses cron scheduling while active descendants and result deliveries finish. After a crash or interrupted restart, opening a session aborts its open turn; Batty does not resume operations after startup. See [the harness integration](docs/pi-agent-harness.md) for implementation boundaries.
 
-Pi's built-in importer opens legacy v3 sessions and normalizes them through a native commit. Batty preserves its application metadata and UI attachment projections without rewriting committed messages. Coding-agent extensions require migration to native harness hooks/tools; configured legacy extensions produce an explicit error.
+Coding-agent extensions must use native harness hooks and tools; configured coding-agent extensions produce an explicit error.
 
 ## Quick start
 

@@ -134,18 +134,12 @@ describe("deployment scripts", () => {
     expect(handoffScript).toContain('--setenv="BATTY_SKIP_DRAIN=${BATTY_SKIP_DRAIN:-}"');
     expect(restartScript).toContain('node_path="${BATTY_NODE:-$(command -v node)}"');
     const linuxDrain = '"$install_root/current/dist/server/cli.mjs" --root "$batty_root" drain';
-    const linuxMigration =
-      '"$install_root/current/dist/server/cli.mjs" --root "$batty_root" migrate-sessions';
     expect(restartScript).toContain(linuxDrain);
-    expect(restartScript).toContain(linuxMigration);
     expect(restartScript.indexOf(linuxDrain)).toBeLessThan(
-      restartScript.lastIndexOf(linuxMigration),
-    );
-    expect(restartScript.lastIndexOf(linuxMigration)).toBeLessThan(
       restartScript.indexOf("systemctl restart batty.service"),
     );
     expect(restartScript).not.toContain("drain --wait");
-    expect(restartScript).toContain('[[ "${BATTY_SKIP_DRAIN:-}" != "1" ]]');
+    expect(restartScript).toContain('"${BATTY_SKIP_DRAIN:-}" != "1"');
     expect(restartScript).toContain('wait_for_url "http://127.0.0.1/"');
     expect(restartScript).not.toContain('wait_for_url "http://127.0.0.1:${backend_port}/"');
     expect(restartScript).not.toContain("deployment/drain");
@@ -174,16 +168,12 @@ describe("deployment scripts", () => {
     expect(restartScript).toContain('launchctl bootstrap "$domain" "$plist"');
     expect(restartScript).toContain('node_path="${BATTY_NODE:-$(command -v node)}"');
     const macosDrain = '"$install_root/current/dist/server/cli.mjs" --root "$batty_root" drain';
-    const macosMigration =
-      '"$install_root/current/dist/server/cli.mjs" --root "$batty_root" migrate-sessions';
     expect(restartScript).toContain(macosDrain);
-    expect(restartScript).toContain(macosMigration);
-    expect(restartScript.indexOf(macosDrain)).toBeLessThan(restartScript.indexOf(macosMigration));
-    expect(restartScript.indexOf(macosMigration)).toBeLessThan(
+    expect(restartScript.indexOf(macosDrain)).toBeLessThan(
       restartScript.indexOf('launchctl kickstart -k "${domain}/${label}"'),
     );
     expect(restartScript).not.toContain("drain --wait");
-    expect(restartScript).toContain('[[ "${BATTY_SKIP_DRAIN:-}" != "1" ]]');
+    expect(restartScript).toContain('"${BATTY_SKIP_DRAIN:-}" != "1"');
     expect(restartScript).not.toContain("deployment/drain");
     expect(restartScript).not.toContain("authSecret");
   });
@@ -245,13 +235,9 @@ describe("deployment scripts", () => {
     expect(workerScript).toContain("function Wait-ForDeploymentDrain");
     expect(workerScript).toContain("(Get-Command node).Source $cliPath --root $battyRoot drain");
     expect(workerScript).toContain('$cliPath = Join-Path $releaseDir "dist\\server\\cli.mjs"');
-    expect(workerScript).toContain("elseif (-not $Force)");
+    expect(workerScript).toContain('$serviceStatus -ne "Stopped" -and -not $Force');
     expect(workerScript).not.toContain("drain --wait");
-    expect(workerScript).toContain("Invoke-SessionMigration $cliPath $BattyRoot");
     expect(workerScript.indexOf("Wait-ForDeploymentDrain $cliPath $BattyRoot")).toBeLessThan(
-      workerScript.lastIndexOf("Invoke-SessionMigration $cliPath $BattyRoot"),
-    );
-    expect(workerScript.lastIndexOf("Invoke-SessionMigration $cliPath $BattyRoot")).toBeLessThan(
       workerScript.indexOf("Stop-Service -Name Batty"),
     );
     expect(workerScript).not.toContain("deployment/drain");

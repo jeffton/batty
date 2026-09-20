@@ -356,7 +356,7 @@ function messageText(message: AgentMessage): string {
     : message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n");
 }
 
-/** Keep Batty's transport envelope, not the legacy execution lifecycle. */
+/** Keep Batty's transport envelope at the harness boundary. */
 function adaptHarnessEvent(event: HarnessEvent): AgentSessionEvent | undefined {
   switch (event.type) {
     case "run_start":

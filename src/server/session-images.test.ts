@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { BACKGROUND_CONTEXT, getOrThrow } from "@earendil-works/pi-agent-core";
 import {
   createUiImageResolver,
-  migrateSessionImages,
   resolveSessionImage,
   sessionImageDirectory,
   SessionImageFileSystem,
@@ -38,9 +37,14 @@ describe("session image storage", () => {
         },
       },
     ];
-    await fs.writeFile(sessionFile, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
-
-    await migrateSessionImages(sessionFile);
+    const env = new SessionImageFileSystem({ cwd: root });
+    getOrThrow(
+      await env.writeFile(
+        sessionFile,
+        `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
+        BACKGROUND_CONTEXT,
+      ),
+    );
 
     const stored = await fs.readFile(sessionFile, "utf8");
     expect(stored).toContain("batty-file:");
@@ -52,7 +56,6 @@ describe("session image storage", () => {
       "image bytes",
     );
 
-    const env = new SessionImageFileSystem({ cwd: root });
     const hydrated = getOrThrow(await env.readTextFile(sessionFile, BACKGROUND_CONTEXT));
     expect(hydrated).toContain(imageData);
     expect(hydrated).not.toContain("batty-file:");
@@ -111,26 +114,5 @@ describe("session image storage", () => {
     await expect(
       fs.readFile(path.join(sessionImageDirectory(sessionFile), result.name), "utf8"),
     ).resolves.toBe("image");
-  });
-
-  it("migrates shared image files into session-owned directories", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-session-images-"));
-    roots.push(root);
-    const sessionFile = path.join(root, "session.jsonl");
-    const name = `${"a".repeat(64)}.png`;
-    await fs.mkdir(path.join(root, ".batty-images"));
-    await fs.writeFile(path.join(root, ".batty-images", name), "legacy image");
-    await fs.mkdir(sessionImageDirectory(sessionFile));
-    await fs.writeFile(path.join(sessionImageDirectory(sessionFile), name), "partial");
-    await fs.writeFile(
-      sessionFile,
-      `${JSON.stringify({ type: "image", mimeType: "image/png", data: `batty-file:${name}` })}\n`,
-    );
-
-    await migrateSessionImages(sessionFile);
-
-    await expect(
-      fs.readFile(path.join(sessionImageDirectory(sessionFile), name), "utf8"),
-    ).resolves.toBe("legacy image");
   });
 });

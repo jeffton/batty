@@ -82,14 +82,31 @@ async function writeSession(
   const sessionPath = path.join(sessionDir, fileName);
   await fs.mkdir(path.dirname(sessionPath), { recursive: true });
   let parentId: string | null = null;
+  let seq = 0;
   const normalized = entries.map((raw) => {
     const entry = raw as Record<string, any>;
-    if (entry.type === "session") return { cwd: workspaceInfo(config, workspaceId).path, ...entry };
+    if (entry.type === "session")
+      return {
+        v: 4,
+        kind: "header",
+        id: entry.id,
+        createdAt: Date.parse(entry.timestamp),
+        storageVersion: 1,
+        cwd: workspaceInfo(config, workspaceId).path,
+        nextSeq: entries.length,
+        ...(entry.parentSessionId ? { parentSessionId: entry.parentSessionId } : {}),
+      };
+    seq += 1;
     const result: Record<string, any> = {
-      id: crypto.randomUUID(),
-      parentId,
-      timestamp: updatedAt,
       ...entry,
+      kind: "entry",
+      id: entry.id ?? crypto.randomUUID(),
+      parentId: entry.parentId ?? parentId,
+      seq,
+      timestamp:
+        typeof entry.timestamp === "number"
+          ? entry.timestamp
+          : Date.parse(entry.timestamp ?? updatedAt),
     };
     parentId = result.id;
     if (entry.message) {
@@ -104,7 +121,17 @@ async function writeSession(
               : entry.message.content,
         };
     }
-    if (entry.type === "custom_message") result.display = true;
+    if (entry.type === "custom_message") {
+      result.type = "message";
+      result.message = {
+        role: "custom",
+        customType: entry.customType,
+        content: entry.content,
+        timestamp: result.timestamp,
+      };
+      delete result.customType;
+      delete result.content;
+    }
     return result;
   });
   await fs.writeFile(
@@ -132,7 +159,7 @@ describe("session summaries", () => {
       "older.jsonl",
       "2026-03-24T12:00:00Z",
       [
-        { type: "session", version: 3, id: "older-id", timestamp: "2026-03-01T00:00:00Z" },
+        { type: "session", id: "older-id", timestamp: "2026-03-01T00:00:00Z" },
         {
           type: "message",
           id: "older-1",
@@ -144,7 +171,7 @@ describe("session summaries", () => {
       ],
     );
     await writeSession(config, workspace.id, "newer.jsonl", "2026-03-25T12:00:00Z", [
-      { type: "session", version: 3, id: "newer-id", timestamp: "2026-01-01T00:00:00Z" },
+      { type: "session", id: "newer-id", timestamp: "2026-01-01T00:00:00Z" },
       {
         type: "message",
         id: "newer-1",
@@ -204,7 +231,7 @@ describe("session summaries", () => {
     await fs.mkdir(workspace.path, { recursive: true });
 
     await writeSession(config, workspace.id, "empty.jsonl", "2026-03-25T12:00:00Z", [
-      { type: "session", version: 3, id: "empty-id", timestamp: "2026-01-01T00:00:00Z" },
+      { type: "session", id: "empty-id", timestamp: "2026-01-01T00:00:00Z" },
       {
         type: "message",
         id: "assistant-1",
@@ -236,7 +263,7 @@ describe("session summaries", () => {
       "subagent.jsonl",
       "2026-03-25T12:00:00Z",
       [
-        { type: "session", version: 3, id: "subagent-id", timestamp: "2026-03-25T12:00:00Z" },
+        { type: "session", id: "subagent-id", timestamp: "2026-03-25T12:00:00Z" },
         {
           type: "custom",
           customType: SUBAGENT_SESSION_CUSTOM_TYPE,
@@ -280,7 +307,7 @@ describe("session summaries", () => {
       "cron-run.jsonl",
       "2026-03-25T12:00:00Z",
       [
-        { type: "session", version: 3, id: "cron-run-id", timestamp: "2026-03-25T12:00:00Z" },
+        { type: "session", id: "cron-run-id", timestamp: "2026-03-25T12:00:00Z" },
         {
           type: "custom",
           customType: CRON_RUN_SESSION_CUSTOM_TYPE,
@@ -326,7 +353,7 @@ describe("session summaries", () => {
       "cron/job-1/run-1/cron-run.jsonl",
       "2026-03-25T12:00:00Z",
       [
-        { type: "session", version: 3, id: "cron-run-id", timestamp: "2026-03-25T12:00:00Z" },
+        { type: "session", id: "cron-run-id", timestamp: "2026-03-25T12:00:00Z" },
         {
           type: "custom",
           customType: CRON_RUN_SESSION_CUSTOM_TYPE,
@@ -366,10 +393,9 @@ describe("session summaries", () => {
     const entries: unknown[] = [
       {
         type: "session",
-        version: 3,
         id: "branched-subagent-id",
         timestamp: "2026-03-25T12:00:00Z",
-        parentSession: "/tmp/parent.jsonl",
+        parentSessionId: "parent-id",
       },
       {
         type: "message",
@@ -418,7 +444,7 @@ describe("session summaries", () => {
     await fs.mkdir(workspace.path, { recursive: true });
 
     await writeSession(config, workspace.id, "older.jsonl", "2026-03-24T12:00:00Z", [
-      { type: "session", version: 3, id: "older-id", timestamp: "2026-03-24T12:00:00Z" },
+      { type: "session", id: "older-id", timestamp: "2026-03-24T12:00:00Z" },
       {
         type: "custom",
         customType: CRON_SESSION_CUSTOM_TYPE,
@@ -431,7 +457,7 @@ describe("session summaries", () => {
       "today.jsonl",
       "2026-03-20T12:00:00Z",
       [
-        { type: "session", version: 3, id: "today-id", timestamp: "2026-03-31T12:00:00Z" },
+        { type: "session", id: "today-id", timestamp: "2026-03-31T12:00:00Z" },
         {
           type: "custom",
           customType: CRON_SESSION_CUSTOM_TYPE,
@@ -440,7 +466,7 @@ describe("session summaries", () => {
       ],
     );
     await writeSession(config, workspace.id, "newer.jsonl", "2026-03-25T12:00:00Z", [
-      { type: "session", version: 3, id: "newer-id", timestamp: "2026-03-25T12:00:00Z" },
+      { type: "session", id: "newer-id", timestamp: "2026-03-25T12:00:00Z" },
     ]);
 
     vi.useFakeTimers();
@@ -483,7 +509,7 @@ describe("session summaries", () => {
     await fs.mkdir(workspace.path, { recursive: true });
 
     await writeSession(config, workspace.id, "regular.jsonl", "2026-03-25T12:00:00Z", [
-      { type: "session", version: 3, id: "regular-id", timestamp: "2026-03-25T12:00:00Z" },
+      { type: "session", id: "regular-id", timestamp: "2026-03-25T12:00:00Z" },
     ]);
 
     vi.useFakeTimers();
@@ -516,10 +542,10 @@ describe("session summaries", () => {
     await fs.mkdir(workspace.path, { recursive: true });
 
     await writeSession(config, workspace.id, "older.jsonl", "2026-03-24T12:00:00Z", [
-      { type: "session", version: 3, id: "older-id", timestamp: "2026-03-30T12:00:00Z" },
+      { type: "session", id: "older-id", timestamp: "2026-03-30T12:00:00Z" },
     ]);
     await writeSession(config, workspace.id, "newer.jsonl", "2026-03-25T12:00:00Z", [
-      { type: "session", version: 3, id: "newer-id", timestamp: "2026-03-01T12:00:00Z" },
+      { type: "session", id: "newer-id", timestamp: "2026-03-01T12:00:00Z" },
     ]);
 
     expect(await latestSessionUpdatedAt(config, workspace.id)).toBe(
@@ -528,9 +554,8 @@ describe("session summaries", () => {
   });
 });
 
-const legacyHeader = (id: string) => ({
+const sessionHeader = (id: string) => ({
   type: "session",
-  version: 3,
   id,
   timestamp: "2026-03-25T12:00:00Z",
 });
@@ -540,7 +565,7 @@ describe("persistent session summary index", () => {
     const config = await createConfig();
     const workspace = workspaceInfo(config, "warm");
     await writeSession(config, workspace.id, "one.jsonl", "2026-03-25T12:00:00Z", [
-      legacyHeader("one"),
+      sessionHeader("one"),
     ]);
     const index = await getSessionSummaryIndex(config);
     await index.ensureInitialized(workspace.id);
@@ -580,7 +605,7 @@ describe("persistent session summary index", () => {
       "new",
       "one.jsonl",
       "2026-03-25T12:00:00Z",
-      [legacyHeader("one")],
+      [sessionHeader("one")],
       false,
     );
     const read = vi.spyOn(HarnessSessionStore, "read");
@@ -607,7 +632,7 @@ describe("persistent session summary index", () => {
       workspace.id,
       "one.jsonl",
       "2026-03-25T12:00:00Z",
-      [legacyHeader("one")],
+      [sessionHeader("one")],
       false,
     );
     const indexFile = path.join(battyAgentDir(config), "session-summary-index.json");
@@ -691,7 +716,7 @@ describe("persistent session summary index", () => {
       workspace.id,
       "good.jsonl",
       "2026-03-25T12:00:00Z",
-      [legacyHeader("good")],
+      [sessionHeader("good")],
       false,
     );
     const bad = await writeSession(

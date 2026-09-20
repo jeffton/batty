@@ -7,7 +7,6 @@ import { err, FileError, ok, toError, type FileSystem } from "@earendil-works/pi
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 
 const IMAGE_REFERENCE_PREFIX = "batty-file:";
-const migrations = new Map<string, Promise<boolean>>();
 
 type TransformDirection = "externalize" | "hydrate";
 type TextLineReader = Extract<
@@ -23,10 +22,6 @@ function canonicalSessionFile(filePath: string): string {
 
 export function sessionImageDirectory(sessionFile: string): string {
   return `${canonicalSessionFile(sessionFile)}.images`;
-}
-
-export function legacySessionImageDirectory(sessionFile: string): string {
-  return path.join(path.dirname(canonicalSessionFile(sessionFile)), ".batty-images");
 }
 
 function imageName(bytes: Buffer, mimeType: string): string {
@@ -355,130 +350,5 @@ export class SessionImageFileSystem implements FileSystem {
     } catch (error) {
       return err(imageError(error, filePath));
     }
-  }
-}
-
-function collectImageReferences(value: unknown, references: Set<string>): void {
-  if (Array.isArray(value)) {
-    for (const entry of value) collectImageReferences(entry, references);
-    return;
-  }
-  if (!value || typeof value !== "object") return;
-  const record = value as Record<string, unknown>;
-  if (
-    record.type === "image" &&
-    typeof record.data === "string" &&
-    record.data.startsWith(IMAGE_REFERENCE_PREFIX)
-  ) {
-    const name = record.data.slice(IMAGE_REFERENCE_PREFIX.length);
-    if (path.basename(name) !== name) {
-      throw new Error(`Invalid session image reference: ${record.data}`);
-    }
-    references.add(name);
-  }
-  for (const entry of Object.values(record)) collectImageReferences(entry, references);
-}
-
-async function migrateSharedImages(file: string, parsed: unknown[]): Promise<void> {
-  const references = new Set<string>();
-  for (const line of parsed) collectImageReferences(line, references);
-  if (references.size === 0) return;
-
-  const sourceDirectory = legacySessionImageDirectory(file);
-  const destinationDirectory = sessionImageDirectory(file);
-  await fs.mkdir(destinationDirectory, { recursive: true });
-  for (const name of references) {
-    const source = path.join(sourceDirectory, name);
-    const destination = path.join(destinationDirectory, name);
-    let sourceBytes: Buffer;
-    try {
-      sourceBytes = await fs.readFile(source);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      await fs.access(destination);
-      continue;
-    }
-    try {
-      if ((await fs.readFile(destination)).equals(sourceBytes)) continue;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-
-    const temporary = path.join(destinationDirectory, `.${name}.${randomUUID()}.tmp`);
-    try {
-      await fs.writeFile(temporary, sourceBytes, { flag: "wx" });
-      const handle = await fs.open(temporary, process.platform === "win32" ? "r+" : "r");
-      try {
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-      try {
-        await fs.rename(temporary, destination);
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== "EEXIST" && !(process.platform === "win32" && code === "EPERM")) {
-          throw error;
-        }
-        let existing: Buffer;
-        try {
-          existing = await fs.readFile(destination);
-        } catch {
-          throw error;
-        }
-        if (!existing.equals(sourceBytes)) {
-          await fs.rm(destination);
-          await fs.rename(temporary, destination);
-        }
-      }
-    } finally {
-      await fs.rm(temporary, { force: true });
-    }
-  }
-}
-
-export async function migrateSessionImages(file: string): Promise<boolean> {
-  file = path.resolve(file);
-  const existing = migrations.get(file);
-  if (existing) return existing;
-  const migrating = (async () => {
-    for (;;) {
-      const original = await fs.readFile(file, "utf8");
-      let parsed: unknown[];
-      try {
-        parsed = original
-          .split("\n")
-          .filter((line) => line.trim().length > 0)
-          .map((line) => JSON.parse(line));
-      } catch (error) {
-        if (error instanceof SyntaxError) return false;
-        throw error;
-      }
-      await migrateSharedImages(file, parsed);
-      const transformed = await new SessionImageStore().transformText(
-        original,
-        "externalize",
-        file,
-      );
-      if (transformed === original) return true;
-      const temporary = `${file}.images-${randomUUID()}.tmp`;
-      try {
-        await fs.writeFile(temporary, transformed, {
-          encoding: "utf8",
-          mode: (await fs.stat(file)).mode,
-        });
-        if ((await fs.readFile(file, "utf8")) !== original) continue;
-        await fs.rename(temporary, file);
-        return true;
-      } finally {
-        await fs.rm(temporary, { force: true });
-      }
-    }
-  })();
-  migrations.set(file, migrating);
-  try {
-    return await migrating;
-  } finally {
-    migrations.delete(file);
   }
 }

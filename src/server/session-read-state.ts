@@ -4,7 +4,7 @@ import { stateDirPath } from "./options";
 
 interface StoredSessionReadState {
   baselineInitialized: boolean;
-  undiscoveredBaselineReadAt?: number;
+  undiscoveredBaselineReadAt: number;
   readAtBySessionId: Record<string, number>;
 }
 
@@ -22,22 +22,13 @@ export class SessionReadStateStore {
   static async create(battyDir: string): Promise<SessionReadStateStore> {
     const store = new SessionReadStateStore(battyDir);
     try {
-      const stored = JSON.parse(await fs.readFile(store.filePath, "utf8")) as
-        | StoredSessionReadState
-        | Record<string, number>;
-      const readAtBySessionId = "readAtBySessionId" in stored ? stored.readAtBySessionId : stored;
-      store.baselineInitialized =
-        "baselineInitialized" in stored && stored.baselineInitialized === true;
-      if (
-        "undiscoveredBaselineReadAt" in stored &&
-        typeof stored.undiscoveredBaselineReadAt === "number"
-      )
-        store.undiscoveredBaselineReadAt = stored.undiscoveredBaselineReadAt;
-      for (const [sessionId, readAt] of Object.entries(readAtBySessionId)) {
-        if (Number.isFinite(readAt)) {
-          store.readAtBySessionId.set(sessionId, readAt);
-        }
-      }
+      const stored = JSON.parse(
+        await fs.readFile(store.filePath, "utf8"),
+      ) as StoredSessionReadState;
+      store.baselineInitialized = stored.baselineInitialized;
+      store.undiscoveredBaselineReadAt = stored.undiscoveredBaselineReadAt;
+      for (const [sessionId, readAt] of Object.entries(stored.readAtBySessionId))
+        store.readAtBySessionId.set(sessionId, readAt);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         throw error;

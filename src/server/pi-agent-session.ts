@@ -127,7 +127,7 @@ export async function createPiAgentSession({
     throw new Error(extensions.errors.map((error) => `${error.path}: ${error.error}`).join("\n"));
   if (extensions.extensions.length) {
     throw new Error(
-      "Coding-agent extensions require migration to AgentHarness hooks/tools: " +
+      "Coding-agent extensions are not supported; use AgentHarness hooks/tools: " +
         extensions.extensions.map((extension) => extension.path).join(", "),
     );
   }
@@ -337,14 +337,6 @@ export async function createPiAgentSession({
   // Explicit per-session choices override a fork's inherited lane configuration.
   if (model) await session.setModel(model as Model<Api>);
   if (thinkingLevel) await session.setThinkingLevel(thinkingLevel as ThinkingLevel);
-  // v3 sessions did not necessarily record the complete builtin set.
-  if (session.getActiveToolNames().length === 0)
-    await session.setActiveToolsByName(
-      battyActivePiToolNames(
-        nativeTools.map((tool) => tool.name),
-        process.platform,
-      ),
-    );
   if (!findBattySystemPromptSnapshot(sessionManager.getEntries()))
     await refreshBattySystemPrompt(config, { workspace, session });
   return { session };

@@ -1,177 +1,46 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
-import { BACKGROUND_CONTEXT as context } from "@earendil-works/pi-agent-core";
-import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { BACKGROUND_CONTEXT } from "@earendil-works/pi-agent-core";
 import { HarnessSessionStore } from "./harness-session-store";
-import { createHarnessFixture } from "./harness-test-fixture";
-import { agentTurnFileChangesByReplyEntryId } from "./agent-turn-file-changes";
-import { sessionImageDirectory } from "./session-images";
 
-const cleanups: Array<() => Promise<void>> = [];
+const tempDirs: string[] = [];
+
+async function currentSessionFile(): Promise<string> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-harness-store-"));
+  tempDirs.push(root);
+  const store = await HarnessSessionStore.create(root, path.join(root, "sessions"));
+  const file = store.getSessionFile();
+  await store.native.close(BACKGROUND_CONTEXT);
+  store.release();
+  return file;
+}
+
 afterEach(async () => {
-  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  await Promise.all(tempDirs.splice(0).map((root) => fs.rm(root, { recursive: true })));
 });
-const timestamp = new Date(1).toISOString();
 
-async function legacyFile() {
-  const f = await createHarnessFixture();
-  cleanups.push(f.cleanup);
-  const file = path.join(f.root, "legacy.jsonl");
-  const entries = [
-    {
-      type: "session",
-      version: 3,
-      id: "11111111-1111-4111-8111-111111111111",
-      cwd: f.root,
-      timestamp,
-    },
-    {
-      type: "model_change",
-      id: "00000001",
-      parentId: null,
-      provider: "faux",
-      modelId: "faux-1",
-      timestamp,
-    },
-    {
-      type: "thinking_level_change",
-      id: "00000002",
-      parentId: "00000001",
-      thinkingLevel: "off",
-      timestamp,
-    },
-    {
-      type: "message",
-      id: "00000003",
-      parentId: "00000002",
-      timestamp,
-      message: { role: "user", content: "work", timestamp: 1, clientMessageId: "client-legacy" },
-    },
-    {
-      type: "message",
-      id: "00000004",
-      parentId: "00000003",
-      timestamp,
-      message: fauxAssistantMessage("done"),
-    },
-    {
-      type: "custom",
-      id: "00000005",
-      parentId: "00000004",
-      timestamp,
-      customType: "batty-agent-turn-file-changes",
-      data: {
-        version: 1,
-        replyEntryId: "00000004",
-        files: [{ path: "/file", patch: "legacy patch" }],
-      },
-    },
-    {
-      type: "session_info",
-      id: "00000006",
-      parentId: "00000005",
-      timestamp,
-      name: "Imported title",
-    },
-  ];
-  await fs.writeFile(file, entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
-  return { f, file };
-}
-function retain(store: HarnessSessionStore) {
-  cleanups.push(async () => {
-    await store.native.close(context);
-    store.release();
-  });
-  return store;
-}
+describe("HarnessSessionStore", () => {
+  it("supports concurrent opens of a current session", async () => {
+    const file = await currentSessionFile();
 
-describe("native harness session storage", () => {
-  it("uses Pi's v3 importer and keeps Batty reply metadata valid across reminting, reopen, and fork", async () => {
-    const { f, file } = await legacyFile();
-    const store = retain(await HarnessSessionStore.open(file));
-    const assistant = store
-      .getBranch()
-      .find((entry) => entry.type === "message" && entry.message.role === "assistant")!;
-    expect(assistant.id).not.toBe("00000004");
-    expect(store.getBranch()).toContainEqual(
-      expect.objectContaining({
-        message: expect.objectContaining({ clientMessageId: "client-legacy" }),
-      }),
-    );
-    expect(agentTurnFileChangesByReplyEntryId(store.getEntries()).get(assistant.id)).toEqual([
-      { path: "/file", patch: "legacy patch" },
-    ]);
-    expect(JSON.parse((await fs.readFile(file, "utf8")).split("\n")[0]!)).toMatchObject({
-      kind: "header",
-      v: 4,
-    });
-    await store.native.close(context);
-    store.release();
-    const reopened = retain(await HarnessSessionStore.open(file));
-    expect(
-      reopened
-        .getBranch()
-        .find((entry) => entry.type === "message" && entry.message.role === "assistant")!.id,
-    ).toBe(assistant.id);
-    expect(
-      agentTurnFileChangesByReplyEntryId(reopened.getEntries()).get(assistant.id)?.[0]?.patch,
-    ).toBe("legacy patch");
-    const child = retain(await reopened.fork(path.join(f.root, "children")));
-    expect(
-      agentTurnFileChangesByReplyEntryId(child.getEntries()).get(assistant.id)?.[0]?.patch,
-    ).toBe("legacy patch");
-    expect(child.native.metadata.parentSessionId).toBe(reopened.getSessionId());
-  });
-
-  it("migrates legacy images during read-only index reads and forks", async () => {
-    const { f, file } = await legacyFile();
-    const lines = (await fs.readFile(file, "utf8")).trimEnd().split("\n");
-    const message = JSON.parse(lines[3]!) as {
-      message: { content: unknown };
-    };
-    message.message.content = [
-      { type: "text", text: "work" },
-      { type: "image", mimeType: "image/png", data: "aGVsbG8=" },
-    ];
-    lines[3] = JSON.stringify(message);
-    await fs.writeFile(file, `${lines.join("\n")}\n`);
-
-    await HarnessSessionStore.read(file, { readOnly: true });
-
-    const stored = await fs.readFile(file, "utf8");
-    expect(stored).toContain("batty-file:");
-    expect(stored).not.toContain("aGVsbG8=");
-
-    const parent = retain(await HarnessSessionStore.open(file));
-    const child = retain(await parent.fork(path.join(f.root, "children")));
-    const childStored = await fs.readFile(child.native.metadata.path, "utf8");
-    expect(childStored).toContain("batty-file:");
-    expect(childStored).not.toContain("aGVsbG8=");
-    expect(JSON.stringify(child.getEntries())).toContain("aGVsbG8=");
-    await expect(
-      fs.readdir(sessionImageDirectory(child.native.metadata.path)),
-    ).resolves.toHaveLength(1);
-
-    const grandchild = retain(await child.fork(path.join(f.root, "children")));
-    expect(JSON.stringify(grandchild.getEntries())).toContain("aGVsbG8=");
-  });
-
-  it("coalesces concurrent opens into one native writer", async () => {
-    const { file } = await legacyFile();
-    const stores = await Promise.all([
+    const [first, second] = await Promise.all([
       HarnessSessionStore.open(file),
       HarnessSessionStore.open(file),
     ]);
-    retain(stores[0]!);
-    expect(stores[0]).toBe(stores[1]);
+
+    expect(first).toBe(second);
+    await first.native.close(BACKGROUND_CONTEXT);
+    first.release();
   });
 
-  it("surfaces malformed storage without rewriting it", async () => {
-    const { file } = await legacyFile();
-    await fs.appendFile(file, "{not json}\n");
-    const before = await fs.readFile(file, "utf8");
-    await expect(HarnessSessionStore.open(file)).rejects.toThrow();
-    expect(await fs.readFile(file, "utf8")).toBe(before);
+  it("does not repair malformed current sessions while indexing", async () => {
+    const file = await currentSessionFile();
+    const malformed = `${await fs.readFile(file, "utf8")}{`;
+    await fs.writeFile(file, malformed);
+
+    await expect(HarnessSessionStore.read(file, { readOnly: true })).rejects.toThrow();
+    expect(await fs.readFile(file, "utf8")).toBe(malformed);
   });
 });

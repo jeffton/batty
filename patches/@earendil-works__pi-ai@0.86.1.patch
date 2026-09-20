@@ -1,6 +1,6 @@
 --- a/dist/types.d.ts
 +++ b/dist/types.d.ts
-@@ -303,6 +303,8 @@
+@@ -348,6 +348,8 @@
      role: "user";
      content: string | (TextContent | ImageContent)[];
      timestamp: number;

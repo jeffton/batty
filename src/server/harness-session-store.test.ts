@@ -166,6 +166,9 @@ describe("native harness session storage", () => {
     expect(childStored).toContain("batty-file:");
     expect(childStored).not.toContain("aGVsbG8=");
     expect(JSON.stringify(child.getEntries())).toContain("aGVsbG8=");
+
+    const grandchild = retain(await child.fork(path.join(f.root, "children")));
+    expect(JSON.stringify(grandchild.getEntries())).toContain("aGVsbG8=");
   });
 
   it("keeps physical line numbers in legacy parse errors after blank lines", async () => {

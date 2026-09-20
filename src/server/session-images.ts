@@ -124,6 +124,20 @@ class SessionImageStore {
   }
 }
 
+export async function copySessionImages(
+  sourceSessionFile: string,
+  destinationDirectory: string,
+): Promise<void> {
+  const source = path.join(path.dirname(sourceSessionFile), ".batty-images");
+  const destination = path.join(destinationDirectory, ".batty-images");
+  if (path.resolve(source) === path.resolve(destination)) return;
+  try {
+    await fs.cp(source, destination, { recursive: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
 export class SessionImageExecutionEnv extends NodeExecutionEnv {
   private readonly images = new SessionImageStore();
 

@@ -1,0 +1,120 @@
+diff --git a/dist/harness/compaction/compaction.js b/dist/harness/compaction/compaction.js
+index d430a3f..0b66e68 100644
+--- a/dist/harness/compaction/compaction.js
++++ b/dist/harness/compaction/compaction.js
+@@ -264,12 +264,18 @@ export function findCutPoint(entries, startIndex, endIndex, keepRecentTokens) {
+         const messageTokens = estimateTokens(entry.message);
+         accumulatedTokens += messageTokens;
+         if (accumulatedTokens >= keepRecentTokens) {
++            let foundCutPoint = false;
+             for (let c = 0; c < cutPoints.length; c++) {
+                 if (cutPoints[c] >= i) {
+                     cutIndex = cutPoints[c];
++                    foundCutPoint = true;
+                     break;
+                 }
+             }
++            // Trailing tool results stay with their preceding assistant call.
++            if (!foundCutPoint) {
++                cutIndex = cutPoints[cutPoints.length - 1];
++            }
+             break;
+         }
+     }
+diff --git a/dist/harness/session/jsonl/legacy-v3.js b/dist/harness/session/jsonl/legacy-v3.js
+index 083ad74..b26ae8d 100644
+--- a/dist/harness/session/jsonl/legacy-v3.js
++++ b/dist/harness/session/jsonl/legacy-v3.js
+@@ -35,13 +35,13 @@ export async function normalizeLegacyV3Header(fileSystem, header, context) {
+         ...(await metadataFromLegacyV3Header(fileSystem, header, context)),
+     };
+ }
+-function parseLegacyV3Entry(line) {
++function parseLegacyV3Entry(line, lineNumber) {
+     let entry;
+     try {
+         entry = JSON.parse(line);
+     }
+     catch (error) {
+-        throw new Error("Invalid legacy v3 JSONL record: not valid JSON", { cause: error });
++        throw new Error(`Invalid legacy v3 JSONL record at line ${lineNumber}: not valid JSON`, { cause: error });
+     }
+     const recordType = entry?.type;
+     if (recordType !== "message" &&
+@@ -54,7 +54,7 @@ function parseLegacyV3Entry(line) {
+         recordType !== "active_tools_change" &&
+         recordType !== "session_info" &&
+         recordType !== "label") {
+-        throw new Error(`Unsupported legacy v3 record type: ${String(recordType)}`);
++        throw new Error(`Unsupported legacy v3 record type at line ${lineNumber}: ${String(recordType)}`);
+     }
+     return entry;
+ }
+@@ -267,12 +267,15 @@ async function readLegacyV3Inventory(reader, context) {
+     let importedUsage = emptyUsage();
+     let name;
+     let finalId = null;
++    let lineNumber = 1;
+     while (true) {
+         const line = fileValue(await reader.readLine(context), "Failed to read legacy v3 source");
+         if (line === undefined || !line.terminated)
+             break;
+-        const lineNumber = entries.size + 2;
+-        const entry = parseLegacyV3Entry(line.text);
++        lineNumber++;
++        if (line.text.trim() === "")
++            continue;
++        const entry = parseLegacyV3Entry(line.text, lineNumber);
+         if (entries.has(entry.id))
+             throw new Error(`Duplicate legacy v3 entry id: ${entry.id}`);
+         const indexed = indexLegacyV3Entry(entry, lineNumber, nextSeq, entries);
+diff --git a/dist/harness/tools/read.js b/dist/harness/tools/read.js
+index c78086d..d57aa09 100644
+--- a/dist/harness/tools/read.js
++++ b/dist/harness/tools/read.js
+@@ -12,7 +12,7 @@ export function createReadTool(options) {
+     return {
+         name: "read",
+         label: "read",
+-        description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.`,
++        description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, reads without an explicit limit are truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). An explicit limit sets the maximum lines returned and removes the byte cap. Use offset/limit for large files. When you need the full file, continue with offset until complete.`,
+         parameters: readSchema,
+         async execute(_toolCallId, { path, offset, limit }, _onUpdate, { env }, _invocation, context) {
+             const absolutePath = await resolveReadToolPath(env, path, context);
+@@ -73,7 +73,10 @@ export function createReadTool(options) {
+             else {
+                 selectedContent = allLines.slice(startLine).join("\n");
+             }
+-            const truncation = truncateHead(selectedContent);
++            const truncation = truncateHead(selectedContent, {
++                maxBytes: limit !== undefined ? Infinity : DEFAULT_MAX_BYTES,
++                maxLines: limit !== undefined ? Infinity : DEFAULT_MAX_LINES,
++            });
+             let outputText;
+             let details;
+             if (truncation.firstLineExceedsLimit) {
+diff --git a/dist/harness/session/jsonl/legacy-v3.js b/dist/harness/session/jsonl/legacy-v3.js
+index 083ad74..4a93c47 100644
+--- a/dist/harness/session/jsonl/legacy-v3.js
++++ b/dist/harness/session/jsonl/legacy-v3.js
+@@ -443,11 +443,16 @@ export class LegacyV3Source {
+                 parsed.header.cwd !== this.header.cwd) {
+                 throw new Error("Legacy v3 source header changed");
+             }
++            let lineNumber = 1;
+             for (const indexed of this.entries.values()) {
+-                const line = fileValue(await reader.readLine(context), "Failed to reread legacy v3 source");
+-                if (line === undefined || !line.terminated)
+-                    throw new Error("Legacy v3 source ended before captured entries");
+-                const entry = parseLegacyV3Entry(line.text);
++                let line;
++                do {
++                    line = fileValue(await reader.readLine(context), "Failed to reread legacy v3 source");
++                    if (line === undefined || !line.terminated)
++                        throw new Error("Legacy v3 source ended before captured entries");
++                    lineNumber++;
++                } while (line.text.trim() === "");
++                const entry = parseLegacyV3Entry(line.text, lineNumber);
+                 if (entry.id !== indexed.id || entry.type !== indexed.type) {
+                     throw new Error("Legacy v3 source changed");
+                 }

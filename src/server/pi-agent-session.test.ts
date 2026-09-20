@@ -2,7 +2,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { createModels, fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
+import {
+  createModels,
+  fauxAssistantMessage,
+  fauxProvider,
+  type JsonObject,
+} from "@earendil-works/pi-ai";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/pi-agent-core";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -75,7 +80,7 @@ async function setup(
   };
 }
 
-function toolCall(name: string, args: Record<string, unknown>) {
+function toolCall(name: string, args: JsonObject) {
   return fauxAssistantMessage([{ type: "toolCall", id: "call", name, arguments: args }]);
 }
 

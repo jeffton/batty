@@ -13,7 +13,11 @@ import {
   type Session,
 } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import { migrateSessionImages, SessionImageExecutionEnv } from "./session-images";
+import {
+  copySessionImages,
+  migrateSessionImages,
+  SessionImageExecutionEnv,
+} from "./session-images";
 
 // Index reads use Pi's decoder without allowing Pi to repair or modify transcripts.
 class SessionIndexReadEnv extends SessionImageExecutionEnv {
@@ -284,6 +288,12 @@ export class HarnessSessionStore {
     if (!leafId)
       return HarnessSessionStore.create(this.native.metadata.cwd!, root, this.getSessionId(), id);
     const repo = repository(root);
+    const cwd = this.native.metadata.cwd!;
+    const destinationDirectory = path.join(
+      path.resolve(root),
+      `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`,
+    );
+    await copySessionImages(this.getSessionFile(), destinationDirectory);
     const native = await repo.fork(
       this.native.metadata,
       { scope: "branch", branch: "main", entryId: leafId, id },

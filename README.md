@@ -220,6 +220,7 @@ Fields:
 - `cronDailySessionStartTime` — local rollover time for daily cron session reuse, formatted as `HH:MM`; defaults to `04:00`
 - `braveSearchKey` — optional Brave Search API key used by Batty's built-in `web-search` tool
 - `browserTailscaleSshDestination` — optional OpenSSH destination used for browser sessions opened with `useTailscale: true`, such as `user@100.64.0.1` or a Tailscale hostname
+- `browserMaxTabs` — maximum tabs per browser-tool session; defaults to `16`
 - `appTitle` — installation title shown in the UI, browser title, and PWA manifest; defaults to `Batty`
 - `appColor` — installation color used for light and dark app chrome; one of `neutral`, `blue`, `teal`, `green`, `amber`, `rose`, or `violet`
 - `defaultProvider` — optional default Pi model provider for new sessions, such as `openai-codex`

@@ -39,6 +39,7 @@ describe("ensureOptionsFile", () => {
       cronDailySessionStartTime: string;
       braveSearchKey?: string;
       browserTailscaleSshDestination?: string;
+      browserMaxTabs?: number;
       pinnedWorkspaceIds?: string[];
       assistantWorkspaceId?: string;
       defaultProvider?: string;
@@ -55,6 +56,7 @@ describe("ensureOptionsFile", () => {
     expect(persisted.cronDailySessionStartTime).toBe("04:00");
     expect(persisted.braveSearchKey).toBeUndefined();
     expect(persisted.browserTailscaleSshDestination).toBeUndefined();
+    expect(persisted.browserMaxTabs).toBeUndefined();
     expect(persisted.pinnedWorkspaceIds).toEqual([]);
     expect(persisted.assistantWorkspaceId).toBeUndefined();
     expect(persisted.defaultProvider).toBeUndefined();
@@ -79,6 +81,7 @@ describe("ensureOptionsFile", () => {
           cronDailySessionStartTime: "4:00",
           braveSearchKey: "  brave-key  ",
           browserTailscaleSshDestination: "  david@summerhouse-pi  ",
+          browserMaxTabs: 12,
           pinnedWorkspaceIds: ["batty", "", 123, "kladde"],
           assistantWorkspaceId: "  batty  ",
           defaultProvider: "  openai-codex  ",
@@ -106,6 +109,7 @@ describe("ensureOptionsFile", () => {
     expect(options.cronDailySessionStartTime).toBe("04:00");
     expect(options.braveSearchKey).toBe("brave-key");
     expect(options.browserTailscaleSshDestination).toBe("david@summerhouse-pi");
+    expect(options.browserMaxTabs).toBe(12);
     expect(options.pinnedWorkspaceIds).toEqual(["batty", "kladde"]);
     expect(options.assistantWorkspaceId).toBe("batty");
     expect(options.defaultProvider).toBe("openai-codex");
@@ -298,6 +302,26 @@ describe("ensureOptionsFile", () => {
 
     await expect(ensureOptionsFile(battyDir)).rejects.toThrow(
       "Invalid defaultThinkingLevel in options.json: 123. Expected off, minimal, low, medium, high, xhigh, or max.",
+    );
+  });
+
+  it("rejects invalid browserMaxTabs values", async () => {
+    const battyDir = await createBattyDir();
+
+    await fs.mkdir(path.dirname(optionsFilePath(battyDir)), { recursive: true });
+    await fs.writeFile(
+      optionsFilePath(battyDir),
+      `${JSON.stringify({
+        authSecret: "existing-secret",
+        workspacesRoots: ["/root/github"],
+        webPushSubject: "https://batty.roybot.se",
+        browserMaxTabs: 0,
+      })}\n`,
+      "utf8",
+    );
+
+    await expect(ensureOptionsFile(battyDir)).rejects.toThrow(
+      "Invalid browserMaxTabs in options.json: 0. Expected a positive safe integer.",
     );
   });
 

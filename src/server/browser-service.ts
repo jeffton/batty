@@ -4,6 +4,7 @@ import path from "node:path";
 import { inspect } from "node:util";
 import type { BrowserContext, CDPSession, Frame, Page } from "patchright";
 import { getSharedBrowser } from "./browser-runtime";
+import { DEFAULT_BROWSER_MAX_TABS } from "./options";
 import type { BrowserProxy } from "./ssh-socks-proxy";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -116,6 +117,7 @@ interface BrowserSession {
   pageIdentityPromises: WeakMap<Page, Promise<void>>;
   pages: Map<string, Page>;
   pageIds: WeakMap<Page, string>;
+  rejectedPages: WeakSet<Page>;
   frames: Map<string, Frame>;
   frameIds: WeakMap<Frame, string>;
   activePageId?: string;
@@ -207,7 +209,10 @@ export class BrowserService {
   private readonly sessions = new Map<string, BrowserSession>();
   private readonly queues = new Map<string, Promise<void>>();
 
-  constructor(private readonly tailscaleProxy?: BrowserProxy) {}
+  constructor(
+    private readonly tailscaleProxy?: BrowserProxy,
+    private readonly maxTabs = DEFAULT_BROWSER_MAX_TABS,
+  ) {}
 
   async execute(
     sessionId: string,
@@ -338,13 +343,21 @@ export class BrowserService {
       pageIdentityPromises: new WeakMap(),
       pages: new Map(),
       pageIds: new WeakMap(),
+      rejectedPages: new WeakSet(),
       frames: new Map(),
       frameIds: new WeakMap(),
       nextPageNumber: 1,
       nextFrameNumber: 1,
       downloadDirs: new Set(),
     };
-    context.on("page", (page) => this.registerPage(session, page, false));
+    context.on("page", (page) => {
+      if (session.pages.size >= this.maxTabs) {
+        session.rejectedPages.add(page);
+        void page.close().catch(() => {});
+        return;
+      }
+      this.registerPage(session, page, false);
+    });
     try {
       const page = await context.newPage();
       this.registerPage(session, page, true);
@@ -405,7 +418,21 @@ export class BrowserService {
     sessionCreated: boolean,
   ): Promise<Page> {
     if ((input.newPage && !sessionCreated) || session.pages.size === 0) {
+      if (session.pages.size >= this.maxTabs) {
+        throw new Error(
+          `Browser tab limit reached (${this.maxTabs}). Close a page before opening another.`,
+        );
+      }
       const page = await session.context.newPage();
+      if (
+        session.rejectedPages.has(page) ||
+        (!session.pageIds.has(page) && session.pages.size >= this.maxTabs)
+      ) {
+        await page.close().catch(() => {});
+        throw new Error(
+          `Browser tab limit reached (${this.maxTabs}). Close a page before opening another.`,
+        );
+      }
       this.registerPage(session, page, true);
       if (input.viewport) await page.setViewportSize(input.viewport);
       return page;

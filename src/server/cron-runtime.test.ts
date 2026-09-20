@@ -32,6 +32,7 @@ async function createConfig(): Promise<AppConfig> {
     webPushDir: path.join(root, "web-push"),
     webPushSubject: "mailto:test@example.com",
     cronDailySessionStartTime: "04:00",
+    browserMaxTabs: 16,
     baseUrl: "/",
     appTitle: "Batty",
     appColor: "neutral",

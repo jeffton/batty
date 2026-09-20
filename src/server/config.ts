@@ -1,7 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AppColor } from "@/shared/appearance";
-import { ensureOptionsFile, stateDirPath, type DefaultThinkingLevel } from "./options";
+import {
+  DEFAULT_BROWSER_MAX_TABS,
+  ensureOptionsFile,
+  stateDirPath,
+  type DefaultThinkingLevel,
+} from "./options";
 
 export interface AppConfig {
   host: string;
@@ -18,6 +23,7 @@ export interface AppConfig {
   cronDailySessionStartTime: string;
   braveSearchKey?: string;
   browserTailscaleSshDestination?: string;
+  browserMaxTabs: number;
   defaultProvider?: string;
   defaultModel?: string;
   defaultThinkingLevel?: DefaultThinkingLevel;
@@ -79,6 +85,7 @@ export async function loadConfig(battyDir: string): Promise<AppConfig> {
     cronDailySessionStartTime: options.cronDailySessionStartTime,
     braveSearchKey: options.braveSearchKey,
     browserTailscaleSshDestination: options.browserTailscaleSshDestination,
+    browserMaxTabs: options.browserMaxTabs ?? DEFAULT_BROWSER_MAX_TABS,
     defaultProvider: options.defaultProvider,
     defaultModel: options.defaultModel,
     defaultThinkingLevel: options.defaultThinkingLevel,

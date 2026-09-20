@@ -34,6 +34,7 @@ function createConfig(webPushDir: string): AppConfig {
     webPushDir,
     webPushSubject: "mailto:test@example.com",
     cronDailySessionStartTime: "04:00",
+    browserMaxTabs: 16,
     baseUrl: "/",
     appTitle: "Batty",
     appColor: "neutral",

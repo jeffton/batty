@@ -154,6 +154,7 @@ export class PiService {
       config.browserTailscaleSshDestination
         ? new SshSocksProxy(config.browserTailscaleSshDestination)
         : undefined,
+      config.browserMaxTabs,
     );
     const authPath = path.join(battyAgentDir(config), "auth.json");
     this.providerAuthService = new ProviderAuthService(modelRuntime, (providerId) =>

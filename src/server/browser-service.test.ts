@@ -254,6 +254,58 @@ describe("BrowserService", () => {
     expect(switched.text).toContain("Page ID: page-2 (active)");
   });
 
+  it("caps tabs and closes popups that exceed the configured limit", async () => {
+    const fixture = createFixture();
+    const service = new BrowserService(undefined, 2);
+    await service.execute("session-1", { action: "open", url: "https://example.com" });
+    await service.execute("session-1", {
+      action: "open",
+      url: "https://example.org",
+      newPage: true,
+    });
+
+    await expect(
+      service.execute("session-1", {
+        action: "open",
+        url: "https://example.net",
+        newPage: true,
+      }),
+    ).rejects.toThrow("Browser tab limit reached (2)");
+
+    const popup = fixture.createPopup({ title: "Excess popup" });
+    await vi.waitFor(() => expect(popup.close).toHaveBeenCalledOnce());
+    const listed = await service.execute("session-1", { action: "pages" });
+    expect(listed.details.pages).toHaveLength(2);
+    expect(listed.text).not.toContain("Excess popup");
+  });
+
+  it("rejects an explicit tab when a racing popup takes the final slot", async () => {
+    const fixture = createFixture();
+    const service = new BrowserService(undefined, 2);
+    await service.execute("session-1", { action: "open", url: "https://example.com" });
+
+    let rejectedPage: any;
+    fixture.context.newPage.mockImplementationOnce(async () => {
+      fixture.createPopup({ title: "Racing popup" });
+      rejectedPage = fixture.createPopup({ title: "Rejected explicit page" });
+      return rejectedPage;
+    });
+
+    await expect(
+      service.execute("session-1", {
+        action: "open",
+        url: "https://example.org",
+        newPage: true,
+      }),
+    ).rejects.toThrow("Browser tab limit reached (2)");
+
+    expect(rejectedPage.close).toHaveBeenCalled();
+    const listed = await service.execute("session-1", { action: "pages" });
+    expect(listed.details.pages).toHaveLength(2);
+    expect(listed.text).toContain("Racing popup");
+    expect(listed.text).not.toContain("Rejected explicit page");
+  });
+
   it("does not create an extra blank page when the initial open requests a new page", async () => {
     const fixture = createFixture();
     const service = new BrowserService();

@@ -20,6 +20,8 @@ export const DEFAULT_THINKING_LEVELS = [
 
 export type DefaultThinkingLevel = (typeof DEFAULT_THINKING_LEVELS)[number];
 
+export const DEFAULT_BROWSER_MAX_TABS = 16;
+
 export interface StoredAppOptions {
   authSecret?: string;
   workspacesRoots?: string[];
@@ -27,6 +29,7 @@ export interface StoredAppOptions {
   cronDailySessionStartTime?: string;
   braveSearchKey?: string;
   browserTailscaleSshDestination?: string;
+  browserMaxTabs?: number;
   pinnedWorkspaceIds?: string[];
   assistantWorkspaceId?: string;
   defaultProvider?: string;
@@ -44,6 +47,7 @@ export interface AppOptions {
   cronDailySessionStartTime: string;
   braveSearchKey?: string;
   browserTailscaleSshDestination?: string;
+  browserMaxTabs?: number;
   pinnedWorkspaceIds: string[];
   assistantWorkspaceId?: string;
   defaultProvider?: string;
@@ -130,6 +134,16 @@ function normalizeOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
+function normalizeBrowserMaxTabs(value: unknown): number | undefined {
+  if (value == null) return undefined;
+  if (!Number.isSafeInteger(value) || (value as number) < 1) {
+    throw new Error(
+      `Invalid browserMaxTabs in options.json: ${String(value)}. Expected a positive safe integer.`,
+    );
+  }
+  return value as number;
+}
+
 function normalizeAppTitle(value: unknown): string {
   if (value == null) {
     return DEFAULT_APP_TITLE;
@@ -204,6 +218,7 @@ function normalizeStoredOptions(options: StoredAppOptions | undefined): StoredAp
     browserTailscaleSshDestination: normalizeOptionalString(
       options?.browserTailscaleSshDestination,
     ),
+    browserMaxTabs: normalizeBrowserMaxTabs(options?.browserMaxTabs),
     pinnedWorkspaceIds: Array.isArray(options?.pinnedWorkspaceIds)
       ? options.pinnedWorkspaceIds.filter(
           (value): value is string => typeof value === "string" && value.trim().length > 0,

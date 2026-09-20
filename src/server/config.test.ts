@@ -35,6 +35,7 @@ async function createBattyDir(): Promise<string> {
         cronDailySessionStartTime: "04:00",
         braveSearchKey: "configured-brave-key",
         browserTailscaleSshDestination: "david@summerhouse-pi",
+        browserMaxTabs: 12,
         defaultProvider: "openai-codex",
         defaultModel: "gpt-5.6-sol",
         defaultThinkingLevel: "medium",
@@ -85,10 +86,25 @@ describe("loadConfig", () => {
     expect(config.cronDailySessionStartTime).toBe("04:00");
     expect(config.braveSearchKey).toBe("configured-brave-key");
     expect(config.browserTailscaleSshDestination).toBe("david@summerhouse-pi");
+    expect(config.browserMaxTabs).toBe(12);
     expect(config.defaultProvider).toBe("openai-codex");
     expect(config.defaultModel).toBe("gpt-5.6-sol");
     expect(config.defaultThinkingLevel).toBe("medium");
     expect(config.baseUrl).toBe("/batty");
+  });
+
+  it("defaults the browser tab cap without persisting it", async () => {
+    const battyDir = await createBattyDir();
+    const optionsPath = optionsFilePath(battyDir);
+    const options = JSON.parse(await fs.readFile(optionsPath, "utf8")) as Record<string, unknown>;
+    delete options.browserMaxTabs;
+    await fs.writeFile(optionsPath, `${JSON.stringify(options, null, 2)}\n`, "utf8");
+
+    const config = await loadConfig(battyDir);
+    const persisted = JSON.parse(await fs.readFile(optionsPath, "utf8")) as Record<string, unknown>;
+
+    expect(config.browserMaxTabs).toBe(16);
+    expect(persisted.browserMaxTabs).toBeUndefined();
   });
 
   it("prefers BATTY_SELF_PATH over the current working directory", async () => {

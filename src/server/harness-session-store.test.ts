@@ -6,6 +6,7 @@ import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { HarnessSessionStore } from "./harness-session-store";
 import { createHarnessFixture } from "./harness-test-fixture";
 import { agentTurnFileChangesByReplyEntryId } from "./agent-turn-file-changes";
+import { sessionImageDirectory } from "./session-images";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -149,7 +150,7 @@ describe("native harness session storage", () => {
     expect(childStored).not.toContain("aGVsbG8=");
     expect(JSON.stringify(child.getEntries())).toContain("aGVsbG8=");
     await expect(
-      fs.readdir(path.join(path.dirname(child.native.metadata.path), ".batty-images")),
+      fs.readdir(sessionImageDirectory(child.native.metadata.path)),
     ).resolves.toHaveLength(1);
 
     const grandchild = retain(await child.fork(path.join(f.root, "children")));

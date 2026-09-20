@@ -1,7 +1,6 @@
-import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import mime from "mime-types";
 import type { UploadedFile } from "./pi-service-types";
 
@@ -76,29 +75,6 @@ export async function preparePromptFiles(
     result.text += `<file name="${escapeXmlAttribute(name)}" mimeType="${escapeXmlAttribute(mimeType)}" size="${size}" path="${escapeXmlAttribute(filePath)}" url="${escapeXmlAttribute(url)}"></file>\n`;
   }
   return result;
-}
-
-/** Externalize the UI projection only. Harness messages and queued image payloads stay immutable. */
-export function createUiImageResolver(
-  uploadsDir: string,
-  sessionId: string,
-  baseUrl?: string,
-): (image: { mimeType: string; data: string }) => { url: string; name: string } {
-  const resolvedByData = new Map<string, { url: string; name: string }>();
-  return ({ mimeType, data }) => {
-    const cached = resolvedByData.get(data);
-    if (cached) return cached;
-    const hash = createHash("sha256").update(data).digest("hex");
-    const extension = mimeType.split("/")[1]?.replace(/[^a-zA-Z0-9]+/g, "-") || "bin";
-    const name = `${hash}.${extension}`;
-    const directory = path.join(uploadsDir, sessionId, "imported");
-    fsSync.mkdirSync(directory, { recursive: true });
-    const filePath = path.join(directory, name);
-    if (!fsSync.existsSync(filePath)) fsSync.writeFileSync(filePath, Buffer.from(data, "base64"));
-    const resolved = { name, url: uploadUrl(baseUrl, sessionId, "imported", name) };
-    resolvedByData.set(data, resolved);
-    return resolved;
-  };
 }
 
 export async function resolveUploadedFile(

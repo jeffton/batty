@@ -52,7 +52,8 @@ import {
 import { hasSubagentSessionMarker, type SubagentToolDetails } from "./subagent";
 import { getSessionMessagePage } from "./pi-service-message-page";
 import { getQueuedPrompts, removeQueuedPrompt } from "./pi-service-queue";
-import { createUiImageResolver, preparePromptFiles } from "./pi-service-uploads";
+import { preparePromptFiles } from "./pi-service-uploads";
+import { createUiImageResolver, resolveSessionImage } from "./session-images";
 import {
   attachSession,
   disposeWebSession,
@@ -405,7 +406,7 @@ export class PiService {
       .catch(() => []);
     const match = entries.find((entry) => entry.isFile() && entry.name.endsWith(sessionFileSuffix));
     if (!match) {
-      throw new Error(`Session not found: ${sessionId}`);
+      throw Object.assign(new Error(`Session not found: ${sessionId}`), { statusCode: 404 });
     }
     return path.join(match.parentPath, match.name);
   }
@@ -1082,7 +1083,12 @@ export class PiService {
       session,
       modelFallbackMessage,
       ephemeral,
-      createUiImageResolver(this.config.uploadsDir, session.sessionId, this.config.baseUrl),
+      createUiImageResolver(
+        session.sessionFile,
+        workspace.id,
+        session.sessionId,
+        this.config.baseUrl,
+      ),
     );
   }
 
@@ -1130,6 +1136,23 @@ export class PiService {
 
   private requireSession(sessionId: string): WebSession {
     return requireSession(this.sessions, sessionId);
+  }
+
+  async resolveSessionImage(workspaceId: string, sessionId: string, name: string) {
+    const active = this.sessions.get(sessionId);
+    if (active) {
+      if (active.workspace.id !== workspaceId) {
+        throw Object.assign(new Error(`Unknown session: ${sessionId}`), { statusCode: 404 });
+      }
+      return resolveSessionImage(active.session.sessionFile, name);
+    }
+    const workspace = (await listWorkspaces(this.config)).find(
+      (candidate) => candidate.id === workspaceId,
+    );
+    if (!workspace) {
+      throw Object.assign(new Error(`Unknown workspace: ${workspaceId}`), { statusCode: 404 });
+    }
+    return resolveSessionImage(await this.findSessionPath(workspace, sessionId), name);
   }
 
   private async preparePromptFiles(sessionId: string, files: UploadedFile[]) {

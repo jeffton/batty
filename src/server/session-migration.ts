@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/pi-agent-core";
 import { HarnessSessionStore, readHarnessSessionMetadata } from "./harness-session-store";
+import { legacySessionImageDirectory, migrateSessionImages } from "./session-images";
 import { battySessionRootDir } from "./pi-paths";
 
 export interface SessionMigrationResult {
@@ -110,8 +111,15 @@ export async function migrateLegacySessions(battyDir: string): Promise<SessionMi
   const files = await sessionFiles(battySessionRootDir({ battyDir }));
   let migrated = 0;
   let repaired = 0;
+  const sharedDirectories = new Map<string, boolean>();
 
   for (const file of files) {
+    const sharedDirectory = legacySessionImageDirectory(file);
+    const imageMigrationComplete = await migrateSessionImages(file);
+    sharedDirectories.set(
+      sharedDirectory,
+      (sharedDirectories.get(sharedDirectory) ?? true) && imageMigrationComplete,
+    );
     const metadata = await readHarnessSessionMetadata(file);
     if (!("v" in metadata)) {
       const originalMode = (await fs.stat(file)).mode;
@@ -126,6 +134,10 @@ export async function migrateLegacySessions(battyDir: string): Promise<SessionMi
       }
     }
     if (await repairImportedReplyIds(file)) repaired++;
+  }
+
+  for (const [directory, complete] of sharedDirectories) {
+    if (complete) await fs.rm(directory, { recursive: true, force: true });
   }
 
   return { scanned: files.length, migrated, repaired };

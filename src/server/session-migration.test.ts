@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { migrateLegacySessions } from "./session-migration";
+import { sessionImageDirectory } from "./session-images";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -119,16 +120,72 @@ describe("legacy session migration", () => {
     });
   });
 
-  it("leaves malformed legacy sessions untouched and fails", async () => {
+  it("moves shared images into session-owned directories and removes shared storage", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-session-migration-"));
+    roots.push(root);
+    const directory = path.join(root, ".batty", "sessions", "workspace");
+    const file = path.join(directory, "session.jsonl");
+    const name = `${"a".repeat(64)}.png`;
+    await fs.mkdir(path.join(directory, ".batty-images"), { recursive: true });
+    await fs.writeFile(path.join(directory, ".batty-images", name), "image");
+    await fs.writeFile(
+      file,
+      [
+        JSON.stringify({
+          v: 4,
+          kind: "header",
+          id: "11111111-1111-4111-8111-111111111111",
+          storageVersion: 1,
+          createdAt: 1,
+          cwd: root,
+        }),
+        JSON.stringify({
+          kind: "value",
+          value: { type: "image", mimeType: "image/png", data: `batty-file:${name}` },
+        }),
+        "",
+      ].join("\n"),
+    );
+
+    await expect(migrateLegacySessions(root)).resolves.toEqual({
+      scanned: 1,
+      migrated: 0,
+      repaired: 0,
+    });
+
+    await expect(fs.readFile(path.join(sessionImageDirectory(file), name), "utf8")).resolves.toBe(
+      "image",
+    );
+    await expect(fs.access(path.join(directory, ".batty-images"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("leaves malformed sessions and their shared images untouched", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-session-migration-"));
     roots.push(root);
     const directory = path.join(root, ".batty", "sessions", "workspace");
     const file = path.join(directory, "broken.jsonl");
-    const original = "{not json}\n";
-    await fs.mkdir(directory, { recursive: true });
+    const original = `${JSON.stringify({
+      v: 4,
+      kind: "header",
+      id: "11111111-1111-4111-8111-111111111111",
+      storageVersion: 1,
+      createdAt: 1,
+      cwd: root,
+    })}\n{not json}\n`;
+    await fs.mkdir(path.join(directory, ".batty-images"), { recursive: true });
+    await fs.writeFile(path.join(directory, ".batty-images", "image.png"), "image");
     await fs.writeFile(file, original);
 
-    await expect(migrateLegacySessions(root)).rejects.toThrow();
+    await expect(migrateLegacySessions(root)).resolves.toEqual({
+      scanned: 1,
+      migrated: 0,
+      repaired: 0,
+    });
     await expect(fs.readFile(file, "utf8")).resolves.toBe(original);
+    await expect(
+      fs.readFile(path.join(directory, ".batty-images", "image.png"), "utf8"),
+    ).resolves.toBe("image");
   });
 });

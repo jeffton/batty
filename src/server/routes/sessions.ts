@@ -278,6 +278,20 @@ export function registerSessionRoutes(context: RouteContext): void {
   });
 
   app.get<{
+    Params: { workspaceId: string; sessionId: string; name: string };
+  }>(routePath("/api/session-images/:workspaceId/:sessionId/:name"), async (request, reply) => {
+    const resolved = await service.resolveSessionImage(
+      request.params.workspaceId,
+      request.params.sessionId,
+      request.params.name,
+    );
+    reply.header("Cache-Control", "private, max-age=31536000, immutable");
+    reply.header("Content-Type", resolved.mimeType);
+    reply.header("X-Content-Type-Options", "nosniff");
+    return reply.send(createReadStream(resolved.path));
+  });
+
+  app.get<{
     Params: { sessionId: string; batchId: string; storedName: string };
   }>(routePath("/api/uploads/:sessionId/:batchId/:storedName"), async (request, reply) => {
     const resolved = await resolveUploadedFile(

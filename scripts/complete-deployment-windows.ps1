@@ -36,6 +36,13 @@ function Wait-ForDeploymentDrain([string]$cliPath, [string]$battyRoot) {
   }
 }
 
+function Invoke-SessionMigration([string]$cliPath, [string]$battyRoot) {
+  & (Get-Command node).Source $cliPath --root $battyRoot migrate-sessions
+  if ($LASTEXITCODE -ne 0) {
+    throw "Session migration failed with exit code $LASTEXITCODE."
+  }
+}
+
 function Remove-Junction([string]$path) {
   cmd /d /c rmdir "$path" | Out-Null
   if ($LASTEXITCODE -ne 0) {
@@ -57,8 +64,12 @@ try {
   if (-not (Test-Path (Join-Path $releaseDir "dist\server\main.mjs")) -or -not (Test-Path $cliPath)) {
     throw "Staged release '$releaseDir' is incomplete."
   }
-  if ((Get-Service -Name Batty).Status -eq "Running" -and -not $Force) {
+  $serviceStatus = (Get-Service -Name Batty).Status
+  if ($serviceStatus -eq "Stopped") {
+    Invoke-SessionMigration $cliPath $BattyRoot
+  } elseif (-not $Force) {
     Wait-ForDeploymentDrain $cliPath $BattyRoot
+    Invoke-SessionMigration $cliPath $BattyRoot
   }
 
   if (Test-Path $currentDir) {

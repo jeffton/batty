@@ -6,11 +6,15 @@ batty_root="${BATTY_ROOT:-/root/github}"
 backend_port="${BATTY_PORT:-3147}"
 node_path="${BATTY_NODE:-$(command -v node)}"
 
-if systemctl is-active --quiet batty.service && [[ "${BATTY_SKIP_DRAIN:-}" != "1" ]]; then
+systemctl daemon-reload
+service_state="$(systemctl is-active batty.service 2>/dev/null || true)"
+if [[ "$service_state" == "inactive" || "$service_state" == "failed" ]]; then
+  "$node_path" "$install_root/current/dist/server/cli.mjs" --root "$batty_root" migrate-sessions
+elif [[ "${BATTY_SKIP_DRAIN:-}" != "1" ]]; then
   "$node_path" "$install_root/current/dist/server/cli.mjs" --root "$batty_root" drain
+  "$node_path" "$install_root/current/dist/server/cli.mjs" --root "$batty_root" migrate-sessions
 fi
 
-systemctl daemon-reload
 systemctl enable batty.service >/dev/null
 systemctl restart batty.service
 systemctl reload nginx

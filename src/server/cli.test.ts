@@ -61,6 +61,14 @@ describe("deployment CLI", () => {
       await control.close();
     }
   });
+
+  it("migrates sessions without loading configuration", async () => {
+    const root = await createRoot(false);
+    const result = await runCli(root, ["migrate-sessions"]);
+
+    expect(result).toMatchObject({ code: 0 });
+    expect(result.output).toContain("Scanned 0 session files; migrated 0; repaired 0.");
+  });
 });
 
 describe("cron CLI model validation", () => {

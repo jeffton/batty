@@ -84,6 +84,9 @@ const SessionTranscriptStub = defineComponent({
 
 const MessageComposerStub = defineComponent({
   name: "MessageComposer",
+  props: {
+    error: String,
+  },
   emits: [
     "submit",
     "steer",
@@ -93,18 +96,21 @@ const MessageComposerStub = defineComponent({
     "setModel",
     "setThinkingLevel",
   ],
-  setup(_props, { emit, expose }) {
+  setup(props, { emit, expose }) {
     expose({ clear: vi.fn(), restore: vi.fn() });
     return () =>
-      h(
-        "button",
-        {
-          class: "submit-prompt",
-          type: "button",
-          onClick: () => emit("submit", "hello", []),
-        },
-        "Submit",
-      );
+      h("div", [
+        props.error ? h("p", { class: "prompt-error" }, props.error) : undefined,
+        h(
+          "button",
+          {
+            class: "submit-prompt",
+            type: "button",
+            onClick: () => emit("submit", "hello", []),
+          },
+          "Submit",
+        ),
+      ]);
   },
 });
 
@@ -282,7 +288,39 @@ describe("ChatSessionPane", () => {
     await result;
   });
 
-  it("removes the optimistic prompt when a failed send restores the draft", async () => {
+  it("does not show an older send failure after a newer send succeeds", async () => {
+    const olderSend = deferred();
+    const newerSend = deferred();
+    sendPrompt.mockReturnValueOnce(olderSend.promise).mockReturnValueOnce(newerSend.promise);
+    const store = useAppStore();
+    store.activeSession = makeSession("session-a", { isStreaming: true });
+    store.selectedWorkspaceId = "batty";
+
+    const wrapper = shallowMount(ChatSessionPane, {
+      global: {
+        stubs: {
+          ChatHeader: true,
+          MessageComposer: MessageComposerStub,
+          SessionTranscriptView: SessionTranscriptStub,
+        },
+      },
+    });
+    const pane = wrapper.vm as unknown as {
+      sendPrompt: (text: string, files: File[]) => Promise<void>;
+    };
+
+    const olderResult = pane.sendPrompt("older", []);
+    const newerResult = pane.sendPrompt("newer", []);
+    newerSend.resolve(undefined);
+    await newerResult;
+    olderSend.reject(new Error("Older failure"));
+    await expect(olderResult).rejects.toThrow("Older failure");
+    await nextTick();
+
+    expect(wrapper.find(".prompt-error").exists()).toBe(false);
+  });
+
+  it("shows a failed send above the composer and removes its optimistic prompt", async () => {
     const pendingSend = deferred();
     sendPrompt.mockReturnValue(pendingSend.promise);
     const store = useAppStore();
@@ -305,10 +343,13 @@ describe("ChatSessionPane", () => {
     await nextTick();
     expect(wrapper.get(".optimistic-messages").text()).toBe("hello");
 
-    pendingSend.reject(new Error("Network error"));
-    await expect(result).rejects.toThrow("Network error");
+    pendingSend.reject(new Error("Batty is preparing to restart. Try again after restart."));
+    await expect(result).rejects.toThrow("Batty is preparing to restart. Try again after restart.");
     await nextTick();
 
+    expect(wrapper.get(".prompt-error").text()).toBe(
+      "Batty is preparing to restart. Try again after restart.",
+    );
     expect(wrapper.get(".optimistic-messages").text()).toBe("");
   });
 });

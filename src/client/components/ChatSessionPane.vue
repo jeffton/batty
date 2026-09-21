@@ -23,8 +23,10 @@ const emit = defineEmits<{
 
 const store = useAppStore();
 const composer = ref<ComposerHandle | null>(null);
+const promptError = ref<string>();
 const thinkingOptions = computed(() => resolveThinkingOptions(store.activeSession));
 const pendingIdlePromptSessionIds = new Set<string>();
+let promptRequestId = 0;
 let optimisticMessageId = 0;
 type OptimisticUserMessage = Extract<UiMessage, { role: "user" }>;
 type PendingOptimisticMessage = {
@@ -69,6 +71,14 @@ function shortModelLabel(model: { label: string }): string {
 
 function thinkingLabel(value: string): string {
   return value === "xhigh" ? "XHigh" : value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function showPromptError(error: unknown, sessionId: string | undefined, requestId: number): void {
+  if (requestId !== promptRequestId || store.activeSession?.sessionId !== sessionId) {
+    return;
+  }
+
+  promptError.value = error instanceof Error ? error.message : String(error);
 }
 
 function refreshModels(): void {
@@ -218,6 +228,8 @@ async function sendPrompt(text: string, files: File[]): Promise<void> {
     return;
   }
 
+  const requestId = ++promptRequestId;
+  promptError.value = undefined;
   composer.value?.clear();
   const clientMessageId = crypto.randomUUID();
   const optimisticId =
@@ -236,6 +248,7 @@ async function sendPrompt(text: string, files: File[]): Promise<void> {
       }
       composer.value?.restore(before.sessionId, text, files);
     }
+    showPromptError(error, before?.sessionId, requestId);
     throw error;
   } finally {
     if (gateSessionId) {
@@ -245,6 +258,13 @@ async function sendPrompt(text: string, files: File[]): Promise<void> {
 }
 
 watch(() => store.activeSession?.messages, reconcileOptimisticMessage);
+watch(
+  () => store.activeSession?.sessionId,
+  () => {
+    promptRequestId += 1;
+    promptError.value = undefined;
+  },
+);
 
 async function removeQueuedPrompt(prompt: QueuedPrompt): Promise<void> {
   await store.removeQueuedPrompt(prompt.kind, prompt.index);
@@ -267,6 +287,8 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
     return;
   }
 
+  const requestId = ++promptRequestId;
+  promptError.value = undefined;
   composer.value?.clear();
   const clientMessageId = crypto.randomUUID();
   if (gateSessionId) {
@@ -278,6 +300,7 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
     if (before && shouldRestoreComposerAfterPromptError(before)) {
       composer.value?.restore(before.sessionId, text, files);
     }
+    showPromptError(error, before?.sessionId, requestId);
     throw error;
   } finally {
     if (gateSessionId) {
@@ -329,6 +352,7 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
         :compacting="store.activeSession.isCompacting"
         :session-key="store.activeSession.sessionId"
         :offline="isUnavailable"
+        :error="promptError"
         :actions-disabled="isUnavailable"
         :queued-prompts="store.activeSession.queuedPrompts"
         :model-popover-id="MODEL_POPOVER_ID"

@@ -15,6 +15,7 @@ const props = defineProps<{
   streaming?: boolean;
   compacting?: boolean;
   offline?: boolean;
+  error?: string;
   sessionKey?: string;
   queuedPrompts?: QueuedPrompt[];
   modelPopoverId: string;
@@ -362,6 +363,7 @@ defineExpose({ clear, restore });
     @drop="onDrop"
   >
     <div class="composer__inner">
+      <p v-if="props.error" class="composer__notice composer__notice--error">{{ props.error }}</p>
       <p v-if="props.offline" class="composer__notice">Offline. Draft saved locally</p>
 
       <div v-if="files.length > 0" class="composer__attachments">
@@ -504,6 +506,11 @@ defineExpose({ clear, restore });
   background: var(--color-warning-soft);
   color: var(--color-warning);
   font-size: 0.82rem;
+}
+
+.composer__notice--error {
+  background: var(--color-error-soft);
+  color: var(--color-error);
 }
 
 .composer__attachments {

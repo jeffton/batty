@@ -30,6 +30,22 @@ describe("MessageComposer", () => {
     expect(textarea.attributes("spellcheck")).toBe("true");
   });
 
+  it("shows send errors in a red banner alongside the offline banner", () => {
+    const wrapper = shallowMount(MessageComposer, {
+      props: {
+        ...requiredProps,
+        error: "Batty is preparing to restart. Try again after restart.",
+        offline: true,
+      },
+    });
+
+    const notices = wrapper.findAll(".composer__notice");
+    expect(notices).toHaveLength(2);
+    expect(notices[0]?.text()).toBe("Batty is preparing to restart. Try again after restart.");
+    expect(notices[0]?.classes()).toContain("composer__notice--error");
+    expect(notices[1]?.text()).toBe("Offline. Draft saved locally");
+  });
+
   it("restores a failed prompt only into its originating session", async () => {
     writeSessionDraft("session-b", "draft B");
     const wrapper = shallowMount(MessageComposer, {

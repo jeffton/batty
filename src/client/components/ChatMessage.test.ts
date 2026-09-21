@@ -75,6 +75,34 @@ describe("ChatMessage", () => {
     expect(wrapper.find(".message__segment--bubble .attached-files__card").exists()).toBe(true);
   });
 
+  it("renders artifacts projected from an async subagent", () => {
+    const message: Extract<UiMessage, { role: "assistant" }> = {
+      id: "assistant-async",
+      role: "assistant",
+      turnPhase: "final",
+      timestamp: 1,
+      blocks: [{ type: "text", text: "Child work complete." }],
+      sentFiles: [
+        {
+          id: "file-1",
+          name: "report.md",
+          size: 100,
+          mimeType: "text/markdown",
+          kind: "file",
+          downloadUrl: "/api/sent-files/report.md",
+        },
+      ],
+      sites: [{ id: "site-1", name: "Report", url: "/sites/site-1", public: false }],
+    };
+
+    const wrapper = mount(ChatMessage, {
+      props: { message, toolStatesByCallId: new Map() },
+    });
+
+    expect(wrapper.findAll(".attached-files__card")).toHaveLength(1);
+    expect(wrapper.findAll(".shared-sites__card")).toHaveLength(1);
+  });
+
   it("shows a code changes button alongside reply attachments", async () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-diff-1",

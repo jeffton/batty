@@ -16,6 +16,7 @@ import { createHarnessFixture } from "./harness-test-fixture";
 import { BATTY_SYSTEM_PROMPT_CUSTOM_TYPE } from "./batty-system-prompt";
 import type { WebSession } from "./pi-service-types";
 import { buildRuntimeNoticeMessage, buildSubagentRuntimeNotice } from "./runtime-notices";
+import { agentTurnArtifactsByReplyEntryId } from "./agent-turn-file-changes";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -353,13 +354,34 @@ describe("detached harness subagents", () => {
     },
   );
 
-  it("delivers an async result as a runtime notice and starts a parent turn", async () => {
+  it("delivers async child artifacts on the resulting parent reply", async () => {
     const { parent, deps, options } = await setup();
     parent.faux.setResponses([
       fauxAssistantMessage("finished child"),
       fauxAssistantMessage("parent handled result"),
     ]);
     deps.deliverResultToParent = async (_request, result) => {
+      result.details.battyFileChanges = [
+        {
+          path: path.join(parent.root, "child.txt"),
+          before: null,
+          after: "child output\n",
+          patch: "child patch",
+        },
+      ];
+      result.details.sentFiles = [
+        {
+          id: "file-1",
+          name: "report.md",
+          size: 10,
+          mimeType: "text/markdown",
+          kind: "file",
+          downloadUrl: "/report.md",
+        },
+      ];
+      result.details.sites = [
+        { id: "site-1", name: "Report", url: "/sites/site-1", public: false },
+      ];
       await deliverAsyncSubagentResult(parent.session, result);
     };
 
@@ -379,6 +401,15 @@ describe("detached harness subagents", () => {
             async: true,
             sessionId: options.sessionId,
           }),
+          battyFileChanges: [
+            expect.objectContaining({
+              path: path.join(parent.root, "child.txt"),
+              before: null,
+              after: "child output\n",
+            }),
+          ],
+          sentFiles: [expect.objectContaining({ id: "file-1" })],
+          sites: [expect.objectContaining({ id: "site-1" })],
         },
       }),
       expect.objectContaining({
@@ -386,6 +417,16 @@ describe("detached harness subagents", () => {
         content: [{ type: "text", text: "parent handled result" }],
       }),
     ]);
+    const parentReply = parent.session.sessionManager
+      .getEntries()
+      .findLast((entry) => entry.type === "message" && entry.message.role === "assistant");
+    expect(parentReply?.id).toBeTruthy();
+    const artifacts = agentTurnArtifactsByReplyEntryId(
+      parent.session.sessionManager.getEntries(),
+    ).get(parentReply!.id);
+    expect(artifacts?.fileChanges?.[0]?.patch).toContain("+child output");
+    expect(artifacts?.sentFiles?.[0]?.id).toBe("file-1");
+    expect(artifacts?.sites?.[0]?.id).toBe("site-1");
   });
 
   it("retries a failed parent delivery without rerunning the child", async () => {

@@ -211,8 +211,8 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
     return [];
   }
 
-  const files: SentFileDescriptor[] = [];
-  const seen = new Set<string>();
+  const files: SentFileDescriptor[] = [...(props.message.sentFiles ?? [])];
+  const seen = new Set(files.map((file) => file.id));
 
   for (const block of props.message.blocks) {
     if (block.type !== "toolCall") {
@@ -254,8 +254,8 @@ function isSiteDescriptor(candidate: unknown): candidate is SiteDescriptor {
 
 const sharedSites = computed<SiteDescriptor[]>(() => {
   if (props.message.role !== "assistant") return [];
-  const sites: SiteDescriptor[] = [];
-  const seen = new Set<string>();
+  const sites: SiteDescriptor[] = [...(props.message.sites ?? [])];
+  const seen = new Set(sites.map((site) => site.id));
   for (const block of props.message.blocks) {
     if (block.type !== "toolCall" || (block.name !== "sites" && block.name !== "attach-files")) {
       continue;

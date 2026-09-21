@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   AGENT_TURN_FILE_CHANGES_CUSTOM_TYPE,
+  agentTurnArtifactsByReplyEntryId,
   agentTurnFileChangesByReplyEntryId,
 } from "./agent-turn-file-changes";
 
@@ -137,6 +138,46 @@ describe("durable file change projection", () => {
     expect(changes.get("empty-child")).toEqual([]);
     expect(changes.has("error-or-historical-child")).toBe(false);
     expect(changes.has("next-reply")).toBe(false);
+  });
+
+  it("projects async subagent artifacts onto the parent reply", () => {
+    const sentFile = {
+      id: "file-1",
+      name: "report.md",
+      size: 10,
+      mimeType: "text/markdown",
+      kind: "file" as const,
+      downloadUrl: "/report.md",
+    };
+    const site = { id: "site-1", name: "Report", url: "/sites/site-1", public: false };
+    const artifacts = agentTurnArtifactsByReplyEntryId([
+      mutation("old-write", "old\n", "stale\n"),
+      reply("old-reply"),
+      message("async-child", {
+        role: "custom",
+        customType: "batty-runtime-notice:subagent",
+        battyDelivery: { id: "subagent:child", part: 0 },
+        data: {
+          battyFileChanges: [
+            {
+              path: "/work/child.txt",
+              before: "before\n",
+              after: "after\n",
+              patch: "per-tool patch",
+            },
+          ],
+          sentFiles: [sentFile],
+          sites: [site],
+        },
+      }),
+      reply("parent-reply"),
+    ]).get("parent-reply");
+
+    expect(artifacts?.fileChanges?.[0]?.patch).toContain("-before");
+    expect(artifacts?.fileChanges?.[0]?.patch).toContain("+after");
+    expect(artifacts?.fileChanges?.[0]?.patch).not.toContain("stale");
+    expect(artifacts?.sentFiles).toEqual([sentFile]);
+    expect(artifacts?.sites).toEqual([site]);
   });
 
   it("does not let a background delivery consume pending parent edits", () => {

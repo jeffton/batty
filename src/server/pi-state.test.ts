@@ -410,6 +410,50 @@ describe("normalizeMessage", () => {
 });
 
 describe("transcriptMessagesFromSessionEntries", () => {
+  it("associates async subagent artifacts with their parent reply", () => {
+    const messages = transcriptMessagesFromSessionEntries([
+      {
+        type: "message",
+        id: "async-result",
+        message: {
+          role: "custom",
+          customType: "batty-runtime-notice:subagent",
+          content: "Child complete",
+          timestamp: 1,
+          battyDelivery: { id: "subagent:child", part: 0 },
+          data: {
+            sentFiles: [
+              {
+                id: "file-1",
+                name: "report.md",
+                size: 10,
+                mimeType: "text/markdown",
+                kind: "file",
+                downloadUrl: "/report.md",
+              },
+            ],
+            sites: [{ id: "site-1", name: "Report", url: "/site", public: false }],
+          },
+        },
+      },
+      {
+        type: "message",
+        id: "reply-1",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "Done" }],
+          timestamp: 2,
+        },
+      },
+    ]);
+
+    const normalized = normalizeMessage(messages[1]!, 1);
+    expect(normalized?.role === "assistant" ? normalized.sentFiles?.[0]?.id : undefined).toBe(
+      "file-1",
+    );
+    expect(normalized?.role === "assistant" ? normalized.sites?.[0]?.id : undefined).toBe("site-1");
+  });
+
   it("associates persisted file changes with their assistant reply", () => {
     const messages = transcriptMessagesFromSessionEntries(
       [

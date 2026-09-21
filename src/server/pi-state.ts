@@ -5,13 +5,14 @@ import type {
   AgentTurnFileChange,
   SentFileDescriptor,
   SessionState,
+  SiteDescriptor,
   ToolExecutionDetails,
   UiAssistantTurnPhase,
   UiContentBlock,
   UiMessage,
 } from "@/shared/types";
 import { sanitizeTerminalBlocks, stripTerminalFormatting } from "./terminal-output";
-import { agentTurnFileChangesByReplyEntryId } from "./agent-turn-file-changes";
+import { agentTurnArtifactsByReplyEntryId } from "./agent-turn-file-changes";
 
 export type UiImageResolver = (image: {
   mimeType: string;
@@ -33,6 +34,8 @@ interface AssistantLikeMessage {
   stopReason?: string;
   errorMessage?: string;
   battyFileChanges?: AgentTurnFileChange[];
+  battySentFiles?: SentFileDescriptor[];
+  battySites?: SiteDescriptor[];
 }
 
 interface ToolResultLikeMessage {
@@ -312,6 +315,8 @@ export function normalizeMessage(
       stopReason: assistant.stopReason,
       errorMessage: assistant.errorMessage,
       fileChanges: assistant.battyFileChanges,
+      sentFiles: assistant.battySentFiles,
+      sites: assistant.battySites,
     };
   }
 
@@ -395,16 +400,25 @@ export function transcriptMessagesFromSessionEntries(
   entries: TranscriptSessionEntry[],
   metadataEntries: TranscriptSessionEntry[] = entries,
 ): AgentMessage[] {
-  const fileChangesByReplyId = agentTurnFileChangesByReplyEntryId(metadataEntries);
+  const artifactsByReplyId = agentTurnArtifactsByReplyEntryId(metadataEntries);
   return entries.flatMap((entry) => {
     if (entry?.type === "message" && entry.message) {
       const message = entry.message as AgentMessage;
-      const fileChanges =
+      const artifacts =
         message.role === "assistant" && typeof entry.id === "string"
-          ? fileChangesByReplyId.get(entry.id)
+          ? artifactsByReplyId.get(entry.id)
           : undefined;
-      return fileChanges
-        ? [{ ...message, battyFileChanges: fileChanges } as unknown as AgentMessage]
+      return artifacts
+        ? [
+            {
+              ...message,
+              ...(artifacts.fileChanges !== undefined
+                ? { battyFileChanges: artifacts.fileChanges }
+                : {}),
+              ...(artifacts.sentFiles?.length ? { battySentFiles: artifacts.sentFiles } : {}),
+              ...(artifacts.sites?.length ? { battySites: artifacts.sites } : {}),
+            } as unknown as AgentMessage,
+          ]
         : [message];
     }
 

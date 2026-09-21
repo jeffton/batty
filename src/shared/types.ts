@@ -50,6 +50,8 @@ export interface UiAssistantMessage {
   stopReason?: string;
   errorMessage?: string;
   fileChanges?: AgentTurnFileChange[];
+  sentFiles?: SentFileDescriptor[];
+  sites?: SiteDescriptor[];
 }
 
 export type UiMessage =

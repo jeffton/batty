@@ -325,6 +325,7 @@ describe("cron runtime", () => {
 
     await (service as unknown as { triggerJob(jobId: string): Promise<void> }).triggerJob(job.id);
     await vi.waitFor(() => expect(delivered).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(service.activeTurns).toBe(0));
     expect(delivered.mock.calls[0]?.[0]).not.toMatchObject({ runId: "archived-delivery" });
     expect(
       service.listRecentRunLogs().find((run) => run.runId === "archived-delivery"),

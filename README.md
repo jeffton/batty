@@ -154,8 +154,8 @@ batty cron rm <jobId>
 batty --root /path/to/batty-root auth code
 batty --root /path/to/batty-root drain
 batty --root /path/to/batty-root cron list --workspace batty
-batty --root /path/to/batty-root cron add --workspace batty --prompt "Check CI and summarize failures" --model openai-codex/gpt-5.6-sol --thinking medium --every 1h --session daily-detached --daily-context include
-batty --root /path/to/batty-root cron add --workspace batty --prompt "Morning summary" --model openai-codex/gpt-5.6-sol --thinking low --cron "0 8 * * 1-5" --tz Europe/Copenhagen --session daily-inline
+batty --root /path/to/batty-root cron add --workspace batty --prompt "Check CI and summarize failures" --model openai-codex/gpt-6-sol --thinking medium --every 1h --session daily-detached --daily-context include
+batty --root /path/to/batty-root cron add --workspace batty --prompt "Morning summary" --model openai-codex/gpt-6-sol --thinking medium --cron "0 8 * * 1-5" --tz Europe/Copenhagen --session daily-inline
 batty --root /path/to/batty-root cron edit <jobId> --prompt "Updated prompt"
 batty --root /path/to/batty-root cron rm <jobId>
 ```

@@ -32,7 +32,7 @@ describe("sites", () => {
     });
     await expect(resolveSiteFile(root, "/batty", created.descriptor.id, "")).resolves.toMatchObject(
       {
-        filePath: path.join(created.directory, "index.html"),
+        filePath: await fs.realpath(path.join(created.directory, "index.html")),
         mimeType: "text/html",
       },
     );

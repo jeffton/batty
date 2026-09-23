@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { battyAgentDir } from "../pi-paths";
+import { readEnvironmentFile, updateEnvironmentFile } from "../config";
 import type { AppColor } from "@/shared/appearance";
 import {
   setAppearance,
@@ -134,6 +135,32 @@ export function registerSettingsRoutes(context: RouteContext): void {
       config.appTitle = options.appTitle;
       config.appColor = options.appColor;
       return appSettingsStatus(config);
+    },
+  );
+
+  app.get(routePath("/api/settings/environment"), async () => ({
+    names: Object.keys(await readEnvironmentFile(config.battyDir)).sort(),
+  }));
+
+  app.put<{ Params: { name: string }; Body: { value?: string } }>(
+    routePath("/api/settings/environment/:name"),
+    async (request) => {
+      const { name } = request.params;
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || typeof request.body?.value !== "string") {
+        throw new Error("Invalid environment variable");
+      }
+      return { names: await updateEnvironmentFile(config.battyDir, name, request.body.value) };
+    },
+  );
+
+  app.delete<{ Params: { name: string } }>(
+    routePath("/api/settings/environment/:name"),
+    async (request) => {
+      const { name } = request.params;
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+        throw new Error("Invalid environment variable name");
+      }
+      return { names: await updateEnvironmentFile(config.battyDir, name) };
     },
   );
 

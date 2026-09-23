@@ -1,8 +1,9 @@
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { useAppStore } from "@/client/stores/app";
 import ModelConfigPopover from "./ModelConfigPopover.vue";
+import FullPopover from "./FullPopover.vue";
 import SettingsPopover from "./SettingsPopover.vue";
 import ModelConfigSelector from "./ModelConfigSelector.vue";
 
@@ -168,6 +169,48 @@ describe("SettingsPopover", () => {
     expect(setDefaultModel).toHaveBeenLastCalledWith("openai-codex/gpt-5.6-sol", "high");
     expect(hidePopover).not.toHaveBeenCalled();
     wrapper.unmount();
+  });
+
+  it("lists variable names, accepts visible entry, and removes variables without exposing saved values", async () => {
+    vi.spyOn(useAppStore(), "refreshProviderAuthStatus").mockResolvedValue();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ names: ["SECRET_KEY"] }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ names: ["SECRET_KEY", "NEW_KEY"] }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ names: ["NEW_KEY"] }), { status: 200 }));
+    const wrapper = mount(SettingsPopover, {
+      props: { popoverId: "settings-popover", anchorName: "--settings-anchor" },
+    });
+    wrapper.findComponent(FullPopover).vm.$emit("toggle", { newState: "open" });
+    await flushPromises();
+    expect(wrapper.text()).toContain("SECRET_KEY");
+    expect(wrapper.text()).not.toContain("secret-value");
+    await wrapper.get('[aria-label="Variable name"]').setValue("NEW_KEY");
+    const value = wrapper.get('[aria-label="Variable value"]');
+    expect(value.attributes("type")).toBe("text");
+    await value.setValue("secret-value");
+    await wrapper
+      .get(".settings-popover__editor:has([aria-label='Variable name'])")
+      .trigger("submit");
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/settings/environment/NEW_KEY"),
+      expect.objectContaining({ method: "PUT", body: JSON.stringify({ value: "secret-value" }) }),
+    );
+    expect(wrapper.get('[aria-label="Variable value"]').element).toHaveProperty("value", "");
+    expect(wrapper.text()).not.toContain("secret-value");
+    await wrapper.get('[aria-label="Remove SECRET_KEY"]').trigger("click");
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/settings/environment/SECRET_KEY"),
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    expect(wrapper.text()).not.toContain("SECRET_KEY");
+    fetchMock.mockRestore();
   });
 
   it("uses the full-popover frame with an explicit close button", async () => {

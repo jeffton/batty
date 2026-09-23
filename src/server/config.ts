@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { AppColor } from "@/shared/appearance";
@@ -47,19 +48,66 @@ export function environmentFilePath(battyDir: string): string {
   return path.join(stateDirPath(battyDir), "environment.json");
 }
 
-export async function loadEnvironmentFile(battyDir: string): Promise<void> {
+export async function readEnvironmentFile(battyDir: string): Promise<Record<string, string>> {
   try {
-    const content = await fs.readFile(environmentFilePath(battyDir), "utf8");
-    const environment = JSON.parse(content) as Record<string, string>;
-
-    for (const [key, value] of Object.entries(environment)) {
-      process.env[key] = value;
-    }
+    return JSON.parse(await fs.readFile(environmentFilePath(battyDir), "utf8")) as Record<
+      string,
+      string
+    >;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return;
+      return {};
     }
     throw error;
+  }
+}
+
+const environmentWrites = new Map<string, Promise<void>>();
+
+export function updateEnvironmentFile(
+  battyDir: string,
+  name: string,
+  value?: string,
+): Promise<string[]> {
+  const previous = environmentWrites.get(battyDir) ?? Promise.resolve();
+  const update = previous
+    .catch(() => {})
+    .then(async () => {
+      const environment = await readEnvironmentFile(battyDir);
+      if (value === undefined && !Object.hasOwn(environment, name)) {
+        throw new Error("Environment variable not found");
+      }
+      const updated = Object.fromEntries(
+        Object.entries(environment).filter(([key]) => key !== name),
+      );
+      if (value !== undefined) updated[name] = value;
+      const filePath = environmentFilePath(battyDir);
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      const temporaryPath = `${filePath}.${crypto.randomUUID()}.tmp`;
+      try {
+        await fs.writeFile(temporaryPath, `${JSON.stringify(updated, null, 2)}\n`, { mode: 0o600 });
+        await fs.rename(temporaryPath, filePath);
+      } finally {
+        await fs.rm(temporaryPath, { force: true });
+      }
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+      return Object.keys(updated).sort();
+    });
+  const settled = update.then(
+    () => {},
+    () => {},
+  );
+  environmentWrites.set(battyDir, settled);
+  void settled.then(() => {
+    if (environmentWrites.get(battyDir) === settled) environmentWrites.delete(battyDir);
+  });
+  return update;
+}
+
+export async function loadEnvironmentFile(battyDir: string): Promise<void> {
+  for (const [key, value] of Object.entries(await readEnvironmentFile(battyDir))) {
+    process.env[key] = value;
   }
 }
 

@@ -20,21 +20,37 @@ export function registerSiteRoutes({ app, config, routePath }: RouteContext): vo
     );
   });
 
+  function capabilityUrl(siteId: string, accessToken: string, requestPath: string): string {
+    const encodedPath = requestPath
+      .split("/")
+      .map((segment) => encodeURIComponent(segment))
+      .join("/");
+    return `${routePath("/site-preview")}/${encodeURIComponent(siteId)}/${encodeURIComponent(accessToken)}/${encodedPath}`;
+  }
+
   async function serveSite(
     request: FastifyRequest,
     reply: FastifyReply,
     siteId: string,
     requestPath: string,
+    capabilityToken?: string,
   ) {
     const resolved = await resolveSiteFile(config.sitesDir, config.baseUrl, siteId, requestPath);
-    const agentCookieName = `batty-site-${siteId}`;
-    const hasAgentAccess = request.cookies[agentCookieName] === resolved.accessToken;
-    if (!resolved.descriptor.public && !request.auth && !hasAgentAccess) {
+    const hasCapability = capabilityToken === resolved.accessToken;
+    if (capabilityToken !== undefined && !hasCapability) {
+      return reply.code(401).send({ error: "Authentication required" });
+    }
+    if (!resolved.descriptor.public && !request.auth && !hasCapability) {
       if (request.headers.accept?.includes("text/html")) {
         const loginUrl = `${routePath("/login")}?returnTo=${encodeURIComponent(request.url)}`;
         return reply.redirect(loginUrl);
       }
       return reply.code(401).send({ error: "Authentication required" });
+    }
+    if (!resolved.descriptor.public && request.auth && !hasCapability) {
+      const queryIndex = request.url.indexOf("?");
+      const query = queryIndex === -1 ? "" : request.url.slice(queryIndex);
+      return reply.redirect(capabilityUrl(siteId, resolved.accessToken, requestPath) + query);
     }
 
     const stats = await fs.stat(resolved.filePath);
@@ -51,8 +67,14 @@ export function registerSiteRoutes({ app, config, routePath }: RouteContext): vo
     return reply.send(createReadStream(resolved.filePath));
   }
 
+  function withTrailingSlash(requestUrl: string): string {
+    const queryIndex = requestUrl.indexOf("?");
+    if (queryIndex === -1) return `${requestUrl}/`;
+    return `${requestUrl.slice(0, queryIndex)}/${requestUrl.slice(queryIndex)}`;
+  }
+
   app.get<{ Params: { siteId: string } }>(routePath("/sites/:siteId"), (request, reply) =>
-    reply.redirect(`${request.url.split("?", 1)[0]}/`),
+    reply.redirect(withTrailingSlash(request.url)),
   );
   app.get<{ Params: { siteId: string; "*": string } }>(
     routePath("/sites/:siteId/*"),
@@ -61,26 +83,22 @@ export function registerSiteRoutes({ app, config, routePath }: RouteContext): vo
 
   app.get<{ Params: { siteId: string; accessToken: string } }>(
     routePath("/site-preview/:siteId/:accessToken"),
-    (request, reply) => reply.redirect(`${request.url.split("?", 1)[0]}/`),
+    (request, reply) => reply.redirect(withTrailingSlash(request.url)),
   );
   app.get<{ Params: { siteId: string; accessToken: string } }>(
     routePath("/site-preview/:siteId/:accessToken/"),
-    async (request, reply) => {
-      const resolved = await resolveSiteFile(
-        config.sitesDir,
-        config.baseUrl,
+    (request, reply) =>
+      serveSite(request, reply, request.params.siteId, "", request.params.accessToken),
+  );
+  app.get<{ Params: { siteId: string; accessToken: string; "*": string } }>(
+    routePath("/site-preview/:siteId/:accessToken/*"),
+    (request, reply) =>
+      serveSite(
+        request,
+        reply,
         request.params.siteId,
-        "",
-      );
-      if (request.params.accessToken !== resolved.accessToken) {
-        return reply.code(401).send({ error: "Authentication required" });
-      }
-      reply.setCookie(`batty-site-${request.params.siteId}`, resolved.accessToken, {
-        httpOnly: true,
-        sameSite: "strict",
-        path: resolved.descriptor.url,
-      });
-      return reply.redirect(resolved.descriptor.url);
-    },
+        request.params["*"],
+        request.params.accessToken,
+      ),
   );
 }

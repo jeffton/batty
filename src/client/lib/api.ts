@@ -223,6 +223,22 @@ export function setBraveSearchApiKey(apiKey: string): Promise<AppSettingsStatus>
   });
 }
 
+export function listEnvironmentVariables(): Promise<{ names: string[] }> {
+  return request("/api/settings/environment");
+}
+
+export function setEnvironmentVariable(name: string, value: string): Promise<{ names: string[] }> {
+  return request(`/api/settings/environment/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value }),
+  });
+}
+
+export function removeEnvironmentVariable(name: string): Promise<{ names: string[] }> {
+  return request(`/api/settings/environment/${encodeURIComponent(name)}`, { method: "DELETE" });
+}
+
 export function getBattyAgentsFile(): Promise<{ content: string }> {
   return request("/api/settings/agents");
 }

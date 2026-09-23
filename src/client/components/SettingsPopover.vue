@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { Check, ExternalLink, LogOut, Palette, Pencil, Save, X } from "@lucide/vue";
+import { Check, ExternalLink, LogOut, Palette, Pencil, Save, Trash2, X } from "@lucide/vue";
 import { computed, reactive, ref, watch } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import ModelConfigSelector from "@/client/components/ModelConfigSelector.vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
+import {
+  listEnvironmentVariables,
+  removeEnvironmentVariable,
+  setEnvironmentVariable,
+} from "@/client/lib/api";
 import {
   normalizeModelThinkingLevel,
   resolveModelThinkingOptions,
@@ -49,6 +54,11 @@ const battyAgentsInput = ref("");
 const battyAgentsLoading = ref(false);
 const battyAgentsSaving = ref(false);
 const battyAgentsError = ref("");
+const environmentNames = ref<string[]>([]);
+const environmentName = ref("");
+const environmentValue = ref("");
+const environmentPending = ref(false);
+const environmentError = ref("");
 const authAttemptId = ref("");
 const authUrl = ref("");
 const authInstructions = ref("");
@@ -193,6 +203,44 @@ async function saveBattyAgentsFile(): Promise<void> {
     battyAgentsError.value = error instanceof Error ? error.message : String(error);
   } finally {
     battyAgentsSaving.value = false;
+  }
+}
+
+async function loadEnvironmentNames(): Promise<void> {
+  environmentNames.value = [];
+  environmentError.value = "";
+  try {
+    environmentNames.value = (await listEnvironmentVariables()).names;
+  } catch (error) {
+    environmentError.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
+async function saveEnvironmentVariable(): Promise<void> {
+  environmentPending.value = true;
+  environmentError.value = "";
+  try {
+    environmentNames.value = (
+      await setEnvironmentVariable(environmentName.value.trim(), environmentValue.value)
+    ).names;
+    environmentName.value = "";
+    environmentValue.value = "";
+  } catch (error) {
+    environmentError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    environmentPending.value = false;
+  }
+}
+
+async function deleteEnvironmentVariable(name: string): Promise<void> {
+  environmentPending.value = true;
+  environmentError.value = "";
+  try {
+    environmentNames.value = (await removeEnvironmentVariable(name)).names;
+  } catch (error) {
+    environmentError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    environmentPending.value = false;
   }
 }
 
@@ -350,6 +398,8 @@ function handlePopoverToggle(event: Event): void {
   const open = (event as Event & { newState?: "open" | "closed" }).newState === "open";
   if (!open) {
     expandedItemId.value = undefined;
+    environmentName.value = "";
+    environmentValue.value = "";
     return;
   }
 
@@ -358,6 +408,7 @@ function handlePopoverToggle(event: Event): void {
   defaultModelError.value = "";
   braveSearchError.value = "";
   battyAgentsError.value = "";
+  void loadEnvironmentNames();
   apiKeyErrors.google = "";
   apiKeyErrors.openrouter = "";
   void store.refreshProviderAuthStatus();
@@ -520,6 +571,58 @@ function handlePopoverToggle(event: Event): void {
             </div>
           </div>
         </article>
+      </section>
+
+      <section class="settings-popover__section">
+        <div class="settings-popover__group-title">Environment variables</div>
+        <div class="settings-popover__help">
+          Stored in <code>.batty/environment.json</code>. Settings read at startup require a
+          restart.
+        </div>
+        <div v-for="name in environmentNames" :key="name" class="settings-popover__environment-row">
+          <code>{{ name }}</code>
+          <button
+            class="settings-popover__icon-btn"
+            type="button"
+            :aria-label="`Remove ${name}`"
+            :disabled="environmentPending"
+            @click="deleteEnvironmentVariable(name)"
+          >
+            <Trash2 :size="14" />
+          </button>
+        </div>
+        <form class="settings-popover__editor" @submit.prevent="saveEnvironmentVariable">
+          <input
+            v-model="environmentName"
+            class="settings-popover__input"
+            aria-label="Variable name"
+            placeholder="VARIABLE_NAME"
+            autocomplete="off"
+            spellcheck="false"
+            :disabled="environmentPending"
+          />
+          <input
+            v-model="environmentValue"
+            class="settings-popover__input"
+            aria-label="Variable value"
+            type="text"
+            placeholder="Value"
+            autocomplete="off"
+            :disabled="environmentPending"
+          />
+          <button
+            class="settings-popover__action settings-popover__action--primary"
+            type="submit"
+            :disabled="
+              environmentPending || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(environmentName.trim())
+            "
+          >
+            <Save :size="14" /> {{ environmentPending ? "Saving…" : "Set variable" }}
+          </button>
+        </form>
+        <div v-if="environmentError" class="settings-popover__error" role="alert">
+          {{ environmentError }}
+        </div>
       </section>
 
       <section class="settings-popover__section">
@@ -873,6 +976,18 @@ function handlePopoverToggle(event: Event): void {
 .settings-popover__item + .settings-popover__item {
   margin-top: -0.55rem;
   border-top: 1px solid var(--color-border-soft);
+}
+
+.settings-popover__environment-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.settings-popover__environment-row code {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .settings-popover__item-meta {

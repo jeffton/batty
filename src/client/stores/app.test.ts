@@ -1,6 +1,11 @@
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { getSessionMessages, listWorkspaceSessions, openSessionById, setSessionModel } from "@/client/lib/api";
+import {
+  getSessionMessages,
+  listWorkspaceSessions,
+  openSessionById,
+  setSessionModel,
+} from "@/client/lib/api";
 import { readCachedSession } from "@/client/lib/cache";
 import { useAppStore } from "@/client/stores/app";
 import type { SessionState, SessionSummary } from "@/shared/types";

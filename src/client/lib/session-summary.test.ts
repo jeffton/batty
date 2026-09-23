@@ -110,9 +110,7 @@ describe("session-summary", () => {
     };
     const idle = { ...working, updatedAt: 200, isInProgress: false };
 
-    expect(mergeSessionSummaries([working], [idle])).toEqual([
-      { ...working, isInProgress: false },
-    ]);
+    expect(mergeSessionSummaries([working], [idle])).toEqual([{ ...working, isInProgress: false }]);
     expect(mergeSessionSummaries([idle], [working])).toEqual([working]);
   });
 

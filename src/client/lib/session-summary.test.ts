@@ -98,6 +98,24 @@ describe("session-summary", () => {
     ]);
   });
 
+  it("uses the latest working status even when its transcript timestamp is older", () => {
+    const working: SessionSummary = {
+      id: "session-1",
+      sessionId: "session-1",
+      firstMessage: "prompt",
+      updatedAt: 300,
+      messageCount: 2,
+      workspaceId: "batty",
+      isInProgress: true,
+    };
+    const idle = { ...working, updatedAt: 200, isInProgress: false };
+
+    expect(mergeSessionSummaries([working], [idle])).toEqual([
+      { ...working, isInProgress: false },
+    ]);
+    expect(mergeSessionSummaries([idle], [working])).toEqual([working]);
+  });
+
   it("prefers a later idle summary when timestamps tie", () => {
     const working: SessionSummary = {
       id: "session-1",

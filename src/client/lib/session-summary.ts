@@ -70,6 +70,8 @@ function mergePair(left: SessionSummary, right: SessionSummary): SessionSummary 
     updatedAt: Math.max(left.updatedAt, right.updatedAt),
     messageCount: Math.max(left.messageCount, right.messageCount),
     model: newer.model || older.model,
+    // updatedAt describes transcript content, not when working status was observed.
+    isInProgress: right.isInProgress,
   };
 }
 

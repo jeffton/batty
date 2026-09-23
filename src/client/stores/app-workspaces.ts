@@ -30,6 +30,8 @@ export const workspaceActions = {
   },
 
   async loadWorkspaceSessions(this: AppActionContext, workspaceId: string): Promise<void> {
+    const snapshotRevision = this.workspaceRevisionByWorkspace[workspaceId];
+    const snapshotStreamId = this.workspaceSnapshotStreamId;
     this.loadingWorkspaceSessions = {
       ...this.loadingWorkspaceSessions,
       [workspaceId]: true,
@@ -37,6 +39,12 @@ export const workspaceActions = {
 
     try {
       const sessions = await listWorkspaceSessions(workspaceId);
+      if (
+        this.workspaceSnapshotStreamId !== snapshotStreamId ||
+        this.workspaceRevisionByWorkspace[workspaceId] !== snapshotRevision
+      ) {
+        return;
+      }
       const existing = this.sessionsByWorkspace[workspaceId] ?? [];
       const activeSession =
         this.activeSession?.workspaceId === workspaceId && this.activeSession.path
@@ -45,7 +53,7 @@ export const workspaceActions = {
 
       this.sessionsByWorkspace = {
         ...this.sessionsByWorkspace,
-        [workspaceId]: mergeSessionSummaries(sessions, existing, activeSession),
+        [workspaceId]: mergeSessionSummaries(existing, sessions, activeSession),
       };
       this.sortWorkspaces();
     } finally {

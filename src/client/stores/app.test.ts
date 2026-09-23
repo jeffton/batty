@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { getSessionMessages, openSessionById, setSessionModel } from "@/client/lib/api";
+import { getSessionMessages, listWorkspaceSessions, openSessionById, setSessionModel } from "@/client/lib/api";
 import { readCachedSession } from "@/client/lib/cache";
 import { useAppStore } from "@/client/stores/app";
 import type { SessionState, SessionSummary } from "@/shared/types";
@@ -227,6 +227,40 @@ describe("app store session streams", () => {
     workspaceStream?.onerror?.(new Event("error"));
     expect(store.connectionState).toBe("online");
     expect(store.workspaceConnectionState).toBe("connecting");
+  });
+
+  it("does not restore a stale working status from an in-flight session list", async () => {
+    const store = useAppStore();
+    const response = deferred<SessionSummary[]>();
+    vi.mocked(listWorkspaceSessions).mockReturnValueOnce(response.promise);
+    const loading = store.loadWorkspaceSessions("batty");
+    store.openWorkspaceStream();
+    const stream = MockEventSource.instances[0];
+    const idle: SessionSummary = {
+      id: "session-a",
+      sessionId: "session-a",
+      firstMessage: "prompt",
+      updatedAt: 200,
+      messageCount: 2,
+      workspaceId: "batty",
+      isInProgress: false,
+    };
+    stream?.onmessage?.({
+      data: JSON.stringify({
+        workspaceId: "batty",
+        streamId: "process-1",
+        revision: 1,
+        sessions: [idle],
+        cronJobs: [],
+        runningCronJobs: [],
+        cronRunLogs: [],
+        uiSettings: { easyMode: false },
+      }),
+    } as MessageEvent<string>);
+    response.resolve([{ ...idle, updatedAt: 300, isInProgress: true }]);
+    await loading;
+
+    expect(store.sessionsByWorkspace.batty?.[0]?.isInProgress).toBe(false);
   });
 
   it("keeps one stream when the same session is selected again", () => {

@@ -574,58 +574,6 @@ function handlePopoverToggle(event: Event): void {
       </section>
 
       <section class="settings-popover__section">
-        <div class="settings-popover__group-title">Environment variables</div>
-        <div class="settings-popover__help">
-          Stored in <code>.batty/environment.json</code>. Settings read at startup require a
-          restart.
-        </div>
-        <div v-for="name in environmentNames" :key="name" class="settings-popover__environment-row">
-          <code>{{ name }}</code>
-          <button
-            class="settings-popover__icon-btn"
-            type="button"
-            :aria-label="`Remove ${name}`"
-            :disabled="environmentPending"
-            @click="deleteEnvironmentVariable(name)"
-          >
-            <Trash2 :size="14" />
-          </button>
-        </div>
-        <form class="settings-popover__editor" @submit.prevent="saveEnvironmentVariable">
-          <input
-            v-model="environmentName"
-            class="settings-popover__input"
-            aria-label="Variable name"
-            placeholder="VARIABLE_NAME"
-            autocomplete="off"
-            spellcheck="false"
-            :disabled="environmentPending"
-          />
-          <input
-            v-model="environmentValue"
-            class="settings-popover__input"
-            aria-label="Variable value"
-            type="text"
-            placeholder="Value"
-            autocomplete="off"
-            :disabled="environmentPending"
-          />
-          <button
-            class="settings-popover__action settings-popover__action--primary"
-            type="submit"
-            :disabled="
-              environmentPending || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(environmentName.trim())
-            "
-          >
-            <Save :size="14" /> {{ environmentPending ? "Saving…" : "Set variable" }}
-          </button>
-        </form>
-        <div v-if="environmentError" class="settings-popover__error" role="alert">
-          {{ environmentError }}
-        </div>
-      </section>
-
-      <section class="settings-popover__section">
         <div class="settings-popover__group-title">Auth</div>
 
         <article class="settings-popover__item">
@@ -808,6 +756,58 @@ function handlePopoverToggle(event: Event): void {
             </template>
           </div>
         </article>
+      </section>
+
+      <section class="settings-popover__section">
+        <div class="settings-popover__group-title">Environment variables</div>
+        <div class="settings-popover__help">
+          Stored in <code>.batty/environment.json</code>. Settings read at startup require a
+          restart.
+        </div>
+        <div v-for="name in environmentNames" :key="name" class="settings-popover__environment-row">
+          <code>{{ name }}</code>
+          <button
+            class="settings-popover__icon-btn"
+            type="button"
+            :aria-label="`Remove ${name}`"
+            :disabled="environmentPending"
+            @click="deleteEnvironmentVariable(name)"
+          >
+            <Trash2 :size="14" />
+          </button>
+        </div>
+        <form class="settings-popover__editor" @submit.prevent="saveEnvironmentVariable">
+          <input
+            v-model="environmentName"
+            class="settings-popover__input"
+            aria-label="Variable name"
+            placeholder="VARIABLE_NAME"
+            autocomplete="off"
+            spellcheck="false"
+            :disabled="environmentPending"
+          />
+          <input
+            v-model="environmentValue"
+            class="settings-popover__input"
+            aria-label="Variable value"
+            type="text"
+            placeholder="Value"
+            autocomplete="off"
+            :disabled="environmentPending"
+          />
+          <button
+            class="settings-popover__action settings-popover__action--primary"
+            type="submit"
+            :disabled="
+              environmentPending || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(environmentName.trim())
+            "
+          >
+            <Save :size="14" /> {{ environmentPending ? "Saving…" : "Set variable" }}
+          </button>
+        </form>
+        <div v-if="environmentError" class="settings-popover__error" role="alert">
+          {{ environmentError }}
+        </div>
       </section>
 
       <section class="settings-popover__section settings-popover__section--logout">

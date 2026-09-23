@@ -213,6 +213,15 @@ describe("SettingsPopover", () => {
     fetchMock.mockRestore();
   });
 
+  it("places environment variables immediately above log out", () => {
+    const wrapper = mount(SettingsPopover, {
+      props: { popoverId: "settings-popover", anchorName: "--settings-anchor" },
+    });
+    const sections = wrapper.findAll(".settings-popover__body > .settings-popover__section");
+    expect(sections.at(-2)?.text()).toContain("Environment variables");
+    expect(sections.at(-1)?.text()).toContain("Log out");
+  });
+
   it("uses the full-popover frame with an explicit close button", async () => {
     const wrapper = mount(SettingsPopover, {
       props: {

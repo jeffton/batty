@@ -32,7 +32,6 @@ let eventSourceSessionId: string | undefined;
 let eventSourceOwnerState: unknown;
 const sessionOpenRequests = new Map<string, Promise<SessionState>>();
 const sessionDetailRequests = new Map<string, Promise<void>>();
-const sessionRefreshRequests = new Map<string, Promise<void>>();
 const sessionDetailTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let modelUpdateVersion = 0;
 let thinkingLevelUpdateVersion = 0;
@@ -274,42 +273,27 @@ export const sessionActions = {
     if (!requestedSession) {
       return;
     }
-    const existing = sessionRefreshRequests.get(requestedSession.sessionId);
-    if (existing) {
-      return existing;
+    const response = normalizeSessionState(await getSession(requestedSession.id));
+    const currentSession = this.activeSession;
+    if (
+      !currentSession ||
+      currentSession.sessionId !== requestedSession.sessionId ||
+      (currentSession.streamId !== requestedSession.streamId &&
+        response?.streamId !== currentSession.streamId) ||
+      (response?.streamId === currentSession.streamId &&
+        response?.revision != null &&
+        currentSession.revision != null &&
+        response.revision < currentSession.revision)
+    ) {
+      return;
     }
-
-    const request = (async () => {
-      const response = normalizeSessionState(await getSession(requestedSession.id));
-      const currentSession = this.activeSession;
-      if (
-        !currentSession ||
-        currentSession.sessionId !== requestedSession.sessionId ||
-        (currentSession.streamId !== requestedSession.streamId &&
-          response?.streamId !== currentSession.streamId) ||
-        (response?.streamId === currentSession.streamId &&
-          response?.revision != null &&
-          currentSession.revision != null &&
-          response.revision < currentSession.revision)
-      ) {
-        return;
-      }
-      const session = mergeSessionState(response, currentSession);
-      if (!session) {
-        throw new Error("Failed to refresh session");
-      }
-      this.activeSession = session;
-      this.updateSessionSummary(session);
-      await writeCachedSession(session);
-    })();
-    sessionRefreshRequests.set(requestedSession.sessionId, request);
-    try {
-      await request;
-    } finally {
-      if (sessionRefreshRequests.get(requestedSession.sessionId) === request) {
-        sessionRefreshRequests.delete(requestedSession.sessionId);
-      }
+    const session = mergeSessionState(response, currentSession);
+    if (!session) {
+      throw new Error("Failed to refresh session");
     }
+    this.activeSession = session;
+    this.updateSessionSummary(session);
+    await writeCachedSession(session);
   },
 
   scheduleSessionEnhancement(

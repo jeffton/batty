@@ -270,13 +270,11 @@ describe("app store session streams", () => {
     expect(store.sessionsByWorkspace.batty?.[0]?.isInProgress).toBe(false);
   });
 
-  it("reconciles an idle workspace snapshot with a missed session completion", async () => {
+  it("shows an idle workspace summary without fetching the active session", () => {
     const store = useAppStore();
     const working = makeSession("session-a", { isStreaming: true, revision: 5 });
     store.activeSession = working;
     store.selectedWorkspaceId = "batty";
-    const response = deferred<SessionState>();
-    vi.mocked(getSession).mockReturnValueOnce(response.promise);
     store.openWorkspaceStream();
     const stream = MockEventSource.instances[0];
     stream?.onmessage?.({
@@ -304,26 +302,10 @@ describe("app store session streams", () => {
     } as MessageEvent<string>);
 
     expect(store.workspaceSessions[0]?.isInProgress).toBe(false);
-    expect(getSession).toHaveBeenCalledWith(working.id);
-    response.resolve({ ...working, isStreaming: false, revision: 6 });
-    await vi.waitFor(() => expect(store.activeSession?.isStreaming).toBe(false));
+    expect(getSession).not.toHaveBeenCalled();
   });
 
-  it("coalesces refreshes while a session reconciliation is pending", async () => {
-    const store = useAppStore();
-    store.activeSession = makeSession("session-a", { isStreaming: true });
-    const response = deferred<SessionState>();
-    vi.mocked(getSession).mockReturnValueOnce(response.promise);
-
-    const first = store.refreshActiveSession();
-    const second = store.refreshActiveSession();
-    expect(getSession).toHaveBeenCalledTimes(1);
-    response.resolve(makeSession("session-a"));
-    await Promise.all([first, second]);
-    expect(store.activeSession?.isStreaming).toBe(false);
-  });
-
-  it("does not replace a newer stream update with an older reconciliation response", async () => {
+  it("does not replace a newer stream update with an older refresh response", async () => {
     const store = useAppStore();
     const working = makeSession("session-a", { isStreaming: true, revision: 5 });
     store.activeSession = working;

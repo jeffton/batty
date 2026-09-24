@@ -1,6 +1,7 @@
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import {
+  getSession,
   getSessionMessages,
   listWorkspaceSessions,
   openSessionById,
@@ -266,6 +267,72 @@ describe("app store session streams", () => {
     await loading;
 
     expect(store.sessionsByWorkspace.batty?.[0]?.isInProgress).toBe(false);
+  });
+
+  it("reconciles an idle workspace snapshot with a missed session completion", async () => {
+    const store = useAppStore();
+    const working = makeSession("session-a", { isStreaming: true, revision: 5 });
+    store.activeSession = working;
+    store.selectedWorkspaceId = "batty";
+    const response = deferred<SessionState>();
+    vi.mocked(getSession).mockReturnValueOnce(response.promise);
+    store.openWorkspaceStream();
+    const stream = MockEventSource.instances[0];
+    stream?.onmessage?.({
+      data: JSON.stringify({
+        workspaceId: "batty",
+        streamId: "process-1",
+        revision: 1,
+        sessions: [
+          {
+            id: working.path!,
+            sessionId: working.sessionId,
+            path: working.path,
+            firstMessage: "prompt",
+            updatedAt: working.updatedAt,
+            messageCount: working.totalMessageCount,
+            workspaceId: working.workspaceId,
+            isInProgress: false,
+          },
+        ],
+        cronJobs: [],
+        runningCronJobs: [],
+        cronRunLogs: [],
+        uiSettings: { easyMode: false },
+      }),
+    } as MessageEvent<string>);
+
+    expect(store.workspaceSessions[0]?.isInProgress).toBe(false);
+    expect(getSession).toHaveBeenCalledWith(working.id);
+    response.resolve({ ...working, isStreaming: false, revision: 6 });
+    await vi.waitFor(() => expect(store.activeSession?.isStreaming).toBe(false));
+  });
+
+  it("coalesces refreshes while a session reconciliation is pending", async () => {
+    const store = useAppStore();
+    store.activeSession = makeSession("session-a", { isStreaming: true });
+    const response = deferred<SessionState>();
+    vi.mocked(getSession).mockReturnValueOnce(response.promise);
+
+    const first = store.refreshActiveSession();
+    const second = store.refreshActiveSession();
+    expect(getSession).toHaveBeenCalledTimes(1);
+    response.resolve(makeSession("session-a"));
+    await Promise.all([first, second]);
+    expect(store.activeSession?.isStreaming).toBe(false);
+  });
+
+  it("does not replace a newer stream update with an older reconciliation response", async () => {
+    const store = useAppStore();
+    const working = makeSession("session-a", { isStreaming: true, revision: 5 });
+    store.activeSession = working;
+    const response = deferred<SessionState>();
+    vi.mocked(getSession).mockReturnValueOnce(response.promise);
+    const refresh = store.refreshActiveSession();
+    store.activeSession = { ...working, revision: 7, isStreaming: true };
+    response.resolve({ ...working, revision: 6, isStreaming: false });
+    await refresh;
+    expect(store.activeSession?.isStreaming).toBe(true);
   });
 
   it("keeps one stream when the same session is selected again", () => {

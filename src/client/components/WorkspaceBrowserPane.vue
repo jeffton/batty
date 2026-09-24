@@ -490,7 +490,7 @@ watch(
           class="workspace-browser-pane__list-shell workspace-browser-pane__list-shell--sessions"
         >
           <div class="workspace-browser-pane__sessions">
-            <template v-if="sessionListLoading">
+            <template v-if="sessionListLoading && filteredSessions.length === 0">
               <div class="workspace-browser-pane__empty workspace-browser-pane__empty--loading">
                 <LoaderCircle :size="18" class="workspace-browser-pane__spinner" />
               </div>

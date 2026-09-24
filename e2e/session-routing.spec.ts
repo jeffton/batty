@@ -61,6 +61,33 @@ test.describe("workspace and session routing", () => {
     expect(relevantErrors).toEqual([]);
   });
 
+  test("back navigation keeps existing sessions visible during refresh", async ({ page }) => {
+    await authenticate(page);
+    await page.goto(`/workspaces/batty?e2e=${Date.now()}`);
+    await page.getByRole("button", { name: /new session/i }).click();
+    await expect(page).toHaveURL(/\/workspaces\/batty\/sessions\/[^/]+$/);
+    const sessionId = decodeURIComponent(new URL(page.url()).pathname.split("/").at(-1)!);
+
+    let releaseRefresh!: () => void;
+    const refreshPending = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    await page.route("**/api/workspaces/batty/sessions", async (route) => {
+      await refreshPending;
+      await route.continue();
+    });
+
+    try {
+      await page.locator(".header__ws-btn").click();
+      await expect(page).toHaveURL(/\/workspaces\/batty(?:\?e2e=\d+)?$/);
+      const sessionItem = page.locator(`[data-session-id="${sessionId}"]`);
+      await expect(sessionItem).toBeVisible();
+      await expect(sessionItem).toBeEnabled();
+    } finally {
+      releaseRefresh();
+    }
+  });
+
   test("creating a workspace from the browser opens a new session", async ({ page }) => {
     const workspaceName = `playwright-workspace-${Date.now()}`;
 

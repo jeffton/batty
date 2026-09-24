@@ -240,6 +240,18 @@ export const workspaceActions = {
         ...this.sessionsByWorkspace,
         [snapshot.workspaceId]: snapshot.sessions,
       };
+      const activeSession = this.activeSession;
+      if (
+        activeSession?.workspaceId === snapshot.workspaceId &&
+        activeSession.isStreaming &&
+        snapshot.sessions.some(
+          (session) => session.sessionId === activeSession.sessionId && !session.isInProgress,
+        )
+      ) {
+        void this.refreshActiveSession().catch((error: unknown) => {
+          console.error("Failed to reconcile completed session", error);
+        });
+      }
       this.cronJobsByWorkspace = {
         ...this.cronJobsByWorkspace,
         [snapshot.workspaceId]: snapshot.cronJobs,

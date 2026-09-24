@@ -31,7 +31,7 @@ export const useAppStore = defineStore("app", {
           ? [toSessionSummary(state.activeSession)]
           : [];
 
-      return mergeSessionSummaries(sessions, activeSession);
+      return mergeSessionSummaries(activeSession, sessions);
     },
     workspaceCronJobs(state): CronJob[] {
       if (!state.selectedWorkspaceId) {

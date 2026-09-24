@@ -29,6 +29,20 @@ describe("session-stream", () => {
     ).toBe("/api/sessions/session-123/events?workspaceId=batty&afterRevision=42");
   });
 
+  it("includes the stream ID when resuming a session revision", () => {
+    expect(
+      sessionEventsPath({
+        id: "session-123",
+        workspaceId: "batty",
+        path: undefined,
+        revision: 42,
+        streamId: "process-1",
+      }),
+    ).toBe(
+      "/api/sessions/session-123/events?workspaceId=batty&afterRevision=42&afterStreamId=process-1",
+    );
+  });
+
   it("can request full reset details for popover transcripts", () => {
     expect(
       sessionEventsPath(

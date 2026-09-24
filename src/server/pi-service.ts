@@ -834,6 +834,7 @@ export class PiService {
     subscriber: SessionSubscriber,
     afterRevision?: number,
     messagesDetailLevel: "summary" | "full" = "summary",
+    afterStreamId?: string,
   ): () => void {
     return subscribeToSession(
       (sessionId) => this.requireSession(sessionId),
@@ -843,6 +844,7 @@ export class PiService {
       subscriber,
       afterRevision,
       messagesDetailLevel,
+      afterStreamId,
     );
   }
 
@@ -861,6 +863,7 @@ export class PiService {
     return createSessionState({
       id: webSession.id,
       revision: webSession.revision,
+      streamId: webSession.streamId,
       imageResolver: webSession.resolveUiImage,
       sessionId: webSession.session.sessionId,
       workspaceId: webSession.workspace.id,

@@ -42,6 +42,7 @@ export interface WebSession {
   agentCompleted?: boolean;
   suppressNextAgentEndCompletion?: boolean;
   revision?: number;
+  streamId: string;
   eventLog?: Array<{ revision: number; event: ServerEvent }>;
   resolveUiImage?: (image: {
     mimeType: string;

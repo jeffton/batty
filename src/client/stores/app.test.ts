@@ -5,6 +5,7 @@ import {
   getSessionMessages,
   listWorkspaceSessions,
   openSessionById,
+  removeQueuedPrompt,
   setSessionModel,
 } from "@/client/lib/api";
 import { readCachedSession } from "@/client/lib/cache";
@@ -333,6 +334,36 @@ describe("app store session streams", () => {
     response.resolve({ ...working, revision: 6, isStreaming: false });
     await refresh;
     expect(store.activeSession?.isStreaming).toBe(true);
+  });
+
+  it("ignores an old-incarnation refresh after a new stream reset", async () => {
+    const store = useAppStore();
+    const working = makeSession("session-a", { streamId: "old", revision: 42, isStreaming: true });
+    store.activeSession = working;
+    const response = deferred<SessionState>();
+    vi.mocked(getSession).mockReturnValueOnce(response.promise);
+    const refresh = store.refreshActiveSession();
+
+    store.activeSession = { ...working, streamId: "new", revision: 0, isStreaming: false };
+    response.resolve({ ...working, isStreaming: true });
+    await refresh;
+
+    expect(store.activeSession?.streamId).toBe("new");
+    expect(store.activeSession?.isStreaming).toBe(false);
+  });
+
+  it("ignores an old-incarnation queued-prompt response", async () => {
+    const store = useAppStore();
+    const old = makeSession("session-a", { streamId: "old", revision: 5 });
+    store.activeSession = old;
+    const response = deferred<SessionState>();
+    vi.mocked(removeQueuedPrompt).mockReturnValueOnce(response.promise);
+    const removal = store.removeQueuedPrompt("followUp", 0);
+
+    store.activeSession = { ...old, streamId: "new", revision: 0 };
+    response.resolve(old);
+    await removal;
+    expect(store.activeSession?.streamId).toBe("new");
   });
 
   it("keeps one stream when the same session is selected again", () => {

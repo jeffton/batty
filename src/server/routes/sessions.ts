@@ -4,6 +4,7 @@ import { listWorkspaces, resolveWorkspace } from "../workspaces";
 import { resolveSentFile } from "../send-files";
 import { resolveUploadedFile } from "../pi-service-uploads";
 import type { UploadedFile } from "../pi-service";
+import type { ServerEvent } from "@/shared/types";
 import type { RouteContext } from "./context";
 import { startEventStream } from "./event-stream";
 
@@ -241,6 +242,7 @@ export function registerSessionRoutes(context: RouteContext): void {
       workspaceId?: string;
       sessionPath?: string;
       afterRevision?: string;
+      afterStreamId?: string;
       messagesDetailLevel?: "summary" | "full";
     };
   }>(routePath("/api/sessions/:sessionId/events"), async (request, reply) => {
@@ -251,13 +253,14 @@ export function registerSessionRoutes(context: RouteContext): void {
 
     startEventStream(reply.raw);
 
-    const send = (payload: unknown, revision: number) => {
-      reply.raw.write(`id: ${revision}\ndata: ${JSON.stringify(payload)}\n\n`);
+    const send = (payload: ServerEvent, revision: number) => {
+      reply.raw.write(`id: ${payload.streamId}:${revision}\ndata: ${JSON.stringify(payload)}\n\n`);
     };
-    const revisionText =
-      typeof request.headers["last-event-id"] === "string"
-        ? request.headers["last-event-id"]
-        : request.query.afterRevision;
+    const lastEventId = request.headers["last-event-id"];
+    const [afterStreamId, revisionText] =
+      typeof lastEventId === "string"
+        ? lastEventId.split(":")
+        : [request.query.afterStreamId, request.query.afterRevision];
     const parsedRevision = Number.parseInt(revisionText ?? "", 10);
 
     const unsubscribe = service.subscribe(
@@ -265,6 +268,7 @@ export function registerSessionRoutes(context: RouteContext): void {
       send,
       Number.isFinite(parsedRevision) && parsedRevision >= 0 ? parsedRevision : undefined,
       request.query.messagesDetailLevel,
+      afterStreamId,
     );
     const heartbeat = setInterval(() => {
       reply.raw.write(": keep-alive\n\n");

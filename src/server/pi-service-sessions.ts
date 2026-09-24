@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { HarnessController as AgentSession } from "./harness-controller";
 import { isPiShellToolName } from "@/shared/pi-tools";
@@ -52,6 +53,7 @@ export function attachSession(
     ephemeral,
     isCompacting: session.isCompacting,
     revision: 0,
+    streamId: randomUUID(),
     eventLog: [],
     resolveUiImage,
   };
@@ -76,20 +78,30 @@ export function attachSession(
 
 const MAX_REPLAY_EVENTS = 500;
 
-function withRevision(event: ServerEvent, revision: number): ServerEvent {
+function withRevision(event: ServerEvent, revision: number, streamId: string): ServerEvent {
   if (event.type === "reset") {
-    return { ...event, revision, state: { ...event.state, revision } };
+    return {
+      ...event,
+      revision,
+      streamId,
+      state: { ...event.state, revision, streamId },
+    };
   }
   if (event.type === "state") {
-    return { ...event, revision, state: { ...event.state, revision } };
+    return {
+      ...event,
+      revision,
+      streamId,
+      state: { ...event.state, revision, streamId },
+    };
   }
-  return { ...event, revision };
+  return { ...event, revision, streamId };
 }
 
 export function publish(webSession: WebSession, event: ServerEvent): void {
   const revision = (webSession.revision ?? 0) + 1;
   webSession.revision = revision;
-  const versionedEvent = withRevision(event, revision);
+  const versionedEvent = withRevision(event, revision, webSession.streamId);
   const eventLog = (webSession.eventLog ??= []);
   if (versionedEvent.type === "reset") {
     eventLog.length = 0;
@@ -473,12 +485,13 @@ export function subscribeToSession(
   subscriber: SessionSubscriber,
   afterRevision?: number,
   initialMessagesDetailLevel: "summary" | "full" = "full",
+  afterStreamId?: string,
 ): () => void {
   const webSession = requireSession(sessionId);
   webSession.subscribers.add(subscriber);
 
   const currentRevision = webSession.revision ?? 0;
-  if (afterRevision === undefined) {
+  if (afterRevision === undefined || afterStreamId !== webSession.streamId) {
     subscriber(
       withRevision(
         {
@@ -486,6 +499,7 @@ export function subscribeToSession(
           state: getState(sessionId, { messagesDetailLevel: initialMessagesDetailLevel }),
         },
         currentRevision,
+        webSession.streamId,
       ),
       currentRevision,
     );
@@ -509,6 +523,7 @@ export function subscribeToSession(
             state: getState(sessionId, { messagesDetailLevel: initialMessagesDetailLevel }),
           },
           currentRevision,
+          webSession.streamId,
         ),
         currentRevision,
       );

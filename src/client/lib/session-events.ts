@@ -67,7 +67,11 @@ function applyToolDelta(
 }
 
 function withEventRevision(state: SessionState, event: ServerEvent): SessionState {
-  return typeof event.revision === "number" ? { ...state, revision: event.revision } : state;
+  return {
+    ...state,
+    ...(typeof event.revision === "number" ? { revision: event.revision } : {}),
+    ...(event.streamId ? { streamId: event.streamId } : {}),
+  };
 }
 
 function mergeTools(previous: ActiveToolRun[], incoming: ActiveToolRun[]): ActiveToolRun[] {
@@ -86,14 +90,26 @@ export function applyServerEvent(
   state: SessionState | undefined,
   event: ServerEvent,
 ): SessionState | undefined {
-  if (
-    state &&
-    event.type !== "reset" &&
-    typeof state.revision === "number" &&
-    typeof event.revision === "number" &&
-    event.revision <= state.revision
-  ) {
-    return state;
+  if (state) {
+    const eventStreamId =
+      event.streamId ?? (event.type === "reset" ? event.state.streamId : undefined);
+    if (event.type === "reset") {
+      if (
+        eventStreamId === state.streamId &&
+        typeof state.revision === "number" &&
+        typeof event.revision === "number" &&
+        event.revision < state.revision
+      ) {
+        return state;
+      }
+    } else if (
+      (eventStreamId && state.streamId && eventStreamId !== state.streamId) ||
+      (typeof state.revision === "number" &&
+        typeof event.revision === "number" &&
+        event.revision <= state.revision)
+    ) {
+      return state;
+    }
   }
 
   switch (event.type) {

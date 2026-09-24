@@ -142,16 +142,30 @@ describe("applyServerEvent", () => {
 
   it("accepts an authoritative reset when server revisions restart", () => {
     const next = applyServerEvent(
-      { ...baseState, revision: 42, isStreaming: true },
+      { ...baseState, revision: 42, streamId: "old-process", isStreaming: true },
       {
         type: "reset",
         revision: 0,
-        state: { ...baseState, revision: 0, isStreaming: false },
+        streamId: "new-process",
+        state: { ...baseState, revision: 0, streamId: "new-process", isStreaming: false },
       },
     );
 
     expect(next?.revision).toBe(0);
     expect(next?.isStreaming).toBe(false);
+    expect(next?.streamId).toBe("new-process");
+  });
+
+  it("ignores an older reset from the same process after an idle refresh", () => {
+    const idle = { ...baseState, revision: 6, streamId: "same-process", isStreaming: false };
+    expect(
+      applyServerEvent(idle, {
+        type: "reset",
+        revision: 5,
+        streamId: "same-process",
+        state: { ...baseState, revision: 5, streamId: "same-process" },
+      }),
+    ).toBe(idle);
   });
 
   it("drops cached tool output when an idle reset snapshot arrives without active tools", () => {

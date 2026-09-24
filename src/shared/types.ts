@@ -270,6 +270,7 @@ export interface QueuedPrompt {
 export interface SessionState {
   id: string;
   revision?: number;
+  streamId?: string;
   sessionId: string;
   workspaceId: string;
   cwd: string;
@@ -417,4 +418,4 @@ export type ServerEvent = (
     }
   | { type: "status"; isStreaming: boolean; pendingMessageCount: number }
   | { type: "error"; message: string }
-) & { revision?: number };
+) & { revision?: number; streamId?: string };

@@ -477,6 +477,7 @@ export interface SessionStateInput {
   isCronSession?: boolean;
   activeTools: SessionState["activeTools"];
   revision?: number;
+  streamId?: string;
   imageResolver?: UiImageResolver;
 }
 
@@ -496,6 +497,7 @@ export function createSessionState(input: SessionStateInput): SessionState {
   return {
     id: input.id,
     revision: input.revision,
+    streamId: input.streamId,
     sessionId: input.sessionId,
     workspaceId: input.workspaceId,
     cwd: input.cwd,

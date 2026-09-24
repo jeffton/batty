@@ -202,7 +202,10 @@ export const sessionActions = {
 
   openStream(
     this: AppActionContext,
-    session: Pick<SessionState, "id" | "sessionId" | "workspaceId" | "path" | "revision">,
+    session: Pick<
+      SessionState,
+      "id" | "sessionId" | "workspaceId" | "path" | "revision" | "streamId"
+    >,
   ): void {
     if (
       eventSource &&
@@ -282,7 +285,10 @@ export const sessionActions = {
       if (
         !currentSession ||
         currentSession.sessionId !== requestedSession.sessionId ||
-        (response?.revision != null &&
+        (currentSession.streamId !== requestedSession.streamId &&
+          response?.streamId !== currentSession.streamId) ||
+        (response?.streamId === currentSession.streamId &&
+          response?.revision != null &&
           currentSession.revision != null &&
           response.revision < currentSession.revision)
       ) {
@@ -338,7 +344,10 @@ export const sessionActions = {
         if (!detailed || !currentSession || currentSession.sessionId !== session.sessionId) {
           return;
         }
-        if (detailed.revision !== currentSession.revision) {
+        if (
+          detailed.streamId !== currentSession.streamId ||
+          detailed.revision !== currentSession.revision
+        ) {
           revisionChanged = true;
           return;
         }
@@ -390,7 +399,11 @@ export const sessionActions = {
         limit: RECENT_SESSION_MESSAGE_WINDOW,
       });
       const currentSession = this.activeSession;
-      if (!currentSession || currentSession.sessionId !== session.sessionId) {
+      if (
+        !currentSession ||
+        currentSession.sessionId !== session.sessionId ||
+        currentSession.streamId !== session.streamId
+      ) {
         return;
       }
       if (currentSession.messages[0]?.id !== session.messages[0]?.id) {
@@ -474,12 +487,20 @@ export const sessionActions = {
     const session = normalizeSessionState(
       await removeQueuedPromptRequest(requestedSession.id, kind, index),
     );
-    const currentSession = this.activeSession;
-    if (!currentSession || currentSession.sessionId !== requestedSession.sessionId) {
-      return;
-    }
     if (!session) {
       throw new Error("Failed to remove queued prompt");
+    }
+    const currentSession = this.activeSession;
+    if (
+      !currentSession ||
+      currentSession.sessionId !== requestedSession.sessionId ||
+      currentSession.streamId !== requestedSession.streamId ||
+      session.streamId !== currentSession.streamId ||
+      (session.revision != null &&
+        currentSession.revision != null &&
+        session.revision < currentSession.revision)
+    ) {
+      return;
     }
     const merged = mergeSessionState(session, currentSession);
     if (!merged) {

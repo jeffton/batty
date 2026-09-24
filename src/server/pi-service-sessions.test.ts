@@ -193,6 +193,7 @@ describe("session event replay", () => {
   it("sends a lightweight initial snapshot before full live resets", () => {
     const webSession = {
       id: "web-progressive",
+      streamId: "test-stream",
       workspace,
       session: { sessionId: "session-progressive", isStreaming: false },
       subscribers: new Set(),
@@ -228,7 +229,8 @@ describe("session event replay", () => {
 
     expect(subscriber.mock.calls[0]?.[0]).toMatchObject({
       type: "reset",
-      state: { messagesDetailLevel: "summary" },
+      streamId: "test-stream",
+      state: { messagesDetailLevel: "summary", streamId: "test-stream" },
     });
     expect(subscriber.mock.calls[1]?.[0]).toMatchObject({
       type: "reset",
@@ -240,6 +242,7 @@ describe("session event replay", () => {
   it("skips the duplicate snapshot and replays only missed events", () => {
     const webSession = {
       id: "web-replay",
+      streamId: "test-stream",
       workspace,
       session: { sessionId: "session-replay", isStreaming: false },
       subscribers: new Set(),
@@ -259,6 +262,8 @@ describe("session event replay", () => {
       webSession.id,
       currentEvents,
       0,
+      "full",
+      webSession.streamId,
     );
     expect(currentEvents).not.toHaveBeenCalled();
     expect(getState).not.toHaveBeenCalled();
@@ -271,13 +276,57 @@ describe("session event replay", () => {
     unsubscribeCurrent();
 
     const replayed = vi.fn();
-    subscribeToSession(() => webSession, getState, vi.fn(), webSession.id, replayed, 0);
+    subscribeToSession(
+      () => webSession,
+      getState,
+      vi.fn(),
+      webSession.id,
+      replayed,
+      0,
+      "full",
+      webSession.streamId,
+    );
     expect(replayed).toHaveBeenCalledTimes(1);
     expect(replayed).toHaveBeenCalledWith(
       expect.objectContaining({ type: "status", revision: 1 }),
       1,
     );
     expect(getState).not.toHaveBeenCalled();
+  });
+
+  it("sends a reset when a reconnect has the previous session incarnation ID", () => {
+    const webSession = {
+      id: "web-restarted",
+      streamId: "test-stream",
+      workspace,
+      session: { sessionId: "session-restarted" },
+      subscribers: new Set(),
+      revision: 4,
+      eventLog: [],
+    } as unknown as WebSession;
+    const state = createState({ isStreaming: false }, webSession, []);
+    const subscriber = vi.fn();
+
+    subscribeToSession(
+      () => webSession,
+      () => state,
+      vi.fn(),
+      webSession.id,
+      subscriber,
+      4,
+      "full",
+      "previous-process",
+    );
+
+    expect(subscriber).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "reset",
+        revision: 4,
+        streamId: "test-stream",
+        state: expect.objectContaining({ streamId: "test-stream" }),
+      }),
+      4,
+    );
   });
 
   it("keeps replayed tool snapshots immutable", () => {
@@ -291,6 +340,7 @@ describe("session event replay", () => {
     };
     const webSession = {
       id: "web-tools",
+      streamId: "test-stream",
       workspace,
       session: { sessionId: "session-tools", isStreaming: true },
       subscribers: new Set(),
@@ -304,7 +354,16 @@ describe("session event replay", () => {
     publish(webSession, { type: "tools", tools: [tool] });
     tool.blocks = [{ type: "text", text: "mutated" }];
     const replayed = vi.fn();
-    subscribeToSession(() => webSession, vi.fn(), vi.fn(), webSession.id, replayed, 0);
+    subscribeToSession(
+      () => webSession,
+      vi.fn(),
+      vi.fn(),
+      webSession.id,
+      replayed,
+      0,
+      "full",
+      webSession.streamId,
+    );
 
     expect(replayed.mock.calls[0]?.[0]).toMatchObject({
       type: "tools",

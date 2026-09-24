@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vite-plus/test";
+import { applyServerEvent } from "@/client/lib/session-events";
+import { withoutRenderedToolCalls } from "@/client/lib/active-assistant";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { ServerEvent, SessionState, WorkspaceInfo } from "@/shared/types";
 import { handleAgentEvent, publish, subscribeToSession } from "./pi-service-sessions";
@@ -383,6 +385,7 @@ describe("handleAgentEvent", () => {
     };
     const webSession = {
       id: "web-delta",
+      publishedAssistantPositions: [{ index: 0, type: "text" }],
       workspace,
       session: { sessionId: "session-delta" },
       subscribers: new Set(),
@@ -419,6 +422,123 @@ describe("handleAgentEvent", () => {
       delta: "o",
     });
     expect(getState).not.toHaveBeenCalled();
+  });
+
+  it("keeps assistant blocks dense when thinking has no delta before text", async () => {
+    const message = {
+      role: "assistant",
+      content: [] as Array<{ type: string; thinking?: string; text?: string }>,
+      timestamp: 1,
+    };
+    const webSession = {
+      id: "web-thinking-start",
+      workspace,
+      session: { sessionId: "session-thinking-start" },
+      subscribers: new Set(),
+      activeTools: new Map(),
+      openedAt: 1,
+      ephemeral: false,
+    } as unknown as WebSession;
+    let state = createState({ activeAssistant: undefined }, webSession, []);
+    const deps = {
+      getState: vi.fn(),
+      getStateMetadata: vi.fn(),
+      publish: vi.fn((_session: WebSession, event: ServerEvent) => {
+        state = applyServerEvent(state, structuredClone(event))!;
+      }),
+      notifyWorkspaceUpdated: vi.fn(async () => undefined),
+      disposeWebSession: vi.fn(),
+    };
+
+    await handleAgentEvent(deps, webSession, {
+      type: "message_start",
+      message,
+    } as unknown as AgentSessionEvent);
+    message.content = [{ type: "thinking", thinking: "" }];
+    await handleAgentEvent(deps, webSession, {
+      type: "message_update",
+      message,
+      assistantMessageEvent: { type: "thinking_start", contentIndex: 0 },
+    } as unknown as AgentSessionEvent);
+    message.content = [
+      { type: "thinking", thinking: "" },
+      { type: "text", text: "" },
+    ];
+    await handleAgentEvent(deps, webSession, {
+      type: "message_update",
+      message,
+      assistantMessageEvent: { type: "text_start", contentIndex: 1 },
+    } as unknown as AgentSessionEvent);
+    for (const text of ["Hello", "Hello world"]) {
+      const delta = text === "Hello" ? "Hello" : " world";
+      message.content[1] = { type: "text", text };
+      await handleAgentEvent(deps, webSession, {
+        type: "message_update",
+        message,
+        assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta },
+      } as unknown as AgentSessionEvent);
+    }
+
+    expect(state.activeAssistant?.blocks).toEqual([
+      { type: "thinking", thinking: "" },
+      { type: "text", text: "Hello world" },
+    ]);
+    expect(withoutRenderedToolCalls(state.activeAssistant, new Set(["call-1"]))?.blocks).toEqual(
+      state.activeAssistant?.blocks,
+    );
+    expect(deps.publish).toHaveBeenLastCalledWith(webSession, {
+      type: "assistant-delta",
+      contentIndex: 1,
+      blockType: "text",
+      delta: " world",
+    });
+  });
+
+  it("maps repeated Pi deltas past hidden blocks without resending the growing message", async () => {
+    const webSession = {
+      id: "web-hidden-thinking",
+      workspace,
+      session: { sessionId: "session-hidden-thinking" },
+      subscribers: new Set(),
+      activeTools: new Map(),
+      openedAt: 1,
+      ephemeral: false,
+    } as unknown as WebSession;
+    const message = {
+      role: "assistant",
+      content: [{ type: "redacted_thinking" }, { type: "text", text: "Hi" }],
+      timestamp: 1,
+    };
+    const publishEvent = vi.fn();
+    const deps = {
+      getState: vi.fn(),
+      getStateMetadata: vi.fn(),
+      publish: publishEvent,
+      notifyWorkspaceUpdated: vi.fn(async () => undefined),
+      disposeWebSession: vi.fn(),
+    };
+    await handleAgentEvent(deps, webSession, {
+      type: "message_start",
+      message,
+    } as unknown as AgentSessionEvent);
+    for (const [text, delta] of [
+      ["Hi there", " there"],
+      ["Hi there!", "!"],
+    ]) {
+      message.content[1] = { type: "text", text };
+      await handleAgentEvent(deps, webSession, {
+        type: "message_update",
+        message,
+        assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta },
+      } as unknown as AgentSessionEvent);
+    }
+
+    expect(publishEvent).toHaveBeenLastCalledWith(webSession, {
+      type: "assistant-delta",
+      contentIndex: 0,
+      blockType: "text",
+      delta: "!",
+    });
   });
 
   it("publishes append-only tool output as deltas", async () => {

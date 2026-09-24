@@ -59,6 +59,10 @@ export function attachSession(
   };
 
   webSession.activeAssistant = session.snapshot.operation?.streamingMessage;
+  webSession.publishedAssistantPositions =
+    webSession.activeAssistant?.role === "assistant"
+      ? assistantBlockPositions(webSession.activeAssistant.content)
+      : undefined;
   for (const tool of session.snapshot.operation?.runningTools ?? []) {
     webSession.activeTools.set(tool.toolCallId, {
       toolCallId: tool.toolCallId,
@@ -136,6 +140,21 @@ export function getStateMetadata(
     ...rest
   } = state;
   return rest;
+}
+
+function assistantBlockPositions(content: unknown): WebSession["publishedAssistantPositions"] {
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+
+  let index = 0;
+  return content.map((block) => {
+    const normalized = normalizeBlocks([block]);
+    if (normalized.length === 0) {
+      return undefined;
+    }
+    return { index: index++, type: normalized[0]!.type };
+  });
 }
 
 function hasToolCallInBlocks(blocks: ReturnType<typeof normalizeBlocks>): boolean {
@@ -258,42 +277,45 @@ export async function handleAgentEvent(
     case "message_start":
       if (event.message.role === "assistant") {
         webSession.activeAssistant = event.message;
-        deps.publish(webSession, {
-          type: "assistant",
-          assistant: normalizeMessage(event.message, Number.MAX_SAFE_INTEGER, {
-            imageResolver: webSession.resolveUiImage,
-          }) as Extract<SessionState["messages"][number], { role: "assistant" }>,
-        });
+        const assistant = normalizeMessage(event.message, Number.MAX_SAFE_INTEGER, {
+          imageResolver: webSession.resolveUiImage,
+        }) as Extract<SessionState["messages"][number], { role: "assistant" }>;
+        webSession.publishedAssistantPositions = assistantBlockPositions(event.message.content);
+        deps.publish(webSession, { type: "assistant", assistant });
       }
       break;
     case "message_update":
       if (event.message.role === "assistant") {
         webSession.activeAssistant = event.message;
         const update = event.assistantMessageEvent;
-        if (update.type === "text_delta" || update.type === "thinking_delta") {
+        const positions = webSession.publishedAssistantPositions;
+        const content = event.message.content;
+        if (
+          (update.type === "text_delta" || update.type === "thinking_delta") &&
+          Array.isArray(content) &&
+          positions?.length === content.length &&
+          positions[update.contentIndex]?.type ===
+            (update.type === "text_delta" ? "text" : "thinking") &&
+          content[update.contentIndex]?.type === positions[update.contentIndex]?.type
+        ) {
           deps.publish(webSession, {
             type: "assistant-delta",
-            contentIndex: update.contentIndex,
+            contentIndex: positions[update.contentIndex]!.index,
             blockType: update.type === "text_delta" ? "text" : "thinking",
             delta: update.delta,
           });
-        } else if (
-          update.type === "toolcall_start" ||
-          update.type === "toolcall_delta" ||
-          update.type === "toolcall_end" ||
-          update.type === "error"
-        ) {
-          deps.publish(webSession, {
-            type: "assistant",
-            assistant: normalizeMessage(event.message, Number.MAX_SAFE_INTEGER, {
-              imageResolver: webSession.resolveUiImage,
-            }) as Extract<SessionState["messages"][number], { role: "assistant" }>,
-          });
+        } else {
+          const assistant = normalizeMessage(event.message, Number.MAX_SAFE_INTEGER, {
+            imageResolver: webSession.resolveUiImage,
+          }) as Extract<SessionState["messages"][number], { role: "assistant" }>;
+          webSession.publishedAssistantPositions = assistantBlockPositions(event.message.content);
+          deps.publish(webSession, { type: "assistant", assistant });
         }
       }
       break;
     case "message_end":
       if (event.message.role === "assistant") {
+        webSession.publishedAssistantPositions = undefined;
         const blocks = normalizeBlocks(event.message.content, {
           imageResolver: webSession.resolveUiImage,
         });
@@ -409,6 +431,7 @@ export async function handleAgentEvent(
       }
       if (event.type === "agent_end") {
         webSession.activeAssistant = undefined;
+        webSession.publishedAssistantPositions = undefined;
         if (!agentEndWillRetry && !webSession.autoRetryActive) {
           webSession.agentCompleted = true;
           webSession.activeTools.clear();

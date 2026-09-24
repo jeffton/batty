@@ -5,6 +5,7 @@ import type {
   ModelOption,
   ServerEvent,
   ToolExecutionDetails,
+  UiContentBlock,
   WorkspaceInfo,
 } from "@/shared/types";
 
@@ -33,6 +34,7 @@ export interface WebSession {
   session: AgentSession;
   subscribers: Set<SessionSubscriber>;
   activeAssistant?: AgentSession["messages"][number] | undefined;
+  publishedAssistantPositions?: Array<{ index: number; type: UiContentBlock["type"] } | undefined>;
   activeTools: Map<string, ActiveToolRun>;
   openedAt: number;
   modelFallbackMessage?: string | undefined;

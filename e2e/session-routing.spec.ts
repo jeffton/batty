@@ -88,6 +88,98 @@ test.describe("workspace and session routing", () => {
     }
   });
 
+  test("streamed assistant blocks render and completion leaves back navigation responsive", async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.addInitScript(() => {
+      const NativeEventSource = window.EventSource;
+      window.EventSource = class extends NativeEventSource {
+        constructor(url: string | URL, options?: EventSourceInit) {
+          super(url, options);
+          if (String(url).includes("/api/sessions/")) {
+            (window as typeof window & { testSessionSource?: EventSource }).testSessionSource =
+              this;
+          }
+        }
+      };
+    });
+
+    await authenticate(page);
+    await page.goto(`/workspaces/batty?e2e=${Date.now()}`);
+    await page.getByRole("button", { name: /new session/i }).click();
+    await expect(page).toHaveURL(/\/workspaces\/batty\/sessions\/[^/]+$/);
+    const sessionId = decodeURIComponent(new URL(page.url()).pathname.split("/").at(-1)!);
+    await page.waitForFunction(() => {
+      const source = (window as typeof window & { testSessionSource?: EventSource })
+        .testSessionSource;
+      return source?.readyState === EventSource.OPEN && Boolean(source.onmessage);
+    });
+    const state = await page.evaluate(async (id) => {
+      const response = await fetch(`/api/sessions/${encodeURIComponent(id)}`);
+      return response.json();
+    }, sessionId);
+    const assistant = {
+      id: "assistant-live-1",
+      role: "assistant",
+      turnPhase: "pending",
+      timestamp: Date.now(),
+      blocks: [
+        { type: "thinking", thinking: "" },
+        { type: "text", text: "Hello" },
+      ],
+    };
+    const sourceEvent = (event: object) =>
+      page.evaluate((payload) => {
+        (
+          window as typeof window & { testSessionSource: EventSource }
+        ).testSessionSource.dispatchEvent(
+          new MessageEvent("message", { data: JSON.stringify(payload) }),
+        );
+      }, event);
+    await sourceEvent({
+      type: "reset",
+      revision: state.revision + 1,
+      streamId: state.streamId,
+      state: {
+        ...state,
+        revision: state.revision + 1,
+        isStreaming: true,
+        messages: [
+          {
+            id: "assistant-tool-0",
+            role: "assistant",
+            turnPhase: "intermediate",
+            timestamp: Date.now() - 1000,
+            blocks: [{ type: "toolCall", id: "tool-1", name: "read", arguments: {} }],
+          },
+        ],
+        totalMessageCount: 1,
+        activeAssistant: assistant,
+      },
+    });
+    await sourceEvent({
+      type: "assistant-delta",
+      revision: state.revision + 2,
+      streamId: state.streamId,
+      contentIndex: 1,
+      blockType: "text",
+      delta: " world",
+    });
+    await expect(page.getByText("Hello world")).toBeVisible();
+    await sourceEvent({
+      type: "reset",
+      revision: state.revision + 3,
+      streamId: state.streamId,
+      state: { ...state, revision: state.revision + 3, isStreaming: false },
+    });
+    await expect(page.locator(".composer__stream-actions")).toHaveCount(0);
+    await page.locator(".header__ws-btn").click();
+    await expect(page).toHaveURL(/\/workspaces\/batty(?:\?e2e=\d+)?$/);
+    expect(errors).toEqual([]);
+  });
+
   test("creating a workspace from the browser opens a new session", async ({ page }) => {
     const workspaceName = `playwright-workspace-${Date.now()}`;
 

@@ -87,6 +87,7 @@ import type { CronService } from "./cron";
 import { buildSubagentSteeringRuntimeNotice } from "./runtime-notices";
 import {
   deliverCronJobRun,
+  deliverCronFollowup,
   deliverSkippedCronJobRun,
   runCronJobSession,
   executeCronOperation,
@@ -1119,6 +1120,15 @@ export class PiService {
         notifyWorkspaceUpdated: (workspaceId) => this.notifyWorkspaceUpdated(workspaceId),
         disposeWebSession: (webSession) => this.disposeWebSession(webSession),
         onAgentCompleted: this.onAgentCompleted,
+        onAgentSettled: (settled) =>
+          deliverCronFollowup(
+            {
+              ...this.cronAdapterContext(),
+              openSessionById: (workspace, sessionId) => this.openSessionById(workspace, sessionId),
+            },
+            settled.workspace,
+            settled.session,
+          ),
       },
       webSession,
       event,

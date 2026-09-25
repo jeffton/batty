@@ -1,7 +1,7 @@
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import { BACKGROUND_CONTEXT as nativeContext, getOrThrow } from "@earendil-works/pi-agent-core";
 import { CRON_RUN_SESSION_CUSTOM_TYPE, type CronRunSessionBinding } from "./cron-session";
-import { appendResultDelivery } from "./session-result-delivery";
+import { appendResultMessages } from "./session-result-delivery";
 import type { HarnessController as AgentSession } from "./harness-controller";
 import type {
   CronJobSession,
@@ -10,17 +10,20 @@ import type {
   RunningCronJob,
   SessionState,
   SiteDescriptor,
+  SentFileDescriptor,
   WorkspaceInfo,
 } from "@/shared/types";
 import { buildCronRuntimeNotice, type RuntimeNotice } from "./runtime-notices";
 import type { WebSession } from "./pi-service-types";
 import {
+  collectSentFiles,
   collectSites,
+  SUBAGENT_SESSION_CUSTOM_TYPE,
   extractAssistantText,
   stripThinkingFromAssistantMessage,
   ZERO_USAGE,
 } from "./subagent";
-import { agentTurnFileChangesByReplyEntryId } from "./agent-turn-file-changes";
+import { agentTurnArtifactsByReplyEntryId } from "./agent-turn-file-changes";
 import type { AgentTurnFileChange } from "@/shared/types";
 
 export type CronJobRun = {
@@ -122,14 +125,7 @@ export async function deliverSkippedCronJobRun(
 
   await context.runSubagentSerial(session.id, async () => {
     const parent = context.requireSession(session.id);
-    const appended = await appendCronErrorDelivery(
-      parent.session,
-      notice,
-      job,
-      skipped.reason,
-      skipped.skippedAtMs,
-    );
-    if (!appended) return;
+    await appendCronErrorDelivery(parent.session, notice, job, skipped.reason, skipped.skippedAtMs);
     const state = context.getState(parent.id);
     context.publishReset(parent, state);
     await context.onAgentCompleted?.(state);
@@ -218,12 +214,14 @@ export async function runCronJobSession(
   const sharedSites = (
     finalAssistant as (AssistantMessage & { battyDeliveredSites?: SiteDescriptor[] }) | undefined
   )?.battyDeliveredSites;
+  const sentFiles = sentFilesFromAssistant(finalAssistant);
   if (
     parent &&
     !(
       errorMessage === undefined &&
       extractAssistantText(finalAssistant) === "NO_REPLY" &&
-      !sharedSites?.length
+      !sharedSites?.length &&
+      !sentFiles.length
     )
   ) {
     await job.queueResultDelivery(parent.sessionId);
@@ -283,6 +281,97 @@ async function runInlineCronJob(
   });
 }
 
+export async function deliverCronFollowup(
+  context: Pick<
+    PiServiceCronAdapterContext,
+    | "runSubagentSerial"
+    | "getState"
+    | "publishReset"
+    | "onAgentCompleted"
+    | "notifyWorkspaceUpdated"
+  > & {
+    openSessionById(workspace: WorkspaceInfo, sessionId: string): Promise<SessionState>;
+    requireSession(sessionId: string): WebSession;
+  },
+  workspace: WorkspaceInfo,
+  cronSession: AgentSession,
+): Promise<void> {
+  const entries = cronSession.sessionManager.getEntries();
+  if (
+    entries.some(
+      (entry) => entry.type === "custom" && entry.customType === SUBAGENT_SESSION_CUSTOM_TYPE,
+    )
+  )
+    return;
+  const binding = entries.find(
+    (entry) => entry.type === "custom" && entry.customType === CRON_RUN_SESSION_CUSTOM_TYPE,
+  );
+  const cronBinding =
+    binding?.type === "custom" ? (binding.data as unknown as CronRunSessionBinding) : undefined;
+  if (!cronBinding?.parentSessionId) return;
+
+  const result = cronSession.snapshot.lastResult;
+  if (!result || result.operationId === cronBinding.runId) return;
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  const turnEntries: typeof entries = [];
+  let id = result.tipId;
+  while (id && id !== result.fromTipId) {
+    const entry = byId.get(id);
+    if (!entry) throw new Error(`Missing cron follow-up entry ${id}`);
+    turnEntries.unshift(entry);
+    id = entry.parentId;
+  }
+  const reply = turnEntries.findLast(
+    (entry) => entry.type === "message" && entry.message.role === "assistant",
+  );
+  if (!reply || reply.type !== "message") return;
+  const turnMessages = turnEntries.flatMap((entry) =>
+    entry.type === "message" ? [entry.message] : [],
+  );
+  const artifacts = agentTurnArtifactsByReplyEntryId(turnEntries).get(reply.id);
+  const assistant = {
+    ...reply.message,
+    battyDeliveredFileChanges: artifacts?.fileChanges ?? [],
+    battyDeliveredSites: [...(artifacts?.sites ?? []), ...collectSites(turnMessages)].filter(
+      (site, index, sites) => sites.findIndex((candidate) => candidate.id === site.id) === index,
+    ),
+  } as AssistantMessage & {
+    battyDeliveredFileChanges: AgentTurnFileChange[];
+    battyDeliveredSites: SiteDescriptor[];
+  };
+  const sentFiles = [...(artifacts?.sentFiles ?? []), ...collectSentFiles(turnMessages)].filter(
+    (file, index, files) => files.findIndex((candidate) => candidate.id === file.id) === index,
+  );
+  if (
+    extractAssistantText(assistant) === "NO_REPLY" &&
+    !assistant.battyDeliveredSites.length &&
+    !sentFiles.length
+  )
+    return;
+
+  const parentState = await context.openSessionById(workspace, cronBinding.parentSessionId);
+  await context.runSubagentSerial(parentState.id, async () => {
+    const parent = context.requireSession(parentState.id);
+    const timestamp = Date.now();
+    await appendResultMessages(parent.session, [
+      {
+        role: "custom",
+        customType: "batty-runtime-notice:cron",
+        content: `Follow-up from detached cron session:\n${cronSession.sessionFile}`,
+        data: { cron: { sessionPath: cronSession.sessionFile } },
+        timestamp,
+      } as unknown as Message,
+      ...deliveredSitesMessage(assistant, reply.id, timestamp + 1),
+      ...deliveredFilesMessage(sentFiles, reply.id, timestamp + 2),
+      deliveredAssistant(parent.session, assistant, timestamp + 3),
+    ]);
+    const state = context.getState(parent.id);
+    context.publishReset(parent, state);
+    await context.onAgentCompleted?.(state);
+    await context.notifyWorkspaceUpdated(parent.workspace.id);
+  });
+}
+
 export async function deliverCronJobRun(
   context: PiServiceCronAdapterContext & {
     openSessionById(workspace: WorkspaceInfo, sessionId: string): Promise<SessionState>;
@@ -325,10 +414,12 @@ export async function deliverCronJobRun(
       | (AssistantMessage & { battyDeliveredSites?: SiteDescriptor[] })
       | undefined
   )?.battyDeliveredSites;
+  const sentFiles = sentFilesFromAssistant(captured.finalAssistant);
   if (
     !job.error &&
     extractAssistantText(captured.finalAssistant) === "NO_REPLY" &&
-    !sharedSites?.length
+    !sharedSites?.length &&
+    !sentFiles.length
   ) {
     return;
   }
@@ -336,8 +427,7 @@ export async function deliverCronJobRun(
   await context.runSubagentSerial(parentState.id, async () => {
     const parent = context.requireSession(parentState.id);
     await parent.session.waitForIdle();
-    const appended = await appendCronRunDelivery(parent.session, job, captured, job.error);
-    if (!appended) return;
+    await appendCronRunDelivery(parent.session, job, captured, job.error);
     const state = context.getState(parent.id);
     context.publishReset(parent, state);
     await context.onAgentCompleted?.(state);
@@ -363,11 +453,11 @@ async function appendCronErrorDelivery(
   job: Pick<CronJobRun, "jobId" | "runId" | "workspace" | "prompt">,
   errorMessage: string,
   timestamp = Date.now(),
-): Promise<boolean> {
+): Promise<void> {
   const jobId = job.jobId;
   const runId = job.runId;
   const workspaceId = job.workspace.id;
-  return appendResultDelivery(parent, `cron:${runId}`, [
+  await appendResultMessages(parent, [
     cronNoticeMessage(
       cronNotice,
       {
@@ -391,9 +481,9 @@ async function appendCronRunDelivery(
     finalAssistant?: AssistantMessage;
   },
   error?: unknown,
-): Promise<boolean> {
+): Promise<void> {
   const timestamp = Date.now();
-  return appendResultDelivery(parent, `cron:${job.runId}`, [
+  await appendResultMessages(parent, [
     cronNoticeMessage(
       buildCronRuntimeNotice({
         scheduleLabel: job.scheduleLabel,
@@ -413,7 +503,12 @@ async function appendCronRunDelivery(
       timestamp,
     ),
     ...deliveredSitesMessage(delivery.finalAssistant, job.runId, timestamp + 1),
-    deliveredAssistant(parent, delivery.finalAssistant, timestamp + 2, error),
+    ...deliveredFilesMessage(
+      sentFilesFromAssistant(delivery.finalAssistant),
+      job.runId,
+      timestamp + 2,
+    ),
+    deliveredAssistant(parent, delivery.finalAssistant, timestamp + 3, error),
   ]);
 }
 
@@ -492,7 +587,7 @@ async function lastCronAssistant(
     id = entry.parentId;
   }
 
-  const fileChangesByReplyEntryId = agentTurnFileChangesByReplyEntryId(operationEntries);
+  const artifactsByReplyEntryId = agentTurnArtifactsByReplyEntryId(operationEntries);
   const finalEntry = operationEntries.findLast(
     (entry) => entry.type === "message" && entry.message.role === "assistant",
   );
@@ -500,14 +595,52 @@ async function lastCronAssistant(
   const operationMessages = operationEntries.flatMap((entry) =>
     entry.type === "message" ? [entry.message] : [],
   );
+  const artifacts = artifactsByReplyEntryId.get(finalEntry.id);
   return {
     ...finalEntry.message,
-    battyDeliveredFileChanges: fileChangesByReplyEntryId.get(finalEntry.id) ?? [],
-    battyDeliveredSites: collectSites(operationMessages),
+    battyDeliveredFileChanges: artifacts?.fileChanges ?? [],
+    battyDeliveredSites: [...(artifacts?.sites ?? []), ...collectSites(operationMessages)].filter(
+      (site, index, sites) => sites.findIndex((candidate) => candidate.id === site.id) === index,
+    ),
+    battyDeliveredSentFiles: [
+      ...(artifacts?.sentFiles ?? []),
+      ...collectSentFiles(operationMessages),
+    ].filter(
+      (file, index, files) => files.findIndex((candidate) => candidate.id === file.id) === index,
+    ),
   } as AssistantMessage & {
     battyDeliveredFileChanges: AgentTurnFileChange[];
     battyDeliveredSites: SiteDescriptor[];
+    battyDeliveredSentFiles: SentFileDescriptor[];
   };
+}
+
+function sentFilesFromAssistant(message: AssistantMessage | undefined): SentFileDescriptor[] {
+  return (
+    (message as (AssistantMessage & { battyDeliveredSentFiles?: SentFileDescriptor[] }) | undefined)
+      ?.battyDeliveredSentFiles ?? []
+  );
+}
+
+function deliveredFilesMessage(
+  files: SentFileDescriptor[],
+  replyId: string,
+  timestamp: number,
+): Message[] {
+  if (!files.length) return [];
+  return [
+    {
+      role: "toolResult",
+      toolCallId: `cron-files:${replyId}`,
+      toolName: "attach-files",
+      content: [
+        { type: "text", text: `Attached ${files.length} file${files.length === 1 ? "" : "s"}.` },
+      ],
+      details: { sentFiles: files },
+      isError: false,
+      timestamp,
+    } as unknown as Message,
+  ];
 }
 
 function deliveredSitesMessage(

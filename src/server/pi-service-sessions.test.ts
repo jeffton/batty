@@ -45,6 +45,31 @@ function createState(
 }
 
 describe("workspace activity updates", () => {
+  it("invokes the settled-operation hook when the harness run ends", async () => {
+    const webSession = {
+      id: "cron-session",
+      workspace,
+      session: { sessionId: "cron-session" },
+      subscribers: new Set(),
+      activeTools: new Map(),
+    } as unknown as WebSession;
+    const onAgentSettled = vi.fn(async () => undefined);
+
+    await handleAgentEvent(
+      {
+        getState: () => createState({ isStreaming: false }, webSession, []),
+        getStateMetadata: () => createState({ isStreaming: false }, webSession, []),
+        publish: vi.fn(),
+        notifyWorkspaceUpdated: vi.fn(async () => undefined),
+        disposeWebSession: vi.fn(),
+        onAgentSettled,
+      },
+      webSession,
+      { type: "agent_end", messages: [], willRetry: false } as AgentSessionEvent,
+    );
+
+    expect(onAgentSettled).toHaveBeenCalledWith(webSession);
+  });
   it("publishes a workspace update when an agent starts", async () => {
     const notifyWorkspaceUpdated = vi.fn(async () => undefined);
     const webSession = {
@@ -969,6 +994,7 @@ describe("handleAgentEvent", () => {
 
   it("defers completion hooks until auto-retry has fully finished", async () => {
     const onAgentCompleted = vi.fn();
+    const onAgentSettled = vi.fn(async () => undefined);
     const notifyWorkspaceUpdated = vi.fn(async () => undefined);
     const webSession = {
       id: "web-1",
@@ -1026,6 +1052,7 @@ describe("handleAgentEvent", () => {
         notifyWorkspaceUpdated,
         disposeWebSession: vi.fn(),
         onAgentCompleted,
+        onAgentSettled,
       },
       webSession,
       {
@@ -1037,6 +1064,7 @@ describe("handleAgentEvent", () => {
     );
 
     expect(onAgentCompleted).toHaveBeenCalledTimes(1);
+    expect(onAgentSettled).toHaveBeenCalledTimes(1);
     expect(notifyWorkspaceUpdated).toHaveBeenCalledTimes(1);
     expect(webSession.agentCompleted).toBe(true);
 

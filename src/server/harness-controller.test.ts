@@ -78,6 +78,22 @@ describe("AgentHarness controller", () => {
     expect((await f.reopen()).pendingMessageCount).toBe(1);
   });
 
+  it("exposes the committed operation result when the run ends", async () => {
+    const f = await fixture();
+    f.faux.setResponses([fauxAssistantMessage("answer")]);
+    const results: Array<{ status: string; tipId: string | null }> = [];
+    f.session.subscribe((event) => {
+      if (event.type === "agent_end") {
+        const result = f.session.snapshot.lastResult;
+        if (result) results.push({ status: result.status, tipId: result.tipId });
+      }
+    });
+
+    await f.session.prompt("question");
+
+    expect(results).toEqual([{ status: "completed", tipId: expect.any(String) }]);
+  });
+
   it("delivers transcript events only after the immutable entry exists", async () => {
     const f = await fixture();
     f.faux.setResponses([fauxAssistantMessage("answer")]);
@@ -157,7 +173,7 @@ describe("AgentHarness controller", () => {
         customType: "batty-runtime-notice:subagent",
         content: "child result",
         display: true,
-        battyDelivery: { id: "subagent:child", part: 0 },
+        data: { subagent: { sessionId: "child" } },
       },
       { triggerTurn: true, steerWhenBusy: true },
     );

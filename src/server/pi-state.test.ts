@@ -420,8 +420,8 @@ describe("transcriptMessagesFromSessionEntries", () => {
           customType: "batty-runtime-notice:subagent",
           content: "Child complete",
           timestamp: 1,
-          battyDelivery: { id: "subagent:child", part: 0 },
           data: {
+            subagent: { sessionId: "child" },
             sentFiles: [
               {
                 id: "file-1",

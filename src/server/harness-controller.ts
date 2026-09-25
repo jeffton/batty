@@ -272,7 +272,6 @@ export class HarnessController {
       display: boolean;
       data?: unknown;
       details?: unknown;
-      battyDelivery?: { id: string; part: number };
     },
     options: {
       triggerTurn?: boolean;
@@ -298,12 +297,7 @@ export class HarnessController {
     for (;;) {
       await this.lane.runWhenIdle(() => undefined, context);
       const cancellation = getOrThrow(await this.lane.cancelQueued(queuedEntryId, context));
-      if (
-        cancellation.kind !== "cancelled" &&
-        (!message.battyDelivery || this.hasDeliveryReceipt(message.battyDelivery))
-      ) {
-        return;
-      }
+      if (cancellation.kind !== "cancelled" && this.hasSteeredMessage(custom)) return;
 
       const admission = await this.lane.accept({ kind: "prompt", prompt: custom }, context);
       if (admission.ok) {
@@ -314,14 +308,15 @@ export class HarnessController {
       queuedEntryId = getOrThrow(await this.lane.steer(custom, undefined, context)).entryId;
     }
   }
-  private hasDeliveryReceipt(receipt: { id: string; part: number }): boolean {
+  private hasSteeredMessage(message: AgentMessage): boolean {
     return this.snapshot.transcript.some(
       (entry) =>
         entry.type === "message" &&
-        (entry.message as { battyDelivery?: { id: string; part: number } }).battyDelivery?.id ===
-          receipt.id &&
-        (entry.message as { battyDelivery?: { id: string; part: number } }).battyDelivery?.part ===
-          receipt.part,
+        entry.message.role === "custom" &&
+        message.role === "custom" &&
+        entry.message.customType === message.customType &&
+        entry.message.timestamp === message.timestamp &&
+        entry.message.content === message.content,
     );
   }
   getSteeringMessages(): string[] {

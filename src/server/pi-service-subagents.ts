@@ -2,7 +2,7 @@ import { type AssistantMessage, type Message } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { HarnessClosed, HarnessFault } from "@earendil-works/pi-agent-core";
 import type { DurableFileChange } from "./agent-turn-file-changes";
-import { appendResultDelivery } from "./session-result-delivery";
+import { appendResultMessages } from "./session-result-delivery";
 import { HarnessSessionStore as SessionManager } from "./harness-session-store";
 import { createSessionManagerWithPreviousContext } from "./previous-context";
 import type { HarnessController as AgentSession } from "./harness-controller";
@@ -518,7 +518,7 @@ export async function deliverDetachedSubagentResult(
   const child = (result.details as SubagentToolDetails).subagent;
   const timestamp = Date.now();
   const finalAssistant = stripThinkingFromAssistantMessage(result.finalAssistant);
-  return appendResultDelivery(parent, `subagent:${child.sessionId}`, [
+  await appendResultMessages(parent, [
     {
       role: "custom",
       customType: "batty-subagent-result",
@@ -542,6 +542,7 @@ export async function deliverDetachedSubagentResult(
       timestamp: timestamp + 1,
     } as AssistantMessage,
   ]);
+  return true;
 }
 
 export async function deliverAsyncSubagentResult(
@@ -579,7 +580,6 @@ export async function deliverAsyncSubagentResult(
         ...(artifacts.sentFiles?.length ? { sentFiles: artifacts.sentFiles } : {}),
         ...(artifacts.sites?.length ? { sites: artifacts.sites } : {}),
       },
-      battyDelivery: { id: `subagent:${child.sessionId}`, part: 0 },
     },
     { triggerTurn: true, steerWhenBusy: true },
   );

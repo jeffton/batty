@@ -91,7 +91,11 @@ describe("durable file change projection", () => {
 
   it("isolates cron replies from copied context and preceding inline turns", () => {
     const cronPrompt = (id: string) =>
-      message(id, { role: "custom", customType: "batty-runtime-notice:cron" });
+      message(id, {
+        role: "custom",
+        customType: "batty-runtime-notice:cron",
+        data: { cron: { runId: id } },
+      });
     const changes = agentTurnFileChangesByReplyEntryId([
       mutation("parent-write", "before\n", "parent\n"),
       reply("parent-reply"),
@@ -116,7 +120,6 @@ describe("durable file change projection", () => {
       message(id, {
         role: "assistant",
         content: [{ type: "text", text: "cron result" }],
-        battyDelivery: { id: `cron:${id}`, part: 1 },
         ...(fileChanges ? { battyDeliveredFileChanges: fileChanges } : {}),
       });
     const changes = agentTurnFileChangesByReplyEntryId([
@@ -125,16 +128,61 @@ describe("durable file change projection", () => {
       message("notice", {
         role: "custom",
         customType: "batty-runtime-notice:cron",
-        battyDelivery: { id: "cron:child", part: 0 },
+        data: { cron: { sessionPath: "/cron/child.jsonl" } },
+      }),
+      message("child-files", {
+        role: "toolResult",
+        toolCallId: "cron-files:child",
+        details: {
+          battyFileChanges: [{ path: "/cron/leak", before: null, after: "leak" }],
+          sentFiles: [{ id: "file-1", name: "report.md" }],
+        },
+      }),
+      message("child-sites", {
+        role: "toolResult",
+        toolCallId: "cron-sites:child",
+        details: { sites: [{ id: "site-1", name: "Report" }] },
       }),
       delivered("child", files),
+      message("empty-notice", {
+        role: "custom",
+        customType: "batty-runtime-notice:cron",
+        data: { cron: { sessionPath: "/cron/empty.jsonl" } },
+      }),
       delivered("empty-child", []),
+      message("error-notice", {
+        role: "custom",
+        customType: "batty-runtime-notice:cron",
+        data: { cron: { jobId: "skipped-job", runId: "skipped-run" } },
+      }),
       delivered("error-or-historical-child"),
       message("next-user", { role: "user" }),
       reply("next-reply"),
     ]);
     expect(changes.get("parent-reply")?.[0]?.patch).toContain("+after");
     expect(changes.get("child")).toEqual(files);
+    const artifacts = agentTurnArtifactsByReplyEntryId([
+      message("notice", {
+        role: "custom",
+        customType: "batty-runtime-notice:cron",
+        data: { cron: { sessionPath: "/cron/child.jsonl" } },
+      }),
+      message("file", {
+        role: "toolResult",
+        toolCallId: "cron-files:child",
+        details: { sentFiles: [{ id: "file-1", name: "report.md" }] },
+      }),
+      message("site", {
+        role: "toolResult",
+        toolCallId: "cron-sites:child",
+        details: { sites: [{ id: "site-1", name: "Report" }] },
+      }),
+      delivered("child", files),
+      reply("next-reply"),
+    ]);
+    expect(artifacts.get("child")?.sentFiles?.[0]?.id).toBe("file-1");
+    expect(artifacts.get("child")?.sites?.[0]?.id).toBe("site-1");
+    expect(artifacts.get("next-reply")?.sentFiles).toBeUndefined();
     expect(changes.get("empty-child")).toEqual([]);
     expect(changes.has("error-or-historical-child")).toBe(false);
     expect(changes.has("next-reply")).toBe(false);
@@ -156,8 +204,8 @@ describe("durable file change projection", () => {
       message("async-child", {
         role: "custom",
         customType: "batty-runtime-notice:subagent",
-        battyDelivery: { id: "subagent:child", part: 0 },
         data: {
+          subagent: { sessionId: "child" },
           battyFileChanges: [
             {
               path: "/work/child.txt",
@@ -183,10 +231,14 @@ describe("durable file change projection", () => {
   it("does not let a background delivery consume pending parent edits", () => {
     const changes = agentTurnFileChangesByReplyEntryId([
       mutation("parent-write", "before\n", "middle\n"),
+      message("notice", {
+        role: "custom",
+        customType: "batty-runtime-notice:cron",
+        data: { cron: { sessionPath: "/cron/child.jsonl" } },
+      }),
       message("child", {
         role: "assistant",
         content: [{ type: "text", text: "cron result" }],
-        battyDelivery: { id: "cron:child", part: 1 },
         battyDeliveredFileChanges: [],
       }),
       message("steer", { role: "user" }),

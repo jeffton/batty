@@ -328,7 +328,7 @@ describe("detached harness subagents", () => {
   });
 
   it.each(["Parent result", "NO_REPLY"])(
-    "durably delivers detached session result %s once across replay",
+    "delivers detached session result %s and skips silent replies",
     async (answer) => {
       const { parent, deps, options, children } = await setup();
       parent.faux.setResponses([fauxAssistantMessage(answer)]);
@@ -347,9 +347,9 @@ describe("detached harness subagents", () => {
       await child.dispose();
       children.delete(child.sessionId);
       await parent.reopen();
-      await runDetachedSubagentSession(deps, request);
       expect(parent.faux.state.callCount).toBe(1);
       expect(parent.session.messages).toHaveLength(answer === "NO_REPLY" ? 0 : 2);
+      expect(parent.session.messages.every((message) => !("battyDelivery" in message))).toBe(true);
       expect(queues.size).toBe(0);
     },
   );

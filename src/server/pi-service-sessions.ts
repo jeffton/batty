@@ -459,6 +459,7 @@ export async function handleAgentEvent(
       if (event.type === "auto_retry_end") {
         if (!event.success) {
           webSession.suppressNextAgentEndCompletion = true;
+          if (deps.onAgentSettled) await deps.onAgentSettled(webSession);
           await runCompletionHook(deps, webSession, publishedState);
         }
         break;
@@ -470,13 +471,13 @@ export async function handleAgentEvent(
           break;
         }
         if (!agentEndWillRetry && !webSession.autoRetryActive) {
+          if (deps.onAgentSettled) await deps.onAgentSettled(webSession);
           await runCompletionHook(deps, webSession, publishedState);
         }
       }
       break;
     }
     case "agent_settled":
-      await deps.onAgentSettled?.(webSession);
       await waitForSessionStateFlush();
       deps.publish(webSession, { type: "reset", state: deps.getState(webSession.id) });
       break;

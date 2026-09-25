@@ -70,13 +70,19 @@ export function agentTurnArtifactsByReplyEntryId(
   const changes = new Map<string, DurableFileChange>();
   const sentFiles: SentFileDescriptor[] = [];
   const sites: SiteDescriptor[] = [];
+  const deliveredSentFiles: SentFileDescriptor[] = [];
+  const deliveredSites: SiteDescriptor[] = [];
   let hasReply = false;
+  let backgroundResultPending = false;
 
   const reset = () => {
     changes.clear();
     sentFiles.length = 0;
     sites.length = 0;
     hasReply = false;
+    backgroundResultPending = false;
+    deliveredSentFiles.length = 0;
+    deliveredSites.length = 0;
   };
 
   for (const entry of entries) {
@@ -85,9 +91,16 @@ export function agentTurnArtifactsByReplyEntryId(
         role: string;
         customType?: string;
         content?: unknown;
-        details?: { battyFileChanges?: DurableFileChange[] };
-        data?: ArtifactData;
-        battyDelivery?: { id: string; part: number };
+        details?: {
+          battyFileChanges?: DurableFileChange[];
+          sentFiles?: SentFileDescriptor[];
+          sites?: SiteDescriptor[];
+        };
+        data?: ArtifactData & {
+          cron?: { jobId?: string; sessionPath?: string };
+          subagent?: unknown;
+        };
+        toolCallId?: string;
         battyDeliveredFileChanges?: AgentTurnFileChange[];
       };
 
@@ -96,7 +109,7 @@ export function agentTurnArtifactsByReplyEntryId(
       const isAsyncSubagentResult =
         message.role === "custom" &&
         message.customType === `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:subagent` &&
-        message.battyDelivery?.id.startsWith("subagent:");
+        message.data?.subagent !== undefined;
       if (isAsyncSubagentResult) {
         if (hasReply) reset();
         for (const change of message.data?.battyFileChanges ?? []) {
@@ -108,21 +121,65 @@ export function agentTurnArtifactsByReplyEntryId(
         continue;
       }
 
-      // Other delivered background results are not turns in this session. Their edits
-      // belong to the child, and must not consume or inherit the parent's aggregate.
-      if (message.battyDelivery) {
-        if (
-          message.role === "assistant" &&
-          typeof entry.id === "string" &&
-          message.battyDeliveredFileChanges
-        ) {
+      // Background notices mark appended child results; unlike cron prompts, these
+      // entries are not turns in the parent and must not consume its pending edits.
+      const isBackgroundNotice =
+        message.role === "custom" &&
+        (message.customType === "batty-subagent-result" ||
+          (message.customType === `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:cron` &&
+            (typeof message.data?.cron?.sessionPath === "string" ||
+              typeof message.data?.cron?.jobId === "string")));
+      if (isBackgroundNotice) {
+        backgroundResultPending = true;
+        deliveredSentFiles.length = 0;
+        deliveredSites.length = 0;
+        continue;
+      }
+      if (backgroundResultPending) {
+        if (message.role === "toolResult") {
+          if (message.toolCallId?.startsWith("cron-files:")) {
+            appendUniqueById(deliveredSentFiles, message.details?.sentFiles ?? []);
+          }
+          if (message.toolCallId?.startsWith("cron-sites:")) {
+            appendUniqueById(deliveredSites, message.details?.sites ?? []);
+          }
+        }
+        if (message.role === "assistant") {
+          if (
+            typeof entry.id === "string" &&
+            (message.battyDeliveredFileChanges ||
+              deliveredSentFiles.length ||
+              deliveredSites.length)
+          ) {
+            result.set(entry.id, {
+              ...(message.battyDeliveredFileChanges
+                ? { fileChanges: message.battyDeliveredFileChanges }
+                : {}),
+              ...(deliveredSentFiles.length ? { sentFiles: [...deliveredSentFiles] } : {}),
+              ...(deliveredSites.length ? { sites: [...deliveredSites] } : {}),
+            });
+          }
+          backgroundResultPending = false;
+          deliveredSentFiles.length = 0;
+          deliveredSites.length = 0;
+        }
+        if (message.role !== "user") continue;
+        backgroundResultPending = false;
+      }
+      if (
+        message.role === "toolResult" &&
+        (message.toolCallId?.startsWith("cron-sites:") ||
+          message.toolCallId?.startsWith("cron-files:"))
+      )
+        continue;
+      if (message.role === "assistant" && message.battyDeliveredFileChanges !== undefined) {
+        if (typeof entry.id === "string") {
           result.set(entry.id, { fileChanges: message.battyDeliveredFileChanges });
         }
         continue;
       }
 
       // Cron prompts start their own operation, including in copied daily context.
-      // Delivery notices were skipped above and must not reset the parent's edits.
       const isCronPrompt =
         message.role === "custom" &&
         message.customType === `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:cron`;

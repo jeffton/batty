@@ -141,15 +141,17 @@ describe("AgentHarness controller", () => {
       await f.session.lane.accept({ kind: "prompt", prompt: "initial" }, context),
     );
 
+    const onAccepted = vi.fn();
     const delivery = f.session.sendCustomMessage(
       {
         customType: "batty-runtime-notice:subagent",
         content: "child result",
         display: true,
       },
-      { triggerTurn: true, steerWhenBusy: true },
+      { triggerTurn: true, steerWhenBusy: true, onAccepted },
     );
     await vi.waitFor(() => expect(f.session.pendingMessageCount).toBe(1));
+    expect(onAccepted).toHaveBeenCalledOnce();
     await f.session.driveOperation(admission.operationId);
     await delivery;
 

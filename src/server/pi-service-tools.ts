@@ -207,6 +207,14 @@ export interface SubagentToolDependencies extends CommonToolDependencies {
     subagentSessionId: string,
     prompt: string,
   ) => Promise<void>;
+  continueSubagent: (
+    parentSessionId: string,
+    subagentSessionId: string,
+    prompt: string,
+    async: boolean,
+    queued: boolean,
+    signal?: AbortSignal,
+  ) => Promise<{ text: string; details: ToolExecutionDetails; isError: boolean }>;
 }
 
 export interface CronToolDependencies {
@@ -223,20 +231,23 @@ export function createSubagentTool({
   startDetachedSubagentSession,
   stopSubagent,
   steerSubagent,
+  continueSubagent,
 }: SubagentToolDependencies): ToolDefinition<typeof SubagentToolSchema> {
   return {
     name: SUBAGENT_TOOL_NAME,
     label: "Subagent",
     description:
-      "Run a subagent in the current workspace, stop a running subagent, or queue steering instructions for one. Synchronous runs return the reply directly; async runs deliver it into the parent session later.",
+      "Run a subagent, queue a new turn for an async subagent, resume a finished subagent, steer its active turn, or stop it. Async replies are delivered to the parent session.",
     promptSnippet:
-      "Run, stop, or steer a subagent in the current workspace. Async runs can be managed by session id.",
+      "Run, queue, resume, stop, or steer a subagent by session id. Queue preserves the current reply before starting the next turn.",
     promptGuidelines: [
       "Use this tool to delegate focused work to another agent without leaving the current session.",
       "Use action=run to start a subagent. Prefer omitting model and effort so it inherits the current session settings.",
       'Subagents start fresh by default. Set includePreviousContext=true for full context with prompt-cache reuse, or includePreviousContext="chat-only" for only user and assistant messages without transcript details.',
       "Set async=true to continue working while the subagent runs. Its result will automatically start or steer a later parent turn.",
-      "Use action=steer with sessionId and prompt to queue additional instructions for a running subagent.",
+      "Use action=steer with sessionId and prompt to add instructions to the running turn.",
+      "Use action=queue with sessionId and prompt for a running async subagent. Its current reply reaches the parent before queued work begins; the queued reply is delivered later.",
+      "Use action=resume with sessionId and prompt for a finished subagent. Set async=true to deliver its reply to the parent later, or omit it to wait for the reply. Queue and resume tolerate the subagent finishing during the request.",
       "Use action=stop with sessionId to stop a running subagent.",
     ],
     parameters: SubagentToolSchema,
@@ -262,6 +273,26 @@ export function createSubagentTool({
           content: [{ type: "text", text: `Queued steering for subagent ${subagentSessionId}.` }],
           details: {},
           isError: false,
+        };
+      }
+
+      if (params.action === "queue" || params.action === "resume") {
+        const subagentSessionId = String(params.sessionId ?? "").trim();
+        if (!subagentSessionId) throw new Error("sessionId is required to continue a subagent");
+        const prompt = String(params.prompt ?? "").trim();
+        if (!prompt) throw new Error("prompt is required to continue a subagent");
+        const result = await continueSubagent(
+          parentSessionId,
+          subagentSessionId,
+          prompt,
+          params.action === "queue" || params.async === true,
+          params.action === "queue",
+          signal,
+        );
+        return {
+          content: [{ type: "text", text: result.text }],
+          details: result.details,
+          isError: result.isError,
         };
       }
 

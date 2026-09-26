@@ -294,6 +294,7 @@ export class HarnessController {
     if (!(accepted.error instanceof LaneBusy) || !options.steerWhenBusy) throw accepted.error;
 
     let queuedEntryId = getOrThrow(await this.lane.steer(custom, undefined, context)).entryId;
+    options.onAccepted?.();
     for (;;) {
       await this.lane.runWhenIdle(() => undefined, context);
       const cancellation = getOrThrow(await this.lane.cancelQueued(queuedEntryId, context));

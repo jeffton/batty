@@ -49,7 +49,11 @@ import {
   buildCronRunSessionBinding,
   CRON_RUN_SESSION_CUSTOM_TYPE,
 } from "./cron-session";
-import { hasSubagentSessionMarker, type SubagentToolDetails } from "./subagent";
+import {
+  hasSubagentSessionMarker,
+  SUBAGENT_SESSION_CUSTOM_TYPE,
+  type SubagentToolDetails,
+} from "./subagent";
 import { getSessionMessagePage } from "./pi-service-message-page";
 import { getQueuedPrompts, removeQueuedPrompt } from "./pi-service-queue";
 import { preparePromptFiles } from "./pi-service-uploads";
@@ -125,6 +129,8 @@ export class PiService {
   private readonly liveSessions = new Map<string, LiveSession>();
   private readonly runningSubagents = new Map<string, RunningSubagent>();
   private readonly subagentQueues = new Map<string, Promise<void>>();
+  private readonly subagentOperations = new Map<string, Promise<void>>();
+  private readonly subagentOperationAsync = new Map<string, boolean>();
   private readonly cronSessionResolutions = new Map<string, Promise<SessionState>>();
   private readonly sessionOpenPromises = new Map<string, Promise<SessionState>>();
   private readonly sessionControllers = new Map<
@@ -598,8 +604,10 @@ export class PiService {
     deliveryMode?: "append" | "prompt";
     preludeNotices?: Array<{ kind: "cron" | "subagent"; text: string }>;
     currentToolCallId?: string;
+    continueSession?: boolean;
     signal?: AbortSignal;
     onReady?: (details: ToolExecutionDetails) => void;
+    onDelivered?: () => void;
     onUpdate?: (partial: {
       content: Array<{ type: "text"; text: string }>;
       details: ToolExecutionDetails;
@@ -607,7 +615,11 @@ export class PiService {
   }): ReturnType<typeof runDetachedSubagentSession> {
     const startedAtMs = Date.now();
     let runningSubagent: RunningSubagent | undefined;
-    return this.turns.run(async () => {
+    let releaseDelivery: (() => void) | undefined;
+    const deliveryAccepted = new Promise<void>((resolve) => {
+      releaseDelivery = resolve;
+    });
+    const operation = this.turns.run(async () => {
       try {
         return await runDetachedSubagentSession(
           {
@@ -623,7 +635,11 @@ export class PiService {
             deliverResultToParent: async (request, result) => {
               const opened = await this.openSessionById(request.workspace, request.parentSessionId);
               if (request.deliveryMode === "prompt") {
-                await deliverAsyncSubagentResult(this.requireSession(opened.id).session, result);
+                await deliverAsyncSubagentResult(
+                  this.requireSession(opened.id).session,
+                  result,
+                  request.onDelivered,
+                );
                 return;
               }
               await this.runSubagentSerial(opened.id, async () => {
@@ -638,6 +654,10 @@ export class PiService {
           },
           {
             ...options,
+            onDelivered: () => {
+              releaseDelivery?.();
+              options.onDelivered?.();
+            },
             onReady: (details) => {
               const child = (details as SubagentToolDetails).subagent;
               if (!child.sessionId || !child.sessionPath || !child.workspaceId) {
@@ -654,6 +674,7 @@ export class PiService {
                 startedAtMs,
               };
               this.runningSubagents.set(child.sessionId, runningSubagent);
+              this.subagentOperationAsync.set(child.sessionId, options.respondIn === "session");
               options.onReady?.(details);
             },
           },
@@ -667,6 +688,24 @@ export class PiService {
         }
       }
     }, true);
+    if (options.sessionId && !options.continueSession) {
+      const settled =
+        options.deliveryMode === "prompt"
+          ? Promise.race([deliveryAccepted, operation]).then(
+              () => {},
+              () => {},
+            )
+          : operation.then(
+              () => {},
+              () => {},
+            );
+      this.subagentOperations.set(options.sessionId, settled);
+      void settled.finally(() => {
+        if (this.subagentOperations.get(options.sessionId!) === settled)
+          this.subagentOperations.delete(options.sessionId!);
+      });
+    }
+    return operation;
   }
 
   private startDetachedSubagentSession(options: {
@@ -716,6 +755,127 @@ export class PiService {
         });
       });
     });
+  }
+
+  private async continueSubagent(
+    workspace: WorkspaceInfo,
+    parentSessionId: string,
+    subagentSessionId: string,
+    prompt: string,
+    async: boolean,
+    queued: boolean,
+    signal?: AbortSignal,
+  ): Promise<{ text: string; details: ToolExecutionDetails; isError: boolean }> {
+    const manager = await SessionManager.existing(
+      workspace.path,
+      workspaceSessionDir(this.config, workspace.id),
+      subagentSessionId,
+    );
+    if (!manager) throw new Error(`Subagent session not found: ${subagentSessionId}`);
+    const marker = manager
+      .getEntries()
+      .findLast(
+        (entry) => entry.type === "custom" && entry.customType === SUBAGENT_SESSION_CUSTOM_TYPE,
+      );
+    const data =
+      marker?.type === "custom"
+        ? (marker.data as { parentSessionId?: string; depth?: number; deliveryMode?: string })
+        : undefined;
+    if (data?.parentSessionId !== parentSessionId)
+      throw new Error(`Subagent does not belong to this session: ${subagentSessionId}`);
+    if (
+      queued &&
+      (this.subagentOperationAsync.get(subagentSessionId) ?? data.deliveryMode === "prompt") ===
+        false
+    )
+      throw new Error("Only async subagents can be queued");
+    const live = this.liveSessions.get(subagentSessionId)?.session;
+    const modelId = live?.model ? modelKey(live.model as PiModel) : undefined;
+    const parent = this.liveSessions.get(parentSessionId)?.session;
+    const effectiveModel =
+      modelId ?? (parent?.model ? modelKey(parent.model as PiModel) : undefined);
+    if (!effectiveModel) throw new Error("No model available for subagent");
+
+    const previous = this.subagentOperations.get(subagentSessionId);
+    let ready!: (value: { text: string; details: ToolExecutionDetails; isError: boolean }) => void;
+    let failed!: (error: unknown) => void;
+    const started = new Promise<{ text: string; details: ToolExecutionDetails; isError: boolean }>(
+      (resolve, reject) => {
+        ready = resolve;
+        failed = reject;
+      },
+    );
+    let releaseDelivery: (() => void) | undefined;
+    const deliveryAccepted = new Promise<void>((resolve) => {
+      releaseDelivery = resolve;
+    });
+    const operation = (async () => {
+      await previous;
+      signal?.throwIfAborted();
+      return this.runDetachedSubagentSession({
+        sessionId: subagentSessionId,
+        workspace,
+        parentSessionId,
+        parentSubagentDepth: data.depth! - 1,
+        prompt,
+        modelId: effectiveModel,
+        thinkingLevel: live?.thinkingLevel ?? parent?.thinkingLevel ?? "medium",
+        includePreviousContext: false,
+        respondIn: async ? "session" : "tool-call",
+        deliveryMode: async ? "prompt" : undefined,
+        continueSession: true,
+        signal: async ? undefined : signal,
+        onDelivered: () => releaseDelivery?.(),
+        onReady: (details) => {
+          const child = (details as SubagentToolDetails).subagent;
+          ready({
+            text: `Subagent ${queued ? "queued" : "resumed"} asynchronously.\n\nSession ID: ${child.sessionId}\nIts final result will be delivered automatically.`,
+            details,
+            isError: false,
+          });
+        },
+      });
+    })();
+    const settled = async
+      ? Promise.race([deliveryAccepted, operation]).then(
+          () => {},
+          () => {},
+        )
+      : operation.then(
+          () => {},
+          () => {},
+        );
+    this.subagentOperations.set(subagentSessionId, settled);
+    void settled.finally(() => {
+      if (this.subagentOperations.get(subagentSessionId) === settled)
+        this.subagentOperations.delete(subagentSessionId);
+    });
+    if (!async) return operation;
+    void operation
+      .catch(async (error) => {
+        failed(error);
+        if (queued && previous) {
+          const opened = await this.openSessionById(workspace, parentSessionId);
+          await this.requireSession(opened.id).session.sendCustomMessage(
+            {
+              customType: "batty-runtime-notice:subagent",
+              content: `Queued subagent ${subagentSessionId} failed: ${error instanceof Error ? error.message : String(error)}`,
+              display: true,
+            },
+            { triggerTurn: true, steerWhenBusy: true },
+          );
+        }
+      })
+      .catch((error) => console.error("Failed to deliver queued subagent error", error));
+    if (queued && previous) {
+      void started.catch(() => {});
+      return {
+        text: `Subagent queued.\n\nSession ID: ${subagentSessionId}\nIts final result will be delivered automatically.`,
+        details: {},
+        isError: false,
+      };
+    }
+    return started;
   }
 
   private requireRunningOwnedSubagent(
@@ -1042,6 +1202,16 @@ export class PiService {
               this.stopSubagent(parentSessionId, subagentSessionId),
             steerSubagent: (parentSessionId, subagentSessionId, prompt) =>
               this.steerSubagent(parentSessionId, subagentSessionId, prompt),
+            continueSubagent: (parentSessionId, subagentSessionId, prompt, async, queued, signal) =>
+              this.continueSubagent(
+                workspace,
+                parentSessionId,
+                subagentSessionId,
+                prompt,
+                async,
+                queued,
+                signal,
+              ),
           },
           workspace,
         ),

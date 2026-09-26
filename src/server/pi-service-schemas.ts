@@ -112,14 +112,18 @@ export const CronToolSchema = Type.Object(
 
 export const SubagentToolSchema = Type.Object(
   {
-    action: StringEnum(["run", "stop", "steer"] as const, {
-      description: "Run a subagent, stop a running subagent, or steer a running subagent.",
+    action: StringEnum(["run", "stop", "steer", "queue", "resume"] as const, {
+      description: "Run, stop, steer, queue work for, or resume a subagent.",
     }),
     sessionId: Type.Optional(
-      Type.String({ description: "Subagent session id. Required for stop and steer." }),
+      Type.String({
+        description: "Subagent session id. Required for stop, steer, queue, and resume.",
+      }),
     ),
     prompt: Type.Optional(
-      Type.String({ description: "Task for run, or additional instructions for steer." }),
+      Type.String({
+        description: "Task for run, queue, or resume; additional instructions for steer.",
+      }),
     ),
     model: Type.Optional(
       Type.String({ description: "Model id for the subagent, for example openai/gpt-5." }),
@@ -134,7 +138,7 @@ export const SubagentToolSchema = Type.Object(
       Type.Boolean({
         default: false,
         description:
-          "Run in the background and deliver the result into the parent session. Defaults to false.",
+          "Run or resume in the background and deliver the result into the parent session. Defaults to false. Queue is always async.",
       }),
     ),
   },

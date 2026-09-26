@@ -116,8 +116,10 @@ export interface DetachedSubagentOptions {
   deliveryMode?: "append" | "prompt";
   preludeNotices?: RuntimeNotice[];
   currentToolCallId?: string;
+  continueSession?: boolean;
   signal?: AbortSignal;
   onReady?: (details: ToolExecutionDetails) => void;
+  onDelivered?: () => void;
   onUpdate?: (partial: {
     content: Array<{ type: "text"; text: string }>;
     details: ToolExecutionDetails;
@@ -331,6 +333,7 @@ export async function runDetachedSubagentSession(
     await appendMessages(subagentSession, preludeMessages as Message[]);
   }
   const seedMessageCount = subagentSession.messages.length;
+  const startingBranchLength = subagentSession.sessionManager.getBranch().length;
 
   const readyDetails = buildSubagentDetails(
     {
@@ -427,7 +430,17 @@ export async function runDetachedSubagentSession(
         ? options.signal.reason
         : new Error("Subagent aborted");
     }
-    if (subagentSession.isStreaming) {
+    if (options.continueSession) {
+      if (!existing) throw new Error("Subagent session not found");
+      await subagentSession.sendCustomMessage(
+        {
+          customType: `batty-runtime-notice:${subagentNotice.kind}`,
+          content: subagentNotice.text,
+          display: true,
+        },
+        { triggerTurn: true, onAccepted: () => options.onReady?.(readyDetails) },
+      );
+    } else if (subagentSession.isStreaming) {
       // Another live caller owns this operation; wait for its normal driver to finish.
       options.onReady?.(readyDetails);
       await subagentSession.waitForIdle();
@@ -449,7 +462,7 @@ export async function runDetachedSubagentSession(
       (entry) => entry.type === "custom" && entry.customType === SUBAGENT_SESSION_CUSTOM_TYPE,
     );
     const generated = branch
-      .slice(marker + 1)
+      .slice(options.continueSession ? startingBranchLength : marker + 1)
       .flatMap((entry) => (entry.type === "message" ? [entry.message] : []));
     const result = buildDetachedSubagentResult(
       subagentSession,
@@ -548,6 +561,7 @@ export async function deliverDetachedSubagentResult(
 export async function deliverAsyncSubagentResult(
   parent: AgentSession,
   result: DetachedSubagentResult,
+  onAccepted?: () => void,
 ): Promise<void> {
   const child = (result.details as SubagentToolDetails).subagent;
   const status = result.isError ? "failed" : "completed";
@@ -581,7 +595,7 @@ export async function deliverAsyncSubagentResult(
         ...(artifacts.sites?.length ? { sites: artifacts.sites } : {}),
       },
     },
-    { triggerTurn: true, steerWhenBusy: true },
+    { triggerTurn: true, steerWhenBusy: true, onAccepted },
   );
 }
 

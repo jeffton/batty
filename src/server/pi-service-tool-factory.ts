@@ -11,6 +11,7 @@ import {
   createSitesTool,
   createSubagentTool,
   createWebSearchTool,
+  type SubagentToolDependencies,
 } from "./pi-service-tools";
 
 type DetachedSubagentToolRequest = {
@@ -64,6 +65,7 @@ export type PiServiceToolFactoryContext = {
     subagentSessionId: string,
     prompt: string,
   ) => Promise<void>;
+  continueSubagent: SubagentToolDependencies["continueSubagent"];
 };
 
 export function createPiServiceTools(
@@ -79,6 +81,7 @@ export function createPiServiceTools(
       startDetachedSubagentSession: context.startDetachedSubagentSession,
       stopSubagent: context.stopSubagent,
       steerSubagent: context.steerSubagent,
+      continueSubagent: context.continueSubagent,
     }),
     createCronTool({
       workspace,

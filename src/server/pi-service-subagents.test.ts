@@ -107,6 +107,30 @@ describe("detached harness subagents", () => {
       ]);
     },
   );
+  it("starts a new turn in a finished subagent and returns only the new reply", async () => {
+    const { parent, deps, options } = await setup();
+    parent.faux.setResponses([fauxAssistantMessage("first"), fauxAssistantMessage("second")]);
+    const first = await runDetachedSubagentSession(deps, options);
+    const resumed = await runDetachedSubagentSession(deps, {
+      ...options,
+      prompt: "Next task",
+      continueSession: true,
+    });
+    expect(first.text).toBe("first");
+    expect(resumed.text).toBe("second");
+    expect(resumed.generatedMessages).toEqual([
+      expect.objectContaining({
+        role: "custom",
+        content: buildSubagentRuntimeNotice(1, "Next task").text,
+      }),
+      expect.objectContaining({
+        role: "assistant",
+        content: expect.arrayContaining([expect.objectContaining({ text: "second" })]),
+      }),
+    ]);
+    expect(parent.faux.state.callCount).toBe(2);
+  });
+
   it("forks before the invoking tool call and preserves the prompt snapshot", async () => {
     const { parent, deps, options, children } = await setup();
     await parent.session.sessionManager.appendCustomEntry("batty-subagent-session", {

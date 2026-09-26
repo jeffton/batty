@@ -391,6 +391,7 @@ describe("createSubagentTool", () => {
       startDetachedSubagentSession: vi.fn(),
       stopSubagent: vi.fn(),
       steerSubagent: vi.fn(),
+      continueSubagent: vi.fn(),
     });
 
     const result = await tool.execute(
@@ -448,6 +449,7 @@ describe("createSubagentTool", () => {
       startDetachedSubagentSession,
       stopSubagent: vi.fn(),
       steerSubagent: vi.fn(),
+      continueSubagent: vi.fn(),
     });
 
     const result = await tool.execute(
@@ -488,6 +490,7 @@ describe("createSubagentTool", () => {
       startDetachedSubagentSession: vi.fn(),
       stopSubagent: vi.fn(),
       steerSubagent: vi.fn(),
+      continueSubagent: vi.fn(),
     });
 
     await tool.execute(
@@ -513,6 +516,7 @@ describe("createSubagentTool", () => {
       startDetachedSubagentSession: vi.fn(),
       stopSubagent: vi.fn(),
       steerSubagent: vi.fn(),
+      continueSubagent: vi.fn(),
     });
 
     await expect(
@@ -535,6 +539,7 @@ describe("createSubagentTool", () => {
       startDetachedSubagentSession: vi.fn(),
       stopSubagent: vi.fn(),
       steerSubagent: vi.fn(),
+      continueSubagent: vi.fn(),
       runDetachedSubagentSession: async () => ({
         text: "subagent failed",
         details: {
@@ -577,6 +582,7 @@ describe("createSubagentTool", () => {
       startDetachedSubagentSession: vi.fn(),
       stopSubagent,
       steerSubagent: vi.fn(),
+      continueSubagent: vi.fn(),
     });
 
     const result = await tool.execute(
@@ -591,6 +597,49 @@ describe("createSubagentTool", () => {
     expect(result.content).toEqual([{ type: "text", text: "Stopped subagent child-session." }]);
   });
 
+  it.each([
+    { action: "queue" as const, async: undefined, expectedAsync: true, queued: true },
+    { action: "resume" as const, async: false, expectedAsync: false, queued: false },
+    { action: "resume" as const, async: true, expectedAsync: true, queued: false },
+  ])("dispatches $action with async=$async", async ({ action, async, expectedAsync, queued }) => {
+    const continueSubagent = vi.fn(async () => ({
+      text: "continued",
+      details: {},
+      isError: false,
+    }));
+    const tool = createSubagentTool({
+      workspace: { id: "batty", path: "/root/github/batty" } as any,
+      config: {} as any,
+      resolveSubagentDefaults: vi.fn(),
+      runDetachedSubagentSession: vi.fn(),
+      startDetachedSubagentSession: vi.fn(),
+      stopSubagent: vi.fn(),
+      steerSubagent: vi.fn(),
+      continueSubagent,
+    });
+    const result = await tool.execute(
+      "tool-call-continue",
+      {
+        action,
+        sessionId: "child-session",
+        prompt: "Next task",
+        ...(async !== undefined ? { async } : {}),
+      },
+      undefined,
+      undefined,
+      createContext(),
+    );
+    expect(continueSubagent).toHaveBeenCalledWith(
+      "parent-session",
+      "child-session",
+      "Next task",
+      expectedAsync,
+      queued,
+      undefined,
+    );
+    expect(result.content).toEqual([{ type: "text", text: "continued" }]);
+  });
+
   it("queues steering instructions for a running async subagent", async () => {
     const steerSubagent = vi.fn(async () => undefined);
     const tool = createSubagentTool({
@@ -601,6 +650,7 @@ describe("createSubagentTool", () => {
       startDetachedSubagentSession: vi.fn(),
       stopSubagent: vi.fn(),
       steerSubagent,
+      continueSubagent: vi.fn(),
     });
 
     const result = await tool.execute(
@@ -664,6 +714,7 @@ describe("createSubagentTool", () => {
       startDetachedSubagentSession: vi.fn(),
       stopSubagent: vi.fn(),
       steerSubagent: vi.fn(),
+      continueSubagent: vi.fn(),
     });
 
     const first = tool.execute(

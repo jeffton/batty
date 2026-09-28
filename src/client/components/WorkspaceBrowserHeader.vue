@@ -211,7 +211,7 @@ watch(
   max-width: 100%;
   padding: 0.2rem 0.25rem 0.2rem 0.55rem;
   border-radius: 0.7rem;
-  background: var(--color-bg-elevated);
+  background: color-mix(in oklch, var(--color-bg-panel-strong) 88%, var(--color-text-strong));
 }
 
 .workspace-browser-header__search-icon {
@@ -271,6 +271,10 @@ watch(
   .workspace-browser-header__btn:hover {
     background: var(--color-bg-elevated);
     color: var(--color-text-strong);
+  }
+
+  .workspace-browser-header__btn--search-close:hover {
+    background: color-mix(in oklch, var(--color-bg-panel-strong) 76%, var(--color-text-strong));
   }
 }
 

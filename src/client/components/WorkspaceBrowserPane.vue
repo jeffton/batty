@@ -324,6 +324,7 @@ watch(
       :popover-anchor="PROVIDER_AUTH_POPOVER_ANCHOR"
       :connection-state="store.workspaceConnectionState"
       :connection-description="connectionDescription"
+      :search-session-error="searchSessionError"
       :search-open="searchOpen"
       :search-query="searchQuery"
       @open-search="openSearch"
@@ -331,13 +332,6 @@ watch(
       @update-search-query="setSearchQuery"
       @logout="store.logout"
     />
-
-    <div v-if="actionsDisabled" class="workspace-browser-pane__notice">
-      Offline or reconnecting — workspace and session actions are disabled.
-    </div>
-    <div v-if="searchSessionError" class="workspace-browser-pane__notice">
-      {{ searchSessionError }}
-    </div>
 
     <div class="workspace-browser-pane__cols">
       <section class="workspace-browser-pane__column workspace-browser-pane__column--workspaces">
@@ -597,15 +591,6 @@ watch(
   flex-direction: column;
   background: var(--color-bg-app);
   overflow: hidden;
-}
-
-.workspace-browser-pane__notice {
-  flex: 0 0 auto;
-  padding: 0.7rem calc(var(--safe-area-right) + 1rem) 0.7rem calc(var(--safe-area-left) + 1rem);
-  border-bottom: 1px solid var(--color-border-soft);
-  background: var(--color-warning-soft);
-  color: var(--color-warning);
-  font-size: 0.9rem;
 }
 
 .workspace-browser-pane__cols {

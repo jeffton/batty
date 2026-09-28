@@ -11,6 +11,7 @@ const props = defineProps<{
   popoverAnchor: string;
   connectionState: "online" | "connecting" | "offline";
   connectionDescription: string;
+  searchSessionError: string;
   searchOpen: boolean;
   searchQuery: string;
 }>();
@@ -40,85 +41,98 @@ watch(
 
 <template>
   <header class="workspace-browser-header">
-    <div class="workspace-browser-header__brand">
-      <img src="/favicon.png" alt="" class="workspace-browser-header__brand-icon" />
-      <div class="workspace-browser-header__brand-copy">
-        <h1>{{ store.settings.appearance.title }}</h1>
+    <div class="workspace-browser-header__bar">
+      <div class="workspace-browser-header__brand">
+        <img src="/favicon.png" alt="" class="workspace-browser-header__brand-icon" />
+        <div class="workspace-browser-header__brand-copy">
+          <h1>{{ store.settings.appearance.title }}</h1>
+        </div>
+      </div>
+
+      <div class="workspace-browser-header__actions">
+        <button
+          v-if="!props.searchOpen"
+          class="workspace-browser-header__btn"
+          type="button"
+          aria-label="Search workspaces and sessions"
+          title="Search"
+          @click="emit('openSearch')"
+        >
+          <Search :size="16" />
+        </button>
+
+        <div v-else class="workspace-browser-header__search-shell">
+          <Search :size="14" class="workspace-browser-header__search-icon" />
+          <input
+            ref="searchInput"
+            class="workspace-browser-header__search-input"
+            type="text"
+            :value="props.searchQuery"
+            aria-label="Search workspaces and sessions"
+            @input="emit('updateSearchQuery', ($event.target as HTMLInputElement).value)"
+            @keydown.escape="emit('closeSearch')"
+          />
+          <button
+            class="workspace-browser-header__btn workspace-browser-header__btn--search-close"
+            type="button"
+            aria-label="Clear search"
+            title="Clear search"
+            @click="emit('closeSearch')"
+          >
+            <X :size="16" />
+          </button>
+        </div>
+
+        <span
+          class="workspace-browser-header__status"
+          :aria-label="props.connectionDescription"
+          :title="props.connectionDescription"
+        >
+          <Wifi
+            v-if="props.connectionState === 'online'"
+            :size="15"
+            class="workspace-browser-header__status-icon workspace-browser-header__status-icon--online"
+          />
+          <LoaderCircle
+            v-else-if="props.connectionState === 'connecting'"
+            :size="15"
+            class="workspace-browser-header__status-icon workspace-browser-header__status-icon--spin"
+          />
+          <WifiOff
+            v-else
+            :size="15"
+            class="workspace-browser-header__status-icon workspace-browser-header__status-icon--offline"
+          />
+        </span>
+
+        <button
+          class="workspace-browser-header__btn"
+          type="button"
+          :style="{ 'anchor-name': props.popoverAnchor }"
+          :popovertarget="props.popoverId"
+          aria-label="Settings"
+          title="Settings"
+        >
+          <Cog :size="16" />
+        </button>
+
+        <SettingsPopover
+          :popover-id="props.popoverId"
+          :anchor-name="props.popoverAnchor"
+          @logout="emit('logout')"
+        />
       </div>
     </div>
-
-    <div class="workspace-browser-header__actions">
-      <button
-        v-if="!props.searchOpen"
-        class="workspace-browser-header__btn"
-        type="button"
-        aria-label="Search workspaces and sessions"
-        title="Search"
-        @click="emit('openSearch')"
-      >
-        <Search :size="16" />
-      </button>
-
-      <div v-else class="workspace-browser-header__search-shell">
-        <Search :size="14" class="workspace-browser-header__search-icon" />
-        <input
-          ref="searchInput"
-          class="workspace-browser-header__search-input"
-          type="text"
-          :value="props.searchQuery"
-          aria-label="Search workspaces and sessions"
-          @input="emit('updateSearchQuery', ($event.target as HTMLInputElement).value)"
-          @keydown.escape="emit('closeSearch')"
-        />
-        <button
-          class="workspace-browser-header__btn workspace-browser-header__btn--search-close"
-          type="button"
-          aria-label="Clear search"
-          title="Clear search"
-          @click="emit('closeSearch')"
-        >
-          <X :size="16" />
-        </button>
+    <div
+      v-if="props.connectionState !== 'online' || props.searchSessionError"
+      class="workspace-browser-header__notices"
+    >
+      <div v-if="props.connectionState !== 'online'" class="workspace-browser-header__notice">
+        Offline or reconnecting — workspace and session actions are disabled.
       </div>
-
-      <span
-        class="workspace-browser-header__status"
-        :aria-label="props.connectionDescription"
-        :title="props.connectionDescription"
-      >
-        <Wifi
-          v-if="props.connectionState === 'online'"
-          :size="15"
-          class="workspace-browser-header__status-icon workspace-browser-header__status-icon--online"
-        />
-        <LoaderCircle
-          v-else-if="props.connectionState === 'connecting'"
-          :size="15"
-          class="workspace-browser-header__status-icon workspace-browser-header__status-icon--spin"
-        />
-        <WifiOff
-          v-else
-          :size="15"
-          class="workspace-browser-header__status-icon workspace-browser-header__status-icon--offline"
-        />
-      </span>
-
-      <button
-        class="workspace-browser-header__btn"
-        type="button"
-        :style="{ 'anchor-name': props.popoverAnchor }"
-        :popovertarget="props.popoverId"
-        aria-label="Settings"
-        title="Settings"
-      >
-        <Cog :size="16" />
-      </button>
-
-      <SettingsPopover
-        :popover-id="props.popoverId"
-        :anchor-name="props.popoverAnchor"
-        @logout="emit('logout')"
-      />
+      <div v-if="props.searchSessionError" class="workspace-browser-header__notice">
+        {{ props.searchSessionError }}
+      </div>
     </div>
   </header>
 </template>
@@ -127,15 +141,30 @@ watch(
 .workspace-browser-header {
   position: relative;
   z-index: 2;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--color-border-soft);
+  background: var(--color-bg-panel-strong);
+  box-shadow: var(--color-shadow-header);
+}
+
+.workspace-browser-header__bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
   padding: calc(var(--safe-area-top) + 0.9rem) calc(var(--safe-area-right) + 1rem) 0.9rem
     calc(var(--safe-area-left) + 1rem);
-  border-bottom: 1px solid var(--color-border-soft);
-  background: var(--color-bg-panel-strong);
-  box-shadow: var(--color-shadow-header);
+}
+
+.workspace-browser-header__notices {
+  display: grid;
+}
+
+.workspace-browser-header__notice {
+  padding: 0.7rem calc(var(--safe-area-right) + 1rem) 0.7rem calc(var(--safe-area-left) + 1rem);
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+  font-size: 0.9rem;
 }
 
 .workspace-browser-header__brand {

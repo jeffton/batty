@@ -363,8 +363,10 @@ defineExpose({ clear, restore });
     @drop="onDrop"
   >
     <div class="composer__inner">
-      <p v-if="props.error" class="composer__notice composer__notice--error">{{ props.error }}</p>
-      <p v-if="props.offline" class="composer__notice">Offline. Draft saved locally</p>
+      <div v-if="props.error || props.offline" class="composer__notices">
+        <p v-if="props.error" class="composer__notice composer__notice--error">{{ props.error }}</p>
+        <p v-if="props.offline" class="composer__notice">Offline. Draft saved locally</p>
+      </div>
 
       <div v-if="files.length > 0" class="composer__attachments">
         <button
@@ -496,6 +498,10 @@ defineExpose({ clear, restore });
 .composer__inner {
   display: grid;
   gap: 0.4rem;
+}
+
+.composer__notices {
+  display: grid;
 }
 
 .composer__notice {

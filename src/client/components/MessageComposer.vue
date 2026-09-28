@@ -158,8 +158,10 @@ function syncTextareaHeight(): void {
     return;
   }
 
-  // Growing text is measurable at the existing height. Collapsing the textarea on
-  // every keystroke also resizes the transcript viewport while it follows a stream.
+  // Never reset height while text grows, including insertions in the middle of a draft.
+  // Setting height to "auto" on each keystroke resizes the transcript viewport and
+  // makes streaming auto-follow bounce the chat. Remeasure from scratch when
+  // text changes without growing, or when the textarea width changes.
   if (
     element.clientWidth !== measuredTextareaWidth ||
     (element.value !== measuredTextareaText && element.value.length <= measuredTextareaText.length)

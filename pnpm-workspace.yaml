@@ -2,8 +2,6 @@ minimumReleaseAge: 4320
 minimumReleaseAgeExclude:
   - "@earendil-works/pi-*"
   - "@earendil-works/chord"
-  # Security release fixing GHSA-62qx-hpj5-j6hc and GHSA-vmph-573x-85f6.
-  - "@fastify/multipart@10.1.1"
   # Security release fixing GHSA-2g3p-m8c9-hhwh and GHSA-j3h4-m3m2-7p7j.
   - "@simplewebauthn/server@14.0.2"
   - vite-plus
@@ -23,8 +21,8 @@ allowBuilds:
   koffi: false
   protobufjs: false
 catalog:
-  vite: npm:@voidzero-dev/vite-plus-core@0.3.3
-  vite-plus: 0.3.3
+  vite: npm:@voidzero-dev/vite-plus-core@1.0.0
+  vite-plus: 1.0.0
 overrides:
   "@vue/compiler-sfc": 3.5.43
   shell-quote: 1.10.0

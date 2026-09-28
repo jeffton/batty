@@ -743,6 +743,88 @@ test.describe("tool rendering", () => {
     await expect(page.locator(".tool-call .code-block").last()).toContainText("line-41");
   });
 
+  test("does not resize the transcript on every composer keystroke while streaming", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await installMocks(
+      page,
+      createSession({
+        isStreaming: true,
+        messages: createMessages(30),
+      }),
+    );
+
+    await page.goto(`/workspaces/${workspace.id}/sessions/${summary.sessionId}`);
+    const transcript = page.locator(".transcript");
+    const composer = page.locator(".composer__input");
+    await expect(transcript).toBeVisible();
+    await composer.focus();
+    await expect.poll(() => composer.evaluate((element) => element.style.height)).not.toBe("");
+
+    const startingHeight = await transcript.evaluate((element) => element.clientHeight);
+    const heightsPromise = page.evaluate(() => {
+      const textarea = document.querySelector<HTMLTextAreaElement>(".composer__input")!;
+      const recorded: string[] = [];
+      const observer = new MutationObserver((mutations) => {
+        recorded.push(...mutations.map((mutation) => mutation.oldValue ?? ""));
+      });
+      observer.observe(textarea, {
+        attributes: true,
+        attributeFilter: ["style"],
+        attributeOldValue: true,
+      });
+      return new Promise<string[]>((resolve) => {
+        (window as Window & { __finishHeightTracking: () => void }).__finishHeightTracking = () => {
+          observer.disconnect();
+          resolve(recorded);
+        };
+      });
+    });
+    await composer.pressSequentially("Typing while the assistant is streaming", { delay: 25 });
+    await composer.press("Home");
+    await composer.pressSequentially("Editing the beginning: ", { delay: 25 });
+    await page.evaluate(() =>
+      (window as Window & { __finishHeightTracking: () => void }).__finishHeightTracking(),
+    );
+    const heights = await heightsPromise;
+    expect(heights.filter((style) => /height:\s*auto/.test(style))).toEqual([]);
+    expect(await transcript.evaluate((element) => element.clientHeight)).toBe(startingHeight);
+    await expect
+      .poll(() =>
+        transcript.evaluate(
+          (element) => element.scrollHeight - element.scrollTop - element.clientHeight,
+        ),
+      )
+      .toBeLessThanOrEqual(12);
+
+    const initialInputHeight = await composer.evaluate((element) => element.clientHeight);
+    await composer.press("End");
+    await composer.press("Enter");
+    await expect
+      .poll(() => composer.evaluate((element) => element.clientHeight))
+      .toBeGreaterThan(initialInputHeight);
+    await expect
+      .poll(() => transcript.evaluate((element) => element.clientHeight))
+      .toBeLessThan(startingHeight);
+    await composer.press("Backspace");
+    await expect
+      .poll(() => composer.evaluate((element) => element.clientHeight))
+      .toBe(initialInputHeight);
+    await expect
+      .poll(() => transcript.evaluate((element) => element.clientHeight))
+      .toBe(startingHeight);
+
+    await page.setViewportSize({ width: 320, height: 720 });
+    await expect
+      .poll(() => composer.evaluate((element) => element.clientHeight))
+      .toBeGreaterThan(initialInputHeight);
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await expect
+      .poll(() => composer.evaluate((element) => element.clientHeight))
+      .toBe(initialInputHeight);
+  });
+
   test("does not surprise-scroll when the user has scrolled up", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await installMocks(

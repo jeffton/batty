@@ -51,6 +51,8 @@ const hasPayload = computed(() => text.value.trim().length > 0 || files.value.le
 
 let textareaResizeObserver: ResizeObserver | undefined;
 let textareaHeightAnimationFrame: number | undefined;
+let measuredTextareaText = "";
+let measuredTextareaWidth = 0;
 
 let draftSaveTimeout: number | undefined;
 let queuedDraftSessionKey: string | undefined;
@@ -156,11 +158,22 @@ function syncTextareaHeight(): void {
     return;
   }
 
-  element.style.height = "auto";
+  // Growing text is measurable at the existing height. Collapsing the textarea on
+  // every keystroke also resizes the transcript viewport while it follows a stream.
+  if (
+    element.clientWidth !== measuredTextareaWidth ||
+    (element.value !== measuredTextareaText && element.value.length <= measuredTextareaText.length)
+  ) {
+    element.style.height = "auto";
+  }
   const naturalHeight = Math.max(element.scrollHeight, textareaMinHeight(element));
   const nextHeight = Math.min(naturalHeight, maxInputHeight.value);
-  element.style.height = `${nextHeight}px`;
+  if (element.style.height !== `${nextHeight}px`) {
+    element.style.height = `${nextHeight}px`;
+  }
   element.style.overflowY = naturalHeight > maxInputHeight.value ? "auto" : "hidden";
+  measuredTextareaText = element.value;
+  measuredTextareaWidth = element.clientWidth;
 }
 
 function scheduleTextareaHeightSync(): void {

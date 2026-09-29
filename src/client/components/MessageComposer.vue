@@ -383,6 +383,12 @@ defineExpose({ clear, restore });
         <p v-if="props.offline" class="composer__notice">Offline. Draft saved locally</p>
       </div>
 
+      <ComposerQueuedPrompts
+        :prompts="props.queuedPrompts"
+        :disabled="props.disabled"
+        @remove="removeQueuedPrompt"
+      />
+
       <div v-if="files.length > 0" class="composer__attachments">
         <button
           v-for="(file, index) in files"
@@ -394,12 +400,6 @@ defineExpose({ clear, restore });
           {{ file.name }} ×
         </button>
       </div>
-
-      <ComposerQueuedPrompts
-        :prompts="props.queuedPrompts"
-        :disabled="props.disabled"
-        @remove="removeQueuedPrompt"
-      />
 
       <textarea
         ref="textarea"

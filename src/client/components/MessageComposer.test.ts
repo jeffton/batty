@@ -72,6 +72,30 @@ describe("MessageComposer", () => {
     expect(wrapper.get(".composer__attachments").text()).toContain("a.txt");
   });
 
+  it("places attached files below queued prompts", async () => {
+    const wrapper = shallowMount(MessageComposer, {
+      props: {
+        ...requiredProps,
+        sessionKey: "session-a",
+        queuedPrompts: [{ kind: "followUp", index: 0, text: "next prompt" }],
+      },
+    });
+    await nextTick();
+
+    const restore = (
+      wrapper.vm as unknown as {
+        restore(sessionKey: string, text: string, files: File[]): void;
+      }
+    ).restore;
+    restore("session-a", "", [new File(["a"], "a.txt")]);
+    await nextTick();
+
+    const children = Array.from(wrapper.get(".composer__inner").element.children);
+    expect(children.indexOf(wrapper.get("composer-queued-prompts-stub").element)).toBeLessThan(
+      children.indexOf(wrapper.get(".composer__attachments").element),
+    );
+  });
+
   it("does not replace newer composer input when an earlier prompt fails", async () => {
     const wrapper = shallowMount(MessageComposer, {
       props: { ...requiredProps, sessionKey: "session-a" },

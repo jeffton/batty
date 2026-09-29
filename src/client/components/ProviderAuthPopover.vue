@@ -3,6 +3,7 @@ import { ExternalLink, KeyRound, Save } from "@lucide/vue";
 import { computed, reactive, ref, watch } from "vue";
 import BasePopover from "@/client/components/BasePopover.vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
+import { watchOpenAIAuthAttempt } from "@/client/lib/provider-auth";
 import { useAppStore } from "@/client/stores/app";
 import type { ProviderAuthProviderStatus } from "@/shared/types";
 
@@ -34,7 +35,7 @@ const apiKeyErrors = reactive<Record<string, string>>({
 });
 
 const providerOrder = computed(() => {
-  const supportedIds = new Set(["openai-codex", "google", "openrouter"]);
+  const supportedIds = new Set(["openai", "google", "openrouter"]);
   return [...store.providerAuth.providers]
     .filter((provider) => supportedIds.has(provider.id))
     .sort((a, b) => {
@@ -44,7 +45,7 @@ const providerOrder = computed(() => {
       return a.name.localeCompare(b.name);
     });
 });
-const hasOpenAICodexAttempt = computed(() => authAttemptId.value.length > 0);
+const hasOpenAIAttempt = computed(() => authAttemptId.value.length > 0);
 const authExpiryLabel = computed(() =>
   authExpiresAt.value == null ? "" : formatShortDateTime(authExpiresAt.value),
 );
@@ -53,8 +54,8 @@ function providerById(providerId: string): ProviderAuthProviderStatus | undefine
   return store.providerAuth.providers.find((provider) => provider.id === providerId);
 }
 
-function isCodexProvider(providerId: string): boolean {
-  return providerId === "openai-codex";
+function isOpenAIProvider(providerId: string): boolean {
+  return providerId === "openai";
 }
 
 function resetAttempt(): void {
@@ -73,11 +74,12 @@ function apiKeyPlaceholder(providerId: "google" | "openrouter"): string {
   return providerId === "google" ? "Paste Gemini API key" : "Paste OpenRouter API key";
 }
 
-async function startOpenAICodexAuth(): Promise<void> {
+async function startOpenAIAuth(): Promise<void> {
+  resetAttempt();
   connectPending.value = true;
   authError.value = "";
   try {
-    const result = await store.startOpenAICodexProviderAuth();
+    const result = await store.startOpenAIProviderAuth();
     authAttemptId.value = result.attemptId;
     authUrl.value = result.authUrl;
     authInstructions.value = result.instructions ?? "";
@@ -90,7 +92,7 @@ async function startOpenAICodexAuth(): Promise<void> {
   }
 }
 
-async function completeOpenAICodexAuth(): Promise<void> {
+async function completeOpenAIAuth(): Promise<void> {
   if (!authAttemptId.value || !authInput.value.trim()) {
     return;
   }
@@ -98,7 +100,7 @@ async function completeOpenAICodexAuth(): Promise<void> {
   completePending.value = true;
   authError.value = "";
   try {
-    await store.completeOpenAICodexProviderAuth(authAttemptId.value, authInput.value.trim());
+    await store.completeOpenAIProviderAuth(authAttemptId.value, authInput.value.trim());
     resetAttempt();
   } catch (error) {
     authError.value = error instanceof Error ? error.message : String(error);
@@ -106,6 +108,18 @@ async function completeOpenAICodexAuth(): Promise<void> {
     completePending.value = false;
   }
 }
+
+watchOpenAIAuthAttempt(
+  computed(() => (completePending.value ? "" : authAttemptId.value)),
+  async () => {
+    resetAttempt();
+    await store.bootstrap();
+  },
+  (error) => {
+    resetAttempt();
+    authError.value = error instanceof Error ? error.message : String(error);
+  },
+);
 
 async function saveApiKey(providerId: "google" | "openrouter"): Promise<void> {
   const apiKey = apiKeyInputs[providerId].trim();
@@ -152,11 +166,11 @@ watch(
       :key="provider.id"
       class="provider-auth-popover__section"
     >
-      <template v-if="isCodexProvider(provider.id)">
+      <template v-if="isOpenAIProvider(provider.id)">
         <div class="provider-auth-popover__header">
           <div>
-            <div class="provider-auth-popover__title">ChatGPT/Codex subscription</div>
-            <div class="provider-auth-popover__subtitle">Provider: openai-codex</div>
+            <div class="provider-auth-popover__title">ChatGPT subscription</div>
+            <div class="provider-auth-popover__subtitle">Provider: openai</div>
           </div>
           <span
             :class="[
@@ -176,33 +190,33 @@ watch(
         </div>
 
         <p class="provider-auth-popover__copy">
-          Sign in with your ChatGPT/Codex subscription to use <code>openai-codex/*</code> models.
+          Sign in with your ChatGPT subscription to use <code>openai/*</code> models.
         </p>
 
         <button
           class="provider-auth-popover__action"
           type="button"
           :disabled="connectPending || completePending"
-          @click="startOpenAICodexAuth"
+          @click="startOpenAIAuth"
         >
           {{
             connectPending
               ? "Starting…"
-              : hasOpenAICodexAttempt
+              : hasOpenAIAttempt
                 ? "Restart connect flow"
                 : provider.connected
                   ? "Reconnect account"
-                  : "Connect ChatGPT/Codex"
+                  : "Connect ChatGPT"
           }}
         </button>
 
-        <div v-if="hasOpenAICodexAttempt" class="provider-auth-popover__attempt">
+        <div v-if="hasOpenAIAttempt" class="provider-auth-popover__attempt">
           <div v-if="authInstructions" class="provider-auth-popover__help">
             {{ authInstructions }}
           </div>
           <div class="provider-auth-popover__help">
-            Open the sign-in page, finish login in the browser, then paste the localhost callback
-            URL or just the authorization code here.
+            Finish sign-in in your browser. If this stays open, paste the full callback URL from the
+            address bar, even if the page cannot load.
           </div>
           <div v-if="authExpiryLabel" class="provider-auth-popover__help">
             Expires: {{ authExpiryLabel }}
@@ -221,7 +235,7 @@ watch(
             v-model="authInput"
             class="provider-auth-popover__input"
             rows="4"
-            placeholder="Paste the localhost callback URL or the authorization code"
+            placeholder="Paste the full http://127.0.0.1:1455/auth/callback URL"
             :disabled="completePending"
           />
 
@@ -229,7 +243,7 @@ watch(
             class="provider-auth-popover__action provider-auth-popover__action--primary"
             type="button"
             :disabled="completePending || !authInput.trim()"
-            @click="completeOpenAICodexAuth"
+            @click="completeOpenAIAuth"
           >
             {{ completePending ? "Completing…" : "Complete connection" }}
           </button>

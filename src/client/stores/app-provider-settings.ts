@@ -1,5 +1,5 @@
 import {
-  completeOpenAICodexProviderAuth,
+  completeOpenAIProviderAuth,
   getBattyAgentsFile,
   getModels,
   getProviderAuthStatus,
@@ -8,7 +8,7 @@ import {
   setBraveSearchApiKey as setBraveSearchApiKeyRequest,
   setDefaultModel as setDefaultModelRequest,
   setProviderApiKey,
-  startOpenAICodexProviderAuth,
+  startOpenAIProviderAuth,
 } from "@/client/lib/api";
 import { applyAppAppearance } from "@/client/lib/appearance";
 import type { AppAppearance } from "@/shared/appearance";
@@ -23,16 +23,16 @@ export const providerSettingsActions = {
     this.providerAuth = await getProviderAuthStatus();
   },
 
-  async startOpenAICodexProviderAuth() {
-    return startOpenAICodexProviderAuth();
+  async startOpenAIProviderAuth() {
+    return startOpenAIProviderAuth();
   },
 
-  async completeOpenAICodexProviderAuth(
+  async completeOpenAIProviderAuth(
     this: AppActionContext,
     attemptId: string,
-    callbackUrlOrCode: string,
+    callbackUrl: string,
   ): Promise<void> {
-    this.providerAuth = await completeOpenAICodexProviderAuth(attemptId, callbackUrlOrCode);
+    this.providerAuth = await completeOpenAIProviderAuth(attemptId, callbackUrl);
     await this.bootstrap();
   },
 

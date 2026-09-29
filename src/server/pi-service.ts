@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import {
   ModelRuntime,
+  SettingsManager,
   readStoredCredential,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
@@ -165,8 +166,17 @@ export class PiService {
       config.browserMaxTabs,
     );
     const authPath = path.join(battyAgentDir(config), "auth.json");
-    this.providerAuthService = new ProviderAuthService(modelRuntime, (providerId) =>
-      readStoredCredential(providerId, authPath),
+    const settingsManager = SettingsManager.create(process.cwd(), battyAgentDir(config));
+    this.providerAuthService = new ProviderAuthService(
+      modelRuntime,
+      (providerId) => readStoredCredential(providerId, authPath),
+      async () => {
+        const deviceId = settingsManager.getOrCreateDeviceId();
+        await settingsManager.flush();
+        const errors = settingsManager.drainErrors();
+        if (errors.length) throw errors[0]!.error;
+        return deviceId;
+      },
     );
     this.providerUsageService = new ProviderUsageService(modelRuntime, (providerId) =>
       readStoredCredential(providerId, authPath),
@@ -206,6 +216,7 @@ export class PiService {
   }
 
   async dispose(): Promise<void> {
+    await this.providerAuthService.dispose();
     await this.modelConfigWatcher.dispose();
     await Promise.all([...this.liveSessions.values()].map(({ session }) => session.dispose()));
     await this.browserService.dispose();
@@ -226,7 +237,11 @@ export class PiService {
     return this.providerAuthService.getStatus();
   }
 
-  async startProviderAuth(providerId: "openai-codex"): Promise<ProviderAuthStartResponse> {
+  getProviderAuthAttemptStatus(attemptId: string): { completed: boolean } {
+    return this.providerAuthService.getAttemptStatus(attemptId);
+  }
+
+  async startProviderAuth(providerId: "openai"): Promise<ProviderAuthStartResponse> {
     return this.providerAuthService.start(providerId);
   }
 
@@ -234,11 +249,8 @@ export class PiService {
     return this.providerUsageService.getUsage(provider, model);
   }
 
-  async completeProviderAuth(
-    attemptId: string,
-    callbackUrlOrCode: string,
-  ): Promise<ProviderAuthStatus> {
-    await this.providerAuthService.complete(attemptId, callbackUrlOrCode);
+  async completeProviderAuth(attemptId: string, callbackUrl: string): Promise<ProviderAuthStatus> {
+    await this.providerAuthService.complete(attemptId, callbackUrl);
     return this.providerAuthService.getStatus();
   }
 

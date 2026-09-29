@@ -18,7 +18,7 @@ const { setWorkspaceAssistant } = vi.hoisted(() => ({
 
 vi.mock("@/client/lib/api", () => ({
   abortSession: vi.fn(),
-  completeOpenAICodexProviderAuth: vi.fn(),
+  completeOpenAIProviderAuth: vi.fn(),
   createOrOpenDailySession: vi.fn(),
   createSession: vi.fn(),
   createWorkspace: vi.fn(),
@@ -48,7 +48,7 @@ vi.mock("@/client/lib/api", () => ({
   setSessionThinkingLevel: vi.fn(),
   setWorkspaceAssistant,
   setWorkspacePinned: vi.fn(),
-  startOpenAICodexProviderAuth: vi.fn(),
+  startOpenAIProviderAuth: vi.fn(),
   updateCronJob: vi.fn(),
 }));
 

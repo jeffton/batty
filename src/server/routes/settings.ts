@@ -205,21 +205,26 @@ export function registerSettingsRoutes(context: RouteContext): void {
     },
   );
 
-  app.post(routePath("/api/provider-auth/openai-codex/start"), async () => {
-    return service.startProviderAuth("openai-codex");
+  app.get<{ Params: { attemptId: string } }>(
+    routePath("/api/provider-auth/openai/attempt/:attemptId"),
+    async (request) => service.getProviderAuthAttemptStatus(request.params.attemptId),
+  );
+
+  app.post(routePath("/api/provider-auth/openai/start"), async () => {
+    return service.startProviderAuth("openai");
   });
 
-  app.post<{ Body: { attemptId?: string; callbackUrlOrCode?: string } }>(
-    routePath("/api/provider-auth/openai-codex/complete"),
+  app.post<{ Body: { attemptId?: string; callbackUrl?: string } }>(
+    routePath("/api/provider-auth/openai/complete"),
     async (request) => {
       if (!request.body?.attemptId) {
         throw new Error("Missing auth attempt id");
       }
-      if (!request.body?.callbackUrlOrCode) {
-        throw new Error("Missing callback URL or authorization code");
+      if (!request.body?.callbackUrl) {
+        throw new Error("Missing callback URL");
       }
 
-      return service.completeProviderAuth(request.body.attemptId, request.body.callbackUrlOrCode);
+      return service.completeProviderAuth(request.body.attemptId, request.body.callbackUrl);
     },
   );
 

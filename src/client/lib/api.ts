@@ -72,20 +72,24 @@ export function getProviderAuthStatus(): Promise<ProviderAuthStatus> {
   return request("/api/provider-auth/status");
 }
 
-export function startOpenAICodexProviderAuth(): Promise<ProviderAuthStartResponse> {
-  return request("/api/provider-auth/openai-codex/start", {
+export function getOpenAIAuthAttemptStatus(attemptId: string): Promise<{ completed: boolean }> {
+  return request(`/api/provider-auth/openai/attempt/${encodeURIComponent(attemptId)}`);
+}
+
+export function startOpenAIProviderAuth(): Promise<ProviderAuthStartResponse> {
+  return request("/api/provider-auth/openai/start", {
     method: "POST",
   });
 }
 
-export function completeOpenAICodexProviderAuth(
+export function completeOpenAIProviderAuth(
   attemptId: string,
-  callbackUrlOrCode: string,
+  callbackUrl: string,
 ): Promise<ProviderAuthStatus> {
-  return request("/api/provider-auth/openai-codex/complete", {
+  return request("/api/provider-auth/openai/complete", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ attemptId, callbackUrlOrCode }),
+    body: JSON.stringify({ attemptId, callbackUrl }),
   });
 }
 

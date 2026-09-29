@@ -31,6 +31,7 @@ interface ProviderAuthAttempt {
   manualInput: Deferred<string>;
   loginPromise: Promise<void>;
   timeout: NodeJS.Timeout;
+  abort: AbortController;
 }
 
 function deferred<T>(): Deferred<T> {
@@ -93,20 +94,18 @@ function statusForProvider(
 
 export class ProviderAuthService {
   private readonly attempts = new Map<string, ProviderAuthAttempt>();
+  private startQueue = Promise.resolve();
 
   constructor(
     private readonly modelRuntime: Pick<ModelRuntime, "login">,
     private readonly readCredential: (providerId: string) => Credential | undefined,
+    private readonly getDeviceId: () => string | Promise<string>,
   ) {}
 
   getStatus(): ProviderAuthStatus {
     this.cleanupExpiredAttempts();
     const providers = [
-      statusForProvider(
-        this.readCredential,
-        "openai-codex",
-        "ChatGPT Plus/Pro (Codex Subscription)",
-      ),
+      statusForProvider(this.readCredential, "openai", "ChatGPT subscription"),
       ...Object.entries(API_KEY_PROVIDER_NAMES).map(([providerId, name]) =>
         statusForProvider(this.readCredential, providerId, name),
       ),
@@ -133,14 +132,45 @@ export class ProviderAuthService {
     return this.getStatus();
   }
 
-  async start(providerId: "openai-codex"): Promise<ProviderAuthStartResponse> {
+  async dispose(): Promise<void> {
+    const attempts = [...this.attempts.values()];
+    for (const attempt of attempts) {
+      clearTimeout(attempt.timeout);
+      if (!attempt.completed && !attempt.finalError) {
+        const error = new Error("Auth attempt cancelled");
+        attempt.manualInput.reject(error);
+        attempt.abort.abort(error);
+      }
+    }
+    await Promise.all(attempts.map((attempt) => attempt.loginPromise));
+    this.attempts.clear();
+  }
+
+  getAttemptStatus(attemptId: string): { completed: boolean } {
     this.cleanupExpiredAttempts();
+    return { completed: this.requireAttempt(attemptId).completed };
+  }
+
+  start(providerId: "openai"): Promise<ProviderAuthStartResponse> {
+    const started = this.startQueue.then(() => this.startAttempt(providerId));
+    this.startQueue = started.then(
+      () => {},
+      () => {},
+    );
+    return started;
+  }
+
+  private async startAttempt(providerId: "openai"): Promise<ProviderAuthStartResponse> {
+    this.cleanupExpiredAttempts();
+    const deviceId = await this.getDeviceId();
+    await this.dispose();
 
     const attemptId = randomUUID();
     const createdAt = Date.now();
     const expiresAt = createdAt + PROVIDER_AUTH_TTL_MS;
     const authInfo = deferred<{ url: string; instructions?: string }>();
     const manualInput = deferred<string>();
+    const abort = new AbortController();
 
     const timeout = setTimeout(() => {
       const attempt = this.attempts.get(attemptId);
@@ -151,6 +181,7 @@ export class ProviderAuthService {
       attempt.finalError = error;
       authInfo.reject(error);
       manualInput.reject(error);
+      abort.abort(error);
     }, PROVIDER_AUTH_TTL_MS);
 
     const notify = (event: AuthEvent): void => {
@@ -167,7 +198,12 @@ export class ProviderAuthService {
       request.type === "select" ? "browser" : manualInput.promise;
 
     const loginPromise = this.modelRuntime
-      .login(providerId, "oauth", { notify, prompt })
+      .login(
+        providerId,
+        "oauth",
+        { notify, prompt, signal: abort.signal },
+        { getDeviceId: () => deviceId },
+      )
       .then(() => {
         const attempt = this.attempts.get(attemptId);
         if (attempt) {
@@ -195,6 +231,7 @@ export class ProviderAuthService {
       manualInput,
       loginPromise,
       timeout,
+      abort,
     });
 
     try {
@@ -216,7 +253,7 @@ export class ProviderAuthService {
     }
   }
 
-  async complete(attemptId: string, callbackUrlOrCode: string): Promise<void> {
+  async complete(attemptId: string, callbackUrl: string): Promise<void> {
     this.cleanupExpiredAttempts();
     const attempt = this.requireAttempt(attemptId);
 
@@ -227,14 +264,15 @@ export class ProviderAuthService {
     }
 
     if (attempt.completed) {
+      this.attempts.delete(attemptId);
       return;
     }
 
-    if (!callbackUrlOrCode.trim()) {
-      throw new Error("Missing callback URL or authorization code");
+    if (!callbackUrl.trim()) {
+      throw new Error("Missing callback URL");
     }
 
-    attempt.manualInput.resolve(callbackUrlOrCode.trim());
+    attempt.manualInput.resolve(callbackUrl.trim());
     try {
       await attempt.loginPromise;
       if (attempt.finalError) {
@@ -260,12 +298,11 @@ export class ProviderAuthService {
   private cleanupExpiredAttempts(): void {
     const now = Date.now();
     for (const [attemptId, attempt] of this.attempts) {
-      if (attempt.completed) {
+      if (attempt.completed && now > attempt.expiresAt) {
         this.attempts.delete(attemptId);
-        clearTimeout(attempt.timeout);
         continue;
       }
-      if (now <= attempt.expiresAt || attempt.finalError) {
+      if (now <= attempt.expiresAt || attempt.finalError || attempt.completed) {
         continue;
       }
       const error = new Error("Auth attempt expired");

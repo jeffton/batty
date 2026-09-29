@@ -29,6 +29,14 @@ function createContext(battyDir: string, models: Array<{ id: string; provider: s
       })),
     ),
     getProviderUsage: vi.fn(async (): Promise<ProviderUsage> => ({ windows: [] })),
+    startProviderAuth: vi.fn(async () => ({
+      attemptId: "attempt-1",
+      providerId: "openai",
+      authUrl: "https://auth.openai.com/example",
+      expiresAt: Date.now() + 60_000,
+    })),
+    completeProviderAuth: vi.fn(async () => ({ providers: [] })),
+    getProviderAuthAttemptStatus: vi.fn(() => ({ completed: true })),
   };
   const context = {
     app,
@@ -124,6 +132,36 @@ describe("environment settings routes", () => {
       expect(response.body).not.toContain("secret");
     }
     await app.close();
+  });
+});
+
+describe("OpenAI ChatGPT auth routes", () => {
+  it("starts OpenAI login, reports local completion, and accepts a full remote callback URL", async () => {
+    const battyDir = await fs.mkdtemp(path.join(os.tmpdir(), "batty-settings-route-"));
+    tempDirs.push(battyDir);
+    const { app, service } = createContext(battyDir, []);
+    try {
+      const start = await app.inject({ method: "POST", url: "/api/provider-auth/openai/start" });
+      expect(start.statusCode).toBe(200);
+      expect(service.startProviderAuth).toHaveBeenCalledWith("openai");
+      const status = await app.inject({
+        method: "GET",
+        url: "/api/provider-auth/openai/attempt/attempt-1",
+      });
+      expect(status.json()).toEqual({ completed: true });
+      expect(service.getProviderAuthAttemptStatus).toHaveBeenCalledWith("attempt-1");
+      const callbackUrl =
+        "http://127.0.0.1:1455/auth/callback?code=abc&state=state&client_id=client";
+      const complete = await app.inject({
+        method: "POST",
+        url: "/api/provider-auth/openai/complete",
+        payload: { attemptId: "attempt-1", callbackUrl },
+      });
+      expect(complete.statusCode).toBe(200);
+      expect(service.completeProviderAuth).toHaveBeenCalledWith("attempt-1", callbackUrl);
+    } finally {
+      await app.close();
+    }
   });
 });
 

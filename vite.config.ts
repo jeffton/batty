@@ -59,7 +59,12 @@ export default defineConfig({
   },
   pack: {
     deps: { resolveDepSubpath: true },
-    entry: ["src/server/main.ts", "src/server/add-user.ts", "src/server/cli.ts"],
+    entry: [
+      "src/server/main.ts",
+      "src/server/add-user.ts",
+      "src/server/cli.ts",
+      "src/server/codemode-worker.ts",
+    ],
     outDir: "dist/server",
     format: ["esm"],
     target: "node24",

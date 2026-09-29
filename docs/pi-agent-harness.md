@@ -1,6 +1,6 @@
 # Pi AgentHarness integration
 
-Batty uses the pinned Pi 0.85.1 AgentHarness API. There is one execution backend.
+Batty uses the pinned Pi 0.99.1 AgentHarness API. There is one execution backend.
 
 ## Ownership
 
@@ -31,9 +31,17 @@ Write/edit mutation snapshots are committed inside tool-result details. Per-turn
 
 Prompt and queued image data remain in native storage. UI images use content-addressed attachment URLs. Image blocking affects provider projection, not persisted messages. Tool image resizing uses Pi's public image utility.
 
+## Codemode
+
+The `codemode` tool uses `@earendil-works/pi-codemode` for source parsing, declarations, and QuickJS execution. Scripts batch or chain active tools through `tools.<name>(args)` and return selected output with `text()`, `image()`, or `return`. Direct tools remain enabled. The optional `// @options:` line controls the deadline and output budget; oversized text is saved to a temporary file.
+
+Nested calls use the harness's argument validation, before/after hooks, cancellation, and scoped invocation memos. Their artifacts and call summaries are stored in the parent result, not separate model messages. Codemode is never replayed. Successful `store()` writes persist in result details and `load()` reconstructs them from the current branch, including after reopen and fork.
+
+Server builds include `codemode-worker.mjs` and `quickjs.wasm`.
+
 ## Retained patch
 
-`patches/@earendil-works__pi-agent-core@0.85.1.patch` changes the compaction cut-point selection for oversized trailing tool results. It retains their preceding assistant tool call. Native compaction tests cover the regression, compaction before the next assistant request, failed compaction, and cancellation.
+`patches/@earendil-works__pi-agent-core@0.99.1.patch` retains the assistant tool call when compaction encounters oversized trailing results, removes the read byte cap when an explicit line limit is supplied, and exposes `invocation.executeTool()` for nested calls through the native tool pipeline. Nested calls share the parent operation and use distinct invocation identities; they do not create independent transcript entries.
 
 ## Explicit boundaries
 

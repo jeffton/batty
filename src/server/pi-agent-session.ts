@@ -46,6 +46,7 @@ import type { PiModel, WebSession } from "./pi-service-types";
 import { modelKey } from "./pi-service-types";
 import { HarnessController } from "./harness-controller";
 import { HarnessSessionStore } from "./harness-session-store";
+import { createCodemodeTool } from "./codemode";
 
 export const BATTY_FIND_DEFAULT_LIMIT = 100;
 
@@ -210,6 +211,18 @@ export async function createPiAgentSession({
       adapt(tool, tool.name === "web-search" || tool.name === "subagent" ? "safe" : "never"),
     ),
   ];
+  const activeToolNames = new Set(
+    battyActivePiToolNames(
+      nativeTools.map((tool) => tool.name),
+      process.platform,
+    ),
+  );
+  nativeTools.push(
+    createCodemodeTool(
+      nativeTools.filter((tool) => activeToolNames.has(tool.name)),
+      sessionManager,
+    ),
+  );
   // Resource discovery owns validation and collision precedence. The native skill loader
   // accepts directories, not individual files, so retain the selected files directly.
   const skills = await Promise.all(
@@ -334,6 +347,7 @@ export async function createPiAgentSession({
     if ((event.details as { battyToolError?: boolean })?.battyToolError) return { isError: true };
     return undefined;
   });
+  await session.setActiveToolsByName([...new Set([...session.getActiveToolNames(), "codemode"])]);
   // Explicit per-session choices override a fork's inherited lane configuration.
   if (model) await session.setModel(model as Model<Api>);
   if (thinkingLevel) await session.setThinkingLevel(thinkingLevel as ThinkingLevel);

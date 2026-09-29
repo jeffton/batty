@@ -8,7 +8,10 @@ import {
   fauxProvider,
   type JsonObject,
 } from "@earendil-works/pi-ai";
-import { BACKGROUND_CONTEXT as context } from "@earendil-works/pi-agent-core";
+import {
+  BACKGROUND_CONTEXT as context,
+  type AgentHarnessToolInvocation,
+} from "@earendil-works/pi-agent-core";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { createPiAgentSession } from "./pi-agent-session";
@@ -68,6 +71,14 @@ async function setup(
     faux,
     session,
     config,
+    async fork(entryId: string) {
+      const { session: forked } = await createPiAgentSession({
+        ...options,
+        sessionManager: await session.sessionManager.fork(path.join(root, "sessions"), entryId),
+      });
+      sessions.push(forked);
+      return forked;
+    },
     async reopen() {
       await session.dispose();
       const { session: restored } = await createPiAgentSession({
@@ -314,5 +325,433 @@ describe("Batty native harness tools", () => {
     expect(tools.find((tool) => tool.name === "read")?.replay).toBe("safe");
     expect(tools.find((tool) => tool.name === "find")?.replay).toBe("safe");
     expect(tools.find((tool) => tool.name === "browser")?.replay).toBe("never");
+    expect(tools.find((tool) => tool.name === "codemode")?.replay).toBe("never");
+    expect(session.getActiveToolNames()).toContain("codemode");
+  });
+});
+
+describe("Codemode", () => {
+  it("chains native tools, batches reads, and preserves file changes without exposing nested output", async () => {
+    const { root, faux, session } = await setup();
+    const calls: string[] = [];
+    session.harness.hooks.on("before_tool", (event) => {
+      calls.push(event.toolName);
+      return undefined;
+    });
+    faux.setResponses([
+      toolCall("codemode", {
+        code: `
+          await tools.write({ path: "one.txt", content: "private intermediate one" });
+          await tools.write({ path: "two.txt", content: "private intermediate two" });
+          const values = await Promise.all([
+            tools.read({ path: "one.txt" }), tools.read({ path: "two.txt" })
+          ]);
+          return values.map(value => value.length);
+        `,
+      }),
+      (request) => {
+        expect(JSON.stringify(request.messages)).not.toContain('text":"private intermediate');
+        return fauxAssistantMessage("done");
+      },
+    ]);
+    await session.prompt("batch calls");
+    const results = session.messages.filter((message) => message.role === "toolResult");
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      toolName: "codemode",
+      isError: false,
+      content: expect.arrayContaining([{ type: "text", text: "[24,24]" }]),
+      details: {
+        codemode: {
+          calls: expect.arrayContaining([expect.objectContaining({ name: "read", status: "ok" })]),
+        },
+      },
+    });
+    expect(calls).toEqual(["codemode", "write", "write", "read", "read"]);
+    expect(getSessionMessagePage(session).messages.at(-1)).toMatchObject({
+      battyFileChanges: expect.arrayContaining([
+        expect.objectContaining({ path: path.join(root, "one.txt") }),
+        expect.objectContaining({ path: path.join(root, "two.txt") }),
+      ]),
+    });
+  });
+
+  it("applies argument validation, hook argument replacement, blocking, and structured results", async () => {
+    const execute = vi.fn(async (_id, { value }) => ({
+      content: [{ type: "text" as const, text: "text view" }],
+      structuredContent: { value },
+      details: {},
+    }));
+    const { faux, session } = await setup([
+      {
+        name: "probe",
+        label: "probe",
+        description: "probe",
+        parameters: Type.Object({ value: Type.String() }),
+        outputSchema: Type.Object({ value: Type.String() }),
+        execute,
+      },
+    ]);
+    session.harness.hooks.on("before_tool", (event) => {
+      if (event.toolName !== "probe") return;
+      if (event.args.value === "blocked") return { block: { reason: "blocked by hook" } };
+      return { args: { value: "replaced" } };
+    });
+    faux.setResponses([
+      toolCall("codemode", {
+        code: `return await Promise.allSettled([
+          tools.probe({}),
+          tools.probe({ value: "blocked" }),
+          tools.probe({ value: "original" })
+        ]).then(results => results.map(result => result.status === "fulfilled" ? result.value : result.reason.message));`,
+      }),
+      fauxAssistantMessage("done"),
+    ]);
+    await session.prompt("check hooks");
+    expect(execute).toHaveBeenCalledTimes(1);
+    const result = session.messages.findLast((message) => message.role === "toolResult");
+    expect(result?.content).toEqual(
+      expect.arrayContaining([
+        { type: "text", text: expect.stringContaining('"blocked by hook",{"value":"replaced"}') },
+      ]),
+    );
+  });
+
+  it("preserves partial output and file changes when a script fails", async () => {
+    const { root, faux, session } = await setup();
+    faux.setResponses([
+      toolCall("codemode", {
+        code: 'await tools.write({ path: "written.txt", content: "kept" }); text("partial"); throw new Error("script broke");',
+      }),
+      fauxAssistantMessage("handled"),
+    ]);
+    await session.prompt("failure");
+    expect(await fs.readFile(path.join(root, "written.txt"), "utf8")).toBe("kept");
+    expect(session.messages.findLast((message) => message.role === "toolResult")).toMatchObject({
+      isError: true,
+      content: expect.arrayContaining([
+        { type: "text", text: "partial" },
+        { type: "text", text: expect.stringContaining("script broke") },
+      ]),
+    });
+    expect(getSessionMessagePage(session).messages.at(-1)).toMatchObject({
+      battyFileChanges: [expect.objectContaining({ path: path.join(root, "written.txt") })],
+    });
+  });
+
+  it("reports nested tool errors and keeps direct tools enabled", async () => {
+    const { faux, session } = await setup([
+      {
+        name: "failed",
+        label: "failed",
+        description: "failed",
+        parameters: Type.Object({}),
+        execute: async () => ({
+          content: [{ type: "text" as const, text: "nested failure" }],
+          details: {},
+          isError: true,
+        }),
+      },
+    ]);
+    faux.setResponses([
+      toolCall("codemode", { code: "await tools.failed({});" }),
+      fauxAssistantMessage("handled"),
+    ]);
+    await session.prompt("failure");
+    expect(session.messages.findLast((message) => message.role === "toolResult")).toMatchObject({
+      isError: true,
+      content: expect.arrayContaining([
+        { type: "text", text: expect.stringContaining("nested failure") },
+      ]),
+    });
+    expect(session.getActiveToolNames()).toEqual(
+      expect.arrayContaining(["codemode", "read", "write", "bash"]),
+    );
+  });
+
+  it("isolates invocation identities and durable memos for concurrent nested calls", async () => {
+    const ids: string[] = [];
+    const { faux, session } = await setup([
+      {
+        name: "memo",
+        label: "memo",
+        description: "memo",
+        parameters: Type.Object({ value: Type.String() }),
+        async execute(_id, { value }, _signal, _update, ctx) {
+          const invocation = (ctx as unknown as { invocation: AgentHarnessToolInvocation })
+            .invocation;
+          ids.push(invocation.invocationId);
+          await invocation.setMemo("key", value);
+          return {
+            content: [{ type: "text" as const, text: String(await invocation.getMemo("key")) }],
+            details: {},
+          };
+        },
+      },
+    ]);
+    faux.setResponses([
+      toolCall("codemode", {
+        code: 'return await Promise.all([tools.memo({value:"one"}), tools.memo({value:"two"})]);',
+      }),
+      fauxAssistantMessage("done"),
+    ]);
+    await session.prompt("memos");
+    expect(new Set(ids).size).toBe(2);
+    expect(session.messages.findLast((message) => message.role === "toolResult")?.content).toEqual(
+      expect.arrayContaining([{ type: "text", text: '["one","two"]' }]),
+    );
+  });
+
+  it("persists successful stores across reopen and follows the forked branch", async () => {
+    const fixture = await setup();
+    fixture.faux.setResponses([
+      toolCall("codemode", { code: 'store("value", "first");' }),
+      fauxAssistantMessage("first stored"),
+    ]);
+    await fixture.session.prompt("first");
+    const firstTip = fixture.session.sessionManager.getLeafId()!;
+    fixture.faux.setResponses([
+      toolCall("codemode", { code: 'store("value", "second");' }),
+      fauxAssistantMessage("second stored"),
+    ]);
+    await fixture.session.prompt("second");
+    const fork = await fixture.fork(firstTip);
+    fixture.faux.setResponses([
+      toolCall("codemode", { code: 'return load("value");' }),
+      fauxAssistantMessage("fork read"),
+    ]);
+    await fork.prompt("read fork");
+    expect(fork.messages.findLast((message) => message.role === "toolResult")?.content).toEqual(
+      expect.arrayContaining([{ type: "text", text: '"first"' }]),
+    );
+    const restored = await fixture.reopen();
+    fixture.faux.setResponses([
+      toolCall("codemode", { code: 'store("value", "failed"); throw new Error("do not commit");' }),
+      toolCall("codemode", { code: 'return load("value");' }),
+      fauxAssistantMessage("read"),
+    ]);
+    await restored.prompt("read store");
+    expect(restored.messages.findLast((message) => message.role === "toolResult")?.content).toEqual(
+      expect.arrayContaining([{ type: "text", text: '"second"' }]),
+    );
+  });
+
+  it("uses Pi's source parser and spills output exceeding the requested budget", async () => {
+    const { faux, session } = await setup();
+    faux.setResponses([
+      toolCall("codemode", { code: '// @options: {"unknown": 1}\ntext("never");' }),
+      toolCall("codemode", {
+        code: '// @options: {"max_output_tokens": 5}\ntext("a".repeat(500));',
+      }),
+      fauxAssistantMessage("done"),
+    ]);
+    await session.prompt("options");
+    const results = session.messages.filter((message) => message.role === "toolResult");
+    expect(results[0]).toMatchObject({
+      isError: true,
+      content: [{ type: "text", text: expect.stringContaining("only supports") }],
+    });
+    const text = results[1]!.content
+      .filter((item) => item.type === "text")
+      .map((item) => item.text)
+      .join("\n");
+    expect(text).toContain("480 chars truncated");
+    const outputPath = text.split("Full output: ")[1]!;
+    try {
+      expect(await fs.readFile(outputPath, "utf8")).toBe("a".repeat(500));
+    } finally {
+      await fs.rm(path.dirname(outputPath), { recursive: true, force: true });
+    }
+  });
+
+  it("cancels nested calls when the script deadline expires", async () => {
+    let cancelled = false;
+    const { faux, session } = await setup([
+      {
+        name: "wait",
+        label: "wait",
+        description: "wait",
+        parameters: Type.Object({}),
+        async execute(_id, _args, signal) {
+          await new Promise<void>((resolve) => {
+            signal!.addEventListener(
+              "abort",
+              () => {
+                cancelled = true;
+                resolve();
+              },
+              { once: true },
+            );
+          });
+          signal!.throwIfAborted();
+          return { content: [], details: {} };
+        },
+      },
+    ]);
+    faux.setResponses([
+      toolCall("codemode", { code: '// @options: {"timeout_ms": 250}\nawait tools.wait({});' }),
+      fauxAssistantMessage("handled"),
+    ]);
+    await session.prompt("deadline");
+    expect(cancelled).toBe(true);
+    expect(session.messages.findLast((message) => message.role === "toolResult")).toMatchObject({
+      isError: true,
+    });
+  });
+
+  it.each(["deadline", "failure", "unawaited"])(
+    "settles admitted effects and preserves their artifacts after %s",
+    async (mode) => {
+      let started!: () => void;
+      const start = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      let cancelled!: () => void;
+      const cancellation = new Promise<void>((resolve) => {
+        cancelled = resolve;
+      });
+      let finish!: () => void;
+      const completion = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      let settled = false;
+      const fixture = await setup([
+        {
+          name: "slow-write",
+          label: "slow-write",
+          description: "write that has already started its external effect",
+          parameters: Type.Object({}),
+          async execute(_id, _args, signal, _update, ctx) {
+            started();
+            signal!.addEventListener("abort", cancelled, { once: true });
+            await completion;
+            const file = path.join(ctx.cwd, "late.txt");
+            await fs.writeFile(file, "late effect");
+            settled = true;
+            return {
+              content: [{ type: "text" as const, text: "written" }],
+              details: {
+                battyFileChanges: [
+                  { path: file, before: null, after: "late effect", patch: "+late effect" },
+                ],
+              },
+            };
+          },
+        },
+        {
+          name: "started",
+          label: "started",
+          description: "wait for the external effect to start",
+          parameters: Type.Object({}),
+          async execute() {
+            await start;
+            return { content: [], details: {} };
+          },
+        },
+      ]);
+      const code =
+        mode === "deadline"
+          ? '// @options: {"timeout_ms": 250}\nawait tools.slow_write({});'
+          : `tools.slow_write({}); await tools.started({}); ${mode === "failure" ? 'throw new Error("stop");' : 'return "early";'}`;
+      fixture.faux.setResponses([toolCall("codemode", { code }), fauxAssistantMessage("handled")]);
+      const run = fixture.session.prompt("settle effects");
+      try {
+        await cancellation;
+        expect(settled).toBe(false);
+        expect(fixture.session.isStreaming).toBe(true);
+      } finally {
+        finish();
+        await run;
+      }
+      expect(settled).toBe(true);
+      const file = path.join(fixture.root, "late.txt");
+      expect(getSessionMessagePage(fixture.session).messages.at(-1)).toMatchObject({
+        battyFileChanges: [expect.objectContaining({ path: file })],
+      });
+      expect(
+        (await fixture.reopen()).messages.findLast((message) => message.role === "toolResult"),
+      ).toMatchObject({
+        details: { battyFileChanges: [expect.objectContaining({ path: file })] },
+      });
+    },
+  );
+
+  it("rejects queued memo writes after their child scope expires while the parent stays active", async () => {
+    let expired!: () => void;
+    const expiry = new Promise<void>((resolve) => {
+      expired = resolve;
+    });
+    let memoCompleted!: (outcome: string) => void;
+    const memoOutcome = new Promise<string>((resolve) => {
+      memoCompleted = resolve;
+    });
+    let finish!: () => void;
+    const completion = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    let barrier: Awaited<ReturnType<HarnessSessionStore["native"]["beginMutation"]>>;
+    const fixture = await setup([
+      {
+        name: "enqueue-memo",
+        label: "enqueue-memo",
+        description: "enqueue an unawaited memo write",
+        parameters: Type.Object({}),
+        async execute(_id, _args, signal, _update, ctx) {
+          const { invocation, sessionManager } = ctx as unknown as {
+            invocation: AgentHarnessToolInvocation;
+            sessionManager: HarnessSessionStore;
+          };
+          barrier = await sessionManager.native.beginMutation(context);
+          signal!.addEventListener("abort", expired, { once: true });
+          void invocation.setMemo("key", "late").then(
+            () => memoCompleted("committed"),
+            (error) => memoCompleted(error.message),
+          );
+          return { content: [], details: {} };
+        },
+      },
+      {
+        name: "hold",
+        label: "hold",
+        description: "keep the parent script active",
+        parameters: Type.Object({}),
+        async execute() {
+          await completion;
+          return { content: [], details: {} };
+        },
+      },
+    ]);
+    fixture.faux.setResponses([
+      toolCall("codemode", { code: "await tools.enqueue_memo({}); await tools.hold({});" }),
+      fauxAssistantMessage("done"),
+    ]);
+    const run = fixture.session.prompt("memo expiry");
+    await expiry;
+    try {
+      await barrier!.end(context);
+      expect(fixture.session.isStreaming).toBe(true);
+      expect(await memoOutcome).toContain("Tool invocation no longer owns");
+    } finally {
+      finish();
+      await run;
+    }
+  });
+
+  it("aborts a spinning sandbox and activates codemode in existing sessions", async () => {
+    const fixture = await setup();
+    await fixture.session.setActiveToolsByName(["read"]);
+    const session = await fixture.reopen();
+    expect(session.getActiveToolNames()).toContain("codemode");
+    const started = new Promise<void>((resolve) =>
+      session.subscribe((event) => {
+        if (event.type === "tool_execution_start" && event.toolName === "codemode") resolve();
+      }),
+    );
+    fixture.faux.setResponses([toolCall("codemode", { code: "while (true) {}" })]);
+    const run = session.prompt("spin");
+    await started;
+    await session.abort();
+    await run;
+    expect(session.isStreaming).toBe(false);
   });
 });

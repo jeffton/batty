@@ -1,8 +1,7 @@
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
-import { BACKGROUND_CONTEXT as nativeContext, getOrThrow } from "@earendil-works/pi-agent-core";
 import { CRON_RUN_SESSION_CUSTOM_TYPE, type CronRunSessionBinding } from "./cron-session";
 import { appendResultMessages } from "./session-result-delivery";
-import type { HarnessController as AgentSession } from "./harness-controller";
+import type { AgentSessionController as AgentSession } from "./agent-session-controller";
 import type {
   CronJobSession,
   CronRunLog,
@@ -72,37 +71,96 @@ export type PiServiceCronAdapterContext = {
   notifyWorkspaceUpdated: (workspaceId: string) => Promise<void>;
 };
 
-/** The scheduler's run ID is the native operation ID, not a second execution journal. */
+export const CRON_EXECUTION_CUSTOM_TYPE = "batty-cron-execution";
+const activeCronRuns = new WeakMap<AgentSession, string>();
+const cronRunSignals = new WeakMap<AgentSession, { runId: string; signal: AbortSignal }>();
+
+export type CronExecutionResult = {
+  runId: string;
+  startEntryId: string | null;
+  endEntryId: string | null;
+  status: "running" | "completed" | "failed" | "aborted";
+  error?: string;
+};
+
+export function getCronExecutionResult(
+  session: AgentSession,
+  runId: string,
+): CronExecutionResult | undefined {
+  const entry = session.sessionManager
+    .getEntries()
+    .findLast(
+      (entry) =>
+        entry.type === "custom" &&
+        entry.customType === CRON_EXECUTION_CUSTOM_TYPE &&
+        (entry.data as CronExecutionResult).runId === runId,
+    );
+  return entry?.type === "custom" ? (entry.data as CronExecutionResult) : undefined;
+}
+
+/** Persist scheduler-owned boundaries without resuming an interrupted SDK turn. */
 export async function executeCronOperation(
   session: AgentSession,
   notice: RuntimeNotice,
-  operationId: string,
+  runId: string,
 ): Promise<void> {
-  let result = await cronOperationResult(session, operationId);
-  if (!result) {
-    const execution = await session.lane.inspectExecution(nativeContext);
-    if (execution.current && execution.current.id !== operationId) {
-      throw new Error(`Cron operation ${operationId} does not own this session`);
-    }
-    if (!execution.current) {
-      getOrThrow(
-        await session.lane.accept(
-          {
-            kind: "prompt",
-            operationId,
-            prompt: cronNoticeMessage(notice, { runId: operationId }, Date.now()),
-          },
-          nativeContext,
-        ),
-      );
-    }
-    await session.driveOperation(operationId);
-    result = await cronOperationResult(session, operationId);
+  const previous = getCronExecutionResult(session, runId);
+  if (previous) {
+    if (previous.status === "completed") return;
+    throw new Error(previous.error ?? `Cron run ${previous.status}`);
   }
-  if (!result) throw new Error(`Cron operation ${operationId} has no terminal result`);
-  if (result.status !== "completed") {
-    throw new Error(result.error?.message ?? `Cron run ${result.status}`);
+  await session.waitForIdle();
+  const startEntryId = session.sessionManager.getLeafId();
+  const record: CronExecutionResult = { runId, startEntryId, endEntryId: null, status: "running" };
+  await session.sessionManager.appendCustomEntry(CRON_EXECUTION_CUSTOM_TYPE, record);
+  activeCronRuns.set(session, runId);
+  const runSignal = cronRunSignals.get(session);
+  const signal = runSignal?.runId === runId ? runSignal.signal : undefined;
+  try {
+    signal?.throwIfAborted();
+    await session.sendCustomMessage(
+      {
+        customType: `batty-runtime-notice:${notice.kind}`,
+        content: notice.text,
+        details: { cron: { runId } },
+        display: true,
+      },
+      {
+        triggerTurn: true,
+        onAccepted: () => {
+          if (signal?.aborted) abortOwnedCron(session, runId);
+        },
+      },
+    );
+    await session.waitForIdle();
+    const assistant = findRunAssistant(session, startEntryId, session.sessionManager.getLeafId());
+    const error = finalAssistantError(assistant);
+    const status = assistant?.stopReason === "aborted" ? "aborted" : error ? "failed" : "completed";
+    await session.sessionManager.appendCustomEntry(CRON_EXECUTION_CUSTOM_TYPE, {
+      ...record,
+      endEntryId: session.sessionManager.getLeafId(),
+      status,
+      ...(error ? { error } : {}),
+    });
+    if (error) throw new Error(error);
+  } catch (error) {
+    if (getCronExecutionResult(session, runId)?.status === "running") {
+      await session.sessionManager.appendCustomEntry(CRON_EXECUTION_CUSTOM_TYPE, {
+        ...record,
+        endEntryId: session.sessionManager.getLeafId(),
+        status: signal?.aborted ? "aborted" : "failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    throw error;
+  } finally {
+    activeCronRuns.delete(session);
   }
+}
+
+function abortOwnedCron(session: AgentSession, runId: string): void {
+  if (activeCronRuns.get(session) !== runId) return;
+  void session.abort().catch((error) => console.error("Failed to stop cron run", error));
 }
 
 export async function deliverSkippedCronJobRun(
@@ -186,10 +244,9 @@ export async function runCronJobSession(
     sessionPath: cronSessionPath,
   });
 
+  cronRunSignals.set(cronWebSession.session, { runId: job.runId, signal: job.signal });
   const abortListener = () => {
-    void cronWebSession.session.lane
-      .requestAbort(job.runId, nativeContext)
-      .catch((error) => console.error("Failed to stop cron operation", error));
+    abortOwnedCron(cronWebSession.session, job.runId);
   };
   if (job.signal.aborted) {
     abortListener();
@@ -207,6 +264,7 @@ export async function runCronJobSession(
     throw error;
   } finally {
     job.signal.removeEventListener("abort", abortListener);
+    cronRunSignals.delete(cronWebSession.session);
   }
 
   const finalAssistant = await lastCronAssistant(cronWebSession.session, job.runId);
@@ -257,10 +315,9 @@ async function runInlineCronJob(
     await context.setThinkingLevel(session.id, job.thinkingLevel);
     context.publishReset(webSession, context.getState(webSession.id));
 
+    cronRunSignals.set(webSession.session, { runId: job.runId, signal: job.signal });
     const abortListener = () => {
-      void webSession.session.lane
-        .requestAbort(job.runId, nativeContext)
-        .catch((error) => console.error("Failed to stop inline cron operation", error));
+      abortOwnedCron(webSession.session, job.runId);
     };
     if (job.signal.aborted) {
       abortListener();
@@ -273,6 +330,7 @@ async function runInlineCronJob(
       await context.promptCron(session.id, cronNotice, job.runId);
     } finally {
       job.signal.removeEventListener("abort", abortListener);
+      cronRunSignals.delete(webSession.session);
     }
     return {
       sessionId: webSession.session.sessionId,
@@ -310,17 +368,22 @@ export async function deliverCronFollowup(
     binding?.type === "custom" ? (binding.data as unknown as CronRunSessionBinding) : undefined;
   if (!cronBinding?.parentSessionId) return;
 
-  const result = cronSession.snapshot.lastResult;
-  if (!result || result.operationId === cronBinding.runId) return;
-  const byId = new Map(entries.map((entry) => [entry.id, entry]));
-  const turnEntries: typeof entries = [];
-  let id = result.tipId;
-  while (id && id !== result.fromTipId) {
-    const entry = byId.get(id);
-    if (!entry) throw new Error(`Missing cron follow-up entry ${id}`);
-    turnEntries.unshift(entry);
-    id = entry.parentId;
-  }
+  const branch = cronSession.sessionManager.getBranch();
+  const boundary = branch.findLastIndex(
+    (entry) => entry.type === "custom" && entry.customType === CRON_EXECUTION_CUSTOM_TYPE,
+  );
+  if (
+    boundary >= 0 &&
+    (branch[boundary] as { data: CronExecutionResult }).data.status === "running"
+  )
+    return;
+  const followingEntries = branch.slice(boundary + 1);
+  const turnStart = followingEntries.findLastIndex(
+    (entry) =>
+      entry.type === "custom_message" ||
+      (entry.type === "message" && entry.message.role === "user"),
+  );
+  const turnEntries = followingEntries.slice(Math.max(0, turnStart));
   const reply = turnEntries.findLast(
     (entry) => entry.type === "message" && entry.message.role === "assistant",
   );
@@ -358,7 +421,7 @@ export async function deliverCronFollowup(
         role: "custom",
         customType: "batty-runtime-notice:cron",
         content: `Follow-up from detached cron session:\n${cronSession.sessionFile}`,
-        data: { cron: { sessionPath: cronSession.sessionFile } },
+        details: { cron: { sessionPath: cronSession.sessionFile } },
         timestamp,
       } as unknown as Message,
       ...deliveredSitesMessage(assistant, reply.id, timestamp + 1),
@@ -521,7 +584,7 @@ function cronNoticeMessage(
     role: "custom",
     customType: `batty-runtime-notice:${cronNotice.kind}`,
     content: cronNoticeText(cronNotice, cron),
-    data: { cron },
+    details: { cron },
     timestamp,
   } as unknown as Message;
 }
@@ -559,33 +622,41 @@ function errorAssistant(
   };
 }
 
-function cronOperationResult(session: AgentSession, operationId: string) {
-  // Pi's watch materializes the committed result before completion hooks run.
-  // This view survives disposal; only historical operations need a live lane read.
-  const result = session.snapshot.lastResult;
-  return result?.operationId === operationId
-    ? Promise.resolve(result)
-    : session.lane.getResult(operationId, nativeContext);
-}
-
-async function lastCronAssistant(
+function cronRunEntries(
   session: AgentSession,
-  operationId: string,
-): Promise<AssistantMessage | undefined> {
-  const result = await cronOperationResult(session, operationId);
-  if (!result) return undefined;
-  // The presentation index retains immutable entries after the native session closes.
+  startEntryId: string | null,
+  endEntryId: string | null,
+) {
   const entries = new Map(session.sessionManager.getEntries().map((entry) => [entry.id, entry]));
-  // Bound delivery to this operation, even if the session was copied from a parent or
-  // has since accepted another turn. The base entry itself belongs to earlier context.
   const operationEntries: ReturnType<typeof session.sessionManager.getEntries> = [];
-  let id = result.tipId;
-  while (id && id !== result.fromTipId) {
+  let id = endEntryId;
+  while (id && id !== startEntryId) {
     const entry = entries.get(id);
     if (!entry) throw new Error(`Missing cron result entry ${id}`);
     operationEntries.unshift(entry);
     id = entry.parentId;
   }
+  return operationEntries;
+}
+
+function findRunAssistant(
+  session: AgentSession,
+  startEntryId: string | null,
+  endEntryId: string | null,
+) {
+  const entry = cronRunEntries(session, startEntryId, endEntryId).findLast(
+    (entry) => entry.type === "message" && entry.message.role === "assistant",
+  );
+  return entry?.type === "message" ? (entry.message as AssistantMessage) : undefined;
+}
+
+async function lastCronAssistant(
+  session: AgentSession,
+  runId: string,
+): Promise<AssistantMessage | undefined> {
+  const result = getCronExecutionResult(session, runId);
+  if (!result || result.status === "running") return undefined;
+  const operationEntries = cronRunEntries(session, result.startEntryId, result.endEntryId);
 
   const artifactsByReplyEntryId = agentTurnArtifactsByReplyEntryId(operationEntries);
   const finalEntry = operationEntries.findLast(

@@ -1,247 +1,36 @@
-diff --git a/dist/harness/compaction/compaction.js b/dist/harness/compaction/compaction.js
-index d430a3f966cc9624cc2e78638fd207a83a75b312..0b66e68d06cda0a9a7c461d97c5b2081c94662b4 100644
---- a/dist/harness/compaction/compaction.js
-+++ b/dist/harness/compaction/compaction.js
-@@ -264,12 +264,18 @@ export function findCutPoint(entries, startIndex, endIndex, keepRecentTokens) {
-         const messageTokens = estimateTokens(entry.message);
-         accumulatedTokens += messageTokens;
-         if (accumulatedTokens >= keepRecentTokens) {
-+            let foundCutPoint = false;
-             for (let c = 0; c < cutPoints.length; c++) {
-                 if (cutPoints[c] >= i) {
-                     cutIndex = cutPoints[c];
-+                    foundCutPoint = true;
-                     break;
-                 }
-             }
-+            // Trailing tool results stay with their preceding assistant call.
-+            if (!foundCutPoint) {
-+                cutIndex = cutPoints[cutPoints.length - 1];
-+            }
-             break;
-         }
+diff --git a/dist/agent.d.ts b/dist/agent.d.ts
+index 2429a213b6a95642effca6eec34a2772aabfec41..0f6bcc76cd17a7c9e40a397225273aa4d64aede8 100644
+--- a/dist/agent.d.ts
++++ b/dist/agent.d.ts
+@@ -91,6 +91,8 @@ export declare class Agent {
+     /** Queue a message to run only after the agent would otherwise stop. */
+     followUp(message: AgentMessage): void;
+     /** Remove all queued steering messages. */
++    getQueuedMessages(kind: "steer" | "followUp"): readonly AgentMessage[];
++    removeQueuedMessage(kind: "steer" | "followUp", index: number): AgentMessage | undefined;
+     clearSteeringQueue(): void;
+     /** Remove all queued follow-up messages. */
+     clearFollowUpQueue(): void;
+diff --git a/dist/agent.js b/dist/agent.js
+index a8ccfc0bd9bd84895b5f158c9dfa328e65f200ca..53e12732fd60c1bdb52beaf943321a4179141c36 100644
+--- a/dist/agent.js
++++ b/dist/agent.js
+@@ -188,6 +188,18 @@ export class Agent {
+     followUp(message) {
+         this.followUpQueue.enqueue(message);
      }
-diff --git a/dist/harness/runtime/drive/tools.js b/dist/harness/runtime/drive/tools.js
-index 237cc525a4c8e8e8307770838f6f05e07fd8a5d5..ace727da64da3366904e1e7dc6164f0863b925b9 100644
---- a/dist/harness/runtime/drive/tools.js
-+++ b/dist/harness/runtime/drive/tools.js
-@@ -34,28 +34,48 @@ function validateMemoName(name) {
-     if (name.includes(":"))
-         throw new TypeError("Tool invocation memo name must not contain ':'");
- }
--function invocationCapability(lane, drive, batch, call) {
-+function invocationCapability(lane, drive, batch, call, toolContext) {
-     let active = true;
-     const ownsEffect = (state) => {
-         const operation = state.operation;
--        if (operation?.state.at !== "tools")
-+        if (operation?.meta.operationId !== drive.operationId || operation.state.at !== "tools")
-             return false;
-         return findCall(operation.state.batch, call.sourceIndex, call.resultEntryId)?.status === "effect_pending";
-     };
-     const ended = () => new ToolInvocationEnded();
--    return {
--        invocation: {
--            invocationId: call.resultEntryId,
--            operationId: drive.operationId,
--            turnId: batch.turnId,
-+    const controller = new AbortController();
-+    const gate = {
-+        signal: AbortSignal.any([drive.gate.signal, controller.signal]),
-+        admit(invoke) {
-+            return drive.gate.admit(() => {
-+                if (!active || !ownsEffect(lane.state))
-+                    throw ended();
-+                this.signal.throwIfAborted();
-+                return invoke();
-+            });
-+        },
-+    };
-+    function memoScopeError(state, scopeGate) {
-+        if (!active || !ownsEffect(state))
-+            return ended();
-+        try {
-+            scopeGate?.admit(() => undefined);
-+        }
-+        catch (error) {
-+            return error;
-+        }
++    /** Snapshot all pending messages in one queue, independent of drain mode. */
++    getQueuedMessages(kind) {
++        const queue = kind === "steer" ? this.steeringQueue : this.followUpQueue;
++        return queue.messages.slice();
 +    }
-+    function scopedMemos(prefix, scopeGate) {
-+        return {
-             getMemo(name) {
-                 validateMemoName(name);
-                 if (!active)
-                     return Promise.reject(ended());
-                 return lane.command(async (state, reader) => {
--                    if (!ownsEffect(state))
--                        return { kind: "reject", error: ended() };
--                    const stored = await reader.getValue(operationToolMemo(drive.operationId, call.resultEntryId, name), drive.context);
-+                    const error = memoScopeError(state, scopeGate);
-+                    if (error !== undefined)
-+                        return { kind: "reject", error };
-+                    const stored = await reader.getValue(operationToolMemo(drive.operationId, call.resultEntryId, `${prefix}${name}`), drive.context);
-                     return { kind: "return", result: stored?.value };
-                 }, drive.context);
-             },
-@@ -64,9 +84,10 @@ function invocationCapability(lane, drive, batch, call) {
-                 if (!active)
-                     return Promise.reject(ended());
-                 return lane.command((state) => {
--                    if (!ownsEffect(state))
--                        return { kind: "reject", error: ended() };
--                    const address = operationToolMemo(drive.operationId, call.resultEntryId, name);
-+                    const error = memoScopeError(state, scopeGate);
-+                    if (error !== undefined)
-+                        return { kind: "reject", error };
-+                    const address = operationToolMemo(drive.operationId, call.resultEntryId, `${prefix}${name}`);
-                     return {
-                         kind: "commit",
-                         writes: [value === undefined ? deleteValue(address) : setValue(address, value)],
-@@ -75,9 +96,95 @@ function invocationCapability(lane, drive, batch, call) {
-                     };
-                 }, drive.context);
-             },
--        },
-+        };
++    /** Remove one pending message without changing the remaining queue. */
++    removeQueuedMessage(kind, index) {
++        const queue = kind === "steer" ? this.steeringQueue : this.followUpQueue;
++        if (!Number.isInteger(index) || index < 0 || index >= queue.messages.length)
++            return undefined;
++        return queue.messages.splice(index, 1)[0];
 +    }
-+    function addDispatcher(invocation, parentGate, memoPrefix) {
-+        let nextChild = 0;
-+        invocation.executeTool = async (name, args, options = {}) => {
-+            parentGate.admit(() => undefined);
-+            const index = ++nextChild;
-+            const childController = new AbortController();
-+            let childActive = true;
-+            const childGate = {
-+                signal: AbortSignal.any([
-+                    parentGate.signal,
-+                    childController.signal,
-+                    ...(options.signal === undefined ? [] : [options.signal]),
-+                ]),
-+                admit(invoke) {
-+                    return parentGate.admit(() => {
-+                        if (!childActive)
-+                            throw ended();
-+                        this.signal.throwIfAborted();
-+                        return invoke();
-+                    });
-+                },
-+            };
-+            const child = {
-+                invocationId: `${invocation.invocationId}.${index}`,
-+                operationId: invocation.operationId,
-+                turnId: invocation.turnId,
-+                ...scopedMemos(`${memoPrefix}nested-${index}.`, childGate),
-+            };
-+            addDispatcher(child, childGate, `${memoPrefix}nested-${index}.`);
-+            try {
-+                const toolCall = { type: "toolCall", id: child.invocationId, name, arguments: args };
-+                const activeTools = new Set(batch.configuration.activeToolNames);
-+                const tools = lane.readConfig().tools.filter((tool) => activeTools.has(tool.name));
-+                const prepared = childGate.admit(() => prepareToolCall(toolCall, tools));
-+                if ("kind" in prepared)
-+                    return { ...prepared.result, isError: prepared.isError, terminate: prepared.terminate };
-+                const event = {
-+                    lane: lane.name,
-+                    runId: drive.operationId,
-+                    toolCallId: toolCall.id,
-+                    toolName: name,
-+                    args: prepared.args,
-+                };
-+                const decision = await lane.hooks.runToolWithGate("before_tool", event, childGate, drive.context);
-+                const cleared = childGate.admit(() => applyBeforeToolDecision(prepared, decision));
-+                if ("kind" in cleared)
-+                    return { ...cleared.result, isError: cleared.isError, terminate: cleared.terminate };
-+                const executed = await executeToolCall(cleared, childGate, (partial, updateOptions) => {
-+                    if (childActive && !childGate.signal.aborted)
-+                        options.onUpdate?.(partial, updateOptions);
-+                }, toolContext, child, drive.context);
-+                let patch;
-+                try {
-+                    patch = await lane.hooks.runToolWithGate("after_tool", {
-+                        ...event,
-+                        args: cleared.args,
-+                        content: executed.result.content,
-+                        ...(executed.result.details === undefined ? {} : { details: executed.result.details }),
-+                        isError: executed.isError,
-+                        ...(executed.result.usage === undefined ? {} : { usage: executed.result.usage }),
-+                    }, childGate, drive.context);
-+                }
-+                catch (error) {
-+                    if (!childGate.signal.aborted)
-+                        throw error;
-+                }
-+                const finalized = finalizeToolCall(cleared, executed, patch);
-+                return { ...finalized.result, isError: finalized.isError, terminate: finalized.terminate };
-+            }
-+            finally {
-+                childActive = false;
-+                childController.abort(ended());
-+            }
-+        };
-+    }
-+    const invocation = {
-+        invocationId: call.resultEntryId,
-+        operationId: drive.operationId,
-+        turnId: batch.turnId,
-+        ...scopedMemos("", undefined),
-+    };
-+    addDispatcher(invocation, gate, "");
-+    return {
-+        invocation,
-         expire() {
-             active = false;
-+            controller.abort(ended());
-         },
-     };
- }
-@@ -238,7 +345,7 @@ async function resolveToolContext(lane, drive) {
-     return (typeof source === "function" ? await source(drive.context) : source);
- }
- async function performToolInvocation(lane, drive, batch, call, cleared, toolContext, recovery) {
--    const capability = invocationCapability(lane, drive, batch, call);
-+    const capability = invocationCapability(lane, drive, batch, call, toolContext);
-     const progress = openToolProgress(lane, drive, batch.turnId, call.sourceIndex, call.resultEntryId);
-     let latestUpdateDelivery = Promise.resolve();
-     const publishUpdate = (partial) => {
-diff --git a/dist/harness/tools/read.js b/dist/harness/tools/read.js
-index c78086d084b5dacd2021aec15ec919c9f7f45ad7..d57aa09314c2d04c994eed7a049b8e868c6dd59c 100644
---- a/dist/harness/tools/read.js
-+++ b/dist/harness/tools/read.js
-@@ -12,7 +12,7 @@ export function createReadTool(options) {
-     return {
-         name: "read",
-         label: "read",
--        description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.`,
-+        description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, reads without an explicit limit are truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). An explicit limit sets the maximum lines returned and removes the byte cap. Use offset/limit for large files. When you need the full file, continue with offset until complete.`,
-         parameters: readSchema,
-         async execute(_toolCallId, { path, offset, limit }, _onUpdate, { env }, _invocation, context) {
-             const absolutePath = await resolveReadToolPath(env, path, context);
-@@ -73,7 +73,10 @@ export function createReadTool(options) {
-             else {
-                 selectedContent = allLines.slice(startLine).join("\n");
-             }
--            const truncation = truncateHead(selectedContent);
-+            const truncation = truncateHead(selectedContent, {
-+                maxBytes: limit !== undefined ? Infinity : DEFAULT_MAX_BYTES,
-+                maxLines: limit !== undefined ? Infinity : DEFAULT_MAX_LINES,
-+            });
-             let outputText;
-             let details;
-             if (truncation.firstLineExceedsLimit) {
-diff --git a/dist/harness/types.d.ts b/dist/harness/types.d.ts
-index 847e22c47d13b470afca96d94fefda276ec6af48..6900967654a8376011a3bd096f211536034f6a63 100644
---- a/dist/harness/types.d.ts
-+++ b/dist/harness/types.d.ts
-@@ -69,6 +69,11 @@ export interface AgentHarnessToolInvocation {
-     readonly invocationId: string;
-     readonly operationId: string;
-     readonly turnId: string;
-+    /** Execute an active tool within this invocation, without separate transcript entries. */
-+    executeTool(name: string, args: unknown, options?: {
-+        signal?: AbortSignal;
-+        onUpdate?: AgentHarnessToolUpdateCallback<unknown>;
-+    }): Promise<AgentToolResult<unknown> & { isError: boolean }>;
-     /** Read one invocation-scoped durable replay memo. */
-     getMemo(name: string): Promise<JsonValue | undefined>;
-     /** Set or delete one invocation-scoped durable replay memo. */
+     /** Remove all queued steering messages. */
+     clearSteeringQueue() {
+         this.steeringQueue.clear();

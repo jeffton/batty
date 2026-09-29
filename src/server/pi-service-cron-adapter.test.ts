@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import type { HarnessController as AgentSession } from "./harness-controller";
+import type { AgentSessionController as AgentSession } from "./agent-session-controller";
 import type { WebSession } from "./pi-service-types";
 import { deliverCronFollowup, runCronJobSession } from "./pi-service-cron-adapter";
 
@@ -29,25 +29,30 @@ function createSession(
         .messages;
     },
     agent: { state: { messages } },
+    sdk: { refreshContext: vi.fn() },
     waitForIdle: vi.fn(async () => undefined),
-    snapshot: { queues: [] },
-    lane: {
-      appendMessage: async (message: AgentMessage) => {
-        messages.push(message);
-      },
-      getResult: async () => ({
-        tipId: session.messages.length ? String(session.messages.length - 1) : null,
-        fromTipId: operationBaseEntryId,
-      }),
-    },
+
     sessionManager: {
-      getEntries: () =>
-        session.messages.map((message, index) => ({
+      getEntries: () => [
+        ...session.messages.map((message, index) => ({
           id: String(index),
           type: "message",
           message,
           parentId: index > 0 ? String(index - 1) : null,
         })),
+        {
+          id: "execution",
+          type: "custom",
+          customType: "batty-cron-execution",
+          data: {
+            runId: "run-1",
+            startEntryId: operationBaseEntryId,
+            endEntryId: session.messages.length ? String(session.messages.length - 1) : null,
+            status: "completed",
+          },
+        },
+      ],
+      getBranch: () => session.sessionManager.getEntries(),
       native: {
         findEntries: async () => messages.map((message) => ({ type: "message", message })),
         getEntry: async (id: string) => ({
@@ -56,7 +61,7 @@ function createSession(
           parentId: Number(id) > 0 ? String(Number(id) - 1) : null,
         }),
       },
-      appendMessage(message: AgentMessage) {
+      async appendMessage(message: AgentMessage) {
         messages.push(message);
       },
     },
@@ -344,7 +349,7 @@ describe("runCronJobSession", () => {
         },
         {
           jobId: "job-1",
-          runId: "run-no-reply",
+          runId: "run-1",
           workspace: parent.workspace,
           prompt: "Run heartbeat",
           model: "openai-codex/gpt-5.5",
@@ -422,7 +427,7 @@ describe("deliverCronFollowup", () => {
           role: "custom",
           customType: "batty-runtime-notice:subagent",
           content: "Async subagent completed",
-          data: {
+          details: {
             subagent: { sessionId: "child-id" },
             sentFiles:
               answer === "NO_REPLY"
@@ -488,11 +493,6 @@ describe("deliverCronFollowup", () => {
           timestamp: 3,
         },
       ];
-      cron.session.snapshot.lastResult = {
-        operationId: "followup-1",
-        fromTipId: "binding",
-        tipId: "reply-3",
-      } as never;
       vi.spyOn(cron.session.sessionManager, "getEntries").mockImplementation(
         () =>
           [
@@ -545,26 +545,32 @@ describe("deliverCronFollowup", () => {
         });
       }
       expect(publishReset).toHaveBeenCalledTimes(answer === "NO_REPLY" ? 0 : 1);
+      expect(parent.session.sdk.refreshContext).toHaveBeenCalledTimes(
+        answer === "NO_REPLY" ? 0 : 1,
+      );
 
-      // A steered subagent result can finish in the original cron operation.
-      cron.session.snapshot.lastResult = {
-        operationId: "run-1",
-        fromTipId: "binding",
-        tipId: "reply-3",
-      } as never;
+      // A steered subagent result in an active cron turn is delivered with that run.
+      const entries = cron.session.sessionManager.getEntries();
+      vi.spyOn(cron.session.sessionManager, "getEntries").mockReturnValue([
+        ...entries,
+        {
+          id: "execution",
+          type: "custom",
+          customType: "batty-cron-execution",
+          data: { runId: "run-1", status: "running", startEntryId: null, endEntryId: null },
+        },
+      ] as ReturnType<AgentSession["sessionManager"]["getEntries"]>);
       await deliverCronFollowup(context, parent.workspace, cron.session);
       expect(parent.session.messages).toHaveLength(answer === "NO_REPLY" ? 0 : 4);
+      expect(parent.session.sdk.refreshContext).toHaveBeenCalledTimes(
+        answer === "NO_REPLY" ? 0 : 1,
+      );
     },
   );
 
   it("forwards a regular cron-session reply without an async subagent", async () => {
     const parent = createWebSession("daily-session-id", "/tmp/daily-session.jsonl");
     const cron = createWebSession("cron-session-id", "/tmp/cron-session.jsonl");
-    cron.session.snapshot.lastResult = {
-      operationId: "manual-followup",
-      fromTipId: "binding",
-      tipId: "answer",
-    } as never;
     vi.spyOn(cron.session.sessionManager, "getEntries").mockReturnValue([
       {
         id: "binding",
@@ -618,5 +624,6 @@ describe("deliverCronFollowup", () => {
       role: "assistant",
       content: [{ type: "text", text: "The update" }],
     });
+    expect(parent.session.sdk.refreshContext).toHaveBeenCalledTimes(1);
   });
 });

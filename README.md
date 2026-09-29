@@ -25,7 +25,7 @@ Batty is a web UI for [Pi Coding Agent](https://pi.dev). It keeps Pi's workspace
 
 ## How it works
 
-Batty runs a Fastify server and a Vue client. Pi AgentHarness owns agent execution and durable session state:
+Batty runs a Fastify server and a Vue client. Pi AgentSession owns agent execution and SessionManager owns durable session history:
 
 - models come from Pi's model registry
 - global agent resources come from `<batty-root>/.batty/`
@@ -46,9 +46,9 @@ Batty adds a browser-native layer on top:
 
 ### Restart behavior
 
-A coordinated deployment drains active turns: it rejects new turns and pauses cron scheduling while active descendants and result deliveries finish. After a crash or interrupted restart, opening a session aborts its open turn; Batty does not resume operations after startup. See [the harness integration](docs/pi-agent-harness.md) for implementation boundaries.
+A coordinated deployment drains active turns: it rejects new turns and pauses cron scheduling while active descendants and result deliveries finish. Queues and in-flight execution are process-local; interrupted work is not resumed after startup. See [the AgentSession integration](docs/pi-agent-session.md) for implementation boundaries and the Harness comparison.
 
-Coding-agent extensions must use native harness hooks and tools; configured coding-agent extensions produce an explicit error.
+Configured coding-agent extensions run in Pi's headless SDK context. Terminal dialogs and widgets are not exposed in the web UI. Codemode uses Pi's built-in extension; MCP is not configured.
 
 ## Quick start
 
@@ -237,7 +237,7 @@ Example model defaults:
 }
 ```
 
-Creating a harness session requires an explicit model selection or a configured default provider/model pair.
+Creating a session requires an explicit model selection or a configured default provider/model pair.
 
 ### Browser routing through a Tailscale node
 

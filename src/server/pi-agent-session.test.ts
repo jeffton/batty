@@ -1,32 +1,19 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import {
-  createModels,
-  fauxAssistantMessage,
-  fauxProvider,
-  type JsonObject,
-} from "@earendil-works/pi-ai";
-import {
-  BACKGROUND_CONTEXT as context,
-  type AgentHarnessToolInvocation,
-} from "@earendil-works/pi-agent-core";
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { fauxAssistantMessage, type JsonObject } from "@earendil-works/pi-ai";
+import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { createAgentSessionFixture } from "./agent-session-test-fixture";
 import { Type } from "typebox";
 import { createPiAgentSession } from "./pi-agent-session";
-import { HarnessSessionStore } from "./harness-session-store";
-import type { HarnessController } from "./harness-controller";
 import { environmentFilePath, type AppConfig } from "./config";
 import { getSessionMessagePage } from "./pi-service-message-page";
 import { battyAgentDir } from "./pi-paths";
 
-const roots: string[] = [];
-const sessions: HarnessController[] = [];
-const key = `BATTY_HARNESS_ENV_${process.pid}`;
+const fixtures: Awaited<ReturnType<typeof createAgentSessionFixture>>[] = [];
+const key = `BATTY_AGENT_SESSION_ENV_${process.pid}`;
 afterEach(async () => {
-  for (const session of sessions.splice(0)) await session.dispose();
-  for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true });
+  for (const fixture of fixtures.splice(0)) await fixture.cleanup();
   delete process.env[key];
   vi.restoreAllMocks();
 });
@@ -34,68 +21,64 @@ afterEach(async () => {
 async function setup(
   customTools: Parameters<typeof createPiAgentSession>[0]["customTools"] = [],
   prepare?: (root: string, config: AppConfig) => Promise<void>,
+  extensionFactories?: ExtensionFactory[],
 ) {
-  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "batty-harness-tools-")));
-  roots.push(root);
-  const faux = fauxProvider();
-  const models = createModels();
-  models.setProvider(faux.provider);
-  const workspace = {
-    id: "test",
-    path: root,
-    label: "Test",
-    kind: "workspace" as const,
-    isPinned: false,
-    isAssistant: false,
-  };
-  const config = {
-    battyDir: path.join(root, "data"),
-    selfPath: root,
-    defaultProvider: "faux",
-    defaultModel: faux.getModel().id,
-    defaultThinkingLevel: "off",
-    cronDailySessionStartTime: "00:00",
-  } as AppConfig;
-  await prepare?.(root, config);
-  const options = {
-    config,
-    workspace,
-    sessionManager: await HarnessSessionStore.create(root, path.join(root, "sessions")),
-    modelRuntime: models as unknown as ModelRuntime,
-    customTools,
-  };
-  const { session } = await createPiAgentSession(options);
-  sessions.push(session);
-  return {
-    root,
-    faux,
-    session,
-    config,
-    async fork(entryId: string) {
-      const { session: forked } = await createPiAgentSession({
-        ...options,
-        sessionManager: await session.sessionManager.fork(path.join(root, "sessions"), entryId),
-      });
-      sessions.push(forked);
-      return forked;
-    },
-    async reopen() {
-      await session.dispose();
-      const { session: restored } = await createPiAgentSession({
-        ...options,
-        sessionManager: await HarnessSessionStore.open(session.sessionFile),
-      });
-      sessions.push(restored);
-      return restored;
-    },
-  };
+  const fixture = await createAgentSessionFixture({
+    tools: customTools,
+    prepare,
+    extensionFactories,
+  });
+  fixtures.push(fixture);
+  return fixture;
 }
 
 function toolCall(name: string, args: JsonObject) {
   return fauxAssistantMessage([{ type: "toolCall", id: "call", name, arguments: args }]);
 }
 
-describe("Batty native harness tools", () => {
+describe("Batty native AgentSession tools", () => {
+  it.each(["write", "codemode"])(
+    "persists completed writes when %s is cancelled during filesystem execution",
+    async (name) => {
+      const { root, faux, session } = await setup();
+      const file = path.join(root, "cancelled-write.txt");
+      const write = fs.writeFile.bind(fs);
+      let stopped!: Promise<void>;
+      vi.spyOn(fs, "writeFile").mockImplementation(async (...args) => {
+        await write(...args);
+        if (args[0] === file) stopped = session.abort();
+      });
+      faux.setResponses([
+        toolCall(
+          name,
+          name === "write"
+            ? { path: file, content: "completed mutation\n" }
+            : {
+                code: `await tools.write(${JSON.stringify({ path: file, content: "completed mutation\n" })});`,
+              },
+        ),
+      ]);
+      await session.prompt("write then cancel");
+      await stopped;
+      expect(await fs.readFile(file, "utf8")).toBe("completed mutation\n");
+      const result = session.sessionManager
+        .getBranch()
+        .findLast(
+          (entry) =>
+            entry.type === "message" &&
+            entry.message.role === "toolResult" &&
+            entry.message.toolName === name,
+        );
+      expect(result).toMatchObject({
+        message: {
+          isError: true,
+          details: {
+            battyFileChanges: [{ path: file, before: null, after: "completed mutation\n" }],
+          },
+        },
+      });
+    },
+  );
   it("reloads environment and supplies current session metadata to every shell invocation", async () => {
     const { config, faux, session } = await setup();
     await fs.mkdir(path.dirname(environmentFilePath(config.battyDir)), { recursive: true });
@@ -156,15 +139,11 @@ describe("Batty native harness tools", () => {
     ]);
     await session.prompt("edit the file");
     expect(steered).toBe(true);
-    expect(session.messages.map((message) => message.role)).toEqual([
-      "user",
-      "assistant",
-      "toolResult",
-      "user",
-      "assistant",
-      "toolResult",
-      "assistant",
-    ]);
+    expect(
+      session.messages
+        .filter((message) => message.role !== "system")
+        .map((message) => message.role),
+    ).toEqual(["user", "assistant", "toolResult", "user", "assistant", "toolResult", "assistant"]);
     const expected = {
       battyFileChanges: [
         { path: path.join(root, "example.txt"), patch: expect.stringContaining("-before") },
@@ -179,6 +158,61 @@ describe("Batty native harness tools", () => {
     faux.setResponses([fauxAssistantMessage("nothing changed")]);
     await restored.prompt("just answer");
     expect(getSessionMessagePage(restored).messages.at(-1)).not.toHaveProperty("battyFileChanges");
+  });
+
+  it("expands home-relative configured extension paths before checking and loading them", async () => {
+    const homeKey = process.platform === "win32" ? "USERPROFILE" : "HOME";
+    const home = process.env[homeKey];
+    try {
+      const { root, session } = await setup([], async (root) => {
+        process.env[homeKey] = root;
+        await fs.mkdir(path.join(root, ".batty"), { recursive: true });
+        await fs.writeFile(
+          path.join(root, ".batty", "settings.json"),
+          JSON.stringify({ extensions: ["~/home-probe.js"] }),
+        );
+        await fs.writeFile(path.join(root, "home-probe.js"), "export default function () {}\n");
+      });
+      expect(
+        session.resourceLoader
+          .getExtensions()
+          .extensions.map((extension) => extension.resolvedPath),
+      ).toContain(path.join(root, "home-probe.js"));
+    } finally {
+      if (home === undefined) delete process.env[homeKey];
+      else process.env[homeKey] = home;
+    }
+  });
+
+  it("runs a configured coding-agent extension through native SDK hooks and tools", async () => {
+    const { faux, session } = await setup([], async (root) => {
+      const extensions = path.join(root, ".batty", "extensions");
+      await fs.mkdir(extensions, { recursive: true });
+      await fs.writeFile(
+        path.join(extensions, "probe.js"),
+        `export default function (pi) {
+  pi.registerTool({
+    name: "configured-probe",
+    label: "Configured probe",
+    description: "A configured extension tool",
+    parameters: { type: "object", properties: {} },
+    async execute() {
+      return { content: [{ type: "text", text: "configured extension" }], details: { native: true } };
+    },
+  });
+  pi.on("tool_result", (event) => event.toolName === "configured-probe"
+    ? { details: { ...event.details, hook: true } }
+    : undefined);
+}`,
+      );
+    });
+    expect(session.getActiveToolNames()).toContain("configured-probe");
+    faux.setResponses([toolCall("configured-probe", {}), fauxAssistantMessage("done")]);
+    await session.prompt("extension work");
+    expect(session.messages.findLast((message) => message.role === "toolResult")).toMatchObject({
+      content: [{ type: "text", text: "configured extension" }],
+      details: { native: true, hook: true },
+    });
   });
 
   it.each(["shared", "Invalid-Name"])(
@@ -217,11 +251,10 @@ describe("Batty native harness tools", () => {
           "Pi resource diagnostic",
           expect.objectContaining({ type: "warning" }),
         );
-      expect((await session.harness.getResources(context)).skills).toEqual([
+      expect(session.sdk.resourceLoader.getSkills().skills).toEqual([
         expect.objectContaining({
           name,
           filePath: globalSkill,
-          content: expect.stringContaining("Global instructions"),
         }),
       ]);
       faux.setResponses([
@@ -255,9 +288,9 @@ describe("Batty native harness tools", () => {
     });
   });
 
-  it("stores tool images as files while preserving provider image input", async () => {
+  it("preserves native tool image input across reopening", async () => {
     const imageData =
-      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+XZRqWQAAAABJRU5ErkJggg==";
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=";
     const { faux, session, reopen } = await setup([
       {
         name: "custom-image",
@@ -279,14 +312,15 @@ describe("Batty native harness tools", () => {
     faux.setResponses([toolCall("custom-image", {}), fauxAssistantMessage("done")]);
     await session.prompt("work");
     const stored = await fs.readFile(session.sessionFile, "utf8");
-    expect(stored).toContain("batty-file:");
-    expect(stored).not.toContain(imageData);
+    expect(stored).toContain(imageData);
     expect(JSON.stringify(session.messages)).toContain('"type":"image"');
     const restored = await reopen();
     expect(JSON.stringify(restored.messages)).toContain('"type":"image"');
   });
 
   it("blocks image transmission without removing durable prompt images", async () => {
+    const imageData =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=";
     const { faux, session } = await setup();
     session.settingsManager.setBlockImages(true);
     faux.setResponses([
@@ -297,15 +331,14 @@ describe("Batty native harness tools", () => {
       },
     ]);
     await session.prompt("image", {
-      images: [{ type: "image", mimeType: "image/png", data: "aGVsbG8=" }],
+      images: [{ type: "image", mimeType: "image/png", data: imageData }],
     });
     expect(JSON.stringify(session.messages)).toContain('"type":"image"');
     const stored = await fs.readFile(session.sessionFile, "utf8");
-    expect(stored).toContain("batty-file:");
-    expect(stored).not.toContain("aGVsbG8=");
+    expect(stored).toContain(imageData);
   });
 
-  it("advertises explicit replay policy and Batty's complete tool set", async () => {
+  it("advertises Batty's complete native tool set", async () => {
     const { session } = await setup([
       {
         name: "browser",
@@ -318,26 +351,23 @@ describe("Batty native harness tools", () => {
         }),
       },
     ]);
-    const tools = await session.harness.getTools(context);
     expect(session.getActiveToolNames()).toEqual(
       expect.arrayContaining(["read", "write", "edit", "bash", "find", "grep", "browser"]),
     );
-    expect(tools.find((tool) => tool.name === "read")?.replay).toBe("safe");
-    expect(tools.find((tool) => tool.name === "find")?.replay).toBe("safe");
-    expect(tools.find((tool) => tool.name === "browser")?.replay).toBe("never");
-    expect(tools.find((tool) => tool.name === "codemode")?.replay).toBe("never");
     expect(session.getActiveToolNames()).toContain("codemode");
   });
 });
 
 describe("Codemode", () => {
   it("chains native tools, batches reads, and preserves file changes without exposing nested output", async () => {
-    const { root, faux, session } = await setup();
     const calls: string[] = [];
-    session.harness.hooks.on("before_tool", (event) => {
-      calls.push(event.toolName);
-      return undefined;
-    });
+    const { root, faux, session } = await setup([], undefined, [
+      (pi) => {
+        pi.on("tool_call", (event) => {
+          calls.push(event.toolName);
+        });
+      },
+    ]);
     faux.setResponses([
       toolCall("codemode", {
         code: `
@@ -362,9 +392,7 @@ describe("Codemode", () => {
       isError: false,
       content: expect.arrayContaining([{ type: "text", text: "[24,24]" }]),
       details: {
-        codemode: {
-          calls: expect.arrayContaining([expect.objectContaining({ name: "read", status: "ok" })]),
-        },
+        calls: expect.arrayContaining([expect.objectContaining({ name: "read", status: "ok" })]),
       },
     });
     expect(calls).toEqual(["codemode", "write", "write", "read", "read"]);
@@ -382,21 +410,29 @@ describe("Codemode", () => {
       structuredContent: { value },
       details: {},
     }));
-    const { faux, session } = await setup([
-      {
-        name: "probe",
-        label: "probe",
-        description: "probe",
-        parameters: Type.Object({ value: Type.String() }),
-        outputSchema: Type.Object({ value: Type.String() }),
-        execute,
-      },
-    ]);
-    session.harness.hooks.on("before_tool", (event) => {
-      if (event.toolName !== "probe") return;
-      if (event.args.value === "blocked") return { block: { reason: "blocked by hook" } };
-      return { args: { value: "replaced" } };
-    });
+    const { faux, session } = await setup(
+      [
+        {
+          name: "probe",
+          label: "probe",
+          description: "probe",
+          parameters: Type.Object({ value: Type.String() }),
+          outputSchema: Type.Object({ value: Type.String() }),
+          execute,
+        },
+      ],
+      undefined,
+      [
+        (pi) => {
+          pi.on("tool_call", (event) => {
+            if (event.toolName !== "probe") return;
+            if (event.input.value === "blocked") return { block: true, reason: "blocked by hook" };
+            event.input.value = "replaced";
+          });
+        },
+      ],
+    );
+
     faux.setResponses([
       toolCall("codemode", {
         code: `return await Promise.allSettled([
@@ -469,33 +505,27 @@ describe("Codemode", () => {
     );
   });
 
-  it("isolates invocation identities and durable memos for concurrent nested calls", async () => {
+  it("assigns distinct native tool call IDs to concurrent nested calls", async () => {
     const ids: string[] = [];
     const { faux, session } = await setup([
       {
-        name: "memo",
-        label: "memo",
-        description: "memo",
+        name: "identity",
+        label: "identity",
+        description: "identity",
         parameters: Type.Object({ value: Type.String() }),
-        async execute(_id, { value }, _signal, _update, ctx) {
-          const invocation = (ctx as unknown as { invocation: AgentHarnessToolInvocation })
-            .invocation;
-          ids.push(invocation.invocationId);
-          await invocation.setMemo("key", value);
-          return {
-            content: [{ type: "text" as const, text: String(await invocation.getMemo("key")) }],
-            details: {},
-          };
+        async execute(id, { value }) {
+          ids.push(id);
+          return { content: [{ type: "text", text: value }], details: {} };
         },
       },
     ]);
     faux.setResponses([
       toolCall("codemode", {
-        code: 'return await Promise.all([tools.memo({value:"one"}), tools.memo({value:"two"})]);',
+        code: 'return await Promise.all([tools.identity({value:"one"}), tools.identity({value:"two"})]);',
       }),
       fauxAssistantMessage("done"),
     ]);
-    await session.prompt("memos");
+    await session.prompt("identities");
     expect(new Set(ids).size).toBe(2);
     expect(session.messages.findLast((message) => message.role === "toolResult")?.content).toEqual(
       expect.arrayContaining([{ type: "text", text: '["one","two"]' }]),
@@ -522,7 +552,7 @@ describe("Codemode", () => {
     ]);
     await fork.prompt("read fork");
     expect(fork.messages.findLast((message) => message.role === "toolResult")?.content).toEqual(
-      expect.arrayContaining([{ type: "text", text: '"first"' }]),
+      expect.arrayContaining([{ type: "text", text: "first" }]),
     );
     const restored = await fixture.reopen();
     fixture.faux.setResponses([
@@ -532,7 +562,7 @@ describe("Codemode", () => {
     ]);
     await restored.prompt("read store");
     expect(restored.messages.findLast((message) => message.role === "toolResult")?.content).toEqual(
-      expect.arrayContaining([{ type: "text", text: '"second"' }]),
+      expect.arrayContaining([{ type: "text", text: "second" }]),
     );
   });
 
@@ -555,12 +585,12 @@ describe("Codemode", () => {
       .filter((item) => item.type === "text")
       .map((item) => item.text)
       .join("\n");
-    expect(text).toContain("480 chars truncated");
-    const outputPath = text.split("Full output: ")[1]!;
+    expect(text).toContain("120 tokens truncated");
+    const outputPath = text.match(/\[Full output: (.+) \(read with offset\/limit\)\]/)![1]!;
     try {
       expect(await fs.readFile(outputPath, "utf8")).toBe("a".repeat(500));
     } finally {
-      await fs.rm(path.dirname(outputPath), { recursive: true, force: true });
+      await fs.rm(outputPath);
     }
   });
 
@@ -675,67 +705,6 @@ describe("Codemode", () => {
       });
     },
   );
-
-  it("rejects queued memo writes after their child scope expires while the parent stays active", async () => {
-    let expired!: () => void;
-    const expiry = new Promise<void>((resolve) => {
-      expired = resolve;
-    });
-    let memoCompleted!: (outcome: string) => void;
-    const memoOutcome = new Promise<string>((resolve) => {
-      memoCompleted = resolve;
-    });
-    let finish!: () => void;
-    const completion = new Promise<void>((resolve) => {
-      finish = resolve;
-    });
-    let barrier: Awaited<ReturnType<HarnessSessionStore["native"]["beginMutation"]>>;
-    const fixture = await setup([
-      {
-        name: "enqueue-memo",
-        label: "enqueue-memo",
-        description: "enqueue an unawaited memo write",
-        parameters: Type.Object({}),
-        async execute(_id, _args, signal, _update, ctx) {
-          const { invocation, sessionManager } = ctx as unknown as {
-            invocation: AgentHarnessToolInvocation;
-            sessionManager: HarnessSessionStore;
-          };
-          barrier = await sessionManager.native.beginMutation(context);
-          signal!.addEventListener("abort", expired, { once: true });
-          void invocation.setMemo("key", "late").then(
-            () => memoCompleted("committed"),
-            (error) => memoCompleted(error.message),
-          );
-          return { content: [], details: {} };
-        },
-      },
-      {
-        name: "hold",
-        label: "hold",
-        description: "keep the parent script active",
-        parameters: Type.Object({}),
-        async execute() {
-          await completion;
-          return { content: [], details: {} };
-        },
-      },
-    ]);
-    fixture.faux.setResponses([
-      toolCall("codemode", { code: "await tools.enqueue_memo({}); await tools.hold({});" }),
-      fauxAssistantMessage("done"),
-    ]);
-    const run = fixture.session.prompt("memo expiry");
-    await expiry;
-    try {
-      await barrier!.end(context);
-      expect(fixture.session.isStreaming).toBe(true);
-      expect(await memoOutcome).toContain("Tool invocation no longer owns");
-    } finally {
-      finish();
-      await run;
-    }
-  });
 
   it("aborts a spinning sandbox and activates codemode in existing sessions", async () => {
     const fixture = await setup();

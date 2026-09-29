@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import type { HarnessController as AgentSession } from "./harness-controller";
+import type { AgentSessionController as AgentSession } from "./agent-session-controller";
 import { isPiShellToolName } from "@/shared/pi-tools";
 import type {
   ServerEvent,
@@ -58,20 +58,20 @@ export function attachSession(
     resolveUiImage,
   };
 
-  webSession.activeAssistant = session.snapshot.operation?.streamingMessage;
+  webSession.activeAssistant = session.streamingMessage ?? undefined;
   webSession.publishedAssistantPositions =
     webSession.activeAssistant?.role === "assistant"
       ? assistantBlockPositions(webSession.activeAssistant.content)
       : undefined;
-  for (const tool of session.snapshot.operation?.runningTools ?? []) {
+  for (const tool of session.runningTools) {
     webSession.activeTools.set(tool.toolCallId, {
       toolCallId: tool.toolCallId,
       toolName: tool.toolName,
       args: tool.args as Record<string, unknown>,
-      blocks: normalizeBlocks(tool.result?.content ?? [], { imageResolver: resolveUiImage }),
-      details: normalizeToolDetails(tool.result?.details),
-      status: tool.status === "running" ? "running" : tool.isError ? "error" : "success",
-      isError: tool.status === "settled" && tool.isError,
+      blocks: normalizeBlocks(tool.partialResult?.content ?? [], { imageResolver: resolveUiImage }),
+      details: normalizeToolDetails(tool.partialResult?.details),
+      status: "running",
+      isError: false,
     });
   }
   session.subscribe((event) => handleAgentEvent(webSession, event));
@@ -432,17 +432,10 @@ export async function handleAgentEvent(
       if (event.type === "agent_end") {
         webSession.activeAssistant = undefined;
         webSession.publishedAssistantPositions = undefined;
-        if (!agentEndWillRetry && !webSession.autoRetryActive) {
-          webSession.agentCompleted = true;
-          webSession.activeTools.clear();
-        }
+        // Pi may still retry, compact, or continue. Completion belongs to agent_settled.
       }
       if (event.type === "auto_retry_end") {
         webSession.autoRetryActive = false;
-        if (!event.success) {
-          webSession.agentCompleted = true;
-          webSession.activeTools.clear();
-        }
       }
       const state = deps.getState(webSession.id);
       const publishedState = webSession.agentCompleted
@@ -456,31 +449,20 @@ export async function handleAgentEvent(
         : state;
       deps.publish(webSession, { type: "reset", state: publishedState });
 
-      if (event.type === "auto_retry_end") {
-        if (!event.success) {
-          webSession.suppressNextAgentEndCompletion = true;
-          if (deps.onAgentSettled) await deps.onAgentSettled(webSession);
-          await runCompletionHook(deps, webSession, publishedState);
-        }
-        break;
-      }
-
-      if (event.type === "agent_end") {
-        if (webSession.suppressNextAgentEndCompletion) {
-          webSession.suppressNextAgentEndCompletion = false;
-          break;
-        }
-        if (!agentEndWillRetry && !webSession.autoRetryActive) {
-          if (deps.onAgentSettled) await deps.onAgentSettled(webSession);
-          await runCompletionHook(deps, webSession, publishedState);
-        }
-      }
       break;
     }
-    case "agent_settled":
+    case "agent_settled": {
+      if (webSession.agentCompleted) break;
+      webSession.agentCompleted = true;
       await waitForSessionStateFlush();
-      deps.publish(webSession, { type: "reset", state: deps.getState(webSession.id) });
+      webSession.autoRetryActive = false;
+      webSession.activeTools.clear();
+      const state = deps.getState(webSession.id);
+      deps.publish(webSession, { type: "reset", state });
+      if (deps.onAgentSettled) await deps.onAgentSettled(webSession);
+      await runCompletionHook(deps, webSession, state);
       break;
+    }
     default:
       break;
   }

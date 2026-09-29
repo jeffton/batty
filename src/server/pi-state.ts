@@ -66,7 +66,8 @@ interface CustomLikeMessage {
   customType: string;
   content: string | (TextContent | ImageContent)[];
   timestamp: number;
-  data?: CustomMessageData;
+  details?: CustomMessageData;
+  display?: boolean;
 }
 
 function normalizeToolDetails(details: unknown): ToolExecutionDetails | undefined {
@@ -355,6 +356,7 @@ export function normalizeMessage(
 
   if (message.role === "custom") {
     const custom = message as CustomLikeMessage;
+    if (custom.display === false) return undefined;
     return {
       id: messageId("custom", custom.timestamp, index),
       role: "custom",
@@ -369,7 +371,7 @@ export function normalizeMessage(
               )
               .join("\n")
               .trim(),
-      data: normalizeCustomData(custom.data),
+      data: normalizeCustomData(custom.details),
     };
   }
 
@@ -394,6 +396,8 @@ type TranscriptSessionEntry = {
   content?: unknown;
   timestamp?: unknown;
   data?: unknown;
+  details?: unknown;
+  display?: boolean;
 };
 
 export function transcriptMessagesFromSessionEntries(
@@ -422,11 +426,7 @@ export function transcriptMessagesFromSessionEntries(
         : [message];
     }
 
-    if (
-      entry?.type === "custom_message" &&
-      typeof entry.customType === "string" &&
-      typeof entry.content === "string"
-    ) {
+    if (entry?.type === "custom_message" && typeof entry.customType === "string") {
       const timestamp =
         typeof entry.timestamp === "number"
           ? entry.timestamp
@@ -439,7 +439,8 @@ export function transcriptMessagesFromSessionEntries(
           customType: entry.customType,
           content: entry.content,
           timestamp,
-          data: normalizeCustomData(entry.data),
+          display: entry.display,
+          details: normalizeCustomData(entry.details),
         } as unknown as AgentMessage,
       ];
     }

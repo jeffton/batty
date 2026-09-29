@@ -1,4 +1,5 @@
-import type { AgentMessage, Entry } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { Message } from "@earendil-works/pi-ai";
 import { chatOnlyBlocks } from "@/shared/chat-only-context";
 
@@ -12,7 +13,7 @@ export function filterMessagesForChatOnlyContext(messages: AgentMessage[]): Mess
   });
 }
 
-export function chatOnlyMessagesFromBranch(entries: Entry[]): Message[] {
+export function chatOnlyMessagesFromBranch(entries: SessionEntry[]): Message[] {
   return filterMessagesForChatOnlyContext(
     entries.flatMap((entry) => (entry.type === "message" ? [entry.message] : [])),
   );

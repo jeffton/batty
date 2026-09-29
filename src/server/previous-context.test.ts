@@ -1,66 +1,91 @@
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vite-plus/test";
-import { BACKGROUND_CONTEXT as context } from "@earendil-works/pi-agent-core";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { BATTY_SYSTEM_PROMPT_CUSTOM_TYPE } from "./batty-system-prompt";
-import { createHarnessFixture } from "./harness-test-fixture";
+import { SessionStore } from "./session-store";
 import { createSessionManagerWithPreviousContext } from "./previous-context";
 
-async function closeManager(
-  manager: Awaited<ReturnType<typeof createSessionManagerWithPreviousContext>>["manager"],
-) {
-  manager.release();
-  await manager.native.close(context);
-}
+const roots: string[] = [];
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+});
 
 describe("createSessionManagerWithPreviousContext", () => {
-  it("keeps native cache lineage for full copies and projects chat-only copies", async () => {
-    const parent = await createHarnessFixture();
-    await parent.session.sessionManager.appendCustomEntry(BATTY_SYSTEM_PROMPT_CUSTOM_TYPE, {
+  it("uses the captured leaf even when the source has moved to another branch", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-captured-context-"));
+    roots.push(root);
+    const parent = await SessionStore.create(root, path.join(root, "parent"));
+    const firstId = await parent.appendMessage({ role: "user", content: "shared", timestamp: 1 });
+    const capturedId = await parent.appendMessage({
+      role: "user",
+      content: "captured",
+      timestamp: 2,
+    });
+    parent.native.branch(firstId);
+    await parent.appendMessage({ role: "user", content: "other branch", timestamp: 3 });
+    const options = { cwd: root, sourceSessionPath: parent.getSessionFile(), leafId: capturedId };
+    const full = await createSessionManagerWithPreviousContext({
+      ...options,
+      targetRoot: path.join(root, "full"),
+      mode: true,
+    });
+    const chatOnly = await createSessionManagerWithPreviousContext({
+      ...options,
+      targetRoot: path.join(root, "chat"),
+      mode: "chat-only",
+    });
+    expect(full.manager.getEntries().map((entry) => entry.id)).toEqual([firstId, capturedId]);
+    expect(chatOnly.chatOnlyMessages?.map((message) => message.content)).toEqual([
+      "shared",
+      "captured",
+    ]);
+    full.manager.release();
+    chatOnly.manager.release();
+    parent.release();
+  });
+
+  it("preserves native full history and projects chat-only copies", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-previous-context-"));
+    roots.push(root);
+    const parent = await SessionStore.create(root, path.join(root, "parent"));
+    await parent.appendCustomEntry(BATTY_SYSTEM_PROMPT_CUSTOM_TYPE, {
       appendedPrompt: "cached system prompt",
     });
-    await parent.session.lane.appendMessage(
-      { role: "user", content: "Question", timestamp: 1 },
-      context,
-    );
-    await parent.session.lane.appendMessage(
+    await parent.appendMessage({ role: "user", content: "Question", timestamp: 1 });
+    await parent.appendMessage(
       fauxAssistantMessage([
         { type: "thinking", thinking: "Reasoning" },
         { type: "text", text: "Answer" },
         { type: "toolCall", id: "read-1", name: "read", arguments: { path: "x" } },
       ]),
-      context,
     );
-    await parent.session.lane.appendMessage(
-      {
-        role: "toolResult",
-        toolCallId: "read-1",
-        toolName: "read",
-        content: [{ type: "text", text: "Output" }],
-        isError: false,
-        timestamp: 2,
-      },
-      context,
-    );
-    const leafId = parent.session.sessionManager.getLeafId();
-
+    await parent.appendMessage({
+      role: "toolResult",
+      toolCallId: "read-1",
+      toolName: "read",
+      content: [{ type: "text", text: "Output" }],
+      isError: false,
+      timestamp: 2,
+    });
+    const options = {
+      cwd: root,
+      sourceSessionPath: parent.getSessionFile(),
+      leafId: parent.getLeafId(),
+    };
     const full = await createSessionManagerWithPreviousContext({
-      cwd: parent.root,
-      targetRoot: path.join(parent.root, "full"),
-      sourceSessionPath: parent.session.sessionFile,
-      leafId,
+      ...options,
+      targetRoot: path.join(root, "full"),
       mode: true,
     });
     const chatOnly = await createSessionManagerWithPreviousContext({
-      cwd: parent.root,
-      targetRoot: path.join(parent.root, "chat-only"),
-      parentSessionId: parent.session.sessionId,
-      sourceSessionPath: parent.session.sessionFile,
-      leafId,
+      ...options,
+      targetRoot: path.join(root, "chat-only"),
+      parentSessionId: parent.getSessionId(),
       mode: "chat-only",
     });
-
-    expect(full.manager.native.metadata.parentSessionId).toBe(parent.session.sessionId);
+    expect(full.manager.native.getHeader()?.parentSession).toBe(parent.getSessionFile());
     expect(full.manager.getEntries()).toContainEqual(
       expect.objectContaining({
         customType: BATTY_SYSTEM_PROMPT_CUSTOM_TYPE,
@@ -75,9 +100,8 @@ describe("createSessionManagerWithPreviousContext", () => {
         content: [expect.objectContaining({ type: "text", text: "Answer" })],
       }),
     ]);
-
-    await closeManager(full.manager);
-    await closeManager(chatOnly.manager);
-    await parent.cleanup();
+    full.manager.release();
+    chatOnly.manager.release();
+    parent.release();
   });
 });

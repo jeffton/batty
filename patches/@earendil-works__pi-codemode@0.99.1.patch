@@ -1,0 +1,48 @@
+diff --git a/dist/runtime/host.js b/dist/runtime/host.js
+index 637bb9f78a5d5a50e2de0a64061ecefe7f190819..c559e6cef84b5072c232e0eae6cf036e9d19f4b8 100644
+--- a/dist/runtime/host.js
++++ b/dist/runtime/host.js
+@@ -58,6 +58,7 @@ class Execution {
+     output = [];
+     calls = [];
+     pending = new Map();
++    hostCalls = new Set();
+     finished = false;
+     constructor(options) {
+         this.promise = new Promise((resolve) => {
+@@ -141,9 +142,12 @@ class Execution {
+             case "output":
+                 this.output.push(message.item);
+                 break;
+-            case "call":
+-                void this.handleCall(message);
++            case "call": {
++                const call = this.handleCall(message);
++                this.hostCalls.add(call);
++                call.then(() => this.hostCalls.delete(call), () => this.hostCalls.delete(call));
+                 break;
++            }
+             case "done":
+                 this.handleDone(message);
+                 break;
+@@ -215,15 +219,12 @@ class Execution {
+                 calls: this.calls,
+                 storeWrites: writes === undefined ? { set: {}, delete: [] } : parseStoreWrites(writes),
+             };
+-        if (!this.worker) {
+-            this.resolveResult(result);
+-            return;
+-        }
+         Atomics.store(new Int32Array(this.interrupt), 0, 1);
+-        this.worker
+-            .terminate()
+-            .catch(() => undefined)
+-            .then(() => this.resolveResult(result));
++        // Cancellation stops admission; settlement joins host tools and their hooks.
++        const settlement = [...this.hostCalls];
++        if (this.worker)
++            settlement.push(this.worker.terminate());
++        void Promise.allSettled(settlement).then(() => this.resolveResult(result));
+     }
+ }
+ /**

@@ -1,44 +1,62 @@
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import {
   findCutPoint,
-  type Entry,
-  BACKGROUND_CONTEXT as context,
-} from "@earendil-works/pi-agent-core";
+  type SessionEntry,
+  type ExtensionFactory,
+} from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { createHarnessFixture } from "./harness-test-fixture";
+import { createAgentSessionFixture } from "./agent-session-test-fixture";
 
-const fixtures: Awaited<ReturnType<typeof createHarnessFixture>>[] = [];
+const fixtures: Awaited<ReturnType<typeof createAgentSessionFixture>>[] = [];
 afterEach(async () => {
   for (const fixture of fixtures.splice(0)) await fixture.cleanup();
 });
 
-async function setup() {
-  const f = await createHarnessFixture({
+async function setup(extensionFactories: ExtensionFactory[] = []) {
+  const f = await createAgentSessionFixture({
     compaction: { enabled: true, reserveTokens: 20, keepRecentTokens: 20 },
     retry: { enabled: false, maxRetries: 0, baseDelayMs: 0 },
+    extensionFactories,
     tools: [
       {
-        name: "read",
-        label: "read",
+        name: "large-read",
+        label: "large-read",
         description: "read",
         parameters: Type.Object({}),
-        replay: "safe",
         async execute() {
           return { content: [{ type: "text", text: "x".repeat(10000) }], details: {} };
         },
       },
     ],
   });
-  f.faux.getModel().contextWindow = 1000;
+  // Keep ordinary turns below the automatic threshold; overflow recovery is
+  // triggered by an explicit provider error rather than prompt size.
+  f.faux.getModel().contextWindow = 100000;
   fixtures.push(f);
   return f;
 }
 
+const summary: ExtensionFactory = (pi) => {
+  pi.on("session_before_compact", ({ preparation }) => ({
+    compaction: {
+      summary: "History",
+      firstKeptEntryId: preparation.firstKeptEntryId,
+      tokensBefore: preparation.tokensBefore,
+    },
+  }));
+};
+
 describe("native Pi compaction", () => {
   it("retains the preceding assistant call when trailing results exceed the retention budget", () => {
-    const messageEntry = (id: string, message: unknown): Entry =>
-      ({ type: "message", id, parentId: null, seq: 1, timestamp: 1, message }) as Entry;
+    const messageEntry = (id: string, message: unknown): SessionEntry =>
+      ({
+        type: "message",
+        id,
+        parentId: null,
+        timestamp: new Date(0).toISOString(),
+        message,
+      }) as SessionEntry;
     const entries = [
       messageEntry("user", { role: "user", content: "Investigate", timestamp: 1 }),
       messageEntry(
@@ -66,74 +84,98 @@ describe("native Pi compaction", () => {
     });
   });
 
-  it("compacts at the tool boundary before the next assistant request", async () => {
-    const f = await setup();
-    let summaries = 0;
-    f.session.harness.hooks.on("before_compaction", ({ preparation }) => {
-      summaries++;
-      return {
-        compaction: {
-          summary: "Read complete",
-          retainedTail: [],
-          tokensBefore: preparation.tokensBefore,
-        },
-      };
+  it("emits manual compaction lifecycle through the controller", async () => {
+    const f = await setup([summary]);
+    f.faux.setResponses([fauxAssistantMessage("history answer ".repeat(20))]);
+    await f.session.prompt("history");
+    const events: string[] = [];
+    f.session.subscribe((event) => {
+      if (event.type === "compaction_start" || event.type === "compaction_end")
+        events.push(event.type);
     });
-    f.faux.setResponses([
-      fauxAssistantMessage([{ type: "toolCall", id: "read", name: "read", arguments: {} }]),
-      (providerContext) => {
-        expect(JSON.stringify(providerContext.messages)).toContain("Read complete");
-        expect(JSON.stringify(providerContext.messages)).not.toContain("x".repeat(100));
-        return fauxAssistantMessage("done");
-      },
-    ]);
-    await f.session.prompt("inspect");
-    expect(summaries).toBe(1);
+    await f.session.compact();
+    expect(events).toEqual(["compaction_start", "compaction_end"]);
+    expect(f.session.isCompacting).toBe(false);
     expect(f.session.sessionManager.getEntries().some((entry) => entry.type === "compaction")).toBe(
       true,
     );
   });
 
-  it("stops instead of dispatching an oversized request after failed compaction", async () => {
+  it("reports manual summary failure instead of hiding the error", async () => {
     const f = await setup();
+    f.faux.setResponses([fauxAssistantMessage("history answer ".repeat(20))]);
+    await f.session.prompt("history");
     f.faux.setResponses([
-      fauxAssistantMessage([{ type: "toolCall", id: "read", name: "read", arguments: {} }]),
       fauxAssistantMessage("", { stopReason: "error", errorMessage: "summary failed" }),
     ]);
-    await expect(f.session.prompt("inspect")).rejects.toThrow();
-    expect(f.faux.state.callCount).toBe(2);
-    expect(f.session.snapshot.lastResult?.status).toBe("failed");
-  });
-
-  it("emits the compaction lifecycle through the controller", async () => {
-    const f = await setup();
-    await f.session.lane.appendMessage({ role: "user", content: "history", timestamp: 1 }, context);
-    f.session.harness.hooks.on("before_compaction", ({ preparation }) => ({
-      compaction: {
-        summary: "History",
-        retainedTail: [],
-        tokensBefore: preparation.tokensBefore,
-      },
-    }));
-    const events: string[] = [];
-    f.session.subscribe((event) => {
-      if (event.type === "compaction_start" || event.type === "compaction_end") {
-        events.push(event.type);
-      }
-    });
-
-    await f.session.compact();
-
-    expect(events).toEqual(["compaction_start", "compaction_end"]);
+    const calls = f.faux.state.callCount;
+    await expect(f.session.compact()).rejects.toThrow("summary failed");
+    expect(f.faux.state.callCount).toBe(calls + 1);
+    expect(f.session.sessionManager.getEntries().some((entry) => entry.type === "compaction")).toBe(
+      false,
+    );
     expect(f.session.isCompacting).toBe(false);
   });
 
-  it("cancels a durable manual compaction without starting summary generation", async () => {
-    const f = await setup();
-    await f.session.lane.appendMessage({ role: "user", content: "history", timestamp: 1 }, context);
-    const accepted = await f.session.lane.accept({ kind: "compaction" }, context);
-    expect(accepted.ok).toBe(true);
-    await f.session.abort();
-    expect(f.faux.state.callCount).toBe(0);
+  it("cancels manual compaction before dispatching summary generation", async () => {
+    let started!: () => void;
+    const start = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const f = await setup([
+      (pi) => {
+        pi.on("session_before_compact", async ({ signal }) => {
+          started();
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return { cancel: true };
+        });
+      },
+    ]);
+    f.faux.setResponses([fauxAssistantMessage("history answer ".repeat(20))]);
+    await f.session.prompt("history");
+    const calls = f.faux.state.callCount;
+    const compact = expect(f.session.compact()).rejects.toThrow("Compaction cancelled");
+    await start;
+    expect(f.session.isCompacting).toBe(true);
+    f.session.abortCompaction();
+    await compact;
+    expect(f.session.sessionManager.getEntries().some((entry) => entry.type === "compaction")).toBe(
+      false,
+    );
+    expect(f.faux.state.callCount).toBe(calls);
+    expect(f.session.isCompacting).toBe(false);
+  });
+
+  it("recovers context overflow through native compaction and retries the turn", async () => {
+    const f = await setup([summary]);
+    f.faux.setResponses([fauxAssistantMessage("history answer ".repeat(20))]);
+    await f.session.prompt("history");
+    f.faux.setResponses([
+      fauxAssistantMessage("", {
+        stopReason: "error",
+        errorMessage: "maximum context length exceeded",
+      }),
+      fauxAssistantMessage("recovered"),
+    ]);
+    const events: unknown[] = [];
+    f.session.subscribe((event) => {
+      if (event.type === "compaction_start" || event.type === "compaction_end") events.push(event);
+    });
+    const calls = f.faux.state.callCount;
+    await f.session.prompt("continue");
+    expect(f.faux.state.callCount).toBe(calls + 2);
+    expect(events).toMatchObject([
+      { type: "compaction_start", reason: "overflow" },
+      { type: "compaction_end", reason: "overflow", aborted: false, willRetry: true },
+    ]);
+    expect(f.session.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "recovered" }],
+    });
+    expect(f.session.sessionManager.getEntries().some((entry) => entry.type === "compaction")).toBe(
+      true,
+    );
   });
 });

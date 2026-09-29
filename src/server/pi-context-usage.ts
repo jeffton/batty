@@ -1,5 +1,5 @@
 import { calculateContextTokens, estimateTokens } from "@earendil-works/pi-agent-core";
-import type { HarnessController as AgentSession } from "./harness-controller";
+import type { AgentSessionController as AgentSession } from "./agent-session-controller";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 
 interface ContextUsage {

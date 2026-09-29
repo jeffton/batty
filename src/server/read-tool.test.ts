@@ -2,8 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
-import { BACKGROUND_CONTEXT, createReadTool } from "@earendil-works/pi-agent-core";
-import { TrackedExecutionEnv } from "./harness-file-changes";
+import { createReadTool } from "@earendil-works/pi-coding-agent";
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -14,14 +13,7 @@ async function read(text: string, args: { offset?: number; limit?: number } = {}
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "batty-read-test-"));
   dirs.push(cwd);
   await fs.writeFile(path.join(cwd, "input.txt"), text);
-  return createReadTool().execute(
-    "read-test",
-    { path: "input.txt", ...args },
-    () => {},
-    { env: new TrackedExecutionEnv({ cwd }) },
-    undefined as never,
-    BACKGROUND_CONTEXT,
-  );
+  return createReadTool(cwd).execute("read-test", { path: "input.txt", ...args });
 }
 
 describe("read tool explicit ranges", () => {

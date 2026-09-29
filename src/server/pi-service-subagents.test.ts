@@ -1,9 +1,9 @@
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { BACKGROUND_CONTEXT as context } from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { DefaultResourceLoader, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { HarnessController } from "./harness-controller";
+import { randomUUID } from "node:crypto";
+import { createPiAgentSession } from "./pi-agent-session";
+import { AgentSessionController } from "./agent-session-controller";
 import {
   runDetachedSubagentSession,
   deliverAsyncSubagentResult,
@@ -12,11 +12,11 @@ import {
   type RunDetachedSubagentDeps,
   type DetachedSubagentOptions,
 } from "./pi-service-subagents";
-import { createHarnessFixture } from "./harness-test-fixture";
+import { createAgentSessionFixture } from "./agent-session-test-fixture";
 import { BATTY_SYSTEM_PROMPT_CUSTOM_TYPE } from "./batty-system-prompt";
 import type { WebSession } from "./pi-service-types";
-import { buildRuntimeNoticeMessage, buildSubagentRuntimeNotice } from "./runtime-notices";
 import { agentTurnArtifactsByReplyEntryId } from "./agent-turn-file-changes";
+import { buildSubagentRuntimeNotice } from "./runtime-notices";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -24,8 +24,8 @@ afterEach(async () => {
 });
 
 async function setup() {
-  const parent = await createHarnessFixture();
-  const children = new Map<string, HarnessController>();
+  const parent = await createAgentSessionFixture();
+  const children = new Map<string, AgentSessionController>();
   cleanups.push(async () => {
     for (const child of children.values()) await child.dispose();
     await parent.cleanup();
@@ -43,17 +43,15 @@ async function setup() {
     async createPiAgentSession(_workspace, store) {
       let session = children.get(store.getSessionId());
       if (!session) {
-        session = await HarnessController.create(
-          store,
-          {
-            models: parent.models,
-            model: parent.faux.getModel(),
-            compaction: { enabled: false, reserveTokens: 100, keepRecentTokens: 100 },
-            retry: { enabled: false, maxRetries: 0, baseDelayMs: 0 },
-          },
-          SettingsManager.inMemory(),
-          new DefaultResourceLoader({ cwd: parent.root, agentDir: parent.root }),
-        );
+        session = (
+          await createPiAgentSession({
+            config: parent.config,
+            workspace: parent.workspace,
+            sessionManager: store,
+            modelRuntime: parent.modelRuntime,
+            customTools: [],
+          })
+        ).session;
         children.set(session.sessionId, session);
       }
       return { session };
@@ -72,7 +70,7 @@ async function setup() {
     disposeWebSession: vi.fn(),
   };
   const options: DetachedSubagentOptions = {
-    sessionId: parent.session.sessionManager.native.idGenerator.next(),
+    sessionId: randomUUID(),
     workspace,
     parentSessionId: parent.session.sessionId,
     parentSessionPath: parent.session.sessionFile,
@@ -86,7 +84,7 @@ async function setup() {
   return { parent, children, deps, options };
 }
 
-describe("detached harness subagents", () => {
+describe("detached AgentSession subagents", () => {
   it.each([false, true])(
     "sends the task only in a runtime notice with includePreviousContext=%s",
     async (includePreviousContext) => {
@@ -102,9 +100,13 @@ describe("detached harness subagents", () => {
           role: "custom",
           customType: "batty-runtime-notice:subagent",
           content: buildSubagentRuntimeNotice(1, options.prompt).text,
+          details: expect.objectContaining({ battyDeliveryId: expect.any(String) }),
         }),
         expect.objectContaining({ role: "assistant" }),
       ]);
+      expect(result.messages).toContainEqual(
+        expect.objectContaining({ role: "system", toolsAdded: expect.any(Array) }),
+      );
     },
   );
   it("starts a new turn in a finished subagent and returns only the new reply", async () => {
@@ -140,18 +142,18 @@ describe("detached harness subagents", () => {
     await parent.session.sessionManager.appendCustomEntry(BATTY_SYSTEM_PROMPT_CUSTOM_TYPE, {
       appendedPrompt: "parent prompt",
     });
-    await parent.session.lane.appendMessage(
-      { role: "user", content: "parent question", timestamp: 1 },
-      context,
-    );
-    await parent.session.lane.appendMessage(fauxAssistantMessage("parent answer"), context);
-    await parent.session.lane.appendMessage(
+    await parent.session.sessionManager.appendMessage({
+      role: "user",
+      content: "parent question",
+      timestamp: 1,
+    });
+    await parent.session.sessionManager.appendMessage(fauxAssistantMessage("parent answer"));
+    await parent.session.sessionManager.appendMessage(
       fauxAssistantMessage([
         { type: "toolCall", id: "invoke-child", name: "subagent", arguments: {} },
       ]),
-      context,
     );
-    await parent.session.lane.appendCustomEntry("sibling-tool-metadata", {}, context);
+    await parent.session.sessionManager.appendCustomEntry("sibling-tool-metadata", {});
     parent.faux.setResponses([fauxAssistantMessage("child answer")]);
     const result = await runDetachedSubagentSession(deps, {
       ...options,
@@ -165,7 +167,7 @@ describe("detached harness subagents", () => {
       expect.objectContaining({ role: "user", content: "parent question" }),
     );
     expect(JSON.stringify(child.messages)).not.toContain("invoke-child");
-    expect(child.sessionManager.native.metadata.parentSessionId).toBe(parent.session.sessionId);
+    expect(child.sessionManager.native.getHeader()!.parentSession).toBe(parent.session.sessionFile);
     expect(
       child.sessionManager
         .getEntries()
@@ -186,34 +188,30 @@ describe("detached harness subagents", () => {
     await parent.session.sessionManager.appendCustomEntry(BATTY_SYSTEM_PROMPT_CUSTOM_TYPE, {
       appendedPrompt: "parent prompt",
     });
-    await parent.session.lane.appendMessage(
-      { role: "user", content: "parent question", timestamp: 1 },
-      context,
-    );
-    await parent.session.lane.appendMessage(
+    await parent.session.sessionManager.appendMessage({
+      role: "user",
+      content: "parent question",
+      timestamp: 1,
+    });
+    await parent.session.sessionManager.appendMessage(
       fauxAssistantMessage([
         { type: "thinking", thinking: "private reasoning" },
         { type: "text", text: "parent answer" },
         { type: "toolCall", id: "read-1", name: "read", arguments: { path: "x" } },
       ]),
-      context,
     );
-    await parent.session.lane.appendMessage(
-      {
-        role: "toolResult",
-        toolCallId: "read-1",
-        toolName: "read",
-        content: [{ type: "text", text: "tool output" }],
-        isError: false,
-        timestamp: 2,
-      },
-      context,
-    );
-    await parent.session.lane.appendMessage(
+    await parent.session.sessionManager.appendMessage({
+      role: "toolResult",
+      toolCallId: "read-1",
+      toolName: "read",
+      content: [{ type: "text", text: "tool output" }],
+      isError: false,
+      timestamp: 2,
+    });
+    await parent.session.sessionManager.appendMessage(
       fauxAssistantMessage([
         { type: "toolCall", id: "invoke-child", name: "subagent", arguments: {} },
       ]),
-      context,
     );
     parent.faux.setResponses([fauxAssistantMessage("child answer")]);
 
@@ -237,7 +235,10 @@ describe("detached harness subagents", () => {
     expect(JSON.stringify(child.messages)).not.toContain("tool output");
     expect(JSON.stringify(child.messages)).not.toContain("read-1");
     expect(child.sessionManager.getEntries()).not.toContainEqual(
-      expect.objectContaining({ customType: BATTY_SYSTEM_PROMPT_CUSTOM_TYPE }),
+      expect.objectContaining({
+        customType: BATTY_SYSTEM_PROMPT_CUSTOM_TYPE,
+        data: { appendedPrompt: "parent prompt" },
+      }),
     );
     expect(JSON.stringify(child.messages)).toContain("chat-only transcript of the parent session");
   });
@@ -308,36 +309,24 @@ describe("detached harness subagents", () => {
     const replayed = await runDetachedSubagentSession(deps, options);
     expect(replayed.text).toBe(first.text);
     expect(parent.faux.state.callCount).toBe(1);
+    expect(replayed.generatedMessages).toEqual(first.generatedMessages);
     expect(replayed.generatedMessages.filter((message) => message.role === "user")).toHaveLength(0);
     expect(replayed.generatedMessages.filter((message) => message.role === "custom")).toHaveLength(
       1,
     );
   });
 
-  it("does not resume an admitted child operation after reopening", async () => {
+  it("does not replay a child cancelled before execution", async () => {
     const { parent, deps, options, children } = await setup();
     await runDetachedSubagentSession(deps, {
       ...options,
       signal: AbortSignal.abort(new Error("not started")),
     });
     const child = children.get(options.sessionId!)!;
-    const admission = await child.lane.accept(
-      {
-        kind: "prompt",
-        prompt: buildRuntimeNoticeMessage(
-          buildSubagentRuntimeNotice(1, options.prompt),
-          Date.now(),
-        ),
-      },
-      context,
-    );
-    expect(admission.ok).toBe(true);
     await child.dispose();
     children.delete(child.sessionId);
-
     const result = await runDetachedSubagentSession(deps, options);
-
-    expect(result.text).toBe("Subagent stopped by user");
+    expect(result.isError).toBe(true);
     expect(parent.faux.state.callCount).toBe(0);
   });
 
@@ -416,11 +405,12 @@ describe("detached harness subagents", () => {
     });
 
     expect(parent.session.messages).toEqual([
+      expect.objectContaining({ role: "system", toolsAdded: expect.any(Array) }),
       expect.objectContaining({
         role: "custom",
         customType: "batty-runtime-notice:subagent",
         content: expect.stringContaining("finished child"),
-        data: {
+        details: expect.objectContaining({
           subagent: expect.objectContaining({
             async: true,
             sessionId: options.sessionId,
@@ -434,7 +424,7 @@ describe("detached harness subagents", () => {
           ],
           sentFiles: [expect.objectContaining({ id: "file-1" })],
           sites: [expect.objectContaining({ id: "site-1" })],
-        },
+        }),
       }),
       expect.objectContaining({
         role: "assistant",
@@ -462,7 +452,7 @@ describe("detached harness subagents", () => {
     });
     await expect(runDetachedSubagentSession(deps, request)).rejects.toThrow("parent unavailable");
     const child = children.get(options.sessionId!)!;
-    expect(child.snapshot.lastResult?.status).toBe("completed");
+    expect(child.messages.at(-1)).toMatchObject({ role: "assistant", stopReason: "stop" });
     await child.dispose();
     children.delete(child.sessionId);
     deps.deliverResultToParent = async (_request, result) => {

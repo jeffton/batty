@@ -1,20 +1,16 @@
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import {
-  BACKGROUND_CONTEXT as context,
-  getOrThrow,
-  HarnessClosed,
-} from "@earendil-works/pi-agent-core";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { DefaultResourceLoader, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { SessionState, WorkspaceInfo } from "@/shared/types";
-import { HarnessController } from "./harness-controller";
-import { createHarnessFixture } from "./harness-test-fixture";
+import type { AgentSessionController } from "./agent-session-controller";
+import { createAgentSessionFixture } from "./agent-session-test-fixture";
+import { createPiAgentSession } from "./pi-agent-session";
 import { attachSession, disposeWebSession, handleAgentEvent } from "./pi-service-sessions";
 import type { WebSession } from "./pi-service-types";
 import {
   deliverCronJobRun,
   executeCronOperation,
+  getCronExecutionResult,
   runCronJobSession,
   type PiServiceCronAdapterContext,
 } from "./pi-service-cron-adapter";
@@ -30,6 +26,10 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
 
+function conversationalMessages<T extends { role: string }>(messages: T[]): T[] {
+  return messages.filter((message) => message.role !== "system");
+}
+
 function completionLifecycle(workspace: WorkspaceInfo) {
   const sessions = new Map<string, WebSession>();
   const unregistered = vi.fn();
@@ -41,7 +41,7 @@ function completionLifecycle(workspace: WorkspaceInfo) {
     state,
     dispose,
     unregistered,
-    attach: (session: HarnessController) =>
+    attach: (session: AgentSessionController) =>
       attachSession(
         sessions,
         vi.fn(),
@@ -66,8 +66,7 @@ function completionLifecycle(workspace: WorkspaceInfo) {
 }
 
 async function busyParent() {
-  const parent = await createHarnessFixture();
-  cleanups.push(parent.cleanup);
+  const parent = await createAgentSessionFixture();
   const workspace: WorkspaceInfo = {
     id: "test",
     path: parent.root,
@@ -76,22 +75,27 @@ async function busyParent() {
     isPinned: false,
     isAssistant: false,
   };
-  getOrThrow(
-    await parent.session.lane.accept(
-      { kind: "prompt", prompt: "Busy parent turn", operationId: "parent-turn" },
-      context,
-    ),
-  );
-  parent.faux.setResponses([fauxAssistantMessage("Parent answer")]);
-  return { parent, workspace };
+  let finishParent!: () => void;
+  const response = new Promise<ReturnType<typeof fauxAssistantMessage>>((resolve) => {
+    finishParent = () => resolve(fauxAssistantMessage("Parent answer"));
+  });
+  parent.faux.setResponses([async () => response]);
+  const parentTurn = parent.session.prompt("Busy parent turn");
+  cleanups.unshift(async () => {
+    finishParent();
+    await parentTurn;
+  });
+  cleanups.push(parent.cleanup);
+  await vi.waitFor(() => expect(parent.session.isStreaming).toBe(true));
+  return { parent, workspace, parentTurn, finishParent };
 }
 
-describe("detached result delivery after ephemeral harness disposal", () => {
+describe("detached result delivery after ephemeral session disposal", () => {
   it.each(["fresh", "disposed-before-return", "failed", "NO_REPLY"])(
     "preserves a %s cron result while its parent is busy",
     async (mode) => {
-      const { parent, workspace } = await busyParent();
-      const child = await createHarnessFixture({
+      const { parent, workspace, parentTurn, finishParent } = await busyParent();
+      const child = await createAgentSessionFixture({
         retry: { enabled: false, maxRetries: 0, baseDelayMs: 0 },
       });
       cleanups.push(child.cleanup);
@@ -155,11 +159,8 @@ describe("detached result delivery after ephemeral harness disposal", () => {
       );
       await vi.waitFor(() => expect(lifecycle.unregistered).toHaveBeenCalledWith(childId));
       expect(parent.session.isStreaming).toBe(true);
-      expect(parent.session.messages).toHaveLength(1);
-      await expect(child.session.lane.getResult("run", context)).rejects.toBeInstanceOf(
-        HarnessClosed,
-      );
-      expect(child.session.snapshot.lastResult?.status).toBe(
+      expect(conversationalMessages(parent.session.messages)).toHaveLength(1);
+      expect(getCronExecutionResult(child.session, "run")?.status).toBe(
         mode === "failed" ? "failed" : "completed",
       );
       expect(await outcome).toEqual(
@@ -172,7 +173,8 @@ describe("detached result delivery after ephemeral harness disposal", () => {
         expect(job.queueResultDelivery).toHaveBeenCalledWith(parent.session.sessionId);
       }
       expect(queues.size).toBe(0);
-      await parent.session.driveOperation("parent-turn");
+      finishParent();
+      await parentTurn;
       if (mode !== "NO_REPLY") {
         await deliverCronJobRun(
           {
@@ -206,7 +208,9 @@ describe("detached result delivery after ephemeral harness disposal", () => {
         expect(lifecycle.sessions.has(childId)).toBe(false);
       }
       await parent.reopen();
-      expect(parent.session.messages).toHaveLength(mode === "NO_REPLY" ? 2 : 4);
+      expect(conversationalMessages(parent.session.messages)).toHaveLength(
+        mode === "NO_REPLY" ? 2 : 4,
+      );
       if (mode !== "NO_REPLY") {
         expect(parent.session.messages.at(-1)).toMatchObject({
           role: "assistant",
@@ -225,32 +229,26 @@ describe("detached result delivery after ephemeral harness disposal", () => {
   );
 
   it("delivers a captured subagent result after completion closes the child while its parent is busy", async () => {
-    const { parent, workspace } = await busyParent();
+    const { parent, workspace, parentTurn, finishParent } = await busyParent();
     const lifecycle = completionLifecycle(workspace);
-    let child!: HarnessController;
-    cleanups.unshift(async () => {
+    let child!: AgentSessionController;
+    cleanups.push(async () => {
       await child?.dispose();
     });
     const delivering = vi.fn();
-    // This provider is shared by child and parent; the child runs first.
-    parent.faux.setResponses([
-      fauxAssistantMessage("Child answer"),
-      fauxAssistantMessage("Parent answer"),
-    ]);
+    parent.faux.setResponses([fauxAssistantMessage("Child answer")]);
     const running = runDetachedSubagentSession(
       {
         workspaceSessionDir: path.join(parent.root, "sessions"),
         createPiAgentSession: async (_workspace, store) => {
-          child = await HarnessController.create(
-            store,
-            {
-              models: parent.models,
-              model: parent.faux.getModel(),
-              compaction: { enabled: false, reserveTokens: 100, keepRecentTokens: 100 },
-            },
-            SettingsManager.inMemory(),
-            new DefaultResourceLoader({ cwd: parent.root, agentDir: parent.root }),
-          );
+          ({ session: child } = await createPiAgentSession({
+            config: parent.config,
+            workspace,
+            sessionManager: store,
+            modelRuntime: parent.modelRuntime,
+            customTools: [],
+            model: parent.faux.getModel(),
+          }));
           return { session: child };
         },
         attachSession: (_workspace, session) => lifecycle.attach(session),
@@ -279,13 +277,12 @@ describe("detached result delivery after ephemeral harness disposal", () => {
     await vi.waitFor(() => expect(lifecycle.unregistered).toHaveBeenCalledTimes(1));
     expect(delivering).toHaveBeenCalledTimes(1);
     expect(parent.session.isStreaming).toBe(true);
-    await expect(
-      child.lane.getResult(child.snapshot.lastResult!.operationId, context),
-    ).rejects.toBeInstanceOf(HarnessClosed);
-    await parent.session.driveOperation("parent-turn");
+    expect(child.messages.at(-1)).toMatchObject({ role: "assistant" });
+    finishParent();
+    await parentTurn;
     expect(await outcome).toMatchObject({ result: { text: "Child answer", isError: false } });
     await parent.reopen();
-    expect(parent.session.messages).toHaveLength(4);
+    expect(conversationalMessages(parent.session.messages)).toHaveLength(4);
     expect(parent.session.messages.at(-1)).toMatchObject({
       role: "assistant",
       content: [{ type: "text", text: "Child answer" }],

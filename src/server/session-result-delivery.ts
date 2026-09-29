@@ -1,11 +1,12 @@
-import { BACKGROUND_CONTEXT as context, type AgentMessage } from "@earendil-works/pi-agent-core";
-import type { HarnessController } from "./harness-controller";
+import type { AgentSessionController } from "./agent-session-controller";
+import type { SessionStore } from "./session-store";
 
-/** Callers serialize background deliveries; wait for any active parent turn to settle. */
+/** Callers serialize background deliveries; refresh the SDK's authoritative context after appending. */
 export async function appendResultMessages(
-  session: HarnessController,
-  messages: AgentMessage[],
+  session: AgentSessionController,
+  messages: Array<Parameters<SessionStore["appendMessage"]>[0]>,
 ): Promise<void> {
   await session.waitForIdle();
-  for (const message of messages) await session.lane.appendMessage(message, context);
+  for (const message of messages) await session.sessionManager.appendMessage(message);
+  session.sdk.refreshContext();
 }

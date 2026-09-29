@@ -103,9 +103,9 @@ import { createPiServiceTools } from "./pi-service-tool-factory";
 import type { RuntimeNotice } from "./runtime-notices";
 import { SessionReadStateStore } from "./session-read-state";
 import { listWorkspaces } from "./workspaces";
-import { HarnessSessionStore as SessionManager } from "./harness-session-store";
-import type { HarnessController as AgentSession } from "./harness-controller";
-import type { Entry as SessionEntry } from "@earendil-works/pi-agent-core";
+import { SessionStore as SessionManager } from "./session-store";
+import type { AgentSessionController as AgentSession } from "./agent-session-controller";
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 
 export type { UploadedFile } from "./pi-service-types";
 
@@ -1237,8 +1237,6 @@ export class PiService {
       return await creating;
     } catch (error) {
       this.sessionControllers.delete(id);
-      const { BACKGROUND_CONTEXT } = await import("@earendil-works/pi-agent-core");
-      await sessionManager.native.close(BACKGROUND_CONTEXT);
       sessionManager.release();
       throw error;
     }

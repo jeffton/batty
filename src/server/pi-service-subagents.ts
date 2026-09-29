@@ -1,11 +1,10 @@
 import { type AssistantMessage, type Message } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { HarnessClosed, HarnessFault } from "@earendil-works/pi-agent-core";
 import type { DurableFileChange } from "./agent-turn-file-changes";
 import { appendResultMessages } from "./session-result-delivery";
-import { HarnessSessionStore as SessionManager } from "./harness-session-store";
+import { SessionStore as SessionManager } from "./session-store";
 import { createSessionManagerWithPreviousContext } from "./previous-context";
-import type { HarnessController as AgentSession } from "./harness-controller";
+import type { AgentSessionController as AgentSession } from "./agent-session-controller";
 import type {
   PreviousContextMode,
   SentFileDescriptor,
@@ -126,6 +125,8 @@ export interface DetachedSubagentOptions {
   }) => void;
 }
 
+export const SUBAGENT_COMPLETION_CUSTOM_TYPE = "batty-subagent-completion";
+
 export interface DetachedSubagentResult {
   text: string;
   details: ToolExecutionDetails;
@@ -165,8 +166,9 @@ function buildDetachedSubagentResult(
   generatedMessagesOverride?: AgentSession["messages"],
 ): DetachedSubagentResult {
   const messages = structuredClone(subagentSession.messages) as AgentSession["messages"];
-  const generatedMessages =
-    generatedMessagesOverride ?? newlyGeneratedSubagentMessages(messages, seedMessageCount);
+  const generatedMessages = (
+    generatedMessagesOverride ?? newlyGeneratedSubagentMessages(messages, seedMessageCount)
+  ).filter((message) => message.role !== "system");
   const finalAssistant = finalAssistantOverride ?? findLastAssistantMessage(generatedMessages);
   const assistantError =
     finalAssistant?.stopReason === "aborted"
@@ -409,11 +411,7 @@ export async function runDetachedSubagentSession(
   });
 
   const abortListener = () => {
-    const closing =
-      options.signal?.reason instanceof HarnessClosed ||
-      options.signal?.reason instanceof HarnessFault;
-    const operation = closing ? subagentSession.dispose() : subagentSession.abort();
-    void operation.catch((error) => console.error("Failed to stop subagent", error));
+    void subagentSession.abort().catch((error) => console.error("Failed to stop subagent", error));
   };
   if (options.signal) {
     if (options.signal.aborted) {
@@ -424,6 +422,7 @@ export async function runDetachedSubagentSession(
   }
 
   let deliveringResult = false;
+  let startedTurn = false;
   try {
     if (options.signal?.aborted) {
       throw options.signal.reason instanceof Error
@@ -432,6 +431,7 @@ export async function runDetachedSubagentSession(
     }
     if (options.continueSession) {
       if (!existing) throw new Error("Subagent session not found");
+      startedTurn = true;
       await subagentSession.sendCustomMessage(
         {
           customType: `batty-runtime-notice:${subagentNotice.kind}`,
@@ -444,8 +444,8 @@ export async function runDetachedSubagentSession(
       // Another live caller owns this operation; wait for its normal driver to finish.
       options.onReady?.(readyDetails);
       await subagentSession.waitForIdle();
-    } else if (!subagentSession.snapshot.lastResult) {
-      if (existing) throw new Error("Detached subagent operation was interrupted");
+    } else if (!existing) {
+      startedTurn = true;
       await subagentSession.sendCustomMessage(
         {
           customType: `batty-runtime-notice:${subagentNotice.kind}`,
@@ -455,6 +455,19 @@ export async function runDetachedSubagentSession(
         { triggerTurn: true, onAccepted: () => options.onReady?.(readyDetails) },
       );
     } else {
+      const branch = subagentSession.sessionManager.getBranch();
+      const marker = branch.findLastIndex(
+        (entry) => entry.type === "custom" && entry.customType === SUBAGENT_SESSION_CUSTOM_TYPE,
+      );
+      if (
+        !branch
+          .slice(marker + 1)
+          .some(
+            (entry) =>
+              entry.type === "custom" && entry.customType === SUBAGENT_COMPLETION_CUSTOM_TYPE,
+          )
+      )
+        throw new Error("Detached subagent operation was interrupted");
       options.onReady?.(readyDetails);
     }
     const branch = subagentSession.sessionManager.getBranch();
@@ -463,19 +476,45 @@ export async function runDetachedSubagentSession(
     );
     const generated = branch
       .slice(options.continueSession ? startingBranchLength : marker + 1)
-      .flatMap((entry) => (entry.type === "message" ? [entry.message] : []));
+      .flatMap((entry): AgentSession["messages"] => {
+        if (entry.type === "message") {
+          return [entry.message];
+        }
+        if (entry.type === "custom_message") {
+          return [
+            {
+              role: "custom",
+              customType: entry.customType,
+              content: entry.content,
+              details: entry.details,
+              display: entry.display,
+              timestamp: new Date(entry.timestamp).getTime(),
+            },
+          ];
+        }
+        return [];
+      });
+    const completion = branch.findLast(
+      (entry) => entry.type === "custom" && entry.customType === SUBAGENT_COMPLETION_CUSTOM_TYPE,
+    );
+    const completionError =
+      !startedTurn && completion?.type === "custom"
+        ? (completion.data as { error?: string }).error
+        : undefined;
     const result = buildDetachedSubagentResult(
       subagentSession,
       options,
       seedMessageCount,
-      subagentSession.snapshot.lastResult?.status === "failed"
-        ? subagentSession.snapshot.lastResult.error!.message
-        : subagentSession.snapshot.lastResult?.status === "aborted"
-          ? "Subagent stopped by user"
-          : undefined,
+      completionError,
       observedFinalAssistant,
       generated,
     );
+    if (startedTurn) {
+      await subagentSession.sessionManager.appendCustomEntry(SUBAGENT_COMPLETION_CUSTOM_TYPE, {
+        status: result.isError ? "failed" : "completed",
+        ...(result.errorMessage ? { error: result.errorMessage } : {}),
+      });
+    }
     if (options.respondIn === "session") {
       deliveringResult = true;
       if (!deps.deliverResultToParent)
@@ -487,7 +526,6 @@ export async function runDetachedSubagentSession(
       text: result.text || lastText,
     };
   } catch (error) {
-    if (error instanceof HarnessClosed || error instanceof HarnessFault) throw error;
     // Delivery failures remain retryable; they must not replace the child's native result.
     if (deliveringResult || subagentSession.isStreaming) throw error;
     const result = buildDetachedSubagentResult(
@@ -498,9 +536,15 @@ export async function runDetachedSubagentSession(
       observedFinalAssistant,
       observedGeneratedMessages.length > 0 ? observedGeneratedMessages : undefined,
     );
+    if (startedTurn) {
+      await subagentSession.sessionManager.appendCustomEntry(SUBAGENT_COMPLETION_CUSTOM_TYPE, {
+        status: "failed",
+        error: result.errorMessage,
+      });
+    }
     if (
       options.respondIn === "session" &&
-      (subagentSession.snapshot.lastResult || options.deliveryMode === "prompt")
+      (observedFinalAssistant || options.deliveryMode === "prompt")
     ) {
       if (!deps.deliverResultToParent)
         throw new Error("Subagent parent delivery is not configured");
@@ -536,7 +580,7 @@ export async function deliverDetachedSubagentResult(
       role: "custom",
       customType: "batty-subagent-result",
       content: `Subagent result\n\nDetached session: ${child.sessionPath}`,
-      data: { subagent: child },
+      details: { subagent: child },
       timestamp,
     } as unknown as Message,
     {
@@ -586,7 +630,7 @@ export async function deliverAsyncSubagentResult(
         output,
       ].join("\n"),
       display: true,
-      data: {
+      details: {
         subagent: child,
         ...(artifacts.battyFileChanges?.length
           ? { battyFileChanges: artifacts.battyFileChanges }
@@ -601,6 +645,7 @@ export async function deliverAsyncSubagentResult(
 
 export async function appendMessages(session: AgentSession, messages: Message[]): Promise<void> {
   for (const message of messages) await session.sessionManager.appendMessage(message);
+  session.sdk.refreshContext();
 }
 
 export interface ResolveDailySessionDeps {

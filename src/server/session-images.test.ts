@@ -2,12 +2,11 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
-import { BACKGROUND_CONTEXT, getOrThrow } from "@earendil-works/pi-agent-core";
+import { SessionStore } from "./session-store";
 import {
   createUiImageResolver,
   resolveSessionImage,
   sessionImageDirectory,
-  SessionImageFileSystem,
 } from "./session-images";
 
 const roots: string[] = [];
@@ -17,83 +16,28 @@ afterEach(async () => {
 });
 
 describe("session image storage", () => {
-  it("externalizes nested images and hydrates them for Pi reads", async () => {
+  it("preserves inline images in native persistence and provider context", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-session-images-"));
     roots.push(root);
-    const sessionFile = path.join(root, "session.jsonl");
-    const imageData = Buffer.from("image bytes").toString("base64");
-    const lines = [
-      { v: 4, kind: "header", id: "session", storageVersion: 1, createdAt: 1, cwd: root },
-      {
-        kind: "entry",
-        entry: {
-          type: "compaction",
-          retainedTail: [
-            {
-              role: "toolResult",
-              content: [{ type: "image", mimeType: "image/png", data: imageData }],
-            },
-          ],
-        },
-      },
-    ];
-    const env = new SessionImageFileSystem({ cwd: root });
-    getOrThrow(
-      await env.writeFile(
-        sessionFile,
-        `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
-        BACKGROUND_CONTEXT,
-      ),
-    );
-
-    const stored = await fs.readFile(sessionFile, "utf8");
-    expect(stored).toContain("batty-file:");
-    expect(stored).not.toContain(imageData);
-    const assetsDirectory = sessionImageDirectory(sessionFile);
-    const assets = await fs.readdir(assetsDirectory);
-    expect(assets).toHaveLength(1);
-    await expect(fs.readFile(path.join(assetsDirectory, assets[0]!), "utf8")).resolves.toBe(
+    const store = await SessionStore.create(root, path.join(root, "sessions"));
+    const image = {
+      type: "image" as const,
+      mimeType: "image/png",
+      data: Buffer.from("image bytes").toString("base64"),
+    };
+    await store.appendMessage({ role: "user", content: [image], timestamp: 1 });
+    const file = store.getSessionFile();
+    expect(await fs.readFile(file, "utf8")).toContain(image.data);
+    store.release();
+    const reopened = await SessionStore.open(file);
+    expect(reopened.native.buildSessionContext().messages[0]).toMatchObject({ content: [image] });
+    const resolve = createUiImageResolver(file, "workspace", reopened.getSessionId());
+    const result = resolve(image);
+    expect(await resolveSessionImage(file, result.name)).toMatchObject({ mimeType: "image/png" });
+    expect(await fs.readFile(path.join(sessionImageDirectory(file), result.name), "utf8")).toBe(
       "image bytes",
     );
-
-    const hydrated = getOrThrow(await env.readTextFile(sessionFile, BACKGROUND_CONTEXT));
-    expect(hydrated).toContain(imageData);
-    expect(hydrated).not.toContain("batty-file:");
-
-    const reader = getOrThrow(await env.openTextLineReader(sessionFile, BACKGROUND_CONTEXT));
-    const header = getOrThrow(await reader.readLine(BACKGROUND_CONTEXT));
-    const entry = getOrThrow(await reader.readLine(BACKGROUND_CONTEXT));
-    await reader.close(BACKGROUND_CONTEXT);
-    expect(header?.text).not.toContain(imageData);
-    expect(entry?.text).toContain(imageData);
-    expect(entry?.text).not.toContain("batty-file:");
-  });
-
-  it("externalizes images on append without changing the in-memory payload", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-session-images-"));
-    roots.push(root);
-    const sessionFile = path.join(root, "session.jsonl");
-    const imageData = Buffer.from("tool image").toString("base64");
-    const env = new SessionImageFileSystem({ cwd: root });
-    const line = `${JSON.stringify({
-      kind: "value",
-      value: { type: "image", mimeType: "image/jpeg", data: imageData },
-    })}\n`;
-
-    await Promise.all([
-      env.appendFile(sessionFile, line, BACKGROUND_CONTEXT).then(getOrThrow),
-      env.appendFile(sessionFile, line, BACKGROUND_CONTEXT).then(getOrThrow),
-    ]);
-
-    const stored = await fs.readFile(sessionFile, "utf8");
-    expect(stored).toContain("batty-file:");
-    expect(stored).not.toContain(imageData);
-    expect(line).toContain(imageData);
-    const assets = await fs.readdir(sessionImageDirectory(sessionFile));
-    expect(assets).toHaveLength(1);
-    await expect(
-      fs.readFile(path.join(sessionImageDirectory(sessionFile), assets[0]!), "utf8"),
-    ).resolves.toBe("tool image");
+    reopened.release();
   });
 
   it("uses session-owned images for UI presentation", async () => {

@@ -2,13 +2,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { BACKGROUND_CONTEXT as context, getOrThrow } from "@earendil-works/pi-agent-core";
-import { createModels, fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AppConfig } from "./config";
 import type { CronService } from "./cron";
 import { createPiAgentSession } from "./pi-agent-session";
-import { HarnessSessionStore } from "./harness-session-store";
+import { SessionStore } from "./session-store";
 import { PiService } from "./pi-service";
 import { workspaceSessionDir } from "./pi-paths";
 import type { WorkspaceInfo } from "@/shared/types";
@@ -24,9 +23,9 @@ async function createService() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-service-drain-"));
   cleanups.push(() => fs.rm(root, { recursive: true, force: true }));
   const faux = fauxProvider();
-  const models = createModels();
-  models.setProvider(faux.provider);
-  vi.spyOn(ModelRuntime, "create").mockResolvedValue(models as unknown as ModelRuntime);
+  const models = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+  models.registerNativeProvider(faux.provider);
+  vi.spyOn(ModelRuntime, "create").mockResolvedValue(models);
   const config = {
     battyDir: path.join(root, "data"),
     selfPath: root,
@@ -54,10 +53,10 @@ async function createService() {
 
 async function createInterruptedSession(
   config: AppConfig,
-  models: ReturnType<typeof createModels>,
+  models: ModelRuntime,
   workspace: WorkspaceInfo,
 ) {
-  const store = await HarnessSessionStore.create(
+  const store = await SessionStore.create(
     workspace.path,
     workspaceSessionDir(config, workspace.id),
   );
@@ -65,15 +64,14 @@ async function createInterruptedSession(
     config,
     workspace,
     sessionManager: store,
-    modelRuntime: models as unknown as ModelRuntime,
+    modelRuntime: models,
     customTools: [],
   });
-  getOrThrow(
-    await session.lane.accept(
-      { kind: "prompt", operationId: "interrupted", prompt: "unfinished" },
-      context,
-    ),
-  );
+  await session.sessionManager.appendMessage({
+    role: "user",
+    content: "unfinished",
+    timestamp: Date.now(),
+  });
   const sessionPath = session.sessionFile;
   await session.dispose();
   return sessionPath;
@@ -92,16 +90,12 @@ describe("PiService drain and interrupted sessions", () => {
     expect(faux.state.callCount).toBe(0);
   });
 
-  it("aborts an orphaned operation when opened, leaving it idle and ready for a new prompt", async () => {
+  it("opens an unfinished transcript idle and ready for a new prompt", async () => {
     const { config, faux, models, service, workspace } = await createService();
     const sessionPath = await createInterruptedSession(config, models, workspace);
 
     const opened = await service.openSession(workspace, sessionPath);
-    const controller = await (service as any).sessionControllers.get(opened.sessionId);
-    expect(controller.session.snapshot.lastResult).toMatchObject({
-      operationId: "interrupted",
-      status: "aborted",
-    });
+    expect(faux.state.callCount).toBe(0);
     expect(opened.isStreaming).toBe(false);
 
     faux.setResponses([fauxAssistantMessage("fresh answer")]);

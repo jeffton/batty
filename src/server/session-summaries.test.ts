@@ -12,11 +12,7 @@ import {
   disposeSessionSummaryIndex,
   SessionSummaryIndex,
 } from "@/server/session-summaries";
-import { HarnessSessionStore } from "./harness-session-store";
-import { HarnessController } from "./harness-controller";
-import { createModels, fauxProvider } from "@earendil-works/pi-ai";
-import { DefaultResourceLoader, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { BACKGROUND_CONTEXT } from "@earendil-works/pi-agent-core";
+import { SessionStore } from "./session-store";
 import { battyAgentDir, workspaceSessionDir } from "@/server/pi-paths";
 import { CRON_RUN_SESSION_CUSTOM_TYPE, CRON_SESSION_CUSTOM_TYPE } from "@/server/cron-session";
 import { SUBAGENT_SESSION_CUSTOM_TYPE } from "@/server/subagent";
@@ -82,31 +78,25 @@ async function writeSession(
   const sessionPath = path.join(sessionDir, fileName);
   await fs.mkdir(path.dirname(sessionPath), { recursive: true });
   let parentId: string | null = null;
-  let seq = 0;
   const normalized = entries.map((raw) => {
     const entry = raw as Record<string, any>;
     if (entry.type === "session")
       return {
-        v: 4,
-        kind: "header",
+        type: "session",
+        version: 3,
         id: entry.id,
-        createdAt: Date.parse(entry.timestamp),
-        storageVersion: 1,
+        timestamp: entry.timestamp,
         cwd: workspaceInfo(config, workspaceId).path,
-        nextSeq: entries.length,
-        ...(entry.parentSessionId ? { parentSessionId: entry.parentSessionId } : {}),
+        ...(entry.parentSessionId ? { parentSession: entry.parentSessionId } : {}),
       };
-    seq += 1;
     const result: Record<string, any> = {
       ...entry,
-      kind: "entry",
       id: entry.id ?? crypto.randomUUID(),
       parentId: entry.parentId ?? parentId,
-      seq,
       timestamp:
         typeof entry.timestamp === "number"
-          ? entry.timestamp
-          : Date.parse(entry.timestamp ?? updatedAt),
+          ? new Date(entry.timestamp).toISOString()
+          : (entry.timestamp ?? updatedAt),
     };
     parentId = result.id;
     if (entry.message) {
@@ -120,17 +110,6 @@ async function writeSession(
               ? [{ type: "text", text: entry.message.content }]
               : entry.message.content,
         };
-    }
-    if (entry.type === "custom_message") {
-      result.type = "message";
-      result.message = {
-        role: "custom",
-        customType: entry.customType,
-        content: entry.content,
-        timestamp: result.timestamp,
-      };
-      delete result.customType;
-      delete result.content;
     }
     return result;
   });
@@ -561,6 +540,32 @@ const sessionHeader = (id: string) => ({
 });
 
 describe("persistent session summary index", () => {
+  it("rebuilds a fresh empty session from its native header after clearing the index", async () => {
+    const config = await createConfig();
+    const workspace = workspaceInfo(config, "empty-rebuild");
+    const index = await getSessionSummaryIndex(config);
+    const store = await SessionStore.create(
+      workspace.path,
+      workspaceSessionDir(config, workspace.id),
+    );
+    const file = store.getSessionFile();
+    const sessionId = store.getSessionId();
+    expect(index.list(workspace.id, "2026-03-25")[1]?.sessionId).toBe(sessionId);
+    store.release();
+    await disposeSessionSummaryIndex(config);
+    await fs.rm(path.join(battyAgentDir(config), "session-summary-index.json"));
+    const read = vi.spyOn(SessionStore, "read");
+    const rebuilt = await getSessionSummaryIndex(config);
+    await rebuilt.ensureInitialized(workspace.id);
+    expect(read).toHaveBeenCalledWith(file, { readOnly: true });
+    expect(rebuilt.list(workspace.id, "2026-03-25")[1]).toMatchObject({
+      sessionId,
+      path: file,
+      firstMessage: "(no messages)",
+      messageCount: 0,
+    });
+  });
+
   it("serves warm and restarted lists without directory scans, stats, or transcript reads", async () => {
     const config = await createConfig();
     const workspace = workspaceInfo(config, "warm");
@@ -572,7 +577,7 @@ describe("persistent session summary index", () => {
     await index.flush();
     const readdir = vi.spyOn(fs, "readdir");
     const stat = vi.spyOn(fs, "stat");
-    const read = vi.spyOn(HarnessSessionStore, "read");
+    const read = vi.spyOn(SessionStore, "read");
     const readFile = vi.spyOn(fs, "readFile");
     for (let i = 0; i < 5; i++) {
       expect((await listSessionSummaries(config, workspace))[1]?.sessionId).toBe("one");
@@ -608,7 +613,7 @@ describe("persistent session summary index", () => {
       [sessionHeader("one")],
       false,
     );
-    const read = vi.spyOn(HarnessSessionStore, "read");
+    const read = vi.spyOn(SessionStore, "read");
     await Promise.all([restored.ensureInitialized("new"), restored.ensureInitialized("new")]);
     expect(read).toHaveBeenCalledTimes(1);
     expect(restored.list("new", "2026-03-25")[1]?.sessionId).toBe("one");
@@ -618,11 +623,11 @@ describe("persistent session summary index", () => {
 
   it.each([
     ["malformed JSON", "{not JSON"],
-    ["unsupported version", JSON.stringify({ version: 2, entries: {} })],
-    ["invalid index structure", JSON.stringify({ version: 1, entries: {} })],
+    ["unsupported version", JSON.stringify({ version: 1, entries: {} })],
+    ["invalid index structure", JSON.stringify({ version: 2, entries: {} })],
     [
       "invalid index structure",
-      JSON.stringify({ version: 1, entries: { broken: null }, completedWorkspaces: [] }),
+      JSON.stringify({ version: 2, entries: { broken: null }, completedWorkspaces: [] }),
     ],
   ])("invalidates a %s cache and rebuilds it", async (_reason, content) => {
     const config = await createConfig();
@@ -654,21 +659,20 @@ describe("persistent session summary index", () => {
     await index.ensureInitialized(workspace.id);
     expect(index.list(workspace.id, "2026-03-25")[1]?.sessionId).toBe("one");
     await index.flush();
-    expect(JSON.parse(await fs.readFile(indexFile, "utf8"))).toMatchObject({ version: 1 });
+    expect(JSON.parse(await fs.readFile(indexFile, "utf8"))).toMatchObject({ version: 2 });
   });
 
   it("surfaces persistence failures and allows the next flush to save the index", async () => {
     const config = await createConfig();
     const workspace = workspaceInfo(config, "persistence");
     const index = await getSessionSummaryIndex(config);
-    const store = await HarnessSessionStore.create(
+    const store = await SessionStore.create(
       workspace.path,
       workspaceSessionDir(config, workspace.id),
     );
     vi.spyOn(fs, "rename").mockRejectedValueOnce(new Error("disk failure"));
     await expect(index.flush()).rejects.toThrow("disk failure");
     await expect(index.flush()).resolves.toBeUndefined();
-    await store.native.close(BACKGROUND_CONTEXT);
     store.release();
     await disposeSessionSummaryIndex(config);
     expect((await listSessionSummaries(config, workspace))[1]?.sessionId).toBe(
@@ -679,12 +683,12 @@ describe("persistent session summary index", () => {
   it("does not let Pi repair a torn transcript during initial indexing", async () => {
     const config = await createConfig();
     const workspace = workspaceInfo(config, "torn");
-    const store = await HarnessSessionStore.create(
+    const store = await SessionStore.create(
       workspace.path,
       workspaceSessionDir(config, workspace.id),
     );
+    await store.appendMessage({ role: "user", content: "initial", timestamp: 1 });
     const file = store.getSessionFile();
-    await store.native.close(BACKGROUND_CONTEXT);
     store.release();
     const torn = `${await fs.readFile(file, "utf8")}{`;
     await fs.writeFile(file, torn);
@@ -751,59 +755,37 @@ describe("persistent session summary index", () => {
     const config = await createConfig();
     const workspace = workspaceInfo(config, "events");
     const index = await getSessionSummaryIndex(config);
-    const store = await HarnessSessionStore.create(
+    const store = await SessionStore.create(
       workspace.path,
       workspaceSessionDir(config, workspace.id),
     );
     expect((await listSessionSummaries(config, workspace))[1]?.sessionId).toBe(
       store.getSessionId(),
     );
-    const faux = fauxProvider();
-    const models = createModels();
-    models.setProvider(faux.provider);
-    const settings = SettingsManager.inMemory({ compaction: { enabled: false } });
-    const resources = new DefaultResourceLoader({
-      cwd: config.battyDir,
-      agentDir: config.battyDir,
-      noExtensions: true,
-      noSkills: true,
-      noThemes: true,
-      noPromptTemplates: true,
+    const read = vi.spyOn(SessionStore, "read");
+    const readdir = vi.spyOn(fs, "readdir");
+    await store.appendMessage({ role: "user", content: "live first message", timestamp: 100 });
+    await store.appendMessage({ ...fauxAssistantMessage("reply"), timestamp: 200 });
+    await store.appendCustomEntry(CRON_SESSION_CUSTOM_TYPE, {
+      version: 1,
+      kind: "daily",
+      date: "2026-03-25",
     });
-    const controller = await HarnessController.create(
-      store,
-      { models, model: faux.getModel() },
-      settings,
-      resources,
-    );
-    try {
-      const read = vi.spyOn(HarnessSessionStore, "read");
-      const readdir = vi.spyOn(fs, "readdir");
-      await store.appendMessage({ role: "user", content: "live first message", timestamp: 100 });
-      await store.appendMessage({ ...fauxAssistantMessage("reply"), timestamp: 200 });
-      await store.appendCustomEntry(CRON_SESSION_CUSTOM_TYPE, {
-        version: 1,
-        kind: "daily",
-        date: "2026-03-25",
-      });
-      const summary = index.list(workspace.id, "2026-03-25")[0];
-      expect(summary).toMatchObject({
-        sessionId: store.getSessionId(),
-        firstMessage: "live first message",
-        lastAssistantReplyAt: 200,
-        dailySession: { isToday: true, exists: true },
-      });
-      expect(index.list(workspace.id, "2026-03-26")[1]?.dailySession?.isToday).toBe(false);
-      const child = await store.fork(workspaceSessionDir(config, workspace.id));
-      expect(index.list(workspace.id, "2026-03-25")).toHaveLength(1);
-      await child.native.close(BACKGROUND_CONTEXT);
-      child.release();
-      expect(read).not.toHaveBeenCalled();
-      expect(readdir).not.toHaveBeenCalled();
-      await index.flush();
-    } finally {
-      await controller.dispose();
-    }
+    const summary = index.list(workspace.id, "2026-03-25")[0];
+    expect(summary).toMatchObject({
+      sessionId: store.getSessionId(),
+      firstMessage: "live first message",
+      lastAssistantReplyAt: 200,
+      dailySession: { isToday: true, exists: true },
+    });
+    expect(index.list(workspace.id, "2026-03-26")[1]?.dailySession?.isToday).toBe(false);
+    const child = await store.fork(workspaceSessionDir(config, workspace.id));
+    expect(index.list(workspace.id, "2026-03-25")).toHaveLength(1);
+    child.release();
+    expect(read).not.toHaveBeenCalled();
+    expect(readdir).not.toHaveBeenCalled();
+    await index.flush();
+    store.release();
     await disposeSessionSummaryIndex(config);
     expect(
       (await getSessionSummaryIndex(config)).list(workspace.id, "2026-03-25")[0]
@@ -814,28 +796,27 @@ describe("persistent session summary index", () => {
   it("does not replace a live update with an older in-flight initial snapshot", async () => {
     const config = await createConfig();
     const workspace = workspaceInfo(config, "race");
-    const store = await HarnessSessionStore.create(
+    const store = await SessionStore.create(
       workspace.path,
       workspaceSessionDir(config, workspace.id),
     );
+    await store.appendCustomEntry("test", {});
+    // Pi persists when the first conversation message arrives.
+    await store.appendMessage({
+      ...fauxAssistantMessage("setup"),
+      timestamp: 1,
+    });
     const index = await getSessionSummaryIndex(config);
-    const original = HarnessSessionStore.read.bind(HarnessSessionStore);
-    vi.spyOn(HarnessSessionStore, "read").mockImplementationOnce(async (file, options) => {
+    const original = SessionStore.read.bind(SessionStore);
+    vi.spyOn(SessionStore, "read").mockImplementationOnce(async (file, options) => {
       const stale = await original(file, options);
-      store.observe({
-        type: "message",
-        id: "live",
-        parentId: null,
-        timestamp: 100,
-        message: { role: "user", content: "new live message", timestamp: 100 },
-      } as never);
+      await store.appendMessage({ role: "user", content: "new live message", timestamp: 100 });
       return stale;
     });
     await index.ensureInitialized(workspace.id);
     expect((await listSessionSummaries(config, workspace))[1]?.firstMessage).toBe(
       "new live message",
     );
-    await store.native.close(BACKGROUND_CONTEXT);
     store.release();
   });
 
@@ -843,7 +824,7 @@ describe("persistent session summary index", () => {
     const config = await createConfig();
     const workspace = workspaceInfo(config, "load-race");
     const index = await getSessionSummaryIndex(config);
-    const store = await HarnessSessionStore.create(
+    const store = await SessionStore.create(
       workspace.path,
       workspaceSessionDir(config, workspace.id),
     );
@@ -853,20 +834,13 @@ describe("persistent session summary index", () => {
     vi.spyOn(fs, "readFile").mockImplementationOnce(
       async (...args: Parameters<typeof fs.readFile>) => {
         const saved = await original(...args);
-        store.observe({
-          type: "message",
-          id: "live",
-          parentId: null,
-          timestamp: 100,
-          message: { role: "user", content: "during load", timestamp: 100 },
-        } as never);
+        await store.appendMessage({ role: "user", content: "during load", timestamp: 100 });
         return saved;
       },
     );
     const restored = await SessionSummaryIndex.create(config);
     expect(restored.list(workspace.id, "2026-03-25")[1]?.firstMessage).toBe("during load");
     await restored.dispose();
-    await store.native.close(BACKGROUND_CONTEXT);
     store.release();
   });
 });

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -323,17 +324,12 @@ export function createSubagentTool({
         params.includePreviousContext === true || params.includePreviousContext === "chat-only"
           ? params.includePreviousContext
           : false;
-      const replay = ctx as unknown as {
-        invocation: import("@earendil-works/pi-agent-core").AgentHarnessToolInvocation;
-        childSessionId: () => string;
-      };
-      let childSessionId = (await replay.invocation.getMemo("child-session-id")) as
-        | string
-        | undefined;
-      if (!childSessionId) {
-        childSessionId = replay.childSessionId();
-        await replay.invocation.setMemo("child-session-id", childSessionId);
-      }
+      const childIdBytes = randomBytes(16);
+      childIdBytes.writeUIntBE(Date.now(), 0, 6);
+      childIdBytes[6] = (childIdBytes[6]! & 0x0f) | 0x70;
+      childIdBytes[8] = (childIdBytes[8]! & 0x3f) | 0x80;
+      const childHex = childIdBytes.toString("hex");
+      const childSessionId = `${childHex.slice(0, 8)}-${childHex.slice(8, 12)}-${childHex.slice(12, 16)}-${childHex.slice(16, 20)}-${childHex.slice(20)}`;
       const request: DetachedSubagentRequest = {
         sessionId: childSessionId,
         workspace,

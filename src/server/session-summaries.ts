@@ -5,7 +5,7 @@ import type { AppConfig } from "./config";
 import { battyAgentDir, battySessionRootDir, workspaceSessionDir } from "./pi-paths";
 import { findLatestDailyCronSessionBinding, toLocalIsoDate } from "./cron-session";
 import { isSubagentSessionEntry } from "./subagent";
-import { HarnessSessionStore, type SessionRead } from "./harness-session-store";
+import { SessionStore, type SessionRead } from "./session-store";
 
 const DEFAULT_SESSION_LABEL = "(no messages)";
 const CRON_RUNTIME_NOTICE_CUSTOM_TYPE = "batty-runtime-notice:cron";
@@ -15,7 +15,7 @@ interface IndexEntry {
   summary?: SessionSummary;
 }
 interface StoredIndex {
-  version: 1;
+  version: 2;
   entries: Record<string, IndexEntry>;
   completedWorkspaces: string[];
 }
@@ -45,10 +45,16 @@ function buildSessionSummary(
   workspaceId: string,
   updatedAt: number,
 ): SessionSummary | undefined {
-  if (metadata.parentSessionId || entries.some(isSubagentSessionEntry)) return undefined;
+  if (metadata.parentSession || entries.some(isSubagentSessionEntry)) return undefined;
   let firstMessage = "";
   let lastAssistantReplyAt: number | undefined;
   for (const entry of entries) {
+    if (
+      entry.type === "custom_message" &&
+      !firstMessage &&
+      entry.customType === CRON_RUNTIME_NOTICE_CUSTOM_TYPE
+    )
+      firstMessage = extractCronRuntimeNoticePrompt(entry.content);
     if (entry.type !== "message") continue;
     const message = entry.message;
     if (!firstMessage && message.role === "user")
@@ -111,7 +117,7 @@ export class SessionSummaryIndex {
   private constructor(private readonly config: Pick<AppConfig, "battyDir">) {
     this.filePath = path.join(battyAgentDir(config), "session-summary-index.json");
     // Subscribe before loading: disk state must not overwrite a concurrent Batty write.
-    this.unsubscribe = HarnessSessionStore.subscribe((file, snapshot) => {
+    this.unsubscribe = SessionStore.subscribe((file, snapshot) => {
       const workspaceId = this.workspaceId(file);
       if (!workspaceId) return;
       this.bump(file);
@@ -176,7 +182,7 @@ export class SessionSummaryIndex {
       await this.invalidateCache("malformed JSON", error as Error);
       return;
     }
-    if (stored?.version !== 1) {
+    if (stored?.version !== 2) {
       const error = new Error(`Unsupported session summary index: ${stored?.version}`);
       await this.invalidateCache("unsupported version", error);
       return;
@@ -247,7 +253,7 @@ export class SessionSummaryIndex {
       if (!this.dirty) return;
       this.dirty = false;
       const stored: StoredIndex = {
-        version: 1,
+        version: 2,
         entries: Object.fromEntries(this.entries),
         completedWorkspaces: [...this.completedWorkspaces],
       };
@@ -330,7 +336,7 @@ export class SessionSummaryIndex {
     for (const file of files) {
       try {
         if (this.revisions.has(file)) continue;
-        const snapshot = await HarnessSessionStore.read(file, { readOnly: true });
+        const snapshot = await SessionStore.read(file, { readOnly: true });
         if (!unchanged(file)) continue;
         this.entries.set(
           file,

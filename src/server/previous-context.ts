@@ -1,7 +1,7 @@
 import type { Message } from "@earendil-works/pi-ai";
 import type { PreviousContextMode } from "@/shared/types";
 import { chatOnlyMessagesFromBranch } from "./chat-only-context";
-import { HarnessSessionStore as SessionManager } from "./harness-session-store";
+import { SessionStore as SessionManager } from "./session-store";
 
 export async function createSessionManagerWithPreviousContext(options: {
   cwd: string;
@@ -34,8 +34,7 @@ export async function createSessionManagerWithPreviousContext(options: {
     };
   }
 
-  const branch = source.getBranch();
-  const leafIndex = options.leafId ? branch.findIndex((entry) => entry.id === options.leafId) : -1;
+  const branch = options.leafId ? source.getBranch(options.leafId) : [];
   return {
     manager: await SessionManager.create(
       options.cwd,
@@ -43,8 +42,6 @@ export async function createSessionManagerWithPreviousContext(options: {
       options.parentSessionId,
       options.sessionId,
     ),
-    chatOnlyMessages: chatOnlyMessagesFromBranch(
-      leafIndex >= 0 ? branch.slice(0, leafIndex + 1) : [],
-    ),
+    chatOnlyMessages: chatOnlyMessagesFromBranch(branch),
   };
 }

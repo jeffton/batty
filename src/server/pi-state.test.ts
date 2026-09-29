@@ -410,30 +410,48 @@ describe("normalizeMessage", () => {
 });
 
 describe("transcriptMessagesFromSessionEntries", () => {
+  it("projects native array-content notices and hides context-only messages", () => {
+    const entries = [true, false].map((display) => ({
+      type: "custom_message",
+      customType: "extension-notice",
+      content: [
+        { type: "text", text: "first" },
+        { type: "text", text: "second" },
+      ],
+      display,
+      timestamp: "1970-01-01T00:00:00.001Z",
+      details: { source: "extension" },
+    }));
+    const messages = transcriptMessagesFromSessionEntries(entries);
+    expect(normalizeMessage(messages[0]!, 0)).toMatchObject({
+      role: "custom",
+      text: "first\nsecond",
+      data: { source: "extension" },
+    });
+    expect(normalizeMessage(messages[1]!, 1)).toBeUndefined();
+  });
   it("associates async subagent artifacts with their parent reply", () => {
     const messages = transcriptMessagesFromSessionEntries([
       {
-        type: "message",
+        type: "custom_message",
         id: "async-result",
-        message: {
-          role: "custom",
-          customType: "batty-runtime-notice:subagent",
-          content: "Child complete",
-          timestamp: 1,
-          data: {
-            subagent: { sessionId: "child" },
-            sentFiles: [
-              {
-                id: "file-1",
-                name: "report.md",
-                size: 10,
-                mimeType: "text/markdown",
-                kind: "file",
-                downloadUrl: "/report.md",
-              },
-            ],
-            sites: [{ id: "site-1", name: "Report", url: "/site", public: false }],
-          },
+        customType: "batty-runtime-notice:subagent",
+        content: "Child complete",
+        display: true,
+        timestamp: "1970-01-01T00:00:00.001Z",
+        details: {
+          subagent: { sessionId: "child" },
+          sentFiles: [
+            {
+              id: "file-1",
+              name: "report.md",
+              size: 10,
+              mimeType: "text/markdown",
+              kind: "file",
+              downloadUrl: "/report.md",
+            },
+          ],
+          sites: [{ id: "site-1", name: "Report", url: "/site", public: false }],
         },
       },
       {
@@ -447,6 +465,10 @@ describe("transcriptMessagesFromSessionEntries", () => {
       },
     ]);
 
+    expect(normalizeMessage(messages[0]!, 0)).toMatchObject({
+      role: "custom",
+      data: { subagent: { sessionId: "child" } },
+    });
     const normalized = normalizeMessage(messages[1]!, 1);
     expect(normalized?.role === "assistant" ? normalized.sentFiles?.[0]?.id : undefined).toBe(
       "file-1",

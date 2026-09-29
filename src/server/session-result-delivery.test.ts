@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { appendResultMessages } from "./session-result-delivery";
-import { createHarnessFixture } from "./harness-test-fixture";
+import { createAgentSessionFixture } from "./agent-session-test-fixture";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -11,7 +11,7 @@ afterEach(async () => {
 
 describe("result delivery", () => {
   it("appends each message after the parent becomes idle without delivery metadata", async () => {
-    const fixture = await createHarnessFixture();
+    const fixture = await createAgentSessionFixture();
     cleanups.push(fixture.cleanup);
     const messages = [
       { role: "user" as const, content: "Detached result", timestamp: 1 },

@@ -3,7 +3,12 @@ import { applyServerEvent } from "@/client/lib/session-events";
 import { withoutRenderedToolCalls } from "@/client/lib/active-assistant";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { ServerEvent, SessionState, WorkspaceInfo } from "@/shared/types";
-import { handleAgentEvent, publish, subscribeToSession } from "./pi-service-sessions";
+import {
+  attachSession,
+  handleAgentEvent,
+  publish,
+  subscribeToSession,
+} from "./pi-service-sessions";
 import type { WebSession } from "./pi-service-types";
 
 const workspace: WorkspaceInfo = {
@@ -45,7 +50,44 @@ function createState(
 }
 
 describe("workspace activity updates", () => {
-  it("invokes the settled-operation hook when the harness run ends", async () => {
+  it("initializes live assistant and tool state from the native session", () => {
+    const streamingMessage = {
+      role: "assistant",
+      content: [{ type: "text", text: "in progress" }],
+      timestamp: 1,
+    };
+    const runningTool = {
+      toolCallId: "call-live",
+      toolName: "bash",
+      args: { command: "echo live" },
+      partialResult: { content: [{ type: "text", text: "partial" }] },
+    };
+    const session = {
+      sessionId: "session-live",
+      streamingMessage,
+      runningTools: [runningTool],
+      isCompacting: false,
+      subscribe: vi.fn(),
+    };
+    const webSession = attachSession(
+      new Map(),
+      vi.fn(),
+      vi.fn(async () => undefined),
+      workspace,
+      session as never,
+    );
+
+    expect(webSession.activeAssistant).toBe(streamingMessage);
+    expect(webSession.activeTools.get("call-live")).toMatchObject({
+      toolCallId: "call-live",
+      toolName: "bash",
+      args: { command: "echo live" },
+      blocks: [{ type: "text", text: "partial" }],
+      status: "running",
+    });
+  });
+
+  it("invokes the settled-operation hook when the agent settles", async () => {
     const webSession = {
       id: "cron-session",
       workspace,
@@ -65,7 +107,7 @@ describe("workspace activity updates", () => {
         onAgentSettled,
       },
       webSession,
-      { type: "agent_end", messages: [], willRetry: false } as AgentSessionEvent,
+      { type: "agent_settled" } as AgentSessionEvent,
     );
 
     expect(onAgentSettled).toHaveBeenCalledWith(webSession);
@@ -803,7 +845,7 @@ describe("handleAgentEvent", () => {
     expect(published[0]?.state?.messages).toEqual(persistedMessages);
   });
 
-  it("runs completion hooks on agent_end even when state still reports streaming", async () => {
+  it("does not notify on intermediate agent_end and completes on agent_settled", async () => {
     const onAgentCompleted = vi.fn();
     const notifyWorkspaceUpdated = vi.fn(async () => undefined);
     const published: Array<{ type: string; state?: SessionState }> = [];
@@ -817,11 +859,11 @@ describe("handleAgentEvent", () => {
       openedAt: 1,
       ephemeral: false,
     } as unknown as WebSession;
-    const state = createState({ isStreaming: true }, webSession, []);
+    const getState = () => createState({ isStreaming: !webSession.agentCompleted }, webSession, []);
 
     await handleAgentEvent(
       {
-        getState: () => state,
+        getState,
         getStateMetadata: vi.fn(),
         publish: (_webSession, event) =>
           published.push(event as { type: string; state?: SessionState }),
@@ -831,6 +873,24 @@ describe("handleAgentEvent", () => {
       },
       webSession,
       { type: "agent_end", messages: [] } as unknown as AgentSessionEvent,
+    );
+
+    expect(onAgentCompleted).not.toHaveBeenCalled();
+    expect(notifyWorkspaceUpdated).not.toHaveBeenCalled();
+    expect(webSession.agentCompleted).not.toBe(true);
+
+    await handleAgentEvent(
+      {
+        getState,
+        getStateMetadata: vi.fn(),
+        publish: (_webSession, event) =>
+          published.push(event as { type: string; state?: SessionState }),
+        notifyWorkspaceUpdated,
+        disposeWebSession: vi.fn(),
+        onAgentCompleted,
+      },
+      webSession,
+      { type: "agent_settled" } as unknown as AgentSessionEvent,
     );
 
     expect(onAgentCompleted).toHaveBeenCalledTimes(1);
@@ -866,7 +926,7 @@ describe("handleAgentEvent", () => {
 
     const handling = handleAgentEvent(
       {
-        getState: () => createState({ isStreaming: true }, webSession, []),
+        getState: () => createState({ isStreaming: !webSession.agentCompleted }, webSession, []),
         getStateMetadata: vi.fn(),
         publish: vi.fn(),
         notifyWorkspaceUpdated,
@@ -874,12 +934,16 @@ describe("handleAgentEvent", () => {
         onAgentCompleted,
       },
       webSession,
-      { type: "agent_end", messages: [] } as unknown as AgentSessionEvent,
+      { type: "agent_settled" } as unknown as AgentSessionEvent,
     );
 
-    expect(notifyWorkspaceUpdated).toHaveBeenCalledWith(workspace.id);
+    expect(notifyWorkspaceUpdated).not.toHaveBeenCalled();
     expect(onAgentCompleted).not.toHaveBeenCalled();
 
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(notifyWorkspaceUpdated).toHaveBeenCalledWith(workspace.id);
+    expect(onAgentCompleted).not.toHaveBeenCalled();
     await Promise.resolve();
     expect(onAgentCompleted).toHaveBeenCalledTimes(1);
     expect(notifyWorkspaceUpdated).toHaveBeenCalledTimes(1);
@@ -937,6 +1001,10 @@ describe("handleAgentEvent", () => {
       type: "agent_end",
       messages: [],
     } as unknown as AgentSessionEvent);
+    expect(webSession.agentCompleted).not.toBe(true);
+    await handleAgentEvent(deps, webSession, {
+      type: "agent_settled",
+    } as unknown as AgentSessionEvent);
     await handleAgentEvent(deps, webSession, {
       type: "turn_end",
       turn: [],
@@ -944,8 +1012,9 @@ describe("handleAgentEvent", () => {
 
     expect(webSession.agentCompleted).toBe(true);
     expect(webSession.activeTools.size).toBe(0);
-    expect(published).toHaveLength(2);
-    expect(published).toEqual([
+    expect(published).toHaveLength(3);
+    expect(published[0]).toMatchObject({ isStreaming: true });
+    expect(published.slice(1)).toEqual([
       expect.objectContaining({ isStreaming: false, activeTools: [] }),
       expect.objectContaining({ isStreaming: false, activeTools: [] }),
     ]);
@@ -992,7 +1061,7 @@ describe("handleAgentEvent", () => {
     );
   });
 
-  it("defers completion hooks until auto-retry has fully finished", async () => {
+  it("resets retry state at auto_retry_end and completes only when the agent settles", async () => {
     const onAgentCompleted = vi.fn();
     const onAgentSettled = vi.fn(async () => undefined);
     const notifyWorkspaceUpdated = vi.fn(async () => undefined);
@@ -1044,11 +1113,12 @@ describe("handleAgentEvent", () => {
     expect(onAgentCompleted).not.toHaveBeenCalled();
     expect(webSession.agentCompleted).not.toBe(true);
 
+    const publish = vi.fn();
     await handleAgentEvent(
       {
         getState: () => completedState,
         getStateMetadata: vi.fn(),
-        publish: vi.fn(),
+        publish,
         notifyWorkspaceUpdated,
         disposeWebSession: vi.fn(),
         onAgentCompleted,
@@ -1063,6 +1133,26 @@ describe("handleAgentEvent", () => {
       } as unknown as AgentSessionEvent,
     );
 
+    expect(webSession.autoRetryActive).toBe(false);
+    expect(onAgentCompleted).not.toHaveBeenCalled();
+    expect(onAgentSettled).not.toHaveBeenCalled();
+    expect(notifyWorkspaceUpdated).not.toHaveBeenCalled();
+    expect(publish).toHaveBeenCalledWith(webSession, expect.objectContaining({ type: "reset" }));
+
+    await handleAgentEvent(
+      {
+        getState: () => completedState,
+        getStateMetadata: vi.fn(),
+        publish,
+        notifyWorkspaceUpdated,
+        disposeWebSession: vi.fn(),
+        onAgentCompleted,
+        onAgentSettled,
+      },
+      webSession,
+      { type: "agent_settled" } as unknown as AgentSessionEvent,
+    );
+
     expect(onAgentCompleted).toHaveBeenCalledTimes(1);
     expect(onAgentSettled).toHaveBeenCalledTimes(1);
     expect(notifyWorkspaceUpdated).toHaveBeenCalledTimes(1);
@@ -1072,16 +1162,18 @@ describe("handleAgentEvent", () => {
       {
         getState: () => completedState,
         getStateMetadata: vi.fn(),
-        publish: vi.fn(),
+        publish,
         notifyWorkspaceUpdated,
         disposeWebSession: vi.fn(),
         onAgentCompleted,
+        onAgentSettled,
       },
       webSession,
-      { type: "agent_end", messages: [] } as unknown as AgentSessionEvent,
+      { type: "agent_settled" } as unknown as AgentSessionEvent,
     );
 
     expect(onAgentCompleted).toHaveBeenCalledTimes(1);
+    expect(onAgentSettled).toHaveBeenCalledTimes(1);
     expect(notifyWorkspaceUpdated).toHaveBeenCalledTimes(1);
   });
 });

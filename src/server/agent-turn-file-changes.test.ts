@@ -6,6 +6,13 @@ import {
 } from "./agent-turn-file-changes";
 
 const message = (id: string, value: object) => ({ id, type: "message", message: value });
+const customMessage = (id: string, customType: string, details: object) => ({
+  id,
+  type: "custom_message",
+  customType,
+  content: "",
+  details,
+});
 const mutation = (id: string, before: string | null, after: string) =>
   message(id, {
     role: "toolResult",
@@ -91,11 +98,7 @@ describe("durable file change projection", () => {
 
   it("isolates cron replies from copied context and preceding inline turns", () => {
     const cronPrompt = (id: string) =>
-      message(id, {
-        role: "custom",
-        customType: "batty-runtime-notice:cron",
-        data: { cron: { runId: id } },
-      });
+      customMessage(id, "batty-runtime-notice:cron", { cron: { runId: id } });
     const changes = agentTurnFileChangesByReplyEntryId([
       mutation("parent-write", "before\n", "parent\n"),
       reply("parent-reply"),
@@ -125,10 +128,8 @@ describe("durable file change projection", () => {
     const changes = agentTurnFileChangesByReplyEntryId([
       mutation("parent-write", "before\n", "after\n"),
       reply("parent-reply"),
-      message("notice", {
-        role: "custom",
-        customType: "batty-runtime-notice:cron",
-        data: { cron: { sessionPath: "/cron/child.jsonl" } },
+      customMessage("notice", "batty-runtime-notice:cron", {
+        cron: { sessionPath: "/cron/child.jsonl" },
       }),
       message("child-files", {
         role: "toolResult",
@@ -144,16 +145,12 @@ describe("durable file change projection", () => {
         details: { sites: [{ id: "site-1", name: "Report" }] },
       }),
       delivered("child", files),
-      message("empty-notice", {
-        role: "custom",
-        customType: "batty-runtime-notice:cron",
-        data: { cron: { sessionPath: "/cron/empty.jsonl" } },
+      customMessage("empty-notice", "batty-runtime-notice:cron", {
+        cron: { sessionPath: "/cron/empty.jsonl" },
       }),
       delivered("empty-child", []),
-      message("error-notice", {
-        role: "custom",
-        customType: "batty-runtime-notice:cron",
-        data: { cron: { jobId: "skipped-job", runId: "skipped-run" } },
+      customMessage("error-notice", "batty-runtime-notice:cron", {
+        cron: { jobId: "skipped-job", runId: "skipped-run" },
       }),
       delivered("error-or-historical-child"),
       message("next-user", { role: "user" }),
@@ -162,10 +159,8 @@ describe("durable file change projection", () => {
     expect(changes.get("parent-reply")?.[0]?.patch).toContain("+after");
     expect(changes.get("child")).toEqual(files);
     const artifacts = agentTurnArtifactsByReplyEntryId([
-      message("notice", {
-        role: "custom",
-        customType: "batty-runtime-notice:cron",
-        data: { cron: { sessionPath: "/cron/child.jsonl" } },
+      customMessage("notice", "batty-runtime-notice:cron", {
+        cron: { sessionPath: "/cron/child.jsonl" },
       }),
       message("file", {
         role: "toolResult",
@@ -201,22 +196,18 @@ describe("durable file change projection", () => {
     const artifacts = agentTurnArtifactsByReplyEntryId([
       mutation("old-write", "old\n", "stale\n"),
       reply("old-reply"),
-      message("async-child", {
-        role: "custom",
-        customType: "batty-runtime-notice:subagent",
-        data: {
-          subagent: { sessionId: "child" },
-          battyFileChanges: [
-            {
-              path: "/work/child.txt",
-              before: "before\n",
-              after: "after\n",
-              patch: "per-tool patch",
-            },
-          ],
-          sentFiles: [sentFile],
-          sites: [site],
-        },
+      customMessage("async-child", "batty-runtime-notice:subagent", {
+        subagent: { sessionId: "child" },
+        battyFileChanges: [
+          {
+            path: "/work/child.txt",
+            before: "before\n",
+            after: "after\n",
+            patch: "per-tool patch",
+          },
+        ],
+        sentFiles: [sentFile],
+        sites: [site],
       }),
       reply("parent-reply"),
     ]).get("parent-reply");
@@ -231,10 +222,8 @@ describe("durable file change projection", () => {
   it("does not let a background delivery consume pending parent edits", () => {
     const changes = agentTurnFileChangesByReplyEntryId([
       mutation("parent-write", "before\n", "middle\n"),
-      message("notice", {
-        role: "custom",
-        customType: "batty-runtime-notice:cron",
-        data: { cron: { sessionPath: "/cron/child.jsonl" } },
+      customMessage("notice", "batty-runtime-notice:cron", {
+        cron: { sessionPath: "/cron/child.jsonl" },
       }),
       message("child", {
         role: "assistant",

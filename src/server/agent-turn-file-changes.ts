@@ -62,6 +62,8 @@ export function agentTurnArtifactsByReplyEntryId(
     type?: unknown;
     customType?: unknown;
     data?: unknown;
+    details?: unknown;
+    content?: unknown;
     id?: unknown;
     message?: unknown;
   }>,
@@ -86,17 +88,21 @@ export function agentTurnArtifactsByReplyEntryId(
   };
 
   for (const entry of entries) {
-    if (entry.type === "message" && entry.message) {
-      const message = entry.message as {
+    const contribution =
+      entry.type === "custom_message"
+        ? {
+            role: "custom",
+            customType: entry.customType,
+            content: entry.content,
+            details: entry.details,
+          }
+        : entry.message;
+    if ((entry.type === "message" || entry.type === "custom_message") && contribution) {
+      const message = contribution as {
         role: string;
         customType?: string;
         content?: unknown;
-        details?: {
-          battyFileChanges?: DurableFileChange[];
-          sentFiles?: SentFileDescriptor[];
-          sites?: SiteDescriptor[];
-        };
-        data?: ArtifactData & {
+        details?: ArtifactData & {
           cron?: { jobId?: string; sessionPath?: string };
           subagent?: unknown;
         };
@@ -109,15 +115,15 @@ export function agentTurnArtifactsByReplyEntryId(
       const isAsyncSubagentResult =
         message.role === "custom" &&
         message.customType === `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:subagent` &&
-        message.data?.subagent !== undefined;
+        message.details?.subagent !== undefined;
       if (isAsyncSubagentResult) {
         if (hasReply) reset();
-        for (const change of message.data?.battyFileChanges ?? []) {
+        for (const change of message.details?.battyFileChanges ?? []) {
           const first = changes.get(change.path);
           changes.set(change.path, { ...change, before: first ? first.before : change.before });
         }
-        appendUniqueById(sentFiles, message.data?.sentFiles ?? []);
-        appendUniqueById(sites, message.data?.sites ?? []);
+        appendUniqueById(sentFiles, message.details?.sentFiles ?? []);
+        appendUniqueById(sites, message.details?.sites ?? []);
         continue;
       }
 
@@ -127,8 +133,8 @@ export function agentTurnArtifactsByReplyEntryId(
         message.role === "custom" &&
         (message.customType === "batty-subagent-result" ||
           (message.customType === `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:cron` &&
-            (typeof message.data?.cron?.sessionPath === "string" ||
-              typeof message.data?.cron?.jobId === "string")));
+            (typeof message.details?.cron?.sessionPath === "string" ||
+              typeof message.details?.cron?.jobId === "string")));
       if (isBackgroundNotice) {
         backgroundResultPending = true;
         deliveredSentFiles.length = 0;

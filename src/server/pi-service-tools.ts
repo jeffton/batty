@@ -244,7 +244,7 @@ export function createSubagentTool({
       "Use this tool to delegate focused work to another agent without leaving the current session.",
       "Use action=run to start a subagent. Prefer omitting model and effort so it inherits the current session settings.",
       'Subagents start fresh by default. Set includePreviousContext=true for full context with prompt-cache reuse, or includePreviousContext="chat-only" for only user and assistant messages without transcript details.',
-      "Set async=true to continue working while the subagent runs. Its result will automatically start or steer a later parent turn.",
+      "Set async=true to continue working while the subagent runs. Its result will automatically start or steer a later parent turn. If you are only waiting, end your turn; resume starts another task, not a wait for the result.",
       "Use action=steer with sessionId and prompt to add instructions to the running turn.",
       "Use action=queue with sessionId and prompt for a running async subagent. Its current reply reaches the parent before queued work begins; the queued reply is delivered later.",
       "Use action=resume with sessionId and prompt for a finished subagent. Set async=true to deliver its reply to the parent later, or omit it to wait for the reply. Queue and resume tolerate the subagent finishing during the request.",

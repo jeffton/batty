@@ -18,6 +18,7 @@ import type {
   ModelOption,
   ProviderAuthStartResponse,
   ProviderAuthStatus,
+  PromptSubmissionResult,
   ProviderUsage,
   SessionMessagesPage,
   SessionState,
@@ -410,7 +411,7 @@ export async function sendPrompt(
   files: File[],
   clientMessageId: string,
   streamingBehavior?: "steer" | "followUp",
-): Promise<void> {
+): Promise<PromptSubmissionResult> {
   const formData = new FormData();
   formData.set("text", text);
   formData.set("clientMessageId", clientMessageId);
@@ -421,7 +422,7 @@ export async function sendPrompt(
     formData.append("files", file, file.name);
   }
 
-  await request(`/api/sessions/${sessionId}/prompt`, {
+  return request(`/api/sessions/${sessionId}/prompt`, {
     method: "POST",
     body: formData,
   });

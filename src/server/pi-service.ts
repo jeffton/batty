@@ -13,6 +13,7 @@ import type {
   ModelOption,
   ProviderAuthStartResponse,
   ProviderAuthStatus,
+  PromptSubmissionResult,
   ProviderUsage,
   PreviousContextMode,
   ServerEvent,
@@ -1147,19 +1148,20 @@ export class PiService {
     files: UploadedFile[],
     clientMessageId: string,
     streamingBehavior?: "steer" | "followUp",
-  ): Promise<void> {
-    await this.turns.run(async () => {
+  ): Promise<PromptSubmissionResult> {
+    return this.turns.run(async () => {
       const webSession = this.requireSession(sessionId);
       await this.waitForSubagentQueue(sessionId);
       const prepared = await this.preparePromptFiles(sessionId, files);
       const parts = [text.trim(), prepared.text.trim()].filter(Boolean);
       const promptText = parts.join("\n\n").trim() || "Please inspect the attached files.";
-      await webSession.session.prompt(promptText, {
+      const disposition = await webSession.session.prompt(promptText, {
         images: prepared.images,
         clientMessageId,
         ...(streamingBehavior ? { streamingBehavior } : {}),
       });
       this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
+      return { ...disposition, clientMessageId };
     });
   }
 

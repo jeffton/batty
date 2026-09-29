@@ -265,7 +265,14 @@ export interface QueuedPrompt {
   kind: "steer" | "followUp";
   index: number;
   text: string;
+  clientMessageId?: string;
 }
+
+export type PromptDisposition =
+  | { disposition: "queued"; entryId: string }
+  | { disposition: "completed" };
+
+export type PromptSubmissionResult = PromptDisposition & { clientMessageId: string };
 
 export interface SessionState {
   id: string;

@@ -154,7 +154,9 @@ function reconcileOptimisticMessage(): void {
     (message): message is OptimisticUserMessage => message.role === "user",
   );
   const authoritativeClientMessageIds = new Set(
-    userMessages.flatMap((message) => (message.clientMessageId ? [message.clientMessageId] : [])),
+    [...userMessages, ...session.queuedPrompts].flatMap((message) =>
+      message.clientMessageId ? [message.clientMessageId] : [],
+    ),
   );
   const remaining = pending.filter(
     (candidate) => !authoritativeClientMessageIds.has(candidate.clientMessageId),
@@ -172,55 +174,18 @@ function reconcileOptimisticMessage(): void {
   optimisticMessagesBySessionId.value = next;
 }
 
-function shouldRestoreComposerAfterPromptError(
-  before:
-    | {
-        sessionId: string;
-        isStreaming: boolean;
-        pendingMessageCount: number;
-        updatedAt: number;
-        messageCount: number;
-      }
-    | undefined,
-): boolean {
-  if (!before) {
-    return true;
-  }
-
-  const after = store.activeSession;
-  if (!after || after.sessionId !== before.sessionId) {
-    return true;
-  }
-
-  if (!before.isStreaming && after.isStreaming) {
-    return false;
-  }
-
-  if (after.pendingMessageCount > before.pendingMessageCount) {
-    return false;
-  }
-
-  if (after.updatedAt > before.updatedAt) {
-    return false;
-  }
-
-  if (after.messages.length > before.messageCount) {
-    return false;
-  }
-
-  return true;
+function wasPromptAccepted(sessionId: string, clientMessageId: string): boolean {
+  const session = store.activeSession;
+  return (
+    session?.sessionId === sessionId &&
+    [...session.messages, ...session.queuedPrompts].some(
+      (message) => message.clientMessageId === clientMessageId,
+    )
+  );
 }
 
 async function sendPrompt(text: string, files: File[]): Promise<void> {
-  const before = store.activeSession
-    ? {
-        sessionId: store.activeSession.sessionId,
-        isStreaming: store.activeSession.isStreaming,
-        pendingMessageCount: store.activeSession.pendingMessageCount,
-        updatedAt: store.activeSession.updatedAt,
-        messageCount: store.activeSession.messages.length,
-      }
-    : undefined;
+  const sessionId = store.activeSession?.sessionId;
   const gateSessionId = store.activeSession?.isStreaming
     ? undefined
     : store.activeSession?.sessionId;
@@ -240,15 +205,18 @@ async function sendPrompt(text: string, files: File[]): Promise<void> {
     pendingIdlePromptSessionIds.add(gateSessionId);
   }
   try {
-    await store.sendPrompt(text, files, clientMessageId);
-  } catch (error) {
-    if (before && shouldRestoreComposerAfterPromptError(before)) {
-      if (optimisticId) {
-        removeOptimisticMessage(before.sessionId, optimisticId);
-      }
-      composer.value?.restore(before.sessionId, text, files);
+    const result = await store.sendPrompt(text, files, clientMessageId);
+    if (result?.disposition === "queued" && gateSessionId && optimisticId) {
+      removeOptimisticMessage(gateSessionId, optimisticId);
     }
-    showPromptError(error, before?.sessionId, requestId);
+  } catch (error) {
+    if (sessionId && !wasPromptAccepted(sessionId, clientMessageId)) {
+      if (optimisticId) {
+        removeOptimisticMessage(sessionId, optimisticId);
+      }
+      composer.value?.restore(sessionId, text, files);
+    }
+    showPromptError(error, sessionId, requestId);
     throw error;
   } finally {
     if (gateSessionId) {
@@ -257,7 +225,10 @@ async function sendPrompt(text: string, files: File[]): Promise<void> {
   }
 }
 
-watch(() => store.activeSession?.messages, reconcileOptimisticMessage);
+watch(
+  [() => store.activeSession?.messages, () => store.activeSession?.queuedPrompts],
+  reconcileOptimisticMessage,
+);
 watch(
   () => store.activeSession?.sessionId,
   () => {
@@ -271,15 +242,7 @@ async function removeQueuedPrompt(prompt: QueuedPrompt): Promise<void> {
 }
 
 async function steerPrompt(text: string, files: File[]): Promise<void> {
-  const before = store.activeSession
-    ? {
-        sessionId: store.activeSession.sessionId,
-        isStreaming: store.activeSession.isStreaming,
-        pendingMessageCount: store.activeSession.pendingMessageCount,
-        updatedAt: store.activeSession.updatedAt,
-        messageCount: store.activeSession.messages.length,
-      }
-    : undefined;
+  const sessionId = store.activeSession?.sessionId;
   const gateSessionId = store.activeSession?.isStreaming
     ? undefined
     : store.activeSession?.sessionId;
@@ -297,10 +260,10 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
   try {
     await store.steerPrompt(text, files, clientMessageId);
   } catch (error) {
-    if (before && shouldRestoreComposerAfterPromptError(before)) {
-      composer.value?.restore(before.sessionId, text, files);
+    if (sessionId && !wasPromptAccepted(sessionId, clientMessageId)) {
+      composer.value?.restore(sessionId, text, files);
     }
-    showPromptError(error, before?.sessionId, requestId);
+    showPromptError(error, sessionId, requestId);
     throw error;
   } finally {
     if (gateSessionId) {

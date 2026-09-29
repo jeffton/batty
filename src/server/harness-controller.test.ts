@@ -57,6 +57,7 @@ describe("AgentHarness controller", () => {
             { type: "image", mimeType: "image/png", data: "aGVsbG8=" },
           ],
           timestamp: 1,
+          clientMessageId: "queued-client-1",
         },
         undefined,
         context,
@@ -73,8 +74,9 @@ describe("AgentHarness controller", () => {
       message: { content: expect.arrayContaining([expect.objectContaining({ type: "image" })]) },
     });
     await restored.removeQueuedPrompt("followUp", 0);
-    expect(restored.getSteeringMessages()).toEqual(["one"]);
-    expect(restored.getFollowUpMessages()).toEqual([]);
+    expect(restored.getQueuedPrompts()).toEqual([
+      { kind: "steer", index: 0, text: "one", clientMessageId: "queued-client-1" },
+    ]);
     expect((await f.reopen()).pendingMessageCount).toBe(1);
   });
 
@@ -89,10 +91,28 @@ describe("AgentHarness controller", () => {
       }
     });
 
-    await f.session.prompt("question");
+    expect(await f.session.prompt("question")).toEqual({ disposition: "completed" });
 
     expect(results).toEqual([{ status: "completed", tipId: expect.any(String) }]);
   });
+
+  it.each(["steer", "followUp"] as const)(
+    "acknowledges a durable %s admission",
+    async (streamingBehavior) => {
+      const f = await fixture();
+      getOrThrow(await f.session.lane.accept({ kind: "prompt", prompt: "working" }, context));
+      const result = await f.session.prompt("queued", {
+        streamingBehavior,
+        clientMessageId: "queued-client-1",
+      });
+      expect(result).toEqual({ disposition: "queued", entryId: expect.any(String) });
+      expect(f.session.getQueuedPrompts()).toEqual([
+        { kind: streamingBehavior, index: 0, text: "queued", clientMessageId: "queued-client-1" },
+      ]);
+      expect(f.faux.state.callCount).toBe(0);
+      expect(await fs.readFile(f.session.sessionFile, "utf8")).toContain("queued-client-1");
+    },
+  );
 
   it("delivers transcript events only after the immutable entry exists", async () => {
     const f = await fixture();

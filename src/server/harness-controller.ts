@@ -31,6 +31,7 @@ import type {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { HarnessSessionStore } from "./harness-session-store";
+import type { PromptDisposition, QueuedPrompt } from "@/shared/types";
 
 export interface HarnessPromptOptions {
   images?: ImageContent[];
@@ -187,7 +188,7 @@ export class HarnessController {
     if (adapted) for (const listener of this.listeners) await listener(adapted);
   }
 
-  async prompt(text: string, options: HarnessPromptOptions = {}): Promise<void> {
+  async prompt(text: string, options: HarnessPromptOptions = {}): Promise<PromptDisposition> {
     if (text.startsWith("/")) {
       const [command, ...args] = parseCommandArgs(text.slice(1));
       const resources = await this.harness.getResources(context);
@@ -208,13 +209,16 @@ export class HarnessController {
     };
     if (this.isStreaming) {
       if (!options.streamingBehavior) throw new Error("Session is busy; choose steer or followUp");
-      getOrThrow(await this.lane[options.streamingBehavior](message, undefined, context));
-      return;
+      const admission = getOrThrow(
+        await this.lane[options.streamingBehavior](message, undefined, context),
+      );
+      return { disposition: "queued", entryId: admission.entryId };
     }
     const admission = getOrThrow(
       await this.lane.accept({ kind: "prompt", prompt: message }, context),
     );
     await this.drive(admission.operationId);
+    return { disposition: "completed" };
   }
   async driveOperation(operationId: string): Promise<void> {
     return this.drive(operationId);
@@ -320,15 +324,19 @@ export class HarnessController {
         entry.message.content === message.content,
     );
   }
-  getSteeringMessages(): string[] {
-    return this.queuedTexts("steer");
-  }
-  getFollowUpMessages(): string[] {
-    return this.queuedTexts("followUp");
-  }
-  private queuedTexts(kind: "steer" | "followUp"): string[] {
-    return this.snapshot.queues.flatMap((item) =>
-      item.kind === kind && item.type === "message" ? [messageText(item.message)] : [],
+  getQueuedPrompts(): QueuedPrompt[] {
+    return (["steer", "followUp"] as const).flatMap((kind) =>
+      this.snapshot.queues
+        .filter((item) => item.kind === kind)
+        .filter((item) => item.type === "message")
+        .map(({ message }, index) => ({
+          kind,
+          index,
+          text: messageText(message),
+          ...(message.role === "user" && message.clientMessageId
+            ? { clientMessageId: message.clientMessageId }
+            : {}),
+        })),
     );
   }
   async removeQueuedPrompt(kind: "steer" | "followUp", index: number): Promise<void> {

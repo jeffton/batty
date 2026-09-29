@@ -24,7 +24,7 @@ import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-s
 import { sessionEventsPath } from "@/client/lib/session-stream";
 import { mergeSessionSummaries, toSessionSummary } from "@/client/lib/session-summary";
 import { RECENT_SESSION_MESSAGE_WINDOW } from "@/shared/session-history";
-import type { ServerEvent, SessionState } from "@/shared/types";
+import type { PromptSubmissionResult, ServerEvent, SessionState } from "@/shared/types";
 import { closeEventSource, type AppActionContext } from "./app-state";
 
 let eventSource: EventSource | undefined;
@@ -424,7 +424,7 @@ export const sessionActions = {
     text: string,
     files: File[],
     clientMessageId: string,
-  ): Promise<void> {
+  ): Promise<PromptSubmissionResult | undefined> {
     if (!this.activeSession) {
       return;
     }
@@ -433,7 +433,7 @@ export const sessionActions = {
         void syncPushSubscription(false);
       }
     });
-    await sendPrompt(
+    return sendPrompt(
       this.activeSession.id,
       text,
       files,
@@ -447,7 +447,7 @@ export const sessionActions = {
     text: string,
     files: File[],
     clientMessageId: string,
-  ): Promise<void> {
+  ): Promise<PromptSubmissionResult | undefined> {
     if (!this.activeSession) {
       return;
     }
@@ -456,7 +456,7 @@ export const sessionActions = {
         void syncPushSubscription(false);
       }
     });
-    await sendPrompt(this.activeSession.id, text, files, clientMessageId, "steer");
+    return sendPrompt(this.activeSession.id, text, files, clientMessageId, "steer");
   },
 
   async removeQueuedPrompt(

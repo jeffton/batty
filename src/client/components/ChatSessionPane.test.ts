@@ -4,7 +4,12 @@ import { defineComponent, h, nextTick } from "vue";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import ChatSessionPane from "@/client/components/ChatSessionPane.vue";
 import { useAppStore } from "@/client/stores/app";
-import type { SessionState, SessionSummary, UiMessage } from "@/shared/types";
+import type {
+  PromptSubmissionResult,
+  SessionState,
+  SessionSummary,
+  UiMessage,
+} from "@/shared/types";
 
 const { sendPrompt } = vi.hoisted(() => ({
   sendPrompt: vi.fn(),
@@ -82,6 +87,7 @@ const SessionTranscriptStub = defineComponent({
   },
 });
 
+const restoreComposer = vi.fn();
 const MessageComposerStub = defineComponent({
   name: "MessageComposer",
   props: {
@@ -97,7 +103,7 @@ const MessageComposerStub = defineComponent({
     "setThinkingLevel",
   ],
   setup(props, { emit, expose }) {
-    expose({ clear: vi.fn(), restore: vi.fn() });
+    expose({ clear: vi.fn(), restore: restoreComposer });
     return () =>
       h("div", [
         props.error ? h("p", { class: "prompt-error" }, props.error) : undefined,
@@ -318,6 +324,132 @@ describe("ChatSessionPane", () => {
     await nextTick();
 
     expect(wrapper.find(".prompt-error").exists()).toBe(false);
+  });
+
+  it.each([
+    ["sendPrompt", "queued"],
+    ["sendPrompt", "message"],
+    ["sendPrompt", "unrelated"],
+    ["steerPrompt", "queued"],
+    ["steerPrompt", "message"],
+    ["steerPrompt", "unrelated"],
+  ] as const)(
+    "uses submission identity, not session activity, after a failed %s (%s)",
+    async (action, acceptance) => {
+      const pendingSend = deferred();
+      sendPrompt.mockReturnValue(pendingSend.promise);
+      const store = useAppStore();
+      store.activeSession = makeSession("session-a");
+      const wrapper = shallowMount(ChatSessionPane, {
+        global: {
+          stubs: {
+            ChatHeader: true,
+            MessageComposer: MessageComposerStub,
+            SessionTranscriptView: SessionTranscriptStub,
+          },
+        },
+      });
+      const result = (
+        wrapper.vm as unknown as Record<
+          typeof action,
+          (text: string, files: File[]) => Promise<void>
+        >
+      )[action]("hello", []);
+      await nextTick();
+      const clientMessageId = sendPrompt.mock.calls[0]![3] as string;
+      store.activeSession = makeSession("session-a", {
+        isStreaming: true,
+        pendingMessageCount: 1,
+        updatedAt: 2,
+        queuedPrompts: [
+          {
+            kind: "followUp",
+            index: 0,
+            text: "hello",
+            clientMessageId: acceptance === "queued" ? clientMessageId : "other-client",
+          },
+        ],
+        messages: [
+          {
+            id: "user-1",
+            role: "user",
+            timestamp: 2,
+            blocks: [{ type: "text", text: "hello" }],
+            clientMessageId: acceptance === "message" ? clientMessageId : "other-client",
+          },
+        ],
+      });
+      pendingSend.reject(new Error("Connection lost"));
+      await expect(result).rejects.toThrow("Connection lost");
+      if (acceptance === "unrelated") {
+        expect(restoreComposer).toHaveBeenCalledWith("session-a", "hello", []);
+      } else {
+        expect(restoreComposer).not.toHaveBeenCalled();
+      }
+      wrapper.unmount();
+    },
+  );
+
+  it("removes an optimistic transcript message when the server acknowledges queue admission", async () => {
+    const pendingSend = deferred<PromptSubmissionResult>();
+    sendPrompt.mockReturnValue(pendingSend.promise);
+    const store = useAppStore();
+    store.activeSession = makeSession("session-a");
+    const wrapper = shallowMount(ChatSessionPane, {
+      global: {
+        stubs: {
+          ChatHeader: true,
+          MessageComposer: MessageComposerStub,
+          SessionTranscriptView: SessionTranscriptStub,
+        },
+      },
+    });
+    const result = (
+      wrapper.vm as unknown as { sendPrompt: (text: string, files: File[]) => Promise<void> }
+    ).sendPrompt("hello", []);
+    await nextTick();
+    expect(wrapper.get(".optimistic-messages").text()).toBe("hello");
+    pendingSend.resolve({
+      disposition: "queued",
+      entryId: "entry-1",
+      clientMessageId: sendPrompt.mock.calls[0]![3] as string,
+    });
+    await result;
+    await nextTick();
+    expect(wrapper.get(".optimistic-messages").text()).toBe("");
+    expect(restoreComposer).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("reconciles an optimistic message from a queue snapshot before the HTTP receipt", async () => {
+    const pendingSend = deferred<PromptSubmissionResult>();
+    sendPrompt.mockReturnValue(pendingSend.promise);
+    const store = useAppStore();
+    store.activeSession = makeSession("session-a");
+    const wrapper = shallowMount(ChatSessionPane, {
+      global: {
+        stubs: {
+          ChatHeader: true,
+          MessageComposer: MessageComposerStub,
+          SessionTranscriptView: SessionTranscriptStub,
+        },
+      },
+    });
+    const result = (
+      wrapper.vm as unknown as { sendPrompt: (text: string, files: File[]) => Promise<void> }
+    ).sendPrompt("hello", []);
+    await nextTick();
+    expect(wrapper.get(".optimistic-messages").text()).toBe("hello");
+    const clientMessageId = sendPrompt.mock.calls[0]![3] as string;
+    store.activeSession.queuedPrompts = [
+      { kind: "followUp", index: 0, text: "hello", clientMessageId },
+    ];
+    await nextTick();
+    expect(wrapper.get(".optimistic-messages").text()).toBe("");
+    pendingSend.resolve({ disposition: "queued", entryId: "entry-1", clientMessageId });
+    await result;
+    expect(restoreComposer).not.toHaveBeenCalled();
+    wrapper.unmount();
   });
 
   it("shows a failed send above the composer and removes its optimistic prompt", async () => {

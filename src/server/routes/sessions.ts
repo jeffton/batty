@@ -185,7 +185,7 @@ export function registerSessionRoutes(context: RouteContext): void {
 
   app.post<{ Params: { sessionId: string } }>(
     routePath("/api/sessions/:sessionId/prompt"),
-    async (request, reply) => {
+    async (request) => {
       const files: UploadedFile[] = [];
       let text = "";
       let clientMessageId: string | undefined;
@@ -210,14 +210,13 @@ export function registerSessionRoutes(context: RouteContext): void {
         }
       }
 
-      await service.prompt(
+      return service.prompt(
         request.params.sessionId,
         text,
         files,
         parseClientMessageId(clientMessageId),
         streamingBehavior,
       );
-      reply.send({ ok: true });
     },
   );
 

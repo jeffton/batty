@@ -2,6 +2,29 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { parseClientMessageId, registerSessionRoutes } from "./sessions";
 
 describe("session routes", () => {
+  it("returns the submission-specific queue acknowledgment", async () => {
+    const app = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
+    const clientMessageId = crypto.randomUUID();
+    const receipt = { disposition: "queued", entryId: "entry-1", clientMessageId };
+    const prompt = vi.fn(async () => receipt);
+    registerSessionRoutes({
+      app,
+      config: {},
+      service: { prompt },
+      routePath: (path: string) => path,
+    } as never);
+    const handler = app.post.mock.calls.find(
+      ([route]) => route === "/api/sessions/:sessionId/prompt",
+    )![1];
+    async function* parts() {
+      yield { type: "field", fieldname: "text", value: "next" };
+      yield { type: "field", fieldname: "clientMessageId", value: clientMessageId };
+      yield { type: "field", fieldname: "streamingBehavior", value: "followUp" };
+    }
+    expect(await handler({ params: { sessionId: "session-1" }, parts })).toEqual(receipt);
+    expect(prompt).toHaveBeenCalledWith("session-1", "next", [], clientMessageId, "followUp");
+  });
+
   it("serves session-owned images", async () => {
     const app = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
     const resolveSessionImage = vi.fn(async () => ({

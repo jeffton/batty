@@ -2,18 +2,7 @@ import type { SessionState } from "@/shared/types";
 import type { WebSession } from "./pi-service-types";
 
 export function getQueuedPrompts(webSession: WebSession): SessionState["queuedPrompts"] {
-  return [
-    ...webSession.session.getSteeringMessages().map((text, index) => ({
-      kind: "steer" as const,
-      index,
-      text,
-    })),
-    ...webSession.session.getFollowUpMessages().map((text, index) => ({
-      kind: "followUp" as const,
-      index,
-      text,
-    })),
-  ];
+  return webSession.session.getQueuedPrompts();
 }
 
 export function removeQueuedPrompt(

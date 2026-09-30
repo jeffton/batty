@@ -112,12 +112,13 @@ export const CronToolSchema = Type.Object(
 
 export const SubagentToolSchema = Type.Object(
   {
-    action: StringEnum(["run", "stop", "steer", "queue", "resume"] as const, {
-      description: "Run, stop, steer, queue work for, or resume a subagent.",
+    action: StringEnum(["run", "await", "stop", "steer", "queue", "resume"] as const, {
+      description:
+        "Run, await an async reply, stop, steer, queue work for, or resume a finished subagent.",
     }),
     sessionId: Type.Optional(
       Type.String({
-        description: "Subagent session id. Required for stop, steer, queue, and resume.",
+        description: "Subagent session id. Required for await, stop, steer, queue, and resume.",
       }),
     ),
     prompt: Type.Optional(

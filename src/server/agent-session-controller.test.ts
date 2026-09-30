@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { createAgentSessionFixture } from "./agent-session-test-fixture";
+import { createSubagentTool } from "./pi-service-tools";
 
 const fixtures: Awaited<ReturnType<typeof createAgentSessionFixture>>[] = [];
 afterEach(async () => {
@@ -31,7 +32,7 @@ function customNoticeEntries(f: Awaited<ReturnType<typeof fixture>>) {
     );
 }
 
-async function busyFixture() {
+async function busyFixture(setup?: (f: Awaited<ReturnType<typeof fixture>>) => void) {
   const started = barrier();
   const finish = barrier();
   const f = await fixture({
@@ -55,6 +56,7 @@ async function busyFixture() {
     fauxAssistantMessage("answer"),
     fauxAssistantMessage("follow up"),
   ]);
+  setup?.(f);
   const run = f.session.prompt("working", { clientMessageId: "initial-client" });
   await started.promise;
   return { f, run, finish };
@@ -259,6 +261,113 @@ describe("native AgentSession controller", () => {
         (message) => message.role === "user" && JSON.stringify(message).includes("volatile-client"),
       ),
     ).toBe(false);
+  });
+
+  it.each([false, true])("await action ends the turn (codemode=%s)", async (codemode) => {
+    let f!: Awaited<ReturnType<typeof fixture>>;
+    const awaitSubagent = vi.fn(async () => {
+      f.session.requestTurnEnd();
+      return true;
+    });
+    const tool = createSubagentTool({
+      workspace: { id: "test", path: "/tmp" } as any,
+      config: {} as any,
+      resolveSubagentDefaults: vi.fn(),
+      runDetachedSubagentSession: vi.fn(),
+      startDetachedSubagentSession: vi.fn(),
+      awaitSubagent,
+      stopSubagent: vi.fn(),
+      steerSubagent: vi.fn(),
+      continueSubagent: vi.fn(),
+    });
+    f = await fixture({ tools: [tool] });
+    f.faux.setResponses([
+      fauxAssistantMessage([
+        {
+          type: "toolCall",
+          id: "await-child",
+          name: codemode ? "codemode" : "subagent",
+          arguments: codemode
+            ? { code: 'text(await tools.subagent({ action: "await", sessionId: "child" }));' }
+            : { action: "await", sessionId: "child" },
+        },
+      ]),
+      fauxAssistantMessage("must not be requested"),
+    ]);
+    await f.session.prompt("wait for the child");
+    expect(awaitSubagent).toHaveBeenCalledWith(f.session.sessionId, "child");
+    expect(f.faux.state.callCount).toBe(1);
+    expect(f.session.messages.at(-1)).toMatchObject({ role: "toolResult", isError: false });
+  });
+
+  it("ends after a successful tool result and accepts a later child reply", async () => {
+    const { f, run, finish } = await busyFixture();
+    f.session.requestTurnEnd();
+    finish.release();
+    await run;
+    expect(f.faux.state.callCount).toBe(1);
+    expect(f.session.messages.at(-1)).toMatchObject({ role: "toolResult", isError: false });
+    expect(f.session.isStreaming).toBe(false);
+    await f.session.sendCustomMessage(
+      { customType: "batty-runtime-notice:subagent", content: "child reply", display: true },
+      { triggerTurn: true, steerWhenBusy: true },
+    );
+    expect(f.faux.state.callCount).toBe(2);
+    expect(customNoticeEntries(f)).toHaveLength(1);
+  });
+
+  it.each(["steer", "followUp"] as const)(
+    "consumes %s already queued before yielding",
+    async (kind) => {
+      const { f, run, finish } = await busyFixture();
+      f.session.requestTurnEnd();
+      await f.session.prompt("new input", { streamingBehavior: kind });
+      finish.release();
+      await run;
+      expect(f.session.pendingMessageCount).toBe(0);
+      expect(f.faux.state.callCount).toBeGreaterThan(1);
+      expect(
+        f.session.messages.some(
+          (message) =>
+            message.role === "user" && JSON.stringify(message.content).includes("new input"),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it("admits input arriving after the end decision in a fresh turn", async () => {
+    const ended = barrier();
+    const settle = barrier();
+    const { f, run, finish } = await busyFixture((f) => {
+      const emit = f.session.sdk.agent.finishTurn!;
+      // Hold the boundary after the controller has committed its end decision.
+      f.session.sdk.agent.finishTurn = async (...args) => {
+        const decision = await emit(...args);
+        if (decision?.action === "end") {
+          ended.release();
+          await settle.promise;
+        }
+        return decision ?? undefined;
+      };
+    });
+    f.session.requestTurnEnd();
+    finish.release();
+    await ended.promise;
+    const prompt = f.session.prompt("late input", { streamingBehavior: "steer" });
+    const delivery = f.session.sendCustomMessage(
+      { customType: "batty-runtime-notice:subagent", content: "late reply", display: true },
+      { triggerTurn: true, steerWhenBusy: true },
+    );
+    settle.release();
+    await Promise.all([run, prompt, delivery]);
+    expect(f.session.pendingMessageCount).toBe(0);
+    expect(customNoticeEntries(f)).toHaveLength(1);
+    expect(
+      f.session.messages.some(
+        (message) =>
+          message.role === "user" && JSON.stringify(message.content).includes("late input"),
+      ),
+    ).toBe(true);
   });
 
   it("delivers transcript events after native entries exist", async () => {

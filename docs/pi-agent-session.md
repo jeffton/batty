@@ -16,6 +16,14 @@ Direct tools and codemode remain enabled. Codemode is Pi's built-in extension, i
 
 Configured coding-agent extensions load through `DefaultResourceLoader` with Batty's resource paths. They receive a headless SDK context; Batty does not render terminal dialogs or widgets. Native MCP and tool-search extensions share this lifecycle. Batty's [MCP settings](mcp.md) manage scoped configuration, status, and OAuth through a dedicated web UI bridge.
 
+## Async subagent handoff
+
+`subagent await` with `sessionId` yields the parent turn at the completed tool batch. It does not start child work or abort tool execution. If the child has finished and its reply has been admitted, the action returns without yielding. Pending child turns and result admission count as active work.
+
+The controller uses Pi's `agent.finishTurn` boundary. Admitted input is consumed before yielding; input arriving after the end decision is admitted after idle. Async replies either steer the active parent or start a fresh turn, including replies that arrive during the handoff.
+
+`resume` requires a finished child and rejects active operations. Use `steer` to add instructions to an active turn or `queue` to schedule another task after its reply.
+
 ## Storage and execution differences
 
 | Concern                  | AgentHarness baseline                         | AgentSession evaluation                                  |

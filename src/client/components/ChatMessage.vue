@@ -721,6 +721,7 @@ onBeforeUnmount(() => {
 
 .message__notice-text {
   font-family: var(--font-family-mono);
+  font-size: 0.92em;
 }
 
 .message__notice-text:has(+ .markdown-body) {

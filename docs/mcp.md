@@ -4,7 +4,7 @@ Batty uses Pi's native MCP extension for stdio and streamable HTTP servers. MCP 
 
 ## Configuration
 
-Manage servers in **Settings → MCP servers**. Choose Global or a workspace scope. Workspace entries replace global entries with the same name. Select a workspace to inspect connection status and tools, reconnect, or sign in.
+Manage servers in **Settings → MCP servers**. The list shows global servers first, followed by workspace servers with their workspace names. **Add server** opens the editor: enable **Global**, or select a workspace. Workspace entries replace global entries with the same name. Global connection actions use the selected workspace.
 
 Configuration files:
 

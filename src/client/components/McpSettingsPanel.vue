@@ -26,13 +26,28 @@ const props = defineProps<{
   workspaces: WorkspaceInfo[];
 }>();
 
-const scope = ref<"global" | "workspace">("global");
-const settings = ref<McpSettingsResponse>({ servers: [], errors: [] });
-const status = ref<McpWorkspaceStatus>({ servers: [], errors: [] });
+type ScopedServer = McpSettingsResponse["servers"][number] & {
+  workspaceId?: string;
+  workspaceLabel?: string;
+};
+
+const settings = ref<{ servers: ScopedServer[]; errors: string[] }>({ servers: [], errors: [] });
+const statusByWorkspace = ref<Record<string, McpWorkspaceStatus>>({});
+const status = computed(
+  () =>
+    (props.workspaceId && statusByWorkspace.value[props.workspaceId]) || {
+      servers: [],
+      errors: [],
+    },
+);
 const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
 const selectedName = ref("");
+const editorOpen = ref(false);
+const creatingGlobal = ref(true);
+const creationWorkspaceId = ref("");
+const editWorkspaceId = ref<string | undefined>();
 const nameInput = ref("");
 const configInput = ref(
   '{\n  "type": "stdio",\n  "command": "",\n  "args": [],\n  "exposure": "codemode"\n}',
@@ -45,20 +60,60 @@ let workspaceGeneration = 0;
 let pollTimer: ReturnType<typeof setTimeout> | undefined;
 let disposed = false;
 
-const selectedWorkspaceLabel = computed(
-  () => props.workspaces.find((workspace) => workspace.id === props.workspaceId)?.label,
-);
 const visibleServers = computed(() =>
-  settings.value.servers.filter((server) => server.scope === scope.value),
+  [...settings.value.servers].sort((a, b) => {
+    if (a.scope !== b.scope) return a.scope === "global" ? -1 : 1;
+    return (
+      (a.workspaceLabel ?? "").localeCompare(b.workspaceLabel ?? "") || a.name.localeCompare(b.name)
+    );
+  }),
 );
 const attemptServer = computed(() => attempt.value?.serverName);
+const creationWorkspaceOptions = computed(() => props.workspaces);
+const validCreationWorkspace = computed(() =>
+  props.workspaces.some((workspace) => workspace.id === creationWorkspaceId.value),
+);
+
+function targetWorkspaceId(server: ScopedServer): string | undefined {
+  return server.scope === "workspace" ? server.workspaceId : props.workspaceId;
+}
+
+function workspaceStatus(server: ScopedServer): McpWorkspaceStatus["servers"][number] | undefined {
+  const workspaceId = targetWorkspaceId(server);
+  return workspaceId
+    ? statusByWorkspace.value[workspaceId]?.servers.find((item) => item.name === server.name)
+    : undefined;
+}
 
 function statusForServer(name: string): McpWorkspaceStatus["servers"][number] | undefined {
   return status.value.servers.find((server) => server.name === name);
 }
 
-function isOverriddenInWorkspace(server: McpSettingsResponse["servers"][number]): boolean {
-  return server.scope === "global" && statusForServer(server.name)?.scope === "project";
+function isOverriddenInWorkspace(server: ScopedServer): boolean {
+  return (
+    server.scope === "global" &&
+    (statusForServer(server.name)?.scope === "project" ||
+      settings.value.servers.some(
+        (item) =>
+          item.workspaceId === props.workspaceId &&
+          item.scope === "workspace" &&
+          item.name === server.name,
+      ))
+  );
+}
+
+function invalidateStatus(workspaceId?: string): void {
+  if (workspaceId) delete statusByWorkspace.value[workspaceId];
+  else statusByWorkspace.value = {};
+}
+
+async function refreshAfterAuth(workspaceId: string, requestGeneration: number): Promise<void> {
+  await load();
+  if (disposed || requestGeneration !== workspaceGeneration || workspaceId === props.workspaceId)
+    return;
+  const result = await getWorkspaceMcpStatus(workspaceId);
+  if (!disposed && requestGeneration === workspaceGeneration)
+    statusByWorkspace.value[workspaceId] = result;
 }
 
 function stopPolling(): void {
@@ -76,22 +131,27 @@ async function load(): Promise<void> {
   const requestGeneration = ++loadGeneration;
   const workspaceGenerationAtStart = workspaceGeneration;
   const workspaceId = props.workspaceId;
+  const workspaces = props.workspaces;
   loading.value = true;
   error.value = "";
   try {
-    const [globalSettings, workspaceSettings] = await Promise.all([
+    const [globalSettings, ...workspaceSettings] = await Promise.all([
       getMcpSettings(),
-      workspaceId ? getMcpSettings(workspaceId) : Promise.resolve(undefined),
+      ...workspaces.map((workspace) => getMcpSettings(workspace.id)),
     ]);
-    const nextSettings: McpSettingsResponse = {
+    const nextSettings = {
       servers: [
         ...globalSettings.servers.map((server) => ({ ...server, scope: "global" as const })),
-        ...(workspaceSettings?.servers.map((server) => ({
-          ...server,
-          scope: "workspace" as const,
-        })) ?? []),
+        ...workspaceSettings.flatMap((result, index) =>
+          result.servers.map((server) => ({
+            ...server,
+            scope: "workspace" as const,
+            workspaceId: workspaces[index].id,
+            workspaceLabel: workspaces[index].label,
+          })),
+        ),
       ],
-      errors: [...globalSettings.errors, ...(workspaceSettings?.errors ?? [])],
+      errors: [...globalSettings.errors, ...workspaceSettings.flatMap((result) => result.errors)],
     };
     let nextStatus: McpWorkspaceStatus = { servers: [], errors: [] };
     if (workspaceId) nextStatus = await getWorkspaceMcpStatus(workspaceId);
@@ -99,11 +159,13 @@ async function load(): Promise<void> {
       disposed ||
       requestGeneration !== loadGeneration ||
       workspaceGenerationAtStart !== workspaceGeneration ||
-      workspaceId !== props.workspaceId
+      workspaceId !== props.workspaceId ||
+      workspaces.map((workspace) => `${workspace.id}:${workspace.label}`).join("|") !==
+        props.workspaces.map((workspace) => `${workspace.id}:${workspace.label}`).join("|")
     )
       return;
     settings.value = nextSettings;
-    status.value = nextStatus;
+    if (workspaceId) statusByWorkspace.value[workspaceId] = nextStatus;
   } catch (cause) {
     if (
       !disposed &&
@@ -124,20 +186,25 @@ async function load(): Promise<void> {
 
 function beginAdd(): void {
   selectedName.value = "";
+  editWorkspaceId.value = undefined;
+  creatingGlobal.value = true;
+  creationWorkspaceId.value = props.workspaceId ?? creationWorkspaceOptions.value[0]?.id ?? "";
   nameInput.value = "";
   configInput.value =
     '{\n  "type": "stdio",\n  "command": "",\n  "args": [],\n  "exposure": "codemode"\n}';
 }
 
-function editServer(server: McpSettingsResponse["servers"][number]): void {
+function editServer(server: ScopedServer): void {
   selectedName.value = server.name;
+  editWorkspaceId.value = server.workspaceId;
+  editorOpen.value = true;
   nameInput.value = server.name;
-  scope.value = server.scope;
   configInput.value = JSON.stringify(server.config, null, 2);
 }
 
 function cancelEdit(): void {
   selectedName.value = "";
+  editorOpen.value = false;
   beginAdd();
 }
 
@@ -159,16 +226,23 @@ async function save(): Promise<void> {
     error.value = "Enter valid JSON configuration";
     return;
   }
-  if (scope.value === "workspace" && !props.workspaceId) {
+  if (!selectedName.value && !creatingGlobal.value && !validCreationWorkspace.value) {
     error.value = "Choose a workspace to save workspace-scoped servers";
     return;
   }
   saving.value = true;
   const requestGeneration = workspaceGeneration;
   try {
-    await saveMcpServer(name, config, scope.value === "workspace" ? props.workspaceId : undefined);
+    const workspaceId = selectedName.value
+      ? editWorkspaceId.value
+      : creatingGlobal.value
+        ? undefined
+        : creationWorkspaceId.value;
+    await saveMcpServer(name, config, workspaceId);
     if (disposed || requestGeneration !== workspaceGeneration) return;
+    invalidateStatus(workspaceId);
     selectedName.value = "";
+    editorOpen.value = false;
     beginAdd();
     await load();
   } catch (cause) {
@@ -178,16 +252,17 @@ async function save(): Promise<void> {
   }
 }
 
-async function toggleEnabled(server: McpSettingsResponse["servers"][number]): Promise<void> {
+async function toggleEnabled(server: ScopedServer): Promise<void> {
   const requestGeneration = workspaceGeneration;
   error.value = "";
   try {
     await saveMcpServer(
       server.name,
       { ...server.config, enabled: server.config.enabled === false },
-      server.scope === "workspace" ? props.workspaceId : undefined,
+      server.workspaceId,
     );
     if (disposed || requestGeneration !== workspaceGeneration) return;
+    invalidateStatus(server.workspaceId);
     await load();
   } catch (cause) {
     if (!disposed && requestGeneration === workspaceGeneration) {
@@ -196,30 +271,31 @@ async function toggleEnabled(server: McpSettingsResponse["servers"][number]): Pr
   }
 }
 
-async function remove(server: McpSettingsResponse["servers"][number]): Promise<void> {
+async function remove(server: ScopedServer): Promise<void> {
   if (!window.confirm(`Remove MCP server “${server.name}”?`)) return;
   error.value = "";
   const requestGeneration = workspaceGeneration;
   try {
-    await removeMcpServer(
-      server.name,
-      server.scope === "workspace" ? props.workspaceId : undefined,
-    );
+    await removeMcpServer(server.name, server.workspaceId);
     if (disposed || requestGeneration !== workspaceGeneration) return;
+    invalidateStatus(server.workspaceId);
     await load();
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
   }
 }
 
-async function updateStatus(request: () => Promise<McpWorkspaceStatus>): Promise<void> {
-  if (!props.workspaceId) return;
+async function updateStatus(
+  workspaceId: string,
+  request: () => Promise<McpWorkspaceStatus>,
+): Promise<void> {
   const requestGeneration = workspaceGeneration;
   statusBusy.value = "Refreshing…";
   error.value = "";
   try {
     const result = await request();
-    if (!disposed && requestGeneration === workspaceGeneration) status.value = result;
+    if (!disposed && requestGeneration === workspaceGeneration)
+      statusByWorkspace.value[workspaceId] = result;
   } catch (cause) {
     if (!disposed && requestGeneration === workspaceGeneration) {
       error.value = cause instanceof Error ? cause.message : String(cause);
@@ -229,12 +305,15 @@ async function updateStatus(request: () => Promise<McpWorkspaceStatus>): Promise
   }
 }
 
-async function reconnect(name: string): Promise<void> {
-  await updateStatus(() => reconnectMcpServer(props.workspaceId!, name));
+async function reconnect(server: ScopedServer): Promise<void> {
+  const workspaceId = targetWorkspaceId(server);
+  if (workspaceId)
+    await updateStatus(workspaceId, () => reconnectMcpServer(workspaceId, server.name));
 }
 
-async function logout(name: string): Promise<void> {
-  await updateStatus(() => logoutMcpServer(props.workspaceId!, name));
+async function logout(server: ScopedServer): Promise<void> {
+  const workspaceId = targetWorkspaceId(server);
+  if (workspaceId) await updateStatus(workspaceId, () => logoutMcpServer(workspaceId, server.name));
 }
 
 function schedulePoll(attemptId: string, requestGeneration: number): void {
@@ -253,7 +332,8 @@ async function pollAttempt(attemptId: string, requestGeneration: number): Promis
       return;
     attempt.value = result;
     if (result.status === "pending") schedulePoll(attemptId, requestGeneration);
-    else if (result.status === "completed") await load();
+    else if (result.status === "completed")
+      await refreshAfterAuth(result.workspaceId, requestGeneration);
   } catch (cause) {
     if (
       !disposed &&
@@ -269,18 +349,15 @@ async function pollAttempt(attemptId: string, requestGeneration: number): Promis
   }
 }
 
-async function login(name: string): Promise<void> {
-  if (!props.workspaceId) return;
-  const workspaceId = props.workspaceId;
+async function login(server: ScopedServer): Promise<void> {
+  const workspaceId = targetWorkspaceId(server);
+  if (!workspaceId) return;
+  const name = server.name;
   const requestGeneration = workspaceGeneration;
   error.value = "";
   try {
     const started = await startMcpLogin(workspaceId, name);
-    if (
-      disposed ||
-      requestGeneration !== workspaceGeneration ||
-      workspaceId !== props.workspaceId
-    ) {
+    if (disposed || requestGeneration !== workspaceGeneration) {
       if (started.status === "pending") void cancelMcpAuthAttempt(started.attemptId);
       return;
     }
@@ -307,7 +384,8 @@ async function completeLogin(): Promise<void> {
       return;
     attempt.value = result;
     if (result.status === "pending") schedulePoll(active.attemptId, requestGeneration);
-    if (result.status === "completed") await load();
+    if (result.status === "completed")
+      await refreshAfterAuth(result.workspaceId, requestGeneration);
   } catch (cause) {
     if (
       attempt.value?.attemptId === active.attemptId &&
@@ -338,13 +416,25 @@ async function cancelLogin(): Promise<void> {
 }
 
 watch(
-  () => [props.active, props.workspaceId] as const,
+  () =>
+    [
+      props.active,
+      props.workspaceId,
+      props.workspaces.map((workspace) => `${workspace.id}:${workspace.label}`).join("|"),
+    ] as const,
   ([active], previous = [false, undefined]) => {
     const [wasActive] = previous;
-    if (!props.workspaceId && scope.value === "workspace") {
-      scope.value = "global";
-      if (selectedName.value) cancelEdit();
+    if (!validCreationWorkspace.value) creationWorkspaceId.value = "";
+    for (const workspaceId of Object.keys(statusByWorkspace.value)) {
+      if (!props.workspaces.some((workspace) => workspace.id === workspaceId))
+        delete statusByWorkspace.value[workspaceId];
     }
+    if (
+      selectedName.value &&
+      editWorkspaceId.value &&
+      !props.workspaces.some((workspace) => workspace.id === editWorkspaceId.value)
+    )
+      cancelEdit();
     workspaceGeneration++;
     const pendingAttempt = attempt.value;
     clearAttempt();
@@ -367,47 +457,32 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="mcp-settings">
-    <div class="mcp-settings__toolbar">
-      <label class="mcp-settings__scope">
-        <span>Scope</span>
-        <select v-model="scope" aria-label="MCP server scope">
-          <option value="global">Global</option>
-          <option value="workspace" :disabled="!props.workspaceId">Workspace</option>
-        </select>
-      </label>
-      <button type="button" :disabled="loading" @click="load">
-        {{ loading ? "Loading…" : "Refresh servers" }}
-      </button>
-    </div>
     <div class="mcp-settings__help">
-      <template v-if="props.workspaceId"
-        >Workspace: {{ selectedWorkspaceLabel ?? props.workspaceId }}</template
-      >
-      <template v-else>Choose a workspace to connect, sign in, or inspect server tools.</template>
+      MCP servers are listed by scope. Workspace servers apply only to their named workspace.
     </div>
-
     <div v-for="item in settings.errors" :key="item" class="mcp-settings__error">{{ item }}</div>
     <div v-for="item in status.errors" :key="item" class="mcp-settings__error">{{ item }}</div>
     <div v-if="error" class="mcp-settings__error" role="alert">{{ error }}</div>
 
     <article
       v-for="server in visibleServers"
-      :key="`${server.scope}:${server.name}`"
+      :key="`${server.scope}:${server.workspaceId ?? 'global'}:${server.name}`"
       class="mcp-settings__server"
     >
       <div class="mcp-settings__server-head">
         <div class="mcp-settings__server-meta">
           <strong>{{ server.name }}</strong>
           <span>{{
-            server.scope === "global"
-              ? "Global"
-              : `Workspace · ${selectedWorkspaceLabel ?? "selected"}`
+            server.scope === "global" ? "Global" : `Workspace · ${server.workspaceLabel}`
           }}</span>
           <span v-if="isOverriddenInWorkspace(server)">Overridden in this workspace</span>
           <span v-else>{{
             server.config.enabled === false
               ? "Disabled"
-              : (statusForServer(server.name)?.state ?? "Not connected")
+              : (workspaceStatus(server)?.state ??
+                (statusByWorkspace[targetWorkspaceId(server) ?? ""]
+                  ? "Not connected"
+                  : "Not inspected"))
           }}</span>
         </div>
         <div class="mcp-settings__actions">
@@ -421,39 +496,56 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="mcp-settings__help">Exposure: {{ server.config.exposure ?? "codemode" }}</div>
-      <ul v-if="statusForServer(server.name)?.tools.length" class="mcp-settings__tools">
-        <li v-for="tool in statusForServer(server.name)?.tools" :key="tool.name">
+      <ul v-if="workspaceStatus(server)?.tools.length" class="mcp-settings__tools">
+        <li v-for="tool in workspaceStatus(server)?.tools" :key="tool.name">
           <code>{{ tool.name }}</code> · {{ tool.exposure
           }}<span v-if="tool.description"> — {{ tool.description }}</span>
         </li>
       </ul>
-      <div v-if="statusForServer(server.name)?.error" class="mcp-settings__error">
-        {{ statusForServer(server.name)?.error }}
+      <div v-if="workspaceStatus(server)?.error" class="mcp-settings__error">
+        {{ workspaceStatus(server)?.error }}
       </div>
-      <div v-if="props.workspaceId" class="mcp-settings__actions">
+      <template v-if="targetWorkspaceId(server) !== props.workspaceId">
+        <div
+          v-for="item in statusByWorkspace[targetWorkspaceId(server) ?? '']?.errors"
+          :key="item"
+          class="mcp-settings__error"
+        >
+          {{ item }}
+        </div>
+      </template>
+      <div v-if="targetWorkspaceId(server)" class="mcp-settings__actions">
         <button
           type="button"
           :disabled="Boolean(statusBusy) || isOverriddenInWorkspace(server)"
-          @click="reconnect(server.name)"
+          @click="reconnect(server)"
         >
           Reconnect
         </button>
         <button
           type="button"
           :disabled="Boolean(statusBusy) || isOverriddenInWorkspace(server)"
-          @click="login(server.name)"
+          @click="login(server)"
         >
           Sign in
         </button>
         <button
           type="button"
           :disabled="Boolean(statusBusy) || isOverriddenInWorkspace(server)"
-          @click="logout(server.name)"
+          @click="logout(server)"
         >
           Sign out
         </button>
       </div>
-      <div v-if="attemptServer === server.name" class="mcp-settings__auth">
+      <div
+        v-if="
+          !isOverriddenInWorkspace(server) &&
+          attemptServer === server.name &&
+          attempt?.workspaceId === targetWorkspaceId(server) &&
+          targetWorkspaceId(server)
+        "
+        class="mcp-settings__auth"
+      >
         <div>{{ attempt?.prompt ?? `Sign in to ${server.name}.` }}</div>
         <a
           v-if="attempt?.authorizationUrl"
@@ -481,20 +573,54 @@ onBeforeUnmount(() => {
       </div>
     </article>
 
-    <form class="mcp-settings__form" @submit.prevent="save">
+    <button
+      v-if="!editorOpen"
+      type="button"
+      :disabled="loading"
+      @click="
+        editorOpen = true;
+        beginAdd();
+      "
+    >
+      Add server
+    </button>
+    <form v-if="editorOpen" class="mcp-settings__form" @submit.prevent="save">
       <h4>{{ selectedName ? `Edit ${selectedName}` : "Add server" }}</h4>
-      <label>
-        <span>Name</span>
-        <input
+      <template v-if="!selectedName">
+        <label class="mcp-settings__switch">
+          <input
+            v-model="creatingGlobal"
+            type="checkbox"
+            role="switch"
+            aria-label="Global server"
+          />
+          <span>Global server</span>
+        </label>
+        <label v-if="!creatingGlobal" class="mcp-settings__scope">
+          <span>Workspace</span>
+          <select v-model="creationWorkspaceId" aria-label="Server workspace">
+            <option value="" disabled>Select a workspace</option>
+            <option
+              v-for="workspace in creationWorkspaceOptions"
+              :key="workspace.id"
+              :value="workspace.id"
+            >
+              {{ workspace.label }}
+            </option>
+          </select>
+        </label>
+      </template>
+      <label
+        ><span>Name</span
+        ><input
           v-model="nameInput"
           aria-label="MCP server name"
           autocomplete="off"
           :disabled="Boolean(selectedName) || saving"
-        />
-      </label>
-      <label>
-        <span>Server configuration (JSON)</span>
-        <textarea
+      /></label>
+      <label
+        ><span>Server configuration (JSON)</span
+        ><textarea
           v-model="configInput"
           aria-label="MCP server configuration"
           rows="9"
@@ -503,10 +629,13 @@ onBeforeUnmount(() => {
         />
       </label>
       <div class="mcp-settings__actions">
-        <button type="submit" :disabled="saving || (scope === 'workspace' && !props.workspaceId)">
+        <button
+          type="submit"
+          :disabled="saving || (!selectedName && !creatingGlobal && !validCreationWorkspace)"
+        >
           {{ saving ? "Saving…" : "Save server" }}
         </button>
-        <button v-if="selectedName" type="button" @click="cancelEdit">Cancel edit</button>
+        <button type="button" @click="cancelEdit">Cancel</button>
       </div>
     </form>
   </section>
@@ -533,6 +662,14 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 0.25rem;
   flex: 1;
+}
+.mcp-settings__switch {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.mcp-settings__switch input {
+  width: auto;
 }
 .mcp-settings__server {
   display: flex;

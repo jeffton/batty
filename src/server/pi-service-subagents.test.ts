@@ -331,7 +331,23 @@ describe("detached AgentSession subagents", () => {
     await deliverAsyncSubagentResult(parent.session, result, accepted);
     expect(accepted).toHaveBeenCalledTimes(2);
     expect(parent.faux.state.callCount).toBe(2);
-    expect(parent.session.messages.filter((message) => message.role === "custom")).toHaveLength(1);
+    const notices = parent.session.messages.filter((message) => message.role === "custom");
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({
+      details: {
+        runtimeNotice: {
+          text: expect.stringContaining("Assigned task:"),
+          markdown: "Child result",
+        },
+      },
+    });
+    const notice = notices[0] as unknown as {
+      content: string;
+      details: { runtimeNotice: { text: string; markdown: string } };
+    };
+    expect(notice.content).toBe(
+      `${notice.details.runtimeNotice.text}\n${notice.details.runtimeNotice.markdown}`,
+    );
   });
 
   it("delivers resumed replies with identical timestamps using distinct entry IDs", async () => {

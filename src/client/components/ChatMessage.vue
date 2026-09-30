@@ -104,6 +104,13 @@ const isRuntimeNotice = computed(
     props.message.customType.startsWith(BATTY_RUNTIME_NOTICE_CUSTOM_TYPE),
 );
 
+const runtimeNoticeContent = computed(() => {
+  if (!isRuntimeNotice.value || props.message.role !== "custom") {
+    return undefined;
+  }
+  return props.message.data?.runtimeNotice as { text: string; markdown: string } | undefined;
+});
+
 const cronNoticeDetails = computed(() => {
   if (props.message.role !== "custom") {
     return undefined;
@@ -344,10 +351,12 @@ onBeforeUnmount(() => {
           <Cog :size="16" />
         </span>
         <div class="message__text">
-          <MarkdownBlock
-            v-if="props.message.customType === `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:subagent`"
-            :text="props.message.text"
-          />
+          <template v-if="isRuntimeNotice">
+            <div class="message__notice-text">
+              {{ runtimeNoticeContent?.text ?? props.message.text }}
+            </div>
+            <MarkdownBlock v-if="runtimeNoticeContent" :text="runtimeNoticeContent.markdown" />
+          </template>
           <template v-else>{{ props.message.text }}</template>
           <div
             v-if="props.allowSessionPopovers && cronNoticeDetails && cronNoticePopoverId"
@@ -708,6 +717,14 @@ onBeforeUnmount(() => {
   border-radius: 0.5rem;
   background: var(--color-info-soft);
   color: var(--color-info);
+}
+
+.message__notice-text {
+  font-family: var(--font-family-mono);
+}
+
+.message__notice-text:has(+ .markdown-body) {
+  margin-bottom: 0.55rem;
 }
 
 .message__system-bubble--runtime {

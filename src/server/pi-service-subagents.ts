@@ -695,23 +695,24 @@ export async function deliverAsyncSubagentResult(
     sentFiles?: SentFileDescriptor[];
     sites?: SiteDescriptor[];
   };
+  const noticeText = [
+    `Async subagent ${status}.`,
+    "",
+    `Detached session: ${child.sessionPath}`,
+    "",
+    "Assigned task:",
+    child.prompt,
+    "",
+    result.isError ? "Error:" : "Result:",
+  ].join("\n");
   await parent.sendCustomMessage(
     {
       customType: "batty-runtime-notice:subagent",
-      content: [
-        `Async subagent ${status}.`,
-        "",
-        `Detached session: ${child.sessionPath}`,
-        "",
-        "Assigned task:",
-        child.prompt,
-        "",
-        result.isError ? "Error:" : "Result:",
-        output,
-      ].join("\n"),
+      content: `${noticeText}\n${output}`,
       display: true,
       details: {
         battyResultReplyId: replyId,
+        runtimeNotice: { text: noticeText, markdown: output },
         subagent: child,
         ...(artifacts.battyFileChanges?.length
           ? { battyFileChanges: artifacts.battyFileChanges }

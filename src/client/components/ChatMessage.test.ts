@@ -568,29 +568,33 @@ describe("ChatMessage", () => {
     );
   });
 
-  it("renders markdown in async subagent results without session metadata", () => {
+  it("renders only the structured response as markdown in async subagent notices", () => {
+    const text =
+      "Async subagent completed.\n\nAssigned task:\nCheck **status** and `code`.\n\nResult:";
+    const markdownText = [
+      "**Summary:** A *formatted* response.",
+      "",
+      "- [Source](https://example.com/source)",
+      "",
+      "```ts",
+      "const done = true;",
+      "```",
+    ].join("\n");
     const message: Extract<UiMessage, { role: "custom" }> = {
       id: "custom-subagent-markdown",
       role: "custom",
       timestamp: 4,
       customType: `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:subagent`,
-      text: [
-        "Async subagent completed.",
-        "",
-        "Result:",
-        "**Summary:** A *formatted* response.",
-        "",
-        "- [Source](https://example.com/source)",
-        "",
-        "```ts",
-        "const done = true;",
-        "```",
-      ].join("\n"),
+      text: `${text}\n${markdownText}`,
+      data: { runtimeNotice: { text, markdown: markdownText } },
     };
 
     const wrapper = mount(ChatMessage, { props: { message, allowSessionPopovers: false } });
     const markdown = wrapper.find(".message__system-bubble .markdown-body");
 
+    expect(wrapper.find(".message__notice-text").text()).toBe(text);
+    expect(wrapper.find(".message__notice-text strong").exists()).toBe(false);
+    expect(markdown.text()).not.toContain("Assigned task:");
     expect(markdown.find("strong").text()).toBe("Summary:");
     expect(markdown.find("em").text()).toBe("formatted");
     expect(markdown.find("ul li a").attributes("href")).toBe("https://example.com/source");
@@ -609,7 +613,7 @@ describe("ChatMessage", () => {
 
     const wrapper = mount(ChatMessage, { props: { message } });
 
-    expect(wrapper.text()).toContain("Check **status**.");
+    expect(wrapper.find(".message__notice-text").text()).toBe("Check **status**.");
     expect(wrapper.find(".markdown-body").exists()).toBe(false);
   });
 

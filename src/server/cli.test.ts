@@ -45,6 +45,17 @@ afterEach(async () => {
 });
 
 describe("deployment CLI", () => {
+  it("does not advertise or accept session migration", async () => {
+    const root = await createRoot(false);
+    const help = await runCli(root, ["--help"]);
+    expect(help.code).toBe(0);
+    expect(help.output).not.toContain("migrate-agent-sessions");
+
+    const migration = await runCli(root, ["migrate-agent-sessions"]);
+    expect(migration.code).toBe(1);
+    expect(migration.output).toContain("Unknown command: migrate-agent-sessions");
+  });
+
   it("drains without loading configuration", async () => {
     const root = await createRoot(false);
     let drained = false;

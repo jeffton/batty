@@ -132,9 +132,9 @@ describe("SessionStore", () => {
     store.release();
     const old = `${JSON.stringify({ v: 4, kind: "header", id: "old", storageVersion: 1 })}\n`;
     await fs.writeFile(file, old);
-    await expect(SessionStore.open(file)).rejects.toThrow("Harness v4 session is incompatible");
+    await expect(SessionStore.open(file)).rejects.toThrow("Expected Pi session version 3");
     await expect(SessionStore.read(file, { readOnly: true })).rejects.toThrow(
-      "Harness v4 session is incompatible",
+      "Expected Pi session version 3",
     );
     expect(await fs.readFile(file, "utf8")).toBe(old);
   });

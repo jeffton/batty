@@ -38,7 +38,7 @@ The controller uses Pi's `agent.finishTurn` boundary. Admitted input is consumed
 | Cron/subagent completion | Harness operation state                       | Batty custom-entry receipts and native branch boundaries |
 | Crash continuation       | Not resumed by Batty                          | Not resumed by Batty                                     |
 
-**Session formats are incompatible.** The runtime rejects Harness v4 files. `batty --root <root> migrate-agent-sessions` explicitly converts history to v3 and backs up the original files outside the session directory. `--dry-run` validates without writing. Conversion runs with the server stopped; deployment validates, drains active work, stops the server, converts history, and starts the prepared release. The runtime does not support both formats.
+Session storage requires native Pi v3 files. The runtime rejects other formats. Converted history retains native custom metadata for selected tools and cron/subagent completion boundaries; its readers remain part of session handling. Deployments drain active work and restart the prepared release without session conversion.
 
 Coordinated deployment draining remains required. Queued prompts do not survive process replacement. Completed cron runs and detached children have persisted receipts; interrupted executions are rejected rather than replayed. Subagent tool calls allocate a fresh child identity per invocation.
 

@@ -18,10 +18,6 @@ async function readEntries(file: string) {
   const content = await fs.readFile(file, "utf8");
   const lines = content.split("\n").filter((line) => line.trim());
   const header = lines.length ? JSON.parse(lines[0]!) : undefined;
-  if (header?.kind === "header" || header?.v === 4)
-    throw new Error(
-      `Harness v4 session is incompatible with Pi AgentSession v3: ${file}. Use an isolated evaluation session directory.`,
-    );
   if (header?.type !== "session" || header.version !== CURRENT_SESSION_VERSION)
     throw new Error(`Expected Pi session version ${CURRENT_SESSION_VERSION}: ${file}`);
   // Pi's parser skips malformed lines. Indexing must report incomplete histories instead.

@@ -85,7 +85,6 @@ function usage(): string {
     "Commands:",
     "  auth code                  Print a fresh one-time 8 char auth code",
     "  drain                      Stop accepting new turns and wait for active turns",
-    "  migrate-agent-sessions [--dry-run]  Convert Harness history to native AgentSession files",
     "  cron list [--workspace ID] [--json]",
     "  cron add --workspace ID --prompt TEXT --model ID --thinking LEVEL (--in DUR | --at ISO | --every DUR | --cron EXPR) [--tz IANA] [--session new|daily-inline|daily-detached] [--daily-context include|chat-only|omit]",
     "  cron edit <jobId> [fields...] [--session new|daily-inline|daily-detached] [--daily-context include|chat-only|omit]",
@@ -353,18 +352,6 @@ async function main(): Promise<void> {
 
   if (command === "drain") {
     await handleDrain(root);
-    return;
-  }
-
-  if (command === "migrate-agent-sessions") {
-    const { migrateAgentSessions } = await import("./migrate-agent-sessions");
-    console.log(
-      JSON.stringify(
-        await migrateAgentSessions(root, { dryRun: booleanFlag(parsed.flags, "dry-run") }),
-        null,
-        2,
-      ),
-    );
     return;
   }
 

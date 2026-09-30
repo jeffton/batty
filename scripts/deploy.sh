@@ -8,7 +8,6 @@ step() {
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_dir="$(cd -- "${script_dir}/.." && pwd)"
 install_root="${BATTY_INSTALL_ROOT:-/opt/batty}"
-batty_root="${BATTY_ROOT:-/root/github}"
 release_name="$(git -C "$repo_dir" rev-parse --short HEAD)"
 
 cd "$repo_dir"
@@ -24,9 +23,6 @@ pnpm test
 
 step "Building app"
 pnpm build
-
-step "Validating session migration"
-node "$repo_dir/dist/server/cli.mjs" --root "$batty_root" migrate-agent-sessions --dry-run
 
 step "Packaging release"
 "$repo_dir/scripts/install-release.sh" "$release_name"

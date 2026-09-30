@@ -121,11 +121,7 @@ describe("deployment scripts", () => {
     ]);
 
     expect(deployScript).toContain('"$repo_dir/scripts/handoff-restart.sh"');
-    expect(deployScript).toContain("normalize-session-metadata --dry-run");
     expect(deployScript.indexOf("pnpm build")).toBeLessThan(
-      deployScript.indexOf("normalize-session-metadata --dry-run"),
-    );
-    expect(deployScript.indexOf("normalize-session-metadata --dry-run")).toBeLessThan(
       deployScript.indexOf("scripts/install-release.sh"),
     );
     expect(deployScript).not.toContain("--force");
@@ -143,16 +139,10 @@ describe("deployment scripts", () => {
     const linuxDrain =
       '"$node_path" "$install_root/current/dist/server/cli.mjs" --root "$batty_root" drain';
     expect(restartScript).toContain(linuxDrain);
-    expect(deployScript).toContain("normalize-session-metadata --dry-run");
-    expect(restartScript).toContain("normalize-session-metadata");
-    expect(restartScript).not.toContain("normalize-session-metadata --dry-run");
     expect(restartScript.indexOf(linuxDrain)).toBeLessThan(
       restartScript.indexOf("systemctl stop batty.service"),
     );
     expect(restartScript.indexOf("systemctl stop batty.service")).toBeLessThan(
-      restartScript.indexOf("normalize-session-metadata"),
-    );
-    expect(restartScript.indexOf("normalize-session-metadata")).toBeLessThan(
       restartScript.indexOf("systemctl start batty.service"),
     );
     expect(restartScript.indexOf("systemctl start batty.service")).toBeLessThan(
@@ -177,11 +167,7 @@ describe("deployment scripts", () => {
     expect(deployScript).toContain('if [[ "$(id -u)" -eq 0 ]]');
     expect(deployScript).toContain('webPushSubject: "mailto:batty@localhost"');
     expect(deployScript).toContain('if [[ "$was_running" == true ]]');
-    expect(deployScript).toContain("normalize-session-metadata --dry-run");
     expect(deployScript.indexOf("pnpm build")).toBeLessThan(
-      deployScript.indexOf("normalize-session-metadata --dry-run"),
-    );
-    expect(deployScript.indexOf("normalize-session-metadata --dry-run")).toBeLessThan(
       deployScript.indexOf("install-release.sh"),
     );
     expect(handoffScript).toContain("nohup /usr/bin/env");
@@ -199,13 +185,7 @@ describe("deployment scripts", () => {
     expect(restartScript.indexOf(macosDrain)).toBeLessThan(
       restartScript.indexOf('launchctl bootout "${domain}/${label}"'),
     );
-    expect(deployScript).toContain("normalize-session-metadata --dry-run");
-    expect(restartScript).toContain("normalize-session-metadata");
-    expect(restartScript).not.toContain("normalize-session-metadata --dry-run");
     expect(restartScript.indexOf('launchctl bootout "${domain}/${label}"')).toBeLessThan(
-      restartScript.indexOf("normalize-session-metadata"),
-    );
-    expect(restartScript.indexOf("normalize-session-metadata")).toBeLessThan(
       restartScript.indexOf('launchctl bootstrap "$domain" "$plist"'),
     );
     expect(restartScript.indexOf('launchctl kickstart -k "${domain}/${label}"')).toBeLessThan(
@@ -237,7 +217,6 @@ describe("deployment scripts", () => {
       "utf8",
     );
     expect(script).toContain('(Get-Date).ToUniversalTime().ToString("yyyyMMddHHmmssfff")');
-    expect(script).toContain("normalize-session-metadata --dry-run");
     expect(script).toContain("if (Test-Path $optionsPath) {");
     expect(script).toContain("workspacesRoots = @($WorkspacesRoots)");
     expect(script).toContain("Get-Content -Raw $optionsPath | ConvertFrom-Json");
@@ -282,33 +261,13 @@ describe("deployment scripts", () => {
     );
     expect(workerScript).not.toContain("deployment/drain");
     expect(workerScript).not.toContain("authSecret");
-    expect(workerScript).toContain("normalize-session-metadata");
-    expect(workerScript).toContain("$storageChanged = $true");
-    expect(workerScript).toContain('$metadataSummary.PSObject.Properties["convertedFiles"]');
-    expect(workerScript).toContain("$storageChanged = ($convertedFiles -gt 0)");
-    expect(workerScript).toContain("elseif ($activationStarted -and $previousReleaseDir)");
-    expect(workerScript).toContain("if ($activationStarted -and $storageChanged)");
+    expect(workerScript).toContain("if ($activationStarted -and $previousReleaseDir)");
     expect(workerScript.indexOf("Stop-Service -Name Batty")).toBeLessThan(
-      workerScript.indexOf("normalize-session-metadata"),
+      workerScript.indexOf("$activationStarted = $true"),
     );
     expect(workerScript.indexOf("$activationStarted = $true")).toBeLessThan(
-      workerScript.indexOf("normalize-session-metadata"),
+      workerScript.indexOf("New-Item -ItemType Junction"),
     );
-    const normalizeInvocation = workerScript.indexOf(
-      "$metadataOutput = & (Get-Command node).Source $cliPath --root $BattyRoot normalize-session-metadata",
-    );
-    expect(workerScript.indexOf("$storageChanged = $true")).toBeLessThan(normalizeInvocation);
-    expect(normalizeInvocation).toBeLessThan(workerScript.indexOf("ConvertFrom-Json"));
-    const changedStorageFailure = workerScript
-      .split("if ($activationStarted -and $storageChanged)")[1]
-      ?.split("} elseif ($activationStarted -and $previousReleaseDir)")[0];
-    expect(changedStorageFailure).toContain(
-      "New-Item -ItemType Junction -Path $currentDir -Target $releaseDir",
-    );
-    expect(changedStorageFailure).toContain('"configure-iis-app.ps1"');
-    expect(changedStorageFailure).not.toContain("Start-Service -Name Batty");
-    expect(changedStorageFailure).toContain('WaitForStatus("Stopped"');
-    expect(workerScript).toContain("ConvertFrom-Json");
     expect(workerScript.indexOf("Stop-Service -Name Batty")).toBeLessThan(
       workerScript.indexOf("New-Item -ItemType Junction"),
     );

@@ -45,44 +45,15 @@ afterEach(async () => {
 });
 
 describe("deployment CLI", () => {
-  it("does not advertise or accept session migration", async () => {
+  it("shows help without configuration and rejects unknown commands", async () => {
     const root = await createRoot(false);
     const help = await runCli(root, ["--help"]);
     expect(help.code).toBe(0);
-    expect(help.output).not.toContain("migrate-agent-sessions");
+    expect(help.output).toContain("drain");
 
-    const migration = await runCli(root, ["migrate-agent-sessions"]);
-    expect(migration.code).toBe(1);
-    expect(migration.output).toContain("Unknown command: migrate-agent-sessions");
-  });
-
-  it("normalizes metadata in dry-run mode and leaves an empty root untouched", async () => {
-    const root = await createRoot(false);
-    const sessionDirectory = path.join(root, ".batty", "sessions");
-    await fs.mkdir(sessionDirectory);
-    const sessionFile = path.join(sessionDirectory, "fixture.jsonl");
-    const sessionContents = `${JSON.stringify({
-      type: "session",
-      version: 3,
-      id: "native-v3-session",
-      timestamp: "2026-09-30T00:00:00.000Z",
-      cwd: root,
-    })}\n`;
-    await fs.writeFile(sessionFile, sessionContents);
-    const before = await fs.readdir(path.join(root, ".batty"));
-    const help = await runCli(root, ["--help"]);
-    expect(help.output).toContain("normalize-session-metadata [--dry-run]");
-
-    const result = await runCli(root, ["normalize-session-metadata", "--dry-run"]);
-
-    expect(result.code).toBe(0);
-    expect(JSON.parse(result.output)).toMatchObject({
-      scanned: 1,
-      convertedFiles: 0,
-      dryRun: true,
-    });
-    await expect(fs.readdir(path.join(root, ".batty"))).resolves.toEqual(before);
-    await expect(fs.readFile(sessionFile, "utf8")).resolves.toBe(sessionContents);
+    const result = await runCli(root, ["unknown-command"]);
+    expect(result.code).toBe(1);
+    expect(result.output).toContain("Unknown command: unknown-command");
   });
 
   it("drains without loading configuration", async () => {

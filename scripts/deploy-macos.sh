@@ -57,9 +57,6 @@ rm -f "$test_storage"
 step "Building app"
 pnpm build
 
-step "Preflighting session metadata normalization"
-"$node_path" "$repo_dir/dist/server/cli.mjs" --root "$batty_root" normalize-session-metadata --dry-run
-
 if [[ ! -f "$options_path" ]]; then
   step "Initializing Batty root configuration"
   mkdir -p "$options_dir"

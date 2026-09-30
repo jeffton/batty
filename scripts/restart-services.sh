@@ -14,7 +14,6 @@ fi
 
 systemctl enable batty.service >/dev/null
 systemctl stop batty.service
-"$node_path" "$install_root/current/dist/server/cli.mjs" --root "$batty_root" normalize-session-metadata
 systemctl start batty.service
 systemctl reload nginx
 

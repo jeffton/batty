@@ -77,12 +77,6 @@ try {
   if ($LASTEXITCODE -ne 0) {
     throw "pnpm build failed"
   }
-
-  Step "Preflighting session metadata normalization"
-  & (Get-Command node).Source (Join-Path $repoDir "dist\server\cli.mjs") --root $BattyRoot normalize-session-metadata --dry-run
-  if ($LASTEXITCODE -ne 0) {
-    throw "Session metadata normalization preflight failed"
-  }
 } finally {
   Pop-Location
 }

@@ -2,6 +2,7 @@
 import { Check, ExternalLink, LogOut, Palette, Pencil, Save, Trash2, X } from "@lucide/vue";
 import { computed, reactive, ref, watch } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
+import McpSettingsPanel from "@/client/components/McpSettingsPanel.vue";
 import ModelConfigSelector from "@/client/components/ModelConfigSelector.vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
 import { watchOpenAIAuthAttempt } from "@/client/lib/provider-auth";
@@ -32,6 +33,7 @@ const DEFAULT_MODEL_POPOVER_ID = "settings-default-model-popover";
 const DEFAULT_MODEL_ANCHOR = "--settings-default-model-anchor";
 const store = useAppStore();
 const connectPending = ref(false);
+const mcpPanelActive = ref(false);
 const completePending = ref(false);
 const expandedItemId = ref<string>();
 const apiKeySaving = reactive<Record<string, boolean>>({
@@ -410,6 +412,7 @@ function logout(): void {
 
 function handlePopoverToggle(event: Event): void {
   const open = (event as Event & { newState?: "open" | "closed" }).newState === "open";
+  mcpPanelActive.value = open;
   if (!open) {
     expandedItemId.value = undefined;
     environmentName.value = "";
@@ -770,6 +773,15 @@ function handlePopoverToggle(event: Event): void {
             </template>
           </div>
         </article>
+      </section>
+
+      <section class="settings-popover__section">
+        <div class="settings-popover__group-title">MCP servers</div>
+        <McpSettingsPanel
+          :active="mcpPanelActive"
+          :workspace-id="store.selectedWorkspaceId"
+          :workspaces="store.workspaces"
+        />
       </section>
 
       <section class="settings-popover__section">

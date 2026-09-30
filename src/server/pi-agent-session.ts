@@ -5,6 +5,9 @@ import {
   createAgentSession,
   createBashToolDefinition,
   createCodemodeExtension,
+  createMcpExtension,
+  createToolSearchExtension,
+  type McpStatusSnapshot,
   createFindToolDefinition,
   createGrepToolDefinition,
   createPowerShellToolDefinition,
@@ -39,6 +42,7 @@ import { modelKey } from "./pi-service-types";
 import { AgentSessionController } from "./agent-session-controller";
 import { SessionStore } from "./session-store";
 import { createArtifactExtension, createTrackedFileTools } from "./agent-file-changes";
+import { loadBattyMcpConfig, createBattyMcpCredentials, battyMcpLogPath } from "./mcp-settings";
 
 export const BATTY_FIND_DEFAULT_LIMIT = 100;
 
@@ -51,6 +55,7 @@ export interface CreatePiAgentSessionOptions {
   model?: PiModel;
   thinkingLevel?: string;
   extensionFactories?: ExtensionFactory[];
+  onMcpStatusChange?: (status: McpStatusSnapshot) => void;
 }
 
 export async function createPiAgentSession({
@@ -62,6 +67,7 @@ export async function createPiAgentSession({
   model,
   thinkingLevel,
   extensionFactories = [],
+  onMcpStatusChange,
 }: CreatePiAgentSessionOptions): Promise<{
   session: AgentSessionController;
   modelFallbackMessage?: string;
@@ -217,10 +223,32 @@ export async function createPiAgentSession({
         replaceable: true,
         factory: createCodemodeExtension({ models: false }),
       },
+      {
+        name: "tool-search",
+        builtin: true,
+        replaceable: true,
+        factory: createToolSearchExtension(),
+      },
+      {
+        name: "mcp",
+        builtin: true,
+        replaceable: true,
+        factory: createMcpExtension({
+          loadConfig: (ctx) => loadBattyMcpConfig(config, workspace.path, ctx.isProjectTrusted()),
+          credentials: createBattyMcpCredentials(config),
+          logPath: battyMcpLogPath(config),
+          onStatusChange: onMcpStatusChange,
+        }),
+      },
       createArtifactExtension(),
       ...extensionFactories,
     ],
-    additionalExtensionPaths: ["builtin:codemode", ...extensionPaths],
+    additionalExtensionPaths: [
+      "builtin:codemode",
+      "builtin:tool-search",
+      "builtin:mcp",
+      ...extensionPaths,
+    ],
     additionalSkillPaths: availablePaths.skills,
     additionalPromptTemplatePaths: availablePaths.prompts,
     additionalThemePaths: availablePaths.themes,
@@ -267,19 +295,32 @@ export async function createPiAgentSession({
     customTools: tools as unknown as ToolDefinition[],
   });
   session = await AgentSessionController.create(result.session, sessionManager);
-  await result.session.bindExtensions({
-    mode: "rpc",
-    onError: (error) => {
-      throw new Error(`Pi extension ${error.extensionPath}: ${error.error}`);
-    },
-  });
-  if (!findBattySystemPromptSnapshot(sessionManager.getEntries()))
-    await refreshBattySystemPrompt(config, { workspace, session });
-  if (importedToolNames)
-    result.session.setActiveToolsByName(
-      battyActivePiToolNames([...importedToolNames, "codemode"], process.platform),
-    );
-  return { session, modelFallbackMessage: result.modelFallbackMessage };
+  try {
+    if (!findBattySystemPromptSnapshot(sessionManager.getEntries()))
+      await refreshBattySystemPrompt(config, { workspace, session });
+    await result.session.bindExtensions({
+      mode: "rpc",
+      onError: (error) => {
+        throw new Error(`Pi extension ${error.extensionPath}: ${error.error}`);
+      },
+    });
+    if (importedToolNames) {
+      const battyTools = new Set(tools.map((tool) => tool.name));
+      const extensionTools = result.session
+        .getActiveToolNames()
+        .filter((name) => !battyTools.has(name));
+      result.session.setActiveToolsByName(
+        battyActivePiToolNames(
+          [...importedToolNames, ...extensionTools, "codemode"],
+          process.platform,
+        ),
+      );
+    }
+    return { session, modelFallbackMessage: result.modelFallbackMessage };
+  } catch (error) {
+    await session.dispose();
+    throw error;
+  }
 }
 
 export async function refreshBattySystemPrompt(

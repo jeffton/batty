@@ -14,7 +14,7 @@ Pi's public subscribers run before `message_end` persistence. Batty defers subsc
 
 Direct tools and codemode remain enabled. Codemode is Pi's built-in extension, including its sandbox, declarations, dynamic catalog, output truncation, and branch-local store. Nested calls use Pi's tool hooks and call IDs. Batty attaches nested file changes, downloads, and sites to the outer result. Native shell calls inside codemode return structured results, including `output` and `exit_code`.
 
-Configured coding-agent extensions load through `DefaultResourceLoader` with Batty's resource paths. They receive a headless SDK context; Batty does not render terminal dialogs or widgets. MCP connections and OAuth management are not configured.
+Configured coding-agent extensions load through `DefaultResourceLoader` with Batty's resource paths. They receive a headless SDK context; Batty does not render terminal dialogs or widgets. Native MCP and tool-search extensions share this lifecycle. Batty's [MCP settings](mcp.md) manage scoped configuration, status, and OAuth through a dedicated web UI bridge.
 
 ## Storage and execution differences
 
@@ -45,6 +45,8 @@ Batty retains the Pi AI sampling patch and applies these SDK adaptations:
 - SessionManager: persist initial setup immediately and fork a selected leaf, including an explicitly empty branch.
 - Read: explicit line limits remove the byte cap.
 - Codemode: cancel and join admitted host calls before returning, including failure, deadline, and sandbox close.
+- MCP: expose native configuration/credential helpers, explicit config paths, and connection-status snapshots for Batty's web manager.
+- Extension UI: expose Pi's headless UI defaults for the MCP OAuth input/notification bridge.
 
 The upstream compaction implementation handles trailing tool results without a Batty patch. Worker and WASM assets come from installed Pi packages; Batty does not ship a separate codemode worker.
 

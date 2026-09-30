@@ -46,6 +46,18 @@ describe("Batty native AgentSession tools", () => {
         parameters: Type.Object({}),
         execute: async () => ({ content: [{ type: "text" as const, text: "done" }], details: {} }),
       })),
+      undefined,
+      [
+        (pi) => {
+          pi.registerTool({
+            name: "extension-tool",
+            label: "Extension",
+            description: "Extension",
+            parameters: Type.Object({}),
+            execute: async () => ({ content: [{ type: "text", text: "done" }], details: {} }),
+          });
+        },
+      ],
     );
     await fixture.session.sessionManager.appendCustomEntry("batty-agent-session-migration", {
       configuration: { activeToolNames: ["read", "codemode", "selected-tool"] },
@@ -55,6 +67,7 @@ describe("Batty native AgentSession tools", () => {
     expect(session.sdk.getActiveToolNames()).toContain("codemode");
     expect(session.sdk.getActiveToolNames()).toContain("selected-tool");
     expect(session.sdk.getActiveToolNames()).not.toContain("unselected-tool");
+    expect(session.sdk.getActiveToolNames()).toContain("extension-tool");
   });
   it.each(["write", "codemode"])(
     "persists completed writes when %s is cancelled during filesystem execution",

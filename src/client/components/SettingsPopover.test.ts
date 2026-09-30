@@ -173,15 +173,28 @@ describe("SettingsPopover", () => {
 
   it("lists variable names, accepts visible entry, and removes variables without exposing saved values", async () => {
     vi.spyOn(useAppStore(), "refreshProviderAuthStatus").mockResolvedValue();
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ names: ["SECRET_KEY"] }), { status: 200 }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ names: ["SECRET_KEY", "NEW_KEY"] }), { status: 200 }),
-      )
-      .mockResolvedValueOnce(new Response(JSON.stringify({ names: ["NEW_KEY"] }), { status: 200 }));
+    let environmentNames = ["SECRET_KEY"];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/api/settings/environment/NEW_KEY")) {
+        environmentNames = ["SECRET_KEY", "NEW_KEY"];
+        return new Response(JSON.stringify({ names: environmentNames }), { status: 200 });
+      }
+      if (url.includes("/api/settings/environment/SECRET_KEY")) {
+        environmentNames = [];
+        return new Response(JSON.stringify({ names: environmentNames }), { status: 200 });
+      }
+      if (url.includes("/api/settings/environment")) {
+        return new Response(JSON.stringify({ names: environmentNames }), { status: 200 });
+      }
+      if (url.includes("/api/settings/mcp")) {
+        return new Response(JSON.stringify({ servers: [], errors: [] }), { status: 200 });
+      }
+      if (url.includes("/api/workspaces/") && url.endsWith("/mcp")) {
+        return new Response(JSON.stringify({ servers: [], errors: [] }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    });
     const wrapper = mount(SettingsPopover, {
       props: { popoverId: "settings-popover", anchorName: "--settings-anchor" },
     });
@@ -213,11 +226,12 @@ describe("SettingsPopover", () => {
     fetchMock.mockRestore();
   });
 
-  it("places environment variables immediately above log out", () => {
+  it("places MCP servers before environment variables and environment immediately above log out", () => {
     const wrapper = mount(SettingsPopover, {
       props: { popoverId: "settings-popover", anchorName: "--settings-anchor" },
     });
     const sections = wrapper.findAll(".settings-popover__body > .settings-popover__section");
+    expect(sections.at(-3)?.text()).toContain("MCP servers");
     expect(sections.at(-2)?.text()).toContain("Environment variables");
     expect(sections.at(-1)?.text()).toContain("Log out");
   });

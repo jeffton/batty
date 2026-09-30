@@ -17,6 +17,7 @@ import { PiService } from "./pi-service";
 import type { WorkspaceSnapshot, WorkspaceUiSettings } from "@/shared/types";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerCronRoutes } from "./routes/cron";
+import { registerMcpRoutes } from "./routes/mcp";
 import type { RouteContext } from "./routes/context";
 import { registerPushRoutes } from "./routes/push";
 import { registerSessionRoutes } from "./routes/sessions";
@@ -368,6 +369,7 @@ const routeContext: RouteContext = {
 
 registerAuthRoutes(routeContext);
 registerSettingsRoutes(routeContext);
+registerMcpRoutes(routeContext);
 registerPushRoutes(routeContext);
 registerWorkspaceRoutes(routeContext, workspaceSubscribers);
 registerCronRoutes(routeContext);

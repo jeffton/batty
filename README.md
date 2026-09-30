@@ -48,7 +48,7 @@ Batty adds a browser-native layer on top:
 
 A coordinated deployment drains active turns: it rejects new turns and pauses cron scheduling while active descendants and result deliveries finish. Queues and in-flight execution are process-local; interrupted work is not resumed after startup. See [the AgentSession integration](docs/pi-agent-session.md) for implementation boundaries and the Harness comparison.
 
-Configured coding-agent extensions run in Pi's headless SDK context. Terminal dialogs and widgets are not exposed in the web UI. Codemode uses Pi's built-in extension; MCP is not configured.
+Configured coding-agent extensions run in Pi's headless SDK context. Terminal dialogs and widgets are not exposed in the web UI. Codemode and MCP use Pi's built-in extensions. [MCP settings](docs/mcp.md) provide server configuration, tool exposure, connection status, and OAuth sign-in.
 
 ## Quick start
 

@@ -44,6 +44,7 @@ import {
   disposeSessionSummaryIndex,
 } from "./session-summaries";
 import { ProviderAuthService } from "./provider-auth";
+import { McpService } from "./mcp-service";
 import { ProviderUsageService } from "./provider-usage";
 import { SshSocksProxy } from "./ssh-socks-proxy";
 import {
@@ -121,6 +122,7 @@ function leafBeforeCurrentTurn(branch: SessionEntry[]): string | null | undefine
 
 export class PiService {
   readonly turns = new TurnDrain();
+  readonly mcp: McpService;
   private readonly config: AppConfig;
   private readonly modelRuntime: ModelRuntime;
   private readonly modelConfigWatcher: ModelConfigWatcher;
@@ -156,6 +158,7 @@ export class PiService {
     this.config = config;
     this.cronService = cronService;
     this.modelRuntime = modelRuntime;
+    this.mcp = new McpService(config, modelRuntime, (workspaceId) => this.reloadMcp(workspaceId));
     this.modelConfigWatcher = modelConfigWatcher;
     this.sessionReadState = sessionReadState;
     this.onAgentCompleted = onAgentCompleted;
@@ -217,6 +220,7 @@ export class PiService {
   }
 
   async dispose(): Promise<void> {
+    await this.mcp.dispose();
     await this.providerAuthService.dispose();
     await this.modelConfigWatcher.dispose();
     await Promise.all([...this.liveSessions.values()].map(({ session }) => session.dispose()));
@@ -229,7 +233,16 @@ export class PiService {
     this.liveSessions.set(session.sessionId, { workspace, session });
   }
 
+  private async reloadMcp(workspaceId?: string): Promise<void> {
+    await Promise.all(
+      [...this.liveSessions.values()]
+        .filter((live) => workspaceId === undefined || live.workspace.id === workspaceId)
+        .map((live) => live.session.reloadResources()),
+    );
+  }
+
   private unregisterLiveSession(sessionId: string): void {
+    this.mcp.forget(sessionId);
     this.sessionControllers.delete(sessionId);
     this.liveSessions.delete(sessionId);
   }
@@ -1200,6 +1213,7 @@ export class PiService {
         modelRuntime: this.modelRuntime,
         model,
         thinkingLevel: options?.thinkingLevel,
+        onMcpStatusChange: (status) => this.mcp.observe(id, workspace.id, status),
         customTools: createPiServiceTools(
           {
             config: this.config,
@@ -1236,6 +1250,7 @@ export class PiService {
     try {
       return await creating;
     } catch (error) {
+      this.mcp.forget(id);
       this.sessionControllers.delete(id);
       sessionManager.release();
       throw error;

@@ -1,3 +1,4 @@
+import type { McpExposure, McpServerConfig } from "@earendil-works/pi-coding-agent";
 import type { AppAppearance } from "./appearance";
 
 export type UiContentBlock =
@@ -374,6 +375,39 @@ export interface AppSettingsStatus {
 export interface WorkspaceUiSettings {
   easyMode: boolean;
 }
+
+export interface McpSettingsResponse {
+  servers: Array<{
+    name: string;
+    config: McpServerConfig;
+    scope: "global" | "workspace";
+  }>;
+  errors: string[];
+}
+
+export interface McpWorkspaceStatus {
+  servers: Array<{
+    name: string;
+    state: string;
+    scope?: "global" | "project" | "extension";
+    source?: string;
+    tools: Array<{ name: string; description?: string; exposure: string }>;
+    error?: string;
+  }>;
+  errors: string[];
+}
+
+export interface McpAuthAttempt {
+  attemptId: string;
+  workspaceId: string;
+  serverName: string;
+  status: "pending" | "completed" | "failed" | "cancelled";
+  authorizationUrl?: string;
+  prompt?: string;
+  error?: string;
+}
+
+export type { McpExposure, McpServerConfig };
 
 export interface BootstrapPayload {
   authenticated: boolean;

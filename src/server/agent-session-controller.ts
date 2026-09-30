@@ -35,6 +35,7 @@ export class AgentSessionController {
   private readonly promptPreflights = new Set<AbortController>();
   private admission = Promise.resolve();
   private admitting = false;
+  private reloadRequested = false;
   private closing?: Promise<void>;
   private readonly unsubscribe: () => void;
 
@@ -66,6 +67,8 @@ export class AgentSessionController {
             sessionManager.publishSummary();
           }
           await Promise.all([...this.listeners].map((listener) => listener(event)));
+          if (event.type === "agent_settled" && this.reloadRequested && !this.closing)
+            await this.reloadResources();
         }),
       );
       this.pendingEvents.add(delivery);
@@ -166,6 +169,12 @@ export class AgentSessionController {
     try {
       if (this.closing) throw new Error("Session is closed");
       signal?.throwIfAborted();
+      if (this.reloadRequested && !this.sdk.isStreaming) {
+        this.reloadRequested = false;
+        await this.sdk.reload();
+        if (this.closing) throw new Error("Session is closed");
+        signal?.throwIfAborted();
+      }
       return await run(finishAdmission);
     } finally {
       finishAdmission();
@@ -204,6 +213,14 @@ export class AgentSessionController {
   async removeQueuedPrompt(kind: "steer" | "followUp", index: number): Promise<void> {
     this.sdk.removeQueuedPrompt(kind, index);
     await this.flushEvents();
+  }
+
+  /** Configuration changes never interrupt admitted turns or their nested MCP calls. */
+  async reloadResources(): Promise<void> {
+    this.reloadRequested = true;
+    await this.admit(async (accepted) => {
+      accepted();
+    });
   }
 
   async waitForIdle(): Promise<void> {

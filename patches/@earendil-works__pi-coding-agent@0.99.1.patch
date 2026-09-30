@@ -202,6 +202,31 @@ index 07af8cf3cc9e07bb1229c0d5b32dca4a506187b9..67206bf7cbb0ba4e318bd5a93ec4cc36
          await this._extensionRunner.emit(this._sessionStartEvent);
          this._extensionRunner.reportUnhandledMcpServers();
          await this.extendResourcesFromExtensions(this._sessionStartEvent.reason === "reload" ? "reload" : "startup");
+diff --git a/dist/core/extensions/runner.d.ts b/dist/core/extensions/runner.d.ts
+index 37335ab116dee456bb4407bd34fe172ab5fee846..10b75a0f25c21c0b304ed82715d4de2b2493cdb6 100644
+--- a/dist/core/extensions/runner.d.ts
++++ b/dist/core/extensions/runner.d.ts
+@@ -31,6 +31,7 @@ type RunnerEmitResult<TEvent extends RunnerEmitEvent> = TEvent extends {
+ } ? SessionBeforeCompactResult | undefined : TEvent extends {
+     type: "session_before_tree";
+ } ? SessionBeforeTreeResult | undefined : undefined;
++export declare const noOpUIContext: ExtensionUIContext;
+ export type ExtensionErrorListener = (error: ExtensionError) => void;
+ type BoundaryBaseEvent = Omit<TurnEndEvent, "entries" | "continue" | "context"> | Omit<AgentBeforeSettleEvent, "entries" | "continue" | "context">;
+ interface BoundaryDispatchResult {
+diff --git a/dist/core/extensions/runner.js b/dist/core/extensions/runner.js
+index 10a0aa16b8ca70cad61c24e140f70618a0d1159a..bdc463208ae0bd0fcdfff181fa48f79c83e3f971 100644
+--- a/dist/core/extensions/runner.js
++++ b/dist/core/extensions/runner.js
+@@ -129,7 +129,7 @@ export async function emitProjectTrustEvent(extensionsResult, event, ctx) {
+     }
+     return { errors };
+ }
+-const noOpUIContext = {
++export const noOpUIContext = {
+     select: async () => undefined,
+     confirm: async () => false,
+     input: async () => undefined,
 diff --git a/dist/core/session-manager.d.ts b/dist/core/session-manager.d.ts
 index 3f6104e19f4bdf82e5513af1cb6d84bf9f8b9d07..824979ca3fdb01d8879d2348cf43f6274dba197c 100644
 --- a/dist/core/session-manager.d.ts
@@ -308,3 +333,184 @@ index b9bc3b9dde0f5e8f0e6b24451cc20cd609b15a53..277fb027253a43f3b51b736390b8379b
                              let outputText;
                              if (truncation.firstLineExceedsLimit) {
                                  // First line alone exceeds the byte limit. Point the model at a bash fallback.
+diff --git a/dist/extensions/mcp/config.d.ts b/dist/extensions/mcp/config.d.ts
+index dc58ee9a57bc9e654673d7456a053cd325b1a0ae..9543bbb4fa344863669814b8d0e561ae06a3c701 100644
+--- a/dist/extensions/mcp/config.d.ts
++++ b/dist/extensions/mcp/config.d.ts
+@@ -49,6 +49,9 @@ export declare function loadMcpConfig(options: {
+     agentDir: string;
+     cwd: string;
+     projectTrusted: boolean;
++    /** Explicit config files for SDK hosts with their own resource layout. */
++    globalConfigPath?: string;
++    projectConfigPath?: string;
+ }): LoadedMcpConfig;
+ /** Settings `/mcp` changes. `enabled: true` and `exposure: "codemode"` are the defaults and remove the key. */
+ export interface McpServerConfigPatch {
+diff --git a/dist/extensions/mcp/config.js b/dist/extensions/mcp/config.js
+index ca62062dc1c5eb15963dbc67ec9d30ce4b8083e0..20751fef385a6d73f683e3b6b6baf8d76e1d2c2c 100644
+--- a/dist/extensions/mcp/config.js
++++ b/dist/extensions/mcp/config.js
+@@ -21,7 +21,8 @@
+  * The top-level `autoEnableCodemode` (default true) activates the codemode tool when a server
+  * with `codemode` or `codemode-deferred` exposure connects. A project value overrides the global one.
+  */
+-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
++import { randomUUID } from "node:crypto";
++import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+ import { dirname, join } from "node:path";
+ import { CONFIG_DIR_NAME } from "../../config.js";
+ import { validateMcpServerConfig } from "../../core/mcp-servers.js";
+@@ -64,9 +65,9 @@ function readConfigFile(path, scope, state) {
+  */
+ export function loadMcpConfig(options) {
+     const state = { servers: new Map(), errors: [] };
+-    readConfigFile(join(options.agentDir, "mcp.json"), "global", state);
++    readConfigFile(options.globalConfigPath ?? join(options.agentDir, "mcp.json"), "global", state);
+     if (options.projectTrusted)
+-        readConfigFile(join(options.cwd, CONFIG_DIR_NAME, "mcp.json"), "project", state);
++        readConfigFile(options.projectConfigPath ?? join(options.cwd, CONFIG_DIR_NAME, "mcp.json"), "project", state);
+     return {
+         servers: [...state.servers.values()],
+         ...(state.autoEnableCodemode === undefined ? {} : { autoEnableCodemode: state.autoEnableCodemode }),
+@@ -141,6 +142,13 @@ function editMcpServers(path, edit) {
+         return;
+     const indent = (text && /^([ \t]+)\S/m.exec(text)?.[1]) || "  ";
+     mkdirSync(dirname(path), { recursive: true });
+-    writeFileSync(path, `${JSON.stringify(parsed, null, indent)}\n`);
++    const temporary = `${path}.${randomUUID()}.tmp`;
++    try {
++        writeFileSync(temporary, `${JSON.stringify(parsed, null, indent)}\n`, { mode: 0o600, flag: "wx" });
++        renameSync(temporary, path);
++    }
++    finally {
++        rmSync(temporary, { force: true });
++    }
+ }
+ //# sourceMappingURL=config.js.map
+\ No newline at end of file
+diff --git a/dist/extensions/mcp/index.d.ts b/dist/extensions/mcp/index.d.ts
+index 7fc6441bca5f7751ab6c28b2aa341999d2980f96..846b9983aaaed3968d5f03858876db443d629dcf 100644
+--- a/dist/extensions/mcp/index.d.ts
++++ b/dist/extensions/mcp/index.d.ts
+@@ -23,11 +23,27 @@
+  * current session for registered servers.
+  */
+ import type { ExtensionContext, ExtensionFactory } from "../../core/extensions/types.ts";
+-import { type LoadedMcpConfig, type McpServerConfigPatch, type McpServerEntry } from "./config.ts";
++import { type LoadedMcpConfig, type McpExposure, type McpServerConfigPatch, type McpServerEntry } from "./config.ts";
+ import type { McpOAuthCredentialStore } from "./oauth.ts";
+ import type { McpTransportFactory } from "./runtime.ts";
+ export type { McpTransportFactory } from "./runtime.ts";
++export interface McpServerStatus {
++    name: string;
++    state: "disabled" | "connecting" | "connected" | "disconnected" | "needs-auth" | "failed" | "closed";
++    error?: string;
++    exposure: McpExposure;
++    source: string;
++    scope?: McpServerEntry["scope"];
++    usesOAuth: boolean;
++    tools: Array<{ name: string; description?: string; exposure: McpExposure }>;
++}
++export interface McpStatusSnapshot {
++    servers: McpServerStatus[];
++    errors: string[];
++}
+ export interface McpExtensionOptions {
++    /** Observes native connection/tool/config status, including startup and shutdown. */
++    onStatusChange?: (status: McpStatusSnapshot) => void;
+     /** Defaults to reading `mcp.json` from the agent directory and the trusted project. */
+     loadConfig?: (ctx: ExtensionContext) => LoadedMcpConfig;
+     /** Defaults to stdio and streamable HTTP transports built from the server config. */
+diff --git a/dist/extensions/mcp/index.js b/dist/extensions/mcp/index.js
+index 12b4e7c0956509928e9b0d2e56779687abf11c03..eefd2269d31ce7a3e6b7dfa24b041a7f364cd3ed 100644
+--- a/dist/extensions/mcp/index.js
++++ b/dist/extensions/mcp/index.js
+@@ -126,6 +126,23 @@ export function createMcpExtension(options = {}) {
+         const updateConfig = options.updateConfig ?? ((entry, patch) => updateMcpServerConfig(entry.source, entry.name, patch));
+         const listeners = new Set();
+         const emitChange = () => {
++            options.onStatusChange?.({
++                servers: servers.map(({ entry, connection }) => ({
++                    name: entry.name,
++                    state: entry.config.enabled === false ? "disabled" : (connection?.state ?? "connecting"),
++                    error: connection?.error,
++                    exposure: exposureOf(entry),
++                    source: entry.source,
++                    scope: entry.scope,
++                    usesOAuth: "url" in entry.config && !Object.keys(entry.config.headers ?? {}).some((key) => key.toLowerCase() === "authorization"),
++                    tools: (connection?.tools ?? []).map((tool) => ({
++                        name: tool.name,
++                        description: tool.description,
++                        exposure: getMcpToolExposure(entry.config, tool.name),
++                    })),
++                })),
++                errors: [...configErrors],
++            });
+             for (const listener of listeners)
+                 listener();
+         };
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 045ddb2aaa9dc0b2f1dc9c4cd81e4278a08131d2..5fc67dfd3d3a80512c0099c5dcf96ccc5282b267 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -1,7 +1,7 @@
+ export { type Args, parseArgs } from "./cli/args.ts";
+ export { CONFIG_DIR_NAME, getAgentDir, getDocsPath, getExamplesPath, getPackageDir, getReadmePath, VERSION, } from "./config.ts";
+ export { AgentSession, type AgentSessionConfig, type AgentSessionEvent, type AgentSessionEventListener, type ModelCycleResult, type ParsedSkillBlock, type PromptOptions, parseSkillBlock, type SessionStats, } from "./core/agent-session.ts";
+-export { readStoredCredential } from "./core/auth-storage.ts";
++export { FileAuthStorageBackend, readStoredCredential } from "./core/auth-storage.ts";
+ export type { CacheWarmingDecision, CacheWarmingStatus } from "./core/cache-warmer.ts";
+ export { type BranchPreparation, type BranchSummaryResult, type CollectEntriesResult, type CompactionResult, type CutPointResult, calculateContextTokens, collectEntriesForBranchSummary, compact, DEFAULT_COMPACTION_SETTINGS, estimateTokens, type FileOperations, findCutPoint, findTurnStartIndex, type GenerateBranchSummaryOptions, generateBranchSummary, generateSummary, generateSummaryWithUsage, getLastAssistantUsage, prepareBranchEntries, serializeConversation, shouldCompact, } from "./core/compaction/index.ts";
+ export { createEventBus, type EventBus, type EventBusController } from "./core/event-bus.ts";
+@@ -29,8 +29,13 @@ export { type ModelRoute, type ModelRouteReason, type ModelRouteRequest, VIRTUAL
+ export { type CodemodeExtensionOptions, createCodemodeExtension } from "./extensions/codemode/index.ts";
+ export type { CodemodeStoreEntryData, CodemodeToolDetails } from "./extensions/codemode/tool.ts";
+ export type { LoadedMcpConfig, McpExposure, McpServerConfig, McpServerEntry } from "./extensions/mcp/config.ts";
+-export { createMcpExtension, type McpExtensionOptions, type McpTransportFactory } from "./extensions/mcp/index.ts";
++export { createMcpExtension, type McpExtensionOptions, type McpTransportFactory, type McpServerStatus, type McpStatusSnapshot } from "./extensions/mcp/index.ts";
+ export { createToolSearchExtension } from "./extensions/tool-search/index.ts";
++export { validateMcpServerConfig } from "./core/mcp-servers.ts";
++export { loadMcpConfig, addMcpServerConfig, removeMcpServerConfig, updateMcpServerConfig } from "./extensions/mcp/config.ts";
++export { McpOAuthCredentialStore, signInMcpServer } from "./extensions/mcp/oauth.ts";
++export type { McpServerConfigPatch } from "./extensions/mcp/config.ts";
++export type { McpSignInPrompt, McpOAuthSettings } from "./extensions/mcp/oauth.ts";
+ export { type MainOptions, main } from "./main.ts";
+ export { InteractiveMode, type InteractiveModeOptions, type JsonAgentSessionEvent, type ModelInfo, type PrintModeOptions, RpcClient, type RpcClientOptions, type RpcCommand, type RpcEventListener, type RpcExtensionUIRequest, type RpcExtensionUIResponse, type RpcResponse, type RpcSessionState, runPrintMode, runRpcMode, } from "./modes/index.ts";
+ export { ArminComponent, AssistantMessageComponent, BashExecutionComponent, BorderedLoader, BranchSummaryMessageComponent, CompactionSummaryMessageComponent, CustomEditor, type CustomEditorOptions, CustomMessageComponent, DynamicBorder, ExtensionEditorComponent, ExtensionInputComponent, ExtensionSelectorComponent, FooterComponent, keyHint, keyText, LoginDialogComponent, ModelSelectorComponent, OAuthSelectorComponent, type RenderDiffOptions, rawKeyHint, renderDiff, SessionSelectorComponent, type SettingsCallbacks, type SettingsConfig, SettingsSelectorComponent, ShowImagesSelectorComponent, SkillInvocationMessageComponent, ThemeSelectorComponent, ThinkingSelectorComponent, ToolExecutionComponent, type ToolExecutionOptions, TreeSelectorComponent, truncateToVisualLines, UserMessageComponent, UserMessageSelectorComponent, type VisualTruncateResult, } from "./modes/interactive/components/index.ts";
+@@ -41,4 +46,5 @@ export { convertToPng } from "./utils/image-convert.ts";
+ export { formatDimensionNote, type ResizedImage, resizeImage } from "./utils/image-resize.ts";
+ export { detectSupportedImageMimeTypeFromFile } from "./utils/mime.ts";
+ export { getPowerShellConfig, getShellConfig } from "./utils/shell.ts";
++export { noOpUIContext } from "./core/extensions/runner.ts";
+ //# sourceMappingURL=index.d.ts.map
+\ No newline at end of file
+diff --git a/dist/index.js b/dist/index.js
+index c48934f78d61fd5f5f8008bc9e09d8c4558d330a..4213e46b139eead48dd674492bfb460c26b15864 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -3,7 +3,7 @@ export { parseArgs } from "./cli/args.js";
+ // Config paths
+ export { CONFIG_DIR_NAME, getAgentDir, getDocsPath, getExamplesPath, getPackageDir, getReadmePath, VERSION, } from "./config.js";
+ export { AgentSession, parseSkillBlock, } from "./core/agent-session.js";
+-export { readStoredCredential } from "./core/auth-storage.js";
++export { FileAuthStorageBackend, readStoredCredential } from "./core/auth-storage.js";
+ // Compaction
+ export { calculateContextTokens, collectEntriesForBranchSummary, compact, DEFAULT_COMPACTION_SETTINGS, estimateTokens, findCutPoint, findTurnStartIndex, generateBranchSummary, generateSummary, generateSummaryWithUsage, getLastAssistantUsage, prepareBranchEntries, serializeConversation, shouldCompact, } from "./core/compaction/index.js";
+ export { createEventBus } from "./core/event-bus.js";
+@@ -34,6 +34,9 @@ export { VIRTUAL_MODEL_STATE_ENTRY, } from "./core/virtual-models.js";
+ export { createCodemodeExtension } from "./extensions/codemode/index.js";
+ export { createMcpExtension } from "./extensions/mcp/index.js";
+ export { createToolSearchExtension } from "./extensions/tool-search/index.js";
++export { validateMcpServerConfig } from "./core/mcp-servers.js";
++export { loadMcpConfig, addMcpServerConfig, removeMcpServerConfig, updateMcpServerConfig } from "./extensions/mcp/config.js";
++export { McpOAuthCredentialStore, signInMcpServer } from "./extensions/mcp/oauth.js";
+ // Main entry point
+ export { main } from "./main.js";
+ // Run modes for programmatic SDK usage
+@@ -50,4 +53,5 @@ export { formatDimensionNote, resizeImage } from "./utils/image-resize.js";
+ export { detectSupportedImageMimeTypeFromFile } from "./utils/mime.js";
+ // Shell utilities
+ export { getPowerShellConfig, getShellConfig } from "./utils/shell.js";
++export { noOpUIContext } from "./core/extensions/runner.js";
+ //# sourceMappingURL=index.js.map

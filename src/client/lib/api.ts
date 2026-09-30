@@ -16,6 +16,9 @@ import type {
   RunningSubagent,
   SiteDescriptor,
   ModelOption,
+  McpAuthAttempt,
+  McpSettingsResponse,
+  McpWorkspaceStatus,
   ProviderAuthStartResponse,
   ProviderAuthStatus,
   PromptSubmissionResult,
@@ -71,6 +74,72 @@ export function getProviderUsage(provider: string, model: string): Promise<Provi
 
 export function getProviderAuthStatus(): Promise<ProviderAuthStatus> {
   return request("/api/provider-auth/status");
+}
+
+export function getMcpSettings(workspaceId?: string): Promise<McpSettingsResponse> {
+  const query = workspaceId ? `?${new URLSearchParams({ workspaceId })}` : "";
+  return request(`/api/settings/mcp${query}`);
+}
+
+export function saveMcpServer(
+  name: string,
+  config: McpSettingsResponse["servers"][number]["config"],
+  workspaceId?: string,
+): Promise<McpSettingsResponse> {
+  return request(`/api/settings/mcp/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workspaceId, config }),
+  });
+}
+
+export function removeMcpServer(name: string, workspaceId?: string): Promise<McpSettingsResponse> {
+  const query = workspaceId ? `?${new URLSearchParams({ workspaceId })}` : "";
+  return request(`/api/settings/mcp/${encodeURIComponent(name)}${query}`, { method: "DELETE" });
+}
+
+export function getWorkspaceMcpStatus(workspaceId: string): Promise<McpWorkspaceStatus> {
+  return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/mcp`);
+}
+
+export function reconnectMcpServer(workspaceId: string, name: string): Promise<McpWorkspaceStatus> {
+  return request(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/mcp/${encodeURIComponent(name)}/reconnect`,
+    { method: "POST" },
+  );
+}
+
+export function logoutMcpServer(workspaceId: string, name: string): Promise<McpWorkspaceStatus> {
+  return request(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/mcp/${encodeURIComponent(name)}/logout`,
+    { method: "POST" },
+  );
+}
+
+export function startMcpLogin(workspaceId: string, name: string): Promise<McpAuthAttempt> {
+  return request(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/mcp/${encodeURIComponent(name)}/login`,
+    { method: "POST" },
+  );
+}
+
+export function getMcpAuthAttempt(attemptId: string): Promise<McpAuthAttempt> {
+  return request(`/api/mcp/auth/${encodeURIComponent(attemptId)}`);
+}
+
+export function completeMcpAuthAttempt(
+  attemptId: string,
+  callbackUrl: string,
+): Promise<McpAuthAttempt> {
+  return request(`/api/mcp/auth/${encodeURIComponent(attemptId)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ callbackUrl }),
+  });
+}
+
+export function cancelMcpAuthAttempt(attemptId: string): Promise<McpAuthAttempt> {
+  return request(`/api/mcp/auth/${encodeURIComponent(attemptId)}`, { method: "DELETE" });
 }
 
 export function getOpenAIAuthAttemptStatus(attemptId: string): Promise<{ completed: boolean }> {

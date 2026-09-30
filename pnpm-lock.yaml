@@ -29,7 +29,7 @@ patchedDependencies:
   '@earendil-works/pi-agent-core@0.99.1': 1146a16ac0ca40c78280ec9793c5d051558201e154712e11c9a2dfae7fd34dd2
   '@earendil-works/pi-ai@0.99.1': 662741a8d08f323bccfa319b98953e7fe9a4082fdf05a87a24b28017db938abf
   '@earendil-works/pi-codemode@0.99.1': 28fbe8ce21a7f0c0751e3fea96cd02d2e75ff49b3d6a34ec26ee7f149aee9fca
-  '@earendil-works/pi-coding-agent@0.99.1': d46ca75333afddae4d8746f5fe5acd3a405d07d95ae17c8305efa9dda1f72334
+  '@earendil-works/pi-coding-agent@0.99.1': 15cf64eb71a805d1819edf5d57335b38a795babc1ea37ee791dcecc8ac4555a0
 
 importers:
 
@@ -43,7 +43,7 @@ importers:
         version: 0.99.1(patch_hash=662741a8d08f323bccfa319b98953e7fe9a4082fdf05a87a24b28017db938abf)(@aws-sdk/credential-provider-node@3.972.82)(@smithy/signature-v4@5.7.3)(supports-color@10.2.2)(undici@8.11.2)(ws@8.21.3)(zod@4.4.3)
       '@earendil-works/pi-coding-agent':
         specifier: 0.99.1
-        version: 0.99.1(patch_hash=d46ca75333afddae4d8746f5fe5acd3a405d07d95ae17c8305efa9dda1f72334)(@aws-sdk/credential-provider-node@3.972.82)(@smithy/signature-v4@5.7.3)(supports-color@10.2.2)(ws@8.21.3)(zod@4.4.3)
+        version: 0.99.1(patch_hash=15cf64eb71a805d1819edf5d57335b38a795babc1ea37ee791dcecc8ac4555a0)(@aws-sdk/credential-provider-node@3.972.82)(@smithy/signature-v4@5.7.3)(supports-color@10.2.2)(ws@8.21.3)(zod@4.4.3)
       '@fastify/cookie':
         specifier: 11.1.2
         version: 11.1.2
@@ -5741,7 +5741,7 @@ snapshots:
     dependencies:
       quickjs-wasi: 3.6.2
 
-  '@earendil-works/pi-coding-agent@0.99.1(patch_hash=d46ca75333afddae4d8746f5fe5acd3a405d07d95ae17c8305efa9dda1f72334)(@aws-sdk/credential-provider-node@3.972.82)(@smithy/signature-v4@5.7.3)(supports-color@10.2.2)(ws@8.21.3)(zod@4.4.3)':
+  '@earendil-works/pi-coding-agent@0.99.1(patch_hash=15cf64eb71a805d1819edf5d57335b38a795babc1ea37ee791dcecc8ac4555a0)(@aws-sdk/credential-provider-node@3.972.82)(@smithy/signature-v4@5.7.3)(supports-color@10.2.2)(ws@8.21.3)(zod@4.4.3)':
     dependencies:
       '@earendil-works/chord': 0.99.1
       '@earendil-works/pi-agent-core': 0.99.1(patch_hash=1146a16ac0ca40c78280ec9793c5d051558201e154712e11c9a2dfae7fd34dd2)(@aws-sdk/credential-provider-node@3.972.82)(@smithy/signature-v4@5.7.3)(supports-color@10.2.2)(undici@8.10.2)(ws@8.21.3)(zod@4.4.3)

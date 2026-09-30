@@ -201,6 +201,7 @@ async function prepare(
     } = await hydrate(raw, file, images);
     entry.timestamp = date;
     entry.parentId = raw.parentId === null ? null : after.get(raw.parentId)!;
+    const omittedErrors: RecordValue[] = [];
     if (raw.type === "message") {
       const message = record(entry.message, "session message");
       if (
@@ -247,14 +248,29 @@ async function prepare(
         parentId = ancestor.parentId;
       }
       ancestors.reverse();
-      const tail = raw.retainedTail.length ? ancestors.slice(-raw.retainedTail.length) : [];
+      let tail = raw.retainedTail.length ? ancestors.slice(-raw.retainedTail.length) : [];
       if (
         !isDeepStrictEqual(
           tail.map((ancestor) => ancestor.message),
           raw.retainedTail,
         )
-      )
-        throw new Error(`Unsupported retained compaction tail in ${file}: ${raw.id}`);
+      ) {
+        const retained = [...ancestors];
+        while (
+          retained.at(-1)?.message?.role === "assistant" &&
+          retained.at(-1)?.message?.stopReason === "error"
+        ) {
+          omittedErrors.push(retained.pop()!);
+        }
+        tail = raw.retainedTail.length ? retained.slice(-raw.retainedTail.length) : [];
+        if (
+          !isDeepStrictEqual(
+            tail.map((ancestor) => ancestor.message),
+            raw.retainedTail,
+          )
+        )
+          throw new Error(`Unsupported retained compaction tail in ${file}: ${raw.id}`);
+      }
       entry.firstKeptEntryId = tail[0]?.id ?? raw.id;
     } else if (raw.type === "branch_summary") {
       if (typeof raw.summary !== "string" || (raw.fromId !== null && !byId.has(raw.fromId)))
@@ -264,6 +280,15 @@ async function prepare(
     output.push(entry);
     byId.set(raw.id, raw);
     let childParent = raw.id;
+    for (const ancestor of omittedErrors) {
+      // Keep failed responses in history, but omit them from the native model context.
+      childParent = synthetic(
+        childParent,
+        "context_edit",
+        { targetId: ancestor.id, replacement: null },
+        date,
+      );
+    }
     const writes =
       entry.message?.role === "toolResult" &&
       entry.message.toolName === "codemode" &&

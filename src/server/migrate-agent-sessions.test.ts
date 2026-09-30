@@ -445,6 +445,60 @@ describe("migrateAgentSessions", () => {
     );
   });
 
+  it("omits failed assistant responses following a retained compaction tail", async () => {
+    const assistant = {
+      role: "assistant",
+      content: [{ type: "text", text: "answer" }],
+      stopReason: "toolUse",
+      timestamp: time,
+    };
+    const result = {
+      role: "toolResult",
+      toolCallId: "call",
+      toolName: "read",
+      content: [{ type: "text", text: "file" }],
+      isError: false,
+      timestamp: time,
+    };
+    const failed = {
+      role: "assistant",
+      content: [{ type: "text", text: "failed" }],
+      stopReason: "error",
+      timestamp: time,
+    };
+    const { root, file } = await fixture([
+      header(),
+      entry("assistant", null, { type: "message", message: assistant }, 1),
+      entry("result", "assistant", { type: "message", message: result }, 2),
+      entry("failed", "result", { type: "message", message: failed }, 3),
+      entry(
+        "compact",
+        "failed",
+        {
+          type: "compaction",
+          summary: "summary",
+          retainedTail: [assistant, result],
+          tokensBefore: 100,
+        },
+        4,
+      ),
+      ...config("compact", 5),
+    ]);
+    await migrateAgentSessions(root);
+    const native = SessionManager.open(file);
+    expect(native.getEntry("failed")).toMatchObject({ type: "message", message: failed });
+    expect(native.getEntry("compact")).toMatchObject({ firstKeptEntryId: "assistant" });
+    expect(native.getEntries().filter((item) => item.type === "context_edit")).toEqual([
+      expect.objectContaining({ targetId: "failed", replacement: null }),
+    ]);
+    expect(native.buildSessionContext().messages).not.toContainEqual(failed);
+    expect(native.buildSessionContext().messages.map((message) => message.role)).toEqual([
+      "compactionSummary",
+      "assistant",
+      "toolResult",
+    ]);
+  });
+
   it("fails on unsupported conversation, non-suffix compactions and pending inputs", async () => {
     for (const records of [
       [header(), entry("entry", null, { type: "unknown" }, 1), ...config("entry", 2)],

@@ -85,6 +85,7 @@ function usage(): string {
     "Commands:",
     "  auth code                  Print a fresh one-time 8 char auth code",
     "  drain                      Stop accepting new turns and wait for active turns",
+    "  normalize-session-metadata [--dry-run]  Normalize legacy session metadata to native v3",
     "  cron list [--workspace ID] [--json]",
     "  cron add --workspace ID --prompt TEXT --model ID --thinking LEVEL (--in DUR | --at ISO | --every DUR | --cron EXPR) [--tz IANA] [--session new|daily-inline|daily-detached] [--daily-context include|chat-only|omit]",
     "  cron edit <jobId> [fields...] [--session new|daily-inline|daily-detached] [--daily-context include|chat-only|omit]",
@@ -333,6 +334,14 @@ async function handleDrain(root: string): Promise<void> {
   console.log("All active turns have finished.");
 }
 
+async function handleNormalizeSessionMetadata(root: string, parsed: ParsedArgs): Promise<void> {
+  const { normalizeSessionMetadata } = await import("./normalize-session-metadata");
+  const summary = await normalizeSessionMetadata(root, {
+    dryRun: booleanFlag(parsed.flags, "dry-run"),
+  });
+  console.log(JSON.stringify(summary));
+}
+
 async function main(): Promise<void> {
   const parsed = parseArgs(process.argv.slice(2));
   const command = parsed.positionals[0];
@@ -352,6 +361,11 @@ async function main(): Promise<void> {
 
   if (command === "drain") {
     await handleDrain(root);
+    return;
+  }
+
+  if (command === "normalize-session-metadata") {
+    await handleNormalizeSessionMetadata(root, parsed);
     return;
   }
 

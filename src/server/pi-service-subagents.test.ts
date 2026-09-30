@@ -18,7 +18,7 @@ import type { WebSession } from "./pi-service-types";
 import { agentTurnArtifactsByReplyEntryId } from "./agent-turn-file-changes";
 import { buildSubagentRuntimeNotice } from "./runtime-notices";
 import { SessionStore } from "./session-store";
-import { MIGRATED_OPERATION_RESULT_CUSTOM_TYPE } from "./session-result-delivery";
+import { SUBAGENT_COMPLETION_CUSTOM_TYPE } from "./pi-service-subagents";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -87,8 +87,130 @@ async function setup() {
 }
 
 describe("detached AgentSession subagents", () => {
-  it.each(["completed", "failed", "aborted", "declined"])(
-    "reuses migrated child completion %s without restarting it",
+  it.each(["completed", "failed", "aborted"])(
+    "does not reuse inherited %s parent receipts for an interrupted nested child",
+    async (status) => {
+      const { parent, deps, options, children } = await setup();
+      const parentStore = parent.session.sessionManager;
+      await parentStore.appendCustomEntry("batty-subagent-session", {
+        sessionId: parent.session.sessionId,
+        parentSessionId: "grandparent",
+        depth: 1,
+      });
+      const startEntryId = parentStore.getLeafId();
+      const parentReplyId = await parentStore.appendMessage(fauxAssistantMessage("PARENT ANSWER"));
+      await parentStore.appendCustomEntry(SUBAGENT_COMPLETION_CUSTOM_TYPE, {
+        startEntryId,
+        endEntryId: parentReplyId,
+        status,
+        ...(status === "completed" ? {} : { error: "Parent failure" }),
+      });
+      await parentStore.appendCustomEntry("batty-session-operation", {
+        operationId: "parent-operation",
+        kind: "run",
+        status,
+        startEntryId,
+        endEntryId: parentReplyId,
+        startedAt: 1,
+        endedAt: 2,
+      });
+      const store = await parentStore.fork(
+        deps.workspaceSessionDir,
+        parentStore.getLeafId(),
+        options.sessionId,
+      );
+      await store.appendCustomEntry("batty-subagent-session", {
+        sessionId: store.getSessionId(),
+        parentSessionId: parent.session.sessionId,
+        depth: 2,
+      });
+      const { session } = await deps.createPiAgentSession(options.workspace, store);
+      await session.dispose();
+      children.delete(session.sessionId);
+      const result = await runDetachedSubagentSession(deps, {
+        ...options,
+        includePreviousContext: true,
+        parentSubagentDepth: 1,
+      });
+      expect(result.isError).toBe(true);
+      expect(result.text).toBe("Detached subagent operation was interrupted");
+      expect(result.finalAssistant).toBeUndefined();
+      expect(result.generatedMessages).toEqual([]);
+      expect(result.deliveryEntryId).not.toBe(parentReplyId);
+      expect(parent.faux.state.callCount).toBe(0);
+      const repeated = await runDetachedSubagentSession(deps, options);
+      expect(repeated.deliveryEntryId).toBe(result.deliveryEntryId);
+      expect(repeated.text).toBe(result.text);
+    },
+  );
+
+  it("repairs a missing child marker with a stable owned interruption receipt", async () => {
+    const { parent, deps, options, children } = await setup();
+    const parentStore = parent.session.sessionManager;
+    await parentStore.appendCustomEntry("batty-subagent-session", {
+      sessionId: parent.session.sessionId,
+      parentSessionId: "grandparent",
+      depth: 1,
+    });
+    const startEntryId = parentStore.getLeafId();
+    const endEntryId = await parentStore.appendMessage(fauxAssistantMessage("PARENT ANSWER"));
+    await parentStore.appendCustomEntry(SUBAGENT_COMPLETION_CUSTOM_TYPE, {
+      startEntryId,
+      endEntryId,
+      status: "completed",
+    });
+    const childStore = await parentStore.fork(
+      deps.workspaceSessionDir,
+      parentStore.getLeafId(),
+      options.sessionId,
+    );
+    childStore.release();
+    const result = await runDetachedSubagentSession(deps, {
+      ...options,
+      includePreviousContext: true,
+    });
+    expect(result.isError).toBe(true);
+    expect(result.text).toBe("Detached subagent operation was interrupted");
+    expect(result.deliveryEntryId).not.toBe(endEntryId);
+    expect(parent.faux.state.callCount).toBe(0);
+    const child = children.get(options.sessionId!)!;
+    await child.dispose();
+    children.delete(child.sessionId);
+    const repeated = await runDetachedSubagentSession(deps, options);
+    expect(repeated.deliveryEntryId).toBe(result.deliveryEntryId);
+    expect(repeated.text).toBe(result.text);
+    expect(repeated.isError).toBe(true);
+    expect(repeated.generatedMessages).toEqual([]);
+    const branch = children.get(options.sessionId!)!.sessionManager.getBranch();
+    const marker = branch.findLastIndex(
+      (entry) =>
+        entry.type === "custom" &&
+        entry.customType === "batty-subagent-session" &&
+        (entry.data as { sessionId: string }).sessionId === options.sessionId,
+    );
+    expect(
+      branch
+        .slice(marker + 1)
+        .filter(
+          (entry) =>
+            entry.type === "custom" && entry.customType === SUBAGENT_COMPLETION_CUSTOM_TYPE,
+        ),
+    ).toHaveLength(1);
+    parent.faux.setResponses([fauxAssistantMessage("Acknowledged interruption")]);
+    await deliverAsyncSubagentResult(parent.session, result);
+    await parent.reopen();
+    await deliverAsyncSubagentResult(parent.session, repeated);
+    expect(
+      parent.session.messages.filter(
+        (message) =>
+          message.role === "custom" && message.customType === "batty-runtime-notice:subagent",
+      ),
+    ).toHaveLength(1);
+    expect(parent.faux.state.callCount).toBe(1);
+  });
+
+  it.each(["completed", "failed", "aborted"])(
+    "reuses canonical child completion %s without restarting it",
     async (status) => {
       const { parent, deps, options } = await setup();
       const store = await SessionStore.create(
@@ -101,26 +223,23 @@ describe("detached AgentSession subagents", () => {
       await store.appendCustomEntry("batty-subagent-session", {
         parentSessionId: options.parentSessionId,
         depth: 1,
+        sessionId: store.getSessionId(),
       });
       const start = store.getLeafId();
-      await store.appendMessage(fauxAssistantMessage("Migrated answer"));
-      await store.appendCustomEntry(MIGRATED_OPERATION_RESULT_CUSTOM_TYPE, {
-        operationId: "old-operation",
-        kind: "run",
+      await store.appendMessage(fauxAssistantMessage("Canonical answer"));
+      await store.appendCustomEntry(SUBAGENT_COMPLETION_CUSTOM_TYPE, {
         status,
-        fromTipId: start,
-        tipId: store.getLeafId(),
-        startedAt: 1,
-        endedAt: 2,
-        ...(status === "failed" ? { error: { code: "provider", message: "Migrated error" } } : {}),
+        startEntryId: start,
+        endEntryId: store.getLeafId(),
+        ...(status === "failed" ? { error: "Canonical error" } : {}),
       });
       const result = await runDetachedSubagentSession(deps, options);
       expect(result.isError).toBe(status !== "completed");
       expect(result.text).toBe(
         status === "completed"
-          ? "Migrated answer"
+          ? "Canonical answer"
           : status === "failed"
-            ? "Migrated error"
+            ? "Canonical error"
             : `Subagent ${status}`,
       );
       expect(parent.faux.state.callCount).toBe(0);
@@ -130,7 +249,72 @@ describe("detached AgentSession subagents", () => {
           .filter(
             (entry) => entry.type === "custom" && entry.customType === "batty-subagent-completion",
           ),
-      ).toHaveLength(0);
+      ).toHaveLength(1);
+    },
+  );
+
+  it("reads a completion's referenced parent chain rather than the selected branch", async () => {
+    const { deps, options, parent } = await setup();
+    const store = await SessionStore.create(
+      options.workspace.path,
+      deps.workspaceSessionDir,
+      options.parentSessionId,
+      options.sessionId,
+    );
+    await deps.createPiAgentSession(options.workspace, store);
+    await store.appendCustomEntry("batty-subagent-session", {
+      parentSessionId: options.parentSessionId,
+      depth: 1,
+      sessionId: store.getSessionId(),
+    });
+    const startEntryId = store.getLeafId();
+    await store.appendMessage(fauxAssistantMessage("Bounded answer"));
+    const endEntryId = store.getLeafId();
+    store.native.branch(startEntryId!);
+    await store.appendMessage(fauxAssistantMessage("Unrelated selected reply"));
+    await store.appendCustomEntry(SUBAGENT_COMPLETION_CUSTOM_TYPE, {
+      startEntryId,
+      endEntryId,
+      status: "completed",
+    });
+    const result = await runDetachedSubagentSession(deps, options);
+    expect(result.text).toBe("Bounded answer");
+    expect(result.deliveryEntryId).toBe(endEntryId);
+    expect(parent.faux.state.callCount).toBe(0);
+  });
+
+  it.each(["missing", "non-ancestor", "unbounded"])(
+    "rejects %s completion boundaries",
+    async (invalid) => {
+      const { deps, options, parent } = await setup();
+      const store = await SessionStore.create(
+        options.workspace.path,
+        deps.workspaceSessionDir,
+        options.parentSessionId,
+        options.sessionId,
+      );
+      await deps.createPiAgentSession(options.workspace, store);
+      await store.appendCustomEntry("batty-subagent-session", {
+        parentSessionId: options.parentSessionId,
+        depth: 1,
+        sessionId: store.getSessionId(),
+      });
+      const root = store.getLeafId();
+      await store.appendMessage(fauxAssistantMessage("Other branch"));
+      const other = store.getLeafId();
+      store.native.branch(root!);
+      await store.appendMessage(fauxAssistantMessage("Answer"));
+      await store.appendCustomEntry(SUBAGENT_COMPLETION_CUSTOM_TYPE, {
+        status: "completed",
+        ...(invalid === "unbounded"
+          ? {}
+          : {
+              startEntryId: invalid === "missing" ? "missing" : other,
+              endEntryId: store.getLeafId(),
+            }),
+      });
+      await expect(runDetachedSubagentSession(deps, options)).rejects.toThrow();
+      expect(parent.faux.state.callCount).toBe(0);
     },
   );
 
@@ -263,6 +447,7 @@ describe("detached AgentSession subagents", () => {
     const { parent, deps, options, children } = await setup();
     await parent.session.sessionManager.appendCustomEntry("batty-subagent-session", {
       parentSessionId: "grandparent",
+      sessionId: parent.session.sessionId,
       depth: 1,
     });
     await parent.session.sessionManager.appendCustomEntry(BATTY_SYSTEM_PROMPT_CUSTOM_TYPE, {
@@ -375,6 +560,7 @@ describe("detached AgentSession subagents", () => {
       const { parent, deps, options, children } = await setup();
       await parent.session.sessionManager.appendCustomEntry("batty-subagent-session", {
         parentSessionId: "root",
+        sessionId: parent.session.sessionId,
         depth: 1,
       });
       parent.faux.setResponses([fauxAssistantMessage("done")]);

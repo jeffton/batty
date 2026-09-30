@@ -1,6 +1,7 @@
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import { CRON_RUN_SESSION_CUSTOM_TYPE, type CronRunSessionBinding } from "./cron-session";
-import { appendResultMessages, migratedOperationResult } from "./session-result-delivery";
+import { appendResultMessages } from "./session-result-delivery";
+import { boundedSessionEntries, SESSION_OPERATION_CUSTOM_TYPE } from "./session-metadata";
 import type { AgentSessionController as AgentSession } from "./agent-session-controller";
 import type {
   CronJobSession,
@@ -94,15 +95,6 @@ export function getCronExecutionResult(
       (entry.data as CronExecutionResult).runId === runId
     )
       return entry.data as CronExecutionResult;
-    const migrated = migratedOperationResult(entry);
-    if (migrated?.operationId === runId)
-      return {
-        runId,
-        startEntryId: migrated.fromTipId,
-        endEntryId: migrated.tipId,
-        status: migrated.status === "declined" ? "failed" : migrated.status,
-        ...(migrated.error ? { error: migrated.error.message } : {}),
-      };
   }
   return undefined;
 }
@@ -381,7 +373,7 @@ export async function deliverCronFollowup(
   const boundary = branch.findLastIndex(
     (entry) =>
       (entry.type === "custom" && entry.customType === CRON_EXECUTION_CUSTOM_TYPE) ||
-      migratedOperationResult(entry) !== undefined,
+      (entry.type === "custom" && entry.customType === SESSION_OPERATION_CUSTOM_TYPE),
   );
   if (
     boundary >= 0 &&
@@ -652,16 +644,7 @@ function cronRunEntries(
   startEntryId: string | null,
   endEntryId: string | null,
 ) {
-  const entries = new Map(session.sessionManager.getEntries().map((entry) => [entry.id, entry]));
-  const operationEntries: ReturnType<typeof session.sessionManager.getEntries> = [];
-  let id = endEntryId;
-  while (id && id !== startEntryId) {
-    const entry = entries.get(id);
-    if (!entry) throw new Error(`Missing cron result entry ${id}`);
-    operationEntries.unshift(entry);
-    id = entry.parentId;
-  }
-  return operationEntries;
+  return boundedSessionEntries(session.sessionManager.getEntries(), startEntryId, endEntryId);
 }
 
 function findRunAssistant(

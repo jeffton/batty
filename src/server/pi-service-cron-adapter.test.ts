@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { createAgentSessionFixture } from "./agent-session-test-fixture";
-import { MIGRATED_OPERATION_RESULT_CUSTOM_TYPE } from "./session-result-delivery";
+import { CRON_EXECUTION_CUSTOM_TYPE } from "./pi-service-cron-adapter";
 import { buildCronRuntimeNotice } from "./runtime-notices";
 import type { AgentSessionController as AgentSession } from "./agent-session-controller";
 import type { WebSession } from "./pi-service-types";
@@ -108,8 +108,8 @@ afterEach(async () => {
   for (const cleanup of fixtureCleanups.splice(0)) await cleanup();
 });
 
-describe("migrated cron results", () => {
-  it("delivers only the migrated run's reply and deduplicates after parent reopen", async () => {
+describe("canonical cron results", () => {
+  it("delivers only the canonical run's reply and deduplicates after parent reopen", async () => {
     const parent = await createAgentSessionFixture();
     const child = await createAgentSessionFixture();
     fixtureCleanups.push(parent.cleanup, child.cleanup);
@@ -117,21 +117,18 @@ describe("migrated cron results", () => {
     await store.appendCustomEntry("batty-cron-run-session", {
       version: 1,
       kind: "run",
-      runId: "migrated-run",
+      runId: "canonical-run",
       jobId: "job",
       parentSessionId: parent.session.sessionId,
     });
     await store.appendMessage(fauxAssistantMessage("Inherited reply"));
-    const fromTipId = store.getLeafId();
-    await store.appendMessage(fauxAssistantMessage("Migrated cron reply"));
-    await store.appendCustomEntry(MIGRATED_OPERATION_RESULT_CUSTOM_TYPE, {
-      operationId: "migrated-run",
-      kind: "run",
+    const startEntryId = store.getLeafId();
+    await store.appendMessage(fauxAssistantMessage("Canonical cron reply"));
+    await store.appendCustomEntry(CRON_EXECUTION_CUSTOM_TYPE, {
+      runId: "canonical-run",
       status: "completed",
-      fromTipId,
-      tipId: store.getLeafId(),
-      startedAt: 1,
-      endedAt: 2,
+      startEntryId,
+      endEntryId: store.getLeafId(),
     });
     await child.reopen();
     const context = {
@@ -148,7 +145,7 @@ describe("migrated cron results", () => {
       notifyWorkspaceUpdated: async () => {},
     } as unknown as Parameters<typeof deliverCronJobRun>[0];
     const job = {
-      runId: "migrated-run",
+      runId: "canonical-run",
       jobId: "job",
       workspace: parent.workspace,
       sessionId: child.session.sessionId,
@@ -164,12 +161,12 @@ describe("migrated cron results", () => {
     await parent.reopen();
     await deliverCronJobRun(context, job, delivery);
     expect(parent.session.messages.filter((message) => message.role === "assistant")).toEqual([
-      expect.objectContaining({ content: [{ type: "text", text: "Migrated cron reply" }] }),
+      expect.objectContaining({ content: [{ type: "text", text: "Canonical cron reply" }] }),
     ]);
     expect(parent.faux.state.callCount + child.faux.state.callCount).toBe(0);
   });
-  it.each(["completed", "failed", "aborted", "declined"])(
-    "recognizes migrated %s run boundaries after reopen",
+  it.each(["completed", "failed", "aborted"])(
+    "recognizes canonical %s run boundaries after reopen",
     async (status) => {
       const fixture = await createAgentSessionFixture();
       fixtureCleanups.push(fixture.cleanup);
@@ -178,23 +175,20 @@ describe("migrated cron results", () => {
       const startEntryId = store.getLeafId();
       await store.appendMessage(fauxAssistantMessage("Cron answer"));
       const endEntryId = store.getLeafId();
-      await store.appendCustomEntry(MIGRATED_OPERATION_RESULT_CUSTOM_TYPE, {
-        operationId: "imported-run",
-        kind: "run",
+      await store.appendCustomEntry(CRON_EXECUTION_CUSTOM_TYPE, {
+        runId: "imported-run",
         status,
-        fromTipId: startEntryId,
-        tipId: endEntryId,
-        startedAt: 1,
-        endedAt: 2,
-        ...(status === "failed" ? { error: { code: "provider", message: "Migrated error" } } : {}),
+        startEntryId: startEntryId,
+        endEntryId: endEntryId,
+        ...(status === "failed" ? { error: "Canonical error" } : {}),
       });
       await fixture.reopen();
       expect(getCronExecutionResult(fixture.session, "imported-run")).toEqual({
         runId: "imported-run",
-        status: status === "declined" ? "failed" : status,
+        status,
         startEntryId,
         endEntryId,
-        ...(status === "failed" ? { error: "Migrated error" } : {}),
+        ...(status === "failed" ? { error: "Canonical error" } : {}),
       });
       const execution = executeCronOperation(
         fixture.session,
@@ -208,7 +202,7 @@ describe("migrated cron results", () => {
       if (status === "completed") await expect(execution).resolves.toBeUndefined();
       else
         await expect(execution).rejects.toThrow(
-          status === "failed" ? "Migrated error" : "Cron run",
+          status === "failed" ? "Canonical error" : "Cron run",
         );
       expect(fixture.faux.state.callCount).toBe(0);
     },
@@ -540,6 +534,56 @@ describe("runCronJobSession", () => {
 });
 
 describe("deliverCronFollowup", () => {
+  it.each(["run", "compaction", "navigation"])(
+    "treats canonical %s metadata as an inert follow-up boundary",
+    async (kind) => {
+      const child = await createAgentSessionFixture();
+      fixtureCleanups.push(child.cleanup);
+      const parent = createWebSession("parent", "/tmp/parent.jsonl");
+      const store = child.session.sessionManager;
+      await store.appendCustomEntry("batty-cron-run-session", {
+        version: 1,
+        kind: "run",
+        runId: "run",
+        jobId: "job",
+        parentSessionId: parent.id,
+      });
+      await store.appendMessage(fauxAssistantMessage("Old reply"));
+      await store.appendCustomEntry("batty-session-operation", {
+        operationId: "operation",
+        kind,
+        status: "completed",
+        startEntryId: null,
+        endEntryId: store.getLeafId(),
+        startedAt: 1,
+        endedAt: 2,
+      });
+      await child.reopen();
+      const context = {
+        openSessionById: async () => ({ id: parent.id }) as never,
+        requireSession: () => parent,
+        runSubagentSerial: async <T>(_id: string, run: () => Promise<T>) => run(),
+        getState: () => ({ id: parent.id }) as never,
+        publishReset: vi.fn(),
+        notifyWorkspaceUpdated: async () => {},
+      };
+      expect(getCronExecutionResult(child.session, "operation")).toBeUndefined();
+      await deliverCronFollowup(context, parent.workspace, child.session);
+      expect(parent.session.messages).toHaveLength(0);
+      await child.session.sessionManager.appendMessage({
+        role: "user",
+        content: "Follow up",
+        timestamp: 3,
+      });
+      await child.session.sessionManager.appendMessage(fauxAssistantMessage("Fresh reply"));
+      await deliverCronFollowup(context, parent.workspace, child.session);
+      expect(parent.session.messages.at(-1)).toMatchObject({
+        content: [{ type: "text", text: "Fresh reply" }],
+      });
+      expect(child.faux.state.callCount).toBe(0);
+    },
+  );
+
   it.each(["Follow-up answer", "NO_REPLY"])(
     "delivers %s to the daily session with the reply artifacts",
     async (answer) => {

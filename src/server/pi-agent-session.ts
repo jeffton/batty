@@ -106,7 +106,7 @@ export async function createPiAgentSession({
   const restored = await sessionManager.configuration();
   const selected = model
     ? modelRuntime.getModel(model.provider, model.id)
-    : restored
+    : restored.model
       ? modelRuntime.getModel(restored.model.provider, restored.model.modelId)
       : settings.defaultProvider && settings.defaultModel
         ? modelRuntime.getModel(settings.defaultProvider, settings.defaultModel)
@@ -167,21 +167,12 @@ export async function createPiAgentSession({
       : []),
     ...customTools,
   ];
-  const migration = sessionManager
-    .getBranch()
-    .findLast(
-      (entry) => entry.type === "custom" && entry.customType === "batty-agent-session-migration",
-    );
-  const importedToolNames =
-    migration?.type === "custom"
-      ? (migration.data as { configuration?: { activeToolNames: string[] } }).configuration
-          ?.activeToolNames
-      : undefined;
+  const restoredToolNames = restored?.activeToolNames;
   const settingsManager = SettingsManager.inMemory({
     ...settings,
     sessionDir: workspaceSessionDir(config, workspace.id),
     defaultTools: battyActivePiToolNames(
-      importedToolNames ?? [...tools.map((tool) => tool.name), "codemode"],
+      restoredToolNames ?? [...tools.map((tool) => tool.name), "codemode"],
       process.platform,
     ),
   });
@@ -304,18 +295,20 @@ export async function createPiAgentSession({
         throw new Error(`Pi extension ${error.extensionPath}: ${error.error}`);
       },
     });
-    if (importedToolNames) {
+    session.regularToolNames = new Set(tools.map((tool) => tool.name));
+    if (restoredToolNames) {
       const battyTools = new Set(tools.map((tool) => tool.name));
       const extensionTools = result.session
         .getActiveToolNames()
         .filter((name) => !battyTools.has(name));
       result.session.setActiveToolsByName(
         battyActivePiToolNames(
-          [...importedToolNames, ...extensionTools, "codemode"],
+          [...restoredToolNames, ...extensionTools, "codemode"],
           process.platform,
         ),
       );
     }
+    if (!restoredToolNames) await session.persistActiveTools();
     return { session, modelFallbackMessage: result.modelFallbackMessage };
   } catch (error) {
     await session.dispose();

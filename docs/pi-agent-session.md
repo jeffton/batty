@@ -38,7 +38,9 @@ The controller uses Pi's `agent.finishTurn` boundary. Admitted input is consumed
 | Cron/subagent completion | Harness operation state                       | Batty custom-entry receipts and native branch boundaries |
 | Crash continuation       | Not resumed by Batty                          | Not resumed by Batty                                     |
 
-Session storage requires native Pi v3 files. The runtime rejects other formats. Converted history retains native custom metadata for selected tools and cron/subagent completion boundaries; its readers remain part of session handling. Deployments drain active work and restart the prepared release without session conversion.
+Session storage requires native Pi v3 files and canonical Batty metadata. Tool preferences use `batty-session-tools`; cron and subagent completion records contain explicit, exclusive-start/inclusive-end entry boundaries.
+
+`batty --root <root> normalize-session-metadata [--dry-run]` upgrades historical custom metadata without changing conversation entries, images, entry IDs, or tree links. Deployment validates the upgrade, drains active work, stops the server, normalizes metadata with backups, and starts the prepared release. A completion marker makes subsequent deployments skip the pass. Runtime readers use only canonical metadata.
 
 Coordinated deployment draining remains required. Queued prompts do not survive process replacement. Completed cron runs and detached children have persisted receipts; interrupted executions are rejected rather than replayed. Subagent tool calls allocate a fresh child identity per invocation.
 

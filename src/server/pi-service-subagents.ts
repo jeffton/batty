@@ -1,11 +1,8 @@
 import { type AssistantMessage, type Message } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { DurableFileChange } from "./agent-turn-file-changes";
-import {
-  appendResultMessages,
-  hasDeliveredResult,
-  migratedOperationResult,
-} from "./session-result-delivery";
+import { appendResultMessages, hasDeliveredResult } from "./session-result-delivery";
+import { boundedSessionEntries } from "./session-metadata";
 import { SessionStore as SessionManager } from "./session-store";
 import { createSessionManagerWithPreviousContext } from "./previous-context";
 import type { AgentSessionController as AgentSession } from "./agent-session-controller";
@@ -130,6 +127,12 @@ export interface DetachedSubagentOptions {
 }
 
 export const SUBAGENT_COMPLETION_CUSTOM_TYPE = "batty-subagent-completion";
+export interface SubagentCompletion {
+  startEntryId: string | null;
+  endEntryId: string | null;
+  status: "completed" | "failed" | "aborted";
+  error?: string;
+}
 
 export interface DetachedSubagentResult {
   deliveryEntryId: string;
@@ -212,31 +215,50 @@ function buildDetachedSubagentResult(
   };
 }
 
+function ownSubagentMarkerIndex(manager: SessionManager) {
+  return manager
+    .getBranch()
+    .findLastIndex(
+      (entry) =>
+        entry.type === "custom" &&
+        entry.customType === SUBAGENT_SESSION_CUSTOM_TYPE &&
+        (entry.data as { sessionId: string }).sessionId === manager.getSessionId(),
+    );
+}
+
+async function ensureSubagentMarker(manager: SessionManager, options: DetachedSubagentOptions) {
+  if (ownSubagentMarkerIndex(manager) >= 0) return;
+  await manager.appendCustomEntry(SUBAGENT_SESSION_CUSTOM_TYPE, {
+    sessionId: manager.getSessionId(),
+    parentSessionId: options.parentSessionId,
+    depth: options.parentSubagentDepth + 1,
+    respondIn: options.respondIn,
+    deliveryMode: options.deliveryMode,
+  });
+}
+
+function subagentCompletion(manager: SessionManager) {
+  const branch = manager.getBranch();
+  const marker = ownSubagentMarkerIndex(manager);
+  if (marker < 0) return undefined;
+  return branch
+    .slice(marker + 1)
+    .findLast(
+      (entry) => entry.type === "custom" && entry.customType === SUBAGENT_COMPLETION_CUSTOM_TYPE,
+    );
+}
+
 function subagentOperationEntries(
-  branch: ReturnType<SessionManager["getBranch"]>,
+  manager: SessionManager,
   startedTurn: boolean,
-  startingBranchLength: number,
+  startEntryId: string | null,
 ) {
-  if (startedTurn) return branch.slice(startingBranchLength);
-  const isCompletion = (entry: (typeof branch)[number]) =>
-    (entry.type === "custom" && entry.customType === SUBAGENT_COMPLETION_CUSTOM_TYPE) ||
-    migratedOperationResult(entry)?.kind === "run";
-  const completionIndex = branch.findLastIndex(isCompletion);
-  const completion = branch[completionIndex];
-  const migrated = completion ? migratedOperationResult(completion) : undefined;
-  if (migrated) {
-    const startIndex = branch.findIndex((entry) => entry.id === migrated.fromTipId);
-    const endIndex = branch.findIndex((entry) => entry.id === migrated.tipId);
-    return branch.slice(startIndex + 1, endIndex + 1);
-  }
-  const marker = branch.findLastIndex(
-    (entry) => entry.type === "custom" && entry.customType === SUBAGENT_SESSION_CUSTOM_TYPE,
-  );
-  const previousCompletion = branch.slice(0, completionIndex).findLastIndex(isCompletion);
-  return branch.slice(
-    Math.max(marker, previousCompletion) + 1,
-    completion ? completionIndex + 1 : undefined,
-  );
+  if (startedTurn)
+    return boundedSessionEntries(manager.getEntries(), startEntryId, manager.getLeafId());
+  const completion = subagentCompletion(manager);
+  if (completion?.type !== "custom") throw new Error("Detached subagent operation was interrupted");
+  const bounds = completion.data as SubagentCompletion;
+  return boundedSessionEntries(manager.getEntries(), bounds.startEntryId, bounds.endEntryId);
 }
 
 function isToolCallBlockForId(block: unknown, toolCallId: string): boolean {
@@ -277,14 +299,14 @@ function resolveDetachedContextLeafId(
 async function createDetachedSubagentSessionManager(
   deps: RunDetachedSubagentDeps,
   options: DetachedSubagentOptions,
-): Promise<{ manager: SessionManager; chatOnlyMessages?: Message[] }> {
+): Promise<{ manager: SessionManager; chatOnlyMessages?: Message[]; existing?: boolean }> {
   if (options.sessionId) {
     const existing = await SessionManager.existing(
       options.workspace.path,
       deps.workspaceSessionDir,
       options.sessionId,
     );
-    if (existing) return { manager: existing };
+    if (existing) return { manager: existing, existing: true };
   }
   const sourceManager =
     options.includePreviousContext && options.parentSessionPath
@@ -315,15 +337,10 @@ export async function runDetachedSubagentSession(
   deps: RunDetachedSubagentDeps,
   options: DetachedSubagentOptions,
 ): Promise<DetachedSubagentResult> {
-  const { manager, chatOnlyMessages } = await createDetachedSubagentSessionManager(deps, options);
-  const existing = manager
-    .getEntries()
-    .some(
-      (entry) =>
-        entry.type === "custom" &&
-        entry.customType === SUBAGENT_SESSION_CUSTOM_TYPE &&
-        (entry.data as { parentSessionId?: string })?.parentSessionId === options.parentSessionId,
-    );
+  const { manager, chatOnlyMessages, existing } = await createDetachedSubagentSessionManager(
+    deps,
+    options,
+  );
   const result = await deps.createPiAgentSession(
     options.workspace,
     manager,
@@ -338,14 +355,7 @@ export async function runDetachedSubagentSession(
   if (!existing && chatOnlyMessages) {
     await appendMessages(subagentSession, chatOnlyMessages);
   }
-  if (!existing)
-    await subagentSession.sessionManager.appendCustomEntry(SUBAGENT_SESSION_CUSTOM_TYPE, {
-      sessionId: subagentSession.sessionId,
-      parentSessionId: options.parentSessionId,
-      depth: options.parentSubagentDepth + 1,
-      respondIn: options.respondIn,
-      deliveryMode: options.deliveryMode,
-    });
+  if (!existing) await ensureSubagentMarker(subagentSession.sessionManager, options);
   const webSubagentSession = deps.attachSession(
     options.workspace,
     subagentSession,
@@ -367,7 +377,7 @@ export async function runDetachedSubagentSession(
     await appendMessages(subagentSession, preludeMessages as Message[]);
   }
   const seedMessageCount = subagentSession.messages.length;
-  const startingBranchLength = subagentSession.sessionManager.getBranch().length;
+  const startEntryId = subagentSession.sessionManager.getLeafId();
 
   const readyDetails = buildSubagentDetails(
     {
@@ -487,24 +497,15 @@ export async function runDetachedSubagentSession(
         { triggerTurn: true, onAccepted: () => options.onReady?.(readyDetails) },
       );
     } else {
-      const branch = subagentSession.sessionManager.getBranch();
-      const marker = branch.findLastIndex(
-        (entry) => entry.type === "custom" && entry.customType === SUBAGENT_SESSION_CUSTOM_TYPE,
-      );
-      if (
-        !branch
-          .slice(marker + 1)
-          .some(
-            (entry) =>
-              (entry.type === "custom" && entry.customType === SUBAGENT_COMPLETION_CUSTOM_TYPE) ||
-              migratedOperationResult(entry)?.kind === "run",
-          )
-      )
+      if (!subagentCompletion(subagentSession.sessionManager))
         throw new Error("Detached subagent operation was interrupted");
       options.onReady?.(readyDetails);
     }
-    const branch = subagentSession.sessionManager.getBranch();
-    const operationEntries = subagentOperationEntries(branch, startedTurn, startingBranchLength);
+    const operationEntries = subagentOperationEntries(
+      subagentSession.sessionManager,
+      startedTurn,
+      startEntryId,
+    );
     const generated = operationEntries.flatMap((entry): AgentSession["messages"] => {
       if (entry.type === "message") {
         return [entry.message];
@@ -523,20 +524,13 @@ export async function runDetachedSubagentSession(
       }
       return [];
     });
-    const completion = branch.findLast(
-      (entry) =>
-        (entry.type === "custom" && entry.customType === SUBAGENT_COMPLETION_CUSTOM_TYPE) ||
-        migratedOperationResult(entry)?.kind === "run",
-    );
-    const migratedCompletion = completion ? migratedOperationResult(completion) : undefined;
+    const completion = subagentCompletion(subagentSession.sessionManager);
+    const receipt =
+      completion?.type === "custom" ? (completion.data as SubagentCompletion) : undefined;
     const completionError =
-      !startedTurn && completion?.type === "custom"
-        ? migratedCompletion
-          ? (migratedCompletion.error?.message ??
-            (migratedCompletion.status === "completed"
-              ? undefined
-              : `Subagent ${migratedCompletion.status}`))
-          : (completion.data as { error?: string }).error
+      !startedTurn && receipt
+        ? (receipt.error ??
+          (receipt.status === "completed" ? undefined : `Subagent ${receipt.status}`))
         : undefined;
     const built = buildDetachedSubagentResult(
       subagentSession,
@@ -549,7 +543,14 @@ export async function runDetachedSubagentSession(
     const completionEntryId =
       startedTurn || !completion
         ? await subagentSession.sessionManager.appendCustomEntry(SUBAGENT_COMPLETION_CUSTOM_TYPE, {
-            status: built.isError ? "failed" : "completed",
+            startEntryId,
+            endEntryId: subagentSession.sessionManager.getLeafId(),
+            status:
+              built.finalAssistant?.stopReason === "aborted"
+                ? "aborted"
+                : built.isError
+                  ? "failed"
+                  : "completed",
             ...(built.errorMessage ? { error: built.errorMessage } : {}),
           })
         : completion.id;
@@ -572,7 +573,12 @@ export async function runDetachedSubagentSession(
     };
   } catch (error) {
     // Delivery failures remain retryable; they must not replace the child's native result.
-    if (deliveringResult || subagentSession.isStreaming) throw error;
+    if (
+      deliveringResult ||
+      subagentSession.isStreaming ||
+      (!startedTurn && subagentCompletion(subagentSession.sessionManager))
+    )
+      throw error;
     const built = buildDetachedSubagentResult(
       subagentSession,
       options,
@@ -581,21 +587,22 @@ export async function runDetachedSubagentSession(
       observedFinalAssistant,
       observedGeneratedMessages.length > 0 ? observedGeneratedMessages : undefined,
     );
-    const branch = subagentSession.sessionManager.getBranch();
-    const operationEntries = subagentOperationEntries(branch, startedTurn, startingBranchLength);
+    const operationEntries = startedTurn
+      ? subagentOperationEntries(subagentSession.sessionManager, true, startEntryId)
+      : [];
     const assistantEntry = operationEntries.findLast(
       (entry) => entry.type === "message" && entry.message.role === "assistant",
     );
-    const previousCompletion = operationEntries.findLast(
-      (entry) =>
-        (entry.type === "custom" && entry.customType === SUBAGENT_COMPLETION_CUSTOM_TYPE) ||
-        migratedOperationResult(entry)?.kind === "run",
-    );
+    // Interrupted files need an owned binding so the durable failure can be reused on restore.
+    await ensureSubagentMarker(subagentSession.sessionManager, options);
+    const previousCompletion = subagentCompletion(subagentSession.sessionManager);
     const completionEntryId =
       !startedTurn && previousCompletion
         ? previousCompletion.id
         : await subagentSession.sessionManager.appendCustomEntry(SUBAGENT_COMPLETION_CUSTOM_TYPE, {
-            status: "failed",
+            startEntryId,
+            endEntryId: subagentSession.sessionManager.getLeafId(),
+            status: options.signal?.aborted ? "aborted" : "failed",
             error: built.errorMessage,
           });
     const result: DetachedSubagentResult = {

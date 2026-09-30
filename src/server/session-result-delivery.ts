@@ -1,25 +1,6 @@
 import type { AgentSessionController } from "./agent-session-controller";
 import type { SessionStore } from "./session-store";
 
-/** Native custom metadata emitted by the Harness v4 history converter. */
-export const MIGRATED_OPERATION_RESULT_CUSTOM_TYPE = "batty-agent-session-operation-result";
-export interface MigratedOperationResult {
-  operationId: string;
-  kind: "run" | "compaction" | "navigation";
-  status: "completed" | "declined" | "failed" | "aborted";
-  fromTipId: string | null;
-  tipId: string | null;
-  error?: { code: string; message: string };
-  startedAt: number;
-  endedAt: number;
-}
-
-export function migratedOperationResult(entry: ReturnType<SessionStore["getEntries"]>[number]) {
-  return entry.type === "custom" && entry.customType === MIGRATED_OPERATION_RESULT_CUSTOM_TYPE
-    ? (entry.data as MigratedOperationResult)
-    : undefined;
-}
-
 const RESULT_DELIVERY_CUSTOM_TYPE = "batty-result-delivery";
 
 export function hasDeliveredResult(session: AgentSessionController, replyId: string): boolean {

@@ -9,6 +9,7 @@ import { createPiAgentSession } from "./pi-agent-session";
 import { environmentFilePath, type AppConfig } from "./config";
 import { getSessionMessagePage } from "./pi-service-message-page";
 import { battyAgentDir } from "./pi-paths";
+import { SessionStore } from "./session-store";
 
 const fixtures: Awaited<ReturnType<typeof createAgentSessionFixture>>[] = [];
 const key = `BATTY_AGENT_SESSION_ENV_${process.pid}`;
@@ -37,7 +38,100 @@ function toolCall(name: string, args: JsonObject) {
 }
 
 describe("Batty native AgentSession tools", () => {
-  it("restores the migrated active tool selection on reopen", async () => {
+  it.each(["empty", "tools-only", "model-only"])(
+    "uses configured thinking for %s native history without an explicit preference",
+    async (history) => {
+      const fixture = await setup();
+      const model = fixture.modelRuntime.getModel(
+        fixture.session.model!.provider,
+        fixture.session.model!.id,
+      )!;
+      model.reasoning = true;
+      fixture.config.defaultThinkingLevel = "high";
+      const store = await SessionStore.create(fixture.root, path.join(fixture.root, "sessions"));
+      if (history === "tools-only")
+        await store.appendCustomEntry("batty-session-tools", { activeToolNames: ["read"] });
+      if (history === "model-only") store.native.appendModelChange(model.provider, model.id);
+      expect((await store.configuration()).thinkingLevel).toBeUndefined();
+      const { session } = await createPiAgentSession({
+        config: fixture.config,
+        workspace: fixture.workspace,
+        sessionManager: store,
+        modelRuntime: fixture.modelRuntime,
+        customTools: [],
+      });
+      try {
+        expect(session.thinkingLevel).toBe("high");
+      } finally {
+        await session.dispose();
+      }
+    },
+  );
+
+  it.each(["high", "off"] as const)(
+    "restores canonical tools and explicit native %s thinking without a persisted model",
+    async (thinkingLevel) => {
+      const customTools = ["selected-tool", "inactive-tool"].map((name) => ({
+        name,
+        label: name,
+        description: name,
+        parameters: Type.Object({}),
+        execute: async () => ({ content: [{ type: "text" as const, text: "done" }], details: {} }),
+      }));
+      const fixture = await setup(customTools);
+      fixture.modelRuntime.getModel(
+        fixture.session.model!.provider,
+        fixture.session.model!.id,
+      )!.reasoning = true;
+      fixture.config.defaultThinkingLevel = "high";
+      const store = await SessionStore.create(fixture.root, path.join(fixture.root, "sessions"));
+      store.native.appendThinkingLevelChange(thinkingLevel);
+      await store.appendCustomEntry("batty-session-tools", { activeToolNames: ["selected-tool"] });
+      expect(await store.configuration()).toEqual({
+        model: undefined,
+        thinkingLevel,
+        activeToolNames: ["selected-tool"],
+      });
+      const { session } = await createPiAgentSession({
+        config: fixture.config,
+        workspace: fixture.workspace,
+        sessionManager: store,
+        modelRuntime: fixture.modelRuntime,
+        customTools,
+        extensionFactories: [
+          (pi) => {
+            pi.registerTool({
+              name: "extension-tool",
+              label: "Extension",
+              description: "Extension",
+              parameters: Type.Object({}),
+              execute: async () => ({ content: [{ type: "text", text: "done" }], details: {} }),
+            });
+          },
+        ],
+      });
+      try {
+        expect(session.model?.id).toBe("faux-1");
+        expect(session.thinkingLevel).toBe(thinkingLevel);
+        expect(session.getActiveToolNames()).toContain("selected-tool");
+        expect(session.getActiveToolNames()).not.toContain("inactive-tool");
+        expect(session.getActiveToolNames()).toContain("extension-tool");
+        expect(session.getActiveToolNames()).toContain("codemode");
+        expect(await store.configuration()).toMatchObject({ activeToolNames: ["selected-tool"] });
+        expect(
+          store
+            .getEntries()
+            .filter(
+              (entry) => entry.type === "custom" && entry.customType === "batty-session-tools",
+            ),
+        ).toHaveLength(1);
+      } finally {
+        await session.dispose();
+      }
+    },
+  );
+
+  it("restores canonical active tool selection on reopen", async () => {
     const fixture = await setup(
       ["selected-tool", "unselected-tool"].map((name) => ({
         name,
@@ -59,8 +153,8 @@ describe("Batty native AgentSession tools", () => {
         },
       ],
     );
-    await fixture.session.sessionManager.appendCustomEntry("batty-agent-session-migration", {
-      configuration: { activeToolNames: ["read", "codemode", "selected-tool"] },
+    await fixture.session.sessionManager.appendCustomEntry("batty-session-tools", {
+      activeToolNames: ["read", "selected-tool"],
     });
     const session = await fixture.reopen();
     expect(session.sdk.getActiveToolNames()).toContain("read");
@@ -69,6 +163,23 @@ describe("Batty native AgentSession tools", () => {
     expect(session.sdk.getActiveToolNames()).not.toContain("unselected-tool");
     expect(session.sdk.getActiveToolNames()).toContain("extension-tool");
   });
+  it("persists public tool selection as regular canonical preferences", async () => {
+    const fixture = await setup();
+    expect(await fixture.session.sessionManager.configuration()).toMatchObject({
+      activeToolNames: expect.arrayContaining(["read", "write"]),
+    });
+    await fixture.session.setActiveToolsByName(["read", "codemode"]);
+    expect(await fixture.session.sessionManager.configuration()).toMatchObject({
+      activeToolNames: ["read"],
+    });
+    const reopened = await fixture.reopen();
+    expect(reopened.getActiveToolNames()).toContain("read");
+    expect(reopened.getActiveToolNames()).toContain("codemode");
+    expect(await reopened.sessionManager.configuration()).toMatchObject({
+      activeToolNames: ["read"],
+    });
+  });
+
   it.each(["write", "codemode"])(
     "persists completed writes when %s is cancelled during filesystem execution",
     async (name) => {

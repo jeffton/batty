@@ -8,6 +8,8 @@ import {
   type SessionHeader,
 } from "@earendil-works/pi-coding-agent";
 
+import { SESSION_TOOLS_CUSTOM_TYPE, type SessionTools } from "./session-metadata";
+
 export interface SessionRead {
   metadata: SessionHeader & { path: string; modifiedAt: number };
   entries: SessionEntry[];
@@ -127,9 +129,17 @@ export class SessionStore {
   }
   async configuration() {
     const context = this.native.buildSessionContext();
-    return context.model
-      ? { model: context.model, thinkingLevel: context.thinkingLevel }
-      : undefined;
+    const branch = this.getBranch();
+    const thinking = branch.findLast((entry) => entry.type === "thinking_level_change");
+    const tools = branch.findLast(
+      (entry) => entry.type === "custom" && entry.customType === SESSION_TOOLS_CUSTOM_TYPE,
+    );
+    return {
+      model: context.model ?? undefined,
+      thinkingLevel: thinking?.type === "thinking_level_change" ? context.thinkingLevel : undefined,
+      activeToolNames:
+        tools?.type === "custom" ? (tools.data as SessionTools).activeToolNames : undefined,
+    };
   }
   async appendCustomEntry(customType: string, data: unknown): Promise<string> {
     const id = this.native.appendCustomEntry(customType, data);

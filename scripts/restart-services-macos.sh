@@ -16,6 +16,7 @@ if launchctl print "${domain}/${label}" >/dev/null 2>&1; then
   launchctl bootout "${domain}/${label}"
 fi
 
+"$node_path" "$install_root/current/dist/server/cli.mjs" --root "$batty_root" normalize-session-metadata
 launchctl bootstrap "$domain" "$plist"
 launchctl enable "${domain}/${label}"
 launchctl kickstart -k "${domain}/${label}"

@@ -44,6 +44,7 @@ function Remove-Junction([string]$path) {
 }
 
 $activationStarted = $false
+$storageChanged = $false
 $previousReleaseDir = $null
 $currentDir = Join-Path $InstallRoot "current"
 
@@ -76,6 +77,23 @@ try {
   }
 
   $activationStarted = $true
+  $storageChanged = $true
+  $metadataOutput = & (Get-Command node).Source $cliPath --root $BattyRoot normalize-session-metadata
+  if ($LASTEXITCODE -ne 0) {
+    throw "Session metadata normalization failed with exit code $LASTEXITCODE."
+  }
+  $metadataSummary = (($metadataOutput -join "`n") | ConvertFrom-Json)
+  $convertedFiles = $metadataSummary.convertedFiles
+  if (
+    $null -eq $metadataSummary -or
+    $null -eq $metadataSummary.PSObject.Properties["convertedFiles"] -or
+    (($convertedFiles -isnot [int]) -and ($convertedFiles -isnot [long])) -or
+    $convertedFiles -lt 0
+  ) {
+    throw "Session metadata normalization returned an invalid convertedFiles count."
+  }
+  $storageChanged = ($convertedFiles -gt 0)
+
   if (Test-Path $currentDir) {
     Remove-Junction $currentDir
   }
@@ -96,7 +114,26 @@ try {
   Write-Host "Activated Batty release $ReleaseName"
 } catch {
   $deploymentError = $_
-  if ($activationStarted -and $previousReleaseDir) {
+  if ($activationStarted -and $storageChanged) {
+    try {
+      if ((Get-Service -Name Batty).Status -ne "Stopped") {
+        Stop-Service -Name Batty
+        (Get-Service -Name Batty).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(30))
+      }
+      if (Test-Path $currentDir) {
+        Remove-Junction $currentDir
+      }
+      New-Item -ItemType Junction -Path $currentDir -Target $releaseDir | Out-Null
+      & (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "configure-iis-app.ps1") `
+        -SiteName $SiteName `
+        -AppPath $AppPath `
+        -PhysicalPath $currentDir `
+        -AppPoolName $AppPoolName
+      Write-Warning "Deployment failed after session metadata changed; selected '$releaseDir' and left Batty stopped."
+    } catch {
+      throw "Deployment failed: $deploymentError Could not preserve prepared release '$releaseDir' with Batty stopped: $_"
+    }
+  } elseif ($activationStarted -and $previousReleaseDir) {
     try {
       if ((Get-Service -Name Batty).Status -ne "Stopped") {
         Stop-Service -Name Batty

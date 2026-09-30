@@ -5,6 +5,7 @@ import type { Api, ImageContent, Model, TextContent } from "@earendil-works/pi-a
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { PromptDisposition, QueuedPrompt } from "@/shared/types";
 import type { SessionStore } from "./session-store";
+import { SESSION_TOOLS_CUSTOM_TYPE } from "./session-metadata";
 
 export interface AgentSessionPromptOptions {
   images?: ImageContent[];
@@ -147,8 +148,15 @@ export class AgentSessionController {
   getActiveToolNames() {
     return this.sdk.getActiveToolNames();
   }
+  regularToolNames = new Set<string>();
+  async persistActiveTools() {
+    await this.sessionManager.appendCustomEntry(SESSION_TOOLS_CUSTOM_TYPE, {
+      activeToolNames: this.getActiveToolNames().filter((name) => this.regularToolNames.has(name)),
+    });
+  }
   async setActiveToolsByName(names: string[]) {
     this.sdk.setActiveToolsByName(names);
+    await this.persistActiveTools();
   }
   async setModel(model: Model<Api>) {
     await this.sdk.setModel(model);

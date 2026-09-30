@@ -23,6 +23,56 @@ async function session() {
 }
 
 describe("SessionStore", () => {
+  it("does not expose the SDK's implicit off value as a stored thinking preference", async () => {
+    const store = await session();
+    expect((await store.configuration()).thinkingLevel).toBeUndefined();
+    await store.appendCustomEntry("batty-session-tools", { activeToolNames: ["read"] });
+    expect((await store.configuration()).thinkingLevel).toBeUndefined();
+    store.native.appendModelChange("faux", "faux-1");
+    expect((await store.configuration()).thinkingLevel).toBeUndefined();
+    const selected = store.getLeafId();
+    store.native.appendThinkingLevelChange("high");
+    expect((await store.configuration()).thinkingLevel).toBe("high");
+    store.native.branch(selected!);
+    expect((await store.configuration()).thinkingLevel).toBeUndefined();
+  });
+
+  it.each(["high", "off"] as const)(
+    "projects tools and explicit native %s thinking independently of model metadata",
+    async (thinkingLevel) => {
+      const store = await session();
+      store.native.appendThinkingLevelChange(thinkingLevel);
+      await store.appendCustomEntry("batty-session-tools", { activeToolNames: ["selected-tool"] });
+      store.release();
+      const reopened = await SessionStore.open(store.getSessionFile());
+      stores.push(reopened);
+      expect(await reopened.configuration()).toEqual({
+        model: undefined,
+        thinkingLevel,
+        activeToolNames: ["selected-tool"],
+      });
+    },
+  );
+
+  it("projects canonical tool preferences from the selected branch with native model settings", async () => {
+    const store = await session();
+    store.native.appendModelChange("faux", "faux-1");
+    store.native.appendThinkingLevelChange("high");
+    await store.appendCustomEntry("batty-session-tools", { activeToolNames: ["read"] });
+    const selected = store.getLeafId();
+    await store.appendCustomEntry("batty-session-tools", { activeToolNames: ["write"] });
+    store.native.branch(selected!);
+    await store.appendMessage({ role: "user", content: "selected", timestamp: 2 });
+    store.release();
+    const reopened = await SessionStore.open(store.getSessionFile());
+    stores.push(reopened);
+    expect(await reopened.configuration()).toEqual({
+      model: { provider: "faux", modelId: "faux-1" },
+      thinkingLevel: "high",
+      activeToolNames: ["read"],
+    });
+  });
+
   it("persists a fresh empty session that can be found and reopened", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-empty-session-"));
     roots.push(root);

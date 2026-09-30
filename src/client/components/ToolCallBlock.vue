@@ -210,9 +210,29 @@ const grepFindHeadView = computed(() =>
     OUTPUT_TAIL_LINE_COUNT,
   ),
 );
+const codemodeTextOutput = computed(() =>
+  props.name !== "codemode"
+    ? ""
+    : props.resultBlocks
+        .filter(
+          (block): block is Extract<UiContentBlock, { type: "text" }> => block.type === "text",
+        )
+        .map((block) => block.text)
+        .join("\n"),
+);
+const codemodeOutputView = computed(() =>
+  createToolOutputView("codemode", codemodeTextOutput.value, OUTPUT_TAIL_LINE_COUNT),
+);
+const visibleCodemodeOutput = computed(() =>
+  isExpanded.value ? codemodeTextOutput.value : codemodeOutputView.value.text,
+);
+const showCollapsedCodemodeWindow = computed(
+  () => props.name === "codemode" && !isExpanded.value && codemodeOutputView.value.isTrimmed,
+);
 const canExpandOutput = computed(
   () =>
     (isPiShellToolName(props.name) && shellTailView.value.isTrimmed) ||
+    (props.name === "codemode" && codemodeOutputView.value.isTrimmed) ||
     (props.name === "write" && writeTailView.value.isTrimmed) ||
     (props.name === "read" && readHeadView.value.isTrimmed) ||
     (props.name === "cron" && cronHeadView.value.isTrimmed) ||
@@ -239,7 +259,9 @@ const expandButtonLabel = computed(() => {
           ? cronHeadView.value.hiddenLineCount
           : props.name === "web-search" || props.name === "browser"
             ? browserHeadView.value.hiddenLineCount
-            : grepFindHeadView.value.hiddenLineCount;
+            : props.name === "codemode"
+              ? codemodeOutputView.value.hiddenLineCount
+              : grepFindHeadView.value.hiddenLineCount;
   return `Show full output (+${hiddenLineCount} lines)`;
 });
 const visibleWriteContent = computed(() => {
@@ -290,6 +312,7 @@ const showCollapsedGrepFindWindow = computed(
 const visibleResultBlocks = computed(() => {
   if (
     props.name === "read" ||
+    props.name === "codemode" ||
     (props.name === "cron" && props.status !== "error") ||
     props.name === "grep" ||
     props.name === "find"
@@ -380,7 +403,7 @@ const showResultSection = computed(() => {
     return props.status === "error" || visibleResultBlocks.value.length > 0;
   }
 
-  if (props.name === "grep" || props.name === "find") {
+  if (props.name === "grep" || props.name === "find" || props.name === "codemode") {
     return visibleResultBlocks.value.length > 0;
   }
 
@@ -559,6 +582,17 @@ const genericEntries = computed(() => {
         @toggle-expanded="isExpanded = !isExpanded"
       />
     </template>
+
+    <ToolCallCodeOutput
+      v-if="props.name === 'codemode' && visibleCodemodeOutput.trim().length > 0"
+      :code="visibleCodemodeOutput"
+      :compact="props.compact"
+      :collapsed="showCollapsedCodemodeWindow"
+      collapsed-alignment="start"
+      :can-expand="canExpandOutput"
+      :expand-button-label="expandButtonLabel"
+      @toggle-expanded="isExpanded = !isExpanded"
+    />
 
     <div v-if="showResultSection" class="tool-call__result">
       <template v-for="(block, index) in visibleResultBlocks" :key="`${props.name}-${index}`">

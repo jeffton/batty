@@ -208,6 +208,82 @@ describe("ToolCallBlock", () => {
     expect(wrapper.text()).toContain("Show full output (+10 lines)");
   });
 
+  it.each(["running", "success", "error"] as const)(
+    "heads %s codemode output and expands the monospaced output",
+    async (status) => {
+      const wrapper = mount(ToolCallBlock, {
+        props: {
+          name: "codemode",
+          arguments: {},
+          resultBlocks: [{ type: "text", text: lines(30) }],
+          status,
+        },
+      });
+
+      expect(wrapper.get("pre.code-block").text()).toBe(lines(20));
+      expect(wrapper.find(".tool-call__text").exists()).toBe(false);
+      expect(wrapper.find(".tool-call__output-window--collapsed-start").exists()).toBe(true);
+      expect(wrapper.text()).toContain("Show full output (+10 lines)");
+
+      await wrapper.get(".tool-call__expand-btn").trigger("click");
+
+      expect(wrapper.get("pre.code-block").text()).toBe(lines(30));
+      expect(wrapper.find(".tool-call__output-window--collapsed").exists()).toBe(false);
+      expect(wrapper.text()).toContain("Collapse output");
+
+      await wrapper.get(".tool-call__expand-btn").trigger("click");
+
+      expect(wrapper.get("pre.code-block").text()).toBe(lines(20));
+    },
+  );
+
+  it("keeps codemode truncation at the bottom across output updates and completion", async () => {
+    const wrapper = mount(ToolCallBlock, {
+      props: {
+        name: "codemode",
+        arguments: {},
+        resultBlocks: [{ type: "text", text: lines(30) }],
+        status: "running",
+      },
+    });
+
+    expect(wrapper.get("pre.code-block").text()).toBe(lines(20));
+    expect(wrapper.find(".tool-call__output-window--collapsed").exists()).toBe(true);
+    expect(wrapper.find(".tool-call__output-window--collapsed-start").exists()).toBe(true);
+
+    await wrapper.setProps({ resultBlocks: [{ type: "text", text: lines(35) }] });
+
+    expect(wrapper.get("pre.code-block").text()).toBe(lines(20));
+    expect(wrapper.text()).toContain("Show full output (+15 lines)");
+
+    await wrapper.setProps({ status: "success" });
+
+    expect(wrapper.get("pre.code-block").text()).toBe(lines(20));
+    expect(wrapper.find(".tool-call__output-window--collapsed-start").exists()).toBe(true);
+  });
+
+  it("preserves codemode images alongside short monospaced text output", () => {
+    const wrapper = mount(ToolCallBlock, {
+      props: {
+        name: "codemode",
+        arguments: {},
+        resultBlocks: [
+          { type: "text", text: "First result" },
+          { type: "image", mimeType: "image/png", data: "cG5n" },
+          { type: "text", text: "Second result" },
+        ],
+        status: "success",
+      },
+    });
+
+    expect(wrapper.get("pre.code-block").text()).toBe("First result\nSecond result");
+    expect(wrapper.find(".tool-call__expand-btn").exists()).toBe(false);
+    expect(wrapper.find(".tool-call__text").exists()).toBe(false);
+    expect(wrapper.get('img[alt="Tool output"]').attributes("src")).toBe(
+      "data:image/png;base64,cG5n",
+    );
+  });
+
   it("tails write content and expands to the full buffer on demand", async () => {
     const wrapper = mount(ToolCallBlock, {
       props: {

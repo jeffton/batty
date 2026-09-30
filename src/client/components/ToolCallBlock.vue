@@ -3,6 +3,7 @@ import { PanelRightOpen } from "@lucide/vue";
 import { computed, ref } from "vue";
 import AttachedFilesList from "@/client/components/AttachedFilesList.vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
+import CodemodeDisplay from "@/client/components/CodemodeDisplay.vue";
 import SubagentSessionPopover from "@/client/components/SubagentSessionPopover.vue";
 import DiffBlock from "@/client/components/DiffBlock.vue";
 import MarkdownBlock from "@/client/components/MarkdownBlock.vue";
@@ -10,7 +11,7 @@ import ToolCallCodeOutput from "@/client/components/ToolCallCodeOutput.vue";
 import ToolCallHeader from "@/client/components/ToolCallHeader.vue";
 import ToolCallMeta from "@/client/components/ToolCallMeta.vue";
 import { formatValue, languageFromPath } from "@/client/lib/code-format";
-import { createToolOutputView } from "@/client/lib/tool-output";
+import { createHeadView, createToolOutputView } from "@/client/lib/tool-output";
 import { hasToolResultContent } from "@/client/lib/transcript";
 import { isPiShellToolName } from "@/shared/pi-tools";
 import type { SentFileDescriptor, ToolExecutionDetails, UiContentBlock } from "@/shared/types";
@@ -64,6 +65,10 @@ function imageUrl(block: Extract<UiContentBlock, { type: "image" }>): string {
 
 const pathValue = computed(() => readString("path"));
 const commandValue = computed(() => readString("command"));
+const commandView = computed(() => createHeadView(commandValue.value ?? "", 10));
+const visibleCommand = computed(() =>
+  isExpanded.value ? commandValue.value : commandView.value.text,
+);
 const contentValue = computed(() => readString("content"));
 const oldTextValue = computed(() => readString("oldText"));
 const newTextValue = computed(() => readString("newText"));
@@ -210,29 +215,10 @@ const grepFindHeadView = computed(() =>
     OUTPUT_TAIL_LINE_COUNT,
   ),
 );
-const codemodeTextOutput = computed(() =>
-  props.name !== "codemode"
-    ? ""
-    : props.resultBlocks
-        .filter(
-          (block): block is Extract<UiContentBlock, { type: "text" }> => block.type === "text",
-        )
-        .map((block) => block.text)
-        .join("\n"),
-);
-const codemodeOutputView = computed(() =>
-  createToolOutputView("codemode", codemodeTextOutput.value, OUTPUT_TAIL_LINE_COUNT),
-);
-const visibleCodemodeOutput = computed(() =>
-  isExpanded.value ? codemodeTextOutput.value : codemodeOutputView.value.text,
-);
-const showCollapsedCodemodeWindow = computed(
-  () => props.name === "codemode" && !isExpanded.value && codemodeOutputView.value.isTrimmed,
-);
 const canExpandOutput = computed(
   () =>
-    (isPiShellToolName(props.name) && shellTailView.value.isTrimmed) ||
-    (props.name === "codemode" && codemodeOutputView.value.isTrimmed) ||
+    (isPiShellToolName(props.name) &&
+      (shellTailView.value.isTrimmed || commandView.value.isTrimmed)) ||
     (props.name === "write" && writeTailView.value.isTrimmed) ||
     (props.name === "read" && readHeadView.value.isTrimmed) ||
     (props.name === "cron" && cronHeadView.value.isTrimmed) ||
@@ -243,6 +229,10 @@ const canExpandOutput = computed(
 const expandButtonLabel = computed(() => {
   if (!canExpandOutput.value) {
     return "";
+  }
+
+  if (isPiShellToolName(props.name) && commandView.value.isTrimmed) {
+    return isExpanded.value ? "Collapse command and output" : "Show full command and output";
   }
 
   if (isExpanded.value) {
@@ -259,9 +249,7 @@ const expandButtonLabel = computed(() => {
           ? cronHeadView.value.hiddenLineCount
           : props.name === "web-search" || props.name === "browser"
             ? browserHeadView.value.hiddenLineCount
-            : props.name === "codemode"
-              ? codemodeOutputView.value.hiddenLineCount
-              : grepFindHeadView.value.hiddenLineCount;
+            : grepFindHeadView.value.hiddenLineCount;
   return `Show full output (+${hiddenLineCount} lines)`;
 });
 const visibleWriteContent = computed(() => {
@@ -461,6 +449,7 @@ const genericEntries = computed(() => {
     "newText",
     "timeout",
     ...(props.name === "read" ? ["offset", "limit"] : []),
+    ...(props.name === "codemode" ? ["code"] : []),
   ]);
   return Object.entries(props.arguments)
     .filter(([key]) => !hiddenKeys.has(key))
@@ -519,7 +508,7 @@ const genericEntries = computed(() => {
       :collapsed="showCollapsedShellWindow"
       :can-expand="canExpandOutput"
       :expand-button-label="expandButtonLabel"
-      :command="commandValue"
+      :command="visibleCommand"
       button-placement="before"
       @toggle-expanded="isExpanded = !isExpanded"
     />
@@ -583,15 +572,13 @@ const genericEntries = computed(() => {
       />
     </template>
 
-    <ToolCallCodeOutput
-      v-if="props.name === 'codemode' && visibleCodemodeOutput.trim().length > 0"
-      :code="visibleCodemodeOutput"
+    <CodemodeDisplay
+      v-if="props.name === 'codemode'"
+      :code="readString('code') ?? ''"
+      :blocks="props.resultBlocks"
+      :details="props.resultDetails"
+      :status="props.status"
       :compact="props.compact"
-      :collapsed="showCollapsedCodemodeWindow"
-      collapsed-alignment="start"
-      :can-expand="canExpandOutput"
-      :expand-button-label="expandButtonLabel"
-      @toggle-expanded="isExpanded = !isExpanded"
     />
 
     <div v-if="showResultSection" class="tool-call__result">

@@ -208,58 +208,142 @@ describe("ToolCallBlock", () => {
     expect(wrapper.text()).toContain("Show full output (+10 lines)");
   });
 
-  it.each(["running", "success", "error"] as const)(
-    "heads %s codemode output and expands the monospaced output",
-    async (status) => {
-      const wrapper = mount(ToolCallBlock, {
-        props: {
-          name: "codemode",
-          arguments: {},
-          resultBlocks: [{ type: "text", text: lines(30) }],
-          status,
-        },
-      });
+  it.each(["bash", "powershell"])("previews long %s commands without output", async (name) => {
+    const wrapper = mount(ToolCallBlock, {
+      props: { name, arguments: { command: lines(15) }, status: "running" },
+    });
 
-      expect(wrapper.get("pre.code-block").text()).toBe(lines(20));
-      expect(wrapper.find(".tool-call__text").exists()).toBe(false);
-      expect(wrapper.find(".tool-call__output-window--collapsed-start").exists()).toBe(true);
-      expect(wrapper.text()).toContain("Show full output (+10 lines)");
+    expect(wrapper.get("pre.code-block").text()).toContain("line-10");
+    expect(wrapper.get("pre.code-block").text()).not.toContain("line-11");
+    expect(wrapper.text()).toContain("Show full command and output");
 
-      await wrapper.get(".tool-call__expand-btn").trigger("click");
+    await wrapper.get(".tool-call__expand-btn").trigger("click");
+    expect(wrapper.get("pre.code-block").text()).toContain("line-15");
 
-      expect(wrapper.get("pre.code-block").text()).toBe(lines(30));
-      expect(wrapper.find(".tool-call__output-window--collapsed").exists()).toBe(false);
-      expect(wrapper.text()).toContain("Collapse output");
+    await wrapper.setProps({ resultBlocks: [{ type: "text", text: lines(30) }] });
+    expect(wrapper.findAll("pre.code-block")[1]?.text()).toBe(lines(30));
 
-      await wrapper.get(".tool-call__expand-btn").trigger("click");
+    await wrapper.get(".tool-call__expand-btn").trigger("click");
+    expect(wrapper.get("pre.code-block").text()).not.toContain("line-11");
+    expect(wrapper.findAll("pre.code-block")[1]?.text()).toContain("line-30");
+  });
 
-      expect(wrapper.get("pre.code-block").text()).toBe(lines(20));
-    },
-  );
-
-  it("keeps codemode truncation at the bottom across output updates and completion", async () => {
+  it("renders codemode code, live call summaries, and final output with Pi previews", async () => {
+    const calls = Array.from({ length: 10 }, (_, index) => ({
+      id: String(index),
+      name: `tool-${index}`,
+      args: "a".repeat(90),
+      status: index === 9 ? "error" : "ok",
+      durationMs: index === 9 ? 1500 : 25,
+      ...(index === 9 ? { error: "Nested failure" } : {}),
+      cost: 0.001,
+    }));
     const wrapper = mount(ToolCallBlock, {
       props: {
         name: "codemode",
-        arguments: {},
-        resultBlocks: [{ type: "text", text: lines(30) }],
+        arguments: { code: Array.from({ length: 15 }, (_, i) => `const v${i} = ${i};`).join("\n") },
+        resultDetails: { calls },
         status: "running",
       },
     });
 
-    expect(wrapper.get("pre.code-block").text()).toBe(lines(20));
-    expect(wrapper.find(".tool-call__output-window--collapsed").exists()).toBe(true);
-    expect(wrapper.find(".tool-call__output-window--collapsed-start").exists()).toBe(true);
+    expect(wrapper.find(".tool-call__meta").exists()).toBe(false);
+    expect(wrapper.get(".hljs-keyword").text()).toBe("const");
+    expect(wrapper.get("pre.code-block").text()).not.toContain("const v10");
+    expect(wrapper.findAll(".codemode-display__call")).toHaveLength(8);
+    expect(wrapper.text()).toContain("2 earlier calls");
+    expect(wrapper.text()).not.toContain("tool-0");
+    expect(wrapper.text()).toContain(`${"a".repeat(77)}...`);
+    expect(wrapper.text()).toContain("1.5s");
+    expect(wrapper.text()).toContain("Model calls: $0.01");
+    expect(wrapper.text()).not.toContain("Nested failure");
 
-    await wrapper.setProps({ resultBlocks: [{ type: "text", text: lines(35) }] });
+    await wrapper.get(".tool-call__expand-btn").trigger("click");
+    expect(wrapper.findAll(".codemode-display__call")).toHaveLength(10);
+    expect(wrapper.get("pre.code-block").text()).toContain("const v14");
+    expect(wrapper.text()).toContain("Nested failure");
+    expect(wrapper.text()).toContain("a".repeat(90));
 
-    expect(wrapper.get("pre.code-block").text()).toBe(lines(20));
-    expect(wrapper.text()).toContain("Show full output (+15 lines)");
+    await wrapper.setProps({
+      status: "error",
+      resultBlocks: [
+        { type: "text", text: "Script failed\nWall time 1.5 seconds\nOutput:\n" },
+        { type: "text", text: lines(30) },
+      ],
+    });
+    expect(wrapper.findAll("pre.code-block")[1]?.text()).toBe(lines(30));
+    expect(wrapper.text()).not.toContain("Script failed");
 
-    await wrapper.setProps({ status: "success" });
+    await wrapper.get(".tool-call__expand-btn").trigger("click");
+    expect(wrapper.findAll("pre.code-block")[1]?.text()).toBe(lines(5));
+    expect(wrapper.text()).toContain("25 more output lines");
+  });
 
-    expect(wrapper.get("pre.code-block").text()).toBe(lines(20));
-    expect(wrapper.find(".tool-call__output-window--collapsed-start").exists()).toBe(true);
+  it("keeps live codemode calls updated without showing partial script output", async () => {
+    const wrapper = mount(ToolCallBlock, {
+      props: {
+        name: "codemode",
+        arguments: { code: "await tools.read({ path: 'a' });" },
+        resultBlocks: [{ type: "text", text: "Script completed\nWall time 0 seconds\nOutput:\n" }],
+        resultDetails: {
+          calls: [{ id: "1", name: "read", args: '{"path":"a"}', status: "running" }],
+        },
+        status: "running",
+      },
+    });
+
+    expect(wrapper.get('[aria-label="running"]').text()).toBe("…");
+    expect(wrapper.text()).not.toContain("Script completed");
+    await wrapper.setProps({
+      resultDetails: {
+        calls: [{ id: "1", name: "read", args: '{"path":"a"}', status: "ok", durationMs: 12 }],
+        fullOutputPath: "/tmp/output.txt",
+      },
+      status: "success",
+      resultBlocks: [{ type: "text", text: "done" }],
+    });
+    expect(wrapper.get('[aria-label="ok"]').text()).toBe("✓");
+    expect(wrapper.text()).toContain("12ms");
+    expect(wrapper.text()).toContain("Full output: /tmp/output.txt");
+    expect(wrapper.findAll("pre.code-block")[1]?.text()).toBe("done");
+  });
+
+  it("keeps concurrent codemode rows stable as temporary IDs complete and the preview slides", async () => {
+    const calls = Array.from({ length: 10 }, (_, index) => ({
+      id: "parent/?",
+      name: `tool-${index}`,
+      args: "{}",
+      status: "running",
+    }));
+    const wrapper = mount(ToolCallBlock, {
+      props: {
+        name: "codemode",
+        arguments: { code: "await Promise.all([]);" },
+        resultDetails: { calls },
+        status: "running",
+      },
+    });
+    const originalRow = wrapper.findAll(".codemode-display__call")[1]!.element;
+
+    await wrapper.setProps({
+      resultDetails: {
+        calls: [
+          ...calls.map((call, index) => ({ ...call, id: `parent/${index}`, status: "ok" })),
+          { id: "parent/?", name: "tool-10", args: "{}", status: "cancelled" },
+        ],
+      },
+    });
+
+    const rows = wrapper.findAll(".codemode-display__call");
+    expect(rows).toHaveLength(8);
+    expect(rows[0]!.element).toBe(originalRow);
+    expect(rows[0]!.text()).toContain("tool-3");
+    expect(wrapper.findAll('[aria-label="ok"]')).toHaveLength(7);
+    expect(wrapper.get('[aria-label="cancelled"]').text()).toBe("⊘");
+
+    await wrapper.get(".tool-call__expand-btn").trigger("click");
+    expect(wrapper.findAll(".codemode-display__call")).toHaveLength(11);
+    expect(wrapper.findAll(".codemode-display__call")[3]!.element).toBe(originalRow);
   });
 
   it("preserves codemode images alongside short monospaced text output", () => {

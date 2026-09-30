@@ -17,6 +17,8 @@ import { BATTY_SYSTEM_PROMPT_CUSTOM_TYPE } from "./batty-system-prompt";
 import type { WebSession } from "./pi-service-types";
 import { agentTurnArtifactsByReplyEntryId } from "./agent-turn-file-changes";
 import { buildSubagentRuntimeNotice } from "./runtime-notices";
+import { SessionStore } from "./session-store";
+import { MIGRATED_OPERATION_RESULT_CUSTOM_TYPE } from "./session-result-delivery";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -85,6 +87,130 @@ async function setup() {
 }
 
 describe("detached AgentSession subagents", () => {
+  it.each(["completed", "failed", "aborted", "declined"])(
+    "reuses migrated child completion %s without restarting it",
+    async (status) => {
+      const { parent, deps, options } = await setup();
+      const store = await SessionStore.create(
+        options.workspace.path,
+        deps.workspaceSessionDir,
+        options.parentSessionId,
+        options.sessionId,
+      );
+      const { session } = await deps.createPiAgentSession(options.workspace, store);
+      await store.appendCustomEntry("batty-subagent-session", {
+        parentSessionId: options.parentSessionId,
+        depth: 1,
+      });
+      const start = store.getLeafId();
+      await store.appendMessage(fauxAssistantMessage("Migrated answer"));
+      await store.appendCustomEntry(MIGRATED_OPERATION_RESULT_CUSTOM_TYPE, {
+        operationId: "old-operation",
+        kind: "run",
+        status,
+        fromTipId: start,
+        tipId: store.getLeafId(),
+        startedAt: 1,
+        endedAt: 2,
+        ...(status === "failed" ? { error: { code: "provider", message: "Migrated error" } } : {}),
+      });
+      const result = await runDetachedSubagentSession(deps, options);
+      expect(result.isError).toBe(status !== "completed");
+      expect(result.text).toBe(
+        status === "completed"
+          ? "Migrated answer"
+          : status === "failed"
+            ? "Migrated error"
+            : `Subagent ${status}`,
+      );
+      expect(parent.faux.state.callCount).toBe(0);
+      expect(
+        session.sessionManager
+          .getEntries()
+          .filter(
+            (entry) => entry.type === "custom" && entry.customType === "batty-subagent-completion",
+          ),
+      ).toHaveLength(0);
+    },
+  );
+
+  it("acknowledges repeated async delivery without triggering another parent turn", async () => {
+    const { parent, deps, options } = await setup();
+    parent.faux.setResponses([
+      fauxAssistantMessage("Child result"),
+      fauxAssistantMessage("Parent reply"),
+    ]);
+    const result = await runDetachedSubagentSession(deps, options);
+    const accepted = vi.fn();
+    await deliverAsyncSubagentResult(parent.session, result, accepted);
+    await parent.reopen();
+    await deliverAsyncSubagentResult(parent.session, result, accepted);
+    expect(accepted).toHaveBeenCalledTimes(2);
+    expect(parent.faux.state.callCount).toBe(2);
+    expect(parent.session.messages.filter((message) => message.role === "custom")).toHaveLength(1);
+  });
+
+  it("delivers resumed replies with identical timestamps using distinct entry IDs", async () => {
+    const { parent, deps, options } = await setup();
+    parent.faux.setResponses([
+      { ...fauxAssistantMessage("First reply"), timestamp: 42 },
+      { ...fauxAssistantMessage("Second reply"), timestamp: 42 },
+    ]);
+    const first = await runDetachedSubagentSession(deps, options);
+    expect(await deliverDetachedSubagentResult(parent.session, first)).toBe(true);
+    const second = await runDetachedSubagentSession(deps, {
+      ...options,
+      prompt: "More work",
+      continueSession: true,
+    });
+    expect(first.finalAssistant?.timestamp).toBe(second.finalAssistant?.timestamp);
+    expect(first.deliveryEntryId).not.toBe(second.deliveryEntryId);
+    expect(await deliverDetachedSubagentResult(parent.session, second)).toBe(true);
+    await parent.reopen();
+    const reopened = await runDetachedSubagentSession(deps, options);
+    expect(reopened.deliveryEntryId).toBe(second.deliveryEntryId);
+    expect(reopened.text).toBe("Second reply");
+    expect(await deliverDetachedSubagentResult(parent.session, reopened)).toBe(false);
+    expect(parent.session.messages.filter((message) => message.role === "assistant")).toHaveLength(
+      2,
+    );
+  });
+
+  it("deduplicates synthetic errors by their completion entry instead of an earlier reply", async () => {
+    const { parent, deps, options, children } = await setup();
+    parent.faux.setResponses([fauxAssistantMessage("Earlier reply")]);
+    const first = await runDetachedSubagentSession(deps, options);
+    await deliverDetachedSubagentResult(parent.session, first);
+    const child = children.get(options.sessionId!)!;
+    const rejected = vi
+      .spyOn(child, "sendCustomMessage")
+      .mockRejectedValueOnce(new Error("Pre-turn error"));
+    const failed = await runDetachedSubagentSession(deps, {
+      ...options,
+      continueSession: true,
+    });
+    rejected.mockRestore();
+    expect(failed.finalAssistant).toBeUndefined();
+    expect(failed.deliveryEntryId).not.toBe(first.deliveryEntryId);
+    expect(await deliverDetachedSubagentResult(parent.session, failed)).toBe(true);
+    await parent.reopen();
+    const repeated = await runDetachedSubagentSession(deps, options);
+    expect(repeated.finalAssistant).toBeUndefined();
+    expect(repeated.deliveryEntryId).toBe(failed.deliveryEntryId);
+    expect(repeated.text).toBe("Pre-turn error");
+    expect(await deliverDetachedSubagentResult(parent.session, repeated)).toBe(false);
+    expect(parent.faux.state.callCount).toBe(1);
+  });
+
+  it("delivers a positive child result only once across parent reopen", async () => {
+    const { parent, deps, options } = await setup();
+    parent.faux.setResponses([fauxAssistantMessage("Positive result")]);
+    const result = await runDetachedSubagentSession(deps, options);
+    expect(await deliverDetachedSubagentResult(parent.session, result)).toBe(true);
+    await parent.reopen();
+    expect(await deliverDetachedSubagentResult(parent.session, result)).toBe(false);
+    expect(parent.session.messages).toHaveLength(2);
+  });
   it.each([false, true])(
     "sends the task only in a runtime notice with includePreviousContext=%s",
     async (includePreviousContext) => {

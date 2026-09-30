@@ -10,6 +10,16 @@ afterEach(async () => {
 });
 
 describe("result delivery", () => {
+  it("persists native delivery receipts across reopen", async () => {
+    const fixture = await createAgentSessionFixture();
+    cleanups.push(fixture.cleanup);
+    const messages = [fauxAssistantMessage("Positive result")];
+    expect(await appendResultMessages(fixture.session, messages, "cron:new-run")).toBe(true);
+    await fixture.reopen();
+    expect(await appendResultMessages(fixture.session, messages, "cron:new-run")).toBe(false);
+    expect(fixture.session.messages).toHaveLength(1);
+    expect(fixture.faux.state.callCount).toBe(0);
+  });
   it("appends each message after the parent becomes idle without delivery metadata", async () => {
     const fixture = await createAgentSessionFixture();
     cleanups.push(fixture.cleanup);

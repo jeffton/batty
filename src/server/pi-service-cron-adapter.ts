@@ -1,6 +1,6 @@
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import { CRON_RUN_SESSION_CUSTOM_TYPE, type CronRunSessionBinding } from "./cron-session";
-import { appendResultMessages } from "./session-result-delivery";
+import { appendResultMessages, migratedOperationResult } from "./session-result-delivery";
 import type { AgentSessionController as AgentSession } from "./agent-session-controller";
 import type {
   CronJobSession,
@@ -87,15 +87,24 @@ export function getCronExecutionResult(
   session: AgentSession,
   runId: string,
 ): CronExecutionResult | undefined {
-  const entry = session.sessionManager
-    .getEntries()
-    .findLast(
-      (entry) =>
-        entry.type === "custom" &&
-        entry.customType === CRON_EXECUTION_CUSTOM_TYPE &&
-        (entry.data as CronExecutionResult).runId === runId,
-    );
-  return entry?.type === "custom" ? (entry.data as CronExecutionResult) : undefined;
+  for (const entry of session.sessionManager.getEntries().toReversed()) {
+    if (
+      entry.type === "custom" &&
+      entry.customType === CRON_EXECUTION_CUSTOM_TYPE &&
+      (entry.data as CronExecutionResult).runId === runId
+    )
+      return entry.data as CronExecutionResult;
+    const migrated = migratedOperationResult(entry);
+    if (migrated?.operationId === runId)
+      return {
+        runId,
+        startEntryId: migrated.fromTipId,
+        endEntryId: migrated.tipId,
+        status: migrated.status === "declined" ? "failed" : migrated.status,
+        ...(migrated.error ? { error: migrated.error.message } : {}),
+      };
+  }
+  return undefined;
 }
 
 /** Persist scheduler-owned boundaries without resuming an interrupted SDK turn. */
@@ -370,11 +379,15 @@ export async function deliverCronFollowup(
 
   const branch = cronSession.sessionManager.getBranch();
   const boundary = branch.findLastIndex(
-    (entry) => entry.type === "custom" && entry.customType === CRON_EXECUTION_CUSTOM_TYPE,
+    (entry) =>
+      (entry.type === "custom" && entry.customType === CRON_EXECUTION_CUSTOM_TYPE) ||
+      migratedOperationResult(entry) !== undefined,
   );
   if (
     boundary >= 0 &&
-    (branch[boundary] as { data: CronExecutionResult }).data.status === "running"
+    branch[boundary]?.type === "custom" &&
+    branch[boundary].customType === CRON_EXECUTION_CUSTOM_TYPE &&
+    (branch[boundary].data as CronExecutionResult).status === "running"
   )
     return;
   const followingEntries = branch.slice(boundary + 1);
@@ -416,18 +429,22 @@ export async function deliverCronFollowup(
   await context.runSubagentSerial(parentState.id, async () => {
     const parent = context.requireSession(parentState.id);
     const timestamp = Date.now();
-    await appendResultMessages(parent.session, [
-      {
-        role: "custom",
-        customType: "batty-runtime-notice:cron",
-        content: `Follow-up from detached cron session:\n${cronSession.sessionFile}`,
-        details: { cron: { sessionPath: cronSession.sessionFile } },
-        timestamp,
-      } as unknown as Message,
-      ...deliveredSitesMessage(assistant, reply.id, timestamp + 1),
-      ...deliveredFilesMessage(sentFiles, reply.id, timestamp + 2),
-      deliveredAssistant(parent.session, assistant, timestamp + 3),
-    ]);
+    await appendResultMessages(
+      parent.session,
+      [
+        {
+          role: "custom",
+          customType: "batty-runtime-notice:cron",
+          content: `Follow-up from detached cron session:\n${cronSession.sessionFile}`,
+          details: { cron: { sessionPath: cronSession.sessionFile } },
+          timestamp,
+        } as unknown as Message,
+        ...deliveredSitesMessage(assistant, reply.id, timestamp + 1),
+        ...deliveredFilesMessage(sentFiles, reply.id, timestamp + 2),
+        deliveredAssistant(parent.session, assistant, timestamp + 3),
+      ],
+      `cron-followup:${cronSession.sessionId}:${reply.id}`,
+    );
     const state = context.getState(parent.id);
     context.publishReset(parent, state);
     await context.onAgentCompleted?.(state);
@@ -520,19 +537,23 @@ async function appendCronErrorDelivery(
   const jobId = job.jobId;
   const runId = job.runId;
   const workspaceId = job.workspace.id;
-  await appendResultMessages(parent, [
-    cronNoticeMessage(
-      cronNotice,
-      {
-        jobId,
-        runId,
-        workspaceId,
-        prompt: job.prompt,
-      },
-      timestamp,
-    ),
-    errorAssistant(parent, errorMessage, timestamp + 1),
-  ]);
+  await appendResultMessages(
+    parent,
+    [
+      cronNoticeMessage(
+        cronNotice,
+        {
+          jobId,
+          runId,
+          workspaceId,
+          prompt: job.prompt,
+        },
+        timestamp,
+      ),
+      errorAssistant(parent, errorMessage, timestamp + 1),
+    ],
+    `cron:${runId}`,
+  );
 }
 
 async function appendCronRunDelivery(
@@ -546,33 +567,37 @@ async function appendCronRunDelivery(
   error?: unknown,
 ): Promise<void> {
   const timestamp = Date.now();
-  await appendResultMessages(parent, [
-    cronNoticeMessage(
-      buildCronRuntimeNotice({
-        scheduleLabel: job.scheduleLabel,
-        prompt: job.prompt,
-        session: job.session,
-        phase: "delivery",
-        now: new Date(timestamp),
-      }),
-      {
-        jobId: job.jobId,
-        runId: job.runId,
-        workspaceId: job.workspace.id,
-        sessionId: delivery.sessionId,
-        sessionPath: delivery.sessionPath,
-        prompt: job.prompt,
-      },
-      timestamp,
-    ),
-    ...deliveredSitesMessage(delivery.finalAssistant, job.runId, timestamp + 1),
-    ...deliveredFilesMessage(
-      sentFilesFromAssistant(delivery.finalAssistant),
-      job.runId,
-      timestamp + 2,
-    ),
-    deliveredAssistant(parent, delivery.finalAssistant, timestamp + 3, error),
-  ]);
+  await appendResultMessages(
+    parent,
+    [
+      cronNoticeMessage(
+        buildCronRuntimeNotice({
+          scheduleLabel: job.scheduleLabel,
+          prompt: job.prompt,
+          session: job.session,
+          phase: "delivery",
+          now: new Date(timestamp),
+        }),
+        {
+          jobId: job.jobId,
+          runId: job.runId,
+          workspaceId: job.workspace.id,
+          sessionId: delivery.sessionId,
+          sessionPath: delivery.sessionPath,
+          prompt: job.prompt,
+        },
+        timestamp,
+      ),
+      ...deliveredSitesMessage(delivery.finalAssistant, job.runId, timestamp + 1),
+      ...deliveredFilesMessage(
+        sentFilesFromAssistant(delivery.finalAssistant),
+        job.runId,
+        timestamp + 2,
+      ),
+      deliveredAssistant(parent, delivery.finalAssistant, timestamp + 3, error),
+    ],
+    `cron:${job.runId}`,
+  );
 }
 
 function cronNoticeMessage(

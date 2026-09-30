@@ -161,11 +161,21 @@ export async function createPiAgentSession({
       : []),
     ...customTools,
   ];
+  const migration = sessionManager
+    .getBranch()
+    .findLast(
+      (entry) => entry.type === "custom" && entry.customType === "batty-agent-session-migration",
+    );
+  const importedToolNames =
+    migration?.type === "custom"
+      ? (migration.data as { configuration?: { activeToolNames: string[] } }).configuration
+          ?.activeToolNames
+      : undefined;
   const settingsManager = SettingsManager.inMemory({
     ...settings,
     sessionDir: workspaceSessionDir(config, workspace.id),
     defaultTools: battyActivePiToolNames(
-      [...tools.map((tool) => tool.name), "codemode"],
+      importedToolNames ?? [...tools.map((tool) => tool.name), "codemode"],
       process.platform,
     ),
   });
@@ -265,6 +275,10 @@ export async function createPiAgentSession({
   });
   if (!findBattySystemPromptSnapshot(sessionManager.getEntries()))
     await refreshBattySystemPrompt(config, { workspace, session });
+  if (importedToolNames)
+    result.session.setActiveToolsByName(
+      battyActivePiToolNames([...importedToolNames, "codemode"], process.platform),
+    );
   return { session, modelFallbackMessage: result.modelFallbackMessage };
 }
 

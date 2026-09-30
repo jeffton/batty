@@ -1,6 +1,6 @@
 # Pi AgentSession integration
 
-`evaluate-agent-session` uses Pi 0.99.1's coding-agent SDK. `main` is the AgentHarness comparison baseline. This branch is an evaluation implementation, not a deployed release.
+Batty uses Pi 0.99.1's coding-agent SDK. Commit `566c1d7` is the AgentHarness comparison baseline.
 
 ## Ownership
 
@@ -14,7 +14,7 @@ Pi's public subscribers run before `message_end` persistence. Batty defers subsc
 
 Direct tools and codemode remain enabled. Codemode is Pi's built-in extension, including its sandbox, declarations, dynamic catalog, output truncation, and branch-local store. Nested calls use Pi's tool hooks and call IDs. Batty attaches nested file changes, downloads, and sites to the outer result. Native shell calls inside codemode return structured results, including `output` and `exit_code`.
 
-Configured coding-agent extensions load through `DefaultResourceLoader` with Batty's resource paths. They receive a headless SDK context; Batty does not render terminal dialogs or widgets. MCP connections and OAuth management are outside this branch.
+Configured coding-agent extensions load through `DefaultResourceLoader` with Batty's resource paths. They receive a headless SDK context; Batty does not render terminal dialogs or widgets. MCP connections and OAuth management are not configured.
 
 ## Storage and execution differences
 
@@ -30,7 +30,7 @@ Configured coding-agent extensions load through `DefaultResourceLoader` with Bat
 | Cron/subagent completion | Harness operation state                       | Batty custom-entry receipts and native branch boundaries |
 | Crash continuation       | Not resumed by Batty                          | Not resumed by Batty                                     |
 
-**Session formats are incompatible.** Batty rejects Harness v4 files before Pi can modify them. Evaluation requires a separate Batty root with fresh sessions; this branch contains no conversion or dual-format support.
+**Session formats are incompatible.** The runtime rejects Harness v4 files. `batty --root <root> migrate-agent-sessions` explicitly converts history to v3 and backs up the original files outside the session directory. `--dry-run` validates without writing. Conversion runs with the server stopped; deployment validates, drains active work, stops the server, converts history, and starts the prepared release. The runtime does not support both formats.
 
 Coordinated deployment draining remains required. Queued prompts do not survive process replacement. Completed cron runs and detached children have persisted receipts; interrupted executions are rejected rather than replayed. Subagent tool calls allocate a fresh child identity per invocation.
 

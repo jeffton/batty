@@ -1,7 +1,11 @@
 import { type AssistantMessage, type Message } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { DurableFileChange } from "./agent-turn-file-changes";
-import { appendResultMessages } from "./session-result-delivery";
+import {
+  appendResultMessages,
+  hasDeliveredResult,
+  migratedOperationResult,
+} from "./session-result-delivery";
 import { SessionStore as SessionManager } from "./session-store";
 import { createSessionManagerWithPreviousContext } from "./previous-context";
 import type { AgentSessionController as AgentSession } from "./agent-session-controller";
@@ -128,6 +132,7 @@ export interface DetachedSubagentOptions {
 export const SUBAGENT_COMPLETION_CUSTOM_TYPE = "batty-subagent-completion";
 
 export interface DetachedSubagentResult {
+  deliveryEntryId: string;
   text: string;
   details: ToolExecutionDetails;
   messages: AgentSession["messages"];
@@ -164,7 +169,7 @@ function buildDetachedSubagentResult(
   errorOverride?: string,
   finalAssistantOverride?: AssistantMessage,
   generatedMessagesOverride?: AgentSession["messages"],
-): DetachedSubagentResult {
+): Omit<DetachedSubagentResult, "deliveryEntryId"> {
   const messages = structuredClone(subagentSession.messages) as AgentSession["messages"];
   const generatedMessages = (
     generatedMessagesOverride ?? newlyGeneratedSubagentMessages(messages, seedMessageCount)
@@ -205,6 +210,33 @@ function buildDetachedSubagentResult(
     isError: errorMessage !== undefined,
     errorMessage,
   };
+}
+
+function subagentOperationEntries(
+  branch: ReturnType<SessionManager["getBranch"]>,
+  startedTurn: boolean,
+  startingBranchLength: number,
+) {
+  if (startedTurn) return branch.slice(startingBranchLength);
+  const isCompletion = (entry: (typeof branch)[number]) =>
+    (entry.type === "custom" && entry.customType === SUBAGENT_COMPLETION_CUSTOM_TYPE) ||
+    migratedOperationResult(entry)?.kind === "run";
+  const completionIndex = branch.findLastIndex(isCompletion);
+  const completion = branch[completionIndex];
+  const migrated = completion ? migratedOperationResult(completion) : undefined;
+  if (migrated) {
+    const startIndex = branch.findIndex((entry) => entry.id === migrated.fromTipId);
+    const endIndex = branch.findIndex((entry) => entry.id === migrated.tipId);
+    return branch.slice(startIndex + 1, endIndex + 1);
+  }
+  const marker = branch.findLastIndex(
+    (entry) => entry.type === "custom" && entry.customType === SUBAGENT_SESSION_CUSTOM_TYPE,
+  );
+  const previousCompletion = branch.slice(0, completionIndex).findLastIndex(isCompletion);
+  return branch.slice(
+    Math.max(marker, previousCompletion) + 1,
+    completion ? completionIndex + 1 : undefined,
+  );
 }
 
 function isToolCallBlockForId(block: unknown, toolCallId: string): boolean {
@@ -464,44 +496,49 @@ export async function runDetachedSubagentSession(
           .slice(marker + 1)
           .some(
             (entry) =>
-              entry.type === "custom" && entry.customType === SUBAGENT_COMPLETION_CUSTOM_TYPE,
+              (entry.type === "custom" && entry.customType === SUBAGENT_COMPLETION_CUSTOM_TYPE) ||
+              migratedOperationResult(entry)?.kind === "run",
           )
       )
         throw new Error("Detached subagent operation was interrupted");
       options.onReady?.(readyDetails);
     }
     const branch = subagentSession.sessionManager.getBranch();
-    const marker = branch.findLastIndex(
-      (entry) => entry.type === "custom" && entry.customType === SUBAGENT_SESSION_CUSTOM_TYPE,
-    );
-    const generated = branch
-      .slice(options.continueSession ? startingBranchLength : marker + 1)
-      .flatMap((entry): AgentSession["messages"] => {
-        if (entry.type === "message") {
-          return [entry.message];
-        }
-        if (entry.type === "custom_message") {
-          return [
-            {
-              role: "custom",
-              customType: entry.customType,
-              content: entry.content,
-              details: entry.details,
-              display: entry.display,
-              timestamp: new Date(entry.timestamp).getTime(),
-            },
-          ];
-        }
-        return [];
-      });
+    const operationEntries = subagentOperationEntries(branch, startedTurn, startingBranchLength);
+    const generated = operationEntries.flatMap((entry): AgentSession["messages"] => {
+      if (entry.type === "message") {
+        return [entry.message];
+      }
+      if (entry.type === "custom_message") {
+        return [
+          {
+            role: "custom",
+            customType: entry.customType,
+            content: entry.content,
+            details: entry.details,
+            display: entry.display,
+            timestamp: new Date(entry.timestamp).getTime(),
+          },
+        ];
+      }
+      return [];
+    });
     const completion = branch.findLast(
-      (entry) => entry.type === "custom" && entry.customType === SUBAGENT_COMPLETION_CUSTOM_TYPE,
+      (entry) =>
+        (entry.type === "custom" && entry.customType === SUBAGENT_COMPLETION_CUSTOM_TYPE) ||
+        migratedOperationResult(entry)?.kind === "run",
     );
+    const migratedCompletion = completion ? migratedOperationResult(completion) : undefined;
     const completionError =
       !startedTurn && completion?.type === "custom"
-        ? (completion.data as { error?: string }).error
+        ? migratedCompletion
+          ? (migratedCompletion.error?.message ??
+            (migratedCompletion.status === "completed"
+              ? undefined
+              : `Subagent ${migratedCompletion.status}`))
+          : (completion.data as { error?: string }).error
         : undefined;
-    const result = buildDetachedSubagentResult(
+    const built = buildDetachedSubagentResult(
       subagentSession,
       options,
       seedMessageCount,
@@ -509,12 +546,20 @@ export async function runDetachedSubagentSession(
       observedFinalAssistant,
       generated,
     );
-    if (startedTurn) {
-      await subagentSession.sessionManager.appendCustomEntry(SUBAGENT_COMPLETION_CUSTOM_TYPE, {
-        status: result.isError ? "failed" : "completed",
-        ...(result.errorMessage ? { error: result.errorMessage } : {}),
-      });
-    }
+    const completionEntryId =
+      startedTurn || !completion
+        ? await subagentSession.sessionManager.appendCustomEntry(SUBAGENT_COMPLETION_CUSTOM_TYPE, {
+            status: built.isError ? "failed" : "completed",
+            ...(built.errorMessage ? { error: built.errorMessage } : {}),
+          })
+        : completion.id;
+    const assistantEntry = operationEntries.findLast(
+      (entry) => entry.type === "message" && entry.message.role === "assistant",
+    );
+    const result: DetachedSubagentResult = {
+      ...built,
+      deliveryEntryId: assistantEntry?.id ?? completionEntryId,
+    };
     if (options.respondIn === "session") {
       deliveringResult = true;
       if (!deps.deliverResultToParent)
@@ -528,7 +573,7 @@ export async function runDetachedSubagentSession(
   } catch (error) {
     // Delivery failures remain retryable; they must not replace the child's native result.
     if (deliveringResult || subagentSession.isStreaming) throw error;
-    const result = buildDetachedSubagentResult(
+    const built = buildDetachedSubagentResult(
       subagentSession,
       options,
       seedMessageCount,
@@ -536,12 +581,27 @@ export async function runDetachedSubagentSession(
       observedFinalAssistant,
       observedGeneratedMessages.length > 0 ? observedGeneratedMessages : undefined,
     );
-    if (startedTurn) {
-      await subagentSession.sessionManager.appendCustomEntry(SUBAGENT_COMPLETION_CUSTOM_TYPE, {
-        status: "failed",
-        error: result.errorMessage,
-      });
-    }
+    const branch = subagentSession.sessionManager.getBranch();
+    const operationEntries = subagentOperationEntries(branch, startedTurn, startingBranchLength);
+    const assistantEntry = operationEntries.findLast(
+      (entry) => entry.type === "message" && entry.message.role === "assistant",
+    );
+    const previousCompletion = operationEntries.findLast(
+      (entry) =>
+        (entry.type === "custom" && entry.customType === SUBAGENT_COMPLETION_CUSTOM_TYPE) ||
+        migratedOperationResult(entry)?.kind === "run",
+    );
+    const completionEntryId =
+      !startedTurn && previousCompletion
+        ? previousCompletion.id
+        : await subagentSession.sessionManager.appendCustomEntry(SUBAGENT_COMPLETION_CUSTOM_TYPE, {
+            status: "failed",
+            error: built.errorMessage,
+          });
+    const result: DetachedSubagentResult = {
+      ...built,
+      deliveryEntryId: assistantEntry?.id ?? completionEntryId,
+    };
     if (
       options.respondIn === "session" &&
       (observedFinalAssistant || options.deliveryMode === "prompt")
@@ -575,31 +635,39 @@ export async function deliverDetachedSubagentResult(
   const child = (result.details as SubagentToolDetails).subagent;
   const timestamp = Date.now();
   const finalAssistant = stripThinkingFromAssistantMessage(result.finalAssistant);
-  await appendResultMessages(parent, [
-    {
-      role: "custom",
-      customType: "batty-subagent-result",
-      content: `Subagent result\n\nDetached session: ${child.sessionPath}`,
-      details: { subagent: child },
-      timestamp,
-    } as unknown as Message,
-    {
-      ...(finalAssistant ?? {
-        role: "assistant",
-        api: parent.model!.api,
-        provider: parent.model!.provider,
-        model: parent.model!.id,
-      }),
-      ...(result.isError || !finalAssistant
-        ? { content: [{ type: "text", text: result.text || "(no output)" }] }
-        : {}),
-      usage: ZERO_USAGE,
-      stopReason: result.isError ? "error" : "stop",
-      ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
-      timestamp: timestamp + 1,
-    } as AssistantMessage,
-  ]);
-  return true;
+  return appendResultMessages(
+    parent,
+    [
+      {
+        role: "custom",
+        customType: "batty-subagent-result",
+        content: `Subagent result\n\nDetached session: ${child.sessionPath}`,
+        details: { subagent: child },
+        timestamp,
+      } as unknown as Message,
+      {
+        ...(finalAssistant ?? {
+          role: "assistant",
+          api: parent.model!.api,
+          provider: parent.model!.provider,
+          model: parent.model!.id,
+        }),
+        ...(result.isError || !finalAssistant
+          ? { content: [{ type: "text", text: result.text || "(no output)" }] }
+          : {}),
+        usage: ZERO_USAGE,
+        stopReason: result.isError ? "error" : "stop",
+        ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
+        timestamp: timestamp + 1,
+      } as AssistantMessage,
+    ],
+    subagentReplyId(result),
+  );
+}
+
+function subagentReplyId(result: DetachedSubagentResult): string {
+  const child = (result.details as SubagentToolDetails).subagent;
+  return `subagent:${child.sessionId}:${result.deliveryEntryId}`;
 }
 
 export async function deliverAsyncSubagentResult(
@@ -607,6 +675,11 @@ export async function deliverAsyncSubagentResult(
   result: DetachedSubagentResult,
   onAccepted?: () => void,
 ): Promise<void> {
+  const replyId = subagentReplyId(result);
+  if (hasDeliveredResult(parent, replyId)) {
+    onAccepted?.();
+    return;
+  }
   const child = (result.details as SubagentToolDetails).subagent;
   const status = result.isError ? "failed" : "completed";
   const output = result.text.trim() || "(no output)";
@@ -631,6 +704,7 @@ export async function deliverAsyncSubagentResult(
       ].join("\n"),
       display: true,
       details: {
+        battyResultReplyId: replyId,
         subagent: child,
         ...(artifacts.battyFileChanges?.length
           ? { battyFileChanges: artifacts.battyFileChanges }

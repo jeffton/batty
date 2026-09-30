@@ -37,6 +37,25 @@ function toolCall(name: string, args: JsonObject) {
 }
 
 describe("Batty native AgentSession tools", () => {
+  it("restores the migrated active tool selection on reopen", async () => {
+    const fixture = await setup(
+      ["selected-tool", "unselected-tool"].map((name) => ({
+        name,
+        label: name,
+        description: name,
+        parameters: Type.Object({}),
+        execute: async () => ({ content: [{ type: "text" as const, text: "done" }], details: {} }),
+      })),
+    );
+    await fixture.session.sessionManager.appendCustomEntry("batty-agent-session-migration", {
+      configuration: { activeToolNames: ["read", "codemode", "selected-tool"] },
+    });
+    const session = await fixture.reopen();
+    expect(session.sdk.getActiveToolNames()).toContain("read");
+    expect(session.sdk.getActiveToolNames()).toContain("codemode");
+    expect(session.sdk.getActiveToolNames()).toContain("selected-tool");
+    expect(session.sdk.getActiveToolNames()).not.toContain("unselected-tool");
+  });
   it.each(["write", "codemode"])(
     "persists completed writes when %s is cancelled during filesystem execution",
     async (name) => {

@@ -44,6 +44,8 @@ function Remove-Junction([string]$path) {
 }
 
 $activationStarted = $false
+$sessionMigrationOccurred = $false
+$sessionMigrationPotentiallyConverted = $false
 $previousReleaseDir = $null
 $currentDir = Join-Path $InstallRoot "current"
 
@@ -70,12 +72,21 @@ try {
     $previousReleaseDir = $current.Target
   }
 
-  $activationStarted = $true
   if ((Get-Service -Name Batty).Status -ne "Stopped") {
     Stop-Service -Name Batty
     (Get-Service -Name Batty).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(30))
   }
 
+  $sessionMigrationPotentiallyConverted = $true
+  $migrationOutput = & (Get-Command node).Source $cliPath --root $BattyRoot migrate-agent-sessions
+  if ($LASTEXITCODE -ne 0) {
+    throw "Agent session migration failed with exit code $LASTEXITCODE."
+  }
+  $migrationSummary = ($migrationOutput -join [Environment]::NewLine) | ConvertFrom-Json
+  $sessionMigrationOccurred = $migrationSummary.migratedFiles -gt 0
+  $sessionMigrationPotentiallyConverted = $sessionMigrationOccurred
+
+  $activationStarted = $true
   if (Test-Path $currentDir) {
     Remove-Junction $currentDir
   }
@@ -96,7 +107,7 @@ try {
   Write-Host "Activated Batty release $ReleaseName"
 } catch {
   $deploymentError = $_
-  if ($activationStarted -and $previousReleaseDir) {
+  if ($activationStarted -and $previousReleaseDir -and -not $sessionMigrationOccurred) {
     try {
       if ((Get-Service -Name Batty).Status -ne "Stopped") {
         Stop-Service -Name Batty
@@ -116,6 +127,20 @@ try {
       Write-Warning "Deployment failed; restored '$previousReleaseDir'."
     } catch {
       throw "Deployment failed: $deploymentError Rollback also failed: $_"
+    }
+  } elseif ($sessionMigrationPotentiallyConverted) {
+    try {
+      if ((Get-Service -Name Batty).Status -ne "Stopped") {
+        Stop-Service -Name Batty
+        (Get-Service -Name Batty).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(30))
+      }
+      if (Test-Path $currentDir) {
+        Remove-Junction $currentDir
+      }
+      New-Item -ItemType Junction -Path $currentDir -Target $releaseDir | Out-Null
+      Write-Warning "Deployment failed after session conversion; selected the prepared release and left the service stopped."
+    } catch {
+      throw "Deployment failed: $deploymentError Selecting the prepared release also failed: $_"
     }
   }
   throw $deploymentError

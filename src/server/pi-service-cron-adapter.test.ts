@@ -1,7 +1,17 @@
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { createAgentSessionFixture } from "./agent-session-test-fixture";
+import { MIGRATED_OPERATION_RESULT_CUSTOM_TYPE } from "./session-result-delivery";
+import { buildCronRuntimeNotice } from "./runtime-notices";
 import type { AgentSessionController as AgentSession } from "./agent-session-controller";
 import type { WebSession } from "./pi-service-types";
-import { deliverCronFollowup, runCronJobSession } from "./pi-service-cron-adapter";
+import {
+  deliverCronFollowup,
+  deliverCronJobRun,
+  executeCronOperation,
+  getCronExecutionResult,
+  runCronJobSession,
+} from "./pi-service-cron-adapter";
 
 const ZERO_USAGE = {
   input: 0,
@@ -61,6 +71,7 @@ function createSession(
           parentId: Number(id) > 0 ? String(Number(id) - 1) : null,
         }),
       },
+      appendCustomEntry: vi.fn(async () => "receipt"),
       async appendMessage(message: AgentMessage) {
         messages.push(message);
       },
@@ -91,6 +102,118 @@ function createWebSession(
     ephemeral: false,
   } as unknown as WebSession;
 }
+
+const fixtureCleanups: Array<() => Promise<void>> = [];
+afterEach(async () => {
+  for (const cleanup of fixtureCleanups.splice(0)) await cleanup();
+});
+
+describe("migrated cron results", () => {
+  it("delivers only the migrated run's reply and deduplicates after parent reopen", async () => {
+    const parent = await createAgentSessionFixture();
+    const child = await createAgentSessionFixture();
+    fixtureCleanups.push(parent.cleanup, child.cleanup);
+    const store = child.session.sessionManager;
+    await store.appendCustomEntry("batty-cron-run-session", {
+      version: 1,
+      kind: "run",
+      runId: "migrated-run",
+      jobId: "job",
+      parentSessionId: parent.session.sessionId,
+    });
+    await store.appendMessage(fauxAssistantMessage("Inherited reply"));
+    const fromTipId = store.getLeafId();
+    await store.appendMessage(fauxAssistantMessage("Migrated cron reply"));
+    await store.appendCustomEntry(MIGRATED_OPERATION_RESULT_CUSTOM_TYPE, {
+      operationId: "migrated-run",
+      kind: "run",
+      status: "completed",
+      fromTipId,
+      tipId: store.getLeafId(),
+      startedAt: 1,
+      endedAt: 2,
+    });
+    await child.reopen();
+    const context = {
+      openSessionForDelivery: async () => ({ state: { id: "child" }, owned: false }),
+      openSessionById: async () => ({ id: "parent" }),
+      requireSession: (id: string) => ({
+        id,
+        session: id === "parent" ? parent.session : child.session,
+        workspace: parent.workspace,
+      }),
+      runSubagentSerial: async (_id: string, run: () => Promise<void>) => run(),
+      getState: () => ({ id: "parent" }),
+      publishReset: vi.fn(),
+      notifyWorkspaceUpdated: async () => {},
+    } as unknown as Parameters<typeof deliverCronJobRun>[0];
+    const job = {
+      runId: "migrated-run",
+      jobId: "job",
+      workspace: parent.workspace,
+      sessionId: child.session.sessionId,
+      sessionPath: child.session.sessionFile,
+      prompt: "Task",
+      scheduleLabel: "daily",
+      session: { kind: "daily-detached" },
+    } as Parameters<typeof deliverCronJobRun>[1];
+    const delivery = { parentSessionId: parent.session.sessionId } as Parameters<
+      typeof deliverCronJobRun
+    >[2];
+    await deliverCronJobRun(context, job, delivery);
+    await parent.reopen();
+    await deliverCronJobRun(context, job, delivery);
+    expect(parent.session.messages.filter((message) => message.role === "assistant")).toEqual([
+      expect.objectContaining({ content: [{ type: "text", text: "Migrated cron reply" }] }),
+    ]);
+    expect(parent.faux.state.callCount + child.faux.state.callCount).toBe(0);
+  });
+  it.each(["completed", "failed", "aborted", "declined"])(
+    "recognizes migrated %s run boundaries after reopen",
+    async (status) => {
+      const fixture = await createAgentSessionFixture();
+      fixtureCleanups.push(fixture.cleanup);
+      const store = fixture.session.sessionManager;
+      await store.appendMessage(fauxAssistantMessage("Earlier reply"));
+      const startEntryId = store.getLeafId();
+      await store.appendMessage(fauxAssistantMessage("Cron answer"));
+      const endEntryId = store.getLeafId();
+      await store.appendCustomEntry(MIGRATED_OPERATION_RESULT_CUSTOM_TYPE, {
+        operationId: "imported-run",
+        kind: "run",
+        status,
+        fromTipId: startEntryId,
+        tipId: endEntryId,
+        startedAt: 1,
+        endedAt: 2,
+        ...(status === "failed" ? { error: { code: "provider", message: "Migrated error" } } : {}),
+      });
+      await fixture.reopen();
+      expect(getCronExecutionResult(fixture.session, "imported-run")).toEqual({
+        runId: "imported-run",
+        status: status === "declined" ? "failed" : status,
+        startEntryId,
+        endEntryId,
+        ...(status === "failed" ? { error: "Migrated error" } : {}),
+      });
+      const execution = executeCronOperation(
+        fixture.session,
+        buildCronRuntimeNotice({
+          scheduleLabel: "daily",
+          prompt: "Cron work",
+          session: { kind: "new" },
+        }),
+        "imported-run",
+      );
+      if (status === "completed") await expect(execution).resolves.toBeUndefined();
+      else
+        await expect(execution).rejects.toThrow(
+          status === "failed" ? "Migrated error" : "Cron run",
+        );
+      expect(fixture.faux.state.callCount).toBe(0);
+    },
+  );
+});
 
 describe("runCronJobSession", () => {
   it("runs detached daily cron jobs in a cron session and delivers the result to the parent", async () => {

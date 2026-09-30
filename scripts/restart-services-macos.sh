@@ -13,12 +13,13 @@ if launchctl print "${domain}/${label}" >/dev/null 2>&1; then
   if [[ "${BATTY_SKIP_DRAIN:-}" != "1" ]]; then
     "$node_path" "$install_root/current/dist/server/cli.mjs" --root "$batty_root" drain
   fi
-  launchctl kickstart -k "${domain}/${label}"
-else
-  launchctl bootstrap "$domain" "$plist"
-  launchctl enable "${domain}/${label}"
-  launchctl kickstart -k "${domain}/${label}"
+  launchctl bootout "${domain}/${label}"
 fi
+
+"$node_path" "$install_root/current/dist/server/cli.mjs" --root "$batty_root" migrate-agent-sessions
+launchctl bootstrap "$domain" "$plist"
+launchctl enable "${domain}/${label}"
+launchctl kickstart -k "${domain}/${label}"
 
 for ((attempt = 1; attempt <= 30; attempt++)); do
   if curl --fail --silent --head --max-time 2 "http://127.0.0.1:${backend_port}/healthz" >/dev/null; then

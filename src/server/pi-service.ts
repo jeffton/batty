@@ -810,6 +810,11 @@ export class PiService {
     if (!effectiveModel) throw new Error("No model available for subagent");
 
     const previous = this.subagentOperations.get(subagentSessionId);
+    if (!queued && (previous || live?.isStreaming)) {
+      throw new Error(
+        "Subagent is still running. Use await to wait, steer to add instructions, or queue to schedule another task.",
+      );
+    }
     let ready!: (value: { text: string; details: ToolExecutionDetails; isError: boolean }) => void;
     let failed!: (error: unknown) => void;
     const started = new Promise<{ text: string; details: ToolExecutionDetails; isError: boolean }>(
@@ -889,6 +894,40 @@ export class PiService {
       };
     }
     return started;
+  }
+
+  private async awaitSubagent(
+    workspace: WorkspaceInfo,
+    parentSessionId: string,
+    subagentSessionId: string,
+  ): Promise<boolean> {
+    const manager = await SessionManager.existing(
+      workspace.path,
+      workspaceSessionDir(this.config, workspace.id),
+      subagentSessionId,
+    );
+    if (!manager) throw new Error(`Subagent session not found: ${subagentSessionId}`);
+    const marker = manager
+      .getEntries()
+      .findLast(
+        (entry) => entry.type === "custom" && entry.customType === SUBAGENT_SESSION_CUSTOM_TYPE,
+      );
+    const data =
+      marker?.type === "custom"
+        ? (marker.data as { parentSessionId?: string; deliveryMode?: string })
+        : undefined;
+    if (data?.parentSessionId !== parentSessionId)
+      throw new Error(`Subagent does not belong to this session: ${subagentSessionId}`);
+    if (!(this.subagentOperationAsync.get(subagentSessionId) ?? data.deliveryMode === "prompt"))
+      throw new Error("Only async subagents can be awaited");
+    // No async boundary between checking completion and requesting the handoff.
+    // Operations include pending result admission and queued child turns.
+    const pending =
+      this.subagentOperations.has(subagentSessionId) ||
+      this.liveSessions.get(subagentSessionId)?.session.isStreaming === true;
+    if (!pending) return false;
+    this.requireSession(parentSessionId).session.requestTurnEnd();
+    return true;
   }
 
   private requireRunningOwnedSubagent(
@@ -1212,6 +1251,8 @@ export class PiService {
               this.resolveSubagentDefaults(sessionId, ctx),
             runDetachedSubagentSession: (request) => this.runDetachedSubagentSession(request),
             startDetachedSubagentSession: (request) => this.startDetachedSubagentSession(request),
+            awaitSubagent: (parentSessionId, subagentSessionId) =>
+              this.awaitSubagent(workspace, parentSessionId, subagentSessionId),
             stopSubagent: (parentSessionId, subagentSessionId) =>
               this.stopSubagent(parentSessionId, subagentSessionId),
             steerSubagent: (parentSessionId, subagentSessionId, prompt) =>

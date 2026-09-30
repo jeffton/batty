@@ -202,6 +202,7 @@ export interface SubagentToolDependencies extends CommonToolDependencies {
   startDetachedSubagentSession: (
     request: DetachedSubagentRequest,
   ) => Promise<DetachedSubagentResult>;
+  awaitSubagent: (parentSessionId: string, subagentSessionId: string) => Promise<boolean>;
   stopSubagent: (parentSessionId: string, subagentSessionId: string) => Promise<void>;
   steerSubagent: (
     parentSessionId: string,
@@ -230,6 +231,7 @@ export function createSubagentTool({
   resolveSubagentDefaults,
   runDetachedSubagentSession,
   startDetachedSubagentSession,
+  awaitSubagent,
   stopSubagent,
   steerSubagent,
   continueSubagent,
@@ -238,22 +240,39 @@ export function createSubagentTool({
     name: SUBAGENT_TOOL_NAME,
     label: "Subagent",
     description:
-      "Run a subagent, queue a new turn for an async subagent, resume a finished subagent, steer its active turn, or stop it. Async replies are delivered to the parent session.",
+      "Run a subagent, await its async reply, queue a new turn, resume a finished subagent, steer its active turn, or stop it. Async replies are delivered to the parent session.",
     promptSnippet:
-      "Run, queue, resume, stop, or steer a subagent by session id. Queue preserves the current reply before starting the next turn.",
+      "Run, await, queue, resume, stop, or steer a subagent by session id. Await yields the parent turn; queue preserves the current reply before starting the next turn.",
     promptGuidelines: [
       "Use this tool to delegate focused work to another agent without leaving the current session.",
       "Use action=run to start a subagent. Prefer omitting model and effort so it inherits the current session settings.",
       'Subagents start fresh by default. Set includePreviousContext=true for full context with prompt-cache reuse, or includePreviousContext="chat-only" for only user and assistant messages without transcript details.',
-      "Set async=true to continue working while the subagent runs. Its result will automatically start or steer a later parent turn. If you are only waiting, end your turn; resume starts another task, not a wait for the result.",
+      "Set async=true to continue working while the subagent runs. Its result will automatically start or steer a later parent turn. If you are only waiting, use action=await with sessionId to safely end your turn until its reply arrives. If it has already finished, await returns without ending your turn.",
       "Use action=steer with sessionId and prompt to add instructions to the running turn.",
       "Use action=queue with sessionId and prompt for a running async subagent. Its current reply reaches the parent before queued work begins; the queued reply is delivered later.",
-      "Use action=resume with sessionId and prompt for a finished subagent. Set async=true to deliver its reply to the parent later, or omit it to wait for the reply. Queue and resume tolerate the subagent finishing during the request.",
+      "Use action=resume with sessionId and prompt for a finished subagent. Set async=true to deliver its reply to the parent later, or omit it to wait for the reply. Resume rejects running subagents; it starts another task and cannot steer, rush, or wait for an active turn.",
       "Use action=stop with sessionId to stop a running subagent.",
     ],
     parameters: SubagentToolSchema,
     execute: async (toolCallId, params, signal, onUpdate, ctx) => {
       const parentSessionId = ctx.sessionManager.getSessionId();
+      if (params.action === "await") {
+        const subagentSessionId = String(params.sessionId ?? "").trim();
+        if (!subagentSessionId) throw new Error("sessionId is required to await a subagent");
+        const waiting = await awaitSubagent(parentSessionId, subagentSessionId);
+        return {
+          content: [
+            {
+              type: "text",
+              text: waiting
+                ? `Awaiting subagent ${subagentSessionId}. The parent turn will end; its reply will resume the session.`
+                : `Subagent ${subagentSessionId} has already finished. Continue with its delivered reply.`,
+            },
+          ],
+          details: {},
+          isError: false,
+        };
+      }
       if (params.action === "stop") {
         const subagentSessionId = String(params.sessionId ?? "").trim();
         if (!subagentSessionId) throw new Error("sessionId is required to stop a subagent");

@@ -389,6 +389,7 @@ describe("createSubagentTool", () => {
       resolveSubagentDefaults: () => ({ modelId: "openai/gpt-5", thinkingLevel: "medium" }),
       runDetachedSubagentSession,
       startDetachedSubagentSession: vi.fn(),
+      awaitSubagent: vi.fn(),
       stopSubagent: vi.fn(),
       steerSubagent: vi.fn(),
       continueSubagent: vi.fn(),
@@ -447,6 +448,7 @@ describe("createSubagentTool", () => {
       resolveSubagentDefaults: () => ({ modelId: "openai/gpt-5", thinkingLevel: "medium" }),
       runDetachedSubagentSession,
       startDetachedSubagentSession,
+      awaitSubagent: vi.fn(),
       stopSubagent: vi.fn(),
       steerSubagent: vi.fn(),
       continueSubagent: vi.fn(),
@@ -488,6 +490,7 @@ describe("createSubagentTool", () => {
       resolveSubagentDefaults: () => ({ modelId: "openai/gpt-5", thinkingLevel: "medium" }),
       runDetachedSubagentSession,
       startDetachedSubagentSession: vi.fn(),
+      awaitSubagent: vi.fn(),
       stopSubagent: vi.fn(),
       steerSubagent: vi.fn(),
       continueSubagent: vi.fn(),
@@ -514,6 +517,7 @@ describe("createSubagentTool", () => {
       resolveSubagentDefaults: () => ({ modelId: "openai/gpt-5", thinkingLevel: "medium" }),
       runDetachedSubagentSession,
       startDetachedSubagentSession: vi.fn(),
+      awaitSubagent: vi.fn(),
       stopSubagent: vi.fn(),
       steerSubagent: vi.fn(),
       continueSubagent: vi.fn(),
@@ -537,6 +541,7 @@ describe("createSubagentTool", () => {
       config: {} as any,
       resolveSubagentDefaults: () => ({ modelId: "openai/gpt-5", thinkingLevel: "medium" }),
       startDetachedSubagentSession: vi.fn(),
+      awaitSubagent: vi.fn(),
       stopSubagent: vi.fn(),
       steerSubagent: vi.fn(),
       continueSubagent: vi.fn(),
@@ -572,6 +577,38 @@ describe("createSubagentTool", () => {
     expect(result).not.toHaveProperty("terminate");
   });
 
+  it.each([true, false])("awaits an async subagent (pending=%s)", async (pending) => {
+    const awaitSubagent = vi.fn(async () => pending);
+    const tool = createSubagentTool({
+      workspace: { id: "batty", path: "/root/github/batty" } as any,
+      config: {} as any,
+      resolveSubagentDefaults: vi.fn(),
+      runDetachedSubagentSession: vi.fn(),
+      startDetachedSubagentSession: vi.fn(),
+      awaitSubagent,
+      stopSubagent: vi.fn(),
+      steerSubagent: vi.fn(),
+      continueSubagent: vi.fn(),
+    });
+    await expect(
+      tool.execute("await", { action: "await" }, undefined, undefined, createContext()),
+    ).rejects.toThrow("sessionId is required");
+    const result = await tool.execute(
+      "await",
+      { action: "await", sessionId: "child" },
+      undefined,
+      undefined,
+      createContext(),
+    );
+    expect(awaitSubagent).toHaveBeenCalledWith("parent-session", "child");
+    expect(result.content).toEqual([
+      {
+        type: "text",
+        text: expect.stringContaining(pending ? "parent turn will end" : "already finished"),
+      },
+    ]);
+  });
+
   it("stops a running async subagent by session id", async () => {
     const stopSubagent = vi.fn(async () => undefined);
     const tool = createSubagentTool({
@@ -580,6 +617,7 @@ describe("createSubagentTool", () => {
       resolveSubagentDefaults: vi.fn(),
       runDetachedSubagentSession: vi.fn(),
       startDetachedSubagentSession: vi.fn(),
+      awaitSubagent: vi.fn(),
       stopSubagent,
       steerSubagent: vi.fn(),
       continueSubagent: vi.fn(),
@@ -613,6 +651,7 @@ describe("createSubagentTool", () => {
       resolveSubagentDefaults: vi.fn(),
       runDetachedSubagentSession: vi.fn(),
       startDetachedSubagentSession: vi.fn(),
+      awaitSubagent: vi.fn(),
       stopSubagent: vi.fn(),
       steerSubagent: vi.fn(),
       continueSubagent,
@@ -648,6 +687,7 @@ describe("createSubagentTool", () => {
       resolveSubagentDefaults: vi.fn(),
       runDetachedSubagentSession: vi.fn(),
       startDetachedSubagentSession: vi.fn(),
+      awaitSubagent: vi.fn(),
       stopSubagent: vi.fn(),
       steerSubagent,
       continueSubagent: vi.fn(),
@@ -712,6 +752,7 @@ describe("createSubagentTool", () => {
       resolveSubagentDefaults: () => ({ modelId: "openai/gpt-5", thinkingLevel: "medium" }),
       runDetachedSubagentSession,
       startDetachedSubagentSession: vi.fn(),
+      awaitSubagent: vi.fn(),
       stopSubagent: vi.fn(),
       steerSubagent: vi.fn(),
       continueSubagent: vi.fn(),

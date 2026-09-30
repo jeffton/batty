@@ -35,6 +35,8 @@ export class AgentSessionController {
   private readonly promptPreflights = new Set<AbortController>();
   private admission = Promise.resolve();
   private admitting = false;
+  private endTurnRequested = false;
+  private endingTurn = false;
   private closing?: Promise<void>;
   private readonly unsubscribe: () => void;
 
@@ -42,6 +44,16 @@ export class AgentSessionController {
     readonly sdk: AgentSession,
     readonly sessionManager: SessionStore,
   ) {
+    const finishTurn = sdk.agent.finishTurn;
+    sdk.agent.finishTurn = async (turn, signal) => {
+      const decision = await finishTurn?.(turn, signal);
+      if (!this.endTurnRequested) return decision ?? undefined;
+      this.endTurnRequested = false;
+      // Already-admitted input must be consumed, not stranded by the handoff.
+      if (this.admitting || sdk.pendingMessageCount > 0) return decision ?? undefined;
+      this.endingTurn = true;
+      return { action: "end" };
+    };
     this.unsubscribe = sdk.subscribe((event) => {
       if (event.type === "tool_execution_start") this.tools.set(event.toolCallId, event);
       if (event.type === "tool_execution_update") {
@@ -49,7 +61,11 @@ export class AgentSessionController {
         if (tool) tool.partialResult = event.partialResult;
       }
       if (event.type === "tool_execution_end") this.tools.delete(event.toolCallId);
-      if (event.type === "agent_settled") this.tools.clear();
+      if (event.type === "agent_settled") {
+        this.tools.clear();
+        this.endTurnRequested = false;
+        this.endingTurn = false;
+      }
       // Pi emits message_end immediately before persisting it. Observe the completed
       // synchronous dispatch so UI projections and summaries see the durable entry.
       const delivery = Promise.resolve().then(() =>
@@ -155,6 +171,8 @@ export class AgentSessionController {
       release = resolve;
     });
     await previous;
+    // After the end decision Pi skips queue polling. Admit new input after idle.
+    if (this.endingTurn) await this.sdk.waitForIdle();
     this.admitting = true;
     let accepted = false;
     const finishAdmission = () => {
@@ -206,6 +224,11 @@ export class AgentSessionController {
     await this.flushEvents();
   }
 
+  /** End at the next completed tool batch without aborting its results. */
+  requestTurnEnd(): void {
+    this.endTurnRequested = true;
+  }
+
   async waitForIdle(): Promise<void> {
     await this.sdk.waitForIdle();
     await this.flushEvents();
@@ -237,6 +260,10 @@ export class AgentSessionController {
   }
 
   async queueCustomSteeringMessage(message: CustomInput): Promise<void> {
+    if (this.endingTurn) {
+      await this.sendCustomMessage(message, { triggerTurn: true, steerWhenBusy: true });
+      return;
+    }
     this.sdk.agent.steer({ role: "custom", ...message, timestamp: Date.now() } as AgentMessage);
   }
 

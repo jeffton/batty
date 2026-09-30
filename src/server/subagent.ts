@@ -16,7 +16,7 @@ export const SUBAGENT_EFFORT_LEVELS = [
 ] as const;
 export type SubagentEffort = (typeof SUBAGENT_EFFORT_LEVELS)[number];
 
-export type SubagentToolAction = "run" | "stop" | "steer";
+export type SubagentToolAction = "run" | "await" | "stop" | "steer" | "queue" | "resume";
 
 export interface SubagentToolInput {
   action: SubagentToolAction;

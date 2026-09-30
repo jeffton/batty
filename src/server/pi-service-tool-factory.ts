@@ -59,6 +59,7 @@ export type PiServiceToolFactoryContext = {
   startDetachedSubagentSession: (
     request: DetachedSubagentToolRequest,
   ) => Promise<DetachedSubagentToolResult>;
+  awaitSubagent: SubagentToolDependencies["awaitSubagent"];
   stopSubagent: (parentSessionId: string, subagentSessionId: string) => Promise<void>;
   steerSubagent: (
     parentSessionId: string,
@@ -79,6 +80,7 @@ export function createPiServiceTools(
       resolveSubagentDefaults: context.resolveSubagentDefaults,
       runDetachedSubagentSession: context.runDetachedSubagentSession,
       startDetachedSubagentSession: context.startDetachedSubagentSession,
+      awaitSubagent: context.awaitSubagent,
       stopSubagent: context.stopSubagent,
       steerSubagent: context.steerSubagent,
       continueSubagent: context.continueSubagent,

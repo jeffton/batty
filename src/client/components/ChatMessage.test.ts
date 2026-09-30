@@ -568,6 +568,51 @@ describe("ChatMessage", () => {
     );
   });
 
+  it("renders markdown in async subagent results without session metadata", () => {
+    const message: Extract<UiMessage, { role: "custom" }> = {
+      id: "custom-subagent-markdown",
+      role: "custom",
+      timestamp: 4,
+      customType: `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:subagent`,
+      text: [
+        "Async subagent completed.",
+        "",
+        "Result:",
+        "**Summary:** A *formatted* response.",
+        "",
+        "- [Source](https://example.com/source)",
+        "",
+        "```ts",
+        "const done = true;",
+        "```",
+      ].join("\n"),
+    };
+
+    const wrapper = mount(ChatMessage, { props: { message, allowSessionPopovers: false } });
+    const markdown = wrapper.find(".message__system-bubble .markdown-body");
+
+    expect(markdown.find("strong").text()).toBe("Summary:");
+    expect(markdown.find("em").text()).toBe("formatted");
+    expect(markdown.find("ul li a").attributes("href")).toBe("https://example.com/source");
+    expect(markdown.find("pre code").text()).toBe("const done = true;");
+    expect(wrapper.find(".message__notice-btn").exists()).toBe(false);
+  });
+
+  it("keeps other custom notices as plain text", () => {
+    const message: Extract<UiMessage, { role: "custom" }> = {
+      id: "custom-plain",
+      role: "custom",
+      timestamp: 4,
+      customType: `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:cron`,
+      text: "Check **status**.",
+    };
+
+    const wrapper = mount(ChatMessage, { props: { message } });
+
+    expect(wrapper.text()).toContain("Check **status**.");
+    expect(wrapper.find(".markdown-body").exists()).toBe(false);
+  });
+
   it("hides cron session buttons when session popovers are disabled", () => {
     const message: Extract<UiMessage, { role: "custom" }> = {
       id: "custom-cron-1",

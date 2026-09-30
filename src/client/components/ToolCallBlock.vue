@@ -586,7 +586,10 @@ const genericEntries = computed(() => {
         <CodeBlock
           v-if="
             block.type === 'text' &&
-            (isPiShellToolName(props.name) || ['find', 'grep'].includes(props.name))
+            (isPiShellToolName(props.name) ||
+              ['find', 'grep'].includes(props.name) ||
+              (props.name === 'subagent' &&
+                (subagentRespondIn !== 'tool-call' || subagentDetails?.async === true)))
           "
           :code="block.text"
           :language="isPiShellToolName(props.name) ? shellLanguage : undefined"

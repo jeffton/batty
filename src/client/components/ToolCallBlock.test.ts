@@ -583,6 +583,8 @@ describe("ToolCallBlock", () => {
 
     expect(wrapper.text()).toContain("Started in /tmp/subagent-123.jsonl");
     expect(wrapper.text()).toContain("Open session");
+    expect(wrapper.find(".code-block code").text()).toBe("Started in /tmp/subagent-123.jsonl");
+    expect(wrapper.find(".markdown-body").exists()).toBe(false);
   });
 
   it("hides subagent session buttons when session popovers are disabled", () => {
@@ -608,6 +610,25 @@ describe("ToolCallBlock", () => {
     expect(wrapper.text()).not.toContain("Open session");
     expect(wrapper.find(".tool-call__subagent-btn").exists()).toBe(false);
   });
+
+  it.each(["await", "queue", "steer", "stop"])(
+    "renders subagent %s acknowledgements as monospaced text",
+    (action) => {
+      const text = "Session ID: child_123\nStatus: **running**";
+      const wrapper = mount(ToolCallBlock, {
+        props: {
+          name: "subagent",
+          arguments: { action, sessionId: "child_123" },
+          resultBlocks: [{ type: "text", text }],
+          resultDetails: {},
+          status: "success",
+        },
+      });
+
+      expect(wrapper.find(".code-block code").text()).toBe(text);
+      expect(wrapper.find(".markdown-body").exists()).toBe(false);
+    },
+  );
 
   it("renders tool-call mode subagent responses as markdown", () => {
     const wrapper = mount(ToolCallBlock, {

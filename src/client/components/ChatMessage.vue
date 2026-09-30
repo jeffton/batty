@@ -344,7 +344,11 @@ onBeforeUnmount(() => {
           <Cog :size="16" />
         </span>
         <div class="message__text">
-          {{ props.message.text }}
+          <MarkdownBlock
+            v-if="props.message.customType === `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:subagent`"
+            :text="props.message.text"
+          />
+          <template v-else>{{ props.message.text }}</template>
           <div
             v-if="props.allowSessionPopovers && cronNoticeDetails && cronNoticePopoverId"
             class="message__notice-actions"

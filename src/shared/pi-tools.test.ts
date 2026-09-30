@@ -15,6 +15,7 @@ describe("tool output truncation directions", () => {
       write: "tail",
       read: "head",
       cron: "head",
+      codemode: "head",
       "web-search": "head",
       browser: "head",
       grep: "head",

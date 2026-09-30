@@ -82,6 +82,34 @@ describe("suppressAgentCompletionNotification", () => {
     expect(suppressAgentCompletionNotification(session)).toBe(true);
   });
 
+  it.each(["", "Waiting for the child."])("suppresses tool-use handoffs with text %j", (text) => {
+    const session = createSession(text);
+    const assistant = session.messages[0]!;
+    if (assistant.role !== "assistant") throw new Error("Expected assistant");
+    assistant.stopReason = "toolUse";
+    session.messages.push({
+      id: "await-result",
+      role: "toolResult",
+      timestamp: 101,
+      toolCallId: "await-child",
+      toolName: "subagent",
+      blocks: [{ type: "text", text: "Awaiting subagent child." }],
+      isError: false,
+    });
+
+    expect(suppressAgentCompletionNotification(session)).toBe(true);
+
+    session.messages.push({
+      id: "final-reply",
+      role: "assistant",
+      turnPhase: "final",
+      timestamp: 102,
+      stopReason: "stop",
+      blocks: [{ type: "text", text: "The child finished." }],
+    });
+    expect(suppressAgentCompletionNotification(session)).toBe(false);
+  });
+
   it("suppresses notifications for exact NO_REPLY assistant messages", () => {
     expect(suppressAgentCompletionNotification(createSession(" NO_REPLY\n"))).toBe(true);
   });

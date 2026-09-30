@@ -85,6 +85,10 @@ export function suppressAgentCompletionNotification(session: SessionState): bool
     return true;
   }
 
+  if (latestAssistantMessage(session)?.stopReason === "toolUse") {
+    return true;
+  }
+
   const latestMessage = session.messages.at(-1);
   if (latestMessage?.role !== "assistant") {
     return false;

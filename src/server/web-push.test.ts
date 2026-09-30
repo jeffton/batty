@@ -187,6 +187,49 @@ describe("WebPushService", () => {
     expect(webPushMocks.sendNotification).not.toHaveBeenCalled();
   });
 
+  it("does not notify for an await handoff but notifies for its eventual reply", async () => {
+    const service = new WebPushService(createConfig(tempDir));
+    await service.initialize();
+    await service.upsertSubscription({
+      endpoint: "https://push.example/subscription",
+      expirationTime: null,
+      keys: { p256dh: "p256dh_key", auth: "auth-key" },
+    });
+    const session = createSession();
+    session.messages = [
+      {
+        id: "await-call",
+        role: "assistant",
+        turnPhase: "intermediate",
+        timestamp: Date.now(),
+        stopReason: "toolUse",
+        blocks: [],
+      },
+      {
+        id: "await-result",
+        role: "toolResult",
+        timestamp: Date.now() + 1,
+        toolCallId: "await-child",
+        toolName: "subagent",
+        blocks: [{ type: "text", text: "Awaiting subagent child." }],
+        isError: false,
+      },
+    ];
+    await service.notifyAgentCompleted(session);
+    expect(webPushMocks.sendNotification).not.toHaveBeenCalled();
+
+    session.messages.push({
+      id: "final-reply",
+      role: "assistant",
+      turnPhase: "final",
+      timestamp: Date.now() + 2,
+      stopReason: "stop",
+      blocks: [{ type: "text", text: "The child finished." }],
+    });
+    await service.notifyAgentCompleted(session);
+    expect(webPushMocks.sendNotification).toHaveBeenCalledOnce();
+  });
+
   it("does not send a push notification for NO_REPLY completions", async () => {
     const service = new WebPushService(createConfig(tempDir));
     await service.initialize();

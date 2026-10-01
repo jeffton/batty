@@ -39,6 +39,25 @@ test("MCP layout, inline editing and relevant connection actions", async ({ page
       },
     });
   });
+  const authAttempt = {
+    attemptId: "auth-1",
+    workspaceId: "batty",
+    serverName: "f2docs",
+    status: "pending",
+    prompt: "Sign in to f2docs",
+    authorizationUrl: "https://docs.example/authorize",
+  };
+  await page.route("**/api/workspaces/batty/mcp/f2docs/login", (route) =>
+    route.fulfill({ json: authAttempt }),
+  );
+  await page.route("**/api/mcp/auth/auth-1", (route) =>
+    route.fulfill({
+      json: {
+        ...authAttempt,
+        status: route.request().method() === "POST" ? "completed" : "pending",
+      },
+    }),
+  );
   await page.goto(`/workspaces/batty?e2e=${Date.now()}`);
   await page.getByRole("button", { name: /new session/i }).click();
   await page.getByRole("button", { name: "MCPs, skills and tools", exact: true }).click();
@@ -60,6 +79,15 @@ test("MCP layout, inline editing and relevant connection actions", async ({ page
     Math.abs(detailsBox.y + detailsBox.height / 2 - reconnectBox.y - reconnectBox.height / 2),
   ).toBeLessThan(2);
   await page.screenshot({ path: testInfo.outputPath("mcp-list-light.png") });
+  await cards.nth(1).getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(cards.nth(1).locator(".mcp-settings__auth")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("mcp-sign-in-light.png") });
+  await cards
+    .nth(1)
+    .getByRole("textbox", { name: "MCP OAuth callback URL" })
+    .fill("https://callback.example/?code=test");
+  await cards.nth(1).getByRole("button", { name: "Complete sign-in", exact: true }).click();
+  await expect(cards.nth(1).locator(".mcp-settings__auth")).toHaveCount(0);
   await page.getByRole("button", { name: "Edit f2docs", exact: true }).click();
   await expect(
     cards.nth(1).getByRole("textbox", { name: "MCP server configuration" }),

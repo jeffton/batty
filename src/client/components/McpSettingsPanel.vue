@@ -142,6 +142,7 @@ function invalidateStatus(workspaceId?: string): void {
 }
 
 async function refreshAfterAuth(workspaceId: string, requestGeneration: number): Promise<void> {
+  clearAttempt();
   await load();
   if (disposed || requestGeneration !== workspaceGeneration || workspaceId === props.workspaceId)
     return;
@@ -415,6 +416,7 @@ async function login(server: ScopedServer): Promise<void> {
     attempt.value = started;
     callbackInput.value = "";
     if (started.status === "pending") schedulePoll(started.attemptId, workspaceGeneration);
+    else if (started.status === "completed") await refreshAfterAuth(workspaceId, requestGeneration);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
   }
@@ -527,6 +529,7 @@ onBeforeUnmount(() => {
           </label>
           <button
             v-if="workspaceStatus(server)?.tools.length"
+            class="mcp-settings__secondary"
             type="button"
             :popovertarget="toolsPopoverId(server)"
             :aria-label="`Show tools for ${server.name}`"
@@ -658,7 +661,9 @@ onBeforeUnmount(() => {
           <button type="button" :disabled="!callbackInput.trim()" @click="completeLogin">
             Complete sign-in
           </button>
-          <button type="button" @click="cancelLogin">Cancel sign-in</button>
+          <button type="button" class="mcp-settings__secondary" @click="cancelLogin">
+            Cancel sign-in
+          </button>
         </div>
         <div v-if="attempt?.error" class="mcp-settings__error" role="alert">
           {{ attempt.error }}
@@ -845,6 +850,10 @@ onBeforeUnmount(() => {
   font: inherit;
   font-size: 0.78rem;
   cursor: pointer;
+}
+.mcp-settings button.mcp-settings__secondary {
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
 }
 .mcp-settings button.mcp-settings__icon-btn {
   background: transparent;

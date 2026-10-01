@@ -240,8 +240,113 @@ describe("McpSettingsPanel OAuth and stale responses", () => {
         }),
       }),
     );
+    expect(wrapper.find(".mcp-settings__auth").exists()).toBe(false);
     wrapper.unmount();
   });
+
+  it.each(["poll", "callback", "start"] as const)(
+    "closes the sign-in panel on %s success before refreshing connection status",
+    async (completion) => {
+      vi.useFakeTimers();
+      const server: McpSettingsResponse["servers"][number] = {
+        name: "successful-login",
+        config: { type: "http", url: "https://mcp.example.test", oauth: {} },
+        scope: "global",
+      };
+      const auth: McpAuthAttempt = {
+        attemptId: "successful-attempt",
+        workspaceId: workspace.id,
+        serverName: server.name,
+        status: "pending",
+        authorizationUrl: "https://auth.example.test/authorize",
+      };
+      let statusRequests = 0;
+      let releaseStatus!: (response: Response) => void;
+      const refreshedStatus = new Promise<Response>((resolve) => {
+        releaseStatus = resolve;
+      });
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.includes("/api/settings/mcp") && url.includes("workspaceId="))
+          return json(settings());
+        if (url.includes("/api/settings/mcp")) return json(settings([server]));
+        if (url.endsWith("/login"))
+          return json({ ...auth, status: completion === "start" ? "completed" : "pending" });
+        if (url.endsWith("/api/mcp/auth/successful-attempt"))
+          return json({ ...auth, status: "completed" });
+        statusRequests++;
+        if (statusRequests > 1) return refreshedStatus;
+        return json(
+          status([
+            {
+              name: server.name,
+              state: "needs-auth",
+              usesOAuth: true,
+              hasOAuthCredentials: false,
+              tools: [],
+            },
+          ]),
+        );
+      });
+      const wrapper = mount(McpSettingsPanel, {
+        props: { active: true, workspaceId: workspace.id },
+      });
+      await flushPromises();
+      await wrapper
+        .findAll("button")
+        .find((button) => button.text() === "Sign in")!
+        .trigger("click");
+      await flushPromises();
+
+      if (completion !== "start") {
+        expect(wrapper.find(".mcp-settings__auth").exists()).toBe(true);
+        await wrapper
+          .get('[aria-label="MCP OAuth callback URL"]')
+          .setValue("http://localhost/callback?code=abc&state=server-checks");
+        if (completion === "callback") {
+          await wrapper
+            .findAll("button")
+            .find((button) => button.text() === "Complete sign-in")!
+            .trigger("click");
+        } else {
+          await vi.advanceTimersByTimeAsync(1000);
+        }
+        await flushPromises();
+      }
+
+      expect(statusRequests).toBe(2);
+      expect(wrapper.find(".mcp-settings__auth").exists()).toBe(false);
+      expect(wrapper.find('[aria-label="MCP OAuth callback URL"]').exists()).toBe(false);
+      expect(fetchMock).toHaveBeenCalledWith(`/api/workspaces/${workspace.id}/mcp`, {
+        credentials: "include",
+      });
+
+      releaseStatus(
+        json(
+          status([
+            {
+              name: server.name,
+              state: "connected",
+              usesOAuth: true,
+              hasOAuthCredentials: true,
+              tools: [],
+            },
+          ]),
+        ),
+      );
+      await flushPromises();
+      expect(wrapper.text()).toContain("Connected");
+      expect(wrapper.find(".mcp-settings__auth").exists()).toBe(false);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(statusRequests).toBe(2);
+      expect(
+        fetchMock.mock.calls.filter(([input]) =>
+          String(input).endsWith("/api/mcp/auth/successful-attempt"),
+        ),
+      ).toHaveLength(completion === "start" ? 0 : 1);
+      wrapper.unmount();
+    },
+  );
 
   it("cancels OAuth attempts and ignores a settings response from a stale workspace", async () => {
     let releaseOld!: (response: Response) => void;

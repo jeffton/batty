@@ -97,8 +97,8 @@ const emit = defineEmits<{ save: []; cancel: [] }>();
   font-weight: 600;
 }
 .mcp-editor__cancel {
-  background: transparent;
-  color: var(--color-text-muted);
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
 }
 .mcp-editor__switch {
   display: inline-flex;

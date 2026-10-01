@@ -729,6 +729,9 @@ onBeforeUnmount(() => {
 }
 
 .message__system-bubble--runtime {
+  --color-bg-inline-code: color-mix(in srgb, var(--color-info-soft) 90%, var(--color-info));
+  --color-code-bg: var(--color-bg-inline-code);
+  --color-code-border: color-mix(in srgb, var(--color-info-soft) 75%, var(--color-info));
   background: var(--color-info-soft);
   color: var(--color-info);
 }

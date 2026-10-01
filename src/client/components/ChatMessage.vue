@@ -355,7 +355,11 @@ onBeforeUnmount(() => {
             <div class="message__notice-text">
               {{ runtimeNoticeContent?.text ?? props.message.text }}
             </div>
-            <MarkdownBlock v-if="runtimeNoticeContent" :text="runtimeNoticeContent.markdown" />
+            <MarkdownBlock
+              v-if="runtimeNoticeContent"
+              class="message__runtime-markdown"
+              :text="runtimeNoticeContent.markdown"
+            />
           </template>
           <template v-else>{{ props.message.text }}</template>
           <div
@@ -729,11 +733,14 @@ onBeforeUnmount(() => {
 }
 
 .message__system-bubble--runtime {
+  background: var(--color-info-soft);
+  color: var(--color-info);
+}
+
+.message__runtime-markdown {
   --color-bg-inline-code: color-mix(in srgb, var(--color-info-soft) 90%, var(--color-info));
   --color-code-bg: var(--color-bg-inline-code);
   --color-code-border: color-mix(in srgb, var(--color-info-soft) 75%, var(--color-info));
-  background: var(--color-info-soft);
-  color: var(--color-info);
 }
 
 .message__system-icon {

@@ -91,7 +91,7 @@ describe("SessionStore", () => {
     expect(snapshot.entries).toEqual([]);
     const reopened = await SessionStore.existing(root, sessionDir, id);
     stores.push(reopened!);
-    expect(reopened?.getSessionFile()).toBe(file);
+    expect(reopened?.getSessionFile()).toBe(await fs.realpath(file));
     expect(reopened?.getEntries()).toEqual([]);
   });
 

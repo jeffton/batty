@@ -85,7 +85,9 @@ describe("createSessionManagerWithPreviousContext", () => {
       parentSessionId: parent.getSessionId(),
       mode: "chat-only",
     });
-    expect(full.manager.native.getHeader()?.parentSession).toBe(parent.getSessionFile());
+    expect(full.manager.native.getHeader()?.parentSession).toBe(
+      await fs.realpath(parent.getSessionFile()),
+    );
     expect(full.manager.getEntries()).toContainEqual(
       expect.objectContaining({
         customType: BATTY_SYSTEM_PROMPT_CUSTOM_TYPE,

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { Check, ExternalLink, LogOut, Palette, Pencil, Save, Trash2, X } from "@lucide/vue";
+import { Check, ExternalLink, LogOut, Palette, Pencil, Save, X } from "@lucide/vue";
 import { computed, reactive, ref, watch } from "vue";
+import DeleteButton from "@/client/components/DeleteButton.vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import ModelConfigSelector from "@/client/components/ModelConfigSelector.vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
@@ -780,15 +781,12 @@ function handlePopoverToggle(event: Event): void {
         </div>
         <div v-for="name in environmentNames" :key="name" class="settings-popover__environment-row">
           <code>{{ name }}</code>
-          <button
+          <DeleteButton
             class="settings-popover__icon-btn"
-            type="button"
-            :aria-label="`Remove ${name}`"
+            :label="`Remove ${name}`"
             :disabled="environmentPending"
-            @click="deleteEnvironmentVariable(name)"
-          >
-            <Trash2 :size="14" />
-          </button>
+            @confirm="deleteEnvironmentVariable(name)"
+          />
         </div>
         <form class="settings-popover__editor" @submit.prevent="saveEnvironmentVariable">
           <input
@@ -1048,7 +1046,7 @@ function handlePopoverToggle(event: Event): void {
 
 .settings-popover__link,
 .settings-popover__logout,
-.settings-popover__icon-btn {
+:deep(.settings-popover__icon-btn) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1072,7 +1070,7 @@ function handlePopoverToggle(event: Event): void {
   color: var(--color-error);
 }
 
-.settings-popover__icon-btn {
+:deep(.settings-popover__icon-btn) {
   background: transparent;
   color: var(--color-text-muted);
   padding: 0.45rem;
@@ -1102,7 +1100,7 @@ function handlePopoverToggle(event: Event): void {
 
 @media (hover: hover) {
   .settings-popover__link:hover,
-  .settings-popover__icon-btn:hover {
+  :deep(.settings-popover__icon-btn:hover) {
     background: var(--color-bg-hover);
   }
 
@@ -1113,7 +1111,7 @@ function handlePopoverToggle(event: Event): void {
 
 .settings-popover__link:disabled,
 .settings-popover__logout:disabled,
-.settings-popover__icon-btn:disabled,
+:deep(.settings-popover__icon-btn:disabled),
 .settings-popover__select:disabled,
 .settings-popover__input:disabled {
   opacity: 0.6;

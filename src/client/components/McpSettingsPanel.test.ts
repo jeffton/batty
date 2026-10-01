@@ -69,7 +69,7 @@ describe("McpSettingsPanel OAuth and stale responses", () => {
     expect(new Set(targets).size).toBe(2);
     for (const [index, card] of wrapper.findAll(".mcp-settings__server").entries()) {
       expect(toolButtons[index]!.text()).toBe("Tools (1)");
-      const popover = card.get('[popover="auto"]');
+      const popover = card.get(`[id="${targets[index]}"]`);
       expect(popover.attributes("id")).toBe(targets[index]);
       expect(popover.get(".mcp-settings__tools").text()).toContain("Search docs");
       expect(card.find(".mcp-settings__server-head .mcp-settings__tools").exists()).toBe(false);
@@ -150,8 +150,10 @@ describe("McpSettingsPanel OAuth and stale responses", () => {
     );
 
     await wrapper.findAll('[aria-label="Remove docs"]')[0]!.trigger("click");
+    const confirmation = wrapper.findAll('button[aria-label="Confirm: Remove docs"]')[0]!;
+    (confirmation.element.parentElement as HTMLElement).hidePopover = vi.fn();
+    await confirmation.trigger("click");
     await flushPromises();
-    expect(window.confirm).toHaveBeenCalledWith("Remove MCP server “docs”?");
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/api/settings/mcp/docs"),
       expect.objectContaining({ method: "DELETE" }),
@@ -627,6 +629,9 @@ describe("McpSettingsPanel", () => {
       .findAll(".mcp-settings__server")[0]!
       .get('[aria-label="Remove shared"]')
       .trigger("click");
+    const confirmation = wrapper.findAll('button[aria-label="Confirm: Remove shared"]')[0]!;
+    (confirmation.element.parentElement as HTMLElement).hidePopover = vi.fn();
+    await confirmation.trigger("click");
     await flushPromises();
     const mutations = fetchMock.mock.calls.filter(
       ([, init]) => init?.method === "PUT" || init?.method === "DELETE",
@@ -825,7 +830,7 @@ describe("McpSettingsPanel", () => {
     expect(wrapper.text()).toContain("Workspace");
     expect(wrapper.text()).not.toContain("alpha");
     expect(wrapper.findAll('[aria-label^="Show tools for"]')).toHaveLength(0);
-    expect(wrapper.findAll("[popover]")).toHaveLength(0);
+    expect(wrapper.findAll(".mcp-settings__tools-popover")).toHaveLength(0);
     expect(
       fetchMock.mock.calls.some(([url]) => String(url).includes("workspaceId=workspace-1")),
     ).toBe(true);
@@ -934,6 +939,10 @@ describe("McpSettingsPanel", () => {
     );
     const updatedCard = wrapper.get(".mcp-settings__server");
     await updatedCard.get('[aria-label="Remove two"]').trigger("click");
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+    const confirmation = updatedCard.get('button[aria-label="Confirm: Remove two"]');
+    (confirmation.element.parentElement as HTMLElement).hidePopover = vi.fn();
+    await confirmation.trigger("click");
     await flushPromises();
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/api/settings/mcp/two?workspaceId=workspace-2"),

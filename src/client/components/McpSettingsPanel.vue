@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Pencil, Plus, RotateCw, LogIn, LogOut, Trash2, X } from "@lucide/vue";
+import { Pencil, Plus, RotateCw, LogIn, LogOut, X } from "@lucide/vue";
+import DeleteButton from "@/client/components/DeleteButton.vue";
 import McpServerEditor from "@/client/components/McpServerEditor.vue";
 import { computed, onBeforeUnmount, ref, useId, watch } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
@@ -324,7 +325,6 @@ async function toggleEnabled(server: ScopedServer): Promise<void> {
 }
 
 async function remove(server: ScopedServer): Promise<void> {
-  if (!window.confirm(`Remove MCP server “${server.name}”?`)) return;
   error.value = "";
   const requestGeneration = workspaceGeneration;
   try {
@@ -546,16 +546,13 @@ onBeforeUnmount(() => {
           >
             <component :is="isEditing(server) ? X : Pencil" :size="14" />
           </button>
-          <button
-            type="button"
+          <DeleteButton
             class="mcp-settings__icon-btn mcp-settings__icon-btn--danger"
-            :aria-label="`Remove ${server.name}`"
+            :label="`Remove ${server.name}`"
             title="Remove"
             :disabled="saving"
-            @click="remove(server)"
-          >
-            <Trash2 :size="14" />
-          </button>
+            @confirm="remove(server)"
+          />
         </div>
       </div>
       <div class="mcp-settings__status-row">
@@ -837,7 +834,8 @@ onBeforeUnmount(() => {
   padding: 0.65rem 0.75rem;
   font: 0.86rem/1.5 var(--font-family-mono);
 }
-.mcp-settings button {
+.mcp-settings button,
+.mcp-settings :deep(button.mcp-settings__icon-btn) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -855,7 +853,7 @@ onBeforeUnmount(() => {
   background: var(--color-bg-elevated);
   color: var(--color-text);
 }
-.mcp-settings button.mcp-settings__icon-btn {
+.mcp-settings :deep(button.mcp-settings__icon-btn) {
   background: transparent;
   color: var(--color-text-muted);
   padding-inline: 0.45rem;
@@ -873,10 +871,11 @@ onBeforeUnmount(() => {
   margin-top: 0.35rem;
 }
 @media (hover: hover) {
-  .mcp-settings button:hover {
+  .mcp-settings button:hover,
+  .mcp-settings :deep(button.mcp-settings__icon-btn:hover) {
     background: var(--color-bg-elevated);
   }
-  .mcp-settings button.mcp-settings__icon-btn--danger:hover {
+  .mcp-settings :deep(button.mcp-settings__icon-btn--danger:hover) {
     background: var(--color-error-soft);
     color: var(--color-error);
   }

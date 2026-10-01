@@ -217,6 +217,10 @@ describe("SettingsPopover", () => {
     expect(wrapper.get('[aria-label="Variable value"]').element).toHaveProperty("value", "");
     expect(wrapper.text()).not.toContain("secret-value");
     await wrapper.get('[aria-label="Remove SECRET_KEY"]').trigger("click");
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+    const confirmation = wrapper.get('button[aria-label="Confirm: Remove SECRET_KEY"]');
+    (confirmation.element.parentElement as HTMLElement).hidePopover = vi.fn();
+    await confirmation.trigger("click");
     await flushPromises();
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/api/settings/environment/SECRET_KEY"),

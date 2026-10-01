@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import DeleteButton from "@/client/components/DeleteButton.vue";
 import ModelConfigSelector from "@/client/components/ModelConfigSelector.vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
 import type { CronDraft } from "@/client/composables/useCronJobDrafts";
 import type { CronJob, ModelOption } from "@/shared/types";
-import { Pencil, Save, Trash2, X } from "@lucide/vue";
+import { Pencil, Save, X } from "@lucide/vue";
 
 const props = defineProps<{
   job: CronJob;
@@ -78,14 +79,12 @@ function modelLabel(): string {
         >
           <component :is="props.draft.editing ? X : Pencil" :size="14" />
         </button>
-        <button
+        <DeleteButton
           class="cron-popover__icon-btn cron-popover__icon-btn--danger"
-          type="button"
+          label="Delete cron job"
           :disabled="props.draft.deleting"
-          @click.stop.prevent="emit('delete')"
-        >
-          <Trash2 :size="14" />
-        </button>
+          @confirm="emit('delete')"
+        />
       </div>
     </div>
 
@@ -376,7 +375,7 @@ function modelLabel(): string {
 }
 
 .cron-popover__save,
-.cron-popover__icon-btn {
+:deep(.cron-popover__icon-btn) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -390,21 +389,21 @@ function modelLabel(): string {
   font-weight: 600;
 }
 
-.cron-popover__icon-btn {
+:deep(.cron-popover__icon-btn) {
   background: transparent;
   color: var(--color-text-muted);
   padding-inline: 0.45rem;
 }
 
 @media (hover: hover) {
-  .cron-popover__icon-btn--danger:hover {
+  :deep(.cron-popover__icon-btn--danger:hover) {
     background: var(--color-error-soft);
     color: var(--color-error);
   }
 }
 
 .cron-popover__save:disabled,
-.cron-popover__icon-btn:disabled,
+:deep(.cron-popover__icon-btn:disabled),
 .cron-popover__prompt:disabled,
 .cron-popover__select:disabled,
 .cron-popover__checkbox input:disabled {

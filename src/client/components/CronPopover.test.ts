@@ -354,7 +354,11 @@ describe("CronPopover", () => {
     await wrapper.findAll(".cron-popover__icon-btn")[0]!.trigger("click");
     expect(wrapper.find(".mc-popover").exists()).toBe(true);
 
-    await wrapper.findAll(".cron-popover__icon-btn")[1]!.trigger("click");
+    await wrapper.get('[aria-label="Delete cron job"]').trigger("click");
+    expect(deleteCronJob).not.toHaveBeenCalled();
+    const confirmation = wrapper.get('button[aria-label="Confirm: Delete cron job"]');
+    (confirmation.element.parentElement as HTMLElement).hidePopover = vi.fn();
+    await confirmation.trigger("click");
     expect(wrapper.find(".mc-popover").exists()).toBe(true);
     expect(
       wrapper.find('[aria-label="Choose cron model and effort"]').attributes("disabled"),

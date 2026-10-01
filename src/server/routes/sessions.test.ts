@@ -2,6 +2,27 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { parseClientMessageId, registerSessionRoutes } from "./sessions";
 
 describe("session routes", () => {
+  it("returns resources for the requested session", async () => {
+    const app = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
+    const resources = {
+      skills: [{ name: "notes", description: "Manage notes", filePath: "/skills/notes/SKILL.md" }],
+      tools: [{ name: "read", description: "Read files" }],
+    };
+    const getSessionResources = vi.fn(() => resources);
+    registerSessionRoutes({
+      app,
+      config: {},
+      service: { getSessionResources },
+      routePath: (path: string) => path,
+    } as never);
+    const handler = app.get.mock.calls.find(
+      ([route]) => route === "/api/sessions/:sessionId/resources",
+    )![1];
+
+    await expect(handler({ params: { sessionId: "session-1" } })).resolves.toEqual(resources);
+    expect(getSessionResources).toHaveBeenCalledWith("session-1");
+  });
+
   it("returns the submission-specific queue acknowledgment", async () => {
     const app = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
     const clientMessageId = crypto.randomUUID();

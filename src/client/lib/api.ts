@@ -24,6 +24,7 @@ import type {
   PromptSubmissionResult,
   ProviderUsage,
   SessionMessagesPage,
+  SessionResourcesResponse,
   SessionState,
   SessionSummary,
   UpdateCronJobInput,
@@ -423,6 +424,10 @@ export function openSessionById(workspaceId: string, sessionId: string): Promise
 
 export function getSession(sessionId: string): Promise<SessionState> {
   return request(`/api/sessions/${sessionId}`);
+}
+
+export function getSessionResources(sessionId: string): Promise<SessionResourcesResponse> {
+  return request(`/api/sessions/${encodeURIComponent(sessionId)}/resources`);
 }
 
 export function getSessionMessages(

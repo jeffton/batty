@@ -226,12 +226,12 @@ describe("SettingsPopover", () => {
     fetchMock.mockRestore();
   });
 
-  it("places MCP servers before environment variables and environment immediately above log out", () => {
+  it("keeps environment immediately above log out without MCP settings", () => {
     const wrapper = mount(SettingsPopover, {
       props: { popoverId: "settings-popover", anchorName: "--settings-anchor" },
     });
     const sections = wrapper.findAll(".settings-popover__body > .settings-popover__section");
-    expect(sections.at(-3)?.text()).toContain("MCP servers");
+    expect(wrapper.text()).not.toContain("MCP servers");
     expect(sections.at(-2)?.text()).toContain("Environment variables");
     expect(sections.at(-1)?.text()).toContain("Log out");
   });

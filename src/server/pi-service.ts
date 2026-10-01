@@ -18,6 +18,7 @@ import type {
   PreviousContextMode,
   ServerEvent,
   SessionMessagesPage,
+  SessionResourcesResponse,
   SessionState,
   SessionStateMetadata,
   SessionSummary,
@@ -1125,6 +1126,21 @@ export class PiService {
         webSession.session.sessionManager.getEntries(),
       ),
     });
+  }
+
+  getSessionResources(sessionId: string): SessionResourcesResponse {
+    const sdk = this.requireSession(sessionId).session.sdk;
+    return {
+      skills: sdk.resourceLoader.getSkills().skills.map(({ name, description, filePath }) => ({
+        name,
+        description,
+        filePath,
+      })),
+      tools: sdk
+        .getAllTools()
+        .filter((tool) => !tool.name.startsWith("mcp__") && tool.exposure !== "hidden")
+        .map(({ name, description }) => ({ name, description })),
+    };
   }
 
   getSessionMessages(

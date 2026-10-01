@@ -19,18 +19,15 @@ import type {
   McpServerConfig,
   McpSettingsResponse,
   McpWorkspaceStatus,
-  WorkspaceInfo,
 } from "@/shared/types";
 
 const props = defineProps<{
   active: boolean;
   workspaceId?: string;
-  workspaces: WorkspaceInfo[];
 }>();
 
 type ScopedServer = McpSettingsResponse["servers"][number] & {
   workspaceId?: string;
-  workspaceLabel?: string;
 };
 
 const settings = ref<{ servers: ScopedServer[]; errors: string[] }>({ servers: [], errors: [] });
@@ -54,7 +51,6 @@ const error = ref("");
 const selectedName = ref("");
 const editorOpen = ref(false);
 const creatingGlobal = ref(true);
-const creationWorkspaceId = ref("");
 const editWorkspaceId = ref<string | undefined>();
 const nameInput = ref("");
 const configInput = ref(
@@ -71,16 +67,11 @@ let disposed = false;
 const visibleServers = computed(() =>
   [...settings.value.servers].sort((a, b) => {
     if (a.scope !== b.scope) return a.scope === "global" ? -1 : 1;
-    return (
-      (a.workspaceLabel ?? "").localeCompare(b.workspaceLabel ?? "") || a.name.localeCompare(b.name)
-    );
+    return a.name.localeCompare(b.name);
   }),
 );
 const attemptServer = computed(() => attempt.value?.serverName);
-const creationWorkspaceOptions = computed(() => props.workspaces);
-const validCreationWorkspace = computed(() =>
-  props.workspaces.some((workspace) => workspace.id === creationWorkspaceId.value),
-);
+const validCreationWorkspace = computed(() => Boolean(props.workspaceId));
 
 function targetWorkspaceId(server: ScopedServer): string | undefined {
   return server.scope === "workspace" ? server.workspaceId : props.workspaceId;
@@ -139,27 +130,23 @@ async function load(): Promise<void> {
   const requestGeneration = ++loadGeneration;
   const workspaceGenerationAtStart = workspaceGeneration;
   const workspaceId = props.workspaceId;
-  const workspaces = props.workspaces;
   loading.value = true;
   error.value = "";
   try {
-    const [globalSettings, ...workspaceSettings] = await Promise.all([
+    const [globalSettings, workspaceSettings] = await Promise.all([
       getMcpSettings(),
-      ...workspaces.map((workspace) => getMcpSettings(workspace.id)),
+      workspaceId ? getMcpSettings(workspaceId) : Promise.resolve({ servers: [], errors: [] }),
     ]);
     const nextSettings = {
       servers: [
         ...globalSettings.servers.map((server) => ({ ...server, scope: "global" as const })),
-        ...workspaceSettings.flatMap((result, index) =>
-          result.servers.map((server) => ({
-            ...server,
-            scope: "workspace" as const,
-            workspaceId: workspaces[index].id,
-            workspaceLabel: workspaces[index].label,
-          })),
-        ),
+        ...workspaceSettings.servers.map((server) => ({
+          ...server,
+          scope: "workspace" as const,
+          workspaceId,
+        })),
       ],
-      errors: [...globalSettings.errors, ...workspaceSettings.flatMap((result) => result.errors)],
+      errors: [...globalSettings.errors, ...workspaceSettings.errors],
     };
     let nextStatus: McpWorkspaceStatus = { servers: [], errors: [] };
     if (workspaceId) nextStatus = await getWorkspaceMcpStatus(workspaceId);
@@ -167,9 +154,7 @@ async function load(): Promise<void> {
       disposed ||
       requestGeneration !== loadGeneration ||
       workspaceGenerationAtStart !== workspaceGeneration ||
-      workspaceId !== props.workspaceId ||
-      workspaces.map((workspace) => `${workspace.id}:${workspace.label}`).join("|") !==
-        props.workspaces.map((workspace) => `${workspace.id}:${workspace.label}`).join("|")
+      workspaceId !== props.workspaceId
     )
       return;
     settings.value = nextSettings;
@@ -196,7 +181,6 @@ function beginAdd(): void {
   selectedName.value = "";
   editWorkspaceId.value = undefined;
   creatingGlobal.value = true;
-  creationWorkspaceId.value = props.workspaceId ?? creationWorkspaceOptions.value[0]?.id ?? "";
   nameInput.value = "";
   configInput.value =
     '{\n  "type": "stdio",\n  "command": "",\n  "args": [],\n  "exposure": "codemode"\n}';
@@ -235,7 +219,7 @@ async function save(): Promise<void> {
     return;
   }
   if (!selectedName.value && !creatingGlobal.value && !validCreationWorkspace.value) {
-    error.value = "Choose a workspace to save workspace-scoped servers";
+    error.value = "Select a workspace to save workspace-scoped servers";
     return;
   }
   saving.value = true;
@@ -245,7 +229,7 @@ async function save(): Promise<void> {
       ? editWorkspaceId.value
       : creatingGlobal.value
         ? undefined
-        : creationWorkspaceId.value;
+        : props.workspaceId;
     await saveMcpServer(name, config, workspaceId);
     if (disposed || requestGeneration !== workspaceGeneration) return;
     invalidateStatus(workspaceId);
@@ -424,25 +408,13 @@ async function cancelLogin(): Promise<void> {
 }
 
 watch(
-  () =>
-    [
-      props.active,
-      props.workspaceId,
-      props.workspaces.map((workspace) => `${workspace.id}:${workspace.label}`).join("|"),
-    ] as const,
+  () => [props.active, props.workspaceId] as const,
   ([active], previous = [false, undefined]) => {
     const [wasActive] = previous;
-    if (!validCreationWorkspace.value) creationWorkspaceId.value = "";
-    for (const workspaceId of Object.keys(statusByWorkspace.value)) {
-      if (!props.workspaces.some((workspace) => workspace.id === workspaceId))
-        delete statusByWorkspace.value[workspaceId];
-    }
-    if (
-      selectedName.value &&
-      editWorkspaceId.value &&
-      !props.workspaces.some((workspace) => workspace.id === editWorkspaceId.value)
-    )
-      cancelEdit();
+    statusByWorkspace.value = {};
+    settings.value = { servers: [], errors: [] };
+    statusBusy.value = "";
+    if (selectedName.value && editWorkspaceId.value !== props.workspaceId) cancelEdit();
     workspaceGeneration++;
     const pendingAttempt = attempt.value;
     clearAttempt();
@@ -466,7 +438,7 @@ onBeforeUnmount(() => {
 <template>
   <section class="mcp-settings">
     <div class="mcp-settings__help">
-      MCP servers are listed by scope. Workspace servers apply only to their named workspace.
+      Global servers apply to every workspace. Workspace servers apply to the current workspace.
     </div>
     <div v-for="item in settings.errors" :key="item" class="mcp-settings__error">{{ item }}</div>
     <div v-for="item in status.errors" :key="item" class="mcp-settings__error">{{ item }}</div>
@@ -480,9 +452,7 @@ onBeforeUnmount(() => {
       <div class="mcp-settings__server-head">
         <div class="mcp-settings__server-meta">
           <strong>{{ server.name }}</strong>
-          <span>{{
-            server.scope === "global" ? "Global" : `Workspace · ${server.workspaceLabel}`
-          }}</span>
+          <span>{{ server.scope === "global" ? "Global" : "Workspace" }}</span>
           <span v-if="isOverriddenInWorkspace(server)">Overridden in this workspace</span>
           <span v-else>{{
             server.config.enabled === false
@@ -516,7 +486,7 @@ onBeforeUnmount(() => {
         v-if="workspaceStatus(server)?.tools.length"
         :popover-id="toolsPopoverId(server)"
         :title="`${server.name} tools`"
-        :subtitle="server.scope === 'global' ? 'Global' : `Workspace · ${server.workspaceLabel}`"
+        :subtitle="server.scope === 'global' ? 'Global' : 'Workspace'"
       >
         <div class="mcp-settings__tools-content">
           <ul class="mcp-settings__tools">
@@ -622,21 +592,6 @@ onBeforeUnmount(() => {
           <span class="mcp-settings__switch-track" aria-hidden="true" />
           <span>Global server</span>
         </label>
-        <select
-          v-if="!creatingGlobal"
-          v-model="creationWorkspaceId"
-          class="mcp-settings__workspace"
-          aria-label="Server workspace"
-        >
-          <option value="" disabled>Select a workspace</option>
-          <option
-            v-for="workspace in creationWorkspaceOptions"
-            :key="workspace.id"
-            :value="workspace.id"
-          >
-            {{ workspace.label }}
-          </option>
-        </select>
       </div>
       <label
         ><span>Name</span
@@ -742,10 +697,6 @@ onBeforeUnmount(() => {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
-.mcp-settings__workspace {
-  flex: 1;
-  min-width: 0;
-}
 .mcp-settings__server {
   display: flex;
   flex-direction: column;
@@ -795,8 +746,7 @@ onBeforeUnmount(() => {
   color: var(--color-text-strong);
 }
 .mcp-settings input,
-.mcp-settings textarea,
-.mcp-settings select {
+.mcp-settings textarea {
   width: 100%;
   border: 1px solid var(--color-border-soft);
   border-radius: 0.45rem;

@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ChevronLeft, LoaderCircle, Clock3 } from "@lucide/vue";
+import { ChevronLeft, LoaderCircle, Clock3, Wrench } from "@lucide/vue";
+import { useId } from "vue";
+import ToolsPopover from "@/client/components/ToolsPopover.vue";
 import CronPopover from "@/client/components/CronPopover.vue";
 import SessionHeaderStatus from "@/client/components/SessionHeaderStatus.vue";
 
@@ -16,6 +18,9 @@ const props = defineProps<{
   contextPercent?: number;
   connectionState: "online" | "connecting" | "offline";
 }>();
+
+const toolsPopoverId = useId();
+const toolsPopoverAnchor = `--tools-${toolsPopoverId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 
 const emit = defineEmits<{
   back: [];
@@ -55,7 +60,23 @@ const emit = defineEmits<{
       <Clock3 :size="15" />
     </button>
 
+    <button
+      class="header__icon-btn"
+      type="button"
+      :style="{ 'anchor-name': toolsPopoverAnchor }"
+      :popovertarget="toolsPopoverId"
+      aria-label="MCPs, skills and tools"
+      title="MCPs, skills and tools"
+    >
+      <Wrench :size="15" />
+    </button>
+
     <CronPopover :popover-id="props.cronPopoverId" :anchor-name="props.cronPopoverAnchor" />
+    <ToolsPopover
+      :popover-id="toolsPopoverId"
+      :anchor-name="toolsPopoverAnchor"
+      :workspace-id="props.selectedWorkspaceId"
+    />
 
     <div class="header__spacer" />
 

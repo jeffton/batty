@@ -311,6 +311,11 @@ export type SessionStateMetadata = Omit<
   "messages" | "messagesDetailLevel" | "activeAssistant" | "activeTools"
 >;
 
+export interface SessionResourcesResponse {
+  skills: Array<{ name: string; description: string; filePath: string }>;
+  tools: Array<{ name: string; description: string }>;
+}
+
 export interface SessionMessagesPage {
   messages: UiMessage[];
   totalMessageCount: number;

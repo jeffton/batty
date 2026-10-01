@@ -13,6 +13,18 @@ describe("StreamingStopControl", () => {
     expect(children[2]?.classList.contains("streaming-stop-control__button")).toBe(true);
   });
 
+  it.each([1, 3])("shows a pill for %i running subagents without a stop button", (count) => {
+    const wrapper = mount(StreamingStopControl, {
+      props: { subagentCount: count, hideStop: true },
+    });
+
+    expect(wrapper.get(".streaming-stop-control__status").text()).toBe(
+      `${count} ${count === 1 ? "subagent" : "subagents"}`,
+    );
+    expect(wrapper.find(".streaming-stop-control__spinner").exists()).toBe(true);
+    expect(wrapper.find("button").exists()).toBe(false);
+  });
+
   it("hides compaction status during regular streaming", () => {
     const wrapper = mount(StreamingStopControl);
 

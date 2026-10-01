@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import ChatHeader from "@/client/components/ChatHeader.vue";
 import MessageComposer from "@/client/components/MessageComposer.vue";
 import SessionTranscriptView from "@/client/components/SessionTranscriptView.vue";
+import { listRunningSubagents } from "@/client/lib/api";
 import { resolveThinkingOptions } from "@/client/lib/thinking-levels";
 import { useAppStore } from "@/client/stores/app";
 import type { QueuedPrompt, UiMessage } from "@/shared/types";
@@ -24,6 +25,8 @@ const emit = defineEmits<{
 const store = useAppStore();
 const composer = ref<ComposerHandle | null>(null);
 const promptError = ref<string>();
+const subagentCount = ref(0);
+const subagentError = ref<string>();
 const thinkingOptions = computed(() => resolveThinkingOptions(store.activeSession));
 const pendingIdlePromptSessionIds = new Set<string>();
 let promptRequestId = 0;
@@ -41,6 +44,39 @@ const activeOptimisticMessages = computed(() => {
     : [];
 });
 const isUnavailable = computed(() => store.connectionState === "offline");
+
+watch(
+  [() => store.activeSession?.sessionId, isUnavailable],
+  ([sessionId, offline], _previous, onCleanup) => {
+    subagentCount.value = 0;
+    subagentError.value = undefined;
+    if (!sessionId || offline) return;
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    onCleanup(() => {
+      cancelled = true;
+      clearTimeout(timer);
+    });
+
+    async function refresh(): Promise<void> {
+      try {
+        const subagents = await listRunningSubagents(sessionId!);
+        if (cancelled) return;
+        subagentCount.value = subagents.length;
+        subagentError.value = undefined;
+      } catch (error) {
+        if (cancelled) return;
+        subagentError.value = error instanceof Error ? error.message : String(error);
+      } finally {
+        if (!cancelled) timer = setTimeout(() => void refresh(), 1_500);
+      }
+    }
+
+    void refresh();
+  },
+  { immediate: true },
+);
 const selectedWorkspaceLoading = computed(() => {
   const workspaceId = store.selectedWorkspaceId;
   if (!workspaceId) {
@@ -313,9 +349,10 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
         ref="composer"
         :streaming="store.activeSession.isStreaming"
         :compacting="store.activeSession.isCompacting"
+        :subagent-count="subagentCount"
         :session-key="store.activeSession.sessionId"
         :offline="isUnavailable"
-        :error="promptError"
+        :error="promptError ?? subagentError"
         :actions-disabled="isUnavailable"
         :queued-prompts="store.activeSession.queuedPrompts"
         :model-popover-id="MODEL_POPOVER_ID"

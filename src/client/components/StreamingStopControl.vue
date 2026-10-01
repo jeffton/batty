@@ -5,6 +5,8 @@ const props = defineProps<{
   disabled?: boolean;
   label?: string;
   compacting?: boolean;
+  subagentCount?: number;
+  hideStop?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -39,8 +41,12 @@ function triggerClick(): void {
 <template>
   <div class="streaming-stop-control">
     <span v-if="props.compacting" class="streaming-stop-control__status">Compacting</span>
+    <span v-else-if="props.subagentCount" class="streaming-stop-control__status">
+      {{ props.subagentCount }} {{ props.subagentCount === 1 ? "subagent" : "subagents" }}
+    </span>
     <span class="spinner streaming-stop-control__spinner" aria-hidden="true" />
     <button
+      v-if="!props.hideStop"
       class="streaming-stop-control__button"
       type="button"
       :aria-label="props.label ?? 'Stop'"

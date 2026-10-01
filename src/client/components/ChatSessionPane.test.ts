@@ -1,4 +1,4 @@
-import { shallowMount } from "@vue/test-utils";
+import { flushPromises, shallowMount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { defineComponent, h, nextTick } from "vue";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -6,13 +6,15 @@ import ChatSessionPane from "@/client/components/ChatSessionPane.vue";
 import { useAppStore } from "@/client/stores/app";
 import type {
   PromptSubmissionResult,
+  RunningSubagent,
   SessionState,
   SessionSummary,
   UiMessage,
 } from "@/shared/types";
 
-const { sendPrompt } = vi.hoisted(() => ({
+const { sendPrompt, listRunningSubagents } = vi.hoisted(() => ({
   sendPrompt: vi.fn(),
+  listRunningSubagents: vi.fn<(sessionId: string) => Promise<RunningSubagent[]>>(async () => []),
 }));
 
 vi.mock("@/client/lib/api", () => ({
@@ -28,6 +30,7 @@ vi.mock("@/client/lib/api", () => ({
   getSession: vi.fn(),
   getSessionMessages: vi.fn(),
   getVersion: vi.fn(async () => ({ buildId: "build-1" })),
+  listRunningSubagents,
   listWorkspaceCronJobs: vi.fn(),
   listWorkspaceCronRunLogs: vi.fn(),
   listWorkspaceCronRuns: vi.fn(),
@@ -160,10 +163,67 @@ function makeSession(sessionId: string, overrides: Partial<SessionState> = {}): 
   };
 }
 
+const runningSubagent: RunningSubagent = {
+  sessionId: "child-a",
+  sessionPath: "/tmp/child-a.jsonl",
+  workspaceId: "batty",
+  parentSessionId: "session-a",
+  prompt: "Work",
+  model: "openai/gpt-5",
+  thinkingLevel: "medium",
+  startedAtMs: 1,
+};
+
 describe("ChatSessionPane", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
+  });
+
+  it("polls subagents while idle and clears activity when they finish", async () => {
+    vi.useFakeTimers();
+    const store = useAppStore();
+    store.activeSession = makeSession("session-a");
+    listRunningSubagents.mockResolvedValueOnce([
+      runningSubagent,
+      { ...runningSubagent, sessionId: "child-b" },
+    ]);
+    const wrapper = shallowMount(ChatSessionPane);
+    try {
+      await flushPromises();
+      const composer = wrapper.getComponent({ name: "MessageComposer" });
+      expect(listRunningSubagents).toHaveBeenCalledWith("session-a");
+      expect(composer.props("subagentCount")).toBe(2);
+      expect(composer.props("streaming")).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(composer.props("subagentCount")).toBe(0);
+      wrapper.unmount();
+      const calls = listRunningSubagents.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(listRunningSubagents).toHaveBeenCalledTimes(calls);
+    } finally {
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores subagent responses from a previous session", async () => {
+    const pending = deferred<RunningSubagent[]>();
+    listRunningSubagents.mockReturnValueOnce(pending.promise);
+    const store = useAppStore();
+    store.activeSession = makeSession("session-a");
+    const wrapper = shallowMount(ChatSessionPane);
+    try {
+      store.activeSession = makeSession("session-b");
+      await flushPromises();
+      pending.resolve([runningSubagent]);
+      await flushPromises();
+      expect(wrapper.getComponent({ name: "MessageComposer" }).props("subagentCount")).toBe(0);
+      expect(listRunningSubagents).toHaveBeenLastCalledWith("session-b");
+    } finally {
+      wrapper.unmount();
+    }
   });
 
   it("does not block sending in another idle session while a previous session send is pending", async () => {

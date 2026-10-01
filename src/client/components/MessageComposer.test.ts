@@ -19,6 +19,26 @@ describe("MessageComposer", () => {
     window.localStorage.clear();
   });
 
+  it("shows subagent activity while idle without changing send controls", async () => {
+    const wrapper = shallowMount(MessageComposer, {
+      props: { ...requiredProps, subagentCount: 2 },
+    });
+
+    const control = wrapper.getComponent({ name: "StreamingStopControl" });
+    expect(control.props("subagentCount")).toBe(2);
+    expect(control.props("hideStop")).toBe(true);
+    expect(wrapper.get(".composer__send").attributes("aria-label")).toBe("Send prompt");
+    expect(wrapper.find(".composer__steer").exists()).toBe(false);
+
+    await wrapper.setProps({ streaming: true });
+    expect(control.props("subagentCount")).toBe(0);
+    expect(control.props("hideStop")).toBe(false);
+
+    await wrapper.setProps({ streaming: false, subagentCount: 0 });
+    expect(wrapper.findComponent({ name: "StreamingStopControl" }).exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("disables browser autofill without disabling writing assistance", () => {
     const wrapper = shallowMount(MessageComposer, {
       props: { ...requiredProps, sessionKey: "session-a" },

@@ -1058,7 +1058,6 @@ function handlePopoverToggle(event: Event): void {
   justify-content: flex-start;
 }
 
-.settings-popover__action,
 .settings-popover__link,
 .settings-popover__logout,
 .settings-popover__icon-btn {
@@ -1071,7 +1070,6 @@ function handlePopoverToggle(event: Event): void {
   font-size: 0.82rem;
 }
 
-.settings-popover__action,
 .settings-popover__link,
 .settings-popover__logout {
   width: fit-content;
@@ -1079,12 +1077,6 @@ function handlePopoverToggle(event: Event): void {
   background: var(--color-bg-elevated);
   color: inherit;
   text-decoration: none;
-}
-
-.settings-popover__action--primary {
-  background: var(--color-bg-selection);
-  color: var(--color-accent-strong);
-  font-weight: 600;
 }
 
 .settings-popover__logout {
@@ -1121,19 +1113,16 @@ function handlePopoverToggle(event: Event): void {
 }
 
 @media (hover: hover) {
-  .settings-popover__action:hover,
   .settings-popover__link:hover,
   .settings-popover__icon-btn:hover {
     background: var(--color-bg-hover);
   }
 
-  .settings-popover__action--primary:hover,
   .settings-popover__logout:hover {
     filter: brightness(1.03);
   }
 }
 
-.settings-popover__action:disabled,
 .settings-popover__link:disabled,
 .settings-popover__logout:disabled,
 .settings-popover__icon-btn:disabled,

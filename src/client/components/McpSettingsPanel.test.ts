@@ -823,9 +823,16 @@ describe("McpSettingsPanel", () => {
     expect(wrapper.find('[aria-label="MCP server name"]').exists()).toBe(false);
     await wrapper.get("button").trigger("click");
     expect(wrapper.get('[aria-label="Global server"]').element).toHaveProperty("checked", true);
+    const saveButton = wrapper.get('button[type="submit"]');
+    expect(saveButton.classes()).toContain("settings-popover__action--primary");
+    expect(saveButton.find("svg").exists()).toBe(true);
+    const scopeRow = wrapper.get(".mcp-settings__scope-row");
+    expect(scopeRow.get('[role="switch"]').attributes("aria-label")).toBe("Global server");
+    expect(scopeRow.get(".mcp-settings__switch-track").attributes("aria-hidden")).toBe("true");
+    expect(scopeRow.get("label").text()).toBe("Global server");
     expect(wrapper.findAll('[aria-label="Server workspace"]')).toHaveLength(0);
     await wrapper.get('[aria-label="Global server"]').setValue(false);
-    expect(wrapper.findAll('[aria-label="Server workspace"]')).toHaveLength(1);
+    expect(scopeRow.findAll('[aria-label="Server workspace"]')).toHaveLength(1);
     await wrapper.get('[aria-label="Server workspace"]').setValue("workspace-2");
     await wrapper.get('[aria-label="MCP server name"]').setValue("new-project-server");
     await wrapper
@@ -844,6 +851,16 @@ describe("McpSettingsPanel", () => {
       }),
     );
     expect(wrapper.find('[aria-label="MCP server name"]').exists()).toBe(false);
+    await wrapper.get("button").trigger("click");
+    await wrapper.get('[aria-label="Global server"]').setValue(false);
+    await wrapper.get('[aria-label="Server workspace"]').setValue("workspace-2");
+    await wrapper.get('[aria-label="Global server"]').setValue(true);
+    expect(wrapper.find('[aria-label="Server workspace"]').exists()).toBe(false);
+    await wrapper.get('[aria-label="Global server"]').setValue(false);
+    expect(wrapper.get('[aria-label="Server workspace"]').element).toHaveProperty(
+      "value",
+      "workspace-2",
+    );
     wrapper.unmount();
   });
 

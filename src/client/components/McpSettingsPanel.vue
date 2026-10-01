@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Save } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref, useId, watch } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import {
@@ -610,7 +611,7 @@ onBeforeUnmount(() => {
     </button>
     <form v-if="editorOpen" class="mcp-settings__form" @submit.prevent="save">
       <h4>{{ selectedName ? `Edit ${selectedName}` : "Add server" }}</h4>
-      <template v-if="!selectedName">
+      <div v-if="!selectedName" class="mcp-settings__scope-row">
         <label class="mcp-settings__switch">
           <input
             v-model="creatingGlobal"
@@ -618,22 +619,25 @@ onBeforeUnmount(() => {
             role="switch"
             aria-label="Global server"
           />
+          <span class="mcp-settings__switch-track" aria-hidden="true" />
           <span>Global server</span>
         </label>
-        <label v-if="!creatingGlobal" class="mcp-settings__scope">
-          <span>Workspace</span>
-          <select v-model="creationWorkspaceId" aria-label="Server workspace">
-            <option value="" disabled>Select a workspace</option>
-            <option
-              v-for="workspace in creationWorkspaceOptions"
-              :key="workspace.id"
-              :value="workspace.id"
-            >
-              {{ workspace.label }}
-            </option>
-          </select>
-        </label>
-      </template>
+        <select
+          v-if="!creatingGlobal"
+          v-model="creationWorkspaceId"
+          class="mcp-settings__workspace"
+          aria-label="Server workspace"
+        >
+          <option value="" disabled>Select a workspace</option>
+          <option
+            v-for="workspace in creationWorkspaceOptions"
+            :key="workspace.id"
+            :value="workspace.id"
+          >
+            {{ workspace.label }}
+          </option>
+        </select>
+      </div>
       <label
         ><span>Name</span
         ><input
@@ -654,10 +658,11 @@ onBeforeUnmount(() => {
       </label>
       <div class="mcp-settings__actions">
         <button
+          class="settings-popover__action settings-popover__action--primary"
           type="submit"
           :disabled="saving || (!selectedName && !creatingGlobal && !validCreationWorkspace)"
         >
-          {{ saving ? "Saving…" : "Save server" }}
+          <Save :size="14" /> {{ saving ? "Saving…" : "Save server" }}
         </button>
         <button type="button" @click="cancelEdit">Cancel</button>
       </div>
@@ -680,20 +685,66 @@ onBeforeUnmount(() => {
   gap: 0.4rem;
   flex-wrap: wrap;
 }
-.mcp-settings__scope,
 .mcp-settings__form label {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
   flex: 1;
 }
-.mcp-settings__switch {
+.mcp-settings__scope-row {
   display: flex;
   align-items: center;
+  gap: 0.75rem;
+}
+.mcp-settings__form .mcp-settings__switch {
+  position: relative;
+  flex: none;
+  flex-direction: row;
+  align-items: center;
   gap: 0.5rem;
+  white-space: nowrap;
+  cursor: pointer;
 }
 .mcp-settings__switch input {
+  position: absolute;
   width: auto;
+  opacity: 0;
+  pointer-events: none;
+}
+.mcp-settings__switch-track {
+  position: relative;
+  flex-shrink: 0;
+  width: 2rem;
+  height: 1.1rem;
+  border-radius: 999px;
+  background: var(--color-border-strong);
+  transition: background 120ms ease;
+}
+.mcp-settings__switch-track::after {
+  position: absolute;
+  top: 0.15rem;
+  left: 0.15rem;
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 50%;
+  background: var(--color-bg-overlay);
+  box-shadow: 0 1px 2px color-mix(in srgb, black 30%, transparent);
+  content: "";
+  transition: transform 120ms ease;
+}
+.mcp-settings__switch input:checked + .mcp-settings__switch-track {
+  background: var(--color-accent);
+}
+.mcp-settings__switch input:checked + .mcp-settings__switch-track::after {
+  transform: translateX(0.9rem);
+}
+.mcp-settings__switch input:focus-visible + .mcp-settings__switch-track {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.mcp-settings__workspace {
+  flex: 1;
+  min-width: 0;
 }
 .mcp-settings__server {
   display: flex;
@@ -755,7 +806,7 @@ onBeforeUnmount(() => {
   font: inherit;
   font-family: var(--font-family-mono);
 }
-.mcp-settings button {
+.mcp-settings button:not(.settings-popover__action) {
   border: 1px solid var(--color-border-soft);
   border-radius: 0.45rem;
   background: var(--color-bg-panel-strong);
@@ -765,7 +816,7 @@ onBeforeUnmount(() => {
   font-size: 0.78rem;
   cursor: pointer;
 }
-.mcp-settings button:disabled {
+.mcp-settings button:not(.settings-popover__action):disabled {
   opacity: 0.55;
   cursor: default;
 }

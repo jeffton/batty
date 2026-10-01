@@ -3,6 +3,44 @@
 @import "@fontsource/source-sans-3/latin-600.css";
 @import "@fontsource/source-sans-3/latin-700.css";
 
+.settings-popover__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  width: fit-content;
+  padding: 0.45rem 0.65rem;
+  border: 0;
+  border-radius: 0.45rem;
+  background: var(--color-bg-elevated);
+  color: inherit;
+  font: inherit;
+  font-size: 0.82rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.settings-popover__action--primary {
+  background: var(--color-bg-selection);
+  color: var(--color-accent-strong);
+  font-weight: 600;
+}
+
+.settings-popover__action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@media (hover: hover) {
+  .settings-popover__action:hover {
+    background: var(--color-bg-hover);
+  }
+
+  .settings-popover__action--primary:hover {
+    filter: brightness(1.03);
+  }
+}
+
 /*
   "Neon Reef" color system — OKLCH.
   One accent: teal (hue 175). Everything else: neutral blue-gray (hue 240).

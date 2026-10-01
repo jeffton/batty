@@ -170,14 +170,17 @@ describe("deployment scripts", () => {
     expect(deployScript.indexOf("pnpm build")).toBeLessThan(
       deployScript.indexOf("install-release.sh"),
     );
-    expect(handoffScript).toContain("nohup /usr/bin/env");
-    expect(handoffScript).toContain('/bin/bash "$script_dir/restart-services-macos.sh"');
+    expect(handoffScript).toContain('launchctl bootstrap "$domain" "$plist"');
+    expect(handoffScript).toContain('"restart-services-macos.sh"');
+    expect(handoffScript).not.toContain("nohup");
+    expect(handoffScript).toContain('"KeepAlive": False');
+    expect(handoffScript).toContain('launchctl bootout "$BATTY_RELOAD_SERVICE"');
     expect(handoffScript).not.toMatch(/sleep|delay_seconds/);
-    expect(handoffScript).toContain('"BATTY_INSTALL_ROOT=$install_root"');
-    expect(handoffScript).toContain('"BATTY_ROOT=$batty_root"');
-    expect(handoffScript).toContain('"BATTY_PORT=$backend_port"');
-    expect(handoffScript).toContain('"BATTY_NODE=$node_path"');
-    expect(handoffScript).toContain('"BATTY_SKIP_DRAIN=${BATTY_SKIP_DRAIN:-}"');
+    expect(handoffScript).toContain('BATTY_INSTALL_ROOT="$install_root"');
+    expect(handoffScript).toContain('BATTY_ROOT="$batty_root"');
+    expect(handoffScript).toContain('BATTY_PORT="$backend_port"');
+    expect(handoffScript).toContain('BATTY_NODE="$node_path"');
+    expect(handoffScript).toContain('BATTY_SKIP_DRAIN="${BATTY_SKIP_DRAIN:-}"');
     expect(restartScript).toContain('launchctl bootstrap "$domain" "$plist"');
     expect(restartScript).toContain('node_path="${BATTY_NODE:-$(command -v node)}"');
     const macosDrain = '"$install_root/current/dist/server/cli.mjs" --root "$batty_root" drain';
@@ -196,6 +199,73 @@ describe("deployment scripts", () => {
     expect(restartScript).not.toContain("deployment/drain");
     expect(restartScript).not.toContain("authSecret");
   });
+
+  linuxIt.each([0, 5])(
+    "submits a one-shot macOS reload job and propagates bootstrap exit %i",
+    async (code) => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-macos-handoff-"));
+      tempDirs.push(root);
+      const bin = path.join(root, "bin");
+      await fs.mkdir(bin);
+      const captured = path.join(root, "job.json");
+      await fs.writeFile(path.join(bin, "uuidgen"), "#!/bin/bash\necho test-reload\n", {
+        mode: 0o755,
+      });
+      await fs.writeFile(
+        path.join(bin, "launchctl"),
+        `#!/bin/bash
+python3 - "$3" "$CAPTURED" <<'PY'
+import json, plistlib, sys
+assert sys.argv[1].endswith('.plist')
+with open(sys.argv[1], 'rb') as source:
+    job = plistlib.load(source)
+with open(sys.argv[2], 'w') as output:
+    json.dump(job, output)
+PY
+exit ${code}
+`,
+        { mode: 0o755 },
+      );
+      const env = {
+        ...process.env,
+        HOME: root,
+        PATH: `${bin}:${process.env.PATH}`,
+        CAPTURED: captured,
+        BATTY_INSTALL_ROOT: "/release with spaces",
+        BATTY_ROOT: "/workspace with spaces",
+        BATTY_PORT: "4321",
+        BATTY_NODE: "/node with spaces",
+        BATTY_SKIP_DRAIN: "1",
+      };
+      const run = execFileAsync(
+        "bash",
+        [path.join(process.cwd(), "scripts", "handoff-restart-macos.sh")],
+        { env },
+      );
+      if (code === 0) {
+        expect((await run).stdout).toContain("Handed off launchd reload");
+      } else {
+        await expect(run).rejects.toMatchObject({ code });
+      }
+      const job = JSON.parse(await fs.readFile(captured, "utf8"));
+      expect(job.Label).toBe("se.roybot.batty-reload-test-reload");
+      expect(job.RunAtLoad).toBe(true);
+      expect(job.KeepAlive).toBe(false);
+      expect(job.EnvironmentVariables).toMatchObject({
+        BATTY_INSTALL_ROOT: env.BATTY_INSTALL_ROOT,
+        BATTY_ROOT: env.BATTY_ROOT,
+        BATTY_PORT: "4321",
+        BATTY_NODE: env.BATTY_NODE,
+        BATTY_SKIP_DRAIN: "1",
+        PATH: env.PATH,
+      });
+      expect(job.ProgramArguments.slice(-2)).toEqual([
+        "/bin/bash",
+        path.join(process.cwd(), "scripts", "restart-services-macos.sh"),
+      ]);
+      expect(await fs.readdir(path.join(root, "Library", "Logs", "Batty"))).toEqual([]);
+    },
+  );
 
   it("packages the pnpm workspace configuration in Windows releases", async () => {
     const script = await fs.readFile(

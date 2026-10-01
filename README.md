@@ -355,7 +355,7 @@ BATTY_WORKSPACES_ROOT="$HOME/Projects" \
 
 The script builds and validates Batty, installs versioned releases under `~/Library/Application Support/Batty/app`, creates the `se.roybot.batty` launch agent, and installs the `batty` CLI in `~/.local/bin`. Logs are written under `~/Library/Logs/Batty`. The local app is served at `http://localhost:3147`; use that hostname rather than the numeric loopback address so passkeys work.
 
-On the first deployment, the script creates `<batty-root>/.batty/options.json` and starts Batty immediately. Later deployments hand the launchd reload to a detached background process, which runs the prepared release's CLI over local IPC, puts the server into deployment drain mode, and waits for active agent turns to finish before restarting it. Set `BATTY_SKIP_DRAIN=1` to explicitly skip draining, including the first upgrade from a server without deployment IPC.
+On the first deployment, the script creates `<batty-root>/.batty/options.json` and starts Batty immediately. Later deployments hand the reload to a separate one-shot launchd job, which runs the prepared release's CLI over local IPC, puts the server into deployment drain mode, and waits for active agent turns to finish before restarting it. The worker checks `/healthz`, logs its result in `~/Library/Logs/Batty/deploy.log`, and removes its launchd job when finished. Handoff errors are reported before the running service is stopped. Set `BATTY_SKIP_DRAIN=1` to explicitly skip draining, including the first upgrade from a server without deployment IPC.
 
 ### Windows deployment behind IIS
 

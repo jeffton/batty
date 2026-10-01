@@ -191,7 +191,7 @@ export class McpService {
     try {
       await control.session.prompt(text);
       if (control.errors.length) throw new Error(control.errors.join("\n"));
-      return structuredClone(control.status);
+      return this.workspaceStatus(workspace, control.status);
     } finally {
       await this.closeControl(control);
     }
@@ -201,7 +201,35 @@ export class McpService {
     const snapshot = [...this.snapshots.values()].findLast(
       (value) => value.workspaceId === workspace.id,
     );
-    return snapshot ? structuredClone(snapshot.status) : this.command(workspace, "/mcp");
+    return snapshot
+      ? this.workspaceStatus(workspace, snapshot.status)
+      : this.command(workspace, "/mcp");
+  }
+
+  private workspaceStatus(workspace: WorkspaceInfo, status: McpStatusSnapshot): McpWorkspaceStatus {
+    const configs = new Map(
+      loadBattyMcpConfig(this.config, workspace.path).servers.map((entry) => [
+        entry.name,
+        entry.config,
+      ]),
+    );
+    const credentials = createBattyMcpCredentials(this.config);
+    const result = structuredClone(status);
+    return {
+      ...result,
+      servers: result.servers.map((server) => {
+        const config = configs.get(server.name);
+        return {
+          ...server,
+          hasOAuthCredentials: !!(
+            server.usesOAuth &&
+            config &&
+            "url" in config &&
+            credentials.tokens(config.url)
+          ),
+        };
+      }),
+    };
   }
 
   private requireServer(workspace: WorkspaceInfo, name: string): void {

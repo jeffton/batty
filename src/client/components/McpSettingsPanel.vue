@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Save } from "@lucide/vue";
+import { Pencil, Plus, RotateCw, LogIn, LogOut, Trash2, X } from "@lucide/vue";
+import McpServerEditor from "@/client/components/McpServerEditor.vue";
 import { computed, onBeforeUnmount, ref, useId, watch } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import {
@@ -53,9 +54,7 @@ const editorOpen = ref(false);
 const creatingGlobal = ref(true);
 const editWorkspaceId = ref<string | undefined>();
 const nameInput = ref("");
-const configInput = ref(
-  '{\n  "type": "stdio",\n  "command": "",\n  "args": [],\n  "exposure": "codemode"\n}',
-);
+const configInput = ref('{\n  "type": "stdio",\n  "command": "",\n  "args": []\n}');
 const callbackInput = ref("");
 const attempt = ref<McpAuthAttempt>();
 const statusBusy = ref("");
@@ -99,6 +98,42 @@ function isOverriddenInWorkspace(server: ScopedServer): boolean {
           item.name === server.name,
       ))
   );
+}
+
+function isEditing(server: ScopedServer): boolean {
+  return (
+    editorOpen.value &&
+    selectedName.value === server.name &&
+    editWorkspaceId.value === server.workspaceId
+  );
+}
+
+function connectionLabel(server: ScopedServer): string {
+  if (server.config.enabled === false) return "Disabled";
+  const state = workspaceStatus(server)?.state;
+  if (!state)
+    return statusByWorkspace.value[targetWorkspaceId(server) ?? ""]
+      ? "Not connected"
+      : "Not inspected";
+  if (state === "needs-auth") return "Sign-in required";
+  return state.charAt(0).toUpperCase() + state.slice(1);
+}
+
+function connectionActions(server: ScopedServer): Array<"reconnect" | "login" | "logout"> {
+  if (isOverriddenInWorkspace(server) || server.config.enabled === false) return [];
+  const status = workspaceStatus(server);
+  if (!status) return [];
+  const actions: Array<"reconnect" | "login" | "logout"> = [];
+  if (["connected", "disconnected", "failed", "needs-auth"].includes(status.state))
+    actions.push("reconnect");
+  if (status.usesOAuth && status.state === "needs-auth") actions.push("login");
+  if (
+    status.usesOAuth &&
+    status.hasOAuthCredentials &&
+    !["disabled", "connecting", "closed"].includes(status.state)
+  )
+    actions.push("logout");
+  return actions;
 }
 
 function invalidateStatus(workspaceId?: string): void {
@@ -182,16 +217,17 @@ function beginAdd(): void {
   editWorkspaceId.value = undefined;
   creatingGlobal.value = true;
   nameInput.value = "";
-  configInput.value =
-    '{\n  "type": "stdio",\n  "command": "",\n  "args": [],\n  "exposure": "codemode"\n}';
+  configInput.value = '{\n  "type": "stdio",\n  "command": "",\n  "args": []\n}';
 }
 
 function editServer(server: ScopedServer): void {
   selectedName.value = server.name;
   editWorkspaceId.value = server.workspaceId;
   editorOpen.value = true;
+  creatingGlobal.value = server.scope === "global";
   nameInput.value = server.name;
-  configInput.value = JSON.stringify(server.config, null, 2);
+  const { exposure: _exposure, ...config } = server.config;
+  configInput.value = JSON.stringify(config, null, 2);
 }
 
 function cancelEdit(): void {
@@ -218,21 +254,44 @@ async function save(): Promise<void> {
     error.value = "Enter valid JSON configuration";
     return;
   }
-  if (!selectedName.value && !creatingGlobal.value && !validCreationWorkspace.value) {
+  if (!creatingGlobal.value && !validCreationWorkspace.value) {
     error.value = "Select a workspace to save workspace-scoped servers";
     return;
   }
   saving.value = true;
   const requestGeneration = workspaceGeneration;
   try {
-    const workspaceId = selectedName.value
-      ? editWorkspaceId.value
-      : creatingGlobal.value
-        ? undefined
-        : props.workspaceId;
-    await saveMcpServer(name, config, workspaceId);
+    const workspaceId = creatingGlobal.value ? undefined : props.workspaceId;
+    const previousWorkspaceId = editWorkspaceId.value;
+    const moving = Boolean(selectedName.value) && workspaceId !== previousWorkspaceId;
+    if (
+      moving &&
+      settings.value.servers.some(
+        (server) => server.name === name && server.workspaceId === workspaceId,
+      )
+    ) {
+      error.value = `A server named “${name}” already exists in that scope`;
+      return;
+    }
+    await saveMcpServer(name, { ...config, exposure: "codemode" }, workspaceId);
+    if (moving) {
+      try {
+        await removeMcpServer(name, previousWorkspaceId);
+      } catch (cause) {
+        try {
+          await removeMcpServer(name, workspaceId);
+        } catch (rollbackCause) {
+          await load();
+          throw new AggregateError(
+            [cause, rollbackCause],
+            `Could not move “${name}” or undo the destination server: ${String(cause)}; ${String(rollbackCause)}`,
+          );
+        }
+        throw cause;
+      }
+    }
     if (disposed || requestGeneration !== workspaceGeneration) return;
-    invalidateStatus(workspaceId);
+    invalidateStatus();
     selectedName.value = "";
     editorOpen.value = false;
     beginAdd();
@@ -452,19 +511,25 @@ onBeforeUnmount(() => {
       <div class="mcp-settings__server-head">
         <div class="mcp-settings__server-meta">
           <strong>{{ server.name }}</strong>
-          <span>{{ server.scope === "global" ? "Global" : "Workspace" }}</span>
-          <span v-if="isOverriddenInWorkspace(server)">Overridden in this workspace</span>
-          <span v-else>{{
-            server.config.enabled === false
-              ? "Disabled"
-              : (workspaceStatus(server)?.state ??
-                (statusByWorkspace[targetWorkspaceId(server) ?? ""]
-                  ? "Not connected"
-                  : "Not inspected"))
-          }}</span>
+          <div class="mcp-settings__details">
+            <span>{{ server.scope === "global" ? "Global" : "Workspace" }}</span>
+            <span v-if="isOverriddenInWorkspace(server)">Overridden in this workspace</span>
+            <span v-else>{{ connectionLabel(server) }}</span>
+          </div>
         </div>
         <div class="mcp-settings__actions">
-          <button type="button" @click="editServer(server)">Edit</button>
+          <label class="mcp-settings__switch">
+            <input
+              type="checkbox"
+              role="switch"
+              :aria-label="`Enabled ${server.name}`"
+              :checked="server.config.enabled !== false"
+              :disabled="saving || loading"
+              @change="toggleEnabled(server)"
+            />
+            <span class="mcp-settings__switch-track" aria-hidden="true" />
+            <span>Enabled</span>
+          </label>
           <button
             v-if="workspaceStatus(server)?.tools.length"
             type="button"
@@ -473,15 +538,39 @@ onBeforeUnmount(() => {
           >
             Tools ({{ workspaceStatus(server)?.tools.length }})
           </button>
-          <button type="button" @click="toggleEnabled(server)">
-            {{ server.config.enabled === false ? "Enable" : "Disable" }}
+          <button
+            type="button"
+            class="mcp-settings__icon-btn"
+            :aria-label="isEditing(server) ? `Cancel edit ${server.name}` : `Edit ${server.name}`"
+            :title="isEditing(server) ? 'Cancel edit' : 'Edit'"
+            :disabled="saving"
+            @click="isEditing(server) ? cancelEdit() : editServer(server)"
+          >
+            <component :is="isEditing(server) ? X : Pencil" :size="14" />
           </button>
-          <button type="button" :aria-label="`Remove ${server.name}`" @click="remove(server)">
-            Remove
+          <button
+            type="button"
+            class="mcp-settings__icon-btn mcp-settings__icon-btn--danger"
+            :aria-label="`Remove ${server.name}`"
+            title="Remove"
+            :disabled="saving"
+            @click="remove(server)"
+          >
+            <Trash2 :size="14" />
           </button>
         </div>
       </div>
-      <div class="mcp-settings__help">Exposure: {{ server.config.exposure ?? "codemode" }}</div>
+      <McpServerEditor
+        v-if="isEditing(server)"
+        v-model:name="nameInput"
+        v-model:config="configInput"
+        v-model:global="creatingGlobal"
+        :editing="true"
+        :saving="saving"
+        :can-save="creatingGlobal || validCreationWorkspace"
+        @save="save"
+        @cancel="cancelEdit"
+      />
       <FullPopover
         v-if="workspaceStatus(server)?.tools.length"
         :popover-id="toolsPopoverId(server)"
@@ -491,8 +580,8 @@ onBeforeUnmount(() => {
         <div class="mcp-settings__tools-content">
           <ul class="mcp-settings__tools">
             <li v-for="tool in workspaceStatus(server)?.tools" :key="tool.name">
-              <code>{{ tool.name }}</code> · {{ tool.exposure
-              }}<span v-if="tool.description"> — {{ tool.description }}</span>
+              <code>{{ tool.name }}</code
+              ><span v-if="tool.description"> — {{ tool.description }}</span>
             </li>
           </ul>
         </div>
@@ -509,27 +598,33 @@ onBeforeUnmount(() => {
           {{ item }}
         </div>
       </template>
-      <div v-if="targetWorkspaceId(server)" class="mcp-settings__actions">
+      <div
+        v-if="connectionActions(server).length"
+        class="mcp-settings__actions mcp-settings__connection-actions"
+      >
         <button
+          v-if="connectionActions(server).includes('reconnect')"
           type="button"
-          :disabled="Boolean(statusBusy) || isOverriddenInWorkspace(server)"
+          :disabled="Boolean(statusBusy)"
           @click="reconnect(server)"
         >
-          Reconnect
+          <RotateCw :size="13" /> Reconnect
         </button>
         <button
+          v-if="connectionActions(server).includes('login')"
           type="button"
-          :disabled="Boolean(statusBusy) || isOverriddenInWorkspace(server)"
+          :disabled="Boolean(statusBusy) || attempt?.status === 'pending'"
           @click="login(server)"
         >
-          Sign in
+          <LogIn :size="13" /> Sign in
         </button>
         <button
+          v-if="connectionActions(server).includes('logout')"
           type="button"
-          :disabled="Boolean(statusBusy) || isOverriddenInWorkspace(server)"
+          :disabled="Boolean(statusBusy)"
           @click="logout(server)"
         >
-          Sign out
+          <LogOut :size="13" /> Sign out
         </button>
       </div>
       <div
@@ -569,59 +664,28 @@ onBeforeUnmount(() => {
     </article>
 
     <button
-      v-if="!editorOpen"
+      v-if="!editorOpen || selectedName"
+      class="mcp-settings__add"
       type="button"
-      :disabled="loading"
+      :disabled="loading || saving"
       @click="
         editorOpen = true;
         beginAdd();
       "
     >
-      Add server
+      <Plus :size="14" /> Add server
     </button>
-    <form v-if="editorOpen" class="mcp-settings__form" @submit.prevent="save">
-      <h4>{{ selectedName ? `Edit ${selectedName}` : "Add server" }}</h4>
-      <div v-if="!selectedName" class="mcp-settings__scope-row">
-        <label class="mcp-settings__switch">
-          <input
-            v-model="creatingGlobal"
-            type="checkbox"
-            role="switch"
-            aria-label="Global server"
-          />
-          <span class="mcp-settings__switch-track" aria-hidden="true" />
-          <span>Global server</span>
-        </label>
-      </div>
-      <label
-        ><span>Name</span
-        ><input
-          v-model="nameInput"
-          aria-label="MCP server name"
-          autocomplete="off"
-          :disabled="Boolean(selectedName) || saving"
-      /></label>
-      <label
-        ><span>Server configuration (JSON)</span
-        ><textarea
-          v-model="configInput"
-          aria-label="MCP server configuration"
-          rows="9"
-          spellcheck="false"
-          :disabled="saving"
-        />
-      </label>
-      <div class="mcp-settings__actions">
-        <button
-          class="settings-popover__action settings-popover__action--primary"
-          type="submit"
-          :disabled="saving || (!selectedName && !creatingGlobal && !validCreationWorkspace)"
-        >
-          <Save :size="14" /> {{ saving ? "Saving…" : "Save server" }}
-        </button>
-        <button type="button" @click="cancelEdit">Cancel</button>
-      </div>
-    </form>
+    <McpServerEditor
+      v-if="editorOpen && !selectedName"
+      v-model:name="nameInput"
+      v-model:config="configInput"
+      v-model:global="creatingGlobal"
+      :editing="false"
+      :saving="saving"
+      :can-save="creatingGlobal || validCreationWorkspace"
+      @save="save"
+      @cancel="cancelEdit"
+    />
   </section>
 </template>
 
@@ -631,40 +695,34 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 0.55rem;
 }
-.mcp-settings__toolbar,
 .mcp-settings__server-head,
 .mcp-settings__actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 0.4rem;
   flex-wrap: wrap;
 }
-.mcp-settings__form label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  flex: 1;
+.mcp-settings__server-head {
+  justify-content: space-between;
+  gap: 0.6rem 1rem;
 }
-.mcp-settings__scope-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
+.mcp-settings__actions {
+  justify-content: flex-start;
 }
-.mcp-settings__form .mcp-settings__switch {
+.mcp-settings__switch {
   position: relative;
-  flex: none;
-  flex-direction: row;
+  display: inline-flex;
   align-items: center;
   gap: 0.5rem;
+  margin-right: 0.35rem;
   white-space: nowrap;
+  font-size: 0.78rem;
   cursor: pointer;
 }
 .mcp-settings__switch input {
   position: absolute;
   width: auto;
   opacity: 0;
-  pointer-events: none;
 }
 .mcp-settings__switch-track {
   position: relative;
@@ -697,30 +755,43 @@ onBeforeUnmount(() => {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
+.mcp-settings__switch input:disabled + .mcp-settings__switch-track {
+  opacity: 0.5;
+}
 .mcp-settings__server {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  padding: 0.55rem 0;
+  gap: 0.45rem;
+  padding: 0.85rem 0;
   border-bottom: 1px solid var(--color-border-soft);
 }
 .mcp-settings__server-meta {
   display: flex;
   flex-direction: column;
+  gap: 0.25rem;
   min-width: 0;
   font-size: 0.78rem;
-  color: var(--color-text-muted);
+  color: var(--color-text-subtle);
 }
 .mcp-settings__server-meta strong {
   color: var(--color-text-strong);
-  font-size: 0.84rem;
+  font-size: 0.88rem;
+}
+.mcp-settings__details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.mcp-settings__details span + span::before {
+  content: "·";
+  margin-right: 0.35rem;
 }
 .mcp-settings__help {
   color: var(--color-text-subtle);
   font-size: 0.78rem;
 }
 .mcp-settings__error {
-  color: var(--color-warning);
+  color: var(--color-error);
   font-size: 0.78rem;
 }
 .mcp-settings__tools-content {
@@ -734,39 +805,64 @@ onBeforeUnmount(() => {
   padding-left: 1.2rem;
   font-size: 0.76rem;
 }
-.mcp-settings__auth,
-.mcp-settings__form {
+.mcp-settings__auth {
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
-  padding-top: 0.4rem;
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+  font-size: 0.82rem;
 }
-.mcp-settings__form h4 {
-  margin: 0;
-  color: var(--color-text-strong);
-}
-.mcp-settings input,
-.mcp-settings textarea {
+.mcp-settings__auth textarea {
   width: 100%;
   border: 1px solid var(--color-border-soft);
-  border-radius: 0.45rem;
+  border-radius: 0.6rem;
   background: var(--color-bg-app);
   color: inherit;
-  padding: 0.5rem;
-  font: inherit;
-  font-family: var(--font-family-mono);
+  padding: 0.65rem 0.75rem;
+  font: 0.86rem/1.5 var(--font-family-mono);
 }
-.mcp-settings button:not(.settings-popover__action) {
-  border: 1px solid var(--color-border-soft);
+.mcp-settings button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  border: 0;
   border-radius: 0.45rem;
-  background: var(--color-bg-panel-strong);
-  color: inherit;
-  padding: 0.4rem 0.55rem;
+  background: var(--color-bg-selection);
+  color: var(--color-accent-strong);
+  padding: 0.45rem 0.65rem;
   font: inherit;
   font-size: 0.78rem;
   cursor: pointer;
 }
-.mcp-settings button:not(.settings-popover__action):disabled {
+.mcp-settings button.mcp-settings__icon-btn {
+  background: transparent;
+  color: var(--color-text-muted);
+  padding-inline: 0.45rem;
+}
+.mcp-settings__connection-actions button {
+  background: transparent;
+  color: var(--color-text-muted);
+  padding: 0.35rem 0.45rem;
+}
+.mcp-settings__connection-actions {
+  gap: 0.25rem;
+  margin-left: -0.45rem;
+}
+.mcp-settings__add {
+  align-self: flex-start;
+  margin-top: 0.35rem;
+}
+@media (hover: hover) {
+  .mcp-settings button:hover {
+    background: var(--color-bg-elevated);
+  }
+  .mcp-settings button.mcp-settings__icon-btn--danger:hover {
+    background: var(--color-error-soft);
+    color: var(--color-error);
+  }
+}
+.mcp-settings button:disabled {
   opacity: 0.55;
   cursor: default;
 }

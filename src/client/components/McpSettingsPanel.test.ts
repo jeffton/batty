@@ -45,6 +45,8 @@ describe("McpSettingsPanel OAuth and stale responses", () => {
           {
             name: "docs",
             state: "connected",
+            usesOAuth: true,
+            hasOAuthCredentials: true,
             scope: "project",
             source: "/project-one/.batty/mcp.json",
             tools: [{ name: "search", exposure: "codemode", description: "Search docs" }],
@@ -60,7 +62,7 @@ describe("McpSettingsPanel OAuth and stale responses", () => {
 
     expect(wrapper.text()).toContain("Overridden in this workspace");
     expect(wrapper.text()).toContain("search");
-    expect(wrapper.text()).toContain("codemode");
+    expect(wrapper.text()).not.toContain("codemode");
     const toolButtons = wrapper.findAll('[aria-label="Show tools for docs"]');
     expect(toolButtons).toHaveLength(2);
     const targets = toolButtons.map((button) => button.attributes("popovertarget"));
@@ -72,10 +74,7 @@ describe("McpSettingsPanel OAuth and stale responses", () => {
       expect(popover.get(".mcp-settings__tools").text()).toContain("Search docs");
       expect(card.find(".mcp-settings__server-head .mcp-settings__tools").exists()).toBe(false);
     }
-    await wrapper
-      .findAll("button")
-      .find((button) => button.text() === "Edit")!
-      .trigger("click");
+    await wrapper.findAll('[aria-label="Edit docs"]')[0]!.trigger("click");
     expect(wrapper.get('[aria-label="MCP server configuration"]').element).toHaveProperty(
       "value",
       expect.stringContaining("mcp.example.test"),
@@ -91,13 +90,13 @@ describe("McpSettingsPanel OAuth and stale responses", () => {
     for (const action of ["Reconnect", "Sign in", "Sign out"]) {
       expect(
         wrapper
+          .findAll(".mcp-settings__server")[0]!
           .findAll("button")
-          .find((button) => button.text() === action)
-          ?.attributes("disabled"),
-      ).toBeDefined();
+          .some((button) => button.text() === action),
+      ).toBe(false);
     }
     expect(wrapper.text()).toContain("Workspace");
-    await wrapper.findAll(".mcp-settings__server")[1]!.get("button").trigger("click");
+    await wrapper.findAll('[aria-label="Edit docs"]')[1]!.trigger("click");
     expect(wrapper.get('[aria-label="MCP server configuration"]').element).toHaveProperty(
       "value",
       expect.stringContaining("project.example.test"),
@@ -133,10 +132,7 @@ describe("McpSettingsPanel OAuth and stale responses", () => {
       }),
     );
 
-    await wrapper
-      .findAll("button")
-      .find((button) => button.text() === "Disable")!
-      .trigger("click");
+    await wrapper.findAll('[aria-label="Enabled docs"]')[0]!.setValue(false);
     await flushPromises();
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/api/settings/mcp/docs"),
@@ -186,7 +182,17 @@ describe("McpSettingsPanel OAuth and stale responses", () => {
       if (url.includes("/api/settings/mcp") && url.includes("workspaceId="))
         return json(settings([server]));
       if (url.includes("/api/settings/mcp")) return json(settings());
-      return json(status([{ name: "calendar", state: "connected", tools: [] }]));
+      return json(
+        status([
+          {
+            name: "calendar",
+            state: "needs-auth",
+            usesOAuth: true,
+            hasOAuthCredentials: false,
+            tools: [],
+          },
+        ]),
+      );
     });
     const wrapper = mount(McpSettingsPanel, {
       props: { active: true, workspaceId: workspace.id },
@@ -260,12 +266,28 @@ describe("McpSettingsPanel OAuth and stale responses", () => {
           }),
         );
       if (url.includes("/api/workspaces/workspace-2/mcp"))
-        return Promise.resolve(json(status([{ name: "fresh", state: "connected", tools: [] }])));
+        return Promise.resolve(
+          json(
+            status([
+              {
+                name: "fresh",
+                state: "needs-auth",
+                usesOAuth: true,
+                hasOAuthCredentials: false,
+                tools: [],
+              },
+            ]),
+          ),
+        );
       if (url.includes("workspaceId=workspace-2"))
         return Promise.resolve(
           json(
             settings([
-              { name: "fresh", config: { type: "stdio", command: "fresh" }, scope: "workspace" },
+              {
+                name: "fresh",
+                config: { type: "http", url: "https://fresh.example.test/mcp" },
+                scope: "workspace",
+              },
             ]),
           ),
         );
@@ -294,10 +316,22 @@ describe("McpSettingsPanel OAuth and stale responses", () => {
       ),
     );
     await flushPromises();
-    releaseOldStatus(json(status([{ name: "fresh", state: "stale-workspace-status", tools: [] }])));
+    releaseOldStatus(
+      json(
+        status([
+          {
+            name: "fresh",
+            state: "stale-workspace-status",
+            usesOAuth: true,
+            hasOAuthCredentials: false,
+            tools: [],
+          },
+        ]),
+      ),
+    );
     await flushPromises();
     expect(wrapper.text()).toContain("fresh");
-    expect(wrapper.text()).toContain("connected");
+    expect(wrapper.text()).toContain("Sign-in required");
     expect(wrapper.text()).not.toContain("stale-workspace-status");
 
     await wrapper
@@ -342,7 +376,17 @@ describe("McpSettingsPanel OAuth and stale responses", () => {
         pollCount++;
         return json(auth);
       }
-      return json(status([{ name: globalServer.name, state: "connected", tools: [] }]));
+      return json(
+        status([
+          {
+            name: globalServer.name,
+            state: "needs-auth",
+            usesOAuth: true,
+            hasOAuthCredentials: false,
+            tools: [],
+          },
+        ]),
+      );
     });
     const wrapper = mount(McpSettingsPanel, {
       props: { active: true, workspaceId: workspace.id },
@@ -354,10 +398,7 @@ describe("McpSettingsPanel OAuth and stale responses", () => {
       .trigger("click");
     await flushPromises();
     expect(wrapper.get(".mcp-settings__auth a").attributes("href")).toBe(auth.authorizationUrl);
-    await wrapper
-      .findAll("button")
-      .find((button) => button.text() === "Disable")!
-      .trigger("click");
+    await wrapper.get('[aria-label="Enabled shared-login"]').setValue(false);
     await flushPromises();
     await vi.advanceTimersByTimeAsync(1000);
     await flushPromises();
@@ -400,7 +441,17 @@ describe("McpSettingsPanel OAuth and stale responses", () => {
         pollCount++;
         return json(auth);
       }
-      return json(status());
+      return json(
+        status([
+          {
+            name: server.name,
+            state: "needs-auth",
+            usesOAuth: true,
+            hasOAuthCredentials: false,
+            tools: [],
+          },
+        ]),
+      );
     });
     const wrapper = mount(McpSettingsPanel, {
       props: { active: true, workspaceId: workspace.id },
@@ -447,18 +498,25 @@ describe("McpSettingsPanel", () => {
                 : [{ name: "shared", config: globalConfig, scope: "global" }],
           ),
         );
-      return json(status([{ name: "shared", scope: "project", state: "connected", tools: [] }]));
+      return json(
+        status([
+          {
+            name: "shared",
+            scope: "project",
+            state: "connected",
+            usesOAuth: false,
+            hasOAuthCredentials: false,
+            tools: [],
+          },
+        ]),
+      );
     });
     window.confirm = vi.fn(() => true);
     const wrapper = mount(McpSettingsPanel, {
       props: { active: true, workspaceId: "workspace-1" },
     });
     await flushPromises();
-    await wrapper
-      .findAll(".mcp-settings__server")[0]!
-      .findAll("button")
-      .find((button) => button.text() === "Disable")!
-      .trigger("click");
+    await wrapper.findAll('[aria-label="Enabled shared"]')[0]!.setValue(false);
     await flushPromises();
     await wrapper
       .findAll(".mcp-settings__server")[0]!
@@ -500,7 +558,17 @@ describe("McpSettingsPanel", () => {
               : [],
           ),
         );
-      return json(status([{ name: "other", state: "connected", tools: [] }]));
+      return json(
+        status([
+          {
+            name: "other",
+            state: "connected",
+            usesOAuth: false,
+            hasOAuthCredentials: false,
+            tools: [],
+          },
+        ]),
+      );
     });
     const wrapper = mount(McpSettingsPanel, {
       props: { active: true, workspaceId: "workspace-1" },
@@ -513,10 +581,21 @@ describe("McpSettingsPanel", () => {
     await wrapper.setProps({ workspaceId: "workspace-2" });
     await flushPromises();
     release(
-      json(status([{ name: "other", state: "stale", error: "Stale runtime error", tools: [] }])),
+      json(
+        status([
+          {
+            name: "other",
+            state: "stale",
+            usesOAuth: false,
+            hasOAuthCredentials: false,
+            error: "Stale runtime error",
+            tools: [],
+          },
+        ]),
+      ),
     );
     await flushPromises();
-    expect(wrapper.text()).toContain("connected");
+    expect(wrapper.text()).toContain("Connected");
     expect(wrapper.text()).not.toContain("Stale runtime error");
     wrapper.unmount();
   });
@@ -580,7 +659,16 @@ describe("McpSettingsPanel", () => {
           ),
         );
       return json(
-        status([{ name: "shared", scope: "project", state: "auth_required", tools: [] }]),
+        status([
+          {
+            name: "shared",
+            scope: "project",
+            state: "needs-auth",
+            usesOAuth: true,
+            hasOAuthCredentials: false,
+            tools: [],
+          },
+        ]),
       );
     });
     const wrapper = mount(McpSettingsPanel, {
@@ -588,12 +676,7 @@ describe("McpSettingsPanel", () => {
     });
     await flushPromises();
     const cards = wrapper.findAll(".mcp-settings__server");
-    expect(
-      cards[0]!
-        .findAll("button")
-        .find((button) => button.text() === "Sign in")!
-        .attributes("disabled"),
-    ).toBeDefined();
+    expect(cards[0]!.findAll("button").some((button) => button.text() === "Sign in")).toBe(false);
     await cards[1]!
       .findAll("button")
       .find((button) => button.text() === "Sign in")!
@@ -673,11 +756,11 @@ describe("McpSettingsPanel", () => {
     await wrapper.get("button").trigger("click");
     expect(wrapper.get('[aria-label="Global server"]').element).toHaveProperty("checked", true);
     const saveButton = wrapper.get('button[type="submit"]');
-    expect(saveButton.classes()).toContain("settings-popover__action--primary");
+    expect(saveButton.classes()).toContain("mcp-editor__save");
     expect(saveButton.find("svg").exists()).toBe(true);
-    const scopeRow = wrapper.get(".mcp-settings__scope-row");
+    const scopeRow = wrapper.get(".mcp-editor__switch");
     expect(scopeRow.get('[role="switch"]').attributes("aria-label")).toBe("Global server");
-    expect(scopeRow.get(".mcp-settings__switch-track").attributes("aria-hidden")).toBe("true");
+    expect(scopeRow.get(".mcp-editor__switch-track").attributes("aria-hidden")).toBe("true");
     await wrapper.get('[aria-label="Global server"]').setValue(false);
     expect(wrapper.find("select").exists()).toBe(false);
     await wrapper.setProps({ workspaceId: "workspace-2" });
@@ -694,7 +777,7 @@ describe("McpSettingsPanel", () => {
         method: "PUT",
         body: JSON.stringify({
           workspaceId: "workspace-2",
-          config: { type: "stdio", command: "node" },
+          config: { type: "stdio", command: "node", exposure: "codemode" },
         }),
       }),
     );
@@ -730,7 +813,7 @@ describe("McpSettingsPanel", () => {
     await wrapper.setProps({ workspaceId: "workspace-2" });
     await flushPromises();
     const two = wrapper.get(".mcp-settings__server");
-    await two.get("button").trigger("click");
+    await two.get('[aria-label="Edit two"]').trigger("click");
     expect(wrapper.get('[aria-label="MCP server configuration"]').element).toHaveProperty(
       "value",
       expect.stringContaining('"two"'),
@@ -753,6 +836,310 @@ describe("McpSettingsPanel", () => {
     );
     wrapper.unmount();
   });
+
+  it.each([
+    { state: "connected", usesOAuth: false, hasOAuthCredentials: false, actions: ["Reconnect"] },
+    { state: "connected", usesOAuth: true, hasOAuthCredentials: false, actions: ["Reconnect"] },
+    {
+      state: "connected",
+      usesOAuth: true,
+      hasOAuthCredentials: true,
+      actions: ["Reconnect", "Sign out"],
+    },
+    {
+      state: "needs-auth",
+      usesOAuth: true,
+      hasOAuthCredentials: false,
+      actions: ["Reconnect", "Sign in"],
+    },
+    {
+      state: "needs-auth",
+      usesOAuth: true,
+      hasOAuthCredentials: true,
+      actions: ["Reconnect", "Sign in", "Sign out"],
+    },
+    { state: "failed", usesOAuth: false, hasOAuthCredentials: false, actions: ["Reconnect"] },
+    { state: "disconnected", usesOAuth: false, hasOAuthCredentials: false, actions: ["Reconnect"] },
+    { state: "disabled", usesOAuth: true, hasOAuthCredentials: true, actions: [] },
+    { state: "connecting", usesOAuth: true, hasOAuthCredentials: true, actions: [] },
+    { state: "closed", usesOAuth: true, hasOAuthCredentials: true, actions: [] },
+  ])(
+    "shows relevant connection actions for $state / OAuth $usesOAuth / credentials $hasOAuthCredentials",
+    async ({ actions, ...runtime }) => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.includes("/api/settings/mcp"))
+          return json(
+            settings(
+              url.includes("workspaceId=")
+                ? []
+                : [
+                    {
+                      name: "docs",
+                      scope: "global",
+                      config: { url: "https://docs.example.test/mcp" },
+                    },
+                  ],
+            ),
+          );
+        return json(status([{ name: "docs", ...runtime, tools: [] }]));
+      });
+      const wrapper = mount(McpSettingsPanel, {
+        props: { active: true, workspaceId: workspace.id },
+      });
+      await flushPromises();
+      const buttons = wrapper
+        .get(".mcp-settings__server")
+        .findAll("button")
+        .map((button) => button.text());
+      for (const action of ["Reconnect", "Sign in", "Sign out"]) {
+        expect(buttons.includes(action)).toBe(actions.includes(action));
+      }
+      wrapper.unmount();
+    },
+  );
+
+  it("labels a server missing from inspected runtime status as Not connected", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/api/settings/mcp"))
+        return json(
+          settings(
+            url.includes("workspaceId=")
+              ? []
+              : [
+                  {
+                    name: "docs",
+                    scope: "global",
+                    config: { command: "node" },
+                  },
+                ],
+          ),
+        );
+      return json(status());
+    });
+    const wrapper = mount(McpSettingsPanel, { props: { active: true, workspaceId: workspace.id } });
+    await flushPromises();
+    expect(wrapper.get(".mcp-settings__server").text()).toContain("Not connected");
+    expect(wrapper.get(".mcp-settings__server").text()).not.toContain("Not inspected");
+    wrapper.unmount();
+  });
+
+  it("disables Add server while an inline save is pending", async () => {
+    let release!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (init?.method === "PUT") return pending;
+      const url = String(input);
+      if (url.includes("/api/settings/mcp"))
+        return json(
+          settings(
+            url.includes("workspaceId=")
+              ? []
+              : [
+                  {
+                    name: "docs",
+                    scope: "global",
+                    config: { command: "node" },
+                  },
+                ],
+          ),
+        );
+      return json(status());
+    });
+    const wrapper = mount(McpSettingsPanel, { props: { active: true, workspaceId: workspace.id } });
+    await flushPromises();
+    await wrapper.get('[aria-label="Edit docs"]').trigger("click");
+    await wrapper.get(".mcp-settings__form").trigger("submit");
+    await flushPromises();
+    const add = wrapper.findAll("button").find((button) => button.text() === "Add server")!;
+    expect(add.attributes("disabled")).toBeDefined();
+    await add.trigger("click");
+    expect(wrapper.get(".mcp-settings__server").find(".mcp-settings__form").exists()).toBe(true);
+    expect(wrapper.findAll(".mcp-settings__form")).toHaveLength(1);
+    release(json(settings()));
+    await flushPromises();
+    expect(add.attributes("disabled")).toBeUndefined();
+    expect(wrapper.find(".mcp-settings__form").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it.each([false, true])(
+    "rolls back a failed scope move with rollback failure %s",
+    async (rollbackFails) => {
+      let destinationExists = false;
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        const url = String(input);
+        if (init?.method === "PUT") {
+          destinationExists = true;
+          return json(settings());
+        }
+        if (init?.method === "DELETE") {
+          if (!url.includes("workspaceId="))
+            return new Response(JSON.stringify({ error: "Source delete failed" }), { status: 500 });
+          if (rollbackFails)
+            return new Response(JSON.stringify({ error: "Destination rollback failed" }), {
+              status: 500,
+            });
+          destinationExists = false;
+          return json(settings());
+        }
+        if (url.includes("/api/settings/mcp"))
+          return json(
+            settings(
+              url.includes("workspaceId=")
+                ? destinationExists
+                  ? [
+                      {
+                        name: "docs",
+                        scope: "workspace",
+                        config: { command: "node", exposure: "codemode" },
+                      },
+                    ]
+                  : []
+                : [{ name: "docs", scope: "global", config: { command: "node" } }],
+            ),
+          );
+        return json(status());
+      });
+      const wrapper = mount(McpSettingsPanel, {
+        props: { active: true, workspaceId: workspace.id },
+      });
+      await flushPromises();
+      const initialSettingsReads = fetchMock.mock.calls.filter(
+        ([input, init]) => String(input).includes("/api/settings/mcp") && !init?.method,
+      ).length;
+      await wrapper.get('[aria-label="Edit docs"]').trigger("click");
+      await wrapper.get('[aria-label="Global server"]').setValue(false);
+      await wrapper.get(".mcp-settings__form").trigger("submit");
+      await flushPromises();
+      const mutations = fetchMock.mock.calls.filter(([, init]) =>
+        ["PUT", "DELETE"].includes(init?.method ?? ""),
+      );
+      expect(mutations.map(([url, init]) => [url, init?.method])).toEqual([
+        ["/api/settings/mcp/docs", "PUT"],
+        ["/api/settings/mcp/docs", "DELETE"],
+        [`/api/settings/mcp/docs?workspaceId=${workspace.id}`, "DELETE"],
+      ]);
+      expect(wrapper.text()).toContain("Source delete failed");
+      expect(wrapper.find(".mcp-settings__form").exists()).toBe(true);
+      expect(wrapper.get('[aria-label="Global server"]').element).toHaveProperty("checked", false);
+      const settingsReads = fetchMock.mock.calls.filter(
+        ([input, init]) => String(input).includes("/api/settings/mcp") && !init?.method,
+      ).length;
+      if (rollbackFails) {
+        expect(wrapper.text()).toContain("Destination rollback failed");
+        expect(settingsReads).toBeGreaterThan(initialSettingsReads);
+        expect(wrapper.findAll(".mcp-settings__server")).toHaveLength(2);
+      } else {
+        expect(wrapper.text()).not.toContain("Destination rollback failed");
+        expect(settingsReads).toBe(initialSettingsReads);
+        expect(wrapper.findAll(".mcp-settings__server")).toHaveLength(1);
+      }
+      wrapper.unmount();
+    },
+  );
+
+  it.each([true, false])(
+    "edits inline and moves a server with Global set to %s",
+    async (global) => {
+      const sourceScope = global ? "workspace" : "global";
+      const config = {
+        type: "http" as const,
+        url: "https://docs.example.test/mcp",
+        exposure: "direct" as const,
+      };
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.includes("/api/settings/mcp"))
+          return json(
+            settings(
+              url.includes("workspaceId=") === (sourceScope === "workspace")
+                ? [{ name: "docs", scope: sourceScope, config }]
+                : [],
+            ),
+          );
+        return json(status());
+      });
+      const wrapper = mount(McpSettingsPanel, {
+        props: { active: true, workspaceId: workspace.id },
+      });
+      await flushPromises();
+      expect(wrapper.find(".mcp-settings__form").exists()).toBe(false);
+      await wrapper.get('[aria-label="Edit docs"]').trigger("click");
+      const card = wrapper.get(".mcp-settings__server");
+      expect(card.find(".mcp-settings__form").exists()).toBe(true);
+      expect(wrapper.findAll(".mcp-settings__form")).toHaveLength(1);
+      expect(card.find('[aria-label="MCP server name"]').exists()).toBe(false);
+      expect(
+        JSON.parse(
+          (card.get('[aria-label="MCP server configuration"]').element as HTMLTextAreaElement)
+            .value,
+        ),
+      ).toEqual({ type: "http", url: config.url });
+      await card.get('[aria-label="Global server"]').setValue(global);
+      await card.get(".mcp-settings__form").trigger("submit");
+      await flushPromises();
+      const mutations = fetchMock.mock.calls.filter(([, init]) =>
+        ["PUT", "DELETE"].includes(init?.method ?? ""),
+      );
+      expect(mutations).toEqual([
+        [
+          "/api/settings/mcp/docs",
+          expect.objectContaining({
+            method: "PUT",
+            body: JSON.stringify({
+              workspaceId: global ? undefined : workspace.id,
+              config: { type: "http", url: config.url, exposure: "codemode" },
+            }),
+          }),
+        ],
+        [
+          global ? `/api/settings/mcp/docs?workspaceId=${workspace.id}` : "/api/settings/mcp/docs",
+          expect.objectContaining({ method: "DELETE" }),
+        ],
+      ]);
+      expect(wrapper.find(".mcp-settings__form").exists()).toBe(false);
+      wrapper.unmount();
+    },
+  );
+
+  it.each([true, false])(
+    "prevents moving into an existing name with Global set to %s",
+    async (global) => {
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.includes("/api/settings/mcp"))
+          return json(
+            settings([
+              {
+                name: "docs",
+                scope: url.includes("workspaceId=") ? "workspace" : "global",
+                config: { command: "node" },
+              },
+            ]),
+          );
+        return json(status());
+      });
+      const wrapper = mount(McpSettingsPanel, {
+        props: { active: true, workspaceId: workspace.id },
+      });
+      await flushPromises();
+      const card = wrapper.findAll(".mcp-settings__server")[global ? 1 : 0]!;
+      await card.get('[aria-label="Edit docs"]').trigger("click");
+      await card.get('[aria-label="Global server"]').setValue(global);
+      await card.get(".mcp-settings__form").trigger("submit");
+      await flushPromises();
+      expect(wrapper.text()).toContain("already exists in that scope");
+      expect(
+        fetchMock.mock.calls.filter(([, init]) => ["PUT", "DELETE"].includes(init?.method ?? "")),
+      ).toHaveLength(0);
+      expect(card.find(".mcp-settings__form").exists()).toBe(true);
+      wrapper.unmount();
+    },
+  );
 
   it("uses the selected workspace for global runtime actions and preserves OAuth polling", async () => {
     vi.useFakeTimers();
@@ -786,7 +1173,17 @@ describe("McpSettingsPanel", () => {
           ),
         );
       if (url.includes("/api/workspaces/workspace-1/mcp/reconnect")) return json(status());
-      return json(status([{ name: "shared", state: "connected", tools: [] }]));
+      return json(
+        status([
+          {
+            name: "shared",
+            state: "needs-auth",
+            usesOAuth: true,
+            hasOAuthCredentials: false,
+            tools: [],
+          },
+        ]),
+      );
     });
     const wrapper = mount(McpSettingsPanel, {
       props: { active: true, workspaceId: "workspace-1" },

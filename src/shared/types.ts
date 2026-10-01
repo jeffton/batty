@@ -394,6 +394,9 @@ export interface McpWorkspaceStatus {
   servers: Array<{
     name: string;
     state: string;
+    usesOAuth: boolean;
+    /** Stored OAuth tokens exist; connection state alone does not imply a sign-in. */
+    hasOAuthCredentials: boolean;
     scope?: "global" | "project" | "extension";
     source?: string;
     tools: Array<{ name: string; description?: string; exposure: string }>;

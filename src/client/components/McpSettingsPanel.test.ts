@@ -85,6 +85,17 @@ describe("McpSettingsPanel OAuth and stale responses", () => {
     expect(wrapper.text()).toContain("Overridden in this workspace");
     expect(wrapper.text()).toContain("search");
     expect(wrapper.text()).toContain("codemode");
+    const toolButtons = wrapper.findAll('[aria-label="Show tools for docs"]');
+    expect(toolButtons).toHaveLength(2);
+    const targets = toolButtons.map((button) => button.attributes("popovertarget"));
+    expect(new Set(targets).size).toBe(2);
+    for (const [index, card] of wrapper.findAll(".mcp-settings__server").entries()) {
+      expect(toolButtons[index]!.text()).toBe("Tools (1)");
+      const popover = card.get('[popover="auto"]');
+      expect(popover.attributes("id")).toBe(targets[index]);
+      expect(popover.get(".mcp-settings__tools").text()).toContain("Search docs");
+      expect(card.find(".mcp-settings__server-head .mcp-settings__tools").exists()).toBe(false);
+    }
     await wrapper
       .findAll("button")
       .find((button) => button.text() === "Edit")!
@@ -787,6 +798,8 @@ describe("McpSettingsPanel", () => {
     expect(names).toEqual(["global", "zeta", "alpha"]);
     expect(wrapper.text()).toContain("Workspace · Project One");
     expect(wrapper.text()).toContain("Workspace · Project Two");
+    expect(wrapper.findAll('[aria-label^="Show tools for"]')).toHaveLength(0);
+    expect(wrapper.findAll("[popover]")).toHaveLength(0);
     expect(
       fetchMock.mock.calls.some(([url]) => String(url).includes("workspaceId=workspace-1")),
     ).toBe(true);

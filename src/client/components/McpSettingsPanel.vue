@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, useId, watch } from "vue";
+import FullPopover from "@/client/components/FullPopover.vue";
 import {
   cancelMcpAuthAttempt,
   completeMcpAuthAttempt,
@@ -40,6 +41,12 @@ const status = computed(
       errors: [],
     },
 );
+const toolsPopoverIdPrefix = useId();
+
+function toolsPopoverId(server: ScopedServer): string {
+  return `${toolsPopoverIdPrefix}-tools-${encodeURIComponent(JSON.stringify([server.scope, server.workspaceId, server.name]))}`;
+}
+
 const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
@@ -487,6 +494,14 @@ onBeforeUnmount(() => {
         </div>
         <div class="mcp-settings__actions">
           <button type="button" @click="editServer(server)">Edit</button>
+          <button
+            v-if="workspaceStatus(server)?.tools.length"
+            type="button"
+            :popovertarget="toolsPopoverId(server)"
+            :aria-label="`Show tools for ${server.name}`"
+          >
+            Tools ({{ workspaceStatus(server)?.tools.length }})
+          </button>
           <button type="button" @click="toggleEnabled(server)">
             {{ server.config.enabled === false ? "Enable" : "Disable" }}
           </button>
@@ -496,12 +511,21 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="mcp-settings__help">Exposure: {{ server.config.exposure ?? "codemode" }}</div>
-      <ul v-if="workspaceStatus(server)?.tools.length" class="mcp-settings__tools">
-        <li v-for="tool in workspaceStatus(server)?.tools" :key="tool.name">
-          <code>{{ tool.name }}</code> · {{ tool.exposure
-          }}<span v-if="tool.description"> — {{ tool.description }}</span>
-        </li>
-      </ul>
+      <FullPopover
+        v-if="workspaceStatus(server)?.tools.length"
+        :popover-id="toolsPopoverId(server)"
+        :title="`${server.name} tools`"
+        :subtitle="server.scope === 'global' ? 'Global' : `Workspace · ${server.workspaceLabel}`"
+      >
+        <div class="mcp-settings__tools-content">
+          <ul class="mcp-settings__tools">
+            <li v-for="tool in workspaceStatus(server)?.tools" :key="tool.name">
+              <code>{{ tool.name }}</code> · {{ tool.exposure
+              }}<span v-if="tool.description"> — {{ tool.description }}</span>
+            </li>
+          </ul>
+        </div>
+      </FullPopover>
       <div v-if="workspaceStatus(server)?.error" class="mcp-settings__error">
         {{ workspaceStatus(server)?.error }}
       </div>
@@ -696,6 +720,12 @@ onBeforeUnmount(() => {
 .mcp-settings__error {
   color: var(--color-warning);
   font-size: 0.78rem;
+}
+.mcp-settings__tools-content {
+  height: 100%;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: 1rem;
 }
 .mcp-settings__tools {
   margin: 0;

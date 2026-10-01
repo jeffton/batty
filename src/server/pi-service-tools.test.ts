@@ -578,7 +578,10 @@ describe("createSubagentTool", () => {
   });
 
   it.each([true, false])("awaits an async subagent (pending=%s)", async (pending) => {
-    const awaitSubagent = vi.fn(async () => pending);
+    const details = {
+      subagent: { workspaceId: "batty", sessionId: "child", sessionPath: "/tmp/child.jsonl" },
+    };
+    const awaitSubagent = vi.fn(async () => ({ waiting: pending, details }));
     const tool = createSubagentTool({
       workspace: { id: "batty", path: "/root/github/batty" } as any,
       config: {} as any,
@@ -601,6 +604,7 @@ describe("createSubagentTool", () => {
       createContext(),
     );
     expect(awaitSubagent).toHaveBeenCalledWith("parent-session", "child");
+    expect(result.details).toEqual(details);
     expect(result.content).toEqual([
       {
         type: "text",
@@ -610,7 +614,14 @@ describe("createSubagentTool", () => {
   });
 
   it("stops a running async subagent by session id", async () => {
-    const stopSubagent = vi.fn(async () => undefined);
+    const details = {
+      subagent: {
+        workspaceId: "batty",
+        sessionId: "child-session",
+        sessionPath: "/tmp/child.jsonl",
+      },
+    };
+    const stopSubagent = vi.fn(async () => details);
     const tool = createSubagentTool({
       workspace: { id: "batty", path: "/root/github/batty" } as any,
       config: {} as any,
@@ -632,6 +643,7 @@ describe("createSubagentTool", () => {
     );
 
     expect(stopSubagent).toHaveBeenCalledWith("parent-session", "child-session");
+    expect(result.details).toEqual(details);
     expect(result.content).toEqual([{ type: "text", text: "Stopped subagent child-session." }]);
   });
 
@@ -680,7 +692,14 @@ describe("createSubagentTool", () => {
   });
 
   it("queues steering instructions for a running async subagent", async () => {
-    const steerSubagent = vi.fn(async () => undefined);
+    const details = {
+      subagent: {
+        workspaceId: "batty",
+        sessionId: "child-session",
+        sessionPath: "/tmp/child.jsonl",
+      },
+    };
+    const steerSubagent = vi.fn(async () => details);
     const tool = createSubagentTool({
       workspace: { id: "batty", path: "/root/github/batty" } as any,
       config: {} as any,
@@ -706,6 +725,7 @@ describe("createSubagentTool", () => {
       "child-session",
       "Focus on the failing test",
     );
+    expect(result.details).toEqual(details);
     expect(result.content).toEqual([
       { type: "text", text: "Queued steering for subagent child-session." },
     ]);

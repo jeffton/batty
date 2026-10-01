@@ -60,12 +60,8 @@ export type PiServiceToolFactoryContext = {
     request: DetachedSubagentToolRequest,
   ) => Promise<DetachedSubagentToolResult>;
   awaitSubagent: SubagentToolDependencies["awaitSubagent"];
-  stopSubagent: (parentSessionId: string, subagentSessionId: string) => Promise<void>;
-  steerSubagent: (
-    parentSessionId: string,
-    subagentSessionId: string,
-    prompt: string,
-  ) => Promise<void>;
+  stopSubagent: SubagentToolDependencies["stopSubagent"];
+  steerSubagent: SubagentToolDependencies["steerSubagent"];
   continueSubagent: SubagentToolDependencies["continueSubagent"];
 };
 

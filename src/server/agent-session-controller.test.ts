@@ -267,7 +267,7 @@ describe("native AgentSession controller", () => {
     let f!: Awaited<ReturnType<typeof fixture>>;
     const awaitSubagent = vi.fn(async () => {
       f.session.requestTurnEnd();
-      return true;
+      return { waiting: true, details: {} };
     });
     const tool = createSubagentTool({
       workspace: { id: "test", path: "/tmp" } as any,

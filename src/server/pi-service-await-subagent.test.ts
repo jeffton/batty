@@ -23,6 +23,7 @@ function fixture(
   );
   service.runDetachedSubagentSession = vi.fn();
   vi.spyOn(SessionStore, "existing").mockResolvedValue({
+    getSessionFile: () => "/tmp/child.jsonl",
     getEntries: () => [
       {
         type: "custom",
@@ -43,13 +44,20 @@ afterEach(() => vi.restoreAllMocks());
 describe("PiService.awaitSubagent", () => {
   it("ends the parent turn for a running async child", async () => {
     const { service, requestTurnEnd } = fixture();
-    expect(await service.awaitSubagent(workspace, "parent", "child")).toBe(true);
+    expect(await service.awaitSubagent(workspace, "parent", "child")).toMatchObject({
+      waiting: true,
+    });
     expect(requestTurnEnd).toHaveBeenCalledOnce();
   });
 
   it("does not end the parent turn if the child has already finished", async () => {
     const { service, requestTurnEnd } = fixture({ streaming: false });
-    expect(await service.awaitSubagent(workspace, "parent", "child")).toBe(false);
+    expect(await service.awaitSubagent(workspace, "parent", "child")).toMatchObject({
+      waiting: false,
+      details: {
+        subagent: { workspaceId: "test", sessionId: "child", sessionPath: "/tmp/child.jsonl" },
+      },
+    });
     expect(requestTurnEnd).not.toHaveBeenCalled();
   });
 
@@ -67,13 +75,15 @@ describe("PiService.awaitSubagent", () => {
     const waiting = service.awaitSubagent(workspace, "parent", "child");
     service.liveSessions.get("child").session.isStreaming = false;
     release();
-    expect(await waiting).toBe(false);
+    expect(await waiting).toMatchObject({ waiting: false });
     expect(requestTurnEnd).not.toHaveBeenCalled();
   });
 
   it("yields while a completed child's reply is still awaiting admission", async () => {
     const { service, requestTurnEnd } = fixture({ streaming: false, pending: true });
-    expect(await service.awaitSubagent(workspace, "parent", "child")).toBe(true);
+    expect(await service.awaitSubagent(workspace, "parent", "child")).toMatchObject({
+      waiting: true,
+    });
     expect(requestTurnEnd).toHaveBeenCalledOnce();
   });
 
@@ -123,7 +133,12 @@ describe("PiService.continueSubagent", () => {
     });
     await expect(
       service.continueSubagent(workspace, "parent", "child", "next", true, true),
-    ).resolves.toMatchObject({ text: expect.stringContaining("Subagent queued.") });
+    ).resolves.toMatchObject({
+      text: expect.stringContaining("Subagent queued."),
+      details: {
+        subagent: { workspaceId: "test", sessionId: "child", sessionPath: "/tmp/child.jsonl" },
+      },
+    });
     expect(service.runDetachedSubagentSession).not.toHaveBeenCalled();
     release();
     await vi.waitFor(() => expect(service.runDetachedSubagentSession).toHaveBeenCalledOnce());

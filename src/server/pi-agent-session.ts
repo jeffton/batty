@@ -42,6 +42,7 @@ import { modelKey } from "./pi-service-types";
 import { AgentSessionController } from "./agent-session-controller";
 import { SessionStore } from "./session-store";
 import { createArtifactExtension, createTrackedFileTools } from "./agent-file-changes";
+import { createCodemodeSubagentExtension } from "./codemode-subagents";
 import { loadBattyMcpConfig, createBattyMcpCredentials, battyMcpLogPath } from "./mcp-settings";
 
 export const BATTY_FIND_DEFAULT_LIMIT = 100;
@@ -232,6 +233,7 @@ export async function createPiAgentSession({
         }),
       },
       createArtifactExtension(),
+      createCodemodeSubagentExtension(),
       ...extensionFactories,
     ],
     additionalExtensionPaths: [

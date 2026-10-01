@@ -202,13 +202,19 @@ export interface SubagentToolDependencies extends CommonToolDependencies {
   startDetachedSubagentSession: (
     request: DetachedSubagentRequest,
   ) => Promise<DetachedSubagentResult>;
-  awaitSubagent: (parentSessionId: string, subagentSessionId: string) => Promise<boolean>;
-  stopSubagent: (parentSessionId: string, subagentSessionId: string) => Promise<void>;
+  awaitSubagent: (
+    parentSessionId: string,
+    subagentSessionId: string,
+  ) => Promise<{ waiting: boolean; details: ToolExecutionDetails }>;
+  stopSubagent: (
+    parentSessionId: string,
+    subagentSessionId: string,
+  ) => Promise<ToolExecutionDetails>;
   steerSubagent: (
     parentSessionId: string,
     subagentSessionId: string,
     prompt: string,
-  ) => Promise<void>;
+  ) => Promise<ToolExecutionDetails>;
   continueSubagent: (
     parentSessionId: string,
     subagentSessionId: string,
@@ -259,7 +265,7 @@ export function createSubagentTool({
       if (params.action === "await") {
         const subagentSessionId = String(params.sessionId ?? "").trim();
         if (!subagentSessionId) throw new Error("sessionId is required to await a subagent");
-        const waiting = await awaitSubagent(parentSessionId, subagentSessionId);
+        const { waiting, details } = await awaitSubagent(parentSessionId, subagentSessionId);
         return {
           content: [
             {
@@ -269,17 +275,17 @@ export function createSubagentTool({
                 : `Subagent ${subagentSessionId} has already finished. Continue with its delivered reply.`,
             },
           ],
-          details: {},
+          details,
           isError: false,
         };
       }
       if (params.action === "stop") {
         const subagentSessionId = String(params.sessionId ?? "").trim();
         if (!subagentSessionId) throw new Error("sessionId is required to stop a subagent");
-        await stopSubagent(parentSessionId, subagentSessionId);
+        const details = await stopSubagent(parentSessionId, subagentSessionId);
         return {
           content: [{ type: "text", text: `Stopped subagent ${subagentSessionId}.` }],
-          details: {},
+          details,
           isError: false,
         };
       }
@@ -288,10 +294,10 @@ export function createSubagentTool({
         if (!subagentSessionId) throw new Error("sessionId is required to steer a subagent");
         const prompt = String(params.prompt ?? "").trim();
         if (!prompt) throw new Error("prompt is required to steer a subagent");
-        await steerSubagent(parentSessionId, subagentSessionId, prompt);
+        const details = await steerSubagent(parentSessionId, subagentSessionId, prompt);
         return {
           content: [{ type: "text", text: `Queued steering for subagent ${subagentSessionId}.` }],
-          details: {},
+          details,
           isError: false,
         };
       }

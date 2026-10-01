@@ -502,6 +502,58 @@ describe("Batty native AgentSession tools", () => {
 });
 
 describe("Codemode", () => {
+  it.each([false, true])(
+    "preserves nested subagent destinations across reopen (script error=%s)",
+    async (fails) => {
+      const fixture = await setup([
+        {
+          name: "subagent",
+          label: "subagent",
+          description: "subagent",
+          parameters: Type.Object({ sessionId: Type.String() }),
+          execute: async (_id, args: { sessionId: string }) => ({
+            content: [{ type: "text" as const, text: "private nested reply" }],
+            details: {
+              subagent: {
+                workspaceId: "workspace",
+                sessionId: args.sessionId,
+                sessionPath: `/sessions/${args.sessionId}.jsonl`,
+              },
+            },
+          }),
+        },
+      ]);
+      fixture.faux.setResponses([
+        toolCall("codemode", {
+          code: `await Promise.all([tools.subagent({ sessionId: "one" }), tools.subagent({ sessionId: "two" })]);
+            ${fails ? 'throw new Error("script failed");' : 'text("done");'}`,
+        }),
+        fauxAssistantMessage("done"),
+      ]);
+      await fixture.session.prompt("run subagents");
+      for (const session of [fixture.session, await fixture.reopen()]) {
+        const result = session.messages.findLast((message) => message.role === "toolResult");
+        expect(result).toMatchObject({
+          toolName: "codemode",
+          isError: fails,
+          details: {
+            calls: ["one", "two"].map((sessionId) =>
+              expect.objectContaining({
+                name: "subagent",
+                subagent: {
+                  workspaceId: "workspace",
+                  sessionId,
+                  sessionPath: `/sessions/${sessionId}.jsonl`,
+                },
+              }),
+            ),
+          },
+        });
+        expect(JSON.stringify(result?.content)).not.toContain("private nested reply");
+      }
+    },
+  );
+
   it("chains native tools, batches reads, and preserves file changes without exposing nested output", async () => {
     const calls: string[] = [];
     const { root, faux, session } = await setup([], undefined, [

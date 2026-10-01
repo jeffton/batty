@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { PanelRightOpen } from "@lucide/vue";
+import { computed, ref, useId } from "vue";
+import SubagentSessionPopover from "@/client/components/SubagentSessionPopover.vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
 import { createHeadView } from "@/client/lib/tool-output";
 import type { ToolExecutionDetails, UiContentBlock } from "@/shared/types";
@@ -12,15 +14,25 @@ type NestedCall = {
   durationMs?: number;
   error?: string;
   cost?: number;
+  subagent?: { workspaceId?: string; sessionPath?: string };
 };
 
-const props = defineProps<{
-  code: string;
-  blocks: UiContentBlock[];
-  details?: ToolExecutionDetails;
-  status?: "running" | "success" | "error";
-  compact: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    code: string;
+    blocks: UiContentBlock[];
+    details?: ToolExecutionDetails;
+    status?: "running" | "success" | "error";
+    compact: boolean;
+    allowSessionPopovers?: boolean;
+  }>(),
+  { allowSessionPopovers: true },
+);
+
+const popoverPrefix = `codemode-subagent-${useId()}`;
+function popoverId(index: number): string {
+  return `${popoverPrefix}-${expanded.value ? index : Math.max(0, calls.value.length - 8) + index}`;
+}
 
 const expanded = ref(false);
 const codeView = computed(() => createHeadView(props.code.replaceAll("\r", "").trimEnd(), 10));
@@ -92,6 +104,28 @@ function cost(value: number): string {
             {{ duration(call.durationMs) }}
           </span>
           <span v-if="call.cost" class="codemode-display__muted">{{ cost(call.cost) }}</span>
+          <template
+            v-if="
+              props.allowSessionPopovers &&
+              call.name === 'subagent' &&
+              call.subagent?.workspaceId &&
+              call.subagent?.sessionPath
+            "
+          >
+            <button
+              type="button"
+              class="codemode-display__session-btn"
+              :popovertarget="popoverId(index)"
+            >
+              <PanelRightOpen :size="14" />
+              {{ call.status === "running" ? "Open live session" : "Open session" }}
+            </button>
+            <SubagentSessionPopover
+              :popover-id="popoverId(index)"
+              :workspace-id="call.subagent.workspaceId"
+              :session-path="call.subagent.sessionPath"
+            />
+          </template>
         </div>
         <div v-if="expanded && call.error" class="codemode-display__error">{{ call.error }}</div>
       </div>
@@ -161,6 +195,18 @@ function cost(value: number): string {
 .codemode-display__control {
   display: flex;
   justify-content: center;
+}
+
+.codemode-display__session-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--color-info);
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
 }
 
 .tool-call__expand-btn {

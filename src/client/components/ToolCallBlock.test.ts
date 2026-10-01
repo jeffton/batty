@@ -611,8 +611,8 @@ describe("ToolCallBlock", () => {
     expect(wrapper.find(".tool-call__subagent-btn").exists()).toBe(false);
   });
 
-  it.each(["await", "queue", "steer", "stop"])(
-    "renders subagent %s acknowledgements as monospaced text",
+  it.each(["await", "queue", "steer", "stop", "resume"])(
+    "renders subagent %s acknowledgements with a session button",
     (action) => {
       const text = "Session ID: child_123\nStatus: **running**";
       const wrapper = mount(ToolCallBlock, {
@@ -620,13 +620,23 @@ describe("ToolCallBlock", () => {
           name: "subagent",
           arguments: { action, sessionId: "child_123" },
           resultBlocks: [{ type: "text", text }],
-          resultDetails: {},
+          resultDetails: {
+            subagent: {
+              workspaceId: "workspace",
+              sessionId: "child_123",
+              sessionPath: "/tmp/child_123.jsonl",
+            },
+          },
           status: "success",
         },
       });
 
       expect(wrapper.find(".code-block code").text()).toBe(text);
       expect(wrapper.find(".markdown-body").exists()).toBe(false);
+      expect(wrapper.get(".tool-call__subagent-btn").text()).toBe("Open session");
+      expect(wrapper.get(".tool-call__subagent-btn").attributes("popovertarget")).toBe(
+        "subagent-session-popover-child_123",
+      );
     },
   );
 

@@ -903,7 +903,7 @@ export class PiService {
       void started.catch(() => {});
       return {
         text: `Subagent queued.\n\nSession ID: ${subagentSessionId}\nIts final result will be delivered automatically.`,
-        details: {},
+        details: this.subagentSessionDetails(workspace.id, subagentSessionId, manager),
         isError: false,
       };
     }
@@ -914,7 +914,7 @@ export class PiService {
     workspace: WorkspaceInfo,
     parentSessionId: string,
     subagentSessionId: string,
-  ): Promise<boolean> {
+  ): Promise<{ waiting: boolean; details: ToolExecutionDetails }> {
     const manager = await SessionManager.existing(
       workspace.path,
       workspaceSessionDir(this.config, workspace.id),
@@ -939,9 +939,11 @@ export class PiService {
     const pending =
       this.subagentOperations.has(subagentSessionId) ||
       this.liveSessions.get(subagentSessionId)?.session.isStreaming === true;
-    if (!pending) return false;
-    this.requireSession(parentSessionId).session.requestTurnEnd();
-    return true;
+    if (pending) this.requireSession(parentSessionId).session.requestTurnEnd();
+    return {
+      waiting: pending,
+      details: this.subagentSessionDetails(workspace.id, subagentSessionId, manager),
+    };
   }
 
   private requireRunningOwnedSubagent(
@@ -964,24 +966,38 @@ export class PiService {
     return child;
   }
 
-  private async stopSubagent(parentSessionId: string, subagentSessionId: string): Promise<void> {
-    await this.requireRunningOwnedSubagent(parentSessionId, subagentSessionId).abort();
+  private subagentSessionDetails(
+    workspaceId: string,
+    sessionId: string,
+    manager: SessionManager,
+  ): ToolExecutionDetails {
+    return { subagent: { workspaceId, sessionId, sessionPath: manager.getSessionFile() } };
+  }
+
+  private async stopSubagent(
+    workspace: WorkspaceInfo,
+    parentSessionId: string,
+    subagentSessionId: string,
+  ): Promise<ToolExecutionDetails> {
+    const child = this.requireRunningOwnedSubagent(parentSessionId, subagentSessionId);
+    await child.abort();
+    return this.subagentSessionDetails(workspace.id, subagentSessionId, child.sessionManager);
   }
 
   private async steerSubagent(
+    workspace: WorkspaceInfo,
     parentSessionId: string,
     subagentSessionId: string,
     prompt: string,
-  ): Promise<void> {
+  ): Promise<ToolExecutionDetails> {
     const notice = buildSubagentSteeringRuntimeNotice(prompt);
-    await this.requireRunningOwnedSubagent(
-      parentSessionId,
-      subagentSessionId,
-    ).queueCustomSteeringMessage({
+    const child = this.requireRunningOwnedSubagent(parentSessionId, subagentSessionId);
+    await child.queueCustomSteeringMessage({
       customType: `batty-runtime-notice:${notice.kind}`,
       content: notice.text,
       display: true,
     });
+    return this.subagentSessionDetails(workspace.id, subagentSessionId, child.sessionManager);
   }
 
   private async resolveOrCreateDailySession(
@@ -1284,9 +1300,9 @@ export class PiService {
             awaitSubagent: (parentSessionId, subagentSessionId) =>
               this.awaitSubagent(workspace, parentSessionId, subagentSessionId),
             stopSubagent: (parentSessionId, subagentSessionId) =>
-              this.stopSubagent(parentSessionId, subagentSessionId),
+              this.stopSubagent(workspace, parentSessionId, subagentSessionId),
             steerSubagent: (parentSessionId, subagentSessionId, prompt) =>
-              this.steerSubagent(parentSessionId, subagentSessionId, prompt),
+              this.steerSubagent(workspace, parentSessionId, subagentSessionId, prompt),
             continueSubagent: (parentSessionId, subagentSessionId, prompt, async, queued, signal) =>
               this.continueSubagent(
                 workspace,

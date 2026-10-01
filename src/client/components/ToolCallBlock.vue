@@ -577,6 +577,7 @@ const genericEntries = computed(() => {
       :code="readString('code') ?? ''"
       :blocks="props.resultBlocks"
       :details="props.resultDetails"
+      :allow-session-popovers="props.allowSessionPopovers"
       :status="props.status"
       :compact="props.compact"
     />

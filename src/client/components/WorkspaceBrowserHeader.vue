@@ -139,7 +139,9 @@ watch(
 
 <style scoped>
 .workspace-browser-header {
-  position: relative;
+  /* Pin the header so iOS does not apply its native scroll-edge blur over it. */
+  position: sticky;
+  top: 0;
   z-index: 2;
   flex: 0 0 auto;
   border-bottom: 1px solid var(--color-border-soft);

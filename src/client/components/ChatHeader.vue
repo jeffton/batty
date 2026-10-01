@@ -92,7 +92,9 @@ const emit = defineEmits<{
 
 <style scoped>
 .header {
-  position: relative;
+  /* Pin the header so iOS does not apply its native scroll-edge blur over it. */
+  position: sticky;
+  top: 0;
   z-index: 2;
   display: flex;
   align-items: center;

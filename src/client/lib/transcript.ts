@@ -113,7 +113,7 @@ export function isAttachmentOutputToolCall(
   }
 
   const state = toolStatesByCallId.get(block.id);
-  if (state?.status !== "success") return false;
+  if (state?.status !== "success" && state?.status !== "error") return false;
   return (
     (block.name === "attach-files" && hasSentFiles(state)) ||
     (block.name === "sites" && hasSites(state))
@@ -177,6 +177,8 @@ function hasRenderableContent(message: Extract<UiMessage, { role: "assistant" }>
   return (
     assistantHasError(message) ||
     (message.fileChanges?.length ?? 0) > 0 ||
+    (message.sentFiles?.length ?? 0) > 0 ||
+    (message.sites?.length ?? 0) > 0 ||
     message.blocks.some((block) => block.type !== "thinking" || block.thinking.trim().length > 0)
   );
 }
@@ -189,14 +191,21 @@ function attachmentBlockFromToolResult(
     resultBlocks: message.blocks,
     resultDetails: message.details,
   };
-  if (state.status !== "success") return undefined;
+  if (state.status !== "success" && message.toolName !== "codemode") return undefined;
   if (
     hasSentFiles(state) &&
-    (message.toolName === "attach-files" || message.toolName === "subagent")
+    (message.toolName === "attach-files" ||
+      message.toolName === "subagent" ||
+      message.toolName === "codemode")
   ) {
     return { type: "toolCall", id: message.toolCallId, name: "attach-files", arguments: {} };
   }
-  if (hasSites(state) && (message.toolName === "sites" || message.toolName === "subagent")) {
+  if (
+    hasSites(state) &&
+    (message.toolName === "sites" ||
+      message.toolName === "subagent" ||
+      message.toolName === "codemode")
+  ) {
     return { type: "toolCall", id: message.toolCallId, name: "sites", arguments: {} };
   }
   return undefined;
@@ -213,7 +222,9 @@ function acceptsPendingAttachmentBlocks(message: UiMessage): boolean {
   return (
     message.role === "assistant" &&
     message.turnPhase === "final" &&
-    message.blocks.some((block) => block.type === "text" || block.type === "image")
+    (message.blocks.some((block) => block.type === "text" || block.type === "image") ||
+      (message.sentFiles?.length ?? 0) > 0 ||
+      (message.sites?.length ?? 0) > 0)
   );
 }
 
@@ -232,7 +243,8 @@ export function buildTranscriptMessages(
     if (message.role === "toolResult") {
       const isReferenced = toolStateLookup.referencedToolCallIds.has(message.toolCallId);
       const attachmentBlock = attachmentBlockFromToolResult(message);
-      const propagatesReferencedAttachment = isReferenced && message.toolName === "subagent";
+      const propagatesReferencedAttachment =
+        isReferenced && (message.toolName === "subagent" || message.toolName === "codemode");
 
       if (attachmentBlock && (!isReferenced || propagatesReferencedAttachment)) {
         if (pendingAttachmentBlocks.length === 0) {

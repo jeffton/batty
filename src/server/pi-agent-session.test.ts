@@ -547,6 +547,66 @@ describe("Codemode", () => {
     });
   });
 
+  it.each([false, true])(
+    "promotes nested codemode files, sites, and diffs across reopen (script error=%s)",
+    async (fails) => {
+      const sentFiles = [
+        {
+          id: "file-1",
+          name: "photo.jpg",
+          size: 42,
+          mimeType: "image/jpeg",
+          kind: "image",
+          downloadUrl: "/photo.jpg",
+        },
+      ];
+      const sites = [{ id: "site-1", name: "Report", url: "/sites/site-1", public: true }];
+      const fixture = await setup(
+        [
+          { name: "attach-files", details: { sentFiles } },
+          { name: "sites", details: { sites } },
+        ].map(({ name, details }) => ({
+          name,
+          label: name,
+          description: name,
+          parameters: Type.Object({}),
+          execute: async () => ({
+            content: [{ type: "text" as const, text: "Attached" }],
+            details,
+          }),
+        })),
+      );
+      fixture.faux.setResponses([
+        toolCall("codemode", {
+          code: `await tools.write({ path: "report.txt", content: "report" });
+            await Promise.all([tools.attach_files({}), tools.sites({})]);
+            ${fails ? 'throw new Error("failed after attachments");' : 'text("done");'}`,
+        }),
+        fauxAssistantMessage("Here you go."),
+      ]);
+      await fixture.session.prompt("Build and attach report");
+      expect(
+        fixture.session.messages.findLast((message) => message.role === "toolResult"),
+      ).toMatchObject({
+        toolName: "codemode",
+        isError: fails,
+        details: { sentFiles, sites },
+      });
+      for (const session of [fixture.session, await fixture.reopen()]) {
+        expect(getSessionMessagePage(session).messages.at(-1)).toMatchObject({
+          battySentFiles: sentFiles,
+          battySites: sites,
+          battyFileChanges: [
+            {
+              path: path.join(fixture.root, "report.txt"),
+              patch: expect.stringContaining("+report"),
+            },
+          ],
+        });
+      }
+    },
+  );
+
   it("applies argument validation, hook argument replacement, blocking, and structured results", async () => {
     const execute = vi.fn(async (_id, { value }) => ({
       content: [{ type: "text" as const, text: "text view" }],

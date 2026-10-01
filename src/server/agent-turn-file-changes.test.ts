@@ -24,6 +24,55 @@ const reply = (id: string) =>
   message(id, { role: "assistant", content: [{ type: "text", text: "done" }] });
 
 describe("durable file change projection", () => {
+  it.each([false, true])(
+    "projects codemode files, sites, and diffs even on error=%s",
+    (isError) => {
+      const sentFiles = [
+        {
+          id: "file-1",
+          name: "photo.jpg",
+          size: 42,
+          mimeType: "image/jpeg",
+          kind: "image",
+          downloadUrl: "/photo.jpg",
+        },
+      ];
+      const sites = [{ id: "site-1", name: "Report", url: "/sites/site-1", public: true }];
+      const result = message("codemode", {
+        role: "toolResult",
+        toolName: "codemode",
+        isError,
+        details: {
+          sentFiles,
+          sites,
+          battyFileChanges: [
+            {
+              path: "/work/file.txt",
+              before: "before\n",
+              after: "after\n",
+              patch: "per-tool patch",
+            },
+          ],
+        },
+      });
+      const artifacts = agentTurnArtifactsByReplyEntryId([
+        message("user", { role: "user" }),
+        result,
+        message("duplicate", { role: "toolResult", details: { sentFiles, sites } }),
+        reply("reply"),
+        message("next-user", { role: "user" }),
+        reply("next-reply"),
+      ]);
+      expect(artifacts.get("reply")).toEqual({
+        sentFiles,
+        sites,
+        fileChanges: [{ path: "/work/file.txt", patch: expect.stringContaining("+after") }],
+      });
+      expect(artifacts.get("reply")?.fileChanges?.[0]?.patch).toContain("-before");
+      expect(artifacts.has("next-reply")).toBe(false);
+    },
+  );
+
   it("aggregates repeated writes and subagent results into one final per-file diff", () => {
     const entries = [
       message("user", { role: "user" }),

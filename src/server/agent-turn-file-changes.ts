@@ -197,6 +197,8 @@ export function agentTurnArtifactsByReplyEntryId(
           !message.content.some((block) => block.type === "toolCall");
       }
       if (message.role === "toolResult") {
+        appendUniqueById(sentFiles, message.details?.sentFiles ?? []);
+        appendUniqueById(sites, message.details?.sites ?? []);
         for (const change of message.details?.battyFileChanges ?? []) {
           const first = changes.get(change.path);
           changes.set(change.path, { ...change, before: first ? first.before : change.before });

@@ -4,6 +4,7 @@ import {
   buildTranscriptMessages,
   toolStatesForMessage,
 } from "@/client/lib/transcript";
+import { easyModeMessage } from "@/client/lib/easy-mode";
 import type { SessionState, UiContentBlock, UiMessage } from "@/shared/types";
 
 const assistantMessage: Extract<UiMessage, { role: "assistant" }> = {
@@ -356,69 +357,192 @@ describe("transcript tool state merging", () => {
     ]);
   });
 
-  it("propagates attachments from a nonempty subagent result to the parent reply", () => {
-    const subagentAssistant: Extract<UiMessage, { role: "assistant" }> = {
-      id: "assistant-subagent",
-      role: "assistant",
-      turnPhase: "intermediate",
-      timestamp: 3,
-      blocks: [
-        {
-          type: "toolCall",
-          id: "subagent-1",
-          name: "subagent",
-          arguments: { prompt: "Build the report" },
-        },
-      ],
-    };
-    const subagentResult: Extract<UiMessage, { role: "toolResult" }> = {
-      id: "tool-subagent",
-      role: "toolResult",
-      timestamp: 4,
-      toolCallId: "subagent-1",
-      toolName: "subagent",
-      blocks: [{ type: "text", text: "Report complete." }],
-      details: {
-        sentFiles: [
+  it.each(["subagent", "codemode"])(
+    "propagates attachments from a nonempty %s result to the parent reply",
+    (toolName) => {
+      const subagentAssistant: Extract<UiMessage, { role: "assistant" }> = {
+        id: "assistant-subagent",
+        role: "assistant",
+        turnPhase: "intermediate",
+        timestamp: 3,
+        blocks: [
           {
-            id: "file-1",
-            name: "report.csv",
-            size: 42,
-            mimeType: "text/csv",
-            kind: "file",
-            downloadUrl: "/api/sent-files/file-1?download=1",
+            type: "toolCall",
+            id: "subagent-1",
+            name: toolName,
+            arguments: { prompt: "Build the report" },
           },
         ],
-      },
-      isError: false,
-    };
-    const finalAssistant: Extract<UiMessage, { role: "assistant" }> = {
-      id: "assistant-final",
+      };
+      const subagentResult: Extract<UiMessage, { role: "toolResult" }> = {
+        id: "tool-subagent",
+        role: "toolResult",
+        timestamp: 4,
+        toolCallId: "subagent-1",
+        toolName,
+        blocks: [{ type: "text", text: "Report complete." }],
+        details: {
+          sentFiles: [
+            {
+              id: "file-1",
+              name: "report.csv",
+              size: 42,
+              mimeType: "text/csv",
+              kind: "file",
+              downloadUrl: "/api/sent-files/file-1?download=1",
+            },
+          ],
+        },
+        isError: false,
+      };
+      const finalAssistant: Extract<UiMessage, { role: "assistant" }> = {
+        id: "assistant-final",
+        role: "assistant",
+        turnPhase: "final",
+        timestamp: 5,
+        blocks: [{ type: "text", text: "Here is the report." }],
+      };
+
+      const messages: SessionState["messages"] = [
+        subagentAssistant,
+        subagentResult,
+        finalAssistant,
+      ];
+      const lookup = buildToolStateLookup(messages, []);
+      const transcript = buildTranscriptMessages(messages, lookup);
+
+      expect(transcript).toHaveLength(2);
+      expect(transcript[0]?.message).toEqual(subagentAssistant);
+      expect(transcript[0]?.toolStatesByCallId.get("subagent-1")?.resultBlocks).toEqual([
+        { type: "text", text: "Report complete." },
+      ]);
+      expect(transcript[1]?.message).toEqual({
+        ...finalAssistant,
+        blocks: [
+          ...finalAssistant.blocks,
+          { type: "toolCall", id: "subagent-1", name: "attach-files", arguments: {} },
+        ],
+      });
+      expect(transcript[1]?.toolStatesByCallId.get("subagent-1")?.resultDetails).toEqual(
+        subagentResult.details,
+      );
+    },
+  );
+
+  it.each([
+    ["files", false],
+    ["sites", false],
+    ["both", false],
+    ["files", true],
+    ["sites", true],
+    ["both", true],
+  ] as const)(
+    "keeps codemode %s attachments in easy mode with and without a final reply (error=%s)",
+    (artifacts, isError) => {
+      const call: Extract<UiMessage, { role: "assistant" }> = {
+        id: "codemode-call",
+        role: "assistant",
+        timestamp: 1,
+        turnPhase: "intermediate",
+        blocks: [{ type: "toolCall", id: "code-1", name: "codemode", arguments: {} }],
+      };
+      const result: Extract<UiMessage, { role: "toolResult" }> = {
+        id: "codemode-result",
+        role: "toolResult",
+        timestamp: 2,
+        toolCallId: "code-1",
+        toolName: "codemode",
+        blocks: [{ type: "text", text: "Nested tool output" }],
+        isError,
+        details: {
+          sentFiles:
+            artifacts === "sites"
+              ? []
+              : [
+                  {
+                    id: "image-1",
+                    name: "photo.jpg",
+                    size: 42,
+                    mimeType: "image/jpeg",
+                    kind: "image",
+                    downloadUrl: "/photo.jpg",
+                  },
+                ],
+          sites:
+            artifacts === "files"
+              ? []
+              : [{ id: "site-1", name: "Report", url: "/sites/site-1", public: true }],
+        },
+      };
+      const final: Extract<UiMessage, { role: "assistant" }> = {
+        id: "final",
+        role: "assistant",
+        timestamp: 3,
+        turnPhase: "final",
+        blocks: [{ type: "text", text: "Here you go." }],
+      };
+
+      const artifactOnlyFinal: Extract<UiMessage, { role: "assistant" }> = {
+        ...final,
+        blocks: [],
+        sentFiles: result.details!.sentFiles as Extract<
+          UiMessage,
+          { role: "assistant" }
+        >["sentFiles"],
+        sites: result.details!.sites as Extract<UiMessage, { role: "assistant" }>["sites"],
+      };
+      for (const messages of [
+        [call, result, final],
+        [call, result],
+        [result, final],
+        [call, result, artifactOnlyFinal],
+      ]) {
+        const lookup = buildToolStateLookup(messages, []);
+        const transcript = buildTranscriptMessages(messages, lookup);
+        expect(transcript).toHaveLength(messages[0] === call ? 2 : 1);
+        if (messages[0] === call) expect(transcript[0]?.message).toEqual(call);
+        const entry = transcript.at(-1)!;
+        const easy = easyModeMessage(entry.message, entry.toolStatesByCallId);
+        expect(easy?.role).toBe("assistant");
+        expect(easy && "blocks" in easy ? easy.blocks : []).toContainEqual({
+          type: "toolCall",
+          id: "code-1",
+          name: artifacts === "sites" ? "sites" : "attach-files",
+          arguments: {},
+        });
+        expect(entry.toolStatesByCallId.get("code-1")?.resultDetails).toEqual(result.details);
+      }
+    },
+  );
+
+  it.each(["files", "sites"])("keeps an artifact-only reply with promoted %s", (kind) => {
+    const message: Extract<UiMessage, { role: "assistant" }> = {
+      id: "artifacts",
       role: "assistant",
+      timestamp: 1,
       turnPhase: "final",
-      timestamp: 5,
-      blocks: [{ type: "text", text: "Here is the report." }],
+      blocks: [],
+      sentFiles:
+        kind === "files"
+          ? [
+              {
+                id: "file-1",
+                name: "report.txt",
+                size: 42,
+                mimeType: "text/plain",
+                kind: "file",
+                downloadUrl: "/report.txt",
+              },
+            ]
+          : [],
+      sites:
+        kind === "sites"
+          ? [{ id: "site-1", name: "Report", url: "/sites/site-1", public: true }]
+          : [],
     };
-
-    const messages: SessionState["messages"] = [subagentAssistant, subagentResult, finalAssistant];
-    const lookup = buildToolStateLookup(messages, []);
-    const transcript = buildTranscriptMessages(messages, lookup);
-
-    expect(transcript).toHaveLength(2);
-    expect(transcript[0]?.message).toEqual(subagentAssistant);
-    expect(transcript[0]?.toolStatesByCallId.get("subagent-1")?.resultBlocks).toEqual([
-      { type: "text", text: "Report complete." },
-    ]);
-    expect(transcript[1]?.message).toEqual({
-      ...finalAssistant,
-      blocks: [
-        ...finalAssistant.blocks,
-        { type: "toolCall", id: "subagent-1", name: "attach-files", arguments: {} },
-      ],
-    });
-    expect(transcript[1]?.toolStatesByCallId.get("subagent-1")?.resultDetails).toEqual(
-      subagentResult.details,
-    );
+    const transcript = buildTranscriptMessages([message], buildToolStateLookup([message], []));
+    expect(transcript).toHaveLength(1);
+    expect(easyModeMessage(transcript[0]!.message)).toEqual(message);
   });
 
   it("moves standalone attachment tool results into the following assistant response", () => {

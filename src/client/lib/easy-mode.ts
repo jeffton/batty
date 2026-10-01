@@ -22,6 +22,8 @@ export function easyModeMessage(
   if (
     !blocks &&
     (next.fileChanges?.length ?? 0) === 0 &&
+    (next.sentFiles?.length ?? 0) === 0 &&
+    (next.sites?.length ?? 0) === 0 &&
     !next.errorMessage &&
     next.stopReason !== "error"
   ) {

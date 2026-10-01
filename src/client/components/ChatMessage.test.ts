@@ -2,7 +2,12 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE } from "@/server/runtime-notices";
 import ChatMessage from "@/client/components/ChatMessage.vue";
-import type { ToolDisplayState } from "@/client/lib/transcript";
+import {
+  buildToolStateLookup,
+  buildTranscriptMessages,
+  type ToolDisplayState,
+} from "@/client/lib/transcript";
+import { easyModeMessage } from "@/client/lib/easy-mode";
 import type { UiMessage } from "@/shared/types";
 
 describe("ChatMessage", () => {
@@ -73,6 +78,60 @@ describe("ChatMessage", () => {
       "/api/sent-files/workspace/session/call/video-1",
     );
     expect(wrapper.find(".message__segment--bubble .attached-files__card").exists()).toBe(true);
+  });
+
+  it("renders files and sites propagated together from codemode in easy mode", () => {
+    const messages: UiMessage[] = [
+      {
+        id: "call",
+        role: "assistant",
+        timestamp: 1,
+        turnPhase: "intermediate",
+        blocks: [{ type: "toolCall", id: "code-1", name: "codemode", arguments: {} }],
+      },
+      {
+        id: "result",
+        role: "toolResult",
+        timestamp: 2,
+        toolCallId: "code-1",
+        toolName: "codemode",
+        isError: false,
+        blocks: [{ type: "text", text: "Nested output" }],
+        details: {
+          sentFiles: [
+            {
+              id: "image-1",
+              name: "photo.jpg",
+              size: 42,
+              mimeType: "image/jpeg",
+              kind: "image",
+              downloadUrl: "/photo.jpg",
+              previewUrl: "/photo.jpg",
+            },
+          ],
+          sites: [{ id: "site-1", name: "Report", url: "/sites/site-1", public: true }],
+        },
+      },
+      {
+        id: "final",
+        role: "assistant",
+        timestamp: 3,
+        turnPhase: "final",
+        blocks: [{ type: "text", text: "Here you go." }],
+      },
+    ];
+    const entry = buildTranscriptMessages(messages, buildToolStateLookup(messages, [])).at(-1)!;
+    const wrapper = mount(ChatMessage, {
+      props: {
+        message: easyModeMessage(entry.message, entry.toolStatesByCallId)!,
+        toolStatesByCallId: entry.toolStatesByCallId,
+      },
+    });
+    expect(wrapper.findAll(".attached-files__card")).toHaveLength(1);
+    expect(wrapper.find("img.attached-files__preview").attributes("src")).toBe("/photo.jpg");
+    expect(wrapper.findAll(".shared-sites__card")).toHaveLength(1);
+    expect(wrapper.text()).toContain("Report");
+    expect(wrapper.text()).not.toContain("Nested output");
   });
 
   it("renders artifacts projected from an async subagent", () => {

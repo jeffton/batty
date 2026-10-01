@@ -51,12 +51,22 @@ test("MCP layout, inline editing and relevant connection actions", async ({ page
   await expect(page.getByRole("switch", { name: "Enabled f2", exact: true })).toBeChecked();
   const add = page.getByRole("button", { name: "Add server", exact: true });
   expect((await add.boundingBox())!.width).toBeLessThan(200);
+  const statusRow = cards.nth(1).locator(".mcp-settings__status-row");
+  const detailsBox = (await statusRow.locator(".mcp-settings__details").boundingBox())!;
+  const reconnectBox = (await statusRow
+    .getByRole("button", { name: "Reconnect", exact: true })
+    .boundingBox())!;
+  expect(
+    Math.abs(detailsBox.y + detailsBox.height / 2 - reconnectBox.y - reconnectBox.height / 2),
+  ).toBeLessThan(2);
   await page.screenshot({ path: testInfo.outputPath("mcp-list-light.png") });
   await page.getByRole("button", { name: "Edit f2docs", exact: true }).click();
   await expect(
     cards.nth(1).getByRole("textbox", { name: "MCP server configuration" }),
   ).toBeVisible();
   await expect(cards.nth(1).getByRole("switch", { name: "Global server" })).toBeChecked();
+  await expect(cards.nth(1).getByRole("button", { name: "Reconnect", exact: true })).toHaveCount(0);
+  await expect(cards.nth(1).getByRole("button", { name: "Sign in", exact: true })).toHaveCount(0);
   await expect(
     cards.nth(1).getByRole("textbox", { name: "MCP server configuration" }),
   ).not.toHaveValue(/exposure/);
@@ -64,6 +74,12 @@ test("MCP layout, inline editing and relevant connection actions", async ({ page
   await page.emulateMedia({ colorScheme: "dark" });
   await page.screenshot({ path: testInfo.outputPath("mcp-edit-dark.png") });
   await cards.nth(1).getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(cards.nth(1).getByRole("button", { name: "Reconnect", exact: true })).toBeVisible();
+  await expect(cards.nth(1).getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Edit testlodge", exact: true }).click();
+  await expect(cards.nth(3).getByRole("button", { name: "Sign out", exact: true })).toHaveCount(0);
+  await cards.nth(3).getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(cards.nth(3).getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: testInfo.outputPath("mcp-list-mobile.png") });
   expect(

@@ -511,11 +511,6 @@ onBeforeUnmount(() => {
       <div class="mcp-settings__server-head">
         <div class="mcp-settings__server-meta">
           <strong>{{ server.name }}</strong>
-          <div class="mcp-settings__details">
-            <span>{{ server.scope === "global" ? "Global" : "Workspace" }}</span>
-            <span v-if="isOverriddenInWorkspace(server)">Overridden in this workspace</span>
-            <span v-else>{{ connectionLabel(server) }}</span>
-          </div>
         </div>
         <div class="mcp-settings__actions">
           <label class="mcp-settings__switch">
@@ -560,6 +555,42 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
+      <div class="mcp-settings__status-row">
+        <div class="mcp-settings__details">
+          <span>{{ server.scope === "global" ? "Global" : "Workspace" }}</span>
+          <span v-if="isOverriddenInWorkspace(server)">Overridden in this workspace</span>
+          <span v-else>{{ connectionLabel(server) }}</span>
+        </div>
+        <div
+          v-if="!isEditing(server) && connectionActions(server).length"
+          class="mcp-settings__actions mcp-settings__connection-actions"
+        >
+          <button
+            v-if="connectionActions(server).includes('reconnect')"
+            type="button"
+            :disabled="Boolean(statusBusy)"
+            @click="reconnect(server)"
+          >
+            <RotateCw :size="13" /> Reconnect
+          </button>
+          <button
+            v-if="connectionActions(server).includes('login')"
+            type="button"
+            :disabled="Boolean(statusBusy) || attempt?.status === 'pending'"
+            @click="login(server)"
+          >
+            <LogIn :size="13" /> Sign in
+          </button>
+          <button
+            v-if="connectionActions(server).includes('logout')"
+            type="button"
+            :disabled="Boolean(statusBusy)"
+            @click="logout(server)"
+          >
+            <LogOut :size="13" /> Sign out
+          </button>
+        </div>
+      </div>
       <McpServerEditor
         v-if="isEditing(server)"
         v-model:name="nameInput"
@@ -598,35 +629,7 @@ onBeforeUnmount(() => {
           {{ item }}
         </div>
       </template>
-      <div
-        v-if="connectionActions(server).length"
-        class="mcp-settings__actions mcp-settings__connection-actions"
-      >
-        <button
-          v-if="connectionActions(server).includes('reconnect')"
-          type="button"
-          :disabled="Boolean(statusBusy)"
-          @click="reconnect(server)"
-        >
-          <RotateCw :size="13" /> Reconnect
-        </button>
-        <button
-          v-if="connectionActions(server).includes('login')"
-          type="button"
-          :disabled="Boolean(statusBusy) || attempt?.status === 'pending'"
-          @click="login(server)"
-        >
-          <LogIn :size="13" /> Sign in
-        </button>
-        <button
-          v-if="connectionActions(server).includes('logout')"
-          type="button"
-          :disabled="Boolean(statusBusy)"
-          @click="logout(server)"
-        >
-          <LogOut :size="13" /> Sign out
-        </button>
-      </div>
+
       <div
         v-if="
           !isOverriddenInWorkspace(server) &&
@@ -777,6 +780,14 @@ onBeforeUnmount(() => {
   color: var(--color-text-strong);
   font-size: 0.88rem;
 }
+.mcp-settings__status-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.65rem;
+  color: var(--color-text-subtle);
+  font-size: 0.78rem;
+}
 .mcp-settings__details {
   display: flex;
   flex-wrap: wrap;
@@ -847,7 +858,6 @@ onBeforeUnmount(() => {
 }
 .mcp-settings__connection-actions {
   gap: 0.25rem;
-  margin-left: -0.45rem;
 }
 .mcp-settings__add {
   align-self: flex-start;

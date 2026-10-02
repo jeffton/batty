@@ -246,7 +246,7 @@ export function createSubagentTool({
     name: SUBAGENT_TOOL_NAME,
     label: "Subagent",
     description:
-      "Run a subagent, await its async reply, queue a new turn, resume a finished subagent, steer its active turn, or stop it. Async replies are delivered to the parent session.",
+      "Run a subagent, await its async reply, queue a new turn, resume a finished subagent, steer its active turn, or stop it. Returns plain text, not JSON: synchronous run/resume returns the subagent's reply; async run/resume and queue return an acknowledgement with a Session ID: <id> line. Async replies are delivered to the parent session.",
     promptSnippet:
       "Run, await, queue, resume, stop, or steer a subagent by session id. Await yields the parent turn; queue preserves the current reply before starting the next turn.",
     promptGuidelines: [
@@ -258,6 +258,8 @@ export function createSubagentTool({
       "Use action=queue with sessionId and prompt for a running async subagent. Its current reply reaches the parent before queued work begins; the queued reply is delivered later.",
       "Use action=resume with sessionId and prompt for a finished subagent. Set async=true to deliver its reply to the parent later, or omit it to wait for the reply. Resume rejects running subagents; it starts another task and cannot steer, rush, or wait for an active turn.",
       "Use action=stop with sessionId to stop a running subagent.",
+      "In codemode, await tools.subagent(...) returns a string, not a JSON object or a tool-result envelope. Do not JSON.parse it. Synchronous run/resume returns the subagent's reply (or '(no output)' for an empty run); async run/resume and queue return an acknowledgement containing Session ID: <id>. Extract that line to obtain the sessionId for later calls, for example const sessionId = result.match(/^Session ID: (.+)$/m)[1].",
+      "Await, steer, and stop return plain-text status acknowledgements, not the subagent's reply. Async replies arrive separately in the parent session; await yields while work is active and returns a finished-status acknowledgement if it is already done.",
     ],
     parameters: SubagentToolSchema,
     execute: async (toolCallId, params, signal, onUpdate, ctx) => {

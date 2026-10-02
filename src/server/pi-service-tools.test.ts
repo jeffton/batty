@@ -420,6 +420,10 @@ describe("createSubagentTool", () => {
       isError: false,
     });
     expect(result).not.toHaveProperty("terminate");
+    expect(tool.description).toContain("Returns plain text, not JSON");
+    expect(tool.promptGuidelines).toContainEqual(
+      expect.stringContaining("await tools.subagent(...) returns a string"),
+    );
   });
 
   it("returns immediately from an async launch and delegates completion to the parent session", async () => {

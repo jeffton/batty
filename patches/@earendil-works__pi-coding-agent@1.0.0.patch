@@ -1,211 +1,16 @@
-diff --git a/dist/core/agent-session.d.ts b/dist/core/agent-session.d.ts
-index 0ff6862..c84ee85 100644
---- a/dist/core/agent-session.d.ts
-+++ b/dist/core/agent-session.d.ts
-@@ -163,6 +163,10 @@ export type QueuedInputDisposition = "handled" | "queued";
- export type PromptDisposition = QueuedInputDisposition | "started";
- /** Options for AgentSession.prompt() */
- export interface PromptOptions {
-+    clientMessageId?: string;
-+    queuedInputId?: string;
-+    /** Cancel prompt preflight before native run starts. Hooks already in progress are joined, not raced. */
-+    signal?: AbortSignal;
-     /** Whether to dispatch extension commands and expand skill commands and prompt templates (default: true) */
-     expandPromptTemplates?: boolean;
-     /** Image attachments */
-@@ -597,6 +601,14 @@ export declare class AgentSession {
-     get pendingMessageCount(): number;
-     /** Get pending steering messages (read-only) */
-     getSteeringMessages(): readonly string[];
-+    getQueuedPrompts(): Array<{
-+        kind: "steer" | "followUp";
-+        index: number;
-+        text: string;
-+        clientMessageId?: string;
-+        entryId?: string;
-+    }>;
-+    removeQueuedPrompt(kind: "steer" | "followUp", index: number): void;
-     /** Get pending follow-up messages (read-only) */
-     getFollowUpMessages(): readonly string[];
-     get resourceLoader(): ResourceLoader;
-diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
-index 1da213f..9321898 100644
---- a/dist/core/agent-session.js
-+++ b/dist/core/agent-session.js
-@@ -635,6 +635,7 @@ export class AgentSession {
-     }
-     /** Emit an event to all listeners */
-     _emit(event) {
-+        this.sessionManager.persistNow();
-         for (const l of this._eventListeners) {
-             l(event);
-         }
-@@ -1479,6 +1480,7 @@ export class AgentSession {
-      * @throws Error if no model selected or no API key available (when not streaming)
-      */
-     async prompt(text, options) {
-+        options?.signal?.throwIfAborted();
-         if (this._isEmittingAgentSettled) {
-             this._deferredSettledActions.push(async () => await this.prompt(text, options));
-             return;
-@@ -1489,6 +1491,7 @@ export class AgentSession {
-         // Extension commands manage their own LLM interaction via pi.sendMessage()
-         if (expandPromptTemplates && text.startsWith("/")) {
-             const handled = await this._tryExecuteExtensionCommand(text);
-+            options?.signal?.throwIfAborted();
-             if (handled) {
-                 // Extension command executed, no prompt to send
-                 preflightResult?.("handled");
-@@ -1500,6 +1503,7 @@ export class AgentSession {
-         }
-         // Emit input event for extension interception (before skill/template expansion)
-         const processedInput = await this._runInputHandlers(text, options?.images, options?.source ?? "interactive", this.isStreaming ? options?.streamingBehavior : undefined);
-+        options?.signal?.throwIfAborted();
-         if (!processedInput) {
-             preflightResult?.("handled");
-             return;
-@@ -1517,10 +1521,10 @@ export class AgentSession {
-                 throw new Error("Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.");
-             }
-             if (options.streamingBehavior === "followUp") {
--                await this._queueFollowUp(expandedText, currentImages);
-+                await this._queueFollowUp(expandedText, currentImages, options);
-             }
-             else {
--                await this._queueSteer(expandedText, currentImages);
-+                await this._queueSteer(expandedText, currentImages, options);
-             }
-             preflightResult?.("queued");
-             return;
-@@ -1543,12 +1547,14 @@ export class AgentSession {
-             }
-             throw new Error(formatNoApiKeyFoundMessage(this.model.provider));
-         }
-+        options?.signal?.throwIfAborted();
-         // Check if we need to compact before sending (catches aborted responses).
-         // The user's new prompt is sent below, so do not call agent.continue() here.
-         const lastAssistant = this._findLastAssistantMessage();
-         if (lastAssistant) {
-             await this._checkCompaction(lastAssistant, false);
-         }
-+        options?.signal?.throwIfAborted();
-         // Emit before_agent_start before normalizing images so extension-driven model
-         // selection determines the resize profile used for the request and history.
-         const selectedToolsBefore = this._baseSystemPromptOptions.selectedTools;
-@@ -1561,6 +1567,7 @@ export class AgentSession {
-         if (!handlerEditedTools)
-             result.systemPromptOptions.selectedTools = this.getActiveToolNames();
-         const normalized = await this._normalizePromptImages(currentImages);
-+        options?.signal?.throwIfAborted();
-         const userText = normalized.hints.length > 0 ? `${expandedText}\n\n${normalized.hints.join("\n")}` : expandedText;
-         // Build messages only after hooks and image normalization have completed.
-         const messages = [];
-@@ -1570,6 +1577,8 @@ export class AgentSession {
-             role: "user",
-             content: userContent,
-             timestamp: Date.now(),
-+            clientMessageId: options?.clientMessageId,
-+            queuedInputId: options?.queuedInputId,
-         });
-         // Inject any pending "nextTurn" messages as context alongside the user message
-         for (const msg of this._pendingNextTurnMessages) {
-@@ -1694,9 +1703,8 @@ export class AgentSession {
-     /**
-      * Internal: Queue a steering message (already expanded, no extension command check).
-      */
--    async _queueSteer(text, images) {
-+    async _queueSteer(text, images, metadata) {
-         this._steeringMessages.push(text);
--        this._emitQueueUpdate();
-         const content = [{ type: "text", text }];
-         if (images) {
-             content.push(...images);
-@@ -1705,19 +1713,28 @@ export class AgentSession {
-             role: "user",
-             content,
-             timestamp: Date.now(),
-+            clientMessageId: metadata?.clientMessageId,
-+            queuedInputId: metadata?.queuedInputId,
-         });
-+        this._emitQueueUpdate();
-     }
-     /**
-      * Internal: Queue a follow-up message (already expanded, no extension command check).
-      */
--    async _queueFollowUp(text, images) {
-+    async _queueFollowUp(text, images, metadata) {
-         this._followUpMessages.push(text);
--        this._emitQueueUpdate();
-         const content = [{ type: "text", text }];
-         if (images) {
-             content.push(...images);
-         }
--        this.agent.followUp({ role: "user", content, timestamp: Date.now() });
-+        this.agent.followUp({
-+            role: "user",
-+            content,
-+            timestamp: Date.now(),
-+            clientMessageId: metadata?.clientMessageId,
-+            queuedInputId: metadata?.queuedInputId,
-+        });
-+        this._emitQueueUpdate();
-     }
-     /**
-      * Throw an error if the text is an extension command.
-@@ -1856,6 +1873,41 @@ export class AgentSession {
-     get pendingMessageCount() {
-         return this._steeringMessages.length + this._followUpMessages.length;
-     }
-+    /** Snapshot pending user prompts with their admission metadata. */
-+    getQueuedPrompts() {
-+        const prompts = [];
-+        for (const kind of ["steer", "followUp"]) {
-+            let index = 0;
-+            for (const message of this.agent.getQueuedMessages(kind)) {
-+                if (message.role !== "user")
-+                    continue;
-+                prompts.push({
-+                    kind,
-+                    index: index++,
-+                    text: typeof message.content === "string" ? message.content : message.content
-+                        .filter((block) => block.type === "text")
-+                        .map((block) => block.text)
-+                        .join("\n"),
-+                    clientMessageId: message.clientMessageId,
-+                    entryId: message.queuedInputId,
-+                });
-+            }
-+        }
-+        return prompts;
-+    }
-+    /** Remove the nth user prompt, preserving queued context messages. */
-+    removeQueuedPrompt(kind, index) {
-+        if (!Number.isInteger(index) || index < 0)
-+            throw new Error("Queued prompt is unavailable");
-+        const messages = this.agent.getQueuedMessages(kind);
-+        let userIndex = 0;
-+        const queueIndex = messages.findIndex((message) => message.role === "user" && userIndex++ === index);
-+        if (queueIndex < 0 || !this.agent.removeQueuedMessage(kind, queueIndex))
-+            throw new Error("Queued prompt is unavailable");
-+        const displayed = kind === "steer" ? this._steeringMessages : this._followUpMessages;
-+        displayed.splice(index, 1);
-+        this._emitQueueUpdate();
-+    }
-     /** Get pending steering messages (read-only) */
-     getSteeringMessages() {
-         return this._steeringMessages;
-@@ -2579,6 +2631,7 @@ export class AgentSession {
-             this._extensionErrorListener = bindings.onError;
-         }
-         this._applyExtensionBindings(this._extensionRunner);
-+        this.sessionManager.persistNow();
-         await this._extensionRunner.emit(this._sessionStartEvent);
-         this._extensionRunner.reportUnhandledMcpServers();
-         await this.extendResourcesFromExtensions(this._sessionStartEvent.reason === "reload" ? "reload" : "startup");
 diff --git a/dist/core/extensions/runner.d.ts b/dist/core/extensions/runner.d.ts
-index 37335ab..10b75a0 100644
+index 37335ab116dee456bb4407bd34fe172ab5fee846..5c76f5bee77b635dea2ac05a53aac503b588e93f 100644
 --- a/dist/core/extensions/runner.d.ts
 +++ b/dist/core/extensions/runner.d.ts
+@@ -8,7 +8,7 @@ import type { CacheWarmingAction } from "../cache-warmer.ts";
+ import type { ResourceDiagnostic } from "../diagnostics.ts";
+ import type { KeybindingsConfig } from "../keybindings.ts";
+ import type { ModelRegistry } from "../model-registry.ts";
+-import type { SessionManager } from "../session-manager.ts";
++import type { ReadonlySessionManager, SessionManager } from "../session-manager.ts";
+ import { type BuildSystemPromptOptions, type NormalizedBuildSystemPromptOptions } from "../system-prompt.ts";
+ import type { VirtualModelDefinition } from "../virtual-models.ts";
+ import type { AgentBeforeSettleEvent, BeforeAgentStartEvent, BeforeAgentStartEventResult, BeforeProviderHeadersEvent, BeforeProviderRequestEvent, BoundaryContextPreview, CacheWarmingDecisionEvent, ContextEvent, ContextWithSystemEvent, EntryRenderer, Extension, ExtensionActions, ExtensionCommandContext, ExtensionCommandContextActions, ExtensionContext, ExtensionContextActions, ExtensionError, ExtensionEvent, ExtensionFlag, ExtensionMode, ExtensionRuntime, ExtensionShortcut, ExtensionToolContext, ExtensionUIContext, InputEvent, InputEventResult, InputSource, LoadExtensionsResult, MarkdownTransformer, MessageEndEvent, MessageRenderer, ProjectTrustContext, ProjectTrustEvent, ProjectTrustEventResult, ProviderConfig, RegisteredTool, ReplacedSessionContext, ResolvedCommand, ResourcesDiscoverEvent, SessionBeforeCompactResult, SessionBeforeForkResult, SessionBeforeSwitchResult, SessionBeforeTreeResult, SessionBoundaryDraft, SessionShutdownEvent, ToolCallEvent, ToolCallEventResult, ToolResultEvent, ToolResultEventResult, TurnEndEvent, UserBashEvent, UserBashEventResult } from "./types.ts";
 @@ -31,6 +31,7 @@ type RunnerEmitResult<TEvent extends RunnerEmitEvent> = TEvent extends {
  } ? SessionBeforeCompactResult | undefined : TEvent extends {
      type: "session_before_tree";
@@ -214,8 +19,17 @@ index 37335ab..10b75a0 100644
  export type ExtensionErrorListener = (error: ExtensionError) => void;
  type BoundaryBaseEvent = Omit<TurnEndEvent, "entries" | "continue" | "context"> | Omit<AgentBeforeSettleEvent, "entries" | "continue" | "context">;
  interface BoundaryDispatchResult {
+@@ -112,7 +113,7 @@ export declare class ExtensionRunner {
+     private staleMessage;
+     private uiPromptDepth;
+     private activeUIPrompt;
+-    constructor(extensions: Extension[], runtime: ExtensionRuntime, cwd: string, sessionManager: SessionManager, modelRegistry: ModelRegistry);
++    constructor(extensions: Extension[], runtime: ExtensionRuntime, cwd: string, sessionManager: ReadonlySessionManager, modelRegistry: ModelRegistry);
+     bindCore(actions: ExtensionActions, contextActions: ExtensionContextActions, providerActions?: {
+         registerProvider?: (name: string, config: ProviderConfig) => void;
+         registerNativeProvider?: (provider: Provider) => void;
 diff --git a/dist/core/extensions/runner.js b/dist/core/extensions/runner.js
-index 10a0aa1..bdc4632 100644
+index 10a0aa16b8ca70cad61c24e140f70618a0d1159a..bdc463208ae0bd0fcdfff181fa48f79c83e3f971 100644
 --- a/dist/core/extensions/runner.js
 +++ b/dist/core/extensions/runner.js
 @@ -129,7 +129,7 @@ export async function emitProjectTrustEvent(extensionsResult, event, ctx) {
@@ -227,88 +41,8 @@ index 10a0aa1..bdc4632 100644
      select: async () => undefined,
      confirm: async () => false,
      input: async () => undefined,
-diff --git a/dist/core/session-manager.d.ts b/dist/core/session-manager.d.ts
-index 3f6104e..824979c 100644
---- a/dist/core/session-manager.d.ts
-+++ b/dist/core/session-manager.d.ts
-@@ -238,6 +238,8 @@ export declare class SessionManager {
-     newSession(options?: NewSessionOptions): string | undefined;
-     private _loadEntries;
-     private _buildIndex;
-+    /** Persist a header/setup-only session before exposing it to the UI. */
-+    persistNow(): void;
-     private _rewriteFile;
-     isPersisted(): boolean;
-     getCwd(): string;
-@@ -386,12 +388,12 @@ export declare class SessionManager {
-     static inMemory(cwd?: string, options?: NewSessionOptions, entries?: FileEntry[]): SessionManager;
-     /**
-      * Fork a session from another project directory into the current project.
--     * Creates a new session in the target cwd with the full history from the source session.
-+     * Creates a new session in the target cwd with the selected branch from the source session.
-      * @param sourcePath Path to the source session file
-      * @param targetCwd Target working directory (where the new session will be stored)
-      * @param sessionDir Optional session directory. If omitted, uses default for targetCwd.
-      */
--    static forkFrom(sourcePath: string, targetCwd: string, sessionDir?: string, options?: NewSessionOptions): SessionManager;
-+    static forkFrom(sourcePath: string, targetCwd: string, sessionDir?: string, options?: NewSessionOptions & { leafId?: string | null }): SessionManager;
-     /**
-      * Find an exact session ID without loading transcript bodies.
-      * @param cwd Working directory (used to compute default session directory)
-diff --git a/dist/core/session-manager.js b/dist/core/session-manager.js
-index 62b469b..b7149f8 100644
---- a/dist/core/session-manager.js
-+++ b/dist/core/session-manager.js
-@@ -751,6 +751,13 @@ export class SessionManager {
-             }
-         }
-     }
-+    /** Persist a header/setup-only session before exposing it to the UI. */
-+    persistNow() {
-+        if (!this.persist || !this.sessionFile || this.flushed)
-+            return;
-+        this._rewriteFile();
-+        this.flushed = true;
-+    }
-     _rewriteFile() {
-         if (!this.persist || !this.sessionFile)
-             return;
-@@ -1366,7 +1373,7 @@ export class SessionManager {
-     }
-     /**
-      * Fork a session from another project directory into the current project.
--     * Creates a new session in the target cwd with the full history from the source session.
-+     * Creates a new session in the target cwd with the selected branch from the source session.
-      * @param sourcePath Path to the source session file
-      * @param targetCwd Target working directory (where the new session will be stored)
-      * @param sessionDir Optional session directory. If omitted, uses default for targetCwd.
-@@ -1382,6 +1389,10 @@ export class SessionManager {
-         if (!sourceHeader) {
-             throw new Error(`Cannot fork: source session has no header: ${resolvedSourcePath}`);
-         }
-+        const source = SessionManager.inMemory(getSessionHeaderCwd(sourceHeader), undefined, sourceEntries);
-+        if (options?.leafId != null && !source.getEntry(options.leafId))
-+            throw new Error(`Cannot fork: unknown leaf ${options.leafId}`);
-+        const branch = options?.leafId === null ? [] : source.getBranch(options?.leafId);
-         const dir = sessionDir ? normalizePath(sessionDir) : getDefaultSessionDir(resolvedTargetCwd);
-         if (!existsSync(dir)) {
-             mkdirSync(dir, { recursive: true });
-@@ -1404,11 +1415,8 @@ export class SessionManager {
-             parentSession: resolvedSourcePath,
-         };
-         writeFileSync(newSessionFile, `${JSON.stringify(newHeader)}\n`, { flag: "wx" });
--        // Copy all non-header entries from source
--        for (const entry of sourceEntries) {
--            if (entry.type !== "session") {
--                appendFileSync(newSessionFile, `${JSON.stringify(entry)}\n`);
--            }
-+        for (const entry of branch) {
-+            appendFileSync(newSessionFile, `${JSON.stringify(entry)}\n`);
-         }
-         return new SessionManager(resolvedTargetCwd, dir, newSessionFile, true);
-     }
 diff --git a/dist/core/tools/read.js b/dist/core/tools/read.js
-index b9bc3b9..277fb02 100644
+index b9bc3b9dde0f5e8f0e6b24451cc20cd609b15a53..277fb027253a43f3b51b736390b8379b8ff89ec8 100644
 --- a/dist/core/tools/read.js
 +++ b/dist/core/tools/read.js
 @@ -34,7 +34,7 @@ export function createReadToolDefinition(cwd, options) {
@@ -334,7 +68,7 @@ index b9bc3b9..277fb02 100644
                              if (truncation.firstLineExceedsLimit) {
                                  // First line alone exceeds the byte limit. Point the model at a bash fallback.
 diff --git a/dist/extensions/mcp/config.d.ts b/dist/extensions/mcp/config.d.ts
-index 2033a2b..460962a 100644
+index 2033a2b2649e841ebf7429073bfa3d178699cf64..460962a3c2b4826d2999526e08a0cde9f3a54959 100644
 --- a/dist/extensions/mcp/config.d.ts
 +++ b/dist/extensions/mcp/config.d.ts
 @@ -51,6 +51,9 @@ export declare function loadMcpConfig(options: {
@@ -348,7 +82,7 @@ index 2033a2b..460962a 100644
  /** Settings `/mcp` changes. `enabled: true` and `exposure: "codemode"` are the defaults and remove the key. */
  export interface McpServerConfigPatch {
 diff --git a/dist/extensions/mcp/config.js b/dist/extensions/mcp/config.js
-index 6b43474..2686d4d 100644
+index 6b43474f140d9874f16bfdd5ea172aa48799244d..2686d4d994d21f362e8b5898e817960978041bd7 100644
 --- a/dist/extensions/mcp/config.js
 +++ b/dist/extensions/mcp/config.js
 @@ -23,7 +23,8 @@
@@ -390,7 +124,7 @@ index 6b43474..2686d4d 100644
  //# sourceMappingURL=config.js.map
 \ No newline at end of file
 diff --git a/dist/extensions/mcp/index.d.ts b/dist/extensions/mcp/index.d.ts
-index 5c39af8..67dbbb6 100644
+index 5c39af847eee2489421b3ee12edeb52bee408e92..67dbbb6cc6a0ceccdd06a6f8dd2711c2d9f4069b 100644
 --- a/dist/extensions/mcp/index.d.ts
 +++ b/dist/extensions/mcp/index.d.ts
 @@ -26,11 +26,27 @@
@@ -423,7 +157,7 @@ index 5c39af8..67dbbb6 100644
      loadConfig?: (ctx: ExtensionContext) => LoadedMcpConfig;
      /** Defaults to stdio and streamable HTTP transports built from the server config. */
 diff --git a/dist/extensions/mcp/index.js b/dist/extensions/mcp/index.js
-index fbbb30c..8893142 100644
+index fbbb30c87e610b98ffbe47fa71f93dbc3bd0bc45..88931429db54d4b10a2db483645d3c01efc1b533 100644
 --- a/dist/extensions/mcp/index.js
 +++ b/dist/extensions/mcp/index.js
 @@ -217,6 +217,23 @@ export function createMcpExtension(options = {}) {
@@ -451,7 +185,7 @@ index fbbb30c..8893142 100644
                  listener();
          };
 diff --git a/dist/index.d.ts b/dist/index.d.ts
-index eda1c08..241b941 100644
+index eda1c0822e3dc7830fb5e3835690afe56b59017a..30416fe365cdc46e81aaea2e529f0d6ac95ee65b 100644
 --- a/dist/index.d.ts
 +++ b/dist/index.d.ts
 @@ -1,7 +1,7 @@
@@ -463,7 +197,15 @@ index eda1c08..241b941 100644
  export type { CacheWarmingDecision, CacheWarmingStatus } from "./core/cache-warmer.ts";
  export { type BranchPreparation, type BranchSummaryResult, type CollectEntriesResult, type CompactionResult, type CutPointResult, calculateContextTokens, collectEntriesForBranchSummary, compact, DEFAULT_COMPACTION_SETTINGS, estimateTokens, type FileOperations, findCutPoint, findTurnStartIndex, type GenerateBranchSummaryOptions, generateBranchSummary, generateSummary, generateSummaryWithUsage, getLastAssistantUsage, prepareBranchEntries, serializeConversation, shouldCompact, } from "./core/compaction/index.ts";
  export { createEventBus, type EventBus, type EventBusController } from "./core/event-bus.ts";
-@@ -29,8 +29,13 @@ export { type ModelRoute, type ModelRouteReason, type ModelRouteRequest, VIRTUAL
+@@ -20,6 +20,7 @@ export { DefaultResourceLoader, loadProjectContextFiles } from "./core/resource-
+ export { AgentSessionRuntime, type AgentSessionRuntimeDiagnostic, type AgentSessionServices, type CreateAgentSessionFromServicesOptions, type CreateAgentSessionOptions, type CreateAgentSessionResult, type CreateAgentSessionRuntimeFactory, type CreateAgentSessionRuntimeResult, type CreateAgentSessionServicesOptions, createAgentSession, createAgentSessionFromServices, createAgentSessionRuntime, createAgentSessionServices, createBashTool, createCodingTools, createEditTool, createFindTool, createGrepTool, createLsTool, createPowerShellTool, createReadOnlyTools, createReadTool, createWriteTool, type PromptTemplate, } from "./core/sdk.ts";
+ export { type BranchSummaryEntry, buildContextEntries, buildSessionContext, buildSessionProjection, type CompactionEntry, type ContextEditableContent, type ContextEditEntry, CURRENT_SESSION_VERSION, type CustomEntry, type CustomMessageEntry, type FileEntry, getLatestCompactionEntry, type ModelChangeEntry, migrateSessionEntries, type NewSessionOptions, type ProjectedSessionEntry, parseSessionEntries, type SessionContext, type SessionEntry, type SessionEntryBase, type SessionHeader, type SessionInfo, type SessionInfoEntry, SessionManager, type SessionMessageEntry, type SessionProjection, type SessionTreeNode, sessionEntryToContextMessages, type ThinkingLevelChangeEntry, } from "./core/session-manager.ts";
+ export { type CacheWarmingMode, type CompactionModelOverride, type CompactionSettings, type DefaultProjectTrust, type FullscreenExitOutput, type ImageSettings, type PackageSource, type QuietStartup, type RetrySettings, SettingsManager, type SettingsManagerCreateOptions, type TuiMode, } from "./core/settings-manager.ts";
++export { buildSystemPrompt, buildSystemPromptSections, normalizeBuildSystemPromptOptions } from "./core/system-prompt.ts";
+ export { formatSkillsForPrompt, type LoadSkillsFromDirOptions, type LoadSkillsResult, loadSkills, loadSkillsFromDir, type Skill, type SkillFrontmatter, } from "./core/skills.ts";
+ export { createSyntheticSourceInfo } from "./core/source-info.ts";
+ export { type EditDiffResult, generateDiffString, generateUnifiedPatch } from "./core/tools/edit-diff.ts";
+@@ -29,8 +30,13 @@ export { type ModelRoute, type ModelRouteReason, type ModelRouteRequest, VIRTUAL
  export { type CodemodeExtensionOptions, createCodemodeExtension } from "./extensions/codemode/index.ts";
  export type { CodemodeStoreEntryData, CodemodeToolDetails } from "./extensions/codemode/tool.ts";
  export type { LoadedMcpConfig, McpExposure, McpServerConfig, McpServerEntry } from "./extensions/mcp/config.ts";
@@ -478,7 +220,7 @@ index eda1c08..241b941 100644
  export { type MainOptions, main } from "./main.ts";
  export { InteractiveMode, type InteractiveModeOptions, type JsonAgentSessionEvent, type ModelInfo, type PrintModeOptions, RpcClient, type RpcClientOptions, type RpcCommand, type RpcEventListener, type RpcExtensionUIRequest, type RpcExtensionUIResponse, type RpcResponse, type RpcSessionState, runPrintMode, runRpcMode, } from "./modes/index.ts";
  export { ArminComponent, AssistantMessageComponent, BashExecutionComponent, BorderedLoader, BranchSummaryMessageComponent, CompactionSummaryMessageComponent, CustomEditor, type CustomEditorOptions, CustomMessageComponent, DynamicBorder, ExtensionEditorComponent, ExtensionInputComponent, ExtensionSelectorComponent, FooterComponent, keyHint, keyText, LoginDialogComponent, ModelSelectorComponent, OAuthSelectorComponent, type RenderDiffOptions, rawKeyHint, renderDiff, SessionSelectorComponent, type SettingsCallbacks, type SettingsConfig, SettingsSelectorComponent, ShowImagesSelectorComponent, SkillInvocationMessageComponent, ThemeSelectorComponent, ThinkingSelectorComponent, ToolExecutionComponent, type ToolExecutionOptions, TreeSelectorComponent, truncateToVisualLines, UserMessageComponent, UserMessageSelectorComponent, type VisualTruncateResult, } from "./modes/interactive/components/index.ts";
-@@ -41,4 +46,5 @@ export { convertToPng } from "./utils/image-convert.ts";
+@@ -41,4 +47,5 @@ export { convertToPng } from "./utils/image-convert.ts";
  export { formatDimensionNote, type ResizedImage, resizeImage } from "./utils/image-resize.ts";
  export { detectSupportedImageMimeTypeFromFile } from "./utils/mime.ts";
  export { getPowerShellConfig, getShellConfig } from "./utils/shell.ts";
@@ -486,7 +228,7 @@ index eda1c08..241b941 100644
  //# sourceMappingURL=index.d.ts.map
 \ No newline at end of file
 diff --git a/dist/index.js b/dist/index.js
-index c48934f..4213e46 100644
+index c48934f78d61fd5f5f8008bc9e09d8c4558d330a..7878928821eee21057eee24c54d36ceb52f3160e 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -3,7 +3,7 @@ export { parseArgs } from "./cli/args.js";
@@ -498,7 +240,15 @@ index c48934f..4213e46 100644
  // Compaction
  export { calculateContextTokens, collectEntriesForBranchSummary, compact, DEFAULT_COMPACTION_SETTINGS, estimateTokens, findCutPoint, findTurnStartIndex, generateBranchSummary, generateSummary, generateSummaryWithUsage, getLastAssistantUsage, prepareBranchEntries, serializeConversation, shouldCompact, } from "./core/compaction/index.js";
  export { createEventBus } from "./core/event-bus.js";
-@@ -34,6 +34,9 @@ export { VIRTUAL_MODEL_STATE_ENTRY, } from "./core/virtual-models.js";
+@@ -22,6 +22,7 @@ createAgentSession, createAgentSessionFromServices, createAgentSessionRuntime, c
+ createCodingTools, createEditTool, createFindTool, createGrepTool, createLsTool, createPowerShellTool, createReadOnlyTools, createReadTool, createWriteTool, } from "./core/sdk.js";
+ export { buildContextEntries, buildSessionContext, buildSessionProjection, CURRENT_SESSION_VERSION, getLatestCompactionEntry, migrateSessionEntries, parseSessionEntries, SessionManager, sessionEntryToContextMessages, } from "./core/session-manager.js";
+ export { SettingsManager, } from "./core/settings-manager.js";
++export { buildSystemPrompt, buildSystemPromptSections, normalizeBuildSystemPromptOptions } from "./core/system-prompt.js";
+ // Skills
+ export { formatSkillsForPrompt, loadSkills, loadSkillsFromDir, } from "./core/skills.js";
+ export { createSyntheticSourceInfo } from "./core/source-info.js";
+@@ -34,6 +35,9 @@ export { VIRTUAL_MODEL_STATE_ENTRY, } from "./core/virtual-models.js";
  export { createCodemodeExtension } from "./extensions/codemode/index.js";
  export { createMcpExtension } from "./extensions/mcp/index.js";
  export { createToolSearchExtension } from "./extensions/tool-search/index.js";
@@ -508,10 +258,9 @@ index c48934f..4213e46 100644
  // Main entry point
  export { main } from "./main.js";
  // Run modes for programmatic SDK usage
-@@ -50,4 +53,5 @@ export { formatDimensionNote, resizeImage } from "./utils/image-resize.js";
+@@ -50,4 +54,5 @@ export { formatDimensionNote, resizeImage } from "./utils/image-resize.js";
  export { detectSupportedImageMimeTypeFromFile } from "./utils/mime.js";
  // Shell utilities
  export { getPowerShellConfig, getShellConfig } from "./utils/shell.js";
 +export { noOpUIContext } from "./core/extensions/runner.js";
  //# sourceMappingURL=index.js.map
-\ No newline at end of file

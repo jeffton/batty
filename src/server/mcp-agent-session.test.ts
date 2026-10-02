@@ -161,9 +161,9 @@ describe("native MCP in Batty AgentSession", () => {
     expect(JSON.stringify(result)).toContain(path.join(root, "launch"));
     expect(JSON.stringify(result)).toContain("mcp__srv__echo");
     expect(JSON.stringify(result)).not.toContain("mcp__srv__secret");
-    expect(session.sdk.getActiveToolNames()).toContain("mcp__srv__direct");
-    expect(session.sdk.getActiveToolNames()).not.toContain("mcp__srv__echo");
-    expect(session.sdk.getActiveToolNames()).not.toContain("mcp__srv__deferred");
+    expect(session.getActiveToolNames()).toContain("mcp__srv__direct");
+    expect(session.getActiveToolNames()).not.toContain("mcp__srv__echo");
+    expect(session.getActiveToolNames()).not.toContain("mcp__srv__deferred");
     expect(calls).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ toolName: "mcp__srv__echo", parentToolCallId: "outer-call" }),
@@ -188,7 +188,7 @@ describe("native MCP in Batty AgentSession", () => {
       fauxAssistantMessage("loaded"),
     ]);
     await session.prompt("load deferred tools");
-    expect(session.sdk.getActiveToolNames()).toContain("mcp__srv__deferred");
+    expect(session.getActiveToolNames()).toContain("mcp__srv__deferred");
     const pid = Number(await fs.readFile(path.join(root, "server.pid"), "utf8"));
     expect(alive(pid)).toBe(true);
     await session.dispose();
@@ -217,9 +217,9 @@ describe("native MCP in Batty AgentSession", () => {
     await fs.writeFile(configPath, JSON.stringify({ mcpServers: {} }));
     await fixture.session.reloadResources();
     await expect.poll(() => alive(replacementPid)).toBe(false);
-    expect(fixture.session.sdk.getAllTools().some((tool) => tool.name.startsWith("mcp__"))).toBe(
-      false,
-    );
+    expect(
+      fixture.session.resources.getAllTools().some((tool) => tool.name.startsWith("mcp__")),
+    ).toBe(false);
   });
 
   it("defers configuration reload until admitted nested calls have completed", async () => {
@@ -248,9 +248,9 @@ describe("native MCP in Batty AgentSession", () => {
     await fixture.session.waitForIdle();
     expect(await fs.readFile(path.join(fixture.root, "settled.txt"), "utf8")).toBe("completed");
     await expect.poll(() => alive(pid)).toBe(false);
-    expect(fixture.session.sdk.getAllTools().some((tool) => tool.name.startsWith("mcp__"))).toBe(
-      false,
-    );
+    expect(
+      fixture.session.resources.getAllTools().some((tool) => tool.name.startsWith("mcp__")),
+    ).toBe(false);
   });
 
   it("applies tools/list_changed additions and withdrawals on subsequent admission", async () => {
@@ -258,7 +258,7 @@ describe("native MCP in Batty AgentSession", () => {
     const result = await runCode(fixture, "text(await tools.mcp__srv__change({}));");
     expect(result).toMatchObject({ isError: false });
     await expect
-      .poll(() => fixture.session.sdk.getAllTools().map((tool) => tool.name))
+      .poll(() => fixture.session.resources.getAllTools().map((tool) => tool.name))
       .toContain("mcp__srv__late");
     const next = await runCode(
       fixture,
@@ -267,7 +267,7 @@ describe("native MCP in Batty AgentSession", () => {
     expect(next).toMatchObject({ isError: false });
     expect(JSON.stringify(next)).toContain("mcp__srv__late");
     expect(JSON.stringify(next)).not.toContain("mcp__srv__echo");
-    expect(fixture.session.sdk.getActiveToolNames()).not.toContain("mcp__srv__direct");
+    expect(fixture.session.getActiveToolNames()).not.toContain("mcp__srv__direct");
     const rejected = await runCode(fixture, "await tools.mcp__srv__echo({value: 'withdrawn'});");
     expect(rejected).toMatchObject({ isError: true });
     const calls = await fs.readFile(path.join(fixture.root, "calls.jsonl"), "utf8");

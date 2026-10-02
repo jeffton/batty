@@ -1,14 +1,14 @@
 import { randomUUID } from "node:crypto";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import {
-  createAgentSession,
   createCodemodeExtension,
   createMcpExtension,
   createToolSearchExtension,
   DefaultResourceLoader,
   noOpUIContext,
-  SessionManager,
   SettingsManager,
-  type AgentSession,
   type ModelRuntime,
   type McpServerConfig,
   type McpStatusSnapshot,
@@ -21,6 +21,8 @@ import type {
 } from "@/shared/types";
 import { type AppConfig, loadEnvironmentFile } from "./config";
 import { battyAgentDir } from "./pi-paths";
+import { SessionResources } from "./session-resources";
+import { SessionStore } from "./session-store";
 import {
   battyMcpLogPath,
   createBattyMcpCredentials,
@@ -31,13 +33,17 @@ import {
 } from "./mcp-settings";
 
 type Control = {
-  session: AgentSession;
+  resources: SessionResources;
+  store: SessionStore;
+  directory: string;
+  abort: AbortController;
   status: McpStatusSnapshot;
   errors: string[];
   closed?: Promise<void>;
 };
 type Auth = {
   state: McpAuthAttempt;
+  abort: AbortController;
   callbackUrl?: string;
   input?: (value: string | undefined) => void;
   task?: Promise<void>;
@@ -98,10 +104,11 @@ export class McpService {
     let status: McpStatusSnapshot = { servers: [], errors: [] };
     const errors: string[] = [];
     let control: Control | undefined;
+    const settingsManager = SettingsManager.inMemory({});
     const resourceLoader = new DefaultResourceLoader({
       cwd: workspace.path,
       agentDir: battyAgentDir(this.config),
-      settingsManager: SettingsManager.inMemory({}),
+      settingsManager,
       noExtensions: true,
       noSkills: true,
       noPromptTemplates: true,
@@ -129,47 +136,106 @@ export class McpService {
       additionalExtensionPaths: ["builtin:codemode", "builtin:tool-search", "builtin:mcp"],
     });
     await resourceLoader.reload();
-    const { session } = await createAgentSession({
-      cwd: workspace.path,
-      agentDir: battyAgentDir(this.config),
-      modelRuntime: this.modelRuntime,
-      sessionManager: SessionManager.inMemory(),
-      settingsManager: SettingsManager.inMemory({}),
-      resourceLoader,
-      noTools: "all",
-    });
-    control = { session, status, errors };
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "batty-mcp-control-"));
+    let store: SessionStore | undefined;
+    let resources: SessionResources;
+    const abort = auth?.abort ?? new AbortController();
+    try {
+      store = await SessionStore.create(workspace.path, directory);
+      resources = new SessionResources({
+        cwd: workspace.path,
+        modelRuntime: this.modelRuntime,
+        store,
+        settingsManager,
+        resourceLoader,
+        tools: [],
+        activeToolNames: [],
+      });
+    } catch (error) {
+      try {
+        await store?.close();
+      } finally {
+        await fs.rm(directory, { recursive: true, force: true });
+      }
+      throw error;
+    }
+    control = { resources, store, directory, abort, status, errors };
     this.controls.add(control);
     try {
       if (this.closing) throw new Error("MCP management is closed");
-      await session.bindExtensions({
-        mode: "rpc",
-        onError: (error) => {
-          throw new Error(error.error);
+      const unsupported = () => {
+        throw new Error("Generation and session navigation are unsupported in MCP management");
+      };
+      resources.bind({
+        actions: {
+          sendMessage: unsupported,
+          sendUserMessage: unsupported,
+          appendEntry: unsupported,
+          setSessionName: unsupported,
+          getSessionName: () => control!.store.getSessionName(),
+          setLabel: unsupported,
+          setModel: unsupported,
+          getThinkingLevel: () => "off",
+          setThinkingLevel: unsupported,
         },
-        uiContext: {
+        context: {
+          getModel: () => undefined,
+          getScopedModels: () => [],
+          isIdle: () => true,
+          getSignal: () => abort.signal,
+          abort: () => abort.abort(),
+          hasPendingMessages: () => false,
+          shutdown: () => abort.abort(),
+          getContextUsage: () => undefined,
+          compact: unsupported,
+        },
+        getMessages: () => [],
+        commands: {
+          waitForIdle: async () => {},
+          newSession: unsupported,
+          fork: unsupported,
+          navigateTree: unsupported,
+          switchSession: unsupported,
+          reload: unsupported,
+        },
+      });
+      resources.extensionRunner.onError((error) => {
+        errors.push(error.error);
+      });
+      resources.extensionRunner.setUIContext(
+        {
           ...noOpUIContext,
           notify: (message, type) => {
             if (type === "error") errors.push(message);
           },
           input: async (title, _placeholder, options) => {
-            if (!auth || auth.state.status !== "pending" || options?.signal?.aborted)
+            if (
+              !auth ||
+              auth.state.status !== "pending" ||
+              options?.signal?.aborted ||
+              abort.signal.aborted
+            )
               return undefined;
             auth.state.prompt = title;
             if (auth.callbackUrl) return auth.callbackUrl;
             return new Promise<string | undefined>((resolve) => {
               const finish = (value: string | undefined) => {
                 options?.signal?.removeEventListener("abort", cancelled);
+                abort.signal.removeEventListener("abort", cancelled);
                 auth.input = undefined;
                 resolve(value);
               };
               const cancelled = () => finish(undefined);
               auth.input = finish;
               options?.signal?.addEventListener("abort", cancelled, { once: true });
+              abort.signal.addEventListener("abort", cancelled, { once: true });
             });
           },
         },
-      });
+        "rpc",
+      );
+      await resources.start();
+      if (errors.length) throw new Error(errors.join("\n"));
       return control;
     } catch (error) {
       await this.closeControl(control);
@@ -179,17 +245,31 @@ export class McpService {
 
   private closeControl(control: Control): Promise<void> {
     return (control.closed ??= (async () => {
-      await control.session.abort();
-      await control.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
-      control.session.dispose();
-      this.controls.delete(control);
+      control.abort.abort();
+      try {
+        await control.resources.dispose();
+      } finally {
+        try {
+          await control.store.close();
+        } finally {
+          await fs.rm(control.directory, { recursive: true, force: true });
+          this.controls.delete(control);
+        }
+      }
     })());
   }
 
-  private async command(workspace: WorkspaceInfo, text: string): Promise<McpWorkspaceStatus> {
+  private async runCommand(control: Control, args: string): Promise<void> {
+    const runner = control.resources.extensionRunner;
+    const command = runner.getCommand("mcp");
+    if (!command) throw new Error("MCP management command is unavailable");
+    await command.handler(args, runner.createCommandContext());
+  }
+
+  private async command(workspace: WorkspaceInfo, args: string): Promise<McpWorkspaceStatus> {
     const control = await this.openControl(workspace);
     try {
-      await control.session.prompt(text);
+      await this.runCommand(control, args);
       if (control.errors.length) throw new Error(control.errors.join("\n"));
       return this.workspaceStatus(workspace, control.status);
     } finally {
@@ -203,7 +283,7 @@ export class McpService {
     );
     return snapshot
       ? this.workspaceStatus(workspace, snapshot.status)
-      : this.command(workspace, "/mcp");
+      : this.command(workspace, "");
   }
 
   private workspaceStatus(workspace: WorkspaceInfo, status: McpStatusSnapshot): McpWorkspaceStatus {
@@ -241,14 +321,14 @@ export class McpService {
 
   async reconnect(workspace: WorkspaceInfo, name: string): Promise<McpWorkspaceStatus> {
     this.requireServer(workspace, name);
-    const status = await this.command(workspace, `/mcp reconnect ${name}`);
+    const status = await this.command(workspace, `reconnect ${name}`);
     await this.changed(workspace.id);
     return status;
   }
 
   async logout(workspace: WorkspaceInfo, name: string): Promise<McpWorkspaceStatus> {
     this.requireServer(workspace, name);
-    const status = await this.command(workspace, `/mcp logout ${name}`);
+    const status = await this.command(workspace, `logout ${name}`);
     await this.changed();
     return status;
   }
@@ -259,6 +339,7 @@ export class McpService {
     if ([...this.attempts.values()].some((auth) => auth.state.status === "pending"))
       throw Object.assign(new Error("An MCP sign-in is already pending"), { statusCode: 409 });
     const auth: Auth = {
+      abort: new AbortController(),
       state: {
         attemptId: randomUUID(),
         workspaceId: workspace.id,
@@ -272,7 +353,7 @@ export class McpService {
       try {
         control = await this.openControl(workspace, auth);
         if (auth.state.status !== "pending") return;
-        await control.session.prompt(`/mcp login ${name}`);
+        await this.runCommand(control, `login ${name}`);
         if (auth.state.status !== "pending") return;
         if (control.errors.length) throw new Error(control.errors.join("\n"));
         await this.changed();
@@ -315,6 +396,7 @@ export class McpService {
     const auth = this.attempt(id);
     if (auth.state.status === "pending") {
       auth.state.status = "cancelled";
+      auth.abort.abort();
       auth.input?.(undefined);
     }
     return this.getAuthAttempt(id);

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { prepareDurablePrompt, type DurablePromptSdk } from "./durable-prompt-preflight";
+import { prepareDurablePrompt, type DurablePromptHost } from "./durable-prompt-preflight";
 
-function makeSdk(overrides: Partial<DurablePromptSdk> = {}) {
+function makeSdk(overrides: Partial<DurablePromptHost> = {}) {
   const runner = {
     getCommand: vi.fn(
       (
@@ -48,7 +48,7 @@ function makeSdk(overrides: Partial<DurablePromptSdk> = {}) {
       isUsingOAuth: () => false,
     },
     ...overrides,
-  } as unknown as DurablePromptSdk;
+  } as unknown as DurablePromptHost;
   return { sdk, runner };
 }
 
@@ -71,7 +71,7 @@ describe("prepareDurablePrompt", () => {
     expect(runner.emitBeforeAgentStart).toHaveBeenCalledWith(
       "Review API compatibility, focus!: API compatibility focus!",
       undefined,
-      { cwd: "/workspace", selectedTools: ["read"], forceSystemPrompt: "base system" },
+      { cwd: "/workspace", selectedTools: ["read"] },
     );
   });
 

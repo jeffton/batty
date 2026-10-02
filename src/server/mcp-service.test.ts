@@ -10,6 +10,7 @@ import type { McpAuthAttempt, WorkspaceInfo } from "@/shared/types";
 import type { AppConfig } from "./config";
 import { createBattyMcpCredentials } from "./mcp-settings";
 import { McpService } from "./mcp-service";
+import { SessionStore } from "./session-store";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -218,6 +219,23 @@ async function expectCallbackClosed(authorizationUrl: string) {
 }
 
 describe("native MCP web management", () => {
+  it("uses an ephemeral bookkeeping store without configuring a generation runtime", async () => {
+    const { service, workspace } = await setup();
+    const create = vi.spyOn(SessionStore, "create");
+    const configure = vi.spyOn(SessionStore.prototype, "configureRuntime");
+    try {
+      expect(await service.getStatus(workspace)).toEqual({ servers: [], errors: [] });
+      expect(create).toHaveBeenCalledTimes(1);
+      const store = await create.mock.results[0]!.value;
+      expect(store.getEntries()).toEqual([]);
+      expect(configure).not.toHaveBeenCalled();
+      await expect(fs.stat(store.getSessionDir())).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      create.mockRestore();
+      configure.mockRestore();
+    }
+  });
+
   it("edits scoped config and invalidates only the relevant workspace", async () => {
     const { service, workspace, changed } = await setup();
     await service.setServer(undefined, "shared", { command: "global", enabled: false });

@@ -1,40 +1,41 @@
 # Pi Durable integration
 
-The `experiment/pi-durable` branch uses Pi Durable 1.0.0 for model generation, retries, compaction, tool scheduling, and input queues. The coding-agent SDK supplies resources, authentication, tools, and headless extension contexts; its agent loop does not run.
+The `experiment/pi-durable` branch uses Pi Durable 1.0.0 for generation, admission, persistent queues, retries, compaction, and tool scheduling. No coding-agent SDK session or agent loop is created.
 
 ## Ownership
 
-- `DurableAgentSessionController` adapts durable submissions and committed events to Batty's web protocol.
-- Each session has a JSONL durable store at `<session-file>.durable`, with fsync and a lifetime writer lock.
-- The native v3 session file is a presentation projection for session listings, search, pagination, metadata, and artifact readers. Durable entries carry projection identities for replay repair.
-- Opening a session imports its selected native branch once. Host-appended notices and completion receipts are synchronized into durable entries.
-- Batty retains cron and subagent orchestration. Each child has its own harness; children are not durable task-owned conversations.
+- `SessionStore` owns one Durable Harness, conversation, writer lock, and `.sqlite` file per session. Durable records are the sole persisted history and execution state.
+- `DurableAgentSessionController` implements Batty's session contract and translates committed events into its web protocol.
+- `SessionResources` owns model/auth services, resource loading, tool loadouts, and Pi's standalone extension runner. Built-in codemode, tool search, and MCP use this host.
+- `session-projection.ts` translates Durable entries into existing UI DTOs in memory. Listing, search, pagination, images, and artifacts read the same store.
+- Batty manages cron and subagent orchestration. Each child has its own Harness; host completion receipts commit before settlement can dispose an ephemeral child.
 
-Observers project completed entries before publishing them. Completion notifications occur after the final run in a committed frame, including admitted follow-ups. Resource reloads wait for that boundary.
+Readers observe committed entries before completion notifications. Follow-ups finish before settlement, and resource reloads wait for the settled boundary.
 
-## Tools and extensions
+## Tools and resources
 
-Batty retains image reading, tracked file writes, shell metadata, MCP, tool search, and Pi's built-in codemode. The tool bridge preserves SDK argument preparation, tool-call/result hooks, cancellation, progress, usage, and artifacts. SDK input hooks, commands, templates, skills, context transforms, model/thinking callbacks, and compaction hooks use the durable controller.
+Image reading, tracked writes, shell session metadata, MCP status/OAuth, codemode, and tool search retain their Batty behavior. Commands, skills, templates, prompt construction, and request-context transforms use independent resource services.
 
-Tools are not replay-safe. An interrupted call produces an error result rather than repeating side effects. Codemode is one durable tool task; its nested calls use the SDK dispatch pipeline, not separate durable tasks. File, download, and site receipts are committed independently and attributed by durable tool-task identity, including late cancellation results.
+Tools are unsafe to replay: interrupted calls produce error results rather than repeat side effects. Codemode is one Durable tool task; nested calls use the resource host's validation, hooks, progress events, and concurrency policy. Artifact receipts capture the exact outer task identity, including late cancellation results, and decorate presentation copies without changing model context.
 
-The compaction bridge accepts SDK cancellation and supplied summaries. Durable determines the retained context boundary; SDK extensions cannot choose a different cut through `firstKeptEntryId`.
+Regular tool preferences are separate from Durable model declarations. Deferred MCP tools remain callable through codemode; loadout preparation controls model-visible declarations and descriptions.
 
-[MCP settings](mcp.md) retain Batty's scoped configuration, status, and OAuth UI.
+Durable determines compaction's retained context boundary. Resource hooks can cancel compaction or supply a summary, but cannot select another cut.
 
-## Lifecycle and breaking differences
+[MCP settings](mcp.md) describe scoped configuration and the web-management UI.
 
-- Steering and follow-up queues persist across process replacement. Client message IDs deduplicate durable admission.
-- `abort()` stops work and withdraws queued inputs. `dispose()` checkpoints unfinished work for recovery.
-- Opening a session installs resources and tools before resuming its pending tasks.
-- Generated system entries are positional: an initial user input precedes its system/tool declaration.
-- Durable sidecars are required to resume work. Native v3 files alone preserve conversation history, not task or inbox state.
-- Model requests, retry policy, and task ownership follow Pi Durable rather than coding-agent loop/boundary hooks.
+## Lifecycle and format changes
 
-Coordinated deployment draining remains part of Batty's service lifecycle. This experiment does not change deployment scripts.
+- `.sqlite` is the session format. Existing JSONL histories and experimental sidecars are not imported or listed; data migration is a separate task.
+- Client message IDs deduplicate admission. Steering and follow-up queues survive process replacement.
+- `abort()` withdraws queued inputs and stops work. `dispose()` checkpoints unfinished work for recovery.
+- Resources and tools are installed before recovered tasks resume.
+- Failed/interrupted assistants remain visible in the transcript but are excluded from provider context by Durable.
 
-## Dependencies
+Deployment scripts and coordinated service draining are unchanged.
 
-Pi AI, agent-core, coding-agent, durable, and Chord are pinned to 1.0.0. Batty's SDK patches retain sampling configuration, resource access, indexed queue helpers, selected-leaf forks, read limits, and MCP web-management APIs. MCP OAuth credential access uses both server name and URL.
+## Dependencies and validation
 
-Tests cover recovery during generation and unsafe tools, persistent queues, deduplication, cancellation, compaction, MCP reloads, nested codemode artifacts, and detached result delivery.
+Pi AI, agent-core, coding-agent, Durable, and Chord are pinned to 1.0.0. The coding-agent patch exposes pure prompt builders and accepts a readonly session view in `ExtensionRunner`; it does not introduce another execution engine.
+
+Tests cover durable recovery, unsafe-tool cancellation, queues, deduplication, compaction, forks, SQLite readers, MCP reloads, nested artifacts, and detached result delivery.

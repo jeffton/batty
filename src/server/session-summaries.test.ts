@@ -3,7 +3,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { createPiAgentSession } from "./pi-agent-session";
 import type { AppConfig } from "@/server/config";
 import {
   latestSessionUpdatedAt,
@@ -77,46 +79,49 @@ async function writeSession(
   await fs.mkdir(sessionDir, { recursive: true });
   const sessionPath = path.join(sessionDir, fileName);
   await fs.mkdir(path.dirname(sessionPath), { recursive: true });
-  let parentId: string | null = null;
-  const normalized = entries.map((raw) => {
-    const entry = raw as Record<string, any>;
-    if (entry.type === "session")
-      return {
-        type: "session",
-        version: 3,
-        id: entry.id,
-        timestamp: entry.timestamp,
-        cwd: workspaceInfo(config, workspaceId).path,
-        ...(entry.parentSessionId ? { parentSession: entry.parentSessionId } : {}),
-      };
-    const result: Record<string, any> = {
-      ...entry,
-      id: entry.id ?? crypto.randomUUID(),
-      parentId: entry.parentId ?? parentId,
-      timestamp:
-        typeof entry.timestamp === "number"
-          ? new Date(entry.timestamp).toISOString()
-          : (entry.timestamp ?? updatedAt),
-    };
-    parentId = result.id;
-    if (entry.message) {
-      result.message = { timestamp: Date.parse(updatedAt), ...entry.message };
-      if (entry.message.role === "assistant")
-        result.message = {
-          ...fauxAssistantMessage(entry.message.content),
-          ...result.message,
-          content:
-            typeof entry.message.content === "string"
-              ? [{ type: "text", text: entry.message.content }]
-              : entry.message.content,
-        };
-    }
-    return result;
-  });
-  await fs.writeFile(
-    sessionPath,
-    `${normalized.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+  const header = entries.find((raw) => (raw as any).type === "session") as any;
+  if (!header) {
+    await fs.writeFile(sessionPath, "invalid sqlite session");
+    return sessionPath;
+  }
+  const store = await SessionStore.create(
+    workspaceInfo(config, workspaceId).path,
+    path.dirname(sessionPath),
+    header.parentSessionId,
+    header.id,
   );
+  for (const raw of entries) {
+    const entry = raw as Record<string, any>;
+    if (entry.type === "custom") {
+      await store.appendCustomEntry(entry.customType, entry.data);
+    } else if (entry.type === "custom_message") {
+      await store.appendMessage({
+        role: "custom",
+        customType: entry.customType,
+        content: entry.content,
+        details: entry.details,
+        display: entry.display,
+        timestamp: Date.parse(updatedAt),
+      });
+    } else if (entry.type === "message") {
+      const message = { timestamp: Date.parse(updatedAt), ...entry.message };
+      await store.appendMessage(
+        message.role === "assistant"
+          ? {
+              ...fauxAssistantMessage(message.content),
+              ...message,
+              content:
+                typeof message.content === "string"
+                  ? [{ type: "text", text: message.content }]
+                  : message.content,
+            }
+          : message,
+      );
+    }
+  }
+  const createdPath = store.getSessionFile();
+  await store.close();
+  await fs.rename(createdPath, sessionPath);
   const date = new Date(updatedAt);
   await fs.utimes(sessionPath, date, date);
   if (resetIndex) {
@@ -127,6 +132,21 @@ async function writeSession(
 }
 
 describe("session summaries", () => {
+  it("discovers only SQLite sessions and ignores legacy files and sidecars", async () => {
+    const config = await createConfig();
+    const workspace = workspaceInfo(config, "sqlite-only");
+    const file = await writeSession(config, workspace.id, "modern.sqlite", "2026-03-25T12:00:00Z", [
+      sessionHeader("modern"),
+    ]);
+    await fs.writeFile(path.join(path.dirname(file), "legacy.jsonl"), "invalid legacy transcript");
+    await fs.writeFile(path.join(path.dirname(file), "sidecar.sqlite-wal"), "not a session");
+    const read = vi.spyOn(SessionStore, "read");
+    const sessions = await listSessionSummaries(config, workspace);
+    expect(sessions.filter((session) => session.path).map((session) => session.sessionId)).toEqual([
+      "modern",
+    ]);
+    expect(read.mock.calls.map(([path]) => path)).toEqual([file]);
+  });
   it("lists sessions using file mtime and first user message", async () => {
     const config = await createConfig();
     const workspace = workspaceInfo(config, "alpha");
@@ -135,7 +155,7 @@ describe("session summaries", () => {
     const olderPath = await writeSession(
       config,
       workspace.id,
-      "older.jsonl",
+      "older.sqlite",
       "2026-03-24T12:00:00Z",
       [
         { type: "session", id: "older-id", timestamp: "2026-03-01T00:00:00Z" },
@@ -149,7 +169,7 @@ describe("session summaries", () => {
         },
       ],
     );
-    await writeSession(config, workspace.id, "newer.jsonl", "2026-03-25T12:00:00Z", [
+    await writeSession(config, workspace.id, "newer.sqlite", "2026-03-25T12:00:00Z", [
       { type: "session", id: "newer-id", timestamp: "2026-01-01T00:00:00Z" },
       {
         type: "message",
@@ -181,9 +201,9 @@ describe("session summaries", () => {
           },
         },
         {
-          id: path.join(workspaceSessionDir(config, workspace.id), "newer.jsonl"),
+          id: path.join(workspaceSessionDir(config, workspace.id), "newer.sqlite"),
           sessionId: "newer-id",
-          path: path.join(workspaceSessionDir(config, workspace.id), "newer.jsonl"),
+          path: path.join(workspaceSessionDir(config, workspace.id), "newer.sqlite"),
           firstMessage: "newer first message",
           updatedAt: new Date("2026-03-25T12:00:00Z").getTime(),
           messageCount: 0,
@@ -209,7 +229,7 @@ describe("session summaries", () => {
     const workspace = workspaceInfo(config, "beta");
     await fs.mkdir(workspace.path, { recursive: true });
 
-    await writeSession(config, workspace.id, "empty.jsonl", "2026-03-25T12:00:00Z", [
+    await writeSession(config, workspace.id, "empty.sqlite", "2026-03-25T12:00:00Z", [
       { type: "session", id: "empty-id", timestamp: "2026-01-01T00:00:00Z" },
       {
         type: "message",
@@ -239,7 +259,7 @@ describe("session summaries", () => {
     const subagentPath = await writeSession(
       config,
       workspace.id,
-      "subagent.jsonl",
+      "subagent.sqlite",
       "2026-03-25T12:00:00Z",
       [
         { type: "session", id: "subagent-id", timestamp: "2026-03-25T12:00:00Z" },
@@ -283,7 +303,7 @@ describe("session summaries", () => {
     const cronPath = await writeSession(
       config,
       workspace.id,
-      "cron-run.jsonl",
+      "cron-run.sqlite",
       "2026-03-25T12:00:00Z",
       [
         { type: "session", id: "cron-run-id", timestamp: "2026-03-25T12:00:00Z" },
@@ -329,7 +349,7 @@ describe("session summaries", () => {
     const cronPath = await writeSession(
       config,
       workspace.id,
-      "cron/job-1/run-1/cron-run.jsonl",
+      "cron/job-1/run-1/cron-run.sqlite",
       "2026-03-25T12:00:00Z",
       [
         { type: "session", id: "cron-run-id", timestamp: "2026-03-25T12:00:00Z" },
@@ -401,7 +421,7 @@ describe("session summaries", () => {
     const subagentPath = await writeSession(
       config,
       workspace.id,
-      "branched-subagent.jsonl",
+      "branched-subagent.sqlite",
       "2026-03-25T12:00:00Z",
       entries,
     );
@@ -422,7 +442,7 @@ describe("session summaries", () => {
     const workspace = workspaceInfo(config, "daily");
     await fs.mkdir(workspace.path, { recursive: true });
 
-    await writeSession(config, workspace.id, "older.jsonl", "2026-03-24T12:00:00Z", [
+    await writeSession(config, workspace.id, "older.sqlite", "2026-03-24T12:00:00Z", [
       { type: "session", id: "older-id", timestamp: "2026-03-24T12:00:00Z" },
       {
         type: "custom",
@@ -433,7 +453,7 @@ describe("session summaries", () => {
     const todayPath = await writeSession(
       config,
       workspace.id,
-      "today.jsonl",
+      "today.sqlite",
       "2026-03-20T12:00:00Z",
       [
         { type: "session", id: "today-id", timestamp: "2026-03-31T12:00:00Z" },
@@ -444,7 +464,7 @@ describe("session summaries", () => {
         },
       ],
     );
-    await writeSession(config, workspace.id, "newer.jsonl", "2026-03-25T12:00:00Z", [
+    await writeSession(config, workspace.id, "newer.sqlite", "2026-03-25T12:00:00Z", [
       { type: "session", id: "newer-id", timestamp: "2026-03-25T12:00:00Z" },
     ]);
 
@@ -487,7 +507,7 @@ describe("session summaries", () => {
     const workspace = workspaceInfo(config, "missing-daily");
     await fs.mkdir(workspace.path, { recursive: true });
 
-    await writeSession(config, workspace.id, "regular.jsonl", "2026-03-25T12:00:00Z", [
+    await writeSession(config, workspace.id, "regular.sqlite", "2026-03-25T12:00:00Z", [
       { type: "session", id: "regular-id", timestamp: "2026-03-25T12:00:00Z" },
     ]);
 
@@ -520,10 +540,10 @@ describe("session summaries", () => {
     const workspace = workspaceInfo(config, "gamma");
     await fs.mkdir(workspace.path, { recursive: true });
 
-    await writeSession(config, workspace.id, "older.jsonl", "2026-03-24T12:00:00Z", [
+    await writeSession(config, workspace.id, "older.sqlite", "2026-03-24T12:00:00Z", [
       { type: "session", id: "older-id", timestamp: "2026-03-30T12:00:00Z" },
     ]);
-    await writeSession(config, workspace.id, "newer.jsonl", "2026-03-25T12:00:00Z", [
+    await writeSession(config, workspace.id, "newer.sqlite", "2026-03-25T12:00:00Z", [
       { type: "session", id: "newer-id", timestamp: "2026-03-01T12:00:00Z" },
     ]);
 
@@ -540,7 +560,54 @@ const sessionHeader = (id: string) => ({
 });
 
 describe("persistent session summary index", () => {
-  it("rebuilds a fresh empty session from its native header after clearing the index", async () => {
+  it("indexes committed durable turns and preserves their summaries across restart", async () => {
+    const config = await createConfig();
+    const workspace = workspaceInfo(config, "durable-turn");
+    await fs.mkdir(workspace.path, { recursive: true });
+    const faux = fauxProvider();
+    const models = await ModelRuntime.create({
+      modelsPath: null,
+      authPath: path.join(config.battyDir, "auth.json"),
+      refreshOnCreate: false,
+    });
+    models.registerNativeProvider(faux.provider);
+    const index = await getSessionSummaryIndex(config);
+    await index.ensureInitialized(workspace.id);
+    const store = await SessionStore.create(
+      workspace.path,
+      workspaceSessionDir(config, workspace.id),
+    );
+    const { session } = await createPiAgentSession({
+      config,
+      workspace,
+      sessionManager: store,
+      modelRuntime: models,
+      customTools: [],
+      model: faux.getModel(),
+      thinkingLevel: "off",
+    });
+    try {
+      expect(index.list(workspace.id, "2026-10-02")[1]).toMatchObject({ messageCount: 0 });
+      faux.setResponses([fauxAssistantMessage("Indexed answer")]);
+      await session.prompt("Indexed question");
+      expect(index.list(workspace.id, "2026-10-02")[1]).toMatchObject({
+        firstMessage: "Indexed question",
+        lastAssistantReplyAt: expect.any(Number),
+      });
+      await index.flush();
+      await disposeSessionSummaryIndex(config);
+      const restored = await getSessionSummaryIndex(config);
+      await restored.ensureInitialized(workspace.id);
+      expect(restored.list(workspace.id, "2026-10-02")[1]).toMatchObject({
+        firstMessage: "Indexed question",
+        lastAssistantReplyAt: expect.any(Number),
+      });
+    } finally {
+      await session.dispose();
+    }
+  });
+
+  it("rebuilds a fresh empty session from its durable header after clearing the index", async () => {
     const config = await createConfig();
     const workspace = workspaceInfo(config, "empty-rebuild");
     const index = await getSessionSummaryIndex(config);
@@ -551,7 +618,7 @@ describe("persistent session summary index", () => {
     const file = store.getSessionFile();
     const sessionId = store.getSessionId();
     expect(index.list(workspace.id, "2026-03-25")[1]?.sessionId).toBe(sessionId);
-    store.release();
+    await store.release();
     await disposeSessionSummaryIndex(config);
     await fs.rm(path.join(battyAgentDir(config), "session-summary-index.json"));
     const read = vi.spyOn(SessionStore, "read");
@@ -569,7 +636,7 @@ describe("persistent session summary index", () => {
   it("serves warm and restarted lists without directory scans, stats, or transcript reads", async () => {
     const config = await createConfig();
     const workspace = workspaceInfo(config, "warm");
-    await writeSession(config, workspace.id, "one.jsonl", "2026-03-25T12:00:00Z", [
+    await writeSession(config, workspace.id, "one.sqlite", "2026-03-25T12:00:00Z", [
       sessionHeader("one"),
     ]);
     const index = await getSessionSummaryIndex(config);
@@ -608,7 +675,7 @@ describe("persistent session summary index", () => {
     await writeSession(
       config,
       "new",
-      "one.jsonl",
+      "one.sqlite",
       "2026-03-25T12:00:00Z",
       [sessionHeader("one")],
       false,
@@ -624,10 +691,10 @@ describe("persistent session summary index", () => {
   it.each([
     ["malformed JSON", "{not JSON"],
     ["unsupported version", JSON.stringify({ version: 1, entries: {} })],
-    ["invalid index structure", JSON.stringify({ version: 2, entries: {} })],
+    ["invalid index structure", JSON.stringify({ version: 3, entries: {} })],
     [
       "invalid index structure",
-      JSON.stringify({ version: 2, entries: { broken: null }, completedWorkspaces: [] }),
+      JSON.stringify({ version: 3, entries: { broken: null }, completedWorkspaces: [] }),
     ],
   ])("invalidates a %s cache and rebuilds it", async (_reason, content) => {
     const config = await createConfig();
@@ -635,7 +702,7 @@ describe("persistent session summary index", () => {
     await writeSession(
       config,
       workspace.id,
-      "one.jsonl",
+      "one.sqlite",
       "2026-03-25T12:00:00Z",
       [sessionHeader("one")],
       false,
@@ -659,7 +726,7 @@ describe("persistent session summary index", () => {
     await index.ensureInitialized(workspace.id);
     expect(index.list(workspace.id, "2026-03-25")[1]?.sessionId).toBe("one");
     await index.flush();
-    expect(JSON.parse(await fs.readFile(indexFile, "utf8"))).toMatchObject({ version: 2 });
+    expect(JSON.parse(await fs.readFile(indexFile, "utf8"))).toMatchObject({ version: 3 });
   });
 
   it("surfaces persistence failures and allows the next flush to save the index", async () => {
@@ -673,14 +740,14 @@ describe("persistent session summary index", () => {
     vi.spyOn(fs, "rename").mockRejectedValueOnce(new Error("disk failure"));
     await expect(index.flush()).rejects.toThrow("disk failure");
     await expect(index.flush()).resolves.toBeUndefined();
-    store.release();
+    await store.release();
     await disposeSessionSummaryIndex(config);
     expect((await listSessionSummaries(config, workspace))[1]?.sessionId).toBe(
       store.getSessionId(),
     );
   });
 
-  it("does not let Pi repair a torn transcript during initial indexing", async () => {
+  it("reports a corrupt durable session without modifying it", async () => {
     const config = await createConfig();
     const workspace = workspaceInfo(config, "torn");
     const store = await SessionStore.create(
@@ -689,8 +756,8 @@ describe("persistent session summary index", () => {
     );
     await store.appendMessage({ role: "user", content: "initial", timestamp: 1 });
     const file = store.getSessionFile();
-    store.release();
-    const torn = `${await fs.readFile(file, "utf8")}{`;
+    await store.release();
+    const torn = "invalid sqlite database";
     await fs.writeFile(file, torn);
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const index = await getSessionSummaryIndex(config);
@@ -710,7 +777,7 @@ describe("persistent session summary index", () => {
     await writeSession(
       config,
       workspace.id,
-      "nested/cron/job/run/broken.jsonl",
+      "nested/cron/job/run/broken.sqlite",
       "2026-03-25T12:00:00Z",
       [],
       false,
@@ -718,7 +785,7 @@ describe("persistent session summary index", () => {
     await writeSession(
       config,
       workspace.id,
-      "good.jsonl",
+      "good.sqlite",
       "2026-03-25T12:00:00Z",
       [sessionHeader("good")],
       false,
@@ -726,7 +793,7 @@ describe("persistent session summary index", () => {
     const bad = await writeSession(
       config,
       workspace.id,
-      "bad.jsonl",
+      "bad.sqlite",
       "2026-03-25T12:00:00Z",
       [],
       false,
@@ -781,11 +848,11 @@ describe("persistent session summary index", () => {
     expect(index.list(workspace.id, "2026-03-26")[1]?.dailySession?.isToday).toBe(false);
     const child = await store.fork(workspaceSessionDir(config, workspace.id));
     expect(index.list(workspace.id, "2026-03-25")).toHaveLength(1);
-    child.release();
+    await child.release();
     expect(read).not.toHaveBeenCalled();
     expect(readdir).not.toHaveBeenCalled();
     await index.flush();
-    store.release();
+    await store.release();
     await disposeSessionSummaryIndex(config);
     expect(
       (await getSessionSummaryIndex(config)).list(workspace.id, "2026-03-25")[0]
@@ -801,7 +868,7 @@ describe("persistent session summary index", () => {
       workspaceSessionDir(config, workspace.id),
     );
     await store.appendCustomEntry("test", {});
-    // Pi persists when the first conversation message arrives.
+    // Include a persisted conversation message in the initial snapshot.
     await store.appendMessage({
       ...fauxAssistantMessage("setup"),
       timestamp: 1,
@@ -817,7 +884,7 @@ describe("persistent session summary index", () => {
     expect((await listSessionSummaries(config, workspace))[1]?.firstMessage).toBe(
       "new live message",
     );
-    store.release();
+    await store.release();
   });
 
   it("does not replace writes received while loading the persisted index", async () => {
@@ -841,6 +908,6 @@ describe("persistent session summary index", () => {
     const restored = await SessionSummaryIndex.create(config);
     expect(restored.list(workspace.id, "2026-03-25")[1]?.firstMessage).toBe("during load");
     await restored.dispose();
-    store.release();
+    await store.release();
   });
 });

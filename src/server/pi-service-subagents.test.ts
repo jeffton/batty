@@ -87,6 +87,42 @@ async function setup() {
 }
 
 describe("detached AgentSession subagents", () => {
+  it.each(["completed", "failed", "aborted"] as const)(
+    "stores the canonical %s receipt before settlement and parent delivery",
+    async (status) => {
+      const { parent, deps, options } = await setup();
+      parent.faux.setResponses([
+        fauxAssistantMessage(status === "completed" ? "Done" : "", {
+          stopReason: status === "completed" ? "stop" : status === "failed" ? "error" : "aborted",
+          ...(status === "completed" ? {} : { errorMessage: `Child ${status}` }),
+        }),
+      ]);
+      const settledReceipts: unknown[] = [];
+      const create = deps.createPiAgentSession;
+      deps.createPiAgentSession = async (...args) => {
+        const result = await create(...args);
+        result.session.subscribe((event) => {
+          if (event.type === "agent_settled") {
+            const receipt = result.session.sessionManager
+              .getEntries()
+              .findLast(
+                (entry) =>
+                  entry.type === "custom" && entry.customType === SUBAGENT_COMPLETION_CUSTOM_TYPE,
+              );
+            settledReceipts.push(receipt?.type === "custom" ? receipt.data : undefined);
+          }
+        });
+        return result;
+      };
+      deps.deliverResultToParent = vi.fn(async () => {
+        expect(settledReceipts).toEqual([expect.objectContaining({ status })]);
+      });
+      const result = await runDetachedSubagentSession(deps, { ...options, respondIn: "session" });
+      expect(result.isError).toBe(status !== "completed");
+      expect(deps.deliverResultToParent).toHaveBeenCalledTimes(1);
+      expect(settledReceipts).toHaveLength(1);
+    },
+  );
   it.each(["completed", "failed", "aborted"])(
     "does not reuse inherited %s parent receipts for an interrupted nested child",
     async (status) => {
@@ -164,7 +200,7 @@ describe("detached AgentSession subagents", () => {
       parentStore.getLeafId(),
       options.sessionId,
     );
-    childStore.release();
+    await childStore.release();
     const result = await runDetachedSubagentSession(deps, {
       ...options,
       includePreviousContext: true,
@@ -270,7 +306,6 @@ describe("detached AgentSession subagents", () => {
     const startEntryId = store.getLeafId();
     await store.appendMessage(fauxAssistantMessage("Bounded answer"));
     const endEntryId = store.getLeafId();
-    store.native.branch(startEntryId!);
     await store.appendMessage(fauxAssistantMessage("Unrelated selected reply"));
     await store.appendCustomEntry(SUBAGENT_COMPLETION_CUSTOM_TYPE, {
       startEntryId,
@@ -299,18 +334,17 @@ describe("detached AgentSession subagents", () => {
         depth: 1,
         sessionId: store.getSessionId(),
       });
-      const root = store.getLeafId();
       await store.appendMessage(fauxAssistantMessage("Other branch"));
-      const other = store.getLeafId();
-      store.native.branch(root!);
       await store.appendMessage(fauxAssistantMessage("Answer"));
+      const endEntryId = store.getLeafId();
+      const other = await store.appendMessage(fauxAssistantMessage("Later non-ancestor"));
       await store.appendCustomEntry(SUBAGENT_COMPLETION_CUSTOM_TYPE, {
         status: "completed",
         ...(invalid === "unbounded"
           ? {}
           : {
               startEntryId: invalid === "missing" ? "missing" : other,
-              endEntryId: store.getLeafId(),
+              endEntryId,
             }),
       });
       await expect(runDetachedSubagentSession(deps, options)).rejects.toThrow();
@@ -494,7 +528,7 @@ describe("detached AgentSession subagents", () => {
       expect.objectContaining({ role: "user", content: "parent question" }),
     );
     expect(JSON.stringify(child.messages)).not.toContain("invoke-child");
-    expect(child.sessionManager.native.getHeader()!.parentSession).toBe(parent.session.sessionFile);
+    expect(child.sessionManager.getHeader()!.parentSession).toBe(parent.session.sessionFile);
     expect(
       child.sessionManager
         .getEntries()

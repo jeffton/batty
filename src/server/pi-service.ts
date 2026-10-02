@@ -422,10 +422,13 @@ export class PiService {
           (candidate) => candidate.session.sessionFile === sourceSessionPath,
         ))
       : undefined;
-    const sessionManager =
-      webSession?.session.sessionManager ?? (await SessionManager.open(sourceSessionPath));
+    if (!webSession) {
+      const { entries } = await SessionManager.read(sourceSessionPath, { readOnly: true });
+      return entries.at(-1)?.id ?? null;
+    }
+    const sessionManager = webSession.session.sessionManager;
 
-    if (!webSession?.session.isStreaming) {
+    if (!webSession.session.isStreaming) {
       return sessionManager.getLeafId();
     }
 
@@ -434,7 +437,7 @@ export class PiService {
 
   private async findSessionPath(workspace: WorkspaceInfo, sessionId: string): Promise<string> {
     const sessionDir = workspaceSessionDir(this.config, workspace.id);
-    const sessionFileSuffix = `_${sessionId}.jsonl`;
+    const sessionFileSuffix = `_${sessionId}.sqlite`;
     const entries = await fs
       .readdir(sessionDir, { recursive: true, withFileTypes: true })
       .catch(() => []);
@@ -1145,14 +1148,16 @@ export class PiService {
   }
 
   getSessionResources(sessionId: string): SessionResourcesResponse {
-    const sdk = this.requireSession(sessionId).session.sdk;
+    const resources = this.requireSession(sessionId).session.resources;
     return {
-      skills: sdk.resourceLoader.getSkills().skills.map(({ name, description, filePath }) => ({
-        name,
-        description,
-        filePath,
-      })),
-      tools: sdk
+      skills: resources.resourceLoader
+        .getSkills()
+        .skills.map(({ name, description, filePath }) => ({
+          name,
+          description,
+          filePath,
+        })),
+      tools: resources
         .getAllTools()
         .filter((tool) => !tool.name.startsWith("mcp__") && tool.exposure !== "hidden")
         .map(({ name, description }) => ({ name, description })),

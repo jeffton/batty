@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { homedir } from "node:os";
 import {
-  createAgentSession,
   createBashToolDefinition,
   createCodemodeExtension,
   createMcpExtension,
@@ -41,6 +40,7 @@ import type { PiModel, WebSession } from "./pi-service-types";
 import { modelKey } from "./pi-service-types";
 import type { AgentSessionController } from "./agent-session-controller";
 import { DurableAgentSessionController } from "./durable-agent-session";
+import { SessionResources } from "./session-resources";
 import { SessionStore } from "./session-store";
 import { createArtifactExtension, createTrackedFileTools } from "./agent-file-changes";
 import { createCodemodeSubagentExtension } from "./codemode-subagents";
@@ -174,7 +174,7 @@ export async function createPiAgentSession({
     ...settings,
     sessionDir: workspaceSessionDir(config, workspace.id),
     defaultTools: battyActivePiToolNames(
-      restoredToolNames ?? [...tools.map((tool) => tool.name), "codemode"],
+      [...(restoredToolNames ?? tools.map((tool) => tool.name)), "codemode"],
       process.platform,
     ),
   });
@@ -261,6 +261,19 @@ export async function createPiAgentSession({
         findBattySystemPromptSnapshot(sessionManager.getEntries())?.appendedPrompt,
       ].filter((value): value is string => !!value),
   });
+  if (!findBattySystemPromptSnapshot(sessionManager.getEntries())) {
+    await sessionManager.appendCustomEntry(
+      BATTY_SYSTEM_PROMPT_CUSTOM_TYPE,
+      buildBattySystemPromptSnapshot(
+        workspace,
+        modelKey(selected),
+        thinkingLevel ?? restored.thinkingLevel ?? settings.defaultThinkingLevel ?? "off",
+        new Date(),
+        path.join(config.selfPath, "README.md"),
+        getCurrentDailySessionDate(config, sessionManager),
+      ),
+    );
+  }
   await resourceLoader.reload();
   for (const diagnostic of [
     ...resourceLoader.getSkills().diagnostics,
@@ -274,57 +287,36 @@ export async function createPiAgentSession({
   const extensions = resourceLoader.getExtensions();
   if (extensions.errors.length)
     throw new Error(extensions.errors.map((error) => `${error.path}: ${error.error}`).join("\n"));
-  const result = await createAgentSession({
+  const resources = new SessionResources({
     cwd: workspace.path,
-    agentDir,
+    store: sessionManager,
     modelRuntime,
-    model: selected,
-    thinkingLevel: (thinkingLevel ??
-      restored?.thinkingLevel ??
-      settings.defaultThinkingLevel ??
-      "off") as ThinkingLevel,
-    sessionManager: sessionManager.native,
     settingsManager,
     resourceLoader,
-    customTools: tools as unknown as ToolDefinition[],
+    tools: tools as unknown as ToolDefinition[],
+    activeToolNames: settingsManager.getDefaultTools(),
   });
-  const durableSession = await DurableAgentSessionController.open(
-    result.session,
-    sessionManager,
-    modelRuntime,
-    {
-      model: model ? selected : undefined,
-      thinkingLevel: thinkingLevel as ThinkingLevel | undefined,
-    },
-  );
-  session = durableSession;
   try {
-    if (!findBattySystemPromptSnapshot(sessionManager.getEntries()))
-      await refreshBattySystemPrompt(config, { workspace, session });
-    await result.session.bindExtensions({
-      mode: "rpc",
-      onError: (error) => {
-        throw new Error(`Pi extension ${error.extensionPath}: ${error.error}`);
-      },
-    });
+    const durableSession = await DurableAgentSessionController.open(
+      resources,
+      sessionManager,
+      selected,
+      (thinkingLevel ??
+        restored.thinkingLevel ??
+        settings.defaultThinkingLevel ??
+        "off") as ThinkingLevel,
+    );
+    session = durableSession;
     session.regularToolNames = new Set(tools.map((tool) => tool.name));
-    if (restoredToolNames) {
-      const battyTools = new Set(tools.map((tool) => tool.name));
-      const extensionTools = result.session
-        .getActiveToolNames()
-        .filter((name) => !battyTools.has(name));
-      result.session.setActiveToolsByName(
-        battyActivePiToolNames(
-          [...restoredToolNames, ...extensionTools, "codemode"],
-          process.platform,
-        ),
-      );
-    }
     if (!restoredToolNames) await session.persistActiveTools();
     await durableSession.start();
-    return { session, modelFallbackMessage: result.modelFallbackMessage };
+    return { session };
   } catch (error) {
-    await session.dispose();
+    if (session) await session.dispose();
+    else {
+      await resources.dispose();
+      await sessionManager.close();
+    }
     throw error;
   }
 }
@@ -345,7 +337,7 @@ export async function refreshBattySystemPrompt(
     BATTY_SYSTEM_PROMPT_CUSTOM_TYPE,
     snapshot,
   );
-  await webSession.session.sdk.reload();
+  await webSession.session.reloadResources();
 }
 
 export function getCurrentDailySessionDate(

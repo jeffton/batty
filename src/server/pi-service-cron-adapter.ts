@@ -99,7 +99,7 @@ export function getCronExecutionResult(
   return undefined;
 }
 
-/** Persist scheduler-owned boundaries without resuming an interrupted SDK turn. */
+/** Persist scheduler-owned boundaries before publishing turn settlement. */
 export async function executeCronOperation(
   session: AgentSession,
   notice: RuntimeNotice,
@@ -113,11 +113,12 @@ export async function executeCronOperation(
   await session.waitForIdle();
   const startEntryId = session.sessionManager.getLeafId();
   const record: CronExecutionResult = { runId, startEntryId, endEntryId: null, status: "running" };
-  await session.sessionManager.appendCustomEntry(CRON_EXECUTION_CUSTOM_TYPE, record);
+  const releaseSettlement = session.deferSettlement();
   activeCronRuns.set(session, runId);
   const runSignal = cronRunSignals.get(session);
   const signal = runSignal?.runId === runId ? runSignal.signal : undefined;
   try {
+    await session.sessionManager.appendCustomEntry(CRON_EXECUTION_CUSTOM_TYPE, record);
     signal?.throwIfAborted();
     await session.sendCustomMessage(
       {
@@ -156,6 +157,7 @@ export async function executeCronOperation(
     throw error;
   } finally {
     activeCronRuns.delete(session);
+    await releaseSettlement();
   }
 }
 

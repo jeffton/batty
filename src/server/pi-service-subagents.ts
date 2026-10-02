@@ -1,9 +1,9 @@
 import { type AssistantMessage, type Message } from "@earendil-works/pi-ai";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { DurableFileChange } from "./agent-turn-file-changes";
 import { appendResultMessages, hasDeliveredResult } from "./session-result-delivery";
 import { boundedSessionEntries } from "./session-metadata";
-import { SessionStore as SessionManager } from "./session-store";
+import { SessionStore } from "./session-store";
 import { createSessionManagerWithPreviousContext } from "./previous-context";
 import type { AgentSessionController as AgentSession } from "./agent-session-controller";
 import type {
@@ -148,7 +148,7 @@ export interface DetachedSubagentResult {
 export interface RunDetachedSubagentDeps {
   createPiAgentSession: (
     workspace: WorkspaceInfo,
-    sessionManager: SessionManager,
+    sessionManager: SessionStore,
     options?: { modelId?: string; thinkingLevel?: string },
   ) => Promise<Awaited<{ session: AgentSession }>>;
   attachSession: (
@@ -215,7 +215,7 @@ function buildDetachedSubagentResult(
   };
 }
 
-function ownSubagentMarkerIndex(manager: SessionManager) {
+function ownSubagentMarkerIndex(manager: SessionStore) {
   return manager
     .getBranch()
     .findLastIndex(
@@ -226,7 +226,7 @@ function ownSubagentMarkerIndex(manager: SessionManager) {
     );
 }
 
-async function ensureSubagentMarker(manager: SessionManager, options: DetachedSubagentOptions) {
+async function ensureSubagentMarker(manager: SessionStore, options: DetachedSubagentOptions) {
   if (ownSubagentMarkerIndex(manager) >= 0) return;
   await manager.appendCustomEntry(SUBAGENT_SESSION_CUSTOM_TYPE, {
     sessionId: manager.getSessionId(),
@@ -237,7 +237,7 @@ async function ensureSubagentMarker(manager: SessionManager, options: DetachedSu
   });
 }
 
-function subagentCompletion(manager: SessionManager) {
+function subagentCompletion(manager: SessionStore) {
   const branch = manager.getBranch();
   const marker = ownSubagentMarkerIndex(manager);
   if (marker < 0) return undefined;
@@ -249,7 +249,7 @@ function subagentCompletion(manager: SessionManager) {
 }
 
 function subagentOperationEntries(
-  manager: SessionManager,
+  manager: SessionStore,
   startedTurn: boolean,
   startEntryId: string | null,
 ) {
@@ -271,7 +271,7 @@ function isToolCallBlockForId(block: unknown, toolCallId: string): boolean {
 }
 
 function resolveDetachedContextLeafId(
-  sessionManager: SessionManager,
+  entries: SessionEntry[],
   options: Pick<DetachedSubagentOptions, "contextBranchLeafId" | "currentToolCallId">,
 ): string | undefined {
   if (options.contextBranchLeafId !== undefined) {
@@ -279,40 +279,38 @@ function resolveDetachedContextLeafId(
   }
 
   if (options.currentToolCallId) {
-    const invocation = sessionManager
-      .getBranch()
-      .findLast(
-        (entry) =>
-          entry.type === "message" &&
-          entry.message.role === "assistant" &&
-          entry.message.content.some((block) =>
-            isToolCallBlockForId(block, options.currentToolCallId!),
-          ),
-      );
+    const invocation = entries.findLast(
+      (entry) =>
+        entry.type === "message" &&
+        entry.message.role === "assistant" &&
+        entry.message.content.some((block) =>
+          isToolCallBlockForId(block, options.currentToolCallId!),
+        ),
+    );
     if (!invocation) throw new Error(`Parent tool call not found: ${options.currentToolCallId}`);
     return invocation.parentId ?? undefined;
   }
 
-  return sessionManager.getLeafId() ?? undefined;
+  return entries.at(-1)?.id;
 }
 
 async function createDetachedSubagentSessionManager(
   deps: RunDetachedSubagentDeps,
   options: DetachedSubagentOptions,
-): Promise<{ manager: SessionManager; chatOnlyMessages?: Message[]; existing?: boolean }> {
+): Promise<{ manager: SessionStore; chatOnlyMessages?: Message[]; existing?: boolean }> {
   if (options.sessionId) {
-    const existing = await SessionManager.existing(
+    const existing = await SessionStore.existing(
       options.workspace.path,
       deps.workspaceSessionDir,
       options.sessionId,
     );
     if (existing) return { manager: existing, existing: true };
   }
-  const sourceManager =
+  const source =
     options.includePreviousContext && options.parentSessionPath
-      ? await SessionManager.open(options.parentSessionPath)
+      ? await SessionStore.read(options.parentSessionPath, { readOnly: true })
       : undefined;
-  const leafId = sourceManager ? resolveDetachedContextLeafId(sourceManager, options) : undefined;
+  const leafId = source ? resolveDetachedContextLeafId(source.entries, options) : undefined;
   return createSessionManagerWithPreviousContext({
     cwd: options.workspace.path,
     targetRoot: deps.workspaceSessionDir,
@@ -452,6 +450,7 @@ export async function runDetachedSubagentSession(
     });
   });
 
+  const releaseSettlement = subagentSession.deferSettlement();
   const abortListener = () => {
     void subagentSession.abort().catch((error) => console.error("Failed to stop subagent", error));
   };
@@ -561,6 +560,7 @@ export async function runDetachedSubagentSession(
       ...built,
       deliveryEntryId: assistantEntry?.id ?? completionEntryId,
     };
+    await releaseSettlement();
     if (options.respondIn === "session") {
       deliveringResult = true;
       if (!deps.deliverResultToParent)
@@ -572,7 +572,7 @@ export async function runDetachedSubagentSession(
       text: result.text || lastText,
     };
   } catch (error) {
-    // Delivery failures remain retryable; they must not replace the child's native result.
+    // Delivery failures remain retryable; they must not replace the child's canonical result.
     if (
       deliveringResult ||
       subagentSession.isStreaming ||
@@ -609,6 +609,7 @@ export async function runDetachedSubagentSession(
       ...built,
       deliveryEntryId: assistantEntry?.id ?? completionEntryId,
     };
+    await releaseSettlement();
     if (
       options.respondIn === "session" &&
       (observedFinalAssistant || options.deliveryMode === "prompt")
@@ -624,6 +625,7 @@ export async function runDetachedSubagentSession(
       errorMessage: result.errorMessage || (error instanceof Error ? error.message : String(error)),
     };
   } finally {
+    await releaseSettlement();
     if (options.signal) {
       options.signal.removeEventListener("abort", abortListener);
     }
@@ -727,7 +729,7 @@ export async function deliverAsyncSubagentResult(
 
 export async function appendMessages(session: AgentSession, messages: Message[]): Promise<void> {
   for (const message of messages) await session.sessionManager.appendMessage(message);
-  session.sdk.refreshContext();
+  await session.refreshContext();
 }
 
 export interface ResolveDailySessionDeps {
@@ -785,7 +787,7 @@ export async function resolveOrCreateDailySession(
       );
       const entries = loaded
         ? loaded.session.sessionManager.getEntries()
-        : (await SessionManager.read(sessionPath)).entries;
+        : (await SessionStore.read(sessionPath)).entries;
       if (hasSubagentSessionMarker(entries)) {
         continue;
       }

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { BATTY_SYSTEM_PROMPT_CUSTOM_TYPE } from "./batty-system-prompt";
 import { SessionStore } from "./session-store";
+import lockfile from "proper-lockfile";
 import { createSessionManagerWithPreviousContext } from "./previous-context";
 
 const roots: string[] = [];
@@ -13,7 +14,53 @@ afterEach(async () => {
 });
 
 describe("createSessionManagerWithPreviousContext", () => {
-  it("uses the captured leaf even when the source has moved to another branch", async () => {
+  it("closes historical full-copy writers and keeps chat-only copies passive", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-scoped-context-"));
+    roots.push(root);
+    const parent = await SessionStore.create(root, path.join(root, "parent"));
+    const leafId = await parent.appendMessage({ role: "user", content: "shared", timestamp: 1 });
+    const sourceSessionPath = parent.getSessionFile();
+    await parent.close();
+    const full = await createSessionManagerWithPreviousContext({
+      cwd: root,
+      sourceSessionPath,
+      leafId,
+      targetRoot: path.join(root, "full"),
+      mode: true,
+    });
+    try {
+      expect(await lockfile.check(sourceSessionPath)).toBe(false);
+      expect(full.manager.getEntries()[0]).toMatchObject({ message: { content: "shared" } });
+      const chat = await createSessionManagerWithPreviousContext({
+        cwd: root,
+        sourceSessionPath,
+        leafId,
+        targetRoot: path.join(root, "chat"),
+        mode: "chat-only",
+      });
+      try {
+        expect(chat.chatOnlyMessages).toEqual([
+          expect.objectContaining({ role: "user", content: "shared" }),
+        ]);
+        expect(await lockfile.check(sourceSessionPath)).toBe(false);
+      } finally {
+        await chat.manager.close();
+      }
+      await expect(
+        createSessionManagerWithPreviousContext({
+          cwd: root,
+          sourceSessionPath,
+          leafId: "missing",
+          targetRoot: path.join(root, "failed"),
+          mode: true,
+        }),
+      ).rejects.toThrow("Unknown session entry");
+      expect(await lockfile.check(sourceSessionPath)).toBe(false);
+    } finally {
+      await full.manager.close();
+    }
+  });
+  it("uses the captured leaf even when the source has moved to a later leaf", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-captured-context-"));
     roots.push(root);
     const parent = await SessionStore.create(root, path.join(root, "parent"));
@@ -23,7 +70,6 @@ describe("createSessionManagerWithPreviousContext", () => {
       content: "captured",
       timestamp: 2,
     });
-    parent.native.branch(firstId);
     await parent.appendMessage({ role: "user", content: "other branch", timestamp: 3 });
     const options = { cwd: root, sourceSessionPath: parent.getSessionFile(), leafId: capturedId };
     const full = await createSessionManagerWithPreviousContext({
@@ -41,12 +87,12 @@ describe("createSessionManagerWithPreviousContext", () => {
       "shared",
       "captured",
     ]);
-    full.manager.release();
-    chatOnly.manager.release();
-    parent.release();
+    await full.manager.release();
+    await chatOnly.manager.release();
+    await parent.release();
   });
 
-  it("preserves native full history and projects chat-only copies", async () => {
+  it("preserves durable full history and projects chat-only copies", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-previous-context-"));
     roots.push(root);
     const parent = await SessionStore.create(root, path.join(root, "parent"));
@@ -85,7 +131,7 @@ describe("createSessionManagerWithPreviousContext", () => {
       parentSessionId: parent.getSessionId(),
       mode: "chat-only",
     });
-    expect(full.manager.native.getHeader()?.parentSession).toBe(
+    expect(full.manager.getHeader()?.parentSession).toBe(
       await fs.realpath(parent.getSessionFile()),
     );
     expect(full.manager.getEntries()).toContainEqual(
@@ -102,8 +148,8 @@ describe("createSessionManagerWithPreviousContext", () => {
         content: [expect.objectContaining({ type: "text", text: "Answer" })],
       }),
     ]);
-    full.manager.release();
-    chatOnly.manager.release();
-    parent.release();
+    await full.manager.release();
+    await chatOnly.manager.release();
+    await parent.release();
   });
 });

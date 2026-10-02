@@ -1,10 +1,9 @@
-import fs from "node:fs/promises";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { createAgentSessionFixture } from "./agent-session-test-fixture";
 import { DurableAgentSessionController } from "./durable-agent-session";
-import type { openDurableSession } from "./durable-session-store";
+import { SessionStore } from "./session-store";
 
 const fixtures: Awaited<ReturnType<typeof createAgentSessionFixture>>[] = [];
 afterEach(async () => {
@@ -161,39 +160,29 @@ describe("durable runtime admission and recovery", () => {
     });
   });
 
-  it("routes SDK configuration and compaction callbacks through durable state", async () => {
+  it("routes controller configuration and compaction through durable state", async () => {
     const fixture = await setup();
-    const controller = fixture.session as DurableAgentSessionController;
     const model = fixture.session.model!;
-    await fixture.session.sdk.setModel(model);
-    fixture.session.sdk.setThinkingLevel("off");
+    await fixture.session.setModel(model);
+    await fixture.session.setThinkingLevel("off");
     // Configuration commits precede the next model request.
     fixture.faux.setResponses([
       fauxAssistantMessage("history ".repeat(100)),
       fauxAssistantMessage("summary"),
     ]);
     await fixture.session.prompt("history");
-    const state = await (
-      controller as unknown as {
-        backing: {
-          conversation: {
-            agent(context: unknown): Promise<{ model: unknown; thinkingLevel: string }>;
-          };
-        };
-      }
-    ).backing.conversation.agent(
-      (await import("@earendil-works/chord/context")).BACKGROUND_CONTEXT,
-    );
-    expect(state.model).toEqual({ provider: model.provider, modelId: model.id });
-    expect(state.thinkingLevel).toBe("off");
+    expect(await fixture.session.sessionManager.configuration()).toMatchObject({
+      model: { provider: model.provider, modelId: model.id },
+      thinkingLevel: "off",
+    });
     fixture.session.settingsManager.applyOverrides({ compaction: { keepRecentTokens: 20 } });
-    await fixture.session.sdk.compact();
+    await fixture.session.compact();
     expect(
-      fixture.session.sessionManager.getBranch().some((entry) => entry.type === "compaction"),
+      fixture.session.sessionManager.getEntries().some((entry) => entry.type === "compaction"),
     ).toBe(true);
   });
 
-  it("joins the committed compaction projection before resolving SDK compaction", async () => {
+  it("joins the committed compaction projection before resolving controller compaction", async () => {
     const fixture = await setup();
     fixture.session.settingsManager.applyOverrides({ compaction: { keepRecentTokens: 20 } });
     fixture.faux.setResponses([
@@ -201,23 +190,20 @@ describe("durable runtime admission and recovery", () => {
       fauxAssistantMessage("summary"),
     ]);
     await fixture.session.prompt("history");
-    const backing = (
-      fixture.session as unknown as { backing: Awaited<ReturnType<typeof openDurableSession>> }
-    ).backing;
-    const project = backing.projectEntries;
+    const store = fixture.session.sessionManager;
+    const observe = store.observeEntries.bind(store);
     const entered = barrier();
     const finish = barrier();
-    backing.projectEntries = async (entries) => {
+    store.observeEntries = async (entries) => {
       if (entries.some((entry) => entry.kind === "pi.compaction")) {
         entered.release();
         await finish.promise;
       }
-      await project(entries);
+      await observe(entries);
     };
     let settled = false;
-    const run = fixture.session.sdk.compact().then((summary) => {
+    const run = fixture.session.compact().then(() => {
       settled = true;
-      return summary;
     });
     try {
       await entered.promise;
@@ -226,7 +212,10 @@ describe("durable runtime admission and recovery", () => {
     } finally {
       finish.release();
     }
-    expect(await run).toMatchObject({ summary: expect.stringContaining("summary") });
+    await run;
+    expect(
+      fixture.session.sessionManager.getBranch().findLast((entry) => entry.type === "compaction"),
+    ).toMatchObject({ summary: expect.stringContaining("summary") });
   });
 
   it("explicit abort withdraws queued input instead of checkpointing it for recovery", async () => {
@@ -290,11 +279,8 @@ describe("durable runtime admission and recovery", () => {
         !("content" in event.message)
       )
         return;
-      const records = (await fs.readFile(fixture.session.sessionFile, "utf8"))
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line));
-      expect(records).toContainEqual(
+      const stored = await SessionStore.read(fixture.session.sessionFile);
+      expect(stored.entries).toContainEqual(
         expect.objectContaining({
           type: "message",
           message: expect.objectContaining({

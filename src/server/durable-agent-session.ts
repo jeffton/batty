@@ -4,15 +4,14 @@ import { BACKGROUND_CONTEXT, awaitWithContext } from "@earendil-works/chord/cont
 import type { JsonValue } from "@earendil-works/chord";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import {
   convertToLlm,
   estimateTokens,
-  type AgentSession,
   type AgentSessionEvent,
-  type ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
 import {
-  createRegistry,
+  AgentDoc,
   defineExtension,
   defineDoc,
   GenerationTask,
@@ -29,13 +28,18 @@ import {
   type Submission,
 } from "@earendil-works/pi-durable";
 import type { PromptDisposition, QueuedPrompt } from "@/shared/types";
-import { AgentSessionController, type AgentSessionPromptOptions } from "./agent-session-controller";
-import { openDurableSession } from "./durable-session-store";
+import type {
+  AgentSessionController,
+  AgentSessionPromptOptions,
+  CustomSessionInput,
+} from "./agent-session-controller";
 import { createDurableToolExtension } from "./durable-tools";
+import type { SessionResources } from "./session-resources";
 import type { SessionStore } from "./session-store";
+import { SESSION_TOOLS_CUSTOM_TYPE } from "./session-metadata";
 import { prepareDurablePrompt } from "./durable-prompt-preflight";
+import { getSessionContextUsage } from "./pi-context-usage";
 
-type CustomInput = Parameters<AgentSessionController["sendCustomMessage"]>[0];
 const context = BACKGROUND_CONTEXT;
 const PromptDoc = defineDoc<{ override: string | null }>({
   kind: "batty.prompt",
@@ -46,187 +50,187 @@ const PromptDoc = defineDoc<{ override: string | null }>({
   initial: () => ({ override: null }),
 });
 
-/** Durable owns generation, admission, queues and tool scheduling. The SDK supplies resources and host tools only. */
-export class DurableAgentSessionController extends AgentSessionController {
-  private readonly durableListeners = new Set<(event: AgentSessionEvent) => void | Promise<void>>();
+/** Durable owns the conversation, admission, execution and recovery; resources own host tools. */
+export class DurableAgentSessionController implements AgentSessionController {
+  private readonly listeners = new Set<(event: AgentSessionEvent) => void | Promise<void>>();
   private readonly deliveryContext = new AsyncLocalStorage<boolean>();
   private readonly deliveries = new Set<Promise<void>>();
-  private readonly deliveryErrors: unknown[] = [];
-  private readonly registry = createRegistry();
-  private backing!: Awaited<ReturnType<typeof openDurableSession>>;
+  private readonly errors: unknown[] = [];
   private stream!: AgentEventStream;
   private busy = false;
   private partial?: AssistantMessage;
-  private readonly durableTools = new Map<string, ToolSlot>();
+  private readonly tools = new Map<string, ToolSlot>();
   private inbox: Array<{ id: InboxItem["id"]; mode: InboxItem["mode"] }> = [];
   private queued: QueuedPrompt[] = [];
   private compactions = new Set<TaskId>();
-  private retrying = false;
   private handoffRequested = false;
-  private durableClosing?: Promise<void>;
+  private closing?: Promise<void>;
   private started = false;
-  private durableReloadRequested = false;
+  private reloadRequested = false;
   private settlementPending = false;
-  private readonly refreshSdkContext: () => void;
-  private readonly setSdkModel: AgentSession["setModel"];
-  private readonly setSdkThinkingLevel: AgentSession["setThinkingLevel"];
+  private completionHolds = 0;
   private observedTail = 0;
   private readonly observerWaiters = new Set<() => void>();
-  private preparationAdmission = Promise.resolve();
-  private readonly durablePreflights = new Set<AbortController>();
+  private admission = Promise.resolve();
+  private readonly preflights = new Set<AbortController>();
   private readonly preflightOperations = new Set<Promise<unknown>>();
+  private readonly resourceOperations = new Set<Promise<unknown>>();
+  private selectedModel: Model<Api>;
+  private selectedThinking: ThinkingLevel;
+  regularToolNames = new Set<string>();
 
-  private constructor(sdk: AgentSession, store: SessionStore) {
-    super(sdk, store);
-    this.refreshSdkContext = sdk.refreshContext.bind(sdk);
-    this.setSdkModel = sdk.setModel.bind(sdk);
-    this.setSdkThinkingLevel = sdk.setThinkingLevel.bind(sdk);
+  private constructor(
+    readonly resources: SessionResources,
+    readonly sessionManager: SessionStore,
+    model: Model<Api>,
+    thinkingLevel: ThinkingLevel,
+  ) {
+    this.selectedModel = model;
+    this.selectedThinking = clampThinkingLevel(model, thinkingLevel);
   }
 
   static async open(
-    sdk: AgentSession,
+    resources: SessionResources,
     store: SessionStore,
-    models: ModelRuntime,
-    overrides: { model?: Model<Api>; thinkingLevel?: ThinkingLevel } = {},
+    model: Model<Api>,
+    thinkingLevel: ThinkingLevel,
   ) {
-    const controller = new DurableAgentSessionController(sdk, store);
-    controller.refreshRegistry();
-    const settings = sdk.settingsManager;
-    try {
-      controller.backing = await openDurableSession(store, {
-        models,
-        registry: controller.registry,
-        settings: {
-          get compaction() {
-            return settings.getCompactionSettings(sdk.model);
-          },
-          get retry() {
-            return settings.getRetrySettings();
-          },
-          get steeringMode() {
-            return settings.getSteeringMode();
-          },
-          get followUpMode() {
-            return settings.getFollowUpMode();
-          },
-          toolExecution: sdk.agent.toolExecution,
+    const controller = new DurableAgentSessionController(resources, store, model, thinkingLevel);
+    const settings = resources.settingsManager;
+    store.configureRuntime({
+      models: resources.modelRuntime,
+      settings: {
+        get compaction() {
+          return settings.getCompactionSettings(controller.model);
         },
-        onReport: (error) => controller.deliveryErrors.push(error),
-      });
-      const agent = await controller.backing.conversation.agent(context);
-      if (!agent.model || overrides.model || overrides.thinkingLevel !== undefined) {
-        const selected = overrides.model ?? sdk.model!;
-        await controller.backing.conversation.configure(
-          {
-            model:
-              overrides.model || !agent.model
-                ? { provider: selected.provider, modelId: selected.id }
-                : agent.model,
-            thinkingLevel:
-              overrides.thinkingLevel ?? (!agent.model ? sdk.thinkingLevel : agent.thinkingLevel),
-            cwd: store.native.getCwd(),
-          },
-          context,
-        );
-      }
-      {
-        const configured = await controller.backing.conversation.agent(context);
-        const model = models.getModel(configured.model!.provider, configured.model!.modelId);
-        if (!model)
-          throw new Error(
-            `Durable session model is unavailable: ${configured.model!.provider}/${configured.model!.modelId}`,
-          );
-        sdk.agent.state.model = model;
-        sdk.agent.state.thinkingLevel = configured.thinkingLevel;
-      }
-      return controller;
-    } catch (error) {
-      await controller.backing?.close();
-      sdk.dispose();
-      store.release();
-      throw error;
-    }
+        get retry() {
+          return settings.getRetrySettings();
+        },
+        get steeringMode() {
+          return settings.getSteeringMode();
+        },
+        get followUpMode() {
+          return settings.getFollowUpMode();
+        },
+        toolExecution: resources.toolExecution,
+      },
+    });
+    await store.configure({
+      model: { provider: model.provider, modelId: model.id },
+      thinkingLevel: controller.thinkingLevel,
+    });
+    controller.refreshRegistry();
+    return controller;
   }
 
-  /** Bind resources and MCP before allowing recovered tasks to execute. */
+  /** Bind resources before resuming recovered work. */
   async start(): Promise<void> {
-    this.refreshRegistry();
-    await this.backing.syncHostEntries();
-    this.stream = await watchEvents(this.backing.harness, this.backing.conversation.id, context);
+    this.resources.bind({
+      actions: {
+        sendMessage: (message, options) =>
+          this.trackOperation(
+            this.sendCustomMessage(message as CustomSessionInput, {
+              ...options,
+              steerWhenBusy: true,
+            }),
+          ),
+        sendUserMessage: (content, options) => {
+          const text =
+            typeof content === "string"
+              ? content
+              : content
+                  .filter((part) => part.type === "text")
+                  .map((part) => part.text)
+                  .join("\n");
+          const images =
+            typeof content === "string"
+              ? undefined
+              : content.filter((part) => part.type === "image");
+          this.trackOperation(this.prompt(text, { images, streamingBehavior: options?.deliverAs }));
+        },
+        appendEntry: (customType, data) =>
+          this.trackOperation(this.sessionManager.appendCustomEntry(customType, data)),
+        setSessionName: (name) => this.trackOperation(this.sessionManager.setSessionName(name)),
+        getSessionName: () => this.sessionName,
+        setLabel: (entryId, label) =>
+          this.trackOperation(this.sessionManager.setLabel(entryId, label)),
+        setModel: async (model) => {
+          await this.setModel(model);
+          return true;
+        },
+        getThinkingLevel: () => this.thinkingLevel,
+        setThinkingLevel: (level) => this.trackOperation(this.setThinkingLevel(level)),
+      },
+      context: {
+        getModel: () => this.model,
+        getScopedModels: () => [],
+        isIdle: () => !this.isStreaming && !this.isCompacting,
+        getSignal: () => undefined,
+        hasPendingMessages: () => this.pendingMessageCount > 0,
+        getContextUsage: () => getSessionContextUsage(this),
+        compact: (options) =>
+          this.trackOperation(
+            this.compact(options?.customInstructions).then(
+              () => {
+                const entry = this.sessionManager
+                  .getBranch()
+                  .findLast((entry) => entry.type === "compaction");
+                if (entry?.type === "compaction") options?.onComplete?.(entry);
+              },
+              (error: Error) => {
+                if (options?.onError) options.onError(error);
+                else throw error;
+              },
+            ),
+          ),
+        abort: () => this.trackOperation(this.abort()),
+        shutdown: () => {
+          void this.dispose();
+        },
+      },
+      getMessages: () => this.messages,
+      emit: (event) => this.emit(event),
+      toolsChanged: () => this.configureTools(),
+    });
+    await this.resources.start();
+    await this.configureTools();
+    this.stream = await watchEvents(
+      this.sessionManager.harness,
+      this.sessionManager.conversation.id,
+      context,
+    );
     await this.applySnapshot(this.stream.snapshot);
     this.stream.start(async (events) => {
       for (const event of events) await this.acceptEvent(event);
-      if (this.settlementPending && !this.busy) {
-        this.settlementPending = false;
-        if (this.durableReloadRequested && !this.durableClosing) {
-          this.durableReloadRequested = false;
-          await this.sdk.reload();
-          this.refreshRegistry();
-        }
-        this.emit({ type: "agent_settled" } as AgentSessionEvent);
-      }
+      await this.publishSettlement();
       for (const wake of this.observerWaiters) wake();
     });
     void this.stream.closed.then((end) => {
       if (end.reason === "listener_error") {
-        this.deliveryErrors.push(end.error);
+        this.errors.push(end.error);
         for (const wake of this.observerWaiters) wake();
       }
     });
     this.started = true;
-    // SDK extension callbacks must use durable admission, never start the SDK agent loop.
-    this.sdk.prompt = async (text, options) => {
-      await this.prompt(text, options);
-    };
-    this.sdk.sendCustomMessage = async (message, options) => {
-      await this.sendCustomMessage(message as CustomInput, { ...options, steerWhenBusy: true });
-    };
-    this.sdk.setModel = (model) => this.setModel(model);
-    this.sdk.setThinkingLevel = (level) => {
-      this.setSdkThinkingLevel(level);
-      void this.backing.conversation
-        .configure({ thinkingLevel: level }, context)
-        .catch((error) => this.deliveryErrors.push(error));
-    };
-    this.sdk.compact = async (instructions) => {
-      await this.compact(instructions);
-      const entry = this.sessionManager.getBranch().findLast((item) => item.type === "compaction");
-      if (!entry || entry.type !== "compaction") throw new Error("Compaction produced no summary");
-      return {
-        summary: entry.summary,
-        firstKeptEntryId: entry.firstKeptEntryId,
-        tokensBefore: entry.tokensBefore,
-        details: entry.details,
-        usage: entry.usage,
-      };
-    };
-    this.sdk.abortCompaction = () => this.abortCompaction();
-    this.sdk.abort = () => this.abort();
-    this.sdk.waitForIdle = () => this.waitForIdle();
-    Object.defineProperty(this.sdk, "isStreaming", { get: () => this.busy });
-    Object.defineProperty(this.sdk, "isIdle", { get: () => !this.busy && !this.isCompacting });
-    Object.defineProperty(this.sdk, "pendingMessageCount", { get: () => this.pendingMessageCount });
-    const activate = this.sdk.setActiveToolsByName.bind(this.sdk);
-    this.sdk.setActiveToolsByName = (names) => {
-      activate(names);
-      this.refreshRegistry();
-    };
-    this.backing.harness.resume();
+    this.sessionManager.harness.resume();
   }
 
+  private async configureTools(): Promise<void> {
+    this.refreshRegistry();
+    await this.sessionManager.conversation.commit(async (tx) => {
+      (await tx.doc(AgentDoc, this.sessionManager.conversation.id)).tools =
+        this.resources.declaredTools.map((tool) => tool.name);
+    }, context);
+  }
   private refreshRegistry(): void {
-    this.registry.install(
-      createDurableToolExtension(this.sdk, {
+    this.sessionManager.registry.install(
+      createDurableToolExtension(this.resources, {
         shouldEndTurn: () => this.handoffRequested && this.pendingMessageCount === 0,
-        beforeExecute: async () => {
-          this.sdk.agent.state.messages = [
-            ...(await this.backing.conversation.context(context)).messages,
-          ];
-        },
+        beforeExecute: () => this.sessionManager.refresh(),
         recordArtifacts: async (toolCallId, details, toolTaskId) => {
-          await this.backing.conversation.commit(
+          await this.sessionManager.conversation.commit(
             (tx) =>
-              tx.appendEntry(this.backing.conversation.id, {
+              tx.appendEntry(this.sessionManager.conversation.id, {
                 kind: "batty.tool-artifacts",
                 data: JSON.parse(JSON.stringify({ toolCallId, toolTaskId, details })) as JsonValue,
               }),
@@ -235,7 +239,7 @@ export class DurableAgentSessionController extends AgentSessionController {
         },
       }),
     );
-    this.registry.install(
+    this.sessionManager.registry.install(
       defineExtension({
         name: "batty-resources",
         sections: [
@@ -243,42 +247,34 @@ export class DurableAgentSessionController extends AgentSessionController {
             "batty",
             async (input, invocation) => {
               const prompt = await input.read.snapshot(PromptDoc, input.conversationId, invocation);
-              return prompt?.override ?? this.sdk.systemPrompt;
+              return prompt?.override ?? this.resources.systemPrompt;
             },
             { tag: false },
           ),
         ],
         hooks: [
           hook(GenerationTask, {
-            beforeRequest: async (request, _api, invocation) => {
-              // Nested codemode calls consult the SDK's executable tool context, not its loop.
-              this.sdk.agent.state.messages = [...request.messages];
-              const messages = await this.sdk.agent.transformContext?.(
-                [...request.messages],
-                invocation.abortSignal,
-              );
-              if (messages) return { messages: convertToLlm(messages) };
+            beforeRequest: async (request) => {
+              const messages = await this.resources.extensionRunner.emitContext([
+                ...request.messages,
+              ]);
+              return { messages: convertToLlm(messages) };
             },
             afterTools: async (_assistant, results, _api, invocation) => {
               await awaitWithContext(this.waitForObservation(Math.max(0, ...results)), invocation);
+              await awaitWithContext(this.flushResourceOperations(), invocation);
               await awaitWithContext(this.flushDelivery(), invocation);
             },
           }),
           hook(CompactionTask, {
             beforeCompact: async (compaction, _api, invocation) => {
-              await this.backing.projectEntries(compaction.entries);
+              await this.sessionManager.observeEntries(compaction.entries);
               const branch = this.sessionManager.getBranch();
-              const firstKept = branch.find(
-                (entry) =>
-                  entry.type === "message" &&
-                  (entry.message as AgentMessage & { battyDurableEntryId?: string })
-                    .battyDurableEntryId === String(compaction.firstKept),
-              );
-              const response = await this.sdk.extensionRunner.emit({
+              const response = await this.resources.extensionRunner.emit({
                 type: "session_before_compact",
                 branchEntries: branch,
                 preparation: {
-                  firstKeptEntryId: firstKept?.id ?? this.sessionManager.getLeafId()!,
+                  firstKeptEntryId: String(compaction.firstKept),
                   messagesToSummarize: [...compaction.messages],
                   turnPrefixMessages: [],
                   isSplitTurn: false,
@@ -287,7 +283,7 @@ export class DurableAgentSessionController extends AgentSessionController {
                     0,
                   ),
                   fileOps: { read: new Set(), written: new Set(), edited: new Set() },
-                  settings: this.sdk.settingsManager.getCompactionSettings(this.model),
+                  settings: this.settingsManager.getCompactionSettings(this.model),
                 },
                 customInstructions: compaction.instructions,
                 reason: compaction.reason,
@@ -303,42 +299,44 @@ export class DurableAgentSessionController extends AgentSessionController {
     );
   }
 
-  override get messages() {
-    const projected = new Map(
-      this.sessionManager
-        .getEntries()
-        .flatMap((entry) =>
-          entry.type === "message"
-            ? [
-                [
-                  (entry.message as AgentMessage & { battyDurableEntryId?: string })
-                    .battyDurableEntryId,
-                  entry.message,
-                ] as const,
-              ]
-            : [],
-        ),
-    );
-    return this.sdk.messages.map((message) => {
-      const id = (message as AgentMessage & { battyDurableEntryId?: string }).battyDurableEntryId;
-      return id ? (projected.get(id) ?? message) : message;
-    });
+  get sessionId() {
+    return this.sessionManager.getSessionId();
   }
-
-  override get isStreaming() {
+  get sessionFile() {
+    return this.sessionManager.getSessionFile()!;
+  }
+  get sessionName() {
+    return this.sessionManager.getSessionName();
+  }
+  get model() {
+    return this.selectedModel;
+  }
+  get thinkingLevel() {
+    return this.selectedThinking;
+  }
+  get messages(): AgentMessage[] {
+    return this.sessionManager.buildSessionProjection().messages;
+  }
+  get settingsManager() {
+    return this.resources.settingsManager;
+  }
+  get resourceLoader() {
+    return this.resources.resourceLoader;
+  }
+  get isStreaming() {
     return this.busy;
   }
-  override get isCompacting() {
+  get isCompacting() {
     return this.compactions.size > 0;
   }
-  override get pendingMessageCount() {
+  get pendingMessageCount() {
     return this.inbox.filter((item) => item.mode !== "write").length;
   }
-  override get streamingMessage() {
+  get streamingMessage() {
     return this.partial;
   }
-  override get runningTools() {
-    return [...this.durableTools.values()]
+  get runningTools() {
+    return [...this.tools.values()]
       .filter((tool) => tool.status !== "done")
       .map((tool) => ({
         toolCallId: tool.callId,
@@ -350,16 +348,44 @@ export class DurableAgentSessionController extends AgentSessionController {
         },
       }));
   }
-
-  override subscribe(listener: (event: AgentSessionEvent) => void | Promise<void>): () => void {
-    this.durableListeners.add(listener);
-    return () => this.durableListeners.delete(listener);
+  getAvailableThinkingLevels() {
+    return getSupportedThinkingLevels(this.model);
   }
-
+  getActiveToolNames() {
+    return this.resources.activeToolNames;
+  }
+  async persistActiveTools() {
+    await this.sessionManager.appendCustomEntry(SESSION_TOOLS_CUSTOM_TYPE, {
+      activeToolNames: this.getActiveToolNames().filter((name) => this.regularToolNames.has(name)),
+    });
+  }
+  async setActiveToolsByName(names: string[]) {
+    await this.resources.setActiveToolsByName(names);
+    await this.persistActiveTools();
+  }
+  async setModel(model: Model<Api>): Promise<void> {
+    const level = clampThinkingLevel(model, this.thinkingLevel);
+    await this.sessionManager.configure({
+      model: { provider: model.provider, modelId: model.id },
+      thinkingLevel: level,
+    });
+    this.selectedModel = model;
+    this.selectedThinking = level;
+  }
+  async setThinkingLevel(level: ThinkingLevel): Promise<void> {
+    const selected = clampThinkingLevel(this.model, level);
+    await this.sessionManager.configure({ thinkingLevel: selected });
+    this.selectedThinking = selected;
+    this.emit({ type: "thinking_level_changed", level: selected });
+  }
+  subscribe(listener: (event: AgentSessionEvent) => void | Promise<void>): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
   private emit(event: AgentSessionEvent): void {
     const delivery = Promise.resolve().then(() =>
       this.deliveryContext.run(true, async () => {
-        await Promise.all([...this.durableListeners].map((listener) => listener(event)));
+        await Promise.all([...this.listeners].map((listener) => listener(event)));
       }),
     );
     this.deliveries.add(delivery);
@@ -367,40 +393,49 @@ export class DurableAgentSessionController extends AgentSessionController {
       () => this.deliveries.delete(delivery),
       (error) => {
         this.deliveries.delete(delivery);
-        this.deliveryErrors.push(error);
+        this.errors.push(error);
       },
     );
   }
-
+  private trackOperation(operation: Promise<unknown>): void {
+    this.resourceOperations.add(operation);
+    void operation.then(
+      () => this.resourceOperations.delete(operation),
+      (error) => {
+        this.resourceOperations.delete(operation);
+        this.errors.push(error);
+      },
+    );
+  }
+  private async flushResourceOperations(): Promise<void> {
+    await this.resources.flushOperations();
+    while (this.resourceOperations.size) await Promise.allSettled(this.resourceOperations);
+  }
   private async flushDelivery(): Promise<void> {
     if (this.deliveryContext.getStore()) return;
     while (this.deliveries.size) await Promise.allSettled(this.deliveries);
-    if (this.deliveryErrors.length) throw this.deliveryErrors.shift();
+    if (this.errors.length) throw this.errors.shift();
   }
-
   private async applySnapshot(snapshot: SnapshotEvent): Promise<void> {
-    await this.backing.projectEntries(snapshot.entries);
-    this.refreshSdkContext();
+    await this.sessionManager.observeEntries(snapshot.entries);
     this.busy = !!snapshot.run;
     this.partial = snapshot.generation?.message;
-    this.retrying = !!snapshot.generation?.retry;
-    this.durableTools.clear();
-    for (const tool of snapshot.tools) this.durableTools.set(tool.callId, { ...tool });
+    this.tools.clear();
+    for (const tool of snapshot.tools) this.tools.set(tool.callId, { ...tool });
     this.compactions = new Set(snapshot.compactions.map((item) => item.taskId));
     this.inbox = [...snapshot.inbox];
     this.observedTail = Math.max(this.observedTail, ...snapshot.entries.map((entry) => entry.id));
     await this.refreshQueue();
   }
-
   private async refreshQueue(): Promise<void> {
-    const view = await this.backing.conversation.viewState(context);
+    const view = await this.sessionManager.conversation.viewState(context);
     try {
       const items = (view.value.docs["pi.inbox"] as unknown as { items: InboxItem[] }).items;
       this.inbox = items.map((item) => ({ id: item.id, mode: item.mode }));
       const queued: QueuedPrompt[] = [];
       for (const item of items) {
         if (item.mode === "write") continue;
-        const submission = await this.backing.harness.submission(item.id, context);
+        const submission = await this.sessionManager.harness.submission(item.id, context);
         const record = await submission!.status(context);
         queued.push({
           kind: item.mode,
@@ -422,7 +457,6 @@ export class DurableAgentSessionController extends AgentSessionController {
       view.dispose();
     }
   }
-
   private async acceptEvent(event: AgentEvent): Promise<void> {
     switch (event.type) {
       case "snapshot":
@@ -432,19 +466,16 @@ export class DurableAgentSessionController extends AgentSessionController {
         else this.settlementPending = true;
         break;
       case "entry_appended":
-        await this.backing.projectEntries([event.entry]);
-        this.refreshSdkContext();
-        this.observedTail = Math.max(this.observedTail, event.entry.id);
-        this.emit({ type: "entry_appended", entry: event.entry } as unknown as AgentSessionEvent);
-        break;
       case "message_end":
-        await this.backing.projectEntries([event.entry]);
-        this.refreshSdkContext();
+        await this.sessionManager.observeEntries([event.entry]);
         this.observedTail = Math.max(this.observedTail, event.entry.id);
-        for (const message of event.entry.model ?? []) {
-          if (message.role === "assistant") this.partial = undefined;
-          this.emit({ type: "message_end", message });
-        }
+        if (event.type === "entry_appended")
+          this.emit({ type: "entry_appended", entry: event.entry } as unknown as AgentSessionEvent);
+        else
+          for (const message of event.entry.model ?? []) {
+            if (message.role === "assistant") this.partial = undefined;
+            this.emit({ type: "message_end", message });
+          }
         break;
       case "message_start":
         if (event.message.role === "system") break;
@@ -486,20 +517,19 @@ export class DurableAgentSessionController extends AgentSessionController {
         this.settlementPending = false;
         this.busy = true;
         this.handoffRequested = false;
-        await this.sdk.extensionRunner.emit({ type: "agent_start" });
+        await this.resources.extensionRunner.emit({ type: "agent_start" });
         this.emit({ type: "agent_start" });
         break;
       case "run_end":
         this.busy = false;
         this.partial = undefined;
         this.handoffRequested = false;
-        this.retrying = false;
-        await this.sdk.extensionRunner.emit({ type: "agent_end", messages: this.sdk.messages });
+        await this.resources.extensionRunner.emit({ type: "agent_end", messages: this.messages });
         this.emit({ type: "agent_end", messages: [], willRetry: false } as AgentSessionEvent);
         this.settlementPending = true;
         break;
       case "tool_execution_start":
-        this.durableTools.set(event.toolCallId, {
+        this.tools.set(event.toolCallId, {
           callId: event.toolCallId,
           name: event.toolName,
           status: "running",
@@ -507,7 +537,7 @@ export class DurableAgentSessionController extends AgentSessionController {
         this.emit(event);
         break;
       case "tool_execution_update": {
-        const tool = this.durableTools.get(event.toolCallId)!;
+        const tool = this.tools.get(event.toolCallId)!;
         if (event.output)
           tool.output =
             "set" in event.output
@@ -528,7 +558,7 @@ export class DurableAgentSessionController extends AgentSessionController {
         break;
       }
       case "tool_execution_end": {
-        this.durableTools.delete(event.toolCallId);
+        this.tools.delete(event.toolCallId);
         const result = event.entry?.model?.find((message) => message.role === "toolResult");
         this.emit({
           type: "tool_execution_end",
@@ -558,47 +588,42 @@ export class DurableAgentSessionController extends AgentSessionController {
         } as AgentSessionEvent);
         break;
       case "auto_retry_start":
-        this.retrying = true;
         this.emit(event as unknown as AgentSessionEvent);
         break;
       case "auto_retry_end":
-        this.retrying = false;
         this.emit({ ...event, success: true } as AgentSessionEvent);
         break;
       case "task_failed":
-        this.deliveryErrors.push(new Error(`${event.kind}: ${event.message}`));
+        this.errors.push(new Error(`${event.kind}: ${event.message}`));
         break;
     }
   }
 
+  async refreshContext(): Promise<void> {
+    await this.sessionManager.refresh();
+  }
   private async prepare(): Promise<void> {
-    if (this.durableClosing) throw new Error("Session is closed");
-    await this.backing.syncHostEntries();
-    this.refreshSdkContext();
+    if (this.closing) throw new Error("Session is closed");
+    await this.refreshContext();
     this.refreshRegistry();
   }
-
-  override async prompt(
-    text: string,
-    options: AgentSessionPromptOptions = {},
-  ): Promise<PromptDisposition> {
+  async prompt(text: string, options: AgentSessionPromptOptions = {}): Promise<PromptDisposition> {
     const preflight = new AbortController();
-    this.durablePreflights.add(preflight);
-    const previous = this.preparationAdmission;
+    this.preflights.add(preflight);
+    const previous = this.admission;
     let release!: () => void;
-    this.preparationAdmission = new Promise<void>((resolve) => {
+    this.admission = new Promise<void>((resolve) => {
       release = resolve;
     });
     let submission: Submission;
     try {
       await previous;
-      if (this.durableClosing) throw new Error("Session is closed");
+      if (this.closing) throw new Error("Session is closed");
       preflight.signal.throwIfAborted();
       await this.prepare();
-      const prepared = await prepareDurablePrompt(this.sdk, text, {
+      const prepared = await prepareDurablePrompt(this.resources, text, {
         ...options,
         signal: preflight.signal,
-        resourceLoader: this.sdk.resourceLoader,
         onOperation: (operation) => {
           this.preflightOperations.add(operation);
           void operation.then(
@@ -609,23 +634,20 @@ export class DurableAgentSessionController extends AgentSessionController {
       });
       if (prepared.handled) return { disposition: "completed" };
       preflight.signal.throwIfAborted();
-      if (!this.busy) {
-        await this.backing.conversation.commit(async (tx) => {
-          (await tx.doc(PromptDoc, this.backing.conversation.id)).override =
+      if (!this.busy)
+        await this.sessionManager.conversation.commit(async (tx) => {
+          (await tx.doc(PromptDoc, this.sessionManager.conversation.id)).override =
             prepared.systemPrompt ?? null;
         }, context);
-      }
-      for (const message of prepared.messages ?? []) {
+      for (const message of prepared.messages ?? [])
         await this.sessionManager.appendMessage(
           message as Parameters<SessionStore["appendMessage"]>[0],
         );
-      }
-      await this.backing.syncHostEntries();
       preflight.signal.throwIfAborted();
       const content = prepared.images?.length
         ? [{ type: "text" as const, text: prepared.text }, ...prepared.images]
         : prepared.text;
-      submission = await this.backing.conversation.submit(
+      submission = await this.sessionManager.conversation.submit(
         {
           type: "input",
           content,
@@ -635,7 +657,7 @@ export class DurableAgentSessionController extends AgentSessionController {
         context,
       );
     } finally {
-      this.durablePreflights.delete(preflight);
+      this.preflights.delete(preflight);
       release();
     }
     const status = await submission.status(context);
@@ -648,47 +670,60 @@ export class DurableAgentSessionController extends AgentSessionController {
     await this.waitForIdle();
     return { disposition: "completed" };
   }
-
-  override getQueuedPrompts(): QueuedPrompt[] {
+  getQueuedPrompts(): QueuedPrompt[] {
     return this.queued;
   }
-  override async removeQueuedPrompt(kind: "steer" | "followUp", index: number): Promise<void> {
+  async removeQueuedPrompt(kind: "steer" | "followUp", index: number): Promise<void> {
     const item = this.inbox.filter((entry) => entry.mode === kind)[index];
     if (!item) throw new Error("Queued prompt not found");
-    await this.backing.harness.abortSubmission(item.id, context, this.backing.conversation.id);
+    await this.sessionManager.harness.abortSubmission(
+      item.id,
+      context,
+      this.sessionManager.conversation.id,
+    );
     await this.refreshQueue();
   }
-  override async setModel(model: Model<Api>): Promise<void> {
-    await this.backing.conversation.configure(
-      { model: { provider: model.provider, modelId: model.id } },
-      context,
-    );
-    await this.setSdkModel(model);
-  }
-  override async setThinkingLevel(level: ThinkingLevel): Promise<void> {
-    await this.backing.conversation.configure({ thinkingLevel: level }, context);
-    this.setSdkThinkingLevel(level);
-  }
-  override async setActiveToolsByName(names: string[]): Promise<void> {
-    await super.setActiveToolsByName(names);
-    this.refreshRegistry();
-  }
-  override async reloadResources(): Promise<void> {
+  async reloadResources(): Promise<void> {
     if (this.busy) {
-      this.durableReloadRequested = true;
+      this.reloadRequested = true;
       return;
     }
-    await this.sdk.reload();
+    await this.reloadResourcesNow();
+  }
+  private async reloadResourcesNow(): Promise<void> {
+    await this.resources.reload();
+    await this.sessionManager.conversation.commit(async (tx) => {
+      (await tx.doc(PromptDoc, this.sessionManager.conversation.id)).override = null;
+    }, context);
     this.refreshRegistry();
   }
-  override requestTurnEnd(): void {
+  requestTurnEnd(): void {
     this.handoffRequested = true;
+  }
+  deferSettlement(): () => Promise<void> {
+    this.completionHolds++;
+    let released = false;
+    return async () => {
+      if (released) return;
+      released = true;
+      this.completionHolds--;
+      await this.publishSettlement();
+      await this.flushDelivery();
+    };
+  }
+  private async publishSettlement(): Promise<void> {
+    if (!this.settlementPending || this.busy || this.completionHolds) return;
+    this.settlementPending = false;
+    if (this.reloadRequested && !this.closing) {
+      this.reloadRequested = false;
+      await this.reloadResourcesNow();
+    }
+    this.emit({ type: "agent_settled" } as AgentSessionEvent);
   }
   private async waitForObservation(tail: number, idle = false): Promise<void> {
     await new Promise<void>((resolve) => {
       const wake = () => {
-        if (!this.deliveryErrors.length && (this.observedTail < tail || (idle && this.busy)))
-          return;
+        if (!this.errors.length && (this.observedTail < tail || (idle && this.busy))) return;
         this.observerWaiters.delete(wake);
         resolve();
       };
@@ -696,37 +731,41 @@ export class DurableAgentSessionController extends AgentSessionController {
       wake();
     });
   }
-
-  override async waitForIdle(): Promise<void> {
-    if (this.durableClosing && !this.busy) {
+  async waitForIdle(): Promise<void> {
+    if (this.closing && !this.busy) {
       await this.flushDelivery();
       return;
     }
-    await this.backing.conversation.waitForIdle(context);
-    if (this.durableClosing && !this.busy) {
+    await this.sessionManager.conversation.waitForIdle(context);
+    if (this.closing && !this.busy) {
       await this.flushDelivery();
       return;
     }
-    // The observer projects every finalized entry before publishing the idle boundary.
     await this.waitForObservation(0, true);
     await this.flushDelivery();
   }
-  override async abort(): Promise<void> {
-    for (const preflight of this.durablePreflights) preflight.abort();
-    await this.backing.conversation.abort(context);
+  async abort(): Promise<void> {
+    for (const preflight of this.preflights) preflight.abort();
+    await this.sessionManager.conversation.abort(context);
     await this.waitForIdle();
   }
-  override abortCompaction(): void {
-    for (const id of this.compactions) void this.backing.harness.abortTask(id as never, context);
+  abortCompaction(): void {
+    for (const id of this.compactions)
+      void this.sessionManager.harness
+        .abortTask(id as never, context)
+        .catch((error) => this.errors.push(error));
   }
-  override async compact(instructions?: string): Promise<void> {
-    const id = await this.backing.conversation.compact(instructions, context);
-    const result = await this.backing.harness.waitForTask(id, context);
+  async compact(instructions?: string): Promise<void> {
+    const id = await this.sessionManager.conversation.compact(instructions, context);
+    const result = await this.sessionManager.harness.waitForTask(id, context);
     if (result.state.outcome.status === "completed") {
       const summary = result.state.outcome.result;
       let entryId = summary.entryId;
       if (summary.submissionId !== undefined) {
-        const submission = await this.backing.harness.submission(summary.submissionId, context);
+        const submission = await this.sessionManager.harness.submission(
+          summary.submissionId,
+          context,
+        );
         const placed = await submission!.wait(context);
         if (placed.status === "done") entryId = placed.entry;
       }
@@ -737,13 +776,24 @@ export class DurableAgentSessionController extends AgentSessionController {
       throw new Error(result.state.outcome.error.message);
     if (result.state.outcome.status === "aborted") throw new Error("Compaction cancelled");
   }
+  private customIdentity(message: CustomSessionInput): string {
+    const deliveryId = message.details?.battyResultReplyId ?? randomUUID();
+    return Buffer.from(
+      JSON.stringify({
+        deliveryId,
+        customType: message.customType,
+        display: message.display,
+        details: { ...message.details, battyDeliveryId: deliveryId },
+      }),
+    ).toString("base64url");
+  }
   private async admitCustomInput(
-    message: CustomInput,
+    message: CustomSessionInput,
     whenBusy: "steer" | "reject",
     identity: string,
     attempt = 0,
   ): Promise<Submission> {
-    const submission = await this.backing.conversation.submit(
+    const submission = await this.sessionManager.conversation.submit(
       {
         type: "input",
         requestId: `custom-input:${identity}:${attempt}`,
@@ -755,32 +805,18 @@ export class DurableAgentSessionController extends AgentSessionController {
     if ((await submission.status(context)).status === "placed") this.busy = true;
     return submission;
   }
-
-  private customIdentity(message: CustomInput): string {
-    const deliveryId = message.details?.battyResultReplyId ?? randomUUID();
-    return Buffer.from(
-      JSON.stringify({
-        deliveryId,
-        customType: message.customType,
-        display: message.display,
-        details: { ...message.details, battyDeliveryId: deliveryId },
-      }),
-    ).toString("base64url");
-  }
-
-  override async queueCustomSteeringMessage(message: CustomInput): Promise<void> {
+  async queueCustomSteeringMessage(message: CustomSessionInput): Promise<void> {
     await this.prepare();
     await this.admitCustomInput(message, "steer", this.customIdentity(message));
     await this.refreshQueue();
   }
-
-  override async sendCustomMessage(
-    message: CustomInput,
+  async sendCustomMessage(
+    message: CustomSessionInput,
     options: Parameters<AgentSessionController["sendCustomMessage"]>[1] = {},
   ): Promise<void> {
     await this.prepare();
     if (!options.triggerTurn) {
-      const submission = await this.backing.conversation.submit(
+      const submission = await this.sessionManager.conversation.submit(
         {
           type: "write",
           requestId: `custom:${message.details?.battyResultReplyId ?? randomUUID()}`,
@@ -812,26 +848,23 @@ export class DurableAgentSessionController extends AgentSessionController {
           !options.steerWhenBusy
         )
           break;
-        await this.backing.conversation.waitForIdle(context);
+        await this.sessionManager.conversation.waitForIdle(context);
         submission = await this.admitCustomInput(message, "steer", identity, ++attempt);
       }
       await this.waitForIdle();
     }
     await this.flushDelivery();
   }
-
-  override dispose(): Promise<void> {
-    return (this.durableClosing ??= (async () => {
-      // Closing checkpoints work; explicit abort is the only operation that withdraws inputs.
-      for (const preflight of this.durablePreflights) preflight.abort();
-      await this.preparationAdmission;
+  dispose(): Promise<void> {
+    return (this.closing ??= (async () => {
+      for (const preflight of this.preflights) preflight.abort();
+      await this.admission;
       await Promise.allSettled(this.preflightOperations);
-      await this.backing.close();
+      // Closing checkpoints unfinished work. Only abort withdraws accepted inputs.
+      await this.sessionManager.close();
       if (this.started) await this.stream.stop();
       await this.flushDelivery();
-      await this.sdk.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
-      this.sdk.dispose();
-      this.sessionManager.release();
+      await this.resources.dispose();
     })());
   }
 }

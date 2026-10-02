@@ -16,7 +16,7 @@ afterEach(async () => {
 });
 
 describe("session image storage", () => {
-  it("preserves inline images in native persistence and provider context", async () => {
+  it("preserves inline images in durable persistence", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-session-images-"));
     roots.push(root);
     const store = await SessionStore.create(root, path.join(root, "sessions"));
@@ -27,23 +27,33 @@ describe("session image storage", () => {
     };
     await store.appendMessage({ role: "user", content: [image], timestamp: 1 });
     const file = store.getSessionFile();
-    expect(await fs.readFile(file, "utf8")).toContain(image.data);
-    store.release();
+    expect((await SessionStore.read(file)).entries).toContainEqual(
+      expect.objectContaining({
+        type: "message",
+        message: expect.objectContaining({ content: [image] }),
+      }),
+    );
+    await store.release();
     const reopened = await SessionStore.open(file);
-    expect(reopened.native.buildSessionContext().messages[0]).toMatchObject({ content: [image] });
+    expect(reopened.getBranch()).toContainEqual(
+      expect.objectContaining({
+        type: "message",
+        message: expect.objectContaining({ content: [image] }),
+      }),
+    );
     const resolve = createUiImageResolver(file, "workspace", reopened.getSessionId());
     const result = resolve(image);
     expect(await resolveSessionImage(file, result.name)).toMatchObject({ mimeType: "image/png" });
     expect(await fs.readFile(path.join(sessionImageDirectory(file), result.name), "utf8")).toBe(
       "image bytes",
     );
-    reopened.release();
+    await reopened.release();
   });
 
   it("uses session-owned images for UI presentation", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-session-images-"));
     roots.push(root);
-    const sessionFile = path.join(root, "session.jsonl");
+    const sessionFile = path.join(root, "session.sqlite");
     const image = { mimeType: "image/png", data: Buffer.from("image").toString("base64") };
     const resolve = createUiImageResolver(sessionFile, "workspace-1", "session-1", "/batty");
 

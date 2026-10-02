@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { PiService } from "./pi-service";
 import type { WebSession } from "./pi-service-types";
 
-function createService(sdk: unknown): PiService {
+function createService(resources: unknown): PiService {
   const service = Object.create(PiService.prototype) as PiService;
   const internals = service as unknown as { sessions: Map<string, WebSession> };
-  internals.sessions = new Map([["session-1", { session: { sdk } } as unknown as WebSession]]);
+  internals.sessions = new Map([
+    ["session-1", { session: { resources } } as unknown as WebSession],
+  ]);
   return service;
 }
 

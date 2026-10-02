@@ -39,8 +39,9 @@ function createSession(
         .messages;
     },
     agent: { state: { messages } },
-    sdk: { refreshContext: vi.fn() },
+    refreshContext: vi.fn(async () => undefined),
     waitForIdle: vi.fn(async () => undefined),
+    deferSettlement: vi.fn(() => vi.fn(async () => undefined)),
 
     sessionManager: {
       getEntries: () => [
@@ -63,14 +64,7 @@ function createSession(
         },
       ],
       getBranch: () => session.sessionManager.getEntries(),
-      native: {
-        findEntries: async () => messages.map((message) => ({ type: "message", message })),
-        getEntry: async (id: string) => ({
-          type: "message",
-          message: session.messages[Number(id)],
-          parentId: Number(id) > 0 ? String(Number(id) - 1) : null,
-        }),
-      },
+
       appendCustomEntry: vi.fn(async () => "receipt"),
       async appendMessage(message: AgentMessage) {
         messages.push(message);
@@ -109,6 +103,38 @@ afterEach(async () => {
 });
 
 describe("canonical cron results", () => {
+  it.each(["completed", "failed", "aborted"] as const)(
+    "commits the canonical %s receipt before settlement is published",
+    async (status) => {
+      const fixture = await createAgentSessionFixture();
+      fixtureCleanups.push(fixture.cleanup);
+      fixture.faux.setResponses([
+        fauxAssistantMessage(status === "completed" ? "Done" : "", {
+          stopReason: status === "completed" ? "stop" : status === "failed" ? "error" : "aborted",
+          ...(status === "completed" ? {} : { errorMessage: `Run ${status}` }),
+        }),
+      ]);
+      const settledReceipts: Array<ReturnType<typeof getCronExecutionResult>> = [];
+      fixture.session.subscribe((event) => {
+        if (event.type === "agent_settled")
+          settledReceipts.push(getCronExecutionResult(fixture.session, "settlement-run"));
+      });
+      const execution = executeCronOperation(
+        fixture.session,
+        buildCronRuntimeNotice({
+          scheduleLabel: "daily",
+          prompt: "Work",
+          session: { kind: "new" },
+        }),
+        "settlement-run",
+      );
+      if (status === "completed") await execution;
+      else await expect(execution).rejects.toThrow();
+      expect(settledReceipts).toEqual([expect.objectContaining({ status })]);
+      await fixture.reopen();
+      expect(getCronExecutionResult(fixture.session, "settlement-run")).toMatchObject({ status });
+    },
+  );
   it("delivers only the canonical run's reply and deduplicates after parent reopen", async () => {
     const parent = await createAgentSessionFixture();
     const child = await createAgentSessionFixture();
@@ -211,8 +237,8 @@ describe("canonical cron results", () => {
 
 describe("runCronJobSession", () => {
   it("runs detached daily cron jobs in a cron session and delivers the result to the parent", async () => {
-    const parent = createWebSession("daily-session-id", "/tmp/daily-session.jsonl");
-    const cron = createWebSession("cron-session-id", "/tmp/cron-session.jsonl", "2");
+    const parent = createWebSession("daily-session-id", "/tmp/daily-session.sqlite");
+    const cron = createWebSession("cron-session-id", "/tmp/cron-session.sqlite", "2");
     const publishReset = vi.fn();
     const onAgentCompleted = vi.fn(async () => undefined);
     const notifyWorkspaceUpdated = vi.fn(async () => undefined);
@@ -318,21 +344,21 @@ describe("runCronJobSession", () => {
 
     expect(result).toEqual({
       sessionId: "cron-session-id",
-      sessionPath: "/tmp/cron-session.jsonl",
+      sessionPath: "/tmp/cron-session.sqlite",
     });
     expect(prepareSessionForContextCopy).toHaveBeenCalledWith(parent.id, expect.any(Function));
     expect(createCronSession).toHaveBeenCalledWith(
       parent.workspace,
       expect.objectContaining({
         previousContext: {
-          sourceSessionPath: "/tmp/daily-session.jsonl",
+          sourceSessionPath: "/tmp/daily-session.sqlite",
           mode: true,
         },
       }),
     );
     expect(onSessionStarted).toHaveBeenCalledWith({
       sessionId: "cron-session-id",
-      sessionPath: "/tmp/cron-session.jsonl",
+      sessionPath: "/tmp/cron-session.sqlite",
     });
     expect(queueResultDelivery).toHaveBeenCalledWith(parent.session.sessionId);
     expect(parent.session.messages).toHaveLength(0);
@@ -343,7 +369,7 @@ describe("runCronJobSession", () => {
   });
 
   it("applies an inline cron job's effort after switching to its model", async () => {
-    const daily = createWebSession("daily-session-id", "/tmp/daily-session.jsonl");
+    const daily = createWebSession("daily-session-id", "/tmp/daily-session.sqlite");
     const calls: string[] = [];
     vi.mocked(daily.session.waitForIdle).mockImplementation(async () => {
       calls.push("wait");
@@ -403,8 +429,8 @@ describe("runCronJobSession", () => {
   it.each([false, true])(
     "queues a NO_REPLY cron result only when it has an attached file (%s)",
     async (withFile) => {
-      const parent = createWebSession("daily-session-id", "/tmp/daily-session.jsonl");
-      const cron = createWebSession("cron-session-id", "/tmp/cron-session.jsonl");
+      const parent = createWebSession("daily-session-id", "/tmp/daily-session.sqlite");
+      const cron = createWebSession("cron-session-id", "/tmp/cron-session.sqlite");
       const queueResultDelivery = vi.fn(async () => undefined);
 
       const result = await runCronJobSession(
@@ -486,8 +512,8 @@ describe("runCronJobSession", () => {
   );
 
   it("queues cron errors for parent delivery when rejecting", async () => {
-    const parent = createWebSession("daily-session-id", "/tmp/daily-session.jsonl");
-    const cron = createWebSession("cron-session-id", "/tmp/cron-session.jsonl");
+    const parent = createWebSession("daily-session-id", "/tmp/daily-session.sqlite");
+    const cron = createWebSession("cron-session-id", "/tmp/cron-session.sqlite");
 
     const queueResultDelivery = vi.fn(async () => undefined);
     await expect(
@@ -539,7 +565,7 @@ describe("deliverCronFollowup", () => {
     async (kind) => {
       const child = await createAgentSessionFixture();
       fixtureCleanups.push(child.cleanup);
-      const parent = createWebSession("parent", "/tmp/parent.jsonl");
+      const parent = createWebSession("parent", "/tmp/parent.sqlite");
       const store = child.session.sessionManager;
       await store.appendCustomEntry("batty-cron-run-session", {
         version: 1,
@@ -587,8 +613,8 @@ describe("deliverCronFollowup", () => {
   it.each(["Follow-up answer", "NO_REPLY"])(
     "delivers %s to the daily session with the reply artifacts",
     async (answer) => {
-      const parent = createWebSession("daily-session-id", "/tmp/daily-session.jsonl");
-      const cron = createWebSession("cron-session-id", "/tmp/cron-session.jsonl");
+      const parent = createWebSession("daily-session-id", "/tmp/daily-session.sqlite");
+      const cron = createWebSession("cron-session-id", "/tmp/cron-session.sqlite");
       const messages: AgentMessage[] = [
         {
           role: "custom",
@@ -712,9 +738,7 @@ describe("deliverCronFollowup", () => {
         });
       }
       expect(publishReset).toHaveBeenCalledTimes(answer === "NO_REPLY" ? 0 : 1);
-      expect(parent.session.sdk.refreshContext).toHaveBeenCalledTimes(
-        answer === "NO_REPLY" ? 0 : 1,
-      );
+      expect(parent.session.refreshContext).toHaveBeenCalledTimes(answer === "NO_REPLY" ? 0 : 1);
 
       // A steered subagent result in an active cron turn is delivered with that run.
       const entries = cron.session.sessionManager.getEntries();
@@ -729,15 +753,13 @@ describe("deliverCronFollowup", () => {
       ] as ReturnType<AgentSession["sessionManager"]["getEntries"]>);
       await deliverCronFollowup(context, parent.workspace, cron.session);
       expect(parent.session.messages).toHaveLength(answer === "NO_REPLY" ? 0 : 4);
-      expect(parent.session.sdk.refreshContext).toHaveBeenCalledTimes(
-        answer === "NO_REPLY" ? 0 : 1,
-      );
+      expect(parent.session.refreshContext).toHaveBeenCalledTimes(answer === "NO_REPLY" ? 0 : 1);
     },
   );
 
   it("forwards a regular cron-session reply without an async subagent", async () => {
-    const parent = createWebSession("daily-session-id", "/tmp/daily-session.jsonl");
-    const cron = createWebSession("cron-session-id", "/tmp/cron-session.jsonl");
+    const parent = createWebSession("daily-session-id", "/tmp/daily-session.sqlite");
+    const cron = createWebSession("cron-session-id", "/tmp/cron-session.sqlite");
     vi.spyOn(cron.session.sessionManager, "getEntries").mockReturnValue([
       {
         id: "binding",
@@ -791,6 +813,6 @@ describe("deliverCronFollowup", () => {
       role: "assistant",
       content: [{ type: "text", text: "The update" }],
     });
-    expect(parent.session.sdk.refreshContext).toHaveBeenCalledTimes(1);
+    expect(parent.session.refreshContext).toHaveBeenCalledTimes(1);
   });
 });

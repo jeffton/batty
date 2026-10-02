@@ -10,7 +10,7 @@ afterEach(async () => {
 });
 
 describe("result delivery", () => {
-  it("persists native delivery receipts across reopen", async () => {
+  it("persists durable delivery receipts across reopen", async () => {
     const fixture = await createAgentSessionFixture();
     cleanups.push(fixture.cleanup);
     const messages = [fauxAssistantMessage("Positive result")];
@@ -28,9 +28,9 @@ describe("result delivery", () => {
       fauxAssistantMessage("Done"),
     ];
     await appendResultMessages(fixture.session, messages);
-    expect(fixture.session.messages).toEqual(messages);
+    expect(fixture.session.messages).toMatchObject(messages);
     await fixture.reopen();
-    expect(fixture.session.messages).toEqual(messages);
+    expect(fixture.session.messages).toMatchObject(messages);
     expect(fixture.faux.state.callCount).toBe(0);
   });
 });

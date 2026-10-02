@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import mime from "mime-types";
 
 function canonicalSessionFile(filePath: string): string {
-  const match = /^(.*\.jsonl)(?:\..*)?$/.exec(path.resolve(filePath));
+  const match = /^(.*\.sqlite)(?:\..*)?$/.exec(path.resolve(filePath));
   if (!match) throw new Error(`Invalid session storage path: ${filePath}`);
   return match[1]!;
 }

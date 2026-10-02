@@ -1,6 +1,12 @@
 import { readFile } from "node:fs/promises";
 import type { ImageContent } from "@earendil-works/pi-ai";
-import type { AgentSession, ResourceLoader } from "@earendil-works/pi-coding-agent";
+import {
+  buildSystemPrompt,
+  type ExtensionRunner,
+  type ModelRuntime,
+  type ResourceLoader,
+} from "@earendil-works/pi-coding-agent";
+import type { Api, Model } from "@earendil-works/pi-ai";
 
 type StreamingBehavior = "steer" | "followUp";
 
@@ -9,22 +15,13 @@ type PromptTemplate = {
   content: string;
 };
 
-/** AgentSession exposes the extension runner, templates, current prompt, and auth runtime publicly.
- * ResourceLoader is supplied separately because AgentSession intentionally does not expose it. */
-export type DurablePromptSdk = Omit<
-  Pick<
-    AgentSession,
-    | "extensionRunner"
-    | "promptTemplates"
-    | "systemPrompt"
-    | "model"
-    | "modelRuntime"
-    | "isStreaming"
-  >,
-  "extensionRunner" | "modelRuntime"
-> & {
+/** Prompt transforms depend on resource services, not an SDK session or execution loop. */
+export type DurablePromptHost = {
+  promptTemplates: ReadonlyArray<PromptTemplate>;
+  model: Model<Api> | undefined;
+  isStreaming: boolean;
   extensionRunner: Pick<
-    AgentSession["extensionRunner"],
+    ExtensionRunner,
     | "getCommand"
     | "createCommandContext"
     | "emitInput"
@@ -32,10 +29,7 @@ export type DurablePromptSdk = Omit<
     | "createContext"
     | "emitError"
   >;
-  modelRuntime: Pick<
-    AgentSession["modelRuntime"],
-    "hasConfiguredAuth" | "checkAuth" | "isUsingOAuth"
-  >;
+  modelRuntime: Pick<ModelRuntime, "hasConfiguredAuth" | "checkAuth" | "isUsingOAuth">;
   resourceLoader?: Pick<ResourceLoader, "getSkills">;
 };
 
@@ -43,7 +37,7 @@ export type PrepareDurablePromptOptions = {
   images?: ImageContent[];
   streamingBehavior?: StreamingBehavior;
   signal?: AbortSignal;
-  /** Observe in-flight SDK operations so the owner can join them during disposal. */
+  /** Observe in-flight resource operations so disposal can join them. */
   onOperation?: (operation: Promise<unknown>) => void;
   resourceLoader?: Pick<ResourceLoader, "getSkills">;
 };
@@ -135,7 +129,7 @@ function expandTemplate(text: string, templates: ReadonlyArray<PromptTemplate>):
  * prompt(), steer(), followUp(), or the agent loop.
  */
 export async function prepareDurablePrompt(
-  sdk: DurablePromptSdk,
+  host: DurablePromptHost,
   text: string,
   options: PrepareDurablePromptOptions = {},
 ): Promise<PreparedDurablePrompt> {
@@ -148,7 +142,7 @@ export async function prepareDurablePrompt(
     return waitAbortably(operation, signal);
   };
   checkAbort();
-  const runner = sdk.extensionRunner;
+  const runner = host.extensionRunner;
 
   // Extension commands precede input hooks and template expansion in Pi's prompt contract.
   if (text.startsWith("/")) {
@@ -175,7 +169,7 @@ export async function prepareDurablePrompt(
       text,
       options.images,
       "interactive",
-      sdk.isStreaming ? options.streamingBehavior : undefined,
+      host.isStreaming ? options.streamingBehavior : undefined,
     ),
   );
   checkAbort();
@@ -187,7 +181,7 @@ export async function prepareDurablePrompt(
     const splitAt = processedText.indexOf(" ");
     const name = splitAt === -1 ? processedText.slice(7) : processedText.slice(7, splitAt);
     const args = splitAt === -1 ? "" : processedText.slice(splitAt + 1).trim();
-    const resources = options.resourceLoader ?? sdk.resourceLoader;
+    const resources = options.resourceLoader ?? host.resourceLoader;
     if (!resources) {
       throw new Error(
         "Skill expansion requires the public ResourceLoader used to create the session",
@@ -201,13 +195,13 @@ export async function prepareDurablePrompt(
       processedText = `<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>${args ? `\n\n${args}` : ""}`;
     }
   }
-  processedText = expandTemplate(processedText, sdk.promptTemplates);
+  processedText = expandTemplate(processedText, host.promptTemplates);
   checkAbort();
 
-  const { model, modelRuntime } = sdk;
+  const { model, modelRuntime } = host;
   if (!model) throw new Error("Configure an available default model before creating this session");
   const configured =
-    sdk.isStreaming ||
+    host.isStreaming ||
     modelRuntime.hasConfiguredAuth(model.provider) ||
     (await observe(modelRuntime.checkAuth(model.provider))) !== undefined;
   checkAbort();
@@ -223,20 +217,18 @@ export async function prepareDurablePrompt(
   }
 
   const before = await observe(
-    runner.emitBeforeAgentStart(processedText, images, {
-      ...runner.createCommandContext().getSystemPromptOptions(),
-      forceSystemPrompt: sdk.systemPrompt,
-    }),
+    runner.emitBeforeAgentStart(
+      processedText,
+      images,
+      runner.createCommandContext().getSystemPromptOptions(),
+    ),
   );
   checkAbort();
   return {
     text: processedText,
     images,
     handled: false,
-    systemPrompt:
-      typeof before.systemPromptOptions.forceSystemPrompt === "string"
-        ? before.systemPromptOptions.forceSystemPrompt
-        : undefined,
+    systemPrompt: buildSystemPrompt(before.systemPromptOptions),
     messages: before.messages,
   };
 }

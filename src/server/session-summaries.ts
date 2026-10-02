@@ -15,7 +15,7 @@ interface IndexEntry {
   summary?: SessionSummary;
 }
 interface StoredIndex {
-  version: 2;
+  version: 3;
   entries: Record<string, IndexEntry>;
   completedWorkspaces: string[];
 }
@@ -95,7 +95,7 @@ async function sessionFiles(directory: string): Promise<string[]> {
   for (const entry of entries) {
     const file = path.join(directory, entry.name);
     if (entry.isDirectory() && entry.name !== "cron") files.push(...(await sessionFiles(file)));
-    else if (entry.isFile() && entry.name.endsWith(".jsonl")) files.push(file);
+    else if (entry.isFile() && entry.name.endsWith(".sqlite")) files.push(file);
   }
   return files;
 }
@@ -151,7 +151,7 @@ export class SessionSummaryIndex {
       !path.isAbsolute(relative) &&
       parts.length > 1 &&
       !parts.slice(1, -1).includes("cron") &&
-      file.endsWith(".jsonl")
+      file.endsWith(".sqlite")
       ? parts[0]
       : undefined;
   }
@@ -182,7 +182,7 @@ export class SessionSummaryIndex {
       await this.invalidateCache("malformed JSON", error as Error);
       return;
     }
-    if (stored?.version !== 2) {
+    if (stored?.version !== 3) {
       const error = new Error(`Unsupported session summary index: ${stored?.version}`);
       await this.invalidateCache("unsupported version", error);
       return;
@@ -253,7 +253,7 @@ export class SessionSummaryIndex {
       if (!this.dirty) return;
       this.dirty = false;
       const stored: StoredIndex = {
-        version: 2,
+        version: 3,
         entries: Object.fromEntries(this.entries),
         completedWorkspaces: [...this.completedWorkspaces],
       };
@@ -332,7 +332,7 @@ export class SessionSummaryIndex {
     const unchanged = (file: string) => this.revisions.get(file) === revisions.get(file);
     const files = await sessionFiles(workspaceSessionDir(this.config, workspaceId));
     const errors: unknown[] = [];
-    // One Pi reader at a time bounds memory and yields between large histories.
+    // One durable reader at a time bounds memory and yields between large histories.
     for (const file of files) {
       try {
         if (this.revisions.has(file)) continue;

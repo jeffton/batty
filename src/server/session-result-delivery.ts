@@ -17,7 +17,7 @@ export function hasDeliveredResult(session: AgentSessionController, replyId: str
   });
 }
 
-/** Callers serialize background deliveries; refresh the SDK's authoritative context after appending. */
+/** Callers serialize background deliveries; refresh the durable context after appending. */
 export async function appendResultMessages(
   session: AgentSessionController,
   messages: Array<Parameters<SessionStore["appendMessage"]>[0]>,
@@ -28,6 +28,6 @@ export async function appendResultMessages(
   for (const message of messages) await session.sessionManager.appendMessage(message);
   if (replyId)
     await session.sessionManager.appendCustomEntry(RESULT_DELIVERY_CUSTOM_TYPE, { replyId });
-  session.sdk.refreshContext();
+  await session.refreshContext();
   return true;
 }

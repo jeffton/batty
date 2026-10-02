@@ -53,7 +53,8 @@ describe("Batty native AgentSession tools", () => {
       const store = await SessionStore.create(fixture.root, path.join(fixture.root, "sessions"));
       if (history === "tools-only")
         await store.appendCustomEntry("batty-session-tools", { activeToolNames: ["read"] });
-      if (history === "model-only") store.native.appendModelChange(model.provider, model.id);
+      if (history === "model-only")
+        await store.configure({ model: { provider: model.provider, modelId: model.id } });
       expect((await store.configuration()).thinkingLevel).toBeUndefined();
       const { session } = await createPiAgentSession({
         config: fixture.config,
@@ -87,7 +88,7 @@ describe("Batty native AgentSession tools", () => {
       )!.reasoning = true;
       fixture.config.defaultThinkingLevel = "high";
       const store = await SessionStore.create(fixture.root, path.join(fixture.root, "sessions"));
-      store.native.appendThinkingLevelChange(thinkingLevel);
+      await store.configure({ thinkingLevel });
       await store.appendCustomEntry("batty-session-tools", { activeToolNames: ["selected-tool"] });
       expect(await store.configuration()).toEqual({
         model: undefined,
@@ -159,11 +160,11 @@ describe("Batty native AgentSession tools", () => {
       activeToolNames: ["read", "selected-tool"],
     });
     const session = await fixture.reopen();
-    expect(session.sdk.getActiveToolNames()).toContain("read");
-    expect(session.sdk.getActiveToolNames()).toContain("codemode");
-    expect(session.sdk.getActiveToolNames()).toContain("selected-tool");
-    expect(session.sdk.getActiveToolNames()).not.toContain("unselected-tool");
-    expect(session.sdk.getActiveToolNames()).toContain("extension-tool");
+    expect(session.getActiveToolNames()).toContain("read");
+    expect(session.getActiveToolNames()).toContain("codemode");
+    expect(session.getActiveToolNames()).toContain("selected-tool");
+    expect(session.getActiveToolNames()).not.toContain("unselected-tool");
+    expect(session.getActiveToolNames()).toContain("extension-tool");
   });
   it("persists public tool selection as regular canonical preferences", async () => {
     const fixture = await setup();
@@ -396,7 +397,7 @@ describe("Batty native AgentSession tools", () => {
           "Pi resource diagnostic",
           expect.objectContaining({ type: "warning" }),
         );
-      expect(session.sdk.resourceLoader.getSkills().skills).toEqual([
+      expect(session.resources.resourceLoader.getSkills().skills).toEqual([
         expect.objectContaining({
           name,
           filePath: globalSkill,
@@ -456,8 +457,7 @@ describe("Batty native AgentSession tools", () => {
     session.settingsManager.setImageAutoResize(false);
     faux.setResponses([toolCall("custom-image", {}), fauxAssistantMessage("done")]);
     await session.prompt("work");
-    const stored = await fs.readFile(session.sessionFile, "utf8");
-    expect(stored).toContain(imageData);
+    expect(JSON.stringify(await SessionStore.read(session.sessionFile))).toContain(imageData);
     expect(JSON.stringify(session.messages)).toContain('"type":"image"');
     const restored = await reopen();
     expect(JSON.stringify(restored.messages)).toContain('"type":"image"');
@@ -479,8 +479,7 @@ describe("Batty native AgentSession tools", () => {
       images: [{ type: "image", mimeType: "image/png", data: imageData }],
     });
     expect(JSON.stringify(session.messages)).toContain('"type":"image"');
-    const stored = await fs.readFile(session.sessionFile, "utf8");
-    expect(stored).toContain(imageData);
+    expect(JSON.stringify(await SessionStore.read(session.sessionFile))).toContain(imageData);
   });
 
   it("advertises Batty's complete native tool set", async () => {

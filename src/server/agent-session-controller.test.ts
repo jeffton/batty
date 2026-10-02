@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
@@ -65,6 +66,45 @@ async function busyFixture(setup?: (f: Awaited<ReturnType<typeof fixture>>) => v
 }
 
 describe("durable AgentSession controller", () => {
+  it.each([false, true])(
+    "uses refreshed instructions for custom turns after reload (busy=%s)",
+    async (busy) => {
+      const f = await fixture({
+        prepare: async (root) => {
+          await fs.writeFile(path.join(root, "AGENTS.md"), "Original workspace policy");
+        },
+      });
+      const entered = barrier();
+      const finish = barrier();
+      let system = "";
+      f.faux.setResponses([
+        async () => {
+          entered.release();
+          if (busy) await finish.promise;
+          return fauxAssistantMessage("first answer");
+        },
+        async (context) => {
+          const message = context.messages.findLast((message) => message.role === "system");
+          system = JSON.stringify(message);
+          return fauxAssistantMessage("custom answer");
+        },
+      ]);
+      const first = f.session.prompt("first");
+      await entered.promise;
+      if (!busy) await first;
+      await fs.writeFile(path.join(f.root, "AGENTS.md"), "Refreshed workspace policy");
+      await f.session.reloadResources();
+      finish.release();
+      await first;
+      await f.session.sendCustomMessage(
+        { customType: "notice", content: "custom task", display: true },
+        { triggerTurn: true },
+      );
+      expect(system).toContain("Refreshed workspace policy");
+      expect(system).not.toContain("Original workspace policy");
+    },
+  );
+
   it.each(["input", "before_agent_start"] as const)(
     "cancels a blocked %s preflight before model dispatch",
     async (hook) => {
@@ -197,9 +237,9 @@ describe("durable AgentSession controller", () => {
     await Promise.all([first, second, closing]);
     expect(input).toHaveBeenCalledTimes(1);
     expect(f.faux.state.callCount).toBe(0);
-    expect(f.session.sdk.isStreaming).toBe(false);
+    expect(f.session.isStreaming).toBe(false);
   });
-  it("persists user metadata and completed messages in native v3 entries", async () => {
+  it("persists user metadata and completed messages in the session store", async () => {
     const f = await fixture();
     f.faux.setResponses([fauxAssistantMessage("answer")]);
     expect(await f.session.prompt("question", { clientMessageId: "client-1" })).toEqual({
@@ -209,8 +249,7 @@ describe("durable AgentSession controller", () => {
       role: "user",
       clientMessageId: "client-1",
     });
-    const stored = await fs.readFile(f.session.sessionFile, "utf8");
-    expect(JSON.parse(stored.split("\n")[0]!)).toMatchObject({ type: "session", version: 3 });
+    expect((await f.session.sessionManager.getHeader()).id).toBe(f.session.sessionId);
     expect((await f.reopen()).messages.find((message) => message.role === "user")).toMatchObject({
       clientMessageId: "client-1",
     });

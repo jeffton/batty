@@ -22,9 +22,11 @@
     "check:fix": "vp check --fix"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.99.1",
-    "@earendil-works/pi-ai": "0.99.1",
-    "@earendil-works/pi-coding-agent": "0.99.1",
+    "@earendil-works/chord": "1.0.0",
+    "@earendil-works/pi-agent-core": "1.0.0",
+    "@earendil-works/pi-ai": "1.0.0",
+    "@earendil-works/pi-coding-agent": "1.0.0",
+    "@earendil-works/pi-durable": "1.0.0",
     "@fastify/cookie": "11.1.2",
     "@fastify/multipart": "10.1.2",
     "@fastify/static": "10.1.4",

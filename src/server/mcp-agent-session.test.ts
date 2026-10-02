@@ -59,7 +59,9 @@ readline.createInterface({input: process.stdin}).on('line', async (line) => {
 `;
 
 function toolCall(name: string, args: Record<string, string>) {
-  return fauxAssistantMessage([{ type: "toolCall", id: "outer-call", name, arguments: args }]);
+  return fauxAssistantMessage([{ type: "toolCall", id: "outer-call", name, arguments: args }], {
+    stopReason: "toolUse",
+  });
 }
 
 async function setup(extensionFactories: ExtensionFactory[] = [], workspaceOverride = false) {

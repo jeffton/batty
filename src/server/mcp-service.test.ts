@@ -285,7 +285,7 @@ describe("native MCP web management", () => {
       headers: { authorization: "Bearer configured" },
     });
     const credentials = createBattyMcpCredentials(config);
-    await credentials.forServer(globalUrl).save({
+    await credentials.forServer("docs", globalUrl).save({
       serverUrl: globalUrl,
       tokens: { access_token: "global", token_type: "Bearer" },
     });
@@ -305,11 +305,11 @@ describe("native MCP web management", () => {
     expect(
       (await service.getStatus(workspace)).servers.map((entry) => entry.hasOAuthCredentials),
     ).toEqual([false, false, false]);
-    await credentials.forServer(workspaceUrl).save({
+    await credentials.forServer("docs", workspaceUrl).save({
       serverUrl: workspaceUrl,
       tokens: { access_token: "workspace", token_type: "Bearer" },
     });
-    await credentials.forServer("https://header.example.test/mcp").save({
+    await credentials.forServer("header", "https://header.example.test/mcp").save({
       serverUrl: "https://header.example.test/mcp",
       tokens: { access_token: "unused", token_type: "Bearer" },
     });
@@ -318,7 +318,7 @@ describe("native MCP web management", () => {
     expect(
       (await service.getStatus(workspace)).servers.map((entry) => entry.hasOAuthCredentials),
     ).toEqual([true, false, false]);
-    credentials.remove(workspaceUrl);
+    credentials.remove("docs", workspaceUrl);
     expect((await service.getStatus(workspace)).servers[0]).toMatchObject({
       state: "needs-auth",
       usesOAuth: true,
@@ -356,9 +356,10 @@ describe("native MCP web management", () => {
     expect(issuer.tokenRequests).toHaveLength(1);
     expect(issuer.rpcMethods).toContain("tools/list");
     const file = path.join(config.battyDir, ".batty", "mcp-auth.json");
-    expect(JSON.parse(await fs.readFile(file, "utf8"))[issuer.url].tokens.access_token).toBe(
-      "loopback-token",
-    );
+    expect(
+      JSON.parse(await fs.readFile(file, "utf8"))[`mcp__local|${new URL(issuer.url)}`].tokens
+        .access_token,
+    ).toBe("loopback-token");
     await expect(
       fs.stat(path.join(workspace.path, ".batty", "mcp-auth.json")),
     ).rejects.toMatchObject({ code: "ENOENT" });
@@ -368,15 +369,15 @@ describe("native MCP web management", () => {
       tools: [{ name: "echo" }],
     });
     const credentials = createBattyMcpCredentials(config);
-    await credentials.forServer(`${issuer.url}/other`).save({
+    await credentials.forServer("unrelated", `${issuer.url}/other`).save({
       serverUrl: `${issuer.url}/other`,
       tokens: { access_token: "unrelated", token_type: "Bearer" },
     });
     expect((await service.logout(workspace, "local")).servers[0]).toMatchObject({
       hasOAuthCredentials: false,
     });
-    expect(credentials.tokens(issuer.url)).toBeUndefined();
-    expect(credentials.tokens(`${issuer.url}/other`)?.access_token).toBe("unrelated");
+    expect(credentials.tokens("local", issuer.url)).toBeUndefined();
+    expect(credentials.tokens("unrelated", `${issuer.url}/other`)?.access_token).toBe("unrelated");
     expect((await service.getStatus(workspace)).servers[0]?.state).toBe("needs-auth");
     expect(changed.mock.calls).toEqual([[workspace.id], [], [workspace.id], []]);
     await expect(service.completeAuth(initial.attemptId, "unused")).rejects.toMatchObject({
@@ -414,7 +415,7 @@ describe("native MCP web management", () => {
     );
     expect(failed.error).toContain(error);
     expect(issuer.tokenRequests).toEqual([]);
-    expect(createBattyMcpCredentials(config).tokens(issuer.url)).toBeUndefined();
+    expect(createBattyMcpCredentials(config).tokens("local", issuer.url)).toBeUndefined();
     expect(changed).toHaveBeenCalledTimes(1);
     await expectCallbackClosed(pending.authorizationUrl!);
   });

@@ -34,7 +34,9 @@ async function setup(
 }
 
 function toolCall(name: string, args: JsonObject) {
-  return fauxAssistantMessage([{ type: "toolCall", id: "call", name, arguments: args }]);
+  return fauxAssistantMessage([{ type: "toolCall", id: "call", name, arguments: args }], {
+    stopReason: "toolUse",
+  });
 }
 
 describe("Batty native AgentSession tools", () => {

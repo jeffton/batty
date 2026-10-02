@@ -39,7 +39,8 @@ import {
 } from "./pi-paths";
 import type { PiModel, WebSession } from "./pi-service-types";
 import { modelKey } from "./pi-service-types";
-import { AgentSessionController } from "./agent-session-controller";
+import type { AgentSessionController } from "./agent-session-controller";
+import { DurableAgentSessionController } from "./durable-agent-session";
 import { SessionStore } from "./session-store";
 import { createArtifactExtension, createTrackedFileTools } from "./agent-file-changes";
 import { createCodemodeSubagentExtension } from "./codemode-subagents";
@@ -287,7 +288,16 @@ export async function createPiAgentSession({
     resourceLoader,
     customTools: tools as unknown as ToolDefinition[],
   });
-  session = await AgentSessionController.create(result.session, sessionManager);
+  const durableSession = await DurableAgentSessionController.open(
+    result.session,
+    sessionManager,
+    modelRuntime,
+    {
+      model: model ? selected : undefined,
+      thinkingLevel: thinkingLevel as ThinkingLevel | undefined,
+    },
+  );
+  session = durableSession;
   try {
     if (!findBattySystemPromptSnapshot(sessionManager.getEntries()))
       await refreshBattySystemPrompt(config, { workspace, session });
@@ -311,6 +321,7 @@ export async function createPiAgentSession({
       );
     }
     if (!restoredToolNames) await session.persistActiveTools();
+    await durableSession.start();
     return { session, modelFallbackMessage: result.modelFallbackMessage };
   } catch (error) {
     await session.dispose();

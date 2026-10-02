@@ -1,8 +1,8 @@
 diff --git a/dist/core/agent-session.d.ts b/dist/core/agent-session.d.ts
-index 253774cfc08b9302ec7014c2ffb521a51a813b68..6f75a478141dcf896664a9d2d4b2f2405d066867 100644
+index 0ff6862..c84ee85 100644
 --- a/dist/core/agent-session.d.ts
 +++ b/dist/core/agent-session.d.ts
-@@ -158,6 +158,10 @@ export type QueuedInputDisposition = "handled" | "queued";
+@@ -163,6 +163,10 @@ export type QueuedInputDisposition = "handled" | "queued";
  export type PromptDisposition = QueuedInputDisposition | "started";
  /** Options for AgentSession.prompt() */
  export interface PromptOptions {
@@ -13,7 +13,7 @@ index 253774cfc08b9302ec7014c2ffb521a51a813b68..6f75a478141dcf896664a9d2d4b2f240
      /** Whether to dispatch extension commands and expand skill commands and prompt templates (default: true) */
      expandPromptTemplates?: boolean;
      /** Image attachments */
-@@ -583,6 +587,14 @@ export declare class AgentSession {
+@@ -597,6 +601,14 @@ export declare class AgentSession {
      get pendingMessageCount(): number;
      /** Get pending steering messages (read-only) */
      getSteeringMessages(): readonly string[];
@@ -29,10 +29,10 @@ index 253774cfc08b9302ec7014c2ffb521a51a813b68..6f75a478141dcf896664a9d2d4b2f240
      getFollowUpMessages(): readonly string[];
      get resourceLoader(): ResourceLoader;
 diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
-index 07af8cf3cc9e07bb1229c0d5b32dca4a506187b9..67206bf7cbb0ba4e318bd5a93ec4cc369526fd0d 100644
+index 1da213f..9321898 100644
 --- a/dist/core/agent-session.js
 +++ b/dist/core/agent-session.js
-@@ -626,6 +626,7 @@ export class AgentSession {
+@@ -635,6 +635,7 @@ export class AgentSession {
      }
      /** Emit an event to all listeners */
      _emit(event) {
@@ -40,7 +40,7 @@ index 07af8cf3cc9e07bb1229c0d5b32dca4a506187b9..67206bf7cbb0ba4e318bd5a93ec4cc36
          for (const l of this._eventListeners) {
              l(event);
          }
-@@ -1447,6 +1448,7 @@ export class AgentSession {
+@@ -1479,6 +1480,7 @@ export class AgentSession {
       * @throws Error if no model selected or no API key available (when not streaming)
       */
      async prompt(text, options) {
@@ -48,7 +48,7 @@ index 07af8cf3cc9e07bb1229c0d5b32dca4a506187b9..67206bf7cbb0ba4e318bd5a93ec4cc36
          if (this._isEmittingAgentSettled) {
              this._deferredSettledActions.push(async () => await this.prompt(text, options));
              return;
-@@ -1457,6 +1459,7 @@ export class AgentSession {
+@@ -1489,6 +1491,7 @@ export class AgentSession {
          // Extension commands manage their own LLM interaction via pi.sendMessage()
          if (expandPromptTemplates && text.startsWith("/")) {
              const handled = await this._tryExecuteExtensionCommand(text);
@@ -56,7 +56,7 @@ index 07af8cf3cc9e07bb1229c0d5b32dca4a506187b9..67206bf7cbb0ba4e318bd5a93ec4cc36
              if (handled) {
                  // Extension command executed, no prompt to send
                  preflightResult?.("handled");
-@@ -1468,6 +1471,7 @@ export class AgentSession {
+@@ -1500,6 +1503,7 @@ export class AgentSession {
          }
          // Emit input event for extension interception (before skill/template expansion)
          const processedInput = await this._runInputHandlers(text, options?.images, options?.source ?? "interactive", this.isStreaming ? options?.streamingBehavior : undefined);
@@ -64,7 +64,7 @@ index 07af8cf3cc9e07bb1229c0d5b32dca4a506187b9..67206bf7cbb0ba4e318bd5a93ec4cc36
          if (!processedInput) {
              preflightResult?.("handled");
              return;
-@@ -1485,10 +1489,10 @@ export class AgentSession {
+@@ -1517,10 +1521,10 @@ export class AgentSession {
                  throw new Error("Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.");
              }
              if (options.streamingBehavior === "followUp") {
@@ -77,7 +77,7 @@ index 07af8cf3cc9e07bb1229c0d5b32dca4a506187b9..67206bf7cbb0ba4e318bd5a93ec4cc36
              }
              preflightResult?.("queued");
              return;
-@@ -1511,12 +1515,14 @@ export class AgentSession {
+@@ -1543,12 +1547,14 @@ export class AgentSession {
              }
              throw new Error(formatNoApiKeyFoundMessage(this.model.provider));
          }
@@ -92,7 +92,7 @@ index 07af8cf3cc9e07bb1229c0d5b32dca4a506187b9..67206bf7cbb0ba4e318bd5a93ec4cc36
          // Emit before_agent_start before normalizing images so extension-driven model
          // selection determines the resize profile used for the request and history.
          const selectedToolsBefore = this._baseSystemPromptOptions.selectedTools;
-@@ -1529,6 +1535,7 @@ export class AgentSession {
+@@ -1561,6 +1567,7 @@ export class AgentSession {
          if (!handlerEditedTools)
              result.systemPromptOptions.selectedTools = this.getActiveToolNames();
          const normalized = await this._normalizePromptImages(currentImages);
@@ -100,7 +100,7 @@ index 07af8cf3cc9e07bb1229c0d5b32dca4a506187b9..67206bf7cbb0ba4e318bd5a93ec4cc36
          const userText = normalized.hints.length > 0 ? `${expandedText}\n\n${normalized.hints.join("\n")}` : expandedText;
          // Build messages only after hooks and image normalization have completed.
          const messages = [];
-@@ -1538,6 +1545,8 @@ export class AgentSession {
+@@ -1570,6 +1577,8 @@ export class AgentSession {
              role: "user",
              content: userContent,
              timestamp: Date.now(),
@@ -109,7 +109,7 @@ index 07af8cf3cc9e07bb1229c0d5b32dca4a506187b9..67206bf7cbb0ba4e318bd5a93ec4cc36
          });
          // Inject any pending "nextTurn" messages as context alongside the user message
          for (const msg of this._pendingNextTurnMessages) {
-@@ -1662,9 +1671,8 @@ export class AgentSession {
+@@ -1694,9 +1703,8 @@ export class AgentSession {
      /**
       * Internal: Queue a steering message (already expanded, no extension command check).
       */
@@ -120,7 +120,7 @@ index 07af8cf3cc9e07bb1229c0d5b32dca4a506187b9..67206bf7cbb0ba4e318bd5a93ec4cc36
          const content = [{ type: "text", text }];
          if (images) {
              content.push(...images);
-@@ -1673,19 +1681,28 @@ export class AgentSession {
+@@ -1705,19 +1713,28 @@ export class AgentSession {
              role: "user",
              content,
              timestamp: Date.now(),
@@ -152,7 +152,7 @@ index 07af8cf3cc9e07bb1229c0d5b32dca4a506187b9..67206bf7cbb0ba4e318bd5a93ec4cc36
      }
      /**
       * Throw an error if the text is an extension command.
-@@ -1824,6 +1841,41 @@ export class AgentSession {
+@@ -1856,6 +1873,41 @@ export class AgentSession {
      get pendingMessageCount() {
          return this._steeringMessages.length + this._followUpMessages.length;
      }
@@ -194,7 +194,7 @@ index 07af8cf3cc9e07bb1229c0d5b32dca4a506187b9..67206bf7cbb0ba4e318bd5a93ec4cc36
      /** Get pending steering messages (read-only) */
      getSteeringMessages() {
          return this._steeringMessages;
-@@ -2547,6 +2599,7 @@ export class AgentSession {
+@@ -2579,6 +2631,7 @@ export class AgentSession {
              this._extensionErrorListener = bindings.onError;
          }
          this._applyExtensionBindings(this._extensionRunner);
@@ -203,7 +203,7 @@ index 07af8cf3cc9e07bb1229c0d5b32dca4a506187b9..67206bf7cbb0ba4e318bd5a93ec4cc36
          this._extensionRunner.reportUnhandledMcpServers();
          await this.extendResourcesFromExtensions(this._sessionStartEvent.reason === "reload" ? "reload" : "startup");
 diff --git a/dist/core/extensions/runner.d.ts b/dist/core/extensions/runner.d.ts
-index 37335ab116dee456bb4407bd34fe172ab5fee846..10b75a0f25c21c0b304ed82715d4de2b2493cdb6 100644
+index 37335ab..10b75a0 100644
 --- a/dist/core/extensions/runner.d.ts
 +++ b/dist/core/extensions/runner.d.ts
 @@ -31,6 +31,7 @@ type RunnerEmitResult<TEvent extends RunnerEmitEvent> = TEvent extends {
@@ -215,7 +215,7 @@ index 37335ab116dee456bb4407bd34fe172ab5fee846..10b75a0f25c21c0b304ed82715d4de2b
  type BoundaryBaseEvent = Omit<TurnEndEvent, "entries" | "continue" | "context"> | Omit<AgentBeforeSettleEvent, "entries" | "continue" | "context">;
  interface BoundaryDispatchResult {
 diff --git a/dist/core/extensions/runner.js b/dist/core/extensions/runner.js
-index 10a0aa16b8ca70cad61c24e140f70618a0d1159a..bdc463208ae0bd0fcdfff181fa48f79c83e3f971 100644
+index 10a0aa1..bdc4632 100644
 --- a/dist/core/extensions/runner.js
 +++ b/dist/core/extensions/runner.js
 @@ -129,7 +129,7 @@ export async function emitProjectTrustEvent(extensionsResult, event, ctx) {
@@ -228,7 +228,7 @@ index 10a0aa16b8ca70cad61c24e140f70618a0d1159a..bdc463208ae0bd0fcdfff181fa48f79c
      confirm: async () => false,
      input: async () => undefined,
 diff --git a/dist/core/session-manager.d.ts b/dist/core/session-manager.d.ts
-index 3f6104e19f4bdf82e5513af1cb6d84bf9f8b9d07..824979ca3fdb01d8879d2348cf43f6274dba197c 100644
+index 3f6104e..824979c 100644
 --- a/dist/core/session-manager.d.ts
 +++ b/dist/core/session-manager.d.ts
 @@ -238,6 +238,8 @@ export declare class SessionManager {
@@ -256,7 +256,7 @@ index 3f6104e19f4bdf82e5513af1cb6d84bf9f8b9d07..824979ca3fdb01d8879d2348cf43f627
       * Find an exact session ID without loading transcript bodies.
       * @param cwd Working directory (used to compute default session directory)
 diff --git a/dist/core/session-manager.js b/dist/core/session-manager.js
-index 62b469b5dc3fcea2aa8f52218cbdfe892d9abed4..b7149f84a0050dcf990c50edb1de9a7627959e59 100644
+index 62b469b..b7149f8 100644
 --- a/dist/core/session-manager.js
 +++ b/dist/core/session-manager.js
 @@ -751,6 +751,13 @@ export class SessionManager {
@@ -308,7 +308,7 @@ index 62b469b5dc3fcea2aa8f52218cbdfe892d9abed4..b7149f84a0050dcf990c50edb1de9a76
          return new SessionManager(resolvedTargetCwd, dir, newSessionFile, true);
      }
 diff --git a/dist/core/tools/read.js b/dist/core/tools/read.js
-index b9bc3b9dde0f5e8f0e6b24451cc20cd609b15a53..277fb027253a43f3b51b736390b8379b8ff89ec8 100644
+index b9bc3b9..277fb02 100644
 --- a/dist/core/tools/read.js
 +++ b/dist/core/tools/read.js
 @@ -34,7 +34,7 @@ export function createReadToolDefinition(cwd, options) {
@@ -334,10 +334,10 @@ index b9bc3b9dde0f5e8f0e6b24451cc20cd609b15a53..277fb027253a43f3b51b736390b8379b
                              if (truncation.firstLineExceedsLimit) {
                                  // First line alone exceeds the byte limit. Point the model at a bash fallback.
 diff --git a/dist/extensions/mcp/config.d.ts b/dist/extensions/mcp/config.d.ts
-index dc58ee9a57bc9e654673d7456a053cd325b1a0ae..9543bbb4fa344863669814b8d0e561ae06a3c701 100644
+index 2033a2b..460962a 100644
 --- a/dist/extensions/mcp/config.d.ts
 +++ b/dist/extensions/mcp/config.d.ts
-@@ -49,6 +49,9 @@ export declare function loadMcpConfig(options: {
+@@ -51,6 +51,9 @@ export declare function loadMcpConfig(options: {
      agentDir: string;
      cwd: string;
      projectTrusted: boolean;
@@ -348,20 +348,20 @@ index dc58ee9a57bc9e654673d7456a053cd325b1a0ae..9543bbb4fa344863669814b8d0e561ae
  /** Settings `/mcp` changes. `enabled: true` and `exposure: "codemode"` are the defaults and remove the key. */
  export interface McpServerConfigPatch {
 diff --git a/dist/extensions/mcp/config.js b/dist/extensions/mcp/config.js
-index ca62062dc1c5eb15963dbc67ec9d30ce4b8083e0..20751fef385a6d73f683e3b6b6baf8d76e1d2c2c 100644
+index 6b43474..2686d4d 100644
 --- a/dist/extensions/mcp/config.js
 +++ b/dist/extensions/mcp/config.js
-@@ -21,7 +21,8 @@
+@@ -23,7 +23,8 @@
   * The top-level `autoEnableCodemode` (default true) activates the codemode tool when a server
-  * with `codemode` or `codemode-deferred` exposure connects. A project value overrides the global one.
+  * with `codemode` exposure connects. A project value overrides the global one.
   */
 -import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 +import { randomUUID } from "node:crypto";
 +import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
  import { dirname, join } from "node:path";
  import { CONFIG_DIR_NAME } from "../../config.js";
- import { validateMcpServerConfig } from "../../core/mcp-servers.js";
-@@ -64,9 +65,9 @@ function readConfigFile(path, scope, state) {
+ import { mcpNamespace, validateMcpServerConfig, } from "../../core/mcp-servers.js";
+@@ -76,9 +77,9 @@ function readConfigFile(path, scope, state) {
   */
  export function loadMcpConfig(options) {
      const state = { servers: new Map(), errors: [] };
@@ -373,7 +373,7 @@ index ca62062dc1c5eb15963dbc67ec9d30ce4b8083e0..20751fef385a6d73f683e3b6b6baf8d7
      return {
          servers: [...state.servers.values()],
          ...(state.autoEnableCodemode === undefined ? {} : { autoEnableCodemode: state.autoEnableCodemode }),
-@@ -141,6 +142,13 @@ function editMcpServers(path, edit) {
+@@ -153,6 +154,13 @@ function editMcpServers(path, edit) {
          return;
      const indent = (text && /^([ \t]+)\S/m.exec(text)?.[1]) || "  ";
      mkdirSync(dirname(path), { recursive: true });
@@ -390,10 +390,10 @@ index ca62062dc1c5eb15963dbc67ec9d30ce4b8083e0..20751fef385a6d73f683e3b6b6baf8d7
  //# sourceMappingURL=config.js.map
 \ No newline at end of file
 diff --git a/dist/extensions/mcp/index.d.ts b/dist/extensions/mcp/index.d.ts
-index 7fc6441bca5f7751ab6c28b2aa341999d2980f96..846b9983aaaed3968d5f03858876db443d629dcf 100644
+index 5c39af8..67dbbb6 100644
 --- a/dist/extensions/mcp/index.d.ts
 +++ b/dist/extensions/mcp/index.d.ts
-@@ -23,11 +23,27 @@
+@@ -26,11 +26,27 @@
   * current session for registered servers.
   */
  import type { ExtensionContext, ExtensionFactory } from "../../core/extensions/types.ts";
@@ -423,10 +423,10 @@ index 7fc6441bca5f7751ab6c28b2aa341999d2980f96..846b9983aaaed3968d5f03858876db44
      loadConfig?: (ctx: ExtensionContext) => LoadedMcpConfig;
      /** Defaults to stdio and streamable HTTP transports built from the server config. */
 diff --git a/dist/extensions/mcp/index.js b/dist/extensions/mcp/index.js
-index 12b4e7c0956509928e9b0d2e56779687abf11c03..eefd2269d31ce7a3e6b7dfa24b041a7f364cd3ed 100644
+index fbbb30c..8893142 100644
 --- a/dist/extensions/mcp/index.js
 +++ b/dist/extensions/mcp/index.js
-@@ -126,6 +126,23 @@ export function createMcpExtension(options = {}) {
+@@ -217,6 +217,23 @@ export function createMcpExtension(options = {}) {
          const updateConfig = options.updateConfig ?? ((entry, patch) => updateMcpServerConfig(entry.source, entry.name, patch));
          const listeners = new Set();
          const emitChange = () => {
@@ -451,7 +451,7 @@ index 12b4e7c0956509928e9b0d2e56779687abf11c03..eefd2269d31ce7a3e6b7dfa24b041a7f
                  listener();
          };
 diff --git a/dist/index.d.ts b/dist/index.d.ts
-index 045ddb2aaa9dc0b2f1dc9c4cd81e4278a08131d2..5fc67dfd3d3a80512c0099c5dcf96ccc5282b267 100644
+index eda1c08..241b941 100644
 --- a/dist/index.d.ts
 +++ b/dist/index.d.ts
 @@ -1,7 +1,7 @@
@@ -486,7 +486,7 @@ index 045ddb2aaa9dc0b2f1dc9c4cd81e4278a08131d2..5fc67dfd3d3a80512c0099c5dcf96ccc
  //# sourceMappingURL=index.d.ts.map
 \ No newline at end of file
 diff --git a/dist/index.js b/dist/index.js
-index c48934f78d61fd5f5f8008bc9e09d8c4558d330a..4213e46b139eead48dd674492bfb460c26b15864 100644
+index c48934f..4213e46 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -3,7 +3,7 @@ export { parseArgs } from "./cli/args.js";
@@ -514,3 +514,4 @@ index c48934f78d61fd5f5f8008bc9e09d8c4558d330a..4213e46b139eead48dd674492bfb460c
  export { getPowerShellConfig, getShellConfig } from "./utils/shell.js";
 +export { noOpUIContext } from "./core/extensions/runner.js";
  //# sourceMappingURL=index.js.map
+\ No newline at end of file

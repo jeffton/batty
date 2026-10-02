@@ -9,6 +9,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import { SESSION_TOOLS_CUSTOM_TYPE, type SessionTools } from "./session-metadata";
+import { decorateDurableArtifacts } from "./durable-session-store";
 
 export interface SessionRead {
   metadata: SessionHeader & { path: string; modifiedAt: number };
@@ -105,15 +106,15 @@ export class SessionStore {
     const native = SessionManager.inMemory(undefined, undefined, entries);
     return {
       metadata: { ...native.getHeader()!, path: file, modifiedAt: (await fs.stat(file)).mtimeMs },
-      entries: native.getEntries(),
+      entries: decorateDurableArtifacts(native.getEntries()),
     };
   }
 
   getEntries(): SessionEntry[] {
-    return this.native.getEntries();
+    return decorateDurableArtifacts(this.native.getEntries());
   }
   getBranch(fromId?: string): SessionEntry[] {
-    return this.native.getBranch(fromId);
+    return decorateDurableArtifacts(this.native.getBranch(fromId), this.native.getEntries());
   }
   getLeafId(): string | null {
     return this.native.getLeafId();

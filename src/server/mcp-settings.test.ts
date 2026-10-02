@@ -133,13 +133,13 @@ describe("native MCP settings", () => {
     const credentials = createBattyMcpCredentials(config);
     const url = "https://example.com/mcp";
     const state = { serverUrl: url, tokens: { access_token: "test", token_type: "Bearer" } };
-    await credentials.forServer(url).save(state);
-    expect(await createBattyMcpCredentials(config).forServer(url).load()).toEqual(state);
-    expect(credentials.tokens(url)).toEqual(state.tokens);
+    await credentials.forServer("docs", url).save(state);
+    expect(await createBattyMcpCredentials(config).forServer("docs", url).load()).toEqual(state);
+    expect(credentials.tokens("docs", url)).toEqual(state.tokens);
     expect(battyMcpLogPath(config)).toBe(path.join(root, ".batty", "mcp.log"));
     const file = path.join(root, ".batty", "mcp-auth.json");
-    expect(JSON.parse(await fs.readFile(file, "utf8"))[url]).toEqual(state);
+    expect(JSON.parse(await fs.readFile(file, "utf8"))[`mcp__docs|${new URL(url)}`]).toEqual(state);
     if (process.platform !== "win32") expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
-    expect(credentials.remove(url)).toBe(true);
+    expect(credentials.remove("docs", url)).toBe(true);
   });
 });

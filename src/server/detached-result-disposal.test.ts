@@ -205,7 +205,7 @@ describe("detached result delivery after ephemeral session disposal", () => {
           },
           { parentSessionId: parent.session.sessionId, queuedAtMs: 2 },
         );
-        expect(lifecycle.sessions.has(childId)).toBe(false);
+        await vi.waitFor(() => expect(lifecycle.sessions.has(childId)).toBe(false));
       }
       await parent.reopen();
       expect(conversationalMessages(parent.session.messages)).toHaveLength(

@@ -42,7 +42,7 @@ export class AgentSessionController {
   private closing?: Promise<void>;
   private readonly unsubscribe: () => void;
 
-  private constructor(
+  protected constructor(
     readonly sdk: AgentSession,
     readonly sessionManager: SessionStore,
   ) {

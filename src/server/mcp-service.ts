@@ -225,7 +225,7 @@ export class McpService {
             server.usesOAuth &&
             config &&
             "url" in config &&
-            credentials.tokens(config.url)
+            credentials.tokens(server.name, config.url)
           ),
         };
       }),

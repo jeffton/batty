@@ -733,7 +733,6 @@ describe("detached AgentSession subagents", () => {
     });
 
     expect(parent.session.messages).toEqual([
-      expect.objectContaining({ role: "system", toolsAdded: expect.any(Array) }),
       expect.objectContaining({
         role: "custom",
         customType: "batty-runtime-notice:subagent",
@@ -754,6 +753,7 @@ describe("detached AgentSession subagents", () => {
           sites: [expect.objectContaining({ id: "site-1" })],
         }),
       }),
+      expect.objectContaining({ role: "system", toolsAdded: expect.any(Array) }),
       expect.objectContaining({
         role: "assistant",
         content: [{ type: "text", text: "parent handled result" }],

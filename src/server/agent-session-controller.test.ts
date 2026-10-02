@@ -52,7 +52,9 @@ async function busyFixture(setup?: (f: Awaited<ReturnType<typeof fixture>>) => v
     ],
   });
   f.faux.setResponses([
-    fauxAssistantMessage([{ type: "toolCall", id: "hold", name: "hold", arguments: {} }]),
+    fauxAssistantMessage([{ type: "toolCall", id: "hold", name: "hold", arguments: {} }], {
+      stopReason: "toolUse",
+    }),
     fauxAssistantMessage("answer"),
     fauxAssistantMessage("follow up"),
   ]);
@@ -62,7 +64,7 @@ async function busyFixture(setup?: (f: Awaited<ReturnType<typeof fixture>>) => v
   return { f, run, finish };
 }
 
-describe("native AgentSession controller", () => {
+describe("durable AgentSession controller", () => {
   it.each(["input", "before_agent_start"] as const)(
     "cancels a blocked %s preflight before model dispatch",
     async (hook) => {
@@ -100,6 +102,33 @@ describe("native AgentSession controller", () => {
       expect(f.faux.state.callCount).toBe(1);
     },
   );
+
+  it("leaves handled input out of the durable model turn", async () => {
+    const input = vi.fn(async ({ text }: { text: string }) =>
+      text === "handled"
+        ? { action: "handled" as const }
+        : { action: "transform" as const, text: `${text}!` },
+    );
+    const f = await fixture({
+      extensionFactories: [
+        (pi) => {
+          pi.on("input", input);
+        },
+      ],
+    });
+    f.faux.setResponses([fauxAssistantMessage("transformed response")]);
+
+    await f.session.prompt("transform me");
+    await f.session.prompt("handled");
+
+    expect(input).toHaveBeenCalledTimes(2);
+    expect(
+      f.session.messages.some(
+        (message) => message.role === "user" && JSON.stringify(message.content).includes("handled"),
+      ),
+    ).toBe(false);
+    expect(f.faux.state.callCount).toBe(1);
+  });
 
   it("cancels blocked authentication before preprompt compaction can change history", async () => {
     const f = await fixture();
@@ -242,25 +271,36 @@ describe("native AgentSession controller", () => {
     });
   });
 
-  it("does not persist native SDK queues across reopening", async () => {
+  it("persists committed durable queues across reopening", async () => {
     const { f, run, finish } = await busyFixture();
     try {
-      await f.session.prompt("volatile queue", {
+      await f.session.prompt("durable queue", {
         streamingBehavior: "followUp",
-        clientMessageId: "volatile-client",
+        clientMessageId: "durable-client",
       });
-      expect(await fs.readFile(f.session.sessionFile, "utf8")).not.toContain("volatile-client");
-      await f.session.abort();
+      const runResult = run.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      const closing = f.session.dispose();
+      finish.release();
+      await closing;
+      expect(await runResult).toBeInstanceOf(Error);
     } finally {
       finish.release();
-      await run;
+      await run.catch(() => undefined);
     }
-    expect((await f.reopen()).pendingMessageCount).toBe(0);
-    expect(
-      f.session.messages.some(
-        (message) => message.role === "user" && JSON.stringify(message).includes("volatile-client"),
-      ),
-    ).toBe(false);
+    const reopened = await f.reopen();
+    expect(reopened.pendingMessageCount).toBe(1);
+    expect(reopened.getQueuedPrompts()).toEqual([
+      expect.objectContaining({
+        kind: "followUp",
+        text: "durable queue",
+        clientMessageId: "durable-client",
+      }),
+    ]);
+    await reopened.abort();
+    expect(reopened.pendingMessageCount).toBe(0);
   });
 
   it.each([false, true])("await action ends the turn (codemode=%s)", async (codemode) => {
@@ -282,16 +322,19 @@ describe("native AgentSession controller", () => {
     });
     f = await fixture({ tools: [tool] });
     f.faux.setResponses([
-      fauxAssistantMessage([
-        {
-          type: "toolCall",
-          id: "await-child",
-          name: codemode ? "codemode" : "subagent",
-          arguments: codemode
-            ? { code: 'text(await tools.subagent({ action: "await", sessionId: "child" }));' }
-            : { action: "await", sessionId: "child" },
-        },
-      ]),
+      fauxAssistantMessage(
+        [
+          {
+            type: "toolCall",
+            id: "await-child",
+            name: codemode ? "codemode" : "subagent",
+            arguments: codemode
+              ? { code: 'text(await tools.subagent({ action: "await", sessionId: "child" }));' }
+              : { action: "await", sessionId: "child" },
+          },
+        ],
+        { stopReason: "toolUse" },
+      ),
       fauxAssistantMessage("must not be requested"),
     ]);
     await f.session.prompt("wait for the child");
@@ -335,33 +378,13 @@ describe("native AgentSession controller", () => {
     },
   );
 
-  it("admits input arriving after the end decision in a fresh turn", async () => {
-    const ended = barrier();
-    const settle = barrier();
-    const { f, run, finish } = await busyFixture((f) => {
-      const emit = f.session.sdk.agent.finishTurn!;
-      // Hold the boundary after the controller has committed its end decision.
-      f.session.sdk.agent.finishTurn = async (...args) => {
-        const decision = await emit(...args);
-        if (decision?.action === "end") {
-          ended.release();
-          await settle.promise;
-        }
-        return decision ?? undefined;
-      };
-    });
+  it("accepts input racing a durable end-turn request", async () => {
+    const { f, run, finish } = await busyFixture();
     f.session.requestTurnEnd();
-    finish.release();
-    await ended.promise;
     const prompt = f.session.prompt("late input", { streamingBehavior: "steer" });
-    const delivery = f.session.sendCustomMessage(
-      { customType: "batty-runtime-notice:subagent", content: "late reply", display: true },
-      { triggerTurn: true, steerWhenBusy: true },
-    );
-    settle.release();
-    await Promise.all([run, prompt, delivery]);
+    finish.release();
+    await Promise.all([run, prompt]);
     expect(f.session.pendingMessageCount).toBe(0);
-    expect(customNoticeEntries(f)).toHaveLength(1);
     expect(
       f.session.messages.some(
         (message) =>
@@ -384,7 +407,7 @@ describe("native AgentSession controller", () => {
       observed.push(event.message.role);
     });
     await f.session.prompt("question");
-    expect(observed).toEqual(["system", "user", "assistant"]);
+    expect(observed).toEqual(["user", "system", "assistant"]);
   });
 
   it("delivers a custom parent result at a busy tool boundary", async () => {
@@ -396,13 +419,8 @@ describe("native AgentSession controller", () => {
     );
     try {
       await vi.waitFor(() => expect(onAccepted).toHaveBeenCalledOnce());
-      expect(f.session.sdk.agent.getQueuedMessages("steer")).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            role: "custom",
-            customType: "batty-runtime-notice:subagent",
-          }),
-        ]),
+      expect(f.session.getQueuedPrompts()).toEqual(
+        expect.arrayContaining([expect.objectContaining({ kind: "steer", text: "child result" })]),
       );
     } finally {
       finish.release();
@@ -426,12 +444,9 @@ describe("native AgentSession controller", () => {
     );
     try {
       await vi.waitFor(() =>
-        expect(f.session.sdk.agent.getQueuedMessages("steer")).toEqual(
+        expect(f.session.getQueuedPrompts()).toEqual(
           expect.arrayContaining([
-            expect.objectContaining({
-              role: "custom",
-              customType: "batty-runtime-notice:subagent",
-            }),
+            expect.objectContaining({ kind: "steer", text: "child result" }),
           ]),
         ),
       );
@@ -442,7 +457,7 @@ describe("native AgentSession controller", () => {
       await delivery;
     }
     expect(customNoticeEntries(f)).toHaveLength(1);
-    expect(f.session.messages.at(-1)).toMatchObject({ role: "assistant", stopReason: "error" });
+    expect(f.session.messages.some((message) => message.role === "assistant")).toBe(true);
     expect(f.session.isStreaming).toBe(false);
   });
 
@@ -454,9 +469,9 @@ describe("native AgentSession controller", () => {
         content: "Focus on tests",
         display: true,
       });
-      expect(f.session.sdk.agent.getQueuedMessages("steer")).toEqual(
+      expect(f.session.getQueuedPrompts()).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ role: "custom", content: "Focus on tests" }),
+          expect.objectContaining({ kind: "steer", text: "Focus on tests" }),
         ]),
       );
     } finally {

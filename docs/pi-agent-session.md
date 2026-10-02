@@ -52,7 +52,6 @@ Batty retains the Pi AI sampling patch and applies these SDK adaptations:
 - AgentSession: preserve client/queue IDs on user messages; expose indexed user queues, targeted removal, and cancellable prompt preflight.
 - SessionManager: persist initial setup immediately and fork a selected leaf, including an explicitly empty branch.
 - Read: explicit line limits remove the byte cap.
-- Codemode: cancel and join admitted host calls before returning, including failure, deadline, and sandbox close.
 - MCP: expose native configuration/credential helpers, explicit config paths, and connection-status snapshots for Batty's web manager.
 - Extension UI: expose Pi's headless UI defaults for the MCP OAuth input/notification bridge.
 

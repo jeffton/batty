@@ -43,4 +43,3 @@ patchedDependencies:
   "@earendil-works/pi-ai@0.99.1": patches/@earendil-works__pi-ai@0.99.1.patch
   "@earendil-works/pi-agent-core@0.99.1": patches/@earendil-works__pi-agent-core@0.99.1.patch
   "@earendil-works/pi-coding-agent@0.99.1": patches/@earendil-works__pi-coding-agent@0.99.1.patch
-  "@earendil-works/pi-codemode@0.99.1": patches/@earendil-works__pi-codemode@0.99.1.patch

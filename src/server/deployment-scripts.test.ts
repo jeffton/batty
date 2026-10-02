@@ -267,6 +267,72 @@ exit ${code}
     },
   );
 
+  linuxIt("waits for asynchronous macOS bootout before bootstrapping the replacement", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-macos-bootout-"));
+    tempDirs.push(root);
+    const bin = path.join(root, "bin");
+    await fs.mkdir(bin);
+    const trace = path.join(root, "trace");
+    await fs.writeFile(
+      path.join(bin, "launchctl"),
+      `#!/bin/bash
+set -eu
+echo "$1" >>"$TRACE"
+case "$1" in
+  print)
+    if [[ ! -f "$STATE" ]]; then exit 0; fi
+    count=$(<"$STATE")
+    if [[ "$count" -ge 3 ]]; then exit 1; fi
+    echo "$((count + 1))" >"$STATE"
+    ;;
+  bootout) echo 0 >"$STATE" ;;
+  bootstrap) [[ $(<"$STATE") -ge 3 ]] ;;
+esac
+`,
+      { mode: 0o755 },
+    );
+    await fs.writeFile(path.join(bin, "node"), '#!/bin/bash\necho drain >>"$TRACE"\n', {
+      mode: 0o755,
+    });
+    await fs.writeFile(path.join(bin, "sleep"), '#!/bin/bash\necho wait >>"$TRACE"\n', {
+      mode: 0o755,
+    });
+    await fs.writeFile(path.join(bin, "curl"), '#!/bin/bash\necho health >>"$TRACE"\n', {
+      mode: 0o755,
+    });
+    await execFileAsync(
+      "bash",
+      [path.join(process.cwd(), "scripts", "restart-services-macos.sh")],
+      {
+        env: {
+          ...process.env,
+          HOME: root,
+          PATH: `${bin}:${process.env.PATH}`,
+          BATTY_NODE: path.join(bin, "node"),
+          BATTY_SKIP_DRAIN: "",
+          STATE: path.join(root, "state"),
+          TRACE: trace,
+        },
+      },
+    );
+    expect((await fs.readFile(trace, "utf8")).trim().split("\n")).toEqual([
+      "print",
+      "drain",
+      "bootout",
+      "print",
+      "wait",
+      "print",
+      "wait",
+      "print",
+      "wait",
+      "print",
+      "bootstrap",
+      "enable",
+      "kickstart",
+      "health",
+    ]);
+  });
+
   it("packages the pnpm workspace configuration in Windows releases", async () => {
     const script = await fs.readFile(
       path.join(process.cwd(), "scripts", "install-release.ps1"),

@@ -14,6 +14,10 @@ if launchctl print "${domain}/${label}" >/dev/null 2>&1; then
     "$node_path" "$install_root/current/dist/server/cli.mjs" --root "$batty_root" drain
   fi
   launchctl bootout "${domain}/${label}"
+  # bootout returns before launchd finishes terminating and removing the job.
+  while launchctl print "${domain}/${label}" >/dev/null 2>&1; do
+    sleep 0.1
+  done
 fi
 
 launchctl bootstrap "$domain" "$plist"

@@ -1,6 +1,8 @@
+diff --git a/dist/types.d.ts b/dist/types.d.ts
+index b141efd..d78e691 100644
 --- a/dist/types.d.ts
 +++ b/dist/types.d.ts
-@@ -348,6 +348,8 @@
+@@ -368,6 +368,8 @@ export interface UserMessage {
      role: "user";
      content: string | (TextContent | ImageContent)[];
      timestamp: number;

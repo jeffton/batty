@@ -1,4 +1,6 @@
+import { readFileSync } from "node:fs";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import {
   addMcpServerConfig,
   FileAuthStorageBackend,
@@ -33,19 +35,23 @@ export function battyMcpConfigPath(config: McpSettingsConfig, workspace?: Worksp
 
 /** Reads only the selected editable scope, without inherited servers. */
 export function readMcpSettings(config: McpSettingsConfig, workspace?: WorkspaceInfo): McpSettings {
-  const loaded = loadMcpConfig({
-    agentDir: battyAgentDir(config),
-    cwd: workspace?.path ?? config.battyDir,
-    projectTrusted: false,
-    globalConfigPath: battyMcpConfigPath(config, workspace),
-  });
+  const file = battyMcpConfigPath(config, workspace);
+  const loaded = workspace
+    ? loadBattyMcpConfig(config, workspace.path)
+    : loadMcpConfig({
+        agentDir: battyAgentDir(config),
+        cwd: config.battyDir,
+        projectTrusted: false,
+      });
   return {
-    servers: loaded.servers.map(({ name, config: serverConfig }) => ({
-      name,
-      config: serverConfig,
-      scope: workspace ? "workspace" : "global",
-    })),
-    errors: loaded.errors,
+    servers: loaded.servers
+      .filter((entry) => entry.source === file || entry.override === file)
+      .map(({ name, config: serverConfig }) => ({
+        name,
+        config: serverConfig,
+        scope: workspace ? "workspace" : "global",
+      })),
+    errors: loaded.errors.filter((error) => error.startsWith(`${file}:`)),
   };
 }
 
@@ -57,7 +63,38 @@ export function writeMcpServer(
 ): void {
   const validated = validateMcpServerConfig(name, serverConfig);
   if (typeof validated === "string") throw Object.assign(new Error(validated), { statusCode: 400 });
-  addMcpServerConfig(battyMcpConfigPath(config, workspace), name, validated);
+  const file = battyMcpConfigPath(config, workspace);
+  if (workspace) {
+    const existing = loadBattyMcpConfig(config, workspace.path).servers.find(
+      (entry) => entry.name === name && entry.override === file,
+    );
+    if (existing) {
+      const overrideKeys = ["enabled", "exposure", "toolExposure"] as const;
+      const definition = (value: McpServerConfig) => {
+        const { enabled: _enabled, exposure: _exposure, toolExposure: _tools, ...rest } = value;
+        return rest;
+      };
+      if (isDeepStrictEqual(definition(validated), definition(existing.config))) {
+        const previous = JSON.parse(readFileSync(file, "utf8")).mcpServers[name];
+        const override = Object.fromEntries(
+          overrideKeys
+            .filter(
+              (key) => key in previous || !isDeepStrictEqual(validated[key], existing.config[key]),
+            )
+            .filter((key) => validated[key] !== undefined)
+            .map((key) => [key, validated[key]]),
+        );
+        // Native overrides contain only these settings; validate the effective server above.
+        addMcpServerConfig(file, name, override as unknown as McpServerConfig);
+        return;
+      }
+    }
+    if ("url" in validated && validated.auth)
+      throw Object.assign(new Error("auth is only allowed in the global mcp.json"), {
+        statusCode: 400,
+      });
+  }
+  addMcpServerConfig(file, name, validated);
 }
 
 export function removeMcpServer(

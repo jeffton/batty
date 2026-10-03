@@ -1,5 +1,5 @@
 diff --git a/dist/agent.d.ts b/dist/agent.d.ts
-index 2429a213b6a95642effca6eec34a2772aabfec41..0f6bcc76cd17a7c9e40a397225273aa4d64aede8 100644
+index 2429a21..0f6bcc7 100644
 --- a/dist/agent.d.ts
 +++ b/dist/agent.d.ts
 @@ -91,6 +91,8 @@ export declare class Agent {
@@ -12,7 +12,7 @@ index 2429a213b6a95642effca6eec34a2772aabfec41..0f6bcc76cd17a7c9e40a397225273aa4
      /** Remove all queued follow-up messages. */
      clearFollowUpQueue(): void;
 diff --git a/dist/agent.js b/dist/agent.js
-index a8ccfc0bd9bd84895b5f158c9dfa328e65f200ca..53e12732fd60c1bdb52beaf943321a4179141c36 100644
+index a8ccfc0..53e1273 100644
 --- a/dist/agent.js
 +++ b/dist/agent.js
 @@ -188,6 +188,18 @@ export class Agent {

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createAgentSessionFixture } from "./agent-session-test-fixture";
 import { CRON_EXECUTION_CUSTOM_TYPE } from "./pi-service-cron-adapter";
 import { buildCronRuntimeNotice } from "./runtime-notices";
@@ -12,6 +13,19 @@ import {
   getCronExecutionResult,
   runCronJobSession,
 } from "./pi-service-cron-adapter";
+
+function cronInputRequestId(runId: string): string {
+  const deliveryId = `cron-execution:${runId}`;
+  const identity = Buffer.from(
+    JSON.stringify({
+      deliveryId,
+      customType: "batty-runtime-notice:cron",
+      display: true,
+      details: { cron: { runId }, battyResultReplyId: deliveryId, battyDeliveryId: deliveryId },
+    }),
+  ).toString("base64url");
+  return `custom-input:${identity}:0`;
+}
 
 const ZERO_USAGE = {
   input: 0,
@@ -30,6 +44,7 @@ function createSession(
   operationBaseEntryId: string | null = null,
 ): AgentSession {
   const messages: AgentMessage[] = [];
+  const delivered = new Set<string>();
   const session = {
     sessionId: id,
     sessionFile,
@@ -66,6 +81,12 @@ function createSession(
       getBranch: () => session.sessionManager.getEntries(),
 
       appendCustomEntry: vi.fn(async () => "receipt"),
+      appendResultMessages: vi.fn(async (bundle: AgentMessage[], replyId?: string) => {
+        if (replyId && delivered.has(replyId)) return false;
+        messages.push(...bundle);
+        if (replyId) delivered.add(replyId);
+        return true;
+      }),
       async appendMessage(message: AgentMessage) {
         messages.push(message);
       },
@@ -103,6 +124,253 @@ afterEach(async () => {
 });
 
 describe("canonical cron results", () => {
+  it("admits the cron notice once when checkpoint interrupted between receipt and native admission", async () => {
+    const fixture = await createAgentSessionFixture();
+    fixtureCleanups.push(fixture.cleanup);
+    const runId = "receipt-before-admission";
+    const notice = buildCronRuntimeNotice({
+      scheduleLabel: "daily",
+      prompt: "Original work",
+      session: { kind: "new" },
+    });
+    vi.spyOn(fixture.session, "sendCustomMessage").mockImplementation(async () => {
+      Object.defineProperty(fixture.session, "isClosing", { value: true });
+      throw new Error("Checkpoint before admission");
+    });
+    await expect(executeCronOperation(fixture.session, notice, runId)).rejects.toThrow(
+      "Checkpoint",
+    );
+    const started = getCronExecutionResult(fixture.session, runId)!;
+    expect(started.status).toBe("running");
+    await fixture.reopen();
+    fixture.faux.setResponses([fauxAssistantMessage("Actual result")]);
+    const send = vi.spyOn(fixture.session, "sendCustomMessage");
+    await executeCronOperation(fixture.session, notice, runId);
+    await executeCronOperation(fixture.session, notice, runId);
+    expect(send).toHaveBeenCalledOnce();
+    expect(getCronExecutionResult(fixture.session, runId)).toMatchObject({
+      startEntryId: started.startEntryId,
+      status: "completed",
+    });
+    const submission = await fixture.session.sessionManager.storage.submissionByRequest(
+      fixture.session.sessionManager.conversation.id,
+      cronInputRequestId(runId),
+      BACKGROUND_CONTEXT,
+    );
+    expect(submission?.status).toBe("done");
+  });
+
+  it.each(["aborted", "withdrawn"])(
+    "does not rerun a recovered %s native cron submission",
+    async (reason) => {
+      const fixture = await createAgentSessionFixture();
+      fixtureCleanups.push(fixture.cleanup);
+      const runId = `cancelled-${reason}`;
+      const store = fixture.session.sessionManager;
+      await store.appendCustomEntry(CRON_EXECUTION_CUSTOM_TYPE, {
+        runId,
+        startEntryId: store.getLeafId(),
+        endEntryId: null,
+        status: "running",
+      });
+      await store.conversation.commit(
+        (tx) =>
+          tx.createSubmission({
+            conversationId: store.conversation.id,
+            type: "input",
+            status: "unanswered",
+            requestId: cronInputRequestId(runId),
+            reason,
+          }),
+        BACKGROUND_CONTEXT,
+      );
+      await fixture.reopen();
+      const send = vi.spyOn(fixture.session, "sendCustomMessage");
+      const notice = buildCronRuntimeNotice({
+        scheduleLabel: "daily",
+        prompt: "Cancelled work",
+        session: { kind: "new" },
+      });
+      await expect(executeCronOperation(fixture.session, notice, runId)).rejects.toThrow(reason);
+      await expect(executeCronOperation(fixture.session, notice, runId)).rejects.toThrow(reason);
+      expect(send).not.toHaveBeenCalled();
+      expect(getCronExecutionResult(fixture.session, runId)?.status).toBe("aborted");
+    },
+  );
+
+  it("finalizes an interrupted receipt from its original boundary without accepting another input", async () => {
+    const fixture = await createAgentSessionFixture();
+    fixtureCleanups.push(fixture.cleanup);
+    const store = fixture.session.sessionManager;
+    await store.appendMessage(fauxAssistantMessage("Unrelated earlier reply"));
+    const startEntryId = store.getLeafId();
+    await store.appendCustomEntry(CRON_EXECUTION_CUSTOM_TYPE, {
+      runId: "recovered",
+      startEntryId,
+      endEntryId: null,
+      status: "running",
+    });
+    const inputId = await store.appendMessage({
+      role: "custom",
+      customType: "batty-runtime-notice:cron",
+      content: "Original work",
+      details: { cron: { runId: "recovered" } },
+      display: true,
+      timestamp: Date.now(),
+    });
+    const answerId = await store.appendMessage(fauxAssistantMessage("Recovered result"));
+    await store.conversation.commit(
+      (tx) =>
+        tx.createSubmission({
+          conversationId: store.conversation.id,
+          type: "input",
+          status: "done",
+          requestId: cronInputRequestId("recovered"),
+          entry: inputId as never,
+          answer: answerId as never,
+        }),
+      BACKGROUND_CONTEXT,
+    );
+    await fixture.reopen();
+    const send = vi.spyOn(fixture.session, "sendCustomMessage");
+    await executeCronOperation(
+      fixture.session,
+      buildCronRuntimeNotice({
+        scheduleLabel: "daily",
+        prompt: "Original work",
+        session: { kind: "new" },
+      }),
+      "recovered",
+    );
+    expect(send).not.toHaveBeenCalled();
+    expect(getCronExecutionResult(fixture.session, "recovered")).toMatchObject({
+      startEntryId,
+      status: "completed",
+    });
+    await fixture.reopen();
+    expect(getCronExecutionResult(fixture.session, "recovered")?.status).toBe("completed");
+  });
+
+  it("reopens a recovered detached run and delivers to its persisted parent without creating a session", async () => {
+    const fixture = await createAgentSessionFixture();
+    fixtureCleanups.push(fixture.cleanup);
+    const runId = "recovered-detached";
+    await fixture.session.sessionManager.appendCustomEntry("batty-cron-run-session", {
+      version: 1,
+      kind: "run",
+      runId,
+      jobId: "job",
+      parentSessionId: "original-parent",
+    });
+    const startEntryId = fixture.session.sessionManager.getLeafId();
+    await fixture.session.sessionManager.appendCustomEntry(CRON_EXECUTION_CUSTOM_TYPE, {
+      runId,
+      startEntryId,
+      endEntryId: null,
+      status: "running",
+    });
+    const inputId = await fixture.session.sessionManager.appendMessage({
+      role: "custom",
+      customType: "batty-runtime-notice:cron",
+      content: "Original work",
+      details: { cron: { runId } },
+      display: true,
+      timestamp: Date.now(),
+    });
+    const answerId = await fixture.session.sessionManager.appendMessage(
+      fauxAssistantMessage("Recovered result"),
+    );
+    await fixture.session.sessionManager.conversation.commit(
+      (tx) =>
+        tx.createSubmission({
+          conversationId: fixture.session.sessionManager.conversation.id,
+          type: "input",
+          status: "done",
+          requestId: cronInputRequestId(runId),
+          entry: inputId as never,
+          answer: answerId as never,
+        }),
+      BACKGROUND_CONTEXT,
+    );
+    const sessionId = fixture.session.sessionId;
+    const sessionPath = fixture.session.sessionFile;
+    await fixture.reopen();
+    const web = { ...createWebSession("opened", sessionPath), session: fixture.session };
+    const createCronSession = vi.fn();
+    const resolveOrCreateDailySession = vi.fn();
+    const openSession = vi.fn(async () => ({ id: web.id }) as never);
+    const queueResultDelivery = vi.fn(async () => undefined);
+    const job = {
+      jobId: "job",
+      runId,
+      workspace: fixture.workspace,
+      prompt: "Original work",
+      model: "faux/faux",
+      thinkingLevel: "off",
+      session: { kind: "daily-detached" as const },
+      scheduleLabel: "daily",
+      signal: new AbortController().signal,
+      onSessionStarted: vi.fn(),
+      queueResultDelivery,
+    };
+    await runCronJobSession(
+      {
+        openSession,
+        createCronSession,
+        resolveOrCreateDailySession,
+        promptCron: (_id, notice, id) => executeCronOperation(fixture.session, notice, id),
+        requireSession: () => web,
+        requireSessionPath: () => sessionPath,
+        prepareSessionForContextCopy: vi.fn(),
+        runSubagentSerial: vi.fn(),
+        getState: vi.fn(),
+        publishReset: vi.fn(),
+        setThinkingLevel: vi.fn(),
+        setModel: vi.fn(),
+        notifyWorkspaceUpdated: vi.fn(),
+      },
+      {
+        ...job,
+        recovery: {
+          ...job,
+          workspaceId: fixture.workspace.id,
+          status: "running",
+          startedAtMs: Date.now(),
+          sessionId,
+          sessionPath,
+        },
+      },
+    );
+    expect(openSession).toHaveBeenCalledWith(fixture.workspace, sessionPath);
+    expect(createCronSession).not.toHaveBeenCalled();
+    expect(resolveOrCreateDailySession).not.toHaveBeenCalled();
+    expect(queueResultDelivery).toHaveBeenCalledWith("original-parent");
+    expect(getCronExecutionResult(fixture.session, runId)?.status).toBe("completed");
+  });
+
+  it("leaves the operation running when checkpoint closes its controller", async () => {
+    const fixture = await createAgentSessionFixture();
+    fixtureCleanups.push(fixture.cleanup);
+    fixture.faux.setResponses([fauxAssistantMessage("Done")]);
+    const send = fixture.session.sendCustomMessage.bind(fixture.session);
+    vi.spyOn(fixture.session, "sendCustomMessage").mockImplementation(async (...args) => {
+      await send(...args);
+      Object.defineProperty(fixture.session, "isClosing", { value: true });
+    });
+    await expect(
+      executeCronOperation(
+        fixture.session,
+        buildCronRuntimeNotice({
+          scheduleLabel: "daily",
+          prompt: "Work",
+          session: { kind: "new" },
+        }),
+        "checkpointed",
+      ),
+    ).rejects.toThrow("checkpointed");
+    expect(getCronExecutionResult(fixture.session, "checkpointed")?.status).toBe("running");
+  });
+
   it.each(["completed", "failed", "aborted"] as const)(
     "commits the canonical %s receipt before settlement is published",
     async (status) => {
@@ -262,6 +530,7 @@ describe("runCronJobSession", () => {
 
     const result = await runCronJobSession(
       {
+        openSession: vi.fn(),
         createCronSession,
         promptCron: vi.fn(async () => {
           (cron.session as any).agent.state.messages = [
@@ -356,6 +625,7 @@ describe("runCronJobSession", () => {
         },
       }),
     );
+    expect(onSessionStarted).toHaveBeenCalledOnce();
     expect(onSessionStarted).toHaveBeenCalledWith({
       sessionId: "cron-session-id",
       sessionPath: "/tmp/cron-session.sqlite",
@@ -377,6 +647,7 @@ describe("runCronJobSession", () => {
 
     await runCronJobSession(
       {
+        openSession: vi.fn(),
         createCronSession: vi.fn(),
         promptCron: vi.fn(async () => {
           calls.push("prompt");
@@ -435,6 +706,7 @@ describe("runCronJobSession", () => {
 
       const result = await runCronJobSession(
         {
+          openSession: vi.fn(),
           createCronSession: vi.fn(async () => ({ id: cron.id }) as never),
           promptCron: vi.fn(async () => {
             (cron.session as any).agent.state.messages = [
@@ -519,6 +791,7 @@ describe("runCronJobSession", () => {
     await expect(
       runCronJobSession(
         {
+          openSession: vi.fn(),
           createCronSession: vi.fn(async () => ({ id: cron.id }) as never),
           promptCron: vi.fn(async () => {
             throw new Error("detached exploded");
@@ -738,7 +1011,10 @@ describe("deliverCronFollowup", () => {
         });
       }
       expect(publishReset).toHaveBeenCalledTimes(answer === "NO_REPLY" ? 0 : 1);
-      expect(parent.session.refreshContext).toHaveBeenCalledTimes(answer === "NO_REPLY" ? 0 : 1);
+      expect(parent.session.sessionManager.appendResultMessages).toHaveBeenCalledTimes(
+        answer === "NO_REPLY" ? 0 : 1,
+      );
+      expect(parent.session.refreshContext).not.toHaveBeenCalled();
 
       // A steered subagent result in an active cron turn is delivered with that run.
       const entries = cron.session.sessionManager.getEntries();
@@ -753,7 +1029,10 @@ describe("deliverCronFollowup", () => {
       ] as ReturnType<AgentSession["sessionManager"]["getEntries"]>);
       await deliverCronFollowup(context, parent.workspace, cron.session);
       expect(parent.session.messages).toHaveLength(answer === "NO_REPLY" ? 0 : 4);
-      expect(parent.session.refreshContext).toHaveBeenCalledTimes(answer === "NO_REPLY" ? 0 : 1);
+      expect(parent.session.sessionManager.appendResultMessages).toHaveBeenCalledTimes(
+        answer === "NO_REPLY" ? 0 : 1,
+      );
+      expect(parent.session.refreshContext).not.toHaveBeenCalled();
     },
   );
 
@@ -813,6 +1092,7 @@ describe("deliverCronFollowup", () => {
       role: "assistant",
       content: [{ type: "text", text: "The update" }],
     });
-    expect(parent.session.refreshContext).toHaveBeenCalledTimes(1);
+    expect(parent.session.sessionManager.appendResultMessages).toHaveBeenCalledOnce();
+    expect(parent.session.refreshContext).not.toHaveBeenCalled();
   });
 });

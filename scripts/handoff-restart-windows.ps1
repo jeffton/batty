@@ -59,6 +59,12 @@ $arguments = @(
   "-LogPath $(Quote-Argument $logPath)",
   "-BattyRoot $(Quote-Argument $BattyRoot)"
 )
+if ($env:PI_SESSION_FILE) {
+  $arguments += "-RestartSessionFile $(Quote-Argument $env:PI_SESSION_FILE)"
+}
+if ($env:PI_RESTART_AFTER_ENTRY_ID) {
+  $arguments += "-RestartAfterEntryId $(Quote-Argument $env:PI_RESTART_AFTER_ENTRY_ID)"
+}
 if ($Force) {
   $arguments += "-Force"
 }

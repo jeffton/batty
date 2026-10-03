@@ -271,7 +271,7 @@ describe("durable AgentSession controller", () => {
             clientMessageId: "queued-client",
           }),
         ]);
-        await f.session.removeQueuedPrompt(streamingBehavior, 0);
+        await f.session.removeQueuedPrompt(f.session.getQueuedPrompts()[0]!.submissionId);
         expect(f.session.pendingMessageCount).toBe(0);
       } finally {
         finish.release();
@@ -290,7 +290,9 @@ describe("durable AgentSession controller", () => {
         clientMessageId: "two",
         images: [{ type: "image", mimeType: "image/png", data: "aGVsbG8=" }],
       });
-      await f.session.removeQueuedPrompt("steer", 0);
+      await f.session.removeQueuedPrompt(
+        f.session.getQueuedPrompts().find((prompt) => prompt.kind === "steer")!.submissionId,
+      );
       expect(f.session.getQueuedPrompts()).toEqual([
         expect.objectContaining({ text: "same", clientMessageId: "two" }),
       ]);
@@ -438,12 +440,13 @@ describe("durable AgentSession controller", () => {
     const observed: string[] = [];
     f.session.subscribe((event) => {
       if (event.type !== "message_end") return;
+      const message = event.entry.model![0]!;
       expect(
         f.session.sessionManager
           .getBranch()
-          .some((entry) => entry.type === "message" && entry.message.role === event.message.role),
+          .some((entry) => entry.type === "message" && entry.message.role === message.role),
       ).toBe(true);
-      observed.push(event.message.role);
+      observed.push(message.role);
     });
     await f.session.prompt("question");
     expect(observed).toEqual(["user", "system", "assistant"]);

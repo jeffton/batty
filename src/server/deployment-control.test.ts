@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { drainDeployment, startDeploymentControl } from "./deployment-control";
 
 const roots: string[] = [];
@@ -42,7 +42,7 @@ afterEach(async () => {
 });
 
 describe("deployment control", () => {
-  it("waits for drain completion before acknowledging", async () => {
+  it("waits for checkpoint completion before acknowledging", async () => {
     const root = await createRoot();
     let complete!: () => void;
     const completed = new Promise<void>((resolve) => {
@@ -68,13 +68,99 @@ describe("deployment control", () => {
     }
   });
 
+  it("forwards only the initiating session identity without an all-turn wait", async () => {
+    const root = await createRoot();
+    const received: Array<[string | undefined, string | undefined]> = [];
+    const control = await startDeploymentControl(root, async (sessionPath, afterEntryId) => {
+      received.push([sessionPath, afterEntryId]);
+    });
+    try {
+      const sessionPath = path.join(root, 'session "quoted" with spaces.sqlite');
+      await drainDeployment(root, sessionPath, "tool-use-entry");
+      await drainDeployment(root);
+      expect(received).toEqual([[sessionPath, "tool-use-entry"]]);
+    } finally {
+      await control.close();
+    }
+  });
+
+  it("coalesces concurrent clients behind the initiating response and caches success", async () => {
+    const root = await createRoot();
+    let complete!: () => void;
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const pending = new Promise<void>((resolve) => {
+      complete = resolve;
+    });
+    const checkpoint = vi.fn(() => {
+      started();
+      return pending;
+    });
+    const control = await startDeploymentControl(root, checkpoint);
+    try {
+      const first = drainDeployment(root, "/initiating.sqlite", "tool-use-entry");
+      await ready;
+      let secondResolved = false;
+      const second = drainDeployment(root).then(() => {
+        secondResolved = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(secondResolved).toBe(false);
+      expect(checkpoint).toHaveBeenCalledExactlyOnceWith("/initiating.sqlite", "tool-use-entry");
+      complete();
+      await Promise.all([first, second]);
+      await drainDeployment(root, "/other.sqlite", "another-entry");
+      expect(checkpoint).toHaveBeenCalledTimes(1);
+    } finally {
+      await control.close();
+    }
+  });
+
+  it("retries a failed checkpoint and reports its error", async () => {
+    const root = await createRoot();
+    const failure = new Error("checkpoint failed");
+    const checkpoint = vi.fn().mockRejectedValueOnce(failure).mockResolvedValue(undefined);
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    const control = await startDeploymentControl(root, checkpoint);
+    try {
+      await expect(drainDeployment(root)).rejects.toThrow("closed before checkpoint completed");
+      expect(report).toHaveBeenCalledWith("Deployment checkpoint failed", failure);
+      await expect(drainDeployment(root)).resolves.toBeUndefined();
+      expect(checkpoint).toHaveBeenCalledTimes(2);
+    } finally {
+      await control.close();
+      report.mockRestore();
+    }
+  });
+
+  it.each([
+    ["/session.sqlite", undefined],
+    [undefined, "entry"],
+    ["", "entry"],
+    ["/session.sqlite", ""],
+  ])("rejects incomplete response identity %s / %s", async (sessionPath, afterEntryId) => {
+    const root = await createRoot();
+    const checkpoint = vi.fn().mockResolvedValue(undefined);
+    const control = await startDeploymentControl(root, checkpoint);
+    try {
+      await expect(drainDeployment(root, sessionPath, afterEntryId)).rejects.toThrow(
+        "closed before checkpoint completed",
+      );
+      expect(checkpoint).not.toHaveBeenCalled();
+    } finally {
+      await control.close();
+    }
+  });
+
   it("rejects when the server disconnects before acknowledgement", async () => {
     const root = await createRoot();
     const server = net.createServer((socket) => socket.once("data", () => socket.end()));
     await listen(server, deploymentSocket(root));
 
     try {
-      await expect(drainDeployment(root)).rejects.toThrow("closed before draining completed");
+      await expect(drainDeployment(root)).rejects.toThrow("closed before checkpoint completed");
     } finally {
       await close(server);
     }

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { AgentDoc } from "@earendil-works/pi-durable";
 import lockfile from "proper-lockfile";
@@ -34,6 +34,43 @@ function gate() {
 }
 
 describe("SessionStore durable SQLite ownership", () => {
+  it("adopts committed entries and submission identities before observers without rescanning history", async () => {
+    const store = await session(true);
+    const entries = vi.spyOn(store.conversation, "entries");
+    const submissions = vi.spyOn(store.storage, "scanSubmissions");
+    let observed: ReturnType<SessionStore["getEntries"]> = [];
+    const unsubscribe = store.harness.subscribeCommits(() => {
+      observed = store.getEntries();
+    });
+    const id = await store.conversation.commit(async (tx) => {
+      await tx.conversation(store.conversation.id);
+      const submission = await tx.createSubmission({
+        conversationId: store.conversation.id,
+        type: "input",
+        status: "queued",
+        requestId: "client:committed-id",
+      });
+      const entry = await tx.appendEntry(store.conversation.id, {
+        kind: "pi.user",
+        model: [{ role: "user", content: "Committed", timestamp: 1 }],
+      });
+      tx.placeSubmission(submission.id, entry.id);
+      tx.settleSubmission(submission.id, { status: "done", answer: entry.id });
+      return submission.id;
+    }, context);
+    unsubscribe();
+    expect(observed).toMatchObject([
+      { type: "message", message: { role: "user", clientMessageId: "committed-id" } },
+    ]);
+    expect(store.getSubmissionRecord(id)).toMatchObject({
+      status: "done",
+      requestId: "client:committed-id",
+    });
+    await store.refresh();
+    expect(entries).not.toHaveBeenCalled();
+    expect(submissions).not.toHaveBeenCalled();
+  });
+
   it("closes temporary source writers after successful and failing callbacks", async () => {
     const store = await session();
     const file = store.getSessionFile();
@@ -368,7 +405,7 @@ describe("SessionStore durable SQLite ownership", () => {
         ],
       });
     }, context);
-    expect(store.getEntries()).toHaveLength(1);
+    expect(store.getEntries()).toHaveLength(3);
     await store.refresh();
     expect(store.getEntries()).toHaveLength(3);
     expect(store.getEntries()[1]).toMatchObject({ type: "custom_message", customType: "notice" });

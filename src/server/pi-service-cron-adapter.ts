@@ -36,11 +36,13 @@ export type CronJobRun = {
   session: CronJobSession;
   scheduleLabel: string;
   signal: AbortSignal;
+  recovery?: CronRunLog;
   onSessionStarted(session: { sessionId: string; sessionPath: string }): void | Promise<void>;
   queueResultDelivery(parentSessionId: string): Promise<void>;
 };
 
 export type PiServiceCronAdapterContext = {
+  openSession: (workspace: WorkspaceInfo, sessionPath: string) => Promise<SessionState>;
   createCronSession: (
     workspace: WorkspaceInfo,
     options: {
@@ -106,36 +108,61 @@ export async function executeCronOperation(
   runId: string,
 ): Promise<void> {
   const previous = getCronExecutionResult(session, runId);
-  if (previous) {
+  if (previous && previous.status !== "running") {
     if (previous.status === "completed") return;
     throw new Error(previous.error ?? `Cron run ${previous.status}`);
   }
   await session.waitForIdle();
-  const startEntryId = session.sessionManager.getLeafId();
-  const record: CronExecutionResult = { runId, startEntryId, endEntryId: null, status: "running" };
+  const startEntryId = previous ? previous.startEntryId : session.sessionManager.getLeafId();
+  const record: CronExecutionResult = previous ?? {
+    runId,
+    startEntryId,
+    endEntryId: null,
+    status: "running",
+  };
   const releaseSettlement = session.deferSettlement();
   activeCronRuns.set(session, runId);
   const runSignal = cronRunSignals.get(session);
   const signal = runSignal?.runId === runId ? runSignal.signal : undefined;
   try {
-    await session.sessionManager.appendCustomEntry(CRON_EXECUTION_CUSTOM_TYPE, record);
+    if (!previous)
+      await session.sessionManager.appendCustomEntry(CRON_EXECUTION_CUSTOM_TYPE, record);
     signal?.throwIfAborted();
-    await session.sendCustomMessage(
-      {
-        customType: `batty-runtime-notice:${notice.kind}`,
-        content: notice.text,
-        details: { cron: { runId } },
-        display: true,
-      },
-      {
+    const input = {
+      customType: `batty-runtime-notice:${notice.kind}`,
+      content: notice.text,
+      details: { cron: { runId }, battyResultReplyId: `cron-execution:${runId}` },
+      display: true,
+    };
+    let submission = await session.getCustomInputSubmission(input);
+    if (!submission)
+      await session.sendCustomMessage(input, {
         triggerTurn: true,
         onAccepted: () => {
           if (signal?.aborted) abortOwnedCron(session, runId);
         },
-      },
-    );
+      });
     await session.waitForIdle();
+    if (session.isClosing) throw new Error("Cron session checkpointed");
+    submission = await session.getCustomInputSubmission(input);
     const assistant = findRunAssistant(session, startEntryId, session.sessionManager.getLeafId());
+    if (submission?.status === "unanswered") {
+      const error = finalAssistantError(assistant) ?? `Cron input ${submission.reason}`;
+      await session.sessionManager.appendCustomEntry(CRON_EXECUTION_CUSTOM_TYPE, {
+        ...record,
+        endEntryId: session.sessionManager.getLeafId(),
+        status:
+          submission.reason === "aborted" ||
+          submission.reason === "withdrawn" ||
+          assistant?.stopReason === "aborted"
+            ? "aborted"
+            : "failed",
+        error,
+      });
+      throw new Error(error);
+    }
+    if (submission?.status !== "done")
+      throw new Error(`Cron run ${runId} has no settled native input`);
     const error = finalAssistantError(assistant);
     const status = assistant?.stopReason === "aborted" ? "aborted" : error ? "failed" : "completed";
     await session.sessionManager.appendCustomEntry(CRON_EXECUTION_CUSTOM_TYPE, {
@@ -146,7 +173,7 @@ export async function executeCronOperation(
     });
     if (error) throw new Error(error);
   } catch (error) {
-    if (getCronExecutionResult(session, runId)?.status === "running") {
+    if (!session.isClosing && getCronExecutionResult(session, runId)?.status === "running") {
       await session.sessionManager.appendCustomEntry(CRON_EXECUTION_CUSTOM_TYPE, {
         ...record,
         endEntryId: session.sessionManager.getLeafId(),
@@ -159,6 +186,12 @@ export async function executeCronOperation(
     activeCronRuns.delete(session);
     await releaseSettlement();
   }
+}
+
+function isUnfinishedCronCheckpoint(session: AgentSession, runId: string): boolean {
+  if (!session.isClosing) return false;
+  const receipt = getCronExecutionResult(session, runId);
+  return !receipt || receipt.status === "running";
 }
 
 function abortOwnedCron(session: AgentSession, runId: string): void {
@@ -202,7 +235,43 @@ export async function runCronJobSession(
     scheduleLabel: job.scheduleLabel,
     prompt: job.prompt,
     session: job.session,
+    ...(job.recovery ? { now: new Date(job.recovery.startedAtMs) } : {}),
   });
+
+  if (job.recovery?.sessionPath) {
+    const state = await context.openSession(job.workspace, job.recovery.sessionPath);
+    const webSession = context.requireSession(state.id);
+    if (webSession.session.sessionId !== job.recovery.sessionId) {
+      throw new Error(`Cron run ${job.runId} recovered a different session`);
+    }
+    const cronSessionPath = context.requireSessionPath(state.id);
+    await job.onSessionStarted({
+      sessionId: webSession.session.sessionId,
+      sessionPath: cronSessionPath,
+    });
+    const binding = cronRunBinding(webSession.session, job.runId);
+    if (job.session.kind !== "daily-inline" && !binding) {
+      throw new Error(`Cron run ${job.runId} has no persisted session binding`);
+    }
+    try {
+      await context.promptCron(state.id, cronNotice, job.runId);
+    } catch (error) {
+      if (binding?.parentSessionId && !isUnfinishedCronCheckpoint(webSession.session, job.runId)) {
+        await job.queueResultDelivery(binding.parentSessionId);
+      }
+      throw error;
+    }
+    const assistant = await lastCronAssistant(webSession.session, job.runId);
+    if (binding?.parentSessionId && !isSilentCronResult(assistant)) {
+      await job.queueResultDelivery(binding.parentSessionId);
+    }
+    const error = finalAssistantError(assistant);
+    if (error) throw new Error(error);
+    return {
+      sessionId: webSession.session.sessionId,
+      sessionPath: cronSessionPath,
+    };
+  }
 
   if (job.session.kind === "daily-inline") {
     return runInlineCronJob(context, job, cronNotice);
@@ -232,10 +301,6 @@ export async function runCronJobSession(
     });
   let cronSession: SessionState;
   if (parent && includePreviousContext) {
-    await job.onSessionStarted({
-      sessionId: parent.sessionId,
-      sessionPath: context.requireSessionPath(parent.id),
-    });
     cronSession = await context.prepareSessionForContextCopy(parent.id, createCronSession);
   } else {
     cronSession = await createCronSession();
@@ -261,7 +326,7 @@ export async function runCronJobSession(
     job.signal.throwIfAborted();
     await context.promptCron(cronWebSession.id, cronNotice, job.runId);
   } catch (error) {
-    if (parent) {
+    if (parent && !isUnfinishedCronCheckpoint(cronWebSession.session, job.runId)) {
       await job.queueResultDelivery(parent.sessionId);
     }
     throw error;
@@ -694,6 +759,16 @@ async function lastCronAssistant(
     battyDeliveredSites: SiteDescriptor[];
     battyDeliveredSentFiles: SentFileDescriptor[];
   };
+}
+
+function isSilentCronResult(message: AssistantMessage | undefined): boolean {
+  return (
+    !finalAssistantError(message) &&
+    extractAssistantText(message) === "NO_REPLY" &&
+    !(message as (AssistantMessage & { battyDeliveredSites?: SiteDescriptor[] }) | undefined)
+      ?.battyDeliveredSites?.length &&
+    !sentFilesFromAssistant(message).length
+  );
 }
 
 function sentFilesFromAssistant(message: AssistantMessage | undefined): SentFileDescriptor[] {

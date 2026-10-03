@@ -52,10 +52,11 @@ async function listenWithStaleSocketRecovery(server: net.Server, address: string
 
 export async function startDeploymentControl(
   root: string,
-  drain: () => Promise<void>,
+  checkpoint: (sessionPath?: string, afterEntryId?: string) => Promise<void>,
 ): Promise<{ close(): Promise<void> }> {
   const address = socketPath(root);
   const sockets = new Set<net.Socket>();
+  let checkpointPromise: Promise<void> | undefined;
   const server = net.createServer((socket) => {
     sockets.add(socket);
     socket.once("close", () => sockets.delete(socket));
@@ -65,17 +66,38 @@ export async function startDeploymentControl(
 
     socket.on("data", (chunk: string) => {
       input += chunk;
-      if (input !== "drain\n") {
-        if (input.length >= "drain\n".length || !"drain\n".startsWith(input)) {
+      if (!input.includes("\n")) {
+        return;
+      }
+      let request: { command: string; sessionPath?: string; afterEntryId?: string };
+      try {
+        request = JSON.parse(input);
+        if (
+          request.command !== "checkpoint" ||
+          (request.sessionPath !== undefined &&
+            (typeof request.sessionPath !== "string" || !request.sessionPath)) ||
+          (request.afterEntryId !== undefined &&
+            (typeof request.afterEntryId !== "string" || !request.afterEntryId)) ||
+          (request.sessionPath === undefined) !== (request.afterEntryId === undefined)
+        ) {
           socket.destroy();
+          return;
         }
+      } catch {
+        socket.destroy();
         return;
       }
       socket.pause();
-      void drain().then(
-        () => socket.end("drained\n"),
+      checkpointPromise ??= Promise.resolve()
+        .then(() => checkpoint(request.sessionPath, request.afterEntryId))
+        .catch((error) => {
+          checkpointPromise = undefined;
+          throw error;
+        });
+      void checkpointPromise.then(
+        () => socket.end("checkpointed\n"),
         (error) => {
-          console.error("Deployment drain failed", error);
+          console.error("Deployment checkpoint failed", error);
           socket.destroy();
         },
       );
@@ -102,7 +124,11 @@ export async function startDeploymentControl(
   };
 }
 
-export async function drainDeployment(root: string): Promise<void> {
+export async function drainDeployment(
+  root: string,
+  sessionPath?: string,
+  afterEntryId?: string,
+): Promise<void> {
   const address = socketPath(root);
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(address);
@@ -119,22 +145,24 @@ export async function drainDeployment(root: string): Promise<void> {
     socket.once("error", fail);
     socket.once("close", () => {
       if (!settled) {
-        fail(new Error("Deployment control closed before draining completed"));
+        fail(new Error("Deployment control closed before checkpoint completed"));
       }
     });
     socket.on("data", (chunk: string) => {
       response += chunk;
-      if (response === "drained\n") {
+      if (response === "checkpointed\n") {
         settled = true;
         resolve();
         socket.destroy();
         return;
       }
-      if (response.length >= "drained\n".length || !"drained\n".startsWith(response)) {
+      if (response.length >= "checkpointed\n".length || !"checkpointed\n".startsWith(response)) {
         fail(new Error("Unexpected deployment control response"));
         socket.destroy();
       }
     });
-    socket.once("connect", () => socket.write("drain\n"));
+    socket.once("connect", () =>
+      socket.write(`${JSON.stringify({ command: "checkpoint", sessionPath, afterEntryId })}\n`),
+    );
   });
 }

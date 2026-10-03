@@ -84,7 +84,7 @@ function usage(): string {
     "",
     "Commands:",
     "  auth code                  Print a fresh one-time 8 char auth code",
-    "  drain                      Stop accepting new turns and wait for active turns",
+    "  drain [--session <path> --after-entry <id>]   Checkpoint durable sessions for restart",
     "  cron list [--workspace ID] [--json]",
     "  cron add --workspace ID --prompt TEXT --model ID --thinking LEVEL (--in DUR | --at ISO | --every DUR | --cron EXPR) [--tz IANA] [--session new|daily-inline|daily-detached] [--daily-context include|chat-only|omit]",
     "  cron edit <jobId> [fields...] [--session new|daily-inline|daily-detached] [--daily-context include|chat-only|omit]",
@@ -327,10 +327,21 @@ async function handleCronRemove(root: string, parsed: ParsedArgs): Promise<void>
   console.log(`Removed cron job ${job.id} from workspace ${job.workspaceId}.`);
 }
 
-async function handleDrain(root: string): Promise<void> {
+async function handleDrain(root: string, parsed: ParsedArgs): Promise<void> {
   const { drainDeployment } = await import("./deployment-control");
-  await drainDeployment(root);
-  console.log("All active turns have finished.");
+  const sessionPath = stringFlag(parsed.flags, "session");
+  if (parsed.flags.session !== undefined && !sessionPath) {
+    throw new Error("--session requires a path");
+  }
+  const afterEntryId = stringFlag(parsed.flags, "after-entry");
+  if (parsed.flags["after-entry"] !== undefined && !afterEntryId) {
+    throw new Error("--after-entry requires an entry ID");
+  }
+  if (Boolean(sessionPath) !== Boolean(afterEntryId)) {
+    throw new Error("--session and --after-entry must be provided together");
+  }
+  await drainDeployment(root, sessionPath, afterEntryId);
+  console.log("Durable sessions checkpointed.");
 }
 
 async function main(): Promise<void> {
@@ -351,7 +362,7 @@ async function main(): Promise<void> {
   }
 
   if (command === "drain") {
-    await handleDrain(root);
+    await handleDrain(root, parsed);
     return;
   }
 

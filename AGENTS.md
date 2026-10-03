@@ -38,15 +38,15 @@ When replacing a running instance, the deployment flow avoids that by:
 1. preparing and packaging the release before restarting the service
 2. handing the restart off to the platform-specific handoff script
 3. scheduling the actual restart through the platform's detached service-manager handoff
-4. running `batty drain` over local IPC to pause new work and wait for admitted turns, subagents, and result delivery to finish
+4. running the prepared CLI’s `batty drain` over local IPC to await only the deploying turn’s persisted final summary, then checkpoint other active sessions for recovery
 5. letting the browser reconnect to the restored session after restart
 6. letting the client auto-refresh itself when the deployed build id changes
 
 ## Important operational rules
 
-- Keep the restart detached in the platform-specific `handoff-restart*` script. Start draining immediately; do not add a fixed handoff delay.
-- Restart workers must run the prepared CLI's `drain` before restarting. Do not wait for drain in the foreground agent tool call: it would wait for its own turn.
-- Normal drains have no timeout. `BATTY_SKIP_DRAIN=1` (Unix) / `-Force` (Windows) explicitly skips draining, including the first upgrade from a server without deployment IPC.
+- Keep the restart detached in the platform-specific `handoff-restart*` script. Start checkpoint preparation immediately; do not add a fixed handoff delay.
+- Restart workers must run the prepared CLI's `drain` before restarting. Pass the initiating tool’s `PI_SESSION_FILE` and `PI_RESTART_AFTER_ENTRY_ID` through `BATTY_RESTART_SESSION_FILE` and `BATTY_RESTART_AFTER_ENTRY_ID` to `drain --session <path> --after-entry <id>`. The entry anchors the exact initiating response, even if the worker starts after a follow-up. Do not wait in the foreground agent tool call: it would wait for its own final summary.
+- Checkpoint preparation has no timeout for the deploying turn’s persisted final summary. Other active work is checkpointed and recovered, not awaited to completion. `BATTY_SKIP_DRAIN=1` (Unix) / `-Force` (Windows) explicitly skips checkpoint preparation, including the first upgrade from a server without deployment IPC.
 - Do not add post-restart verification commands in the same self-deploy turn if they depend on the old foreground session surviving the restart.
 - If you need verification, put it in the applicable `restart-services*` script or run it in a separate turn after the restart has happened.
 - The reconnect flow depends on the client keeping `workspaceId` and `sessionPath` in the SSE URL so the server can reopen the session after process restart.
@@ -57,7 +57,7 @@ When replacing a running instance, the deployment flow avoids that by:
 1. Run the full deployment command listed above for the current platform.
 2. If replacing a running instance, wait for the script to report that reload was handed off.
 3. Finish the assistant response immediately after handoff so the summary is persisted before restart.
-4. The detached worker restarts once all admitted work has finished.
+4. The detached worker awaits only the deploying turn’s persisted final summary, checkpoints other active work, and restarts.
 5. Expect the browser to refresh onto the new client build and reconnect to the same session.
 
 If this flow breaks, inspect these files first:

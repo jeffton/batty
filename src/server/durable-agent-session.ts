@@ -1,15 +1,11 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { BACKGROUND_CONTEXT, awaitWithContext } from "@earendil-works/chord/context";
-import type { JsonValue } from "@earendil-works/chord";
+import type { AttachedReplicatedState, JsonValue } from "@earendil-works/chord";
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Model, ToolCall } from "@earendil-works/pi-ai";
 import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
-import {
-  convertToLlm,
-  estimateTokens,
-  type AgentSessionEvent,
-} from "@earendil-works/pi-coding-agent";
+import { convertToLlm, estimateTokens } from "@earendil-works/pi-coding-agent";
 import {
   AgentDoc,
   defineExtension,
@@ -19,23 +15,26 @@ import {
   hook,
   section,
   watchEvents,
-  type AgentEvent,
   type AgentEventStream,
-  type InboxItem,
-  type SnapshotEvent,
-  type ToolSlot,
-  type TaskId,
+  type ConversationView,
+  type AgentState,
+  type InboxState,
+  type LiveState,
+  type SubmissionId,
   type Submission,
+  type SubmissionRecord,
+  type CommitPublication,
 } from "@earendil-works/pi-durable";
 import type { PromptDisposition, QueuedPrompt } from "@/shared/types";
 import type {
   AgentSessionController,
   AgentSessionPromptOptions,
   CustomSessionInput,
+  SessionControllerEvent,
 } from "./agent-session-controller";
 import { createDurableToolExtension } from "./durable-tools";
 import type { SessionResources } from "./session-resources";
-import type { SessionStore } from "./session-store";
+import { SessionStore } from "./session-store";
 import { SESSION_TOOLS_CUSTOM_TYPE } from "./session-metadata";
 import { prepareDurablePrompt } from "./durable-prompt-preflight";
 import { getSessionContextUsage } from "./pi-context-usage";
@@ -52,17 +51,22 @@ const PromptDoc = defineDoc<{ override: string | null }>({
 
 /** Durable owns the conversation, admission, execution and recovery; resources own host tools. */
 export class DurableAgentSessionController implements AgentSessionController {
-  private readonly listeners = new Set<(event: AgentSessionEvent) => void | Promise<void>>();
+  private readonly listeners = new Set<(event: SessionControllerEvent) => void | Promise<void>>();
   private readonly deliveryContext = new AsyncLocalStorage<boolean>();
   private readonly deliveries = new Set<Promise<void>>();
   private readonly errors: unknown[] = [];
   private stream!: AgentEventStream;
-  private busy = false;
-  private partial?: AssistantMessage;
-  private readonly tools = new Map<string, ToolSlot>();
-  private inbox: Array<{ id: InboxItem["id"]; mode: InboxItem["mode"] }> = [];
-  private queued: QueuedPrompt[] = [];
-  private compactions = new Set<TaskId>();
+  private state!: AttachedReplicatedState<ConversationView>;
+  /** Semantic delivery cursor, not presentation state. */
+  private observedRun?: SubmissionId;
+  private semanticTail = Promise.resolve();
+  private semanticWork = 0;
+  private unsubscribeCommits?: () => void;
+  private unsubscribeLifecycle?: () => void;
+  private readonly semanticScope = new AsyncLocalStorage<{
+    agent: AgentState;
+    messages: AgentMessage[];
+  }>();
   private handoffRequested = false;
   private closing?: Promise<void>;
   private started = false;
@@ -75,19 +79,12 @@ export class DurableAgentSessionController implements AgentSessionController {
   private readonly preflights = new Set<AbortController>();
   private readonly preflightOperations = new Set<Promise<unknown>>();
   private readonly resourceOperations = new Set<Promise<unknown>>();
-  private selectedModel: Model<Api>;
-  private selectedThinking: ThinkingLevel;
   regularToolNames = new Set<string>();
 
   private constructor(
     readonly resources: SessionResources,
     readonly sessionManager: SessionStore,
-    model: Model<Api>,
-    thinkingLevel: ThinkingLevel,
-  ) {
-    this.selectedModel = model;
-    this.selectedThinking = clampThinkingLevel(model, thinkingLevel);
-  }
+  ) {}
 
   static async open(
     resources: SessionResources,
@@ -95,7 +92,7 @@ export class DurableAgentSessionController implements AgentSessionController {
     model: Model<Api>,
     thinkingLevel: ThinkingLevel,
   ) {
-    const controller = new DurableAgentSessionController(resources, store, model, thinkingLevel);
+    const controller = new DurableAgentSessionController(resources, store);
     const settings = resources.settingsManager;
     store.configureRuntime({
       models: resources.modelRuntime,
@@ -117,9 +114,10 @@ export class DurableAgentSessionController implements AgentSessionController {
     });
     await store.configure({
       model: { provider: model.provider, modelId: model.id },
-      thinkingLevel: controller.thinkingLevel,
+      thinkingLevel: clampThinkingLevel(model, thinkingLevel),
     });
     controller.refreshRegistry();
+    controller.state = await store.conversation.viewState(context);
     return controller;
   }
 
@@ -129,10 +127,12 @@ export class DurableAgentSessionController implements AgentSessionController {
       actions: {
         sendMessage: (message, options) =>
           this.trackOperation(
-            this.sendCustomMessage(message as CustomSessionInput, {
-              ...options,
-              steerWhenBusy: true,
-            }),
+            this.semanticScope.exit(() =>
+              this.sendCustomMessage(message as CustomSessionInput, {
+                ...options,
+                steerWhenBusy: true,
+              }),
+            ),
           ),
         sendUserMessage: (content, options) => {
           const text =
@@ -146,23 +146,39 @@ export class DurableAgentSessionController implements AgentSessionController {
             typeof content === "string"
               ? undefined
               : content.filter((part) => part.type === "image");
-          this.trackOperation(this.prompt(text, { images, streamingBehavior: options?.deliverAs }));
+          this.trackOperation(
+            this.semanticScope.exit(() =>
+              this.prompt(text, { images, streamingBehavior: options?.deliverAs }),
+            ),
+          );
         },
         appendEntry: (customType, data) =>
-          this.trackOperation(this.sessionManager.appendCustomEntry(customType, data)),
-        setSessionName: (name) => this.trackOperation(this.sessionManager.setSessionName(name)),
+          this.trackOperation(
+            this.semanticScope.exit(() => this.sessionManager.appendCustomEntry(customType, data)),
+          ),
+        setSessionName: (name) =>
+          this.trackOperation(
+            this.semanticScope.exit(() => this.sessionManager.setSessionName(name)),
+          ),
         getSessionName: () => this.sessionName,
         setLabel: (entryId, label) =>
-          this.trackOperation(this.sessionManager.setLabel(entryId, label)),
+          this.trackOperation(
+            this.semanticScope.exit(() => this.sessionManager.setLabel(entryId, label)),
+          ),
         setModel: async (model) => {
-          await this.setModel(model);
+          await this.semanticScope.exit(() => this.setModel(model));
           return true;
         },
-        getThinkingLevel: () => this.thinkingLevel,
-        setThinkingLevel: (level) => this.trackOperation(this.setThinkingLevel(level)),
+        getThinkingLevel: () =>
+          this.semanticScope.getStore()?.agent.thinkingLevel ?? this.thinkingLevel,
+        setThinkingLevel: (level) =>
+          this.trackOperation(this.semanticScope.exit(() => this.setThinkingLevel(level))),
       },
       context: {
-        getModel: () => this.model,
+        getModel: () => {
+          const ref = this.semanticScope.getStore()?.agent.model;
+          return ref ? this.resources.modelRuntime.getModel(ref.provider, ref.modelId) : this.model;
+        },
         getScopedModels: () => [],
         isIdle: () => !this.isStreaming && !this.isCompacting,
         getSignal: () => undefined,
@@ -170,27 +186,28 @@ export class DurableAgentSessionController implements AgentSessionController {
         getContextUsage: () => getSessionContextUsage(this),
         compact: (options) =>
           this.trackOperation(
-            this.compact(options?.customInstructions).then(
-              () => {
-                const entry = this.sessionManager
-                  .getBranch()
-                  .findLast((entry) => entry.type === "compaction");
-                if (entry?.type === "compaction") options?.onComplete?.(entry);
-              },
-              (error: Error) => {
-                if (options?.onError) options.onError(error);
-                else throw error;
-              },
-            ),
+            this.semanticScope
+              .exit(() => this.compact(options?.customInstructions))
+              .then(
+                () => {
+                  const entry = this.sessionManager
+                    .getBranch()
+                    .findLast((entry) => entry.type === "compaction");
+                  if (entry?.type === "compaction") options?.onComplete?.(entry);
+                },
+                (error: Error) => {
+                  if (options?.onError) options.onError(error);
+                  else throw error;
+                },
+              ),
           ),
-        abort: () => this.trackOperation(this.abort()),
+        abort: () => this.trackOperation(this.semanticScope.exit(() => this.abort())),
         shutdown: () => {
-          void this.dispose();
+          void this.semanticScope.exit(() => this.dispose());
         },
       },
-      getMessages: () => this.messages,
-      emit: (event) => this.emit(event),
-      toolsChanged: () => this.configureTools(),
+      getMessages: () => this.semanticScope.getStore()?.messages ?? this.messages,
+      toolsChanged: () => this.semanticScope.exit(() => this.configureTools()),
     });
     await this.resources.start();
     await this.configureTools();
@@ -199,11 +216,65 @@ export class DurableAgentSessionController implements AgentSessionController {
       this.sessionManager.conversation.id,
       context,
     );
-    await this.applySnapshot(this.stream.snapshot);
+    await this.sessionManager.observeEntries(this.stream.snapshot.entries);
+    this.observedTail = this.stream.snapshot.entries.reduce(
+      (tail, entry) => Math.max(tail, entry.id),
+      0,
+    );
+    this.unsubscribeCommits = this.sessionManager.harness.subscribeCommits((publication) => {
+      this.captureCommittedEvents(publication);
+    });
+    let previousRun: LiveState["run"];
+    // This callback must remain synchronous: it captures native immutable frames,
+    // never waits for hooks, and cannot acquire a bounded subscriber backlog.
+    this.unsubscribeLifecycle = this.state.subscribe((view) => {
+      const nextRun = (view.docs["pi.live"] as LiveState | undefined)?.run;
+      if (previousRun?.inputs[0] === nextRun?.inputs[0]) return;
+      const ended = previousRun;
+      previousRun = nextRun;
+      this.queueSemantic(async () => {
+        const agent = view.docs["pi.agent"] as AgentState;
+        if (ended) {
+          const nextInput = nextRun?.inputs
+            .map((id) => this.sessionManager.getSubmissionRecord(id)?.entry)
+            .filter((id): id is NonNullable<typeof id> => id !== undefined)
+            .reduce((first, id) => Math.min(first, id), Number.POSITIVE_INFINITY);
+          const messages = this.messagesAt(
+            view,
+            nextInput === undefined ? undefined : nextInput - 1,
+          );
+          this.observedRun = undefined;
+          this.handoffRequested = false;
+          await this.semanticScope.run({ agent, messages }, () =>
+            this.resources.extensionRunner.emit({ type: "agent_end", messages }),
+          );
+          this.emit({ type: "run_end", inputs: ended.inputs });
+          this.settlementPending = true;
+        }
+        if (nextRun) {
+          this.observedRun = nextRun.inputs[0];
+          this.settlementPending = false;
+          this.handoffRequested = false;
+          await this.semanticScope.run({ agent, messages: this.messagesAt(view) }, () =>
+            this.resources.extensionRunner.emit({ type: "agent_start" }),
+          );
+          this.emit({ type: "run_start", inputs: nextRun.inputs });
+        }
+      });
+    });
     this.stream.start(async (events) => {
-      for (const event of events) await this.acceptEvent(event);
-      await this.publishSettlement();
-      for (const wake of this.observerWaiters) wake();
+      for (const event of events) {
+        if (
+          event.type === "run_start" ||
+          event.type === "run_end" ||
+          event.type === "message_end" ||
+          event.type === "entry_appended" ||
+          event.type === "task_failed" ||
+          event.type === "snapshot"
+        )
+          continue;
+        this.emit(event);
+      }
     });
     void this.stream.closed.then((end) => {
       if (end.reason === "listener_error") {
@@ -228,14 +299,20 @@ export class DurableAgentSessionController implements AgentSessionController {
         shouldEndTurn: () => this.handoffRequested && this.pendingMessageCount === 0,
         beforeExecute: () => this.sessionManager.refresh(),
         recordArtifacts: async (toolCallId, details, toolTaskId) => {
-          await this.sessionManager.conversation.commit(
-            (tx) =>
-              tx.appendEntry(this.sessionManager.conversation.id, {
-                kind: "batty.tool-artifacts",
-                data: JSON.parse(JSON.stringify({ toolCallId, toolTaskId, details })) as JsonValue,
-              }),
-            context,
-          );
+          await SessionStore.withSource(this.sessionFile, async (source) => {
+            await source.conversation.commit(
+              (tx) =>
+                tx.appendEntry(source.conversation.id, {
+                  kind: "batty.tool-artifacts",
+                  data: JSON.parse(
+                    JSON.stringify({ toolCallId, toolTaskId, details }),
+                  ) as JsonValue,
+                }),
+              context,
+            );
+            await source.refresh();
+            source.publishSummary();
+          });
         },
       }),
     );
@@ -308,11 +385,14 @@ export class DurableAgentSessionController implements AgentSessionController {
   get sessionName() {
     return this.sessionManager.getSessionName();
   }
-  get model() {
-    return this.selectedModel;
+  get model(): Model<Api> {
+    const ref = (this.view.docs["pi.agent"] as AgentState).model!;
+    const model = this.resources.modelRuntime.getModel(ref.provider, ref.modelId);
+    if (!model) throw new Error(`Unknown session model: ${ref.provider}/${ref.modelId}`);
+    return model;
   }
-  get thinkingLevel() {
-    return this.selectedThinking;
+  get thinkingLevel(): ThinkingLevel {
+    return (this.view.docs["pi.agent"] as AgentState).thinkingLevel!;
   }
   get messages(): AgentMessage[] {
     return this.sessionManager.buildSessionProjection().messages;
@@ -323,25 +403,43 @@ export class DurableAgentSessionController implements AgentSessionController {
   get resourceLoader() {
     return this.resources.resourceLoader;
   }
+  get view(): ConversationView {
+    return this.state.value;
+  }
+  private get live(): LiveState {
+    return (this.view.docs["pi.live"] ?? {}) as LiveState;
+  }
+  private get inbox(): InboxState["items"] {
+    return ((this.view.docs["pi.inbox"] ?? { items: [] }) as InboxState).items;
+  }
   get isStreaming() {
-    return this.busy;
+    return this.live.run !== undefined;
+  }
+  get isClosing() {
+    return this.closing !== undefined;
   }
   get isCompacting() {
-    return this.compactions.size > 0;
+    return (this.live.compactions?.length ?? 0) > 0;
   }
   get pendingMessageCount() {
     return this.inbox.filter((item) => item.mode !== "write").length;
   }
   get streamingMessage() {
-    return this.partial;
+    return this.live.generation?.message as AssistantMessage | undefined;
   }
   get runningTools() {
-    return [...this.tools.values()]
+    return (this.live.tools ?? [])
       .filter((tool) => tool.status !== "done")
       .map((tool) => ({
         toolCallId: tool.callId,
         toolName: tool.name,
-        args: {},
+        args:
+          this.messages
+            .filter((message) => message.role === "assistant")
+            .flatMap((message) => message.content)
+            .findLast(
+              (block): block is ToolCall => block.type === "toolCall" && block.id === tool.callId,
+            )?.arguments ?? {},
         partialResult: {
           content: [{ type: "text", text: tool.output ?? "" }],
           details: tool.details,
@@ -369,20 +467,16 @@ export class DurableAgentSessionController implements AgentSessionController {
       model: { provider: model.provider, modelId: model.id },
       thinkingLevel: level,
     });
-    this.selectedModel = model;
-    this.selectedThinking = level;
   }
   async setThinkingLevel(level: ThinkingLevel): Promise<void> {
     const selected = clampThinkingLevel(this.model, level);
     await this.sessionManager.configure({ thinkingLevel: selected });
-    this.selectedThinking = selected;
-    this.emit({ type: "thinking_level_changed", level: selected });
   }
-  subscribe(listener: (event: AgentSessionEvent) => void | Promise<void>): () => void {
+  subscribe(listener: (event: SessionControllerEvent) => void | Promise<void>): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
-  private emit(event: AgentSessionEvent): void {
+  private emit(event: SessionControllerEvent): void {
     const delivery = Promise.resolve().then(() =>
       this.deliveryContext.run(true, async () => {
         await Promise.all([...this.listeners].map((listener) => listener(event)));
@@ -416,187 +510,87 @@ export class DurableAgentSessionController implements AgentSessionController {
     while (this.deliveries.size) await Promise.allSettled(this.deliveries);
     if (this.errors.length) throw this.errors.shift();
   }
-  private async applySnapshot(snapshot: SnapshotEvent): Promise<void> {
-    await this.sessionManager.observeEntries(snapshot.entries);
-    this.busy = !!snapshot.run;
-    this.partial = snapshot.generation?.message;
-    this.tools.clear();
-    for (const tool of snapshot.tools) this.tools.set(tool.callId, { ...tool });
-    this.compactions = new Set(snapshot.compactions.map((item) => item.taskId));
-    this.inbox = [...snapshot.inbox];
-    this.observedTail = Math.max(this.observedTail, ...snapshot.entries.map((entry) => entry.id));
-    await this.refreshQueue();
-  }
-  private async refreshQueue(): Promise<void> {
-    const view = await this.sessionManager.conversation.viewState(context);
-    try {
-      const items = (view.value.docs["pi.inbox"] as unknown as { items: InboxItem[] }).items;
-      this.inbox = items.map((item) => ({ id: item.id, mode: item.mode }));
-      const queued: QueuedPrompt[] = [];
-      for (const item of items) {
-        if (item.mode === "write") continue;
-        const submission = await this.sessionManager.harness.submission(item.id, context);
-        const record = await submission!.status(context);
-        queued.push({
-          kind: item.mode,
-          index: queued.filter((prompt) => prompt.kind === item.mode).length,
-          text:
-            typeof item.content === "string"
-              ? item.content
-              : item.content
-                  .filter((part) => part.type === "text")
-                  .map((part) => part.text)
-                  .join("\n"),
-          clientMessageId: record.requestId?.startsWith("client:")
-            ? record.requestId.slice(7)
-            : undefined,
-        });
-      }
-      this.queued = queued;
-    } finally {
-      view.dispose();
+  /** Capture table receipts losslessly; no Session API or hook runs on the commit line. */
+  private captureCommittedEvents(publication: CommitPublication): void {
+    const changes = publication.changes.filter(
+      (change) =>
+        (change.type === "entry" || change.type === "task") &&
+        change.value.conversationId === this.sessionManager.conversation.id,
+    );
+    const entries = changes
+      .filter((change) => change.type === "entry")
+      .map((change) => change.value)
+      .sort((left, right) => left.id - right.id);
+    if (entries.length)
+      this.queueSemantic(async () => {
+        await this.sessionManager.observeEntries(entries);
+        for (const entry of entries) {
+          this.observedTail = Math.max(this.observedTail, entry.id);
+          this.emit({ type: entry.model?.length ? "message_end" : "entry_appended", entry });
+        }
+      });
+    for (const change of changes) {
+      if (change.type !== "task") continue;
+      const task = change.value;
+      const state = task.state;
+      if (state.status !== "terminal") continue;
+      const outcome = state.outcome;
+      if (outcome.status !== "faulted" && outcome.status !== "orphaned") continue;
+      const message = outcome.status === "faulted" ? outcome.error.message : outcome.reason;
+      this.queueSemantic(async () => {
+        this.errors.push(new Error(`${task.kind}: ${message}`));
+        this.emit({ type: "task_failed", taskId: task.id, kind: task.kind, message });
+      });
     }
   }
-  private async acceptEvent(event: AgentEvent): Promise<void> {
-    switch (event.type) {
-      case "snapshot":
-        await this.applySnapshot(event);
-        this.emit({ type: "queue_update" } as AgentSessionEvent);
-        if (this.busy) this.emit({ type: "agent_start" });
-        else this.settlementPending = true;
-        break;
-      case "entry_appended":
-      case "message_end":
-        await this.sessionManager.observeEntries([event.entry]);
-        this.observedTail = Math.max(this.observedTail, event.entry.id);
-        if (event.type === "entry_appended")
-          this.emit({ type: "entry_appended", entry: event.entry } as unknown as AgentSessionEvent);
-        else
-          for (const message of event.entry.model ?? []) {
-            if (message.role === "assistant") this.partial = undefined;
-            this.emit({ type: "message_end", message });
-          }
-        break;
-      case "message_start":
-        if (event.message.role === "system") break;
-        if (event.message.role === "assistant") this.partial = structuredClone(event.message);
-        this.emit(event);
-        break;
-      case "message_update":
-        for (const change of event.changes) {
-          if (change.type === "message") this.partial = structuredClone(change.message);
-          else if (this.partial) {
-            if ("block" in change)
-              this.partial.content[change.contentIndex] = structuredClone(change.block);
-            else if (change.type === "text_delta" || change.type === "thinking_delta") {
-              const block = this.partial.content[change.contentIndex]!;
-              if (change.type === "text_delta" && block.type === "text") block.text += change.delta;
-              if (change.type === "thinking_delta" && block.type === "thinking")
-                block.thinking += change.delta;
-            } else if (change.type === "toolcall_delta") {
-              let target = this.partial.content[change.contentIndex] as unknown as Record<
-                string | number,
-                unknown
-              >;
-              for (const key of change.path.slice(0, -1)) target = target[key] as typeof target;
-              const key = change.path.at(-1)!;
-              target[key] = String(target[key]) + change.delta;
-            }
-          }
-        }
-        if (this.partial) {
-          this.partial.usage = event.usage;
-          this.emit({
-            type: "message_update",
-            message: structuredClone(this.partial),
-            assistantMessageEvent: { type: "start", partial: structuredClone(this.partial) },
-          });
-        }
-        break;
-      case "run_start":
-        this.settlementPending = false;
-        this.busy = true;
-        this.handoffRequested = false;
-        await this.resources.extensionRunner.emit({ type: "agent_start" });
-        this.emit({ type: "agent_start" });
-        break;
-      case "run_end":
-        this.busy = false;
-        this.partial = undefined;
-        this.handoffRequested = false;
-        await this.resources.extensionRunner.emit({ type: "agent_end", messages: this.messages });
-        this.emit({ type: "agent_end", messages: [], willRetry: false } as AgentSessionEvent);
-        this.settlementPending = true;
-        break;
-      case "tool_execution_start":
-        this.tools.set(event.toolCallId, {
-          callId: event.toolCallId,
-          name: event.toolName,
-          status: "running",
-        });
-        this.emit(event);
-        break;
-      case "tool_execution_update": {
-        const tool = this.tools.get(event.toolCallId)!;
-        if (event.output)
-          tool.output =
-            "set" in event.output
-              ? event.output.set
-              : (tool.output ?? "").slice(event.output.trimStart ?? 0) +
-                (event.output.append ?? "");
-        if (event.details !== undefined) tool.details = event.details;
-        this.emit({
-          type: "tool_execution_update",
-          toolCallId: event.toolCallId,
-          toolName: event.toolName,
-          args: {},
-          partialResult: {
-            content: [{ type: "text", text: tool.output ?? "" }],
-            details: tool.details,
-          },
-        });
-        break;
-      }
-      case "tool_execution_end": {
-        this.tools.delete(event.toolCallId);
-        const result = event.entry?.model?.find((message) => message.role === "toolResult");
-        this.emit({
-          type: "tool_execution_end",
-          toolCallId: event.toolCallId,
-          toolName: event.toolName,
-          result: { content: result?.content ?? [], details: result?.details },
-          isError: result?.isError ?? true,
-        });
-        break;
-      }
-      case "inbox_update":
-        this.inbox = [...event.items];
-        await this.refreshQueue();
-        this.emit({ type: "queue_update" } as AgentSessionEvent);
-        break;
-      case "compaction_start":
-        this.compactions.add(event.taskId);
-        this.emit({ type: "compaction_start", reason: event.reason } as AgentSessionEvent);
-        break;
-      case "compaction_end":
-        this.compactions.delete(event.taskId);
-        this.emit({
-          type: "compaction_end",
-          reason: event.reason,
-          aborted: false,
-          willRetry: event.reason === "overflow",
-        } as AgentSessionEvent);
-        break;
-      case "auto_retry_start":
-        this.emit(event as unknown as AgentSessionEvent);
-        break;
-      case "auto_retry_end":
-        this.emit({ ...event, success: true } as AgentSessionEvent);
-        break;
-      case "task_failed":
-        this.errors.push(new Error(`${event.kind}: ${event.message}`));
-        break;
-    }
+
+  private queueSemantic(operation: () => Promise<void>): void {
+    this.semanticWork++;
+    this.semanticTail = this.semanticTail
+      .then(operation)
+      .catch((error) => {
+        this.errors.push(error);
+      })
+      .then(async () => {
+        this.semanticWork--;
+        if (!this.semanticWork) await this.publishSettlement();
+        for (const wake of this.observerWaiters) wake();
+      })
+      .catch((error) => {
+        this.errors.push(error);
+        for (const wake of this.observerWaiters) wake();
+      });
+  }
+
+  /** Native active records are immutable: delayed hooks see their captured frame, not future turns. */
+  private messagesAt(
+    view: ConversationView,
+    throughEntryId = Number.POSITIVE_INFINITY,
+  ): AgentMessage[] {
+    const tail = view.entries.reduce((latest, entry) => Math.max(latest, entry.id), 0);
+    const projected = new Map(
+      this.sessionManager.getEntriesUpTo(tail).map((entry) => [entry.id, entry]),
+    );
+    return structuredClone(
+      view.entries
+        .filter((entry) => entry.id <= throughEntryId)
+        .flatMap((entry) =>
+          (entry.model ?? []).map((message, index) => {
+            const source = projected.get(index ? `${entry.id}:${index}` : String(entry.id));
+            if (source?.type === "message") return source.message;
+            if (source?.type === "custom_message")
+              return {
+                role: "custom",
+                customType: source.customType,
+                content: source.content,
+                display: source.display,
+                details: source.details,
+                timestamp: Date.parse(source.timestamp),
+              } as AgentMessage;
+            return message as AgentMessage;
+          }),
+        ),
+    );
   }
 
   async refreshContext(): Promise<void> {
@@ -634,7 +628,7 @@ export class DurableAgentSessionController implements AgentSessionController {
       });
       if (prepared.handled) return { disposition: "completed" };
       preflight.signal.throwIfAborted();
-      if (!this.busy)
+      if (!this.isStreaming)
         await this.sessionManager.conversation.commit(async (tx) => {
           (await tx.doc(PromptDoc, this.sessionManager.conversation.id)).override =
             prepared.systemPrompt ?? null;
@@ -661,9 +655,7 @@ export class DurableAgentSessionController implements AgentSessionController {
       release();
     }
     const status = await submission.status(context);
-    if (status.status === "placed") this.busy = true;
     if (status.status === "queued") {
-      await this.refreshQueue();
       return { disposition: "queued", entryId: String(submission.id) };
     }
     await submission.wait(context);
@@ -671,20 +663,38 @@ export class DurableAgentSessionController implements AgentSessionController {
     return { disposition: "completed" };
   }
   getQueuedPrompts(): QueuedPrompt[] {
-    return this.queued;
+    const indexes = { steer: 0, followUp: 0 };
+    return this.inbox.flatMap((item) => {
+      if (item.mode === "write") return [];
+      const requestId = this.sessionManager.getSubmissionRecord(item.id)?.requestId;
+      return [
+        {
+          submissionId: item.id,
+          kind: item.mode,
+          index: indexes[item.mode]++,
+          text:
+            typeof item.content === "string"
+              ? item.content
+              : item.content
+                  .filter((part) => part.type === "text")
+                  .map((part) => part.text)
+                  .join("\n"),
+          clientMessageId: requestId?.startsWith("client:") ? requestId.slice(7) : undefined,
+        },
+      ];
+    });
   }
-  async removeQueuedPrompt(kind: "steer" | "followUp", index: number): Promise<void> {
-    const item = this.inbox.filter((entry) => entry.mode === kind)[index];
+  async removeQueuedPrompt(submissionId: number): Promise<void> {
+    const item = this.inbox.find((entry) => entry.mode !== "write" && entry.id === submissionId);
     if (!item) throw new Error("Queued prompt not found");
     await this.sessionManager.harness.abortSubmission(
       item.id,
       context,
       this.sessionManager.conversation.id,
     );
-    await this.refreshQueue();
   }
   async reloadResources(): Promise<void> {
-    if (this.busy) {
+    if (this.isStreaming) {
       this.reloadRequested = true;
       return;
     }
@@ -712,18 +722,24 @@ export class DurableAgentSessionController implements AgentSessionController {
     };
   }
   private async publishSettlement(): Promise<void> {
-    if (!this.settlementPending || this.busy || this.completionHolds) return;
+    if (!this.settlementPending || this.isStreaming || this.completionHolds || this.semanticWork)
+      return;
     this.settlementPending = false;
     if (this.reloadRequested && !this.closing) {
       this.reloadRequested = false;
       await this.reloadResourcesNow();
     }
-    this.emit({ type: "agent_settled" } as AgentSessionEvent);
+    this.emit({ type: "agent_settled" });
   }
   private async waitForObservation(tail: number, idle = false): Promise<void> {
     await new Promise<void>((resolve) => {
       const wake = () => {
-        if (!this.errors.length && (this.observedTail < tail || (idle && this.busy))) return;
+        if (
+          !this.errors.length &&
+          (this.observedTail < tail ||
+            (idle && (this.observedRun !== undefined || this.semanticWork > 0)))
+        )
+          return;
         this.observerWaiters.delete(wake);
         resolve();
       };
@@ -732,16 +748,18 @@ export class DurableAgentSessionController implements AgentSessionController {
     });
   }
   async waitForIdle(): Promise<void> {
-    if (this.closing && !this.busy) {
+    if (this.closing && !this.isStreaming) {
+      await this.semanticTail;
       await this.flushDelivery();
       return;
     }
     await this.sessionManager.conversation.waitForIdle(context);
-    if (this.closing && !this.busy) {
+    if (this.closing && !this.isStreaming) {
+      await this.semanticTail;
       await this.flushDelivery();
       return;
     }
-    await this.waitForObservation(0, true);
+    await this.waitForObservation(Math.max(0, ...this.view.entries.map((entry) => entry.id)), true);
     await this.flushDelivery();
   }
   async abort(): Promise<void> {
@@ -750,7 +768,7 @@ export class DurableAgentSessionController implements AgentSessionController {
     await this.waitForIdle();
   }
   abortCompaction(): void {
-    for (const id of this.compactions)
+    for (const { taskId: id } of this.live.compactions ?? [])
       void this.sessionManager.harness
         .abortTask(id as never, context)
         .catch((error) => this.errors.push(error));
@@ -787,6 +805,16 @@ export class DurableAgentSessionController implements AgentSessionController {
       }),
     ).toString("base64url");
   }
+  getCustomInputSubmission(
+    message: Parameters<AgentSessionController["getCustomInputSubmission"]>[0],
+    attempt = 0,
+  ): Promise<SubmissionRecord | undefined> {
+    return this.sessionManager.storage.submissionByRequest(
+      this.sessionManager.conversation.id,
+      `custom-input:${this.customIdentity(message)}:${attempt}`,
+      context,
+    );
+  }
   private async admitCustomInput(
     message: CustomSessionInput,
     whenBusy: "steer" | "reject",
@@ -802,13 +830,11 @@ export class DurableAgentSessionController implements AgentSessionController {
       },
       context,
     );
-    if ((await submission.status(context)).status === "placed") this.busy = true;
     return submission;
   }
   async queueCustomSteeringMessage(message: CustomSessionInput): Promise<void> {
     await this.prepare();
     await this.admitCustomInput(message, "steer", this.customIdentity(message));
-    await this.refreshQueue();
   }
   async sendCustomMessage(
     message: CustomSessionInput,
@@ -863,6 +889,10 @@ export class DurableAgentSessionController implements AgentSessionController {
       // Closing checkpoints unfinished work. Only abort withdraws accepted inputs.
       await this.sessionManager.close();
       if (this.started) await this.stream.stop();
+      this.unsubscribeCommits?.();
+      this.unsubscribeLifecycle?.();
+      if (!this.isStreaming) await this.semanticTail;
+      this.state.dispose();
       await this.flushDelivery();
       await this.resources.dispose();
     })());

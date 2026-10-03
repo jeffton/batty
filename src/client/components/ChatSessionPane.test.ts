@@ -1,3 +1,4 @@
+import { snapshotFromPresentation } from "@/client/lib/session-test-fixture";
 import { flushPromises, shallowMount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { defineComponent, h, nextTick } from "vue";
@@ -183,7 +184,7 @@ describe("ChatSessionPane", () => {
   it("polls subagents while idle and clears activity when they finish", async () => {
     vi.useFakeTimers();
     const store = useAppStore();
-    store.activeSession = makeSession("session-a");
+    store.activeSnapshot = snapshotFromPresentation(makeSession("session-a"));
     listRunningSubagents.mockResolvedValueOnce([
       runningSubagent,
       { ...runningSubagent, sessionId: "child-b" },
@@ -212,10 +213,10 @@ describe("ChatSessionPane", () => {
     const pending = deferred<RunningSubagent[]>();
     listRunningSubagents.mockReturnValueOnce(pending.promise);
     const store = useAppStore();
-    store.activeSession = makeSession("session-a");
+    store.activeSnapshot = snapshotFromPresentation(makeSession("session-a"));
     const wrapper = shallowMount(ChatSessionPane);
     try {
-      store.activeSession = makeSession("session-b");
+      store.activeSnapshot = snapshotFromPresentation(makeSession("session-b"));
       await flushPromises();
       pending.resolve([runningSubagent]);
       await flushPromises();
@@ -230,7 +231,7 @@ describe("ChatSessionPane", () => {
     const pendingSend = deferred();
     sendPrompt.mockReturnValue(pendingSend.promise);
     const store = useAppStore();
-    store.activeSession = makeSession("session-a");
+    store.activeSnapshot = snapshotFromPresentation(makeSession("session-a"));
     store.selectedWorkspaceId = "batty";
 
     const wrapper = shallowMount(ChatSessionPane, {
@@ -253,7 +254,7 @@ describe("ChatSessionPane", () => {
       undefined,
     );
 
-    store.activeSession = makeSession("session-b");
+    store.activeSnapshot = snapshotFromPresentation(makeSession("session-b"));
     await nextTick();
     await wrapper.get(".submit-prompt").trigger("click");
 
@@ -266,7 +267,7 @@ describe("ChatSessionPane", () => {
       undefined,
     );
 
-    store.activeSession = makeSession("session-a");
+    store.activeSnapshot = snapshotFromPresentation(makeSession("session-a"));
     await nextTick();
     await wrapper.get(".submit-prompt").trigger("click");
 
@@ -279,7 +280,7 @@ describe("ChatSessionPane", () => {
     const pendingSend = deferred();
     sendPrompt.mockReturnValue(pendingSend.promise);
     const store = useAppStore();
-    store.activeSession = makeSession("session-a");
+    store.activeSnapshot = snapshotFromPresentation(makeSession("session-a"));
     store.selectedWorkspaceId = "batty";
 
     const wrapper = shallowMount(ChatSessionPane, {
@@ -295,7 +296,7 @@ describe("ChatSessionPane", () => {
     await wrapper.get(".submit-prompt").trigger("click");
 
     expect(wrapper.get(".optimistic-messages").text()).toBe("hello");
-    expect(store.activeSession.messages).toEqual([]);
+    expect(store.activeSession!.messages).toEqual([]);
     const clientMessageId = sendPrompt.mock.calls[0]?.[3] as string;
 
     const otherUserMessage: Extract<UiMessage, { role: "user" }> = {
@@ -305,22 +306,26 @@ describe("ChatSessionPane", () => {
       clientMessageId: crypto.randomUUID(),
       blocks: [{ type: "text", text: "hello" }],
     };
-    store.activeSession = makeSession("session-a", { messages: [otherUserMessage] });
+    store.activeSnapshot = snapshotFromPresentation(
+      makeSession("session-a", { messages: [otherUserMessage] }),
+    );
     await nextTick();
     expect(wrapper.get(".optimistic-messages").text()).toBe("hello");
 
-    store.activeSession = makeSession("session-a", {
-      messages: [
-        otherUserMessage,
-        {
-          id: "user-1",
-          role: "user",
-          timestamp: Date.now(),
-          clientMessageId,
-          blocks: [{ type: "text", text: "server-transformed content" }],
-        },
-      ],
-    });
+    store.activeSnapshot = snapshotFromPresentation(
+      makeSession("session-a", {
+        messages: [
+          otherUserMessage,
+          {
+            id: "user-1",
+            role: "user",
+            timestamp: Date.now(),
+            clientMessageId,
+            blocks: [{ type: "text", text: "server-transformed content" }],
+          },
+        ],
+      }),
+    );
     await nextTick();
 
     expect(wrapper.get(".optimistic-messages").text()).toBe("");
@@ -331,7 +336,7 @@ describe("ChatSessionPane", () => {
     const pendingSend = deferred();
     sendPrompt.mockReturnValue(pendingSend.promise);
     const store = useAppStore();
-    store.activeSession = makeSession("session-a");
+    store.activeSnapshot = snapshotFromPresentation(makeSession("session-a"));
     store.selectedWorkspaceId = "batty";
 
     const wrapper = shallowMount(ChatSessionPane, {
@@ -359,7 +364,9 @@ describe("ChatSessionPane", () => {
     const newerSend = deferred();
     sendPrompt.mockReturnValueOnce(olderSend.promise).mockReturnValueOnce(newerSend.promise);
     const store = useAppStore();
-    store.activeSession = makeSession("session-a", { isStreaming: true });
+    store.activeSnapshot = snapshotFromPresentation(
+      makeSession("session-a", { isStreaming: true }),
+    );
     store.selectedWorkspaceId = "batty";
 
     const wrapper = shallowMount(ChatSessionPane, {
@@ -399,7 +406,7 @@ describe("ChatSessionPane", () => {
       const pendingSend = deferred();
       sendPrompt.mockReturnValue(pendingSend.promise);
       const store = useAppStore();
-      store.activeSession = makeSession("session-a");
+      store.activeSnapshot = snapshotFromPresentation(makeSession("session-a"));
       const wrapper = shallowMount(ChatSessionPane, {
         global: {
           stubs: {
@@ -417,28 +424,31 @@ describe("ChatSessionPane", () => {
       )[action]("hello", []);
       await nextTick();
       const clientMessageId = sendPrompt.mock.calls[0]![3] as string;
-      store.activeSession = makeSession("session-a", {
-        isStreaming: true,
-        pendingMessageCount: 1,
-        updatedAt: 2,
-        queuedPrompts: [
-          {
-            kind: "followUp",
-            index: 0,
-            text: "hello",
-            clientMessageId: acceptance === "queued" ? clientMessageId : "other-client",
-          },
-        ],
-        messages: [
-          {
-            id: "user-1",
-            role: "user",
-            timestamp: 2,
-            blocks: [{ type: "text", text: "hello" }],
-            clientMessageId: acceptance === "message" ? clientMessageId : "other-client",
-          },
-        ],
-      });
+      store.activeSnapshot = snapshotFromPresentation(
+        makeSession("session-a", {
+          isStreaming: true,
+          pendingMessageCount: 1,
+          updatedAt: 2,
+          queuedPrompts: [
+            {
+              submissionId: 1,
+              kind: "followUp",
+              index: 0,
+              text: "hello",
+              clientMessageId: acceptance === "queued" ? clientMessageId : "other-client",
+            },
+          ],
+          messages: [
+            {
+              id: "user-1",
+              role: "user",
+              timestamp: 2,
+              blocks: [{ type: "text", text: "hello" }],
+              clientMessageId: acceptance === "message" ? clientMessageId : "other-client",
+            },
+          ],
+        }),
+      );
       pendingSend.reject(new Error("Connection lost"));
       await expect(result).rejects.toThrow("Connection lost");
       if (acceptance === "unrelated") {
@@ -454,7 +464,7 @@ describe("ChatSessionPane", () => {
     const pendingSend = deferred<PromptSubmissionResult>();
     sendPrompt.mockReturnValue(pendingSend.promise);
     const store = useAppStore();
-    store.activeSession = makeSession("session-a");
+    store.activeSnapshot = snapshotFromPresentation(makeSession("session-a"));
     const wrapper = shallowMount(ChatSessionPane, {
       global: {
         stubs: {
@@ -485,7 +495,7 @@ describe("ChatSessionPane", () => {
     const pendingSend = deferred<PromptSubmissionResult>();
     sendPrompt.mockReturnValue(pendingSend.promise);
     const store = useAppStore();
-    store.activeSession = makeSession("session-a");
+    store.activeSnapshot = snapshotFromPresentation(makeSession("session-a"));
     const wrapper = shallowMount(ChatSessionPane, {
       global: {
         stubs: {
@@ -501,9 +511,12 @@ describe("ChatSessionPane", () => {
     await nextTick();
     expect(wrapper.get(".optimistic-messages").text()).toBe("hello");
     const clientMessageId = sendPrompt.mock.calls[0]![3] as string;
-    store.activeSession.queuedPrompts = [
-      { kind: "followUp", index: 0, text: "hello", clientMessageId },
-    ];
+    store.activeSnapshot = snapshotFromPresentation({
+      ...store.activeSession!,
+      queuedPrompts: [
+        { submissionId: 1, kind: "followUp", index: 0, text: "hello", clientMessageId },
+      ],
+    });
     await nextTick();
     expect(wrapper.get(".optimistic-messages").text()).toBe("");
     pendingSend.resolve({ disposition: "queued", entryId: "entry-1", clientMessageId });
@@ -516,7 +529,7 @@ describe("ChatSessionPane", () => {
     const pendingSend = deferred();
     sendPrompt.mockReturnValue(pendingSend.promise);
     const store = useAppStore();
-    store.activeSession = makeSession("session-a");
+    store.activeSnapshot = snapshotFromPresentation(makeSession("session-a"));
     store.selectedWorkspaceId = "batty";
 
     const wrapper = shallowMount(ChatSessionPane, {

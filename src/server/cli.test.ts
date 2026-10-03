@@ -56,7 +56,7 @@ describe("deployment CLI", () => {
     expect(result.output).toContain("Unknown command: unknown-command");
   });
 
-  it("drains without loading configuration", async () => {
+  it("checkpoints without loading configuration or waiting for unrelated work", async () => {
     const root = await createRoot(false);
     let drained = false;
     const control = await startDeploymentControl(root, async () => {
@@ -66,11 +66,44 @@ describe("deployment CLI", () => {
     try {
       const drain = await runCli(root, ["drain"]);
       expect(drain).toMatchObject({ code: 0 });
-      expect(drain.output).toContain("All active turns have finished.");
+      expect(drain.output).toContain("Durable sessions checkpointed.");
       expect(drained).toBe(true);
     } finally {
       await control.close();
     }
+  });
+});
+
+describe("checkpoint CLI identity", () => {
+  it("passes the deploying session path verbatim", async () => {
+    const root = await createRoot(false);
+    const sessionPath = path.join(root, "session with spaces.sqlite");
+    let received: [string | undefined, string | undefined] | undefined;
+    const control = await startDeploymentControl(root, async (value, afterEntryId) => {
+      received = [value, afterEntryId];
+    });
+    try {
+      expect(
+        await runCli(root, ["drain", "--session", sessionPath, "--after-entry", "tool-use-entry"]),
+      ).toMatchObject({ code: 0 });
+      expect(received).toEqual([sessionPath, "tool-use-entry"]);
+    } finally {
+      await control.close();
+    }
+  });
+
+  it.each([
+    ["--session", "/session.sqlite"],
+    ["--after-entry", "entry"],
+    ["--session", "/session.sqlite", "--after-entry"],
+  ])("rejects incomplete response identity %s", async (...args) => {
+    const root = await createRoot(false);
+    expect(await runCli(root, ["drain", ...args])).toMatchObject({ code: 1 });
+  });
+
+  it("rejects a missing session path", async () => {
+    const root = await createRoot(false);
+    expect(await runCli(root, ["drain", "--session"])).toMatchObject({ code: 1 });
   });
 });
 

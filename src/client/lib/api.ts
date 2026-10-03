@@ -26,6 +26,7 @@ import type {
   SessionMessagesPage,
   SessionResourcesResponse,
   SessionState,
+  SessionSnapshot,
   SessionSummary,
   UpdateCronJobInput,
   WorkspaceInfo,
@@ -386,7 +387,7 @@ export function stopCronRun(runId: string): Promise<RunningCronJob> {
   });
 }
 
-export function createSession(workspaceId: string): Promise<SessionState> {
+export function createSession(workspaceId: string): Promise<SessionSnapshot> {
   return request("/api/sessions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -394,7 +395,7 @@ export function createSession(workspaceId: string): Promise<SessionState> {
   });
 }
 
-export function createOrOpenDailySession(workspaceId: string): Promise<SessionState> {
+export function createOrOpenDailySession(workspaceId: string): Promise<SessionSnapshot> {
   return request("/api/sessions/daily", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -406,7 +407,7 @@ export function openSession(
   workspaceId: string,
   sessionPath: string,
   messagesDetailLevel: "summary" | "full" = "summary",
-): Promise<SessionState> {
+): Promise<SessionSnapshot> {
   return request("/api/sessions/open", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -414,7 +415,7 @@ export function openSession(
   });
 }
 
-export function openSessionById(workspaceId: string, sessionId: string): Promise<SessionState> {
+export function openSessionById(workspaceId: string, sessionId: string): Promise<SessionSnapshot> {
   return request("/api/sessions/open-by-id", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -422,7 +423,7 @@ export function openSessionById(workspaceId: string, sessionId: string): Promise
   });
 }
 
-export function getSession(sessionId: string): Promise<SessionState> {
+export function getSession(sessionId: string): Promise<SessionSnapshot> {
   return request(`/api/sessions/${sessionId}`);
 }
 
@@ -432,7 +433,7 @@ export function getSessionResources(sessionId: string): Promise<SessionResources
 
 export function getSessionMessages(
   session: Pick<SessionState, "id" | "workspaceId" | "path">,
-  options: { before?: string; limit?: number } = {},
+  options: { before?: string; limit?: number; throughEntryId?: number } = {},
 ): Promise<SessionMessagesPage> {
   const params = new URLSearchParams();
   params.set("workspaceId", session.workspaceId);
@@ -442,6 +443,9 @@ export function getSessionMessages(
   if (options.before) {
     params.set("before", options.before);
   }
+  if (options.throughEntryId != null) {
+    params.set("throughEntryId", String(options.throughEntryId));
+  }
   if (typeof options.limit === "number" && Number.isFinite(options.limit)) {
     params.set("limit", String(Math.floor(options.limit)));
   }
@@ -449,7 +453,7 @@ export function getSessionMessages(
   return request(`/api/sessions/${session.id}/messages?${params.toString()}`);
 }
 
-export function setSessionModel(sessionId: string, modelId: string): Promise<SessionState> {
+export function setSessionModel(sessionId: string, modelId: string): Promise<SessionSnapshot> {
   return request(`/api/sessions/${sessionId}/model`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -471,7 +475,7 @@ export function setWorkspaceUiSettings(
 export function setSessionThinkingLevel(
   sessionId: string,
   thinkingLevel: string,
-): Promise<SessionState> {
+): Promise<SessionSnapshot> {
   return request(`/api/sessions/${sessionId}/thinking`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -504,10 +508,9 @@ export async function sendPrompt(
 
 export function removeQueuedPrompt(
   sessionId: string,
-  kind: "steer" | "followUp",
-  index: number,
-): Promise<SessionState> {
-  return request(`/api/sessions/${sessionId}/queue/${kind}/${index}`, {
+  submissionId: number,
+): Promise<SessionSnapshot> {
+  return request(`/api/sessions/${sessionId}/queue/${encodeURIComponent(String(submissionId))}`, {
     method: "DELETE",
   });
 }

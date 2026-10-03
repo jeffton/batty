@@ -168,7 +168,7 @@ describe("native Pi compaction", () => {
     expect(f.faux.state.callCount).toBe(calls + 2);
     expect(events).toMatchObject([
       { type: "compaction_start", reason: "overflow" },
-      { type: "compaction_end", reason: "overflow", aborted: false, willRetry: true },
+      { type: "compaction_end", reason: "overflow" },
     ]);
     expect(f.session.messages.at(-1)).toMatchObject({
       role: "assistant",

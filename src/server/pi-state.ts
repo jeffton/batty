@@ -40,6 +40,7 @@ interface AssistantLikeMessage {
 
 interface ToolResultLikeMessage {
   role: "toolResult";
+  battyDurableEntryId?: string;
   toolCallId: string;
   toolName: string;
   content: unknown;
@@ -330,6 +331,7 @@ export function normalizeMessage(
     return {
       id: messageId("tool", toolResult.timestamp, index),
       role: "toolResult",
+      durableEntryId: toolResult.battyDurableEntryId,
       timestamp: toolResult.timestamp,
       toolCallId: toolResult.toolCallId,
       toolName: toolResult.toolName,
@@ -477,8 +479,6 @@ export interface SessionStateInput {
   isSubagentSession?: boolean;
   isCronSession?: boolean;
   activeTools: SessionState["activeTools"];
-  revision?: number;
-  streamId?: string;
   imageResolver?: UiImageResolver;
 }
 
@@ -497,8 +497,6 @@ export function createSessionState(input: SessionStateInput): SessionState {
 
   return {
     id: input.id,
-    revision: input.revision,
-    streamId: input.streamId,
     sessionId: input.sessionId,
     workspaceId: input.workspaceId,
     cwd: input.cwd,

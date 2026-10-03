@@ -4,6 +4,7 @@ import { computed, ref, useId } from "vue";
 import SubagentSessionPopover from "@/client/components/SubagentSessionPopover.vue";
 import CodeBlock from "@/client/components/CodeBlock.vue";
 import { createHeadView } from "@/client/lib/tool-output";
+import { nestedToolRuns } from "@/client/lib/session-presentation";
 import type { ToolExecutionDetails, UiContentBlock } from "@/shared/types";
 
 type NestedCall = {
@@ -13,6 +14,7 @@ type NestedCall = {
   status: "running" | "ok" | "error" | "cancelled";
   durationMs?: number;
   error?: string;
+  output?: string;
   cost?: number;
   subagent?: { workspaceId?: string; sessionPath?: string };
 };
@@ -36,8 +38,47 @@ function popoverId(index: number): string {
 
 const expanded = ref(false);
 const codeView = computed(() => createHeadView(props.code.replaceAll("\r", "").trimEnd(), 10));
-const calls = computed(() => (props.details?.calls as NestedCall[] | undefined) ?? []);
+const canonicalCalls = computed(() => (props.details?.calls as NestedCall[] | undefined) ?? []);
+const nativeCalls = computed<NestedCall[]>(() =>
+  nestedToolRuns(props.details).map((tool) => ({
+    id: tool.toolCallId,
+    name: tool.toolName,
+    args: JSON.stringify(tool.args),
+    status: tool.status === "running" ? "running" : tool.isError ? "error" : "ok",
+    durationMs: tool.details?.durationMs as number | undefined,
+    error: tool.details?.error as string | undefined,
+    output: tool.blocks
+      .filter((block) => block.type === "text")
+      .map((block) => block.text)
+      .join("\n"),
+  })),
+);
+// Canonical SDK summaries include model spend and subagent destinations. Resource
+// receipts are a distinct progress facet; temporary duplicate SDK IDs are not join keys.
+const joinableIds = computed(() => {
+  const counts = new Map<string, number>();
+  for (const call of canonicalCalls.value) counts.set(call.id, (counts.get(call.id) ?? 0) + 1);
+  return new Set([...counts].filter(([, count]) => count === 1).map(([id]) => id));
+});
+const calls = computed(() => {
+  if (!canonicalCalls.value.length) return nativeCalls.value;
+  const receipts = new Map(nativeCalls.value.map((call) => [call.id, call]));
+  return canonicalCalls.value.map((call) => ({
+    ...call,
+    output: joinableIds.value.has(call.id) ? receipts.get(call.id)?.output : undefined,
+  }));
+});
+const unmatchedPreviews = computed(() =>
+  canonicalCalls.value.length
+    ? nativeCalls.value.filter(
+        (call) => !joinableIds.value.has(call.id) && (call.output || call.error),
+      )
+    : [],
+);
 const visibleCalls = computed(() => (expanded.value ? calls.value : calls.value.slice(-8)));
+const visiblePreviews = computed(() =>
+  expanded.value ? unmatchedPreviews.value : unmatchedPreviews.value.slice(-8),
+);
 const output = computed(() => {
   if (props.status === "running") return "";
   const [first, ...rest] = props.blocks;
@@ -58,7 +99,13 @@ const canExpand = computed(
     codeView.value.isTrimmed ||
     outputView.value.isTrimmed ||
     calls.value.length > 8 ||
-    calls.value.some((call) => call.args.length > 80 || call.error),
+    unmatchedPreviews.value.length > 8 ||
+    [...calls.value, ...unmatchedPreviews.value].some(
+      (call) =>
+        call.args.length > 80 ||
+        call.error ||
+        (call.output && createHeadView(call.output, 3).isTrimmed),
+    ),
 );
 const icons = { running: "…", ok: "✓", error: "✗", cancelled: "⊘" };
 
@@ -86,10 +133,15 @@ function cost(value: number): string {
       <div v-if="!expanded && calls.length > 8" class="codemode-display__muted">
         {{ calls.length - 8 }} earlier calls
       </div>
-      <!-- Pi gives concurrent running calls the same temporary ID; their array positions are stable. -->
       <div
         v-for="(call, index) in visibleCalls"
-        :key="expanded ? index : Math.max(0, calls.length - 8) + index"
+        :key="
+          canonicalCalls.length
+            ? expanded
+              ? index
+              : Math.max(0, calls.length - 8) + index
+            : call.id
+        "
         class="codemode-display__call"
       >
         <div class="codemode-display__summary">
@@ -128,10 +180,31 @@ function cost(value: number): string {
           </template>
         </div>
         <div v-if="expanded && call.error" class="codemode-display__error">{{ call.error }}</div>
+        <CodeBlock
+          v-if="call.output"
+          :code="expanded ? call.output : createHeadView(call.output, 3).text"
+          language="text"
+          compact
+        />
       </div>
       <div v-if="pricedCalls.length > 1" class="codemode-display__muted">
         Model calls: {{ cost(totalCost) }}
       </div>
+    </div>
+    <div v-for="call in visiblePreviews" :key="call.id" class="codemode-display__preview">
+      <div class="codemode-display__summary">
+        <span :class="`codemode-display__status--${call.status}`" :aria-label="call.status">{{
+          icons[call.status]
+        }}</span>
+        <span>{{ call.name }}</span>
+      </div>
+      <CodeBlock
+        v-if="call.output"
+        :code="expanded ? call.output : createHeadView(call.output, 3).text"
+        language="text"
+        compact
+      />
+      <div v-if="call.error" class="codemode-display__error">{{ call.error }}</div>
     </div>
     <CodeBlock v-if="output" :code="expanded ? output : outputView.text" :compact="props.compact" />
     <div v-if="!expanded && outputView.isTrimmed" class="codemode-display__muted">

@@ -267,7 +267,11 @@ describe("Batty native AgentSession tools", () => {
     await fs.writeFile(path.join(root, "example.txt"), "before\n");
     let steered = false;
     session.subscribe(async (event) => {
-      if (event.type === "message_end" && event.message.role === "toolResult" && !steered) {
+      if (
+        event.type === "message_end" &&
+        event.entry.model?.[0]?.role === "toolResult" &&
+        !steered
+      ) {
         steered = true;
         await session.prompt("Continue with the second edit", { streamingBehavior: "steer" });
       }

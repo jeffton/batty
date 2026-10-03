@@ -25,6 +25,38 @@ function userMessage(timestamp: number, text: string): unknown {
 }
 
 describe("getSessionMessagePage", () => {
+  it("pins count, offsets and older pages to the requested native entry boundary", () => {
+    const messages = Array.from({ length: 10 }, (_, index) =>
+      userMessage(index + 1, `message-${index + 1}`),
+    );
+    const session = {
+      sessionManager: {
+        getEntriesUpTo: (bound: number) =>
+          messages.slice(0, bound).map((message) => ({ type: "message", message })),
+      },
+    } as never;
+    expect(getSessionMessagePage(session, { throughEntryId: 6, limit: 2 })).toEqual({
+      messages: messages.slice(4, 6),
+      totalMessageCount: 6,
+      hasMoreMessages: true,
+      messageIndexOffset: 4,
+    });
+    expect(
+      getSessionMessagePage(session, { throughEntryId: 6, beforeMessageId: "user-6-5", limit: 3 }),
+    ).toEqual({
+      messages: messages.slice(2, 5),
+      totalMessageCount: 6,
+      hasMoreMessages: true,
+      messageIndexOffset: 2,
+    });
+    expect(getSessionMessagePage(session, { throughEntryId: 0 })).toEqual({
+      messages: [],
+      totalMessageCount: 0,
+      hasMoreMessages: false,
+      messageIndexOffset: 0,
+    });
+  });
+
   it("returns the most recent default message window", () => {
     const messages = Array.from({ length: RECENT_SESSION_MESSAGE_WINDOW + 2 }, (_, index) =>
       userMessage(index + 1, `message-${index + 1}`),

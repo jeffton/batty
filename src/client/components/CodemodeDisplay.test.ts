@@ -1,4 +1,4 @@
-import { mount } from "@vue/test-utils";
+import { mount, shallowMount } from "@vue/test-utils";
 import { h } from "vue";
 import { describe, expect, it } from "vite-plus/test";
 import CodemodeDisplay from "./CodemodeDisplay.vue";
@@ -9,7 +9,10 @@ const subagent = { workspaceId: "workspace", sessionPath: "/sessions/child.jsonl
 const call = { id: "parent/child", name: "subagent", args: "{}", status: "ok", subagent };
 const global = { stubs: { SubagentSessionPopover: true } };
 
-function display(calls = [call], allowSessionPopovers = true) {
+function display(
+  calls: Array<typeof call & { cost?: number }> = [call],
+  allowSessionPopovers = true,
+) {
   return mount(CodemodeDisplay, {
     props: { code: "", blocks: [], compact: false, details: { calls }, allowSessionPopovers },
     global,
@@ -86,5 +89,104 @@ describe("CodemodeDisplay subagent sessions", () => {
       global,
     });
     expect(wrapper.find("button[popovertarget]").exists()).toBe(false);
+  });
+});
+
+describe("canonical SDK summaries and native progress facets", () => {
+  it("preserves model spend and subagent destinations alongside unmatched native output", async () => {
+    const wrapper = display([
+      { ...call, id: "parent/?", status: "running", cost: 0.01 },
+      { ...call, id: "parent/?", status: "running", cost: 0.02 },
+    ]);
+    await wrapper.setProps({
+      details: {
+        calls: [
+          { ...call, id: "parent/?", status: "running", cost: 0.01 },
+          { ...call, id: "parent/?", status: "running", cost: 0.02 },
+        ],
+        nestedCalls: {
+          complete: false,
+          calls: [
+            { id: "parent/1", name: "subagent", status: "unfinished", output: "child progress" },
+          ],
+        },
+      },
+    });
+    expect(wrapper.findAllComponents(SubagentSessionPopover)).toHaveLength(2);
+    expect(wrapper.text()).toContain("Model calls: $0.03");
+    expect(wrapper.findAll(".codemode-display__call")).toHaveLength(2);
+    expect(wrapper.get(".codemode-display__preview").text()).toContain("child progress");
+  });
+
+  it("overlays native output only on an exact unique canonical identity", async () => {
+    const wrapper = display([{ ...call, id: "parent/1", cost: 0.02 }]);
+    await wrapper.setProps({
+      details: {
+        calls: [{ ...call, id: "parent/1", cost: 0.02 }],
+        nestedCalls: {
+          complete: true,
+          calls: [{ id: "parent/1", name: "subagent", status: "ok", output: "child result" }],
+        },
+      },
+    });
+    expect(wrapper.findAll(".codemode-display__call")).toHaveLength(1);
+    expect(wrapper.find(".codemode-display__preview").exists()).toBe(false);
+    expect(wrapper.text()).toContain("child result");
+    expect(wrapper.text()).toContain("$0.02");
+    expect(wrapper.getComponent(SubagentSessionPopover).props()).toMatchObject(subagent);
+  });
+});
+
+describe("native nested codemode progress", () => {
+  it("renders native unfinished output and completed status without retained calls", async () => {
+    const wrapper = shallowMount(CodemodeDisplay, {
+      props: {
+        code: "run()",
+        blocks: [],
+        compact: true,
+        status: "running",
+        details: {
+          nestedCalls: {
+            complete: false,
+            calls: [
+              {
+                id: "root/1",
+                name: "bash",
+                status: "unfinished",
+                arguments: { command: "build" },
+                output: "building",
+              },
+            ],
+          },
+        },
+      },
+      global: { stubs: { CodeBlock: { props: ["code"], template: "<pre>{{ code }}</pre>" } } },
+    });
+    expect(wrapper.text()).toContain("bash");
+    expect(wrapper.text()).toContain("building");
+    expect(wrapper.find('[aria-label="running"]').exists()).toBe(true);
+    await wrapper.setProps({
+      status: "success",
+      details: {
+        nestedCalls: {
+          complete: true,
+          calls: [
+            {
+              id: "root/1",
+              name: "bash",
+              status: "ok",
+              arguments: { command: "build" },
+              output: "built",
+              durationMs: 30,
+            },
+          ],
+        },
+      },
+    });
+    expect(wrapper.text()).toContain("built");
+    expect(wrapper.text()).not.toContain("building");
+    expect(wrapper.find('[aria-label="ok"]').exists()).toBe(true);
+    await wrapper.setProps({ details: {} });
+    expect(wrapper.text()).not.toContain("bash");
   });
 });

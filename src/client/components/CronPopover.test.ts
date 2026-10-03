@@ -1,3 +1,4 @@
+import { snapshotFromPresentation } from "@/client/lib/session-test-fixture";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -128,7 +129,7 @@ describe("CronPopover", () => {
         supportsImages: true,
       },
     ];
-    store.activeSession = {
+    store.activeSnapshot = snapshotFromPresentation({
       id: "web-1",
       sessionId: "session-1",
       workspaceId: "batty",
@@ -148,7 +149,7 @@ describe("CronPopover", () => {
       hasMoreMessages: false,
       messages: [],
       activeTools: [],
-    };
+    });
 
     const wrapper = mount(CronPopover, {
       props: {
@@ -383,7 +384,7 @@ describe("CronPopover", () => {
 
   it("shows running subagents for the current session and opens them", async () => {
     const store = useAppStore();
-    store.activeSession = {
+    store.activeSnapshot = snapshotFromPresentation({
       id: "web-parent",
       sessionId: "parent-1",
       workspaceId: "batty",
@@ -401,7 +402,7 @@ describe("CronPopover", () => {
       hasMoreMessages: false,
       messages: [],
       activeTools: [],
-    };
+    });
     listRunningSubagents.mockResolvedValue([
       {
         sessionId: "child-1",
@@ -440,7 +441,7 @@ describe("CronPopover", () => {
 
   it("includes recent subagents from the current session in logs without duplicates", async () => {
     const store = useAppStore();
-    store.activeSession = {
+    store.activeSnapshot = snapshotFromPresentation({
       id: "web-parent",
       sessionId: "parent-1",
       workspaceId: "batty",
@@ -510,7 +511,7 @@ describe("CronPopover", () => {
         },
       ],
       activeTools: [],
-    };
+    });
 
     const wrapper = mount(CronPopover, {
       props: { popoverId: "cron-popover", anchorName: "--cron-anchor" },

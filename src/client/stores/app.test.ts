@@ -1,16 +1,9 @@
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import {
-  getSession,
-  getSessionMessages,
-  listWorkspaceSessions,
-  openSessionById,
-  removeQueuedPrompt,
-  setSessionModel,
-} from "@/client/lib/api";
-import { readCachedSession } from "@/client/lib/cache";
+import { getSession, getSessionMessages } from "@/client/lib/api";
+import { writeCachedSession } from "@/client/lib/cache";
 import { useAppStore } from "@/client/stores/app";
-import type { SessionState, SessionSummary } from "@/shared/types";
+import type { SessionSnapshot, SessionSummary } from "@/shared/types";
 
 const { setWorkspaceAssistant } = vi.hoisted(() => ({
   setWorkspaceAssistant: vi.fn(),
@@ -94,471 +87,252 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   return { promise, resolve };
 }
 
-function makeSession(sessionId: string, overrides: Partial<SessionState> = {}): SessionState {
-  return {
-    id: `web-${sessionId}`,
-    sessionId,
-    workspaceId: "batty",
-    cwd: "/root/github/batty",
-    path: `/tmp/${sessionId}.jsonl`,
-    model: "openai/gpt-5",
-    modelLabel: "GPT-5 · openai",
-    thinkingLevel: "medium",
-    availableThinkingLevels: ["off", "medium"],
-    isStreaming: false,
-    pendingMessageCount: 0,
-    updatedAt: 1,
-    contextTokens: 100,
-    contextWindow: 1000,
-    contextPercent: 10,
-    totalMessageCount: 0,
-    hasMoreMessages: false,
-    messages: [],
-    activeTools: [],
-    ...overrides,
-  };
-}
+import { makeSnapshot } from "@/client/lib/session-test-fixture";
 
-describe("app store session streams", () => {
+describe("native app session streams", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     MockEventSource.instances = [];
     vi.clearAllMocks();
     vi.stubGlobal("EventSource", MockEventSource);
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      value: { reload: vi.fn() },
-    });
-    Object.defineProperty(window.navigator, "onLine", {
-      configurable: true,
-      value: true,
-    });
   });
 
-  it("ignores stale session stream callbacks after switching sessions", async () => {
+  it("discards callbacks from replaced sockets and hydrates a fresh base", async () => {
     const store = useAppStore();
-    const sessionA = makeSession("session-a");
-    const sessionB = makeSession("session-b");
+    await store.selectSession(makeSnapshot("a"));
+    const first = MockEventSource.instances[0]!;
+    const callback = first.onmessage!;
+    await store.selectSession(makeSnapshot("b"));
+    const second = MockEventSource.instances[1]!;
+    callback(
+      new MessageEvent("message", {
+        data: JSON.stringify({ type: "session", snapshot: makeSnapshot("a") }),
+      }),
+    );
+    expect(store.activeSession?.sessionId).toBe("b");
+    second.onopen?.(new Event("open"));
+    const base = makeSnapshot("b");
+    base.documents = { ...base.documents, "pi.live": { run: { taskId: 1 as never, inputs: [] } } };
+    second.onmessage?.(
+      new MessageEvent("message", { data: JSON.stringify({ type: "session", snapshot: base }) }),
+    );
+    expect(store.activeSession?.isStreaming).toBe(true);
+    expect(store.$state).not.toHaveProperty("activeSession");
+    expect(vi.mocked(writeCachedSession).mock.calls.at(-1)?.[0]).toHaveProperty("documents");
+    store.closeStream();
+  });
 
-    store.activeSession = sessionA;
-    store.openStream(sessionA);
-
-    const firstStream = MockEventSource.instances[0];
-    const staleMessageHandler = firstStream?.onmessage;
-    const staleErrorHandler = firstStream?.onerror;
-
-    store.activeSession = sessionB;
-    store.openStream(sessionB);
-
-    const secondStream = MockEventSource.instances[1];
-    secondStream?.onopen?.(new Event("open"));
-    expect(store.connectionState).toBe("online");
-
-    await staleMessageHandler?.({
-      data: JSON.stringify({ type: "status", isStreaming: true, pendingMessageCount: 1 }),
-    } as MessageEvent<string>);
-    await staleErrorHandler?.(new Event("error"));
-
-    expect(store.activeSession?.sessionId).toBe(sessionB.sessionId);
+  it("requires a new base after reconnect before accepting deltas", async () => {
+    const store = useAppStore();
+    await store.selectSession(makeSnapshot());
+    const source = MockEventSource.instances[0]!;
+    source.onopen?.(new Event("open"));
+    const send = (event: unknown) =>
+      source.onmessage?.(new MessageEvent("message", { data: JSON.stringify(event) }));
+    const base = makeSnapshot();
+    send({ type: "session", snapshot: base });
+    source.onopen?.(new Event("open"));
+    send({
+      type: "session-update",
+      metadata: base.metadata,
+      historyVersion: 0,
+      queuedClientMessageIds: {},
+      documents: [["s", ["pi.live", "run"], { taskId: 1, inputs: [] }]],
+    });
     expect(store.activeSession?.isStreaming).toBe(false);
-    expect(store.activeSession?.pendingMessageCount).toBe(0);
-    expect(store.connectionState).toBe("online");
+    send({ type: "session", snapshot: base });
+    expect(store.activeSession?.isStreaming).toBe(false);
+    store.closeStream();
   });
 
-  it("multiplexes workspace updates independently of the session stream", async () => {
+  it("rejects old history pages after reconnect or newer committed history", async () => {
     const store = useAppStore();
-    const session = makeSession("session-a");
-
-    store.openWorkspaceStream();
-    store.openWorkspaceStream();
-    const workspaceStream = MockEventSource.instances[0];
-    expect(MockEventSource.instances).toHaveLength(1);
-    workspaceStream?.onopen?.(new Event("open"));
-    expect(store.workspaceConnectionState).toBe("online");
-
-    await workspaceStream?.onmessage?.({
-      data: JSON.stringify({
-        workspaceId: "other",
-        streamId: "process-1",
-        revision: 2,
-        sessions: [],
-        cronJobs: [],
-        runningCronJobs: [],
-        cronRunLogs: [],
-        uiSettings: { easyMode: false },
-        isInProgress: true,
-        hasUnread: false,
-      }),
-    } as MessageEvent<string>);
-    expect(store.workspaceStatusByWorkspace.other?.isInProgress).toBe(true);
-
-    await workspaceStream?.onmessage?.({
-      data: JSON.stringify({
-        workspaceId: "other",
-        streamId: "process-1",
-        revision: 1,
-        sessions: [],
-        cronJobs: [],
-        runningCronJobs: [],
-        cronRunLogs: [],
-        uiSettings: { easyMode: false },
-        isInProgress: false,
-        hasUnread: false,
-      }),
-    } as MessageEvent<string>);
-    expect(store.workspaceStatusByWorkspace.other?.isInProgress).toBe(true);
-
-    await workspaceStream?.onmessage?.({
-      data: JSON.stringify({
-        workspaceId: "other",
-        streamId: "process-2",
-        revision: 1,
-        sessions: [],
-        cronJobs: [],
-        runningCronJobs: [],
-        cronRunLogs: [],
-        uiSettings: { easyMode: false },
-        isInProgress: false,
-        hasUnread: false,
-      }),
-    } as MessageEvent<string>);
-    expect(store.workspaceStatusByWorkspace.other?.isInProgress).toBe(false);
-
-    store.activeSession = session;
-    store.openStream(session);
-    const sessionStream = MockEventSource.instances[1];
-    expect(store.connectionState).toBe("connecting");
-    expect(store.workspaceConnectionState).toBe("online");
-
-    sessionStream?.onopen?.(new Event("open"));
-    workspaceStream?.onerror?.(new Event("error"));
-    expect(store.connectionState).toBe("online");
-    expect(store.workspaceConnectionState).toBe("connecting");
-  });
-
-  it("does not restore a stale working status from an in-flight session list", async () => {
-    const store = useAppStore();
-    const response = deferred<SessionSummary[]>();
-    vi.mocked(listWorkspaceSessions).mockReturnValueOnce(response.promise);
-    const loading = store.loadWorkspaceSessions("batty");
-    store.openWorkspaceStream();
-    const stream = MockEventSource.instances[0];
-    const idle: SessionSummary = {
-      id: "session-a",
-      sessionId: "session-a",
-      firstMessage: "prompt",
-      updatedAt: 200,
-      messageCount: 2,
-      workspaceId: "batty",
-      isInProgress: false,
-    };
-    stream?.onmessage?.({
-      data: JSON.stringify({
-        workspaceId: "batty",
-        streamId: "process-1",
-        revision: 1,
-        sessions: [idle],
-        cronJobs: [],
-        runningCronJobs: [],
-        cronRunLogs: [],
-        uiSettings: { easyMode: false },
-      }),
-    } as MessageEvent<string>);
-    response.resolve([{ ...idle, updatedAt: 300, isInProgress: true }]);
+    const base = makeSnapshot();
+    base.metadata.hasMoreMessages = true;
+    base.messages = [{ role: "user", id: "entry-10", timestamp: 1, blocks: [] }];
+    await store.selectSession(base);
+    const pending = deferred<Awaited<ReturnType<typeof getSessionMessages>>>();
+    vi.mocked(getSessionMessages).mockReturnValueOnce(pending.promise);
+    const loading = store.loadOlderMessages();
+    store.activeSnapshot = { ...base, historyVersion: 12 };
+    pending.resolve({
+      messages: [{ role: "user", id: "entry-1", timestamp: 1, blocks: [] }],
+      historyVersion: 10,
+      hasMoreMessages: false,
+      totalMessageCount: 2,
+    });
     await loading;
-
-    expect(store.sessionsByWorkspace.batty?.[0]?.isInProgress).toBe(false);
+    expect(store.activeSession?.messages).toHaveLength(1);
+    store.closeStream();
   });
 
-  it("shows an idle workspace summary without fetching the active session", () => {
+  it("does not cache live-only partials or queue image deltas", async () => {
     const store = useAppStore();
-    const working = makeSession("session-a", { isStreaming: true, revision: 5 });
-    store.activeSession = working;
-    store.selectedWorkspaceId = "batty";
-    store.openWorkspaceStream();
-    const stream = MockEventSource.instances[0];
-    stream?.onmessage?.({
-      data: JSON.stringify({
-        workspaceId: "batty",
-        streamId: "process-1",
-        revision: 1,
-        sessions: [
-          {
-            id: working.path!,
-            sessionId: working.sessionId,
-            path: working.path,
-            firstMessage: "prompt",
-            updatedAt: working.updatedAt,
-            messageCount: working.totalMessageCount,
-            workspaceId: working.workspaceId,
-            isInProgress: false,
-          },
+    const base = makeSnapshot();
+    base.documents = { ...base.documents, "pi.live": { run: { taskId: 1 as never, inputs: [] } } };
+    await store.selectSession(base);
+    const source = MockEventSource.instances[0]!;
+    const send = (event: unknown) =>
+      source.onmessage?.(new MessageEvent("message", { data: JSON.stringify(event) }));
+    source.onopen?.(new Event("open"));
+    send({ type: "session", snapshot: base });
+    vi.mocked(writeCachedSession).mockClear();
+    for (let index = 0; index < 10; index++) {
+      send({
+        type: "session-update",
+        metadata: { ...base.metadata, updatedAt: index + 2 },
+        queuedClientMessageIds: { "42": "client" },
+        historyVersion: 0,
+        documents: [
+          [
+            "s",
+            ["pi.inbox", "items"],
+            [
+              {
+                id: 42,
+                mode: "followUp",
+                content: [{ type: "image", mimeType: "image/png", data: "pixels".repeat(1000) }],
+              },
+            ],
+          ],
         ],
-        cronJobs: [],
-        runningCronJobs: [],
-        cronRunLogs: [],
-        uiSettings: { easyMode: false },
-      }),
-    } as MessageEvent<string>);
-
-    expect(store.workspaceSessions[0]?.isInProgress).toBe(false);
-    expect(getSession).not.toHaveBeenCalled();
+      });
+    }
+    expect(writeCachedSession).not.toHaveBeenCalled();
+    send({
+      type: "session-update",
+      metadata: base.metadata,
+      historyVersion: 0,
+      queuedClientMessageIds: {},
+      documents: [["d", ["pi.live", "run"]]],
+    });
+    expect(writeCachedSession).toHaveBeenCalledTimes(1);
+    store.closeStream();
   });
 
-  it("does not replace a newer stream update with an older refresh response", async () => {
+  it("a stale HTTP snapshot cannot replace a newer live delta at the same history version", async () => {
     const store = useAppStore();
-    const working = makeSession("session-a", { isStreaming: true, revision: 5 });
-    store.activeSession = working;
-    const response = deferred<SessionState>();
-    vi.mocked(getSession).mockReturnValueOnce(response.promise);
+    const base = makeSnapshot();
+    await store.selectSession(base);
+    const source = MockEventSource.instances[0]!;
+    const send = (event: unknown) =>
+      source.onmessage?.(new MessageEvent("message", { data: JSON.stringify(event) }));
+    source.onopen?.(new Event("open"));
+    send({ type: "session", snapshot: base });
+    const pending = deferred<SessionSnapshot>();
+    vi.mocked(getSession).mockReturnValueOnce(pending.promise);
     const refresh = store.refreshActiveSession();
-    store.activeSession = { ...working, revision: 7, isStreaming: true };
-    response.resolve({ ...working, revision: 6, isStreaming: false });
+    send({
+      type: "session-update",
+      metadata: base.metadata,
+      historyVersion: 0,
+      queuedClientMessageIds: {},
+      documents: [["s", ["pi.live", "run"], { taskId: 7, inputs: [] }]],
+    });
+    pending.resolve(base);
     await refresh;
+    expect(store.activeSnapshot?.documents["pi.live"].run?.taskId).toBe(7);
     expect(store.activeSession?.isStreaming).toBe(true);
+    store.closeStream();
   });
 
-  it("ignores an old-incarnation refresh after a new stream reset", async () => {
+  it("discards ahead-of-SSE HTTP snapshots before applying pending append frames", async () => {
     const store = useAppStore();
-    const working = makeSession("session-a", { streamId: "old", revision: 42, isStreaming: true });
-    store.activeSession = working;
-    const response = deferred<SessionState>();
-    vi.mocked(getSession).mockReturnValueOnce(response.promise);
-    const refresh = store.refreshActiveSession();
-
-    store.activeSession = { ...working, streamId: "new", revision: 0, isStreaming: false };
-    response.resolve({ ...working, isStreaming: true });
-    await refresh;
-
-    expect(store.activeSession?.streamId).toBe("new");
-    expect(store.activeSession?.isStreaming).toBe(false);
-  });
-
-  it("ignores an old-incarnation queued-prompt response", async () => {
-    const store = useAppStore();
-    const old = makeSession("session-a", { streamId: "old", revision: 5 });
-    store.activeSession = old;
-    const response = deferred<SessionState>();
-    vi.mocked(removeQueuedPrompt).mockReturnValueOnce(response.promise);
-    const removal = store.removeQueuedPrompt("followUp", 0);
-
-    store.activeSession = { ...old, streamId: "new", revision: 0 };
-    response.resolve(old);
-    await removal;
-    expect(store.activeSession?.streamId).toBe("new");
-  });
-
-  it("keeps one stream when the same session is selected again", () => {
-    const store = useAppStore();
-    const session = makeSession("session-a", { revision: 12 });
-
-    store.activeSession = session;
-    store.openStream(session);
-    store.openStream(session);
-
-    expect(MockEventSource.instances).toHaveLength(1);
-    expect(MockEventSource.instances[0]?.closed).toBe(false);
-    expect(MockEventSource.instances[0]?.url).toContain("afterRevision=12");
-  });
-
-  it("applies events from the current session stream", async () => {
-    const store = useAppStore();
-    const session = makeSession("session-a");
-
-    store.activeSession = session;
-    store.openStream(session);
-
-    const stream = MockEventSource.instances[0];
-    await stream?.onmessage?.({
-      data: JSON.stringify({ type: "status", isStreaming: true, pendingMessageCount: 2 }),
-    } as MessageEvent<string>);
-
-    expect(store.activeSession?.sessionId).toBe(session.sessionId);
-    expect(store.activeSession?.isStreaming).toBe(true);
-    expect(store.activeSession?.pendingMessageCount).toBe(2);
-  });
-
-  it("marks the active session summary idle when a reset shares its final-message timestamp", async () => {
-    const store = useAppStore();
-    const working = makeSession("session-a", { isStreaming: true, updatedAt: 10 });
-    store.activeSession = working;
-    store.sessionsByWorkspace = {
-      batty: [
+    const base = makeSnapshot();
+    base.documents = {
+      ...base.documents,
+      "pi.live": {
+        run: { taskId: 1 as never, inputs: [] },
+        generation: {
+          attempt: 1,
+          message: { timestamp: 1, content: [{ type: "text", text: "prefix" }] } as never,
+        },
+      },
+    };
+    await store.selectSession(base);
+    const source = MockEventSource.instances[0]!;
+    const send = (event: unknown) =>
+      source.onmessage?.(new MessageEvent("message", { data: JSON.stringify(event) }));
+    source.onopen?.(new Event("open"));
+    send({ type: "session", snapshot: base });
+    const future = makeSnapshot(undefined, {
+      historyVersion: 8,
+      messages: [
         {
-          id: working.path!,
-          sessionId: working.sessionId,
-          path: working.path,
-          firstMessage: "prompt",
-          updatedAt: working.updatedAt,
-          messageCount: working.totalMessageCount,
-          workspaceId: working.workspaceId,
-          isInProgress: true,
-          hasUnread: false,
+          id: "answer-8",
+          role: "assistant",
+          timestamp: 2,
+          turnPhase: "final",
+          blocks: [{ type: "text", text: "prefix next" }],
         },
       ],
-    };
-    store.openStream(working);
-
-    await MockEventSource.instances[0]?.onmessage?.({
-      data: JSON.stringify({ type: "reset", state: { ...working, isStreaming: false } }),
-    } as MessageEvent<string>);
-
-    expect(store.sessionsByWorkspace.batty?.[0]?.isInProgress).toBe(false);
-  });
-
-  it("does not roll session state back when the current stream reconnects", () => {
-    const store = useAppStore();
-    const session = makeSession("session-a", { isStreaming: true, pendingMessageCount: 2 });
-    store.activeSession = session;
-    store.openStream(session);
-
-    MockEventSource.instances[0]?.onerror?.(new Event("error"));
-
-    expect(store.activeSession).toEqual(session);
-    expect(readCachedSession).not.toHaveBeenCalled();
-    expect(store.connectionState).toBe("connecting");
-  });
-
-  it("deduplicates concurrent opens for the same session", async () => {
-    const response = deferred<SessionState>();
-    const session = makeSession("session-a");
-    vi.mocked(openSessionById).mockReturnValue(response.promise);
-    const store = useAppStore();
-
-    const first = store.resumeSessionById("batty", "session-a", { shouldSelect: () => false });
-    const second = store.resumeSessionById("batty", "session-a", { shouldSelect: () => false });
-    response.resolve(session);
-
-    await expect(first).resolves.toEqual(session);
-    await expect(second).resolves.toEqual(session);
-    expect(openSessionById).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not select a resumed session when its commit guard is stale", async () => {
-    const store = useAppStore();
-    const sessionA = makeSession("session-a");
-    const sessionB = makeSession("session-b");
-    vi.mocked(openSessionById).mockResolvedValue(sessionA);
-    store.activeSession = sessionB;
-
-    await store.resumeSessionById("batty", "session-a", { shouldSelect: () => false });
-
-    expect(store.activeSession).toEqual(sessionB);
-    expect(MockEventSource.instances).toHaveLength(0);
-  });
-
-  it("preserves live state while applying a model response", async () => {
-    const response = deferred<SessionState>();
-    vi.mocked(setSessionModel).mockReturnValue(response.promise);
-    const live = { id: "live", role: "assistant", timestamp: 3, blocks: [] } as never;
-    const store = useAppStore();
-    store.activeSession = makeSession("session-a", { model: "old-model" });
-
-    const update = store.setModel("new-model");
-    store.activeSession = { ...store.activeSession, messages: [live], isStreaming: true };
-    response.resolve(makeSession("session-a", { model: "new-model", modelLabel: "New model" }));
-    await update;
-
-    expect(store.activeSession.model).toBe("new-model");
-    expect(store.activeSession.messages).toEqual([live]);
-    expect(store.activeSession.isStreaming).toBe(true);
-  });
-
-  it("ignores an older model response after a newer selection", async () => {
-    const first = deferred<SessionState>();
-    const second = deferred<SessionState>();
-    vi.mocked(setSessionModel)
-      .mockReturnValueOnce(first.promise)
-      .mockReturnValueOnce(second.promise);
-    const store = useAppStore();
-    store.activeSession = makeSession("session-a", { model: "old-model" });
-
-    const firstUpdate = store.setModel("first-model");
-    const secondUpdate = store.setModel("second-model");
-    first.resolve(makeSession("session-a", { model: "first-model" }));
-    await firstUpdate;
-    second.resolve(makeSession("session-a", { model: "second-model" }));
-    await secondUpdate;
-
-    expect(setSessionModel).toHaveBeenNthCalledWith(1, "web-session-a", "first-model");
-    expect(setSessionModel).toHaveBeenNthCalledWith(2, "web-session-a", "second-model");
-    expect(store.activeSession.model).toBe("second-model");
-  });
-
-  it("merges older messages into current live session state", async () => {
-    const page = deferred<{
-      messages: SessionState["messages"];
-      totalMessageCount: number;
-      hasMoreMessages: boolean;
-    }>();
-    vi.mocked(getSessionMessages).mockReturnValue(page.promise);
-    const recent = { id: "recent", role: "user", timestamp: 2, blocks: [] } as never;
-    const live = { id: "live", role: "assistant", timestamp: 3, blocks: [] } as never;
-    const older = { id: "older", role: "user", timestamp: 1, blocks: [] } as never;
-    const store = useAppStore();
-    store.activeSession = makeSession("session-a", {
-      messages: [recent],
-      totalMessageCount: 2,
-      hasMoreMessages: true,
     });
-
-    const loading = store.loadOlderMessages();
-    store.activeSession = { ...store.activeSession, messages: [recent, live], isStreaming: true };
-    page.resolve({ messages: [older], totalMessageCount: 3, hasMoreMessages: false });
-    await loading;
-
-    expect(store.activeSession.messages.map((message) => message.id)).toEqual([
-      "older",
-      "recent",
-      "live",
+    vi.mocked(getSession).mockResolvedValueOnce(future);
+    await store.refreshActiveSession();
+    expect(store.activeSession?.messages).toEqual([]);
+    expect(store.activeSession?.activeAssistant?.blocks).toEqual([
+      { type: "text", text: "prefix" },
     ]);
-    expect(store.activeSession.isStreaming).toBe(true);
+    send({
+      type: "session-update",
+      metadata: base.metadata,
+      historyVersion: 0,
+      queuedClientMessageIds: {},
+      documents: [["a", ["pi.live", "generation", "message", "content", 0, "text"], " next"]],
+    });
+    expect(store.activeSession?.activeAssistant?.blocks).toEqual([
+      { type: "text", text: "prefix next" },
+    ]);
+    expect(store.activeSession?.messages).toEqual([]);
+    store.closeStream();
   });
 
-  it("marks one workspace as the assistant", async () => {
+  it("pins detail hydration to captured stream history and rejects future answers", async () => {
     const store = useAppStore();
-    store.workspaces = [
-      {
-        id: "batty",
-        label: "batty",
-        path: "/root/github/batty",
-        kind: "workspace",
-        isPinned: false,
-        isAssistant: false,
-      },
-      {
-        id: "notes",
-        label: "notes",
-        path: "/root/github/notes",
-        kind: "workspace",
-        isPinned: false,
-        isAssistant: true,
-      },
-    ];
+    await store.selectSession(makeSnapshot());
+    vi.mocked(getSessionMessages).mockResolvedValueOnce({
+      historyVersion: 8,
+      totalMessageCount: 1,
+      hasMoreMessages: false,
+      messages: [
+        {
+          id: "answer-8",
+          role: "assistant",
+          timestamp: 2,
+          turnPhase: "final",
+          blocks: [{ type: "text", text: "future answer" }],
+        },
+      ],
+    });
+    await store.enhanceSessionMessages(store.activeSession!);
+    expect(getSessionMessages).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: "web-session-a" }),
+      { throughEntryId: 0, limit: 25 },
+    );
+    expect(store.activeSession?.messages).toEqual([]);
+    expect(store.activeSnapshot?.historyVersion).toBe(0);
+    store.closeStream();
+  });
 
-    setWorkspaceAssistant.mockResolvedValue([
-      {
-        id: "batty",
-        label: "batty",
-        path: "/root/github/batty",
-        kind: "workspace",
-        isPinned: false,
-        isAssistant: true,
-      },
-      {
-        id: "notes",
-        label: "notes",
-        path: "/root/github/notes",
-        kind: "workspace",
-        isPinned: false,
-        isAssistant: false,
-      },
-    ]);
-
-    await store.toggleWorkspaceAssistant("batty");
-
-    expect(setWorkspaceAssistant).toHaveBeenCalledWith("batty");
-    expect(store.workspaces.find((workspace) => workspace.id === "batty")?.isAssistant).toBe(true);
-    expect(store.workspaces.find((workspace) => workspace.id === "notes")?.isAssistant).toBe(false);
+  it("detail loading preserves newer native documents", async () => {
+    const store = useAppStore();
+    await store.selectSession(makeSnapshot());
+    const pending = deferred<Awaited<ReturnType<typeof getSessionMessages>>>();
+    vi.mocked(getSessionMessages).mockReturnValueOnce(pending.promise);
+    const loading = store.enhanceSessionMessages(store.activeSession!);
+    const current = store.activeSnapshot!;
+    store.activeSnapshot = {
+      ...current,
+      documents: { ...current.documents, "pi.live": { run: { taskId: 1 as never, inputs: [] } } },
+    };
+    pending.resolve({
+      messages: [],
+      historyVersion: 0,
+      totalMessageCount: 0,
+      hasMoreMessages: false,
+    });
+    await loading;
+    expect(store.activeSession?.isStreaming).toBe(true);
+    store.closeStream();
   });
 });

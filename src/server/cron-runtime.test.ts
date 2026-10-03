@@ -94,7 +94,7 @@ describe("cron runtime", () => {
     await service.dispose();
   });
 
-  it("marks persisted running logs as interrupted after a restart", async () => {
+  it("recovers the same persisted run and immutable trigger after checkpoint", async () => {
     const config = await createConfig();
     const service = new CronService(config);
     const result = deferred<{ sessionId: string; sessionPath: string }>();
@@ -124,14 +124,29 @@ describe("cron runtime", () => {
       }),
     );
 
+    const original = service.listRecentRunLogs("alpha")[0]!;
+    service.checkpoint();
+    await service.updateJob(job.id, { prompt: "Edited prompt" });
     const restarted = new CronService(config);
-    await restarted.initialize();
-    expect(restarted.listRecentRunLogs("alpha")[0]).toMatchObject({
-      status: "error",
-      sessionId: "interrupted-session",
-      sessionPath: "/tmp/interrupted.jsonl",
-      error: "Batty stopped before this cron run completed",
+    const recovered = vi.fn(async (snapshot, context) => {
+      expect(snapshot.prompt).toBe("Long-running job");
+      expect(context.runId).toBe(original.runId);
+      expect(context.recovery).toMatchObject({
+        sessionId: "interrupted-session",
+        sessionPath: "/tmp/interrupted.jsonl",
+      });
+      return { sessionId: "interrupted-session", sessionPath: "/tmp/interrupted.jsonl" };
     });
+    restarted.setRunner({ run: recovered });
+    await restarted.initialize();
+    await vi.waitFor(() =>
+      expect(restarted.listRecentRunLogs("alpha")[0]).toMatchObject({
+        runId: original.runId,
+        status: "success",
+        sessionId: "interrupted-session",
+      }),
+    );
+    expect(recovered).toHaveBeenCalledOnce();
 
     result.resolve({ sessionId: "interrupted-session", sessionPath: "/tmp/interrupted.jsonl" });
     await pending;
@@ -235,7 +250,7 @@ describe("cron runtime", () => {
     await service.dispose();
   });
 
-  it("persists queued delivery without resuming it after restart", async () => {
+  it("resumes durable queued delivery after restart", async () => {
     const config = await createConfig();
     const first = new CronService(config);
     const blockedDelivery = deferred<void>();
@@ -273,15 +288,15 @@ describe("cron runtime", () => {
     const restarted = new CronService(config);
     restarted.setRunner({ run: vi.fn(), deliver: delivered });
     await restarted.initialize();
-    expect(delivered).not.toHaveBeenCalled();
-    expect(restarted.listRecentRunLogs()[0]?.pendingDelivery).toEqual(
-      expect.objectContaining({ parentSessionId: "parent-session" }),
+    await vi.waitFor(() => expect(delivered).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(restarted.listRecentRunLogs()[0]?.pendingDelivery).toBeUndefined(),
     );
     blockedDelivery.resolve(undefined);
     await restarted.dispose();
   });
 
-  it("does not deliver archived queue entries after reloads or a later run completes", async () => {
+  it("recovers pending delivery even after its job was deleted, without duplicate retries", async () => {
     const config = await createConfig();
     const store = new CronStore(config);
     await store.startRun({
@@ -321,102 +336,55 @@ describe("cron runtime", () => {
       schedule: { kind: "every", every: "1h" },
     });
     await service.updateJob(job.id, { prompt: "Edited current detached work" });
-    expect(delivered).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(delivered).toHaveBeenCalledOnce());
 
     await (service as unknown as { triggerJob(jobId: string): Promise<void> }).triggerJob(job.id);
-    await vi.waitFor(() => expect(delivered).toHaveBeenCalledOnce());
-    await vi.waitFor(() => expect(service.activeTurns).toBe(0));
-    expect(delivered.mock.calls[0]?.[0]).not.toMatchObject({ runId: "archived-delivery" });
+    await vi.waitFor(() => expect(delivered).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(service.listRecentRunLogs()[0]?.pendingDelivery).toBeUndefined());
+    expect(delivered.mock.calls[0]?.[0]).toMatchObject({ runId: "archived-delivery" });
     expect(
-      service.listRecentRunLogs().find((run) => run.runId === "archived-delivery"),
-    ).toMatchObject({
-      pendingDelivery: { parentSessionId: "archived-parent" },
-    });
+      service.listRecentRunLogs().find((run) => run.runId === "archived-delivery")?.pendingDelivery,
+    ).toBeUndefined();
     await service.dispose();
   });
 
-  it("drains admitted runs and deliveries without admitting new cron work", async () => {
+  it("checkpoints scheduling without waiting for runs or discarding pending delivery", async () => {
     const service = new CronService(await createConfig());
-    const runResult = deferred<{ sessionId: string; sessionPath: string }>();
-    const deliveryResult = deferred<void>();
+    const result = deferred<{ sessionId: string; sessionPath: string }>();
     const run = vi.fn(async (_job, context) => {
-      await context.queueResultDelivery("parent-session");
-      return runResult.promise;
+      await context.onSessionStarted({ sessionId: "child", sessionPath: "/tmp/child.jsonl" });
+      await context.queueResultDelivery("parent");
+      return result.promise;
     });
-    const deliver = vi.fn(() => deliveryResult.promise);
+    const deliver = vi.fn(async () => undefined);
     service.setRunner({ run, deliver });
     const job = await service.createJob({
       workspaceId: "alpha",
-      prompt: "Drain work",
+      prompt: "Checkpoint work",
       model: "openai/gpt-5",
       thinkingLevel: "medium",
       session: { kind: "daily-detached" },
       schedule: { kind: "every", every: "1h" },
     });
-    const trigger = (service as unknown as { triggerJob(jobId: string): Promise<void> }).triggerJob(
+    const trigger = (service as unknown as { triggerJob(id: string): Promise<void> }).triggerJob(
       job.id,
     );
-    await vi.waitFor(() => expect(run).toHaveBeenCalledOnce());
-    expect(service.activeTurns).toBe(1);
-
-    service.beginDrain();
+    await vi.waitFor(() => expect(service.listRecentRunLogs()[0]?.pendingDelivery).toBeDefined());
+    service.checkpoint();
     expect(
       (service as unknown as { scheduledHandles: Map<string, unknown> }).scheduledHandles.size,
     ).toBe(0);
-    await (service as unknown as { triggerJob(jobId: string): Promise<void> }).triggerJob(job.id);
+    await (service as unknown as { triggerJob(id: string): Promise<void> }).triggerJob(job.id);
     expect(run).toHaveBeenCalledOnce();
-
-    runResult.resolve({ sessionId: "cron-session", sessionPath: "/tmp/cron-session.jsonl" });
+    result.resolve({ sessionId: "child", sessionPath: "/tmp/child.jsonl" });
     await trigger;
-    await vi.waitFor(() => expect(deliver).toHaveBeenCalledOnce());
-    expect(service.activeTurns).toBe(1);
-    deliveryResult.resolve(undefined);
-    await vi.waitFor(() => expect(service.activeTurns).toBe(0));
+    expect(deliver).not.toHaveBeenCalled();
+    expect(service.listRecentRunLogs()[0]).toMatchObject({
+      status: "running",
+      sessionId: "child",
+      pendingDelivery: { parentSessionId: "parent" },
+    });
     await service.dispose();
-  });
-
-  it("keeps admitted delivery work active through retries while draining", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
-    vi.useFakeTimers();
-    try {
-      const service = new CronService(await createConfig());
-      const runResult = deferred<{ sessionId: string; sessionPath: string }>();
-      const deliver = vi
-        .fn<(run: CronRunLog, delivery: PendingCronRunDelivery) => Promise<void>>()
-        .mockRejectedValueOnce(new Error("delivery unavailable"))
-        .mockResolvedValueOnce(undefined);
-      service.setRunner({
-        run: async (_job, context) => {
-          await context.queueResultDelivery("parent-session");
-          return runResult.promise;
-        },
-        deliver,
-      });
-      const job = await service.createJob({
-        workspaceId: "alpha",
-        prompt: "Drain retry work",
-        model: "openai/gpt-5",
-        thinkingLevel: "medium",
-        session: { kind: "daily-detached" },
-        schedule: { kind: "every", every: "1h" },
-      });
-      const trigger = (
-        service as unknown as { triggerJob(jobId: string): Promise<void> }
-      ).triggerJob(job.id);
-      await vi.waitFor(() => expect(service.activeTurns).toBe(1));
-      service.beginDrain();
-      runResult.resolve({ sessionId: "cron-session", sessionPath: "/tmp/cron-session.jsonl" });
-      await trigger;
-      await vi.waitFor(() => expect(deliver).toHaveBeenCalledOnce());
-      expect(service.activeTurns).toBe(1);
-
-      await vi.advanceTimersByTimeAsync(5_000);
-      await vi.waitFor(() => expect(deliver).toHaveBeenCalledTimes(2));
-      await vi.waitFor(() => expect(service.activeTurns).toBe(0));
-      await service.dispose();
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it.each([

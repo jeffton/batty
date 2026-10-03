@@ -6,14 +6,14 @@ import type {
   Model,
   TextContent,
 } from "@earendil-works/pi-ai";
-import type {
-  AgentSessionEvent,
-  ResourceLoader,
-  SettingsManager,
-} from "@earendil-works/pi-coding-agent";
+import type { ResourceLoader, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { PromptDisposition, QueuedPrompt } from "@/shared/types";
 import type { SessionResources } from "./session-resources";
 import type { SessionStore } from "./session-store";
+import type { AgentEvent, ConversationView, SubmissionRecord } from "@earendil-works/pi-durable";
+
+/** Native committed semantics plus Batty's receipt-aware settled boundary. */
+export type SessionControllerEvent = AgentEvent | { type: "agent_settled" };
 
 export interface AgentSessionPromptOptions {
   images?: ImageContent[];
@@ -45,6 +45,7 @@ export interface AgentSessionController {
   readonly model: Model<Api>;
   readonly thinkingLevel: ThinkingLevel;
   readonly isStreaming: boolean;
+  readonly isClosing: boolean;
   readonly isCompacting: boolean;
   readonly pendingMessageCount: number;
   readonly messages: AgentMessage[];
@@ -52,6 +53,7 @@ export interface AgentSessionController {
   readonly resourceLoader: ResourceLoader;
   readonly streamingMessage: AssistantMessage | undefined;
   readonly runningTools: ActiveSessionTool[];
+  readonly view: ConversationView;
   regularToolNames: Set<string>;
   getAvailableThinkingLevels(): ThinkingLevel[];
   getActiveToolNames(): string[];
@@ -59,10 +61,10 @@ export interface AgentSessionController {
   setActiveToolsByName(names: string[]): Promise<void>;
   setModel(model: Model<Api>): Promise<void>;
   setThinkingLevel(level: ThinkingLevel): Promise<void>;
-  subscribe(listener: (event: AgentSessionEvent) => void | Promise<void>): () => void;
+  subscribe(listener: (event: SessionControllerEvent) => void | Promise<void>): () => void;
   prompt(text: string, options?: AgentSessionPromptOptions): Promise<PromptDisposition>;
   getQueuedPrompts(): QueuedPrompt[];
-  removeQueuedPrompt(kind: "steer" | "followUp", index: number): Promise<void>;
+  removeQueuedPrompt(submissionId: number): Promise<void>;
   reloadResources(): Promise<void>;
   refreshContext(): Promise<void>;
   requestTurnEnd(): void;
@@ -73,6 +75,11 @@ export interface AgentSessionController {
   abortCompaction(): void;
   compact(instructions?: string): Promise<void>;
   queueCustomSteeringMessage(message: CustomSessionInput): Promise<void>;
+  /** Inspect one deterministic native custom-input admission attempt. */
+  getCustomInputSubmission(
+    message: CustomSessionInput & { details: { battyResultReplyId: string } },
+    attempt?: number,
+  ): Promise<SubmissionRecord | undefined>;
   sendCustomMessage(
     message: CustomSessionInput,
     options?: {

@@ -2,6 +2,39 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { parseClientMessageId, registerSessionRoutes } from "./sessions";
 
 describe("session routes", () => {
+  it("forwards the captured native history boundary to message paging", async () => {
+    const app = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
+    const page = { historyVersion: 12, messages: [], totalMessageCount: 0, hasMoreMessages: false };
+    const getSessionMessages = vi.fn(() => page);
+    registerSessionRoutes({
+      app,
+      config: {},
+      service: { hasSession: () => true, getSessionMessages },
+      routePath: (path: string) => path,
+    } as never);
+    const handler = app.get.mock.calls.find(
+      ([route]) => route === "/api/sessions/:sessionId/messages",
+    )![1];
+    await expect(
+      handler({
+        params: { sessionId: "session" },
+        query: {
+          throughEntryId: "12",
+          limit: "3",
+          before: "user-10-2",
+        },
+      }),
+    ).resolves.toEqual(page);
+    expect(getSessionMessages).toHaveBeenCalledWith("session", {
+      throughEntryId: 12,
+      limit: 3,
+      beforeMessageId: "user-10-2",
+    });
+    await expect(
+      handler({ params: { sessionId: "session" }, query: { throughEntryId: "bad" } }),
+    ).rejects.toMatchObject({ statusCode: 400 });
+  });
+
   it("returns resources for the requested session", async () => {
     const app = { get: vi.fn(), post: vi.fn(), delete: vi.fn() };
     const resources = {

@@ -1,5 +1,7 @@
 import type { McpExposure, McpServerConfig } from "@earendil-works/pi-coding-agent";
 import type { AppAppearance } from "./appearance";
+import type { AgentState, InboxState, LiveState, UsageState } from "@earendil-works/pi-durable";
+import type { Op } from "@earendil-works/chord/delta";
 
 export type UiContentBlock =
   | { type: "text"; text: string }
@@ -68,6 +70,8 @@ export type UiMessage =
       id: string;
       role: "toolResult";
       timestamp: number;
+      /** Native committed result identity; tool call IDs may repeat across rounds. */
+      durableEntryId?: string;
       toolCallId: string;
       toolName: string;
       blocks: UiContentBlock[];
@@ -96,6 +100,7 @@ export type UiMessage =
 
 export interface ActiveToolRun {
   toolCallId: string;
+  parentToolCallId?: string;
   toolName: string;
   args: Record<string, unknown>;
   blocks: UiContentBlock[];
@@ -210,6 +215,8 @@ export interface PendingCronRunDelivery {
 }
 
 export interface CronRunLog extends RunningCronJob {
+  /** Immutable trigger configuration, independent of later job edits or deletion. */
+  jobSnapshot?: CronJob;
   status: "running" | "success" | "error";
   completedAtMs?: number;
   durationMs?: number;
@@ -263,6 +270,8 @@ export interface UpdateCronJobInput {
 }
 
 export interface QueuedPrompt {
+  submissionId: number;
+  blocks?: UiContentBlock[];
   kind: "steer" | "followUp";
   index: number;
   text: string;
@@ -277,8 +286,6 @@ export type PromptSubmissionResult = PromptDisposition & { clientMessageId: stri
 
 export interface SessionState {
   id: string;
-  revision?: number;
-  streamId?: string;
   sessionId: string;
   workspaceId: string;
   cwd: string;
@@ -308,8 +315,29 @@ export interface SessionState {
 
 export type SessionStateMetadata = Omit<
   SessionState,
-  "messages" | "messagesDetailLevel" | "activeAssistant" | "activeTools"
+  | "messages"
+  | "activeAssistant"
+  | "activeTools"
+  | "isStreaming"
+  | "isCompacting"
+  | "pendingMessageCount"
+  | "queuedPrompts"
 >;
+
+export interface SessionDocuments {
+  readonly "pi.live": Readonly<LiveState>;
+  readonly "pi.inbox": Readonly<InboxState>;
+  readonly "pi.agent": Readonly<AgentState>;
+  readonly "pi.usage": Readonly<UsageState>;
+}
+
+export interface SessionSnapshot {
+  metadata: SessionStateMetadata;
+  documents: SessionDocuments;
+  queuedClientMessageIds: Record<string, string>;
+  messages: UiMessage[];
+  historyVersion: number;
+}
 
 export interface SessionResourcesResponse {
   skills: Array<{ name: string; description: string; filePath: string }>;
@@ -317,6 +345,7 @@ export interface SessionResourcesResponse {
 }
 
 export interface SessionMessagesPage {
+  historyVersion: number;
   messages: UiMessage[];
   totalMessageCount: number;
   hasMoreMessages: boolean;
@@ -427,7 +456,7 @@ export interface BootstrapPayload {
   workspaces: WorkspaceInfo[];
   workspaceUiSettings: Record<string, WorkspaceUiSettings>;
   models: ModelOption[];
-  activeSession?: SessionState;
+  activeSession?: SessionSnapshot;
   workspaceSnapshots?: WorkspaceSnapshot[];
 }
 
@@ -444,27 +473,14 @@ export interface WorkspaceSnapshot {
   hasUnread?: boolean;
 }
 
-export type ServerEvent = (
-  | { type: "reset"; state: SessionState }
-  | { type: "state"; state: SessionStateMetadata }
-  | { type: "assistant"; assistant?: Extract<UiMessage, { role: "assistant" }> }
+export type ServerEvent =
+  | { type: "session"; snapshot: SessionSnapshot }
   | {
-      type: "assistant-delta";
-      contentIndex: number;
-      blockType: "text" | "thinking";
-      delta: string;
+      type: "session-update";
+      documents: Op[];
+      metadata: SessionStateMetadata;
+      queuedClientMessageIds: Record<string, string>;
+      messages?: UiMessage[];
+      historyVersion: number;
     }
-  | { type: "tools"; tools: ActiveToolRun[] }
-  | {
-      type: "tool-delta";
-      toolCallId: string;
-      deltas: Array<{
-        contentIndex: number;
-        blockType: "text" | "thinking";
-        delta: string;
-      }>;
-      details?: ToolExecutionDetails;
-    }
-  | { type: "status"; isStreaming: boolean; pendingMessageCount: number }
-  | { type: "error"; message: string }
-) & { revision?: number; streamId?: string };
+  | { type: "error"; message: string };

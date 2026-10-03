@@ -23,6 +23,8 @@ import {
   type Conversation,
   type ConversationInit,
   type ContextView,
+  type CommitPublication,
+  type SubmissionId,
   type Cursor,
   type EntryDraft,
   type EntryId,
@@ -61,6 +63,30 @@ export interface SessionConfiguration {
 }
 function json(value: unknown): JsonValue {
   return JSON.parse(JSON.stringify(value));
+}
+function messageDraft(message: AgentMessage): EntryDraft {
+  return {
+    kind:
+      message.role === "custom"
+        ? "batty.custom-message"
+        : message.role === "toolResult"
+          ? "pi.tool-result"
+          : `pi.${message.role}`,
+    model: convertToLlm([message]),
+    data:
+      message.role === "custom"
+        ? json({
+            customType: message.customType,
+            content: message.content,
+            display: message.display,
+            details: message.details,
+            timestamp: message.timestamp,
+          })
+        : json({
+            clientMessageId: (message as AgentMessage & { clientMessageId?: string })
+              .clientMessageId,
+          }),
+  };
 }
 function latestModifiedAt(records: readonly EntryRecord[], fileMtime: number): number {
   return records.reduce(
@@ -110,7 +136,9 @@ export class SessionStore {
   readonly conversation: Conversation;
   private entries: SessionEntry[] = [];
   private records: EntryRecord[] = [];
-  private submissions: SubmissionRecord[] = [];
+  private submissions = new Map<SubmissionId, SubmissionRecord>();
+  private projectionDirty = false;
+  private unsubscribeCommits?: () => void;
   private refreshing: Promise<void> = Promise.resolve();
   private contextView!: ContextView;
   private agentState: Readonly<AgentState> = {};
@@ -209,7 +237,10 @@ export class SessionStore {
         registry,
         runtime,
       );
-      await store.refresh();
+      await store.hydrate();
+      store.unsubscribeCommits = harness.subscribeCommits((publication) =>
+        store.adopt(publication),
+      );
       return store;
     } catch (error) {
       try {
@@ -329,6 +360,43 @@ export class SessionStore {
       }
     }
   }
+  static async inspectRecovery(
+    file: string,
+  ): Promise<{ pending: boolean; parentSession?: string }> {
+    const storage = await openNodeSqliteStorage(file);
+    try {
+      const tasks = await Promise.all(
+        ["pending", "running", "waiting", "completing"].map((status) =>
+          storage.scanTasks(
+            { status: status as "pending" | "running" | "waiting" | "completing" },
+            1,
+            undefined,
+            context,
+          ),
+        ),
+      );
+      const submissions = await Promise.all(
+        ["queued", "placed"].map((status) =>
+          storage.scanSubmissions({ status: status as "queued" | "placed" }, 1, undefined, context),
+        ),
+      );
+      const document = await storage.findDocument(
+        { scope: { kind: "session" }, kind: "batty.session" },
+        "current",
+        context,
+      );
+      const metadata = document && (await storage.document(document.id, "current", context));
+      if (!metadata) throw new Error(`Session has no metadata: ${file}`);
+      const parent = (metadata.value as Metadata).parentSession;
+      return {
+        pending: [...tasks, ...submissions].some((page) => page.items.length > 0),
+        ...(parent ? { parentSession: parent } : {}),
+      };
+    } finally {
+      await storage.close(context);
+    }
+  }
+
   static async read(file: string, _options: { readOnly?: boolean } = {}): Promise<SessionRead> {
     file = await fs.realpath(file);
     const owner = this.owners.get(file);
@@ -389,13 +457,54 @@ export class SessionStore {
 
   refresh(): Promise<void> {
     const next = this.refreshing.then(
-      () => this.refreshCache(),
-      () => this.refreshCache(),
+      () => this.refreshContext(),
+      () => this.refreshContext(),
     );
     this.refreshing = next;
     return next;
   }
-  private async refreshCache(): Promise<void> {
+  private adopt(publication: CommitPublication): void {
+    for (const change of publication.changes) {
+      if (change.type === "entry" && change.value.conversationId === this.conversation.id) {
+        this.records.push(change.value);
+        this.projectionDirty = true;
+      } else if (
+        change.type === "submission" &&
+        change.value.conversationId === this.conversation.id
+      ) {
+        this.submissions.set(change.value.id, change.value);
+        this.projectionDirty = true;
+      } else if (change.type === "document" && change.value !== null) {
+        if (change.record.kind === SessionMetadataDoc.definition.kind)
+          this.metadata = change.value as Metadata;
+        else if (
+          change.record.kind === AgentDoc.definition.kind &&
+          change.conversationId === this.conversation.id
+        )
+          this.agentState = change.value as AgentState;
+      }
+    }
+  }
+  private project(): SessionEntry[] {
+    if (this.projectionDirty) {
+      this.entries = projectEntries(this.records, [...this.submissions.values()]);
+      this.projectionDirty = false;
+    }
+    return this.entries;
+  }
+  getSubmissionRecord(id: SubmissionId): SubmissionRecord | undefined {
+    return this.submissions.get(id);
+  }
+  getEntriesUpTo(entryId: number): SessionEntry[] {
+    return projectEntries(
+      this.records.filter((record) => record.id <= entryId),
+      [...this.submissions.values()],
+    );
+  }
+  private async refreshContext(): Promise<void> {
+    this.contextView = await this.conversation.context(context);
+  }
+  private async hydrate(): Promise<void> {
     const contextView = await this.conversation.context(context);
     const records = await history(this.conversation);
     const submissions = [];
@@ -415,21 +524,22 @@ export class SessionStore {
     this.contextView = contextView;
     this.agentState = agentState ?? {};
     this.records = records;
-    this.submissions = submissions;
+    this.submissions = new Map(submissions.map((record) => [record.id, record]));
     this.entries = projectEntries(records, submissions);
     this.metadata = metadata as Metadata;
   }
   getEntries(): SessionEntry[] {
-    return structuredClone(this.entries);
+    return structuredClone(this.project());
   }
   getBranch(fromId: string | null = this.getLeafId()): SessionEntry[] {
     if (fromId === null) return [];
-    const index = this.entries.findIndex((entry) => entry.id === fromId);
+    const entries = this.project();
+    const index = entries.findIndex((entry) => entry.id === fromId);
     if (index < 0) throw new Error(`Unknown session entry: ${fromId}`);
-    return structuredClone(this.entries.slice(0, index + 1));
+    return structuredClone(entries.slice(0, index + 1));
   }
   getLeafId(): string | null {
-    return this.entries.at(-1)?.id ?? null;
+    return this.project().at(-1)?.id ?? null;
   }
   getLeafEntry(): SessionEntry | undefined {
     return this.getEntries().at(-1);
@@ -456,7 +566,9 @@ export class SessionStore {
     return this.metadata.name ?? undefined;
   }
   getLabel(id: string): string | undefined {
-    const label = this.entries.findLast((entry) => entry.type === "label" && entry.targetId === id);
+    const label = this.project().findLast(
+      (entry) => entry.type === "label" && entry.targetId === id,
+    );
     return label?.type === "label" ? (label.label ?? undefined) : undefined;
   }
   getTree(): SessionTreeNode[] {
@@ -549,8 +661,8 @@ export class SessionStore {
     this.publishSummary();
   }
   async configuration(): Promise<SessionConfiguration> {
-    const agent = await this.harness.snapshot(AgentDoc, this.conversation.id, context);
-    const preference = (await history(this.conversation)).findLast(
+    const agent = this.agentState;
+    const preference = this.records.findLast(
       (record) =>
         record.kind === "batty.custom" &&
         (record.data as { customType?: string })?.customType === SESSION_TOOLS_CUSTOM_TYPE,
@@ -593,32 +705,53 @@ export class SessionStore {
     this.publishSummary();
     return String(record.id);
   }
+  async appendResultMessages(messages: AgentMessage[], replyId?: string): Promise<boolean> {
+    const appended = await this.conversation.commit(async (tx) => {
+      if (replyId) {
+        let cursor: Cursor | undefined;
+        do {
+          const page = await tx.scanEntries({ conversationId: this.conversation.id }, 500, cursor);
+          for (const record of page.items) {
+            const data = record.data as
+              | {
+                  customType?: string;
+                  details?: { battyResultReplyId?: string };
+                  data?: { replyId?: string };
+                }
+              | undefined;
+            if (
+              record.kind === "batty.custom-message" &&
+              data?.details?.battyResultReplyId === replyId
+            )
+              return false;
+            if (
+              record.kind === "batty.custom" &&
+              data?.customType === "batty-result-delivery" &&
+              data.data?.replyId === replyId
+            )
+              return false;
+          }
+          cursor = page.next;
+        } while (cursor);
+      }
+      for (const message of messages)
+        await tx.appendEntry(this.conversation.id, messageDraft(message));
+      if (replyId)
+        await tx.appendEntry(this.conversation.id, {
+          kind: "batty.custom",
+          data: json({ customType: "batty-result-delivery", data: { replyId } }),
+        });
+      return true;
+    }, context);
+    if (appended) {
+      await this.refresh();
+      this.publishSummary();
+    }
+    return appended;
+  }
   async appendMessage(message: AgentMessage): Promise<string> {
-    const model = convertToLlm([message]);
     const record = await this.conversation.commit(
-      (tx) =>
-        tx.appendEntry(this.conversation.id, {
-          kind:
-            message.role === "custom"
-              ? "batty.custom-message"
-              : message.role === "toolResult"
-                ? "pi.tool-result"
-                : `pi.${message.role}`,
-          model,
-          data:
-            message.role === "custom"
-              ? json({
-                  customType: message.customType,
-                  content: message.content,
-                  display: message.display,
-                  details: message.details,
-                  timestamp: message.timestamp,
-                })
-              : json({
-                  clientMessageId: (message as AgentMessage & { clientMessageId?: string })
-                    .clientMessageId,
-                }),
-        }),
+      (tx) => tx.appendEntry(this.conversation.id, messageDraft(message)),
       context,
     );
     await this.refresh();
@@ -653,7 +786,7 @@ export class SessionStore {
         Object.assign(await tx.doc(AgentDoc, conversationId), agent as AgentState);
         const mapped = new Map<EntryId, EntryId>();
         for (const record of records) {
-          const requestId = this.submissions.find(
+          const requestId = [...this.submissions.values()].find(
             (submission) => submission.entry === record.id,
           )?.requestId;
           const {
@@ -733,6 +866,7 @@ export class SessionStore {
           await this.harness.close(context);
         }
       } finally {
+        this.unsubscribeCommits?.();
         try {
           await this.unlock();
         } finally {

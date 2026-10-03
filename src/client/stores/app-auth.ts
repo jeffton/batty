@@ -97,7 +97,7 @@ export const authBootstrapActions = {
         this.openWorkspaceStream();
       }
     } else {
-      this.activeSession = undefined;
+      this.activeSnapshot = undefined;
       this.providerAuth = defaultProviderAuthStatus;
       this.settings = {
         ...payload.settings,
@@ -129,7 +129,7 @@ export const authBootstrapActions = {
       ...this.settings,
       braveSearchConfigured: false,
     };
-    this.activeSession = undefined;
+    this.activeSnapshot = undefined;
     this.sessionsByWorkspace = {};
     this.cronJobsByWorkspace = {};
     this.runningCronJobsByWorkspace = {};

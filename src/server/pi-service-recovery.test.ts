@@ -77,7 +77,33 @@ async function createInterruptedSession(
   return sessionPath;
 }
 
-describe("PiService drain and interrupted sessions", () => {
+describe("PiService checkpoint and recovery", () => {
+  it("publishes native progress without projecting or cloning full history again", async () => {
+    const { service, workspace } = await createService();
+    const opened = await service.createSession(workspace);
+    const session = (service as any).requireSession(opened.id).session;
+    const first = service.getSnapshot(opened.id);
+    const projection = vi.spyOn(session.sessionManager, "buildSessionProjection");
+    const history = vi.spyOn(session.sessionManager, "getEntriesUpTo");
+    const view = {
+      ...session.view,
+      docs: {
+        ...session.view.docs,
+        "pi.live": {
+          ...session.view.docs["pi.live"],
+          tools: [
+            { id: 1, callId: "progress", name: "bash", status: "running", output: "working" },
+          ],
+        },
+      },
+    };
+    const next = service.getSnapshot(opened.id, view, first);
+    expect(next.messages).toBe(first.messages);
+    expect(next.metadata.contextTokens).toBe(first.metadata.contextTokens);
+    expect(projection).not.toHaveBeenCalled();
+    expect(history).not.toHaveBeenCalled();
+  });
+
   it("does not run archived interrupted operations during startup", async () => {
     const { config, faux, models, workspace, service } = await createService();
     await service.dispose();
@@ -105,35 +131,55 @@ describe("PiService drain and interrupted sessions", () => {
     expect(JSON.stringify(state.messages)).toContain("fresh answer");
   });
 
-  it("rejects new prompts during drain while retaining the active prompt through queueing and completion", async () => {
-    const { faux, service, workspace } = await createService();
-    const session = await service.createSession(workspace);
-    let releaseQueue!: () => void;
-    const queue = new Promise<void>((resolve) => {
-      releaseQueue = resolve;
+  it("checkpoints a running generation and recovers admitted follow-ups without waiting for completion", async () => {
+    const { config, faux, service, workspace } = await createService();
+    const state = await service.createSession(workspace);
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
     });
-    vi.spyOn(service as any, "waitForSubagentQueue").mockReturnValue(queue);
-    let releaseResponse!: () => void;
-    const response = new Promise<ReturnType<typeof fauxAssistantMessage>>((resolve) => {
-      releaseResponse = () => resolve(fauxAssistantMessage("completed"));
+    const interrupted = vi.fn();
+    faux.setResponses([
+      async (_context, options) => {
+        entered();
+        await new Promise<void>((resolve) =>
+          options?.signal?.addEventListener(
+            "abort",
+            () => {
+              interrupted();
+              resolve();
+            },
+            { once: true },
+          ),
+        );
+        return fauxAssistantMessage("", { stopReason: "aborted" });
+      },
+    ]);
+    const active = service.prompt(state.id, "first", [], "message-1").then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await started;
+    expect(await service.prompt(state.id, "follow-up", [], "message-2", "followUp")).toMatchObject({
+      disposition: "queued",
     });
-    faux.setResponses([async () => response]);
-
-    const active = service.prompt(session.id, "first", [], "message-1");
-    expect(service.turns.activeTurns).toBe(1);
-    service.turns.beginDrain();
-
-    await expect(service.prompt(session.id, "second", [], "message-2")).rejects.toMatchObject({
+    await service.prepareRestart();
+    expect(interrupted).toHaveBeenCalledOnce();
+    await active;
+    await expect(service.prompt(state.id, "new input", [], "message-3")).rejects.toMatchObject({
       statusCode: 503,
     });
-    expect(service.turns.activeTurns).toBe(1);
-
-    releaseQueue();
-    await vi.waitFor(() => expect(faux.state.callCount).toBe(1));
-    expect(service.turns.activeTurns).toBe(1);
-    releaseResponse();
-    await active;
-    expect(service.turns.activeTurns).toBe(0);
-    expect(JSON.stringify(service.getState(session.id).messages)).toContain("completed");
+    faux.setResponses([
+      fauxAssistantMessage("Recovered first"),
+      fauxAssistantMessage("Recovered follow-up"),
+    ]);
+    const restarted = await PiService.create(config, {} as CronService);
+    cleanups.push(() => restarted.dispose());
+    await restarted.restoreDurableSessions([workspace]);
+    await (restarted as any).requireSession(state.id).session.waitForIdle();
+    const recovered = restarted.getState(state.id);
+    expect(JSON.stringify(recovered.messages)).toContain("Recovered follow-up");
+    expect(recovered.messages.filter((message) => message.role === "user")).toHaveLength(2);
+    expect(faux.state.callCount).toBe(3);
   });
 });

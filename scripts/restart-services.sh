@@ -9,7 +9,11 @@ node_path="${BATTY_NODE:-$(command -v node)}"
 systemctl daemon-reload
 service_state="$(systemctl is-active batty.service 2>/dev/null || true)"
 if [[ "$service_state" != "inactive" && "$service_state" != "failed" && "${BATTY_SKIP_DRAIN:-}" != "1" ]]; then
-  "$node_path" "$install_root/current/dist/server/cli.mjs" --root "$batty_root" drain
+  checkpoint_args=()
+  if [[ -n "${BATTY_RESTART_SESSION_FILE:-}" || -n "${BATTY_RESTART_AFTER_ENTRY_ID:-}" ]]; then
+    checkpoint_args=(--session "${BATTY_RESTART_SESSION_FILE:-}" --after-entry "${BATTY_RESTART_AFTER_ENTRY_ID:-}")
+  fi
+  "$node_path" "$install_root/current/dist/server/cli.mjs" --root "$batty_root" drain "${checkpoint_args[@]}"
 fi
 
 systemctl enable batty.service >/dev/null

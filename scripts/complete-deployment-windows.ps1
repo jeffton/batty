@@ -9,10 +9,15 @@ param(
   [int]$BackendPort = 3147,
   [string]$LogPath,
   [string]$BattyRoot,
+  [string]$RestartSessionFile,
+  [string]$RestartAfterEntryId,
   [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
+# Win32_Process.Create does not inherit the initiating tool environment.
+$env:BATTY_RESTART_SESSION_FILE = $RestartSessionFile
+$env:BATTY_RESTART_AFTER_ENTRY_ID = $RestartAfterEntryId
 Start-Transcript -Path $LogPath -Append | Out-Null
 
 function Wait-ForUrl([string]$url) {
@@ -30,9 +35,13 @@ function Wait-ForUrl([string]$url) {
 }
 
 function Wait-ForDeploymentDrain([string]$cliPath, [string]$battyRoot) {
-  & (Get-Command node).Source $cliPath --root $battyRoot drain
+  $checkpointArgs = @()
+  if ($env:BATTY_RESTART_SESSION_FILE -or $env:BATTY_RESTART_AFTER_ENTRY_ID) {
+    $checkpointArgs = @("--session", $env:BATTY_RESTART_SESSION_FILE, "--after-entry", $env:BATTY_RESTART_AFTER_ENTRY_ID)
+  }
+  & (Get-Command node).Source $cliPath --root $battyRoot drain @checkpointArgs
   if ($LASTEXITCODE -ne 0) {
-    throw "Deployment drain failed with exit code $LASTEXITCODE."
+    throw "Deployment checkpoint failed with exit code $LASTEXITCODE."
   }
 }
 

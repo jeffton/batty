@@ -176,6 +176,27 @@ describe("createSessionState", () => {
 });
 
 describe("normalizeMessage", () => {
+  it("preserves exact Durable result identity when tool call IDs are reused", () => {
+    const results = [41, 92].map((id) =>
+      normalizeMessage(
+        {
+          role: "toolResult",
+          battyDurableEntryId: String(id),
+          toolCallId: "reused-call",
+          toolName: "bash",
+          timestamp: id,
+          content: [{ type: "text", text: `result ${id}` }],
+          isError: false,
+        } as unknown as AgentMessage,
+        id,
+      ),
+    );
+    expect(results).toMatchObject([
+      { role: "toolResult", toolCallId: "reused-call", durableEntryId: "41" },
+      { role: "toolResult", toolCallId: "reused-call", durableEntryId: "92" },
+    ]);
+  });
+
   it("classifies assistant turn phases from stop reasons and tool blocks", () => {
     const cases = [
       {

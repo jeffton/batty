@@ -35,7 +35,7 @@ describe("cron AgentSession execution", () => {
     expect(fixture.faux.state.callCount).toBe(1);
   });
 
-  it("does not resume an interrupted native SDK turn", async () => {
+  it("admits a checkpointed cron operation whose canonical boundary precedes input admission", async () => {
     const fixture = await setup();
     await fixture.session.sessionManager.appendCustomEntry(CRON_EXECUTION_CUSTOM_TYPE, {
       runId: "interrupted",
@@ -43,9 +43,11 @@ describe("cron AgentSession execution", () => {
       endEntryId: null,
       status: "running",
     });
-    await expect(
-      executeCronOperation(await fixture.reopen(), notice(), "interrupted"),
-    ).rejects.toThrow("Cron run running");
-    expect(fixture.faux.state.callCount).toBe(0);
+    fixture.faux.setResponses([fauxAssistantMessage("recovered")]);
+    await executeCronOperation(await fixture.reopen(), notice(), "interrupted");
+    expect(getCronExecutionResult(fixture.session, "interrupted")?.status).toBe("completed");
+    expect(fixture.faux.state.callCount).toBe(1);
+    await executeCronOperation(await fixture.reopen(), notice(), "interrupted");
+    expect(fixture.faux.state.callCount).toBe(1);
   });
 });

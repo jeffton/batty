@@ -54,11 +54,6 @@ export function buildToolStateLookup(
   }
 
   for (const tool of activeTools) {
-    const persistedToolState = toolStatesByCallId.get(tool.toolCallId);
-    if (persistedToolState) {
-      continue;
-    }
-
     toolStatesByCallId.set(tool.toolCallId, {
       status: tool.status,
       resultBlocks: tool.blocks,

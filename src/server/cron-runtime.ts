@@ -33,11 +33,13 @@ interface ScheduledHandle {
 type ActiveCronRun = RunningCronJob & {
   abortController: AbortController;
   cancelledByOverlap: boolean;
+  jobSnapshot?: CronJob;
 };
 
 export interface CronJobRunnerContext {
   runId: string;
   signal: AbortSignal;
+  recovery?: CronRunLog;
   onSessionStarted(session: { sessionId: string; sessionPath: string }): void | Promise<void>;
   queueResultDelivery(parentSessionId: string): Promise<void>;
 }
@@ -133,22 +135,19 @@ export class CronService {
   private watcher: FSWatcher | undefined;
   private reloadTimer: NodeJS.Timeout | undefined;
   private disposed = false;
-  private draining = false;
-  private activeWork = 0;
+  private checkpointed = false;
 
-  get activeTurns(): number {
-    return this.activeWork;
-  }
-
-  beginDrain(): void {
-    if (this.draining) return;
-    this.draining = true;
+  checkpoint(): void {
+    if (this.checkpointed) return;
+    this.checkpointed = true;
     clearTimeout(this.reloadTimer);
     this.reloadTimer = undefined;
     for (const handle of this.scheduledHandles.values()) {
       handle.stop();
     }
     this.scheduledHandles.clear();
+    for (const timer of this.deliveryRetryTimers.values()) clearTimeout(timer);
+    this.deliveryRetryTimers.clear();
   }
 
   constructor(config: AppConfig) {
@@ -168,33 +167,22 @@ export class CronService {
 
   async initialize(): Promise<void> {
     await this.reloadFromDisk(false);
-    const interruptedAtMs = Date.now();
-    const interruptedWorkspaceIds = new Set<string>();
+    const recovering: Promise<void>[] = [];
     for (const log of this.runLogs
       .filter((candidate) => candidate.status === "running")
       .sort((left, right) => left.startedAtMs - right.startedAtMs)) {
-      const error = "Batty stopped before this cron run completed";
-      if (
-        await this.persistTerminalRun(log.runId, {
-          status: "error",
-          completedAtMs: interruptedAtMs,
-          durationMs: Math.max(0, interruptedAtMs - log.startedAtMs),
-          error,
-        })
-      ) {
-        const job = this.jobs.get(log.jobId);
-        if (job && job.schedule.kind !== "at") {
-          await this.store.setJobState(job.id, markJobRunFailed(job.state, log.startedAtMs, error));
-        }
-        interruptedWorkspaceIds.add(log.workspaceId);
-      }
+      if (!log.jobSnapshot) throw new Error(`Cron run ${log.runId} has no trigger snapshot`);
+      recovering.push(this.triggerJob(log.jobId, log));
     }
     this.rescheduleAll();
-    this.notifyChanged([...interruptedWorkspaceIds]);
+    for (const recovery of recovering) {
+      void recovery.catch((error) => console.error("Failed to recover cron run", error));
+    }
+    for (const log of this.runLogs) this.scheduleRunDelivery(log);
     await fs.mkdir(path.dirname(this.store.filePath), { recursive: true });
     this.watcher = watch(path.dirname(this.store.filePath), (_eventType, fileName) => {
       if (
-        this.draining ||
+        this.checkpointed ||
         this.disposed ||
         (fileName && fileName !== path.basename(this.store.filePath))
       ) {
@@ -345,7 +333,7 @@ export class CronService {
       previousWorkspaceIds.add(job.workspaceId);
     }
     this.stateRevision += 1;
-    if (schedule && !this.disposed && !this.draining) {
+    if (schedule && !this.disposed && !this.checkpointed) {
       this.rescheduleAll();
     }
     this.notifyChanged([...previousWorkspaceIds]);
@@ -384,6 +372,7 @@ export class CronService {
   private scheduleRunDelivery(run: CronRunLog): void {
     if (
       this.disposed ||
+      this.checkpointed ||
       !this.runner?.deliver ||
       !run.pendingDelivery ||
       run.status === "running" ||
@@ -393,13 +382,12 @@ export class CronService {
     }
 
     this.deliveryWorkRuns.add(run.runId);
-    this.activeWork += 1;
     this.deliverRun(run.runId);
   }
 
   private deliverRun(runId: string): void {
     const run = this.runLogs.find((candidate) => candidate.runId === runId);
-    if (!run?.pendingDelivery || !this.runner?.deliver || this.disposed) {
+    if (!run?.pendingDelivery || !this.runner?.deliver || this.disposed || this.checkpointed) {
       this.finishDeliveryWork(runId);
       return;
     }
@@ -407,7 +395,7 @@ export class CronService {
     void this.runner
       .deliver(run, run.pendingDelivery)
       .then(async () => {
-        if (this.disposed) {
+        if (this.disposed || this.checkpointed) {
           this.finishDeliveryWork(runId);
           return;
         }
@@ -420,7 +408,7 @@ export class CronService {
         this.finishDeliveryWork(runId);
       })
       .catch((error) => {
-        if (this.disposed) {
+        if (this.disposed || this.checkpointed) {
           this.finishDeliveryWork(runId);
           return;
         }
@@ -441,20 +429,22 @@ export class CronService {
   }
 
   private finishDeliveryWork(runId: string): void {
-    if (this.deliveryWorkRuns.delete(runId)) {
-      this.activeWork -= 1;
-    }
+    this.deliveryWorkRuns.delete(runId);
   }
 
   private rescheduleAll(): void {
-    if (this.draining) return;
+    if (this.checkpointed) return;
     for (const handle of this.scheduledHandles.values()) {
       handle.stop();
     }
     this.scheduledHandles.clear();
 
     for (const job of this.jobs.values()) {
-      if (!job.enabled) {
+      if (
+        !job.enabled ||
+        (job.schedule.kind === "at" &&
+          [...this.runningJobs.values()].some((run) => run.jobId === job.id))
+      ) {
         continue;
       }
 
@@ -556,37 +546,34 @@ export class CronService {
     this.notifyChanged([job.workspaceId]);
   }
 
-  private async triggerJob(jobId: string): Promise<void> {
-    if (this.disposed || this.draining) return;
+  private async triggerJob(jobId: string, recovery?: CronRunLog): Promise<void> {
+    if (this.disposed || this.checkpointed) return;
     const current = this.jobs.get(jobId);
-    if (!current?.enabled) {
+    if (!recovery && !current?.enabled) {
       return;
     }
 
-    this.activeWork += 1;
     const activeRun = [...this.runningJobs.values()].find((run) => run.jobId === jobId);
     const waitsForParent =
-      current.session.kind === "daily-inline" ||
-      (current.session.kind === "daily-detached" && current.session.includePreviousContext);
-    if (activeRun && !waitsForParent) {
-      try {
-        await this.skipOverlappingRun(current, activeRun);
-      } finally {
-        this.activeWork -= 1;
-      }
+      current?.session.kind === "daily-inline" ||
+      (current?.session.kind === "daily-detached" && current.session.includePreviousContext);
+    if (!recovery && activeRun && !waitsForParent) {
+      await this.skipOverlappingRun(current!, activeRun);
       return;
     }
 
-    const startedAt = Date.now();
-    const publicJob = toCronJob(current);
+    const startedAt = recovery?.startedAtMs ?? Date.now();
+    const publicJob = recovery ? recovery.jobSnapshot! : toCronJob(current!);
     const abortController = new AbortController();
     const running: ActiveCronRun = {
-      runId: randomUUID(),
+      ...recovery,
+      runId: recovery?.runId ?? randomUUID(),
       jobId,
-      workspaceId: current.workspaceId,
-      prompt: current.prompt,
-      model: current.model,
-      thinkingLevel: current.thinkingLevel,
+      jobSnapshot: publicJob,
+      workspaceId: publicJob.workspaceId,
+      prompt: publicJob.prompt,
+      model: publicJob.model,
+      thinkingLevel: publicJob.thinkingLevel,
       session: publicJob.session,
       scheduleLabel: publicJob.scheduleLabel,
       startedAtMs: startedAt,
@@ -594,15 +581,19 @@ export class CronService {
       cancelledByOverlap: false,
     };
     this.runningJobs.set(running.runId, running);
-    let runLogPersisted = false;
+    let runLogPersisted = !!recovery;
 
     try {
       const startedLog = toRunLog(running, "running");
-      await this.store.startRun(startedLog);
+      if (!recovery) await this.store.startRun(startedLog);
       runLogPersisted = true;
       this.replaceRunLog(startedLog);
-      this.notifyChanged([current.workspaceId]);
-      if (current.schedule.kind === "at") {
+      this.notifyChanged([publicJob.workspaceId]);
+      if (
+        publicJob.schedule.kind === "at" &&
+        current &&
+        (!recovery || current.updatedAt === publicJob.updatedAt)
+      ) {
         await this.store.deleteJob(jobId);
         await this.reloadFromDisk();
       }
@@ -614,6 +605,7 @@ export class CronService {
       const result = await this.runner.run(publicJob, {
         runId: running.runId,
         signal: abortController.signal,
+        recovery,
         onSessionStarted: async (session) => {
           running.sessionId = session.sessionId;
           running.sessionPath = session.sessionPath;
@@ -626,7 +618,7 @@ export class CronService {
         queueResultDelivery: (parentSessionId) =>
           this.queueRunDelivery(running.runId, parentSessionId),
       });
-      if (this.disposed) return;
+      if (this.disposed || this.checkpointed) return;
       if (
         !(await this.persistTerminalRun(running.runId, {
           status: running.cancelledByOverlap ? "error" : "success",
@@ -644,13 +636,14 @@ export class CronService {
       if (
         this.runningJobs.get(running.runId) === running &&
         !running.cancelledByOverlap &&
+        current &&
         current.schedule.kind !== "at"
       ) {
         await this.store.setJobState(jobId, markJobRunSucceeded(current.state, startedAt, result));
         await this.reloadFromDisk();
       }
     } catch (error) {
-      if (this.disposed) return;
+      if (this.disposed || this.checkpointed) return;
       console.error("Cron job failed", { jobId, error });
       if (
         runLogPersisted &&
@@ -668,6 +661,7 @@ export class CronService {
       if (
         this.runningJobs.get(running.runId) === running &&
         !running.cancelledByOverlap &&
+        current &&
         current.schedule.kind !== "at"
       ) {
         await this.store.setJobState(jobId, markJobRunFailed(current.state, startedAt, error));
@@ -679,8 +673,7 @@ export class CronService {
       }
       const completedRun = this.runLogs.find((candidate) => candidate.runId === running.runId);
       if (completedRun) this.scheduleRunDelivery(completedRun);
-      this.activeWork -= 1;
-      this.notifyChanged([current.workspaceId]);
+      this.notifyChanged([publicJob.workspaceId]);
     }
   }
 }

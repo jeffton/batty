@@ -9,6 +9,11 @@ export function projectEntries(
 ): SessionEntry[] {
   const entries: SessionEntry[] = [];
   let parentId: string | null = null;
+  const submissionsByEntry = new Map(
+    submissions.flatMap((submission) =>
+      submission.entry === undefined ? [] : [[submission.entry, submission] as const],
+    ),
+  );
   for (const record of records) {
     const data = record.data as Record<string, JsonValue> | undefined;
     const timestamp = new Date(
@@ -50,7 +55,7 @@ export function projectEntries(
       });
     } else if (record.model?.length) {
       const requestId =
-        submissions.find((submission) => submission.entry === record.id)?.requestId ??
+        submissionsByEntry.get(record.id)?.requestId ??
         (typeof data?.submissionRequestId === "string" ? data.submissionRequestId : undefined);
       const customInput = requestId?.startsWith("custom-input:")
         ? JSON.parse(Buffer.from(requestId.split(":")[1]!, "base64url").toString("utf8"))

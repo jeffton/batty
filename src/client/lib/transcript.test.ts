@@ -722,7 +722,7 @@ describe("transcript tool state merging", () => {
     );
   });
 
-  it("prefers persisted tool results over stale active tool output", () => {
+  it("uses authoritative native active output when a historical call ID repeats", () => {
     const messages: SessionState["messages"] = [assistantMessage, toolResultMessage];
     const lookup = buildToolStateLookup(messages, [
       {
@@ -737,8 +737,8 @@ describe("transcript tool state merging", () => {
 
     expect(toolStatesForMessage(assistantMessage, lookup.toolStatesByCallId).get("call-1")).toEqual(
       {
-        status: "success",
-        resultBlocks: [{ type: "text", text: "M src/client/views/ChatView.vue" }],
+        status: "running",
+        resultBlocks: [{ type: "text", text: "still streaming" }],
         resultDetails: undefined,
       },
     );

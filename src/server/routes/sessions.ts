@@ -97,13 +97,15 @@ export function registerSessionRoutes(context: RouteContext): void {
   app.post<{ Body: { workspaceId: string } }>(routePath("/api/sessions"), async (request) => {
     const workspaces = await listWorkspaces(config);
     const workspace = resolveWorkspace(workspaces, request.body.workspaceId);
-    return service.createSession(workspace);
+    const session = await service.createSession(workspace);
+    return service.getSnapshot(session.id);
   });
 
   app.post<{ Body: { workspaceId: string } }>(routePath("/api/sessions/daily"), async (request) => {
     const workspaces = await listWorkspaces(config);
     const workspace = resolveWorkspace(workspaces, request.body.workspaceId);
-    return service.createOrOpenDailySession(workspace);
+    const session = await service.createOrOpenDailySession(workspace);
+    return service.getSnapshot(session.id);
   });
 
   app.post<{
@@ -115,11 +117,8 @@ export function registerSessionRoutes(context: RouteContext): void {
   }>(routePath("/api/sessions/open"), async (request) => {
     const workspaces = await listWorkspaces(config);
     const workspace = resolveWorkspace(workspaces, request.body.workspaceId);
-    return service.openSession(
-      workspace,
-      request.body.sessionPath,
-      request.body.messagesDetailLevel,
-    );
+    const session = await service.openSession(workspace, request.body.sessionPath);
+    return service.getSnapshot(session.id);
   });
 
   app.post<{ Body: { workspaceId: string; sessionId: string } }>(
@@ -127,14 +126,15 @@ export function registerSessionRoutes(context: RouteContext): void {
     async (request) => {
       const workspaces = await listWorkspaces(config);
       const workspace = resolveWorkspace(workspaces, request.body.workspaceId);
-      return service.openSessionById(workspace, request.body.sessionId);
+      const session = await service.openSessionById(workspace, request.body.sessionId);
+      return service.getSnapshot(session.id);
     },
   );
 
   app.get<{ Params: { sessionId: string } }>(
     routePath("/api/sessions/:sessionId"),
     async (request) => {
-      return service.getState(request.params.sessionId);
+      return service.getSnapshot(request.params.sessionId);
     },
   );
 
@@ -160,7 +160,13 @@ export function registerSessionRoutes(context: RouteContext): void {
 
   app.get<{
     Params: { sessionId: string };
-    Querystring: { before?: string; limit?: string; workspaceId?: string; sessionPath?: string };
+    Querystring: {
+      before?: string;
+      limit?: string;
+      throughEntryId?: string;
+      workspaceId?: string;
+      sessionPath?: string;
+    };
   }>(routePath("/api/sessions/:sessionId/messages"), async (request) => {
     await ensureSessionLoaded(context, request.params.sessionId, {
       ...(request.query.workspaceId ? { workspaceId: request.query.workspaceId } : {}),
@@ -168,23 +174,35 @@ export function registerSessionRoutes(context: RouteContext): void {
     });
 
     const parsedLimit = Number.parseInt(request.query.limit ?? "", 10);
+    const throughEntryId =
+      request.query.throughEntryId === undefined ? undefined : Number(request.query.throughEntryId);
+    if (
+      throughEntryId !== undefined &&
+      (!Number.isSafeInteger(throughEntryId) || throughEntryId < 0)
+    )
+      throw Object.assign(new Error("throughEntryId must be a non-negative integer"), {
+        statusCode: 400,
+      });
     return service.getSessionMessages(request.params.sessionId, {
       ...(request.query.before ? { beforeMessageId: request.query.before } : {}),
       ...(Number.isFinite(parsedLimit) ? { limit: parsedLimit } : {}),
+      ...(throughEntryId !== undefined ? { throughEntryId } : {}),
     });
   });
 
   app.post<{ Params: { sessionId: string }; Body: { modelId: string } }>(
     routePath("/api/sessions/:sessionId/model"),
     async (request) => {
-      return service.setModel(request.params.sessionId, request.body.modelId);
+      await service.setModel(request.params.sessionId, request.body.modelId);
+      return service.getSnapshot(request.params.sessionId);
     },
   );
 
   app.post<{ Params: { sessionId: string }; Body: { thinkingLevel: string } }>(
     routePath("/api/sessions/:sessionId/thinking"),
     async (request) => {
-      return service.setThinkingLevel(request.params.sessionId, request.body.thinkingLevel);
+      await service.setThinkingLevel(request.params.sessionId, request.body.thinkingLevel);
+      return service.getSnapshot(request.params.sessionId);
     },
   );
 
@@ -226,10 +244,11 @@ export function registerSessionRoutes(context: RouteContext): void {
   );
 
   app.delete<{
-    Params: { sessionId: string; kind: "steer" | "followUp"; index: string };
-  }>(routePath("/api/sessions/:sessionId/queue/:kind/:index"), async (request) => {
-    const index = Number.parseInt(request.params.index, 10);
-    return service.removeQueuedPrompt(request.params.sessionId, request.params.kind, index);
+    Params: { sessionId: string; submissionId: string };
+  }>(routePath("/api/sessions/:sessionId/queue/:submissionId"), async (request) => {
+    const submissionId = Number.parseInt(request.params.submissionId, 10);
+    await service.removeQueuedPrompt(request.params.sessionId, submissionId);
+    return service.getSnapshot(request.params.sessionId);
   });
 
   app.post<{ Params: { sessionId: string } }>(
@@ -245,9 +264,6 @@ export function registerSessionRoutes(context: RouteContext): void {
     Querystring: {
       workspaceId?: string;
       sessionPath?: string;
-      afterRevision?: string;
-      afterStreamId?: string;
-      messagesDetailLevel?: "summary" | "full";
     };
   }>(routePath("/api/sessions/:sessionId/events"), async (request, reply) => {
     await ensureSessionLoaded(context, request.params.sessionId, {
@@ -257,32 +273,22 @@ export function registerSessionRoutes(context: RouteContext): void {
 
     startEventStream(reply.raw);
 
-    const send = (payload: ServerEvent, revision: number) => {
-      reply.raw.write(`id: ${payload.streamId}:${revision}\ndata: ${JSON.stringify(payload)}\n\n`);
+    let closed = false;
+    let unsubscribe: (() => void) | undefined;
+    const send = (payload: ServerEvent) => {
+      if (!closed) reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
     };
-    const lastEventId = request.headers["last-event-id"];
-    const [afterStreamId, revisionText] =
-      typeof lastEventId === "string"
-        ? lastEventId.split(":")
-        : [request.query.afterStreamId, request.query.afterRevision];
-    const parsedRevision = Number.parseInt(revisionText ?? "", 10);
-
-    const unsubscribe = service.subscribe(
-      request.params.sessionId,
-      send,
-      Number.isFinite(parsedRevision) && parsedRevision >= 0 ? parsedRevision : undefined,
-      request.query.messagesDetailLevel,
-      afterStreamId,
-    );
     const heartbeat = setInterval(() => {
       reply.raw.write(": keep-alive\n\n");
     }, 15000);
-
     request.raw.on("close", () => {
+      closed = true;
       clearInterval(heartbeat);
-      unsubscribe();
+      unsubscribe?.();
       reply.raw.end();
     });
+    unsubscribe = await service.subscribe(request.params.sessionId, send);
+    if (closed) unsubscribe();
   });
 
   app.get<{

@@ -46,7 +46,7 @@ Batty adds a browser-native layer on top:
 
 ### Restart behavior
 
-A coordinated deployment drains active turns: it rejects new turns and pauses cron scheduling while active descendants and result deliveries finish. Queues and in-flight execution are process-local; interrupted work is not resumed after startup. See [the AgentSession integration](docs/pi-agent-session.md) for implementation boundaries and the Harness comparison.
+A coordinated deployment awaits only the deploying turn’s persisted final summary, then checkpoints other active sessions for recovery after restart. Durable queues, subagents, and result delivery survive process replacement. See [the AgentSession integration](docs/pi-agent-session.md) for implementation boundaries and the Harness comparison.
 
 Configured coding-agent extensions run in Pi's headless SDK context. Terminal dialogs and widgets are not exposed in the web UI. Codemode and MCP use Pi's built-in extensions. [MCP settings](docs/mcp.md) provide server configuration, tool exposure, connection status, and OAuth sign-in.
 
@@ -141,7 +141,7 @@ pnpm batty -- --root /path/to/batty-root <command>
 
 ```text
 batty auth code
-batty drain
+batty drain [--session <path> --after-entry <id>]
 batty cron list [--workspace ID] [--json]
 batty cron add --workspace ID --prompt TEXT --model ID --thinking LEVEL (--in DUR | --at ISO | --every DUR | --cron EXPR) [--tz IANA] [--session new|daily-inline|daily-detached] [--daily-context include|chat-only|omit]
 batty cron edit <jobId> [--workspace ID] [--prompt TEXT] [--model ID] [--thinking LEVEL] [--in DUR | --at ISO | --every DUR | --cron EXPR] [--tz IANA] [--session new|daily-inline|daily-detached] [--daily-context include|chat-only|omit]
@@ -311,7 +311,7 @@ When working inside the Batty repo, use:
 ./scripts/reload-self.sh
 ```
 
-That flow drains active turns before reloading. For an initial upgrade from a server without deployment IPC, use `BATTY_SKIP_DRAIN=1 ./scripts/reload-self.sh`.
+That flow checkpoints durable sessions before reloading. For an initial upgrade from a server without deployment IPC, use `BATTY_SKIP_DRAIN=1 ./scripts/reload-self.sh`.
 
 ## Deployment
 
@@ -335,7 +335,7 @@ The Linux deploy script installs Batty to `/opt/batty`:
 - service entrypoint `/opt/batty/current/dist/server/main.mjs`
 - CLI entrypoint `/opt/batty/current/dist/server/cli.mjs`
 
-When replacing a running service, the detached restart worker uses local IPC to put the server into deployment drain mode and waits for active turns to finish before restarting it. Normal deployments wait without a timeout. For an initial upgrade from a server without deployment IPC, use `sudo BATTY_SKIP_DRAIN=1 ./scripts/deploy.sh`. This explicitly skips draining.
+When replacing a running service, the detached restart worker runs the prepared CLI’s `drain` over local IPC. It passes `PI_SESSION_FILE` and `PI_RESTART_AFTER_ENTRY_ID` through worker environment variables as `--session` and `--after-entry`, awaits the exact initiating response’s persisted final summary, and checkpoints other active work for recovery. Both flags are required together; with neither, it checkpoints immediately. For an initial upgrade from a server without deployment IPC, use `sudo BATTY_SKIP_DRAIN=1 ./scripts/deploy.sh`. This explicitly skips checkpoint preparation.
 
 ### macOS deployment with launchd
 
@@ -355,7 +355,7 @@ BATTY_WORKSPACES_ROOT="$HOME/Projects" \
 
 The script builds and validates Batty, installs versioned releases under `~/Library/Application Support/Batty/app`, creates the `se.roybot.batty` launch agent, and installs the `batty` CLI in `~/.local/bin`. Logs are written under `~/Library/Logs/Batty`. The local app is served at `http://localhost:3147`; use that hostname rather than the numeric loopback address so passkeys work.
 
-On the first deployment, the script creates `<batty-root>/.batty/options.json` and starts Batty immediately. Later deployments hand the reload to a separate one-shot launchd job, which runs the prepared release's CLI over local IPC, puts the server into deployment drain mode, and waits for active agent turns to finish before restarting it. The worker checks `/healthz`, logs its result in `~/Library/Logs/Batty/deploy.log`, and removes its launchd job when finished. Handoff errors are reported before the running service is stopped. Set `BATTY_SKIP_DRAIN=1` to explicitly skip draining, including the first upgrade from a server without deployment IPC.
+On the first deployment, the script creates `<batty-root>/.batty/options.json` and starts Batty immediately. Later deployments hand the reload to a separate one-shot launchd job, which runs the prepared release's CLI `drain` over local IPC, awaits only the deploying turn’s persisted final summary, and checkpoints other active sessions before restart. The worker checks `/healthz`, logs its result in `~/Library/Logs/Batty/deploy.log`, and removes its launchd job when finished. Handoff errors are reported before the running service is stopped. Set `BATTY_SKIP_DRAIN=1` to explicitly skip checkpoint preparation, including the first upgrade from a server without deployment IPC.
 
 ### Windows deployment behind IIS
 
@@ -390,9 +390,9 @@ The deployment:
 - packages versioned releases under `D:\Batty\app\releases`
 - installs the pinned WinSW wrapper as the automatic `Batty` Windows service
 - hands service restart and release activation to a detached process without a fixed delay
-- runs the staged release's CLI over local IPC, puts a running service into deployment drain mode, and waits for active agent turns to finish before activation
+- runs the staged release's CLI `drain` over local IPC, awaits only the deploying turn’s persisted final summary, and checkpoints other active work before activation
 - updates `D:\Batty\app\current` as a junction
 - configures IIS as a reverse proxy and verifies both local and public health endpoints
 - writes service logs under `D:\Batty\app\logs` and handoff logs under `D:\Batty\app\deploy-logs`
 
-Inspect the service with `Get-Service Batty`. A new service initially runs as LocalSystem; deployment updates preserve any account configured through Windows Services. That account must be able to access the configured Batty root and workspace roots. Add `-Force` to `deploy-windows.ps1` to skip the drain wait.
+Inspect the service with `Get-Service Batty`. A new service initially runs as LocalSystem; deployment updates preserve any account configured through Windows Services. That account must be able to access the configured Batty root and workspace roots. Add `-Force` to `deploy-windows.ps1` to skip checkpoint preparation.

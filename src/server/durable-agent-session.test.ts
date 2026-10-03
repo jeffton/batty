@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
+import { LiveDoc } from "@earendil-works/pi-durable";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Type } from "typebox";
 import { createAgentSessionFixture } from "./agent-session-test-fixture";
 import { DurableAgentSessionController } from "./durable-agent-session";
@@ -59,6 +61,75 @@ function users(fixture: Awaited<ReturnType<typeof setup>>) {
 }
 
 describe("durable runtime admission and recovery", () => {
+  it("retains every lifecycle boundary behind a slow extension hook and more than 100 native frames", async () => {
+    const entered = barrier();
+    const finish = barrier();
+    const lifecycle: Array<{ type: string; provider: string | undefined; messages?: string }> = [];
+    const fixture = await setup({
+      extensionFactories: [
+        (pi) => {
+          pi.on("agent_start", async (_event, ctx) => {
+            lifecycle.push({ type: "start", provider: ctx.model?.provider });
+            if (lifecycle.length === 1) {
+              entered.release();
+              await finish.promise;
+            }
+          });
+          pi.on("agent_end", async (event, ctx) => {
+            lifecycle.push({
+              type: "end",
+              provider: ctx.model?.provider,
+              messages: JSON.stringify(event.messages),
+            });
+          });
+        },
+      ],
+    });
+    const observed: string[] = [];
+    fixture.session.subscribe((event) => {
+      if (event.type === "run_start" || event.type === "run_end" || event.type === "agent_settled")
+        observed.push(event.type);
+    });
+    fixture.faux.setResponses([fauxAssistantMessage("first answer")]);
+    const first = fixture.session.prompt("first request");
+    await entered.promise;
+    try {
+      await fixture.session.sessionManager.conversation.waitForIdle(BACKGROUND_CONTEXT);
+      for (let index = 0; index < 150; index++) {
+        await fixture.session.sessionManager.conversation.commit(async (tx) => {
+          (await tx.doc(LiveDoc, fixture.session.sessionManager.conversation.id)).tools = [
+            { callId: "progress", name: "bash", status: "running", output: String(index) },
+          ];
+        }, BACKGROUND_CONTEXT);
+      }
+      const secondProvider = fauxProvider({ provider: "second-faux" });
+      fixture.modelRuntime.registerNativeProvider(secondProvider.provider);
+      await fixture.session.setModel(secondProvider.getModel());
+      secondProvider.setResponses([fauxAssistantMessage("second answer")]);
+      const second = fixture.session.prompt("second request");
+      await vi.waitFor(() => expect(secondProvider.state.callCount).toBe(1));
+      await fixture.session.sessionManager.conversation.waitForIdle(BACKGROUND_CONTEXT);
+      expect(lifecycle).toEqual([{ type: "start", provider: fixture.faux.getModel().provider }]);
+      expect(observed).not.toContain("agent_settled");
+      finish.release();
+      await Promise.all([first, second]);
+      expect(lifecycle.map((event) => event.type)).toEqual(["start", "end", "start", "end"]);
+      expect(lifecycle.map((event) => event.provider)).toEqual([
+        fixture.faux.getModel().provider,
+        fixture.faux.getModel().provider,
+        "second-faux",
+        "second-faux",
+      ]);
+      expect(lifecycle[1]!.messages).toContain("first answer");
+      expect(lifecycle[1]!.messages).not.toContain("second request");
+      expect(lifecycle[3]!.messages).toContain("second answer");
+      expect(observed).toEqual(["run_start", "run_end", "run_start", "run_end", "agent_settled"]);
+    } finally {
+      finish.release();
+      await first;
+    }
+  });
+
   it("deduplicates a completed input request across reopening", async () => {
     const fixture = await setup();
     fixture.faux.setResponses([
@@ -71,6 +142,86 @@ describe("durable runtime admission and recovery", () => {
     expect(fixture.faux.state.callCount).toBe(1);
     expect(users(fixture)).toHaveLength(1);
     expect(users(fixture)[0]).toMatchObject({ clientMessageId: "same-request" });
+  });
+
+  it("looks up custom-input settlement by its native deduplication key without scanning history", async () => {
+    const fixture = await setup();
+    const input = {
+      customType: "batty-operation",
+      content: "Work",
+      display: true,
+      details: { battyResultReplyId: "operation:lookup" },
+    };
+    expect(await fixture.session.getCustomInputSubmission(input)).toBeUndefined();
+    fixture.faux.setResponses([fauxAssistantMessage("Done")]);
+    await fixture.session.sendCustomMessage(input, { triggerTurn: true });
+    const scan = vi.spyOn(fixture.session.sessionManager.storage, "scanSubmissions");
+    const lookup = vi.spyOn(fixture.session.sessionManager.storage, "submissionByRequest");
+    const settled = await fixture.session.getCustomInputSubmission(input);
+    expect(settled).toMatchObject({ status: "done", answer: expect.any(Number) });
+    expect(lookup).toHaveBeenCalledOnce();
+    expect(scan).not.toHaveBeenCalled();
+    await fixture.reopen();
+    expect(await fixture.session.getCustomInputSubmission(input)).toEqual(settled);
+    expect(fixture.faux.state.callCount).toBe(1);
+  });
+
+  it("checkpoints without waiting for an unsafe tool that ignores cancellation", async () => {
+    const entered = barrier();
+    const finish = barrier();
+    const execute = vi.fn(async () => {
+      entered.release();
+      await finish.promise;
+      return {
+        content: [{ type: "text" as const, text: "late result" }],
+        details: { battyFileChanges: [{ path: "late.txt" }] },
+      };
+    });
+    const fixture = await setup({
+      tools: [
+        { name: "hold", label: "Hold", description: "hold", parameters: Type.Object({}), execute },
+      ],
+    });
+    fixture.faux.setResponses([holdResponse()]);
+    const running = fixture.session.prompt("hold").catch(() => {});
+    await entered.promise;
+    let checkpointed = false;
+    const closing = fixture.session.dispose().then(() => {
+      checkpointed = true;
+    });
+    try {
+      await vi.waitFor(() => expect(checkpointed).toBe(true), { timeout: 1000 });
+    } finally {
+      finish.release();
+      await closing;
+      await running;
+    }
+    await vi.waitFor(async () => {
+      const snapshot = await SessionStore.read(fixture.session.sessionFile);
+      expect(snapshot.entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "custom",
+            customType: "batty.tool-artifacts",
+            data: expect.objectContaining({
+              toolCallId: "hold-call",
+              toolTaskId: expect.any(Number),
+              details: { battyFileChanges: [{ path: "late.txt" }] },
+            }),
+          }),
+        ]),
+      );
+    });
+    fixture.faux.setResponses([fauxAssistantMessage("recovered without replay")]);
+    await fixture.reopen();
+    await fixture.session.waitForIdle();
+    expect(execute).toHaveBeenCalledOnce();
+    expect(fixture.session.messages.find((message) => message.role === "toolResult")).toMatchObject(
+      { details: expect.objectContaining({ battyFileChanges: [{ path: "late.txt" }] }) },
+    );
+    expect(fixture.session.messages.at(-1)).toMatchObject({
+      content: [{ type: "text", text: "recovered without replay" }],
+    });
   });
 
   it.each(["steer", "followUp"] as const)(
@@ -119,7 +270,9 @@ describe("durable runtime admission and recovery", () => {
         images: [{ type: "image", mimeType: "image/png", data: "aGVsbG8=" }],
       });
       await vi.waitFor(() => expect(fixture.session.pendingMessageCount).toBe(2));
-      await fixture.session.removeQueuedPrompt("steer", 0);
+      await fixture.session.removeQueuedPrompt(
+        fixture.session.getQueuedPrompts().find((prompt) => prompt.kind === "steer")!.submissionId,
+      );
       await vi.waitFor(() =>
         expect(fixture.session.getQueuedPrompts()).toEqual([
           expect.objectContaining({ text: "same", clientMessageId: "keep-id" }),
@@ -273,23 +426,20 @@ describe("durable runtime admission and recovery", () => {
     fixture.faux.setResponses([fauxAssistantMessage("persisted answer")]);
     const observed: string[] = [];
     fixture.session.subscribe(async (event) => {
-      if (
-        event.type !== "message_end" ||
-        event.message.role === "system" ||
-        !("content" in event.message)
-      )
-        return;
+      if (event.type !== "message_end") return;
+      const message = event.entry.model![0]!;
+      if (message.role === "system") return;
       const stored = await SessionStore.read(fixture.session.sessionFile);
       expect(stored.entries).toContainEqual(
         expect.objectContaining({
           type: "message",
           message: expect.objectContaining({
-            role: event.message.role,
-            content: event.message.content,
+            role: message.role,
+            content: message.content,
           }),
         }),
       );
-      observed.push(event.message.role);
+      observed.push(message.role);
     });
     await fixture.session.prompt("question");
     expect(observed).toContain("user");

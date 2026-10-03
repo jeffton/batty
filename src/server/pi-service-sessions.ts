@@ -1,43 +1,47 @@
-import { randomUUID } from "node:crypto";
-import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import type { AgentSessionController as AgentSession } from "./agent-session-controller";
-import { isPiShellToolName } from "@/shared/pi-tools";
-import type {
-  ServerEvent,
-  SessionState,
-  SessionStateMetadata,
-  WorkspaceInfo,
-} from "@/shared/types";
-import { normalizeBlocks, normalizeMessage, type UiImageResolver } from "./pi-state";
-import { sanitizeTerminalBlocks } from "./terminal-output";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import type { Op } from "@earendil-works/chord/delta";
+import type { JsonValue } from "@earendil-works/chord";
+import type { ConversationView } from "@earendil-works/pi-durable";
+import type { SessionSnapshot, WorkspaceInfo } from "@/shared/types";
+import type { AgentSessionController, SessionControllerEvent } from "./agent-session-controller";
+import type { UiImageResolver } from "./pi-state";
 import type { SessionSubscriber, WebSession } from "./pi-service-types";
-import { normalizeToolDetails } from "./pi-service-types";
 
-const disposingSessions = new WeakSet<WebSession>();
+const disposingSessions = new WeakMap<WebSession, Promise<void>>();
+
+export function isWebSessionDisposing(webSession: WebSession): boolean {
+  return disposingSessions.has(webSession);
+}
 
 export function disposeWebSession(
   sessions: Map<string, WebSession>,
   unregisterLiveSession: (sessionId: string) => void,
   webSession: WebSession,
-): void {
-  if (disposingSessions.has(webSession)) return;
-  disposingSessions.add(webSession);
-  void webSession.session
-    .waitForIdle()
-    .then(() => webSession.session.dispose())
-    .then(() => {
+  closeBrowser?: () => Promise<void>,
+): Promise<void> {
+  const existing = disposingSessions.get(webSession);
+  if (existing) return existing;
+  const disposal = Promise.all([
+    webSession.session.waitForIdle().then(() => webSession.session.dispose()),
+    closeBrowser?.(),
+  ]).then(() => {
+    if (sessions.get(webSession.id) === webSession) {
       sessions.delete(webSession.id);
       unregisterLiveSession(webSession.id);
-    })
-    .catch((error) => console.error("Failed to close Pi harness", error));
+    }
+  });
+  disposingSessions.set(webSession, disposal);
+  // Settlement delivery cannot await disposal, which drains that same delivery.
+  void disposal.catch((error) => console.error("Failed to close Pi harness", error));
+  return disposal;
 }
 
 export function attachSession(
   sessions: Map<string, WebSession>,
-  registerLiveSession: (workspace: WorkspaceInfo, session: AgentSession) => void,
-  handleAgentEvent: (webSession: WebSession, event: AgentSessionEvent) => Promise<void>,
+  registerLiveSession: (workspace: WorkspaceInfo, session: AgentSessionController) => void,
+  handleEvent: (session: WebSession, event: SessionControllerEvent) => Promise<void>,
   workspace: WorkspaceInfo,
-  session: AgentSession,
+  session: AgentSessionController,
   modelFallbackMessage?: string,
   ephemeral = false,
   resolveUiImage?: UiImageResolver,
@@ -47,503 +51,98 @@ export function attachSession(
     workspace,
     session,
     subscribers: new Set(),
-    activeTools: new Map(),
     openedAt: Date.now(),
     modelFallbackMessage,
     ephemeral,
-    isCompacting: session.isCompacting,
-    revision: 0,
-    streamId: randomUUID(),
-    eventLog: [],
     resolveUiImage,
   };
-
-  webSession.activeAssistant = session.streamingMessage ?? undefined;
-  webSession.publishedAssistantPositions =
-    webSession.activeAssistant?.role === "assistant"
-      ? assistantBlockPositions(webSession.activeAssistant.content)
-      : undefined;
-  for (const tool of session.runningTools) {
-    webSession.activeTools.set(tool.toolCallId, {
-      toolCallId: tool.toolCallId,
-      toolName: tool.toolName,
-      args: tool.args as Record<string, unknown>,
-      blocks: normalizeBlocks(tool.partialResult?.content ?? [], { imageResolver: resolveUiImage }),
-      details: normalizeToolDetails(tool.partialResult?.details),
-      status: "running",
-      isError: false,
-    });
-  }
-  session.subscribe((event) => handleAgentEvent(webSession, event));
+  session.subscribe((event) => handleEvent(webSession, event));
   sessions.set(webSession.id, webSession);
   registerLiveSession(workspace, session);
   return webSession;
 }
 
-const MAX_REPLAY_EVENTS = 500;
-
-function withRevision(event: ServerEvent, revision: number, streamId: string): ServerEvent {
-  if (event.type === "reset") {
-    return {
-      ...event,
-      revision,
-      streamId,
-      state: { ...event.state, revision, streamId },
-    };
-  }
-  if (event.type === "state") {
-    return {
-      ...event,
-      revision,
-      streamId,
-      state: { ...event.state, revision, streamId },
-    };
-  }
-  return { ...event, revision, streamId };
-}
-
-export function publish(webSession: WebSession, event: ServerEvent): void {
-  const revision = (webSession.revision ?? 0) + 1;
-  webSession.revision = revision;
-  const versionedEvent = withRevision(event, revision, webSession.streamId);
-  const eventLog = (webSession.eventLog ??= []);
-  if (versionedEvent.type === "reset") {
-    eventLog.length = 0;
-  }
-  eventLog.push({ revision, event: structuredClone(versionedEvent) });
-  if (eventLog.length > MAX_REPLAY_EVENTS) {
-    eventLog.splice(0, eventLog.length - MAX_REPLAY_EVENTS);
-  }
-
-  for (const subscriber of webSession.subscribers) {
-    subscriber(versionedEvent, revision);
-  }
-}
-
-export function getStateMetadata(
-  getState: (
-    sessionId: string,
-    options?: {
-      beforeMessageId?: string;
-      limit?: number;
-      messagesDetailLevel?: "summary" | "full";
-    },
-  ) => SessionState,
-  webSession: WebSession,
-): SessionStateMetadata {
-  const state = getState(webSession.id, { limit: 1 });
-  const {
-    messages: _messages,
-    messagesDetailLevel: _messagesDetailLevel,
-    activeAssistant: _activeAssistant,
-    activeTools: _activeTools,
-    ...rest
-  } = state;
-  return rest;
-}
-
-function assistantBlockPositions(content: unknown): WebSession["publishedAssistantPositions"] {
-  if (!Array.isArray(content)) {
-    return undefined;
-  }
-
-  let index = 0;
-  return content.map((block) => {
-    const normalized = normalizeBlocks([block]);
-    if (normalized.length === 0) {
-      return undefined;
-    }
-    return { index: index++, type: normalized[0]!.type };
-  });
-}
-
-function hasToolCallInBlocks(blocks: ReturnType<typeof normalizeBlocks>): boolean {
-  return blocks.some((block) => block.type === "toolCall");
-}
-
-function appendOnlyBlockDeltas(
-  previous: ReturnType<typeof normalizeBlocks>,
-  next: ReturnType<typeof normalizeBlocks>,
-):
-  | Array<{
-      contentIndex: number;
-      blockType: "text" | "thinking";
-      delta: string;
-    }>
-  | undefined {
-  if (previous.length !== next.length) {
-    return undefined;
-  }
-
-  const deltas: Array<{
-    contentIndex: number;
-    blockType: "text" | "thinking";
-    delta: string;
-  }> = [];
-  for (let contentIndex = 0; contentIndex < next.length; contentIndex += 1) {
-    const previousBlock = previous[contentIndex]!;
-    const nextBlock = next[contentIndex]!;
-    if (previousBlock.type === "text" && nextBlock.type === "text") {
-      if (!nextBlock.text.startsWith(previousBlock.text)) {
-        return undefined;
-      }
-      const delta = nextBlock.text.slice(previousBlock.text.length);
-      if (delta) {
-        deltas.push({ contentIndex, blockType: "text", delta });
-      }
-      continue;
-    }
-    if (previousBlock.type === "thinking" && nextBlock.type === "thinking") {
-      if (!nextBlock.thinking.startsWith(previousBlock.thinking)) {
-        return undefined;
-      }
-      const delta = nextBlock.thinking.slice(previousBlock.thinking.length);
-      if (delta) {
-        deltas.push({ contentIndex, blockType: "thinking", delta });
-      }
-      continue;
-    }
-    if (JSON.stringify(previousBlock) !== JSON.stringify(nextBlock)) {
-      return undefined;
-    }
-  }
-  return deltas;
-}
-
-async function waitForSessionStateFlush(): Promise<void> {
-  // `message_end` can arrive before the session manager's branch view reflects
-  // the finished message. Yield once so the reset snapshot includes the new
-  // user message instead of forcing the client to rediscover it later.
-  await Promise.resolve();
-}
-
-async function runCompletionHook(
-  deps: {
-    notifyWorkspaceUpdated: (workspaceId: string) => Promise<void>;
-    onAgentCompleted?: (session: SessionState) => Promise<void>;
-    disposeWebSession: (webSession: WebSession) => void;
-  },
-  webSession: WebSession,
-  session: SessionState,
-): Promise<void> {
-  try {
-    await deps.notifyWorkspaceUpdated(session.workspaceId);
-  } catch (error) {
-    console.error("Failed to publish workspace update", error);
-  }
-  try {
-    console.info("Running agent completion hook", {
-      sessionId: session.sessionId,
-      workspaceId: session.workspaceId,
-    });
-    await deps.onAgentCompleted?.(session);
-  } catch (error) {
-    console.error("Failed to run agent completion hook", error);
-  }
-  if (webSession.ephemeral && webSession.subscribers.size === 0) {
-    deps.disposeWebSession(webSession);
-  }
-}
-
-function hasToolCallMessage(messages: SessionState["messages"], toolCallIds: string[]): boolean {
-  return messages.some(
-    (message) =>
-      message.role === "assistant" &&
-      message.blocks.some((block) => block.type === "toolCall" && toolCallIds.includes(block.id)),
-  );
-}
-
-export async function handleAgentEvent(
-  deps: {
-    getState: (
-      sessionId: string,
-      options?: {
-        beforeMessageId?: string;
-        limit?: number;
-        messagesDetailLevel?: "summary" | "full";
-      },
-    ) => SessionState;
-    getStateMetadata: (webSession: WebSession) => SessionStateMetadata;
-    publish: (webSession: WebSession, event: ServerEvent) => void;
-    notifyWorkspaceUpdated: (workspaceId: string) => Promise<void>;
-    disposeWebSession: (webSession: WebSession) => void;
-    onAgentCompleted?: (session: SessionState) => Promise<void>;
-    onAgentSettled?: (webSession: WebSession) => Promise<void>;
-  },
-  webSession: WebSession,
-  event: AgentSessionEvent,
-): Promise<void> {
-  switch (event.type) {
-    case "message_start":
-      if (event.message.role === "assistant") {
-        webSession.activeAssistant = event.message;
-        const assistant = normalizeMessage(event.message, Number.MAX_SAFE_INTEGER, {
-          imageResolver: webSession.resolveUiImage,
-        }) as Extract<SessionState["messages"][number], { role: "assistant" }>;
-        webSession.publishedAssistantPositions = assistantBlockPositions(event.message.content);
-        deps.publish(webSession, { type: "assistant", assistant });
-      }
-      break;
-    case "message_update":
-      if (event.message.role === "assistant") {
-        webSession.activeAssistant = event.message;
-        const update = event.assistantMessageEvent;
-        const positions = webSession.publishedAssistantPositions;
-        const content = event.message.content;
-        if (
-          (update.type === "text_delta" || update.type === "thinking_delta") &&
-          Array.isArray(content) &&
-          positions?.length === content.length &&
-          positions[update.contentIndex]?.type ===
-            (update.type === "text_delta" ? "text" : "thinking") &&
-          content[update.contentIndex]?.type === positions[update.contentIndex]?.type
-        ) {
-          deps.publish(webSession, {
-            type: "assistant-delta",
-            contentIndex: positions[update.contentIndex]!.index,
-            blockType: update.type === "text_delta" ? "text" : "thinking",
-            delta: update.delta,
-          });
-        } else {
-          const assistant = normalizeMessage(event.message, Number.MAX_SAFE_INTEGER, {
-            imageResolver: webSession.resolveUiImage,
-          }) as Extract<SessionState["messages"][number], { role: "assistant" }>;
-          webSession.publishedAssistantPositions = assistantBlockPositions(event.message.content);
-          deps.publish(webSession, { type: "assistant", assistant });
-        }
-      }
-      break;
-    case "message_end":
-      if (event.message.role === "assistant") {
-        webSession.publishedAssistantPositions = undefined;
-        const blocks = normalizeBlocks(event.message.content, {
-          imageResolver: webSession.resolveUiImage,
-        });
-        if (hasToolCallInBlocks(blocks)) {
-          const toolCallIds = blocks.flatMap((block) =>
-            block.type === "toolCall" ? [block.id] : [],
-          );
-          const state = deps.getState(webSession.id);
-          if (hasToolCallMessage(state.messages, toolCallIds)) {
-            webSession.activeAssistant = undefined;
-            deps.publish(webSession, { type: "reset", state: deps.getState(webSession.id) });
-          } else {
-            deps.publish(webSession, { type: "reset", state });
-          }
-          break;
-        }
-
-        webSession.activeAssistant = undefined;
-      }
-      await waitForSessionStateFlush();
-      if (event.message.role === "toolResult") {
-        webSession.activeTools.delete(event.message.toolCallId);
-      }
-      deps.publish(webSession, { type: "reset", state: deps.getState(webSession.id) });
-      break;
-    case "tool_execution_start":
-      webSession.activeTools.set(event.toolCallId, {
-        toolCallId: event.toolCallId,
-        toolName: event.toolName,
-        args: event.args as Record<string, unknown>,
-        blocks: [],
-        status: "running",
-        isError: false,
-        details: undefined,
-      });
-      deps.publish(webSession, {
-        type: "tools",
-        tools: [webSession.activeTools.get(event.toolCallId)!],
-      });
-      break;
-    case "tool_execution_update": {
-      const current = webSession.activeTools.get(event.toolCallId);
-      if (current) {
-        const normalizedBlocks = normalizeBlocks(event.partialResult.content ?? [], {
-          imageResolver: webSession.resolveUiImage,
-        });
-        const blocks = isPiShellToolName(current.toolName)
-          ? sanitizeTerminalBlocks(normalizedBlocks)
-          : normalizedBlocks;
-        const details = normalizeToolDetails(event.partialResult.details);
-        const deltas = appendOnlyBlockDeltas(current.blocks, blocks);
-        const next = { ...current, blocks, details };
-        webSession.activeTools.set(event.toolCallId, next);
-        if (deltas) {
-          deps.publish(webSession, {
-            type: "tool-delta",
-            toolCallId: event.toolCallId,
-            deltas,
-            details,
-          });
-        } else {
-          deps.publish(webSession, { type: "tools", tools: [next] });
-        }
-      }
-      break;
-    }
-    case "tool_execution_end": {
-      const current = webSession.activeTools.get(event.toolCallId);
-      if (current) {
-        const blocks = normalizeBlocks(event.result.content ?? [], {
-          imageResolver: webSession.resolveUiImage,
-        });
-        current.blocks = isPiShellToolName(current.toolName)
-          ? sanitizeTerminalBlocks(blocks)
-          : blocks;
-        current.status = event.isError ? "error" : "success";
-        current.isError = event.isError;
-        current.details = normalizeToolDetails(event.result.details);
-        webSession.activeTools.set(event.toolCallId, current);
-        deps.publish(webSession, { type: "tools", tools: [current] });
-      }
-      break;
-    }
-    case "agent_start":
-      webSession.activeTools.clear();
-      webSession.agentCompleted = false;
-      webSession.suppressNextAgentEndCompletion = false;
-      deps.publish(webSession, { type: "tools", tools: [] });
-      deps.publish(webSession, { type: "state", state: deps.getStateMetadata(webSession) });
-      await deps.notifyWorkspaceUpdated(webSession.workspace.id);
-      break;
-    case "queue_update":
-      deps.publish(webSession, { type: "state", state: deps.getStateMetadata(webSession) });
-      break;
-    case "auto_retry_start":
-      webSession.autoRetryActive = true;
-      break;
-    case "compaction_start":
-      webSession.agentCompleted = false;
-      webSession.isCompacting = true;
-      deps.publish(webSession, { type: "state", state: deps.getStateMetadata(webSession) });
-      break;
-    case "agent_end":
-    case "turn_end":
-    case "compaction_end":
-    case "auto_retry_end": {
-      if (event.type === "compaction_end") {
-        webSession.isCompacting = false;
-      }
-      const agentEndWillRetry = event.type === "agent_end" && event.willRetry;
-      if (agentEndWillRetry) {
-        webSession.autoRetryActive = true;
-      }
-      if (event.type === "agent_end") {
-        webSession.activeAssistant = undefined;
-        webSession.publishedAssistantPositions = undefined;
-        // Pi may still retry, compact, or continue. Completion belongs to agent_settled.
-      }
-      if (event.type === "auto_retry_end") {
-        webSession.autoRetryActive = false;
-      }
-      const state = deps.getState(webSession.id);
-      const publishedState = webSession.agentCompleted
-        ? {
-            ...state,
-            isStreaming: false,
-            pendingMessageCount: 0,
-            activeAssistant: undefined,
-            activeTools: [],
-          }
-        : state;
-      deps.publish(webSession, { type: "reset", state: publishedState });
-
-      break;
-    }
-    case "agent_settled": {
-      if (webSession.agentCompleted) break;
-      webSession.agentCompleted = true;
-      await waitForSessionStateFlush();
-      webSession.autoRetryActive = false;
-      webSession.activeTools.clear();
-      const state = deps.getState(webSession.id);
-      deps.publish(webSession, { type: "reset", state });
-      if (deps.onAgentSettled) await deps.onAgentSettled(webSession);
-      await runCompletionHook(deps, webSession, state);
-      break;
-    }
-    default:
-      break;
-  }
+/** Metadata/resource changes need no reconstructed live state or replay log. */
+export function publish(webSession: WebSession): void {
+  for (const refresh of webSession.subscribers) refresh();
 }
 
 export function requireSession(sessions: Map<string, WebSession>, sessionId: string): WebSession {
-  const webSession = sessions.get(sessionId);
-  if (!webSession) {
-    throw new Error(`Unknown session: ${sessionId}`);
-  }
-  return webSession;
+  const session = sessions.get(sessionId);
+  if (!session) throw new Error(`Unknown session: ${sessionId}`);
+  return session;
 }
 
-export function subscribeToSession(
+/** Native view operations projected to the native built-in documents only. */
+export function documentOperations(
+  ops: readonly Op[],
+  documents: SessionSnapshot["documents"],
+): Op[] {
+  return ops.flatMap((op): Op[] => {
+    if (op[0] === "r") return [["r", documents as unknown as JsonValue]];
+    const path = op[1];
+    if (path[0] !== "docs") return [];
+    if (path.length === 1) return [["r", documents as unknown as JsonValue]];
+    if (op[0] === "d" && path.length === 2) {
+      const kind = path[1] as keyof typeof documents;
+      return [["s", [kind], documents[kind] as unknown as JsonValue]];
+    }
+    return [[op[0], path.slice(1), ...op.slice(2)] as unknown as Op];
+  });
+}
+
+/** Each connection attaches atomically and begins with a fresh native base. */
+export async function subscribeToSession(
   requireSession: (sessionId: string) => WebSession,
-  getState: (
+  getSnapshot: (
     sessionId: string,
-    options?: {
-      beforeMessageId?: string;
-      limit?: number;
-      messagesDetailLevel?: "summary" | "full";
-    },
-  ) => SessionState,
-  disposeWebSession: (webSession: WebSession) => void,
+    view: ConversationView,
+    previous?: SessionSnapshot,
+  ) => SessionSnapshot,
+  dispose: (session: WebSession) => void,
   sessionId: string,
   subscriber: SessionSubscriber,
-  afterRevision?: number,
-  initialMessagesDetailLevel: "summary" | "full" = "full",
-  afterStreamId?: string,
-): () => void {
-  const webSession = requireSession(sessionId);
-  webSession.subscribers.add(subscriber);
-
-  const currentRevision = webSession.revision ?? 0;
-  if (afterRevision === undefined || afterStreamId !== webSession.streamId) {
-    subscriber(
-      withRevision(
-        {
-          type: "reset",
-          state: getState(sessionId, { messagesDetailLevel: initialMessagesDetailLevel }),
-        },
-        currentRevision,
-        webSession.streamId,
-      ),
-      currentRevision,
-    );
-  } else if (afterRevision !== currentRevision) {
-    const replay = (webSession.eventLog ?? []).filter((entry) => entry.revision > afterRevision);
-    const firstReplay = replay[0];
-    const canReplay =
-      afterRevision < currentRevision &&
-      firstReplay &&
-      (firstReplay.revision === afterRevision + 1 || firstReplay.event.type === "reset");
-
-    if (canReplay) {
-      for (const entry of replay) {
-        subscriber(entry.event, entry.revision);
-      }
-    } else {
-      subscriber(
-        withRevision(
-          {
-            type: "reset",
-            state: getState(sessionId, { messagesDetailLevel: initialMessagesDetailLevel }),
-          },
-          currentRevision,
-          webSession.streamId,
-        ),
-        currentRevision,
-      );
-    }
+): Promise<() => void> {
+  const session = requireSession(sessionId);
+  const watch = await session.session.sessionManager.conversation.watch(BACKGROUND_CONTEXT);
+  let previous: SessionSnapshot;
+  let stopped = false;
+  const send = (view: ConversationView, ops: readonly Op[]) => {
+    const snapshot = getSnapshot(sessionId, view, previous);
+    const historyChanged = snapshot.historyVersion !== previous.historyVersion;
+    subscriber({
+      type: "session-update",
+      documents: documentOperations(ops, snapshot.documents),
+      metadata: snapshot.metadata,
+      queuedClientMessageIds: snapshot.queuedClientMessageIds,
+      ...(historyChanged ? { messages: snapshot.messages } : {}),
+      historyVersion: snapshot.historyVersion,
+    });
+    previous = snapshot;
+  };
+  const refresh = () => send(watch.value, []);
+  try {
+    const snapshot = getSnapshot(sessionId, watch.value);
+    subscriber({ type: "session", snapshot });
+    previous = snapshot;
+    session.subscribers.add(refresh);
+    watch.start(async (view, ops) => send(view, ops));
+  } catch (error) {
+    await watch.stop();
+    throw error;
   }
-
-  return () => {
-    webSession.subscribers.delete(subscriber);
-    if (
-      webSession.ephemeral &&
-      webSession.subscribers.size === 0 &&
-      !webSession.session.isStreaming
-    ) {
-      disposeWebSession(webSession);
+  const unsubscribe = () => {
+    if (stopped) return;
+    stopped = true;
+    session.subscribers.delete(refresh);
+    void watch.stop().catch((error) => console.error("Failed to stop session view", error));
+    if (session.ephemeral && session.subscribers.size === 0 && !session.session.isStreaming) {
+      dispose(session);
     }
   };
+  void watch.closed.then((end) => {
+    unsubscribe();
+    if (end.reason === "listener_error") console.error("Session view listener failed", end.error);
+  });
+  return unsubscribe;
 }

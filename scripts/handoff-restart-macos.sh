@@ -18,6 +18,8 @@ trap 'rm -rf "$plist_dir"' EXIT
 PLIST_PATH="$plist" RELOAD_LABEL="$label" RELOAD_DOMAIN="$domain" SCRIPT_DIR="$script_dir" \
   LOG_DIR="$log_dir" PATH_VALUE="$PATH" BATTY_INSTALL_ROOT="$install_root" \
   BATTY_ROOT="$batty_root" BATTY_PORT="$backend_port" BATTY_NODE="$node_path" \
+  BATTY_RESTART_SESSION_FILE="${PI_SESSION_FILE:-}" \
+  BATTY_RESTART_AFTER_ENTRY_ID="${PI_RESTART_AFTER_ENTRY_ID:-}" \
   BATTY_SKIP_DRAIN="${BATTY_SKIP_DRAIN:-}" python3 <<'PY'
 import os
 import plistlib
@@ -37,6 +39,7 @@ plist = {
     "EnvironmentVariables": {
         **{key: env[key] for key in (
             "BATTY_INSTALL_ROOT", "BATTY_ROOT", "BATTY_PORT", "BATTY_NODE", "BATTY_SKIP_DRAIN",
+            "BATTY_RESTART_SESSION_FILE", "BATTY_RESTART_AFTER_ENTRY_ID",
         )},
         "BATTY_RELOAD_SERVICE": service,
         "PATH": env["PATH_VALUE"],

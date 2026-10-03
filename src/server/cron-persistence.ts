@@ -111,6 +111,7 @@ function normalizeStoredRunLog(value: unknown): CronRunLog {
     scheduleLabel: requireStoredString(run.scheduleLabel, "Schedule label"),
     startedAtMs: requireStoredTimestamp(run.startedAtMs, "Started timestamp"),
     status: run.status,
+    ...(run.jobSnapshot ? { jobSnapshot: run.jobSnapshot } : {}),
   };
   for (const [key, field] of [
     ["completedAtMs", run.completedAtMs],

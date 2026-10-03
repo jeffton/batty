@@ -16,28 +16,35 @@ import type {
   PromptSubmissionResult,
   ProviderUsage,
   PreviousContextMode,
-  ServerEvent,
+  SessionSnapshot,
   SessionMessagesPage,
   SessionResourcesResponse,
   SessionState,
-  SessionStateMetadata,
   SessionSummary,
   ToolExecutionDetails,
   WorkspaceInfo,
 } from "@/shared/types";
 import type { AppConfig } from "./config";
 import { BrowserService } from "./browser-service";
-import { TurnDrain } from "./turn-drain";
+import { hasRestartResponse, waitForRestartResponse } from "./restart-readiness";
+import {
+  readSubagentRecovery,
+  readQueuedSubagentOperations,
+  persistQueuedSubagentOperation,
+} from "./subagent-recovery";
+import { isSessionCheckpointError, SessionCheckpointError } from "./session-checkpoint";
 import { closeSharedBrowser } from "./browser-runtime";
 import { ModelConfigWatcher } from "./model-config-watcher";
 import { resolveModel } from "./model-resolution";
-import { getSessionContextUsage } from "./pi-context-usage";
+import { getSessionContextUsage, getViewContextUsage } from "./pi-context-usage";
 import { createSessionManagerWithPreviousContext } from "./previous-context";
 import {
   createPiAgentSession as createPiAgentSessionImpl,
   refreshBattySystemPrompt,
 } from "./pi-agent-session";
-import { createSessionState } from "./pi-state";
+import { createSessionState, normalizeBlocks, normalizeMessages } from "./pi-state";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
+import { handleSessionEvent } from "./pi-service-agent-events";
 import { battyAgentDir, workspaceCronSessionDir, workspaceSessionDir } from "./pi-paths";
 import {
   listSessionSummaries as listFastSessionSummaries,
@@ -65,8 +72,7 @@ import { createUiImageResolver, resolveSessionImage } from "./session-images";
 import {
   attachSession,
   disposeWebSession,
-  getStateMetadata,
-  handleAgentEvent,
+  isWebSessionDisposing,
   publish,
   requireSession,
   subscribeToSession,
@@ -106,7 +112,10 @@ import type { RuntimeNotice } from "./runtime-notices";
 import { SessionReadStateStore } from "./session-read-state";
 import { listWorkspaces } from "./workspaces";
 import { SessionStore as SessionManager } from "./session-store";
-import type { AgentSessionController as AgentSession } from "./agent-session-controller";
+import type {
+  AgentSessionController as AgentSession,
+  SessionControllerEvent,
+} from "./agent-session-controller";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 
 export type { UploadedFile } from "./pi-service-types";
@@ -122,7 +131,7 @@ function leafBeforeCurrentTurn(branch: SessionEntry[]): string | null | undefine
 }
 
 export class PiService {
-  readonly turns = new TurnDrain();
+  private closing?: Promise<void>;
   readonly mcp: McpService;
   private readonly config: AppConfig;
   private readonly modelRuntime: ModelRuntime;
@@ -220,14 +229,120 @@ export class PiService {
     );
   }
 
-  async dispose(): Promise<void> {
-    await this.mcp.dispose();
-    await this.providerAuthService.dispose();
-    await this.modelConfigWatcher.dispose();
-    await Promise.all([...this.liveSessions.values()].map(({ session }) => session.dispose()));
-    await this.browserService.dispose();
-    await closeSharedBrowser();
-    await disposeSessionSummaryIndex(this.config);
+  async restoreDurableSessions(workspaces: WorkspaceInfo[]): Promise<void> {
+    for (const workspace of workspaces) {
+      const root = workspaceSessionDir(this.config, workspace.id);
+      let entries: import("node:fs").Dirent[];
+      try {
+        entries = await fs.readdir(root, { recursive: true, withFileTypes: true });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
+      for (const entry of entries) {
+        if (!entry.isFile() || !entry.name.endsWith(".sqlite")) continue;
+        const file = path.join(entry.parentPath, entry.name);
+        const recovery = await SessionManager.inspectRecovery(file);
+        if (recovery.parentSession) {
+          const snapshot = await SessionManager.read(file);
+          const operation = readSubagentRecovery(snapshot);
+          const queued = readQueuedSubagentOperations(snapshot);
+          const requests = [
+            ...(operation ? [operation.options] : []),
+            ...queued.map((item) => item.options),
+          ];
+          if (requests.length > 0) {
+            let releaseQueue!: () => void;
+            const tail = new Promise<void>((resolve) => {
+              releaseQueue = resolve;
+            });
+            this.subagentOperations.set(snapshot.metadata.id, tail);
+            void (async () => {
+              try {
+                for (const options of requests) {
+                  if (this.closing) throw new SessionCheckpointError();
+                  let accepted!: () => void;
+                  const deliveryAccepted = new Promise<void>((resolve) => {
+                    accepted = resolve;
+                  });
+                  const running = this.runDetachedSubagentSession({
+                    ...options,
+                    onDelivered: accepted,
+                  });
+                  this.subagentOperations.set(snapshot.metadata.id, tail);
+                  void running.catch((error) => {
+                    if (!isSessionCheckpointError(error))
+                      console.error("Failed to recover subagent", error);
+                  });
+                  await (options.deliveryMode === "prompt"
+                    ? Promise.race([deliveryAccepted, running])
+                    : running);
+                }
+              } finally {
+                releaseQueue();
+                if (this.subagentOperations.get(snapshot.metadata.id) === tail)
+                  this.subagentOperations.delete(snapshot.metadata.id);
+              }
+            })().catch((error) => {
+              if (!isSessionCheckpointError(error))
+                console.error("Failed to recover subagent queue", error);
+            });
+            continue;
+          }
+        }
+        if (recovery.pending) await this.openSession(workspace, file);
+      }
+    }
+  }
+
+  async waitForRestartResponse(sessionPath?: string, afterEntryId?: string): Promise<void> {
+    if (!sessionPath) return;
+    if (!afterEntryId) throw new Error("Restart requires the deploying response anchor");
+    const canonical = path.resolve(sessionPath);
+    const deploying = [...this.liveSessions.values()].find(
+      ({ session }) => session.sessionFile === canonical,
+    );
+    if (deploying) {
+      await waitForRestartResponse(deploying.session, afterEntryId);
+      return;
+    }
+    const snapshot = await SessionManager.read(canonical);
+    const creating = this.sessionControllers.get(snapshot.metadata.id);
+    if (creating) {
+      await waitForRestartResponse((await creating).session, afterEntryId);
+    } else if (!hasRestartResponse(snapshot.entries, afterEntryId)) {
+      throw new Error("Deploying turn ended without a final response");
+    }
+  }
+
+  async prepareRestart(sessionPath?: string, afterEntryId?: string): Promise<void> {
+    await this.waitForRestartResponse(sessionPath, afterEntryId);
+    await this.dispose();
+  }
+
+  dispose(): Promise<void> {
+    return (this.closing ??= (async () => {
+      await this.modelConfigWatcher.dispose();
+      await this.providerAuthService.dispose();
+      const loaded = await Promise.allSettled(this.sessionControllers.values());
+      const closed = await Promise.allSettled(
+        loaded.flatMap((result) =>
+          result.status === "fulfilled" ? [result.value.session.dispose()] : [],
+        ),
+      );
+      const failures = [...loaded, ...closed].flatMap((result) =>
+        result.status === "rejected" ? [result.reason] : [],
+      );
+      await this.mcp.dispose();
+      await this.browserService.dispose();
+      await closeSharedBrowser();
+      await disposeSessionSummaryIndex(this.config);
+      if (failures.length) throw new AggregateError(failures, "Failed to checkpoint sessions");
+    })());
+  }
+
+  private assertRunning(): void {
+    if (this.closing) throw Object.assign(new Error("Batty is restarting"), { statusCode: 503 });
   }
 
   private registerLiveSession(workspace: WorkspaceInfo, session: AgentSession): void {
@@ -300,8 +415,7 @@ export class PiService {
         !webSession.ephemeral &&
         !inlineCronSessionIds.has(summary.sessionId) &&
         !webSession.agentCompleted &&
-        (webSession.session.isStreaming ||
-          [...webSession.activeTools.values()].some((tool) => tool.status === "running")),
+        webSession.session.isStreaming,
       );
       const hasUnread = this.sessionReadState.hasUnread(
         summary.sessionId,
@@ -336,6 +450,7 @@ export class PiService {
     workspace: WorkspaceInfo,
     options?: { modelId?: string; thinkingLevel?: string; ephemeral?: boolean },
   ): Promise<SessionState> {
+    this.assertRunning();
     const sessionOptions = {
       ...(options?.modelId ? { modelId: options.modelId } : {}),
       ...(options?.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
@@ -475,6 +590,7 @@ export class PiService {
     sessionPath: string,
     messagesDetailLevel: "summary" | "full" = "summary",
   ): Promise<SessionState> {
+    this.assertRunning();
     const canonicalPath = path.resolve(sessionPath);
     const existing = [...this.sessions.values()].find(
       (candidate) => candidate.session.sessionFile === canonicalPath,
@@ -517,6 +633,7 @@ export class PiService {
 
   private cronAdapterContext(): PiServiceCronAdapterContext {
     return {
+      openSession: (workspace, sessionPath) => this.openSession(workspace, sessionPath),
       createCronSession: (workspace, options) => this.createCronSession(workspace, options),
       promptCron: (sessionId, notice, operationId) =>
         this.promptCron(sessionId, notice, operationId),
@@ -528,7 +645,7 @@ export class PiService {
         this.prepareSessionForContextCopy(sessionId, copy),
       runSubagentSerial: (sessionId, run) => this.runSubagentSerial(sessionId, run),
       getState: (sessionId) => this.getState(sessionId),
-      publishReset: (webSession, state) => this.publish(webSession, { type: "reset", state }),
+      publishReset: (webSession) => this.publish(webSession),
       setThinkingLevel: (sessionId, thinkingLevel) =>
         this.setThinkingLevel(sessionId, thinkingLevel),
       setModel: (sessionId, modelId) => this.setModel(sessionId, modelId),
@@ -537,19 +654,9 @@ export class PiService {
     };
   }
 
-  async runCronJobSession(job: {
-    workspace: WorkspaceInfo;
-    prompt: string;
-    model: string;
-    thinkingLevel: string;
-    session: CronJobSession;
-    scheduleLabel: string;
-    jobId: string;
-    runId: string;
-    signal: AbortSignal;
-    onSessionStarted(session: { sessionId: string; sessionPath: string }): void;
-    queueResultDelivery(parentSessionId: string): Promise<void>;
-  }): Promise<{ sessionId: string; sessionPath: string }> {
+  async runCronJobSession(
+    job: Parameters<typeof runCronJobSession>[1],
+  ): Promise<{ sessionId: string; sessionPath: string }> {
     return runCronJobSession(this.cronAdapterContext(), job);
   }
 
@@ -621,6 +728,7 @@ export class PiService {
 
   private async runDetachedSubagentSession(options: {
     sessionId?: string;
+    operationId?: string;
     workspace: WorkspaceInfo;
     parentSessionId: string;
     parentSessionPath?: string;
@@ -649,7 +757,8 @@ export class PiService {
     const deliveryAccepted = new Promise<void>((resolve) => {
       releaseDelivery = resolve;
     });
-    const operation = this.turns.run(async () => {
+    this.assertRunning();
+    const operation = (async () => {
       try {
         return await runDetachedSubagentSession(
           {
@@ -676,7 +785,7 @@ export class PiService {
                 const parent = this.requireSession(opened.id);
                 if (!(await deliverDetachedSubagentResult(parent.session, result))) return;
                 const state = this.getState(parent.id);
-                this.publish(parent, { type: "reset", state });
+                this.publish(parent);
                 await this.onAgentCompleted?.(state);
                 await this.notifyWorkspaceUpdated(parent.workspace.id);
               });
@@ -717,7 +826,7 @@ export class PiService {
           this.runningSubagents.delete(runningSubagent.sessionId);
         }
       }
-    }, true);
+    })();
     if (options.sessionId && !options.continueSession) {
       const settled =
         options.deliveryMode === "prompt"
@@ -775,6 +884,7 @@ export class PiService {
         },
       });
       void completion.catch((error) => {
+        if (isSessionCheckpointError(error) && ready) return;
         if (!ready) {
           reject(error);
           return;
@@ -826,7 +936,7 @@ export class PiService {
       modelId ?? (parent?.model ? modelKey(parent.model as PiModel) : undefined);
     if (!effectiveModel) throw new Error("No model available for subagent");
 
-    const previous = this.subagentOperations.get(subagentSessionId);
+    let previous = this.subagentOperations.get(subagentSessionId);
     if (!queued && (previous || live?.isStreaming)) {
       throw new Error(
         "Subagent is still running. Use await to wait, steer to add instructions, or queue to schedule another task.",
@@ -844,21 +954,31 @@ export class PiService {
     const deliveryAccepted = new Promise<void>((resolve) => {
       releaseDelivery = resolve;
     });
+    const request = {
+      sessionId: subagentSessionId,
+      workspace,
+      parentSessionId,
+      parentSessionPath: parent?.sessionFile,
+      parentSubagentDepth: data.depth! - 1,
+      prompt,
+      modelId: effectiveModel,
+      thinkingLevel: live?.thinkingLevel ?? parent?.thinkingLevel ?? "medium",
+      includePreviousContext: false as const,
+      respondIn: async ? ("session" as const) : ("tool-call" as const),
+      deliveryMode: async ? ("prompt" as const) : undefined,
+      continueSession: true,
+    };
+    // A queued acknowledgement represents durable acceptance, not a process-local closure.
+    const durableRequest = queued
+      ? (await persistQueuedSubagentOperation(manager, request)).options
+      : request;
+    if (queued) previous = this.subagentOperations.get(subagentSessionId);
     const operation = (async () => {
       await previous;
-      signal?.throwIfAborted();
+      if (this.closing) throw new SessionCheckpointError();
+      if (!async) signal?.throwIfAborted();
       return this.runDetachedSubagentSession({
-        sessionId: subagentSessionId,
-        workspace,
-        parentSessionId,
-        parentSubagentDepth: data.depth! - 1,
-        prompt,
-        modelId: effectiveModel,
-        thinkingLevel: live?.thinkingLevel ?? parent?.thinkingLevel ?? "medium",
-        includePreviousContext: false,
-        respondIn: async ? "session" : "tool-call",
-        deliveryMode: async ? "prompt" : undefined,
-        continueSession: true,
+        ...durableRequest,
         signal: async ? undefined : signal,
         onDelivered: () => releaseDelivery?.(),
         onReady: (details) => {
@@ -888,6 +1008,7 @@ export class PiService {
     if (!async) return operation;
     void operation
       .catch(async (error) => {
+        if (isSessionCheckpointError(error)) return;
         failed(error);
         if (queued && previous) {
           const opened = await this.openSessionById(workspace, parentSessionId);
@@ -1052,7 +1173,7 @@ export class PiService {
             "Prepare this daily session for a detached cron run that includes previous context. Preserve operational facts, recent decisions, current state, scheduled work, and anything needed by future scheduled runs.",
           );
           const state = this.getState(webSession.id);
-          this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
+          this.publish(webSession);
           await this.onAgentCompleted?.(state);
           await this.notifyWorkspaceUpdated(webSession.workspace.id);
         }
@@ -1075,23 +1196,93 @@ export class PiService {
       .sort((left, right) => left.startedAtMs - right.startedAtMs);
   }
 
-  subscribe(
-    sessionId: string,
-    subscriber: SessionSubscriber,
-    afterRevision?: number,
-    messagesDetailLevel: "summary" | "full" = "summary",
-    afterStreamId?: string,
-  ): () => void {
+  subscribe(sessionId: string, subscriber: SessionSubscriber): Promise<() => void> {
     return subscribeToSession(
-      (sessionId) => this.requireSession(sessionId),
-      (sessionId, options) => this.getState(sessionId, options),
-      (webSession) => this.disposeWebSession(webSession),
+      (id) => this.requireSession(id),
+      (id, view, previous) => this.getSnapshot(id, view, previous),
+      (session) => {
+        void this.disposeWebSession(session);
+      },
       sessionId,
       subscriber,
-      afterRevision,
-      messagesDetailLevel,
-      afterStreamId,
     );
+  }
+
+  getSnapshot(
+    sessionId: string,
+    view = this.requireSession(sessionId).session.view,
+    previous?: SessionSnapshot,
+  ): SessionSnapshot {
+    const web = this.requireSession(sessionId);
+    const store = web.session.sessionManager;
+    const historyVersion = view.entries.reduce((latest, entry) => Math.max(latest, entry.id), 0);
+    const sameHistory = previous?.historyVersion === historyVersion;
+    const page = sameHistory
+      ? undefined
+      : this.getMessagePage(web, { throughEntryId: historyVersion });
+    const documents = {
+      "pi.live": view.docs["pi.live"] ?? {},
+      "pi.inbox": view.docs["pi.inbox"] ?? { items: [] },
+      "pi.agent": view.docs["pi.agent"] ?? {},
+      "pi.usage": view.docs["pi.usage"] ?? { models: {}, tools: {} },
+    } as SessionSnapshot["documents"];
+    const ref = documents["pi.agent"].model!;
+    const model = this.modelRuntime.getModel(ref.provider, ref.modelId)!;
+    const contextUsage =
+      sameHistory && previous.metadata.model === `${ref.provider}/${ref.modelId}`
+        ? {
+            tokens: previous.metadata.contextTokens,
+            contextWindow: previous.metadata.contextWindow!,
+            percent: previous.metadata.contextPercent,
+          }
+        : getViewContextUsage(view, model.contextWindow);
+    const entries = sameHistory ? undefined : store.getEntriesUpTo(historyVersion);
+    const queuedClientMessageIds: Record<string, string> = {};
+    for (const item of documents["pi.inbox"].items) {
+      const requestId = store.getSubmissionRecord(item.id)?.requestId;
+      if (requestId?.startsWith("client:"))
+        queuedClientMessageIds[String(item.id)] = requestId.slice(7);
+    }
+    return {
+      metadata: {
+        id: web.id,
+        sessionId: web.session.sessionId,
+        workspaceId: web.workspace.id,
+        cwd: web.workspace.path,
+        path: web.session.sessionFile,
+        model: `${ref.provider}/${ref.modelId}`,
+        modelLabel: `${model.name} · ${model.provider}`,
+        thinkingLevel: documents["pi.agent"].thinkingLevel!,
+        availableThinkingLevels: getSupportedThinkingLevels(model),
+        updatedAt: sameHistory
+          ? previous.metadata.updatedAt
+          : (page!.messages.findLast((message) => "timestamp" in message)?.timestamp ??
+            web.openedAt),
+        contextTokens: contextUsage?.tokens ?? null,
+        contextWindow: contextUsage?.contextWindow ?? model.contextWindow,
+        contextPercent: contextUsage?.percent ?? null,
+        totalMessageCount: sameHistory
+          ? previous.metadata.totalMessageCount
+          : page!.totalMessageCount,
+        hasMoreMessages: sameHistory ? previous.metadata.hasMoreMessages : page!.hasMoreMessages,
+        messagesDetailLevel: "full",
+        title: web.session.sessionName,
+        isSubagentSession: sameHistory
+          ? previous.metadata.isSubagentSession
+          : hasSubagentSessionMarker(entries!),
+        isCronSession: sameHistory
+          ? previous.metadata.isCronSession
+          : hasParentedCronRunSessionMarker(entries!),
+      },
+      documents,
+      queuedClientMessageIds,
+      messages: sameHistory
+        ? previous.messages
+        : normalizeMessages(page!.messages, page!.messageIndexOffset, {
+            imageResolver: web.resolveUiImage,
+          }),
+      historyVersion,
+    };
   }
 
   getState(
@@ -1100,6 +1291,7 @@ export class PiService {
       beforeMessageId?: string;
       limit?: number;
       messagesDetailLevel?: "summary" | "full";
+      throughEntryId?: number;
     },
   ): SessionState {
     const webSession = this.requireSession(sessionId);
@@ -1108,8 +1300,7 @@ export class PiService {
 
     return createSessionState({
       id: webSession.id,
-      revision: webSession.revision,
-      streamId: webSession.streamId,
+
       imageResolver: webSession.resolveUiImage,
       sessionId: webSession.session.sessionId,
       workspaceId: webSession.workspace.id,
@@ -1121,11 +1312,8 @@ export class PiService {
         : undefined,
       thinkingLevel: webSession.session.thinkingLevel,
       availableThinkingLevels: webSession.session.getAvailableThinkingLevels(),
-      isStreaming:
-        !webSession.agentCompleted &&
-        (webSession.session.isStreaming ||
-          [...webSession.activeTools.values()].some((tool) => tool.status === "running")),
-      isCompacting: Boolean(webSession.isCompacting),
+      isStreaming: !webSession.agentCompleted && webSession.session.isStreaming,
+      isCompacting: webSession.session.isCompacting,
       pendingMessageCount: webSession.session.pendingMessageCount,
       queuedPrompts: getQueuedPrompts(webSession),
       updatedAt: sessionUpdatedAt(webSession.session, webSession.openedAt),
@@ -1137,8 +1325,16 @@ export class PiService {
       messageIndexOffset: messagePage.messageIndexOffset,
       messagesDetailLevel: options?.messagesDetailLevel ?? "full",
       messages: messagePage.messages,
-      activeAssistant: webSession.activeAssistant ?? undefined,
-      activeTools: [...webSession.activeTools.values()],
+      activeAssistant: webSession.session.streamingMessage,
+      activeTools: webSession.session.runningTools.map((tool) => ({
+        toolCallId: tool.toolCallId,
+        toolName: tool.toolName,
+        args: tool.args as Record<string, unknown>,
+        blocks: normalizeBlocks(tool.partialResult?.content ?? []),
+        details: tool.partialResult?.details as ToolExecutionDetails | undefined,
+        status: "running",
+        isError: false,
+      })),
       title: webSession.session.sessionName,
       isSubagentSession: hasSubagentSessionMarker(webSession.session.sessionManager.getEntries()),
       isCronSession: hasParentedCronRunSessionMarker(
@@ -1166,14 +1362,20 @@ export class PiService {
 
   getSessionMessages(
     sessionId: string,
-    options?: { beforeMessageId?: string; limit?: number },
+    options?: { beforeMessageId?: string; limit?: number; throughEntryId?: number },
   ): SessionMessagesPage {
     const webSession = this.requireSession(sessionId);
-    const page = this.getMessagePage(webSession, options);
+    const currentTail = webSession.session.view.entries.reduce(
+      (tail, entry) => Math.max(tail, entry.id),
+      0,
+    );
+    const historyVersion = Math.min(options?.throughEntryId ?? currentTail, currentTail);
+    const page = this.getMessagePage(webSession, { ...options, throughEntryId: historyVersion });
     return {
+      historyVersion,
       messages: createSessionState({
         id: webSession.id,
-        revision: webSession.revision,
+
         imageResolver: webSession.resolveUiImage,
         sessionId: webSession.session.sessionId,
         workspaceId: webSession.workspace.id,
@@ -1183,11 +1385,8 @@ export class PiService {
         modelLabel: undefined,
         thinkingLevel: webSession.session.thinkingLevel,
         availableThinkingLevels: webSession.session.getAvailableThinkingLevels(),
-        isStreaming:
-          !webSession.agentCompleted &&
-          (webSession.session.isStreaming ||
-            [...webSession.activeTools.values()].some((tool) => tool.status === "running")),
-        isCompacting: Boolean(webSession.isCompacting),
+        isStreaming: !webSession.agentCompleted && webSession.session.isStreaming,
+        isCompacting: webSession.session.isCompacting,
         pendingMessageCount: webSession.session.pendingMessageCount,
         queuedPrompts: getQueuedPrompts(webSession),
         updatedAt: sessionUpdatedAt(webSession.session, webSession.openedAt),
@@ -1211,7 +1410,7 @@ export class PiService {
     const model = await this.resolveModel(modelId);
     await webSession.session.setModel(model as never);
     await this.refreshBattySystemPrompt(webSession);
-    this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
+    this.publish(webSession);
     return this.getState(sessionId);
   }
 
@@ -1219,7 +1418,7 @@ export class PiService {
     const webSession = this.requireSession(sessionId);
     await webSession.session.setThinkingLevel(thinkingLevel as AgentSession["thinkingLevel"]);
     await this.refreshBattySystemPrompt(webSession);
-    this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
+    this.publish(webSession);
     return this.getState(sessionId);
   }
 
@@ -1227,7 +1426,7 @@ export class PiService {
     const webSession = this.requireSession(sessionId);
     await executeCronOperation(webSession.session, notice, operationId);
     if (this.hasSession(sessionId)) {
-      this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
+      this.publish(webSession);
     }
   }
 
@@ -1238,9 +1437,11 @@ export class PiService {
     clientMessageId: string,
     streamingBehavior?: "steer" | "followUp",
   ): Promise<PromptSubmissionResult> {
-    return this.turns.run(async () => {
+    this.assertRunning();
+    return (async () => {
       const webSession = this.requireSession(sessionId);
       await this.waitForSubagentQueue(sessionId);
+      this.assertRunning();
       const prepared = await this.preparePromptFiles(sessionId, files);
       const parts = [text.trim(), prepared.text.trim()].filter(Boolean);
       const promptText = parts.join("\n\n").trim() || "Please inspect the attached files.";
@@ -1249,27 +1450,23 @@ export class PiService {
         clientMessageId,
         ...(streamingBehavior ? { streamingBehavior } : {}),
       });
-      this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
+      this.publish(webSession);
       return { ...disposition, clientMessageId };
-    });
+    })();
   }
 
-  async removeQueuedPrompt(
-    sessionId: string,
-    kind: "steer" | "followUp",
-    index: number,
-  ): Promise<SessionState> {
+  async removeQueuedPrompt(sessionId: string, submissionId: number): Promise<SessionState> {
     const webSession = this.requireSession(sessionId);
-    await removeQueuedPrompt(webSession, kind, index);
+    await removeQueuedPrompt(webSession, submissionId);
     const state = this.getState(sessionId);
-    this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
+    this.publish(webSession);
     return state;
   }
 
   async abort(sessionId: string): Promise<void> {
     const webSession = this.requireSession(sessionId);
     await webSession.session.abort();
-    this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
+    this.publish(webSession);
   }
 
   private async createPiAgentSession(
@@ -1278,8 +1475,26 @@ export class PiService {
     options?: { modelId?: string; thinkingLevel?: string; parentSessionId?: string },
   ): ReturnType<typeof createPiAgentSessionImpl> {
     const id = sessionManager.getSessionId();
-    const existing = this.sessionControllers.get(id);
-    if (existing) return existing;
+    if (this.closing) {
+      if (!this.sessionControllers.has(id)) await sessionManager.release();
+      this.assertRunning();
+    }
+    for (;;) {
+      const existing = this.sessionControllers.get(id);
+      if (!existing) break;
+      const result = await existing;
+      try {
+        this.assertRunning();
+        const webSession = this.sessions.get(id);
+        if (!result.session.isClosing && !(webSession && isWebSessionDisposing(webSession)))
+          return result;
+        await this.disposeWebSession(this.requireSession(id));
+        this.assertRunning();
+      } catch (error) {
+        if (result.session.sessionManager !== sessionManager) await sessionManager.release();
+        throw error;
+      }
+    }
     const creating = (async () => {
       const model = options?.modelId ? await this.resolveModel(options.modelId) : undefined;
       const result = await createPiAgentSessionImpl({
@@ -1335,14 +1550,12 @@ export class PiService {
     }
   }
 
-  private disposeWebSession(webSession: WebSession): void {
-    void this.browserService
-      .closeSession(webSession.id)
-      .catch((error) => console.error("Failed to close browser session", error));
-    disposeWebSession(
+  private disposeWebSession(webSession: WebSession): Promise<void> {
+    return disposeWebSession(
       this.sessions,
       (sessionId) => this.unregisterLiveSession(sessionId),
       webSession,
+      () => this.browserService.closeSession(webSession.id),
     );
   }
 
@@ -1357,7 +1570,7 @@ export class PiService {
     return attachSession(
       this.sessions,
       (workspace, session) => this.registerLiveSession(workspace, session),
-      (webSession, event) => this.handleAgentEvent(webSession, event),
+      (webSession, event) => this.handleSessionEvent(webSession, event),
       workspace,
       session,
       modelFallbackMessage,
@@ -1371,35 +1584,34 @@ export class PiService {
     );
   }
 
-  private publish(webSession: WebSession, event: ServerEvent): void {
-    publish(webSession, event);
+  private publish(webSession: WebSession): void {
+    publish(webSession);
   }
 
   private getMessagePage(
     webSession: WebSession,
-    options?: { beforeMessageId?: string; limit?: number },
+    options?: { beforeMessageId?: string; limit?: number; throughEntryId?: number },
   ) {
     return getSessionMessagePage(webSession.session, options);
   }
 
-  private getStateMetadata(webSession: WebSession): SessionStateMetadata {
-    return getStateMetadata((sessionId, options) => this.getState(sessionId, options), webSession);
-  }
-
-  private async handleAgentEvent(webSession: WebSession, event: any): Promise<void> {
-    await handleAgentEvent(
+  private async handleSessionEvent(
+    webSession: WebSession,
+    event: SessionControllerEvent,
+  ): Promise<void> {
+    await handleSessionEvent(
       {
-        getState: (sessionId, options) => this.getState(sessionId, options),
-        getStateMetadata: (webSession) => this.getStateMetadata(webSession),
-        publish: (webSession, event) => this.publish(webSession, event),
-        notifyWorkspaceUpdated: (workspaceId) => this.notifyWorkspaceUpdated(workspaceId),
-        disposeWebSession: (webSession) => this.disposeWebSession(webSession),
+        getState: (id) => this.getState(id),
+        notifyWorkspaceUpdated: (id) => this.notifyWorkspaceUpdated(id),
+        disposeWebSession: (session) => {
+          void this.disposeWebSession(session);
+        },
         onAgentCompleted: this.onAgentCompleted,
         onAgentSettled: (settled) =>
           deliverCronFollowup(
             {
               ...this.cronAdapterContext(),
-              openSessionById: (workspace, sessionId) => this.openSessionById(workspace, sessionId),
+              openSessionById: (workspace, id) => this.openSessionById(workspace, id),
             },
             settled.workspace,
             settled.session,

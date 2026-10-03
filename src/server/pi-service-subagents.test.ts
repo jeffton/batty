@@ -2,6 +2,15 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { randomUUID } from "node:crypto";
+import { Type } from "typebox";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import {
+  readSubagentRecovery,
+  findSubagentOperation,
+  persistSubagentOperation,
+  persistQueuedSubagentOperation,
+  readQueuedSubagentOperations,
+} from "./subagent-recovery";
 import { createPiAgentSession } from "./pi-agent-session";
 import { AgentSessionController } from "./agent-session-controller";
 import {
@@ -25,8 +34,8 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
 
-async function setup() {
-  const parent = await createAgentSessionFixture();
+async function setup(fixtureOptions: Parameters<typeof createAgentSessionFixture>[0] = {}) {
+  const parent = await createAgentSessionFixture(fixtureOptions);
   const children = new Map<string, AgentSessionController>();
   cleanups.push(async () => {
     for (const child of children.values()) await child.dispose();
@@ -51,7 +60,7 @@ async function setup() {
             workspace: parent.workspace,
             sessionManager: store,
             modelRuntime: parent.modelRuntime,
-            customTools: [],
+            customTools: fixtureOptions.tools ?? [],
           })
         ).session;
         children.set(session.sessionId, session);
@@ -87,6 +96,301 @@ async function setup() {
 }
 
 describe("detached AgentSession subagents", () => {
+  it.each([false, true])(
+    "recovers the definition/admission boundary once (admitted=%s)",
+    async (admitted) => {
+      const { parent, deps, options, children } = await setup();
+      const store = await SessionStore.create(
+        options.workspace.path,
+        deps.workspaceSessionDir,
+        options.parentSessionId,
+        options.sessionId,
+      );
+      await store.appendCustomEntry("batty-subagent-session", {
+        sessionId: store.getSessionId(),
+        parentSessionId: options.parentSessionId,
+        depth: 1,
+      });
+      const operation = await persistSubagentOperation(store, options);
+      const child = (await deps.createPiAgentSession(options.workspace, store)).session;
+      parent.faux.setResponses([fauxAssistantMessage("Once")]);
+      if (admitted) {
+        const notice = buildSubagentRuntimeNotice(
+          1,
+          options.prompt,
+          options.includePreviousContext,
+        );
+        await child.sendCustomMessage(
+          {
+            customType: `batty-runtime-notice:${notice.kind}`,
+            content: notice.text,
+            display: true,
+            details: { battyResultReplyId: `subagent-operation:${operation.operationId}` },
+          },
+          { triggerTurn: true },
+        );
+      }
+      await child.dispose();
+      children.delete(child.sessionId);
+      const recovery = readSubagentRecovery(await SessionStore.read(child.sessionFile))!;
+      const result = await runDetachedSubagentSession(deps, recovery.options);
+      expect(result.text).toBe("Once");
+      expect(result.isError).toBe(false);
+      expect(parent.faux.state.callCount).toBe(1);
+      expect(
+        result.generatedMessages.filter((message) => message.role === "assistant"),
+      ).toHaveLength(1);
+      await runDetachedSubagentSession(deps, recovery.options);
+      expect(parent.faux.state.callCount).toBe(1);
+    },
+  );
+
+  it("does not mark a withdrawn native input as an empty completed operation", async () => {
+    const { parent, deps, options } = await setup();
+    const store = await SessionStore.create(
+      options.workspace.path,
+      deps.workspaceSessionDir,
+      options.parentSessionId,
+      options.sessionId,
+    );
+    await store.appendCustomEntry("batty-subagent-session", {
+      sessionId: store.getSessionId(),
+      parentSessionId: options.parentSessionId,
+      depth: 1,
+    });
+    const operation = await persistSubagentOperation(store, options);
+    const notice = buildSubagentRuntimeNotice(1, options.prompt, options.includePreviousContext);
+    const deliveryId = `subagent-operation:${operation.operationId}`;
+    const identity = Buffer.from(
+      JSON.stringify({
+        deliveryId,
+        customType: `batty-runtime-notice:${notice.kind}`,
+        display: true,
+        details: { battyResultReplyId: deliveryId, battyDeliveryId: deliveryId },
+      }),
+    ).toString("base64url");
+    await store.conversation.submit(
+      {
+        type: "input",
+        requestId: `custom-input:${identity}:0`,
+        content: notice.text,
+        whenBusy: "reject",
+      },
+      BACKGROUND_CONTEXT,
+    );
+    await store.conversation.abort(BACKGROUND_CONTEXT);
+    await store.close();
+    const result = await runDetachedSubagentSession(deps, operation.options);
+    expect(result.isError).toBe(true);
+    expect(result.text).toBe("Subagent operation was withdrawn before answering");
+    expect(parent.faux.state.callCount).toBe(0);
+    const completion = (await SessionStore.read(store.getSessionFile())).entries.findLast(
+      (entry) => entry.type === "custom" && entry.customType === SUBAGENT_COMPLETION_CUSTOM_TYPE,
+    );
+    expect(completion?.type === "custom" && completion.data).toMatchObject({ status: "failed" });
+  });
+
+  it("retains unactivated queued requests across reopen and activates them FIFO", async () => {
+    const { parent, deps, options, children } = await setup();
+    parent.faux.setResponses([fauxAssistantMessage("First")]);
+    await runDetachedSubagentSession(deps, options);
+    let child = children.get(options.sessionId!)!;
+    const file = child.sessionFile;
+    const next = await persistQueuedSubagentOperation(child.sessionManager, {
+      ...options,
+      prompt: "Second task",
+      continueSession: true,
+    });
+    const last = await persistQueuedSubagentOperation(child.sessionManager, {
+      ...options,
+      prompt: "Third task",
+      continueSession: true,
+    });
+    await child.dispose();
+    children.delete(child.sessionId);
+    expect(
+      readQueuedSubagentOperations(await SessionStore.read(file)).map((item) => item.operationId),
+    ).toEqual([next.operationId, last.operationId]);
+    parent.faux.setResponses([fauxAssistantMessage("Second"), fauxAssistantMessage("Third")]);
+    const second = await runDetachedSubagentSession(deps, next.options);
+    expect(second.text).toBe("Second");
+    expect((await runDetachedSubagentSession(deps, next.options)).deliveryEntryId).toBe(
+      second.deliveryEntryId,
+    );
+    expect(parent.faux.state.callCount).toBe(2);
+    expect(
+      readQueuedSubagentOperations(await SessionStore.read(file)).map((item) => item.operationId),
+    ).toEqual([last.operationId]);
+    child = children.get(options.sessionId!)!;
+    await child.dispose();
+    children.delete(child.sessionId);
+    expect(
+      (
+        await runDetachedSubagentSession(
+          deps,
+          readQueuedSubagentOperations(await SessionStore.read(file))[0]!.options,
+        )
+      ).text,
+    ).toBe("Third");
+    expect(readQueuedSubagentOperations(await SessionStore.read(file))).toEqual([]);
+    expect(parent.faux.state.callCount).toBe(3);
+  });
+
+  it.each(["generation", "unsafe-tool"] as const)(
+    "recovers checkpointed child %s once even when recovery finishes before adapter attachment",
+    async (phase) => {
+      let entered!: () => void;
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      let finish!: () => void;
+      const held = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const execute = vi.fn(async (_id, _args, signal: AbortSignal | undefined) => {
+        entered();
+        signal?.addEventListener("abort", finish, { once: true });
+        await held;
+        if (signal?.aborted) throw new Error("Checkpointed tool");
+        return { content: [{ type: "text" as const, text: "done" }], details: {} };
+      });
+      const { parent, deps, options, children } = await setup({
+        tools: [
+          {
+            name: "hold",
+            label: "Hold",
+            description: "hold",
+            parameters: Type.Object({}),
+            execute,
+          },
+        ],
+      });
+      parent.faux.setResponses(
+        phase === "unsafe-tool"
+          ? [
+              fauxAssistantMessage(
+                [{ type: "toolCall", id: "hold-call", name: "hold", arguments: {} }],
+                { stopReason: "toolUse" },
+              ),
+            ]
+          : [
+              async () => {
+                entered();
+                await held;
+                return fauxAssistantMessage("obsolete");
+              },
+            ],
+      );
+      const running = runDetachedSubagentSession(deps, { ...options, respondIn: "session" }).catch(
+        (error: unknown) => error,
+      );
+      await started;
+      const child = children.get(options.sessionId!)!;
+      const file = child.sessionFile;
+      const checkpoint = child.dispose();
+      finish();
+      await checkpoint;
+      children.delete(child.sessionId);
+      expect(await running).toBeInstanceOf(Error);
+      const snapshot = await SessionStore.read(file);
+      expect(
+        snapshot.entries.some(
+          (entry) =>
+            entry.type === "custom" && entry.customType === SUBAGENT_COMPLETION_CUSTOM_TYPE,
+        ),
+      ).toBe(false);
+      const operation = findSubagentOperation(snapshot.entries, child.sessionId)!;
+      expect(operation.options).toMatchObject({
+        parentSessionPath: options.parentSessionPath,
+        modelId: options.modelId,
+        prompt: options.prompt,
+      });
+      expect(readSubagentRecovery(await SessionStore.read(file))).toBeDefined();
+      parent.faux.setResponses([fauxAssistantMessage("Recovered answer")]);
+      const create = deps.createPiAgentSession;
+      deps.createPiAgentSession = async (...args) => {
+        const result = await create(...args);
+        await result.session.waitForIdle();
+        return result;
+      };
+      deps.deliverResultToParent = async (_options, result) => {
+        await deliverDetachedSubagentResult(parent.session, result);
+      };
+      const recovered = await runDetachedSubagentSession(deps, operation.options);
+      expect(recovered.text).toBe("Recovered answer");
+      expect(recovered.isError).toBe(false);
+      expect(execute).toHaveBeenCalledTimes(phase === "unsafe-tool" ? 1 : 0);
+      const calls = parent.faux.state.callCount;
+      await parent.reopen();
+      const repeated = await runDetachedSubagentSession(deps, operation.options);
+      expect(repeated.deliveryEntryId).toBe(recovered.deliveryEntryId);
+      expect(parent.faux.state.callCount).toBe(calls);
+      expect(
+        parent.session.messages.filter((message) => message.role === "assistant"),
+      ).toHaveLength(1);
+      expect(readSubagentRecovery(await SessionStore.read(file))).toBeUndefined();
+    },
+  );
+
+  it("retains a completed child delivery while its busy parent checkpoints and reopens", async () => {
+    const { parent, deps, options, children } = await setup();
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let finish!: () => void;
+    const response = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    parent.faux.setResponses([
+      async () => {
+        entered();
+        await response;
+        return fauxAssistantMessage("old parent");
+      },
+      fauxAssistantMessage("Child result"),
+    ]);
+    const parentTurn = parent.session.prompt("Busy parent").catch((error: unknown) => error);
+    await started;
+    let delivering!: () => void;
+    const deliveryStarted = new Promise<void>((resolve) => {
+      delivering = resolve;
+    });
+    deps.deliverResultToParent = async (_options, result) => {
+      delivering();
+      await deliverDetachedSubagentResult(parent.session, result);
+    };
+    const running = runDetachedSubagentSession(deps, { ...options, respondIn: "session" }).catch(
+      (error: unknown) => error,
+    );
+    await deliveryStarted;
+    const child = children.get(options.sessionId!)!;
+    const file = child.sessionFile;
+    const checkpoints = Promise.all([parent.session.dispose(), child.dispose()]);
+    finish();
+    await checkpoints;
+    await parentTurn;
+    expect(await running).toBeInstanceOf(Error);
+    children.delete(child.sessionId);
+    const pending = readSubagentRecovery(await SessionStore.read(file))!;
+    expect(pending).toBeDefined();
+    parent.faux.setResponses([fauxAssistantMessage("Recovered parent")]);
+    await parent.reopen();
+    await parent.session.waitForIdle();
+    const recovered = await runDetachedSubagentSession(deps, pending.options);
+    expect(recovered.text).toBe("Child result");
+    await parent.reopen();
+    await runDetachedSubagentSession(deps, pending.options);
+    expect(
+      parent.session.messages.filter(
+        (message) =>
+          message.role === "assistant" &&
+          message.content.some((block) => block.type === "text" && block.text === "Child result"),
+      ),
+    ).toHaveLength(1);
+    expect(readSubagentRecovery(await SessionStore.read(file))).toBeUndefined();
+  });
+
   it.each(["completed", "failed", "aborted"] as const)(
     "stores the canonical %s receipt before settlement and parent delivery",
     async (status) => {

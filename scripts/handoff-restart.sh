@@ -17,6 +17,8 @@ systemd-run \
   --setenv="BATTY_PORT=$backend_port" \
   --setenv="BATTY_NODE=$node_path" \
   --setenv="BATTY_SKIP_DRAIN=${BATTY_SKIP_DRAIN:-}" \
+  --setenv="BATTY_RESTART_SESSION_FILE=${PI_SESSION_FILE:-}" \
+  --setenv="BATTY_RESTART_AFTER_ENTRY_ID=${PI_RESTART_AFTER_ENTRY_ID:-}" \
   /bin/bash "$script_dir/restart-services.sh"
 
 printf 'Handed off restart to transient unit %s\n' "$unit"

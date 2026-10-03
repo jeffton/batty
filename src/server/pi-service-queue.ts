@@ -5,10 +5,6 @@ export function getQueuedPrompts(webSession: WebSession): SessionState["queuedPr
   return webSession.session.getQueuedPrompts();
 }
 
-export function removeQueuedPrompt(
-  webSession: WebSession,
-  kind: "steer" | "followUp",
-  index: number,
-): Promise<void> {
-  return webSession.session.removeQueuedPrompt(kind, index);
+export function removeQueuedPrompt(webSession: WebSession, submissionId: number): Promise<void> {
+  return webSession.session.removeQueuedPrompt(submissionId);
 }

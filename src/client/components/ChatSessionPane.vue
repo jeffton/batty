@@ -274,7 +274,7 @@ watch(
 );
 
 async function removeQueuedPrompt(prompt: QueuedPrompt): Promise<void> {
-  await store.removeQueuedPrompt(prompt.kind, prompt.index);
+  await store.removeQueuedPrompt(prompt.submissionId);
 }
 
 async function steerPrompt(text: string, files: File[]): Promise<void> {

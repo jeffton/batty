@@ -11,7 +11,11 @@ node_path="${BATTY_NODE:-$(command -v node)}"
 
 if launchctl print "${domain}/${label}" >/dev/null 2>&1; then
   if [[ "${BATTY_SKIP_DRAIN:-}" != "1" ]]; then
-    "$node_path" "$install_root/current/dist/server/cli.mjs" --root "$batty_root" drain
+    checkpoint_args=()
+    if [[ -n "${BATTY_RESTART_SESSION_FILE:-}" || -n "${BATTY_RESTART_AFTER_ENTRY_ID:-}" ]]; then
+      checkpoint_args=(--session "${BATTY_RESTART_SESSION_FILE:-}" --after-entry "${BATTY_RESTART_AFTER_ENTRY_ID:-}")
+    fi
+    "$node_path" "$install_root/current/dist/server/cli.mjs" --root "$batty_root" drain "${checkpoint_args[@]}"
   fi
   launchctl bootout "${domain}/${label}"
   # bootout returns before launchd finishes terminating and removing the job.

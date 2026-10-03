@@ -1,3 +1,4 @@
+import type { Raw } from "vue";
 import type {
   AppSettingsStatus,
   AuthStatus,
@@ -7,6 +8,7 @@ import type {
   ModelOption,
   ProviderAuthStatus,
   SessionState,
+  SessionSnapshot,
   SessionSummary,
   WorkspaceInfo,
   WorkspaceUiSettings,
@@ -35,7 +37,7 @@ export interface AppStoreState {
   workspaceStatusByWorkspace: Record<string, { isInProgress: boolean; hasUnread: boolean }>;
   workspaceRevisionByWorkspace: Record<string, number>;
   workspaceSnapshotStreamId: string | undefined;
-  activeSession: SessionState | undefined;
+  activeSnapshot: Raw<SessionSnapshot> | undefined;
   selectedWorkspaceId: string | undefined;
   authError: string | undefined;
   lastError: string | undefined;
@@ -46,7 +48,9 @@ export interface AppStoreState {
   loadingOlderMessages: boolean;
 }
 
-export type AppActionContext = AppStoreState & Record<string, any>;
+export type AppActionContext = AppStoreState & {
+  readonly activeSession: SessionState | undefined;
+} & Record<string, any>;
 
 export const defaultAuthStatus: AuthStatus = {
   passkeyCount: 0,
@@ -88,7 +92,7 @@ export function createAppState(): AppStoreState {
     workspaceStatusByWorkspace: {},
     workspaceRevisionByWorkspace: {},
     workspaceSnapshotStreamId: undefined,
-    activeSession: undefined,
+    activeSnapshot: undefined,
     selectedWorkspaceId: undefined,
     authError: undefined,
     lastError: undefined,

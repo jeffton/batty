@@ -129,7 +129,7 @@ async function setup(
 type SessionResourcesOptionsStore = ConstructorParameters<typeof SessionResources>[0]["store"];
 function invocation(callId = "outer", taskId = "task-outer") {
   const output = vi.fn();
-  const details = vi.fn(async () => {});
+  const details = vi.fn(async (_details?: unknown) => {});
   const controller = new AbortController();
   return {
     output,
@@ -249,15 +249,19 @@ describe("standalone Durable tool resources", () => {
       }),
     ]);
     const recordArtifacts = vi.fn(async () => {});
-    await createDurableToolExtension(host, { recordArtifacts }).tools![0]!.execute(
-      {},
-      call.api,
-      call.context,
-    );
-    expect(recordArtifacts).toHaveBeenCalledWith(
-      "outer",
-      { battyFileChanges: [{ path: "written.txt" }] },
-      "task-outer",
+    await expect(
+      createDurableToolExtension(host, { recordArtifacts }).tools![0]!.execute(
+        {},
+        call.api,
+        call.context,
+      ),
+    ).rejects.toThrow();
+    await vi.waitFor(() =>
+      expect(recordArtifacts).toHaveBeenCalledWith(
+        "outer",
+        { battyFileChanges: [{ path: "written.txt" }] },
+        "task-outer",
+      ),
     );
   });
 
@@ -312,6 +316,94 @@ describe("standalone Durable tool resources", () => {
     expect(emit.mock.calls.map(([event]) => event)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ type: "tool_execution_start", parentToolCallId: "outer" }),
+        expect.objectContaining({ type: "tool_execution_end", parentToolCallId: "outer" }),
+      ]),
+    );
+  });
+
+  it("commits live nested call receipts through codemode details and finalizes the same call", async () => {
+    let release!: () => void;
+    let started!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const ready = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const hooks: string[] = [];
+    const { host, issue, emit } = await setup(
+      [
+        definition(
+          "deferred",
+          async (_id, _args, _signal, update) => {
+            update?.({
+              content: [{ type: "text", text: "inner progress" }],
+              details: { large: "ignored" },
+            });
+            started();
+            await gate;
+            return { content: [{ type: "text", text: "inner final" }], details: {} };
+          },
+          { exposure: "deferred" },
+        ),
+      ],
+      [
+        createCodemodeExtension({ models: false }),
+        (pi) => {
+          pi.on("tool_call", (event) => {
+            if (event.parentToolCallId) hooks.push(event.parentToolCallId);
+          });
+        },
+      ],
+    );
+    await host.setActiveToolsByName(["codemode"]);
+    const args = { code: "return await tools.deferred({ value: 1 });" };
+    issue("codemode", args);
+    const call = invocation();
+    const detailSnapshots: unknown[] = [];
+    call.details.mockImplementation(async (details) => {
+      detailSnapshots.push(JSON.parse(JSON.stringify(details)));
+    });
+    const pending = tool(host, "codemode").execute(args, call.api, call.context);
+    await ready;
+    const live = detailSnapshots.find((details: any) =>
+      details?.nestedCalls?.calls?.some((receipt: any) => receipt.status === "unfinished"),
+    ) as any;
+    expect(live).toMatchObject({
+      nestedCalls: {
+        complete: false,
+        calls: [
+          {
+            id: "outer/1",
+            name: "deferred",
+            status: "unfinished",
+            arguments: { value: 1 },
+          },
+        ],
+      },
+    });
+    // A subsequent outer progress details snapshot must retain the in-flight inner receipt.
+    const detailsBeforeOuterUpdate = detailSnapshots.length;
+    release();
+    const result = await pending;
+    expect(result.details).toMatchObject({
+      nestedCalls: {
+        complete: true,
+        calls: [{ id: "outer/1", status: "ok", output: "inner final" }],
+      },
+    });
+    expect(detailSnapshots.length).toBeGreaterThan(detailsBeforeOuterUpdate);
+    expect(detailSnapshots.at(-1)).toMatchObject({
+      nestedCalls: {
+        complete: true,
+        calls: [{ id: "outer/1", status: "ok", output: "inner final" }],
+      },
+    });
+    expect(hooks).toEqual(["outer"]);
+    expect(emit.mock.calls.map(([event]) => event)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "tool_execution_start", parentToolCallId: "outer" }),
+        expect.objectContaining({ type: "tool_execution_update", parentToolCallId: "outer" }),
         expect.objectContaining({ type: "tool_execution_end", parentToolCallId: "outer" }),
       ]),
     );
@@ -418,11 +510,12 @@ describe("standalone Durable tool resources", () => {
     )!;
     const old = invocation();
     const fresh = invocation("outer", "task-fresh");
-    const oldExecution = selected.execute(
-      { path: "old.txt", content: "old" },
-      old.api,
-      old.context,
-    );
+    const oldExecution = selected
+      .execute({ path: "old.txt", content: "old" }, old.api, old.context)
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
     await ready;
     old.controller.abort();
     const freshResult = await selected.execute(
@@ -436,11 +529,10 @@ describe("standalone Durable tool resources", () => {
       "task-fresh",
     );
     release();
-    const oldResult = await oldExecution;
-    expect(receipts).toHaveBeenCalledTimes(2);
+    expect(await oldExecution).toBeInstanceOf(Error);
+    await vi.waitFor(() => expect(receipts).toHaveBeenCalledTimes(2));
     expect(receipts.mock.calls.map((call) => call[2])).toEqual(["task-fresh", "task-outer"]);
     expect((freshResult.details as any).nestedCalls.calls).toHaveLength(1);
-    expect((oldResult.details as any).nestedCalls.calls).toHaveLength(1);
     expect(await fs.readFile(path.join(cwd, "old.txt"), "utf8")).toBe("old");
   });
 

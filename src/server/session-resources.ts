@@ -71,6 +71,7 @@ interface NestedReceipt {
   argumentsBytes?: number;
   durationMs?: number;
   error?: string;
+  output?: string;
 }
 interface NestedRecord {
   calls: NestedReceipt[];
@@ -82,6 +83,7 @@ export type NestedCalls = { calls: NestedReceipt[]; complete: boolean };
 interface ToolInvocation {
   scopes: Map<string, NestedScope>;
   recordArtifacts?: (nestedCallId: string, details: unknown) => Promise<void>;
+  onNestedUpdate?: (nestedCalls: NestedCalls) => void | Promise<void>;
 }
 interface ExecuteToolOptions {
   signal?: AbortSignal;
@@ -89,6 +91,7 @@ interface ExecuteToolOptions {
   prepared?: boolean;
   parentToolCallId?: string;
   recordArtifacts?: (nestedCallId: string, details: unknown) => Promise<void>;
+  onNestedUpdate?: (nestedCalls: NestedCalls) => void | Promise<void>;
 }
 interface NestedScope {
   record: NestedRecord;
@@ -473,7 +476,11 @@ export class SessionResources {
     }
     // Each execution owns its scope and artifact callback, even when call IDs are reused.
     return this.invocation.run(
-      { scopes: new Map(), recordArtifacts: options.recordArtifacts },
+      {
+        scopes: new Map(),
+        recordArtifacts: options.recordArtifacts,
+        onNestedUpdate: options.onNestedUpdate,
+      },
       async () => {
         const current = this.invocation.getStore()!;
         const outcome = await this.runTool(toolCall, options, current);
@@ -579,6 +586,7 @@ export class SessionResources {
       args: toolCall.arguments,
       parentToolCallId: callerId,
     });
+    await this.emitNestedSnapshot(invocation, callerId);
     const exclusive =
       !scope.holdsQueue &&
       (this.toolExecution === "sequential" ||
@@ -602,6 +610,11 @@ export class SessionResources {
         signal: options.signal,
         parentToolCallId: callerId,
         onUpdate: async (partialResult) => {
+          const text = partialResult.content
+            .filter((block) => block.type === "text")
+            .map((block) => block.text)
+            .join("\n");
+          if (receipt) receipt.output = text.slice(0, 8192);
           await options.onUpdate?.(partialResult);
           await this.emit({
             type: "tool_execution_update",
@@ -611,6 +624,7 @@ export class SessionResources {
             partialResult,
             parentToolCallId: callerId,
           });
+          await this.emitNestedSnapshot(invocation, callerId);
         },
       });
     } finally {
@@ -627,6 +641,11 @@ export class SessionResources {
           .join("\n")
           .slice(0, 500);
     }
+    const finalText = outcome.result.content
+      .filter((block) => block.type === "text")
+      .map((block) => block.text)
+      .join("\n");
+    if (receipt) receipt.output = finalText.slice(0, 8192);
     if (outcome.result.usage) record.usage = addUsage(record.usage, outcome.result.usage);
     if (hasArtifacts(outcome.result.details))
       await invocation.recordArtifacts?.(toolCall.id, outcome.result.details);
@@ -638,7 +657,17 @@ export class SessionResources {
       isError: outcome.isError,
       parentToolCallId: callerId,
     });
+    await this.emitNestedSnapshot(invocation, callerId);
     return outcome;
+  }
+  private async emitNestedSnapshot(invocation: ToolInvocation, callId: string) {
+    const scope = invocation.scopes.get(callId);
+    if (!scope || (scope.record.calls.length === 0 && scope.record.complete)) return;
+    await invocation.onNestedUpdate?.({
+      calls: scope.record.calls.map((call) => ({ ...call })),
+      complete:
+        scope.record.complete && scope.record.calls.every((call) => call.status !== "unfinished"),
+    });
   }
   private takeNestedCalls(callId: string, invocation: ToolInvocation): NestedCalls | undefined {
     const scope = invocation.scopes.get(callId);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
-import { getSessionContextUsage } from "./pi-context-usage";
+import { getSessionContextUsage, getViewContextUsage } from "./pi-context-usage";
+import type { ConversationView } from "@earendil-works/pi-durable";
 
 function assistantMessage(
   timestamp: number,
@@ -49,6 +50,42 @@ function userMessage(timestamp: number, text: string) {
 }
 
 describe("getSessionContextUsage", () => {
+  it("reads model-context messages once instead of rebuilding them during a backwards search", () => {
+    let reads = 0;
+    const usage = getSessionContextUsage({
+      model: { contextWindow: 1000 },
+      get messages() {
+        reads++;
+        return [assistantMessage(1, { input: 100 }), userMessage(2, "hello world")];
+      },
+      sessionManager: { getBranch: () => [] },
+    } as any);
+    expect(reads).toBe(1);
+    expect(usage?.tokens).toBe(103);
+  });
+
+  it("calculates usage from a captured native frame rather than later history", () => {
+    const view = {
+      entries: [
+        { id: 1, kind: "pi.assistant", model: [assistantMessage(1, { input: 120, output: 30 })] },
+        { id: 2, kind: "pi.user", model: [userMessage(2, "hello world")] },
+      ],
+    } as unknown as ConversationView;
+    expect(getViewContextUsage(view, 1000)?.tokens).toBe(153);
+    expect(
+      getViewContextUsage(
+        {
+          ...view,
+          entries: [
+            ...view.entries,
+            { id: 3, kind: "pi.compaction", model: [userMessage(3, "summary")] },
+          ],
+        } as unknown as ConversationView,
+        1000,
+      )?.tokens,
+    ).toBeNull();
+  });
+
   it("keeps earlier parent usage and adds trailing zero-usage cron-subagent messages", () => {
     const usage = getSessionContextUsage({
       model: { contextWindow: 1000 },

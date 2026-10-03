@@ -1,76 +1,57 @@
-import { describe, expect, it } from "vite-plus/test";
-import { reactive } from "vue";
-import { cloneForCache, trimSessionForCache } from "@/client/lib/cache";
-import type { SessionState } from "@/shared/types";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { shallowReactive } from "vue";
+import { get, set } from "idb-keyval";
+import {
+  cloneForCache,
+  readCachedSession,
+  trimSessionForCache,
+  writeCachedSession,
+} from "@/client/lib/cache";
+import { makeSnapshot } from "./session-test-fixture";
 
-const state: SessionState = {
-  id: "web-1",
-  sessionId: "session-1",
-  workspaceId: "batty",
-  cwd: "/tmp/batty",
-  path: "/tmp/batty/.session.jsonl",
-  model: "anthropic/claude-sonnet-4",
-  modelLabel: "Claude Sonnet 4 · anthropic",
-  thinkingLevel: "medium",
-  availableThinkingLevels: ["off", "low", "medium", "high"],
-  isStreaming: true,
-  pendingMessageCount: 1,
-  updatedAt: 100,
-  contextTokens: 12345,
-  contextWindow: 200000,
-  contextPercent: 6.2,
-  totalMessageCount: 0,
-  hasMoreMessages: false,
-  messages: [],
-  activeAssistant: {
-    id: "assistant-1",
-    role: "assistant",
-    turnPhase: "pending",
-    timestamp: 1,
-    blocks: [{ type: "text", text: "streaming" }],
-  },
-  activeTools: [
-    {
-      toolCallId: "call-1",
-      toolName: "bash",
-      args: { command: "ls" },
-      blocks: [{ type: "text", text: "partial" }],
-      status: "running",
-      isError: false,
-    },
-  ],
-};
+vi.mock("idb-keyval", () => ({ get: vi.fn(), set: vi.fn() }));
 
-describe("cloneForCache", () => {
-  it("converts reactive session state into a structured-cloneable value", () => {
-    const reactiveState = reactive(state);
+beforeEach(() => vi.clearAllMocks());
 
-    expect(() => structuredClone(reactiveState)).toThrow();
-
-    const cloned = cloneForCache(reactiveState);
-
-    expect(structuredClone(cloned)).toEqual(cloned);
-    expect(cloned).toEqual(state);
-    expect(cloned).not.toBe(reactiveState);
+describe("native snapshot cache", () => {
+  it("clones raw native documents, not computed presentation", async () => {
+    const snapshot = makeSnapshot();
+    snapshot.documents = {
+      ...snapshot.documents,
+      "pi.live": {
+        run: { taskId: 1 as never, inputs: [] },
+        tools: [{ callId: "call", name: "bash", status: "running", output: "partial" }],
+      },
+    };
+    const reactiveSnapshot = shallowReactive(snapshot);
+    expect(() => structuredClone(reactiveSnapshot)).toThrow();
+    const cloned = cloneForCache(reactiveSnapshot);
+    expect(structuredClone(cloned)).toEqual(snapshot);
+    await writeCachedSession(reactiveSnapshot);
+    const [key, cached] = vi.mocked(set).mock.calls[0]!;
+    expect(key).toBe("batty:v4-native:session:session-a");
+    expect(cached).toEqual(snapshot);
+    expect(cached).not.toHaveProperty("activeTools");
+    expect(cached).not.toHaveProperty("isStreaming");
+    vi.mocked(get).mockResolvedValueOnce(cached);
+    expect(await readCachedSession("session-a")).toEqual(snapshot);
+    expect(get).toHaveBeenCalledExactlyOnceWith(key);
   });
-});
 
-describe("trimSessionForCache", () => {
-  it("keeps only the recent message window and preserves paging metadata", () => {
-    const trimmed = trimSessionForCache({
-      ...state,
-      totalMessageCount: 120,
-      messages: Array.from({ length: 80 }, (_, index) => ({
-        id: `user-${index}`,
-        role: "user" as const,
-        timestamp: index,
-        blocks: [{ type: "text" as const, text: String(index) }],
-      })),
-    });
-
+  it("keeps only recent history while preserving documents and paging metadata", () => {
+    const snapshot = makeSnapshot();
+    snapshot.metadata.totalMessageCount = 120;
+    snapshot.messages = Array.from({ length: 80 }, (_, index) => ({
+      id: `user-${index}`,
+      role: "user",
+      timestamp: index,
+      blocks: [{ type: "text", text: String(index) }],
+    }));
+    const trimmed = trimSessionForCache(snapshot);
     expect(trimmed.messages).toHaveLength(25);
     expect(trimmed.messages[0]?.id).toBe("user-55");
-    expect(trimmed.totalMessageCount).toBe(120);
-    expect(trimmed.hasMoreMessages).toBe(true);
+    expect(trimmed.metadata.totalMessageCount).toBe(120);
+    expect(trimmed.metadata.hasMoreMessages).toBe(true);
+    expect(trimmed.documents).toBe(snapshot.documents);
   });
 });

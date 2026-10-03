@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import { CircleAlert, LoaderCircle } from "@lucide/vue";
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import SessionHeaderStatus from "@/client/components/SessionHeaderStatus.vue";
 import SessionTranscriptView from "@/client/components/SessionTranscriptView.vue";
 import StreamingStopControl from "@/client/components/StreamingStopControl.vue";
 import { abortSession, getSessionMessages, openSession } from "@/client/lib/api";
 import { applyServerEvent } from "@/client/lib/session-events";
-import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
+import { mergeSessionSnapshot } from "@/client/lib/session-state";
+import { presentSession } from "@/client/lib/session-presentation";
 import { sessionEventsPath } from "@/client/lib/session-stream";
 import { RECENT_SESSION_MESSAGE_WINDOW } from "@/shared/session-history";
-import type { ServerEvent, SessionState } from "@/shared/types";
+import type { ServerEvent, SessionSnapshot } from "@/shared/types";
 
 const props = withDefaults(
   defineProps<{
@@ -24,7 +25,8 @@ const props = withDefaults(
   },
 );
 
-const session = ref<SessionState | undefined>(undefined);
+const snapshot = shallowRef<SessionSnapshot | undefined>(undefined);
+const session = computed(() => presentSession(snapshot.value));
 const loading = ref(false);
 const loadingOlderMessages = ref(false);
 const errorMessage = ref<string | undefined>(undefined);
@@ -53,12 +55,12 @@ function closeStream(): void {
 }
 
 function applyEvent(event: ServerEvent): void {
-  const nextSession = applyServerEvent(session.value, event);
+  const nextSession = applyServerEvent(snapshot.value, event);
   if (!nextSession) {
     return;
   }
 
-  session.value = nextSession;
+  snapshot.value = nextSession;
 }
 
 function openStream(): void {
@@ -70,11 +72,14 @@ function openStream(): void {
   reconnecting.value = true;
   const source = new EventSource(sessionEventsPath(session.value, "full"));
   eventSource = source;
+  let hydrated = false;
   source.onopen = () => {
     if (eventSource !== source) {
       return;
     }
 
+    ++loadGeneration;
+    hydrated = false;
     reconnecting.value = false;
   };
   source.onmessage = (message) => {
@@ -83,7 +88,14 @@ function openStream(): void {
     }
 
     reconnecting.value = false;
-    applyEvent(JSON.parse(message.data) as ServerEvent);
+    const event = JSON.parse(message.data) as ServerEvent;
+    if (event.type === "error") {
+      errorMessage.value = event.message;
+      return;
+    }
+    if (event.type === "session") hydrated = true;
+    else if (!hydrated) return;
+    applyEvent(event);
   };
   source.onerror = () => {
     if (eventSource !== source) {
@@ -95,7 +107,7 @@ function openStream(): void {
 }
 
 async function ensureSessionLoaded(): Promise<void> {
-  if (loading.value) {
+  if (loading.value || eventSource) {
     return;
   }
 
@@ -105,14 +117,11 @@ async function ensureSessionLoaded(): Promise<void> {
   loading.value = true;
   errorMessage.value = undefined;
   try {
-    const opened = normalizeSessionState(await openSession(workspaceId, sessionPath, "full"));
-    if (!opened) {
-      throw new Error("Failed to open session");
-    }
+    const opened = await openSession(workspaceId, sessionPath, "full");
     if (generation !== loadGeneration) {
       return;
     }
-    session.value = mergeSessionState(opened, session.value);
+    snapshot.value = mergeSessionSnapshot(opened, snapshot.value);
     openStream();
   } catch (error) {
     if (generation === loadGeneration) {
@@ -152,15 +161,24 @@ async function loadOlderMessages(): Promise<void> {
     return;
   }
 
+  const generation = loadGeneration;
+  const throughEntryId = snapshot.value!.historyVersion;
   loadingOlderMessages.value = true;
   try {
     const before = current.messages[0]?.id;
     const page = await getSessionMessages(current, {
       ...(before ? { before } : {}),
       limit: RECENT_SESSION_MESSAGE_WINDOW,
+      throughEntryId,
     });
     const latest = session.value;
-    if (!latest || latest.sessionId !== current.sessionId) {
+    if (
+      !latest ||
+      latest.sessionId !== current.sessionId ||
+      generation !== loadGeneration ||
+      page.historyVersion !== throughEntryId ||
+      snapshot.value!.historyVersion !== throughEntryId
+    ) {
       return;
     }
     if (latest.messages[0]?.id !== current.messages[0]?.id) {
@@ -168,17 +186,16 @@ async function loadOlderMessages(): Promise<void> {
     }
     const existingIds = new Set(latest.messages.map((message) => message.id));
     const olderMessages = page.messages.filter((message) => !existingIds.has(message.id));
-    const paginationMetadataChanged =
-      latest.totalMessageCount !== current.totalMessageCount ||
-      latest.hasMoreMessages !== current.hasMoreMessages;
-    session.value = normalizeSessionState({
-      ...latest,
+    snapshot.value = {
+      ...snapshot.value!,
       messages: [...olderMessages, ...latest.messages],
-      totalMessageCount: paginationMetadataChanged
-        ? Math.max(latest.totalMessageCount, page.totalMessageCount)
-        : page.totalMessageCount,
-      hasMoreMessages: paginationMetadataChanged ? latest.hasMoreMessages : page.hasMoreMessages,
-    });
+      historyVersion: page.historyVersion,
+      metadata: {
+        ...snapshot.value!.metadata,
+        totalMessageCount: page.totalMessageCount,
+        hasMoreMessages: page.hasMoreMessages,
+      },
+    };
   } finally {
     loadingOlderMessages.value = false;
   }
@@ -202,7 +219,7 @@ watch(
   () => {
     loadGeneration += 1;
     closeStream();
-    session.value = undefined;
+    snapshot.value = undefined;
     loading.value = false;
     loadingOlderMessages.value = false;
     errorMessage.value = undefined;

@@ -1,14 +1,21 @@
-import { describe, expect, it, vi } from "vite-plus/test";
-import { applyServerEvent } from "@/client/lib/session-events";
-import { withoutRenderedToolCalls } from "@/client/lib/active-assistant";
-import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import type { ServerEvent, SessionState, WorkspaceInfo } from "@/shared/types";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { applyImmutable, type Op } from "@earendil-works/chord/delta";
+import type { ConversationView } from "@earendil-works/pi-durable";
+import { LiveDoc } from "@earendil-works/pi-durable";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import type { ServerEvent, SessionSnapshot, SessionState, WorkspaceInfo } from "@/shared/types";
+import { createAgentSessionFixture } from "./agent-session-test-fixture";
+import { PiService } from "./pi-service";
+import { getSessionMessagePage } from "./pi-service-message-page";
 import {
   attachSession,
-  handleAgentEvent,
+  disposeWebSession,
+  isWebSessionDisposing,
+  documentOperations,
   publish,
   subscribeToSession,
 } from "./pi-service-sessions";
+import { handleSessionEvent } from "./pi-service-agent-events";
 import type { WebSession } from "./pi-service-types";
 
 const workspace: WorkspaceInfo = {
@@ -19,1161 +26,350 @@ const workspace: WorkspaceInfo = {
   isPinned: true,
   isAssistant: false,
 };
+const cleanups: Array<() => Promise<void>> = [];
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0)) await cleanup();
+});
 
-function createState(
-  partial: Partial<SessionState>,
-  webSession: WebSession,
-  messages: SessionState["messages"],
-): SessionState {
+function snapshot(view: ConversationView): SessionSnapshot {
   return {
-    id: webSession.id,
-    sessionId: webSession.session.sessionId,
-    workspaceId: workspace.id,
-    cwd: workspace.path,
-    thinkingLevel: "medium",
-    availableThinkingLevels: ["medium"],
-    isStreaming: true,
-    pendingMessageCount: 0,
-    updatedAt: 1,
-    contextTokens: null,
-    contextWindow: null,
-    contextPercent: null,
-    totalMessageCount: messages.length,
-    hasMoreMessages: false,
-    messages,
-    activeAssistant: webSession.activeAssistant as
-      | Extract<SessionState["messages"][number], { role: "assistant" }>
-      | undefined,
-    activeTools: [],
-    ...partial,
+    metadata: {
+      id: "session",
+      sessionId: "session",
+      workspaceId: workspace.id,
+      cwd: workspace.path,
+      thinkingLevel: "medium",
+      availableThinkingLevels: ["medium"],
+      updatedAt: 1,
+      contextTokens: null,
+      contextWindow: null,
+      contextPercent: null,
+      totalMessageCount: 0,
+      hasMoreMessages: false,
+    },
+    documents: {
+      "pi.live": view.docs["pi.live"] ?? {},
+      "pi.inbox": view.docs["pi.inbox"] ?? { items: [] },
+      "pi.agent": view.docs["pi.agent"] ?? {},
+      "pi.usage": view.docs["pi.usage"] ?? { models: {}, tools: {} },
+    } as SessionSnapshot["documents"],
+    queuedClientMessageIds: {},
+    messages: [],
+    historyVersion: Math.max(0, ...view.entries.map((entry) => entry.id)),
   };
 }
 
-describe("workspace activity updates", () => {
-  it("initializes live assistant and tool state from the native session", () => {
-    const streamingMessage = {
-      role: "assistant",
-      content: [{ type: "text", text: "in progress" }],
-      timestamp: 1,
-    };
-    const runningTool = {
-      toolCallId: "call-live",
-      toolName: "bash",
-      args: { command: "echo live" },
-      partialResult: { content: [{ type: "text", text: "partial" }] },
-    };
-    const session = {
-      sessionId: "session-live",
-      streamingMessage,
-      runningTools: [runningTool],
-      isCompacting: false,
-      subscribe: vi.fn(),
-    };
-    const webSession = attachSession(
-      new Map(),
-      vi.fn(),
-      vi.fn(async () => undefined),
-      workspace,
-      session as never,
-    );
+async function nativeSession() {
+  const fixture = await createAgentSessionFixture();
+  cleanups.push(fixture.cleanup);
+  const sessions = new Map<string, WebSession>();
+  const web = attachSession(sessions, vi.fn(), async () => {}, workspace, fixture.session);
+  return { fixture, web };
+}
 
-    expect(webSession.activeAssistant).toBe(streamingMessage);
-    expect(webSession.activeTools.get("call-live")).toMatchObject({
-      toolCallId: "call-live",
-      toolName: "bash",
-      args: { command: "echo live" },
-      blocks: [{ type: "text", text: "partial" }],
-      status: "running",
+function lifecycle(web: WebSession) {
+  const state = {
+    id: web.id,
+    sessionId: web.id,
+    workspaceId: workspace.id,
+    isStreaming: false,
+    pendingMessageCount: 0,
+    messages: [],
+    activeTools: [],
+  } as unknown as SessionState;
+  return {
+    getState: vi.fn(() => state),
+    notifyWorkspaceUpdated: vi.fn(async () => {}),
+    disposeWebSession: vi.fn(),
+    onAgentCompleted: vi.fn(async () => {}),
+    onAgentSettled: vi.fn(async () => {}),
+  };
+}
+
+describe("web session disposal ownership", () => {
+  it("returns one cleanup promise and never deletes a replacement", async () => {
+    let finishIdle!: () => void;
+    let finishBrowser!: () => void;
+    const idle = new Promise<void>((resolve) => {
+      finishIdle = resolve;
     });
+    const browser = new Promise<void>((resolve) => {
+      finishBrowser = resolve;
+    });
+    const session = { waitForIdle: vi.fn(() => idle), dispose: vi.fn(async () => {}) };
+    const old = { id: "child", session } as unknown as WebSession;
+    const replacement = { id: "child" } as WebSession;
+    const sessions = new Map([[old.id, old]]);
+    const unregister = vi.fn();
+    const closeBrowser = vi.fn(() => browser);
+    const disposal = disposeWebSession(sessions, unregister, old, closeBrowser);
+    expect(isWebSessionDisposing(old)).toBe(true);
+    expect(disposeWebSession(sessions, unregister, old, closeBrowser)).toBe(disposal);
+    finishIdle();
+    await vi.waitFor(() => expect(session.dispose).toHaveBeenCalledOnce());
+    expect(sessions.get(old.id)).toBe(old);
+    sessions.set(old.id, replacement);
+    finishBrowser();
+    await disposal;
+    expect(sessions.get(old.id)).toBe(replacement);
+    expect(unregister).not.toHaveBeenCalled();
   });
 
-  it("invokes the settled-operation hook when the agent settles", async () => {
-    const webSession = {
-      id: "cron-session",
-      workspace,
-      session: { sessionId: "cron-session" },
-      subscribers: new Set(),
-      activeTools: new Map(),
-    } as unknown as WebSession;
-    const onAgentSettled = vi.fn(async () => undefined);
-
-    await handleAgentEvent(
-      {
-        getState: () => createState({ isStreaming: false }, webSession, []),
-        getStateMetadata: () => createState({ isStreaming: false }, webSession, []),
-        publish: vi.fn(),
-        notifyWorkspaceUpdated: vi.fn(async () => undefined),
-        disposeWebSession: vi.fn(),
-        onAgentSettled,
+  it("logs cleanup failure while retaining the rejection", async () => {
+    const error = new Error("resource cleanup failed");
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const web = {
+      id: "child",
+      session: {
+        waitForIdle: async () => {},
+        dispose: async () => {
+          throw error;
+        },
       },
-      webSession,
-      { type: "agent_settled" } as AgentSessionEvent,
-    );
-
-    expect(onAgentSettled).toHaveBeenCalledWith(webSession);
-  });
-  it("publishes a workspace update when an agent starts", async () => {
-    const notifyWorkspaceUpdated = vi.fn(async () => undefined);
-    const webSession = {
-      id: "web-start",
-      workspace,
-      session: { sessionId: "session-start" },
-      subscribers: new Set(),
-      activeTools: new Map(),
-      agentCompleted: true,
-      suppressNextAgentEndCompletion: false,
-      revision: 0,
-      eventLog: [],
     } as unknown as WebSession;
-
-    await handleAgentEvent(
-      {
-        getState: vi.fn(),
-        getStateMetadata: () => createState({}, webSession, []),
-        publish: vi.fn(),
-        notifyWorkspaceUpdated,
-        disposeWebSession: vi.fn(),
-      },
-      webSession,
-      { type: "agent_start" } as unknown as AgentSessionEvent,
-    );
-
-    expect(webSession.agentCompleted).toBe(false);
-    expect(notifyWorkspaceUpdated).toHaveBeenCalledWith(workspace.id);
-  });
-
-  it("publishes compaction activity in session metadata", async () => {
-    const webSession = {
-      id: "web-compaction",
-      workspace,
-      session: { sessionId: "session-compaction" },
-      subscribers: new Set(),
-      activeTools: new Map(),
-    } as unknown as WebSession;
-    const publishEvent = vi.fn();
-    const deps = {
-      getState: () =>
-        createState({ isCompacting: Boolean(webSession.isCompacting) }, webSession, []),
-      getStateMetadata: () =>
-        createState({ isCompacting: Boolean(webSession.isCompacting) }, webSession, []),
-      publish: publishEvent,
-      notifyWorkspaceUpdated: vi.fn(async () => undefined),
-      disposeWebSession: vi.fn(),
-    };
-
-    await handleAgentEvent(deps, webSession, {
-      type: "compaction_start",
-      reason: "threshold",
-    });
-
-    expect(webSession.isCompacting).toBe(true);
-    expect(publishEvent).toHaveBeenLastCalledWith(
-      webSession,
-      expect.objectContaining({
-        type: "state",
-        state: expect.objectContaining({ isCompacting: true }),
-      }),
-    );
-
-    await handleAgentEvent(deps, webSession, {
-      type: "compaction_end",
-      reason: "threshold",
-      result: undefined,
-      aborted: false,
-      willRetry: false,
-    });
-
-    expect(webSession.isCompacting).toBe(false);
-    expect(publishEvent).toHaveBeenLastCalledWith(
-      webSession,
-      expect.objectContaining({
-        type: "reset",
-        state: expect.objectContaining({ isCompacting: false }),
-      }),
-    );
+    const sessions = new Map([[web.id, web]]);
+    await expect(disposeWebSession(sessions, vi.fn(), web)).rejects.toBe(error);
+    expect(log).toHaveBeenCalledWith("Failed to close Pi harness", error);
+    expect(sessions.get(web.id)).toBe(web);
+    log.mockRestore();
   });
 });
 
-describe("live reset events", () => {
-  it("keeps tool payloads in published reset snapshots", () => {
-    const subscriber = vi.fn();
-    const webSession = {
-      id: "web-summary",
-      workspace,
-      session: { sessionId: "session-summary" },
-      subscribers: new Set([subscriber]),
-      revision: 0,
-      eventLog: [],
-    } as unknown as WebSession;
-    const state = createState(
-      {
-        messagesDetailLevel: "full",
-        activeTools: [
-          {
-            toolCallId: "call-1",
-            toolName: "read",
-            args: { path: "large" },
-            blocks: [{ type: "text", text: "active output" }],
-            status: "running",
-            isError: false,
-            details: { diff: "active diff" },
-          },
-        ],
-      },
-      webSession,
-      [
-        {
-          id: "assistant-1-0",
-          role: "assistant",
-          turnPhase: "final",
-          timestamp: 1,
-          blocks: [
-            { type: "text", text: "Checking it." },
-            { type: "toolCall", id: "call-1", name: "read", arguments: { path: "large" } },
-          ],
-        },
-        {
-          id: "tool-2-1",
-          role: "toolResult",
-          timestamp: 2,
-          toolCallId: "call-1",
-          toolName: "read",
-          blocks: [{ type: "text", text: "large result" }],
-          isError: false,
-          details: { diff: "large diff" },
-        },
-      ],
-    );
-
-    publish(webSession, { type: "reset", state });
-
-    const published = subscriber.mock.calls[0]?.[0] as ServerEvent;
-    expect(published.type).toBe("reset");
-    expect(published.type === "reset" ? published.state.messagesDetailLevel : undefined).toBe(
-      "full",
-    );
-    expect(JSON.stringify(published)).toContain("large result");
-    expect(JSON.stringify(published)).toContain("active output");
-    expect(JSON.stringify(published)).toContain("toolCall");
-  });
-});
-
-describe("session event replay", () => {
-  it("sends a lightweight initial snapshot before full live resets", () => {
-    const webSession = {
-      id: "web-progressive",
-      streamId: "test-stream",
-      workspace,
-      session: { sessionId: "session-progressive", isStreaming: false },
-      subscribers: new Set(),
-      activeTools: new Map(),
-      openedAt: 1,
-      ephemeral: false,
-      revision: 0,
-      eventLog: [],
-    } as unknown as WebSession;
-    const getState = vi.fn(
-      (_sessionId: string, options?: { messagesDetailLevel?: "summary" | "full" }) =>
-        createState(
-          { isStreaming: false, messagesDetailLevel: options?.messagesDetailLevel ?? "full" },
-          webSession,
-          [],
-        ),
-    );
-    const subscriber = vi.fn();
-
-    const unsubscribe = subscribeToSession(
-      () => webSession,
-      getState,
-      vi.fn(),
-      webSession.id,
-      subscriber,
-      undefined,
-      "summary",
-    );
-    publish(webSession, {
-      type: "reset",
-      state: createState({ isStreaming: true, messagesDetailLevel: "full" }, webSession, []),
-    });
-
-    expect(subscriber.mock.calls[0]?.[0]).toMatchObject({
-      type: "reset",
-      streamId: "test-stream",
-      state: { messagesDetailLevel: "summary", streamId: "test-stream" },
-    });
-    expect(subscriber.mock.calls[1]?.[0]).toMatchObject({
-      type: "reset",
-      state: { messagesDetailLevel: "full" },
-    });
-    unsubscribe();
-  });
-
-  it("skips the duplicate snapshot and replays only missed events", () => {
-    const webSession = {
-      id: "web-replay",
-      streamId: "test-stream",
-      workspace,
-      session: { sessionId: "session-replay", isStreaming: false },
-      subscribers: new Set(),
-      activeTools: new Map(),
-      openedAt: 1,
-      ephemeral: false,
-      revision: 0,
-      eventLog: [],
-    } as unknown as WebSession;
-    const getState = vi.fn(() => createState({ isStreaming: false }, webSession, []));
-    const currentEvents = vi.fn();
-
-    const unsubscribeCurrent = subscribeToSession(
-      () => webSession,
-      getState,
-      vi.fn(),
-      webSession.id,
-      currentEvents,
-      0,
-      "full",
-      webSession.streamId,
-    );
-    expect(currentEvents).not.toHaveBeenCalled();
-    expect(getState).not.toHaveBeenCalled();
-
-    publish(webSession, { type: "status", isStreaming: true, pendingMessageCount: 1 });
-    expect(currentEvents).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "status", revision: 1 }),
-      1,
-    );
-    unsubscribeCurrent();
-
-    const replayed = vi.fn();
-    subscribeToSession(
-      () => webSession,
-      getState,
-      vi.fn(),
-      webSession.id,
-      replayed,
-      0,
-      "full",
-      webSession.streamId,
-    );
-    expect(replayed).toHaveBeenCalledTimes(1);
-    expect(replayed).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "status", revision: 1 }),
-      1,
-    );
-    expect(getState).not.toHaveBeenCalled();
-  });
-
-  it("sends a reset when a reconnect has the previous session incarnation ID", () => {
-    const webSession = {
-      id: "web-restarted",
-      streamId: "test-stream",
-      workspace,
-      session: { sessionId: "session-restarted" },
-      subscribers: new Set(),
-      revision: 4,
-      eventLog: [],
-    } as unknown as WebSession;
-    const state = createState({ isStreaming: false }, webSession, []);
-    const subscriber = vi.fn();
-
-    subscribeToSession(
-      () => webSession,
-      () => state,
-      vi.fn(),
-      webSession.id,
-      subscriber,
-      4,
-      "full",
-      "previous-process",
-    );
-
-    expect(subscriber).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "reset",
-        revision: 4,
-        streamId: "test-stream",
-        state: expect.objectContaining({ streamId: "test-stream" }),
-      }),
-      4,
-    );
-  });
-
-  it("keeps replayed tool snapshots immutable", () => {
-    const tool = {
-      toolCallId: "call-1",
-      toolName: "bash",
-      args: { command: "echo" },
-      blocks: [{ type: "text" as const, text: "first" }],
-      status: "running" as const,
-      isError: false,
-    };
-    const webSession = {
-      id: "web-tools",
-      streamId: "test-stream",
-      workspace,
-      session: { sessionId: "session-tools", isStreaming: true },
-      subscribers: new Set(),
-      activeTools: new Map([[tool.toolCallId, tool]]),
-      openedAt: 1,
-      ephemeral: false,
-      revision: 0,
-      eventLog: [],
-    } as unknown as WebSession;
-
-    publish(webSession, { type: "tools", tools: [tool] });
-    tool.blocks = [{ type: "text", text: "mutated" }];
-    const replayed = vi.fn();
-    subscribeToSession(
-      () => webSession,
-      vi.fn(),
-      vi.fn(),
-      webSession.id,
-      replayed,
-      0,
-      "full",
-      webSession.streamId,
-    );
-
-    expect(replayed.mock.calls[0]?.[0]).toMatchObject({
-      type: "tools",
-      tools: [{ blocks: [{ type: "text", text: "first" }] }],
-    });
-  });
-});
-
-describe("handleAgentEvent", () => {
-  it("publishes assistant text as deltas without rebuilding session state", async () => {
-    const publishEvent = vi.fn();
-    const getState = vi.fn();
-    const assistantMessage = {
-      role: "assistant",
-      content: [{ type: "text", text: "hello" }],
-      timestamp: 1,
-    };
-    const webSession = {
-      id: "web-delta",
-      publishedAssistantPositions: [{ index: 0, type: "text" }],
-      workspace,
-      session: { sessionId: "session-delta" },
-      subscribers: new Set(),
-      activeTools: new Map(),
-      openedAt: 1,
-      ephemeral: false,
-    } as unknown as WebSession;
-
-    await handleAgentEvent(
-      {
-        getState,
-        getStateMetadata: vi.fn(),
-        publish: publishEvent,
-        notifyWorkspaceUpdated: vi.fn(async () => undefined),
-        disposeWebSession: vi.fn(),
-      },
-      webSession,
-      {
-        type: "message_update",
-        message: assistantMessage,
-        assistantMessageEvent: {
-          type: "text_delta",
-          contentIndex: 0,
-          delta: "o",
-          partial: assistantMessage,
-        },
-      } as unknown as AgentSessionEvent,
-    );
-
-    expect(publishEvent).toHaveBeenCalledWith(webSession, {
-      type: "assistant-delta",
-      contentIndex: 0,
-      blockType: "text",
-      delta: "o",
-    });
-    expect(getState).not.toHaveBeenCalled();
-  });
-
-  it("keeps assistant blocks dense when thinking has no delta before text", async () => {
-    const message = {
-      role: "assistant",
-      content: [] as Array<{ type: string; thinking?: string; text?: string }>,
-      timestamp: 1,
-    };
-    const webSession = {
-      id: "web-thinking-start",
-      workspace,
-      session: { sessionId: "session-thinking-start" },
-      subscribers: new Set(),
-      activeTools: new Map(),
-      openedAt: 1,
-      ephemeral: false,
-    } as unknown as WebSession;
-    let state = createState({ activeAssistant: undefined }, webSession, []);
-    const deps = {
-      getState: vi.fn(),
-      getStateMetadata: vi.fn(),
-      publish: vi.fn((_session: WebSession, event: ServerEvent) => {
-        state = applyServerEvent(state, structuredClone(event))!;
-      }),
-      notifyWorkspaceUpdated: vi.fn(async () => undefined),
-      disposeWebSession: vi.fn(),
-    };
-
-    await handleAgentEvent(deps, webSession, {
-      type: "message_start",
-      message,
-    } as unknown as AgentSessionEvent);
-    message.content = [{ type: "thinking", thinking: "" }];
-    await handleAgentEvent(deps, webSession, {
-      type: "message_update",
-      message,
-      assistantMessageEvent: { type: "thinking_start", contentIndex: 0 },
-    } as unknown as AgentSessionEvent);
-    message.content = [
-      { type: "thinking", thinking: "" },
-      { type: "text", text: "" },
-    ];
-    await handleAgentEvent(deps, webSession, {
-      type: "message_update",
-      message,
-      assistantMessageEvent: { type: "text_start", contentIndex: 1 },
-    } as unknown as AgentSessionEvent);
-    for (const text of ["Hello", "Hello world"]) {
-      const delta = text === "Hello" ? "Hello" : " world";
-      message.content[1] = { type: "text", text };
-      await handleAgentEvent(deps, webSession, {
-        type: "message_update",
-        message,
-        assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta },
-      } as unknown as AgentSessionEvent);
-    }
-
-    expect(state.activeAssistant?.blocks).toEqual([
-      { type: "thinking", thinking: "" },
-      { type: "text", text: "Hello world" },
-    ]);
-    expect(withoutRenderedToolCalls(state.activeAssistant, new Set(["call-1"]))?.blocks).toEqual(
-      state.activeAssistant?.blocks,
-    );
-    expect(deps.publish).toHaveBeenLastCalledWith(webSession, {
-      type: "assistant-delta",
-      contentIndex: 1,
-      blockType: "text",
-      delta: " world",
-    });
-  });
-
-  it("maps repeated Pi deltas past hidden blocks without resending the growing message", async () => {
-    const webSession = {
-      id: "web-hidden-thinking",
-      workspace,
-      session: { sessionId: "session-hidden-thinking" },
-      subscribers: new Set(),
-      activeTools: new Map(),
-      openedAt: 1,
-      ephemeral: false,
-    } as unknown as WebSession;
-    const message = {
-      role: "assistant",
-      content: [{ type: "redacted_thinking" }, { type: "text", text: "Hi" }],
-      timestamp: 1,
-    };
-    const publishEvent = vi.fn();
-    const deps = {
-      getState: vi.fn(),
-      getStateMetadata: vi.fn(),
-      publish: publishEvent,
-      notifyWorkspaceUpdated: vi.fn(async () => undefined),
-      disposeWebSession: vi.fn(),
-    };
-    await handleAgentEvent(deps, webSession, {
-      type: "message_start",
-      message,
-    } as unknown as AgentSessionEvent);
-    for (const [text, delta] of [
-      ["Hi there", " there"],
-      ["Hi there!", "!"],
-    ]) {
-      message.content[1] = { type: "text", text };
-      await handleAgentEvent(deps, webSession, {
-        type: "message_update",
-        message,
-        assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta },
-      } as unknown as AgentSessionEvent);
-    }
-
-    expect(publishEvent).toHaveBeenLastCalledWith(webSession, {
-      type: "assistant-delta",
-      contentIndex: 0,
-      blockType: "text",
-      delta: "!",
-    });
-  });
-
-  it("publishes append-only tool output as deltas", async () => {
-    const publishEvent = vi.fn();
-    const current = {
-      toolCallId: "call-1",
-      toolName: "bash",
-      args: { command: "printf ab" },
-      blocks: [{ type: "text" as const, text: "a" }],
-      status: "running" as const,
-      isError: false,
-    };
-    const webSession = {
-      id: "web-tool-delta",
-      workspace,
-      session: { sessionId: "session-tool-delta" },
-      subscribers: new Set(),
-      activeTools: new Map([[current.toolCallId, current]]),
-      openedAt: 1,
-      ephemeral: false,
-    } as unknown as WebSession;
-
-    await handleAgentEvent(
-      {
-        getState: vi.fn(),
-        getStateMetadata: vi.fn(),
-        publish: publishEvent,
-        notifyWorkspaceUpdated: vi.fn(async () => undefined),
-        disposeWebSession: vi.fn(),
-      },
-      webSession,
-      {
-        type: "tool_execution_update",
-        toolCallId: "call-1",
-        toolName: "bash",
-        args: current.args,
-        partialResult: { content: [{ type: "text", text: "ab" }] },
-      } as unknown as AgentSessionEvent,
-    );
-
-    expect(publishEvent).toHaveBeenCalledWith(webSession, {
-      type: "tool-delta",
-      toolCallId: "call-1",
-      deltas: [{ contentIndex: 0, blockType: "text", delta: "b" }],
-      details: undefined,
-    });
-  });
-
-  it("sanitizes streamed and final PowerShell output", async () => {
-    const publishEvent = vi.fn();
-    const current = {
-      toolCallId: "call-powershell",
-      toolName: "powershell",
-      args: { command: "Write-Output ok" },
-      blocks: [],
-      status: "running" as const,
-      isError: false,
-    };
-    const webSession = {
-      id: "web-powershell",
-      workspace,
-      session: { sessionId: "session-powershell" },
-      subscribers: new Set(),
-      activeTools: new Map([[current.toolCallId, current]]),
-      openedAt: 1,
-      ephemeral: false,
-    } as unknown as WebSession;
-    const deps = {
-      getState: vi.fn(),
-      getStateMetadata: vi.fn(),
-      publish: publishEvent,
-      notifyWorkspaceUpdated: vi.fn(async () => undefined),
-      disposeWebSession: vi.fn(),
-    };
-
-    await handleAgentEvent(deps, webSession, {
-      type: "tool_execution_update",
-      toolCallId: current.toolCallId,
-      toolName: current.toolName,
-      args: current.args,
-      partialResult: { content: [{ type: "text", text: "\u001b[32mok\u001b[0m" }] },
-    } as unknown as AgentSessionEvent);
-
-    expect(webSession.activeTools.get(current.toolCallId)?.blocks).toEqual([
-      { type: "text", text: "ok" },
-    ]);
-
-    await handleAgentEvent(deps, webSession, {
-      type: "tool_execution_end",
-      toolCallId: current.toolCallId,
-      toolName: current.toolName,
-      result: { content: [{ type: "text", text: "\u001b[32mdone\u001b[0m" }] },
-      isError: false,
-    } as unknown as AgentSessionEvent);
-
-    expect(webSession.activeTools.get(current.toolCallId)?.blocks).toEqual([
-      { type: "text", text: "done" },
-    ]);
-  });
-
-  it("keeps a tool-call assistant active when message_end arrives before the message is persisted", async () => {
-    const published: Array<{ type: string; state?: SessionState }> = [];
-    const assistantMessage = {
-      role: "assistant",
-      content: [
-        { type: "text", text: "Checking that" },
-        { type: "toolCall", id: "call-1", name: "subagent", arguments: { prompt: "Search" } },
-      ],
-      timestamp: 1,
-    };
-    const webSession = {
-      id: "web-1",
-      workspace,
-      session: { sessionId: "session-1" },
-      subscribers: new Set(),
-      activeAssistant: assistantMessage,
-      activeTools: new Map(),
-      openedAt: 1,
-      ephemeral: false,
-    } as unknown as WebSession;
-
-    await handleAgentEvent(
-      {
-        getState: () => createState({}, webSession, []),
-        getStateMetadata: () => createState({}, webSession, []),
-        publish: (_webSession, event) =>
-          published.push(event as { type: string; state?: SessionState }),
-        notifyWorkspaceUpdated: async () => {},
-        disposeWebSession: () => {},
-      },
-      webSession,
-      { type: "message_end", message: assistantMessage } as unknown as AgentSessionEvent,
-    );
-
-    expect(webSession.activeAssistant).toEqual(assistantMessage);
-    expect(published).toHaveLength(1);
-    expect(published[0]?.type).toBe("reset");
-    expect(published[0]?.state?.activeAssistant).toEqual(assistantMessage);
-  });
-
-  it("clears a tool-call assistant once the persisted message is present", async () => {
-    const published: Array<{ type: string; state?: SessionState }> = [];
-    const assistantMessage = {
-      role: "assistant",
-      content: [
-        { type: "toolCall", id: "call-1", name: "subagent", arguments: { prompt: "Search" } },
-      ],
-      timestamp: 1,
-    };
-    const webSession = {
-      id: "web-1",
-      workspace,
-      session: { sessionId: "session-1" },
-      subscribers: new Set(),
-      activeAssistant: assistantMessage,
-      activeTools: new Map(),
-      openedAt: 1,
-      ephemeral: false,
-    } as unknown as WebSession;
-    const persistedMessages: SessionState["messages"] = [
-      {
-        id: "assistant-1",
-        role: "assistant",
-        turnPhase: "intermediate",
-        timestamp: 1,
-        blocks: [
-          { type: "toolCall", id: "call-1", name: "subagent", arguments: { prompt: "Search" } },
-        ],
-      },
-    ];
-
-    await handleAgentEvent(
-      {
-        getState: () => createState({}, webSession, persistedMessages),
-        getStateMetadata: vi.fn(),
-        publish: (_webSession, event) =>
-          published.push(event as { type: string; state?: SessionState }),
-        notifyWorkspaceUpdated: async () => {},
-        disposeWebSession: () => {},
-      },
-      webSession,
-      { type: "message_end", message: assistantMessage } as unknown as AgentSessionEvent,
-    );
-
-    expect(webSession.activeAssistant).toBeUndefined();
-    expect(published).toHaveLength(1);
-    expect(published[0]?.type).toBe("reset");
-    expect(published[0]?.state?.activeAssistant).toBeUndefined();
-  });
-
-  it("waits a microtask before publishing a user message reset", async () => {
-    const published: Array<{ type: string; state?: SessionState }> = [];
-    const userMessage = {
-      role: "user",
-      content: "hello",
-      timestamp: 1,
-    };
-    const webSession = {
-      id: "web-1",
-      workspace,
-      session: { sessionId: "session-1" },
-      subscribers: new Set(),
-      activeAssistant: undefined,
-      activeTools: new Map(),
-      openedAt: 1,
-      ephemeral: false,
-    } as unknown as WebSession;
-    const persistedMessages: SessionState["messages"] = [
-      {
-        id: "user-1",
+describe("native session document transport", () => {
+  it("returns the requested history version rather than a later native frame version", async () => {
+    const { fixture, web } = await nativeSession();
+    const bound = Number(
+      await fixture.session.sessionManager.appendMessage({
         role: "user",
+        content: "captured",
         timestamp: 1,
-        blocks: [{ type: "text", text: "hello" }],
-      },
+      }),
+    );
+    await fixture.session.sessionManager.appendMessage({
+      role: "user",
+      content: "future",
+      timestamp: 2,
+    });
+    const service = {
+      requireSession: () => web,
+      getMessagePage: (_web: WebSession, options: Parameters<typeof getSessionMessagePage>[1]) =>
+        getSessionMessagePage(fixture.session, options),
+    } as unknown as PiService;
+    const page = PiService.prototype.getSessionMessages.call(service, web.id, {
+      throughEntryId: bound,
+    });
+    expect(page.historyVersion).toBe(bound);
+    expect(page.totalMessageCount).toBe(1);
+    expect(page.messages).toMatchObject([
+      { role: "user", blocks: [{ type: "text", text: "captured" }] },
+    ]);
+  });
+
+  it("bounds full-history DTOs to the captured view rather than the current cache", async () => {
+    const { fixture, web } = await nativeSession();
+    await fixture.session.sessionManager.appendMessage({
+      role: "user",
+      content: "before",
+      timestamp: 1,
+    });
+    const captured = fixture.session.view;
+    await fixture.session.sessionManager.appendMessage({
+      role: "user",
+      content: "later",
+      timestamp: 2,
+    });
+    const service = {
+      requireSession: () => web,
+      modelRuntime: fixture.modelRuntime,
+      getMessagePage: (_web: WebSession, options: Parameters<typeof getSessionMessagePage>[1]) =>
+        getSessionMessagePage(fixture.session, options),
+    } as unknown as PiService;
+    const frame = PiService.prototype.getSnapshot.call(service, web.id, captured);
+    expect(frame.messages).toHaveLength(1);
+    expect(frame.messages[0]).toMatchObject({
+      role: "user",
+      blocks: [{ type: "text", text: "before" }],
+    });
+    expect(frame.historyVersion).toBeLessThan(
+      Math.max(...fixture.session.view.entries.map((entry) => entry.id)),
+    );
+    expect(frame.metadata).not.toHaveProperty("isStreaming");
+    expect(frame.metadata).not.toHaveProperty("activeAssistant");
+  });
+
+  it("does not create a second assistant or tool authority when attaching", async () => {
+    const { web } = await nativeSession();
+    expect(web).not.toHaveProperty("activeAssistant");
+    expect(web).not.toHaveProperty("activeTools");
+    expect(web).not.toHaveProperty("eventLog");
+    expect(web).not.toHaveProperty("streamId");
+  });
+
+  it("strips only the docs prefix and ignores raw transcript operations", () => {
+    const documents = snapshot({ entries: [], docs: {} } as unknown as ConversationView).documents;
+    const ops: Op[] = [
+      ["a", ["docs", "pi.live", "tools", 0, "output"], "next"],
+      ["t", ["docs", "pi.live", "tools", 0, "output"], 4],
+      ["s", ["docs", "pi.live", "tools", 0, "details"], { nestedCalls: { calls: [] } }],
+      ["p", ["entries"], 0, 0, []],
     ];
-    let flushComplete = false;
-
-    queueMicrotask(() => {
-      flushComplete = true;
-    });
-
-    await handleAgentEvent(
-      {
-        getState: () => createState({}, webSession, flushComplete ? persistedMessages : []),
-        getStateMetadata: vi.fn(),
-        publish: (_webSession, event) =>
-          published.push(event as { type: string; state?: SessionState }),
-        notifyWorkspaceUpdated: async () => {},
-        disposeWebSession: () => {},
-      },
-      webSession,
-      { type: "message_end", message: userMessage } as unknown as AgentSessionEvent,
-    );
-
-    expect(published).toHaveLength(1);
-    expect(published[0]?.type).toBe("reset");
-    expect(published[0]?.state?.messages).toEqual(persistedMessages);
+    expect(documentOperations(ops, documents)).toEqual([
+      ["a", ["pi.live", "tools", 0, "output"], "next"],
+      ["t", ["pi.live", "tools", 0, "output"], 4],
+      ["s", ["pi.live", "tools", 0, "details"], { nestedCalls: { calls: [] } }],
+    ]);
   });
 
-  it("does not notify on intermediate agent_end and completes on agent_settled", async () => {
-    const onAgentCompleted = vi.fn();
-    const notifyWorkspaceUpdated = vi.fn(async () => undefined);
-    const published: Array<{ type: string; state?: SessionState }> = [];
-    const webSession = {
-      id: "web-1",
-      workspace,
-      session: { sessionId: "session-1" },
-      subscribers: new Set(),
-      activeAssistant: undefined,
-      activeTools: new Map(),
-      openedAt: 1,
-      ephemeral: false,
-    } as unknown as WebSession;
-    const getState = () => createState({ isStreaming: !webSession.agentCompleted }, webSession, []);
-
-    await handleAgentEvent(
-      {
-        getState,
-        getStateMetadata: vi.fn(),
-        publish: (_webSession, event) =>
-          published.push(event as { type: string; state?: SessionState }),
-        notifyWorkspaceUpdated,
-        disposeWebSession: vi.fn(),
-        onAgentCompleted,
-      },
-      webSession,
-      { type: "agent_end", messages: [] } as unknown as AgentSessionEvent,
-    );
-
-    expect(onAgentCompleted).not.toHaveBeenCalled();
-    expect(notifyWorkspaceUpdated).not.toHaveBeenCalled();
-    expect(webSession.agentCompleted).not.toBe(true);
-
-    await handleAgentEvent(
-      {
-        getState,
-        getStateMetadata: vi.fn(),
-        publish: (_webSession, event) =>
-          published.push(event as { type: string; state?: SessionState }),
-        notifyWorkspaceUpdated,
-        disposeWebSession: vi.fn(),
-        onAgentCompleted,
-      },
-      webSession,
-      { type: "agent_settled" } as unknown as AgentSessionEvent,
-    );
-
-    expect(onAgentCompleted).toHaveBeenCalledTimes(1);
-    expect(notifyWorkspaceUpdated).toHaveBeenCalledTimes(1);
-    expect(published.at(-1)).toMatchObject({
-      type: "reset",
-      state: expect.objectContaining({ isStreaming: false, activeAssistant: undefined }),
-    });
-    expect(onAgentCompleted).toHaveBeenCalledWith(
-      expect.objectContaining({ isStreaming: false, pendingMessageCount: 0 }),
-    );
+  it("turns native overflow/root replacement into a documents-only base", () => {
+    const documents = snapshot({ entries: [], docs: {} } as unknown as ConversationView).documents;
+    expect(
+      documentOperations([["r", { entries: [{ raw: "secret" }], docs: {} }]], documents),
+    ).toEqual([["r", documents]]);
+    expect(documentOperations([["s", ["docs"], {}]], documents)).toEqual([["r", documents]]);
   });
 
-  it("publishes the workspace idle update before awaiting a slow completion hook", async () => {
-    let resolveCompletion!: () => void;
-    const onAgentCompleted = vi.fn(
+  it("starts every connection from a fresh base and applies native progress ops", async () => {
+    const { fixture, web } = await nativeSession();
+    const events: ServerEvent[] = [];
+    const unsubscribe = await subscribeToSession(
+      () => web,
+      (_id, view) => snapshot(view),
+      vi.fn(),
+      web.id,
+      (event) => events.push(event),
+    );
+    expect(events[0]?.type).toBe("session");
+    const initial = events[0] as Extract<ServerEvent, { type: "session" }>;
+    let documents = initial.snapshot.documents;
+    await fixture.session.sessionManager.conversation.commit(async (tx) => {
+      (await tx.doc(LiveDoc, fixture.session.sessionManager.conversation.id)).tools = [
+        { callId: "call", name: "bash", status: "running", output: "first" },
+      ];
+    }, BACKGROUND_CONTEXT);
+    await vi.waitFor(() => expect(events.length).toBeGreaterThan(1));
+    for (const event of events.slice(1)) {
+      if (event.type === "session-update") {
+        documents = applyImmutable(documents, event.documents);
+        expect(event).not.toHaveProperty("messages");
+      }
+    }
+    expect(documents["pi.live"].tools?.[0]?.output).toBe("first");
+    unsubscribe();
+    const reconnect = vi.fn();
+    const stopReconnect = await subscribeToSession(
+      () => web,
+      (_id, view) => snapshot(view),
+      vi.fn(),
+      web.id,
+      reconnect,
+    );
+    expect(reconnect).toHaveBeenCalledOnce();
+    expect(reconnect.mock.calls[0]![0]).toMatchObject({
+      type: "session",
+      snapshot: { documents: { "pi.live": { tools: [{ output: "first" }] } } },
+    });
+    stopReconnect();
+  });
+
+  it("sends history only when the captured native entry boundary changes", async () => {
+    const { fixture, web } = await nativeSession();
+    const events: ServerEvent[] = [];
+    const stop = await subscribeToSession(
+      () => web,
+      (_id, view) => snapshot(view),
+      vi.fn(),
+      web.id,
+      (event) => events.push(event),
+    );
+    await fixture.session.sessionManager.appendCustomEntry("receipt", { complete: true });
+    await vi.waitFor(() =>
+      expect(events.some((event) => event.type === "session-update" && "messages" in event)).toBe(
+        true,
+      ),
+    );
+    const update = events.find((event) => event.type === "session-update" && "messages" in event)!;
+    expect(update).toMatchObject({ messages: [], historyVersion: expect.any(Number) });
+    const beforeRefresh = events.length;
+    publish(web);
+    expect(events.length).toBe(beforeRefresh + 1);
+    expect(events.at(-1)).toMatchObject({ type: "session-update", documents: [] });
+    expect(events.at(-1)).not.toHaveProperty("messages");
+    stop();
+  });
+
+  it("unsubscribes idempotently without browser-driven completion", async () => {
+    const { web } = await nativeSession();
+    const dispose = vi.fn();
+    const stop = await subscribeToSession(
+      () => web,
+      (_id, view) => snapshot(view),
+      dispose,
+      web.id,
+      vi.fn(),
+    );
+    expect(web.subscribers.size).toBe(1);
+    stop();
+    stop();
+    expect(web.subscribers.size).toBe(0);
+    expect(dispose).not.toHaveBeenCalled();
+  });
+});
+
+describe("receipt-aware host completion", () => {
+  it("notifies activity at native run start", async () => {
+    const { web } = await nativeSession();
+    web.agentCompleted = true;
+    const deps = lifecycle(web);
+    await handleSessionEvent(deps, web, { type: "run_start", inputs: [] });
+    expect(web.agentCompleted).toBe(false);
+    expect(deps.notifyWorkspaceUpdated).toHaveBeenCalledWith(workspace.id);
+    expect(deps.onAgentCompleted).not.toHaveBeenCalled();
+  });
+
+  it("does not complete on native run end or tool/compaction events", async () => {
+    const { web } = await nativeSession();
+    const deps = lifecycle(web);
+    await handleSessionEvent(deps, web, { type: "run_end", inputs: [] });
+    expect(deps.onAgentCompleted).not.toHaveBeenCalled();
+    expect(deps.disposeWebSession).not.toHaveBeenCalled();
+  });
+
+  it("runs receipt delivery before completion and disposes ephemeral children last", async () => {
+    const { web } = await nativeSession();
+    web.ephemeral = true;
+    const deps = lifecycle(web);
+    const order: string[] = [];
+    deps.onAgentSettled.mockImplementation(async () => {
+      order.push("receipts");
+    });
+    deps.notifyWorkspaceUpdated.mockImplementation(async () => {
+      order.push("workspace");
+    });
+    deps.onAgentCompleted.mockImplementation(async () => {
+      order.push("completed");
+    });
+    deps.disposeWebSession.mockImplementation(() => {
+      order.push("dispose");
+    });
+    await handleSessionEvent(deps, web, { type: "agent_settled" });
+    await handleSessionEvent(deps, web, { type: "agent_settled" });
+    expect(order).toEqual(["receipts", "workspace", "completed", "dispose"]);
+  });
+
+  it("publishes workspace idle before a slow completion hook finishes", async () => {
+    const { web } = await nativeSession();
+    const deps = lifecycle(web);
+    let finish!: () => void;
+    deps.onAgentCompleted.mockImplementation(
       () =>
         new Promise<void>((resolve) => {
-          resolveCompletion = resolve;
+          finish = resolve;
         }),
     );
-    const notifyWorkspaceUpdated = vi.fn(async () => undefined);
-    const webSession = {
-      id: "web-slow-completion",
-      workspace,
-      session: { sessionId: "session-slow-completion" },
-      subscribers: new Set(),
-      activeAssistant: undefined,
-      activeTools: new Map(),
-      openedAt: 1,
-      ephemeral: false,
-    } as unknown as WebSession;
-
-    const handling = handleAgentEvent(
-      {
-        getState: () => createState({ isStreaming: !webSession.agentCompleted }, webSession, []),
-        getStateMetadata: vi.fn(),
-        publish: vi.fn(),
-        notifyWorkspaceUpdated,
-        disposeWebSession: vi.fn(),
-        onAgentCompleted,
-      },
-      webSession,
-      { type: "agent_settled" } as unknown as AgentSessionEvent,
-    );
-
-    expect(notifyWorkspaceUpdated).not.toHaveBeenCalled();
-    expect(onAgentCompleted).not.toHaveBeenCalled();
-
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(notifyWorkspaceUpdated).toHaveBeenCalledWith(workspace.id);
-    expect(onAgentCompleted).not.toHaveBeenCalled();
-    await Promise.resolve();
-    expect(onAgentCompleted).toHaveBeenCalledTimes(1);
-    expect(notifyWorkspaceUpdated).toHaveBeenCalledTimes(1);
-
-    resolveCompletion();
-    await handling;
-  });
-
-  it("keeps terminal state idle after later lifecycle events", async () => {
-    const published: SessionState[] = [];
-    const webSession = {
-      id: "web-1",
-      workspace,
-      session: { sessionId: "session-1", isStreaming: true },
-      subscribers: new Set(),
-      activeAssistant: undefined,
-      activeTools: new Map([
-        [
-          "tool-1",
-          {
-            toolCallId: "tool-1",
-            toolName: "bash",
-            args: {},
-            blocks: [],
-            status: "running",
-            isError: false,
-          },
-        ],
-      ]),
-      openedAt: 1,
-      ephemeral: false,
-    } as unknown as WebSession;
-    const deps = {
-      getState: () =>
-        createState(
-          {
-            isStreaming:
-              !webSession.agentCompleted &&
-              (webSession.session.isStreaming ||
-                [...webSession.activeTools.values()].some((tool) => tool.status === "running")),
-            activeTools: [...webSession.activeTools.values()],
-          },
-          webSession,
-          [],
-        ),
-      getStateMetadata: vi.fn(),
-      publish: (_webSession: WebSession, event: ServerEvent) => {
-        if (event.type === "reset") published.push(event.state);
-      },
-      notifyWorkspaceUpdated: vi.fn(async () => undefined),
-      disposeWebSession: vi.fn(),
-    };
-
-    await handleAgentEvent(deps, webSession, {
-      type: "agent_end",
-      messages: [],
-    } as unknown as AgentSessionEvent);
-    expect(webSession.agentCompleted).not.toBe(true);
-    await handleAgentEvent(deps, webSession, {
-      type: "agent_settled",
-    } as unknown as AgentSessionEvent);
-    await handleAgentEvent(deps, webSession, {
-      type: "turn_end",
-      turn: [],
-    } as unknown as AgentSessionEvent);
-
-    expect(webSession.agentCompleted).toBe(true);
-    expect(webSession.activeTools.size).toBe(0);
-    expect(published).toHaveLength(3);
-    expect(published[0]).toMatchObject({ isStreaming: true });
-    expect(published.slice(1)).toEqual([
-      expect.objectContaining({ isStreaming: false, activeTools: [] }),
-      expect.objectContaining({ isStreaming: false, activeTools: [] }),
-    ]);
-  });
-
-  it("defers completion hooks when agent_end announces a pending retry", async () => {
-    const onAgentCompleted = vi.fn();
-    const notifyWorkspaceUpdated = vi.fn(async () => undefined);
-    const publish = vi.fn();
-    const webSession = {
-      id: "web-1",
-      workspace,
-      session: { sessionId: "session-1" },
-      subscribers: new Set(),
-      activeAssistant: undefined,
-      activeTools: new Map(),
-      openedAt: 1,
-      ephemeral: false,
-    } as unknown as WebSession;
-    const retryingState = createState({ isStreaming: true }, webSession, []);
-
-    await handleAgentEvent(
-      {
-        getState: () => retryingState,
-        getStateMetadata: vi.fn(),
-        publish,
-        notifyWorkspaceUpdated,
-        disposeWebSession: vi.fn(),
-        onAgentCompleted,
-      },
-      webSession,
-      { type: "agent_end", messages: [], willRetry: true } as unknown as AgentSessionEvent,
-    );
-
-    expect(onAgentCompleted).not.toHaveBeenCalled();
-    expect(notifyWorkspaceUpdated).not.toHaveBeenCalled();
-    expect(webSession.autoRetryActive).toBe(true);
-    expect(publish).toHaveBeenCalledWith(
-      webSession,
-      expect.objectContaining({
-        type: "reset",
-        state: expect.objectContaining({ isStreaming: true }),
-      }),
-    );
-  });
-
-  it("resets retry state at auto_retry_end and completes only when the agent settles", async () => {
-    const onAgentCompleted = vi.fn();
-    const onAgentSettled = vi.fn(async () => undefined);
-    const notifyWorkspaceUpdated = vi.fn(async () => undefined);
-    const webSession = {
-      id: "web-1",
-      workspace,
-      session: { sessionId: "session-1" },
-      subscribers: new Set(),
-      activeAssistant: undefined,
-      activeTools: new Map(),
-      openedAt: 1,
-      ephemeral: false,
-    } as unknown as WebSession;
-    const completedState = createState({ isStreaming: false }, webSession, []);
-    const retryingState = createState({ isStreaming: true }, webSession, []);
-
-    await handleAgentEvent(
-      {
-        getState: () => retryingState,
-        getStateMetadata: vi.fn(),
-        publish: vi.fn(),
-        notifyWorkspaceUpdated,
-        disposeWebSession: vi.fn(),
-        onAgentCompleted,
-      },
-      webSession,
-      {
-        type: "auto_retry_start",
-        attempt: 1,
-        maxAttempts: 3,
-        delayMs: 2000,
-        errorMessage: "server overloaded",
-      } as unknown as AgentSessionEvent,
-    );
-
-    await handleAgentEvent(
-      {
-        getState: () => retryingState,
-        getStateMetadata: vi.fn(),
-        publish: vi.fn(),
-        notifyWorkspaceUpdated,
-        disposeWebSession: vi.fn(),
-        onAgentCompleted,
-      },
-      webSession,
-      { type: "agent_end", messages: [] } as unknown as AgentSessionEvent,
-    );
-
-    expect(onAgentCompleted).not.toHaveBeenCalled();
-    expect(webSession.agentCompleted).not.toBe(true);
-
-    const publish = vi.fn();
-    await handleAgentEvent(
-      {
-        getState: () => completedState,
-        getStateMetadata: vi.fn(),
-        publish,
-        notifyWorkspaceUpdated,
-        disposeWebSession: vi.fn(),
-        onAgentCompleted,
-        onAgentSettled,
-      },
-      webSession,
-      {
-        type: "auto_retry_end",
-        success: false,
-        attempt: 3,
-        finalError: "server overloaded",
-      } as unknown as AgentSessionEvent,
-    );
-
-    expect(webSession.autoRetryActive).toBe(false);
-    expect(onAgentCompleted).not.toHaveBeenCalled();
-    expect(onAgentSettled).not.toHaveBeenCalled();
-    expect(notifyWorkspaceUpdated).not.toHaveBeenCalled();
-    expect(publish).toHaveBeenCalledWith(webSession, expect.objectContaining({ type: "reset" }));
-
-    await handleAgentEvent(
-      {
-        getState: () => completedState,
-        getStateMetadata: vi.fn(),
-        publish,
-        notifyWorkspaceUpdated,
-        disposeWebSession: vi.fn(),
-        onAgentCompleted,
-        onAgentSettled,
-      },
-      webSession,
-      { type: "agent_settled" } as unknown as AgentSessionEvent,
-    );
-
-    expect(onAgentCompleted).toHaveBeenCalledTimes(1);
-    expect(onAgentSettled).toHaveBeenCalledTimes(1);
-    expect(notifyWorkspaceUpdated).toHaveBeenCalledTimes(1);
-    expect(webSession.agentCompleted).toBe(true);
-
-    await handleAgentEvent(
-      {
-        getState: () => completedState,
-        getStateMetadata: vi.fn(),
-        publish,
-        notifyWorkspaceUpdated,
-        disposeWebSession: vi.fn(),
-        onAgentCompleted,
-        onAgentSettled,
-      },
-      webSession,
-      { type: "agent_settled" } as unknown as AgentSessionEvent,
-    );
-
-    expect(onAgentCompleted).toHaveBeenCalledTimes(1);
-    expect(onAgentSettled).toHaveBeenCalledTimes(1);
-    expect(notifyWorkspaceUpdated).toHaveBeenCalledTimes(1);
+    const work = handleSessionEvent(deps, web, { type: "agent_settled" });
+    await vi.waitFor(() => expect(deps.onAgentCompleted).toHaveBeenCalledOnce());
+    expect(deps.notifyWorkspaceUpdated).toHaveBeenCalledOnce();
+    finish();
+    await work;
   });
 });

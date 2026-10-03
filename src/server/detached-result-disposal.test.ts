@@ -5,7 +5,8 @@ import type { SessionState, WorkspaceInfo } from "@/shared/types";
 import type { AgentSessionController } from "./agent-session-controller";
 import { createAgentSessionFixture } from "./agent-session-test-fixture";
 import { createPiAgentSession } from "./pi-agent-session";
-import { attachSession, disposeWebSession, handleAgentEvent } from "./pi-service-sessions";
+import { attachSession, disposeWebSession } from "./pi-service-sessions";
+import { handleSessionEvent } from "./pi-service-agent-events";
 import type { WebSession } from "./pi-service-types";
 import {
   deliverCronJobRun,
@@ -46,11 +47,9 @@ function completionLifecycle(workspace: WorkspaceInfo) {
         sessions,
         vi.fn(),
         (webSession, event) =>
-          handleAgentEvent(
+          handleSessionEvent(
             {
               getState: state,
-              getStateMetadata: (web) => state(web.id),
-              publish: vi.fn(),
               notifyWorkspaceUpdated: async () => undefined,
               disposeWebSession: dispose,
             },
@@ -91,10 +90,11 @@ async function busyParent() {
 }
 
 describe("detached result delivery after ephemeral session disposal", () => {
-  it.each(["fresh", "disposed-before-return", "failed", "NO_REPLY"])(
+  it.each(["fresh", "disposed-before-return", "failed", "recovered-failed", "NO_REPLY"])(
     "preserves a %s cron result while its parent is busy",
     async (mode) => {
       const { parent, workspace, parentTurn, finishParent } = await busyParent();
+      const failed = mode === "failed" || mode === "recovered-failed";
       const child = await createAgentSessionFixture({
         retry: { enabled: false, maxRetries: 0, baseDelayMs: 0 },
       });
@@ -112,12 +112,13 @@ describe("detached result delivery after ephemeral session disposal", () => {
         }),
       );
       child.faux.setResponses([
-        mode === "failed"
+        failed
           ? fauxAssistantMessage("", { stopReason: "error", errorMessage: "provider refused" })
           : fauxAssistantMessage(mode === "NO_REPLY" ? "NO_REPLY" : "Child answer"),
       ]);
       const queues = new Map<string, Promise<void>>();
       const adapter: PiServiceCronAdapterContext = {
+        openSession: async () => lifecycle.state(childId),
         createCronSession: async () => lifecycle.state(childId),
         promptCron: async (_id, notice, operationId) => {
           await executeCronOperation(child.session, notice, operationId);
@@ -128,7 +129,10 @@ describe("detached result delivery after ephemeral session disposal", () => {
         resolveOrCreateDailySession: async () => lifecycle.state(parent.session.sessionId),
         requireSession: (id) =>
           id === childId ? webChild : ({ id, workspace, session: parent.session } as WebSession),
-        requireSessionPath: () => childPath,
+        requireSessionPath: (id) => {
+          expect(lifecycle.sessions.has(id)).toBe(true);
+          return childPath;
+        },
         prepareSessionForContextCopy: vi.fn(),
         runSubagentSerial: (id, run) => runSubagentSerial(queues, id, run),
         getState: lifecycle.state,
@@ -150,6 +154,24 @@ describe("detached result delivery after ephemeral session disposal", () => {
         signal: new AbortController().signal,
         onSessionStarted: vi.fn(),
         queueResultDelivery: vi.fn(async () => undefined),
+        ...(mode === "recovered-failed"
+          ? {
+              recovery: {
+                jobId: "job",
+                runId: "run",
+                workspaceId: workspace.id,
+                prompt: "Heartbeat",
+                model: "faux/faux-1",
+                thinkingLevel: "off",
+                session: { kind: "daily-detached" as const },
+                scheduleLabel: "Every hour",
+                startedAtMs: 1,
+                status: "running" as const,
+                sessionId: childId,
+                sessionPath: childPath,
+              },
+            }
+          : {}),
       };
       const running = runCronJobSession(adapter, job);
       // Observe rejection immediately so a regression cannot escape as an unhandled rejection.
@@ -159,12 +181,13 @@ describe("detached result delivery after ephemeral session disposal", () => {
       );
       await vi.waitFor(() => expect(lifecycle.unregistered).toHaveBeenCalledWith(childId));
       expect(parent.session.isStreaming).toBe(true);
+      expect(child.session.isClosing).toBe(true);
       expect(conversationalMessages(parent.session.messages)).toHaveLength(1);
       expect(getCronExecutionResult(child.session, "run")?.status).toBe(
-        mode === "failed" ? "failed" : "completed",
+        failed ? "failed" : "completed",
       );
       expect(await outcome).toEqual(
-        mode === "failed"
+        failed
           ? { error: expect.objectContaining({ message: "provider refused" }) }
           : { result: { sessionId: childId, sessionPath: childPath } },
       );
@@ -198,10 +221,10 @@ describe("detached result delivery after ephemeral session disposal", () => {
             session: job.session,
             scheduleLabel: job.scheduleLabel,
             startedAtMs: 1,
-            status: mode === "failed" ? "error" : "success",
+            status: failed ? "error" : "success",
             sessionId: childId,
             sessionPath: childPath,
-            ...(mode === "failed" ? { error: "provider refused" } : {}),
+            ...(failed ? { error: "provider refused" } : {}),
           },
           { parentSessionId: parent.session.sessionId, queuedAtMs: 2 },
         );
@@ -214,10 +237,8 @@ describe("detached result delivery after ephemeral session disposal", () => {
       if (mode !== "NO_REPLY") {
         expect(parent.session.messages.at(-1)).toMatchObject({
           role: "assistant",
-          content: [
-            { type: "text", text: mode === "failed" ? "provider refused" : "Child answer" },
-          ],
-          stopReason: mode === "failed" ? "error" : "stop",
+          content: [{ type: "text", text: failed ? "provider refused" : "Child answer" }],
+          stopReason: failed ? "error" : "stop",
         });
         expect(adapter.onAgentCompleted).toHaveBeenCalledTimes(1);
       } else {

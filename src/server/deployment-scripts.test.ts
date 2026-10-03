@@ -112,7 +112,42 @@ describe("deployment scripts", () => {
     ).resolves.toBe("patch\n");
   });
 
-  it("drains Linux deployments through the prepared CLI", async () => {
+  linuxIt("passes the initiating session to the detached Linux manager", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-linux-handoff-"));
+    tempDirs.push(root);
+    const bin = path.join(root, "bin");
+    await fs.mkdir(bin);
+    const captured = path.join(root, "arguments");
+    await fs.writeFile(
+      path.join(bin, "systemd-run"),
+      '#!/bin/bash\nprintf "%s\\n" "$@" >"$CAPTURED"\n',
+      { mode: 0o755 },
+    );
+    const sessionPath = "/session with spaces.sqlite";
+    const result = await execFileAsync(
+      "bash",
+      [path.join(process.cwd(), "scripts", "handoff-restart.sh")],
+      {
+        env: {
+          ...process.env,
+          PATH: `${bin}:${process.env.PATH}`,
+          CAPTURED: captured,
+          PI_SESSION_FILE: sessionPath,
+          PI_RESTART_AFTER_ENTRY_ID: "tool-use-entry",
+          BATTY_RESTART_SESSION_FILE: "/wrong-session.sqlite",
+        },
+      },
+    );
+    expect(result.stdout).toContain("Handed off restart");
+    expect((await fs.readFile(captured, "utf8")).split("\n")).toContain(
+      `--setenv=BATTY_RESTART_SESSION_FILE=${sessionPath}`,
+    );
+    expect((await fs.readFile(captured, "utf8")).split("\n")).toContain(
+      "--setenv=BATTY_RESTART_AFTER_ENTRY_ID=tool-use-entry",
+    );
+  });
+
+  it("checkpoints Linux deployments through the prepared CLI", async () => {
     const [deployScript, reloadScript, handoffScript, restartScript] = await Promise.all([
       fs.readFile(path.join(process.cwd(), "scripts", "deploy.sh"), "utf8"),
       fs.readFile(path.join(process.cwd(), "scripts", "reload-self.sh"), "utf8"),
@@ -134,6 +169,14 @@ describe("deployment scripts", () => {
     expect(handoffScript).toContain('--setenv="BATTY_ROOT=$batty_root"');
     expect(handoffScript).toContain('--setenv="BATTY_PORT=$backend_port"');
     expect(handoffScript).toContain('--setenv="BATTY_NODE=$node_path"');
+    expect(handoffScript).toContain('--setenv="BATTY_RESTART_SESSION_FILE=${PI_SESSION_FILE:-}"');
+    expect(handoffScript).toContain(
+      '--setenv="BATTY_RESTART_AFTER_ENTRY_ID=${PI_RESTART_AFTER_ENTRY_ID:-}"',
+    );
+    expect(restartScript).toContain(
+      'checkpoint_args=(--session "${BATTY_RESTART_SESSION_FILE:-}" --after-entry "${BATTY_RESTART_AFTER_ENTRY_ID:-}")',
+    );
+    expect(restartScript).toContain('drain "${checkpoint_args[@]}"');
     expect(handoffScript).toContain('--setenv="BATTY_SKIP_DRAIN=${BATTY_SKIP_DRAIN:-}"');
     expect(restartScript).toContain('node_path="${BATTY_NODE:-$(command -v node)}"');
     const linuxDrain =
@@ -180,6 +223,14 @@ describe("deployment scripts", () => {
     expect(handoffScript).toContain('BATTY_ROOT="$batty_root"');
     expect(handoffScript).toContain('BATTY_PORT="$backend_port"');
     expect(handoffScript).toContain('BATTY_NODE="$node_path"');
+    expect(handoffScript).toContain('BATTY_RESTART_SESSION_FILE="${PI_SESSION_FILE:-}"');
+    expect(handoffScript).toContain(
+      'BATTY_RESTART_AFTER_ENTRY_ID="${PI_RESTART_AFTER_ENTRY_ID:-}"',
+    );
+    expect(restartScript).toContain(
+      'checkpoint_args=(--session "${BATTY_RESTART_SESSION_FILE:-}" --after-entry "${BATTY_RESTART_AFTER_ENTRY_ID:-}")',
+    );
+    expect(restartScript).toContain('drain "${checkpoint_args[@]}"');
     expect(handoffScript).toContain('BATTY_SKIP_DRAIN="${BATTY_SKIP_DRAIN:-}"');
     expect(restartScript).toContain('launchctl bootstrap "$domain" "$plist"');
     expect(restartScript).toContain('node_path="${BATTY_NODE:-$(command -v node)}"');
@@ -236,6 +287,8 @@ exit ${code}
         BATTY_PORT: "4321",
         BATTY_NODE: "/node with spaces",
         BATTY_SKIP_DRAIN: "1",
+        PI_SESSION_FILE: "/session with spaces.sqlite",
+        PI_RESTART_AFTER_ENTRY_ID: "tool-use-entry",
       };
       const run = execFileAsync(
         "bash",
@@ -257,6 +310,8 @@ exit ${code}
         BATTY_PORT: "4321",
         BATTY_NODE: env.BATTY_NODE,
         BATTY_SKIP_DRAIN: "1",
+        BATTY_RESTART_SESSION_FILE: env.PI_SESSION_FILE,
+        BATTY_RESTART_AFTER_ENTRY_ID: env.PI_RESTART_AFTER_ENTRY_ID,
         PATH: env.PATH,
       });
       expect(job.ProgramArguments.slice(-2)).toEqual([
@@ -291,9 +346,13 @@ esac
 `,
       { mode: 0o755 },
     );
-    await fs.writeFile(path.join(bin, "node"), '#!/bin/bash\necho drain >>"$TRACE"\n', {
-      mode: 0o755,
-    });
+    await fs.writeFile(
+      path.join(bin, "node"),
+      '#!/bin/bash\necho drain >>"$TRACE"\nprintf "%s\\n" "$@" >"$CLI_ARGS"\n',
+      {
+        mode: 0o755,
+      },
+    );
     await fs.writeFile(path.join(bin, "sleep"), '#!/bin/bash\necho wait >>"$TRACE"\n', {
       mode: 0o755,
     });
@@ -310,11 +369,23 @@ esac
           PATH: `${bin}:${process.env.PATH}`,
           BATTY_NODE: path.join(bin, "node"),
           BATTY_SKIP_DRAIN: "",
+          BATTY_RESTART_SESSION_FILE: "/session with spaces.sqlite",
+          BATTY_RESTART_AFTER_ENTRY_ID: "tool-use-entry",
+          CLI_ARGS: path.join(root, "cli-args"),
           STATE: path.join(root, "state"),
           TRACE: trace,
         },
       },
     );
+    expect(
+      (await fs.readFile(path.join(root, "cli-args"), "utf8")).trim().split("\n").slice(-5),
+    ).toEqual([
+      "drain",
+      "--session",
+      "/session with spaces.sqlite",
+      "--after-entry",
+      "tool-use-entry",
+    ]);
     expect((await fs.readFile(trace, "utf8")).trim().split("\n")).toEqual([
       "print",
       "drain",
@@ -380,6 +451,16 @@ esac
     expect(handoffScript).toContain('return "`"$value$trailingBackslashes`""');
     expect(handoffScript).toContain("$powershell = (Get-Command powershell.exe).Source");
     expect(handoffScript).toContain("-BattyRoot $(Quote-Argument $BattyRoot)");
+    expect(handoffScript).toContain("-RestartSessionFile $(Quote-Argument $env:PI_SESSION_FILE)");
+    expect(workerScript).toContain("$env:BATTY_RESTART_SESSION_FILE = $RestartSessionFile");
+    expect(handoffScript).toContain(
+      "-RestartAfterEntryId $(Quote-Argument $env:PI_RESTART_AFTER_ENTRY_ID)",
+    );
+    expect(workerScript).toContain("$env:BATTY_RESTART_AFTER_ENTRY_ID = $RestartAfterEntryId");
+    expect(workerScript).toContain(
+      '@("--session", $env:BATTY_RESTART_SESSION_FILE, "--after-entry", $env:BATTY_RESTART_AFTER_ENTRY_ID)',
+    );
+    expect(workerScript).toContain("drain @checkpointArgs");
     expect(handoffScript).toContain("if ($Force)");
     expect(handoffScript).toContain('$arguments += "-Force"');
     expect(handoffScript).not.toContain('"-Force:$Force"');

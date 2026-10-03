@@ -41,6 +41,13 @@ import {
 } from "./subagent";
 import type { PiModel, WebSession } from "./pi-service-types";
 import { modelKey } from "./pi-service-types";
+import { isSessionCheckpointError, SessionCheckpointError } from "./session-checkpoint";
+import {
+  findSubagentOperation,
+  persistSubagentOperation,
+  SUBAGENT_DELIVERY_CUSTOM_TYPE,
+  SUBAGENT_OPERATION_CUSTOM_TYPE,
+} from "./subagent-recovery";
 
 export function waitForSubagentQueue(
   subagentQueues: Map<string, Promise<void>>,
@@ -103,6 +110,7 @@ export function resolveSubagentDefaults(
 
 export interface DetachedSubagentOptions {
   sessionId?: string;
+  operationId?: string;
   workspace: WorkspaceInfo;
   parentSessionId: string;
   parentSessionPath?: string;
@@ -241,8 +249,11 @@ function subagentCompletion(manager: SessionStore) {
   const branch = manager.getBranch();
   const marker = ownSubagentMarkerIndex(manager);
   if (marker < 0) return undefined;
+  const operationMarker = branch.findLastIndex(
+    (entry) => entry.type === "custom" && entry.customType === SUBAGENT_OPERATION_CUSTOM_TYPE,
+  );
   return branch
-    .slice(marker + 1)
+    .slice(Math.max(marker, operationMarker) + 1)
     .findLast(
       (entry) => entry.type === "custom" && entry.customType === SUBAGENT_COMPLETION_CUSTOM_TYPE,
     );
@@ -253,9 +264,12 @@ function subagentOperationEntries(
   startedTurn: boolean,
   startEntryId: string | null,
 ) {
-  if (startedTurn)
-    return boundedSessionEntries(manager.getEntries(), startEntryId, manager.getLeafId());
   const completion = subagentCompletion(manager);
+  if (
+    startedTurn ||
+    (!completion && findSubagentOperation(manager.getEntries(), manager.getSessionId()))
+  )
+    return boundedSessionEntries(manager.getEntries(), startEntryId, manager.getLeafId());
   if (completion?.type !== "custom") throw new Error("Detached subagent operation was interrupted");
   const bounds = completion.data as SubagentCompletion;
   return boundedSessionEntries(manager.getEntries(), bounds.startEntryId, bounds.endEntryId);
@@ -375,7 +389,29 @@ export async function runDetachedSubagentSession(
     await appendMessages(subagentSession, preludeMessages as Message[]);
   }
   const seedMessageCount = subagentSession.messages.length;
-  const startEntryId = subagentSession.sessionManager.getLeafId();
+  const operation =
+    !existing || options.continueSession
+      ? await persistSubagentOperation(subagentSession.sessionManager, options)
+      : findSubagentOperation(
+          subagentSession.sessionManager.getEntries(),
+          subagentSession.sessionId,
+        );
+  const startEntryId = operation
+    ? operation.startEntryId
+    : subagentSession.sessionManager.getLeafId();
+  const checkCheckpoint = () => {
+    if (subagentSession.isClosing) throw new SessionCheckpointError();
+  };
+  const markDelivered = async () => {
+    // Canonically completed ephemeral children may already be disposed while their
+    // parent remains busy. Borrow only a writer; do not restart native execution.
+    if (operation)
+      await SessionStore.withSource(subagentSession.sessionFile, (store) =>
+        store.appendCustomEntry(SUBAGENT_DELIVERY_CUSTOM_TYPE, {
+          operationId: operation.operationId,
+        }),
+      );
+  };
 
   const readyDetails = buildSubagentDetails(
     {
@@ -410,13 +446,19 @@ export async function runDetachedSubagentSession(
       return;
     }
     if (event.type === "message_end") {
-      observedGeneratedMessages.push(structuredClone(event.message));
+      observedGeneratedMessages.push(
+        ...(structuredClone(event.entry.model ?? []) as AgentSession["messages"]),
+      );
     }
-    if (event.message.role !== "assistant") {
-      return;
-    }
+    const message =
+      event.type === "message_end"
+        ? event.entry.model?.findLast((message) => message.role === "assistant")
+        : event.type === "message_start"
+          ? event.message
+          : subagentSession.streamingMessage;
+    if (message?.role !== "assistant") return;
 
-    const finalAssistant = event.message as AssistantMessage;
+    const finalAssistant = message as AssistantMessage;
     if (event.type === "message_end") {
       observedFinalAssistant = structuredClone(finalAssistant);
     }
@@ -465,41 +507,36 @@ export async function runDetachedSubagentSession(
   let deliveringResult = false;
   let startedTurn = false;
   try {
+    checkCheckpoint();
     if (options.signal?.aborted) {
       throw options.signal.reason instanceof Error
         ? options.signal.reason
         : new Error("Subagent aborted");
     }
-    if (options.continueSession) {
-      if (!existing) throw new Error("Subagent session not found");
-      startedTurn = true;
+    if (options.continueSession && !existing) throw new Error("Subagent session not found");
+    if (operation && !subagentCompletion(subagentSession.sessionManager)) {
+      // A stable native submission covers either side of the definition/admission boundary.
+      if (subagentSession.isStreaming) await subagentSession.waitForIdle();
+      checkCheckpoint();
+      startedTurn = !existing || options.continueSession === true;
       await subagentSession.sendCustomMessage(
         {
           customType: `batty-runtime-notice:${subagentNotice.kind}`,
           content: subagentNotice.text,
           display: true,
+          details: { battyResultReplyId: `subagent-operation:${operation.operationId}` },
         },
         { triggerTurn: true, onAccepted: () => options.onReady?.(readyDetails) },
       );
     } else if (subagentSession.isStreaming) {
-      // Another live caller owns this operation; wait for its normal driver to finish.
       options.onReady?.(readyDetails);
       await subagentSession.waitForIdle();
-    } else if (!existing) {
-      startedTurn = true;
-      await subagentSession.sendCustomMessage(
-        {
-          customType: `batty-runtime-notice:${subagentNotice.kind}`,
-          content: subagentNotice.text,
-          display: true,
-        },
-        { triggerTurn: true, onAccepted: () => options.onReady?.(readyDetails) },
-      );
     } else {
       if (!subagentCompletion(subagentSession.sessionManager))
         throw new Error("Detached subagent operation was interrupted");
       options.onReady?.(readyDetails);
     }
+    checkCheckpoint();
     const operationEntries = subagentOperationEntries(
       subagentSession.sessionManager,
       startedTurn,
@@ -539,6 +576,8 @@ export async function runDetachedSubagentSession(
       observedFinalAssistant,
       generated,
     );
+    if (operation && !completion && !built.finalAssistant)
+      throw new Error("Subagent operation was withdrawn before answering");
     const completionEntryId =
       startedTurn || !completion
         ? await subagentSession.sessionManager.appendCustomEntry(SUBAGENT_COMPLETION_CUSTOM_TYPE, {
@@ -566,12 +605,19 @@ export async function runDetachedSubagentSession(
       if (!deps.deliverResultToParent)
         throw new Error("Subagent parent delivery is not configured");
       await deps.deliverResultToParent(options, result);
+      await markDelivered();
     }
     return {
       ...result,
       text: result.text || lastText,
     };
   } catch (error) {
+    // Ordinary completed-child disposal is distinct from checkpoint termination.
+    // Delivery failures keep their own error and the canonical child receipt.
+    if (deliveringResult || subagentCompletion(subagentSession.sessionManager)) throw error;
+    // Checkpoint termination is not a child failure and must never write to a closed writer.
+    if (subagentSession.isClosing) throw new SessionCheckpointError();
+    if (isSessionCheckpointError(error)) throw error;
     // Delivery failures remain retryable; they must not replace the child's canonical result.
     if (
       deliveringResult ||
@@ -617,6 +663,7 @@ export async function runDetachedSubagentSession(
       if (!deps.deliverResultToParent)
         throw new Error("Subagent parent delivery is not configured");
       await deps.deliverResultToParent(options, result);
+      await markDelivered();
     }
     return {
       ...result,
@@ -641,6 +688,8 @@ export async function deliverDetachedSubagentResult(
   result: DetachedSubagentResult,
 ): Promise<boolean> {
   if (!result.isError && result.text.trim() === "NO_REPLY") return false;
+  await parent.waitForIdle();
+  if (parent.isClosing) throw new SessionCheckpointError();
   const child = (result.details as SubagentToolDetails).subagent;
   const timestamp = Date.now();
   const finalAssistant = stripThinkingFromAssistantMessage(result.finalAssistant);
@@ -685,6 +734,7 @@ export async function deliverAsyncSubagentResult(
   onAccepted?: () => void,
 ): Promise<void> {
   const replyId = subagentReplyId(result);
+  if (parent.isClosing) throw new SessionCheckpointError();
   if (hasDeliveredResult(parent, replyId)) {
     onAccepted?.();
     return;

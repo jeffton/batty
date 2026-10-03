@@ -23,6 +23,7 @@ function fixture(
   );
   service.runDetachedSubagentSession = vi.fn();
   vi.spyOn(SessionStore, "existing").mockResolvedValue({
+    appendCustomEntry: vi.fn(async () => "queue-entry"),
     getSessionFile: () => "/tmp/child.jsonl",
     getEntries: () => [
       {
@@ -105,6 +106,39 @@ describe("PiService.awaitSubagent", () => {
 });
 
 describe("PiService.continueSubagent", () => {
+  it("does not acknowledge a queued request before its durable definition commits", async () => {
+    const { service } = fixture();
+    service.liveSessions.get("parent").session.model = { provider: "faux", id: "test" };
+    let releasePrevious!: () => void;
+    service.subagentOperations.set(
+      "child",
+      new Promise<void>((resolve) => {
+        releasePrevious = resolve;
+      }),
+    );
+    let committed!: () => void;
+    const commit = new Promise<string>((resolve) => {
+      committed = () => resolve("queue-entry");
+    });
+    const manager = (await SessionStore.existing(workspace.path, "/tmp/batty", "child"))!;
+    vi.mocked(manager.appendCustomEntry).mockReturnValue(commit);
+    let acknowledged = false;
+    const queued = service
+      .continueSubagent(workspace, "parent", "child", "Next", true, true)
+      .then((result: unknown) => {
+        acknowledged = true;
+        return result;
+      });
+    await vi.waitFor(() => expect(manager.appendCustomEntry).toHaveBeenCalledOnce());
+    expect(acknowledged).toBe(false);
+    committed();
+    expect(await queued).toMatchObject({ text: expect.stringContaining("Subagent queued.") });
+    service.closing = Promise.resolve();
+    releasePrevious();
+    await vi.waitFor(() => expect(service.subagentOperations.has("child")).toBe(false));
+    expect(service.runDetachedSubagentSession).not.toHaveBeenCalled();
+  });
+
   it.each([
     { streaming: true, pending: false },
     { streaming: false, pending: true },
@@ -139,6 +173,18 @@ describe("PiService.continueSubagent", () => {
         subagent: { workspaceId: "test", sessionId: "child", sessionPath: "/tmp/child.jsonl" },
       },
     });
+    const manager = await SessionStore.existing(workspace.path, "/tmp/batty", "child");
+    expect(manager!.appendCustomEntry).toHaveBeenCalledWith(
+      "batty-subagent-queue",
+      expect.objectContaining({
+        operationId: expect.any(String),
+        options: expect.objectContaining({
+          prompt: "next",
+          continueSession: true,
+          operationId: expect.any(String),
+        }),
+      }),
+    );
     expect(service.runDetachedSubagentSession).not.toHaveBeenCalled();
     release();
     await vi.waitFor(() => expect(service.runDetachedSubagentSession).toHaveBeenCalledOnce());

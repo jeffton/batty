@@ -1,13 +1,6 @@
 import { getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
 import type { AgentSessionController as AgentSession } from "./agent-session-controller";
-import type {
-  ActiveToolRun,
-  ModelOption,
-  ServerEvent,
-  ToolExecutionDetails,
-  UiContentBlock,
-  WorkspaceInfo,
-} from "@/shared/types";
+import type { ModelOption, ServerEvent, ToolExecutionDetails, WorkspaceInfo } from "@/shared/types";
 
 export interface UploadedFile {
   filename: string;
@@ -15,7 +8,7 @@ export interface UploadedFile {
 }
 
 export interface SessionSubscriber {
-  (event: ServerEvent, revision: number): void;
+  (event: ServerEvent): void;
 }
 
 export interface PiModel {
@@ -32,20 +25,11 @@ export interface WebSession {
   id: string;
   workspace: WorkspaceInfo;
   session: AgentSession;
-  subscribers: Set<SessionSubscriber>;
-  activeAssistant?: AgentSession["messages"][number] | undefined;
-  publishedAssistantPositions?: Array<{ index: number; type: UiContentBlock["type"] } | undefined>;
-  activeTools: Map<string, ActiveToolRun>;
+  subscribers: Set<() => void>;
   openedAt: number;
   modelFallbackMessage?: string | undefined;
   ephemeral: boolean;
-  autoRetryActive?: boolean;
-  isCompacting?: boolean;
   agentCompleted?: boolean;
-  suppressNextAgentEndCompletion?: boolean;
-  revision?: number;
-  streamId: string;
-  eventLog?: Array<{ revision: number; event: ServerEvent }>;
   resolveUiImage?: (image: {
     mimeType: string;
     data: string;

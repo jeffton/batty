@@ -133,6 +133,7 @@ export async function createPiAgentSession({
         ...spawn.env,
         PI_SESSION_ID: session.sessionId,
         PI_SESSION_FILE: session.sessionFile,
+        PI_RESTART_AFTER_ENTRY_ID: session.sessionManager.getLeafId()!,
         PI_PROVIDER: session.model!.provider,
         PI_MODEL: session.model!.id,
         PI_REASONING_LEVEL: session.thinkingLevel,

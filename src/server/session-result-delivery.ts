@@ -24,10 +24,7 @@ export async function appendResultMessages(
   replyId?: string,
 ): Promise<boolean> {
   await session.waitForIdle();
+  // Custom-input records are linked through their submission identity rather than a result receipt.
   if (replyId && hasDeliveredResult(session, replyId)) return false;
-  for (const message of messages) await session.sessionManager.appendMessage(message);
-  if (replyId)
-    await session.sessionManager.appendCustomEntry(RESULT_DELIVERY_CUSTOM_TYPE, { replyId });
-  await session.refreshContext();
-  return true;
+  return session.sessionManager.appendResultMessages(messages, replyId);
 }

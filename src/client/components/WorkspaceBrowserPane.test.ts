@@ -1,3 +1,4 @@
+import { snapshotFromPresentation } from "@/client/lib/session-test-fixture";
 import { flushPromises, shallowMount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { nextTick } from "vue";
@@ -62,7 +63,7 @@ describe("WorkspaceBrowserPane", () => {
     const store = useAppStore();
     store.workspaces = [makeWorkspace("assistant", true), makeWorkspace("project", false)];
     store.selectedWorkspaceId = "project";
-    store.activeSession = { sessionId: "regular" } as never;
+    store.activeSnapshot = snapshotFromPresentation({ sessionId: "regular" } as never);
     store.sessionsByWorkspace = {
       project: [
         makeSession("today-placeholder", "project", {
@@ -149,7 +150,7 @@ describe("WorkspaceBrowserPane", () => {
     const store = useAppStore();
     store.workspaces = [makeWorkspace("project", false)];
     store.selectedWorkspaceId = "project";
-    store.activeSession = { sessionId: "previous" } as never;
+    store.activeSnapshot = snapshotFromPresentation({ sessionId: "previous" } as never);
     store.sessionsByWorkspace = {
       project: [makeSession("selected", "project"), makeSession("previous", "project")],
     };

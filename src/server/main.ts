@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import fastify from "fastify";
 import cookie from "@fastify/cookie";
 import multipart from "@fastify/multipart";
@@ -11,6 +10,7 @@ import { readBuildId } from "./build-id";
 import { loadConfig, resolveBattyDir } from "./config";
 import { CronService } from "./cron";
 import { startDeploymentControl } from "./deployment-control";
+import { installShutdownSignals } from "./shutdown-signals";
 import { createLoginRateLimiter } from "./login-rate-limit";
 import { formatSetupCode, PasskeyAuthService } from "./passkeys";
 import { PiService } from "./pi-service";
@@ -141,6 +141,7 @@ cronService.setRunner({
       jobId: job.id,
       runId: runContext.runId,
       signal: runContext.signal,
+      recovery: runContext.recovery,
       onSessionStarted: runContext.onSessionStarted,
       queueResultDelivery: runContext.queueResultDelivery,
     });
@@ -171,13 +172,15 @@ cronService.setRunner({
   },
 });
 await cronService.initialize();
-const deploymentControl = await startDeploymentControl(config.battyDir, async () => {
-  service.turns.beginDrain();
-  cronService.beginDrain();
-  while (service.turns.activeTurns + cronService.activeTurns > 0) {
-    await delay(250);
-  }
-});
+await service.restoreDurableSessions(await listWorkspaces(config));
+const deploymentControl = await startDeploymentControl(
+  config.battyDir,
+  async (sessionPath, afterEntryId) => {
+    await service.waitForRestartResponse(sessionPath, afterEntryId);
+    await cronService.dispose();
+    await service.prepareRestart();
+  },
+);
 
 const authAttemptLimiter = createLoginRateLimiter();
 
@@ -185,10 +188,18 @@ const app = fastify({
   logger: true,
   trustProxy: ["127.0.0.1", "::1"],
   bodyLimit: 1024 * 1024 * 100,
+  forceCloseConnections: true,
+});
+const removeShutdownSignals = installShutdownSignals(async () => {
+  await cronService.dispose();
+  await service.prepareRestart();
+  await app.close();
 });
 app.addHook("onClose", async () => {
+  removeShutdownSignals();
   await deploymentControl.close();
-  await Promise.all([service.dispose(), cronService.dispose()]);
+  await cronService.dispose();
+  await service.dispose();
 });
 
 if (bootstrapSetupCode) {

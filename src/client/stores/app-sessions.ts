@@ -15,22 +15,27 @@ import {
 import { readCachedSession, writeCachedSession } from "@/client/lib/cache";
 import { primeAgentNotifications } from "@/client/lib/agent-notifications";
 import { syncPushSubscription } from "@/client/lib/push-notifications";
-import {
-  applyServerEvent,
-  shouldUpdateSessionSummary,
-  shouldWriteSessionCache,
-} from "@/client/lib/session-events";
-import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
+import { applyServerEvent, shouldWriteSessionCache } from "@/client/lib/session-events";
+import { mergeSessionSnapshot } from "@/client/lib/session-state";
+import { presentSession } from "@/client/lib/session-presentation";
 import { sessionEventsPath } from "@/client/lib/session-stream";
 import { mergeSessionSummaries, toSessionSummary } from "@/client/lib/session-summary";
 import { RECENT_SESSION_MESSAGE_WINDOW } from "@/shared/session-history";
-import type { PromptSubmissionResult, ServerEvent, SessionState } from "@/shared/types";
+import type {
+  PromptSubmissionResult,
+  ServerEvent,
+  SessionSnapshot,
+  SessionState,
+} from "@/shared/types";
 import { closeEventSource, type AppActionContext } from "./app-state";
 
 let eventSource: EventSource | undefined;
 let eventSourceSessionId: string | undefined;
 let eventSourceOwnerState: unknown;
-const sessionOpenRequests = new Map<string, Promise<SessionState>>();
+let selectionGeneration = 0;
+let connectionGeneration = 0;
+let streamUpdateGeneration = 0;
+const sessionOpenRequests = new Map<string, Promise<SessionSnapshot>>();
 const sessionDetailRequests = new Map<string, Promise<void>>();
 const sessionDetailTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let modelUpdateVersion = 0;
@@ -46,35 +51,32 @@ async function runSessionConfigurationUpdate<T>(update: () => Promise<T>): Promi
   return result;
 }
 
-function latestAssistantReplyAt(session: SessionState): number | undefined {
-  return session.messages.reduce<number | undefined>(
+async function acknowledgeVisibleReplies(session: SessionState): Promise<void> {
+  const readThrough = session.messages.reduce(
     (latest, message) =>
-      message.role === "assistant" ? Math.max(latest ?? 0, message.timestamp) : latest,
-    undefined,
+      message.role === "assistant" ? Math.max(latest, message.timestamp) : latest,
+    0,
+  );
+  if (readThrough) await markSessionRead(session.workspaceId, session.sessionId, readThrough);
+}
+
+function streamOwnsSession(context: AppActionContext, snapshot: SessionSnapshot): boolean {
+  return Boolean(
+    eventSource &&
+    eventSourceOwnerState === context.$state &&
+    eventSourceSessionId === snapshot.metadata.sessionId,
   );
 }
 
-async function acknowledgeVisibleReplies(session: SessionState): Promise<void> {
-  const readThrough = latestAssistantReplyAt(session);
-  if (readThrough != null) {
-    await markSessionRead(session.workspaceId, session.sessionId, readThrough);
-  }
-}
-
-function prependUniqueMessages(
-  existing: SessionState["messages"],
-  older: SessionState["messages"],
-): SessionState["messages"] {
-  if (older.length === 0) {
-    return existing;
-  }
-
-  const existingIds = new Set(existing.map((message) => message.id));
-  return [...older.filter((message) => !existingIds.has(message.id)), ...existing];
+function primeNotifications(): void {
+  void primeAgentNotifications().then((granted) => {
+    if (granted) void syncPushSubscription(false);
+  });
 }
 
 export const sessionActions = {
   closeStream(): void {
+    ++connectionGeneration;
     closeEventSource(eventSource);
     eventSource = undefined;
     eventSourceSessionId = undefined;
@@ -82,34 +84,27 @@ export const sessionActions = {
   },
 
   updateSessionSummary(this: AppActionContext, session: SessionState): void {
-    if (!session.path) {
-      return;
-    }
-
-    const workspaceSessions = this.sessionsByWorkspace[session.workspaceId] ?? [];
+    if (!session.path) return;
     this.sessionsByWorkspace = {
       ...this.sessionsByWorkspace,
-      [session.workspaceId]: mergeSessionSummaries(workspaceSessions, [toSessionSummary(session)]),
+      [session.workspaceId]: mergeSessionSummaries(
+        this.sessionsByWorkspace[session.workspaceId] ?? [],
+        [toSessionSummary(session)],
+      ),
     };
     this.sortWorkspaces();
   },
 
   async startSession(this: AppActionContext, workspaceId: string): Promise<SessionState> {
-    const session = normalizeSessionState(await createSession(workspaceId));
-    if (!session) {
-      throw new Error("Failed to create session");
-    }
-    await this.selectSession(session);
-    return session;
+    const snapshot = await createSession(workspaceId);
+    await this.selectSession(snapshot);
+    return presentSession(snapshot)!;
   },
 
   async startDailySession(this: AppActionContext, workspaceId: string): Promise<SessionState> {
-    const session = normalizeSessionState(await createOrOpenDailySession(workspaceId));
-    if (!session) {
-      throw new Error("Failed to open daily session");
-    }
-    await this.selectSession(session);
-    return session;
+    const snapshot = await createOrOpenDailySession(workspaceId);
+    await this.selectSession(snapshot);
+    return presentSession(snapshot)!;
   },
 
   async resumeSession(
@@ -133,60 +128,58 @@ export const sessionActions = {
       opening = openSessionById(workspaceId, sessionId);
       sessionOpenRequests.set(key, opening);
     }
-
     try {
       return await this.resumeOpenedSession(() => opening!, options);
     } finally {
-      if (sessionOpenRequests.get(key) === opening) {
-        sessionOpenRequests.delete(key);
-      }
+      if (sessionOpenRequests.get(key) === opening) sessionOpenRequests.delete(key);
     }
   },
 
   async resumeOpenedSession(
     this: AppActionContext,
-    opener: () => Promise<SessionState>,
+    opener: () => Promise<SessionSnapshot>,
     options: { shouldSelect?: () => boolean } = {},
   ): Promise<SessionState> {
-    const openedSession = normalizeSessionState(await opener());
-    if (!openedSession) {
-      throw new Error("Failed to open session");
-    }
-    const cached = await readCachedSession(openedSession.sessionId);
-    const session = mergeSessionState(openedSession, cached);
-    if (!session) {
-      throw new Error("Failed to open session");
-    }
-    if (options.shouldSelect?.() !== false) {
-      await this.selectSession(session);
-    }
-    return session;
+    const opened = await opener();
+    const cached = await readCachedSession(opened.metadata.sessionId);
+    const current = this.activeSnapshot;
+    const snapshot =
+      current &&
+      current.metadata.sessionId === opened.metadata.sessionId &&
+      streamOwnsSession(this, current)
+        ? current
+        : mergeSessionSnapshot(opened, cached);
+    if (options.shouldSelect?.() !== false) await this.selectSession(snapshot);
+    return presentSession(snapshot)!;
   },
 
   async selectSession(
     this: AppActionContext,
-    session: SessionState,
+    snapshot: SessionSnapshot,
     options: { openStream?: boolean } = {},
   ): Promise<void> {
-    const { openStream = true } = options;
-
-    this.activeSession = session;
+    const current = this.activeSnapshot;
+    if (
+      current &&
+      current.metadata.sessionId === snapshot.metadata.sessionId &&
+      streamOwnsSession(this, current)
+    )
+      snapshot = current;
+    ++selectionGeneration;
+    this.activeSnapshot = snapshot;
+    const session = presentSession(snapshot)!;
     this.selectedWorkspaceId = session.workspaceId;
     this.updateSessionSummary(session);
-    if (openStream) {
-      this.openStream(session);
-    } else {
-      this.closeStream();
-    }
-    await Promise.all([writeCachedSession(session), acknowledgeVisibleReplies(session)]);
-    if (session.messagesDetailLevel === "summary") {
-      this.scheduleSessionEnhancement(session);
-    }
+    if (options.openStream !== false) this.openStream(session);
+    else this.closeStream();
+    await Promise.all([writeCachedSession(snapshot), acknowledgeVisibleReplies(session)]);
+    if (session.messagesDetailLevel === "summary") this.scheduleSessionEnhancement(session);
   },
 
   clearActiveSession(this: AppActionContext): void {
+    ++selectionGeneration;
     this.closeStream();
-    this.activeSession = undefined;
+    this.activeSnapshot = undefined;
   },
 
   setRouteLoading(this: AppActionContext, workspaceId?: string, sessionId?: string): void {
@@ -201,109 +194,106 @@ export const sessionActions = {
 
   openStream(
     this: AppActionContext,
-    session: Pick<
-      SessionState,
-      "id" | "sessionId" | "workspaceId" | "path" | "revision" | "streamId"
-    >,
+    session: Pick<SessionState, "id" | "sessionId" | "workspaceId" | "path">,
   ): void {
     if (
       eventSource &&
       eventSourceOwnerState === this.$state &&
       eventSourceSessionId === session.sessionId
-    ) {
+    )
       return;
-    }
-
     this.closeStream();
     this.connectionState = "connecting";
     const source = new EventSource(sessionEventsPath(session));
     eventSource = source;
     eventSourceSessionId = session.sessionId;
     eventSourceOwnerState = this.$state;
+    let hydrated = false;
     source.onopen = () => {
-      if (eventSource !== source) {
-        return;
-      }
-
+      if (eventSource !== source) return;
+      ++connectionGeneration;
+      hydrated = false;
       this.connectionState = "online";
       void this.checkForClientUpdate();
     };
-    source.onmessage = async (message) => {
-      if (eventSource !== source) {
+    source.onmessage = (message) => {
+      if (eventSource !== source || this.activeSnapshot?.metadata.sessionId !== session.sessionId)
         return;
-      }
-
-      const currentSession = this.activeSession;
-      if (!currentSession || currentSession.sessionId !== session.sessionId) {
-        return;
-      }
-
       const event = JSON.parse(message.data) as ServerEvent;
-      const nextSession = applyServerEvent(currentSession, event);
-      if (!nextSession || nextSession.sessionId !== session.sessionId) {
+      if (event.type === "error") {
+        this.lastError = event.message;
         return;
       }
-
-      this.activeSession = nextSession;
-      if (nextSession.messagesDetailLevel === "summary") {
-        this.scheduleSessionEnhancement(nextSession);
-      }
-      if (shouldUpdateSessionSummary(event)) {
-        this.updateSessionSummary(nextSession);
-      }
-      if (shouldWriteSessionCache(event)) {
-        await writeCachedSession(nextSession);
-      }
-      if (event.type === "reset" && !nextSession.isStreaming) {
-        await acknowledgeVisibleReplies(nextSession);
-      }
+      if (event.type === "session") hydrated = true;
+      else if (!hydrated) return;
+      const previous = this.activeSnapshot;
+      const next = applyServerEvent(previous, event)!;
+      ++streamUpdateGeneration;
+      this.activeSnapshot = next;
+      const presentation = presentSession(next)!;
+      this.updateSessionSummary(presentation);
+      if (presentation.messagesDetailLevel === "summary")
+        this.scheduleSessionEnhancement(presentation);
+      if (shouldWriteSessionCache(event, previous, next)) void writeCachedSession(next);
+      if (event.type === "session" && !presentation.isStreaming)
+        void acknowledgeVisibleReplies(presentation);
       this.connectionState = "online";
     };
     source.onerror = () => {
-      if (eventSource !== source) {
-        return;
-      }
-
+      if (eventSource !== source) return;
       this.connectionState = navigator.onLine ? "connecting" : "offline";
     };
   },
 
   async refreshActiveSession(this: AppActionContext): Promise<void> {
-    const requestedSession = this.activeSession;
-    if (!requestedSession) {
-      return;
-    }
-    const response = normalizeSessionState(await getSession(requestedSession.id));
-    const currentSession = this.activeSession;
+    const requested = this.activeSnapshot;
+    if (!requested) return;
+    const selected = selectionGeneration;
+    const connection = connectionGeneration;
+    const streamUpdate = streamUpdateGeneration;
+    const response = await getSession(requested.metadata.id);
+    const current = this.activeSnapshot;
     if (
-      !currentSession ||
-      currentSession.sessionId !== requestedSession.sessionId ||
-      (currentSession.streamId !== requestedSession.streamId &&
-        response?.streamId !== currentSession.streamId) ||
-      (response?.streamId === currentSession.streamId &&
-        response?.revision != null &&
-        currentSession.revision != null &&
-        response.revision < currentSession.revision)
-    ) {
+      !current ||
+      selected !== selectionGeneration ||
+      connection !== connectionGeneration ||
+      current.metadata.sessionId !== requested.metadata.sessionId ||
+      response.historyVersion < current.historyVersion
+    )
       return;
-    }
-    const session = mergeSessionState(response, currentSession);
-    if (!session) {
-      throw new Error("Failed to refresh session");
-    }
-    this.activeSession = session;
-    this.updateSessionSummary(session);
-    await writeCachedSession(session);
+    // HTTP can be ahead of queued SSE frames even when no event arrived during the request.
+    const streamOwned = streamOwnsSession(this, current);
+    if (
+      streamOwned &&
+      (response.historyVersion !== requested.historyVersion ||
+        current.historyVersion !== requested.historyVersion)
+    )
+      return;
+    const merged = mergeSessionSnapshot(response, current);
+    this.activeSnapshot =
+      !streamOwned && streamUpdate === streamUpdateGeneration
+        ? merged
+        : {
+            ...current,
+            messages: merged.messages,
+            historyVersion: merged.historyVersion,
+            metadata: {
+              ...current.metadata,
+              totalMessageCount: merged.metadata.totalMessageCount,
+              hasMoreMessages: merged.metadata.hasMoreMessages,
+              messagesDetailLevel: merged.metadata.messagesDetailLevel,
+            },
+          };
+    this.updateSessionSummary(this.activeSession!);
+    await writeCachedSession(this.activeSnapshot!);
   },
 
   scheduleSessionEnhancement(
     this: AppActionContext,
     session: Pick<SessionState, "id" | "sessionId">,
   ): void {
-    const existingTimer = sessionDetailTimers.get(session.sessionId);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-    }
+    const existing = sessionDetailTimers.get(session.sessionId);
+    if (existing) clearTimeout(existing);
     const timer = setTimeout(() => {
       sessionDetailTimers.delete(session.sessionId);
       void this.enhanceSessionMessages(session);
@@ -316,104 +306,95 @@ export const sessionActions = {
     session: Pick<SessionState, "id" | "sessionId">,
   ): Promise<void> {
     const existing = sessionDetailRequests.get(session.sessionId);
-    if (existing) {
-      return existing;
-    }
-
-    let revisionChanged = false;
+    if (existing) return existing;
+    const selected = selectionGeneration;
+    const connection = connectionGeneration;
+    const requested = this.activeSnapshot;
+    if (!requested || requested.metadata.sessionId !== session.sessionId) return;
+    const throughEntryId = requested.historyVersion;
     const request = (async () => {
-      try {
-        const detailed = normalizeSessionState(await getSession(session.id));
-        const currentSession = this.activeSession;
-        if (!detailed || !currentSession || currentSession.sessionId !== session.sessionId) {
-          return;
-        }
-        if (
-          detailed.streamId !== currentSession.streamId ||
-          detailed.revision !== currentSession.revision
-        ) {
-          revisionChanged = true;
-          return;
-        }
-
-        const enhanced = mergeSessionState(detailed, currentSession);
-        if (!enhanced) {
-          return;
-        }
-        this.activeSession = enhanced;
-        await writeCachedSession(enhanced);
-      } catch (error) {
-        console.error("Failed to load session tool details", error);
-      }
+      const detailed = await getSessionMessages(requested.metadata, {
+        throughEntryId,
+        limit: Math.max(RECENT_SESSION_MESSAGE_WINDOW, requested.messages.length),
+      });
+      const current = this.activeSnapshot;
+      if (
+        !current ||
+        current.metadata.sessionId !== session.sessionId ||
+        selected !== selectionGeneration ||
+        connection !== connectionGeneration ||
+        detailed.historyVersion !== throughEntryId ||
+        current.historyVersion !== throughEntryId
+      )
+        return;
+      const merged = mergeSessionSnapshot(
+        {
+          ...current,
+          messages: detailed.messages,
+          metadata: { ...current.metadata, messagesDetailLevel: "full" },
+        },
+        current,
+      );
+      this.activeSnapshot = {
+        ...current,
+        messages: merged.messages,
+        metadata: { ...current.metadata, messagesDetailLevel: "full" },
+      };
+      await writeCachedSession(this.activeSnapshot!);
     })();
     sessionDetailRequests.set(session.sessionId, request);
     try {
       await request;
     } finally {
-      if (sessionDetailRequests.get(session.sessionId) === request) {
+      if (sessionDetailRequests.get(session.sessionId) === request)
         sessionDetailRequests.delete(session.sessionId);
-      }
-      const activeSession = this.activeSession;
-      if (
-        revisionChanged &&
-        activeSession?.sessionId === session.sessionId &&
-        activeSession.messagesDetailLevel === "summary"
-      ) {
-        this.scheduleSessionEnhancement(activeSession);
-      }
     }
   },
 
   async loadOlderMessages(this: AppActionContext): Promise<void> {
+    const snapshot = this.activeSnapshot;
     const session = this.activeSession;
     if (
+      !snapshot ||
       !session ||
       this.loadingOlderMessages ||
       !session.hasMoreMessages ||
-      session.messages.length === 0
-    ) {
+      !session.messages.length
+    )
       return;
-    }
-
+    const selected = selectionGeneration;
+    const connection = connectionGeneration;
     this.loadingOlderMessages = true;
     try {
-      const before = session.messages[0]?.id;
       const page = await getSessionMessages(session, {
-        ...(before ? { before } : {}),
+        before: session.messages[0]!.id,
         limit: RECENT_SESSION_MESSAGE_WINDOW,
+        throughEntryId: snapshot.historyVersion,
       });
-      const currentSession = this.activeSession;
+      const current = this.activeSnapshot;
       if (
-        !currentSession ||
-        currentSession.sessionId !== session.sessionId ||
-        currentSession.streamId !== session.streamId
-      ) {
+        !current ||
+        selected !== selectionGeneration ||
+        connection !== connectionGeneration ||
+        current.metadata.sessionId !== session.sessionId ||
+        page.historyVersion !== snapshot.historyVersion ||
+        current.historyVersion !== snapshot.historyVersion ||
+        current.messages[0]?.id !== snapshot.messages[0]?.id
+      )
         return;
-      }
-      if (currentSession.messages[0]?.id !== session.messages[0]?.id) {
-        return;
-      }
-      const paginationMetadataChanged =
-        currentSession.totalMessageCount !== session.totalMessageCount ||
-        currentSession.hasMoreMessages !== session.hasMoreMessages ||
-        currentSession.messages[0]?.id !== session.messages[0]?.id;
-      const nextSession = normalizeSessionState({
-        ...currentSession,
-        messages: prependUniqueMessages(currentSession.messages, page.messages),
-        totalMessageCount: paginationMetadataChanged
-          ? Math.max(currentSession.totalMessageCount, page.totalMessageCount)
-          : page.totalMessageCount,
-        hasMoreMessages: paginationMetadataChanged
-          ? currentSession.hasMoreMessages
-          : page.hasMoreMessages,
-      });
-      if (!nextSession) {
-        throw new Error("Failed to load older messages");
-      }
-
-      this.activeSession = nextSession;
-      this.updateSessionSummary(nextSession);
-      await writeCachedSession(nextSession);
+      const ids = new Set(current.messages.map((message) => message.id));
+      this.activeSnapshot = {
+        ...current,
+        messages: [...page.messages.filter((message) => !ids.has(message.id)), ...current.messages],
+        historyVersion: page.historyVersion,
+        metadata: {
+          ...current.metadata,
+          totalMessageCount: page.totalMessageCount,
+          hasMoreMessages: page.hasMoreMessages,
+        },
+      };
+      this.updateSessionSummary(this.activeSession!);
+      await writeCachedSession(this.activeSnapshot!);
     } finally {
       this.loadingOlderMessages = false;
     }
@@ -425,14 +406,8 @@ export const sessionActions = {
     files: File[],
     clientMessageId: string,
   ): Promise<PromptSubmissionResult | undefined> {
-    if (!this.activeSession) {
-      return;
-    }
-    void primeAgentNotifications().then((granted) => {
-      if (granted) {
-        void syncPushSubscription(false);
-      }
-    });
+    if (!this.activeSession) return;
+    primeNotifications();
     return sendPrompt(
       this.activeSession.id,
       text,
@@ -448,129 +423,95 @@ export const sessionActions = {
     files: File[],
     clientMessageId: string,
   ): Promise<PromptSubmissionResult | undefined> {
-    if (!this.activeSession) {
-      return;
-    }
-    void primeAgentNotifications().then((granted) => {
-      if (granted) {
-        void syncPushSubscription(false);
-      }
-    });
+    if (!this.activeSession) return;
+    primeNotifications();
     return sendPrompt(this.activeSession.id, text, files, clientMessageId, "steer");
   },
 
-  async removeQueuedPrompt(
-    this: AppActionContext,
-    kind: "steer" | "followUp",
-    index: number,
-  ): Promise<void> {
-    const requestedSession = this.activeSession;
-    if (!requestedSession) {
-      return;
-    }
-    const session = normalizeSessionState(
-      await removeQueuedPromptRequest(requestedSession.id, kind, index),
-    );
-    if (!session) {
-      throw new Error("Failed to remove queued prompt");
-    }
-    const currentSession = this.activeSession;
+  async removeQueuedPrompt(this: AppActionContext, submissionId: number): Promise<void> {
+    const requested = this.activeSnapshot;
+    if (!requested) return;
+    const selected = selectionGeneration;
+    const connection = connectionGeneration;
+    const response = await removeQueuedPromptRequest(requested.metadata.id, submissionId);
     if (
-      !currentSession ||
-      currentSession.sessionId !== requestedSession.sessionId ||
-      currentSession.streamId !== requestedSession.streamId ||
-      session.streamId !== currentSession.streamId ||
-      (session.revision != null &&
-        currentSession.revision != null &&
-        session.revision < currentSession.revision)
-    ) {
+      selected !== selectionGeneration ||
+      connection !== connectionGeneration ||
+      this.activeSnapshot !== requested
+    )
       return;
-    }
-    const merged = mergeSessionState(session, currentSession);
-    if (!merged) {
-      throw new Error("Failed to remove queued prompt");
-    }
-    this.activeSession = merged;
-    this.updateSessionSummary(merged);
-    await writeCachedSession(merged);
+    if (streamOwnsSession(this, requested)) return;
+    this.activeSnapshot = mergeSessionSnapshot(response, requested);
+    this.updateSessionSummary(this.activeSession!);
+    await writeCachedSession(this.activeSnapshot!);
   },
 
   async setModel(this: AppActionContext, modelId: string): Promise<void> {
-    const requestVersion = ++modelUpdateVersion;
-    const requestedSession = this.activeSession;
-    if (!requestedSession) {
-      return;
-    }
-    const session = normalizeSessionState(
-      await runSessionConfigurationUpdate(() => setSessionModel(requestedSession.id, modelId)),
+    const version = ++modelUpdateVersion;
+    const streamUpdate = streamUpdateGeneration;
+    const requested = this.activeSnapshot;
+    const selected = selectionGeneration;
+    if (!requested) return;
+    const response = await runSessionConfigurationUpdate(() =>
+      setSessionModel(requested.metadata.id, modelId),
     );
     if (
-      requestVersion !== modelUpdateVersion ||
-      this.activeSession?.sessionId !== requestedSession.sessionId
-    ) {
+      version !== modelUpdateVersion ||
+      selected !== selectionGeneration ||
+      this.activeSnapshot?.metadata.sessionId !== requested.metadata.sessionId
+    )
       return;
-    }
-    if (!session) {
-      throw new Error("Failed to update model");
-    }
-    const currentSession = this.activeSession;
-    const merged = normalizeSessionState({
-      ...currentSession,
-      model: session.model,
-      modelLabel: session.modelLabel,
-      thinkingLevel: session.thinkingLevel,
-      availableThinkingLevels: session.availableThinkingLevels,
-    });
-    if (!merged) {
-      throw new Error("Failed to merge updated model");
-    }
-    this.activeSession = merged;
-    this.updateSessionSummary(merged);
-    await writeCachedSession(merged);
+    this.activeSnapshot =
+      !streamOwnsSession(this, this.activeSnapshot) && streamUpdate === streamUpdateGeneration
+        ? mergeSessionSnapshot(response, this.activeSnapshot)
+        : {
+            ...this.activeSnapshot,
+            metadata: {
+              ...this.activeSnapshot.metadata,
+              model: response.metadata.model,
+              modelLabel: response.metadata.modelLabel,
+              thinkingLevel: response.metadata.thinkingLevel,
+              availableThinkingLevels: response.metadata.availableThinkingLevels,
+            },
+          };
+    this.updateSessionSummary(this.activeSession!);
+    await writeCachedSession(this.activeSnapshot!);
   },
 
   async setThinkingLevel(this: AppActionContext, thinkingLevel: string): Promise<void> {
-    const requestVersion = ++thinkingLevelUpdateVersion;
-    const requestedSession = this.activeSession;
-    if (!requestedSession) {
-      return;
-    }
-    const session = normalizeSessionState(
-      await runSessionConfigurationUpdate(() =>
-        setSessionThinkingLevel(requestedSession.id, thinkingLevel),
-      ),
+    const version = ++thinkingLevelUpdateVersion;
+    const streamUpdate = streamUpdateGeneration;
+    const requested = this.activeSnapshot;
+    const selected = selectionGeneration;
+    if (!requested) return;
+    const response = await runSessionConfigurationUpdate(() =>
+      setSessionThinkingLevel(requested.metadata.id, thinkingLevel),
     );
     if (
-      requestVersion !== thinkingLevelUpdateVersion ||
-      this.activeSession?.sessionId !== requestedSession.sessionId
-    ) {
+      version !== thinkingLevelUpdateVersion ||
+      selected !== selectionGeneration ||
+      this.activeSnapshot?.metadata.sessionId !== requested.metadata.sessionId
+    )
       return;
-    }
-    if (!session) {
-      throw new Error("Failed to update thinking level");
-    }
-    const currentSession = this.activeSession;
-    const merged = normalizeSessionState({
-      ...currentSession,
-      thinkingLevel: session.thinkingLevel,
-      availableThinkingLevels: session.availableThinkingLevels,
-    });
-    if (!merged) {
-      throw new Error("Failed to merge updated thinking level");
-    }
-    this.activeSession = merged;
-    this.updateSessionSummary(merged);
-    await writeCachedSession(merged);
+    this.activeSnapshot =
+      !streamOwnsSession(this, this.activeSnapshot) && streamUpdate === streamUpdateGeneration
+        ? mergeSessionSnapshot(response, this.activeSnapshot)
+        : {
+            ...this.activeSnapshot,
+            metadata: {
+              ...this.activeSnapshot.metadata,
+              thinkingLevel: response.metadata.thinkingLevel,
+              availableThinkingLevels: response.metadata.availableThinkingLevels,
+            },
+          };
+    this.updateSessionSummary(this.activeSession!);
+    await writeCachedSession(this.activeSnapshot!);
   },
 
   async stopActiveSession(this: AppActionContext): Promise<void> {
-    const requestedSession = this.activeSession;
-    if (!requestedSession) {
-      return;
-    }
-    await abortSession(requestedSession.id);
-    if (this.activeSession?.sessionId === requestedSession.sessionId) {
-      await this.refreshActiveSession();
-    }
+    const requested = this.activeSession;
+    if (!requested) return;
+    await abortSession(requested.id);
+    if (this.activeSession?.sessionId === requested.sessionId) await this.refreshActiveSession();
   },
 };

@@ -1,3 +1,4 @@
+import { snapshotFromPresentation } from "@/client/lib/session-test-fixture";
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import SubagentSessionPopover from "./SubagentSessionPopover.vue";
@@ -47,7 +48,7 @@ const session: SessionState = {
 describe("SubagentSessionPopover", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    openSession.mockResolvedValue(session);
+    openSession.mockResolvedValue(snapshotFromPresentation(session));
     abortSession.mockResolvedValue({ ok: true });
     vi.stubGlobal("EventSource", EventSourceStub);
   });
@@ -110,7 +111,9 @@ describe("SubagentSessionPopover", () => {
   });
 
   it("requests full details when opening a popover transcript", async () => {
-    openSession.mockResolvedValue({ ...session, messagesDetailLevel: "full" });
+    openSession.mockResolvedValue(
+      snapshotFromPresentation({ ...session, messagesDetailLevel: "full" }),
+    );
     const wrapper = mount(SubagentSessionPopover, {
       props: {
         popoverId: "subagent-popover",

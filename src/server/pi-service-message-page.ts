@@ -12,6 +12,8 @@ const MAX_MESSAGE_PAGE_SIZE = 200;
 export interface SessionMessagePageOptions {
   beforeMessageId?: string;
   limit?: number;
+  /** Latest raw entry visible in the captured native view frame. */
+  throughEntryId?: number;
 }
 
 export interface SessionMessagePage {
@@ -85,9 +87,13 @@ export function getSessionMessagePage(
   session: AgentSession,
   options?: SessionMessagePageOptions,
 ): SessionMessagePage {
+  const entries =
+    options?.throughEntryId === undefined
+      ? session.sessionManager.getBranch()
+      : session.sessionManager.getEntriesUpTo(options.throughEntryId);
   const allMessages = transcriptMessagesFromSessionEntries(
-    transcriptEntriesForPage(session.sessionManager.getBranch()),
-    session.sessionManager.getEntries(),
+    transcriptEntriesForPage(entries),
+    entries,
   );
   const totalMessageCount = allMessages.length;
   const limit = clampMessagePageSize(options?.limit);

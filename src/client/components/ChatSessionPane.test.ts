@@ -208,6 +208,85 @@ describe("ChatSessionPane", () => {
     }
   });
 
+  it("keeps transient subagent network failures out of the composer and retries", async () => {
+    vi.useFakeTimers();
+    const logError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const store = useAppStore();
+    store.activeSession = makeSession("session-a");
+    listRunningSubagents
+      .mockRejectedValueOnce(new Error("Server unavailable"))
+      .mockRejectedValueOnce(new TypeError("Load failed"))
+      .mockResolvedValueOnce([runningSubagent]);
+    const wrapper = shallowMount(ChatSessionPane);
+    try {
+      await flushPromises();
+      const composer = wrapper.getComponent({ name: "MessageComposer" });
+      expect(composer.props("error")).toBe("Server unavailable");
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(composer.props("error")).toBeUndefined();
+      expect(logError).toHaveBeenCalledWith(
+        "Failed to refresh subagent status",
+        expect.any(TypeError),
+      );
+
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(composer.props("subagentCount")).toBe(1);
+      expect(composer.props("error")).toBeUndefined();
+    } finally {
+      wrapper.unmount();
+      logError.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("preserves prompt errors when a background status check fails to load", async () => {
+    vi.useFakeTimers();
+    const logError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const store = useAppStore();
+    store.activeSession = makeSession("session-a");
+    listRunningSubagents
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new TypeError("Load failed"));
+    sendPrompt.mockRejectedValueOnce(new Error("Prompt failed"));
+    const wrapper = shallowMount(ChatSessionPane, {
+      global: { stubs: { MessageComposer: MessageComposerStub } },
+    });
+    try {
+      await flushPromises();
+      const pane = wrapper.vm as unknown as {
+        sendPrompt: (text: string, files: File[]) => Promise<void>;
+      };
+      await expect(pane.sendPrompt("hello", [])).rejects.toThrow("Prompt failed");
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(wrapper.getComponent({ name: "MessageComposer" }).props("error")).toBe(
+        "Prompt failed",
+      );
+    } finally {
+      wrapper.unmount();
+      logError.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears subagent server errors after a successful status check", async () => {
+    vi.useFakeTimers();
+    const store = useAppStore();
+    store.activeSession = makeSession("session-a");
+    listRunningSubagents.mockRejectedValueOnce(new Error("Server unavailable"));
+    const wrapper = shallowMount(ChatSessionPane);
+    try {
+      await flushPromises();
+      const composer = wrapper.getComponent({ name: "MessageComposer" });
+      expect(composer.props("error")).toBe("Server unavailable");
+
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(composer.props("error")).toBeUndefined();
+    } finally {
+      wrapper.unmount();
+      vi.useRealTimers();
+    }
+  });
+
   it("ignores subagent responses from a previous session", async () => {
     const pending = deferred<RunningSubagent[]>();
     listRunningSubagents.mockReturnValueOnce(pending.promise);

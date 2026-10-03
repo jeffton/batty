@@ -64,7 +64,12 @@ watch(
         subagentError.value = undefined;
       } catch (error) {
         if (cancelled) return;
-        subagentError.value = error instanceof Error ? error.message : String(error);
+        if (error instanceof TypeError) {
+          console.error("Failed to refresh subagent status", error);
+          subagentError.value = undefined;
+        } else {
+          subagentError.value = error instanceof Error ? error.message : String(error);
+        }
       } finally {
         if (!cancelled) timer = setTimeout(() => void refresh(), 1_500);
       }

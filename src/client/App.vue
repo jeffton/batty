@@ -16,7 +16,7 @@ const router = useRouter();
 
 const handleOffline = () => store.markOffline();
 const handleOnline = async () => {
-  store.markOnline();
+  store.markOnline(route.name === "session");
   await store.checkForClientUpdate();
 };
 const handleVisibilityChange = async () => {
@@ -144,6 +144,10 @@ async function syncRouteToStore(): Promise<void> {
   }
 
   store.setRouteLoading(workspaceId, sessionId);
+  if (!sessionId) {
+    // Workspace snapshots keep activity live without rendering the hidden transcript per token.
+    store.closeStream();
+  }
 
   try {
     if (store.selectedWorkspaceId !== workspaceId) {

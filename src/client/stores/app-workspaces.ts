@@ -51,9 +51,10 @@ export const workspaceActions = {
           ? [toSessionSummary(this.activeSession)]
           : [];
 
+      // A retained transcript can be paused; fetched summaries own the current working status.
       this.sessionsByWorkspace = {
         ...this.sessionsByWorkspace,
-        [workspaceId]: mergeSessionSummaries(existing, sessions, activeSession),
+        [workspaceId]: mergeSessionSummaries(existing, activeSession, sessions),
       };
       this.sortWorkspaces();
     } finally {

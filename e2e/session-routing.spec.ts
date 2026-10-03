@@ -61,6 +61,139 @@ test.describe("workspace and session routing", () => {
     expect(relevantErrors).toEqual([]);
   });
 
+  test("workspace browsing pauses transcript streaming and returning resumes it", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      const NativeEventSource = window.EventSource;
+      const sources: EventSource[] = [];
+      (window as typeof window & { testSessionSources: EventSource[] }).testSessionSources =
+        sources;
+      window.EventSource = class extends NativeEventSource {
+        constructor(url: string | URL, options?: EventSourceInit) {
+          super(url, options);
+          if (String(url).includes("/api/sessions/")) sources.push(this);
+        }
+      };
+    });
+
+    await authenticate(page);
+    await page.goto(`/workspaces/batty?e2e=${Date.now()}`);
+    await page.getByRole("button", { name: /new session/i }).click();
+    await page.waitForFunction(() => {
+      const sources = (window as typeof window & { testSessionSources: EventSource[] })
+        .testSessionSources;
+      return sources[0]?.readyState === EventSource.OPEN;
+    });
+
+    const sessionId = decodeURIComponent(new URL(page.url()).pathname.split("/").at(-1)!);
+    const state = await page.evaluate(async (id) => {
+      const response = await fetch(`/api/sessions/${encodeURIComponent(id)}`);
+      return response.json();
+    }, sessionId);
+    const completed = {
+      ...state,
+      revision: state.revision + 2,
+      updatedAt: Date.now(),
+      isStreaming: false,
+      messagesDetailLevel: "full",
+      totalMessageCount: 1,
+      messages: [
+        {
+          id: "completed-0",
+          role: "assistant",
+          turnPhase: "final",
+          timestamp: Date.now(),
+          blocks: [{ type: "text", text: "Finished while browsing" }],
+        },
+      ],
+    };
+    await page.evaluate(
+      (payload) => {
+        (
+          window as typeof window & { testSessionSources: EventSource[] }
+        ).testSessionSources[0]!.dispatchEvent(
+          new MessageEvent("message", { data: JSON.stringify(payload) }),
+        );
+      },
+      {
+        type: "reset",
+        streamId: state.streamId,
+        revision: state.revision + 1,
+        state: {
+          ...state,
+          revision: state.revision + 1,
+          isStreaming: true,
+          messagesDetailLevel: "summary",
+        },
+      },
+    );
+    await page.route(`**/api/workspaces/batty/sessions`, (route) =>
+      route.fulfill({
+        json: [
+          {
+            id: state.path,
+            path: state.path,
+            sessionId,
+            workspaceId: "batty",
+            firstMessage: "prompt",
+            updatedAt: completed.updatedAt,
+            messageCount: 1,
+            isInProgress: false,
+          },
+        ],
+      }),
+    );
+    await page.route(`**/api/sessions/${sessionId}`, (route) => route.fulfill({ json: completed }));
+    await page.route(`**/api/sessions/${sessionId}/events?*`, (route) =>
+      route.fulfill({
+        contentType: "text/event-stream",
+        body: `data: ${JSON.stringify({ type: "reset", streamId: state.streamId, revision: completed.revision, state: { ...completed, messagesDetailLevel: "summary" } })}\n\n`,
+      }),
+    );
+
+    await page.locator(".header__ws-btn").click();
+    await expect(page).toHaveURL(/\/workspaces\/batty(?:\?e2e=\d+)?$/);
+    await expect(
+      page.locator(".workspace-browser-pane__item-row--session .workspace-browser-pane__spinner"),
+    ).toHaveCount(0);
+    await expect(page.getByText("Finished while browsing")).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as typeof window & { testSessionSources: EventSource[] }).testSessionSources[0]
+              ?.readyState,
+        ),
+      )
+      .toBe(2);
+
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    expect(
+      await page.evaluate(
+        () =>
+          (window as typeof window & { testSessionSources: EventSource[] }).testSessionSources
+            .length,
+      ),
+    ).toBe(1);
+
+    await page.goForward();
+    await page.waitForFunction(() => {
+      const sources = (window as typeof window & { testSessionSources: EventSource[] })
+        .testSessionSources;
+      return sources.length === 2;
+    });
+    const resumedUrl = await page.evaluate(
+      () =>
+        (window as typeof window & { testSessionSources: EventSource[] }).testSessionSources[1]!
+          .url,
+    );
+    expect(new URL(resumedUrl).searchParams.has("afterRevision")).toBe(true);
+    expect(new URL(resumedUrl).searchParams.has("afterStreamId")).toBe(true);
+    await expect(page.getByText("Finished while browsing")).toBeVisible();
+    await expect(page.locator(".composer__stream-actions")).toHaveCount(0);
+  });
+
   test("back navigation keeps existing sessions visible during refresh", async ({ page }) => {
     await authenticate(page);
     await page.goto(`/workspaces/batty?e2e=${Date.now()}`);

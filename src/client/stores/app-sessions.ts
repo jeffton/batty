@@ -75,6 +75,11 @@ function prependUniqueMessages(
 
 export const sessionActions = {
   closeStream(): void {
+    for (const timer of sessionDetailTimers.values()) {
+      clearTimeout(timer);
+    }
+    sessionDetailTimers.clear();
+    sessionDetailRequests.clear();
     closeEventSource(eventSource);
     eventSource = undefined;
     eventSourceSessionId = undefined;
@@ -226,6 +231,9 @@ export const sessionActions = {
       }
 
       this.connectionState = "online";
+      if (this.activeSession?.messagesDetailLevel === "summary") {
+        this.scheduleSessionEnhancement(this.activeSession);
+      }
       void this.checkForClientUpdate();
     };
     source.onmessage = async (message) => {
@@ -300,6 +308,9 @@ export const sessionActions = {
     this: AppActionContext,
     session: Pick<SessionState, "id" | "sessionId">,
   ): void {
+    if (eventSourceOwnerState !== this.$state || eventSourceSessionId !== session.sessionId) {
+      return;
+    }
     const existingTimer = sessionDetailTimers.get(session.sessionId);
     if (existingTimer) {
       clearTimeout(existingTimer);
@@ -315,6 +326,10 @@ export const sessionActions = {
     this: AppActionContext,
     session: Pick<SessionState, "id" | "sessionId">,
   ): Promise<void> {
+    if (eventSourceOwnerState !== this.$state || eventSourceSessionId !== session.sessionId) {
+      return;
+    }
+    const source = eventSource;
     const existing = sessionDetailRequests.get(session.sessionId);
     if (existing) {
       return existing;
@@ -325,7 +340,12 @@ export const sessionActions = {
       try {
         const detailed = normalizeSessionState(await getSession(session.id));
         const currentSession = this.activeSession;
-        if (!detailed || !currentSession || currentSession.sessionId !== session.sessionId) {
+        if (
+          eventSource !== source ||
+          !detailed ||
+          !currentSession ||
+          currentSession.sessionId !== session.sessionId
+        ) {
           return;
         }
         if (
@@ -355,6 +375,7 @@ export const sessionActions = {
       }
       const activeSession = this.activeSession;
       if (
+        eventSource === source &&
         revisionChanged &&
         activeSession?.sessionId === session.sessionId &&
         activeSession.messagesDetailLevel === "summary"

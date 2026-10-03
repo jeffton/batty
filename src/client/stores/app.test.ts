@@ -419,6 +419,110 @@ describe("app store session streams", () => {
     expect(store.connectionState).toBe("connecting");
   });
 
+  it("cancels pending detail enhancement timers when transcript streaming pauses", async () => {
+    vi.useFakeTimers();
+    const store = useAppStore();
+    const session = makeSession("session-a", { messagesDetailLevel: "summary" });
+    store.activeSession = session;
+    store.openStream(session);
+    store.scheduleSessionEnhancement(session);
+    try {
+      store.closeStream();
+      store.scheduleSessionEnhancement(session);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(getSession).not.toHaveBeenCalled();
+    } finally {
+      store.closeStream();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps completion authoritative while paused and resumes transcript details after catch-up", async () => {
+    vi.useFakeTimers();
+    const store = useAppStore();
+    const working = makeSession("session-a", {
+      streamId: "process-1",
+      revision: 5,
+      isStreaming: true,
+      messagesDetailLevel: "summary",
+    });
+    const completed = makeSession("session-a", {
+      streamId: "process-1",
+      revision: 7,
+      updatedAt: 10,
+      messagesDetailLevel: "full",
+      totalMessageCount: 1,
+      messages: [
+        {
+          id: "assistant-0",
+          role: "assistant",
+          turnPhase: "final",
+          timestamp: 10,
+          blocks: [{ type: "text", text: "Finished while browsing" }],
+        },
+      ],
+    });
+    const detailResponse = deferred<SessionState>();
+    vi.mocked(getSession)
+      .mockReturnValueOnce(detailResponse.promise)
+      .mockResolvedValueOnce(completed);
+    store.activeSession = working;
+    store.selectedWorkspaceId = "batty";
+    store.updateSessionSummary(working);
+    store.openStream(working);
+    MockEventSource.instances[0]?.onopen?.(new Event("open"));
+
+    try {
+      await vi.advanceTimersByTimeAsync(500);
+      expect(getSession).toHaveBeenCalledTimes(1);
+      store.closeStream();
+      detailResponse.resolve(completed);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(getSession).toHaveBeenCalledTimes(1);
+      expect(store.activeSession?.revision).toBe(5);
+
+      vi.mocked(listWorkspaceSessions).mockResolvedValueOnce([
+        {
+          id: working.path!,
+          sessionId: working.sessionId,
+          path: working.path,
+          workspaceId: working.workspaceId,
+          firstMessage: "prompt",
+          updatedAt: completed.updatedAt,
+          messageCount: 1,
+          isInProgress: false,
+          hasUnread: true,
+        },
+      ]);
+      await store.loadWorkspaceSessions("batty");
+      expect(store.workspaceSessions[0]?.isInProgress).toBe(false);
+      expect(store.workspaceSessions[0]?.hasUnread).toBe(true);
+      expect(store.activeSession?.isStreaming).toBe(true);
+
+      store.openStream(store.activeSession!);
+      const resumed = MockEventSource.instances[1]!;
+      expect(resumed.url).toContain("afterRevision=5");
+      resumed.onopen?.(new Event("open"));
+      await resumed.onmessage?.({
+        data: JSON.stringify({
+          type: "reset",
+          streamId: completed.streamId,
+          revision: completed.revision,
+          state: { ...completed, messagesDetailLevel: "summary" },
+        }),
+      } as MessageEvent<string>);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(getSession).toHaveBeenCalledTimes(2);
+      expect(store.activeSession?.revision).toBe(7);
+      expect(store.activeSession?.isStreaming).toBe(false);
+      expect(store.activeSession?.messagesDetailLevel).toBe("full");
+      expect(store.activeSession?.messages).toEqual(completed.messages);
+    } finally {
+      store.closeStream();
+      vi.useRealTimers();
+    }
+  });
+
   it("deduplicates concurrent opens for the same session", async () => {
     const response = deferred<SessionState>();
     const session = makeSession("session-a");

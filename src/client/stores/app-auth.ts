@@ -157,11 +157,11 @@ export const authBootstrapActions = {
     this.workspaceConnectionState = "offline";
   },
 
-  markOnline(this: AppActionContext): void {
+  markOnline(this: AppActionContext, streamSession: boolean): void {
     this.connectionState = "online";
     this.workspaceConnectionState = "online";
     this.openWorkspaceStream();
-    if (this.activeSession) {
+    if (streamSession && this.activeSession) {
       this.openStream(this.activeSession);
     }
   },

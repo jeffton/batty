@@ -37,7 +37,7 @@ import {
   createPiAgentSession as createPiAgentSessionImpl,
   refreshBattySystemPrompt,
 } from "./pi-agent-session";
-import { createSessionState } from "./pi-state";
+import { createSessionState, normalizeMessages } from "./pi-state";
 import { battyAgentDir, workspaceCronSessionDir, workspaceSessionDir } from "./pi-paths";
 import {
   listSessionSummaries as listFastSessionSummaries,
@@ -59,7 +59,6 @@ import {
   type SubagentToolDetails,
 } from "./subagent";
 import { getSessionMessagePage } from "./pi-service-message-page";
-import { getQueuedPrompts, removeQueuedPrompt } from "./pi-service-queue";
 import { preparePromptFiles } from "./pi-service-uploads";
 import { createUiImageResolver, resolveSessionImage } from "./session-images";
 import {
@@ -1124,7 +1123,7 @@ export class PiService {
           [...webSession.activeTools.values()].some((tool) => tool.status === "running")),
       isCompacting: Boolean(webSession.isCompacting),
       pendingMessageCount: webSession.session.pendingMessageCount,
-      queuedPrompts: getQueuedPrompts(webSession),
+      queuedPrompts: webSession.session.getQueuedPrompts(),
       updatedAt: sessionUpdatedAt(webSession.session, webSession.openedAt),
       contextTokens: contextUsage?.tokens ?? null,
       contextWindow: contextUsage?.contextWindow ?? webSession.session.model?.contextWindow ?? null,
@@ -1134,7 +1133,7 @@ export class PiService {
       messageIndexOffset: messagePage.messageIndexOffset,
       messagesDetailLevel: options?.messagesDetailLevel ?? "full",
       messages: messagePage.messages,
-      activeAssistant: webSession.activeAssistant ?? undefined,
+      activeAssistant: webSession.activeAssistant,
       activeTools: [...webSession.activeTools.values()],
       title: webSession.session.sessionName,
       isSubagentSession: hasSubagentSessionMarker(webSession.session.sessionManager.getEntries()),
@@ -1166,36 +1165,9 @@ export class PiService {
     const webSession = this.requireSession(sessionId);
     const page = this.getMessagePage(webSession, options);
     return {
-      messages: createSessionState({
-        id: webSession.id,
-        revision: webSession.revision,
+      messages: normalizeMessages(page.messages, page.messageIndexOffset, {
         imageResolver: webSession.resolveUiImage,
-        sessionId: webSession.session.sessionId,
-        workspaceId: webSession.workspace.id,
-        cwd: webSession.workspace.path,
-        path: webSession.session.sessionFile,
-        model: undefined,
-        modelLabel: undefined,
-        thinkingLevel: webSession.session.thinkingLevel,
-        availableThinkingLevels: webSession.session.getAvailableThinkingLevels(),
-        isStreaming:
-          !webSession.agentCompleted &&
-          (webSession.session.isStreaming ||
-            [...webSession.activeTools.values()].some((tool) => tool.status === "running")),
-        isCompacting: Boolean(webSession.isCompacting),
-        pendingMessageCount: webSession.session.pendingMessageCount,
-        queuedPrompts: getQueuedPrompts(webSession),
-        updatedAt: sessionUpdatedAt(webSession.session, webSession.openedAt),
-        contextTokens: null,
-        contextWindow: null,
-        contextPercent: null,
-        totalMessageCount: page.totalMessageCount,
-        hasMoreMessages: page.hasMoreMessages,
-        messageIndexOffset: page.messageIndexOffset,
-        messages: page.messages,
-        activeTools: [],
-        title: undefined,
-      }).messages,
+      }),
       totalMessageCount: page.totalMessageCount,
       hasMoreMessages: page.hasMoreMessages,
     };
@@ -1255,7 +1227,7 @@ export class PiService {
     index: number,
   ): Promise<SessionState> {
     const webSession = this.requireSession(sessionId);
-    await removeQueuedPrompt(webSession, kind, index);
+    await webSession.session.removeQueuedPrompt(kind, index);
     const state = this.getState(sessionId);
     this.publish(webSession, { type: "state", state: this.getStateMetadata(webSession) });
     return state;

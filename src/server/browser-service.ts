@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { inspect } from "node:util";
-import type { BrowserContext, CDPSession, Frame, Page } from "patchright";
+import type { BrowserContext, Frame, Page } from "patchright";
 import { getSharedBrowser } from "./browser-runtime";
 import { DEFAULT_BROWSER_MAX_TABS } from "./options";
 import type { BrowserProxy } from "./ssh-socks-proxy";
@@ -113,7 +113,6 @@ interface BrowserSession {
   context: BrowserContext;
   useTailscale: boolean;
   identity: BrowserIdentity;
-  cdpSessions: Set<CDPSession>;
   pageIdentityPromises: WeakMap<Page, Promise<void>>;
   pages: Map<string, Page>;
   pageIds: WeakMap<Page, string>;
@@ -339,7 +338,6 @@ export class BrowserService {
       context,
       useTailscale,
       identity,
-      cdpSessions: new Set(),
       pageIdentityPromises: new WeakMap(),
       pages: new Map(),
       pageIds: new WeakMap(),
@@ -468,7 +466,6 @@ export class BrowserService {
 
   private async configureBrowserIdentity(session: BrowserSession, page: Page): Promise<void> {
     const cdpSession = await session.context.newCDPSession(page);
-    session.cdpSessions.add(cdpSession);
     await cdpSession.send("Emulation.setUserAgentOverride", session.identity);
   }
 

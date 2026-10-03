@@ -16,7 +16,7 @@ const originalServiceWorker = navigator.serviceWorker;
 const originalPushManager = globalThis.PushManager;
 const originalServiceWorkerRegistration = globalThis.ServiceWorkerRegistration;
 
-function installPushCapableBrowser(): {
+function installPushCapableBrowser(permission: NotificationPermission = "default"): {
   subscribe: ReturnType<typeof vi.fn>;
   getSubscription: ReturnType<typeof vi.fn>;
   requestPermission: ReturnType<typeof vi.fn>;
@@ -34,7 +34,7 @@ function installPushCapableBrowser(): {
   });
   const getSubscription = vi.fn().mockResolvedValue(null);
   class MockNotification {
-    static permission: NotificationPermission = "default";
+    static permission: NotificationPermission = permission;
     static requestPermission = vi.fn().mockImplementation(async () => {
       MockNotification.permission = "granted";
       return "granted";
@@ -125,39 +125,8 @@ describe("syncPushSubscription", () => {
   });
 
   it("removes the server subscription when permission is not granted", async () => {
-    const unsubscribe = vi.fn().mockResolvedValue(true);
-    const getSubscription = vi.fn().mockResolvedValue({
-      endpoint: "https://push.example/subscription",
-      unsubscribe,
-    });
-
-    class MockNotification {
-      static permission: NotificationPermission = "denied";
-      static requestPermission = vi.fn();
-    }
-
-    class MockPushManager {}
-    class MockServiceWorkerRegistration {}
-    Object.defineProperty(MockServiceWorkerRegistration.prototype, "showNotification", {
-      configurable: true,
-      value: vi.fn(),
-    });
-
-    globalThis.Notification = MockNotification as unknown as typeof Notification;
-    globalThis.PushManager = MockPushManager as unknown as typeof PushManager;
-    globalThis.ServiceWorkerRegistration =
-      MockServiceWorkerRegistration as unknown as typeof ServiceWorkerRegistration;
-    Object.defineProperty(navigator, "serviceWorker", {
-      configurable: true,
-      value: {
-        ready: Promise.resolve({
-          pushManager: {
-            getSubscription,
-            subscribe: vi.fn(),
-          },
-        }),
-      },
-    });
+    const browser = installPushCapableBrowser("denied");
+    browser.getSubscription.mockResolvedValue({ endpoint: "https://push.example/subscription" });
 
     await expect(syncPushSubscription(false)).resolves.toBe(false);
     expect(mockedDeletePushSubscription).toHaveBeenCalledWith("https://push.example/subscription");

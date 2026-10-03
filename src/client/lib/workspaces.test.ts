@@ -31,24 +31,7 @@ describe("uniqueWorkspaces", () => {
       },
     ];
 
-    expect(uniqueWorkspaces(workspaces)).toEqual([
-      {
-        id: "batty",
-        label: "batty",
-        path: "/root/github/batty",
-        kind: "workspace",
-        isPinned: false,
-        isAssistant: false,
-      },
-      {
-        id: "babyface",
-        label: "babyface",
-        path: "/root/github/babyface",
-        kind: "workspace",
-        isPinned: false,
-        isAssistant: false,
-      },
-    ]);
+    expect(uniqueWorkspaces(workspaces)).toEqual(workspaces.slice(0, 2));
   });
 });
 

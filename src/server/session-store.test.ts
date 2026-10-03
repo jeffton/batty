@@ -3,7 +3,6 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { SessionStore } from "./session-store";
 
 const roots: string[] = [];
@@ -87,7 +86,7 @@ describe("SessionStore", () => {
       id,
     });
     store.release();
-    const snapshot = await SessionStore.read(file, { readOnly: true });
+    const snapshot = await SessionStore.read(file);
     expect(snapshot.entries).toEqual([]);
     const reopened = await SessionStore.existing(root, sessionDir, id);
     stores.push(reopened!);
@@ -153,17 +152,13 @@ describe("SessionStore", () => {
     expect(reopened.getEntries()).toEqual([]);
   });
 
-  it("shares concurrent opens and delegates tree state to the native SDK", async () => {
+  it("shares concurrent opens", async () => {
     const store = await session();
     const file = store.getSessionFile();
     store.release();
     const [first, second] = await Promise.all([SessionStore.open(file), SessionStore.open(file)]);
     stores.push(first);
     expect(first).toBe(second);
-    expect(first.native).toBeInstanceOf(SessionManager);
-    expect(first.getEntries()).toEqual(first.native.getEntries());
-    expect(first.getBranch()).toEqual(first.native.getBranch());
-    expect(first.getLeafId()).toBe(first.native.getLeafId());
   });
 
   it("reads without repairing torn transcripts", async () => {
@@ -172,7 +167,7 @@ describe("SessionStore", () => {
     store.release();
     const malformed = `${await fs.readFile(file, "utf8")}{`;
     await fs.writeFile(file, malformed);
-    await expect(SessionStore.read(file, { readOnly: true })).rejects.toThrow();
+    await expect(SessionStore.read(file)).rejects.toThrow();
     expect(await fs.readFile(file, "utf8")).toBe(malformed);
   });
 
@@ -183,9 +178,7 @@ describe("SessionStore", () => {
     const old = `${JSON.stringify({ v: 4, kind: "header", id: "old", storageVersion: 1 })}\n`;
     await fs.writeFile(file, old);
     await expect(SessionStore.open(file)).rejects.toThrow("Expected Pi session version 3");
-    await expect(SessionStore.read(file, { readOnly: true })).rejects.toThrow(
-      "Expected Pi session version 3",
-    );
+    await expect(SessionStore.read(file)).rejects.toThrow("Expected Pi session version 3");
     expect(await fs.readFile(file, "utf8")).toBe(old);
   });
 

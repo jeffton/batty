@@ -43,15 +43,7 @@ function startsExpandedTurn(entry: TranscriptMessageView): boolean {
   return startsAnyTurn(entry) && !isDetachedCronTurnStart(entry);
 }
 
-function sectionKey(entry: TranscriptMessageView | undefined, index: number): string {
-  return entry ? `turn:${entry.message.id}` : `turn:${index}`;
-}
-
 function transcriptSections(entries: TranscriptMessageView[]): TranscriptSection[] {
-  if (entries.length === 0) {
-    return [];
-  }
-
   const starts: number[] = [];
   entries.forEach((entry, index) => {
     if (index === 0 || startsAnyTurn(entry)) {
@@ -60,7 +52,7 @@ function transcriptSections(entries: TranscriptMessageView[]): TranscriptSection
   });
 
   return starts.map((startIndex, index) => ({
-    key: sectionKey(entries[startIndex], startIndex),
+    key: `turn:${entries[startIndex]!.message.id}`,
     startIndex,
     endIndex: starts[index + 1] ?? entries.length,
   }));
@@ -91,10 +83,6 @@ function collapsedMessage(
 
 function hasExpandableDetails(entry: TranscriptMessageView): boolean {
   const message = entry.message;
-  if (message.role === "custom" && Boolean(message.data?.cron)) {
-    return true;
-  }
-
   if (isTranscriptDetailsMessageRole(message.role)) return true;
 
   return (
@@ -162,11 +150,7 @@ function hasAssistantReply(entry: TranscriptMessageView | undefined): boolean {
     return false;
   }
 
-  return entry.message.blocks.some(
-    (block) =>
-      !isAttachmentOutputToolCall(block, entry.toolStatesByCallId) &&
-      (block.type === "text" || block.type === "image"),
-  );
+  return entry.message.blocks.some((block) => block.type === "text" || block.type === "image");
 }
 
 export function buildTranscriptDisplayEntries(
@@ -201,8 +185,6 @@ export function buildTranscriptDisplayEntries(
     const items = sectionEntries.map((entry) => {
       const collapsed = collapsedMessage(entry, toolStatesByCallId);
       return {
-        entry,
-        collapsed,
         visibleEntry: isExpanded ? entry : collapsed,
         hidesDetails: hidesExpandableDetails(entry, collapsed),
       };

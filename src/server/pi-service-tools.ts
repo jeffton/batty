@@ -265,7 +265,7 @@ export function createSubagentTool({
     execute: async (toolCallId, params, signal, onUpdate, ctx) => {
       const parentSessionId = ctx.sessionManager.getSessionId();
       if (params.action === "await") {
-        const subagentSessionId = String(params.sessionId ?? "").trim();
+        const subagentSessionId = params.sessionId?.trim();
         if (!subagentSessionId) throw new Error("sessionId is required to await a subagent");
         const { waiting, details } = await awaitSubagent(parentSessionId, subagentSessionId);
         return {
@@ -282,7 +282,7 @@ export function createSubagentTool({
         };
       }
       if (params.action === "stop") {
-        const subagentSessionId = String(params.sessionId ?? "").trim();
+        const subagentSessionId = params.sessionId?.trim();
         if (!subagentSessionId) throw new Error("sessionId is required to stop a subagent");
         const details = await stopSubagent(parentSessionId, subagentSessionId);
         return {
@@ -292,9 +292,9 @@ export function createSubagentTool({
         };
       }
       if (params.action === "steer") {
-        const subagentSessionId = String(params.sessionId ?? "").trim();
+        const subagentSessionId = params.sessionId?.trim();
         if (!subagentSessionId) throw new Error("sessionId is required to steer a subagent");
-        const prompt = String(params.prompt ?? "").trim();
+        const prompt = params.prompt?.trim();
         if (!prompt) throw new Error("prompt is required to steer a subagent");
         const details = await steerSubagent(parentSessionId, subagentSessionId, prompt);
         return {
@@ -305,9 +305,9 @@ export function createSubagentTool({
       }
 
       if (params.action === "queue" || params.action === "resume") {
-        const subagentSessionId = String(params.sessionId ?? "").trim();
+        const subagentSessionId = params.sessionId?.trim();
         if (!subagentSessionId) throw new Error("sessionId is required to continue a subagent");
-        const prompt = String(params.prompt ?? "").trim();
+        const prompt = params.prompt?.trim();
         if (!prompt) throw new Error("prompt is required to continue a subagent");
         const result = await continueSubagent(
           parentSessionId,
@@ -330,27 +330,18 @@ export function createSubagentTool({
       }
 
       const defaults = resolveSubagentDefaults(parentSessionId, ctx);
-      const modelId =
-        typeof params.model === "string" && params.model.trim().length > 0
-          ? params.model.trim()
-          : defaults.modelId;
+      const modelId = params.model?.trim() || defaults.modelId;
       if (!modelId) {
         throw new Error("No model available for subagent");
       }
 
-      const thinkingLevel =
-        typeof params.effort === "string" && params.effort.trim().length > 0
-          ? params.effort.trim()
-          : defaults.thinkingLevel;
-      const prompt = String(params.prompt ?? "").trim();
+      const thinkingLevel = params.effort ?? defaults.thinkingLevel;
+      const prompt = params.prompt?.trim();
       if (!prompt) {
         throw new Error("prompt is required for subagent");
       }
 
-      const includePreviousContext =
-        params.includePreviousContext === true || params.includePreviousContext === "chat-only"
-          ? params.includePreviousContext
-          : false;
+      const includePreviousContext = params.includePreviousContext ?? false;
       const childIdBytes = randomBytes(16);
       childIdBytes.writeUIntBE(Date.now(), 0, 6);
       childIdBytes[6] = (childIdBytes[6]! & 0x0f) | 0x70;
@@ -361,9 +352,7 @@ export function createSubagentTool({
         sessionId: childSessionId,
         workspace,
         parentSessionId,
-        parentSessionPath: (
-          ctx.sessionManager as { getSessionFile?: () => string | undefined }
-        ).getSessionFile?.(),
+        parentSessionPath: ctx.sessionManager.getSessionFile(),
         parentSubagentDepth,
         prompt,
         modelId,
@@ -421,11 +410,8 @@ export function createCronTool({
     ],
     parameters: CronToolSchema,
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
-      const action = String(params.action ?? "").trim();
-      const workspaceId =
-        typeof params.workspaceId === "string" && params.workspaceId.trim().length > 0
-          ? params.workspaceId.trim()
-          : workspace.id;
+      const action = params.action;
+      const workspaceId = params.workspaceId?.trim() || workspace.id;
 
       switch (action) {
         case "list": {
@@ -453,20 +439,11 @@ export function createCronTool({
           const defaults = resolveSubagentDefaults(ctx.sessionManager.getSessionId(), ctx);
           const input: CreateCronJobInput = {
             workspaceId,
-            enabled: typeof params.enabled === "boolean" ? params.enabled : undefined,
-            prompt: String(params.prompt ?? ""),
-            model:
-              typeof params.model === "string" && params.model.trim().length > 0
-                ? params.model.trim()
-                : (defaults.modelId ?? ""),
-            thinkingLevel:
-              typeof params.thinkingLevel === "string" && params.thinkingLevel.trim().length > 0
-                ? params.thinkingLevel.trim()
-                : defaults.thinkingLevel,
-            session:
-              params.session && typeof params.session === "object"
-                ? (params.session as CreateCronJobInput["session"])
-                : undefined,
+            enabled: params.enabled,
+            prompt: params.prompt ?? "",
+            model: params.model?.trim() || defaults.modelId || "",
+            thinkingLevel: params.thinkingLevel?.trim() || defaults.thinkingLevel,
+            session: params.session,
             schedule: (params.schedule ?? {}) as CreateCronJobInput["schedule"],
           };
           validateModel(input.model);
@@ -477,30 +454,20 @@ export function createCronTool({
           };
         }
         case "update": {
-          const jobId = String(params.jobId ?? "").trim();
+          const jobId = params.jobId?.trim();
           if (!jobId) {
             throw new Error("jobId is required for cron update");
           }
 
           const patch: UpdateCronJobInput = {
-            workspaceId,
-            enabled: typeof params.enabled === "boolean" ? params.enabled : undefined,
-            prompt: typeof params.prompt === "string" ? params.prompt : undefined,
-            model: typeof params.model === "string" ? params.model.trim() : undefined,
-            thinkingLevel:
-              typeof params.thinkingLevel === "string" ? params.thinkingLevel : undefined,
-            session:
-              params.session && typeof params.session === "object"
-                ? (params.session as UpdateCronJobInput["session"])
-                : undefined,
-            schedule:
-              params.schedule && typeof params.schedule === "object"
-                ? (params.schedule as UpdateCronJobInput["schedule"])
-                : undefined,
+            workspaceId: params.workspaceId === undefined ? undefined : workspaceId,
+            enabled: params.enabled,
+            prompt: params.prompt,
+            model: params.model?.trim(),
+            thinkingLevel: params.thinkingLevel,
+            session: params.session,
+            schedule: params.schedule as UpdateCronJobInput["schedule"],
           };
-          if (patch.workspaceId === workspace.id && typeof params.workspaceId !== "string") {
-            delete patch.workspaceId;
-          }
 
           if (patch.model != null) {
             validateModel(patch.model);
@@ -512,7 +479,7 @@ export function createCronTool({
           };
         }
         case "remove": {
-          const jobId = String(params.jobId ?? "").trim();
+          const jobId = params.jobId?.trim();
           if (!jobId) {
             throw new Error("jobId is required for cron remove");
           }
@@ -544,10 +511,7 @@ export function createCronTool({
           };
         }
         case "list-run-logs": {
-          const logs = cronService.listRecentRunLogs(
-            workspaceId,
-            typeof params.limit === "number" ? params.limit : undefined,
-          );
+          const logs = cronService.listRecentRunLogs(workspaceId, params.limit);
           const text =
             logs.length === 0
               ? `No recent cron run logs found for workspace ${workspaceId}.`
@@ -563,8 +527,8 @@ export function createCronTool({
           };
         }
         case "stop-running": {
-          const runId = String(params.runId ?? "").trim();
-          const jobId = String(params.jobId ?? "").trim();
+          const runId = params.runId?.trim();
+          const jobId = params.jobId?.trim();
           if (!runId && !jobId) {
             throw new Error("runId or jobId is required for cron stop-running");
           }
@@ -622,31 +586,8 @@ export function createBrowserTool({
       const result = await browserService.execute(
         ctx.sessionManager.getSessionId(),
         {
-          action: params.action,
-          url: typeof params.url === "string" ? params.url : undefined,
-          pageId: typeof params.pageId === "string" ? params.pageId : undefined,
-          frameId: typeof params.frameId === "string" ? params.frameId : undefined,
-          newPage: typeof params.newPage === "boolean" ? params.newPage : undefined,
-          useTailscale: typeof params.useTailscale === "boolean" ? params.useTailscale : undefined,
-          selector: typeof params.selector === "string" ? params.selector : undefined,
-          value: typeof params.value === "string" ? params.value : undefined,
-          values: Array.isArray(params.values)
-            ? params.values.filter((value): value is string => typeof value === "string")
-            : undefined,
-          paths: Array.isArray(params.paths)
-            ? params.paths
-                .filter((value): value is string => typeof value === "string")
-                .map((value) => path.resolve(workspace.path, value))
-            : undefined,
-          key: typeof params.key === "string" ? params.key : undefined,
-          state: params.state,
-          script: typeof params.script === "string" ? params.script : undefined,
-          args: params.args,
-          deltaX: typeof params.deltaX === "number" ? params.deltaX : undefined,
-          deltaY: typeof params.deltaY === "number" ? params.deltaY : undefined,
-          viewport: params.viewport,
-          fullPage: typeof params.fullPage === "boolean" ? params.fullPage : undefined,
-          timeoutMs: typeof params.timeoutMs === "number" ? params.timeoutMs : undefined,
+          ...params,
+          paths: params.paths?.map((value) => path.resolve(workspace.path, value)),
         },
         signal,
       );
@@ -702,12 +643,12 @@ export function createWebSearchTool(config: AppConfig): ToolDefinition<typeof We
       const result = await runWebSearch({
         apiKey: config.braveSearchKey ?? "",
         action: params.action,
-        query: typeof params.query === "string" ? params.query : undefined,
-        url: typeof params.url === "string" ? params.url : undefined,
-        count: typeof params.count === "number" ? params.count : undefined,
-        includeContent: typeof params.includeContent === "boolean" ? params.includeContent : false,
-        country: typeof params.country === "string" ? params.country : undefined,
-        freshness: typeof params.freshness === "string" ? params.freshness : undefined,
+        query: params.query,
+        url: params.url,
+        count: params.count,
+        includeContent: params.includeContent,
+        country: params.country,
+        freshness: params.freshness,
       });
       const output = await spillToolOutputToTempFile(
         "web-search-output",
@@ -744,7 +685,7 @@ export function createSitesTool({
     parameters: SitesToolSchema,
     execute: async (_toolCallId, params) => {
       if (params.action === "create") {
-        const name = typeof params.name === "string" ? params.name.trim() : "";
+        const name = params.name?.trim();
         if (!name) throw new Error("name is required for sites create");
         const site = await createSite(config.sitesDir, config.baseUrl, name);
         return {
@@ -758,7 +699,7 @@ export function createSitesTool({
         };
       }
 
-      const siteId = typeof params.siteId === "string" ? params.siteId.trim() : "";
+      const siteId = params.siteId?.trim();
       if (!siteId) throw new Error(`siteId is required for sites ${params.action}`);
       if (params.action === "delete") {
         await deleteSite(config.sitesDir, siteId);
@@ -811,9 +752,7 @@ export function createAttachFilesTool({
         sessionId,
         toolCallId,
         cwd: workspace.path,
-        paths: Array.isArray(params.paths)
-          ? params.paths.filter((value): value is string => typeof value === "string")
-          : [],
+        paths: params.paths,
       });
       const count = sentFiles.length;
       const noun = count === 1 ? "file" : "files";

@@ -164,12 +164,11 @@ describe("PasskeyAuthService", () => {
     const second = await passkeys.beginAuthentication("https://batty.test", "batty.test");
 
     expect(second.requestId).not.toBe(first.requestId);
-    const pending = (
-      passkeys as unknown as {
-        pendingAuthentications: Map<string, { requestId: string }>;
-      }
-    ).pendingAuthentications;
-    expect([...pending.keys()]).toEqual([first.requestId, second.requestId]);
+    for (const { requestId } of [first, second]) {
+      await expect(
+        passkeys.finishAuthentication(requestId, {} as never, "https://other.test", "other.test"),
+      ).rejects.toThrow("Passkey sign-in origin changed");
+    }
   });
 
   it("drops expired setup codes from disk", async () => {

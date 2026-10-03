@@ -22,7 +22,7 @@ export function chatOnlyBlocks<T extends TranscriptContentBlockLike>(
   blocks: T[],
   keepDetailsBlock?: (block: T) => boolean,
 ): T[] | undefined {
-  if (isTranscriptDetailsMessageRole(role) || (role !== "user" && role !== "assistant")) {
+  if (role !== "user" && role !== "assistant") {
     return undefined;
   }
 

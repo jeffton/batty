@@ -496,7 +496,7 @@ export class PasskeyAuthService {
 
   private async requireValidSetupCode(setupCode: string): Promise<StoredSetupCode> {
     const stored = await this.readSetupCode();
-    if (!stored || !sameValue(stored.codeHash, hashSetupCode(this.authSecret, setupCode.trim()))) {
+    if (!stored || !sameValue(stored.codeHash, hashSetupCode(this.authSecret, setupCode))) {
       throw new Error("Wrong or expired setup code");
     }
     return stored;

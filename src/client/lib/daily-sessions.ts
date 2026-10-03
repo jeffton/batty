@@ -6,40 +6,20 @@ function parseLocalIsoDate(date: string): Date | undefined {
     return undefined;
   }
 
-  const year = Number.parseInt(match[1] ?? "", 10);
-  const month = Number.parseInt(match[2] ?? "", 10);
-  const day = Number.parseInt(match[3] ?? "", 10);
+  const year = Number.parseInt(match[1]!, 10);
+  const month = Number.parseInt(match[2]!, 10);
+  const day = Number.parseInt(match[3]!, 10);
   return new Date(year, month - 1, day);
 }
 
-function formatLocalIsoDate(now: Date): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
-}
-
-function dayDifference(date: string, now: Date): number | undefined {
+export function formatDailySessionTitle(date: string, now = new Date()): string {
   const target = parseLocalIsoDate(date);
   if (!target) {
-    return undefined;
-  }
-
-  const today = parseLocalIsoDate(formatLocalIsoDate(now));
-  if (!today) {
-    return undefined;
-  }
-
-  return Math.round((today.getTime() - target.getTime()) / (24 * 60 * 60 * 1000));
-}
-
-export function formatDailySessionTitle(date: string, now = new Date()): string {
-  const diff = dayDifference(date, now);
-  if (diff == null) {
     return date;
   }
 
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diff = Math.round((today.getTime() - target.getTime()) / (24 * 60 * 60 * 1000));
   if (diff <= 0) {
     return "Today";
   }
@@ -49,11 +29,6 @@ export function formatDailySessionTitle(date: string, now = new Date()): string 
   }
 
   if (diff < 7) {
-    const target = parseLocalIsoDate(date);
-    if (!target) {
-      return date;
-    }
-
     return new Intl.DateTimeFormat(undefined, { weekday: "long" }).format(target);
   }
 

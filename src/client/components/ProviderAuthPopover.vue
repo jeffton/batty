@@ -5,7 +5,6 @@ import BasePopover from "@/client/components/BasePopover.vue";
 import { formatShortDateTime } from "@/client/lib/formatting";
 import { watchOpenAIAuthAttempt } from "@/client/lib/provider-auth";
 import { useAppStore } from "@/client/stores/app";
-import type { ProviderAuthProviderStatus } from "@/shared/types";
 
 const props = defineProps<{
   popoverId: string;
@@ -49,10 +48,6 @@ const hasOpenAIAttempt = computed(() => authAttemptId.value.length > 0);
 const authExpiryLabel = computed(() =>
   authExpiresAt.value == null ? "" : formatShortDateTime(authExpiresAt.value),
 );
-
-function providerById(providerId: string): ProviderAuthProviderStatus | undefined {
-  return store.providerAuth.providers.find((provider) => provider.id === providerId);
-}
 
 function isOpenAIProvider(providerId: string): boolean {
   return providerId === "openai";

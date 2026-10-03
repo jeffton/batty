@@ -60,8 +60,6 @@ export interface AppOptions {
 
 const DEFAULT_CRON_DAILY_SESSION_START_TIME = "04:00";
 
-const REQUIRED_OPTION_KEYS = ["webPushSubject"] as const;
-
 export function stateDirPath(battyDir: string): string {
   return path.join(battyDir, ".batty");
 }
@@ -92,16 +90,9 @@ function normalizeDailySessionStartTime(value: unknown): string {
     );
   }
 
-  const hours = Number.parseInt(match[1] ?? "", 10);
-  const minutes = Number.parseInt(match[2] ?? "", 10);
-  if (
-    !Number.isInteger(hours) ||
-    !Number.isInteger(minutes) ||
-    hours < 0 ||
-    hours > 23 ||
-    minutes < 0 ||
-    minutes > 59
-  ) {
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) {
     throw new Error(
       `Invalid cronDailySessionStartTime in options.json: ${trimmed}. Expected HH:MM.`,
     );
@@ -126,8 +117,7 @@ export function normalizeBaseUrl(value: unknown): string {
     throw new Error(`Invalid baseUrl in options.json: ${trimmed}. Expected a URL path.`);
   }
 
-  const normalized = `/${trimmed.replace(/^\/+/, "").replace(/\/+$/, "")}`;
-  return normalized === "/" ? "/" : normalized;
+  return `/${trimmed.replace(/^\/+/, "").replace(/\/+$/, "")}`;
 }
 
 function normalizeOptionalString(value: unknown): string | undefined {
@@ -202,7 +192,7 @@ function normalizeWorkspacesRoots(options: StoredAppOptions | undefined): string
   ];
 }
 
-function normalizeStoredOptions(options: StoredAppOptions | undefined): StoredAppOptions {
+function normalizeStoredOptions(options: StoredAppOptions | undefined): AppOptions {
   const workspacesRoots = normalizeWorkspacesRoots(options);
 
   return {
@@ -234,13 +224,10 @@ function normalizeStoredOptions(options: StoredAppOptions | undefined): StoredAp
   };
 }
 
-function missingRequiredOptions(options: StoredAppOptions): string[] {
-  const missing: string[] = REQUIRED_OPTION_KEYS.filter((key) => {
-    const value = options[key];
-    return typeof value !== "string" || value.length === 0;
-  });
+function missingRequiredOptions(options: AppOptions): string[] {
+  const missing = options.webPushSubject ? [] : ["webPushSubject"];
 
-  if (!Array.isArray(options.workspacesRoots) || options.workspacesRoots.length === 0) {
+  if (options.workspacesRoots.length === 0) {
     missing.unshift("workspacesRoots");
   }
 
@@ -277,7 +264,7 @@ export async function loadAppOptions(projectRoot: string): Promise<AppOptions> {
     await writeStoredOptions(projectRoot, normalized);
   }
 
-  return normalized as AppOptions;
+  return normalized;
 }
 
 export async function ensureOptionsFile(projectRoot: string): Promise<AppOptions> {
@@ -364,10 +351,9 @@ export async function setBraveSearchKey(
   apiKey: string | undefined,
 ): Promise<AppOptions> {
   const options = await loadAppOptions(projectRoot);
-  const normalizedApiKey = apiKey?.trim();
   const nextOptions: AppOptions = {
     ...options,
-    braveSearchKey: normalizedApiKey ? normalizedApiKey : undefined,
+    braveSearchKey: normalizeOptionalString(apiKey),
   };
 
   await writeStoredOptions(projectRoot, nextOptions);

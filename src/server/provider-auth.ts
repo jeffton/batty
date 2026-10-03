@@ -20,11 +20,6 @@ type Deferred<T> = {
 };
 
 interface ProviderAuthAttempt {
-  id: string;
-  providerId: string;
-  authUrl: string;
-  instructions?: string;
-  createdAt: number;
   expiresAt: number;
   completed: boolean;
   finalError?: Error;
@@ -222,10 +217,6 @@ export class ProviderAuthService {
       });
 
     this.attempts.set(attemptId, {
-      id: attemptId,
-      providerId,
-      authUrl: "",
-      createdAt,
       expiresAt,
       completed: false,
       manualInput,
@@ -236,9 +227,7 @@ export class ProviderAuthService {
 
     try {
       const info = await authInfo.promise;
-      const attempt = this.requireAttempt(attemptId);
-      attempt.authUrl = info.url;
-      attempt.instructions = info.instructions;
+      this.requireAttempt(attemptId);
       return {
         attemptId,
         providerId,
@@ -256,12 +245,6 @@ export class ProviderAuthService {
   async complete(attemptId: string, callbackUrl: string): Promise<void> {
     this.cleanupExpiredAttempts();
     const attempt = this.requireAttempt(attemptId);
-
-    if (Date.now() > attempt.expiresAt) {
-      const error = new Error("Auth attempt expired");
-      attempt.finalError = error;
-      throw error;
-    }
 
     if (attempt.completed) {
       this.attempts.delete(attemptId);

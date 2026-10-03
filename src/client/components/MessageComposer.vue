@@ -198,11 +198,6 @@ let lastEarlyAction:
   | undefined;
 
 function updateMaxInputHeight(): void {
-  if (typeof window === "undefined") {
-    maxInputHeight.value = 240;
-    return;
-  }
-
   maxInputHeight.value = Math.min(Math.max(Math.round(window.innerHeight * 0.34), 160), 320);
   syncTextareaHeight();
 }
@@ -253,29 +248,16 @@ function restore(sessionKey: string, textValue: string, nextFiles: File[]): void
   void nextTick(scheduleTextareaHeightSync);
 }
 
-function submit(): void {
-  if (!hasPayload.value || actionsDisabled.value) {
-    return;
-  }
-
-  emit("submit", text.value, [...files.value]);
-}
-
-function steer(): void {
-  if (!hasPayload.value || actionsDisabled.value) {
-    return;
-  }
-
-  emit("steer", text.value, [...files.value]);
-}
-
 function runAction(kind: "submit" | "steer"): void {
-  if (kind === "submit") {
-    submit();
+  if (!hasPayload.value || actionsDisabled.value) {
     return;
   }
 
-  steer();
+  if (kind === "submit") {
+    emit("submit", text.value, [...files.value]);
+  } else {
+    emit("steer", text.value, [...files.value]);
+  }
 }
 
 function triggerActionEarly(kind: "submit" | "steer", event: PointerEvent): void {
@@ -317,7 +299,7 @@ function onTextareaKeydown(event: KeyboardEvent): void {
   }
 
   event.preventDefault();
-  submit();
+  runAction("submit");
 }
 
 function openFilePicker(): void {

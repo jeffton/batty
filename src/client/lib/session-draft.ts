@@ -5,10 +5,6 @@ export function sessionDraftStorageKey(sessionId: string): string {
 }
 
 export function readSessionDraft(sessionId: string): string {
-  if (typeof window === "undefined") {
-    return "";
-  }
-
   try {
     return window.localStorage.getItem(sessionDraftStorageKey(sessionId)) ?? "";
   } catch {
@@ -17,10 +13,6 @@ export function readSessionDraft(sessionId: string): string {
 }
 
 export function writeSessionDraft(sessionId: string, text: string): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-
   try {
     if (text.length === 0) {
       window.localStorage.removeItem(sessionDraftStorageKey(sessionId));
@@ -34,13 +26,5 @@ export function writeSessionDraft(sessionId: string, text: string): void {
 }
 
 export function clearSessionDraft(sessionId: string): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.removeItem(sessionDraftStorageKey(sessionId));
-  } catch {
-    // Ignore storage errors; drafts are best-effort.
-  }
+  writeSessionDraft(sessionId, "");
 }

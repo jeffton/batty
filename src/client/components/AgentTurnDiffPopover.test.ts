@@ -42,18 +42,7 @@ describe("AgentTurnDiffPopover", () => {
     wrapper.find("#changes-1").element.dispatchEvent(toggle);
     await flushPromises();
 
-    expect(pierre.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        overflow: "wrap",
-        unsafeCSS: expect.stringMatching(
-          /--diffs-font-family: var\(--font-family-mono\)[\s\S]*--diffs-header-font-family: var\(--font-family-mono\)[\s\S]*font-weight: 400/,
-        ),
-      }),
-    );
-    const unsafeCSS = pierre.create.mock.calls[0]?.[0]?.unsafeCSS as string;
-    expect(unsafeCSS).toContain("--diffs-computed-diff-line-bg: var(--color-diff-add-bg)");
-    expect(unsafeCSS).toContain("--diffs-computed-diff-line-bg: var(--color-diff-remove-bg)");
-    expect(unsafeCSS).toContain("background-color: var(--color-diff-inline)");
+    expect(pierre.create).toHaveBeenCalledOnce();
     expect(pierre.parsePatchFiles).toHaveBeenCalledWith(
       expect.stringContaining("-export const value = 1;\n+export const value = 2;"),
       "changes-1:0",

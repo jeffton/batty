@@ -4,7 +4,7 @@ import {
   shouldUpdateSessionSummary,
   shouldWriteSessionCache,
 } from "@/client/lib/session-events";
-import type { SessionState } from "@/shared/types";
+import type { ServerEvent, SessionState } from "@/shared/types";
 
 const baseState: SessionState = {
   id: "web-1",
@@ -28,67 +28,21 @@ const baseState: SessionState = {
   activeTools: [],
 };
 
-describe("session event policies", () => {
-  it("persists transcript snapshots but not metadata-only events", () => {
-    expect(shouldWriteSessionCache({ type: "reset", state: baseState })).toBe(true);
-    expect(
-      shouldWriteSessionCache({
-        type: "state",
-        state: {
-          id: baseState.id,
-          sessionId: baseState.sessionId,
-          workspaceId: baseState.workspaceId,
-          cwd: baseState.cwd,
-          path: baseState.path,
-          model: baseState.model,
-          modelLabel: baseState.modelLabel,
-          thinkingLevel: baseState.thinkingLevel,
-          availableThinkingLevels: baseState.availableThinkingLevels,
-          isStreaming: baseState.isStreaming,
-          pendingMessageCount: baseState.pendingMessageCount,
-          updatedAt: baseState.updatedAt,
-          contextTokens: baseState.contextTokens,
-          contextWindow: baseState.contextWindow,
-          contextPercent: baseState.contextPercent,
-          totalMessageCount: baseState.totalMessageCount,
-          hasMoreMessages: baseState.hasMoreMessages,
-          title: baseState.title,
-        },
-      }),
-    ).toBe(false);
-    expect(shouldWriteSessionCache({ type: "assistant", assistant: undefined })).toBe(false);
-    expect(shouldWriteSessionCache({ type: "tools", tools: [] })).toBe(false);
-  });
+const { messages: _messages, activeTools: _activeTools, ...baseMetadata } = baseState;
 
-  it("only refreshes session summaries for reset and metadata state events", () => {
-    expect(shouldUpdateSessionSummary({ type: "reset", state: baseState })).toBe(true);
-    expect(
-      shouldUpdateSessionSummary({
-        type: "state",
-        state: {
-          id: baseState.id,
-          sessionId: baseState.sessionId,
-          workspaceId: baseState.workspaceId,
-          cwd: baseState.cwd,
-          path: baseState.path,
-          model: baseState.model,
-          modelLabel: baseState.modelLabel,
-          thinkingLevel: baseState.thinkingLevel,
-          availableThinkingLevels: baseState.availableThinkingLevels,
-          isStreaming: baseState.isStreaming,
-          pendingMessageCount: baseState.pendingMessageCount,
-          updatedAt: baseState.updatedAt,
-          contextTokens: baseState.contextTokens,
-          contextWindow: baseState.contextWindow,
-          contextPercent: baseState.contextPercent,
-          totalMessageCount: baseState.totalMessageCount,
-          hasMoreMessages: baseState.hasMoreMessages,
-          title: baseState.title,
-        },
-      }),
-    ).toBe(true);
-    expect(shouldUpdateSessionSummary({ type: "assistant", assistant: undefined })).toBe(false);
-  });
+describe("session event policies", () => {
+  it.each([
+    [{ type: "reset", state: baseState }, true, true],
+    [{ type: "state", state: baseMetadata }, false, true],
+    [{ type: "assistant", assistant: undefined }, false, false],
+    [{ type: "tools", tools: [] }, false, false],
+  ] satisfies [ServerEvent, boolean, boolean][])(
+    "selects cache and summary updates for %j",
+    (event, cache, summary) => {
+      expect(shouldWriteSessionCache(event)).toBe(cache);
+      expect(shouldUpdateSessionSummary(event)).toBe(summary);
+    },
+  );
 });
 
 describe("applyServerEvent", () => {
@@ -107,25 +61,8 @@ describe("applyServerEvent", () => {
 
     const next = applyServerEvent(previous, {
       type: "state",
-      state: {
-        id: previous.id,
-        sessionId: previous.sessionId,
-        workspaceId: previous.workspaceId,
-        cwd: previous.cwd,
-        path: previous.path,
-        model: previous.model,
-        modelLabel: previous.modelLabel,
-        thinkingLevel: previous.thinkingLevel,
-        availableThinkingLevels: previous.availableThinkingLevels,
-        isStreaming: false,
-        pendingMessageCount: 2,
-        updatedAt: 200,
-        contextTokens: previous.contextTokens,
-        contextWindow: previous.contextWindow,
-        contextPercent: previous.contextPercent,
-        title: previous.title,
-      },
-    } as unknown as Parameters<typeof applyServerEvent>[1]);
+      state: { ...baseMetadata, isStreaming: false, pendingMessageCount: 2, updatedAt: 200 },
+    });
 
     expect(next?.pendingMessageCount).toBe(2);
     expect(next?.isStreaming).toBe(false);
@@ -136,7 +73,7 @@ describe("applyServerEvent", () => {
     const next = applyServerEvent(baseState, {
       type: "reset",
       state: { ...baseState, pendingMessageCount: 2 },
-    } as unknown as Parameters<typeof applyServerEvent>[1]);
+    });
     expect(next?.pendingMessageCount).toBe(2);
   });
 
@@ -202,7 +139,7 @@ describe("applyServerEvent", () => {
     const next = applyServerEvent(previous, {
       type: "reset",
       state: { ...previous, isStreaming: false, activeTools: [] },
-    } as unknown as Parameters<typeof applyServerEvent>[1]);
+    });
 
     expect(next?.activeTools).toEqual([]);
   });

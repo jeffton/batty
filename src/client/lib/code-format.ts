@@ -41,22 +41,16 @@ function normalizeLanguage(language?: string): string | undefined {
     case "vue":
       return "xml";
     case "js":
-    case "javascript":
       return "javascript";
     case "ts":
-    case "typescript":
       return "typescript";
     case "md":
-    case "markdown":
       return "markdown";
     case "yml":
-    case "yaml":
       return "yaml";
     case "shell":
     case "sh":
-    case "bash":
       return "bash";
-    case "powershell":
     case "ps1":
       return "powershell";
     default:
@@ -66,11 +60,9 @@ function normalizeLanguage(language?: string): string | undefined {
 
 export function highlightCode(code: string, language?: string): string {
   const normalized = normalizeLanguage(language);
-  const value = normalized
+  return normalized
     ? hljs.highlight(code, { language: normalized, ignoreIllegals: true }).value
     : hljs.highlightAuto(code, AUTO_DETECT_LANGUAGES).value;
-
-  return value;
 }
 
 function encodedTextLength(html: string): number {

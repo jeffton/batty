@@ -42,7 +42,6 @@ export interface WebSession {
   autoRetryActive?: boolean;
   isCompacting?: boolean;
   agentCompleted?: boolean;
-  suppressNextAgentEndCompletion?: boolean;
   revision?: number;
   streamId: string;
   eventLog?: Array<{ revision: number; event: ServerEvent }>;
@@ -73,7 +72,7 @@ export function toModelOption(model: Model<Api>): ModelOption {
 }
 
 export function sessionUpdatedAt(session: AgentSession, openedAt: number): number {
-  const lastMessage = [...session.messages].reverse().find((message) => "timestamp" in message);
+  const lastMessage = session.messages.findLast((message) => "timestamp" in message);
   return typeof lastMessage?.timestamp === "number" ? lastMessage.timestamp : openedAt;
 }
 

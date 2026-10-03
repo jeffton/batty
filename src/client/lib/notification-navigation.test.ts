@@ -1,8 +1,5 @@
 import { afterEach, describe, expect, it } from "vite-plus/test";
-import {
-  NOTIFICATION_NAVIGATION_MESSAGE_TYPE,
-  notificationPathFromUrl,
-} from "@/client/lib/notification-navigation";
+import { notificationPathFromUrl } from "@/client/lib/notification-navigation";
 
 afterEach(() => {
   delete window.__BATTY_BASE_URL__;
@@ -33,9 +30,5 @@ describe("notificationPathFromUrl", () => {
     expect(notificationPathFromUrl("https://example.com/nope", "https://batty.test")).toBe(
       undefined,
     );
-  });
-
-  it("exports a stable message type", () => {
-    expect(NOTIFICATION_NAVIGATION_MESSAGE_TYPE).toBe("notification-navigate");
   });
 });

@@ -62,64 +62,6 @@ export const ZERO_USAGE: Usage = {
   },
 };
 
-function isToolCallBlock(value: unknown): value is { type: "toolCall"; id: string } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as { type?: unknown }).type === "toolCall" &&
-    typeof (value as { id?: unknown }).id === "string"
-  );
-}
-
-function extractTextContent(content: unknown): string {
-  if (typeof content === "string") {
-    return content.trim();
-  }
-
-  if (!Array.isArray(content)) {
-    return "";
-  }
-
-  return content
-    .flatMap((block) =>
-      typeof block === "object" && block !== null && (block as { type?: unknown }).type === "text"
-        ? [String((block as { text?: unknown }).text ?? "")]
-        : [],
-    )
-    .join("")
-    .trim();
-}
-
-export function cloneMessagesForSubagent(
-  messages: AgentMessage[],
-  currentToolCallId?: string,
-  injectedPrompt?: string,
-): AgentMessage[] {
-  const cloned = structuredClone(messages) as AgentMessage[];
-
-  const lastMessage = cloned.at(-1);
-  if (
-    currentToolCallId &&
-    lastMessage?.role === "assistant" &&
-    Array.isArray(lastMessage.content) &&
-    lastMessage.content.some((block) => isToolCallBlock(block) && block.id === currentToolCallId)
-  ) {
-    cloned.pop();
-  }
-
-  const trimmedPrompt = injectedPrompt?.trim();
-  const trailingMessage = cloned.at(-1);
-  if (
-    trimmedPrompt &&
-    trailingMessage?.role === "user" &&
-    extractTextContent(trailingMessage.content) === trimmedPrompt
-  ) {
-    cloned.pop();
-  }
-
-  return cloned;
-}
-
 export function extractAssistantText(
   message: { role: string; content?: unknown } | undefined,
 ): string {
@@ -151,15 +93,11 @@ export function findLastAssistantMessage(messages: AgentMessage[]): AssistantMes
 export function stripThinkingFromAssistantMessage(
   message: AssistantMessage | undefined,
 ): AssistantMessage | undefined {
-  if (!message || !Array.isArray(message.content)) {
-    return message;
-  }
+  if (!message) return undefined;
 
   return {
     ...message,
-    content: message.content.filter(
-      (block) => typeof block === "object" && block !== null && block.type !== "thinking",
-    ) as AssistantMessage["content"],
+    content: message.content.filter((block) => block.type !== "thinking"),
   };
 }
 
@@ -230,13 +168,6 @@ export function collectSites(messages: AgentMessage[]): SiteDescriptor[] {
   return sites;
 }
 
-export function newlyGeneratedSubagentMessages(
-  messages: AgentMessage[],
-  seedMessageCount: number,
-): AgentMessage[] {
-  return messages.slice(seedMessageCount);
-}
-
 export function buildSubagentDetails(
   input: Required<Pick<SubagentToolInput, "prompt">> & {
     model: string;
@@ -257,7 +188,7 @@ export function buildSubagentDetails(
   const generatedMessages = options?.generatedMessages ?? [];
   const sentFiles = collectSentFiles(generatedMessages);
   const sites = collectSites(generatedMessages);
-  const fileChanges = (options?.generatedMessages ?? []).flatMap((message) =>
+  const fileChanges = generatedMessages.flatMap((message) =>
     message.role === "toolResult"
       ? ((message.details as { battyFileChanges?: unknown[] })?.battyFileChanges ?? [])
       : [],
@@ -292,12 +223,12 @@ export function isSubagentSessionEntry(
 export function hasSubagentSessionMarker(
   entries: Array<{ type?: unknown; customType?: unknown }>,
 ): boolean {
-  return entries.some((entry) => isSubagentSessionEntry(entry));
+  return entries.some(isSubagentSessionEntry);
 }
 
 export function getSubagentSessionDepth(
   entries: Array<{ type?: unknown; customType?: unknown; data?: unknown }>,
 ): number {
-  const marker = entries.findLast((entry) => isSubagentSessionEntry(entry));
+  const marker = entries.findLast(isSubagentSessionEntry);
   return marker ? (marker.data as { depth: number }).depth : 0;
 }

@@ -14,7 +14,7 @@ function isEventInsideOpenPopover(event: Event, popovers: readonly HTMLElement[]
 
 function closeOpenPopovers(popovers: readonly HTMLElement[]): void {
   for (const popover of popovers) {
-    popover.hidePopover?.();
+    popover.hidePopover();
   }
 }
 

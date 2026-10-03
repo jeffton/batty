@@ -344,9 +344,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else-if="props.message.role === 'custom'" class="message__body">
-      <div
-        :class="['message__system-bubble', { 'message__system-bubble--runtime': isRuntimeNotice }]"
-      >
+      <div class="message__system-bubble">
         <span class="message__system-icon" aria-hidden="true">
           <Cog :size="16" />
         </span>
@@ -730,11 +728,6 @@ onBeforeUnmount(() => {
 
 .message__notice-text:has(+ .markdown-body) {
   margin-bottom: 0.55rem;
-}
-
-.message__system-bubble--runtime {
-  background: var(--color-info-soft);
-  color: var(--color-info);
 }
 
 .message__runtime-markdown {

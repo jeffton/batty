@@ -144,16 +144,14 @@ self.addEventListener("notificationclick", (event) => {
         notifyClient(client, targetUrl);
       }
 
-      const existingClient = sameOriginClients.find(
-        (client) => "navigate" in client && "focus" in client,
-      );
+      const existingClient = sameOriginClients[0];
       if (existingClient) {
         await routeClient(existingClient, targetUrl);
         return;
       }
 
       const opened = await self.clients.openWindow(targetUrl);
-      if (opened && "focus" in opened && "navigate" in opened) {
+      if (opened) {
         await routeClient(opened, targetUrl);
       }
     }),

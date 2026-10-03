@@ -24,10 +24,7 @@ const emit = defineEmits<{
   toggleDetails: [sectionKey: string];
 }>();
 
-type TranscriptHistoryHandle = InstanceType<typeof Virtualizer>;
-
 const transcript = ref<HTMLElement | null>(null);
-const transcriptHistory = ref<TranscriptHistoryHandle | null>(null);
 const transcriptTop = ref<HTMLElement | null>(null);
 const transcriptTail = ref<HTMLElement | null>(null);
 const transcriptBottom = ref<HTMLElement | null>(null);
@@ -68,7 +65,6 @@ defineExpose({
       <div ref="transcriptTop" class="transcript__top" aria-hidden="true" />
       <Virtualizer
         v-if="props.historyEntries.length > 0"
-        ref="transcriptHistory"
         class="transcript__history"
         :data="props.historyEntries"
         :keep-mounted="props.keptHistoryIndexes"

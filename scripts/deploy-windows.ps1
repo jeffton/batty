@@ -23,11 +23,7 @@ function Ensure-Directory([string]$path) {
 }
 
 function Normalize-BaseUrl([string]$path) {
-  $normalized = "/" + $path.Trim().Trim("/").Replace("\", "/")
-  if ($normalized -eq "/") {
-    return "/"
-  }
-  return $normalized
+  return "/" + $path.Trim().Trim("/").Replace("\", "/")
 }
 
 $BaseUrl = Normalize-BaseUrl $BaseUrl

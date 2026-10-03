@@ -26,7 +26,6 @@ import {
   normalizeStoredSession,
   normalizeStoredThinkingLevel,
   normalizeThinkingLevel,
-  toPublicSession,
   type StoredCronJobSession,
 } from "./cron-state";
 import { listWorkspaces } from "./workspaces";
@@ -197,7 +196,7 @@ export function toCronJob(job: StoredCronJob): CronJob {
     prompt: job.prompt,
     model: job.model,
     thinkingLevel: job.thinkingLevel,
-    session: toPublicSession(job.session),
+    session: { ...job.session },
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     schedule: toPublicSchedule(job.schedule),

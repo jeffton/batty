@@ -49,9 +49,6 @@ $currentDir = Join-Path $InstallRoot "current"
 
 try {
   $backendPath = $BaseUrl.TrimEnd("/")
-  if ($backendPath -eq "/") {
-    $backendPath = ""
-  }
   $releaseDir = Join-Path (Join-Path $InstallRoot "releases") $ReleaseName
   $cliPath = Join-Path $releaseDir "dist\server\cli.mjs"
   if (-not (Test-Path (Join-Path $releaseDir "dist\server\main.mjs")) -or -not (Test-Path $cliPath)) {

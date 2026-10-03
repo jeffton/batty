@@ -166,45 +166,14 @@ const emit = defineEmits<{
   white-space: nowrap;
 }
 
-.header__chevron,
-.header__model-caret {
+.header__chevron {
   color: var(--color-text-subtle);
   flex-shrink: 0;
 }
 
-.header__model-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  flex: 0 1 auto;
-  overflow: hidden;
-  border: 0;
-  border-radius: 0.5rem;
-  background: transparent;
-  color: inherit;
-  padding: 0.3rem 0.45rem;
-  min-width: 0;
-  transition: background 80ms ease;
-}
-
-@media (hover: hover) {
-  .header__model-btn:hover:not(:disabled) {
-    background: var(--color-bg-elevated);
-  }
-}
-
-.header__model-btn:disabled,
 .header__icon-btn:disabled {
   opacity: 0.5;
   cursor: default;
-}
-
-.header__model-info {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  line-height: 1.25;
-  text-align: left;
 }
 
 .header__icon-btn {
@@ -224,23 +193,6 @@ const emit = defineEmits<{
   .header__icon-btn:hover:not(:disabled) {
     background: var(--color-bg-elevated);
   }
-}
-
-.header__model-name {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--color-text-strong);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.header__model-effort {
-  font-size: 0.75rem;
-  color: var(--color-text-subtle);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .header__spacer {

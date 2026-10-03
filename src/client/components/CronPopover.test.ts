@@ -368,19 +368,6 @@ describe("CronPopover", () => {
     await flushPromises();
   });
 
-  it("closes from the header button", async () => {
-    const wrapper = mount(CronPopover, {
-      props: { popoverId: "cron-popover", anchorName: "--cron-anchor" },
-    });
-    const hidePopover = vi.fn();
-    (wrapper.element as HTMLElement & { hidePopover: () => void }).hidePopover = hidePopover;
-
-    expect(wrapper.text()).toContain("Cron and subagents");
-    await wrapper.find('[aria-label="Close cron and subagents popover"]').trigger("click");
-
-    expect(hidePopover).toHaveBeenCalledOnce();
-  });
-
   it("shows running subagents for the current session and opens them", async () => {
     const store = useAppStore();
     store.activeSession = {

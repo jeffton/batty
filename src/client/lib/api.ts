@@ -442,7 +442,7 @@ export function getSessionMessages(
   if (options.before) {
     params.set("before", options.before);
   }
-  if (typeof options.limit === "number" && Number.isFinite(options.limit)) {
+  if (options.limit !== undefined) {
     params.set("limit", String(Math.floor(options.limit)));
   }
 

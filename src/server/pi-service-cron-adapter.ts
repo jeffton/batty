@@ -268,7 +268,7 @@ export async function runCronJobSession(
     cronRunSignals.delete(cronWebSession.session);
   }
 
-  const finalAssistant = await lastCronAssistant(cronWebSession.session, job.runId);
+  const finalAssistant = lastCronAssistant(cronWebSession.session, job.runId);
   const errorMessage = finalAssistantError(finalAssistant);
   const sharedSites = (
     finalAssistant as (AssistantMessage & { battyDeliveredSites?: SiteDescriptor[] }) | undefined
@@ -475,7 +475,7 @@ export async function deliverCronJobRun(
     captured = {
       sessionId: child.sessionId,
       sessionPath: child.sessionFile,
-      finalAssistant: await lastCronAssistant(child, job.runId),
+      finalAssistant: lastCronAssistant(child, job.runId),
     };
   } finally {
     if (opened.owned) context.disposeSession(opened.state.id);
@@ -658,10 +658,7 @@ function findRunAssistant(
   return entry?.type === "message" ? (entry.message as AssistantMessage) : undefined;
 }
 
-async function lastCronAssistant(
-  session: AgentSession,
-  runId: string,
-): Promise<AssistantMessage | undefined> {
+function lastCronAssistant(session: AgentSession, runId: string): AssistantMessage | undefined {
   const result = getCronExecutionResult(session, runId);
   if (!result || result.status === "running") return undefined;
   const operationEntries = cronRunEntries(session, result.startEntryId, result.endEntryId);
@@ -773,8 +770,7 @@ function deliveredAssistant(
       ? error.message
       : String(error)
     : finalAssistantError(finalAssistant);
-  const text =
-    (finalAssistant ? extractAssistantText(finalAssistant) : "") || errorMessage || "(no output)";
+  const text = extractAssistantText(finalAssistant) || errorMessage || "(no output)";
   return {
     role: "assistant",
     content: [{ type: "text", text }],
@@ -799,20 +795,7 @@ function finalAssistantError(message: AssistantMessage | undefined): string | un
 }
 
 function assistantHasRenderableContent(message: AssistantMessage): boolean {
-  if (!Array.isArray(message.content)) {
-    return false;
-  }
-
-  return message.content.some((block) => {
-    if (typeof block !== "object" || block === null) {
-      return false;
-    }
-    if (block.type === "thinking") {
-      return false;
-    }
-    if (block.type === "text") {
-      return typeof block.text === "string" && block.text.trim().length > 0;
-    }
-    return true;
-  });
+  return message.content.some((block) =>
+    block.type === "text" ? block.text.trim().length > 0 : block.type !== "thinking",
+  );
 }

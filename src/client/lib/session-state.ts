@@ -136,16 +136,9 @@ export function mergeSessionState(
   const messages = retainDetailedMessages
     ? mergeSummaryMessages(normalizedIncoming.messages, normalizedPrevious.messages)
     : mergeSessionMessages(normalizedIncoming, normalizedPrevious);
-  const activeAssistant = normalizedIncoming.activeAssistant;
-
   return normalizeSessionState({
     ...normalizedIncoming,
-    messagesDetailLevel: normalizedIncoming.messagesDetailLevel,
     messages,
-    activeAssistant,
-    activeTools: mergeRetainedActiveTools(
-      { ...normalizedIncoming, messages, activeAssistant },
-      normalizedPrevious,
-    ),
+    activeTools: mergeRetainedActiveTools({ ...normalizedIncoming, messages }, normalizedPrevious),
   });
 }

@@ -168,7 +168,7 @@ export async function createPiAgentSession({
       : []),
     ...customTools,
   ];
-  const restoredToolNames = restored?.activeToolNames;
+  const restoredToolNames = restored.activeToolNames;
   const settingsManager = SettingsManager.inMemory({
     ...settings,
     sessionDir: workspaceSessionDir(config, workspace.id),
@@ -279,7 +279,7 @@ export async function createPiAgentSession({
     modelRuntime,
     model: selected,
     thinkingLevel: (thinkingLevel ??
-      restored?.thinkingLevel ??
+      restored.thinkingLevel ??
       settings.defaultThinkingLevel ??
       "off") as ThinkingLevel,
     sessionManager: sessionManager.native,
@@ -299,10 +299,9 @@ export async function createPiAgentSession({
     });
     session.regularToolNames = new Set(tools.map((tool) => tool.name));
     if (restoredToolNames) {
-      const battyTools = new Set(tools.map((tool) => tool.name));
       const extensionTools = result.session
         .getActiveToolNames()
-        .filter((name) => !battyTools.has(name));
+        .filter((name) => !session.regularToolNames.has(name));
       result.session.setActiveToolsByName(
         battyActivePiToolNames(
           [...restoredToolNames, ...extensionTools, "codemode"],

@@ -27,11 +27,6 @@ export type StoredCronJobSchedule =
   | StoredCronJobEverySchedule
   | StoredCronJobCronSchedule;
 
-function isDurationString(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  return normalized.startsWith("+") || normalized.startsWith("in ") || /\d/.test(normalized);
-}
-
 export function parseDurationMs(value: string): number {
   const normalized = value
     .trim()
@@ -96,7 +91,7 @@ export function normalizeAtInput(
     );
   }
 
-  if (isDurationString(rawAt) && /^(?:\+|in\s+)/i.test(rawAt)) {
+  if (/^(?:\+|in\s+)/i.test(rawAt)) {
     return new Date(now + parseDurationMs(rawAt)).toISOString();
   }
 
@@ -175,7 +170,7 @@ export function nextEveryRunAtMs(schedule: StoredCronJobEverySchedule, now = Dat
     return schedule.anchorAtMs;
   }
 
-  const elapsed = Math.max(0, now - schedule.anchorAtMs);
+  const elapsed = now - schedule.anchorAtMs;
   const intervalsElapsed = Math.floor(elapsed / schedule.everyMs);
   const candidate = schedule.anchorAtMs + (intervalsElapsed + 1) * schedule.everyMs;
   return candidate > now ? candidate : candidate + schedule.everyMs;

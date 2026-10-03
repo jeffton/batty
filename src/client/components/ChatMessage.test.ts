@@ -356,68 +356,6 @@ describe("ChatMessage", () => {
     expect(wrapper.find(".message__copy-button").exists()).toBe(false);
   });
 
-  it("renders propagated subagent attachments at the end of the outer assistant response", () => {
-    const message: Extract<UiMessage, { role: "assistant" }> = {
-      id: "assistant-2",
-      role: "assistant",
-      turnPhase: "final",
-      timestamp: 2,
-      blocks: [
-        { type: "text", text: "Morning report" },
-        {
-          type: "toolCall",
-          id: "subagent-1",
-          name: "attach-files",
-          arguments: {},
-        },
-      ],
-    };
-    const toolStatesByCallId = new Map<string, ToolDisplayState>([
-      [
-        "subagent-1",
-        {
-          status: "success",
-          resultBlocks: [{ type: "text", text: "Report complete." }],
-          resultDetails: {
-            sentFiles: [
-              {
-                id: "image-1",
-                name: "webcam.jpg",
-                size: 2048,
-                mimeType: "image/jpeg",
-                kind: "image",
-                downloadUrl: "/api/sent-files/workspace/session/call/image-1?download=1",
-                previewUrl: "/api/sent-files/workspace/session/call/image-1",
-              },
-            ],
-            subagent: {
-              prompt: "Build the morning report",
-              model: "openai/gpt-5",
-              effort: "medium",
-              includePreviousContext: true,
-              respondIn: "tool-call",
-              messageCount: 3,
-            },
-          },
-        },
-      ],
-    ]);
-
-    const wrapper = mount(ChatMessage, {
-      props: {
-        message,
-        toolStatesByCallId,
-      },
-    });
-
-    expect(wrapper.text()).toContain("Morning report");
-    expect(wrapper.text()).not.toContain("Report complete.");
-    expect(wrapper.findAll(".attached-files__card")).toHaveLength(1);
-    expect(wrapper.find("img.attached-files__preview").attributes("src")).toBe(
-      "/api/sent-files/workspace/session/call/image-1",
-    );
-  });
-
   it("renders assistant thinking summaries with the existing italic styling", () => {
     const message: Extract<UiMessage, { role: "assistant" }> = {
       id: "assistant-thinking-1",

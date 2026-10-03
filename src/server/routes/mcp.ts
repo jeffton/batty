@@ -1,5 +1,5 @@
 import type { McpServerConfig } from "@/shared/types";
-import { listWorkspaces, resolveWorkspace } from "../workspaces";
+import { listWorkspaces } from "../workspaces";
 import type { RouteContext } from "./context";
 
 const SERVER_NAME = /^[A-Za-z0-9_-]+$/;
@@ -11,11 +11,7 @@ export function registerMcpRoutes(context: RouteContext): void {
   async function workspaceFor(workspaceId?: string) {
     if (!workspaceId) return undefined;
     const workspaces = await listWorkspaces(config);
-    try {
-      return resolveWorkspace(workspaces, workspaceId);
-    } catch {
-      return undefined;
-    }
+    return workspaces.find((workspace) => workspace.id === workspaceId);
   }
 
   app.get<{ Querystring: { workspaceId?: string } }>(

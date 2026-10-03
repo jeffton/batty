@@ -90,7 +90,16 @@ describe("WorkspaceBrowserPane", () => {
       workspaceId: "assistant",
       sessionId: "daily",
     } as never);
-    const wrapper = shallowMount(WorkspaceBrowserPane);
+    const wrapper = shallowMount(WorkspaceBrowserPane, {
+      global: {
+        stubs: {
+          BasePopover: {
+            template: "<div><slot /></div>",
+            methods: { hidePopover: vi.fn() },
+          },
+        },
+      },
+    });
 
     const footer = wrapper.findComponent(WorkspaceBrowserFooter);
     expect(footer.exists()).toBe(true);

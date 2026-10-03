@@ -30,8 +30,8 @@ export function findLatestDailyCronSessionBinding(
   entries: Array<{ type: string; customType?: string; data?: unknown }>,
 ): DailyCronSessionBinding | undefined {
   for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = entries[index];
-    if (entry?.type !== "custom" || entry.customType !== CRON_SESSION_CUSTOM_TYPE) {
+    const entry = entries[index]!;
+    if (entry.type !== "custom" || entry.customType !== CRON_SESSION_CUSTOM_TYPE) {
       continue;
     }
     if (isDailyCronSessionBinding(entry.data)) {
@@ -115,16 +115,9 @@ function parseDailySessionStartTime(startTime: string): number {
     throw new Error(`Invalid daily session start time: ${startTime}`);
   }
 
-  const hours = Number.parseInt(match[1] ?? "", 10);
-  const minutes = Number.parseInt(match[2] ?? "", 10);
-  if (
-    !Number.isInteger(hours) ||
-    !Number.isInteger(minutes) ||
-    hours < 0 ||
-    hours > 23 ||
-    minutes < 0 ||
-    minutes > 59
-  ) {
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) {
     throw new Error(`Invalid daily session start time: ${startTime}`);
   }
 

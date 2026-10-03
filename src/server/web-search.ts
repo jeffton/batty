@@ -435,13 +435,12 @@ async function extractPdfContent(data: Uint8Array): Promise<string> {
           void settle({ error: new Error("PDF text extraction timed out") });
         }, PDF_EXTRACTION_TIMEOUT_MS);
 
-        worker.once("message", (message: { ok: boolean; text?: string; error?: string }) => {
-          void settle(
-            message.ok
-              ? { text: message.text! }
-              : { error: new Error(message.error ?? "Unknown PDF extraction failure") },
-          );
-        });
+        worker.once(
+          "message",
+          (message: { ok: true; text: string } | { ok: false; error: string }) => {
+            void settle(message.ok ? { text: message.text } : { error: new Error(message.error) });
+          },
+        );
         worker.once("error", (error) => {
           void settle({ error: error instanceof Error ? error : new Error(String(error)) });
         });
@@ -572,7 +571,7 @@ async function fetchBraveResults(
 ): Promise<WebSearchResultItem[]> {
   const params = new URLSearchParams({
     q: query,
-    count: String(Math.min(Math.max(Math.floor(count), 1), 20)),
+    count: String(count),
     country,
   });
 

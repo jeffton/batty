@@ -93,9 +93,7 @@ export function getSessionMessagePage(
   const limit = clampMessagePageSize(options?.limit);
   const beforeIndex = messageIndexFromId(options?.beforeMessageId);
   const end =
-    typeof beforeIndex === "number" && beforeIndex >= 0
-      ? Math.min(beforeIndex, totalMessageCount)
-      : totalMessageCount;
+    beforeIndex !== undefined ? Math.min(beforeIndex, totalMessageCount) : totalMessageCount;
   const countBoundedStart = Math.max(0, end - limit);
   const start = byteBoundedPageStart(allMessages, countBoundedStart, end);
 

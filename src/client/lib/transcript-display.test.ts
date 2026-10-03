@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { buildTranscriptDisplayEntries } from "@/client/lib/transcript-display";
 import type { ToolDisplayState, TranscriptMessageView } from "@/client/lib/transcript";
 import type { UiMessage } from "@/shared/types";
+import type { TranscriptDisplayEntry } from "@/client/lib/transcript-display";
 
 function view(message: UiMessage): TranscriptMessageView {
   return { message, toolStatesByCallId: new Map() };
@@ -103,16 +104,10 @@ function assistantThinkingError(id: string): TranscriptMessageView {
   });
 }
 
-function messageBlockCount(entry: unknown): number {
-  if (!entry || typeof entry !== "object" || !("kind" in entry) || entry.kind !== "message") {
-    return 0;
-  }
-
-  const messageEntry = entry as Extract<
-    ReturnType<typeof buildTranscriptDisplayEntries>["entries"][number],
-    { kind: "message" }
-  >;
-  return "blocks" in messageEntry.entry.message ? messageEntry.entry.message.blocks.length : 0;
+function messageBlockCount(entry: TranscriptDisplayEntry | undefined): number {
+  return entry?.kind === "message" && "blocks" in entry.entry.message
+    ? entry.entry.message.blocks.length
+    : 0;
 }
 
 const toolStates = new Map<string, ToolDisplayState>([

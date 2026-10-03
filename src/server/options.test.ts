@@ -10,6 +10,7 @@ import {
   setAssistantWorkspace,
   setBraveSearchKey,
   setDefaultModel,
+  type StoredAppOptions,
 } from "@/server/options";
 
 const tempDirs: string[] = [];
@@ -32,25 +33,12 @@ describe("ensureOptionsFile", () => {
       `Missing required options in ${optionsFilePath(battyDir)}: workspacesRoots, webPushSubject.`,
     );
 
-    const persisted = JSON.parse(await fs.readFile(optionsFilePath(battyDir), "utf8")) as {
-      authSecret: string;
-      workspacesRoots: string[];
-      webPushSubject: string;
-      cronDailySessionStartTime: string;
-      braveSearchKey?: string;
-      browserTailscaleSshDestination?: string;
-      browserMaxTabs?: number;
-      pinnedWorkspaceIds?: string[];
-      assistantWorkspaceId?: string;
-      defaultProvider?: string;
-      defaultModel?: string;
-      defaultThinkingLevel?: string;
-      baseUrl?: string;
-      appTitle?: string;
-      appColor?: string;
-    };
+    const persisted = JSON.parse(
+      await fs.readFile(optionsFilePath(battyDir), "utf8"),
+    ) as StoredAppOptions;
 
-    expect(persisted.authSecret.length).toBeGreaterThan(0);
+    expect(persisted.authSecret).toEqual(expect.any(String));
+    expect(persisted.authSecret).not.toBe("");
     expect(persisted.workspacesRoots).toEqual([]);
     expect(persisted.webPushSubject).toBe("");
     expect(persisted.cronDailySessionStartTime).toBe("04:00");
@@ -325,27 +313,30 @@ describe("ensureOptionsFile", () => {
     );
   });
 
-  it("rejects invalid cronDailySessionStartTime values", async () => {
-    const battyDir = await createBattyDir();
+  it.each(["25:00", "23:60", "-1:00", "4:0", "noon", 400])(
+    "rejects invalid cronDailySessionStartTime %s",
+    async (cronDailySessionStartTime) => {
+      const battyDir = await createBattyDir();
 
-    await fs.mkdir(path.dirname(optionsFilePath(battyDir)), { recursive: true });
-    await fs.writeFile(
-      optionsFilePath(battyDir),
-      `${JSON.stringify(
-        {
-          authSecret: "existing-secret",
-          workspacesRoots: ["/root/github"],
-          webPushSubject: "https://batty.roybot.se",
-          cronDailySessionStartTime: "25:00",
-        },
-        null,
-        2,
-      )}\n`,
-      "utf8",
-    );
+      await fs.mkdir(path.dirname(optionsFilePath(battyDir)), { recursive: true });
+      await fs.writeFile(
+        optionsFilePath(battyDir),
+        `${JSON.stringify(
+          {
+            authSecret: "existing-secret",
+            workspacesRoots: ["/root/github"],
+            webPushSubject: "https://batty.roybot.se",
+            cronDailySessionStartTime,
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
 
-    await expect(ensureOptionsFile(battyDir)).rejects.toThrow(
-      "Invalid cronDailySessionStartTime in options.json: 25:00. Expected HH:MM.",
-    );
-  });
+      await expect(ensureOptionsFile(battyDir)).rejects.toThrow(
+        `Invalid cronDailySessionStartTime in options.json: ${cronDailySessionStartTime}. Expected HH:MM.`,
+      );
+    },
+  );
 });

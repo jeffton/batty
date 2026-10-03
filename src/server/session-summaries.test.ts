@@ -557,7 +557,7 @@ describe("persistent session summary index", () => {
     const read = vi.spyOn(SessionStore, "read");
     const rebuilt = await getSessionSummaryIndex(config);
     await rebuilt.ensureInitialized(workspace.id);
-    expect(read).toHaveBeenCalledWith(file, { readOnly: true });
+    expect(read).toHaveBeenCalledWith(file);
     expect(rebuilt.list(workspace.id, "2026-03-25")[1]).toMatchObject({
       sessionId,
       path: file,
@@ -808,8 +808,8 @@ describe("persistent session summary index", () => {
     });
     const index = await getSessionSummaryIndex(config);
     const original = SessionStore.read.bind(SessionStore);
-    vi.spyOn(SessionStore, "read").mockImplementationOnce(async (file, options) => {
-      const stale = await original(file, options);
+    vi.spyOn(SessionStore, "read").mockImplementationOnce(async (file) => {
+      const stale = await original(file);
       await store.appendMessage({ role: "user", content: "new live message", timestamp: 100 });
       return stale;
     });

@@ -32,7 +32,7 @@ export class ModelConfigWatcher {
           console.error("Failed to reload models config", error);
         });
       }, WATCH_DEBOUNCE_MS);
-      this.reloadTimer.unref?.();
+      this.reloadTimer.unref();
     });
     this.watcher.on("error", (error) => {
       console.error("Failed to watch models config", error);

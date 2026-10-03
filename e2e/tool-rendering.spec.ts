@@ -839,7 +839,14 @@ test.describe("tool rendering", () => {
     await showToolCalls(page);
 
     await page.locator(".transcript").hover();
+    const scrollFinished = page.locator(".transcript").evaluate(
+      (element) =>
+        new Promise<void>((resolve) => {
+          element.addEventListener("scrollend", () => resolve(), { once: true });
+        }),
+    );
     await page.mouse.wheel(0, -300);
+    await scrollFinished;
 
     const before = await page.locator(".transcript").evaluate((element) => element.scrollTop);
 

@@ -70,30 +70,28 @@ export function updateEnvironmentFile(
   value?: string,
 ): Promise<string[]> {
   const previous = environmentWrites.get(battyDir) ?? Promise.resolve();
-  const update = previous
-    .catch(() => {})
-    .then(async () => {
-      const environment = await readEnvironmentFile(battyDir);
-      if (value === undefined && !Object.hasOwn(environment, name)) {
-        throw new Error("Environment variable not found");
-      }
-      const updated = Object.fromEntries(
-        Object.entries(environment).filter(([key]) => key !== name),
-      );
-      if (value !== undefined) updated[name] = value;
-      const filePath = environmentFilePath(battyDir);
-      await fs.mkdir(path.dirname(filePath), { recursive: true });
-      const temporaryPath = `${filePath}.${crypto.randomUUID()}.tmp`;
-      try {
-        await fs.writeFile(temporaryPath, `${JSON.stringify(updated, null, 2)}\n`, { mode: 0o600 });
-        await fs.rename(temporaryPath, filePath);
-      } finally {
-        await fs.rm(temporaryPath, { force: true });
-      }
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
-      return Object.keys(updated).sort();
-    });
+  const update = previous.then(async () => {
+    const environment = await readEnvironmentFile(battyDir);
+    if (value === undefined && !Object.hasOwn(environment, name)) {
+      throw new Error("Environment variable not found");
+    }
+    const updated = { ...environment, [name]: value };
+    if (value === undefined) delete updated[name];
+    const filePath = environmentFilePath(battyDir);
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    const temporaryPath = `${filePath}.${crypto.randomUUID()}.tmp`;
+    try {
+      await fs.writeFile(temporaryPath, `${JSON.stringify(updated, null, 2)}\n`, {
+        mode: 0o600,
+      });
+      await fs.rename(temporaryPath, filePath);
+    } finally {
+      await fs.rm(temporaryPath, { force: true });
+    }
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+    return Object.keys(updated).sort();
+  });
   const settled = update.then(
     () => {},
     () => {},

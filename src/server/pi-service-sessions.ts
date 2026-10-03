@@ -394,7 +394,6 @@ export async function handleAgentEvent(
         current.status = event.isError ? "error" : "success";
         current.isError = event.isError;
         current.details = normalizeToolDetails(event.result.details);
-        webSession.activeTools.set(event.toolCallId, current);
         deps.publish(webSession, { type: "tools", tools: [current] });
       }
       break;
@@ -402,7 +401,6 @@ export async function handleAgentEvent(
     case "agent_start":
       webSession.activeTools.clear();
       webSession.agentCompleted = false;
-      webSession.suppressNextAgentEndCompletion = false;
       deps.publish(webSession, { type: "tools", tools: [] });
       deps.publish(webSession, { type: "state", state: deps.getStateMetadata(webSession) });
       await deps.notifyWorkspaceUpdated(webSession.workspace.id);

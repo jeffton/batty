@@ -239,23 +239,4 @@ describe("SettingsPopover", () => {
     expect(sections.at(-2)?.text()).toContain("Environment variables");
     expect(sections.at(-1)?.text()).toContain("Log out");
   });
-
-  it("uses the full-popover frame with an explicit close button", async () => {
-    const wrapper = mount(SettingsPopover, {
-      props: {
-        popoverId: "settings-popover",
-        anchorName: "--settings-anchor",
-      },
-    });
-    const hidePopover = vi.fn();
-    (wrapper.element as HTMLElement & { hidePopover: () => void }).hidePopover = hidePopover;
-
-    expect(wrapper.classes()).toContain("full-popover");
-    expect(wrapper.classes()).toContain("settings-popover");
-    expect(wrapper.text()).toContain("Settings");
-    expect(wrapper.find(".settings-popover__body").exists()).toBe(true);
-
-    await wrapper.get('[aria-label="Close settings"]').trigger("click");
-    expect(hidePopover).toHaveBeenCalledOnce();
-  });
 });

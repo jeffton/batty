@@ -36,8 +36,6 @@ describe("daily session titles", () => {
     };
 
     const today = new Date(2026, 4, 1, 12, 0, 0);
-    const todayLabel = formatDailySessionTitle("2026-05-01", today);
-
-    expect(sessionDisplayTitle(session, today)).toBe(todayLabel);
+    expect(sessionDisplayTitle(session, today)).toBe("Today");
   });
 });

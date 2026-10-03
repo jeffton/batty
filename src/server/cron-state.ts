@@ -82,20 +82,6 @@ export function normalizeStoredSession(value: unknown): StoredCronJobSession {
   }
 }
 
-export function toPublicSession(session: StoredCronJobSession): CronJobSession {
-  switch (session.kind) {
-    case "new":
-      return { kind: "new" };
-    case "daily-inline":
-      return { kind: "daily-inline" };
-    case "daily-detached":
-      return {
-        kind: "daily-detached",
-        includePreviousContext: session.includePreviousContext,
-      };
-  }
-}
-
 export function formatSessionLabel(session: CronJobSession | StoredCronJobSession): string {
   switch (session.kind) {
     case "new":

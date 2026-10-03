@@ -7,7 +7,7 @@ import cookie from "@fastify/cookie";
 import multipart from "@fastify/multipart";
 import staticFiles from "@fastify/static";
 import { verifyAuthToken } from "./auth";
-import { readBuildId } from "./build-id";
+import { buildIdFromHtml } from "./build-id";
 import { loadConfig, resolveBattyDir } from "./config";
 import { CronService } from "./cron";
 import { startDeploymentControl } from "./deployment-control";
@@ -202,16 +202,18 @@ await fs.mkdir(config.sitesDir, { recursive: true });
 
 await app.register(cookie);
 await app.register(multipart);
-const hasBuiltClient = await fs
-  .access(path.join(config.publicDir, "index.html"))
-  .then(() => true)
-  .catch(() => false);
-const buildId = await readBuildId(config.publicDir);
+const clientIndexHtml = await fs
+  .readFile(path.join(config.publicDir, "index.html"), "utf8")
+  .catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  });
+const hasBuiltClient = clientIndexHtml !== undefined;
+const buildId = clientIndexHtml === undefined ? "dev" : buildIdFromHtml(clientIndexHtml);
 const appBaseUrl = config.baseUrl;
 const appBaseHref = appBaseUrl === "/" ? "/" : `${appBaseUrl}/`;
-const clientIndexHtml = hasBuiltClient
-  ? await fs.readFile(path.join(config.publicDir, "index.html"), "utf8")
-  : undefined;
 
 function routePath(route: string): string {
   return appBaseUrl === "/" ? route : `${appBaseUrl}${route}`;
@@ -337,13 +339,6 @@ if (hasBuiltClient) {
     reply.type("text/html; charset=utf-8");
     return reply.send(renderClientHtml());
   });
-
-  if (appBaseHref !== "/" && appBaseHref !== routePath("/")) {
-    app.get(appBaseHref, async (_request, reply) => {
-      reply.type("text/html; charset=utf-8");
-      return reply.send(renderClientHtml());
-    });
-  }
 
   app.get(routePath("/index.html"), async (_request, reply) => {
     reply.type("text/html; charset=utf-8");

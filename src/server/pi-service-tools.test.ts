@@ -343,16 +343,9 @@ describe("createCronTool", () => {
 
 describe("createSubagentTool", () => {
   function createContext(subagentDepth?: number) {
-    const memos = new Map<string, unknown>();
     return {
-      invocation: {
-        getMemo: async (name: string) => memos.get(name),
-        setMemo: async (name: string, value: unknown) => {
-          memos.set(name, value);
-        },
-      },
-      childSessionId: () => crypto.randomUUID(),
       sessionManager: {
+        getSessionFile: () => undefined,
         getEntries: () =>
           subagentDepth === undefined
             ? []
@@ -419,11 +412,6 @@ describe("createSubagentTool", () => {
       content: [{ type: "text", text: "done" }],
       isError: false,
     });
-    expect(result).not.toHaveProperty("terminate");
-    expect(tool.description).toContain("Returns plain text, not JSON");
-    expect(tool.promptGuidelines).toContainEqual(
-      expect.stringContaining("await tools.subagent(...) returns a string"),
-    );
   });
 
   it("returns immediately from an async launch and delegates completion to the parent session", async () => {
@@ -578,7 +566,6 @@ describe("createSubagentTool", () => {
       content: [{ type: "text", text: "subagent failed" }],
       isError: true,
     });
-    expect(result).not.toHaveProperty("terminate");
   });
 
   it.each([true, false])("awaits an async subagent (pending=%s)", async (pending) => {

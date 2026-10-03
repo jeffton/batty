@@ -91,7 +91,7 @@ export class SessionStore {
     }
   }
 
-  static async read(file: string, _options: { readOnly?: boolean } = {}): Promise<SessionRead> {
+  static async read(file: string): Promise<SessionRead> {
     file = path.resolve(file);
     const owner = this.owners.get(file);
     if (owner) {

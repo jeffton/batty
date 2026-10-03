@@ -56,10 +56,9 @@ describe("session-summary", () => {
   it("uses the total message count when only the recent window is loaded", () => {
     const summary = toSessionSummary({
       ...baseSession,
-      messages: [baseSession.messages[0]],
       totalMessageCount: 120,
       hasMoreMessages: true,
-    } as unknown as SessionState);
+    });
 
     expect(summary.messageCount).toBe(120);
   });

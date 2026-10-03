@@ -2,6 +2,8 @@ import { describe, expect, it } from "vite-plus/test";
 import { RECENT_SESSION_MESSAGE_WINDOW } from "@/shared/session-history";
 import { CRON_RUN_SESSION_CUSTOM_TYPE } from "./cron-session";
 import { getSessionMessagePage } from "./pi-service-message-page";
+import { PiService } from "./pi-service";
+import type { WebSession } from "./pi-service-types";
 
 function makeSession(messages: unknown[]): never {
   return makeSessionFromEntries(messages.map((message) => ({ type: "message", message })));
@@ -23,6 +25,50 @@ function userMessage(timestamp: number, text: string): unknown {
     content: [{ type: "text", text }],
   };
 }
+
+describe("PiService.getSessionMessages", () => {
+  it("projects older messages with global IDs and resolved images", () => {
+    const service = Object.create(PiService.prototype) as PiService;
+    const messages = [
+      userMessage(1, "first"),
+      {
+        role: "toolResult",
+        toolCallId: "image",
+        toolName: "read",
+        timestamp: 2,
+        content: [{ type: "image", mimeType: "image/png", data: "base64" }],
+        details: { source: "read" },
+        isError: false,
+      },
+      userMessage(3, "latest"),
+    ];
+    const internals = service as unknown as { sessions: Map<string, WebSession> };
+    internals.sessions = new Map([
+      [
+        "session",
+        {
+          session: makeSession(messages),
+          resolveUiImage: () => ({ url: "/image.png" }),
+        } as unknown as WebSession,
+      ],
+    ]);
+
+    expect(
+      service.getSessionMessages("session", { beforeMessageId: "user-3-2", limit: 1 }),
+    ).toEqual({
+      messages: [
+        expect.objectContaining({
+          id: "tool-2-1",
+          role: "toolResult",
+          blocks: [{ type: "image", mimeType: "image/png", url: "/image.png" }],
+          details: { source: "read" },
+        }),
+      ],
+      totalMessageCount: 3,
+      hasMoreMessages: true,
+    });
+  });
+});
 
 describe("getSessionMessagePage", () => {
   it("returns the most recent default message window", () => {

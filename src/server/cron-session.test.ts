@@ -23,6 +23,15 @@ describe("cron session helpers", () => {
     );
   });
 
+  it.each(["4:00", "24:00", "04:60", "-1:00", "04:ab"])(
+    "rejects invalid daily rollover times: %s",
+    (startTime) => {
+      expect(() => toLocalIsoDate(new Date(), startTime)).toThrow(
+        "Invalid daily session start time",
+      );
+    },
+  );
+
   it("detects only cron run sessions with parent sessions as parented", () => {
     expect(
       hasParentedCronRunSessionMarker([

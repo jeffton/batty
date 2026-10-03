@@ -356,7 +356,6 @@ export function normalizeMessage(
 
   if (message.role === "custom") {
     const custom = message as CustomLikeMessage;
-    if (custom.display === false) return undefined;
     return {
       id: messageId("custom", custom.timestamp, index),
       role: "custom",

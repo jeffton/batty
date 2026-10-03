@@ -1,14 +1,4 @@
-const navigatorLocales =
-  typeof navigator !== "undefined" && Array.isArray(navigator.languages)
-    ? navigator.languages.filter(Boolean)
-    : [];
-
-const clientLocales =
-  navigatorLocales.length > 0
-    ? navigatorLocales
-    : typeof navigator !== "undefined" && navigator.language
-      ? [navigator.language]
-      : undefined;
+const clientLocales = navigator.languages.length > 0 ? navigator.languages : [navigator.language];
 
 const timeFormatter = new Intl.DateTimeFormat(clientLocales, {
   hour: "2-digit",
@@ -21,7 +11,7 @@ const dateTimeFormatter = new Intl.DateTimeFormat(clientLocales, {
 });
 
 function isValidTimestamp(timestamp: number): boolean {
-  return Number.isFinite(timestamp) && !Number.isNaN(new Date(timestamp).getTime());
+  return !Number.isNaN(new Date(timestamp).getTime());
 }
 
 export function formatShortTime(timestamp: number): string {

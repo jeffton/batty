@@ -395,8 +395,7 @@ export const sessionActions = {
       }
       const paginationMetadataChanged =
         currentSession.totalMessageCount !== session.totalMessageCount ||
-        currentSession.hasMoreMessages !== session.hasMoreMessages ||
-        currentSession.messages[0]?.id !== session.messages[0]?.id;
+        currentSession.hasMoreMessages !== session.hasMoreMessages;
       const nextSession = normalizeSessionState({
         ...currentSession,
         messages: prependUniqueMessages(currentSession.messages, page.messages),

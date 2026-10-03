@@ -15,8 +15,7 @@ export function cloneForCache<T>(value: T): T {
 
 export function trimSessionForCache(session: SessionState): SessionState {
   const messageCount = session.messages.length;
-  const keepCount = Math.min(RECENT_SESSION_MESSAGE_WINDOW, messageCount);
-  const messages = session.messages.slice(messageCount - keepCount);
+  const messages = session.messages.slice(-RECENT_SESSION_MESSAGE_WINDOW);
   const totalMessageCount = Math.max(session.totalMessageCount, messageCount);
 
   return {
@@ -28,7 +27,7 @@ export function trimSessionForCache(session: SessionState): SessionState {
 }
 
 export async function readCachedBootstrap(): Promise<BootstrapPayload | undefined> {
-  return (await get<BootstrapPayload>(BOOTSTRAP_KEY)) ?? undefined;
+  return get<BootstrapPayload>(BOOTSTRAP_KEY);
 }
 
 export async function writeCachedBootstrap(payload: BootstrapPayload): Promise<void> {
@@ -36,7 +35,7 @@ export async function writeCachedBootstrap(payload: BootstrapPayload): Promise<v
 }
 
 export async function readCachedSession(sessionId: string): Promise<SessionState | undefined> {
-  return await get<SessionState>(sessionCacheKey(sessionId));
+  return get<SessionState>(sessionCacheKey(sessionId));
 }
 
 export async function writeCachedSession(session: SessionState): Promise<void> {

@@ -13,10 +13,7 @@ const MODEL_POPOVER_ANCHOR = "--chat-main-model-anchor";
 const CRON_POPOVER_ID = "chat-main-cron-popover";
 const CRON_POPOVER_ANCHOR = "--chat-main-cron-anchor";
 
-type ComposerHandle = InstanceType<typeof MessageComposer> & {
-  clear: () => void;
-  restore: (text: string, files: File[]) => void;
-};
+type ComposerHandle = InstanceType<typeof MessageComposer>;
 
 const emit = defineEmits<{
   back: [];
@@ -115,26 +112,6 @@ function showPromptError(error: unknown, sessionId: string | undefined, requestI
   }
 
   promptError.value = error instanceof Error ? error.message : String(error);
-}
-
-function refreshModels(): void {
-  void store.refreshModels();
-}
-
-function setModel(modelId: string): void {
-  if (!modelId) {
-    return;
-  }
-
-  void store.setModel(modelId);
-}
-
-function setThinkingLevel(level: string): void {
-  if (!level) {
-    return;
-  }
-
-  void store.setThinkingLevel(level);
 }
 
 function addOptimisticMessage(
@@ -358,8 +335,8 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
         :model-popover-id="MODEL_POPOVER_ID"
         :model-popover-anchor="MODEL_POPOVER_ANCHOR"
         :models="store.models"
-        :current-model-id="store.activeSession?.model"
-        :current-thinking-level="store.activeSession?.thinkingLevel ?? 'off'"
+        :current-model-id="store.activeSession.model"
+        :current-thinking-level="store.activeSession.thinkingLevel"
         :thinking-options="thinkingOptions"
         :model-button-label="modelButtonLabel"
         :thinking-button-label="thinkingButtonLabel"
@@ -367,9 +344,9 @@ async function steerPrompt(text: string, files: File[]): Promise<void> {
         @steer="steerPrompt"
         @stop="store.stopActiveSession"
         @remove-queued-prompt="removeQueuedPrompt"
-        @refresh-models="refreshModels"
-        @set-model="setModel"
-        @set-thinking-level="setThinkingLevel"
+        @refresh-models="store.refreshModels"
+        @set-model="store.setModel"
+        @set-thinking-level="store.setThinkingLevel"
       />
     </template>
   </main>

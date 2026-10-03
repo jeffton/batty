@@ -134,20 +134,16 @@ const hasResultContent = computed(() =>
     props.suppressSentFiles ? { ...props.resultDetails, sentFiles: [] } : props.resultDetails,
   ),
 );
-const shellTextOutput = computed(() =>
-  !isPiShellToolName(props.name)
-    ? ""
-    : props.resultBlocks
-        .filter(
-          (block): block is Extract<UiContentBlock, { type: "text" }> => block.type === "text",
-        )
-        .map((block) => block.text)
-        .join("\n"),
+const resultText = computed(() =>
+  props.resultBlocks
+    .filter((block): block is Extract<UiContentBlock, { type: "text" }> => block.type === "text")
+    .map((block) => block.text)
+    .join("\n"),
 );
 const shellTailView = computed(() =>
   createToolOutputView(
     props.name === "powershell" ? "powershell" : "bash",
-    shellTextOutput.value,
+    resultText.value,
     OUTPUT_TAIL_LINE_COUNT,
   ),
 );
@@ -155,63 +151,23 @@ const shellLanguage = computed(() => (props.name === "powershell" ? "powershell"
 const writeTailView = computed(() =>
   createToolOutputView("write", contentValue.value ?? "", OUTPUT_TAIL_LINE_COUNT),
 );
-const readTextOutput = computed(() =>
-  props.name !== "read"
-    ? ""
-    : props.resultBlocks
-        .filter(
-          (block): block is Extract<UiContentBlock, { type: "text" }> => block.type === "text",
-        )
-        .map((block) => block.text)
-        .join("\n"),
-);
 const readHeadView = computed(() =>
-  createToolOutputView("read", readTextOutput.value, OUTPUT_TAIL_LINE_COUNT),
-);
-const cronTextOutput = computed(() =>
-  props.name !== "cron"
-    ? ""
-    : props.resultBlocks
-        .filter(
-          (block): block is Extract<UiContentBlock, { type: "text" }> => block.type === "text",
-        )
-        .map((block) => block.text)
-        .join("\n"),
+  createToolOutputView("read", resultText.value, OUTPUT_TAIL_LINE_COUNT),
 );
 const cronHeadView = computed(() =>
-  createToolOutputView("cron", cronTextOutput.value, OUTPUT_TAIL_LINE_COUNT),
-);
-const browserTextOutput = computed(() =>
-  props.name !== "web-search" && props.name !== "browser"
-    ? ""
-    : props.resultBlocks
-        .filter(
-          (block): block is Extract<UiContentBlock, { type: "text" }> => block.type === "text",
-        )
-        .map((block) => block.text)
-        .join("\n"),
+  createToolOutputView("cron", resultText.value, OUTPUT_TAIL_LINE_COUNT),
 );
 const browserHeadView = computed(() =>
   createToolOutputView(
     props.name === "browser" ? "browser" : "web-search",
-    browserTextOutput.value,
+    resultText.value,
     OUTPUT_TAIL_LINE_COUNT,
   ),
-);
-const grepFindTextOutput = computed(() =>
-  props.name !== "grep" && props.name !== "find"
-    ? ""
-    : props.resultBlocks
-        .filter(
-          (block): block is Extract<UiContentBlock, { type: "text" }> => block.type === "text",
-        )
-        .map((block) => block.text)
-        .join("\n"),
 );
 const grepFindHeadView = computed(() =>
   createToolOutputView(
     props.name === "grep" ? "grep" : "find",
-    grepFindTextOutput.value,
+    resultText.value,
     OUTPUT_TAIL_LINE_COUNT,
   ),
 );
@@ -259,19 +215,19 @@ const visibleWriteContent = computed(() => {
   return isExpanded.value ? contentValue.value : writeTailView.value.text;
 });
 const visibleShellOutput = computed(() =>
-  isExpanded.value ? shellTextOutput.value : shellTailView.value.text,
+  isExpanded.value ? resultText.value : shellTailView.value.text,
 );
 const visibleReadOutput = computed(() =>
-  isExpanded.value ? readTextOutput.value : readHeadView.value.text,
+  isExpanded.value ? resultText.value : readHeadView.value.text,
 );
 const visibleCronOutput = computed(() =>
-  isExpanded.value ? cronTextOutput.value : cronHeadView.value.text,
+  isExpanded.value ? resultText.value : cronHeadView.value.text,
 );
 const visibleBrowserOutput = computed(() =>
-  isExpanded.value ? browserTextOutput.value : browserHeadView.value.text,
+  isExpanded.value ? resultText.value : browserHeadView.value.text,
 );
 const visibleGrepFindOutput = computed(() =>
-  isExpanded.value ? grepFindTextOutput.value : grepFindHeadView.value.text,
+  isExpanded.value ? resultText.value : grepFindHeadView.value.text,
 );
 const showCollapsedShellWindow = computed(
   () => isPiShellToolName(props.name) && !isExpanded.value && shellTailView.value.isTrimmed,

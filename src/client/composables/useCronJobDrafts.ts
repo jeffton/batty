@@ -29,10 +29,7 @@ function sessionPatchFromDraft(draft: CronDraft): CronJob["session"] {
   if (draft.sessionKind === "daily-detached") {
     return { kind: "daily-detached", includePreviousContext: draft.includePreviousContext };
   }
-  if (draft.sessionKind === "daily-inline") {
-    return { kind: "daily-inline" };
-  }
-  return { kind: "new" };
+  return { kind: draft.sessionKind };
 }
 
 export function useCronJobDrafts(store: AppStore): {
@@ -50,7 +47,7 @@ export function useCronJobDrafts(store: AppStore): {
   const drafts = reactive<Record<string, CronDraft>>({});
   const jobs = computed(() => store.workspaceCronJobs);
 
-  function ensureDraft(job: CronJob): CronDraft {
+  function draftFor(job: CronJob): CronDraft {
     const existing = drafts[job.id];
     if (existing) {
       return existing;
@@ -76,15 +73,9 @@ export function useCronJobDrafts(store: AppStore): {
   function syncDrafts(nextJobs: CronJob[]): void {
     const activeIds = new Set(nextJobs.map((job) => job.id));
     for (const job of nextJobs) {
-      const draft = ensureDraft(job);
+      const draft = draftFor(job);
       if (!draft.saving && !draft.toggling) {
-        draft.enabled = job.enabled;
-        draft.prompt = job.prompt;
-        draft.model = job.model;
-        draft.thinkingLevel = job.thinkingLevel;
-        draft.sessionKind = job.session.kind;
-        draft.includePreviousContext = includePreviousContextFor(job);
-        draft.error = "";
+        resetDraft(job);
       }
     }
 
@@ -93,10 +84,6 @@ export function useCronJobDrafts(store: AppStore): {
         delete drafts[jobId];
       }
     }
-  }
-
-  function draftFor(job: CronJob): CronDraft {
-    return ensureDraft(job);
   }
 
   function resetDraft(job: CronJob): void {

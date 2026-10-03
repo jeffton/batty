@@ -35,8 +35,8 @@ function parseRangeHeader(
     return undefined;
   }
 
-  const startText = match[1] ?? "";
-  const endText = match[2] ?? "";
+  const startText = match[1]!;
+  const endText = match[2]!;
   if (!startText && !endText) {
     return undefined;
   }
@@ -54,7 +54,7 @@ function parseRangeHeader(
 
   const start = Number.parseInt(startText, 10);
   const end = endText ? Number.parseInt(endText, 10) : size - 1;
-  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start) {
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
     return undefined;
   }
 
@@ -162,10 +162,7 @@ export function registerSessionRoutes(context: RouteContext): void {
     Params: { sessionId: string };
     Querystring: { before?: string; limit?: string; workspaceId?: string; sessionPath?: string };
   }>(routePath("/api/sessions/:sessionId/messages"), async (request) => {
-    await ensureSessionLoaded(context, request.params.sessionId, {
-      ...(request.query.workspaceId ? { workspaceId: request.query.workspaceId } : {}),
-      ...(request.query.sessionPath ? { sessionPath: request.query.sessionPath } : {}),
-    });
+    await ensureSessionLoaded(context, request.params.sessionId, request.query);
 
     const parsedLimit = Number.parseInt(request.query.limit ?? "", 10);
     return service.getSessionMessages(request.params.sessionId, {
@@ -250,10 +247,7 @@ export function registerSessionRoutes(context: RouteContext): void {
       messagesDetailLevel?: "summary" | "full";
     };
   }>(routePath("/api/sessions/:sessionId/events"), async (request, reply) => {
-    await ensureSessionLoaded(context, request.params.sessionId, {
-      ...(request.query.workspaceId ? { workspaceId: request.query.workspaceId } : {}),
-      ...(request.query.sessionPath ? { sessionPath: request.query.sessionPath } : {}),
-    });
+    await ensureSessionLoaded(context, request.params.sessionId, request.query);
 
     startEventStream(reply.raw);
 

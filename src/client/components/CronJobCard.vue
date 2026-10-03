@@ -356,19 +356,6 @@ function modelLabel(): string {
   text-align: center;
 }
 
-.cron-popover__checkbox {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.15rem 0.1rem;
-  color: var(--color-text);
-  font-size: 0.82rem;
-}
-
-.cron-popover__checkbox input {
-  margin: 0;
-}
-
 .cron-popover__editor-actions {
   display: flex;
   justify-content: flex-start;
@@ -405,8 +392,7 @@ function modelLabel(): string {
 .cron-popover__save:disabled,
 :deep(.cron-popover__icon-btn:disabled),
 .cron-popover__prompt:disabled,
-.cron-popover__select:disabled,
-.cron-popover__checkbox input:disabled {
+.cron-popover__select:disabled {
   opacity: 0.6;
 }
 

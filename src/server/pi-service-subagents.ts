@@ -33,7 +33,6 @@ import {
   extractAssistantText,
   findLastAssistantMessage,
   hasSubagentSessionMarker,
-  newlyGeneratedSubagentMessages,
   SUBAGENT_SESSION_CUSTOM_TYPE,
   stripThinkingFromAssistantMessage,
   ZERO_USAGE,
@@ -63,7 +62,7 @@ export async function runSubagentSerial<T>(
   run: () => Promise<T>,
 ): Promise<T> {
   const previous = subagentQueues.get(sessionId) ?? Promise.resolve();
-  let release: (() => void) | undefined;
+  let release!: () => void;
   const current = new Promise<void>((resolve) => {
     release = resolve;
   });
@@ -74,7 +73,7 @@ export async function runSubagentSerial<T>(
   try {
     return await run();
   } finally {
-    release?.();
+    release();
     if (subagentQueues.get(sessionId) === queued) {
       subagentQueues.delete(sessionId);
     }
@@ -174,9 +173,9 @@ function buildDetachedSubagentResult(
   generatedMessagesOverride?: AgentSession["messages"],
 ): Omit<DetachedSubagentResult, "deliveryEntryId"> {
   const messages = structuredClone(subagentSession.messages) as AgentSession["messages"];
-  const generatedMessages = (
-    generatedMessagesOverride ?? newlyGeneratedSubagentMessages(messages, seedMessageCount)
-  ).filter((message) => message.role !== "system");
+  const generatedMessages = (generatedMessagesOverride ?? messages.slice(seedMessageCount)).filter(
+    (message) => message.role !== "system",
+  );
   const finalAssistant = finalAssistantOverride ?? findLastAssistantMessage(generatedMessages);
   const assistantError =
     finalAssistant?.stopReason === "aborted"
@@ -185,7 +184,7 @@ function buildDetachedSubagentResult(
         ? finalAssistant.errorMessage || "Subagent failed"
         : undefined;
   const errorMessage = errorOverride || assistantError;
-  const text = errorMessage || extractAssistantText(finalAssistant) || "";
+  const text = errorMessage || extractAssistantText(finalAssistant);
   const details = buildSubagentDetails(
     {
       prompt: options.prompt,
@@ -391,7 +390,7 @@ export async function runDetachedSubagentSession(
     subagentSession.messages,
     undefined,
     {
-      generatedMessages: newlyGeneratedSubagentMessages(subagentSession.messages, seedMessageCount),
+      generatedMessages: subagentSession.messages.slice(seedMessageCount),
       workspaceId: options.workspace.id,
       sessionId: subagentSession.sessionId,
       sessionPath: subagentSession.sessionFile,

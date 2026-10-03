@@ -64,14 +64,7 @@ function textFromBlocks(blocks: UiContentBlock[]): string {
 export function latestAssistantMessage(
   session: SessionState,
 ): Extract<UiMessage, { role: "assistant" }> | undefined {
-  for (let index = session.messages.length - 1; index >= 0; index -= 1) {
-    const message = session.messages[index];
-    if (message?.role === "assistant") {
-      return message;
-    }
-  }
-
-  return undefined;
+  return session.messages.findLast((message) => message.role === "assistant");
 }
 
 export function assistantNotificationText(

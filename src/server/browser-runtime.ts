@@ -16,10 +16,6 @@ async function launchBrowser(): Promise<Browser> {
     ],
   });
 
-  if (!browser || typeof browser.newContext !== "function") {
-    throw new Error("Playwright did not return a browser instance");
-  }
-
   activeBrowser = browser;
   browser.on("disconnected", () => {
     if (activeBrowser === browser) activeBrowser = null;

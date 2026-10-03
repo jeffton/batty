@@ -133,10 +133,6 @@ function sessionMeta(session: SessionSummary): string {
   return formatShortDateTime(session.updatedAt);
 }
 
-function isWorkspacePinned(workspaceId: string): boolean {
-  return store.workspaces.some((workspace) => workspace.id === workspaceId && workspace.isPinned);
-}
-
 function workspaceStatus(workspaceId: string): { isInProgress: boolean; hasUnread: boolean } {
   return (
     store.workspaceStatusByWorkspace[workspaceId] ?? {
@@ -165,7 +161,7 @@ function resetCreateWorkspaceForm(): void {
 }
 
 function closeCreateWorkspacePopover(): void {
-  createWorkspacePopover.value?.hidePopover?.();
+  createWorkspacePopover.value?.hidePopover();
 }
 
 async function handleCreateWorkspacePopoverToggle(event: Event): Promise<void> {
@@ -383,15 +379,12 @@ watch(
               <button
                 class="workspace-browser-pane__pin-btn"
                 type="button"
-                :class="isWorkspacePinned(workspace.id) ? 'is-pinned' : ''"
-                :aria-label="isWorkspacePinned(workspace.id) ? 'Unpin workspace' : 'Pin workspace'"
-                :title="isWorkspacePinned(workspace.id) ? 'Unpin workspace' : 'Pin workspace'"
+                :class="workspace.isPinned ? 'is-pinned' : ''"
+                :aria-label="workspace.isPinned ? 'Unpin workspace' : 'Pin workspace'"
+                :title="workspace.isPinned ? 'Unpin workspace' : 'Pin workspace'"
                 @click.stop="void toggleWorkspacePin(workspace.id)"
               >
-                <Star
-                  :size="16"
-                  :fill="isWorkspacePinned(workspace.id) ? 'currentColor' : 'none'"
-                />
+                <Star :size="16" :fill="workspace.isPinned ? 'currentColor' : 'none'" />
               </button>
             </div>
 

@@ -2,7 +2,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
-import { environmentFilePath, loadConfig, resolveBattyDir } from "@/server/config";
+import {
+  environmentFilePath,
+  loadConfig,
+  resolveBattyDir,
+  updateEnvironmentFile,
+} from "@/server/config";
 import { optionsFilePath } from "@/server/options";
 
 const tempDirs: string[] = [];
@@ -60,6 +65,39 @@ describe("resolveBattyDir", () => {
     expect(resolveBattyDir(["."])).toBe(path.resolve("."));
     expect(resolveBattyDir(["~/ignored-as-literal"])).toBe(path.resolve("~/ignored-as-literal"));
     expect(resolveBattyDir([os.tmpdir()])).toBe(path.resolve(os.tmpdir()));
+  });
+});
+
+describe("updateEnvironmentFile", () => {
+  it("persists and deletes an environment variable named __proto__", async () => {
+    const battyDir = await createBattyDir();
+    const name = "__proto__";
+    try {
+      expect(await updateEnvironmentFile(battyDir, name, "saved")).toEqual([name]);
+      expect(JSON.parse(await fs.readFile(environmentFilePath(battyDir), "utf8"))).toEqual({
+        [name]: "saved",
+      });
+      expect(await updateEnvironmentFile(battyDir, name)).toEqual([]);
+      expect(JSON.parse(await fs.readFile(environmentFilePath(battyDir), "utf8"))).toEqual({});
+    } finally {
+      delete process.env[name];
+    }
+  });
+
+  it("allows a queued update after a previous update fails", async () => {
+    const battyDir = await createBattyDir();
+    const name = "BATTY_CONFIG_TEST_QUEUE";
+    const missing = updateEnvironmentFile(battyDir, name);
+    const next = updateEnvironmentFile(battyDir, name, "saved");
+    try {
+      await expect(missing).rejects.toThrow("Environment variable not found");
+      await expect(next).resolves.toEqual([name]);
+      expect(JSON.parse(await fs.readFile(environmentFilePath(battyDir), "utf8"))).toEqual({
+        [name]: "saved",
+      });
+    } finally {
+      delete process.env[name];
+    }
   });
 });
 

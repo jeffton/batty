@@ -124,9 +124,7 @@ function buildSchedule(flags: Record<string, string | boolean>): CronJobSchedule
   const expression = stringFlag(flags, "cron");
   const timezone = stringFlag(flags, "tz", "timezone");
 
-  const modes = [Boolean(at || inValue), Boolean(every), Boolean(expression)].filter(
-    Boolean,
-  ).length;
+  const modes = [at || inValue, every, expression].filter(Boolean).length;
   if (modes === 0) {
     return undefined;
   }
@@ -198,9 +196,7 @@ function buildSession(
       }
       return { kind: session };
     case "daily-detached":
-      return includePreviousContext == null
-        ? { kind: "daily-detached", includePreviousContext: false }
-        : { kind: "daily-detached", includePreviousContext };
+      return { kind: "daily-detached", includePreviousContext: includePreviousContext ?? false };
     default:
       throw new Error(
         `Invalid --session value: ${session}. Expected new, daily-inline, or daily-detached.`,
@@ -264,17 +260,17 @@ async function handleCronAdd(root: string, parsed: ParsedArgs): Promise<void> {
   ]);
   const config = await loadConfig(root);
   const store = new CronStore(config);
+  const schedule = buildSchedule(parsed.flags);
+  if (!schedule) {
+    throw new Error("A schedule is required: --at/--in, --every, or --cron");
+  }
   const input: CreateCronJobInput = {
     workspaceId: requireString(stringFlag(parsed.flags, "workspace"), "--workspace"),
     prompt: requireString(stringFlag(parsed.flags, "prompt"), "--prompt"),
     model: requireString(stringFlag(parsed.flags, "model"), "--model"),
     thinkingLevel: requireString(stringFlag(parsed.flags, "thinking"), "--thinking"),
     session: buildSession(parsed.flags, { requireExplicitSession: true }),
-    schedule:
-      buildSchedule(parsed.flags) ??
-      (() => {
-        throw new Error("A schedule is required: --at/--in, --every, or --cron");
-      })(),
+    schedule,
   };
 
   await validateSelectedModel(config, input.model);
@@ -300,14 +296,7 @@ async function handleCronEdit(root: string, parsed: ParsedArgs): Promise<void> {
     schedule,
   };
 
-  if (
-    patch.workspaceId == null &&
-    patch.prompt == null &&
-    patch.model == null &&
-    patch.thinkingLevel == null &&
-    patch.session == null &&
-    patch.schedule == null
-  ) {
+  if (Object.values(patch).every((value) => value === undefined)) {
     throw new Error("No changes provided for cron edit");
   }
 

@@ -2,21 +2,29 @@ import { describe, expect, it } from "vite-plus/test";
 import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
 import type { SessionState } from "@/shared/types";
 
+const baseState: SessionState = {
+  id: "web-1",
+  sessionId: "session-1",
+  workspaceId: "batty",
+  cwd: "/tmp/batty",
+  thinkingLevel: "medium",
+  availableThinkingLevels: ["medium"],
+  isStreaming: false,
+  pendingMessageCount: 0,
+  updatedAt: 200,
+  contextTokens: null,
+  contextWindow: null,
+  contextPercent: null,
+  totalMessageCount: 0,
+  hasMoreMessages: false,
+  messages: [],
+  activeTools: [],
+};
+
 describe("normalizeSessionState", () => {
   it("trusts summary pagination metadata when tool messages are omitted", () => {
     const summary = {
-      id: "web-1",
-      sessionId: "session-1",
-      workspaceId: "batty",
-      cwd: "/tmp/batty",
-      thinkingLevel: "medium",
-      availableThinkingLevels: ["medium"],
-      isStreaming: false,
-      pendingMessageCount: 0,
-      updatedAt: 200,
-      contextTokens: null,
-      contextWindow: null,
-      contextPercent: null,
+      ...baseState,
       totalMessageCount: 2,
       hasMoreMessages: false,
       messagesDetailLevel: "summary",
@@ -40,18 +48,7 @@ describe("normalizeSessionState", () => {
 
   it("merges paginated snapshots into an already loaded history", () => {
     const previous = {
-      id: "web-1",
-      sessionId: "session-1",
-      workspaceId: "batty",
-      cwd: "/tmp/batty",
-      thinkingLevel: "medium",
-      availableThinkingLevels: ["medium"],
-      isStreaming: false,
-      pendingMessageCount: 0,
-      updatedAt: 200,
-      contextTokens: null,
-      contextWindow: null,
-      contextPercent: null,
+      ...baseState,
       totalMessageCount: 5,
       hasMoreMessages: false,
       messages: [
@@ -113,18 +110,7 @@ describe("normalizeSessionState", () => {
 
   it("replaces loaded history when a reset snapshot no longer overlaps", () => {
     const previous = {
-      id: "web-1",
-      sessionId: "session-1",
-      workspaceId: "batty",
-      cwd: "/tmp/batty",
-      thinkingLevel: "medium",
-      availableThinkingLevels: ["medium"],
-      isStreaming: false,
-      pendingMessageCount: 0,
-      updatedAt: 200,
-      contextTokens: null,
-      contextWindow: null,
-      contextPercent: null,
+      ...baseState,
       totalMessageCount: 4,
       hasMoreMessages: false,
       messages: [
@@ -172,18 +158,8 @@ describe("normalizeSessionState", () => {
 
   it("drops cached tool output when an idle refreshed session has no active tools", () => {
     const previous: SessionState = {
-      id: "web-1",
-      sessionId: "session-1",
-      workspaceId: "batty",
-      cwd: "/tmp/batty",
-      thinkingLevel: "medium",
-      availableThinkingLevels: ["medium"],
+      ...baseState,
       isStreaming: true,
-      pendingMessageCount: 0,
-      updatedAt: 200,
-      contextTokens: null,
-      contextWindow: null,
-      contextPercent: null,
       totalMessageCount: 1,
       hasMoreMessages: false,
       messages: [
@@ -227,18 +203,8 @@ describe("normalizeSessionState", () => {
 
   it("retains cached tool output while a refreshed streaming session loses in-flight tools", () => {
     const previous: SessionState = {
-      id: "web-1",
-      sessionId: "session-1",
-      workspaceId: "batty",
-      cwd: "/tmp/batty",
-      thinkingLevel: "medium",
-      availableThinkingLevels: ["medium"],
+      ...baseState,
       isStreaming: true,
-      pendingMessageCount: 0,
-      updatedAt: 200,
-      contextTokens: null,
-      contextWindow: null,
-      contextPercent: null,
       totalMessageCount: 1,
       hasMoreMessages: false,
       messages: [
@@ -280,18 +246,8 @@ describe("normalizeSessionState", () => {
 
   it("drops cached tool output once the final tool result exists", () => {
     const previous: SessionState = {
-      id: "web-1",
-      sessionId: "session-1",
-      workspaceId: "batty",
-      cwd: "/tmp/batty",
-      thinkingLevel: "medium",
-      availableThinkingLevels: ["medium"],
+      ...baseState,
       isStreaming: true,
-      pendingMessageCount: 0,
-      updatedAt: 200,
-      contextTokens: null,
-      contextWindow: null,
-      contextPercent: null,
       totalMessageCount: 1,
       hasMoreMessages: false,
       messages: [
@@ -347,18 +303,7 @@ describe("normalizeSessionState", () => {
 
   it("retains detailed tool blocks while merging a summary reset", () => {
     const previous = {
-      id: "web-1",
-      sessionId: "session-1",
-      workspaceId: "batty",
-      cwd: "/tmp/batty",
-      thinkingLevel: "medium",
-      availableThinkingLevels: ["medium"],
-      isStreaming: false,
-      pendingMessageCount: 0,
-      updatedAt: 200,
-      contextTokens: null,
-      contextWindow: null,
-      contextPercent: null,
+      ...baseState,
       totalMessageCount: 2,
       hasMoreMessages: false,
       messagesDetailLevel: "full",
@@ -417,18 +362,9 @@ describe("normalizeSessionState", () => {
 
   it("does not retain tool state from an older active assistant", () => {
     const previous = {
-      id: "web-1",
-      sessionId: "session-1",
-      workspaceId: "batty",
-      cwd: "/tmp/batty",
-      thinkingLevel: "medium",
-      availableThinkingLevels: ["medium"],
+      ...baseState,
       isStreaming: true,
-      pendingMessageCount: 0,
       updatedAt: 100,
-      contextTokens: null,
-      contextWindow: null,
-      contextPercent: null,
       totalMessageCount: 0,
       hasMoreMessages: false,
       messagesDetailLevel: "full",

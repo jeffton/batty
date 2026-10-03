@@ -112,15 +112,16 @@ export function applyServerEvent(
     }
   }
 
+  if (event.type === "reset") {
+    const merged = mergeSessionState(event.state, state);
+    return merged ? withEventRevision(merged, event) : merged;
+  }
+  if (!state) {
+    return state;
+  }
+
   switch (event.type) {
-    case "reset": {
-      const merged = mergeSessionState(event.state, state);
-      return merged ? withEventRevision(merged, event) : merged;
-    }
     case "state":
-      if (!state) {
-        return state;
-      }
       return normalizeSessionState(
         withEventRevision(
           {
@@ -131,16 +132,10 @@ export function applyServerEvent(
         ),
       );
     case "assistant":
-      if (!state) {
-        return state;
-      }
       return normalizeSessionState(
         withEventRevision({ ...state, activeAssistant: event.assistant }, event),
       );
     case "assistant-delta":
-      if (!state) {
-        return state;
-      }
       return normalizeSessionState(
         withEventRevision(
           {
@@ -151,9 +146,6 @@ export function applyServerEvent(
         ),
       );
     case "tools":
-      if (!state) {
-        return state;
-      }
       return normalizeSessionState(
         withEventRevision(
           { ...state, activeTools: mergeTools(state.activeTools, event.tools) },
@@ -161,9 +153,6 @@ export function applyServerEvent(
         ),
       );
     case "tool-delta":
-      if (!state) {
-        return state;
-      }
       return normalizeSessionState(
         withEventRevision(
           { ...state, activeTools: applyToolDelta(state.activeTools, event) },
@@ -171,9 +160,6 @@ export function applyServerEvent(
         ),
       );
     case "status":
-      if (!state) {
-        return state;
-      }
       return normalizeSessionState(
         withEventRevision(
           {

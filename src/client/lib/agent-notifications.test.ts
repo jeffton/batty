@@ -1,39 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import {
-  buildAgentCompletionNotification,
-  primeAgentNotifications,
-} from "@/client/lib/agent-notifications";
-import type { SessionState } from "@/shared/types";
-
-const baseSession: SessionState = {
-  id: "web-1",
-  sessionId: "session-1",
-  workspaceId: "batty",
-  cwd: "/root/github/batty",
-  path: "/root/github/.batty/sessions/batty/session.jsonl",
-  model: "anthropic/claude-sonnet-4",
-  modelLabel: "Claude Sonnet 4 · anthropic",
-  thinkingLevel: "medium",
-  availableThinkingLevels: ["off", "medium"],
-  isStreaming: false,
-  pendingMessageCount: 0,
-  updatedAt: 100,
-  contextTokens: null,
-  contextWindow: null,
-  contextPercent: null,
-  totalMessageCount: 1,
-  hasMoreMessages: false,
-  messages: [
-    {
-      id: "assistant-1",
-      role: "assistant",
-      turnPhase: "final",
-      timestamp: 100,
-      blocks: [{ type: "text", text: "Done shipping the feature." }],
-    },
-  ],
-  activeTools: [],
-};
+import { primeAgentNotifications } from "@/client/lib/agent-notifications";
 
 const originalNotification = globalThis.Notification;
 
@@ -45,18 +11,6 @@ afterEach(() => {
   }
 
   vi.restoreAllMocks();
-});
-
-describe("buildAgentCompletionNotification", () => {
-  it("uses the latest assistant message as the notification body", () => {
-    expect(buildAgentCompletionNotification(baseSession)).toEqual(
-      expect.objectContaining({
-        title: "batty",
-        body: "Done shipping the feature.",
-        tag: "session-complete:session-1",
-      }),
-    );
-  });
 });
 
 describe("primeAgentNotifications", () => {

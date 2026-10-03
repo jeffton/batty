@@ -166,7 +166,7 @@ function resetAttempt(): void {
 
 function closePopover(): void {
   const element = document.getElementById(props.popoverId) as HTMLElement | null;
-  element?.hidePopover?.();
+  element?.hidePopover();
 }
 
 function apiKeyPlaceholder(providerId: "google" | "openrouter"): string {
@@ -861,14 +861,12 @@ function handlePopoverToggle(event: Event): void {
   border-top: 1px solid var(--color-border-soft);
 }
 
-.settings-popover__section-header,
 .settings-popover__section-title-row,
 .settings-popover__item-top {
   display: flex;
   align-items: center;
 }
 
-.settings-popover__section-header,
 .settings-popover__item-top {
   justify-content: space-between;
   gap: 0.5rem;
@@ -879,7 +877,6 @@ function handlePopoverToggle(event: Event): void {
   color: var(--color-text-strong);
 }
 
-.settings-popover__section-title,
 .settings-popover__group-title {
   margin: 0;
   font-size: 0.9rem;

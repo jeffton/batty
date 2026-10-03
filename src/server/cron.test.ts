@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import type { CronRunLog } from "@/shared/types";
 import { buildCronJobSummary, CronStore } from "./cron";
 import type { AppConfig } from "./config";
+import { normalizeAtInput } from "./cron-schedule";
 
 const tempDirs: string[] = [];
 
@@ -38,6 +39,24 @@ async function createConfig(): Promise<AppConfig> {
     authSecret: crypto.randomUUID(),
   };
 }
+
+describe("at schedules", () => {
+  const now = Date.parse("2026-10-03T12:00:00Z");
+
+  it.each([{ in: "10m" }, { at: "+10m" }, { at: "in 10m" }])(
+    "accepts relative times: %j",
+    (input) => {
+      expect(normalizeAtInput({ kind: "at", ...input }, now)).toBe("2026-10-03T12:10:00.000Z");
+    },
+  );
+
+  it.each(["in 10m garbage", "+0m", "2026-10-03T11:00:00Z", "not a date"])(
+    "rejects invalid or past times: %s",
+    (at) => {
+      expect(() => normalizeAtInput({ kind: "at", at }, now)).toThrow();
+    },
+  );
+});
 
 describe("cron store", () => {
   it("defaults jobs to new sessions", async () => {

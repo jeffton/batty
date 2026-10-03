@@ -53,8 +53,8 @@ export function findBattySystemPromptSnapshot(
   entries: Array<{ type: string; customType?: string; data?: unknown }>,
 ): BattySystemPromptSnapshot | undefined {
   for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = entries[index];
-    if (entry?.type !== "custom" || entry.customType !== BATTY_SYSTEM_PROMPT_CUSTOM_TYPE) {
+    const entry = entries[index]!;
+    if (entry.type !== "custom" || entry.customType !== BATTY_SYSTEM_PROMPT_CUSTOM_TYPE) {
       continue;
     }
     if (isBattySystemPromptSnapshot(entry.data)) {

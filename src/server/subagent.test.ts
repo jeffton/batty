@@ -3,12 +3,10 @@ import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
   buildSubagentDetails,
-  cloneMessagesForSubagent,
   collectSentFiles,
   collectSites,
   extractAssistantText,
   findLastAssistantMessage,
-  newlyGeneratedSubagentMessages,
   stripThinkingFromAssistantMessage,
   getSubagentSessionDepth,
   hasSubagentSessionMarker,
@@ -16,124 +14,6 @@ import {
 } from "./subagent";
 
 type AgentMessage = AgentSession["messages"][number];
-
-describe("cloneMessagesForSubagent", () => {
-  it("drops the current assistant tool-call message from inherited context", () => {
-    const messages = [
-      {
-        role: "user",
-        content: "Delegate this",
-        timestamp: 1,
-      },
-      {
-        role: "assistant",
-        content: [
-          { type: "text", text: "Working on it." },
-          {
-            type: "toolCall",
-            id: "sub-1",
-            name: "subagent",
-            arguments: { prompt: "Investigate bug" },
-          },
-        ],
-        api: "openai-responses",
-        provider: "openai",
-        model: "gpt-5",
-        usage: {
-          input: 1,
-          output: 1,
-          cacheRead: 0,
-          cacheWrite: 0,
-          totalTokens: 2,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-        },
-        stopReason: "toolUse",
-        timestamp: 2,
-      },
-    ] as unknown as AgentMessage[];
-
-    expect(cloneMessagesForSubagent(messages, "sub-1")).toEqual([messages[0]]);
-  });
-
-  it("keeps prior messages when the trailing assistant message is unrelated", () => {
-    const messages = [
-      {
-        role: "user",
-        content: "hello",
-        timestamp: 1,
-      },
-      {
-        role: "assistant",
-        content: [{ type: "text", text: "Done" }],
-        api: "openai-responses",
-        provider: "openai",
-        model: "gpt-5",
-        usage: {
-          input: 1,
-          output: 1,
-          cacheRead: 0,
-          cacheWrite: 0,
-          totalTokens: 2,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-        },
-        stopReason: "stop",
-        timestamp: 2,
-      },
-    ] as unknown as AgentMessage[];
-
-    expect(cloneMessagesForSubagent(messages, "sub-1")).toEqual(messages);
-  });
-
-  it("drops a trailing user message when it matches the injected prompt", () => {
-    const messages = [
-      {
-        role: "user",
-        content: [{ type: "text", text: "[Cron trigger]\n\nHeartbeat" }],
-        timestamp: 1,
-      },
-      {
-        role: "assistant",
-        content: [
-          {
-            type: "toolCall",
-            id: "sub-1",
-            name: "subagent",
-            arguments: { prompt: "[Cron trigger]\n\nHeartbeat" },
-          },
-        ],
-        api: "openai-responses",
-        provider: "openai",
-        model: "gpt-5",
-        usage: {
-          input: 1,
-          output: 1,
-          cacheRead: 0,
-          cacheWrite: 0,
-          totalTokens: 2,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-        },
-        stopReason: "toolUse",
-        timestamp: 2,
-      },
-    ] as unknown as AgentMessage[];
-
-    expect(cloneMessagesForSubagent(messages, "sub-1", "[Cron trigger]\n\nHeartbeat")).toEqual([]);
-  });
-
-  it("keeps the trailing user message when it differs from the injected prompt", () => {
-    const messages = [
-      {
-        role: "user",
-        content: "Please investigate the auth flow",
-        timestamp: 1,
-      },
-    ] as unknown as AgentMessage[];
-
-    expect(cloneMessagesForSubagent(messages, undefined, "Review only the login redirect")).toEqual(
-      messages,
-    );
-  });
-});
 
 describe("subagent session markers", () => {
   it("detects persisted subagent sessions and their depth", () => {
@@ -281,7 +161,7 @@ describe("subagent message helpers", () => {
     });
   });
 
-  it("collects sent files from nested tool results and keeps generated messages", () => {
+  it("collects sent files from nested tool results", () => {
     const messages = [
       {
         role: "user",
@@ -320,7 +200,6 @@ describe("subagent message helpers", () => {
         downloadUrl: "/api/sent-files/workspace/session/tool/file-1?download=1",
       },
     ]);
-    expect(newlyGeneratedSubagentMessages(messages, 1)).toEqual([messages[1]]);
   });
 
   it("propagates shared sites from generated subagent messages", () => {

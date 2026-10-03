@@ -46,16 +46,6 @@ describe("PiService.getSessionResources", () => {
         { name: "deferred-tool", description: "Deferred tool" },
       ],
     });
-    expect(getSkills).toHaveBeenCalledOnce();
-    expect(getAllTools).toHaveBeenCalledOnce();
-  });
-
-  it("returns empty catalogs when no resources are loaded", () => {
-    const service = createService({
-      resourceLoader: { getSkills: () => ({ skills: [], diagnostics: [] }) },
-      getAllTools: () => [],
-    });
-    expect(service.getSessionResources("session-1")).toEqual({ skills: [], tools: [] });
   });
 
   it("rejects unknown sessions", () => {

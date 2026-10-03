@@ -14,7 +14,6 @@ function status(servers: McpWorkspaceStatus["servers"] = []): McpWorkspaceStatus
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
-  Reflect.deleteProperty(window, "confirm");
 });
 
 const workspace = { id: "workspace-1" };
@@ -54,7 +53,6 @@ describe("McpSettingsPanel OAuth and stale responses", () => {
         ]),
       );
     });
-    window.confirm = vi.fn(() => true);
     const wrapper = mount(McpSettingsPanel, {
       props: { active: true, workspaceId: workspace.id },
     });
@@ -618,7 +616,6 @@ describe("McpSettingsPanel", () => {
         ]),
       );
     });
-    window.confirm = vi.fn(() => true);
     const wrapper = mount(McpSettingsPanel, {
       props: { active: true, workspaceId: "workspace-1" },
     });
@@ -914,7 +911,6 @@ describe("McpSettingsPanel", () => {
       if (url.includes("/api/settings/mcp")) return json(settings());
       return json(status());
     });
-    window.confirm = vi.fn(() => true);
     const wrapper = mount(McpSettingsPanel, {
       props: { active: true, workspaceId: "workspace-1" },
     });

@@ -121,7 +121,6 @@ describe("workspace activity updates", () => {
       subscribers: new Set(),
       activeTools: new Map(),
       agentCompleted: true,
-      suppressNextAgentEndCompletion: false,
       revision: 0,
       eventLog: [],
     } as unknown as WebSession;

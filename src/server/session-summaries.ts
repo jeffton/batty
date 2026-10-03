@@ -327,7 +327,6 @@ export class SessionSummaryIndex {
   }
 
   private async initializeWorkspace(workspaceId: string): Promise<void> {
-    await this.ready;
     const revisions = new Map(this.revisions);
     const unchanged = (file: string) => this.revisions.get(file) === revisions.get(file);
     const files = await sessionFiles(workspaceSessionDir(this.config, workspaceId));
@@ -336,7 +335,7 @@ export class SessionSummaryIndex {
     for (const file of files) {
       try {
         if (this.revisions.has(file)) continue;
-        const snapshot = await SessionStore.read(file, { readOnly: true });
+        const snapshot = await SessionStore.read(file);
         if (!unchanged(file)) continue;
         this.entries.set(
           file,

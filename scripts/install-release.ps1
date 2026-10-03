@@ -39,9 +39,6 @@ Copy-Item -Recurse (Join-Path $repoDir "dist\client") (Join-Path $tmpDir "dist\c
 Copy-Item -Recurse (Join-Path $repoDir "dist\server") (Join-Path $tmpDir "dist\server")
 
 $backendPath = $BaseUrl.TrimEnd("/")
-if ($backendPath -eq "/") {
-  $backendPath = ""
-}
 $proxyUrl = "http://127.0.0.1:$BackendPort$backendPath/{R:1}"
 $webConfig = @"
 <?xml version="1.0" encoding="utf-8"?>

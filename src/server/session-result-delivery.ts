@@ -17,7 +17,7 @@ export function hasDeliveredResult(session: AgentSessionController, replyId: str
   });
 }
 
-/** Callers serialize background deliveries; refresh the SDK's authoritative context after appending. */
+/** Callers serialize deliveries; this helper owns the idle wait and context refresh. */
 export async function appendResultMessages(
   session: AgentSessionController,
   messages: Array<Parameters<SessionStore["appendMessage"]>[0]>,

@@ -79,6 +79,7 @@ import {
   deliverDetachedSubagentResult,
   runSubagentSerial,
   waitForSubagentQueue,
+  type DetachedSubagentOptions,
 } from "./pi-service-subagents";
 import {
   modelKey,
@@ -615,106 +616,98 @@ export class PiService {
     return resolveSubagentDefaults(this.liveSessions.get(sessionId)?.session, ctx);
   }
 
-  private async runDetachedSubagentSession(options: {
-    sessionId?: string;
-    workspace: WorkspaceInfo;
-    parentSessionId: string;
-    parentSessionPath?: string;
-    parentSubagentDepth: number;
-    contextBranchLeafId?: string | null;
-    prompt: string;
-    modelId: string;
-    thinkingLevel: string;
-    includePreviousContext: PreviousContextMode;
-    respondIn: "tool-call" | "session";
-    deliveryMode?: "append" | "prompt";
-    preludeNotices?: Array<{ kind: "cron" | "subagent"; text: string }>;
-    currentToolCallId?: string;
-    continueSession?: boolean;
-    signal?: AbortSignal;
-    onReady?: (details: ToolExecutionDetails) => void;
-    onDelivered?: () => void;
-    onUpdate?: (partial: {
-      content: Array<{ type: "text"; text: string }>;
-      details: ToolExecutionDetails;
-    }) => void;
-  }): ReturnType<typeof runDetachedSubagentSession> {
-    const startedAtMs = Date.now();
+  private runDetachedSubagentSession(
+    options: DetachedSubagentOptions,
+    previous?: Promise<void>,
+    admissionSignal?: AbortSignal,
+  ): ReturnType<typeof runDetachedSubagentSession> {
     let runningSubagent: RunningSubagent | undefined;
     let releaseDelivery: (() => void) | undefined;
     const deliveryAccepted = new Promise<void>((resolve) => {
       releaseDelivery = resolve;
     });
-    const operation = this.turns.run(async () => {
-      try {
-        return await runDetachedSubagentSession(
-          {
-            createPiAgentSession: (workspace, sessionManager, createOptions) =>
-              this.createPiAgentSession(workspace, sessionManager, {
-                ...createOptions,
-                parentSessionId: options.parentSessionId,
-              }),
-            attachSession: (workspace, session, modelFallbackMessage, ephemeral) =>
-              this.attachSession(workspace, session, modelFallbackMessage, ephemeral),
-            disposeWebSession: (webSession) => this.disposeWebSession(webSession),
-            workspaceSessionDir: workspaceSessionDir(this.config, options.workspace.id),
-            deliverResultToParent: async (request, result) => {
-              const opened = await this.openSessionById(request.workspace, request.parentSessionId);
-              if (request.deliveryMode === "prompt") {
-                await deliverAsyncSubagentResult(
-                  this.requireSession(opened.id).session,
-                  result,
-                  request.onDelivered,
+    const run = () =>
+      this.turns.run(async () => {
+        const startedAtMs = Date.now();
+        try {
+          return await runDetachedSubagentSession(
+            {
+              createPiAgentSession: (workspace, sessionManager, createOptions) =>
+                this.createPiAgentSession(workspace, sessionManager, {
+                  ...createOptions,
+                  parentSessionId: options.parentSessionId,
+                }),
+              attachSession: (workspace, session, modelFallbackMessage, ephemeral) =>
+                this.attachSession(workspace, session, modelFallbackMessage, ephemeral),
+              disposeWebSession: (webSession) => this.disposeWebSession(webSession),
+              workspaceSessionDir: workspaceSessionDir(this.config, options.workspace.id),
+              deliverResultToParent: async (request, result) => {
+                const opened = await this.openSessionById(
+                  request.workspace,
+                  request.parentSessionId,
                 );
-                return;
-              }
-              await this.runSubagentSerial(opened.id, async () => {
-                const parent = this.requireSession(opened.id);
-                if (!(await deliverDetachedSubagentResult(parent.session, result))) return;
-                const state = this.getState(parent.id);
-                this.publish(parent, { type: "reset", state });
-                await this.onAgentCompleted?.(state);
-                await this.notifyWorkspaceUpdated(parent.workspace.id);
-              });
+                if (request.deliveryMode === "prompt") {
+                  await deliverAsyncSubagentResult(
+                    this.requireSession(opened.id).session,
+                    result,
+                    request.onDelivered,
+                  );
+                  return;
+                }
+                await this.runSubagentSerial(opened.id, async () => {
+                  const parent = this.requireSession(opened.id);
+                  if (!(await deliverDetachedSubagentResult(parent.session, result))) return;
+                  const state = this.getState(parent.id);
+                  this.publish(parent, { type: "reset", state });
+                  await this.onAgentCompleted?.(state);
+                  await this.notifyWorkspaceUpdated(parent.workspace.id);
+                });
+              },
             },
-          },
-          {
-            ...options,
-            onDelivered: () => {
-              releaseDelivery?.();
-              options.onDelivered?.();
+            {
+              ...options,
+              onDelivered: () => {
+                releaseDelivery?.();
+                options.onDelivered?.();
+              },
+              onReady: (details) => {
+                const child = (details as SubagentToolDetails).subagent;
+                if (!child.sessionId || !child.sessionPath || !child.workspaceId) {
+                  throw new Error("Running subagent details are incomplete");
+                }
+                runningSubagent = {
+                  sessionId: child.sessionId,
+                  sessionPath: child.sessionPath,
+                  workspaceId: child.workspaceId,
+                  parentSessionId: options.parentSessionId,
+                  prompt: options.prompt,
+                  model: options.modelId,
+                  thinkingLevel: options.thinkingLevel,
+                  startedAtMs,
+                };
+                this.runningSubagents.set(child.sessionId, runningSubagent);
+                this.subagentOperationAsync.set(child.sessionId, options.respondIn === "session");
+                options.onReady?.(details);
+              },
             },
-            onReady: (details) => {
-              const child = (details as SubagentToolDetails).subagent;
-              if (!child.sessionId || !child.sessionPath || !child.workspaceId) {
-                throw new Error("Running subagent details are incomplete");
-              }
-              runningSubagent = {
-                sessionId: child.sessionId,
-                sessionPath: child.sessionPath,
-                workspaceId: child.workspaceId,
-                parentSessionId: options.parentSessionId,
-                prompt: options.prompt,
-                model: options.modelId,
-                thinkingLevel: options.thinkingLevel,
-                startedAtMs,
-              };
-              this.runningSubagents.set(child.sessionId, runningSubagent);
-              this.subagentOperationAsync.set(child.sessionId, options.respondIn === "session");
-              options.onReady?.(details);
-            },
-          },
-        );
-      } finally {
-        if (
-          runningSubagent &&
-          this.runningSubagents.get(runningSubagent.sessionId) === runningSubagent
-        ) {
-          this.runningSubagents.delete(runningSubagent.sessionId);
+          );
+        } finally {
+          if (
+            runningSubagent &&
+            this.runningSubagents.get(runningSubagent.sessionId) === runningSubagent
+          ) {
+            this.runningSubagents.delete(runningSubagent.sessionId);
+          }
         }
-      }
-    }, true);
-    if (options.sessionId && !options.continueSession) {
+      }, true);
+    const operation = options.continueSession
+      ? (previous ?? Promise.resolve()).then(() => {
+          admissionSignal?.throwIfAborted();
+          return run();
+        })
+      : run();
+    if (options.sessionId) {
+      // Queue successors at reply admission; turn draining still tracks the full parent response.
       const settled =
         options.deliveryMode === "prompt"
           ? Promise.race([deliveryAccepted, operation]).then(
@@ -836,14 +829,8 @@ export class PiService {
         failed = reject;
       },
     );
-    let releaseDelivery: (() => void) | undefined;
-    const deliveryAccepted = new Promise<void>((resolve) => {
-      releaseDelivery = resolve;
-    });
-    const operation = (async () => {
-      await previous;
-      signal?.throwIfAborted();
-      return this.runDetachedSubagentSession({
+    const operation = this.runDetachedSubagentSession(
+      {
         sessionId: subagentSessionId,
         workspace,
         parentSessionId,
@@ -856,7 +843,6 @@ export class PiService {
         deliveryMode: async ? "prompt" : undefined,
         continueSession: true,
         signal: async ? undefined : signal,
-        onDelivered: () => releaseDelivery?.(),
         onReady: (details) => {
           const child = (details as SubagentToolDetails).subagent;
           ready({
@@ -865,22 +851,10 @@ export class PiService {
             isError: false,
           });
         },
-      });
-    })();
-    const settled = async
-      ? Promise.race([deliveryAccepted, operation]).then(
-          () => {},
-          () => {},
-        )
-      : operation.then(
-          () => {},
-          () => {},
-        );
-    this.subagentOperations.set(subagentSessionId, settled);
-    void settled.finally(() => {
-      if (this.subagentOperations.get(subagentSessionId) === settled)
-        this.subagentOperations.delete(subagentSessionId);
-    });
+      },
+      previous,
+      signal,
+    );
     if (!async) return operation;
     void operation
       .catch(async (error) => {

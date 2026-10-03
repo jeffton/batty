@@ -594,16 +594,15 @@ export async function runDetachedSubagentSession(
     );
     // Interrupted files need an owned binding so the durable failure can be reused on restore.
     await ensureSubagentMarker(subagentSession.sessionManager, options);
-    const previousCompletion = subagentCompletion(subagentSession.sessionManager);
-    const completionEntryId =
-      !startedTurn && previousCompletion
-        ? previousCompletion.id
-        : await subagentSession.sessionManager.appendCustomEntry(SUBAGENT_COMPLETION_CUSTOM_TYPE, {
-            startEntryId,
-            endEntryId: subagentSession.sessionManager.getLeafId(),
-            status: options.signal?.aborted ? "aborted" : "failed",
-            error: built.errorMessage,
-          });
+    const completionEntryId = await subagentSession.sessionManager.appendCustomEntry(
+      SUBAGENT_COMPLETION_CUSTOM_TYPE,
+      {
+        startEntryId,
+        endEntryId: subagentSession.sessionManager.getLeafId(),
+        status: options.signal?.aborted ? "aborted" : "failed",
+        error: built.errorMessage,
+      },
+    );
     const result: DetachedSubagentResult = {
       ...built,
       deliveryEntryId: assistantEntry?.id ?? completionEntryId,

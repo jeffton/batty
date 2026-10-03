@@ -20,6 +20,31 @@ describe("result delivery", () => {
     expect(fixture.session.messages).toHaveLength(1);
     expect(fixture.faux.state.callCount).toBe(0);
   });
+  it("waits once and rechecks delivery deduplication after becoming idle", async () => {
+    const fixture = await createAgentSessionFixture();
+    cleanups.push(fixture.cleanup);
+    let release!: () => void;
+    const idle = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const wait = vi.spyOn(fixture.session, "waitForIdle").mockReturnValue(idle);
+    const append = vi.spyOn(fixture.session.sessionManager, "appendMessage");
+    const delivery = appendResultMessages(
+      fixture.session,
+      [fauxAssistantMessage("Positive result")],
+      "subagent:child:reply",
+    );
+    expect(wait).toHaveBeenCalledOnce();
+    expect(append).not.toHaveBeenCalled();
+    await fixture.session.sessionManager.appendCustomEntry("batty-result-delivery", {
+      replyId: "subagent:child:reply",
+    });
+    release();
+    expect(await delivery).toBe(false);
+    expect(append).not.toHaveBeenCalled();
+    expect(wait).toHaveBeenCalledOnce();
+  });
+
   it("appends each message after the parent becomes idle without delivery metadata", async () => {
     const fixture = await createAgentSessionFixture();
     cleanups.push(fixture.cleanup);

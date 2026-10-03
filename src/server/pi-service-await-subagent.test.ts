@@ -127,10 +127,13 @@ describe("PiService.continueSubagent", () => {
         release = resolve;
       }),
     );
-    service.runDetachedSubagentSession.mockImplementation(async (request: any) => {
-      request.onReady({ subagent: { sessionId: "child" } });
-      return { text: "done", details: {}, isError: false };
-    });
+    service.runDetachedSubagentSession.mockImplementation(
+      async (request: any, previous: Promise<void>) => {
+        await previous;
+        request.onReady({ subagent: { sessionId: "child" } });
+        return { text: "done", details: {}, isError: false };
+      },
+    );
     await expect(
       service.continueSubagent(workspace, "parent", "child", "next", true, true),
     ).resolves.toMatchObject({
@@ -139,9 +142,11 @@ describe("PiService.continueSubagent", () => {
         subagent: { workspaceId: "test", sessionId: "child", sessionPath: "/tmp/child.jsonl" },
       },
     });
-    expect(service.runDetachedSubagentSession).not.toHaveBeenCalled();
+    expect(service.runDetachedSubagentSession).toHaveBeenCalledOnce();
+    expect(service.runDetachedSubagentSession.mock.calls[0][1]).toBe(
+      service.subagentOperations.get("child"),
+    );
     release();
-    await vi.waitFor(() => expect(service.runDetachedSubagentSession).toHaveBeenCalledOnce());
   });
 
   it.each([true, false])("resumes a finished child (async=%s)", async (async) => {

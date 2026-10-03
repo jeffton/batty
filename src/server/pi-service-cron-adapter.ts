@@ -498,7 +498,6 @@ export async function deliverCronJobRun(
   const parentState = await context.openSessionById(job.workspace, delivery.parentSessionId);
   await context.runSubagentSerial(parentState.id, async () => {
     const parent = context.requireSession(parentState.id);
-    await parent.session.waitForIdle();
     await appendCronRunDelivery(parent.session, job, captured, job.error);
     const state = context.getState(parent.id);
     context.publishReset(parent, state);

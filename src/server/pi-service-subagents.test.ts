@@ -771,25 +771,51 @@ describe("detached AgentSession subagents", () => {
     expect(artifacts?.sites?.[0]?.id).toBe("site-1");
   });
 
-  it("retries a failed parent delivery without rerunning the child", async () => {
-    const { parent, deps, options, children } = await setup();
-    parent.faux.setResponses([fauxAssistantMessage("finished child")]);
-    const request = { ...options, respondIn: "session" as const };
-    deps.deliverResultToParent = vi.fn(async () => {
-      throw new Error("parent unavailable");
-    });
-    await expect(runDetachedSubagentSession(deps, request)).rejects.toThrow("parent unavailable");
-    const child = children.get(options.sessionId!)!;
-    expect(child.messages.at(-1)).toMatchObject({ role: "assistant", stopReason: "stop" });
-    await child.dispose();
-    children.delete(child.sessionId);
-    deps.deliverResultToParent = async (_request, result) => {
-      await deliverDetachedSubagentResult(parent.session, result);
-    };
-    await runDetachedSubagentSession(deps, request);
-    expect(parent.faux.state.callCount).toBe(1);
-    expect(parent.session.messages).toHaveLength(2);
-  });
+  it.each([false, true])(
+    "retries a failed parent delivery without rerunning the child (continuation=%s)",
+    async (continueSession) => {
+      const { parent, deps, options, children } = await setup();
+      if (continueSession) {
+        parent.faux.setResponses([fauxAssistantMessage("initial child")]);
+        await runDetachedSubagentSession(deps, options);
+      }
+      parent.faux.setResponses([fauxAssistantMessage("finished child")]);
+      const request = { ...options, respondIn: "session" as const, continueSession };
+      const deliveries = vi.fn();
+      deps.deliverResultToParent = async (_request, result) => {
+        deliveries(result);
+        throw new Error("parent unavailable");
+      };
+      await expect(runDetachedSubagentSession(deps, request)).rejects.toThrow("parent unavailable");
+      const child = children.get(options.sessionId!)!;
+      expect(child.messages.at(-1)).toMatchObject({ role: "assistant", stopReason: "stop" });
+      const completions = child.sessionManager
+        .getEntries()
+        .filter(
+          (entry) =>
+            entry.type === "custom" && entry.customType === SUBAGENT_COMPLETION_CUSTOM_TYPE,
+        );
+      expect(completions).toHaveLength(continueSession ? 2 : 1);
+      expect(completions.at(-1)).toMatchObject({ data: { status: "completed" } });
+      const original = deliveries.mock.calls[0]![0];
+      expect(original).toMatchObject({ text: "finished child", isError: false });
+      await child.dispose();
+      children.delete(child.sessionId);
+      deps.deliverResultToParent = async (_request, result) => {
+        await deliverDetachedSubagentResult(parent.session, result);
+      };
+      const retried = await runDetachedSubagentSession(deps, {
+        ...request,
+        continueSession: false,
+      });
+      expect(retried.deliveryEntryId).toBe(original.deliveryEntryId);
+      expect(retried.finalAssistant).toEqual(original.finalAssistant);
+      expect(retried.text).toBe(original.text);
+      expect(retried.isError).toBe(false);
+      expect(parent.faux.state.callCount).toBe(continueSession ? 2 : 1);
+      expect(parent.session.messages).toHaveLength(2);
+    },
+  );
 
   it("does not execute a child that was cancelled before admission", async () => {
     const { parent, deps, options } = await setup();

@@ -22,8 +22,6 @@ export function boundedSessionEntries(
   startEntryId: string | null,
   endEntryId: string | null,
 ): SessionEntry[] {
-  if (startEntryId === undefined || endEntryId === undefined)
-    throw new Error("Result boundaries are required");
   const byId = new Map(entries.map((entry) => [entry.id, entry]));
   if (startEntryId !== null && !byId.has(startEntryId))
     throw new Error(`Missing result start entry ${startEntryId}`);

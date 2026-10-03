@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { AppConfig } from "@/server/config";
 import { optionsFilePath } from "@/server/options";
 import { createWorkspace, listWorkspaces } from "@/server/workspaces";
@@ -10,6 +10,7 @@ import { createWorkspace, listWorkspaces } from "@/server/workspaces";
 const tempDirs: string[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
@@ -134,6 +135,20 @@ describe("workspaces", () => {
     const stats = await fs.stat(path.join(secondRoot, "delta"));
     expect(created.rootPath).toBe(secondRoot);
     expect(stats.isDirectory()).toBe(true);
+  });
+
+  it("rejects drive-relative names that escape the configured Windows root", async () => {
+    const config = await createConfig();
+    config.workspacesRoots = ["C:\\workspaces"];
+    const { resolve, relative, isAbsolute } = path.win32;
+    vi.spyOn(path, "resolve").mockImplementation(resolve);
+    vi.spyOn(path, "relative").mockImplementation(relative);
+    vi.spyOn(path, "isAbsolute").mockImplementation(isAbsolute);
+
+    await expect(createWorkspace(config, "D:escape")).rejects.toMatchObject({
+      message: "Workspace must be created directly under the workspaces root",
+      statusCode: 400,
+    });
   });
 
   it("rejects nested paths, path traversal, and hidden folders", async () => {

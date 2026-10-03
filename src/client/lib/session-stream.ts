@@ -20,8 +20,5 @@ export function sessionEventsPath(
     params.set("messagesDetailLevel", messagesDetailLevel);
   }
 
-  const query = params.toString();
-  return withBaseUrl(
-    `/api/sessions/${encodeURIComponent(session.id)}/events${query ? `?${query}` : ""}`,
-  );
+  return withBaseUrl(`/api/sessions/${encodeURIComponent(session.id)}/events?${params}`);
 }

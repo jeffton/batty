@@ -9,10 +9,6 @@ function createHttpError(statusCode: number, message: string): Error & { statusC
   return Object.assign(new Error(message), { statusCode });
 }
 
-function workspaceRootPaths(config: AppConfig): string[] {
-  return config.workspacesRoots;
-}
-
 function workspaceIdFor(rootPath: string, name: string, multipleRoots: boolean): string {
   if (!multipleRoots) {
     return name;
@@ -68,7 +64,7 @@ function normalizeWorkspaceName(name: string): string {
 }
 
 function resolveConfiguredRoot(config: AppConfig, requestedRootPath?: string): string {
-  const roots = workspaceRootPaths(config);
+  const roots = config.workspacesRoots;
   const selectedRoot = requestedRootPath?.trim() || roots[0] || "";
   const resolvedSelectedRoot = path.resolve(selectedRoot);
   const root = roots.find((candidate) => path.resolve(candidate) === resolvedSelectedRoot);
@@ -97,14 +93,10 @@ function resolveWorkspacePath(workspacesRoot: string, name: string): string {
   return workspacePath;
 }
 
-export function listWorkspaceRoots(config: AppConfig): string[] {
-  return workspaceRootPaths(config);
-}
-
 export async function listWorkspaces(config: AppConfig): Promise<WorkspaceInfo[]> {
   const options = await loadAppOptions(config.battyDir);
   const pinnedWorkspaceIds = new Set(options.pinnedWorkspaceIds);
-  const roots = workspaceRootPaths(config);
+  const roots = config.workspacesRoots;
   const multipleRoots = roots.length > 1;
   const workspaceGroups = await Promise.all(
     roots.map(async (root) => {
@@ -166,7 +158,7 @@ export async function createWorkspace(
     normalized,
     new Set(),
     undefined,
-    workspaceRootPaths(config).length > 1,
+    config.workspacesRoots.length > 1,
   );
 }
 

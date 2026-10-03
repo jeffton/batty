@@ -9,7 +9,7 @@ import {
   setBraveSearchKey,
   setDefaultModel,
 } from "../options";
-import { listWorkspaceRoots, listWorkspaces, resolveWorkspace } from "../workspaces";
+import { listWorkspaces, resolveWorkspace } from "../workspaces";
 import type { RouteContext } from "./context";
 import {
   appSettingsStatus,
@@ -52,7 +52,7 @@ export function registerSettingsRoutes(context: RouteContext): void {
         : unauthenticatedProviderAuthStatus(),
       settings: appSettingsStatus(config),
       buildId,
-      workspaceRoots: authenticated ? listWorkspaceRoots(config) : [],
+      workspaceRoots: authenticated ? config.workspacesRoots : [],
       workspaces,
       workspaceUiSettings: Object.fromEntries(
         workspaces.map((workspace) => [workspace.id, context.getWorkspaceUiSettings(workspace.id)]),

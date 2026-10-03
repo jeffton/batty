@@ -37,17 +37,13 @@ export function firstUserMessage(session: SessionState): string {
 
 export function toSessionSummary(session: SessionState): SessionSummary {
   const firstMessage = firstUserMessage(session);
-  const updatedAt = Number.isFinite(session.updatedAt)
-    ? session.updatedAt
-    : session.messages.at(-1)?.timestamp || Date.now();
-
   return {
     id: session.path || session.sessionId,
     sessionId: session.sessionId,
     name: session.title,
     path: session.path,
     firstMessage,
-    updatedAt,
+    updatedAt: session.updatedAt,
     messageCount: session.totalMessageCount,
     workspaceId: session.workspaceId,
     model: session.model,

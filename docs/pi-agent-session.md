@@ -1,6 +1,6 @@
 # Pi AgentSession integration
 
-Batty uses Pi 0.99.1's coding-agent SDK. Commit `566c1d7` is the AgentHarness comparison baseline.
+Batty uses Pi 1.0.2's coding-agent SDK. Commit `566c1d7` is the AgentHarness comparison baseline.
 
 ## Ownership
 
@@ -46,7 +46,9 @@ Appended background transcripts refresh SDK context after persistence. Custom no
 
 ## SDK patches
 
-Batty retains the Pi AI sampling patch and applies these SDK adaptations:
+Batty applies these SDK adaptations:
+
+- Pi AI: declare client message IDs on user messages.
 
 - Agent-core: inspect queued messages and remove a selected message without disturbing duplicate text, images, or unrelated custom steering.
 - AgentSession: preserve client/queue IDs on user messages; expose indexed user queues, targeted removal, and cancellable prompt preflight.

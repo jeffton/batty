@@ -22,9 +22,9 @@
     "check:fix": "vp check --fix"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "1.0.1",
-    "@earendil-works/pi-ai": "1.0.1",
-    "@earendil-works/pi-coding-agent": "1.0.1",
+    "@earendil-works/pi-agent-core": "1.0.2",
+    "@earendil-works/pi-ai": "1.0.2",
+    "@earendil-works/pi-coding-agent": "1.0.2",
     "@fastify/cookie": "11.1.2",
     "@fastify/multipart": "10.1.2",
     "@fastify/static": "10.1.5",
@@ -65,7 +65,7 @@
   "devDependencies": {
     "@playwright/test": "1.63.0",
     "@types/jsdom": "30.0.0",
-    "@types/node": "26.6.3",
+    "@types/node": "26.6.4",
     "@types/proper-lockfile": "4.1.4",
     "@types/turndown": "5.0.6",
     "@types/web-push": "3.6.4",
@@ -83,5 +83,5 @@
   "engines": {
     "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
   },
-  "packageManager": "pnpm@11.18.0"
+  "packageManager": "pnpm@11.28.3"
 }

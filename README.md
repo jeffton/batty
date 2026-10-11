@@ -2,6 +2,10 @@
 
 A personal assistant and coding agent with **one permanent main thread**. Research, coding, background tasks and scheduled work branch out from that conversation and bring their results back. Persistent memory carries the context forward.
 
+<img src="docs/assets/batty-iphone.png" alt="Batty's mobile conversation showing an assistant delegating a coding task" width="300" />
+
+Device frame: [Apple Frames](https://www.macstories.net/shortcuts/) by Federico Viticci / MacStories.
+
 ## Pi Durable
 
 [Pi Durable](https://github.com/earendil-works/pi/tree/main/packages/durable) powers execution. Conversations, tasks and result delivery persist in SQLite; committed work resumes after server restarts, including during deployments.

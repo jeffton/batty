@@ -66,7 +66,7 @@ export default defineConfig({
     ignorePatterns: ["dist/**", "node_modules/**", ".batty/**", ".vite-plus/**"],
   },
   fmt: {
-    ignorePatterns: [".vite-plus/**"],
+    ignorePatterns: [".vite-plus/**", "docs/references/optchat-spec.md"],
   },
   pack: {
     deps: { resolveDepSubpath: true },

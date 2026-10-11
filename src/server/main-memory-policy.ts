@@ -2,9 +2,9 @@ import type { Message, ToolResultMessage } from "@earendil-works/pi-ai";
 
 // Old names classify archived results only; they are not exposed tool aliases.
 export const MAIN_MEMORY_TOOLS = new Set([
-  "memory_search",
   "memory_zoom",
   "memory_date",
+  "memory_search",
   "memory_overview",
   "zoom",
   "date",

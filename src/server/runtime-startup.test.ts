@@ -45,8 +45,14 @@ test("startup restores direct memory tools from a persisted pre-search allowlist
     runtime = await Runtime.open(config, { resume: false });
     const names = (await runtime.main.agent(context)).tools.map((tool) => tool.name);
     expect(names).toEqual(
-      expect.arrayContaining(["memory_search", "memory_zoom", "memory_date", "codemode"]),
+      expect.arrayContaining(["memory_zoom", "memory_date", "memory_search", "codemode"]),
     );
+    expect(names.filter((name) => name.startsWith("memory_"))).toEqual([
+      "memory_zoom",
+      "memory_date",
+      "memory_search",
+    ]);
+    expect(names).not.toContain("memory_overview");
     expect(names).not.toContain("zoom");
     expect(names).not.toContain("date");
     runtime.models.registerNativeProvider(faux.provider);
@@ -54,7 +60,7 @@ test("startup restores direct memory tools from a persisted pre-search allowlist
       (request) => {
         const tools = getCurrentTools(request.messages);
         expect(tools.map((tool) => tool.name)).toEqual(
-          expect.arrayContaining(["memory_search", "memory_zoom", "memory_date"]),
+          expect.arrayContaining(["memory_zoom", "memory_date", "memory_search"]),
         );
         expect(tools.find((tool) => tool.name === "memory_search")?.parameters).toMatchObject({
           required: ["query"],

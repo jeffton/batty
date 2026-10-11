@@ -419,8 +419,8 @@ for one (no sleep, no polling): go on, or end your turn and tell the
 user what is running.`;
 export const VIEW_DOC = `The main-memory view: the chat between Batty and the user, oldest first, inside
 <chat> tags, as one-line summaries. This is the prepared view of the OptChat memory tree.
-The memory_search, memory_zoom and memory_date tools all address this same main history:
-search finds original messages, zoom opens tree nodes, and date retrieves original timestamps.
+The memory_zoom, memory_date and memory_search tools all address this same main history:
+zoom opens tree nodes, date retrieves original timestamps, and search finds original messages.
 Each line is
 
   id+n|text   the n messages from id on, summarized (newlines shown as spaces)
@@ -1150,30 +1150,6 @@ export function createMemory(config: MemoryConfig, models: Models) {
     sections: [section("memory", () => MEMORY_PROMPT)],
     tools: [
       defineTool({
-        name: "memory_search",
-        description:
-          "Search original main-memory text using 1–12 literal words (all must match), newest first. Returns bounded snippets with original id/date/kind; use memory_zoom(id, 1) for full text. Tools/results excluded unless includeTools is true. No semantic search.",
-        parameters: Type.Object({
-          query: Type.String({ maxLength: 256 }),
-          limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
-          includeTools: Type.Optional(Type.Boolean()),
-        }),
-        replay: "safe",
-        execute: async (options, api, context) => {
-          const worker = await api.snapshot(WorkerDoc, api.conversationId, context);
-          if (
-            !conversationPolicy(
-              api.conversationId === main.id ? "assistant" : "worker",
-              worker?.workspaceId,
-            ).mainMemory
-          )
-            throw new Error("Main memory is available only to Roy workers");
-          return {
-            content: [{ type: "text", text: JSON.stringify(await search(options, context)) }],
-          };
-        },
-      }),
-      defineTool({
         name: "memory_zoom",
         description:
           "Open prepared main-memory line id+n into its two child summaries; n=1 returns uncompressed non-thought text, not full message metadata, image bytes or reasoning.",
@@ -1208,6 +1184,30 @@ export function createMemory(config: MemoryConfig, models: Models) {
           )
             throw new Error("Main memory is available only to Roy workers");
           return { content: [{ type: "text", text: await date(id, context) }] };
+        },
+      }),
+      defineTool({
+        name: "memory_search",
+        description:
+          "Search original main-memory text using 1–12 literal words (all must match), newest first. Returns bounded snippets with original id/date/kind; use memory_zoom(id, 1) for full text. Tools/results excluded unless includeTools is true. No semantic search.",
+        parameters: Type.Object({
+          query: Type.String({ maxLength: 256 }),
+          limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
+          includeTools: Type.Optional(Type.Boolean()),
+        }),
+        replay: "safe",
+        execute: async (options, api, context) => {
+          const worker = await api.snapshot(WorkerDoc, api.conversationId, context);
+          if (
+            !conversationPolicy(
+              api.conversationId === main.id ? "assistant" : "worker",
+              worker?.workspaceId,
+            ).mainMemory
+          )
+            throw new Error("Main memory is available only to Roy workers");
+          return {
+            content: [{ type: "text", text: JSON.stringify(await search(options, context)) }],
+          };
         },
       }),
     ],

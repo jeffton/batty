@@ -1,0 +1,299 @@
+import { BACKGROUND_CONTEXT, awaitWithContext } from "@earendil-works/chord/context";
+import type { Context } from "@earendil-works/chord";
+import { Type, type Message } from "@earendil-works/pi-ai";
+import { getCurrentSystemMessage } from "@earendil-works/pi-ai/utils/transcript";
+import {
+  defineExtension,
+  defineTool,
+  GenerationTask,
+  CompactionTask,
+  hook,
+  LiveDoc,
+  section,
+  type Conversation,
+  type ConversationId,
+  type SubmissionId,
+  type EntryId,
+  type Harness,
+} from "@earendil-works/pi-durable";
+import type { MemorySearchOptions, MemorySearch } from "./memory-search";
+import { Packets, WorkerMemory } from "./memory-documents";
+import { decodeRuntimeNotice } from "./runtime-notices";
+import { WorkerDoc } from "./orchestration";
+import { conversationPolicy } from "./conversation-policy";
+import { MAIN_MEMORY_TOOLS, isMainMemoryView, withoutMainMemory } from "./main-memory-policy";
+import { MEMORY_PROMPT } from "./memory-prompts";
+
+type MemoryRequests = {
+  main: () => Conversation;
+  harness: () => Harness;
+  rootSessionId: () => string;
+  exclusive: <T>(operation: () => Promise<T>) => Promise<T>;
+  syncTo: (maximum: number, context: Context) => Promise<void>;
+  load: (context: Context) => Promise<void>;
+  conversationalView: (context: Context) => Promise<string>;
+  preparedView: () => string;
+  zoom: (id: number, count: number, context: Context) => Promise<string>;
+  date: (id: number, context: Context) => Promise<string>;
+  search: (options: MemorySearchOptions, context: Context) => ReturnType<MemorySearch["search"]>;
+  report: (error: unknown) => void;
+};
+
+export function createMemoryRequests({
+  main,
+  harness,
+  rootSessionId,
+  exclusive,
+  syncTo,
+  load,
+  conversationalView,
+  preparedView,
+  zoom,
+  date,
+  search,
+  report,
+}: MemoryRequests) {
+  const validPackets = new Set<string>();
+  async function packetForRun(runId: SubmissionId, context: Context) {
+    const packet = await harness().snapshot(Packets, main().id, String(runId), context);
+    if (packet) return packet;
+    return awaitWithContext(
+      exclusive(async () => {
+        const existing = await harness().snapshot(Packets, main().id, String(runId), context);
+        if (existing) return existing;
+        const input = await (await harness().submission(runId, context))!.status(context);
+        if (!input.entry) throw new Error("Main run input has no entry");
+        await syncTo(input.entry - 1, context);
+        const view = await conversationalView(context);
+        const candidate = {
+          view,
+          boundary: input.entry as number,
+        };
+        await main().commit(async (tx) => {
+          await tx.doc(Packets, main().id, String(runId), candidate);
+          await tx.appendEntry(main().id, { kind: "batty.run-head", head: input.entry });
+        }, context);
+        return candidate;
+      }),
+      context,
+    );
+  }
+  async function runMessages(
+    messages: readonly Message[],
+    packet: { view: string; boundary: number },
+    context: Context,
+  ): Promise<Message[]> {
+    const entry = await main().commit((tx) => tx.entry(packet.boundary as EntryId), context);
+    const original = entry!.model![0]!;
+    const start = messages.findIndex(
+      (message) =>
+        message.role === "user" &&
+        message.timestamp === original.timestamp &&
+        JSON.stringify(message.content) ===
+          JSON.stringify(decodeRuntimeNotice(original.content)?.text ?? original.content),
+    );
+    if (start < 0) throw new Error("Main run boundary absent from request");
+    // Pi may emit its complete system baseline after the input/run-head.
+    // Replay every patch, then lead with the effective instructions and tools.
+    const system = getCurrentSystemMessage(messages);
+    return [
+      ...(system ? [{ ...system, timestamp: 0 }] : []),
+      { role: "user", content: packet.view, timestamp: 0 },
+      ...messages.slice(start).filter((message) => message.role !== "system"),
+    ];
+  }
+  const extension = defineExtension({
+    name: "batty-optchat",
+    sections: [section("memory", () => MEMORY_PROMPT)],
+    tools: [
+      defineTool({
+        name: "memory_zoom",
+        description:
+          "Open prepared main-memory line id+n into its two child summaries; n=1 returns uncompressed non-thought text, not full message metadata, image bytes or reasoning.",
+        parameters: Type.Object({ id: Type.Integer(), n: Type.Integer() }),
+        replay: "safe",
+        outputLimits: { maxBytes: Number.MAX_SAFE_INTEGER, maxLines: Number.MAX_SAFE_INTEGER },
+        execute: async ({ id, n }, api, context) => {
+          const worker = await api.snapshot(WorkerDoc, api.conversationId, context);
+          if (
+            !conversationPolicy(
+              api.conversationId === main().id ? "assistant" : "worker",
+              worker?.workspaceId,
+            ).mainMemory
+          )
+            throw new Error("Main memory is available only to Roy workers");
+          return { content: [{ type: "text", text: await zoom(id, n, context) }] };
+        },
+      }),
+      defineTool({
+        name: "memory_date",
+        description:
+          "The date and time of main-memory message id (from the prepared overview or memory_zoom).",
+        parameters: Type.Object({ id: Type.Integer() }),
+        replay: "safe",
+        execute: async ({ id }, api, context) => {
+          const worker = await api.snapshot(WorkerDoc, api.conversationId, context);
+          if (
+            !conversationPolicy(
+              api.conversationId === main().id ? "assistant" : "worker",
+              worker?.workspaceId,
+            ).mainMemory
+          )
+            throw new Error("Main memory is available only to Roy workers");
+          return { content: [{ type: "text", text: await date(id, context) }] };
+        },
+      }),
+      defineTool({
+        name: "memory_search",
+        description:
+          "Search original main-memory text using 1–12 literal words (all must match), newest first. Returns bounded snippets with original id/date/kind; use memory_zoom(id, 1) for full text. Tools/results excluded unless includeTools is true. No semantic search.",
+        parameters: Type.Object({
+          query: Type.String({ maxLength: 256 }),
+          limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
+          includeTools: Type.Optional(Type.Boolean()),
+        }),
+        replay: "safe",
+        execute: async (options, api, context) => {
+          const worker = await api.snapshot(WorkerDoc, api.conversationId, context);
+          if (
+            !conversationPolicy(
+              api.conversationId === main().id ? "assistant" : "worker",
+              worker?.workspaceId,
+            ).mainMemory
+          )
+            throw new Error("Main memory is available only to Roy workers");
+          return {
+            content: [{ type: "text", text: JSON.stringify(await search(options, context)) }],
+          };
+        },
+      }),
+    ],
+    hooks: [
+      hook(CompactionTask, {
+        beforeCompact: (_, api) =>
+          conversationPolicy(api.conversationId === main().id ? "assistant" : "worker")
+            .nativeCompaction
+            ? undefined
+            : { decline: true },
+      }),
+      hook(GenerationTask, {
+        beforeRequest: async ({ messages }, api, context) => {
+          if (api.conversationId !== main().id) {
+            const worker = await api.snapshot(WorkerDoc, api.conversationId, context);
+            if (!conversationPolicy("worker", worker?.workspaceId).mainMemory) {
+              const isolated = withoutMainMemory(messages);
+              const system = getCurrentSystemMessage(messages);
+              return {
+                messages: [
+                  ...(system
+                    ? [
+                        {
+                          ...system,
+                          toolsAdded: system.toolsAdded?.filter(
+                            (tool) => !MAIN_MEMORY_TOOLS.has(tool.name),
+                          ),
+                        },
+                      ]
+                    : []),
+                  ...isolated,
+                ],
+              };
+            }
+            const copiedView = messages.find(isMainMemoryView);
+            let snapshot = await harness().snapshot(WorkerMemory, api.conversationId, context);
+            if (!snapshot?.view) {
+              await load(context);
+              const active = await harness().snapshot(LiveDoc, main().id, context);
+              const runId = active?.run?.inputs[0];
+              const packet = runId
+                ? await harness().snapshot(Packets, main().id, String(runId), context)
+                : undefined;
+              const candidate = {
+                view: copiedView
+                  ? (copiedView.content as string)
+                  : (packet?.view ?? preparedView()),
+              };
+              const conversation = (await harness().conversation(api.conversationId, context))!;
+              snapshot = await conversation.commit(async (tx) => {
+                const pinned = await tx.doc(WorkerMemory, api.conversationId);
+                pinned.view ??= candidate.view;
+                return { view: pinned.view };
+              }, context);
+            }
+            const system = getCurrentSystemMessage(messages);
+            return {
+              messages: [
+                ...(system ? [{ ...system, timestamp: 0 }] : []),
+                {
+                  role: "user",
+                  content: snapshot!.view!,
+                  timestamp: 0,
+                },
+                ...messages.filter(
+                  (message) => message.role !== "system" && !isMainMemoryView(message),
+                ),
+              ],
+            };
+          }
+          try {
+            const live = (await api.snapshot(LiveDoc, main().id, context))!;
+            const runId = live.run!.inputs[0]!;
+            const packet = await packetForRun(runId, context);
+            const prepared = await runMessages(messages, packet, context);
+            validPackets.clear();
+            validPackets.add(packet.view);
+            return { messages: prepared };
+          } catch (error) {
+            report(error);
+            // Pi swallows ordinary hook exceptions. Mark this invocation aborted and wait for its signal instead.
+            void harness().abortTask(api.taskId, BACKGROUND_CONTEXT).catch(report);
+            await new Promise<never>((_, reject) => {
+              const signal = context.abortSignal!;
+              if (signal.aborted) reject(signal.reason);
+              else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+            });
+          }
+        },
+      }),
+    ],
+  });
+  return {
+    extension,
+    async contextFor(
+      parentId: ConversationId,
+      mode: boolean | "chat-only",
+      context = BACKGROUND_CONTEXT,
+    ): Promise<readonly Message[]> {
+      if (mode === false) return [];
+      if (parentId !== main().id)
+        return (await (await harness().conversation(parentId, context))!.context(context)).messages;
+      const active = await harness().snapshot(LiveDoc, main().id, context);
+      const runId = active?.run?.inputs[0];
+      if (runId) {
+        const packet = await packetForRun(runId, context);
+        return runMessages((await main().context(context)).messages, packet, context);
+      }
+      const view = await awaitWithContext(
+        exclusive(async () => {
+          await syncTo(
+            (await main().entries({}, 1, undefined, context)).items[0]?.id ?? 0,
+            context,
+          );
+          return conversationalView(context);
+        }),
+        context,
+      );
+      return [{ role: "user", content: view, timestamp: 0 }];
+    },
+    validateRequest(request: { messages: readonly Message[] }, options?: { sessionId?: string }) {
+      if (options?.sessionId !== rootSessionId()) return;
+      const admitted = request.messages.some(
+        (message) =>
+          message.role === "user" &&
+          typeof message.content === "string" &&
+          validPackets.has(message.content),
+      );
+      if (!admitted) throw new Error("Main request rejected: no persisted OptChat run packet");
+    },
+  };
+}

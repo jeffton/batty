@@ -40,4 +40,4 @@ Main runs receive a prepared memory overview. Workers in the assistant's workspa
 ## References
 
 - [Pi Durable](https://github.com/earendil-works/pi/tree/main/packages/durable)
-- [OptChat specification](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449)
+- [OptChat specification](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449) ([archived copy](docs/references/optchat-spec.md))

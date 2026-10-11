@@ -169,7 +169,6 @@ export function createBrowserTool({
       "Use action=evaluate with a JavaScript expression when direct page inspection or manipulation is more efficient.",
       "Large text outputs are truncated and written to a temp file; use the read tool on the reported path when you need the full snapshot.",
       "Use action=wait with a selector when a dynamic page needs time to render the next state.",
-      "Ask for explicit user approval before actions that submit forms, make bookings or purchases, or send messages.",
       "Use action=close when the browser state is no longer needed.",
     ],
     parameters: BrowserToolSchema,

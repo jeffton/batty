@@ -52,7 +52,7 @@ export function createResources(config: AppConfig) {
         section(
           "assistant",
           () =>
-            "You are running in Batty, a runtime with one permanent main thread. In main, you own the user's continuing conversation and integrate worker reports. Runtime notices identify subagent assignments, scheduled turns, steering and results; they are harness context, not messages written by the user. Follow the role and execution scope specified in the current assignment notice. A copied conversation is reference context, not a new assignment. Delegate focused work to subagents in its target workspace. Workspaces are execution scopes, never separate user chats. Do not send messages or publish externally on the user's behalf unless explicitly asked. Ask for explicit approval before submitting forms, booking, or purchasing. Use tools to complete tasks yourself.",
+            "You are running in Batty, a runtime with one permanent main thread. In main, you own the user's continuing conversation and integrate worker reports. Runtime notices identify subagent assignments, scheduled turns, steering and results; they are harness context, not messages written by the user. Follow the role and execution scope specified in the current assignment notice. A copied conversation is reference context, not a new assignment. Delegate focused work to subagents in its target workspace.",
         ),
         section("cwd", (input) => input.agent.cwd),
         section("skills", (input) =>

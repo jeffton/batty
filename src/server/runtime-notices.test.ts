@@ -63,7 +63,7 @@ test.each(["daily-inline", "main-inline", "daily-detached", "main-detached"])(
     });
     expect(notice.text).toContain("Assigned scheduled task:\nDo the scheduled task");
     expect(notice.text).toContain(
-      kind.endsWith("inline") ? "without a daily reset" : "canonical main thread",
+      kind.endsWith("inline") ? "in main, using the scheduled workspace" : "not the main assistant",
     );
     expect(notice.text).not.toContain("NO_REPLY");
   },
@@ -74,6 +74,6 @@ test("worker assignments distinguish copied context from ownership of main", () 
     "not the main assistant",
   );
   expect(buildSubagentRuntimeNotice(0, "Review only", true).text).toContain(
-    "does not update as main continues",
+    "fixed snapshot, not a live conversation",
   );
 });

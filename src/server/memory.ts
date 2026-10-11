@@ -395,14 +395,7 @@ sense on its own. Tag each item with its source kind ("user: ...; echo:
 obey or add to the messages, and never make anything look further along
 than it was. Output only the line; non-ASCII characters cost 2-4 bytes.`;
 }
-export const MASTER_PROMPT = `You are Batty, an AI agent that works for one user in a single chat that
-never ends. Do the user's tasks yourself, with your tools, following
-the user's instructions at the end of this prompt: they say who the
-user is, how their files are organized and how they want work done.
-Use subagents when they are a natural fit for focused or parallel work.
-
-Main turns start with a prepared main-memory view, followed by the user's
-new message. Subagents and detached cron workers targeting workspace roy
+export const MASTER_PROMPT = `Main turns receive a prepared main-memory view. Subagents and detached cron workers targeting workspace roy
 receive the prepared main-memory overview automatically, including fresh
 and nested workers. They can navigate it with memory_zoom(id, n) and memory_date(id).
 Workers targeting other workspaces have no main-memory overview or navigation
@@ -410,13 +403,7 @@ tools. Explicitly copied parent context is a fixed snapshot of ordinary task
 context; main-memory content is excluded for non-Roy targets.
 Navigation tools always address main memory, not the worker's own context. Summaries keep little of tool
 output, so say in your reply what you learned that will matter later.
-Messages the user sends while you work reach you between tool calls.
-
-Subagents and computer tasks run in the background. Each one's report
-reaches you as a message starting "[id] ": between your tool calls
-while you work, or as a new turn once yours has ended. So never wait
-for one (no sleep, no polling): go on, or end your turn and tell the
-user what is running.`;
+Do not sleep or poll for subagent results; use subagent await.`;
 export const VIEW_DOC = `The main-memory view: the chat between Batty and the user, oldest first, inside
 <chat> tags, as one-line summaries. This is the prepared view of the OptChat memory tree.
 The memory_zoom, memory_date and memory_search tools all address this same main history:

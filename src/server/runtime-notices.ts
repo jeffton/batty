@@ -35,10 +35,10 @@ export function decodeRuntimeNotice(content: unknown): RuntimeNotice | undefined
 
 function contextInstructions(mode: PreviousContextMode = false): string {
   return mode === "chat-only"
-    ? "You received a chat-only snapshot of the parent's context (main-memory content is excluded for non-Roy targets); tool calls, tool results and thinking were omitted."
+    ? "Copied parent context contains chat only, without tool calls, results or thinking. It is a fixed snapshot, not a live conversation."
     : mode === true
-      ? "You received a fixed snapshot of the parent's prepared context (main-memory content is excluded for non-Roy targets). It does not update as main continues."
-      : "You start fresh with workspace system instructions and the assigned prompt.";
+      ? "Copied parent context is a fixed snapshot, not a live conversation."
+      : "";
 }
 
 export function buildSubagentRuntimeNotice(
@@ -51,10 +51,12 @@ export function buildSubagentRuntimeNotice(
     text: [
       "You are a subagent carrying out an assigned task, not the main assistant. Work only on this task in this execution scope.",
       contextInstructions(includePreviousContext),
-      "Detailed work and tool calls stay here. Asynchronous final responses and errors go to your spawning parent; synchronous results return through the calling agent's tool call. Make your final response self-contained.",
+      "Make your final response self-contained.",
       "Assigned task:",
       prompt.trim(),
-    ].join("\n\n"),
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
   };
 }
 
@@ -82,14 +84,16 @@ export function buildCronRuntimeNotice({
       `Cron ${phase === "run" ? "run triggered" : phase === "delivery" ? "result delivered" : "run skipped"}. Current time: ${now.toISOString()}. Schedule: ${scheduleLabel}.`,
       ...(phase === "run"
         ? [
-            `You are executing a scheduled task. Session mode: ${session.kind}.`,
             inline
-              ? "You run inline in the permanent main conversation, without a daily reset. This turn uses the scheduled workspace's execution scope; messages, tools and final response stay in main's continuing context."
-              : `You run in a separate execution scope, not the main assistant. ${contextInstructions(session.includePreviousContext)} Detailed work and tool calls stay here; your final response or error is delivered to the canonical main thread. Make the final response self-contained.`,
+              ? "Execute the scheduled task in main, using the scheduled workspace."
+              : [
+                  "You run in a separate execution scope, not the main assistant. Execute the scheduled task and make your final response self-contained.",
+                  contextInstructions(session.includePreviousContext),
+                ]
+                  .filter(Boolean)
+                  .join(" "),
           ]
-        : [
-            "Detailed work stays in the linked execution scope; this is a runtime report, not a user request.",
-          ]),
+        : ["This is a runtime report, not a user request."]),
       `${phase === "run" ? "Assigned scheduled task" : "Scheduled prompt (for reference)"}:\n${prompt.trim()}`,
     ].join("\n\n"),
   };

@@ -864,7 +864,7 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
   const subagent = defineTool({
     name: "subagent",
     description:
-      "Run, await, queue, resume, steer or stop durable workers. Main-started workers always run async and main await yields its turn. Async results go to the spawning parent. In workers and cron turns, await durably joins an owned child and returns its final result in the tool call, suppressing its pending separate report. Other helper reports wait until joined or the parent turn finishes. The parent continues processing; only its final cron output reaches main. Start multiple async helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
+      "Run, await, queue, resume, steer or stop subagents. Start a subagent, await it, then use its result. Start multiple async helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
     replay: "safe",
     parameters: Type.Object({
       action: Type.Union(
@@ -1434,7 +1434,7 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
   const cron = defineTool({
     name: "cron",
     description:
-      "Manage durable scheduled turns. daily-inline/main-inline run in main without a daily reset; daily-detached/main-detached use fresh workers. delivery=assistant (default) sends final output to main for an assistant turn or queued follow-up; delivery=direct displays output unchanged in main without an assistant turn (runs in a worker even with an inline session). NO_REPLY remains suppressed. Failures reach the assistant. Helper reports stay with their spawning parent.",
+      "Manage scheduled tasks. daily-inline/main-inline use main's continuing context; daily-detached/main-detached use separate workers. delivery=assistant (default) lets the main assistant handle the result; delivery=direct shows the result unchanged to the user and always runs in a separate worker. Return NO_REPLY for no user-visible output.",
     replay: "unsafe",
     parameters: Type.Object({
       action: Type.String(),

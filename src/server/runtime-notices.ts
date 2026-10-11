@@ -35,10 +35,8 @@ export function decodeRuntimeNotice(content: unknown): RuntimeNotice | undefined
 
 function contextInstructions(mode: PreviousContextMode = false): string {
   return mode === "chat-only"
-    ? "Copied parent context contains chat only, without tool calls, results or thinking. It is a fixed snapshot, not a live conversation."
-    : mode === true
-      ? "Copied parent context is a fixed snapshot, not a live conversation."
-      : "";
+    ? "Copied parent context contains chat only, without tool calls, results or thinking."
+    : "";
 }
 
 export function buildSubagentRuntimeNotice(

@@ -73,7 +73,7 @@ test("worker assignments distinguish copied context from ownership of main", () 
   expect(buildSubagentRuntimeNotice(0, "Review only", true).text).toContain(
     "not the main assistant",
   );
-  expect(buildSubagentRuntimeNotice(0, "Review only", true).text).toContain(
-    "fixed snapshot, not a live conversation",
+  expect(buildSubagentRuntimeNotice(0, "Review only", "chat-only").text).toContain(
+    "chat only, without tool calls, results or thinking",
   );
 });

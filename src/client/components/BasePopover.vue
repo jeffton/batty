@@ -8,6 +8,8 @@ const props = withDefaults(
     as?: "div" | "form";
     mode?: "auto" | "manual";
     anchorUp?: boolean;
+    anchorDown?: boolean;
+    floating?: boolean;
     alignViewportRight?: boolean;
     dimBackdrop?: boolean;
   }>(),
@@ -27,7 +29,7 @@ let observer: ResizeObserver | undefined;
 let layoutObserver: MutationObserver | undefined;
 let frame: number | undefined;
 
-function positionAboveAnchor(): void {
+function positionAtAnchor(): void {
   const popover = element.value!;
   const anchor = document.querySelector<HTMLElement>(
     `[popovertarget="${CSS.escape(popover.id)}"]`,
@@ -43,12 +45,12 @@ function positionAboveAnchor(): void {
     position: "fixed",
     positionArea: "none",
     positionTryFallbacks: "none",
-    top: "auto",
+    top: props.anchorDown ? `${rect.bottom + margin}px` : "auto",
     right: "auto",
-    bottom: `${window.innerHeight - rect.top + margin}px`,
+    bottom: props.anchorDown ? "auto" : `${window.innerHeight - rect.top + margin}px`,
     left: `${props.alignViewportRight ? viewportLeft + viewportWidth - width - margin : Math.max(viewportLeft + margin, Math.min(rect.right - width, viewportLeft + viewportWidth - width - margin))}px`,
     maxWidth: `${viewportWidth - margin * 2}px`,
-    maxHeight: `min(var(--anchored-popover-max-height, 32rem), ${Math.max(0, rect.top - viewportTop - margin * 2)}px)`,
+    maxHeight: `min(var(--anchored-popover-max-height, 32rem), ${Math.max(0, props.anchorDown ? viewportTop + (viewport?.height ?? window.innerHeight) - rect.bottom - margin * 2 : rect.top - viewportTop - margin * 2)}px)`,
     margin: "0",
   };
 }
@@ -56,20 +58,20 @@ function positionAboveAnchor(): void {
 function stopPositioning(): void {
   observer?.disconnect();
   layoutObserver?.disconnect();
-  window.removeEventListener("resize", positionAboveAnchor);
-  window.removeEventListener("scroll", positionAboveAnchor, true);
-  window.visualViewport?.removeEventListener("resize", positionAboveAnchor);
-  window.visualViewport?.removeEventListener("scroll", positionAboveAnchor);
+  window.removeEventListener("resize", positionAtAnchor);
+  window.removeEventListener("scroll", positionAtAnchor, true);
+  window.visualViewport?.removeEventListener("resize", positionAtAnchor);
+  window.visualViewport?.removeEventListener("scroll", positionAtAnchor);
   if (frame !== undefined) cancelAnimationFrame(frame);
 }
 
 function handleBeforeToggle(event: Event): void {
-  if (!props.anchorUp) return;
+  if (!props.anchorUp && !props.anchorDown) return;
   stopPositioning();
   if ((event as ToggleEvent).newState !== "open") return;
   frame = requestAnimationFrame(() => {
-    positionAboveAnchor();
-    observer = new ResizeObserver(positionAboveAnchor);
+    positionAtAnchor();
+    observer = new ResizeObserver(positionAtAnchor);
     observer.observe(element.value!);
     const anchor = document.querySelector<HTMLElement>(
       `[popovertarget="${CSS.escape(element.value!.id)}"]`,
@@ -77,17 +79,17 @@ function handleBeforeToggle(event: Event): void {
     observer.observe(anchor);
     const container = anchor.parentElement!.parentElement!;
     observer.observe(container);
-    layoutObserver = new MutationObserver(positionAboveAnchor);
+    layoutObserver = new MutationObserver(positionAtAnchor);
     layoutObserver.observe(container, {
       subtree: true,
       childList: true,
       attributes: true,
       characterData: true,
     });
-    window.addEventListener("resize", positionAboveAnchor);
-    window.addEventListener("scroll", positionAboveAnchor, true);
-    window.visualViewport?.addEventListener("resize", positionAboveAnchor);
-    window.visualViewport?.addEventListener("scroll", positionAboveAnchor);
+    window.addEventListener("resize", positionAtAnchor);
+    window.addEventListener("scroll", positionAtAnchor, true);
+    window.visualViewport?.addEventListener("resize", positionAtAnchor);
+    window.visualViewport?.addEventListener("scroll", positionAtAnchor);
   });
 }
 
@@ -115,7 +117,10 @@ defineExpose({ element, showPopover, hidePopover, togglePopover });
     <component
       :is="props.as"
       ref="element"
-      :class="['base-popover', { 'base-popover--dimmed': props.dimBackdrop }]"
+      :class="[
+        'base-popover',
+        { 'base-popover--dimmed': props.dimBackdrop, 'base-popover--floating': props.floating },
+      ]"
       :popover="props.mode"
       v-bind="$attrs"
       :style="anchorStyle"
@@ -130,6 +135,18 @@ defineExpose({ element, showPopover, hidePopover, togglePopover });
 <style scoped>
 .base-popover {
   overscroll-behavior: contain;
+}
+
+.base-popover--floating {
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.75rem;
+  background: var(--color-bg-overlay);
+  color: var(--color-text);
+  box-shadow: var(--color-shadow-popover);
+}
+
+.base-popover--floating::backdrop {
+  background: transparent;
 }
 
 .base-popover--dimmed::backdrop {

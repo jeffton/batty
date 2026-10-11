@@ -3,6 +3,7 @@ import ChatMessage from "./ChatMessage.vue";
 import DeleteButton from "./DeleteButton.vue";
 import ModelConfigPopover from "./ModelConfigPopover.vue";
 import ProviderUsageIndicator from "./ProviderUsageIndicator.vue";
+import TasksControl from "./TasksControl.vue";
 import type { UiMessage } from "@/shared/types";
 import "@/client/styles.css";
 const artifacts = {
@@ -64,4 +65,20 @@ messages.push({
       :allow-session-popovers="true"
     />
   </main>
+  <footer
+    style="position: fixed; z-index: 10; bottom: 0; right: 8px; display: flex; align-items: center"
+  >
+    <TasksControl :subagents="[]" :cron-runs="[]" :memory-pending="3" />
+    <button popovertarget="fixture-footer-model" style="min-width: 44px; min-height: 44px">
+      Footer model
+    </button>
+    <ModelConfigPopover
+      popover-id="fixture-footer-model"
+      anchor-name="--fixture-footer-model"
+      placement="up"
+      :models="[{ id: 'fixture/model', label: 'Fixture', provider: 'fixture' }]"
+      current-thinking-level="medium"
+      :thinking-options="['low', 'medium', 'high']"
+    />
+  </footer>
 </template>

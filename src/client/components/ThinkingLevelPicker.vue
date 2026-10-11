@@ -44,6 +44,8 @@ function thinkingLabel(value: string): string {
 }
 
 .thinking-picker__btn {
+  min-width: 44px;
+  min-height: 44px;
   flex: 1;
   border: 0;
   border-radius: 0.35rem;

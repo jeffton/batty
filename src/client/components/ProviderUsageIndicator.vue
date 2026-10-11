@@ -98,6 +98,9 @@ onUnmounted(() => clearInterval(clock));
     v-if="rows.length || error"
     :id="popoverId"
     class="usage-details"
+    floating
+    anchor-down
+    align-viewport-right
     :style="{ 'position-anchor': anchorName }"
     aria-label="Usage limits"
   >
@@ -112,6 +115,8 @@ onUnmounted(() => clearInterval(clock));
 
 <style scoped>
 .usage {
+  min-width: 44px;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -151,22 +156,12 @@ onUnmounted(() => clearInterval(clock));
   display: none;
 }
 :global(.usage-details:popover-open) {
-  position: fixed;
-  position-area: block-end span-inline-start;
-  position-try-fallbacks:
-    block-end span-inline-end,
-    block-start span-inline-start;
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
   width: min(18rem, calc(100vw - 1rem));
-  margin: 0.35rem 0;
+  margin: 0;
   padding: 0.75rem;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.6rem;
-  background: var(--color-bg-overlay);
-  color: var(--color-text-strong);
-  box-shadow: var(--color-shadow-popover);
   font-size: 0.8rem;
   overflow-wrap: anywhere;
 }

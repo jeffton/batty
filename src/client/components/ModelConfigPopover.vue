@@ -56,7 +56,7 @@ watch(
 <template>
   <BasePopover
     :id="props.popoverId"
-    dim-backdrop
+    floating
     :anchor-up="props.placement === 'up'"
     :align-viewport-right="props.placement === 'up'"
     :class="['mc-popover', props.placement === 'up' ? 'mc-popover--up' : '']"
@@ -118,11 +118,7 @@ watch(
   flex-direction: column;
   margin: 0;
   padding: 0.5rem;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.75rem;
-  background: var(--color-bg-overlay);
-  color: inherit;
-  box-shadow: var(--color-shadow-popover);
+
   gap: 0.35rem;
 }
 
@@ -171,6 +167,7 @@ watch(
 }
 
 .mc-popover__model {
+  min-height: 44px;
   display: flex;
   align-items: baseline;
   justify-content: space-between;

@@ -23,6 +23,7 @@ afterAll(async () => {
   await server?.close();
 });
 for (const { width, colorScheme } of [
+  { width: 320, colorScheme: "light" as const },
   { width: 390, colorScheme: "light" as const },
   { width: 390, colorScheme: "dark" as const },
   { width: 1100, colorScheme: "light" as const },
@@ -151,6 +152,57 @@ for (const { width, colorScheme } of [
         expect(box.x + box.width).toBeLessThanOrEqual(width);
         expect(box.y + box.height).toBeLessThanOrEqual(900);
         await page.keyboard.press("Escape");
+      }
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+
+  test(`small popovers have shadows without backdrops and dismiss normally at ${width}px (${colorScheme})`, async () => {
+    const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
+    page.setDefaultTimeout(5000);
+    await page.route("**/api/provider-usage?*", (route) =>
+      route.fulfill({ status: 503, json: { error: "Fixture usage unavailable" } }),
+    );
+    try {
+      await page.goto(url);
+      for (const { name, selector, rightAligned } of [
+        { name: "Usage limits unavailable", selector: ".usage-details", rightAligned: true },
+        { name: "Running tasks", selector: ".tasks-popover", rightAligned: false },
+        { name: "Footer model", selector: "#fixture-footer-model", rightAligned: true },
+      ]) {
+        const trigger = page.getByRole("button", { name, exact: true });
+        const triggerBox = (await trigger.boundingBox())!;
+        expect(triggerBox.width).toBeGreaterThanOrEqual(44);
+        expect(triggerBox.height).toBeGreaterThanOrEqual(44);
+        await trigger.click();
+        const popover = page.locator(`${selector}:popover-open`);
+        await popover.waitFor();
+        if (rightAligned) {
+          await expect
+            .poll(async () => {
+              const box = (await popover.boundingBox())!;
+              return Math.round(box.x + box.width);
+            })
+            .toBe(width - 8);
+        }
+        const styles = await popover.evaluate((element) => ({
+          shadow: getComputedStyle(element).boxShadow,
+          backdrop: getComputedStyle(element, "::backdrop").backgroundColor,
+        }));
+        expect(styles.shadow).not.toBe("none");
+        expect(styles.backdrop).toBe("rgba(0, 0, 0, 0)");
+        for (const button of await popover.locator("button").all()) {
+          const box = (await button.boundingBox())!;
+          expect(box.width).toBeGreaterThanOrEqual(44);
+          expect(box.height).toBeGreaterThanOrEqual(44);
+        }
+        await page.keyboard.press("Escape");
+        expect(await page.locator(`${selector}:popover-open`).count()).toBe(0);
+        await trigger.click();
+        await popover.waitFor();
+        await page.mouse.click(width - 2, 450);
+        expect(await page.locator(`${selector}:popover-open`).count()).toBe(0);
       }
     } finally {
       await page.close();

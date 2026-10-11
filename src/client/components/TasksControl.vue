@@ -85,7 +85,7 @@ function sessionToggle(taskId: string, event: Event): void {
     ref="tasksPopover"
     :id="popoverId"
     class="tasks-popover"
-    dim-backdrop
+    floating
     anchor-up
     role="dialog"
     aria-label="Running tasks"
@@ -184,11 +184,6 @@ function sessionToggle(taskId: string, event: Event): void {
   max-height: 24rem;
   overflow: hidden;
   padding: 0;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.75rem;
-  background: var(--color-bg-overlay);
-  color: var(--color-text);
-  box-shadow: var(--color-shadow-popover);
 }
 
 .tasks-popover__header {

@@ -133,7 +133,7 @@ export function streamSession(
   }, 2000);
   const heartbeat = setInterval(() => {
     if (!closed && !stream.writableNeedDrain) stream.write("event: heartbeat\ndata: {}\n\n");
-  }, 20_000);
+  }, 5000);
   function close() {
     if (closed) return;
     closed = true;

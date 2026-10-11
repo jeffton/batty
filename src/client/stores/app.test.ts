@@ -250,7 +250,7 @@ describe("stream recovery", () => {
     const store = useAppStore();
     store.activeSession = { ...state(99), isStreaming: true };
     store.openStream();
-    vi.advanceTimersByTime(75_000);
+    vi.advanceTimersByTime(15_000);
     expect(streams).toHaveLength(2);
     expect(streams[0].close).toHaveBeenCalledOnce();
     streams[1].onmessage({
@@ -274,13 +274,50 @@ describe("stream recovery", () => {
     store.closeStream();
     vi.useRealTimers();
   });
-  it("resynchronizes via a fresh SSE snapshot on pageshow and visibility resume", async () => {
+  it("requires a snapshot before declaring a reconnected main stream online", async () => {
+    vi.useFakeTimers();
+    const streams: any[] = [];
+    vi.stubGlobal(
+      "EventSource",
+      class {
+        close = vi.fn();
+        addEventListener = vi.fn();
+        constructor() {
+          streams.push(this);
+        }
+      },
+    );
+    const store = useAppStore();
+    store.activeSession = state();
+    store.openStream();
+    streams[0].onopen();
+    expect(store.connectionState).toBe("connecting");
+    streams[0].onmessage({
+      data: JSON.stringify({ type: "state", state: {}, streamId: "generation-a", revision: 2 }),
+    });
+    expect(store.connectionState).toBe("connecting");
+    streams[0].onmessage({
+      data: JSON.stringify({ type: "reset", state: state(3), revision: 3 }),
+    });
+    expect(store.connectionState).toBe("online");
+    streams[0].onerror();
+    expect(store.connectionState).toBe("offline");
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(store.connectionState).toBe("connecting");
+    streams[0].onmessage({ data: JSON.stringify({ type: "reset", state: state(4) }) });
+    expect(store.connectionState).toBe("connecting");
+    streams[1].onmessage({ data: JSON.stringify({ type: "reset", state: state(4) }) });
+    expect(store.connectionState).toBe("online");
+    store.closeStream();
+    vi.useRealTimers();
+  });
+  it("preserves a fresh SSE connection on pageshow and visibility resume", async () => {
     wrapper = mount(App, { global: { plugins: [pinia], stubs: { RouterView: true } } });
     await flushPromises();
     const open = vi.spyOn(useAppStore(), "openStream");
     window.dispatchEvent(new Event("pageshow"));
     document.dispatchEvent(new Event("visibilitychange"));
-    expect(open).toHaveBeenCalledTimes(2);
+    expect(open).not.toHaveBeenCalled();
   });
 });
 

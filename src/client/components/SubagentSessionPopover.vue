@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { CircleAlert, LoaderCircle } from "@lucide/vue";
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { onBeforeUnmount, ref, watch } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import SessionHeaderStatus from "@/client/components/SessionHeaderStatus.vue";
 import SessionTranscriptView from "@/client/components/SessionTranscriptView.vue";
@@ -28,16 +28,9 @@ const session = ref<SessionState | undefined>(undefined);
 const loading = ref(false);
 const loadingOlderMessages = ref(false);
 const errorMessage = ref<string | undefined>(undefined);
-const reconnecting = ref(false);
+const connectionState = ref<"online" | "connecting" | "offline">("connecting");
 let connection: ReturnType<typeof createSessionConnection> | undefined;
 let loadGeneration = 0;
-
-const connectionState = computed<"online" | "connecting" | "offline">(() => {
-  if (errorMessage.value && !session.value) {
-    return "offline";
-  }
-  return reconnecting.value || !session.value ? "connecting" : "online";
-});
 
 function closeStream(): void {
   connection?.close();
@@ -62,17 +55,14 @@ function openStream(): void {
   connection = createSessionConnection({
     path: () => sessionEventsPath(session.value!, "full", sessionHistoryCursor(session.value)),
     onConnecting: () => {
-      reconnecting.value = true;
-    },
-    onOpen: () => {
-      reconnecting.value = false;
+      connectionState.value = "connecting";
     },
     onError: () => {
-      reconnecting.value = true;
+      connectionState.value = "offline";
     },
     onEvent: (event) => {
-      reconnecting.value = false;
       applyEvent(event);
+      if (event.type === "reset") connectionState.value = "online";
     },
   });
   connection.open();
@@ -85,6 +75,7 @@ async function ensureSessionLoaded(): Promise<void> {
 
   const generation = ++loadGeneration;
   loading.value = true;
+  connectionState.value = "connecting";
   errorMessage.value = undefined;
   try {
     const opened = normalizeSessionState(await getSession(props.sessionId));
@@ -98,6 +89,7 @@ async function ensureSessionLoaded(): Promise<void> {
     openStream();
   } catch (error) {
     if (generation === loadGeneration) {
+      connectionState.value = "offline";
       errorMessage.value = error instanceof Error ? error.message : String(error);
     }
   } finally {
@@ -144,7 +136,7 @@ function handlePopoverToggle(event: Event): void {
   loadGeneration += 1;
   closeStream();
   loading.value = false;
-  reconnecting.value = false;
+  connectionState.value = "connecting";
 }
 
 watch(

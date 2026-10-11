@@ -15,7 +15,10 @@ export function createSessionConnection(options: ConnectionOptions) {
   let watchdog: ReturnType<typeof setInterval> | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
   let lastActivity = 0;
-  function close() {
+  let lastWatchdog = 0;
+  let active = false;
+
+  function stopSource() {
     clearTimeout(retry);
     clearInterval(watchdog);
     retry = undefined;
@@ -23,23 +26,30 @@ export function createSessionConnection(options: ConnectionOptions) {
     source?.close();
     source = undefined;
   }
-  function open() {
-    close();
+
+  function connect() {
+    stopSource();
     options.onConnecting();
     const current = new EventSource(options.path());
     source = current;
     lastActivity = Date.now();
+    lastWatchdog = lastActivity;
     const touch = () => {
       if (source === current) lastActivity = Date.now();
     };
     current.addEventListener("heartbeat", touch);
     watchdog = setInterval(() => {
       if (document.visibilityState === "hidden") return;
-      if (Date.now() - lastActivity > 65_000) open();
-      options.onWatchdog?.();
-    }, 15_000);
+      recover();
+      if (Date.now() - lastWatchdog >= 15_000) {
+        lastWatchdog = Date.now();
+        options.onWatchdog?.();
+      }
+    }, 5000);
     current.onopen = () => {
       if (source !== current) return;
+      clearTimeout(retry);
+      retry = undefined;
       touch();
       options.onOpen?.();
     };
@@ -50,12 +60,48 @@ export function createSessionConnection(options: ConnectionOptions) {
     };
     current.onerror = () => {
       if (source !== current) return;
+      // Own retries instead of racing EventSource's automatic reconnect.
+      stopSource();
       options.onError();
-      clearTimeout(retry);
-      retry = setTimeout(() => {
-        if (source === current && navigator.onLine) open();
-      }, 2000);
+      retry = setTimeout(recover, 2000);
     };
   }
-  return { open, close };
+
+  function recover() {
+    if (!active || !navigator.onLine) return;
+    if (source && Date.now() - lastActivity < 15_000) return;
+    connect();
+  }
+
+  function offline() {
+    stopSource();
+    options.onError();
+  }
+
+  function visible() {
+    if (document.visibilityState !== "hidden") recover();
+  }
+
+  function open() {
+    if (!active) {
+      active = true;
+      window.addEventListener("online", recover);
+      window.addEventListener("offline", offline);
+      window.addEventListener("pageshow", recover);
+      document.addEventListener("visibilitychange", visible);
+    }
+    if (navigator.onLine) recover();
+    else offline();
+  }
+
+  function close() {
+    active = false;
+    stopSource();
+    window.removeEventListener("online", recover);
+    window.removeEventListener("offline", offline);
+    window.removeEventListener("pageshow", recover);
+    document.removeEventListener("visibilitychange", visible);
+  }
+
+  return { open, recover, close };
 }

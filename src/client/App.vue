@@ -4,9 +4,6 @@ import { useRouter } from "vue-router";
 import { useAppStore } from "@/client/stores/app";
 const store = useAppStore();
 const router = useRouter();
-const offline = () => {
-  store.connectionState = "offline";
-};
 const online = () => {
   void store.checkForUpdates();
   void store.recoverConnection();
@@ -16,14 +13,12 @@ const visible = () => {
   if (document.visibilityState !== "hidden") online();
 };
 onMounted(() => {
-  window.addEventListener("offline", offline);
   window.addEventListener("online", online);
   window.addEventListener("pageshow", online);
   document.addEventListener("visibilitychange", visible);
   void store.bootstrap();
 });
 onUnmounted(() => {
-  window.removeEventListener("offline", offline);
   window.removeEventListener("online", online);
   window.removeEventListener("pageshow", online);
   document.removeEventListener("visibilitychange", visible);

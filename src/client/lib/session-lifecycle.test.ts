@@ -29,9 +29,116 @@ const state = (ids: string[]): SessionState => ({
   })),
   activeTools: [],
 });
+const connections: ReturnType<typeof createSessionConnection>[] = [];
 afterEach(() => {
+  for (const connection of connections.splice(0)) connection.close();
   vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
+});
+
+function connectionFixture() {
+  vi.useFakeTimers();
+  const sources: FakeSource[] = [];
+  class FakeSource {
+    onopen?: () => void;
+    onerror?: () => void;
+    onmessage?: (event: { data: string }) => void;
+    close = vi.fn();
+    listeners = new Map<string, () => void>();
+    addEventListener(name: string, listener: () => void) {
+      this.listeners.set(name, listener);
+    }
+    constructor(public url: string) {
+      sources.push(this);
+    }
+  }
+  vi.stubGlobal("EventSource", FakeSource);
+  const onEvent = vi.fn();
+  const onError = vi.fn();
+  const connection = createSessionConnection({
+    path: () => "/events",
+    onConnecting: vi.fn(),
+    onOpen: vi.fn(),
+    onError,
+    onEvent,
+  });
+  connections.push(connection);
+  connection.open();
+  return { connection, sources, onEvent, onError };
+}
+
+test("foreground events preserve a live stream and replace a stale stream only once", () => {
+  const { sources } = connectionFixture();
+  for (let i = 0; i < 6; i += 1) {
+    vi.advanceTimersByTime(5000);
+    sources[0]!.listeners.get("heartbeat")!();
+  }
+  window.dispatchEvent(new Event("pageshow"));
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(sources).toHaveLength(1);
+  // Timers are suspended in the background; resume checks the wall clock immediately.
+  vi.setSystemTime(Date.now() + 15_000);
+  window.dispatchEvent(new Event("pageshow"));
+  document.dispatchEvent(new Event("visibilitychange"));
+  window.dispatchEvent(new Event("online"));
+  expect(sources).toHaveLength(2);
+  expect(sources[0]!.close).toHaveBeenCalledOnce();
+});
+
+test("background timers preserve the stream; foreground replaces it once when stale", () => {
+  const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+  const { sources } = connectionFixture();
+  vi.advanceTimersByTime(60_000);
+  expect(sources).toHaveLength(1);
+  visibility.mockReturnValue("visible");
+  document.dispatchEvent(new Event("visibilitychange"));
+  window.dispatchEvent(new Event("pageshow"));
+  expect(sources).toHaveLength(2);
+});
+
+test("silent streams are replaced after 15 seconds and opening alone grants no indefinite lease", () => {
+  const { sources } = connectionFixture();
+  sources[0]!.onopen!();
+  vi.advanceTimersByTime(15_000);
+  expect(sources).toHaveLength(2);
+});
+
+test("foreground recovery cancels retry and stale callbacks cannot restart the new stream", () => {
+  const { sources, onEvent } = connectionFixture();
+  sources[0]!.onerror!();
+  expect(sources[0]!.close).toHaveBeenCalledOnce();
+  window.dispatchEvent(new Event("pageshow"));
+  expect(sources).toHaveLength(2);
+  sources[1]!.onopen!();
+  sources[0]!.onopen!();
+  sources[0]!.onerror!();
+  sources[0]!.onmessage!({ data: '{"type":"error","message":"late"}' });
+  vi.advanceTimersByTime(2000);
+  expect(sources).toHaveLength(2);
+  expect(onEvent).not.toHaveBeenCalled();
+});
+
+test("offline stops retries; online resumes once; disposed streams stay closed", () => {
+  const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
+  const { connection, sources } = connectionFixture();
+  sources[0]!.onerror!();
+  online.mockReturnValue(false);
+  window.dispatchEvent(new Event("offline"));
+  vi.advanceTimersByTime(30_000);
+  window.dispatchEvent(new Event("pageshow"));
+  expect(sources).toHaveLength(1);
+  expect(vi.getTimerCount()).toBe(0);
+  online.mockReturnValue(true);
+  window.dispatchEvent(new Event("online"));
+  window.dispatchEvent(new Event("pageshow"));
+  expect(sources).toHaveLength(2);
+  connection.close();
+  window.dispatchEvent(new Event("online"));
+  document.dispatchEvent(new Event("visibilitychange"));
+  vi.advanceTimersByTime(30_000);
+  expect(sources).toHaveLength(2);
+  expect(vi.getTimerCount()).toBe(0);
 });
 
 test("main and worker streams reconnect at their latest cursor; closing rejects late events and cancels timers", async () => {

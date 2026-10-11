@@ -201,7 +201,10 @@ export const useAppStore = defineStore("app", {
     },
     async recoverConnection() {
       if (this.bootstrapFailed || !this.bootstrapped || !this.activeSession) await this.bootstrap();
-      else if (this.authenticated) this.openStream();
+      else if (this.authenticated) {
+        if (connection) connection.recover();
+        else this.openStream();
+      }
     },
     async checkForUpdates() {
       try {
@@ -237,9 +240,9 @@ export const useAppStore = defineStore("app", {
           this.connectionState = "offline";
         },
         onEvent: (event) => {
-          if (event.type !== "error") this.connectionState = "online";
           if (event.type === "error") this.lastError = event.message;
           this.activeSession = applyServerEvent(this.activeSession, event);
+          if (event.type === "reset") this.connectionState = "online";
           if (!expandedHistory) this.activeSession = recentSessionWindow(this.activeSession);
         },
       });

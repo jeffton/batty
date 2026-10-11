@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Compass, ListOrdered, Paperclip, SendHorizontal } from "@lucide/vue";
 import { blockAppReload } from "@/client/lib/app-updates";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import ComposerQueuedPrompts from "@/client/components/ComposerQueuedPrompts.vue";
 import ModelConfigSelector from "@/client/components/ModelConfigSelector.vue";
 import StreamingStopControl from "@/client/components/StreamingStopControl.vue";
@@ -46,7 +46,11 @@ const emit = defineEmits<{
 const text = ref("");
 const fileInput = ref<HTMLInputElement>();
 const textarea = ref<HTMLTextAreaElement>();
-const files = ref<File[]>([]);
+const files = shallowRef<File[]>([]);
+const fileHashes = new WeakMap<File, string>();
+const pendingFiles = ref(0);
+const fileError = ref("");
+let fileGeneration = 0;
 const draftFilesBySessionKey = new Map<string, File[]>();
 const dragging = ref(false);
 const maxInputHeight = ref(240);
@@ -57,6 +61,7 @@ const unblockReload = blockAppReload(
   () =>
     text.value.length > 0 ||
     files.value.length > 0 ||
+    pendingFiles.value > 0 ||
     [...draftFilesBySessionKey.values()].some((draft) => draft.length > 0),
 );
 onBeforeUnmount(unblockReload);
@@ -129,20 +134,57 @@ function resetFileInput(): void {
   }
 }
 
-function addFiles(next: FileList | File[]): void {
+async function addFiles(next: FileList | File[]): Promise<void> {
   if (actionsDisabled.value) {
     return;
   }
 
-  files.value = [...files.value, ...Array.from(next)];
-  if (props.sessionKey) {
-    draftFilesBySessionKey.set(props.sessionKey, [...files.value]);
-  }
+  const incoming = Array.from(next);
+  const generation = fileGeneration;
   resetFileInput();
+  fileError.value = "";
+  pendingFiles.value += 1;
+  try {
+    await Promise.all(
+      incoming.map(async (file) => {
+        const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+        const hash = Array.from(new Uint8Array(digest), (byte) =>
+          byte.toString(16).padStart(2, "0"),
+        ).join("");
+        fileHashes.set(file, hash);
+      }),
+    );
+    if (generation !== fileGeneration) {
+      return;
+    }
+
+    // Commit synchronously against the latest draft, including overlapping selections.
+    const hashes = new Set(files.value.map((file) => fileHashes.get(file)));
+    const added = incoming.filter((file) => {
+      const hash = fileHashes.get(file)!;
+      if (hashes.has(hash)) {
+        return false;
+      }
+      hashes.add(hash);
+      return true;
+    });
+    files.value = [...files.value, ...added];
+    if (props.sessionKey) {
+      draftFilesBySessionKey.set(props.sessionKey, [...files.value]);
+    }
+  } catch (error) {
+    if (generation === fileGeneration) {
+      fileError.value = error instanceof Error ? error.message : String(error);
+    }
+  } finally {
+    if (generation === fileGeneration) {
+      pendingFiles.value -= 1;
+    }
+  }
 }
 
 function removeFile(index: number): void {
-  files.value.splice(index, 1);
+  files.value = files.value.filter((_, fileIndex) => fileIndex !== index);
   if (props.sessionKey) {
     draftFilesBySessionKey.set(props.sessionKey, [...files.value]);
   }
@@ -214,6 +256,9 @@ function updateMaxInputHeight(): void {
 }
 
 function loadDraft(sessionKey?: string): void {
+  fileGeneration += 1;
+  pendingFiles.value = 0;
+  fileError.value = "";
   hydratingDraft = true;
   text.value = sessionKey ? readSessionDraft(sessionKey) : "";
   files.value = sessionKey ? [...(draftFilesBySessionKey.get(sessionKey) ?? [])] : [];
@@ -225,6 +270,9 @@ function loadDraft(sessionKey?: string): void {
 }
 
 function clear(): void {
+  fileGeneration += 1;
+  pendingFiles.value = 0;
+  fileError.value = "";
   clearDraftSaveTimeout();
   queuedDraftSessionKey = undefined;
   queuedDraftText = "";
@@ -239,7 +287,10 @@ function clear(): void {
 }
 
 function restore(sessionKey: string, textValue: string, nextFiles: File[]): void {
-  if (props.sessionKey === sessionKey && (text.value.length > 0 || files.value.length > 0)) {
+  if (
+    props.sessionKey === sessionKey &&
+    (text.value.length > 0 || files.value.length > 0 || pendingFiles.value > 0)
+  ) {
     return;
   }
 
@@ -260,7 +311,7 @@ function restore(sessionKey: string, textValue: string, nextFiles: File[]): void
 }
 
 function runAction(kind: "submit" | "steer"): void {
-  if (!hasPayload.value || actionsDisabled.value) {
+  if (!hasPayload.value || actionsDisabled.value || pendingFiles.value > 0) {
     return;
   }
 
@@ -297,7 +348,7 @@ function onDrop(event: DragEvent): void {
     return;
   }
 
-  addFiles(event.dataTransfer.files);
+  void addFiles(event.dataTransfer.files);
 }
 
 function onTextareaKeydown(event: KeyboardEvent): void {
@@ -322,7 +373,7 @@ function openFilePicker(): void {
 }
 
 function onFileInputChange(event: Event): void {
-  addFiles((event.target as HTMLInputElement).files || []);
+  void addFiles((event.target as HTMLInputElement).files || []);
 }
 
 watch(
@@ -372,8 +423,9 @@ defineExpose({ clear, restore });
     @drop="onDrop"
   >
     <div class="composer__inner">
-      <div v-if="props.error || props.offline" class="composer__notices">
+      <div v-if="props.error || fileError || props.offline" class="composer__notices">
         <p v-if="props.error" class="composer__notice composer__notice--error">{{ props.error }}</p>
+        <p v-if="fileError" class="composer__notice composer__notice--error">{{ fileError }}</p>
         <p v-if="props.offline" class="composer__notice">Offline. Draft saved locally</p>
       </div>
 
@@ -469,7 +521,7 @@ defineExpose({ clear, restore });
             type="button"
             aria-label="Steer prompt"
             title="Steer prompt"
-            :disabled="!hasPayload || actionsDisabled"
+            :disabled="!hasPayload || actionsDisabled || pendingFiles > 0"
             @pointerdown="triggerActionEarly('steer', $event)"
             @click="triggerActionClick('steer')"
           >
@@ -480,7 +532,7 @@ defineExpose({ clear, restore });
             type="button"
             :aria-label="props.streaming ? 'Queue prompt' : 'Send prompt'"
             :title="props.streaming ? 'Queue prompt' : 'Send prompt'"
-            :disabled="!hasPayload || actionsDisabled"
+            :disabled="!hasPayload || actionsDisabled || pendingFiles > 0"
             @pointerdown="triggerActionEarly('submit', $event)"
             @click="triggerActionClick('submit')"
           >

@@ -6,7 +6,7 @@ import type { AgentTurnArtifacts } from "./agent-turn-file-changes";
 import { decodeRuntimeNotice } from "./runtime-notices";
 
 export const ARTIFACT_FORWARDING_INSTRUCTION =
-  "Files, diffs and sites belong to the execution scope that produced them. To attach selected existing artifacts from a report to your own response, call attach-artifacts with the listed refs. This reuses the original immutable objects, including file IDs and diff contents, without copying files. Use attach-files only to import local files. Links or copied patch text do not forward response metadata. Do not automatically forward every draft. Do not rerun actions or reconstruct diffs.";
+  "Files, diffs and sites belong to the execution scope that produced them. To attach selected existing artifacts from a report to your own response, call attach_artifacts with the listed refs. This reuses the original immutable objects, including file IDs and diff contents, without copying files. Use attach_files only to import local files. Links or copied patch text do not forward response metadata. Do not automatically forward every draft. Do not rerun actions or reconstruct diffs.";
 
 export function artifactRefs(artifacts: AgentTurnArtifacts = {}) {
   return [
@@ -90,7 +90,7 @@ export function forwardedResponseArtifacts(entries: readonly EntryRecord[]): Age
 
 export function createAttachArtifactsTool() {
   return defineTool({
-    name: "attach-artifacts",
+    name: "attach_artifacts",
     description: `Attach selected existing files, diffs and sites from reports to the current response. ${ARTIFACT_FORWARDING_INSTRUCTION}`,
     parameters: Type.Object(
       {

@@ -56,7 +56,7 @@ test("Runtime response and reopened history reuse files and distinct same-path i
   const faux = fauxProvider({ models: [{ id: "artifact-test" }] });
   faux.setResponses([
     fauxAssistantMessage(
-      [fauxToolCall("attach-artifacts", { refs: artifactRefs(selected).map((item) => item.ref) })],
+      [fauxToolCall("attach_artifacts", { refs: artifactRefs(selected).map((item) => item.ref) })],
       { stopReason: "toolUse" },
     ),
     fauxAssistantMessage([fauxText("Chosen output")]),

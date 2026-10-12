@@ -120,6 +120,32 @@ describe("durable tool bridge", () => {
     expect(names).not.toContain(process.platform === "win32" ? "bash" : "powershell");
   });
 
+  it("discovers exact snake_case names and invokes renamed tools through codemode", async () => {
+    const { tools, run } = await fixture();
+    const names = tools.extension.tools!.map((tool) => tool.name);
+    expect(names.every((name) => /^[a-z][a-z0-9_]*$/.test(name))).toBe(true);
+    const discovered = await run(
+      'return { names: (await searchTools("attach", {namespace: "attach_"})).map(tool => tool.name).sort(), declaration: await describeTool("web_search") }',
+    );
+    expect(discovered.isError).toBe(false);
+    expect(JSON.parse(discovered.content[0].text)).toMatchObject({
+      names: ["attach_artifacts", "attach_files"],
+      declaration: expect.stringContaining("web_search"),
+    });
+    const invoked = await run('return await tools.web_search({action: "content"})');
+    expect(invoked.isError).toBe(true);
+    expect(invoked.details.calls[0]).toMatchObject({
+      name: "web_search",
+      error: expect.stringContaining("Missing Brave Search API key"),
+    });
+    const obsolete = await run('return await describeTool("web-search")');
+    expect(obsolete.isError).toBe(true);
+    expect(obsolete.content[0].text).toContain("Unknown tool: web-search");
+    const obsoleteInvocation = await run('return await tools["attach-files"]({paths: []})');
+    expect(obsoleteInvocation.isError).toBe(true);
+    expect(obsoleteInvocation.details.calls).toEqual([]);
+  });
+
   it.skipIf(process.platform !== "win32")(
     "uses PowerShell Core 7 with Unicode output and the conversation cwd",
     async () => {

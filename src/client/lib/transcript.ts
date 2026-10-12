@@ -115,7 +115,7 @@ export function isAttachmentOutputToolCall(
   const state = toolStatesByCallId.get(block.id);
   if (state?.status !== "success" && state?.status !== "error") return false;
   return (
-    (block.name === "attach-files" && hasSentFiles(state)) ||
+    (block.name === "attach_files" && hasSentFiles(state)) ||
     (block.name === "sites" && hasSites(state))
   );
 }
@@ -194,11 +194,11 @@ function attachmentBlockFromToolResult(
   if (state.status !== "success" && message.toolName !== "codemode") return undefined;
   if (
     hasSentFiles(state) &&
-    (message.toolName === "attach-files" ||
+    (message.toolName === "attach_files" ||
       message.toolName === "subagent" ||
       message.toolName === "codemode")
   ) {
-    return { type: "toolCall", id: message.toolCallId, name: "attach-files", arguments: {} };
+    return { type: "toolCall", id: message.toolCallId, name: "attach_files", arguments: {} };
   }
   if (
     hasSites(state) &&

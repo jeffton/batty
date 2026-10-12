@@ -133,9 +133,9 @@ test.each(
       ).toEqual(["diff", "file", "site"]);
       for (const item of artifactRefs(directArtifacts))
         expect(directNotice!.text).toContain(item.ref);
-      expect(directNotice!.text).toContain("call attach-artifacts");
+      expect(directNotice!.text).toContain("call attach_artifacts");
       expect(joinedModelInput).toContain(file.storedPath);
-      expect(joinedModelInput).toContain("call attach-artifacts");
+      expect(joinedModelInput).toContain("call attach_artifacts");
       expect(joinedModelInput).toContain("diff:");
       expect(joinedModelInput).toContain("site:");
       return;
@@ -150,9 +150,9 @@ test.each(
     for (const input of [joinedModelInput, reportModelInput]) {
       expect(input).toContain(file.storedPath);
       expect(input).toContain(file.name);
-      expect(input).toContain("Use attach-files to import local files by path");
+      expect(input).toContain("Use attach_files to import local files by path");
       expect(input).toContain("Copying attachment:// links does not deliver attachments");
-      expect(input).toContain("call attach-artifacts");
+      expect(input).toContain("call attach_artifacts");
       expect(input).toContain("diff:");
       expect(input).toContain("site:");
     }
@@ -219,9 +219,9 @@ test("async subagent reports expose stored attachment paths in parent model inpu
   await main.waitForIdle(context);
   expect(reportInput).toContain(file.name);
   expect(reportInput).toContain(file.storedPath);
-  expect(reportInput).toContain("Use attach-files to import local files by path");
+  expect(reportInput).toContain("Use attach_files to import local files by path");
   expect(reportInput).toContain("do not automatically forward every draft");
-  expect(reportInput).toContain("call attach-artifacts");
+  expect(reportInput).toContain("call attach_artifacts");
   expect(reportInput).toContain("async.ts");
   expect(reportInput).toContain("Async demo");
 });

@@ -646,7 +646,7 @@ export async function runWebSearch(options: WebSearchOptions): Promise<WebSearch
   if (options.action === "content") {
     const url = options.url?.trim();
     if (!url) {
-      throw new Error("url is required for web-search content");
+      throw new Error("url is required for web_search content");
     }
     const content = await fetchPageContent(url);
     return {
@@ -661,7 +661,7 @@ export async function runWebSearch(options: WebSearchOptions): Promise<WebSearch
 
   const query = options.query?.trim();
   if (!query) {
-    throw new Error("query is required for web-search search");
+    throw new Error("query is required for web_search search");
   }
 
   const count = Math.min(Math.max(Math.floor(options.count ?? 5), 1), 20);

@@ -92,7 +92,7 @@ test("rejects unreceived refs rather than loading another workspace or fabricati
 test("report lists stable version-specific refs without dumping patches or pretending links attach", () => {
   const report = reportWithArtifacts("Ready", { fileChanges: [diff], sites: [site] });
   expect(report).toContain(artifactRefs({ fileChanges: [diff] })[0]!.ref);
-  expect(report).toContain("call attach-artifacts");
+  expect(report).toContain("call attach_artifacts");
   expect(report).toContain(site.name);
   expect(report).not.toContain(diff.patch);
   expect(artifactRefs({ fileChanges: [{ ...diff, patch: "different version" }] })[0]!.ref).not.toBe(

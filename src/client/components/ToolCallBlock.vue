@@ -147,7 +147,7 @@ const cronHeadView = computed(() =>
 );
 const browserHeadView = computed(() =>
   createToolOutputView(
-    props.name === "browser" ? "browser" : "web-search",
+    props.name === "browser" ? "browser" : "web_search",
     resultText.value,
     OUTPUT_TAIL_LINE_COUNT,
   ),
@@ -166,7 +166,7 @@ const canExpandOutput = computed(
     (props.name === "write" && writeTailView.value.isTrimmed) ||
     (props.name === "read" && readHeadView.value.isTrimmed) ||
     (props.name === "cron" && cronHeadView.value.isTrimmed) ||
-    ((props.name === "web-search" || props.name === "browser") &&
+    ((props.name === "web_search" || props.name === "browser") &&
       browserHeadView.value.isTrimmed) ||
     ((props.name === "grep" || props.name === "find") && grepFindHeadView.value.isTrimmed),
 );
@@ -191,7 +191,7 @@ const expandButtonLabel = computed(() => {
         ? readHeadView.value.hiddenLineCount
         : props.name === "cron"
           ? cronHeadView.value.hiddenLineCount
-          : props.name === "web-search" || props.name === "browser"
+          : props.name === "web_search" || props.name === "browser"
             ? browserHeadView.value.hiddenLineCount
             : grepFindHeadView.value.hiddenLineCount;
   return `Show full output (+${hiddenLineCount} lines)`;
@@ -231,7 +231,7 @@ const showCollapsedCronWindow = computed(
 );
 const showCollapsedBrowserWindow = computed(
   () =>
-    (props.name === "web-search" || props.name === "browser") &&
+    (props.name === "web_search" || props.name === "browser") &&
     !isExpanded.value &&
     browserHeadView.value.isTrimmed,
 );
@@ -292,7 +292,7 @@ const visibleResultBlocks = computed(() => {
     return props.resultBlocks;
   }
 
-  if (props.name === "web-search" || props.name === "browser") {
+  if (props.name === "web_search" || props.name === "browser") {
     return props.resultBlocks.filter((block) => block.type !== "text");
   }
 
@@ -351,7 +351,7 @@ const showResultSection = computed(() => {
     return !commandValue.value ? hasResultContent.value : visibleResultBlocks.value.length > 0;
   }
 
-  if (props.name === "attach-files") {
+  if (props.name === "attach_files") {
     return props.status === "error" || hasVisibleSentFiles.value || hasResultContent.value;
   }
 
@@ -480,13 +480,13 @@ const genericEntries = computed(() => {
 
     <template
       v-if="
-        (props.name === 'web-search' || props.name === 'browser') &&
+        (props.name === 'web_search' || props.name === 'browser') &&
         visibleBrowserOutput.trim().length > 0
       "
     >
       <ToolCallCodeOutput
         :code="visibleBrowserOutput"
-        :language="props.name === 'web-search' ? 'markdown' : undefined"
+        :language="props.name === 'web_search' ? 'markdown' : undefined"
         :compact="props.compact"
         :collapsed="showCollapsedBrowserWindow"
         collapsed-alignment="start"
@@ -568,7 +568,7 @@ const genericEntries = computed(() => {
           hasVisibleSentFiles && !(props.name === 'subagent' && subagentRespondIn === 'session')
         "
         :files="sentFiles"
-        :preview="props.name !== 'attach-files'"
+        :preview="props.name !== 'attach_files'"
         :compact="props.compact"
       />
 

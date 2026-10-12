@@ -21,7 +21,7 @@ async function fixture() {
   return { dir, source, options };
 }
 
-test("attach-files replay returns the same result after its source is removed", async () => {
+test("attach_files replay returns the same result after its source is removed", async () => {
   const { dir, source, options } = await fixture();
   try {
     const tool = createAttachFilesTool({

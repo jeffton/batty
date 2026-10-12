@@ -1,7 +1,7 @@
 import type { SentFileDescriptor } from "@/shared/types";
 
 export const ATTACHMENT_DELIVERY_INSTRUCTION =
-  "Attachments belong to the current agent's response. To deliver relevant existing files from a report, call attach-artifacts with the listed file refs in your own turn; this preserves their IDs without copying. Use attach-files to import local files by path. Copying attachment:// links does not deliver attachments. Choose the relevant files; do not automatically forward every draft.";
+  "Attachments belong to the current agent's response. To deliver relevant existing files from a report, call attach_artifacts with the listed file refs in your own turn; this preserves their IDs without copying. Use attach_files to import local files by path. Copying attachment:// links does not deliver attachments. Choose the relevant files; do not automatically forward every draft.";
 
 export function reportWithAttachments(
   text: string,

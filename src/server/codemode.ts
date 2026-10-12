@@ -216,9 +216,7 @@ export function createCodemodeTool(
         {
           name: "describeTool",
           execute: (name) => {
-            const tool = tools.find(
-              (tool) => tool.name === name || tool.name.replace(/[^\w]/g, "_") === name,
-            );
+            const tool = tools.find((tool) => tool.name === name);
             if (!tool) throw new Error(`Unknown tool: ${name}`);
             return renderDeclarations({ tools: [tool] });
           },

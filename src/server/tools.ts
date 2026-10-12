@@ -191,10 +191,10 @@ export async function createTools(
   const local: ToolRegistration[] = [
     ...native,
     createAttachArtifactsTool(),
-    bridge("web-search", () => createWebSearchTool(config), "safe"),
+    bridge("web_search", () => createWebSearchTool(config), "safe"),
     scoped("browser", createBrowserTool),
     scoped("sites", createSitesTool),
-    scoped("attach-files", createAttachFilesTool, "safe"),
+    scoped("attach_files", createAttachFilesTool, "safe"),
   ];
   const resolveTools = async (api: ToolExecutionApi, ctx: Context) => {
     const agent = await api.agent(ctx);

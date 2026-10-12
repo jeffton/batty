@@ -245,7 +245,7 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
       continue;
     }
 
-    if (block.name !== "attach-files") {
+    if (block.name !== "attach_files") {
       continue;
     }
 
@@ -284,7 +284,7 @@ const sharedSites = computed<SiteDescriptor[]>(() => {
   const sites: SiteDescriptor[] = [...(props.message.sites ?? [])];
   const seen = new Set(sites.map((site) => site.id));
   for (const block of props.message.blocks) {
-    if (block.type !== "toolCall" || (block.name !== "sites" && block.name !== "attach-files")) {
+    if (block.type !== "toolCall" || (block.name !== "sites" && block.name !== "attach_files")) {
       continue;
     }
     const candidates = toolStateFor(block.id)?.resultDetails?.sites;
@@ -508,7 +508,7 @@ onBeforeUnmount(() => {
               :result-blocks="toolStateFor(block.id)?.resultBlocks ?? []"
               :result-details="toolStateFor(block.id)?.resultDetails"
               :status="toolStateFor(block.id)?.status"
-              :suppress-sent-files="block.name === 'attach-files' || block.name === 'subagent'"
+              :suppress-sent-files="block.name === 'attach_files' || block.name === 'subagent'"
               :allow-session-popovers="props.allowSessionPopovers"
             />
           </template>

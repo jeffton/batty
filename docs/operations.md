@@ -84,6 +84,12 @@ Staging pulls validated source, installs locked dependencies and builds without 
 
 Run activation outside the WinSW process tree. From the running assistant, use a one-shot Windows Task Scheduler task targeting the second command. A detached child process can still be terminated when the service stops.
 
+## AI tool names
+
+Batty-owned AI tools use snake_case. `web_search`, `attach_files` and `attach_artifacts` replace their hyphenated names, including codemode discovery and `tools.<name>` invocation. MCP names keep their existing `mcp__` normalization; codemode's JavaScript helpers such as `searchTools` are unchanged.
+
+This is a breaking change without aliases or history migration. Instructions and scripts must use the new names. Persisted calls retain their original names: unfinished calls or codemode scripts using renamed tools cannot resume under this release. Completed results and artifacts remain stored, but name-specific UI rendering uses the new names.
+
 ## Cron CLI
 
 Deployment installs `/usr/local/bin/batty2`. It authenticates with the local state secret and calls the running scheduler; it does not start another scheduler.

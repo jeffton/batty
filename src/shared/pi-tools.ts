@@ -8,7 +8,7 @@ export const TOOL_OUTPUT_TRUNCATION_DIRECTIONS = {
   read: "head",
   cron: "head",
   codemode: "head",
-  "web-search": "head",
+  web_search: "head",
   browser: "head",
   grep: "head",
   find: "head",

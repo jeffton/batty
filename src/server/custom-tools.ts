@@ -154,7 +154,7 @@ export function createBrowserTool({
       "Open and interact with JavaScript-driven web pages using a session-scoped headless Chromium browser.",
     promptSnippet: "Browse and interact with dynamic web pages using Playwright.",
     promptGuidelines: [
-      "Use this tool when a page requires JavaScript or multi-step interaction that web-search content cannot handle.",
+      "Use this tool when a page requires JavaScript or multi-step interaction that web_search content cannot handle.",
       "Start with action=open. Browser state and cookies persist within the current Batty session only.",
       "Set useTailscale=true on the initial open to route that browser session through the configured SSH destination. Close the session before changing its routing.",
       "Use action=pages to list tabs and popups, action=switch with pageId to activate one, and newPage=true on open to create a tab.",
@@ -217,7 +217,7 @@ export function createBrowserTool({
 
 export function createWebSearchTool(config: AppConfig): ToolDefinition<typeof WebSearchToolSchema> {
   return {
-    name: "web-search",
+    name: "web_search",
     label: "Web Search",
     description:
       "Search the web with Brave Search and extract readable markdown content from result pages.",
@@ -248,7 +248,7 @@ export function createWebSearchTool(config: AppConfig): ToolDefinition<typeof We
           text: result.text,
           details: result.details,
         },
-        "web-search",
+        "web_search",
       );
       return {
         content: [{ type: "text", text: output.text }],
@@ -319,7 +319,7 @@ export function createAttachFilesTool({
   config,
 }: CommonToolDependencies): ToolDefinition<typeof AttachFilesToolSchema> {
   return {
-    name: "attach-files",
+    name: "attach_files",
     label: "Attach Files",
     description: `Copy files into Batty storage so they appear as attachments in the current agent’s response and downloads during the tool call. ${ATTACHMENT_DELIVERY_INSTRUCTION}`,
     promptSnippet: "Attach files to the final response without leaving Batty.",

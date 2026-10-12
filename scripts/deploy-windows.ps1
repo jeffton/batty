@@ -42,7 +42,6 @@ if (-not $ReleasePath) {
         $buildId = "$revision-windows-$(Get-Date -Format yyyyMMddHHmmss)"
         Invoke-Native pnpm @('install', '--frozen-lockfile')
         Invoke-Native pnpm @('check')
-        Invoke-Native pnpm @('test', '--maxWorkers=1')
         $oldBuildId = $env:BATTY_BUILD_ID
         try {
             $env:BATTY_BUILD_ID = $buildId
@@ -63,7 +62,8 @@ if (-not $ReleasePath) {
         }
         Set-Content (Join-Path $ReleasePath 'BUILD_ID') $buildId -Encoding utf8
         Push-Location $ReleasePath
-        try { Invoke-Native pnpm @('install', '--prod', '--frozen-lockfile') } finally { Pop-Location }
+        # Release dependencies are read-only; hardlinking avoids Windows' slower clone-first import.
+        try { Invoke-Native pnpm @('install', '--prod', '--frozen-lockfile', '--config.package-import-method=hardlink') } finally { Pop-Location }
     } finally { Pop-Location }
 }
 $ReleasePath = (Resolve-Path $ReleasePath).Path

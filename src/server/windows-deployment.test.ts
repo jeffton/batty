@@ -2,6 +2,22 @@
 import { readFile } from "node:fs/promises";
 import { expect, test } from "vite-plus/test";
 
+test("Deployment retains build gates and leaves tests to pre-push validation", async () => {
+  const windows = await readFile("scripts/deploy-windows.ps1", "utf8");
+  const linux = await readFile("scripts/deploy.sh", "utf8");
+  expect(windows).not.toMatch(/Invoke-Native pnpm @\('test'/);
+  expect(linux).not.toMatch(/pnpm test|bash scripts\/deploy\.test\.sh/);
+  expect(windows).toContain("@('check')");
+  expect(windows).toContain("@('build')");
+  expect(windows).toContain("scripts/verify-offline.mjs");
+  expect(windows).toContain(
+    "@('install', '--prod', '--frozen-lockfile', '--config.package-import-method=hardlink')",
+  );
+  expect(linux).toContain("pnpm check");
+  expect(linux).toContain("pnpm build");
+  expect(linux).toContain("node scripts/verify-offline.mjs");
+});
+
 test("Windows update and rollback reload IIS configuration after switching releases", async () => {
   const script = await readFile("scripts/deploy-windows.ps1", "utf8");
   expect(script).toContain("[string]$AppPoolName = 'BattyProxy'");

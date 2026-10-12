@@ -18,8 +18,6 @@ git archive HEAD | tar -x -C "$build"
   cd "$build"
   pnpm install --frozen-lockfile
   pnpm check
-  pnpm test --maxWorkers=1
-  bash scripts/deploy.test.sh
   BATTY_BUILD_ID="$revision" pnpm build
   node scripts/verify-offline.mjs
 )

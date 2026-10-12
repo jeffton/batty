@@ -20,6 +20,7 @@ import type { McpService } from "./mcp-service";
 import type { CodemodeCall } from "../shared/types";
 import type { createCodemodeTasks } from "./codemode-tasks";
 import { MAIN_MEMORY_TOOLS } from "./main-memory-policy";
+import { isPiShellToolName } from "../shared/pi-tools";
 
 export const CodemodeCalls = defineDoc<{
   calls: Record<string, { taskId: number; name: string; args: JsonValue }>;
@@ -65,29 +66,28 @@ export function createCodemodeTool(
         name: tool.name,
         description: tool.description,
         inputSchema: tool.parameters as unknown as CodemodeJsonSchema,
-        outputSchema:
-          tool.name === "bash"
+        outputSchema: isPiShellToolName(tool.name)
+          ? {
+              type: "object",
+              properties: {
+                output: { type: "string" },
+                exit_code: { type: "number" },
+                truncated: { type: "boolean" },
+                wall_time_seconds: { type: "number" },
+                full_output_path: { type: "string" },
+              },
+              required: ["output", "exit_code", "truncated", "wall_time_seconds"],
+            }
+          : tool.name.startsWith("mcp__")
             ? {
                 type: "object",
                 properties: {
-                  output: { type: "string" },
-                  exit_code: { type: "number" },
-                  truncated: { type: "boolean" },
-                  wall_time_seconds: { type: "number" },
-                  full_output_path: { type: "string" },
+                  content: { type: "array", items: {} },
+                  structuredContent: {},
+                  isError: { type: "boolean" },
                 },
-                required: ["output", "exit_code", "truncated", "wall_time_seconds"],
               }
-            : tool.name.startsWith("mcp__")
-              ? {
-                  type: "object",
-                  properties: {
-                    content: { type: "array", items: {} },
-                    structuredContent: {},
-                    isError: { type: "boolean" },
-                  },
-                }
-              : { type: "string" },
+            : { type: "string" },
         execute: async (input, { signal }) => {
           // Inputs fixed before memory was read cannot be derived from that read.
           const independentOfMainMemory = !usedMainMemory;

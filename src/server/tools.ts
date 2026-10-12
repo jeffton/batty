@@ -2,6 +2,8 @@ import path from "node:path";
 import { createMutationTool } from "./mutation-tools";
 import {
   createBashToolDefinition,
+  createPowerShellToolDefinition,
+  getPowerShellConfig,
   createFindToolDefinition,
   createGrepToolDefinition,
   type ToolDefinition,
@@ -131,18 +133,25 @@ export async function createTools(
     bridge("read", (cwd) => createBattyReadTool(cwd), "safe"),
     bridge("write", (cwd) => createMutationTool(cwd, "write")),
     bridge("edit", (cwd) => createMutationTool(cwd, "edit")),
-    bridge(
-      "bash",
-      (cwd, api) =>
-        createBashToolDefinition(cwd, {
-          operations: persistentBashOperations(
-            jobsDir,
-            `${api.conversationId ?? "metadata"}-${api.taskId ?? "metadata"}-${api.callId ?? "metadata"}`,
-          ),
-          exposeSessionEnvironment: false,
-        }),
-      "safe",
-    ),
+    process.platform === "win32"
+      ? bridge("powershell", (cwd) => {
+          // The SDK also supports Windows PowerShell 5.1; Batty requires PowerShell 7.
+          if (path.basename(getPowerShellConfig().shell).toLowerCase() !== "pwsh.exe")
+            throw new Error("Batty requires PowerShell 7 (pwsh.exe) on PATH");
+          return createPowerShellToolDefinition(cwd, { exposeSessionEnvironment: false });
+        })
+      : bridge(
+          "bash",
+          (cwd, api) =>
+            createBashToolDefinition(cwd, {
+              operations: persistentBashOperations(
+                jobsDir,
+                `${api.conversationId ?? "metadata"}-${api.taskId ?? "metadata"}-${api.callId ?? "metadata"}`,
+              ),
+              exposeSessionEnvironment: false,
+            }),
+          "safe",
+        ),
     bridge("find", (cwd) => createFindToolDefinition(cwd), "safe"),
     bridge("grep", (cwd) => createGrepToolDefinition(cwd), "safe"),
   ];
@@ -241,7 +250,7 @@ export async function createTools(
           "Use read for files and images; explicit limit removes the read byte cap.",
           "Use edit for exact unique replacements, merging overlapping changes.",
           "Use codemode instead of separate tool calls for independent batching, dependent chaining, and filtering results before returning them. Batch independent work with Promise.allSettled so one failure does not discard successful results, e.g. const results = await Promise.allSettled([tools.read({path: '/path/a'}), tools.read({path: '/path/b'})]); for (const result of results) text(result.status === 'fulfilled' ? result.value : String(result.reason));",
-          "MCP tools are available only through codemode. Discover tools with the awaited GLOBAL helpers: const matches = await searchTools('query'); text(matches); text(await describeTool(matches[0].name)); Do not use tools.searchTools or tools.describeTool. Nested tools return strings, except bash returns {output, exit_code, truncated, wall_time_seconds, full_output_path?} and MCP calls return CallToolResult objects.",
+          "MCP tools are available only through codemode. Discover tools with the awaited GLOBAL helpers: const matches = await searchTools('query'); text(matches); text(await describeTool(matches[0].name)); Do not use tools.searchTools or tools.describeTool. Nested tools return strings, except shell tools return {output, exit_code, truncated, wall_time_seconds, full_output_path?} and MCP calls return CallToolResult objects.",
           ...guidelines,
         ].join("\n"),
       ),

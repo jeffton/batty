@@ -54,7 +54,7 @@ The script checks disk space, builds and tests an immutable release, runs the of
 
 ### Windows and IIS
 
-Windows requires Git for Windows (Bash), PowerShell and the same Node/pnpm versions as local setup. `BATTY_BASH_PATH` selects a custom Bash executable; the default is `C:\\Program Files\\Git\\bin\\bash.exe`. Durable shell supervisors and Chromium survive service restarts, and Windows kernel file-sharing locks prevent concurrent database writers.
+Windows requires PowerShell 7 (`pwsh.exe` on the service account’s PATH) and the same Node/pnpm versions as local setup. Agents use the `powershell` tool; interrupted commands are reported as errors rather than replayed after a restart. Detached Chromium survives service restarts, and Windows kernel file-sharing locks prevent concurrent database writers. Linux agents use durable Bash supervisors; `BATTY_BASH_PATH` selects a custom executable (default `/bin/bash`).
 
 The Windows script updates an installed WinSW service without changing its XML, account, environment or data root. IIS requires URL Rewrite, ARR proxying and the `HTTP_X_FORWARDED_HOST`/`HTTP_X_FORWARDED_PROTO` server variables. Point the IIS application at the `current` junction. `deploy/web.config` forwards the application-relative path to the backend; set `baseUrl` to the public IIS prefix, such as `/batty`.
 

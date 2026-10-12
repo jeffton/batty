@@ -26,6 +26,10 @@ import { createTools } from "./tools";
 import { persistentBashOperations } from "./durable-bash";
 import { stateDirPath } from "./options";
 import { withoutMainMemory } from "./main-memory-policy";
+import { piShellToolNameForPlatform } from "../shared/pi-tools";
+
+const shellName = piShellToolNameForPlatform(process.platform);
+const shellPrint = process.platform === "win32" ? "Write-Output" : "printf";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -109,6 +113,71 @@ async function fixture(persistent = false) {
 }
 
 describe("durable tool bridge", () => {
+  it("exposes only the platform's shell", async () => {
+    const { tools } = await fixture();
+    const names = tools.extension.tools!.map((tool) => tool.name);
+    expect(names).toContain(shellName);
+    expect(names).not.toContain(process.platform === "win32" ? "bash" : "powershell");
+  });
+
+  it.skipIf(process.platform !== "win32")(
+    "uses PowerShell Core 7 with Unicode output and the conversation cwd",
+    async () => {
+      const { directory, tools, api, run } = await fixture();
+      const powershell = tools.extension.tools!.find((tool) => tool.name === "powershell")!;
+      expect(powershell.replay).toBe("unsafe");
+      const result = await powershell.execute(
+        {
+          command:
+            "$PSVersionTable.PSEdition; $PSVersionTable.PSVersion.Major; (Get-Location).Path; Write-Output 'æøå 日本語'",
+        },
+        api,
+        BACKGROUND_CONTEXT,
+      );
+      const text = result.content!.map((block: any) => block.text).join("\n");
+      expect(text).toMatch(/Core\r?\n7\r?\n/);
+      expect(text).toContain(directory);
+      expect(text).toContain("æøå 日本語");
+      const nested = await run(
+        "return await tools.powershell({command: \"Write-Output 'nested æøå'\"})",
+      );
+      expect(nested.isError).toBe(false);
+      expect(JSON.parse(nested.content[0].text)).toMatchObject({
+        output: "nested æøå\r\n",
+        exit_code: 0,
+        truncated: false,
+      });
+      const declaration = await run('return await describeTool("powershell")');
+      expect(declaration.content[0].text).toContain("exit_code");
+      const failed = await run(
+        "return await tools.powershell({command: \"Write-Output 'failure output'; exit 17\"})",
+      );
+      expect(failed.isError).toBe(true);
+      expect(failed.content[0].text).toContain("failure output");
+      expect(failed.content[0].text).toContain("17");
+      const timeout = await run(
+        'return await tools.powershell({command: "Start-Sleep 10", timeout: 0.2})',
+      );
+      expect(timeout.isError).toBe(true);
+      expect(timeout.content[0].text).toContain("timed out");
+    },
+  );
+
+  it.skipIf(process.platform !== "win32")(
+    "rejects Windows PowerShell 5.1 when pwsh is unavailable",
+    async () => {
+      const oldPath = process.env.PATH;
+      process.env.PATH =
+        path.join(process.env.SystemRoot!, "System32", "WindowsPowerShell", "v1.0") +
+        path.delimiter +
+        path.join(process.env.SystemRoot!, "System32");
+      try {
+        await expect(fixture()).rejects.toThrow("Batty requires PowerShell 7 (pwsh.exe) on PATH");
+      } finally {
+        process.env.PATH = oldPath;
+      }
+    },
+  );
   it("gives nested tools the harness model catalog without dropping shell output", async () => {
     const { tools, run } = await fixture();
     tools.registerTools([
@@ -123,7 +192,7 @@ describe("durable tool bridge", () => {
       },
     ]);
     const result = await run(`const model = await tools.modelCatalog({});
-      const shell = await tools.bash({command: "printf 'nested shell output'"});
+      const shell = await tools.${shellName}({command: "${shellPrint} 'nested shell output'"});
       text(model); text(shell);`);
     expect(result.isError).toBe(false);
     const text = result.content.map((block: { text: string }) => block.text).join("\n");
@@ -149,7 +218,7 @@ describe("durable tool bridge", () => {
     expect(JSON.stringify(isolated)).not.toContain("private decision");
     expect(JSON.stringify(isolated)).toContain("ordinary task result");
     const derived = await run(
-      'const secret = await tools.memory_zoom({}); text(await tools.bash({command: "printf \'" + secret + "\'"}));',
+      `const secret = await tools.memory_zoom({}); text(await tools.${shellName}({command: "${shellPrint} '" + secret + "'"}));`,
     );
     expect(withoutMainMemory([derived])).toEqual([]);
     await fs.writeFile(path.join(directory, "task.txt"), "ordinary".repeat(100));
@@ -408,7 +477,7 @@ describe("durable tool bridge", () => {
     expect(spinning.isError).toBe(true);
   });
 
-  it("stops a worker's detached native bash after an explicit subagent stop", async () => {
+  it("stops a worker's native shell after an explicit subagent stop", async () => {
     const { directory, tools, harness, main, registry, faux } = await fixture();
     const orchestration = createOrchestration({
       workspaces: [
@@ -444,8 +513,11 @@ describe("durable tool bridge", () => {
         )
           return fauxAssistantMessage(
             [
-              fauxToolCall("bash", {
-                command: "echo started > worker-started; sleep 1; echo survived > worker-marker",
+              fauxToolCall(shellName, {
+                command:
+                  process.platform === "win32"
+                    ? "Set-Content worker-started started; Start-Sleep 2; Set-Content worker-marker survived"
+                    : "echo started > worker-started; sleep 2; echo survived > worker-marker",
               }),
             ],
             { stopReason: "toolUse" },
@@ -477,7 +549,7 @@ describe("durable tool bridge", () => {
     await (
       await main.submit({ type: "input", content: "stop worker" }, BACKGROUND_CONTEXT)
     ).wait(BACKGROUND_CONTEXT);
-    await delay(1200);
+    await delay(2200);
     await expect(fs.access(path.join(directory, "worker-marker"))).rejects.toMatchObject({
       code: "ENOENT",
     });
@@ -536,94 +608,103 @@ describe("durable tool bridge", () => {
     view.dispose();
   });
 
-  it("replays a script's read->bash journal after SQLite reopen without repeating the shell effect", async () => {
-    const { directory, tools, harness, main, faux, reopen } = await fixture(true);
-    await fs.writeFile(path.join(directory, "seed"), "original");
-    const code =
-      'const source=await tools.read({path:"seed"}); const bash=await tools.bash({command:"echo run >> count; sleep 1; echo finished"}); return source+":"+bash.output;';
-    faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("codemode", { code })], { stopReason: "toolUse" }),
-      fauxAssistantMessage([fauxText("done")]),
-    ]);
-    const submission = await main.submit(
-      { type: "input", content: "run script" },
-      BACKGROUND_CONTEXT,
-    );
-    harness.resume();
-    for (let attempt = 0; attempt < 200; attempt++) {
-      try {
-        await fs.access(path.join(directory, "count"));
-        break;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  it.skipIf(process.platform === "win32")(
+    "replays a script's read->bash journal after SQLite reopen without repeating the shell effect",
+    async () => {
+      const { directory, tools, harness, main, faux, reopen } = await fixture(true);
+      await fs.writeFile(path.join(directory, "seed"), "original");
+      const code =
+        'const source=await tools.read({path:"seed"}); const bash=await tools.bash({command:"echo run >> count; sleep 1; echo finished"}); return source+":"+bash.output;';
+      faux.setResponses([
+        fauxAssistantMessage([fauxToolCall("codemode", { code })], { stopReason: "toolUse" }),
+        fauxAssistantMessage([fauxText("done")]),
+      ]);
+      const submission = await main.submit(
+        { type: "input", content: "run script" },
+        BACKGROUND_CONTEXT,
+      );
+      harness.resume();
+      for (let attempt = 0; attempt < 200; attempt++) {
+        try {
+          await fs.access(path.join(directory, "count"));
+          break;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        await delay(10);
       }
-      await delay(10);
-    }
-    expect(await fs.readFile(path.join(directory, "count"), "utf8")).toBe("run\n");
-    await fs.writeFile(path.join(directory, "seed"), "changed");
-    const restarted = await reopen();
-    const recovered = await restarted.harness.submission(submission.id, BACKGROUND_CONTEXT);
-    expect((await recovered!.wait(BACKGROUND_CONTEXT)).status).toBe("done");
-    expect(await fs.readFile(path.join(directory, "count"), "utf8")).toBe("run\n");
-    const view = await restarted.main.viewState(BACKGROUND_CONTEXT);
-    const result = view.value.entries.findLast(
-      (entry) =>
-        entry.kind === "pi.tool-result" &&
-        entry.model?.[0]?.role === "toolResult" &&
-        entry.model[0].toolName === "codemode",
-    )!.model![0] as any;
-    expect(result.isError, JSON.stringify(result)).toBe(false);
-    expect(result.content[0].text).toContain("original:finished");
-    view.dispose();
-  }, 15_000);
+      expect(await fs.readFile(path.join(directory, "count"), "utf8")).toBe("run\n");
+      await fs.writeFile(path.join(directory, "seed"), "changed");
+      const restarted = await reopen();
+      const recovered = await restarted.harness.submission(submission.id, BACKGROUND_CONTEXT);
+      expect((await recovered!.wait(BACKGROUND_CONTEXT)).status).toBe("done");
+      expect(await fs.readFile(path.join(directory, "count"), "utf8")).toBe("run\n");
+      const view = await restarted.main.viewState(BACKGROUND_CONTEXT);
+      const result = view.value.entries.findLast(
+        (entry) =>
+          entry.kind === "pi.tool-result" &&
+          entry.model?.[0]?.role === "toolResult" &&
+          entry.model[0].toolName === "codemode",
+      )!.model![0] as any;
+      expect(result.isError, JSON.stringify(result)).toBe(false);
+      expect(result.content[0].text).toContain("original:finished");
+      view.dispose();
+    },
+    15_000,
+  );
 
-  it("reconnects a running bash job after its service process is killed without executing it twice", async () => {
-    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "batty-bash-test-"));
-    cleanups.push(() => fs.rm(directory, { recursive: true, force: true }));
-    const waiter = path.join(directory, "waiter.mjs");
-    const module = pathToFileURL(path.join(process.cwd(), "src/server/durable-bash.ts")).href;
-    await fs.writeFile(
-      waiter,
-      `import {persistentBashOperations} from ${JSON.stringify(module)}; await persistentBashOperations(${JSON.stringify(directory)},'job').exec('echo run >> count; sleep 1; echo finished',${JSON.stringify(directory)},{onData:()=>{}});`,
-    );
-    const child = spawn(
-      process.execPath,
-      [
-        "--import",
-        pathToFileURL(createRequire(path.join(process.cwd(), "package.json")).resolve("tsx")).href,
+  it.skipIf(process.platform === "win32")(
+    "reconnects a running bash job after its service process is killed without executing it twice",
+    async () => {
+      const directory = await fs.mkdtemp(path.join(os.tmpdir(), "batty-bash-test-"));
+      cleanups.push(() => fs.rm(directory, { recursive: true, force: true }));
+      const waiter = path.join(directory, "waiter.mjs");
+      const module = pathToFileURL(path.join(process.cwd(), "src/server/durable-bash.ts")).href;
+      await fs.writeFile(
         waiter,
-      ],
-      { cwd: process.cwd(), stdio: ["ignore", "ignore", "pipe"] },
-    );
-    let stderr = "";
-    child.stderr.on("data", (data) => {
-      stderr += data.toString();
-    });
-    const exited = once(child, "exit");
-    for (let attempts = 0; attempts < 100; attempts++) {
-      try {
-        if ((await fs.readFile(path.join(directory, "count"), "utf8")).includes("run")) break;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        `import {persistentBashOperations} from ${JSON.stringify(module)}; await persistentBashOperations(${JSON.stringify(directory)},'job').exec('echo run >> count; sleep 1; echo finished',${JSON.stringify(directory)},{onData:()=>{}});`,
+      );
+      const child = spawn(
+        process.execPath,
+        [
+          "--import",
+          pathToFileURL(createRequire(path.join(process.cwd(), "package.json")).resolve("tsx"))
+            .href,
+          waiter,
+        ],
+        { cwd: process.cwd(), stdio: ["ignore", "ignore", "pipe"] },
+      );
+      let stderr = "";
+      child.stderr.on("data", (data) => {
+        stderr += data.toString();
+      });
+      const exited = once(child, "exit");
+      for (let attempts = 0; attempts < 100; attempts++) {
+        try {
+          if ((await fs.readFile(path.join(directory, "count"), "utf8")).includes("run")) break;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        await delay(20);
       }
-      await delay(20);
-    }
-    expect(stderr).toBe("");
-    expect(await fs.readFile(path.join(directory, "count"), "utf8")).toBe("run\n");
-    child.kill("SIGKILL");
-    await exited;
-    let output = "";
-    const result = await persistentBashOperations(directory, "job").exec(
-      "echo duplicated >> count",
-      directory,
-      {
-        onData: (data) => {
-          output += data.toString();
+      expect(stderr).toBe("");
+      expect(await fs.readFile(path.join(directory, "count"), "utf8")).toBe("run\n");
+      child.kill("SIGKILL");
+      await exited;
+      let output = "";
+      const result = await persistentBashOperations(directory, "job").exec(
+        "echo duplicated >> count",
+        directory,
+        {
+          onData: (data) => {
+            output += data.toString();
+          },
         },
-      },
-    );
-    expect(result.exitCode, output).toBe(0);
-    expect(output).toContain("finished");
-    expect(await fs.readFile(path.join(directory, "count"), "utf8")).toBe("run\n");
-  }, 15_000);
+      );
+      expect(result.exitCode, output).toBe(0);
+      expect(output).toContain("finished");
+      expect(await fs.readFile(path.join(directory, "count"), "utf8")).toBe("run\n");
+    },
+    15_000,
+  );
 });

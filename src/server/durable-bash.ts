@@ -18,22 +18,14 @@ const save = value => { value.identity=job.identity; fs.writeFileSync(receipt+'.
 const startedAt = Date.now();
 save({status:'starting', supervisorPid:process.pid, startedAt});
 if(fs.existsSync(job.cancelPath)) { save({status:'done',exitCode:130,startedAt,endedAt:Date.now()}); process.exit(0); }
-let command = job.command;
-let output;
-if(process.platform === 'win32') {
-  // Git Bash cannot reliably write to inherited Node file descriptors.
-  const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
-  command = 'exec >> ' + quote(path.join(job.directory, 'output').replaceAll('\\','/')) + ' 2>&1\n' + command;
-} else {
-  output = fs.openSync(path.join(job.directory, 'output'), 'a');
-}
-const child = spawn(job.shell, ['-c', command], {cwd:job.cwd, env:job.env, detached:true, windowsHide:true, stdio:process.platform === 'win32' ? 'ignore' : ['ignore',output,output]});
-if(process.platform !== 'win32') fs.closeSync(output);
+const output = fs.openSync(path.join(job.directory, 'output'), 'a');
+const child = spawn(job.shell, ['-c', job.command], {cwd:job.cwd, env:job.env, detached:true, stdio:['ignore',output,output]});
+fs.closeSync(output);
 save({status:'running', supervisorPid:process.pid, pid:child.pid, startedAt});
 let timer;
 let cancelled=false;
 let killTimer;
-const kill=signal=>{ if(!child.pid)return; if(process.platform==='win32') { spawn('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{stdio:'ignore',windowsHide:true}); } else { try{process.kill(-child.pid,signal)}catch{} } };
+const kill=signal=>{ if(!child.pid)return; try{process.kill(-child.pid,signal)}catch{} };
 const cancel=()=>{ if(cancelled)return; cancelled=true; kill('SIGTERM');killTimer=setTimeout(()=>kill('SIGKILL'),500); };
 const monitor=setInterval(()=>{if(fs.existsSync(job.cancelPath))cancel()},20);
 if(fs.existsSync(job.cancelPath))cancel();
@@ -59,11 +51,7 @@ export function persistentBashOperations(jobsDir: string, taskId: string): BashO
             identity: taskId,
             cancelPath: bashCancelPath(jobsDir, taskId),
             command,
-            shell:
-              process.env.BATTY_BASH_PATH ??
-              (process.platform === "win32"
-                ? "C:\\Program Files\\Git\\bin\\bash.exe"
-                : "/bin/bash"),
+            shell: process.env.BATTY_BASH_PATH ?? "/bin/bash",
             cwd,
             env: options.env ?? process.env,
             timeout: options.timeout,
@@ -71,7 +59,6 @@ export function persistentBashOperations(jobsDir: string, taskId: string): BashO
         ],
         {
           detached: true,
-          windowsHide: true,
           stdio: "ignore",
         },
       );

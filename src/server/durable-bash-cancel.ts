@@ -32,7 +32,7 @@ export async function cancelPersistentBashJob(jobsDir: string, identity: string)
         throw error;
       }
     }
-    if (receipt?.pid && process.platform !== "win32") {
+    if (receipt?.pid) {
       const signal = termAt !== undefined && Date.now() - termAt >= 500 ? "SIGKILL" : "SIGTERM";
       try {
         process.kill(-receipt.pid, signal);

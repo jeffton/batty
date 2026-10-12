@@ -2,7 +2,10 @@ import { defineDoc, defineDocFamily } from "@earendil-works/pi-durable";
 import type { MemoryLeaf } from "./memory-projection";
 import type { Part } from "./memory-view";
 
-export const WorkerMemory = defineDoc<{ view: string | null }>({
+export type MemorySnapshot = { generation: number; count: number; prepared: number };
+export type MemoryPacket = { view: string; boundary: number; snapshot: MemorySnapshot };
+
+export const WorkerMemory = defineDoc<{ view: string | null; snapshot?: MemorySnapshot }>({
   kind: "batty.worker-memory",
   version: 1,
   scope: "conversation",
@@ -25,6 +28,7 @@ export type MemoryRebuild = {
   status: "pending" | "complete";
   level?: number;
   repairs?: string[];
+  baseGeneration?: number;
 };
 export const MemoryMaintenanceDoc = defineDoc<{ generation: number; settled: number }>({
   kind: "batty.memory-maintenance",
@@ -69,10 +73,30 @@ export const MemoryNodesDoc = defineDocFamily<{ text: string }, { text: string }
   fork: "initial",
   initial: (node) => node,
 });
-export const Packets = defineDocFamily<
-  { view: string; boundary: number },
-  { view: string; boundary: number }
+export const GenerationCounter = defineDoc<{ next: number }>({
+  kind: "batty.memory-generation-counter",
+  version: 1,
+  scope: "conversation",
+  history: "latest",
+  fork: "initial",
+  initial: () => ({ next: 1 }),
+});
+
+// Repair generations inherit unchanged nodes; published generations remain immutable.
+export const Generations = defineDocFamily<
+  { parent: number; count: number },
+  { parent: number; count: number }
 >({
+  kind: "batty.memory-generation",
+  version: 1,
+  family: true,
+  scope: "conversation",
+  history: "latest",
+  fork: "initial",
+  initial: (generation) => generation,
+});
+
+export const Packets = defineDocFamily<MemoryPacket, MemoryPacket>({
   kind: "batty.memory-packet",
   version: 1,
   family: true,

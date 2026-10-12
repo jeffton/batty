@@ -1,4 +1,4 @@
-import { BACKGROUND_CONTEXT, awaitWithContext } from "@earendil-works/chord/context";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord";
 import { Type, type Message } from "@earendil-works/pi-ai";
 import { getCurrentSystemMessage } from "@earendil-works/pi-ai/utils/transcript";
@@ -17,23 +17,25 @@ import {
   type Harness,
 } from "@earendil-works/pi-durable";
 import type { MemorySearchOptions, MemorySearch } from "./memory-search";
-import { Packets, WorkerMemory } from "./memory-documents";
+import { Packets, WorkerMemory, type MemoryPacket, type MemorySnapshot } from "./memory-documents";
 import { decodeRuntimeNotice } from "./runtime-notices";
 import { WorkerDoc } from "./orchestration";
 import { conversationPolicy } from "./conversation-policy";
 import { MAIN_MEMORY_TOOLS, isMainMemoryView, withoutMainMemory } from "./main-memory-policy";
 import { MEMORY_PROMPT } from "./memory-prompts";
+import { snapshotFromView } from "./memory-snapshot";
 
 type MemoryRequests = {
   main: () => Conversation;
   harness: () => Harness;
   rootSessionId: () => string;
-  exclusive: <T>(operation: () => Promise<T>) => Promise<T>;
-  syncTo: (maximum: number, context: Context) => Promise<void>;
   load: (context: Context) => Promise<void>;
-  conversationalView: (context: Context) => Promise<string>;
-  preparedView: () => string;
-  zoom: (id: number, count: number, context: Context) => Promise<string>;
+  conversationalView: (
+    maximum: number,
+    context: Context,
+  ) => Promise<{ view: string; snapshot: MemorySnapshot }>;
+  preparedView: () => { view: string; snapshot: MemorySnapshot };
+  zoom: (id: number, count: number, context: Context, snapshot?: MemorySnapshot) => Promise<string>;
   date: (id: number, context: Context) => Promise<string>;
   search: (options: MemorySearchOptions, context: Context) => ReturnType<MemorySearch["search"]>;
   report: (error: unknown) => void;
@@ -43,8 +45,6 @@ export function createMemoryRequests({
   main,
   harness,
   rootSessionId,
-  exclusive,
-  syncTo,
   load,
   conversationalView,
   preparedView,
@@ -54,33 +54,37 @@ export function createMemoryRequests({
   report,
 }: MemoryRequests) {
   const validPackets = new Set<string>();
-  async function packetForRun(runId: SubmissionId, context: Context) {
+  async function mainSnapshot(context: Context) {
+    const live = await harness().snapshot(LiveDoc, main().id, context);
+    const runId = live?.run?.inputs[0];
+    return runId
+      ? (await harness().snapshot(Packets, main().id, String(runId), context))?.snapshot
+      : undefined;
+  }
+  let packetQueue: Promise<unknown> = Promise.resolve();
+  function packetForRun(runId: SubmissionId, context: Context) {
+    const result = packetQueue.then(() => createPacket(runId, context));
+    packetQueue = result.catch(() => undefined);
+    return result;
+  }
+  async function createPacket(runId: SubmissionId, context: Context) {
     const packet = await harness().snapshot(Packets, main().id, String(runId), context);
     if (packet) return packet;
-    return awaitWithContext(
-      exclusive(async () => {
-        const existing = await harness().snapshot(Packets, main().id, String(runId), context);
-        if (existing) return existing;
-        const input = await (await harness().submission(runId, context))!.status(context);
-        if (!input.entry) throw new Error("Main run input has no entry");
-        await syncTo(input.entry - 1, context);
-        const view = await conversationalView(context);
-        const candidate = {
-          view,
-          boundary: input.entry as number,
-        };
-        await main().commit(async (tx) => {
-          await tx.doc(Packets, main().id, String(runId), candidate);
-          await tx.appendEntry(main().id, { kind: "batty.run-head", head: input.entry });
-        }, context);
-        return candidate;
-      }),
-      context,
-    );
+    const input = await (await harness().submission(runId, context))!.status(context);
+    if (!input.entry) throw new Error("Main run input has no entry");
+    const candidate = {
+      ...(await conversationalView(input.entry - 1, context)),
+      boundary: input.entry as number,
+    };
+    return main().commit(async (tx) => {
+      await tx.doc(Packets, main().id, String(runId), candidate);
+      await tx.appendEntry(main().id, { kind: "batty.run-head", head: input.entry });
+      return candidate;
+    }, context);
   }
   async function runMessages(
     messages: readonly Message[],
-    packet: { view: string; boundary: number },
+    packet: MemoryPacket,
     context: Context,
   ): Promise<Message[]> {
     const entry = await main().commit((tx) => tx.entry(packet.boundary as EntryId), context);
@@ -122,7 +126,11 @@ export function createMemoryRequests({
             ).mainMemory
           )
             throw new Error("Main memory is available only to Roy workers");
-          return { content: [{ type: "text", text: await zoom(id, n, context) }] };
+          const snapshot =
+            api.conversationId === main().id
+              ? await mainSnapshot(context)
+              : (await api.snapshot(WorkerMemory, api.conversationId, context))?.snapshot;
+          return { content: [{ type: "text", text: await zoom(id, n, context, snapshot) }] };
         },
       }),
       defineTool({
@@ -208,16 +216,24 @@ export function createMemoryRequests({
               const packet = runId
                 ? await harness().snapshot(Packets, main().id, String(runId), context)
                 : undefined;
+              const prepared = preparedView();
               const candidate = {
-                view: copiedView
-                  ? (copiedView.content as string)
-                  : (packet?.view ?? preparedView()),
+                view: copiedView ? (copiedView.content as string) : (packet?.view ?? prepared.view),
+                snapshot: copiedView
+                  ? snapshotFromView(copiedView.content as string)
+                  : (packet?.snapshot ?? prepared.snapshot),
               };
               const conversation = (await harness().conversation(api.conversationId, context))!;
               snapshot = await conversation.commit(async (tx) => {
                 const pinned = await tx.doc(WorkerMemory, api.conversationId);
-                pinned.view ??= candidate.view;
-                return { view: pinned.view };
+                if (pinned.view === null) {
+                  pinned.view = candidate.view;
+                  pinned.snapshot = candidate.snapshot;
+                }
+                return {
+                  view: pinned.view,
+                  snapshot: pinned.snapshot ? { ...pinned.snapshot } : undefined,
+                };
               }, context);
             }
             const system = getCurrentSystemMessage(messages);
@@ -273,14 +289,8 @@ export function createMemoryRequests({
         const packet = await packetForRun(runId, context);
         return runMessages((await main().context(context)).messages, packet, context);
       }
-      const view = await awaitWithContext(
-        exclusive(async () => {
-          await syncTo(
-            (await main().entries({}, 1, undefined, context)).items[0]?.id ?? 0,
-            context,
-          );
-          return conversationalView(context);
-        }),
+      const { view } = await conversationalView(
+        (await main().entries({}, 1, undefined, context)).items[0]?.id ?? 0,
         context,
       );
       return [{ role: "user", content: view, timestamp: 0 }];

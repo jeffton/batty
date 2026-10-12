@@ -1,6 +1,6 @@
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { BACKGROUND_CONTEXT, withCancel } from "@earendil-works/chord/context";
+import { BACKGROUND_CONTEXT, withCancel, awaitWithContext } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord";
 import type { Models } from "@earendil-works/pi-ai";
 import {
@@ -33,14 +33,18 @@ import {
 import { isMemoryNoise, stripNoiseClauses } from "./memory-noise";
 import { createMemoryCompressor, MemoryFatalError, NODE_BYTES } from "./memory-compression";
 import { createMemoryRequests } from "./memory-requests";
+import { snapshotView, captureMemorySnapshot } from "./memory-snapshot";
 import {
   Leaves,
+  Generations,
+  GenerationCounter,
   Rebuild,
   MemoryIndexDoc as Index,
   MemoryMaintenanceDoc as Maintenance,
   MemoryNodesDoc as Nodes,
   type MemoryIndex,
   type MemoryRebuild,
+  type MemorySnapshot,
 } from "./memory-documents";
 
 export { projectEntry, type MemoryLeaf } from "./memory-projection";
@@ -108,7 +112,6 @@ export function createMemory(config: MemoryConfig, models: Models) {
   );
   let maintenance: { generation: number; settled: number };
   let treeWrites = 0;
-  let checkpointDirty = false;
   // Only the current overview is pinned; cold branches never enter Pi's tracker cache.
   let overviewNodes = new Map<string, string>();
   let overviewParts: Part[] = [];
@@ -133,9 +136,33 @@ export function createMemory(config: MemoryConfig, models: Models) {
   }
   const leafAt = async (id: number, context: Context) =>
     (await readTree<MemoryLeaf>(Leaves.definition.kind, String(id), context))!;
-  const nodeAt = async (part: Part, context: Context, generation = index.generation ?? 0) =>
-    (await readTree<{ text: string }>(Nodes.definition.kind, storedKey(part, generation), context))
-      ?.text;
+  const parents = new Map<number, { parent: number; count: number } | null>();
+  async function nodeAt(
+    part: Part,
+    context: Context,
+    generation = index.generation ?? 0,
+  ): Promise<string | undefined> {
+    for (;;) {
+      const node = await readTree<{ text: string }>(
+        Nodes.definition.kind,
+        storedKey(part, generation),
+        context,
+      );
+      if (node !== undefined) return node.text;
+      if (!parents.has(generation)) {
+        const descriptor = await harness.snapshot(
+          Generations,
+          main.id,
+          String(generation),
+          context,
+        );
+        parents.set(generation, descriptor ? { ...descriptor } : null);
+      }
+      const parent = parents.get(generation)!;
+      if (parent === null || part.start + part.count > parent.count) return undefined;
+      generation = parent.parent;
+    }
+  }
   async function releaseTrackers(force = false) {
     // Pi exposes one mutation-line-safe unload operation. Observers subscribe to
     // publications, not tracker identity; unloading does not detach them.
@@ -186,6 +213,12 @@ export function createMemory(config: MemoryConfig, models: Models) {
     overviewGeneration = generation;
   }
   let serial: Promise<unknown> = Promise.resolve();
+  let writer: Promise<unknown> = Promise.resolve();
+  const writeExclusive = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = writer.then(operation);
+    writer = result.catch(() => undefined);
+    return result;
+  };
   let rebuilding: Promise<void> | undefined;
   let rebuildError: string | undefined;
   let rebuildProgress:
@@ -312,37 +345,100 @@ export function createMemory(config: MemoryConfig, models: Models) {
     await releaseTrackers();
     lastError = undefined;
   }
-  async function saveMaintenance(context: Context) {
-    await main.commit(async (tx) => {
-      Object.assign(await tx.doc(Maintenance, main.id), maintenance);
-      const draft = await tx.doc(Index, main.id);
-      draft.viewCount = index.viewCount;
-      draft.parts = index.parts;
-      draft.merging = index.merging;
-    }, context);
-    await refreshOverview(context);
-    await releaseTrackers(true);
-    checkpointDirty = false;
+  async function publishPrefix(
+    expected: { generation: number; settled: number },
+    next: { settled: number; viewCount: number; parts: Part[]; merging?: boolean },
+    context: Context,
+  ) {
+    await exclusive(async () => {
+      await main.commit(async (tx) => {
+        const draft = await tx.doc(Index, main.id);
+        const checkpoint = await tx.doc(Maintenance, main.id);
+        if (
+          (draft.generation ?? 0) !== expected.generation ||
+          checkpoint.generation !== expected.generation ||
+          checkpoint.settled !== expected.settled
+        )
+          throw new Error("Memory checkpoint changed during maintenance");
+        draft.viewCount = next.viewCount;
+        draft.parts = next.parts;
+        draft.merging = next.merging;
+        checkpoint.settled = next.settled;
+      }, context);
+      index.viewCount = next.viewCount;
+      index.parts = next.parts;
+      index.merging = next.merging;
+      maintenance = { generation: expected.generation, settled: next.settled };
+      await refreshOverview(context);
+      await releaseTrackers(true);
+    });
   }
-  async function repairLegacyNoise(id: number, context: Context) {
+  async function allocateGeneration(context: Context) {
+    const rebuild = await harness.snapshot(Rebuild, main.id, context);
+    return main.commit(async (tx) => {
+      const counter = await tx.doc(GenerationCounter, main.id);
+      const generation = Math.max(
+        counter.next,
+        (index.generation ?? 0) + 1,
+        (rebuild?.generation ?? 0) + 1,
+      );
+      counter.next = generation + 1;
+      return generation;
+    }, context);
+  }
+  async function cleanLegacyNoise(context: Context) {
+    const parent = index.generation ?? 0;
+    const generation = await allocateGeneration(context);
+    await main.commit(async (tx) => {
+      await tx.doc(Generations, main.id, String(generation), { parent, count: index.viewCount });
+    }, context);
+    parents.set(generation, { parent, count: index.viewCount });
+    const total = index.viewCount;
+    for (let id = maintenance.settled; id < total; id++)
+      await repairLegacyNoise(id, generation, total, context);
+    await exclusive(async () => {
+      await main.commit(async (tx) => {
+        const draft = await tx.doc(Index, main.id);
+        if ((draft.generation ?? 0) !== parent)
+          throw new Error("Memory generation changed during cleanup");
+        draft.generation = generation;
+        const checkpoint = await tx.doc(Maintenance, main.id);
+        checkpoint.generation = generation;
+        checkpoint.settled = total;
+      }, context);
+      index.generation = generation;
+      maintenance = { generation, settled: total };
+      await refreshOverview(context);
+    });
+  }
+  async function repairLegacyNoise(
+    id: number,
+    generation: number,
+    total: number,
+    context: Context,
+  ) {
     const leaf = await leafAt(id, context);
     if (!isMemoryNoise(leaf)) return;
-    for (let count = 1; count <= index.count; count *= 2) {
+    for (let count = 1; count <= total; count *= 2) {
       const part = { start: Math.floor(id / count) * count, count };
-      const existing = await nodeAt(part, context);
+      const existing = await nodeAt(part, context, generation);
       if (existing === undefined) continue;
       let text = "";
       if (count > 1) {
-        const left = (await nodeAt({ start: part.start, count: count / 2 }, context))!;
-        const right = (await nodeAt({ start: part.start + count / 2, count: count / 2 }, context))!;
+        const left = (await nodeAt({ start: part.start, count: count / 2 }, context, generation))!;
+        const right = (await nodeAt(
+          { start: part.start + count / 2, count: count / 2 },
+          context,
+          generation,
+        ))!;
         text = !left ? right : !right ? left : stripNoiseClauses(existing);
         if (!text && (left || right)) text = [left, right].filter(Boolean).join("; ");
       }
       if (text === existing) continue;
       await main.commit(async (tx) => {
-        (await tx.doc(Nodes, main.id, storedKey(part), { text })).text = text;
+        (await tx.doc(Nodes, main.id, storedKey(part, generation), { text })).text = text;
       }, context);
-      cache.set(`${Nodes.definition.kind}:${storedKey(part)}`, { text });
+      cache.set(`${Nodes.definition.kind}:${storedKey(part, generation)}`, { text });
       await releaseTrackers();
     }
   }
@@ -392,18 +488,14 @@ export function createMemory(config: MemoryConfig, models: Models) {
     }
   }
   async function settleNow(context: Context) {
-    if (maintenance.settled === index.count) {
-      if (checkpointDirty) await saveMaintenance(context);
-      return;
-    }
-    // A bounded prefix is published only after its leaves and every newly
-    // completed ancestor are durable. Retry reuses committed children.
-    while (maintenance.settled < index.count) {
-      const start = maintenance.settled;
-      const end = Math.min(start + 64, index.count);
-      const generation = index.generation ?? 0;
-      for (let id = start; id < Math.min(end, index.viewCount); id++)
-        await repairLegacyNoise(id, context);
+    const total = index.count;
+    // Legacy cleanup writes into a new generation, never into a run's pinned tree.
+    if (maintenance.settled < index.viewCount) await cleanLegacyNoise(context);
+    while (maintenance.settled < total) {
+      const expected = { ...maintenance };
+      const start = expected.settled;
+      const end = Math.min(start + 64, total);
+      const generation = expected.generation;
       await buildRange(start, end, 1, context, generation, "incremental");
       for (let count = 2; count <= end; count *= 2)
         await buildRange(
@@ -414,13 +506,17 @@ export function createMemory(config: MemoryConfig, models: Models) {
           generation,
           "incremental",
         );
-      for (let id = index.viewCount; id < end; id++) index.parts.push({ start: id, count: 1 });
-      index.viewCount = Math.max(index.viewCount, end);
-      index.parts = await fitParts(index.parts, index.viewCount, context);
-      maintenance.settled = end;
-      checkpointDirty = true;
-      config.onProgress?.({ completed: index.viewCount, total: index.count, nodes: cache.size });
-      await saveMaintenance(context);
+      const parts = index.parts.map((part) => ({ ...part }));
+      for (let id = index.viewCount; id < end; id++) parts.push({ start: id, count: 1 });
+      const viewCount = Math.max(index.viewCount, end);
+      const batch: ViewBatch = { merging: index.merging };
+      const fitted = await fitParts(parts, viewCount, context, generation, batch);
+      config.onProgress?.({ completed: viewCount, total: index.count, nodes: cache.size });
+      await publishPrefix(
+        expected,
+        { settled: end, viewCount, parts: fitted, merging: batch.merging },
+        context,
+      );
     }
   }
   const reportRebuild = (error: unknown) => {
@@ -436,7 +532,8 @@ export function createMemory(config: MemoryConfig, models: Models) {
       const existing = await harness.snapshot(Rebuild, main.id, context);
       if (existing) return existing.status === "pending" ? structuredClone(existing) : undefined;
       const candidate: MemoryRebuild = {
-        generation: (index.generation ?? 0) + 1,
+        generation: await allocateGeneration(context),
+        baseGeneration: index.generation ?? 0,
         total: index.count,
         status: "pending",
       };
@@ -504,6 +601,8 @@ export function createMemory(config: MemoryConfig, models: Models) {
     await exclusive(async () => {
       await main.commit(async (tx) => {
         const draft = await tx.doc(Index, main.id);
+        if ((draft.generation ?? 0) !== (job.baseGeneration ?? job.generation - 1))
+          throw new Error("Memory generation changed during rebuild");
         draft.generation = job.generation;
         draft.viewCount = job.total;
         draft.parts = parts;
@@ -521,22 +620,27 @@ export function createMemory(config: MemoryConfig, models: Models) {
       maintenance = { generation: job.generation, settled: job.total };
       await refreshOverview(context);
       console.log("OptChat full rebuild activated:", rebuildProgress);
-      // Includes messages admitted while the isolated generation was building.
+      // Include messages admitted while the isolated generation was building.
       await syncTo(Number.MAX_SAFE_INTEGER, context);
-      await settleNow(context);
     });
+    await settleNow(context);
   }
   const sync = (context = BACKGROUND_CONTEXT) =>
     exclusive(async () => {
       await syncTo(Number.MAX_SAFE_INTEGER, context);
     });
   const settle = (context = BACKGROUND_CONTEXT) =>
-    exclusive(async () => {
-      await load(context);
+    writeExclusive(async () => {
+      await exclusive(() => load(context));
       await settleNow(context);
       return renderView(overviewParts, overviewNodes);
     });
-  async function zoom(id: number, count: number, context = BACKGROUND_CONTEXT) {
+  async function zoom(
+    id: number,
+    count: number,
+    context = BACKGROUND_CONTEXT,
+    snapshot?: MemorySnapshot,
+  ) {
     await load(context);
     if (
       !Number.isInteger(id) ||
@@ -552,7 +656,9 @@ export function createMemory(config: MemoryConfig, models: Models) {
       const leaf = await leafAt(id, context);
       return `${id}+0|${leaf.kind}: ${leaf.text}`;
     }
-    const generation = index.generation ?? 0;
+    if (snapshot && id + count > snapshot.prepared)
+      throw new Error(`No prepared line ${id}+${count} in this memory snapshot`);
+    const generation = snapshot?.generation ?? index.generation ?? 0;
     const children = [
       { start: id, count: count / 2 },
       { start: id + count / 2, count: count / 2 },
@@ -584,28 +690,50 @@ export function createMemory(config: MemoryConfig, models: Models) {
     const leaf = await leafAt(id, context);
     return leaf.date;
   }
-  async function conversationalView(context: Context) {
-    await settleNow(context);
-    // Explicitly expose any unsummarized originals through aligned zoomable ranges.
-    const parts = [...overviewParts];
-    for (let start = index.viewCount; start < index.count;) {
-      let count = 1;
-      while (start % (count * 2) === 0 && start + count * 2 <= index.count) count *= 2;
-      parts.push({ start, count });
-      start += count;
+  async function captureView(maximum: number, context: Context) {
+    await syncTo(maximum, context);
+    return captureMemorySnapshot(
+      {
+        count: index.count,
+        prepared: index.viewCount,
+        generation: overviewGeneration,
+        parts: overviewParts,
+        leaf: leafAt,
+        node: childText,
+      },
+      maximum,
+      budget,
+      context,
+    );
+  }
+  async function conversationalView(maximum: number, context: Context) {
+    let captured = await exclusive(() => captureView(maximum, context));
+    if (captured.overflow) {
+      // Only an oversized raw backlog needs to wait for compression.
+      await awaitWithContext(settle(context), context);
+      captured = await exclusive(() => captureView(maximum, context));
     }
-    return renderView(parts, overviewNodes);
+    return { view: snapshotView(captured.view, captured.snapshot), snapshot: captured.snapshot };
   }
   const compress = createMemoryCompressor(config, models, recordMemoryCall, report);
   const requests = createMemoryRequests({
     main: () => main,
     harness: () => harness,
     rootSessionId: () => rootSessionId,
-    exclusive,
-    syncTo,
     load,
     conversationalView,
-    preparedView: () => renderView(overviewParts, overviewNodes),
+    preparedView: () => ({
+      view: snapshotView(renderView(overviewParts, overviewNodes), {
+        generation: overviewGeneration,
+        count: index.viewCount,
+        prepared: index.viewCount,
+      }),
+      snapshot: {
+        generation: overviewGeneration,
+        count: index.viewCount,
+        prepared: index.viewCount,
+      },
+    }),
     zoom,
     date,
     search,
@@ -636,9 +764,11 @@ export function createMemory(config: MemoryConfig, models: Models) {
         : undefined;
       const cutoff = submission?.entry ? submission.entry - 1 : bootstrap;
       const start = (maximum: number) => {
-        void exclusive(async () => {
-          await syncTo(maximum, background.context);
-          await indexSearch(background.context);
+        void writeExclusive(async () => {
+          await exclusive(async () => {
+            await syncTo(maximum, background.context);
+            await indexSearch(background.context);
+          });
           await settleNow(background.context);
         }).catch((error) => {
           if (!background.context.abortSignal?.aborted) report(error);
@@ -678,7 +808,7 @@ export function createMemory(config: MemoryConfig, models: Models) {
       unsubscribeClose = harness.subscribeClose(() => background.cancel());
       start(cutoff);
       if (config.rebuildRequested) {
-        rebuilding = rebuildAll()
+        rebuilding = writeExclusive(rebuildAll)
           .finally(() => {
             rebuilding = undefined;
           })
@@ -716,9 +846,9 @@ export function createMemory(config: MemoryConfig, models: Models) {
     },
     search,
     async repair(roots: Part[], generation: number, dryRun = false) {
-      return exclusive(async () => {
+      return writeExclusive(async () => {
         const context = background.context;
-        await load(context);
+        await exclusive(() => load(context));
         if (generation !== (index.generation ?? 0))
           throw new RangeError("Active memory generation changed");
         if (rebuilding) throw new Error("Cannot repair during a full rebuild");
@@ -744,8 +874,8 @@ export function createMemory(config: MemoryConfig, models: Models) {
         }
         const parts = [...selected.values()].sort((a, b) => a.count - b.count || a.start - b.start);
         if (dryRun) return { generation, nodes: parts.map((part) => ({ ...part })) };
-        // Stage the entire closure before writing. The shared exclusive queue blocks
-        // incremental maintenance; readers keep the coherent old overview meanwhile.
+        // The writer queue serializes repairs and maintenance, not model requests.
+        // Publish repaired nodes in a child generation; pinned runs keep the old tree.
         const staged = new Map<string, string>();
         const previous = new Map<string, string>();
         for (const part of parts) {
@@ -772,24 +902,34 @@ export function createMemory(config: MemoryConfig, models: Models) {
             ),
           );
         }
-        await main.commit(async (tx) => {
-          if (((await tx.doc(Index, main.id)).generation ?? 0) !== generation)
-            throw new Error("Memory generation changed during repair");
-          for (const part of parts) {
-            const draft = await tx.doc(Nodes, main.id, storedKey(part, generation), { text: "" });
-            if (draft.text !== previous.get(key(part)))
-              throw new Error(`Memory node changed during repair: ${key(part)}`);
-            draft.text = staged.get(key(part))!;
-          }
-        }, context);
-        for (const part of parts)
-          cache.set(`${Nodes.definition.kind}:${storedKey(part, generation)}`, {
-            text: staged.get(key(part))!,
-          });
-        await refreshOverview(context);
-        await releaseTrackers(true);
+        const nextGeneration = await allocateGeneration(context);
+        await exclusive(async () => {
+          await main.commit(async (tx) => {
+            const draft = await tx.doc(Index, main.id);
+            if ((draft.generation ?? 0) !== generation)
+              throw new Error("Memory generation changed during repair");
+            for (const part of parts) {
+              if ((await childText(part, context, generation)) !== previous.get(key(part)))
+                throw new Error(`Memory node changed during repair: ${key(part)}`);
+              await tx.doc(Nodes, main.id, storedKey(part, nextGeneration), {
+                text: staged.get(key(part))!,
+              });
+            }
+            await tx.doc(Generations, main.id, String(nextGeneration), {
+              parent: generation,
+              count: index.viewCount,
+            });
+            draft.generation = nextGeneration;
+            (await tx.doc(Maintenance, main.id)).generation = nextGeneration;
+          }, context);
+          parents.set(nextGeneration, { parent: generation, count: index.viewCount });
+          index.generation = nextGeneration;
+          maintenance.generation = nextGeneration;
+          await refreshOverview(context);
+          await releaseTrackers(true);
+        });
         return {
-          generation,
+          generation: nextGeneration,
           nodes: parts.map((part) => ({ ...part, text: staged.get(key(part))! })),
         };
       });
@@ -825,10 +965,11 @@ export function createMemory(config: MemoryConfig, models: Models) {
       unsubscribeClose();
       background.cancel();
       await rebuilding;
+      await writer;
       await serial;
     },
     async rebuild() {
-      rebuilding ??= rebuildAll()
+      rebuilding ??= writeExclusive(rebuildAll)
         .catch((error) => {
           reportRebuild(error);
           throw error;

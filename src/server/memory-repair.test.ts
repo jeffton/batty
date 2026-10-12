@@ -68,10 +68,10 @@ test("selective repair stages ancestors atomically, preserves siblings and origi
   expect(await state.memory.zoom(0, 1)).toBe(original);
   expect(await state.memory.zoom(8, 1)).toContain("Ny original");
   expect(state.memory.status().totalLeaves).toBe(9);
-  await expect(state.memory.repair([{ start: 1, count: 2 }], 0)).rejects.toThrow(
+  await expect(state.memory.repair([{ start: 1, count: 2 }], result.generation)).rejects.toThrow(
     "Invalid repair root",
   );
-  await expect(state.memory.repair([{ start: 0, count: 2 }], 1)).rejects.toThrow(
+  await expect(state.memory.repair([{ start: 0, count: 2 }], 0)).rejects.toThrow(
     "generation changed",
   );
 });
@@ -202,9 +202,16 @@ test("language repair explicitly translates inherited foreign prose without chan
       return fauxAssistantMessage([fauxText("user: Valgte altan; resten udskudt.")]);
     },
   ]);
-  await state.memory.repair([{ start: 0, count: 2 }], 0);
-  expect((await state.harness.snapshot(MemoryNodesDoc, state.main.id, "0+2", context))?.text).toBe(
-    "user: Valgte altan; resten udskudt.",
-  );
+  const repaired = await state.memory.repair([{ start: 0, count: 2 }], 0);
+  expect(
+    (
+      await state.harness.snapshot(
+        MemoryNodesDoc,
+        state.main.id,
+        `g${repaired.generation}:0+2`,
+        context,
+      )
+    )?.text,
+  ).toBe("user: Valgte altan; resten udskudt.");
   expect(await state.memory.zoom(0, 1)).toContain("Valde altan; resten uppskjutet.");
 });

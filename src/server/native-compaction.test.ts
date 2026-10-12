@@ -160,5 +160,5 @@ test("main and main-inline cron decline native summaries and retain OptChat run 
   expect(fixtureState.summaries()).toBe(0);
   expect(fixtureState.requests).toHaveLength(2);
   expect(fixtureState.requests.every((request) => request.includes("<chat>"))).toBe(true);
-  expect(fixtureState.requests.some((request) => request.includes("batty-optchat:"))).toBe(false);
+  expect(fixtureState.requests.every((request) => request.includes("batty-optchat:"))).toBe(true);
 });

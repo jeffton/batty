@@ -78,7 +78,7 @@ Navigation tools always address main memory, not the worker's own context. Summa
 output, so say in your reply what you learned that will matter later.
 Do not sleep or poll for subagent results; use subagent await.`;
 export const VIEW_DOC = `The main-memory view: the chat between the assistant and the user, oldest first, inside
-<chat> tags, as one-line summaries. This is the prepared view of the OptChat memory tree.
+<chat> tags, as one-line summaries and recent uncompressed text projections.
 The memory_zoom, memory_date and memory_search tools all address this same main history:
 zoom opens tree nodes, date retrieves original timestamps, and search finds original messages.
 Each line is
@@ -91,8 +91,8 @@ A summary tags each item with its kind: user (the user's words), talk
 a computer task, which the log holds as a user message starting
 "[id] "). A short message is its own line, word for word. Recent lines
 cover one message each; the older the messages, the more a line covers.
-A message not summarized yet shows as "(not summarized yet: zoom it)".
-No message appears in full, not even the last ones.
+Recent uncompressed lines preserve non-thought text; images use placeholders.
+A branch not summarized yet shows as "(not summarized yet: zoom it)".
 
 Use memory_search({query}) to find forgotten topics in original text, then memory_zoom the returned id. Literal words match together; tools/results are opt-in.
 

@@ -195,7 +195,7 @@ test("same-process retry publishes a final checkpoint cancelled after the last n
   armed = true;
   await expect(state.memory.prepare(cancellation.context)).rejects.toThrow("cancel checkpoint");
   // All nodes are built, but publishing their view still needs to be retried.
-  expect(state.memory.status().pending).toBe(0);
+  expect(state.memory.status().pending).toBe(1);
   armed = false;
   expect(await state.memory.prepare()).toContain("decision after checkpoint");
   expect((await state.memory.browserOverview()).nodes[0]?.summary).toContain(

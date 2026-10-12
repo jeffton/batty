@@ -60,7 +60,7 @@ test("persisted memory selection drives runtime summaries independently of chat 
           }),
         context,
       );
-      await runtime!.memory.contextFor(runtime!.main.id, true);
+      await runtime!.memory.prepare();
     };
     await appendAndBuild();
     expect(calls.length).toBeGreaterThan(0);

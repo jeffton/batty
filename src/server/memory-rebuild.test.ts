@@ -154,6 +154,7 @@ test("generation publication includes originals admitted while rebuilding and su
     release = resolve;
   });
   let state = await f.open({
+    viewBytes: 10_000,
     compress: async (source) => {
       if (gated && source.startsWith("user: older")) {
         entered();
@@ -184,7 +185,9 @@ test("generation publication includes originals admitted while rebuilding and su
     context,
   );
   // Live old generation remains usable and can admit new messages throughout.
-  expect(await state.memory.prepare()).toContain("concurrent new decision");
+  expect(JSON.stringify(await state.memory.contextFor(state.main.id, true))).toContain(
+    "concurrent new decision",
+  );
   release();
   await rebuilding;
   expect(await state.memory.date(0)).toBe(date);

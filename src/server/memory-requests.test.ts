@@ -31,7 +31,7 @@ test("fatal memory preparation aborts without dispatching raw canonical history"
     },
   ]);
   const memory = createMemory(
-    { memoryModel: "missing/model", nodeBytes: 1, onError: () => undefined },
+    { memoryModel: "missing/model", nodeBytes: 1, viewBytes: 1, onError: () => undefined },
     models,
   );
   const registry = createRegistry();
@@ -90,7 +90,7 @@ test("each run starts from a persisted view and the full new input, never old ra
   const second = requests[1] as { role: string; content: unknown }[];
   expect(second.some((message) => message.role === "assistant")).toBe(false);
   expect(JSON.stringify(second)).toContain("old exact reply");
-  expect(JSON.stringify(second)).not.toContain("batty-optchat:");
+  expect(JSON.stringify(second)).toContain("batty-optchat:");
   expect(second[0]!.role).toBe("system");
   expect(second[0]).toEqual((requests[0] as { role: string; content: unknown }[])[0]);
   expect(second.filter((message) => message.role === "system")).toHaveLength(1);

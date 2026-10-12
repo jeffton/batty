@@ -1,6 +1,7 @@
 import type { ServerResponse } from "node:http";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { Runtime } from "./runtime";
+import { OrchestrationDoc } from "./orchestration-state";
 import type { TranscriptImages } from "./transcript-images";
 
 /** A paused socket owns at most one event; do not materialize the next archive page before drain. */
@@ -112,6 +113,16 @@ export function streamSession(
     let changed = false;
     let entries = false;
     for (const change of publication.changes) {
+      // Delivery tasks are owned by the parent, and orchestration is session-scoped.
+      // Their commits can change worker stop availability without a worker entry.
+      if (
+        ((change.type === "document" || change.type === "document.copy") &&
+          change.record.kind === OrchestrationDoc.definition.kind) ||
+        (change.type === "task" &&
+          change.value.kind === "batty.delivery" &&
+          (change.value.input as { workerId: string }).workerId === String(conversationId))
+      )
+        changed = true;
       const owner =
         change.type === "document" || change.type === "document.copy"
           ? change.conversationId

@@ -2,13 +2,43 @@ import { expect, test, vi } from "vite-plus/test";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { defineExtension, defineTool } from "@earendil-works/pi-durable";
+import { defineExtension, defineTool, LiveDoc } from "@earendil-works/pi-durable";
 
 import { Type } from "@earendil-works/pi-ai";
 
 import { orchestrationHistory } from "./orchestration-test-history";
 
 import { fixture, until } from "./orchestration-test-fixture.js";
+
+test("worker stop availability covers preparation before its first model turn", async () => {
+  const { faux, orchestration, open } = await fixture();
+  const { harness, main } = await open();
+  let release!: () => void;
+  const prepare = new Promise<{}>((resolve) => {
+    release = () => resolve({});
+  });
+  orchestration.setPrepareAgent(async () => prepare);
+  faux.setResponses([
+    fauxAssistantMessage(
+      [fauxToolCall("subagent", { action: "run", async: true, prompt: "prepared worker" })],
+      { stopReason: "toolUse" },
+    ),
+    fauxAssistantMessage([fauxText("accepted")]),
+    fauxAssistantMessage([fauxText("finished")]),
+    fauxAssistantMessage([fauxText("received")]),
+  ]);
+  try {
+    await (await main.submit({ type: "input", content: "launch" }, context)).wait(context);
+    const [worker] = await orchestration.listRunning();
+    expect(worker).toBeDefined();
+    expect((await harness.snapshot(LiveDoc, worker!.conversationId, context))?.run).toBeUndefined();
+    expect(await orchestration.canStopWorker(worker!.sessionId)).toBe(true);
+    release();
+    await until(async () => !(await orchestration.canStopWorker(worker!.sessionId)));
+  } finally {
+    release();
+  }
+});
 
 test("stopping an already completed worker closes its retained browser; resume admission is serialized", async () => {
   const { faux, orchestration, open } = await fixture();
@@ -275,54 +305,62 @@ test("concurrent resumes admit only one new worker turn", async () => {
   expect(JSON.stringify(failures)).toContain("Subagent is running");
 }, 15000);
 
-test("subagent stop cancels the active delivery and its queued tail", async () => {
-  const { faux, orchestration, open } = await fixture(300);
-  const { harness, main } = await open();
-  let workerId = "";
-  faux.setResponses(
-    Array.from({ length: 20 }, () => (request) => {
-      const last = request.messages.findLast((message) => message.role !== "system")!;
-      const text = JSON.stringify(last.content);
-      if (last.role === "user" && text.includes("launch stoppable"))
-        return fauxAssistantMessage(
-          [fauxToolCall("subagent", { action: "run", async: true, prompt: "long worker task" })],
-          { stopReason: "toolUse" },
-        );
-      if (last.role === "user" && text.includes("queue stoppable"))
-        return fauxAssistantMessage(
-          [
-            fauxToolCall("subagent", {
-              action: "queue",
-              sessionId: workerId,
-              prompt: "queued worker must never start",
-            }),
-          ],
-          { stopReason: "toolUse" },
-        );
-      if (last.role === "user" && text.includes("stop worker"))
-        return fauxAssistantMessage(
-          [fauxToolCall("subagent", { action: "stop", sessionId: workerId })],
-          { stopReason: "toolUse" },
-        );
-      if (last.role === "user" && text.includes("long worker task"))
-        return fauxAssistantMessage([fauxText("working ".repeat(1000))]);
-      return fauxAssistantMessage([fauxText("done")]);
-    }),
-  );
-  await (await main.submit({ type: "input", content: "launch stoppable" }, context)).wait(context);
-  workerId = Object.keys((await orchestrationHistory(harness))!.workers)[0]!;
-  await (await main.submit({ type: "input", content: "queue stoppable" }, context)).wait(context);
-  await (await main.submit({ type: "input", content: "stop worker" }, context)).wait(context);
-  await until(async () => (await orchestration.listRunning()).length === 0);
-  const worker = (await harness.conversation(Number(workerId) as never, context))!;
-  expect(JSON.stringify((await worker.context(context)).messages)).not.toContain(
-    "queued worker must never start",
-  );
-  for (const call of Object.values((await orchestrationHistory(harness))!.calls)) {
-    const task = await harness.waitForTask(call.taskId, context);
-    expect(task.state.outcome.status).toBe("aborted");
-  }
-}, 15000);
+test.each(["tool", "host"])(
+  "subagent %s stop cancels the active delivery and its queued tail",
+  async (source) => {
+    const { faux, orchestration, open } = await fixture(300);
+    const { harness, main } = await open();
+    let workerId = "";
+    faux.setResponses(
+      Array.from({ length: 20 }, () => (request) => {
+        const last = request.messages.findLast((message) => message.role !== "system")!;
+        const text = JSON.stringify(last.content);
+        if (last.role === "user" && text.includes("launch stoppable"))
+          return fauxAssistantMessage(
+            [fauxToolCall("subagent", { action: "run", async: true, prompt: "long worker task" })],
+            { stopReason: "toolUse" },
+          );
+        if (last.role === "user" && text.includes("queue stoppable"))
+          return fauxAssistantMessage(
+            [
+              fauxToolCall("subagent", {
+                action: "queue",
+                sessionId: workerId,
+                prompt: "queued worker must never start",
+              }),
+            ],
+            { stopReason: "toolUse" },
+          );
+        if (last.role === "user" && text.includes("stop worker"))
+          return fauxAssistantMessage(
+            [fauxToolCall("subagent", { action: "stop", sessionId: workerId })],
+            { stopReason: "toolUse" },
+          );
+        if (last.role === "user" && text.includes("long worker task"))
+          return fauxAssistantMessage([fauxText("working ".repeat(1000))]);
+        return fauxAssistantMessage([fauxText("done")]);
+      }),
+    );
+    await (
+      await main.submit({ type: "input", content: "launch stoppable" }, context)
+    ).wait(context);
+    workerId = Object.keys((await orchestrationHistory(harness))!.workers)[0]!;
+    await (await main.submit({ type: "input", content: "queue stoppable" }, context)).wait(context);
+    if (source === "tool")
+      await (await main.submit({ type: "input", content: "stop worker" }, context)).wait(context);
+    else await orchestration.stopWorker(workerId);
+    await until(async () => (await orchestration.listRunning()).length === 0);
+    const worker = (await harness.conversation(Number(workerId) as never, context))!;
+    expect(JSON.stringify((await worker.context(context)).messages)).not.toContain(
+      "queued worker must never start",
+    );
+    for (const call of Object.values((await orchestrationHistory(harness))!.calls)) {
+      const task = await harness.waitForTask(call.taskId, context);
+      expect(task.state.outcome.status).toBe("aborted");
+    }
+  },
+  15000,
+);
 
 test("closing in-flight background work resumes the same child input and report", async () => {
   const { faux, orchestration, open } = await fixture(100);

@@ -337,6 +337,7 @@ export interface SessionState {
   activeTools: ActiveToolRun[];
   title?: string;
   isSubagentSession?: boolean;
+  canStopSubagent?: boolean;
   isCronSession?: boolean;
 }
 

@@ -124,6 +124,46 @@ describe("file attachments", () => {
   });
 });
 
+describe("sending", () => {
+  it.each([false, true])("offers one send action with main streaming=%s", async (streaming) => {
+    const wrapper = mount(MessageComposer, {
+      props: { streaming },
+      global: { stubs: { ComposerQueuedPrompts: true } },
+    });
+    try {
+      expect(wrapper.findAll(".composer__send")).toHaveLength(1);
+      expect(wrapper.find('[aria-label="Steer prompt"]').exists()).toBe(false);
+      expect(wrapper.find('[aria-label="Queue prompt"]').exists()).toBe(false);
+      expect(wrapper.find(".streaming-stop-control").exists()).toBe(streaming);
+      await wrapper.get("textarea").setValue("Next message");
+      await wrapper.get('[aria-label="Send prompt"]').trigger("click");
+      await wrapper.get("textarea").trigger("keydown", { key: "Enter", ctrlKey: true });
+      expect(wrapper.emitted("submit")).toEqual([
+        ["Next message", []],
+        ["Next message", []],
+      ]);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it("sends once when a touch press is followed by a click", async () => {
+    const wrapper = mount(MessageComposer, {
+      props: { streaming: true },
+      global: { stubs: { ComposerQueuedPrompts: true } },
+    });
+    try {
+      await wrapper.get("textarea").setValue("Queue this");
+      const send = wrapper.get('[aria-label="Send prompt"]');
+      await send.trigger("pointerdown", { pointerType: "touch" });
+      await send.trigger("click");
+      expect(wrapper.emitted("submit")).toEqual([["Queue this", []]]);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+});
+
 describe("memory preparation", () => {
   it("shows preparation progress without blocking main prompts", async () => {
     const wrapper = mount(MessageComposer, {

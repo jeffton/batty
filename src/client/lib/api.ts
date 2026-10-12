@@ -423,6 +423,10 @@ export function removeMainQueuedPrompt(
   });
 }
 
+export function stopSubagent(sessionId: string): Promise<{ ok: true }> {
+  return request(`/api/sessions/${encodeURIComponent(sessionId)}/stop`, { method: "POST" });
+}
+
 export function getSession(sessionId: string): Promise<SessionState> {
   return request(`/api/sessions/${sessionId}`);
 }

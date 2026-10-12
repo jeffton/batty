@@ -24,7 +24,7 @@ The authenticated root route contains one main chat. Workspace listings never se
 - `GET /api/workspaces/:id/cron-jobs`: `CronJob[]`.
 - `GET /api/workspaces/:id/cron-run-logs`: `CronRunLog[]`.
 
-Tool details `subagent.sessionId`, nested codemode `calls[].subagent.sessionId`, and custom-message `data.subagent.sessionId` / `data.cron.sessionId` identify transcripts. Cron log entries expose `sessionId` when a transcript exists. Worker popovers have no composer, stop control, or mutation endpoint.
+Tool details `subagent.sessionId`, nested codemode `calls[].subagent.sessionId`, and custom-message `data.subagent.sessionId` / `data.cron.sessionId` identify transcripts. Cron log entries expose `sessionId` when a transcript exists. Worker popovers have no composer. Their header offers Stop while the session is active; `POST /api/sessions/:sessionId/stop` aborts the worker’s current delivery chain and queued tail.
 
 ## Existing settings/auth APIs
 

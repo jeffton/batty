@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Compass, ListOrdered, Paperclip, SendHorizontal } from "@lucide/vue";
+import { Paperclip, SendHorizontal } from "@lucide/vue";
 import { blockAppReload } from "@/client/lib/app-updates";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import ComposerQueuedPrompts from "@/client/components/ComposerQueuedPrompts.vue";
@@ -26,7 +26,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   submit: [text: string, files: File[]];
-  steer: [text: string, files: File[]];
   stop: [];
   removeQueuedPrompt: [prompt: QueuedPrompt];
 }>();
@@ -231,12 +230,7 @@ function scheduleTextareaHeightSync(): void {
   });
 }
 
-let lastEarlyAction:
-  | {
-      kind: "submit" | "steer";
-      at: number;
-    }
-  | undefined;
+let lastEarlyActionAt: number | undefined;
 
 function updateMaxInputHeight(): void {
   maxInputHeight.value = Math.min(Math.max(Math.round(window.innerHeight * 0.34), 160), 320);
@@ -298,35 +292,31 @@ function restore(sessionKey: string, textValue: string, nextFiles: File[]): void
   void nextTick(scheduleTextareaHeightSync);
 }
 
-function runAction(kind: "submit" | "steer"): void {
+function runAction(): void {
   if (!hasPayload.value || actionsDisabled.value || pendingFiles.value > 0) {
     return;
   }
 
-  if (kind === "submit") {
-    emit("submit", text.value, [...files.value]);
-  } else {
-    emit("steer", text.value, [...files.value]);
-  }
+  emit("submit", text.value, [...files.value]);
 }
 
-function triggerActionEarly(kind: "submit" | "steer", event: PointerEvent): void {
+function triggerActionEarly(event: PointerEvent): void {
   if (event.pointerType === "mouse") {
     return;
   }
 
   event.preventDefault();
-  lastEarlyAction = { kind, at: Date.now() };
-  runAction(kind);
+  lastEarlyActionAt = Date.now();
+  runAction();
 }
 
-function triggerActionClick(kind: "submit" | "steer"): void {
-  if (lastEarlyAction?.kind === kind && Date.now() - lastEarlyAction.at < 1000) {
-    lastEarlyAction = undefined;
+function triggerActionClick(): void {
+  if (lastEarlyActionAt != null && Date.now() - lastEarlyActionAt < 1000) {
+    lastEarlyActionAt = undefined;
     return;
   }
 
-  runAction(kind);
+  runAction();
 }
 
 function onDrop(event: DragEvent): void {
@@ -349,7 +339,7 @@ function onTextareaKeydown(event: KeyboardEvent): void {
   }
 
   event.preventDefault();
-  runAction("submit");
+  runAction();
 }
 
 function openFilePicker(): void {
@@ -488,28 +478,15 @@ defineExpose({ clear, restore });
             @stop="emit('stop')"
           />
           <button
-            v-if="props.streaming"
-            class="composer__icon-button composer__steer"
-            type="button"
-            aria-label="Steer prompt"
-            title="Steer prompt"
-            :disabled="!hasPayload || actionsDisabled || pendingFiles > 0"
-            @pointerdown="triggerActionEarly('steer', $event)"
-            @click="triggerActionClick('steer')"
-          >
-            <Compass :size="18" />
-          </button>
-          <button
             class="composer__icon-button composer__send"
             type="button"
-            :aria-label="props.streaming ? 'Queue prompt' : 'Send prompt'"
-            :title="props.streaming ? 'Queue prompt' : 'Send prompt'"
+            aria-label="Send prompt"
+            title="Send prompt"
             :disabled="!hasPayload || actionsDisabled || pendingFiles > 0"
-            @pointerdown="triggerActionEarly('submit', $event)"
-            @click="triggerActionClick('submit')"
+            @pointerdown="triggerActionEarly($event)"
+            @click="triggerActionClick()"
           >
-            <ListOrdered v-if="props.streaming" :size="18" />
-            <SendHorizontal v-else :size="18" />
+            <SendHorizontal :size="18" />
           </button>
         </div>
       </div>
@@ -661,10 +638,6 @@ defineExpose({ clear, restore });
 
 .composer__send {
   color: var(--color-accent-strong);
-}
-
-.composer__steer {
-  color: var(--color-warning);
 }
 
 .composer__stream-actions,

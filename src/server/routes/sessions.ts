@@ -42,6 +42,11 @@ export function registerSessionRoutes(
     },
   );
 
+  app.post<{ Params: { sessionId: string } }>("/api/sessions/:sessionId/stop", async (request) => {
+    await runtime.orchestration.stopWorker(request.params.sessionId);
+    return { ok: true };
+  });
+
   const eventStreams = new Set<import("node:http").ServerResponse>();
   for (const url of ["/api/main/events", "/api/sessions/:sessionId/events"]) {
     app.get<{ Params: { sessionId?: string }; Querystring: { after?: string } }>(

@@ -3,8 +3,9 @@ import { CircleAlert, LoaderCircle } from "@lucide/vue";
 import { onBeforeUnmount, ref, watch } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import SessionHeaderStatus from "@/client/components/SessionHeaderStatus.vue";
+import StreamingStopControl from "@/client/components/StreamingStopControl.vue";
 import SessionTranscriptView from "@/client/components/SessionTranscriptView.vue";
-import { getSessionMessages, getSession } from "@/client/lib/api";
+import { getSessionMessages, getSession, stopSubagent } from "@/client/lib/api";
 import { applyServerEvent } from "@/client/lib/session-events";
 import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
 import { sessionEventsPath, sessionHistoryCursor } from "@/client/lib/session-stream";
@@ -27,6 +28,7 @@ const props = withDefaults(
 const session = ref<SessionState | undefined>(undefined);
 const loading = ref(false);
 const loadingOlderMessages = ref(false);
+const stopping = ref(false);
 const errorMessage = ref<string | undefined>(undefined);
 const connectionState = ref<"online" | "connecting" | "offline">("connecting");
 let connection: ReturnType<typeof createSessionConnection> | undefined;
@@ -126,6 +128,22 @@ async function loadOlderMessages(): Promise<void> {
   }
 }
 
+async function stop(): Promise<void> {
+  if (!session.value?.canStopSubagent || stopping.value || connectionState.value !== "online")
+    return;
+  const generation = loadGeneration;
+  stopping.value = true;
+  errorMessage.value = undefined;
+  try {
+    await stopSubagent(props.sessionId);
+  } catch (error) {
+    if (generation === loadGeneration)
+      errorMessage.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    stopping.value = false;
+  }
+}
+
 function handlePopoverToggle(event: Event): void {
   const nextState = (event as Event & { newState?: "open" | "closed" }).newState;
   if (nextState === "open") {
@@ -167,6 +185,12 @@ onBeforeUnmount(() => {
     @toggle="handlePopoverToggle"
   >
     <template #header-actions>
+      <StreamingStopControl
+        v-if="session?.canStopSubagent"
+        label="Stop subagent"
+        :disabled="stopping || connectionState !== 'online'"
+        @stop="stop"
+      />
       <span
         v-if="errorMessage && session"
         class="subagent-session-popover__header-error"

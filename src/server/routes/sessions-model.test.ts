@@ -73,6 +73,12 @@ test("main HTTP input replaces a persisted model and follows changed settings wi
       );
     }
 
+    for (const sessionId of ["main", "99999999"]) {
+      const response = await app.inject({ method: "POST", url: `/api/sessions/${sessionId}/stop` });
+      expect(response.statusCode).toBe(404);
+      expect(response.json().message).toBe("Unknown subagent");
+    }
+
     // An active inline cron keeps its own settings; its saved main settings
     // receive the new default for the user message queued behind it.
     await runtime.main.configure(

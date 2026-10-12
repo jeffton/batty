@@ -441,7 +441,7 @@ describe("optimistic prompt reconciliation", () => {
     const composer = defineComponent({
       name: "MessageComposer",
       props: ["error"],
-      emits: ["submit", "steer", "removeQueuedPrompt"],
+      emits: ["submit", "removeQueuedPrompt"],
       setup(_, { expose }) {
         expose({ clear: vi.fn(), restore });
       },
@@ -460,8 +460,8 @@ describe("optimistic prompt reconciliation", () => {
       store,
       restore,
       pending,
-      submit: (text: string, files: File[] = [], kind = "submit") =>
-        wrapper!.findComponent(composer).vm.$emit(kind, text, files),
+      submit: (text: string, files: File[] = []) =>
+        wrapper!.findComponent(composer).vm.$emit("submit", text, files),
       removeQueued: (prompt: NonNullable<SessionState["queuedPrompts"]>[number]) =>
         wrapper!.findComponent(composer).vm.$emit("removeQueuedPrompt", prompt),
     };
@@ -580,96 +580,85 @@ describe("optimistic prompt reconciliation", () => {
     expect(second.store.activeSession?.queuedPrompts).toEqual([]);
   });
 
-  it.each(["submit", "steer"])(
-    "drops interrupted %s uploads on reload rather than reviving filenames as sent messages",
-    async (kind) => {
-      let reject!: (reason: Error) => void;
-      vi.mocked(api.submitMainPrompt).mockReturnValueOnce(
-        new Promise((_resolve, fail) => {
-          reject = fail;
-        }),
-      );
-      const first = mountPane();
-      first.submit("Unsent", [new File(["image"], "photo.png")], kind);
-      await flushPromises();
-      expect(first.pending()).toHaveLength(1);
-      expect(localStorage.getItem("batty:optimistic-messages")).toBeNull();
-      wrapper!.unmount();
-      // Discard stale entries written by the previous persisted implementation.
-      localStorage.setItem("batty:optimistic-messages", JSON.stringify({ main: first.pending() }));
-      const second = mountPane();
-      await flushPromises();
-      expect(second.pending()).toHaveLength(0);
-      expect(localStorage.getItem("batty:optimistic-messages")).toBeNull();
-      reject(new Error("Interrupted upload"));
-      await flushPromises();
-      expect(second.pending()).toHaveLength(0);
-    },
-  );
+  it("drops interrupted prompt uploads on reload rather than reviving filenames as sent messages", async () => {
+    let reject!: (reason: Error) => void;
+    vi.mocked(api.submitMainPrompt).mockReturnValueOnce(
+      new Promise((_resolve, fail) => {
+        reject = fail;
+      }),
+    );
+    const first = mountPane();
+    first.submit("Unsent", [new File(["image"], "photo.png")]);
+    await flushPromises();
+    expect(first.pending()).toHaveLength(1);
+    expect(localStorage.getItem("batty:optimistic-messages")).toBeNull();
+    wrapper!.unmount();
+    // Discard stale entries written by the previous persisted implementation.
+    localStorage.setItem("batty:optimistic-messages", JSON.stringify({ main: first.pending() }));
+    const second = mountPane();
+    await flushPromises();
+    expect(second.pending()).toHaveLength(0);
+    expect(localStorage.getItem("batty:optimistic-messages")).toBeNull();
+    reject(new Error("Interrupted upload"));
+    await flushPromises();
+    expect(second.pending()).toHaveLength(0);
+  });
 
-  it.each(["submit", "steer"])(
-    "retires %s optimism when another tab cancels before the HTTP response arrives",
-    async (kind) => {
-      let resolve!: (value: Awaited<ReturnType<typeof api.submitMainPrompt>>) => void;
-      vi.mocked(api.submitMainPrompt).mockReturnValueOnce(
-        new Promise((done) => {
-          resolve = done;
-        }),
-      );
-      const { store, pending, submit } = mountPane();
-      submit("Cancel elsewhere", [], kind);
-      await flushPromises();
-      const clientMessageId = vi.mocked(api.submitMainPrompt).mock.calls[0]![3];
-      store.activeSession = applyServerEvent(store.activeSession, {
-        type: "state",
-        state: {
-          ...state(2),
-          queuedPrompts: [
-            { kind: "followUp", index: 7, text: "Cancel elsewhere", clientMessageId },
-          ],
-        },
-        revision: 2,
-        streamId: "generation-a",
-      });
-      await flushPromises();
-      expect(pending()).toHaveLength(0);
-      // No local remove action: cancellation is an authoritative SSE update.
-      store.activeSession = applyServerEvent(store.activeSession, {
-        type: "state",
-        state: state(3),
-        revision: 3,
-        streamId: "generation-a",
-      });
-      resolve({ disposition: "queued", submissionId: "receipt", sessionId: "main" });
-      await flushPromises();
-      expect(pending()).toHaveLength(0);
-      wrapper!.unmount();
-      const reloaded = mountPane();
-      await flushPromises();
-      expect(reloaded.pending()).toHaveLength(0);
-    },
-  );
+  it("retires prompt optimism when another tab cancels before the HTTP response arrives", async () => {
+    let resolve!: (value: Awaited<ReturnType<typeof api.submitMainPrompt>>) => void;
+    vi.mocked(api.submitMainPrompt).mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const { store, pending, submit } = mountPane();
+    submit("Cancel elsewhere", []);
+    await flushPromises();
+    const clientMessageId = vi.mocked(api.submitMainPrompt).mock.calls[0]![3];
+    store.activeSession = applyServerEvent(store.activeSession, {
+      type: "state",
+      state: {
+        ...state(2),
+        queuedPrompts: [{ kind: "followUp", index: 7, text: "Cancel elsewhere", clientMessageId }],
+      },
+      revision: 2,
+      streamId: "generation-a",
+    });
+    await flushPromises();
+    expect(pending()).toHaveLength(0);
+    // No local remove action: cancellation is an authoritative SSE update.
+    store.activeSession = applyServerEvent(store.activeSession, {
+      type: "state",
+      state: state(3),
+      revision: 3,
+      streamId: "generation-a",
+    });
+    resolve({ disposition: "queued", submissionId: "receipt", sessionId: "main" });
+    await flushPromises();
+    expect(pending()).toHaveLength(0);
+    wrapper!.unmount();
+    const reloaded = mountPane();
+    await flushPromises();
+    expect(reloaded.pending()).toHaveLength(0);
+  });
 
-  it.each(["submit", "steer"])(
-    "resolves a %s queue lifecycle missed by SSE from the queued receipt snapshot",
-    async (kind) => {
-      let resolve!: (value: Awaited<ReturnType<typeof api.submitMainPrompt>>) => void;
-      vi.mocked(api.submitMainPrompt).mockReturnValueOnce(
-        new Promise((done) => {
-          resolve = done;
-        }),
-      );
-      // Accepted and withdrawn in another tab before this tab saw the inbox.
-      vi.mocked(api.getMain).mockResolvedValueOnce(state(4));
-      const { pending, submit } = mountPane();
-      submit("Already cancelled", [], kind);
-      await flushPromises();
-      expect(pending()).toHaveLength(1);
-      resolve({ disposition: "queued", submissionId: "receipt", sessionId: "main" });
-      await flushPromises();
-      expect(pending()).toHaveLength(0);
-    },
-  );
+  it("resolves a prompt queue lifecycle missed by SSE from the queued receipt snapshot", async () => {
+    let resolve!: (value: Awaited<ReturnType<typeof api.submitMainPrompt>>) => void;
+    vi.mocked(api.submitMainPrompt).mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    // Accepted and withdrawn in another tab before this tab saw the inbox.
+    vi.mocked(api.getMain).mockResolvedValueOnce(state(4));
+    const { pending, submit } = mountPane();
+    submit("Already cancelled", []);
+    await flushPromises();
+    expect(pending()).toHaveLength(1);
+    resolve({ disposition: "queued", submissionId: "receipt", sessionId: "main" });
+    await flushPromises();
+    expect(pending()).toHaveLength(0);
+  });
 
   it("keeps an accepted queue message when only the receipt snapshot acknowledges it", async () => {
     vi.mocked(api.submitMainPrompt).mockResolvedValueOnce({
@@ -695,93 +684,93 @@ describe("optimistic prompt reconciliation", () => {
     expect(store.activeSession?.queuedPrompts?.[0]?.text).toBe("Snapshot accepted");
   });
 
-  it.each(["submit", "steer"])(
-    "keeps a busy %s only in the queue and removes a cancelled queue item",
-    async (kind) => {
-      let resolve!: (value: Awaited<ReturnType<typeof api.submitMainPrompt>>) => void;
-      vi.mocked(api.submitMainPrompt).mockReturnValueOnce(
-        new Promise((done) => {
-          resolve = done;
-        }),
-      );
-      const { store, pending, submit, removeQueued } = mountPane();
-      store.activeSession!.isStreaming = true;
-      submit("Next instruction", [], kind);
-      await flushPromises();
-      expect(pending()).toHaveLength(0);
-      const clientMessageId = vi.mocked(api.submitMainPrompt).mock.calls[0]![3];
-      resolve({ disposition: "queued", submissionId: "receipt", sessionId: "main" });
-      await flushPromises();
-      const prompt = {
-        kind: "followUp" as const,
-        index: 0,
-        text: "Next instruction",
-        clientMessageId,
-      };
-      store.activeSession = { ...state(2), isStreaming: true, queuedPrompts: [prompt] };
-      await flushPromises();
-      expect(pending()).toHaveLength(0);
-      vi.mocked(api.removeMainQueuedPrompt).mockResolvedValueOnce({
-        ...state(3),
-        isStreaming: true,
-      });
-      removeQueued(prompt);
-      await flushPromises();
-      expect(pending()).toHaveLength(0);
-    },
-  );
+  it("keeps a busy prompt only in the queue and removes a cancelled queue item", async () => {
+    let resolve!: (value: Awaited<ReturnType<typeof api.submitMainPrompt>>) => void;
+    vi.mocked(api.submitMainPrompt).mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const { store, pending, submit, removeQueued } = mountPane();
+    store.activeSession!.isStreaming = true;
+    submit("Next instruction", []);
+    await flushPromises();
+    expect(api.submitMainPrompt).toHaveBeenCalledWith(
+      "prompt",
+      "Next instruction",
+      [],
+      expect.any(String),
+    );
+    expect(pending()).toHaveLength(0);
+    const clientMessageId = vi.mocked(api.submitMainPrompt).mock.calls[0]![3];
+    resolve({ disposition: "queued", submissionId: "receipt", sessionId: "main" });
+    await flushPromises();
+    const prompt = {
+      kind: "followUp" as const,
+      index: 0,
+      text: "Next instruction",
+      clientMessageId,
+    };
+    store.activeSession = { ...state(2), isStreaming: true, queuedPrompts: [prompt] };
+    await flushPromises();
+    expect(pending()).toHaveLength(0);
+    vi.mocked(api.removeMainQueuedPrompt).mockResolvedValueOnce({
+      ...state(3),
+      isStreaming: true,
+    });
+    removeQueued(prompt);
+    await flushPromises();
+    expect(pending()).toHaveLength(0);
+  });
 
-  it.each(["submit", "steer"])(
-    "shows a busy %s in the transcript only after dispatch, including reconnect",
-    async (kind) => {
-      let resolve!: (value: Awaited<ReturnType<typeof api.submitMainPrompt>>) => void;
-      vi.mocked(api.submitMainPrompt).mockReturnValueOnce(
-        new Promise((done) => {
-          resolve = done;
-        }),
-      );
-      const { store, pending, submit } = mountPane();
-      store.activeSession!.isStreaming = true;
-      submit("Dispatch me", [], kind);
-      await flushPromises();
-      expect(pending()).toHaveLength(0);
-      const clientMessageId = vi.mocked(api.submitMainPrompt).mock.calls[0]![3];
-      const queued = {
-        ...state(2),
-        isStreaming: true,
-        queuedPrompts: [
-          { kind: "followUp" as const, index: 0, text: "Dispatch me", clientMessageId },
-        ],
-      };
-      vi.mocked(api.getMain).mockResolvedValueOnce(queued);
-      resolve({ disposition: "queued", submissionId: "receipt", sessionId: "main" });
-      await flushPromises();
-      expect(pending()).toHaveLength(0);
-      expect(store.activeSession?.queuedPrompts).toHaveLength(1);
-      const dispatched = {
-        ...state(3),
-        messages: [
-          {
-            role: "user" as const,
-            id: "server",
-            timestamp: 3,
-            clientMessageId,
-            blocks: [{ type: "text" as const, text: "Dispatch me" }],
-          },
-        ],
-      };
-      store.activeSession = applyServerEvent(store.activeSession, {
-        type: "reset",
-        state: dispatched,
-        revision: 3,
-        streamId: "reconnected",
-      });
-      await flushPromises();
-      expect(pending()).toHaveLength(0);
-      expect(store.activeSession?.messages).toHaveLength(1);
-      expect(store.activeSession?.queuedPrompts).toHaveLength(0);
-    },
-  );
+  it("shows a busy prompt in the transcript only after dispatch, including reconnect", async () => {
+    let resolve!: (value: Awaited<ReturnType<typeof api.submitMainPrompt>>) => void;
+    vi.mocked(api.submitMainPrompt).mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const { store, pending, submit } = mountPane();
+    store.activeSession!.isStreaming = true;
+    submit("Dispatch me", []);
+    await flushPromises();
+    expect(pending()).toHaveLength(0);
+    const clientMessageId = vi.mocked(api.submitMainPrompt).mock.calls[0]![3];
+    const queued = {
+      ...state(2),
+      isStreaming: true,
+      queuedPrompts: [
+        { kind: "followUp" as const, index: 0, text: "Dispatch me", clientMessageId },
+      ],
+    };
+    vi.mocked(api.getMain).mockResolvedValueOnce(queued);
+    resolve({ disposition: "queued", submissionId: "receipt", sessionId: "main" });
+    await flushPromises();
+    expect(pending()).toHaveLength(0);
+    expect(store.activeSession?.queuedPrompts).toHaveLength(1);
+    const dispatched = {
+      ...state(3),
+      messages: [
+        {
+          role: "user" as const,
+          id: "server",
+          timestamp: 3,
+          clientMessageId,
+          blocks: [{ type: "text" as const, text: "Dispatch me" }],
+        },
+      ],
+    };
+    store.activeSession = applyServerEvent(store.activeSession, {
+      type: "reset",
+      state: dispatched,
+      revision: 3,
+      streamId: "reconnected",
+    });
+    await flushPromises();
+    expect(pending()).toHaveLength(0);
+    expect(store.activeSession?.messages).toHaveLength(1);
+    expect(store.activeSession?.queuedPrompts).toHaveLength(0);
+  });
 
   it("reveals a busy submission if the server actually starts it before SSE arrives", async () => {
     vi.mocked(api.submitMainPrompt).mockResolvedValueOnce({
@@ -824,44 +813,41 @@ describe("optimistic prompt reconciliation", () => {
 });
 
 describe("restored prompt submission", () => {
-  it.each(["submit", "steer"] as const)(
-    "does not restore an accepted %s draft when its HTTP response is lost",
-    async (kind) => {
-      const store = useAppStore();
-      store.activeSession = state();
-      store.connectionState = "online";
-      const restore = vi.fn();
-      const handleError = vi.fn();
-      const composer = defineComponent({
-        name: "MessageComposer",
-        emits: ["submit", "steer"],
-        setup(_, { expose }) {
-          expose({ clear: vi.fn(), restore });
-        },
-        template: "<div />",
-      });
-      vi.mocked(api.submitMainPrompt).mockImplementationOnce(
-        async (_kind, _text, _files, clientMessageId) => {
-          store.activeSession = {
-            ...state(2),
-            queuedPrompts: [{ kind: "followUp", index: 0, text: "Accepted", clientMessageId }],
-          };
-          throw new TypeError("Lost response after acceptance");
-        },
-      );
-      wrapper = mount(ChatSessionPane, {
-        global: {
-          plugins: [pinia],
-          config: { errorHandler: handleError },
-          stubs: { ChatHeader: true, SessionTranscriptView: true, MessageComposer: composer },
-        },
-      });
-      wrapper.findComponent(composer).vm.$emit(kind, "Accepted", []);
-      await flushPromises();
-      expect(restore).not.toHaveBeenCalled();
-      expect(handleError).not.toHaveBeenCalled();
-    },
-  );
+  it("does not restore an accepted prompt draft when its HTTP response is lost", async () => {
+    const store = useAppStore();
+    store.activeSession = state();
+    store.connectionState = "online";
+    const restore = vi.fn();
+    const handleError = vi.fn();
+    const composer = defineComponent({
+      name: "MessageComposer",
+      emits: ["submit"],
+      setup(_, { expose }) {
+        expose({ clear: vi.fn(), restore });
+      },
+      template: "<div />",
+    });
+    vi.mocked(api.submitMainPrompt).mockImplementationOnce(
+      async (_kind, _text, _files, clientMessageId) => {
+        store.activeSession = {
+          ...state(2),
+          queuedPrompts: [{ kind: "followUp", index: 0, text: "Accepted", clientMessageId }],
+        };
+        throw new TypeError("Lost response after acceptance");
+      },
+    );
+    wrapper = mount(ChatSessionPane, {
+      global: {
+        plugins: [pinia],
+        config: { errorHandler: handleError },
+        stubs: { ChatHeader: true, SessionTranscriptView: true, MessageComposer: composer },
+      },
+    });
+    wrapper.findComponent(composer).vm.$emit("submit", "Accepted", []);
+    await flushPromises();
+    expect(restore).not.toHaveBeenCalled();
+    expect(handleError).not.toHaveBeenCalled();
+  });
   it("retries a transport-failed prompt with the original clientMessageId", async () => {
     const store = useAppStore();
     store.activeSession = state();

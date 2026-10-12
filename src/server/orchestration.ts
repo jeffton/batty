@@ -248,6 +248,12 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
       }
       return result;
     },
+    canStopWorker(workerId: string) {
+      return workers.canStopWorker(workerId, context);
+    },
+    stopWorker(workerId: string) {
+      return workers.stopWorker(workerId, context);
+    },
     metadata(id: ConversationId) {
       return harness.snapshot(WorkerDoc, id, context);
     },

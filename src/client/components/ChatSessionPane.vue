@@ -205,7 +205,9 @@ async function reconcileQueuedReceipt(sessionId: string, optimisticId: string): 
   }
 }
 
-async function submitPrompt(mode: "prompt" | "steer", text: string, files: File[]): Promise<void> {
+async function submitPrompt(text: string, files: File[]): Promise<void> {
+  // The server starts idle main runs and queues busy ones; never steer from compose.
+  const mode = "prompt";
   const sessionId = store.activeSession?.sessionId;
   const gateSessionId = store.activeSession?.isStreaming
     ? undefined
@@ -319,8 +321,7 @@ async function removeQueuedPrompt(prompt: QueuedPrompt): Promise<void> {
         "
         :actions-disabled="isUnavailable"
         :queued-prompts="store.activeSession.queuedPrompts"
-        @submit="(text, files) => submitPrompt('prompt', text, files)"
-        @steer="(text, files) => submitPrompt('steer', text, files)"
+        @submit="submitPrompt"
         @stop="runAction(() => store.stopActiveSession())"
         @remove-queued-prompt="removeQueuedPrompt"
       />

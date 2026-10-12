@@ -70,12 +70,16 @@ export default defineConfig({
   },
   pack: {
     deps: { resolveDepSubpath: true },
-    entry: ["src/server/main.ts", "src/server/cron-cli.ts"],
+    entry: {
+      main: "src/server/main.ts",
+      "cron-cli": "src/server/cron-cli.ts",
+      "stop-service": "src/server/stop-service.ts",
+    },
     outDir: "dist/server",
     format: ["esm"],
     target: "node24",
     dts: false,
-    clean: false,
+    clean: true,
     sourcemap: true,
     shims: false,
   },

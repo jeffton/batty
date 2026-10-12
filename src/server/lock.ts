@@ -1,12 +1,30 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 
-/** flock arbitrates atomically; the kernel releases it when the owner exits. */
+// FileShare.None and flock are kernel lifetime locks, released when their holder exits.
+const WINDOWS_HOLDER = String.raw`
+$ErrorActionPreference = 'Stop'
+try {
+  $file = [System.IO.File]::Open($env:BATTY_LOCK_PATH, 'OpenOrCreate', 'ReadWrite', 'None')
+} catch [System.IO.IOException] { exit 1 }
+try {
+  [Console]::Out.Write('locked' + [char]10)
+  [Console]::Out.Flush()
+  [Console]::In.ReadToEnd() | Out-Null
+} finally { $file.Dispose() }
+`;
 export async function acquireLock(lockPath: string): Promise<() => Promise<void>> {
+  const windows = process.platform === "win32";
   const holder = spawn(
-    "flock",
-    ["--exclusive", "--nonblock", lockPath, "sh", "-c", "printf 'locked\\n'; cat >/dev/null"],
-    { stdio: ["pipe", "pipe", "pipe"] },
+    windows ? "powershell.exe" : "flock",
+    windows
+      ? ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_HOLDER]
+      : ["--exclusive", "--nonblock", lockPath, "sh", "-c", "printf 'locked\\n'; cat >/dev/null"],
+    {
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+      env: { ...process.env, BATTY_LOCK_PATH: lockPath },
+    },
   );
   let acquired = false;
   let releasing = false;
@@ -40,7 +58,7 @@ export async function acquireLock(lockPath: string): Promise<() => Promise<void>
       }
     });
   });
-  await fs.chmod(lockPath, 0o600);
+  if (!windows) await fs.chmod(lockPath, 0o600);
   return async () => {
     releasing = true;
     holder.stdin.end();

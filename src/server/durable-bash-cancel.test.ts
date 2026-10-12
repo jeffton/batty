@@ -68,7 +68,7 @@ test("bash cancellation escalates SIGTERM-ignoring process groups to SIGKILL", a
     await until(path.join(root, "started"));
     const began = Date.now();
     await cancelPersistentBashJob(root, "9-10-call");
-    expect(Date.now() - began).toBeLessThan(1500);
+    expect(Date.now() - began).toBeLessThan(process.platform === "win32" ? 5000 : 1500);
     expect((await job).exitCode).toBe(130);
     await expect(fs.access(path.join(root, "marker"))).rejects.toMatchObject({ code: "ENOENT" });
   } finally {

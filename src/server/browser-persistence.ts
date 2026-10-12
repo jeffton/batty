@@ -1,9 +1,58 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Browser } from "patchright";
+
+async function profileBrowserPid(directory: string): Promise<number | undefined> {
+  if (process.platform === "win32") {
+    const { stdout } = await promisify(execFile)(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "$pattern = [regex]::Escape('--user-data-dir=' + $env:BATTY_BROWSER_PROFILE) + '(?=\"|\\s|$)'; Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | Where-Object { $_.CommandLine -and -not $_.CommandLine.Contains('--type=') -and $_.CommandLine -match $pattern } | ForEach-Object { $_.ProcessId }",
+      ],
+      {
+        windowsHide: true,
+        env: { ...process.env, BATTY_BROWSER_PROFILE: path.join(directory, "profile") },
+      },
+    );
+    const pids = stdout.trim().split(/\s+/).filter(Boolean).map(Number);
+    if (pids.length > 1) throw new Error(`Multiple Chromium owners for ${directory}`);
+    return pids[0];
+  }
+  const lock = await fs
+    .readlink(path.join(directory, "profile", "SingletonLock"))
+    .catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    });
+  return lock ? Number(lock.slice(lock.lastIndexOf("-") + 1)) : undefined;
+}
+
+async function terminateBrowser(pid: number, signal: NodeJS.Signals): Promise<void> {
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return;
+    throw error;
+  }
+  if (process.platform === "win32") {
+    await promisify(execFile)("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
+      windowsHide: true,
+    });
+  } else {
+    try {
+      process.kill(-pid, signal);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    }
+  }
+}
 
 export interface PersistentBrowserReceipt {
   pid: number;
@@ -60,15 +109,7 @@ export async function connectPersistentBrowser(
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
       let pid = starting?.pid;
-      if (!pid) {
-        const lock = await fs
-          .readlink(path.join(directory, "profile", "SingletonLock"))
-          .catch((error) => {
-            if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-            throw error;
-          });
-        if (lock) pid = Number(lock.slice(lock.lastIndexOf("-") + 1));
-      }
+      if (!pid) pid = await profileBrowserPid(directory);
       if (pid) process.kill(pid, 0);
       const port = await fs
         .readFile(path.join(directory, "profile", "DevToolsActivePort"), "utf8")
@@ -131,6 +172,7 @@ export async function connectPersistentBrowser(
   const log = await fs.open(path.join(directory, "chromium.log"), "a", 0o600);
   const child = spawn(chromium.executablePath(), args, {
     detached: true,
+    windowsHide: true,
     stdio: ["ignore", log.fd, log.fd],
   });
   try {
@@ -171,27 +213,18 @@ export async function connectPersistentBrowser(
     }
     await delay(50);
   }
-  process.kill(-pid, "SIGKILL");
+  await terminateBrowser(pid, "SIGKILL");
   throw new Error(`Persistent Chromium did not expose CDP within 30 seconds: ${directory}`);
 }
 
 export async function closePersistentBrowser(directory: string, browser?: Browser): Promise<void> {
   let receipt = await readBrowserJson<{ pid: number }>(path.join(directory, "process.json"));
   if (!receipt) {
-    const lock = await fs
-      .readlink(path.join(directory, "profile", "SingletonLock"))
-      .catch((error) => {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-        throw error;
-      });
-    if (lock) receipt = { pid: Number(lock.slice(lock.lastIndexOf("-") + 1)) };
+    const pid = await profileBrowserPid(directory);
+    if (pid) receipt = { pid };
   }
   if (receipt) {
-    try {
-      process.kill(-receipt.pid, "SIGTERM");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
-    }
+    await terminateBrowser(receipt.pid, "SIGTERM");
     const deadline = Date.now() + 5000;
     while (Date.now() < deadline) {
       try {
@@ -202,12 +235,8 @@ export async function closePersistentBrowser(directory: string, browser?: Browse
       }
       await delay(50);
     }
-    try {
-      process.kill(-receipt.pid, "SIGKILL");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
-    }
+    await terminateBrowser(receipt.pid, "SIGKILL");
   }
   await browser?.close();
-  await fs.rm(directory, { recursive: true, force: true });
+  await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

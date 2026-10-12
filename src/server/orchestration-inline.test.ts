@@ -127,7 +127,7 @@ test("inline cron tools use the originating workspace and restore main cwd", asy
   await orchestration.tick();
   await until(async () => (await orchestration.listRunLogs())[0]?.status === "completed");
   const result = (await main.context(context)).messages.find((m) => m.role === "toolResult");
-  expect(JSON.stringify(result)).toContain(directory);
+  expect(JSON.stringify(result)).toContain(JSON.stringify(directory).slice(1, -1));
   expect((await main.agent(context)).cwd).toBe("/tmp");
   expect(await orchestration.listRunning()).toHaveLength(0);
 }, 15000);

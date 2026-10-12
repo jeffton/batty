@@ -34,7 +34,7 @@ Main runs receive a prepared memory overview. Workers in the assistant's workspa
 
 - [Setup, development and operation](docs/operations.md)
 - [Runtime, memory and integrations](docs/runtime.md)
-- [Importing history and migrating sites or schedules](docs/migration.md)
+- [Moving sites and importing schedules](docs/migration.md)
 - [Client API](src/client/API.md)
 
 ## References

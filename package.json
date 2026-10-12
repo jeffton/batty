@@ -11,8 +11,7 @@
     "test": "vp test --run",
     "typecheck": "tsc --noEmit",
     "check": "vp check && tsc --noEmit",
-    "check:fix": "vp check --fix",
-    "import": "tsx scripts/import-roy.ts"
+    "check:fix": "vp check --fix"
   },
   "dependencies": {
     "@earendil-works/chord": "1.1.0",

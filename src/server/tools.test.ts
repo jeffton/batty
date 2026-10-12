@@ -572,7 +572,7 @@ describe("durable tool bridge", () => {
         entry.model?.[0]?.role === "toolResult" &&
         entry.model[0].toolName === "codemode",
     )!.model![0] as any;
-    expect(result.isError).toBe(false);
+    expect(result.isError, JSON.stringify(result)).toBe(false);
     expect(result.content[0].text).toContain("original:finished");
     view.dispose();
   }, 15_000);
@@ -622,7 +622,7 @@ describe("durable tool bridge", () => {
         },
       },
     );
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode, output).toBe(0);
     expect(output).toContain("finished");
     expect(await fs.readFile(path.join(directory, "count"), "utf8")).toBe("run\n");
   }, 15_000);

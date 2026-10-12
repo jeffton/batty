@@ -43,9 +43,14 @@ export async function parseCronArgs(args: string[]) {
   if (values.help) return { root: values.root, help: true, body: {} };
   const [command, action, jobId, extra] = positionals;
   if (command !== "cron" || !action || extra) throw new Error(help);
-  const body: Record<string, unknown> = values.json
-    ? JSON.parse(await fs.readFile(values.json === "-" ? "/dev/stdin" : values.json, "utf8"))
-    : {};
+  let jsonText = "";
+  if (values.json === "-") {
+    process.stdin.setEncoding("utf8");
+    for await (const chunk of process.stdin) jsonText += chunk;
+  } else if (values.json) {
+    jsonText = await fs.readFile(values.json, "utf8");
+  }
+  const body: Record<string, unknown> = values.json ? JSON.parse(jsonText) : {};
   body.action = action;
   if (jobId) body.jobId = jobId;
   for (const [flag, field] of [

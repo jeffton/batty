@@ -35,7 +35,7 @@ for (const { width, colorScheme } of [
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     try {
-      await page.goto(url);
+      await page.goto(url, { waitUntil: "domcontentloaded" });
       await page.getByText("Cabin attached.").first().waitFor();
       const messages = page.locator("article.message");
       expect(await messages.count()).toBe(3);
@@ -129,7 +129,7 @@ for (const { width, colorScheme } of [
       route.fulfill({ status: 503, json: { error: "Fixture usage unavailable" } }),
     );
     try {
-      await page.goto(url);
+      await page.goto(url, { waitUntil: "domcontentloaded" });
       for (const { name, selector } of [
         { name: "Delete fixture", selector: ".delete-confirmation" },
         { name: "Choose model", selector: ".mc-popover" },
@@ -165,7 +165,7 @@ for (const { width, colorScheme } of [
       route.fulfill({ status: 503, json: { error: "Fixture usage unavailable" } }),
     );
     try {
-      await page.goto(url);
+      await page.goto(url, { waitUntil: "domcontentloaded" });
       for (const { name, selector, rightAligned } of [
         { name: "Usage limits unavailable", selector: ".usage-details", rightAligned: true },
         { name: "Running tasks", selector: ".tasks-popover", rightAligned: false },
@@ -245,7 +245,7 @@ for (const { width, colorScheme } of [
       }),
     );
     try {
-      await page.goto(url);
+      await page.goto(url, { waitUntil: "domcontentloaded" });
       const normalCode = page.locator(".message--assistant .markdown-body code").first();
       const normalBackground = await normalCode.evaluate(
         (element) => getComputedStyle(element).backgroundColor,

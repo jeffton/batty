@@ -53,7 +53,7 @@ describe("browser error endpoint", () => {
       expect(stored).toHaveLength(200);
       expect(stored.every((r: any) => Date.parse(r.receivedAt) > Date.now() - 86400000)).toBe(true);
       expect(stored.at(-1).correlationId).toBe("test-id");
-      expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
+      if (process.platform !== "win32") expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
     } finally {
       await app.close();
     }

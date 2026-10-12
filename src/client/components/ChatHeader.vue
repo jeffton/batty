@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Wrench, Clock3 } from "@lucide/vue";
 import { useAppStore } from "@/client/stores/app";
+import { withBaseUrl } from "@/client/lib/base-url";
 import SettingsPopover from "./SettingsPopover.vue";
 import ToolsPopover from "./ToolsPopover.vue";
 import CronPopover from "./CronPopover.vue";
@@ -24,7 +25,7 @@ async function logout() {
         aria-label="Settings"
         title="Settings"
       >
-        <img src="/favicon.png" alt="" />
+        <img :src="withBaseUrl('/favicon.png')" alt="" />
       </button>
     </div>
     <button

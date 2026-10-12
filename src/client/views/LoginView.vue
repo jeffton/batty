@@ -8,6 +8,7 @@ import {
   finishPasskeyRegistration,
 } from "@/client/lib/api";
 import { useAppStore } from "@/client/stores/app";
+import { withBaseUrl } from "@/client/lib/base-url";
 
 const store = useAppStore();
 const setupCode = ref("");
@@ -52,7 +53,7 @@ async function register(): Promise<void> {
 <template>
   <main class="login-view">
     <section class="login-card">
-      <img src="/favicon.png" alt="" class="login-card__icon" />
+      <img :src="withBaseUrl('/favicon.png')" alt="" class="login-card__icon" />
       <div class="login-card__header">
         <h1>{{ store.settings.appearance.title }}</h1>
         <p>Sign in with your passkey, or enter a setup code from the server terminal.</p>

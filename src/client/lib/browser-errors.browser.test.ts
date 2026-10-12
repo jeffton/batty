@@ -42,6 +42,10 @@ test("browser rejection and caught upload failure reach authenticated server wit
   const context = await browser.newContext();
   await context.addCookies([{ name: "fixture", value: "authenticated", url }]);
   const page = await context.newPage();
+  const telemetryStatuses: number[] = [];
+  page.on("response", (response) => {
+    if (response.url().endsWith("/api/browser-errors")) telemetryStatuses.push(response.status());
+  });
   try {
     await page.goto(`${url}src/client/lib/BrowserErrors.fixture.html`);
     await page.waitForFunction(() => Boolean((window as any).diagnosticsFixture));
@@ -97,15 +101,11 @@ test("browser rejection and caught upload failure reach authenticated server wit
       undefined,
       false,
     );
+    // Wait for writes to finish before reading: Windows cannot replace a file
+    // while a polling reader holds it open.
     await expect
-      .poll(async () => {
-        try {
-          return JSON.parse(await fs.readFile(file, "utf8")).length;
-        } catch {
-          return 0;
-        }
-      })
-      .toBe(5);
+      .poll(() => telemetryStatuses, { timeout: 5000 })
+      .toEqual([204, 204, 204, 204, 204]);
     const reports = JSON.parse(await fs.readFile(file, "utf8"));
     expect(reports.map((r: any) => r.stage).sort()).toEqual([
       "cache-write",

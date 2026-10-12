@@ -24,6 +24,7 @@ import { verifyAuthToken, authCacheScope } from "./auth";
 import { TranscriptImages, imagePreview } from "./transcript-images";
 import { createLoginRateLimiter } from "./login-rate-limit";
 import { registerAuthRoutes } from "./routes/auth";
+import { appBasePath, renderAppShell } from "./app-shell";
 import { registerBrowserErrorRoutes } from "./browser-errors";
 import { registerCronRoutes } from "./routes/cron";
 import { registerSiteRoutes } from "./routes/sites";
@@ -458,20 +459,25 @@ app.get<{
   return reply.send(createReadStream(file.storedPath));
 });
 
-const index = await fs.readFile(path.join(config.publicDir, "index.html"), "utf8");
+const appBase = appBasePath(config.baseUrl);
+const index = renderAppShell(
+  await fs.readFile(path.join(config.publicDir, "index.html"), "utf8"),
+  config.baseUrl,
+);
 app.get("/manifest.webmanifest", async () => ({
   name: config.appTitle,
   short_name: config.appTitle,
   display: "standalone",
-  start_url: "/",
-  scope: "/",
+  start_url: appBase,
+  scope: appBase,
   theme_color: "#ffffff",
   background_color: "#ffffff",
   icons: [
-    { src: "/pwa-192.png", sizes: "192x192", type: "image/png" },
-    { src: "/pwa-512.png", sizes: "512x512", type: "image/png" },
+    { src: `${appBase}pwa-192.png`, sizes: "192x192", type: "image/png" },
+    { src: `${appBase}pwa-512.png`, sizes: "512x512", type: "image/png" },
   ],
 }));
+app.get("/index.html", async (_request, reply) => reply.type("text/html").send(index));
 await app.register(staticFiles, { root: config.publicDir, prefix: "/" });
 app.get("/", async (_request, reply) => reply.type("text/html").send(index));
 app.setNotFoundHandler((request, reply) =>
@@ -496,6 +502,14 @@ async function shutdown() {
   await releaseLock();
   process.exit(0);
 }
+// WinSW stoparguments asks the parent to checkpoint and exit without killing
+// detached shell supervisors or Chromium processes.
+app.post("/api/service/stop", async (request, reply) => {
+  if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(request.ip))
+    return reply.code(403).send({ error: "Service stop requires a local request" });
+  reply.send({ ok: true });
+  setImmediate(() => void shutdown());
+});
 process.on("SIGTERM", () => void shutdown());
 process.on("SIGINT", () => void shutdown());
 await app.listen({ host: config.host, port: config.port });

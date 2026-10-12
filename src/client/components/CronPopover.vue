@@ -2,6 +2,7 @@
 import { PanelRightOpen } from "@lucide/vue";
 import { onBeforeUnmount, ref } from "vue";
 import FullPopover from "./FullPopover.vue";
+import PopoverTabs from "./PopoverTabs.vue";
 import SubagentSessionPopover from "./SubagentSessionPopover.vue";
 import { listWorkspaceCronJobs, listWorkspaceCronRunLogs } from "@/client/lib/api";
 import { useAppStore } from "@/client/stores/app";
@@ -11,7 +12,7 @@ const props = defineProps<{ popoverId: string; anchorName: string }>();
 const store = useAppStore();
 const tabs = ["cron", "logs"] as const;
 type Tab = (typeof tabs)[number];
-const activeTab = ref<Tab>("cron");
+const activeTab = ref<string>("cron");
 const jobs = ref<CronJob[]>([]);
 const logs = ref<CronRunLog[]>([]);
 const error = ref("");
@@ -28,23 +29,6 @@ function panelId(tab: Tab) {
 }
 function sessionPopoverId(kind: "worker" | "cron", id: string) {
   return `${props.popoverId}-${kind}-${id}`;
-}
-function handleTabKeydown(event: KeyboardEvent) {
-  const index = tabs.indexOf(activeTab.value);
-  const nextIndex =
-    event.key === "ArrowRight"
-      ? (index + 1) % tabs.length
-      : event.key === "ArrowLeft"
-        ? (index - 1 + tabs.length) % tabs.length
-        : event.key === "Home"
-          ? 0
-          : event.key === "End"
-            ? tabs.length - 1
-            : undefined;
-  if (nextIndex === undefined) return;
-  event.preventDefault();
-  activeTab.value = tabs[nextIndex]!;
-  document.getElementById(tabId(activeTab.value))?.focus();
 }
 function workspaceLabel(id: string) {
   return store.workspaces.find((workspace) => workspace.id === id)?.label ?? id;
@@ -112,27 +96,15 @@ onBeforeUnmount(() => {
     @toggle="toggle"
   >
     <template #header-content>
-      <div class="cron-popover__tabs" role="tablist" aria-label="Cron views">
-        <button
-          v-for="tab in tabs"
-          :id="tabId(tab)"
-          :key="tab"
-          type="button"
-          role="tab"
-          :aria-selected="activeTab === tab"
-          :aria-controls="panelId(tab)"
-          :tabindex="activeTab === tab ? 0 : -1"
-          class="cron-popover__tab"
-          @click="activeTab = tab"
-          @keydown="handleTabKeydown"
-        >
+      <PopoverTabs v-model="activeTab" :id-prefix="props.popoverId" label="Cron views" :tabs="tabs">
+        <template #default="{ tab }">
           {{ tab === "cron" ? "Cron" : "Logs" }}
           <span
             v-if="tab === 'logs' && logs.some((run) => run.status === 'running')"
             class="cron-popover__live-dot"
           />
-        </button>
-      </div>
+        </template>
+      </PopoverTabs>
     </template>
     <div class="cron-popover__body">
       <p v-if="error" role="alert" class="cron-popover__error">{{ error }}</p>
@@ -219,29 +191,6 @@ onBeforeUnmount(() => {
   min-height: 0;
   flex-direction: column;
   background: var(--color-bg-app);
-}
-.cron-popover__tabs {
-  display: flex;
-  gap: 0.25rem;
-  margin-bottom: -0.75rem;
-}
-.cron-popover__tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.65rem 0.8rem 0.55rem;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--color-text-subtle);
-  font: inherit;
-  font-size: 0.86rem;
-  font-weight: 650;
-  cursor: pointer;
-}
-.cron-popover__tab[aria-selected="true"] {
-  border-bottom-color: var(--color-accent);
-  color: var(--color-text-strong);
 }
 .cron-popover__live-dot {
   width: 0.45rem;

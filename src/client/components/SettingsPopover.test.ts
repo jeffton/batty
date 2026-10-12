@@ -32,10 +32,11 @@ function setup() {
   ];
   const save = vi.spyOn(store, "setAssistantWorkspace").mockResolvedValue();
   const wrapper = mount(SettingsPopover, {
+    attachTo: document.body,
     props: { popoverId: "settings-test", anchorName: "--settings-test" },
     global: {
       stubs: {
-        FullPopover: { template: "<div><slot /></div>" },
+        FullPopover: { template: '<div><slot name="header-content" /><slot /></div>' },
         ModelConfigSelector: true,
         RouterLink: { template: "<a><slot /></a>" },
       },
@@ -45,6 +46,51 @@ function setup() {
 }
 
 describe("Assistant settings", () => {
+  it("groups settings in accessible tabs and preserves drafts while switching", async () => {
+    const { wrapper } = setup();
+    try {
+      expect(wrapper.findAll('[role="tab"]').map((tab) => tab.text())).toEqual([
+        "Assistant",
+        "Appearance",
+        "Auth",
+      ]);
+      const assistant = wrapper.get("#settings-test-Assistant-panel");
+      const appearance = wrapper.get("#settings-test-Appearance-panel");
+      const auth = wrapper.get("#settings-test-Auth-panel");
+      expect(assistant.isVisible()).toBe(true);
+      expect(assistant.text()).toContain("Default model");
+      expect(assistant.text()).toContain("Memory model");
+      expect(assistant.text()).toContain("Push sender");
+      expect(appearance.isVisible()).toBe(false);
+      expect(appearance.text()).toContain("App title");
+      expect(appearance.text()).toContain("Color");
+      expect(auth.isVisible()).toBe(false);
+      expect(auth.text()).toContain("Environment variables");
+      expect(auth.text()).toContain("Log out");
+      await assistant.get("input").setValue("Draft sender");
+      await wrapper.get("#settings-test-Assistant-tab").trigger("keydown", { key: "ArrowRight" });
+      expect(appearance.isVisible()).toBe(true);
+      expect(document.activeElement?.id).toBe("settings-test-Appearance-tab");
+      await wrapper.get("#settings-test-Appearance-tab").trigger("keydown", { key: "End" });
+      expect(auth.isVisible()).toBe(true);
+      expect(document.activeElement?.id).toBe("settings-test-Auth-tab");
+      await wrapper.get("#settings-test-Auth-tab").trigger("keydown", { key: "ArrowRight" });
+      expect(assistant.isVisible()).toBe(true);
+      expect(assistant.get<HTMLInputElement>("input").element.value).toBe("Draft sender");
+      await wrapper.get("#settings-test-Assistant-tab").trigger("keydown", { key: "ArrowLeft" });
+      expect(auth.isVisible()).toBe(true);
+      await wrapper.get("#settings-test-Auth-tab").trigger("keydown", { key: "Home" });
+      expect(assistant.isVisible()).toBe(true);
+      expect(wrapper.get("#settings-test-Assistant-tab").attributes("aria-controls")).toBe(
+        assistant.attributes("id"),
+      );
+      expect(auth.attributes("aria-labelledby")).toBe("settings-test-Auth-tab");
+      expect(wrapper.findAll('[role="tab"][tabindex="0"]')).toHaveLength(1);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it("groups workspace, push identity and memory without changing stored values", async () => {
     const { wrapper, store, save } = setup();
     const section = wrapper.get('[aria-labelledby="assistant-settings-title"]');

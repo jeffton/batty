@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
+import PopoverTabs from "./PopoverTabs.vue";
 import McpSettingsPanel from "@/client/components/McpSettingsPanel.vue";
 import { getSessionResources } from "@/client/lib/api";
 import { useAppStore } from "@/client/stores/app";
@@ -15,7 +16,7 @@ const props = defineProps<{
 const store = useAppStore();
 const tabs = ["Workspaces", "Skills", "MCPs", "Tools"] as const;
 type Tab = (typeof tabs)[number];
-const activeTab = ref<Tab>("Workspaces");
+const activeTab = ref<string>("Workspaces");
 const open = ref(false);
 const loading = ref(false);
 const error = ref("");
@@ -29,24 +30,6 @@ function tabId(tab: Tab): string {
 
 function panelId(tab: Tab): string {
   return `${props.popoverId}-${tab}-panel`;
-}
-
-function handleTabKeydown(event: KeyboardEvent): void {
-  const index = tabs.indexOf(activeTab.value);
-  const nextIndex =
-    event.key === "ArrowRight"
-      ? (index + 1) % tabs.length
-      : event.key === "ArrowLeft"
-        ? (index - 1 + tabs.length) % tabs.length
-        : event.key === "Home"
-          ? 0
-          : event.key === "End"
-            ? tabs.length - 1
-            : undefined;
-  if (nextIndex === undefined) return;
-  event.preventDefault();
-  activeTab.value = tabs[nextIndex]!;
-  document.getElementById(tabId(activeTab.value))?.focus();
 }
 
 async function loadResources(): Promise<void> {
@@ -84,23 +67,12 @@ onBeforeUnmount(() => loadGeneration++);
     @toggle="handleToggle"
   >
     <template #header-content>
-      <div class="tools-popover__tabs" role="tablist" aria-label="Workspaces and tools">
-        <button
-          v-for="tab in tabs"
-          :id="tabId(tab)"
-          :key="tab"
-          type="button"
-          role="tab"
-          :aria-selected="activeTab === tab"
-          :aria-controls="panelId(tab)"
-          :tabindex="activeTab === tab ? 0 : -1"
-          class="tools-popover__tab"
-          @click="activeTab = tab"
-          @keydown="handleTabKeydown"
-        >
-          {{ tab }}
-        </button>
-      </div>
+      <PopoverTabs
+        v-model="activeTab"
+        :id-prefix="props.popoverId"
+        label="Workspaces and tools"
+        :tabs="tabs"
+      />
     </template>
 
     <div
@@ -167,30 +139,6 @@ onBeforeUnmount(() => loadGeneration++);
 </template>
 
 <style scoped>
-.tools-popover__tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-  margin-bottom: -0.75rem;
-}
-
-.tools-popover__tab {
-  padding: 0.65rem 0.8rem 0.55rem;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--color-text-subtle);
-  font: inherit;
-  font-size: 0.86rem;
-  font-weight: 650;
-  cursor: pointer;
-}
-
-.tools-popover__tab[aria-selected="true"] {
-  border-bottom-color: var(--color-accent);
-  color: var(--color-text-strong);
-}
-
 .tools-popover__pane {
   height: 100%;
   overflow-y: auto;

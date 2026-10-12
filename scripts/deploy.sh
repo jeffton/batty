@@ -2,8 +2,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/deploy-lib.sh
-# Pre-deploy source validation: pnpm test:all and bash scripts/deploy.test.sh.
-# Release staging runs the build/offline gates without repeating source tests.
+# Validate source and production offline behavior before pushing (see AGENTS.md).
+# Deployment builds the release and verifies its running health/build ID.
 git pull --ff-only
 git diff --quiet && git diff --cached --quiet || { echo 'Commit changes before deploying.' >&2; exit 1; }
 
@@ -19,9 +19,7 @@ git archive HEAD | tar -x -C "$build"
 (
   cd "$build"
   pnpm install --frozen-lockfile
-  pnpm check
   BATTY_BUILD_ID="$revision" pnpm build
-  node scripts/verify-offline.mjs
 )
 release="/opt/batty2/releases/${revision}.$(date +%s)"
 previous_release=

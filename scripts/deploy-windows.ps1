@@ -41,13 +41,11 @@ if (-not $ReleasePath) {
         $revision = (git rev-parse --short HEAD).Trim()
         $buildId = "$revision-windows-$(Get-Date -Format yyyyMMddHHmmss)"
         Invoke-Native pnpm @('install', '--frozen-lockfile')
-        Invoke-Native pnpm @('check')
         $oldBuildId = $env:BATTY_BUILD_ID
         try {
             $env:BATTY_BUILD_ID = $buildId
             Invoke-Native pnpm @('build')
         } finally { $env:BATTY_BUILD_ID = $oldBuildId }
-        Invoke-Native node @('scripts/verify-offline.mjs')
         $ReleasePath = Join-Path $AppRoot "releases\batty2-$buildId"
         New-Item -ItemType Directory $ReleasePath | Out-Null
         Copy-Tree (Join-Path $repo 'dist') (Join-Path $ReleasePath 'dist')

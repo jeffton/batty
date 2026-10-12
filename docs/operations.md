@@ -36,12 +36,12 @@ Run the two development servers in separate terminals and open `http://localhost
 ```sh
 pnpm test
 pnpm test:browser  # Browser fixtures, layout and native cache (Chromium/WebKit)
-pnpm test:all      # All three groups; required before pushing/deploying
+pnpm test:all      # All three groups; required before pushing
 ```
 
 Browser fixture servers use separate temporary Vite caches. Viewport cases cover layout; dark-mode cases cover styling rather than repeating every interaction.
 
-Validate the complete source before pushing. Deployment checks and builds releases and runs the production offline gate; it does not repeat the source test suite.
+Before pushing changes, run the complete source validation below. Installations pull validated commits; deployment installs locked dependencies, builds the release and verifies the running service without repeating development checks or browser tests.
 
 ```sh
 pnpm check
@@ -51,7 +51,7 @@ pnpm build
 node scripts/verify-offline.mjs
 ```
 
-The offline verification script exercises the production build's offline reload, private image previews and incremental reconnect. Client API details are in [src/client/API.md](../src/client/API.md).
+The pre-push offline verification script exercises the production build's offline reload, private image previews and incremental reconnect against local fixtures. It is a browser regression gate, not an installation health check. Client API details are in [src/client/API.md](../src/client/API.md).
 
 ## Deployment
 
@@ -63,7 +63,7 @@ For the maintained installation, source is `/root/github/batty2`, tracking `main
 ./scripts/deploy.sh
 ```
 
-The script checks disk space, checks and builds an immutable release, runs the offline gate, atomically switches `/opt/batty2/current`, restarts `batty2.service` and verifies the build ID. It retains the active release and two healthy rollbacks. Pi Durable resumes committed work; shell jobs use stable execution receipts and detached Chromium can retain tabs, cookies and live page state. A kernel lifetime lock prevents concurrent database writers. Unsafe interrupted external actions are reported as errors rather than automatically repeated.
+The script checks disk space, installs locked dependencies and builds an immutable release, atomically switches `/opt/batty2/current`, restarts `batty2.service` and verifies the build ID. It retains the active release and two healthy rollbacks. Pi Durable resumes committed work; shell jobs use stable execution receipts and detached Chromium can retain tabs, cookies and live page state. A kernel lifetime lock prevents concurrent database writers. Unsafe interrupted external actions are reported as errors rather than automatically repeated.
 
 ### Windows and IIS
 
@@ -78,7 +78,7 @@ The maintained installation uses source `D:\github\batty`, application `D:\Batty
 .\scripts\deploy-windows.ps1 -ReleasePath D:\Batty\app\releases\RELEASE
 ```
 
-Staging pulls source, installs locked dependencies, checks, builds and runs the offline gate without interrupting the service. Production dependencies are hardlinked from pnpm's store; do not edit release `node_modules` files. Use `-AllowDirty` for explicitly approved uncommitted work. Activation runs from elevated Windows PowerShell with WebAdministration installed: it stops the service, switches the junction, recycles the IIS pool and checks the backend and IIS build IDs, app shell, script and manifest. `-IisUrl` selects the IIS application URL (default `http://localhost/batty/`). A failed health gate restores the previous release. Releases and live state are retained; updates do not copy data, import history or modify schedules.
+Staging pulls validated source, installs locked dependencies and builds without interrupting the service. Production dependencies are hardlinked from pnpm's store; do not edit release `node_modules` files. Use `-AllowDirty` for explicitly approved uncommitted work. Activation runs from elevated Windows PowerShell with WebAdministration installed: it stops the service, switches the junction, recycles the IIS pool and checks the backend and IIS build IDs, app shell, script and manifest. `-IisUrl` selects the IIS application URL (default `http://localhost/batty/`). A failed health gate restores the previous release. Releases and live state are retained; updates do not copy data, import history or modify schedules.
 
 Run activation outside the WinSW process tree. From the running assistant, use a one-shot Windows Task Scheduler task targeting the second command. A detached child process can still be terminated when the service stops.
 

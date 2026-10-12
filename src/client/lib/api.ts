@@ -255,6 +255,7 @@ export function listWorkspaces(): Promise<WorkspaceInfo[]> {
 export function setAssistantWorkspace(workspaceId: string): Promise<WorkspaceInfo[]> {
   return request<{ workspaces: WorkspaceInfo[] }>("/api/settings/assistant-workspace", {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ workspaceId }),
   }).then((response) => response.workspaces);
 }
@@ -262,6 +263,7 @@ export function setAssistantWorkspace(workspaceId: string): Promise<WorkspaceInf
 export function setPushTitle(title: string): Promise<AppSettingsStatus> {
   return request("/api/settings/push-title", {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title }),
   });
 }
@@ -269,6 +271,7 @@ export function setPushTitle(title: string): Promise<AppSettingsStatus> {
 export function setMemoryLanguage(language: string): Promise<AppSettingsStatus> {
   return request("/api/settings/memory-language", {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ language }),
   });
 }

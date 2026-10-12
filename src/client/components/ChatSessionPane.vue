@@ -5,7 +5,6 @@ import MessageComposer from "@/client/components/MessageComposer.vue";
 import SessionTranscriptView from "@/client/components/SessionTranscriptView.vue";
 import { getMain, listRunningSubagents, listWorkspaceCronRunLogs } from "@/client/lib/api";
 import { applySessionResponse } from "@/client/lib/session-events";
-import { resolveThinkingOptions } from "@/client/lib/thinking-levels";
 import { promptSubmissionId, retainPromptRetry, clearPromptRetry } from "@/client/lib/prompt-retry";
 import { useAppStore } from "@/client/stores/app";
 import {
@@ -16,9 +15,6 @@ import {
 } from "@/client/lib/optimistic-messages";
 import type { CronRunLog, QueuedPrompt, RunningSubagent } from "@/shared/types";
 
-const MODEL_POPOVER_ID = "chat-main-model-popover";
-const MODEL_POPOVER_ANCHOR = "--chat-main-model-anchor";
-
 type ComposerHandle = InstanceType<typeof MessageComposer>;
 
 const store = useAppStore();
@@ -27,7 +23,6 @@ const promptError = ref<string>();
 const subagents = ref<RunningSubagent[]>([]);
 const cronRuns = ref<CronRunLog[]>([]);
 const subagentError = ref<string>();
-const thinkingOptions = computed(() => resolveThinkingOptions(store.activeSession));
 const pendingIdlePromptSessionIds = new Set<string>();
 let promptRequestId = 0;
 let optimisticMessageId = 0;
@@ -88,24 +83,6 @@ watch(
   },
   { immediate: true },
 );
-
-const currentModelOption = computed(() =>
-  store.models.find((model) => model.id === store.activeSession?.model),
-);
-const modelButtonLabel = computed(() =>
-  currentModelOption.value ? shortModelLabel(currentModelOption.value) : "",
-);
-const thinkingButtonLabel = computed(() =>
-  store.activeSession ? thinkingLabel(store.activeSession.thinkingLevel) : "",
-);
-
-function shortModelLabel(model: { label: string }): string {
-  return model.label.split(" · ", 1)[0] ?? model.label;
-}
-
-function thinkingLabel(value: string): string {
-  return value === "xhigh" ? "XHigh" : value.charAt(0).toUpperCase() + value.slice(1);
-}
 
 function showPromptError(error: unknown, sessionId: string | undefined, requestId: number): void {
   if (requestId !== promptRequestId || store.activeSession?.sessionId !== sessionId) {
@@ -342,21 +319,10 @@ async function removeQueuedPrompt(prompt: QueuedPrompt): Promise<void> {
         "
         :actions-disabled="isUnavailable"
         :queued-prompts="store.activeSession.queuedPrompts"
-        :model-popover-id="MODEL_POPOVER_ID"
-        :model-popover-anchor="MODEL_POPOVER_ANCHOR"
-        :models="store.models"
-        :current-model-id="store.activeSession.model"
-        :current-thinking-level="store.activeSession.thinkingLevel"
-        :thinking-options="thinkingOptions"
-        :model-button-label="modelButtonLabel"
-        :thinking-button-label="thinkingButtonLabel"
         @submit="(text, files) => submitPrompt('prompt', text, files)"
         @steer="(text, files) => submitPrompt('steer', text, files)"
         @stop="runAction(() => store.stopActiveSession())"
         @remove-queued-prompt="removeQueuedPrompt"
-        @refresh-models="runAction(() => store.refreshModels())"
-        @set-model="runAction(() => store.setModel($event))"
-        @set-thinking-level="runAction(() => store.setThinkingLevel($event))"
       />
     </template>
   </main>

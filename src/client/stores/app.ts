@@ -299,16 +299,6 @@ export const useAppStore = defineStore("app", {
     async stopActiveSession() {
       await api.stopMain();
     },
-    async setModel(model: string) {
-      const streamId = this.activeSession?.streamId;
-      const response = await api.patchMain("model", { model });
-      this.activeSession = applySessionResponse(this.activeSession, response, streamId);
-    },
-    async setThinkingLevel(thinkingLevel: string) {
-      const streamId = this.activeSession?.streamId;
-      const response = await api.patchMain("thinking", { thinkingLevel });
-      this.activeSession = applySessionResponse(this.activeSession, response, streamId);
-    },
     async removeQueuedPrompt(kind: "steer" | "followUp", index: number) {
       const streamId = this.activeSession?.streamId;
       const response = await api.removeMainQueuedPrompt(kind, index);

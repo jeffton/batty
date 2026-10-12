@@ -12,8 +12,6 @@ The authenticated root route contains one main chat. Workspace listings never se
 - `GET /api/main/events`: SSE JSON `ServerEvent`. Full reset snapshots merge overlapping messages while preserving paginated history. Durable entry IDs need not be numeric.
 - `POST /api/main/prompt` and `POST /api/main/steer`: multipart `text`, `clientMessageId`, repeated `files`; return `{ disposition: 'started' | 'queued', submissionId, sessionId }`. Optimistic messages are removed after HTTP acceptance. On uncertain delivery, the restored draft retains its original `clientMessageId` for a deduplicated retry. State/queued `clientMessageId` mappings can confirm acceptance when an HTTP response is lost.
 - `POST /api/main/stop`: `{ ok: true }`.
-- `PATCH /api/main/model`: `{ model: string }`; return `SessionState`.
-- `PATCH /api/main/thinking`: `{ thinkingLevel: string }`; return `SessionState`.
 - `POST /api/main/queue/remove`: `{ kind, index }`, kind `steer` or `followUp`, index copied from the queued prompt's durable submission identifier; return `SessionState`.
 
 ## Read-only worker sessions

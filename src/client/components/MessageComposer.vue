@@ -3,11 +3,10 @@ import { Compass, ListOrdered, Paperclip, SendHorizontal } from "@lucide/vue";
 import { blockAppReload } from "@/client/lib/app-updates";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import ComposerQueuedPrompts from "@/client/components/ComposerQueuedPrompts.vue";
-import ModelConfigSelector from "@/client/components/ModelConfigSelector.vue";
 import StreamingStopControl from "@/client/components/StreamingStopControl.vue";
 import TasksControl from "@/client/components/TasksControl.vue";
 import { clearSessionDraft, readSessionDraft, writeSessionDraft } from "@/client/lib/session-draft";
-import type { CronRunLog, ModelOption, QueuedPrompt, RunningSubagent } from "@/shared/types";
+import type { CronRunLog, QueuedPrompt, RunningSubagent } from "@/shared/types";
 
 const DRAFT_SAVE_INTERVAL_MS = 400;
 
@@ -23,14 +22,6 @@ const props = defineProps<{
   error?: string;
   sessionKey?: string;
   queuedPrompts?: QueuedPrompt[];
-  modelPopoverId: string;
-  modelPopoverAnchor: string;
-  models: ModelOption[];
-  currentModelId?: string;
-  currentThinkingLevel: string;
-  thinkingOptions: string[];
-  modelButtonLabel: string;
-  thinkingButtonLabel: string;
 }>();
 
 const emit = defineEmits<{
@@ -38,9 +29,6 @@ const emit = defineEmits<{
   steer: [text: string, files: File[]];
   stop: [];
   removeQueuedPrompt: [prompt: QueuedPrompt];
-  refreshModels: [];
-  setModel: [modelId: string];
-  setThinkingLevel: [thinkingLevel: string];
 }>();
 
 const text = ref("");
@@ -499,22 +487,6 @@ defineExpose({ clear, restore });
             :disabled="actionsDisabled"
             @stop="emit('stop')"
           />
-          <ModelConfigSelector
-            :popover-id="props.modelPopoverId"
-            :anchor-name="props.modelPopoverAnchor"
-            :models="props.models"
-            :current-model-id="props.currentModelId"
-            :current-thinking-level="props.currentThinkingLevel"
-            :thinking-options="props.thinkingOptions"
-            :disabled="props.disabled"
-            placement="up"
-            :model-label="props.modelButtonLabel"
-            :effort-label="props.thinkingButtonLabel"
-            compact
-            @refresh-models="emit('refreshModels')"
-            @set-model="emit('setModel', $event)"
-            @set-thinking-level="emit('setThinkingLevel', $event)"
-          />
           <button
             v-if="props.streaming"
             class="composer__icon-button composer__steer"
@@ -716,28 +688,5 @@ defineExpose({ clear, restore });
   flex-shrink: 1;
   justify-content: flex-end;
   margin-left: auto;
-}
-
-.composer__send-actions :deep(.model-config-selector__button) {
-  min-width: var(--button-size);
-  flex-shrink: 1;
-}
-
-@media (max-width: 540px) {
-  /* Streaming has five actions: reserve their full targets, compact model text. */
-  .composer__send-actions:has(.composer__steer) {
-    flex-shrink: 0;
-  }
-
-  .composer__send-actions:has(.composer__steer) :deep(.model-config-selector__info) {
-    display: none;
-  }
-
-  .composer__send-actions:has(.composer__steer) :deep(.model-config-selector__button) {
-    width: var(--button-size);
-    padding: 0;
-    grid-template-columns: auto;
-    gap: 0;
-  }
 }
 </style>

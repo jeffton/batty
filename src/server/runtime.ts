@@ -9,6 +9,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import {
+  configure,
   createRegistry,
   Harness,
   LiveDoc,
@@ -43,6 +44,7 @@ import { ProviderUsageService } from "./provider-usage";
 import { createTools } from "./tools";
 import { createWorkerBrowserCleanup } from "./browser-worker-cleanup";
 import { createOrchestration } from "./orchestration";
+import { OrchestrationDoc } from "./orchestration-state";
 import { createMemory, type MemoryConfig } from "./memory";
 import { createResources } from "./resources";
 import type { SessionState, SessionMessagesPage, UiMessage, ModelOption } from "@/shared/types";
@@ -503,12 +505,23 @@ export class Runtime {
       if (message.role === "user") message.clientMessageId = ids.get(message.id);
   }
 
-  async setModel(modelId: string): Promise<void> {
-    const slash = modelId.indexOf("/");
-    const provider = modelId.slice(0, slash),
-      modelIdPart = modelId.slice(slash + 1);
-    if (!this.models.getModel(provider, modelIdPart)) throw new Error("Unknown model");
-    await this.main.configure({ model: { provider, modelId: modelIdPart } }, context);
+  async useDefaultModel(): Promise<void> {
+    const model = {
+      provider: this.config.defaultProvider ?? "openai-codex",
+      modelId: this.config.defaultModel ?? "gpt-6.1-sol",
+    };
+    const thinkingLevel = (this.config.defaultThinkingLevel ?? "medium") as ModelThinkingLevel;
+    await this.main.commit(async (tx) => {
+      const doc = await tx.doc(OrchestrationDoc);
+      // An inline cron owns the active configuration until it finishes. Update
+      // the saved main configuration so queued user input gets the default.
+      if (doc.inlineContext) {
+        doc.inlineContext.model = model;
+        doc.inlineContext.thinkingLevel = thinkingLevel;
+      } else {
+        await configure(tx, this.main.id, { model, thinkingLevel });
+      }
+    }, context);
   }
 
   async close(): Promise<void> {

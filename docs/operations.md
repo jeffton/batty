@@ -25,6 +25,8 @@ pnpm dev:client
 
 Run the two development servers in separate terminals and open `http://localhost:5173`. The backend defaults to `127.0.0.1:3148`. First startup prints a setup code for passkey registration. Use HTTPS for a hosted installation, then connect model providers and select the default model in Settings. Configure a Brave Search key there to enable web search.
 
+Main chat submissions use the default model and thinking level selected in Settings, replacing any previous session selection. Steered and queued messages use the same defaults. Explicit subagent and cron model settings are independent.
+
 `baseUrl` is a path prefix, not a hostname or public origin; `/` serves Batty at the root. The hostname and HTTPS origin come from hosting/proxy configuration and request headers.
 
 `BATTY_HOST` and `BATTY_PORT` control the listener; `BATTY_SELF_PATH` selects the application files. `BATTY_PROVIDER_AUTH_PATH` selects the SDK's locked provider credential store. Application secrets and passkeys remain in the data root. Environment settings are stored in `.batty/environment.json`.

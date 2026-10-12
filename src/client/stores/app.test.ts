@@ -34,7 +34,6 @@ vi.mock("@/client/lib/api", async (importOriginal) => ({
   getBootstrap: vi.fn(),
   getMain: vi.fn(),
   listWorkspaces: vi.fn(),
-  patchMain: vi.fn(),
   removeMainQueuedPrompt: vi.fn(),
   logout: vi.fn(),
   submitMainPrompt: vi.fn(),
@@ -101,22 +100,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const mutations = ["model", "thinking", "queue"] as const;
-function mutate(kind: (typeof mutations)[number]) {
+const mutations = ["queue"] as const;
+function mutate(_kind: (typeof mutations)[number]) {
   const store = useAppStore();
-  return kind === "model"
-    ? store.setModel("model-new")
-    : kind === "thinking"
-      ? store.setThinkingLevel("high")
-      : store.removeQueuedPrompt("followUp", 0);
+  return store.removeQueuedPrompt("followUp", 0);
 }
-function deferResponse(kind: (typeof mutations)[number]) {
+function deferResponse(_kind: (typeof mutations)[number]) {
   let resolve!: (state: SessionState) => void;
   const promise = new Promise<SessionState>((done) => {
     resolve = done;
   });
-  if (kind === "queue") vi.mocked(api.removeMainQueuedPrompt).mockReturnValueOnce(promise);
-  else vi.mocked(api.patchMain).mockReturnValueOnce(promise);
+  vi.mocked(api.removeMainQueuedPrompt).mockReturnValueOnce(promise);
   return resolve;
 }
 describe("caught cache diagnostics", () => {
@@ -198,8 +192,8 @@ describe("main mutation snapshots", () => {
   it("accepts an equal-revision authoritative response in the current stream", async () => {
     const store = useAppStore();
     store.activeSession = state(5);
-    vi.mocked(api.patchMain).mockResolvedValueOnce({ ...state(5), model: "chosen" });
-    await store.setModel("chosen");
+    vi.mocked(api.removeMainQueuedPrompt).mockResolvedValueOnce({ ...state(5), model: "chosen" });
+    await store.removeQueuedPrompt("followUp", 0);
     expect(store.activeSession?.model).toBe("chosen");
   });
 });

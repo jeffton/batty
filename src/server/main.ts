@@ -5,7 +5,6 @@ import fastify from "fastify";
 import cookie from "@fastify/cookie";
 import multipart from "@fastify/multipart";
 import staticFiles from "@fastify/static";
-import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { SubmissionId } from "@earendil-works/pi-durable";
 import { loadConfig, resolveBattyDir, readEnvironmentFile, updateEnvironmentFile } from "./config";
 import {
@@ -282,17 +281,6 @@ app.delete<{ Params: { submissionId: string } }>(
       runtime.main.id,
     ),
   }),
-);
-app.patch<{ Body: { model?: string; modelId?: string } }>("/api/main/model", async (request) => {
-  await runtime.setModel(request.body.model ?? request.body.modelId!);
-  return runtime.state();
-});
-app.patch<{ Body: { thinkingLevel: ModelThinkingLevel } }>(
-  "/api/main/thinking",
-  async (request) => {
-    await runtime.main.configure({ thinkingLevel: request.body.thinkingLevel }, context);
-    return runtime.state();
-  },
 );
 app.post<{ Body: { kind: string; index: number } }>("/api/main/queue/remove", async (request) => {
   await runtime.harness.abortSubmission(

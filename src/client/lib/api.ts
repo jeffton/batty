@@ -383,13 +383,6 @@ export function getMainMessages(options: {
   if (options.limit) query.set("limit", String(options.limit));
   return request(`/api/main/messages?${query}`);
 }
-export function patchMain(kind: "model" | "thinking", body: object): Promise<SessionState> {
-  return request(`/api/main/${kind}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
 export async function submitMainPrompt(
   kind: "prompt" | "steer",
   text: string,

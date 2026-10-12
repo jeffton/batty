@@ -10,15 +10,8 @@ describe("file attachments", () => {
     return mount(MessageComposer, {
       props: {
         sessionKey: "attachment-test",
-        modelPopoverId: "model-test",
-        modelPopoverAnchor: "--model-test",
-        models: [],
-        currentThinkingLevel: "medium",
-        thinkingOptions: ["medium"],
-        modelButtonLabel: "Model",
-        thinkingButtonLabel: "Medium",
       },
-      global: { stubs: { ModelConfigSelector: true, ComposerQueuedPrompts: true } },
+      global: { stubs: { ComposerQueuedPrompts: true } },
     });
   }
 
@@ -138,15 +131,8 @@ describe("memory preparation", () => {
         compacting: false,
         memoryPending: 8,
         sessionKey: "main",
-        modelPopoverId: "model-test",
-        modelPopoverAnchor: "--model-test",
-        models: [],
-        currentThinkingLevel: "medium",
-        thinkingOptions: ["medium"],
-        modelButtonLabel: "Model",
-        thinkingButtonLabel: "Medium",
       },
-      global: { stubs: { ModelConfigSelector: true, ComposerQueuedPrompts: true } },
+      global: { stubs: { ComposerQueuedPrompts: true } },
     });
     try {
       // The initial session snapshot supplies this before any memory-status request.

@@ -102,6 +102,7 @@ export function registerSessionRoutes(
         { type: "text", text: [text, attachments.text].filter(Boolean).join("\n\n") },
         ...attachments.images,
       ];
+      await runtime.useDefaultModel();
       const submission = await runtime.main.submit(
         {
           type: "input",

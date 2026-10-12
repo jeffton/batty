@@ -81,6 +81,7 @@ const server = http.createServer(async (request, response) => {
         braveSearchConfigured: false,
         pushTitle: "Roy",
         memoryModel: "fixture/model",
+        memoryLanguage: "English",
         memoryReasoning: "low",
         defaultThinkingLevel: "off",
         defaultProvider: "fixture",

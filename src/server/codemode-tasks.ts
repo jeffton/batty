@@ -38,6 +38,7 @@ export function createCodemodeTasks(
       conversationId: runtime.conversationId,
       callId,
       registry: runtime.registry,
+      models: runtime.models,
       env: await runtime.env(ctx),
       agent: runtime.agent.bind(runtime),
       snapshot: runtime.snapshot.bind(runtime),
@@ -48,6 +49,8 @@ export function createCodemodeTasks(
       waitForTask: runtime.waitForTask.bind(runtime),
       conversation: runtime.conversation.bind(runtime),
       output: () => {},
+      // Nested calls retain their returned content, not a running-output tail.
+      outputWindow: undefined,
       diagnostic: () => {},
       details: async (details, context) => {
         await runtime.commit(async (tx) => {

@@ -275,6 +275,7 @@ describe("stream recovery", () => {
     vi.useRealTimers();
   });
   it("requires a snapshot before declaring a reconnected main stream online", async () => {
+    const check = vi.spyOn(updates, "checkAppUpdate").mockResolvedValue();
     vi.useFakeTimers();
     const streams: any[] = [];
     vi.stubGlobal(
@@ -309,15 +310,19 @@ describe("stream recovery", () => {
     streams[1].onmessage({ data: JSON.stringify({ type: "reset", state: state(4) }) });
     expect(store.connectionState).toBe("online");
     store.closeStream();
+    check.mockRestore();
     vi.useRealTimers();
   });
   it("preserves a fresh SSE connection on pageshow and visibility resume", async () => {
+    const check = vi.spyOn(updates, "checkAppUpdate").mockResolvedValue();
     wrapper = mount(App, { global: { plugins: [pinia], stubs: { RouterView: true } } });
     await flushPromises();
     const open = vi.spyOn(useAppStore(), "openStream");
     window.dispatchEvent(new Event("pageshow"));
     document.dispatchEvent(new Event("visibilitychange"));
     expect(open).not.toHaveBeenCalled();
+    await flushPromises();
+    check.mockRestore();
   });
 });
 
@@ -379,6 +384,7 @@ describe("authentication recovery", () => {
     check.mockRestore();
   });
   it("retries an initial bootstrap transport failure on the browser online event", async () => {
+    const check = vi.spyOn(updates, "checkAppUpdate").mockResolvedValue();
     vi.mocked(api.getBootstrap).mockRejectedValueOnce(new TypeError("Network unavailable"));
     wrapper = mount(App, { global: { plugins: [pinia], stubs: { RouterView: true } } });
     await flushPromises();
@@ -393,6 +399,7 @@ describe("authentication recovery", () => {
     expect(store.authenticated).toBe(true);
     expect(store.bootstrapFailed).toBe(false);
     expect(replace).toHaveBeenLastCalledWith("/");
+    check.mockRestore();
   });
   it("retains authenticated state during a bootstrap transport failure", async () => {
     const store = useAppStore();

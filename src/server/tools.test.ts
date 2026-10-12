@@ -109,6 +109,27 @@ async function fixture(persistent = false) {
 }
 
 describe("durable tool bridge", () => {
+  it("gives nested tools the harness model catalog without dropping shell output", async () => {
+    const { tools, run } = await fixture();
+    tools.registerTools([
+      {
+        name: "modelCatalog",
+        description: "resolves the active model",
+        parameters: Type.Object({}),
+        execute: async (_args, api) => {
+          const model = api.models.getModel("faux", "faux-1")!;
+          return { content: [{ type: "text", text: `${model.provider}/${model.id}` }] };
+        },
+      },
+    ]);
+    const result = await run(`const model = await tools.modelCatalog({});
+      const shell = await tools.bash({command: "printf 'nested shell output'"});
+      text(model); text(shell);`);
+    expect(result.isError).toBe(false);
+    const text = result.content.map((block: { text: string }) => block.text).join("\n");
+    expect(text).toContain("faux/faux-1");
+    expect(text).toContain("nested shell output");
+  });
   it("isolates dynamically invoked main-memory output while retaining ordinary mixed-batch results", async () => {
     const { directory, tools, run } = await fixture();
     await fs.writeFile(path.join(directory, "task.txt"), "ordinary task result");

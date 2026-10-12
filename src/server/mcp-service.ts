@@ -21,7 +21,12 @@ export class McpService {
   private readonly structured = new WeakMap<object, unknown>();
   private readonly attempts = new Map<
     string,
-    { state: any; input?: (url: string | undefined) => void; task?: Promise<void> }
+    {
+      state: any;
+      controller: AbortController;
+      input?: (url: string | undefined) => void;
+      task?: Promise<void>;
+    }
   >();
   private closing = false;
   private constructor(
@@ -223,14 +228,19 @@ export class McpService {
     if (this.closing) throw new Error("MCP service is closed");
     if ([...this.attempts.values()].some((attempt) => attempt.state.status === "pending"))
       throw Object.assign(new Error("MCP sign-in already pending"), { statusCode: 409 });
-    const attempt: { state: any; input?: (url: string | undefined) => void; task?: Promise<void> } =
-      {
-        state: {
-          attemptId: randomUUID(),
-          serverName: name,
-          status: "pending",
-        },
-      };
+    const attempt: {
+      state: any;
+      controller: AbortController;
+      input?: (url: string | undefined) => void;
+      task?: Promise<void>;
+    } = {
+      state: {
+        attemptId: randomUUID(),
+        serverName: name,
+        status: "pending",
+      },
+      controller: new AbortController(),
+    };
     this.attempts.set(attempt.state.attemptId, attempt);
     attempt.task = (async () => {
       try {
@@ -247,6 +257,7 @@ export class McpService {
           store: credentials.forServer(name, connection.oauthUrl),
           settings: connection.oauthSettings(),
           challenge: connection.challenge,
+          signal: attempt.controller.signal,
           prompt: {
             showAuthorizationUrl: (url: URL) => {
               attempt.state.authorizationUrl = url.href;
@@ -298,6 +309,7 @@ export class McpService {
     const attempt = this.attempt(id);
     if (attempt.state.status === "pending") {
       attempt.state.status = "cancelled";
+      attempt.controller.abort();
       attempt.input?.(undefined);
     }
     return this.getAuthAttempt(id);

@@ -121,6 +121,7 @@ test("artifact-only and error-only replies each render exactly one action stack"
         isStreaming: false,
         isPinnedToBottom: true,
       },
+      global: { stubs: { SharedSitesList: true } },
     });
     try {
       expect(wrapper.findAll(".reply-actions")).toHaveLength(1);

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import fastify from "fastify";
 import { chromium } from "patchright";
-import { createServer } from "vite";
+import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
 import { expect, test } from "vite-plus/test";
 import { registerBrowserErrorRoutes } from "@/server/browser-errors";
 
@@ -26,9 +26,7 @@ test("browser rejection and caught upload failure reach authenticated server wit
   );
   await backend.listen({ host: "127.0.0.1", port: 0 });
   const address = backend.server.address() as { port: number };
-  const server = await createServer({
-    configFile: false,
-    cacheDir: path.resolve("node_modules/.vite-browser-errors-tests"),
+  const server = await createBrowserFixtureServer("src/client/lib/BrowserErrors.fixture.html", {
     resolve: { alias: { "@": path.resolve("src") } },
     server: {
       host: "127.0.0.1",
@@ -127,7 +125,7 @@ test("browser rejection and caught upload failure reach authenticated server wit
     expect(reports.every((r: any) => /^[a-f0-9-]{36}$/.test(r.correlationId))).toBe(true);
   } finally {
     await browser.close();
-    await server.close();
+    await closeBrowserFixtureServer(server);
     await backend.close();
   }
 }, 30_000);

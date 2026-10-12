@@ -1,7 +1,8 @@
 // @vitest-environment node
 import path from "node:path";
 import { chromium, webkit, type Browser, type Page } from "playwright-core";
-import { createServer, type ViteDevServer } from "vite";
+import type { ViteDevServer } from "vite";
+import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
 
 let browser: Browser;
@@ -16,9 +17,7 @@ async function fixture(context = browser) {
   return page;
 }
 beforeAll(async () => {
-  server = await createServer({
-    configFile: false,
-    cacheDir: path.resolve("node_modules/.vite-main-cache-tests"),
+  server = await createBrowserFixtureServer("src/client/lib/MainCache.fixture.html", {
     resolve: { alias: { "@": path.resolve("src") } },
     server: { host: "127.0.0.1", port: 0 },
   });
@@ -30,7 +29,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await browser?.close();
   await safari?.close();
-  await server?.close();
+  if (server) await closeBrowserFixtureServer(server);
 });
 
 test("native cache upserts IDs, rejects stale state, isolates users/workers and expires", async () => {

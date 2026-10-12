@@ -31,12 +31,22 @@ Run the two development servers in separate terminals and open `http://localhost
 
 ## Checks
 
-Run checks and tests before pushing changes. Deployment builds and verifies releases without running the test suite.
+`pnpm test` runs the server/shared and client-component groups. Server tests use Node and reusable threads; component tests use isolated happy-dom environments. Durable replay, process cancellation, browser persistence and SQLite scaling regressions remain in the standard suite.
+
+```sh
+pnpm test
+pnpm test:browser  # Browser fixtures, layout and native cache (Chromium/WebKit)
+pnpm test:all      # All three groups; required before pushing/deploying
+```
+
+Browser fixture servers use separate temporary Vite caches. Viewport cases cover layout; dark-mode cases cover styling rather than repeating every interaction.
+
+Validate the complete source before pushing. Deployment checks and builds releases and runs the production offline gate; it does not repeat the source test suite.
 
 ```sh
 pnpm check
-pnpm test --maxWorkers=1
-bash scripts/deploy.test.sh
+pnpm test:all
+bash scripts/deploy.test.sh  # Linux deployment regression checks
 pnpm build
 node scripts/verify-offline.mjs
 ```

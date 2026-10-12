@@ -2,6 +2,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/deploy-lib.sh
+# Pre-deploy source validation: pnpm test:all and bash scripts/deploy.test.sh.
+# Release staging runs the build/offline gates without repeating source tests.
 git pull --ff-only
 git diff --quiet && git diff --cached --quiet || { echo 'Commit changes before deploying.' >&2; exit 1; }
 

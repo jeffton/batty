@@ -2,7 +2,8 @@
 import path from "node:path";
 import vue from "@vitejs/plugin-vue";
 import { chromium, type Browser, type Page } from "patchright";
-import { createServer, type ViteDevServer } from "vite";
+import type { ViteDevServer } from "vite";
+import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
 
 declare global {
@@ -16,57 +17,59 @@ let server: ViteDevServer;
 let browser: Browser;
 let url: string;
 beforeAll(async () => {
-  server = await createServer({
-    configFile: false,
-    plugins: [
-      vue(),
-      {
-        name: "reconnect-fixture",
-        configureServer(server) {
-          server.middlewares.use("/fixture-resumed.json", (_request, response) => {
-            response.setHeader("content-type", "application/json");
-            response.end(
-              JSON.stringify({
-                streamId: "after-restart",
-                revision: 1,
-                totalMessageCount: 3,
-                isStreaming: false,
-                messages: [
-                  {
-                    id: "101",
-                    role: "assistant",
-                    timestamp: Date.now(),
-                    runTaskId: "42",
-                    stopReason: "aborted",
-                    turnPhase: "final",
-                    blocks: [{ type: "text", text: "**Jeg synes, tur" }],
-                  },
-                  {
-                    id: "102",
-                    role: "assistant",
-                    timestamp: Date.now(),
-                    runTaskId: "42",
-                    stopReason: "stop",
-                    turnPhase: "final",
-                    blocks: [{ type: "text", text: "**Full reply after reconnect**" }],
-                  },
-                ],
-              }),
-            );
-          });
+  server = await createBrowserFixtureServer(
+    "src/client/components/SessionTranscript.fixture.html",
+    {
+      plugins: [
+        vue(),
+        {
+          name: "reconnect-fixture",
+          configureServer(server) {
+            server.middlewares.use("/fixture-resumed.json", (_request, response) => {
+              response.setHeader("content-type", "application/json");
+              response.end(
+                JSON.stringify({
+                  streamId: "after-restart",
+                  revision: 1,
+                  totalMessageCount: 3,
+                  isStreaming: false,
+                  messages: [
+                    {
+                      id: "101",
+                      role: "assistant",
+                      timestamp: Date.now(),
+                      runTaskId: "42",
+                      stopReason: "aborted",
+                      turnPhase: "final",
+                      blocks: [{ type: "text", text: "**Jeg synes, tur" }],
+                    },
+                    {
+                      id: "102",
+                      role: "assistant",
+                      timestamp: Date.now(),
+                      runTaskId: "42",
+                      stopReason: "stop",
+                      turnPhase: "final",
+                      blocks: [{ type: "text", text: "**Full reply after reconnect**" }],
+                    },
+                  ],
+                }),
+              );
+            });
+          },
         },
-      },
-    ],
-    resolve: { alias: { "@": path.resolve("src") } },
-    server: { host: "127.0.0.1", port: 0 },
-  });
+      ],
+      resolve: { alias: { "@": path.resolve("src") } },
+      server: { host: "127.0.0.1", port: 0 },
+    },
+  );
   await server.listen();
   url = `${server.resolvedUrls!.local[0]}src/client/components/SessionTranscript.fixture.html`;
   browser = await chromium.launch({ headless: true });
 }, 30_000);
 afterAll(async () => {
   await browser?.close();
-  await server?.close();
+  if (server) await closeBrowserFixtureServer(server);
 });
 async function state(page: Page, value: string) {
   await page.evaluate(
@@ -124,7 +127,6 @@ for (const width of [390, 1100]) {
       ).toBe(0);
       const collapse = page.getByRole("button", { name: "Collapse details", exact: true });
       expect(await collapse.getAttribute("aria-expanded")).toBe("true");
-      await page.screenshot({ path: `/tmp/batty2-orphan-${width}-expanded.png` });
       expect(await collapse.evaluate((element) => element === document.activeElement)).toBe(true);
       await page.keyboard.press("Space");
       await page.getByText("Full cron result", { exact: true }).waitFor({ state: "hidden" });
@@ -135,7 +137,6 @@ for (const width of [390, 1100]) {
       expect(
         await page.getByRole("button", { name: "Copy reply as markdown", exact: true }).count(),
       ).toBe(0);
-      await page.screenshot({ path: `/tmp/batty2-orphan-${width}-collapsed.png` });
     } finally {
       await page.close();
     }
@@ -182,12 +183,10 @@ for (const width of [390, 1100]) {
       await page.getByText("Interrupted response", { exact: true }).waitFor({ state: "hidden" });
       expect(await page.locator(".message--assistant").count()).toBe(1);
       await page.getByText("Fix spacing", { exact: true }).waitFor();
-      await page.screenshot({ path: `/tmp/batty2-reconnect-${width}-collapsed.png` });
       await page.getByRole("button", { name: "Show details", exact: true }).click();
       await page.getByText("Interrupted response", { exact: true }).waitFor();
       await page.getByText("**Jeg synes, tur", { exact: true }).waitFor();
       expect(await page.locator(".message--assistant").count()).toBe(2);
-      await page.screenshot({ path: `/tmp/batty2-reconnect-${width}-details.png` });
     } finally {
       await context.close();
     }

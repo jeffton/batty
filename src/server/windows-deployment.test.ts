@@ -6,7 +6,7 @@ test("Deployment retains build gates and leaves tests to pre-push validation", a
   const windows = await readFile("scripts/deploy-windows.ps1", "utf8");
   const linux = await readFile("scripts/deploy.sh", "utf8");
   expect(windows).not.toMatch(/Invoke-Native pnpm @\('test'/);
-  expect(linux).not.toMatch(/pnpm test|bash scripts\/deploy\.test\.sh/);
+  expect(linux).not.toMatch(/^\s*(?:pnpm test|bash scripts\/deploy\.test\.sh)/m);
   expect(windows).toContain("@('check')");
   expect(windows).toContain("@('build')");
   expect(windows).toContain("scripts/verify-offline.mjs");

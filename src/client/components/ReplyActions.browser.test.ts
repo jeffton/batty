@@ -2,7 +2,8 @@
 import path from "node:path";
 import vue from "@vitejs/plugin-vue";
 import { chromium, type Browser, type Page } from "patchright";
-import { createServer, type ViteDevServer } from "vite";
+import type { ViteDevServer } from "vite";
+import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
 
 let server: ViteDevServer;
@@ -10,8 +11,7 @@ let browser: Browser;
 let url: string;
 
 beforeAll(async () => {
-  server = await createServer({
-    configFile: false,
+  server = await createBrowserFixtureServer("src/client/components/ReplyActions.fixture.html", {
     plugins: [vue()],
     resolve: { alias: { "@": path.resolve("src") } },
     server: { host: "127.0.0.1", port: 0 },
@@ -23,7 +23,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await browser?.close();
-  await server?.close();
+  if (server) await closeBrowserFixtureServer(server);
 });
 
 async function verifyTargets(page: Page) {

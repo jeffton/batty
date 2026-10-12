@@ -2,33 +2,36 @@
 import path from "node:path";
 import vue from "@vitejs/plugin-vue";
 import { chromium, type Browser } from "patchright";
-import { createServer, type ViteDevServer } from "vite";
+import type { ViteDevServer } from "vite";
+import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
 let server: ViteDevServer;
 let browser: Browser;
 let url: string;
 beforeAll(async () => {
-  server = await createServer({
-    configFile: false,
-    plugins: [vue()],
-    resolve: { alias: { "@": path.resolve("src") } },
-    server: { host: "127.0.0.1", port: 0 },
-  });
+  server = await createBrowserFixtureServer(
+    "src/client/components/RuntimeNoticeArtifacts.fixture.html",
+    {
+      plugins: [vue()],
+      resolve: { alias: { "@": path.resolve("src") } },
+      server: { host: "127.0.0.1", port: 0 },
+    },
+  );
   await server.listen();
   url = `${server.resolvedUrls!.local[0]}src/client/components/RuntimeNoticeArtifacts.fixture.html`;
   browser = await chromium.launch({ headless: true });
 }, 30_000);
 afterAll(async () => {
   await browser?.close();
-  await server?.close();
+  if (server) await closeBrowserFixtureServer(server);
 });
-for (const { width, colorScheme } of [
+const themedLayouts = [
   { width: 320, colorScheme: "light" as const },
-  { width: 390, colorScheme: "light" as const },
-  { width: 390, colorScheme: "dark" as const },
   { width: 1100, colorScheme: "light" as const },
-  { width: 1100, colorScheme: "dark" as const },
-]) {
+  { width: 390, colorScheme: "dark" as const },
+];
+
+for (const { width, colorScheme } of themedLayouts) {
   test(`cron, subagent and ordinary reply artifacts render directly at ${width}px (${colorScheme})`, async () => {
     const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
     page.setDefaultTimeout(5000);
@@ -65,9 +68,9 @@ for (const { width, colorScheme } of [
             "solid",
           );
           await action.hover();
-          expect(
-            await action.evaluate((element) => getComputedStyle(element).backgroundColor),
-          ).not.toBe(codeBackground);
+          await expect
+            .poll(() => action.evaluate((element) => getComputedStyle(element).backgroundColor))
+            .not.toBe(codeBackground);
           await page.mouse.move(0, 0);
         }
         const box = (await diff.boundingBox())!;
@@ -102,9 +105,6 @@ for (const { width, colorScheme } of [
         expect(layout.bottom).toBe(900 - inset);
         expect(layout.width).toBe(width - 2 * inset);
         await popover.locator(".agent-turn-diff-popover__viewer diffs-container").waitFor();
-        await page.screenshot({
-          path: `/tmp/batty2-diff-popover-${width}-${colorScheme}.png`,
-        });
         await popover.getByRole("button", { name: "Close code changes" }).click();
       }
       expect(await page.getByRole("button", { name: "Open cron session" }).count()).toBe(1);
@@ -113,15 +113,15 @@ for (const { width, colorScheme } of [
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);
       expect(errors).toEqual([]);
-      await page.screenshot({
-        path: `/tmp/batty2-notice-artifacts-${width}-${colorScheme}.png`,
-        fullPage: true,
-      });
     } finally {
       await page.close();
     }
   }, 30_000);
+}
 
+// Placement and dismissal depend on viewport size, not the color scheme.
+for (const width of [320, 1100]) {
+  const colorScheme = "light";
   test(`teleported model, usage and delete popovers retain their layout at ${width}px (${colorScheme})`, async () => {
     const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
     page.setDefaultTimeout(5000);
@@ -208,7 +208,9 @@ for (const { width, colorScheme } of [
       await page.close();
     }
   }, 30_000);
+}
 
+for (const { width, colorScheme } of themedLayouts) {
   test(`runtime notice popovers isolate styles and preserve nested navigation at ${width}px (${colorScheme})`, async () => {
     const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
     page.setDefaultTimeout(5000);
@@ -280,7 +282,6 @@ for (const { width, colorScheme } of [
         expect(box.y + box.height).toBe(900 - inset);
         expect(await popover.evaluate((element) => getComputedStyle(element).display)).toBe("grid");
       }
-      await page.screenshot({ path: `/tmp/batty2-nested-popover-${width}-${colorScheme}.png` });
       expect(await parent.evaluate((element) => element.matches(":popover-open"))).toBe(true);
       expect(await child.evaluate((element) => element.matches(":popover-open"))).toBe(true);
       await child.getByRole("button", { name: "Close subagent transcript" }).click();

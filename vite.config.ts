@@ -52,9 +52,37 @@ export default defineConfig({
     sourcemap: true,
   },
   test: {
-    environment: "happy-dom",
     execArgv: ["--no-experimental-webstorage"],
-    include: ["src/**/*.test.ts"],
+    projects: [
+      {
+        test: {
+          name: "server",
+          environment: "node",
+          include: ["src/server/**/*.test.ts", "src/shared/**/*.test.ts"],
+          pool: "threads",
+          isolate: false,
+        },
+      },
+      {
+        test: {
+          name: "client",
+          environment: "happy-dom",
+          include: ["src/client/**/*.test.ts"],
+          exclude: ["src/**/*.browser.test.ts"],
+          pool: "threads",
+          isolate: true,
+        },
+      },
+      {
+        test: {
+          name: "browser",
+          environment: "node",
+          include: ["src/**/*.browser.test.ts"],
+          pool: "forks",
+          isolate: true,
+        },
+      },
+    ],
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],

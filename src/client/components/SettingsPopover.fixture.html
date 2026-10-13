@@ -44,6 +44,14 @@
       store.settings.defaultProvider = "fixture";
       store.getBattyAgentsFile = async () => "Global instructions";
       store.setBattyAgentsFile = async (content) => content;
+      store.providerAuth = {
+        providers: [
+          { id: "openai", name: "OpenAI", connected: true, authKind: "oauth" },
+          { id: "google", name: "Google", connected: false, authKind: "apiKey" },
+          { id: "openrouter", name: "OpenRouter", connected: false, authKind: "apiKey" },
+        ],
+      };
+      store.bootstrap = async () => {};
       store.refreshProviderAuthStatus = async () => {};
       createApp({
         render: () => h(SettingsPopover, { popoverId: "settings", anchorName: "--settings" }),

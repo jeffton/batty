@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Network, Save } from "@lucide/vue";
+import SettingsField from "./SettingsField.vue";
 import { computed, ref, watch } from "vue";
 import ModelConfigSelector from "@/client/components/ModelConfigSelector.vue";
 import { useAppStore } from "@/client/stores/app";
@@ -76,25 +77,24 @@ async function saveMemoryModel(modelId: string): Promise<void> {
     </div>
   </div>
   <form class="settings-popover__editor" @submit.prevent="saveMemoryLanguage">
-    <div class="settings-popover__inline">
-      <label class="settings-popover__field">
-        <span>Memory language</span>
-        <input
-          v-model="memoryLanguage"
-          class="settings-popover__input"
-          type="text"
-          autocomplete="off"
-          :disabled="memoryLanguageSaving"
-        />
-      </label>
-      <button
-        class="settings-popover__action settings-popover__action--primary"
-        type="submit"
-        :disabled="memoryLanguageSaving || !memoryLanguage.trim()"
-      >
-        <Save :size="14" /> {{ memoryLanguageSaving ? "Saving…" : "Save" }}
-      </button>
-    </div>
+    <SettingsField label="Memory language">
+      <input
+        v-model="memoryLanguage"
+        class="settings-popover__input"
+        type="text"
+        autocomplete="off"
+        :disabled="memoryLanguageSaving"
+      />
+      <template #action>
+        <button
+          class="settings-popover__action settings-popover__action--primary"
+          type="submit"
+          :disabled="memoryLanguageSaving || !memoryLanguage.trim()"
+        >
+          <Save :size="14" /> {{ memoryLanguageSaving ? "Saving…" : "Save" }}
+        </button>
+      </template>
+    </SettingsField>
     <div v-if="memoryLanguageError" class="settings-popover__error" role="alert">
       {{ memoryLanguageError }}
     </div>

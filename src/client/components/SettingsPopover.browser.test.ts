@@ -29,11 +29,18 @@ for (const width of [390, 1100]) {
   test(`settings controls, drafts and nested editors at ${width}px`, async () => {
     const page = await browser.newPage({ viewport: { width, height: 900 } });
     const appearanceRequests: unknown[] = [];
+    const environmentRequests: unknown[] = [];
+    let environmentNames = ["PROJECT_ROOT"];
     try {
       await page.route("**/api/**", async (route) => {
         const pathname = new URL(route.request().url()).pathname;
         let body: unknown = {};
-        if (pathname.endsWith("/environment")) body = { names: [] };
+        if (pathname.endsWith("/environment")) body = { names: environmentNames };
+        if (pathname.endsWith("/environment/NEW_KEY")) {
+          environmentRequests.push(route.request().postDataJSON());
+          environmentNames = ["PROJECT_ROOT", "NEW_KEY"];
+          body = { names: environmentNames };
+        }
         if (pathname.endsWith("/appearance")) {
           const appearance = route.request().postDataJSON();
           appearanceRequests.push(appearance);
@@ -119,6 +126,54 @@ for (const width of [390, 1100]) {
         expect(row.right).toBeLessThanOrEqual(width);
         expect(row.gap).toBeGreaterThan(0);
       }
+      await page.getByRole("tab", { name: "Auth", exact: true }).click();
+      await page.getByRole("button", { name: "Edit Gemini API key" }).click();
+      const keyInput = page.getByPlaceholder("Paste Gemini API key");
+      await keyInput.fill("Unsaved key draft");
+      await page.getByRole("textbox", { name: "Variable name", exact: true }).fill("NEW_KEY");
+      await page
+        .getByRole("textbox", { name: "Variable value", exact: true })
+        .fill("value with spaces");
+      await page.getByRole("tab", { name: "Appearance" }).click();
+      expect(await page.getByRole("textbox", { name: "App title" }).inputValue()).toBe(
+        "Unsaved app title",
+      );
+      await page.getByRole("tab", { name: "Auth", exact: true }).click();
+      expect(await keyInput.inputValue()).toBe("Unsaved key draft");
+      expect(
+        await page.getByRole("textbox", { name: "Variable name", exact: true }).inputValue(),
+      ).toBe("NEW_KEY");
+      const authFields = await page
+        .locator("#settings-Auth-panel input:visible")
+        .evaluateAll((elements) =>
+          elements.map((element) => {
+            const rect = element.getBoundingClientRect();
+            return { left: rect.left, right: rect.right, height: rect.height };
+          }),
+        );
+      for (const field of authFields) {
+        expect(field.left).toBeCloseTo(controls[0]!.left, 0);
+        expect(field.right).toBeLessThanOrEqual(width);
+        expect(field.height).toBeGreaterThanOrEqual(44);
+      }
+      for (const button of await page.locator("#settings-Auth-panel button:visible").all()) {
+        const bounds = await button.boundingBox();
+        expect(bounds!.height).toBeGreaterThanOrEqual(44);
+        expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+      }
+      await page.screenshot({ path: `/tmp/settings-b-auth-${width}.png` });
+      await page.getByRole("button", { name: "Set variable", exact: true }).click();
+      await page.getByText("NEW_KEY", { exact: true }).waitFor();
+      expect(environmentRequests).toEqual([{ value: "value with spaces" }]);
+      expect(
+        await page.getByRole("textbox", { name: "Variable name", exact: true }).inputValue(),
+      ).toBe("");
+      expect(
+        await page.getByRole("textbox", { name: "Variable value", exact: true }).inputValue(),
+      ).toBe("");
+      await page.getByRole("button", { name: "Remove NEW_KEY" }).click();
+      await page.getByRole("button", { name: "Cancel", exact: true }).click();
+      expect(await page.getByText("NEW_KEY", { exact: true }).count()).toBe(1);
     } finally {
       await page.close();
     }

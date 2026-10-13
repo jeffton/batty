@@ -86,7 +86,7 @@ describe("Settings popover lifecycle", () => {
     const auth = section(wrapper, "Brave Search API key");
     await auth.get("button").trigger("click");
     await auth.get("input").setValue("invalid");
-    await auth.get(".settings-popover__editor button").trigger("click");
+    await auth.get("form").trigger("submit");
     await flushPromises();
     expect(auth.text()).toContain("Invalid search key");
     await toggle("closed");

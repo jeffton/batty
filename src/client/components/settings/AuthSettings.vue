@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ExternalLink, Pencil, Save, X } from "@lucide/vue";
+import { Check, ExternalLink, LogIn, Save } from "@lucide/vue";
+import SettingsCredential from "./SettingsCredential.vue";
+import SettingsField from "./SettingsField.vue";
 import { computed, reactive, ref, watch } from "vue";
 import { useAppStore } from "@/client/stores/app";
 import { formatShortDateTime } from "@/client/lib/formatting";
@@ -215,156 +217,120 @@ watch(
 
 <template>
   <section class="settings-popover__section">
-    <article class="settings-popover__item">
-      <div class="settings-popover__item-top">
-        <div class="settings-popover__item-meta">
-          <strong>{{ itemTitle(BRAVE_SEARCH_ITEM_ID) }}</strong>
-          <div class="settings-popover__item-status-row">
-            <span
-              :class="[
-                'settings-popover__badge',
-                itemConnected(BRAVE_SEARCH_ITEM_ID)
-                  ? 'settings-popover__badge--connected'
-                  : 'settings-popover__badge--disconnected',
-              ]"
-            >
-              {{ itemStatusLabel(BRAVE_SEARCH_ITEM_ID) }}
-            </span>
-          </div>
-        </div>
-
-        <button
-          class="settings-popover__icon-btn"
-          type="button"
-          :disabled="braveSearchSaving"
-          @click="toggleExpanded(BRAVE_SEARCH_ITEM_ID)"
-        >
-          <component :is="isExpanded(BRAVE_SEARCH_ITEM_ID) ? X : Pencil" :size="14" />
-        </button>
-      </div>
-
-      <div v-if="isExpanded(BRAVE_SEARCH_ITEM_ID)" class="settings-popover__editor">
-        <input
-          v-model="braveSearchInput"
-          class="settings-popover__input"
-          type="text"
-          autocomplete="off"
-          placeholder="Paste Brave Search API key"
-          :disabled="braveSearchSaving"
-        />
-        <div class="settings-popover__editor-actions">
-          <button
-            class="settings-popover__action settings-popover__action--primary"
-            type="button"
+    <SettingsCredential
+      :title="itemTitle(BRAVE_SEARCH_ITEM_ID)"
+      :status="itemStatusLabel(BRAVE_SEARCH_ITEM_ID)"
+      :connected="itemConnected(BRAVE_SEARCH_ITEM_ID)"
+      :expanded="isExpanded(BRAVE_SEARCH_ITEM_ID)"
+      :disabled="braveSearchSaving"
+      @toggle="toggleExpanded(BRAVE_SEARCH_ITEM_ID)"
+    >
+      <form class="settings-popover__editor" @submit.prevent="saveBraveSearchKey">
+        <SettingsField label="API key">
+          <input
+            v-model="braveSearchInput"
+            class="settings-popover__input"
+            type="text"
+            autocomplete="off"
+            placeholder="Paste Brave Search API key"
             :disabled="braveSearchSaving"
-            @click="saveBraveSearchKey"
-          >
-            <Save :size="14" /> {{ braveSearchSaving ? "Saving…" : "Save" }}
-          </button>
-        </div>
-        <div v-if="braveSearchError" class="settings-popover__error">
-          {{ braveSearchError }}
-        </div>
-      </div>
-    </article>
-
-    <article v-for="provider in providerOrder" :key="provider.id" class="settings-popover__item">
-      <div class="settings-popover__item-top">
-        <div class="settings-popover__item-meta">
-          <strong>{{ itemTitle(provider.id) }}</strong>
-          <div class="settings-popover__item-status-row">
-            <span
-              :class="[
-                'settings-popover__badge',
-                itemConnected(provider.id)
-                  ? 'settings-popover__badge--connected'
-                  : 'settings-popover__badge--disconnected',
-              ]"
-            >
-              {{ itemStatusLabel(provider.id) }}
-            </span>
-          </div>
-        </div>
-
-        <button
-          class="settings-popover__icon-btn"
-          type="button"
-          :disabled="
-            provider.id === 'openai' ? connectPending || completePending : apiKeySaving[provider.id]
-          "
-          @click="toggleExpanded(provider.id)"
-        >
-          <component :is="isExpanded(provider.id) ? X : Pencil" :size="14" />
-        </button>
-      </div>
-
-      <div v-if="isExpanded(provider.id)" class="settings-popover__editor">
-        <template v-if="isOpenAIProvider(provider.id)">
-          <div class="settings-popover__help">
-            Sign in with your ChatGPT subscription to use <code>openai/*</code>
-            models.
-          </div>
-
-          <button
-            class="settings-popover__action"
-            type="button"
-            :disabled="connectPending || completePending"
-            @click="startOpenAIAuth"
-          >
-            {{
-              connectPending
-                ? "Starting…"
-                : hasOpenAIAttempt
-                  ? "Restart connect flow"
-                  : provider.connected
-                    ? "Reconnect account"
-                    : "Connect ChatGPT"
-            }}
-          </button>
-
-          <div v-if="hasOpenAIAttempt" class="settings-popover__attempt">
-            <div v-if="authInstructions" class="settings-popover__help">
-              {{ authInstructions }}
-            </div>
-            <div class="settings-popover__help">
-              Finish sign-in in your browser. If this stays open, paste the full callback URL from
-              the address bar, even if the page cannot load.
-            </div>
-            <div v-if="authExpiryLabel" class="settings-popover__help">
-              Expires: {{ authExpiryLabel }}
-            </div>
-
-            <a
-              class="settings-popover__link"
-              :href="authUrl"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <ExternalLink :size="14" /> Open sign-in page
-            </a>
-
-            <textarea
-              v-model="authInput"
-              class="settings-popover__input settings-popover__textarea"
-              rows="4"
-              placeholder="Paste the full http://127.0.0.1:1455/auth/callback URL"
-              :disabled="completePending"
-            />
-
+          />
+          <template #action>
             <button
               class="settings-popover__action settings-popover__action--primary"
-              type="button"
-              :disabled="completePending || !authInput.trim()"
-              @click="completeOpenAIAuth"
+              type="submit"
+              :disabled="braveSearchSaving"
             >
-              {{ completePending ? "Completing…" : "Complete connection" }}
+              <Save :size="14" /> {{ braveSearchSaving ? "Saving…" : "Save" }}
             </button>
+          </template>
+        </SettingsField>
+        <div v-if="braveSearchError" class="settings-popover__error" role="alert">
+          {{ braveSearchError }}
+        </div>
+      </form>
+    </SettingsCredential>
+
+    <SettingsCredential
+      v-for="provider in providerOrder"
+      :key="provider.id"
+      :title="itemTitle(provider.id)"
+      :status="itemStatusLabel(provider.id)"
+      :connected="itemConnected(provider.id)"
+      :expanded="isExpanded(provider.id)"
+      :disabled="
+        provider.id === 'openai' ? connectPending || completePending : apiKeySaving[provider.id]
+      "
+      @toggle="toggleExpanded(provider.id)"
+    >
+      <template v-if="isOpenAIProvider(provider.id)">
+        <div class="settings-popover__help">
+          Sign in with your ChatGPT subscription to use <code>openai/*</code> models.
+        </div>
+        <button
+          class="settings-popover__action"
+          type="button"
+          :disabled="connectPending || completePending"
+          @click="startOpenAIAuth"
+        >
+          <LogIn :size="16" />
+          {{
+            connectPending
+              ? "Starting…"
+              : hasOpenAIAttempt
+                ? "Restart connect flow"
+                : provider.connected
+                  ? "Reconnect account"
+                  : "Connect ChatGPT"
+          }}
+        </button>
+        <div v-if="hasOpenAIAttempt" class="settings-popover__attempt">
+          <div v-if="authInstructions" class="settings-popover__help">
+            {{ authInstructions }}
           </div>
+          <div class="settings-popover__help">
+            Finish sign-in in your browser. If this stays open, paste the full callback URL from the
+            address bar, even if the page cannot load.
+          </div>
+          <div v-if="authExpiryLabel" class="settings-popover__help">
+            Expires: {{ authExpiryLabel }}
+          </div>
+          <a
+            class="settings-popover__action"
+            :href="authUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <ExternalLink :size="14" /> Open sign-in page
+          </a>
+          <form class="settings-popover__editor" @submit.prevent="completeOpenAIAuth">
+            <SettingsField label="Callback URL">
+              <textarea
+                v-model="authInput"
+                class="settings-popover__input settings-popover__textarea"
+                rows="4"
+                placeholder="Paste the full http://127.0.0.1:1455/auth/callback URL"
+                :disabled="completePending"
+              />
+            </SettingsField>
+            <button
+              class="settings-popover__action settings-popover__action--primary"
+              type="submit"
+              :disabled="completePending || !authInput.trim()"
+            >
+              <Check :size="16" /> {{ completePending ? "Completing…" : "Complete connection" }}
+            </button>
+          </form>
+        </div>
+        <div v-if="authError" class="settings-popover__error" role="alert">{{ authError }}</div>
+      </template>
 
-          <div v-if="authError" class="settings-popover__error">{{ authError }}</div>
-        </template>
-
-        <template v-else>
+      <form
+        v-else
+        class="settings-popover__editor"
+        @submit.prevent="saveApiKey(provider.id as 'google' | 'openrouter')"
+      >
+        <SettingsField label="API key">
           <input
             v-model="apiKeyInputs[provider.id as 'google' | 'openrouter']"
             class="settings-popover__input"
@@ -373,21 +339,20 @@ watch(
             :placeholder="apiKeyPlaceholder(provider.id as 'google' | 'openrouter')"
             :disabled="apiKeySaving[provider.id]"
           />
-          <div class="settings-popover__editor-actions">
+          <template #action>
             <button
               class="settings-popover__action settings-popover__action--primary"
-              type="button"
+              type="submit"
               :disabled="apiKeySaving[provider.id]"
-              @click="saveApiKey(provider.id as 'google' | 'openrouter')"
             >
               <Save :size="14" /> {{ apiKeySaving[provider.id] ? "Saving…" : "Save" }}
             </button>
-          </div>
-          <div v-if="apiKeyErrors[provider.id]" class="settings-popover__error">
-            {{ apiKeyErrors[provider.id] }}
-          </div>
-        </template>
-      </div>
-    </article>
+          </template>
+        </SettingsField>
+        <div v-if="apiKeyErrors[provider.id]" class="settings-popover__error" role="alert">
+          {{ apiKeyErrors[provider.id] }}
+        </div>
+      </form>
+    </SettingsCredential>
   </section>
 </template>

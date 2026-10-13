@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Check, Save } from "@lucide/vue";
+import SettingsField from "./SettingsField.vue";
 import { ref, watch } from "vue";
 import { useAppStore } from "@/client/stores/app";
 import { APP_COLOR_OPTIONS, type AppColor } from "@/shared/appearance";
@@ -71,28 +72,27 @@ watch(
 
 <template>
   <section class="settings-popover__section">
-    <div class="settings-popover__inline">
-      <label class="settings-popover__field">
-        <span>App title</span>
-        <input
-          v-model="appearanceTitle"
-          class="settings-popover__input settings-popover__input--title"
-          type="text"
-          maxlength="40"
-          autocomplete="off"
-          :disabled="appearanceSaving"
-          @keydown.enter="saveAppearance"
-        />
-      </label>
-      <button
-        class="settings-popover__action settings-popover__action--primary"
-        type="button"
-        :disabled="appearanceSaving || !appearanceTitle.trim()"
-        @click="saveAppearance"
-      >
-        <Save :size="14" /> {{ appearanceSaving ? "Saving…" : "Save" }}
-      </button>
-    </div>
+    <SettingsField label="App title">
+      <input
+        v-model="appearanceTitle"
+        class="settings-popover__input settings-popover__input--title"
+        type="text"
+        maxlength="40"
+        autocomplete="off"
+        :disabled="appearanceSaving"
+        @keydown.enter="saveAppearance"
+      />
+      <template #action>
+        <button
+          class="settings-popover__action settings-popover__action--primary"
+          type="button"
+          :disabled="appearanceSaving || !appearanceTitle.trim()"
+          @click="saveAppearance"
+        >
+          <Save :size="14" /> {{ appearanceSaving ? "Saving…" : "Save" }}
+        </button>
+      </template>
+    </SettingsField>
 
     <fieldset class="settings-popover__color-fieldset">
       <legend>Color</legend>
@@ -100,7 +100,7 @@ watch(
         <label
           v-for="color in APP_COLOR_OPTIONS"
           :key="color.id"
-          class="settings-popover__color-option"
+          class="settings-popover__action settings-popover__color-option"
           :title="color.label"
         >
           <input

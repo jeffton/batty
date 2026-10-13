@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Save } from "@lucide/vue";
+import SettingsField from "./SettingsField.vue";
 import { ref, watch } from "vue";
 import DeleteButton from "@/client/components/DeleteButton.vue";
 import {
@@ -74,38 +75,46 @@ watch(
     <div v-for="name in environmentNames" :key="name" class="settings-popover__environment-row">
       <code>{{ name }}</code>
       <DeleteButton
-        class="settings-popover__icon-btn"
+        class="settings-popover__action"
         :label="`Remove ${name}`"
         :disabled="environmentPending"
         @confirm="deleteEnvironmentVariable(name)"
       />
     </div>
     <form class="settings-popover__editor" @submit.prevent="saveEnvironmentVariable">
-      <input
-        v-model="environmentName"
-        class="settings-popover__input"
-        aria-label="Variable name"
-        placeholder="VARIABLE_NAME"
-        autocomplete="off"
-        spellcheck="false"
-        :disabled="environmentPending"
-      />
-      <input
-        v-model="environmentValue"
-        class="settings-popover__input"
-        aria-label="Variable value"
-        type="text"
-        placeholder="Value"
-        autocomplete="off"
-        :disabled="environmentPending"
-      />
-      <button
-        class="settings-popover__action settings-popover__action--primary"
-        type="submit"
-        :disabled="environmentPending || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(environmentName.trim())"
-      >
-        <Save :size="14" /> {{ environmentPending ? "Saving…" : "Set variable" }}
-      </button>
+      <SettingsField label="Variable name">
+        <input
+          v-model="environmentName"
+          class="settings-popover__input"
+          aria-label="Variable name"
+          placeholder="VARIABLE_NAME"
+          autocomplete="off"
+          spellcheck="false"
+          :disabled="environmentPending"
+        />
+      </SettingsField>
+      <SettingsField label="Value">
+        <input
+          v-model="environmentValue"
+          class="settings-popover__input"
+          aria-label="Variable value"
+          type="text"
+          placeholder="Value"
+          autocomplete="off"
+          :disabled="environmentPending"
+        />
+        <template #action>
+          <button
+            class="settings-popover__action settings-popover__action--primary"
+            type="submit"
+            :disabled="
+              environmentPending || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(environmentName.trim())
+            "
+          >
+            <Save :size="14" /> {{ environmentPending ? "Saving…" : "Set variable" }}
+          </button>
+        </template>
+      </SettingsField>
     </form>
     <div v-if="environmentError" class="settings-popover__error" role="alert">
       {{ environmentError }}

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Save } from "@lucide/vue";
+import SettingsField from "./SettingsField.vue";
 import { computed, ref, watch } from "vue";
 import { useAppStore } from "@/client/stores/app";
 import MemorySettings from "./MemorySettings.vue";
@@ -72,26 +73,25 @@ async function savePushTitle(): Promise<void> {
     <div v-if="assistantWorkspaceError" class="settings-popover__error" role="alert">
       {{ assistantWorkspaceError }}
     </div>
-    <div class="settings-popover__inline">
-      <label class="settings-popover__field">
-        <span>Push sender</span>
-        <input
-          v-model="pushTitle"
-          class="settings-popover__input"
-          type="text"
-          :disabled="pushTitleSaving"
-          @keydown.enter.prevent="savePushTitle"
-        />
-      </label>
-      <button
-        class="settings-popover__action settings-popover__action--primary"
-        type="button"
-        :disabled="pushTitleSaving || !pushTitle.trim()"
-        @click="savePushTitle"
-      >
-        <Save :size="14" /> {{ pushTitleSaving ? "Saving…" : "Save" }}
-      </button>
-    </div>
+    <SettingsField label="Push sender">
+      <input
+        v-model="pushTitle"
+        class="settings-popover__input"
+        type="text"
+        :disabled="pushTitleSaving"
+        @keydown.enter.prevent="savePushTitle"
+      />
+      <template #action>
+        <button
+          class="settings-popover__action settings-popover__action--primary"
+          type="button"
+          :disabled="pushTitleSaving || !pushTitle.trim()"
+          @click="savePushTitle"
+        >
+          <Save :size="14" /> {{ pushTitleSaving ? "Saving…" : "Save" }}
+        </button>
+      </template>
+    </SettingsField>
     <div v-if="pushTitleError" class="settings-popover__error" role="alert">
       {{ pushTitleError }}
     </div>

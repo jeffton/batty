@@ -68,7 +68,11 @@ function handlePopoverToggle(event: Event): void {
         <AuthSettings v-model:expanded-item-id="expandedItemId" :open="open" />
         <EnvironmentSettings :open="open" />
         <section class="settings-popover__section settings-popover__section--logout">
-          <button class="settings-popover__logout" type="button" @click="logout">
+          <button
+            class="settings-popover__action settings-popover__action--danger"
+            type="button"
+            @click="logout"
+          >
             <LogOut :size="14" /> Log out
           </button>
         </section>

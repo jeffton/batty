@@ -110,9 +110,11 @@ export async function runCronCli(args: string[]) {
     return;
   }
   const config = await loadConfig(input.root);
-  if (!["127.0.0.1", "::1", "localhost"].includes(config.host))
+  const localHost =
+    config.host === "0.0.0.0" ? "127.0.0.1" : config.host === "::" ? "::1" : config.host;
+  if (!["127.0.0.1", "::1", "localhost"].includes(localHost))
     throw new Error("Cron CLI requires a loopback BATTY_HOST");
-  const host = config.host === "::1" ? "[::1]" : config.host;
+  const host = localHost === "::1" ? "[::1]" : localHost;
   const response = await fetch(`http://${host}:${config.port}/api/cron`, {
     method: "POST",
     headers: {

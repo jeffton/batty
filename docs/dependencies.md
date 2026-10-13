@@ -1,3 +1,37 @@
+# Dependency review — 2026-10-13
+
+Direct dependencies, development dependencies, catalogs, overrides and pnpm were checked against npm. Updates honor the 4320-minute minimum release age and explicit Pi/Chord exclusions.
+
+## Updates
+
+| Package                                           | Version           |
+| ------------------------------------------------- | ----------------- |
+| All seven `@earendil-works/pi-*` / Chord packages | 1.1.0 → 1.2.0     |
+| `@fastify/static`                                 | 10.1.5 → 10.1.6   |
+| `@types/node`                                     | 26.6.4 → 26.6.5   |
+| pnpm                                              | 12.11.0 → 12.11.2 |
+
+## Integration
+
+Pi Durable's `ToolExecutionResult.content` becomes `output`; Batty's coding-agent bridge, MCP bridge, memory, orchestration, artifact forwarding, codemode and test tools use that boundary. Transcript messages and coding-agent/MCP results retain `content`. Codemode's nested API retains streamed output and diagnostics and supports the new `retainedOutput()` and durable `executeTool()` methods. Regression coverage exercises streamed results, delegation in the conversation's working directory, structured program output, unsafe restart abandonment and cancellation of unawaited child calls. Batty's nested task moves to version 2; its receipt migration preserves completed version 1 output when interrupted scripts reopen.
+
+The built-in `pi.tool` task migrates version 1 live tasks to its model/nested tagged unions. Batty does not inspect those input/result fields. Batty uses upstream SQLite storage and Chord's retained JSON/context APIs, not the removed service/facet runtime. Existing restart, replay, cancellation, transcript, queue, cron, memory and artifact tests cover these boundaries. Display-only submissions, stricter storage-failure behavior, scheduler/cache fixes and compaction failures are inherited from Durable.
+
+Coding-agent startup hooks and theme schemas are not used by Batty. Its custom read/mutation/shell bridges retain the coding-agent contracts, including nonzero shell exits; Durable's native shell return-shape change does not change Batty's shell result contract. Codemode retains explicit MCP result declarations, compatible with arbitrary JSON structured content. The provider retry, auth, stream and MCP cancellation fixes are inherited without configuration changes.
+
+Fastify Static's patch changes release publishing only. Node declarations permit hex colors in `util.styleText()` format arrays and require no Batty source changes. pnpm 12.11.1/12.11.2 fix installation, registry and workspace handling; Batty's catalog and deployment setup are unchanged.
+
+Validation: `pnpm check`, all 511 tests (2 Windows-only skips), Linux deployment regression checks, production build and offline browser verification pass. Existing lint and build warnings remain.
+
+## Held versions
+
+Playwright Core stays at 1.63.0 to match Patchright 1.63.0. Release age holds Source Sans 3 5.3.1, Lucide 1.55.0, DOMPurify 3.4.17, Marked 18.1.1, TypeBox 1.3.37, Virtua 0.53.4/0.53.5, Vue plugin 6.0.10, Happy DOM 21.0.0/21.0.1, pnpm 12.12.0/12.12.1, fast-uri@4 4.2.2, PostCSS 8.5.30 and find-my-way@9 9.10.0. Remaining direct packages, catalogs and maintained-major overrides are current under the policy; no override removal is warranted.
+
+## Official sources
+
+- [Pi 1.2.0 release](https://github.com/earendil-works/pi/releases/tag/v1.2.0) and tagged changelogs: [Durable](https://github.com/earendil-works/pi/blob/v1.2.0/packages/durable/CHANGELOG.md), [Chord](https://github.com/earendil-works/pi/blob/v1.2.0/packages/chord/CHANGELOG.md), [AI](https://github.com/earendil-works/pi/blob/v1.2.0/packages/ai/CHANGELOG.md), [agent](https://github.com/earendil-works/pi/blob/v1.2.0/packages/agent/CHANGELOG.md), [codemode](https://github.com/earendil-works/pi/blob/v1.2.0/packages/codemode/CHANGELOG.md), [coding agent](https://github.com/earendil-works/pi/blob/v1.2.0/packages/coding-agent/CHANGELOG.md), [MCP](https://github.com/earendil-works/pi/blob/v1.2.0/packages/mcp/CHANGELOG.md).
+- [Fastify Static 10.1.6](https://github.com/fastify/fastify-static/releases/tag/v10.1.6), [Node declarations](https://github.com/DefinitelyTyped/DefinitelyTyped/commit/8cbe9250b21658bb36f7995a0b5cddcc22c8aa2e), [pnpm 12.11.1](https://github.com/pnpm/pnpm/releases/tag/v12.11.1), [pnpm 12.11.2](https://github.com/pnpm/pnpm/releases/tag/v12.11.2).
+
 # Dependency review — 2026-10-12
 
 Direct dependencies, development dependencies, catalog entries, overrides and pnpm were checked against npm. Selection honors the 4320-minute minimum release age and workspace exclusions.

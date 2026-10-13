@@ -128,7 +128,7 @@ export function createAttachArtifactsTool() {
       const sites = selected.flatMap((item) => (item.kind === "site" ? [item.value] : []));
       const sentFiles = selected.flatMap((item) => (item.kind === "file" ? [item.value] : []));
       return {
-        content: [
+        output: [
           {
             type: "text" as const,
             text: `Attached ${selected.length} existing artifacts to this response.`,

@@ -18,7 +18,7 @@ import { Type } from "typebox";
 import { Compile } from "typebox/compile";
 import type { McpService } from "./mcp-service";
 import type { CodemodeCall } from "../shared/types";
-import type { createCodemodeTasks } from "./codemode-tasks";
+import { migrateNestedToolResult, type createCodemodeTasks } from "./codemode-tasks";
 import { MAIN_MEMORY_TOOLS } from "./main-memory-policy";
 import { isPiShellToolName } from "../shared/pi-tools";
 
@@ -159,7 +159,8 @@ export function createCodemodeTool(
                     : `Nested tool ${tool.name} ${outcome.status}`,
               );
             }
-            const { result, structured } = outcome.result;
+            const { structured } = outcome.result;
+            const result = migrateNestedToolResult(outcome.result.result);
             call.details = result.details ?? null;
             if (
               result.details &&
@@ -175,14 +176,15 @@ export function createCodemodeTool(
             }
             if (result.control) control = result.control;
             const text =
-              result.content
+              result.output
                 ?.filter((block) => block.type === "text")
                 .map((block) => block.text)
                 .join("\n") ?? "";
             if (MAIN_MEMORY_TOOLS.has(tool.name)) usedMainMemory = true;
             else if (independentOfMainMemory) ordinaryOutputs.add(text);
-            if (result.isError) throw new Error(text);
-            call.status = "ok";
+            if (result.isError && result.structuredOutput === undefined) throw new Error(text);
+            call.status = result.isError ? "error" : "ok";
+            if (result.structuredOutput !== undefined) return result.structuredOutput;
             if (structured !== null) return structured;
             return text;
           } catch (error) {
@@ -290,7 +292,7 @@ export function createCodemodeTool(
             : [],
         );
         return {
-          content: limited,
+          output: limited,
           isError: !result.ok,
           details: {
             calls,

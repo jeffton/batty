@@ -270,7 +270,7 @@ test("repair leaves the run's zoom tree unchanged and later runs select the repa
           replay: "safe",
           execute: async () => {
             await state.memory.repair([{ start: 0, count: 2 }], 0);
-            return { content: [{ type: "text", text: "repaired" }] };
+            return { output: [{ type: "text", text: "repaired" }] };
           },
         }),
       ],
@@ -397,7 +397,7 @@ test("reopen resumes a run using its persisted packet despite a repair between m
           description: "pause",
           parameters: Type.Object({}),
           replay: "safe",
-          execute: async () => ({ content: [{ type: "text", text: "resumed" }] }),
+          execute: async () => ({ output: [{ type: "text", text: "resumed" }] }),
         }),
       ],
     }),

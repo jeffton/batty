@@ -130,7 +130,7 @@ export function createMemoryRequests({
             api.conversationId === main().id
               ? await mainSnapshot(context)
               : (await api.snapshot(WorkerMemory, api.conversationId, context))?.snapshot;
-          return { content: [{ type: "text", text: await zoom(id, n, context, snapshot) }] };
+          return { output: [{ type: "text", text: await zoom(id, n, context, snapshot) }] };
         },
       }),
       defineTool({
@@ -148,7 +148,7 @@ export function createMemoryRequests({
             ).mainMemory
           )
             throw new Error("Main memory is available only to Roy workers");
-          return { content: [{ type: "text", text: await date(id, context) }] };
+          return { output: [{ type: "text", text: await date(id, context) }] };
         },
       }),
       defineTool({
@@ -171,7 +171,7 @@ export function createMemoryRequests({
           )
             throw new Error("Main memory is available only to Roy workers");
           return {
-            content: [{ type: "text", text: JSON.stringify(await search(options, context)) }],
+            output: [{ type: "text", text: JSON.stringify(await search(options, context)) }],
           };
         },
       }),

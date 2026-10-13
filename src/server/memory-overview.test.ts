@@ -51,7 +51,7 @@ test("fresh Roy worker pins its overview across tools and later inputs while new
               context,
             );
             await memory.prepare();
-            return { content: [{ type: "text", text: "advanced" }] };
+            return { output: [{ type: "text", text: "advanced" }] };
           },
         }),
       ],

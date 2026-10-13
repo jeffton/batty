@@ -117,7 +117,7 @@ test("silent detached cron creates no report or steering while main is busy", as
           execute: async () => {
             entered = true;
             await gate;
-            return { content: [{ type: "text", text: "released" }] };
+            return { output: [{ type: "text", text: "released" }] };
           },
         }),
       ],
@@ -193,7 +193,7 @@ test.each(
           execute: async () => {
             entered = true;
             await gate;
-            return { content: [{ type: "text", text: "released" }] };
+            return { output: [{ type: "text", text: "released" }] };
           },
         }),
       ],

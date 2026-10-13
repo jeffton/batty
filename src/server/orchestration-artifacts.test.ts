@@ -269,16 +269,16 @@ test.each([
             execute: async ({ parent, fast, between }) => {
               if (fast) {
                 await fastGate;
-                return { content: [{ type: "text", text: "fast ready" }] };
+                return { output: [{ type: "text", text: "fast ready" }] };
               }
               if (between) {
                 continuing = true;
                 await betweenGate;
-                return { content: [{ type: "text", text: "continue joins" }] };
+                return { output: [{ type: "text", text: "continue joins" }] };
               }
               if (parent) processing = true;
               await (parent ? parentGate : childGate);
-              return { content: [{ type: "text", text: parent ? "processed" : "child ready" }] };
+              return { output: [{ type: "text", text: parent ? "processed" : "child ready" }] };
             },
           }),
         ],

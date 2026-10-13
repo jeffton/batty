@@ -9,7 +9,11 @@ import { createRequire } from "node:module";
 import http from "node:http";
 import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import {
+  BACKGROUND_CONTEXT,
+  awaitWithContext,
+  withAbortSignal,
+} from "@earendil-works/chord/context";
 import { Type } from "typebox";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
@@ -18,11 +22,20 @@ import {
   fauxToolCall,
   fauxText,
 } from "@earendil-works/pi-ai/providers/faux";
-import { createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
+import {
+  createRegistry,
+  defineTask,
+  Harness,
+  MemoryStorage,
+  type AnyTask,
+  defineTool,
+  type ToolRegistration,
+} from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createOrchestration, OrchestrationDoc } from "./orchestration";
 import { createTools } from "./tools";
+import { CodemodeCalls } from "./codemode";
 import { persistentBashOperations } from "./durable-bash";
 import { stateDirPath } from "./options";
 import { withoutMainMemory } from "./main-memory-policy";
@@ -36,7 +49,7 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-async function fixture(persistent = false) {
+async function fixture(persistent = false, legacy?: { task: AnyTask; tool: ToolRegistration }) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "batty-tools-test-"));
   cleanups.push(() => fs.rm(directory, { recursive: true, force: true }));
   const config = { battyDir: directory, browserMaxTabs: 4, workspacesRoots: [directory] } as any;
@@ -46,7 +59,17 @@ async function fixture(persistent = false) {
   const models = createModels();
   models.setProvider(faux.provider);
   const registry = createRegistry();
-  registry.install(tools.extension);
+  registry.install(
+    legacy
+      ? {
+          ...tools.extension,
+          tasks: [legacy.task],
+          tools: tools.extension.tools!.map((tool) =>
+            tool.name === "codemode" ? legacy.tool : tool,
+          ),
+        }
+      : tools.extension,
+  );
   const settings = {
     get extensions() {
       return registry
@@ -160,7 +183,7 @@ describe("durable tool bridge", () => {
         api,
         BACKGROUND_CONTEXT,
       );
-      const text = result.content!.map((block: any) => block.text).join("\n");
+      const text = result.output!.map((block: any) => block.text).join("\n");
       expect(text).toMatch(/Core\r?\n7\r?\n/);
       expect(text).toContain(directory);
       expect(text).toContain("æøå 日本語");
@@ -213,7 +236,7 @@ describe("durable tool bridge", () => {
         parameters: Type.Object({}),
         execute: async (_args, api) => {
           const model = api.models.getModel("faux", "faux-1")!;
-          return { content: [{ type: "text", text: `${model.provider}/${model.id}` }] };
+          return { output: [{ type: "text", text: `${model.provider}/${model.id}` }] };
         },
       },
     ]);
@@ -225,6 +248,259 @@ describe("durable tool bridge", () => {
     expect(text).toContain("faux/faux-1");
     expect(text).toContain("nested shell output");
   });
+  it("retains streamed durable output and supports tool-to-tool calls from codemode", async () => {
+    const { directory, tools, run } = await fixture();
+    await fs.writeFile(path.join(directory, "nested.txt"), "local nested result");
+    tools.registerTools([
+      {
+        name: "streamed",
+        description: "streamed output",
+        parameters: Type.Object({}),
+        execute: async (_, api) => {
+          api.output("first ");
+          api.output("second");
+          expect(api.retainedOutput()).toEqual({ text: "first second", truncated: false });
+          return {};
+        },
+      },
+      {
+        name: "delegate",
+        description: "calls another tool",
+        parameters: Type.Object({}),
+        execute: async (_, api, ctx) => {
+          const result = await api.executeTool("read", { path: "nested.txt" }, ctx);
+          expect(result.isError).toBe(false);
+          return { output: [{ type: "text", text: String(result.structuredOutput) }] };
+        },
+      },
+    ]);
+    const result = await run("text(await tools.streamed({})); return await tools.delegate({});");
+    expect(result.isError).toBe(false);
+    expect(JSON.stringify(result.content)).toContain("first second");
+    expect(JSON.stringify(result.content)).toContain("local nested result");
+  });
+
+  it("preserves structured program output independently of model-facing text", async () => {
+    const { tools, run } = await fixture();
+    tools.registerTools([
+      {
+        name: "structured",
+        description: "structured result",
+        parameters: Type.Object({}),
+        structuredOutputSchema: Type.Object({ value: Type.Integer() }),
+        execute: async () => ({
+          output: [{ type: "text", text: "model summary" }],
+          structuredOutput: { value: 42 },
+        }),
+      },
+      {
+        name: "delegate",
+        description: "delegation",
+        parameters: Type.Object({}),
+        execute: async (_, api, ctx) => {
+          const result = await api.executeTool("structured", {}, ctx);
+          return { output: [{ type: "text", text: JSON.stringify(result.structuredOutput) }] };
+        },
+      },
+    ]);
+    const direct = await run("return await tools.structured({});");
+    expect(direct.content[0].text).toBe('{"value":42}');
+    const delegated = await run("return await tools.delegate({});");
+    expect(delegated.content[0].text).toBe('{"value":42}');
+  });
+
+  it("cancels a tool-to-tool call left running when its caller settles", async () => {
+    const { tools, run } = await fixture();
+    let started!: () => void;
+    const running = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let cancelled = false;
+    tools.registerTools([
+      {
+        name: "effect",
+        description: "waiting effect",
+        parameters: Type.Object({}),
+        replay: "safe",
+        execute: async (_, _api, ctx) => {
+          started();
+          try {
+            await awaitWithContext(new Promise(() => {}), ctx);
+          } finally {
+            cancelled = true;
+          }
+          return {};
+        },
+      },
+      {
+        name: "delegate",
+        description: "starts unawaited call",
+        parameters: Type.Object({}),
+        execute: async (_, api, ctx) => {
+          void api.executeTool("effect", {}, ctx).catch(() => {});
+          await running;
+          return { output: [{ type: "text", text: "settled" }] };
+        },
+      },
+    ]);
+    const result = await run("return await tools.delegate({});");
+    expect(result.isError).toBe(false);
+    expect(cancelled).toBe(true);
+  });
+
+  it("abandons nested work when an unsafe caller is interrupted by restart", async () => {
+    const { tools, harness, main, faux, reopen } = await fixture(true);
+    let started!: () => void;
+    const running = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let effects = 0;
+    tools.registerTools([
+      {
+        name: "effect",
+        description: "waiting effect",
+        parameters: Type.Object({}),
+        replay: "safe",
+        execute: async (_, _api, ctx) => {
+          effects++;
+          started();
+          await awaitWithContext(new Promise(() => {}), ctx);
+          return {};
+        },
+      },
+      {
+        name: "delegate",
+        description: "unsafe caller",
+        parameters: Type.Object({}),
+        execute: async (_, api, ctx) => {
+          await api.executeTool("effect", {}, ctx);
+          return {};
+        },
+      },
+    ]);
+    faux.setResponses([
+      fauxAssistantMessage(
+        [fauxToolCall("codemode", { code: "return await tools.delegate({});" })],
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage([fauxText("done")]),
+    ]);
+    const submitted = await main.submit({ type: "input", content: "start" }, BACKGROUND_CONTEXT);
+    harness.resume();
+    await running;
+    const restarted = await reopen();
+    const recovered = await restarted.harness.submission(submitted.id, BACKGROUND_CONTEXT);
+    expect((await recovered!.wait(BACKGROUND_CONTEXT)).status).toBe("done");
+    expect(effects).toBe(1);
+    const view = await restarted.main.viewState(BACKGROUND_CONTEXT);
+    expect(JSON.stringify(view.value.entries)).toContain("Nested tool interrupted by restart");
+    view.dispose();
+  });
+
+  it("reopens a v1 codemode receipt without losing its completed output", async () => {
+    let held!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      held = resolve;
+    });
+    const legacy = defineTask<any, any, any>({
+      name: "batty.codemode-tool",
+      version: 1,
+      initial: () => ({ phase: "call" }),
+      phases: {
+        call: async (task, runtime, ctx) => {
+          if (task.input.name === "read") {
+            await runtime.commit(
+              () => ({
+                status: "terminal",
+                outcome: {
+                  status: "completed",
+                  result: {
+                    result: { content: [{ type: "text", text: "original v1 output" }] },
+                    structured: null,
+                  },
+                },
+              }),
+              ctx,
+            );
+          } else {
+            await runtime.commit(
+              () => ({ status: "running", checkpoint: { phase: "execute", replay: "safe" } }),
+              ctx,
+            );
+            held();
+            await awaitWithContext(new Promise(() => {}), withAbortSignal(runtime.signal, ctx));
+          }
+        },
+        execute: async () => {
+          throw new Error("legacy task should be migrated");
+        },
+      },
+      abort: async (_, runtime, ctx) => {
+        await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
+      },
+    });
+    const legacyCodemode = defineTool({
+      name: "codemode",
+      description: "legacy codemode",
+      parameters: Type.Object({ code: Type.String() }),
+      replay: "safe",
+      execute: async (_, api, ctx) => {
+        const calls: Array<{ name: string; args: Record<string, string> }> = [
+          { name: "read", args: { path: "seed" } },
+          { name: "hold", args: {} },
+        ];
+        for (const [index, call] of calls.entries()) {
+          const taskId = await api.commit(async (tx) => {
+            const taskId = await tx.createTask(
+              legacy,
+              { ...call, callId: `${api.callId}-${index}` },
+              { ownership: { kind: "task", taskId: api.taskId } },
+            );
+            (await tx.doc(CodemodeCalls, api.taskId)).calls[String(index)] = { ...call, taskId };
+            return taskId;
+          }, ctx);
+          await api.waitForTask(taskId, ctx);
+        }
+        return {};
+      },
+    });
+    const { tools, registry, harness, main, faux, reopen } = await fixture(true, {
+      task: legacy,
+      tool: legacyCodemode,
+    });
+    tools.registerTools([
+      {
+        name: "hold",
+        description: "hold",
+        parameters: Type.Object({}),
+        replay: "safe",
+        execute: async () => ({ output: [{ type: "text", text: "resumed" }] }),
+      },
+    ]);
+    faux.setResponses([
+      fauxAssistantMessage(
+        [
+          fauxToolCall("codemode", {
+            code: 'const source = await tools.read({path:"seed"}); return source + ":" + await tools.hold({});',
+          }),
+        ],
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage([fauxText("done")]),
+    ]);
+    const submitted = await main.submit({ type: "input", content: "start" }, BACKGROUND_CONTEXT);
+    harness.resume();
+    await waiting;
+    await harness.close(BACKGROUND_CONTEXT);
+    registry.install(tools.extension);
+    const restarted = await reopen();
+    const recovered = await restarted.harness.submission(submitted.id, BACKGROUND_CONTEXT);
+    expect((await recovered!.wait(BACKGROUND_CONTEXT)).status).toBe("done");
+    const view = await restarted.main.viewState(BACKGROUND_CONTEXT);
+    expect(JSON.stringify(view.value.entries)).toContain("original v1 output:resumed");
+    view.dispose();
+  });
+
   it("isolates dynamically invoked main-memory output while retaining ordinary mixed-batch results", async () => {
     const { directory, tools, run } = await fixture();
     await fs.writeFile(path.join(directory, "task.txt"), "ordinary task result");
@@ -234,7 +510,7 @@ describe("durable tool bridge", () => {
         description: "main memory",
         parameters: Type.Object({}),
         replay: "safe",
-        execute: async () => ({ content: [{ type: "text", text: "private decision" }] }),
+        execute: async () => ({ output: [{ type: "text", text: "private decision" }] }),
       },
     ]);
     const result = await run(
@@ -265,7 +541,7 @@ describe("durable tool bridge", () => {
         parameters: Type.Object({}),
         execute: async () => ({
           isError: true,
-          content: [{ type: "text", text: "permission denied" }],
+          output: [{ type: "text", text: "permission denied" }],
         }),
       },
     ]);
@@ -315,14 +591,14 @@ describe("durable tool bridge", () => {
     await fs.writeFile(path.join(directory, "large.txt"), "x".repeat(60_000));
     const read = tools.extension.tools!.find((tool) => tool.name === "read")!;
     const result = await read.execute({ path: "large.txt", limit: 1 }, api, BACKGROUND_CONTEXT);
-    expect(result.content?.[0]).toEqual({ type: "text", text: "x".repeat(60_000) });
+    expect(result.output?.[0]).toEqual({ type: "text", text: "x".repeat(60_000) });
     tools.registerTools([
       {
         name: "multiply",
         description: "multiply numbers",
         parameters: Type.Object({ value: Type.Number() }),
         execute: async ({ value }: any) => ({
-          content: [{ type: "text", text: String(value * 2) }],
+          output: [{ type: "text", text: String(value * 2) }],
         }),
       },
     ]);

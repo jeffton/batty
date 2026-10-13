@@ -87,7 +87,7 @@ test("worker agent preparation applies workspace-scoped tools before generation 
     description: "scope",
     parameters: Type.Object({}),
     replay: "safe",
-    execute: async (_, api) => ({ content: [{ type: "text", text: `scoped:${api.env!.cwd}` }] }),
+    execute: async (_, api) => ({ output: [{ type: "text", text: `scoped:${api.env!.cwd}` }] }),
   });
   const scopedExtension = defineExtension({ name: "worker-mcp-scope", tools: [scoped] });
   registry.install(scopedExtension);
@@ -219,7 +219,7 @@ test.each([undefined, false])(
             replay: "safe",
             execute: async () => {
               await gate;
-              return { content: [{ type: "text", text: "released" }] };
+              return { output: [{ type: "text", text: "released" }] };
             },
           }),
         ],
@@ -327,7 +327,7 @@ test("async reports steer a busy main before its final reply", async () => {
               mainHeld = true;
               await mainGate;
             } else await workerGate;
-            return { content: [{ type: "text", text: "released" }] };
+            return { output: [{ type: "text", text: "released" }] };
           },
         }),
       ],

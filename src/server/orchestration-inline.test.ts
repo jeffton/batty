@@ -25,7 +25,7 @@ test.each(["complete", "cancel", "restart"] as const)(
       replay: "safe",
       execute: async (_, api) => {
         executed = true;
-        return { content: [{ type: "text", text: `scoped:${api.env!.cwd}` }] };
+        return { output: [{ type: "text", text: `scoped:${api.env!.cwd}` }] };
       },
     });
     const scopedExtension = defineExtension({ name: "inline-mcp-scope", tools: [scoped] });
@@ -104,7 +104,7 @@ test("inline cron tools use the originating workspace and restore main cwd", asy
           description: "cwd",
           parameters: Type.Object({}),
           replay: "safe",
-          execute: async (_, api) => ({ content: [{ type: "text", text: api.env!.cwd }] }),
+          execute: async (_, api) => ({ output: [{ type: "text", text: api.env!.cwd }] }),
         }),
       ],
     }),
@@ -151,7 +151,7 @@ test("inline workspace context survives a steer and subsequent tool round", asyn
           execute: async (_, api) => {
             seen.push(api.env!.cwd);
             if (seen.length === 1) await gate;
-            return { content: [{ type: "text", text: api.env!.cwd }] };
+            return { output: [{ type: "text", text: api.env!.cwd }] };
           },
         }),
       ],
@@ -211,7 +211,7 @@ test("stopping a waiting inline cron does not abort main or withdraw ordinary qu
           execute: async () => {
             entered = true;
             await gate;
-            return { content: [{ type: "text", text: "released" }] };
+            return { output: [{ type: "text", text: "released" }] };
           },
         }),
       ],

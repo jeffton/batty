@@ -117,7 +117,7 @@ test("a run's tool loop preserves reasoning signatures and its frozen view verba
           description: "check",
           parameters: Type.Object({}),
           replay: "safe",
-          execute: async () => ({ content: [{ type: "text", text: "exact tool output" }] }),
+          execute: async () => ({ output: [{ type: "text", text: "exact tool output" }] }),
         }),
       ],
     }),

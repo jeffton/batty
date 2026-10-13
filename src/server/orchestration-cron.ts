@@ -36,7 +36,7 @@ function validateDelivery(delivery?: CronDelivery) {
 }
 
 function reply(text: string) {
-  return { content: [{ type: "text" as const, text }] };
+  return { output: [{ type: "text" as const, text }] };
 }
 
 export function createCronScheduler(

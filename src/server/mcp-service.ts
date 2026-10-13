@@ -144,7 +144,7 @@ export class McpService {
           execute: async (args: any, _api: any, ctx: any) => {
             const result = await connection.callTool(tool.name, args, { signal: ctx.abortSignal });
             const wrapped = {
-              content: toLlmContent(result),
+              output: toLlmContent(result),
               isError: result.isError === true,
               details: { server: connection.name, tool: tool.name },
             };

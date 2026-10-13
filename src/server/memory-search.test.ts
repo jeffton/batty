@@ -125,7 +125,7 @@ test("memory lifecycle indexes original history and new entries with zoom IDs; t
       tool.execute({ query: "pension" }, api(child.id, "other"), context),
     ).rejects.toThrow("only to Roy");
     const result = await tool.execute({ query: "pension" }, api(child.id, "roy"), context);
-    expect(result.content).toMatchObject([
+    expect(result.output).toMatchObject([
       { type: "text", text: expect.stringContaining("New [pension] decision") },
     ]);
     expect(MAIN_MEMORY_TOOLS.has("memory_search")).toBe(true);
@@ -135,7 +135,7 @@ test("memory lifecycle indexes original history and new entries with zoom IDs; t
           role: "toolResult",
           toolName: "memory_search",
           toolCallId: "search",
-          content: result.content!,
+          content: result.output!,
           isError: false,
           timestamp: 1,
         },

@@ -179,7 +179,7 @@ test("concurrent queues chain transactionally and defer worker configuration", a
           execute: async (_, api) => {
             seen.push(api.env!.cwd);
             if (seen.length === 1) await gate;
-            return { content: [{ type: "text", text: `probe-${seen.length}` }] };
+            return { output: [{ type: "text", text: `probe-${seen.length}` }] };
           },
         }),
       ],

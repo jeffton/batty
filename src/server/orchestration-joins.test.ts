@@ -39,7 +39,7 @@ test.each(["complete", "restart", "cron-run", "cron-resume", "cron-restart"])(
                   resolve();
                 });
               });
-              return { content: [{ type: "text", text: "review ready" }] };
+              return { output: [{ type: "text", text: "review ready" }] };
             },
           }),
         ],

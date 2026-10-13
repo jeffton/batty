@@ -41,7 +41,7 @@ import {
 import type { createDeliveryTask } from "./orchestration-delivery.js";
 
 function reply(text: string) {
-  return { content: [{ type: "text" as const, text }] };
+  return { output: [{ type: "text" as const, text }] };
 }
 
 export function createWorkers(

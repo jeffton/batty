@@ -117,7 +117,7 @@ export async function createTools(
           context,
         );
         const wrapped = {
-          content: result.content,
+          output: result.content,
           isError: result.isError,
           ...(result.details === undefined
             ? {}

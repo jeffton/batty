@@ -117,8 +117,8 @@ test.each(["Subagent", "Cron run"])(
     });
     try {
       expect(wrapper.findComponent({ name: "ProviderUsageIndicator" }).exists()).toBe(false);
-      expect(wrapper.get('[aria-label="Connecting"]').exists()).toBe(true);
-      expect(wrapper.get('[aria-label="ctx ?/? · ?"]').exists()).toBe(true);
+      expect(wrapper.find('[aria-label="Connecting"]').exists()).toBe(true);
+      expect(wrapper.find('[aria-label="ctx ?/? · ?"]').exists()).toBe(true);
     } finally {
       wrapper.unmount();
     }

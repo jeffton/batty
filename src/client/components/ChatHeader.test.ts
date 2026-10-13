@@ -24,7 +24,7 @@ test("main header retains provider usage alongside session status", () => {
     expect(wrapper.getComponent({ name: "ProviderUsageIndicator" }).props("model")).toBe(
       "fixture/model",
     );
-    expect(wrapper.get('[aria-label="Connected"]').exists()).toBe(true);
+    expect(wrapper.find('[aria-label="Connected"]').exists()).toBe(true);
   } finally {
     wrapper.unmount();
   }

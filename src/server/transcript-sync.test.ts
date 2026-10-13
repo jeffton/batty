@@ -80,62 +80,67 @@ test("delta history starts after its anchor and crosses invisible records and pa
   }
 });
 
-test("inline full-resolution images leave history payloads, and previews retain originals", async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "batty-image-preview-"));
-  const original = await sharp({
-    create: { width: 4000, height: 3000, channels: 3, background: "red" },
-  })
-    .png()
-    .toBuffer();
-  const images = new TranscriptImages(directory);
-  const messages = await images.messages([
-    {
-      id: "1",
-      role: "user",
-      timestamp: 1,
-      blocks: [{ type: "image", mimeType: "image/png", data: original.toString("base64") }],
-    },
-  ]);
-  const block = (messages[0] as any).blocks[0];
-  expect(block.data).toBeUndefined();
-  expect(block.previewUrl).toContain("?preview=1");
-  const id = block.url.split("/").at(-1);
-  const preview = await images.resolve(id, true);
-  const originalFile = await images.resolve(id, false);
-  expect(await fs.readFile(originalFile.path)).toEqual(original);
-  expect(await sharp(preview.path).metadata()).toMatchObject({
-    width: 768,
-    height: 576,
-    format: "webp",
-  });
-  expect(JSON.stringify(messages).length).toBeLessThan(1000);
-  const again = await images.messages([
-    {
-      id: "2",
-      role: "user",
-      timestamp: 2,
-      blocks: [{ type: "image", mimeType: "image/png", data: original.toString("base64") }],
-    },
-  ]);
-  expect((again[0] as any).blocks[0].url).toBe(block.url);
-  const invalid = await images.messages([
-    {
-      id: "3",
-      role: "user",
-      timestamp: 3,
-      blocks: [
-        {
-          type: "image",
-          mimeType: "image/png",
-          data: Buffer.from("not an image").toString("base64"),
-        },
-      ],
-    },
-  ]);
-  const invalidId = (invalid[0] as any).blocks[0].url.split("/").at(-1);
-  await expect(images.resolve(invalidId, true)).rejects.toThrow();
-  expect(await fs.readFile((await images.resolve(invalidId, false)).path, "utf8")).toBe(
-    "not an image",
-  );
-  // Keep generated fixtures in the OS temp directory; no user files are affected.
-});
+test.each(["/", "/batty"])(
+  "inline images at %s leave history payloads, and previews retain originals",
+  async (baseUrl) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "batty-image-preview-"));
+    const original = await sharp({
+      create: { width: 4000, height: 3000, channels: 3, background: "red" },
+    })
+      .png()
+      .toBuffer();
+    const images = new TranscriptImages(directory, baseUrl);
+    const messages = await images.messages([
+      {
+        id: "1",
+        role: "user",
+        timestamp: 1,
+        blocks: [{ type: "image", mimeType: "image/png", data: original.toString("base64") }],
+      },
+    ]);
+    const block = (messages[0] as any).blocks[0];
+    expect(block.data).toBeUndefined();
+    const prefix = baseUrl === "/" ? "" : baseUrl;
+    expect(block.url).toMatch(new RegExp(`^${prefix}/api/transcript-images/[a-f0-9]{64}$`));
+    expect(block.previewUrl).toBe(`${block.url}?preview=1`);
+    const id = block.url.split("/").at(-1);
+    const preview = await images.resolve(id, true);
+    const originalFile = await images.resolve(id, false);
+    expect(await fs.readFile(originalFile.path)).toEqual(original);
+    expect(await sharp(preview.path).metadata()).toMatchObject({
+      width: 768,
+      height: 576,
+      format: "webp",
+    });
+    expect(JSON.stringify(messages).length).toBeLessThan(1000);
+    const again = await images.messages([
+      {
+        id: "2",
+        role: "user",
+        timestamp: 2,
+        blocks: [{ type: "image", mimeType: "image/png", data: original.toString("base64") }],
+      },
+    ]);
+    expect((again[0] as any).blocks[0].url).toBe(block.url);
+    const invalid = await images.messages([
+      {
+        id: "3",
+        role: "user",
+        timestamp: 3,
+        blocks: [
+          {
+            type: "image",
+            mimeType: "image/png",
+            data: Buffer.from("not an image").toString("base64"),
+          },
+        ],
+      },
+    ]);
+    const invalidId = (invalid[0] as any).blocks[0].url.split("/").at(-1);
+    await expect(images.resolve(invalidId, true)).rejects.toThrow();
+    expect(await fs.readFile((await images.resolve(invalidId, false)).path, "utf8")).toBe(
+      "not an image",
+    );
+    // Keep generated fixtures in the OS temp directory; no user files are affected.
+  },
+);

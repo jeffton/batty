@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import sharp from "sharp";
+import { appBasePath } from "./app-shell";
 import type { SessionState, UiContentBlock, UiMessage } from "@/shared/types";
 
 const pending = new Map<string, Promise<void>>();
@@ -23,7 +24,14 @@ export async function imagePreview(filePath: string): Promise<Buffer> {
 }
 
 export class TranscriptImages {
-  constructor(private readonly directory: string) {}
+  private readonly basePath: string;
+
+  constructor(
+    private readonly directory: string,
+    baseUrl = "/",
+  ) {
+    this.basePath = appBasePath(baseUrl);
+  }
 
   async resolve(id: string, preview: boolean) {
     if (!/^[a-f0-9]{64}$/.test(id))
@@ -40,7 +48,8 @@ export class TranscriptImages {
   private async block(block: UiContentBlock): Promise<UiContentBlock> {
     if (block.type !== "image") return block;
     if (block.url) {
-      return block.url.startsWith("/api/uploads/") || block.url.startsWith("/api/sent-files/")
+      return block.url.startsWith(`${this.basePath}api/uploads/`) ||
+        block.url.startsWith(`${this.basePath}api/sent-files/`)
         ? { ...block, previewUrl: `${block.url}${block.url.includes("?") ? "&" : "?"}preview=1` }
         : block;
     }
@@ -66,8 +75,8 @@ export class TranscriptImages {
     const { data: _data, ...metadata } = block;
     return {
       ...metadata,
-      url: `/api/transcript-images/${id}`,
-      previewUrl: `/api/transcript-images/${id}?preview=1`,
+      url: `${this.basePath}api/transcript-images/${id}`,
+      previewUrl: `${this.basePath}api/transcript-images/${id}?preview=1`,
     };
   }
 

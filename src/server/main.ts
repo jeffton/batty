@@ -54,6 +54,7 @@ const runtime = await Runtime.open(config, {
 });
 const transcriptImages = new TranscriptImages(
   path.join(stateDirPath(config.battyDir), "transcript-images"),
+  config.baseUrl,
 );
 const passkeys = new PasskeyAuthService(config.battyDir, config.authSecret);
 const setup = await passkeys.initialize();

@@ -21,7 +21,11 @@ test("multipart image → durable receipt → SSE → backend reopen reconciles 
   await mkdir(join(directory, "work"));
   await writeFile(
     join(directory, ".batty/options.json"),
-    JSON.stringify({ workspacesRoots: [directory], webPushSubject: "mailto:test@example.com" }),
+    JSON.stringify({
+      workspacesRoots: [directory],
+      webPushSubject: "mailto:test@example.com",
+      baseUrl: "/batty",
+    }),
   );
   const config = {
     ...(await loadConfig(directory)),
@@ -50,7 +54,7 @@ test("multipart image → durable receipt → SSE → backend reopen reconciles 
     closeStreams = registerSessionRoutes(
       app,
       runtime,
-      new TranscriptImages(join(directory, "previews")),
+      new TranscriptImages(join(directory, "previews"), config.baseUrl),
     );
     return app.listen({ host: "127.0.0.1", port: 0 });
   };
@@ -123,7 +127,11 @@ test("multipart image → durable receipt → SSE → backend reopen reconciles 
     expect(user).toMatchObject({
       blocks: [
         { type: "text", text: "HTTP image test" },
-        { type: "image", url: expect.stringContaining("/api/transcript-images/") },
+        {
+          type: "image",
+          url: expect.stringMatching(/^\/batty\/api\/transcript-images\//),
+          previewUrl: expect.stringMatching(/^\/batty\/api\/transcript-images\/.*\?preview=1$/),
+        },
       ],
     });
     expect(JSON.stringify((await runtime!.main.context(context)).messages)).toContain("pixel.png");

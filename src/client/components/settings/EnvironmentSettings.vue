@@ -79,7 +79,7 @@ watch(
       />
     </div>
     <form class="settings-popover__editor" @submit.prevent="saveEnvironmentVariable">
-      <SettingsField label="Variable name">
+      <SettingsField>
         <input
           v-model="environmentName"
           class="settings-popover__input"
@@ -90,7 +90,7 @@ watch(
           :disabled="environmentPending"
         />
       </SettingsField>
-      <SettingsField label="Value">
+      <SettingsField>
         <input
           v-model="environmentValue"
           class="settings-popover__input"

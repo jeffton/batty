@@ -1,11 +1,11 @@
 <script setup lang="ts">
-defineProps<{ label: string }>();
+defineProps<{ label?: string }>();
 </script>
 
 <template>
   <div class="settings-popover__inline">
     <label class="settings-popover__field">
-      <span>{{ label }}</span>
+      <span v-if="label">{{ label }}</span>
       <slot />
     </label>
     <slot name="action" />

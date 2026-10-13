@@ -16,7 +16,13 @@
       const pinia = createPinia();
       const store = useAppStore(pinia);
       store.workspaces = [
-        { id: "assistant", label: "Assistant workspace", path: "/fixture", isAssistant: true },
+        {
+          id: "assistant",
+          label:
+            new URLSearchParams(location.search).get("assistantLabel") ?? "Assistant workspace",
+          path: "/fixture",
+          isAssistant: true,
+        },
       ];
       store.settings.pushTitle = "Batty";
       store.settings.memoryLanguage = "English";

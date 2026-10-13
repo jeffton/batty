@@ -179,3 +179,35 @@ for (const width of [390, 1100]) {
     }
   });
 }
+
+for (const { width, label, sideBySide } of [
+  { width: 1100, label: "Roy", sideBySide: true },
+  { width: 390, label: "Roy", sideBySide: true },
+  { width: 320, label: "Assistant workspace", sideBySide: false },
+]) {
+  test(`instruction buttons fit their labels at ${width}px`, async () => {
+    const page = await browser.newPage({ viewport: { width, height: 900 } });
+    try {
+      await page.route("**/api/**", (route) => route.fulfill({ json: { names: [] } }));
+      await page.goto(`${url}?assistantLabel=${encodeURIComponent(label)}`);
+      const buttons = page.locator(".settings-popover__instruction-buttons button");
+      await buttons.first().waitFor();
+      const first = (await buttons.nth(0).boundingBox())!;
+      const second = (await buttons.nth(1).boundingBox())!;
+      if (sideBySide) {
+        expect(second.y).toBeCloseTo(first.y, 0);
+        expect(second.x).toBeGreaterThanOrEqual(first.x + first.width);
+      } else {
+        expect(second.y).toBeGreaterThanOrEqual(first.y + first.height);
+        expect(second.x).toBeCloseTo(first.x, 0);
+      }
+      for (const bounds of [first, second]) {
+        expect(bounds.height).toBeGreaterThanOrEqual(44);
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+      }
+      await page.screenshot({ path: `/tmp/settings-instructions-${width}.png` });
+    } finally {
+      await page.close();
+    }
+  });
+}

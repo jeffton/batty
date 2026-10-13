@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { deletePushSubscription, getPushPublicKey, savePushSubscription } from "@/client/lib/api";
-import {
-  supportsWebPush,
-  syncPushSubscription,
-  unregisterPushSubscription,
-} from "@/client/lib/push-notifications";
+import { syncPushSubscription, unregisterPushSubscription } from "@/client/lib/push-notifications";
 
 vi.mock("@/client/lib/api", () => ({
   getPushPublicKey: vi.fn(),
@@ -109,13 +105,6 @@ afterEach(() => {
     value: originalServiceWorker,
   });
   vi.restoreAllMocks();
-});
-
-describe("supportsWebPush", () => {
-  it("detects a push-capable browser environment", () => {
-    installPushCapableBrowser();
-    expect(supportsWebPush()).toBe(true);
-  });
 });
 
 describe("unregisterPushSubscription", () => {

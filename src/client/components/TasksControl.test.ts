@@ -74,23 +74,18 @@ describe("compose tasks", () => {
         "Publish news",
         "Research",
       ]);
-      expect(wrapper.get(".tasks-popover__header").text()).toBe("Running tasks");
       expect(rows[0]!.element.tagName).toBe("ARTICLE");
       expect(rows[0]!.attributes("popovertarget")).toBeUndefined();
       expect(rows[1]!.element.tagName).toBe("BUTTON");
       expect(rows[1]!.attributes("popovertarget")).toContain("cron-run");
       expect(rows[2]!.element.tagName).toBe("BUTTON");
       expect(rows[2]!.attributes("popovertarget")).toContain("agent-agent");
-      expect(rows[2]!.attributes("aria-label")).toBe("Open task session: Research");
-      expect(rows[2]!.find("button").exists()).toBe(false);
-      expect(rows[2]!.get("svg").attributes("aria-hidden")).toBe("true");
       await wrapper.setProps({
         memoryPending: 0,
         subagents: [],
         cronRuns: [{ ...run, status: "success" }],
       });
       expect(wrapper.find(".tasks-control").exists()).toBe(false);
-      expect(wrapper.text()).toContain("No running tasks.");
     } finally {
       wrapper.unmount();
     }

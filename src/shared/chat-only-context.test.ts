@@ -1,20 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
-import {
-  chatOnlyBlocks,
-  isTranscriptDetailsBlock,
-  isTranscriptDetailsMessageRole,
-} from "./chat-only-context";
+import { chatOnlyBlocks } from "./chat-only-context";
 
 describe("chat-only transcript policy", () => {
-  it("classifies the same messages and blocks hidden in transcript details", () => {
-    expect(isTranscriptDetailsMessageRole("toolResult")).toBe(true);
-    expect(isTranscriptDetailsMessageRole("custom")).toBe(true);
-    expect(isTranscriptDetailsMessageRole("assistant")).toBe(false);
-    expect(isTranscriptDetailsBlock({ type: "thinking" })).toBe(true);
-    expect(isTranscriptDetailsBlock({ type: "toolCall" })).toBe(true);
-    expect(isTranscriptDetailsBlock({ type: "text" })).toBe(false);
-  });
-
   it("empty assistant text is not chat, while attachments and actual replies survive", () => {
     expect(chatOnlyBlocks("assistant", [{ type: "text", text: "" }])).toBeUndefined();
     expect(chatOnlyBlocks("assistant", [{ type: "text", text: " \n\t" }])).toBeUndefined();

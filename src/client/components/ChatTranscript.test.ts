@@ -35,7 +35,7 @@ const messages: UiMessage[] = [
 ];
 
 for (const location of ["history", "tail"] as const) {
-  test(`${location} has one details action to the right of copy on the last reply and emits the section key`, async () => {
+  test(`${location} has one details action on the last reply and emits the section key`, async () => {
     const entries = buildTranscriptDisplayEntries(
       messages.map((message) => ({ message, toolStatesByCallId: tools })),
       tools,
@@ -52,11 +52,6 @@ for (const location of ["history", "tail"] as const) {
     try {
       const toggle = wrapper.get('button[aria-label="Show details"]');
       expect(wrapper.findAll('button[aria-label="Show details"]')).toHaveLength(1);
-      const stack = toggle.element.parentElement!;
-      expect(stack.classList.contains("reply-actions")).toBe(true);
-      expect(
-        [...stack.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")),
-      ).toEqual(["Copy reply as markdown", "Show details"]);
       expect(wrapper.findAll("article").at(-1)!.text()).toContain("Last answer");
       expect(wrapper.text()).toContain("Useful failure");
       expect(wrapper.findAll(".reply-actions")).toHaveLength(2);

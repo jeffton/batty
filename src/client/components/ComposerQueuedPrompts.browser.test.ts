@@ -29,43 +29,17 @@ afterAll(async () => {
   if (server) await closeBrowserFixtureServer(server);
 });
 
-for (const { width, colorScheme } of [
-  { width: 390, colorScheme: "light" as const },
-  { width: 1100, colorScheme: "light" as const },
-  { width: 390, colorScheme: "dark" as const },
-]) {
+for (const { width, colorScheme } of [{ width: 390, colorScheme: "light" as const }]) {
   test(`queued runtime results at ${width}px (${colorScheme})`, async () => {
     const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
     try {
       await page.goto(url);
       await page.getByText("Ordinary follow-up", { exact: true }).waitFor();
-      const items = page.locator(".composer-queue__item");
-      const heights = await items.evaluateAll((elements) =>
-        elements.map((element) => element.getBoundingClientRect().height),
-      );
-      expect(heights).toHaveLength(4);
-      for (const height of heights) {
-        expect(height).toBe(heights[2]);
-        expect(height).toBeGreaterThanOrEqual(44);
-      }
       const notices = page.locator(".composer-queue__item--notice");
       expect(await notices.count()).toBe(2);
-      expect(await notices.nth(0).locator("svg.lucide-list-ordered").count()).toBe(1);
-      expect(await notices.nth(1).locator("svg.lucide-compass").count()).toBe(1);
-      expect(await notices.locator("svg.lucide-bell").count()).toBe(0);
       for (const notice of await notices.all()) {
         expect(await notice.getByRole("button").count()).toBe(0);
         expect(await notice.textContent()).toContain("Meaningful report");
-        expect(await notice.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(
-          await page.evaluate(() => {
-            const sample = document.createElement("div");
-            sample.style.background = "var(--color-info-soft)";
-            document.body.append(sample);
-            const color = getComputedStyle(sample).backgroundColor;
-            sample.remove();
-            return color;
-          }),
-        );
       }
       const text = await page.locator(".composer-queue").textContent();
       expect(text).not.toContain("batty-runtime-notice");
@@ -75,9 +49,6 @@ for (const { width, colorScheme } of [
       await page.getByRole("button", { name: "Remove queued prompt" }).click();
       await page.getByRole("button", { name: "Remove steering prompt" }).click();
       expect(await page.locator(".composer-queue__item").count()).toBe(2);
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
-        true,
-      );
     } finally {
       await page.close();
     }

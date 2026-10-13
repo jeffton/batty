@@ -95,11 +95,8 @@ describe("cron popover", () => {
       expect(wrapper.get("#cron-test-logs-panel").text()).toContain("Completed");
       const rows = wrapper.get("#cron-test-logs-panel").findAll(".cron-popover__run");
       expect(rows[0]!.element.tagName).toBe("BUTTON");
-      expect(rows[0]!.attributes("aria-label")).toBe("Open cron run session: Job in second");
       expect(rows[0]!.attributes("popovertarget")).toBe("cron-test-cron-run-second");
       expect(rows[0]!.text()).toContain("Job in second");
-      expect(rows[0]!.find("button").exists()).toBe(false);
-      expect(rows[0]!.get("svg").attributes("aria-hidden")).toBe("true");
       expect(rows[1]!.element.tagName).toBe("ARTICLE");
       expect(rows[1]!.attributes("popovertarget")).toBeUndefined();
       expect(

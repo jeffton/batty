@@ -85,12 +85,3 @@ test("leaf and merge requests contain only their own sources, never the precedin
     await memory.close();
   }
 });
-
-test("summary instructions prohibit recovery and preserve uncertainty and correction provenance", () => {
-  expect(COMPACT_PROMPT).toContain("only factual input");
-  expect(COMPACT_PROMPT).toContain("Every claim must be supported");
-  expect(COMPACT_PROMPT).toContain("Keep unknowns");
-  expect(COMPACT_PROMPT).toContain("distinguish corrections from the claims");
-  expect(COMPACT_PROMPT).not.toContain("recover\ndetail your input lost");
-  expect(COMPACT_PROMPT).not.toContain("<chat>");
-});

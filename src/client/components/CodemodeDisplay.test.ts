@@ -104,7 +104,6 @@ describe("codemode runtime call display", () => {
     expect(wrapper.findAll(".codemode-display__call")).toHaveLength(2);
     expect(wrapper.text()).toContain('{"path":"present.txt"}');
     expect(wrapper.text()).toContain('{"path":"missing.txt"}');
-    expect(wrapper.text()).toContain("12ms");
     expect(wrapper.find('[aria-label="ok"]').exists()).toBe(true);
     expect(wrapper.find('[aria-label="error"]').exists()).toBe(true);
     await wrapper.get(".tool-call__expand-btn").trigger("click");

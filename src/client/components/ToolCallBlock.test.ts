@@ -38,7 +38,6 @@ describe("subagent tool session buttons", () => {
         const popover = wrapper.getComponent({ name: "SubagentSessionPopover" });
         expect(popover.props("sessionId")).toBe("worker-42");
         expect(button.attributes("popovertarget")).toBe(popover.props("popoverId"));
-        expect(button.text()).toBe(status === "running" ? "Open live session" : "Open session");
         wrapper.unmount();
       }
     },

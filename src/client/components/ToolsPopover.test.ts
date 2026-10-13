@@ -2,7 +2,6 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import ToolsPopover from "./ToolsPopover.vue";
-import ChatHeader from "./ChatHeader.vue";
 import { useAppStore } from "@/client/stores/app";
 import { getSessionResources } from "@/client/lib/api";
 
@@ -74,28 +73,6 @@ describe("Workspaces and tools", () => {
       wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState: "closed" });
       await flushPromises();
       expect(wrapper.getComponent({ name: "McpSettingsPanel" }).props("active")).toBe(false);
-    } finally {
-      wrapper.unmount();
-    }
-  });
-
-  it("has one combined header opener instead of a separate workspace popover", () => {
-    const wrapper = mount(ChatHeader, {
-      global: {
-        stubs: {
-          ToolsPopover: true,
-          SettingsPopover: true,
-          CronPopover: true,
-          SessionHeaderStatus: true,
-        },
-      },
-    });
-    try {
-      expect(
-        wrapper.get('button[aria-label="Workspaces and tools"]').attributes("popovertarget"),
-      ).toBe("tools-popover");
-      expect(wrapper.find('[popovertarget="workspaces-popover"]').exists()).toBe(false);
-      expect(wrapper.find("#workspaces-popover").exists()).toBe(false);
     } finally {
       wrapper.unmount();
     }

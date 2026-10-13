@@ -56,7 +56,7 @@ async function savePushTitle(): Promise<void> {
     <DefaultModelSettings :open="props.open" />
     <AgentsFileSettings />
     <label class="settings-popover__field">
-      <span>Workspace</span>
+      <span>Assistant workspace</span>
       <select
         class="settings-popover__select"
         :value="assistantWorkspaceId"

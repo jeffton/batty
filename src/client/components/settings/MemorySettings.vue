@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Save } from "@lucide/vue";
+import { Network, Save } from "@lucide/vue";
 import { computed, ref, watch } from "vue";
 import ModelConfigSelector from "@/client/components/ModelConfigSelector.vue";
 import { useAppStore } from "@/client/stores/app";
@@ -55,24 +55,25 @@ async function saveMemoryModel(modelId: string): Promise<void> {
 </script>
 
 <template>
-  <div class="settings-popover__group-title">Memory</div>
-  <div class="settings-popover__help">Used to build OptChat memory summaries.</div>
-  <ModelConfigSelector
-    :model-label="memoryModelLabel"
-    :effort-label="store.settings.memoryReasoning"
-    aria-label="Choose memory model"
-    @refresh-models="store.refreshModels"
-    popover-id="settings-memory-model-popover"
-    anchor-name="--settings-memory-model-anchor"
-    :models="store.models"
-    :current-model-id="store.settings.memoryModel"
-    :current-thinking-level="store.settings.memoryReasoning"
-    :thinking-options="[]"
-    :disabled="memoryModelSaving"
-    @set-model="saveMemoryModel"
-  />
-  <div v-if="memoryModelError" class="settings-popover__error" role="alert">
-    {{ memoryModelError }}
+  <div class="settings-popover__editor">
+    <div class="settings-popover__group-title">Memory</div>
+    <ModelConfigSelector
+      :model-label="memoryModelLabel"
+      :effort-label="store.settings.memoryReasoning"
+      aria-label="Choose memory model"
+      @refresh-models="store.refreshModels"
+      popover-id="settings-memory-model-popover"
+      anchor-name="--settings-memory-model-anchor"
+      :models="store.models"
+      :current-model-id="store.settings.memoryModel"
+      :current-thinking-level="store.settings.memoryReasoning"
+      :thinking-options="[]"
+      :disabled="memoryModelSaving"
+      @set-model="saveMemoryModel"
+    />
+    <div v-if="memoryModelError" class="settings-popover__error" role="alert">
+      {{ memoryModelError }}
+    </div>
   </div>
   <form class="settings-popover__editor" @submit.prevent="saveMemoryLanguage">
     <div class="settings-popover__inline">
@@ -99,7 +100,7 @@ async function saveMemoryModel(modelId: string): Promise<void> {
     </div>
   </form>
   <button class="settings-popover__action" type="button" popovertarget="settings-memory-tree">
-    Memory tree
+    <Network :size="16" aria-hidden="true" /> Memory tree
   </button>
   <FullPopover
     class="settings-popover"

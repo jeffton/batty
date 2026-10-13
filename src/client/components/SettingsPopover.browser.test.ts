@@ -44,6 +44,29 @@ for (const width of [390, 1100]) {
         await route.fulfill({ json: body });
       });
       await page.goto(url);
+      const workspace = page.getByRole("combobox", { name: "Assistant workspace", exact: true });
+      await workspace.waitFor();
+      const controls = await page
+        .locator(
+          "#settings-Assistant-panel .settings-popover__select, #settings-Assistant-panel .settings-popover__input, #settings-Assistant-panel .model-config-selector__button",
+        )
+        .evaluateAll((elements) =>
+          elements.map((element) => {
+            const rect = element.getBoundingClientRect();
+            return { left: rect.left, height: rect.height };
+          }),
+        );
+      for (const control of controls) {
+        expect(control.left).toBeCloseTo(controls[0]!.left, 0);
+        expect(control.height).toBeGreaterThanOrEqual(44);
+      }
+      for (const name of ["Batty AGENTS.md", "Assistant workspace AGENTS.md", "Memory tree"]) {
+        const button = page.getByRole("button", { name, exact: true });
+        expect(await button.locator("svg").count()).toBe(1);
+        const bounds = await button.boundingBox();
+        expect(bounds!.height).toBeGreaterThanOrEqual(44);
+        expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+      }
       await page.getByRole("button", { name: "Batty AGENTS.md", exact: true }).click();
       const editor = page.getByRole("textbox", { name: "AGENTS.md instructions" });
       await editor.fill("Unsaved global draft");
@@ -70,7 +93,7 @@ for (const width of [390, 1100]) {
         .locator("#settings-memory-tree")
         .getByRole("button", { name: "Close popover" })
         .click();
-      await page.screenshot({ path: `/tmp/settings-assistant-${width}.png` });
+      await page.screenshot({ path: `/tmp/settings-b-assistant-${width}.png` });
       await page.getByRole("tab", { name: "Appearance" }).click();
       await page.getByRole("textbox", { name: "App title" }).fill("Unsaved app title");
       await page.getByText("Blue", { exact: true }).click();
@@ -84,7 +107,7 @@ for (const width of [390, 1100]) {
       expect(await page.getByRole("textbox", { name: "App title" }).inputValue()).toBe(
         "Unsaved app title",
       );
-      await page.screenshot({ path: `/tmp/settings-appearance-${width}.png` });
+      await page.screenshot({ path: `/tmp/settings-b-appearance-${width}.png` });
       const rows = await page.locator(".settings-popover__inline:visible").evaluateAll((elements) =>
         elements.map((element) => {
           const input = element.querySelector("input")!.getBoundingClientRect();

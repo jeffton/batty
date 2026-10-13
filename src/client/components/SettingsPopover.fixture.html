@@ -20,7 +20,26 @@
       ];
       store.settings.pushTitle = "Batty";
       store.settings.memoryLanguage = "English";
-      store.settings.memoryModel = "fixture/model";
+      store.models = [
+        {
+          id: "fixture/model",
+          label: "Sol",
+          provider: "fixture",
+          reasoning: true,
+          thinkingLevels: ["medium"],
+          supportsImages: true,
+        },
+        {
+          id: "fixture/memory",
+          label: "Luna",
+          provider: "fixture",
+          reasoning: true,
+          thinkingLevels: ["high"],
+          supportsImages: true,
+        },
+      ];
+      store.settings.defaultThinkingLevel = "medium";
+      store.settings.memoryModel = "fixture/memory";
       store.settings.defaultModel = "model";
       store.settings.defaultProvider = "fixture";
       store.getBattyAgentsFile = async () => "Global instructions";

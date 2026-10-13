@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Save } from "@lucide/vue";
+import { FilePenLine, Save } from "@lucide/vue";
 import { computed, reactive, ref } from "vue";
 import FullPopover from "../FullPopover.vue";
 import { useAppStore } from "@/client/stores/app";
@@ -61,7 +61,7 @@ async function save(): Promise<void> {
       popovertarget="settings-agents-editor"
       @click="edit()"
     >
-      Batty AGENTS.md
+      <FilePenLine :size="16" aria-hidden="true" /> Batty AGENTS.md
     </button>
     <button
       v-if="assistant"
@@ -71,7 +71,7 @@ async function save(): Promise<void> {
       popovertarget="settings-agents-editor"
       @click="edit(assistant.id)"
     >
-      {{ assistant.label }} AGENTS.md
+      <FilePenLine :size="16" aria-hidden="true" /> {{ assistant.label }} AGENTS.md
     </button>
   </div>
   <FullPopover class="settings-popover" popover-id="settings-agents-editor" :title="title">

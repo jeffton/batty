@@ -1,10 +1,3 @@
-.settings-popover .memory-tree-link {
-  display: flex;
-  align-items: center;
-  min-height: 44px;
-  margin-bottom: 8px;
-}
-
 .settings-popover {
   background: var(--color-bg-panel-strong);
 }
@@ -26,8 +19,10 @@
 .settings-popover .settings-popover__section {
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
-  padding: 0.75rem 1rem;
+  width: min(100%, 32rem);
+  margin-inline: auto;
+  gap: 1.4rem;
+  padding: 2rem 1.5rem;
 }
 
 .settings-popover .settings-popover__section + .settings-popover__section {
@@ -52,7 +47,7 @@
 
 .settings-popover .settings-popover__group-title {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   font-weight: 600;
   color: var(--color-text-strong);
 }
@@ -62,10 +57,13 @@
   width: 100%;
   border: 1px solid var(--color-border-soft);
   border-radius: 0.55rem;
-  background: var(--color-bg-app);
-  color: inherit;
-  padding: 0.55rem 0.65rem;
+  min-height: 44px;
+  box-sizing: border-box;
+  background: var(--color-bg-panel-strong);
+  color: var(--color-text);
+  padding: 0.65rem 0.8rem;
   font: inherit;
+  font-weight: 400;
 }
 
 .settings-popover .settings-popover__select {
@@ -84,12 +82,13 @@
 .settings-popover .settings-popover__color-fieldset {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.5rem;
   margin: 0;
   padding: 0;
   border: 0;
-  color: var(--color-text-muted);
-  font-size: 0.78rem;
+  color: var(--color-text-strong);
+  font-size: 0.95rem;
+  font-weight: 600;
 }
 
 .settings-popover .settings-popover__colors {
@@ -216,6 +215,33 @@
   gap: 0.5rem;
 }
 
+.settings-popover .model-config-selector__button {
+  min-height: 54px;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.55rem;
+  padding: 0.65rem 0.8rem;
+  background: var(--color-bg-panel-strong);
+  gap: 0.65rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.settings-popover .model-config-selector__button::after {
+  content: "";
+  width: 0.4rem;
+  height: 0.4rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+}
+
+.settings-popover .model-config-selector__model-label {
+  font-size: 0.95rem;
+}
+
+.settings-popover .model-config-selector__effort-label {
+  font-size: 0.82rem;
+}
+
 .settings-popover .settings-popover__editor-actions {
   display: flex;
   justify-content: flex-start;
@@ -311,9 +337,41 @@
 }
 
 .settings-popover .settings-popover__instruction-buttons {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.5rem;
+}
+
+.settings-popover .settings-popover__action {
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.55rem;
+  background: var(--color-bg-panel-strong);
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.settings-popover .settings-popover__action--primary {
+  border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border-soft));
+  background: var(--color-bg-selection);
+}
+
+.settings-popover .settings-popover__instruction-buttons .settings-popover__action {
+  width: 100%;
+  height: auto;
+  text-align: left;
+  justify-content: flex-start;
+  padding: 0.65rem 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 540px) {
+  .settings-popover .settings-popover__section {
+    padding: 1.25rem 1rem;
+  }
+
+  .settings-popover .settings-popover__instruction-buttons {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .settings-popover .settings-popover__file-editor {

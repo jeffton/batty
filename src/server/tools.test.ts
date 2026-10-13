@@ -9,11 +9,7 @@ import { createRequire } from "node:module";
 import http from "node:http";
 import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
-import {
-  BACKGROUND_CONTEXT,
-  awaitWithContext,
-  withAbortSignal,
-} from "@earendil-works/chord/context";
+import { BACKGROUND_CONTEXT, awaitWithContext } from "@earendil-works/chord/context";
 import { Type } from "typebox";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
@@ -22,20 +18,11 @@ import {
   fauxToolCall,
   fauxText,
 } from "@earendil-works/pi-ai/providers/faux";
-import {
-  createRegistry,
-  defineTask,
-  Harness,
-  MemoryStorage,
-  type AnyTask,
-  defineTool,
-  type ToolRegistration,
-} from "@earendil-works/pi-durable";
+import { createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createOrchestration, OrchestrationDoc } from "./orchestration";
 import { createTools } from "./tools";
-import { CodemodeCalls } from "./codemode";
 import { persistentBashOperations } from "./durable-bash";
 import { stateDirPath } from "./options";
 import { withoutMainMemory } from "./main-memory-policy";
@@ -49,7 +36,7 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-async function fixture(persistent = false, legacy?: { task: AnyTask; tool: ToolRegistration }) {
+async function fixture(persistent = false) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "batty-tools-test-"));
   cleanups.push(() => fs.rm(directory, { recursive: true, force: true }));
   const config = { battyDir: directory, browserMaxTabs: 4, workspacesRoots: [directory] } as any;
@@ -59,17 +46,7 @@ async function fixture(persistent = false, legacy?: { task: AnyTask; tool: ToolR
   const models = createModels();
   models.setProvider(faux.provider);
   const registry = createRegistry();
-  registry.install(
-    legacy
-      ? {
-          ...tools.extension,
-          tasks: [legacy.task],
-          tools: tools.extension.tools!.map((tool) =>
-            tool.name === "codemode" ? legacy.tool : tool,
-          ),
-        }
-      : tools.extension,
-  );
+  registry.install(tools.extension);
   const settings = {
     get extensions() {
       return registry
@@ -394,110 +371,6 @@ describe("durable tool bridge", () => {
     expect(effects).toBe(1);
     const view = await restarted.main.viewState(BACKGROUND_CONTEXT);
     expect(JSON.stringify(view.value.entries)).toContain("Nested tool interrupted by restart");
-    view.dispose();
-  });
-
-  it("reopens a v1 codemode receipt without losing its completed output", async () => {
-    let held!: () => void;
-    const waiting = new Promise<void>((resolve) => {
-      held = resolve;
-    });
-    const legacy = defineTask<any, any, any>({
-      name: "batty.codemode-tool",
-      version: 1,
-      initial: () => ({ phase: "call" }),
-      phases: {
-        call: async (task, runtime, ctx) => {
-          if (task.input.name === "read") {
-            await runtime.commit(
-              () => ({
-                status: "terminal",
-                outcome: {
-                  status: "completed",
-                  result: {
-                    result: { content: [{ type: "text", text: "original v1 output" }] },
-                    structured: null,
-                  },
-                },
-              }),
-              ctx,
-            );
-          } else {
-            await runtime.commit(
-              () => ({ status: "running", checkpoint: { phase: "execute", replay: "safe" } }),
-              ctx,
-            );
-            held();
-            await awaitWithContext(new Promise(() => {}), withAbortSignal(runtime.signal, ctx));
-          }
-        },
-        execute: async () => {
-          throw new Error("legacy task should be migrated");
-        },
-      },
-      abort: async (_, runtime, ctx) => {
-        await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
-      },
-    });
-    const legacyCodemode = defineTool({
-      name: "codemode",
-      description: "legacy codemode",
-      parameters: Type.Object({ code: Type.String() }),
-      replay: "safe",
-      execute: async (_, api, ctx) => {
-        const calls: Array<{ name: string; args: Record<string, string> }> = [
-          { name: "read", args: { path: "seed" } },
-          { name: "hold", args: {} },
-        ];
-        for (const [index, call] of calls.entries()) {
-          const taskId = await api.commit(async (tx) => {
-            const taskId = await tx.createTask(
-              legacy,
-              { ...call, callId: `${api.callId}-${index}` },
-              { ownership: { kind: "task", taskId: api.taskId } },
-            );
-            (await tx.doc(CodemodeCalls, api.taskId)).calls[String(index)] = { ...call, taskId };
-            return taskId;
-          }, ctx);
-          await api.waitForTask(taskId, ctx);
-        }
-        return {};
-      },
-    });
-    const { tools, registry, harness, main, faux, reopen } = await fixture(true, {
-      task: legacy,
-      tool: legacyCodemode,
-    });
-    tools.registerTools([
-      {
-        name: "hold",
-        description: "hold",
-        parameters: Type.Object({}),
-        replay: "safe",
-        execute: async () => ({ output: [{ type: "text", text: "resumed" }] }),
-      },
-    ]);
-    faux.setResponses([
-      fauxAssistantMessage(
-        [
-          fauxToolCall("codemode", {
-            code: 'const source = await tools.read({path:"seed"}); return source + ":" + await tools.hold({});',
-          }),
-        ],
-        { stopReason: "toolUse" },
-      ),
-      fauxAssistantMessage([fauxText("done")]),
-    ]);
-    const submitted = await main.submit({ type: "input", content: "start" }, BACKGROUND_CONTEXT);
-    harness.resume();
-    await waiting;
-    await harness.close(BACKGROUND_CONTEXT);
-    registry.install(tools.extension);
-    const restarted = await reopen();
-    const recovered = await restarted.harness.submission(submitted.id, BACKGROUND_CONTEXT);
-    expect((await recovered!.wait(BACKGROUND_CONTEXT)).status).toBe("done");
-    const view = await restarted.main.viewState(BACKGROUND_CONTEXT);
-    expect(JSON.stringify(view.value.entries)).toContain("original v1 output:resumed");
     view.dispose();
   });
 

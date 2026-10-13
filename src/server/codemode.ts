@@ -18,7 +18,7 @@ import { Type } from "typebox";
 import { Compile } from "typebox/compile";
 import type { McpService } from "./mcp-service";
 import type { CodemodeCall } from "../shared/types";
-import { migrateNestedToolResult, type createCodemodeTasks } from "./codemode-tasks";
+import type { createCodemodeTasks } from "./codemode-tasks";
 import { MAIN_MEMORY_TOOLS } from "./main-memory-policy";
 import { isPiShellToolName } from "../shared/pi-tools";
 
@@ -159,8 +159,7 @@ export function createCodemodeTool(
                     : `Nested tool ${tool.name} ${outcome.status}`,
               );
             }
-            const { structured } = outcome.result;
-            const result = migrateNestedToolResult(outcome.result.result);
+            const { result, structured } = outcome.result;
             call.details = result.details ?? null;
             if (
               result.details &&

@@ -19,14 +19,6 @@ type Input = { name: string; args: JsonValue; callId: string };
 type State = { phase: "call" } | { phase: "execute"; replay: "safe" | "unsafe" };
 type Result = { result: ToolExecutionResult; structured: JsonValue | null };
 
-/** Migrate completed v1 receipts as well as live tasks; terminal receipts do not run task migrations. */
-export function migrateNestedToolResult(result: ToolExecutionResult): ToolExecutionResult {
-  if (!("content" in result)) return result;
-  const { content, ...rest } = result as ToolExecutionResult & {
-    content: ToolExecutionResult["output"];
-  };
-  return { ...rest, output: content };
-}
 const NestedDetails = defineDoc<{ details: JsonValue }>({
   kind: "batty.codemode-nested-details",
   version: 1,
@@ -113,8 +105,7 @@ export function createCodemodeTasks(
         const outcome = settled.state.outcome;
         if (outcome.status !== "completed")
           throw new Error(`Nested tool ${name} ${outcome.status}`);
-        const { structured } = outcome.result;
-        const result = migrateNestedToolResult(outcome.result.result);
+        const { result, structured } = outcome.result;
         const output = result.output ?? [];
         const only = output[0];
         return {
@@ -270,7 +261,6 @@ export function createCodemodeTasks(
   const nested = defineTask<Input, State, Result>({
     name: "batty.codemode-tool",
     version: 2,
-    migrate: (input, checkpoint) => ({ input: input as Input, checkpoint: checkpoint as State }),
     initial: () => ({ phase: "call" }),
     phases: {
       call: (task, runtime, ctx) => execute(task, runtime, ctx, false),

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import path from "node:path";
 import vue from "@vitejs/plugin-vue";
-import { chromium, type Browser } from "patchright";
+import { chromium, type Browser, type Page } from "patchright";
 import type { ViteDevServer } from "vite";
 import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
@@ -24,6 +24,14 @@ afterAll(async () => {
   await browser?.close();
   if (server) await closeBrowserFixtureServer(server);
 });
+
+async function expectBoldButtons(page: Page) {
+  const weights = await page
+    .locator("button:visible")
+    .evaluateAll((buttons) => buttons.map((button) => getComputedStyle(button).fontWeight));
+  expect(weights.length).toBeGreaterThan(0);
+  expect(new Set(weights)).toEqual(new Set(["700"]));
+}
 
 for (const width of [390, 1100]) {
   test(`settings controls, drafts and nested editors at ${width}px`, async () => {
@@ -53,6 +61,16 @@ for (const width of [390, 1100]) {
       await page.goto(url);
       const workspace = page.getByRole("combobox", { name: "Assistant workspace", exact: true });
       await workspace.waitFor();
+      await expectBoldButtons(page);
+      expect(
+        await page
+          .locator(".model-config-selector__model-label")
+          .first()
+          .evaluate((element) => getComputedStyle(element).fontWeight),
+      ).toBe("700");
+      expect(await workspace.evaluate((element) => getComputedStyle(element).fontWeight)).toBe(
+        "400",
+      );
       const controls = await page
         .locator(
           "#settings-Assistant-panel .settings-popover__select, #settings-Assistant-panel .settings-popover__input, #settings-Assistant-panel .model-config-selector__button",
@@ -114,6 +132,7 @@ for (const width of [390, 1100]) {
       expect(await page.getByRole("textbox", { name: "App title" }).inputValue()).toBe(
         "Unsaved app title",
       );
+      await expectBoldButtons(page);
       await page.screenshot({ path: `/tmp/settings-b-appearance-${width}.png` });
       const rows = await page.locator(".settings-popover__inline:visible").evaluateAll((elements) =>
         elements.map((element) => {
@@ -161,6 +180,7 @@ for (const width of [390, 1100]) {
         expect(bounds!.height).toBeGreaterThanOrEqual(44);
         expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
       }
+      await expectBoldButtons(page);
       await page.screenshot({ path: `/tmp/settings-b-auth-${width}.png` });
       await page.getByRole("button", { name: "Set variable", exact: true }).click();
       await page.getByText("NEW_KEY", { exact: true }).waitFor();

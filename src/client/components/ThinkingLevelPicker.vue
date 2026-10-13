@@ -53,7 +53,6 @@ function thinkingLabel(value: string): string {
   color: var(--color-text-muted);
   padding: 0.3rem 0.4rem;
   font-size: 0.82rem;
-  font-weight: 500;
   transition:
     background 80ms ease,
     color 80ms ease;
@@ -69,7 +68,6 @@ function thinkingLabel(value: string): string {
 .thinking-picker__btn.is-active {
   background: var(--color-user-bg);
   color: var(--color-user-text);
-  font-weight: 600;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 

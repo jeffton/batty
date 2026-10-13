@@ -193,7 +193,7 @@ function cost(value: number): string {
   background: none;
   border: 0;
   padding: 0;
-  font: inherit;
+  font-family: inherit;
   cursor: pointer;
 }
 
@@ -203,9 +203,8 @@ function cost(value: number): string {
   border: 1px solid color-mix(in srgb, var(--color-info) 30%, transparent);
   border-radius: 0.5rem;
   padding: 0.22rem 0.65rem;
-  font: inherit;
+  font-family: inherit;
   font-size: 0.88rem;
-  font-weight: 600;
   cursor: pointer;
 }
 </style>

@@ -131,9 +131,8 @@ const emit = defineEmits<{
   border: 1px solid color-mix(in srgb, var(--color-info) 30%, transparent);
   border-radius: 0.5rem;
   padding: 0.22rem 0.65rem;
-  font: inherit;
+  font-family: inherit;
   font-size: 0.88rem;
-  font-weight: 600;
   cursor: pointer;
 }
 

@@ -142,7 +142,7 @@ function sessionToggle(taskId: string, event: Event): void {
   border-radius: 0.5rem;
   background: transparent;
   color: var(--color-text-muted);
-  font: inherit;
+  font-family: inherit;
   font-size: 0.78rem;
   white-space: nowrap;
   cursor: pointer;
@@ -221,7 +221,7 @@ function sessionToggle(taskId: string, event: Event): void {
   border-radius: 0;
   background: transparent;
   color: inherit;
-  font: inherit;
+  font-family: inherit;
   text-align: left;
 }
 

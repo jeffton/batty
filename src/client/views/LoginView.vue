@@ -188,7 +188,6 @@ async function register(): Promise<void> {
   padding: 0.8rem 1rem;
   color: white;
   background: var(--color-accent);
-  font-weight: 600;
   transition: background 80ms ease;
 }
 

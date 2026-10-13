@@ -691,7 +691,7 @@ onBeforeUnmount(() => {
   background: var(--color-bg-selection);
   color: var(--color-accent-strong);
   padding: 0.45rem 0.65rem;
-  font: inherit;
+  font-family: inherit;
   font-size: 0.78rem;
   cursor: pointer;
 }

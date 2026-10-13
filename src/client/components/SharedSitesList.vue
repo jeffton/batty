@@ -166,8 +166,7 @@ onBeforeUnmount(() => {
   border-radius: 0.5rem;
   background: var(--color-bg-panel);
   color: var(--color-text);
-  font: inherit;
-  font-weight: 600;
+  font-family: inherit;
   cursor: pointer;
 }
 

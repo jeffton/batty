@@ -19,6 +19,7 @@
       ];
       createApp({
         render: () => [
+          h("a", { href: "#app" }, "Ordinary link"),
           h("button", { popovertarget: "cron", style: "anchor-name: --cron" }, "Cron"),
           h(CronPopover, { popoverId: "cron", anchorName: "--cron" }),
           h("div", { style: "position: fixed; bottom: 1rem; right: 1rem" }, [

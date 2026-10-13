@@ -38,12 +38,15 @@ async function expectContainedRows(rows: Locator, contentSelector: string) {
           contentTop: content.top,
           contentBottom: content.bottom,
           overflow: element.scrollWidth > element.clientWidth,
+          weight: getComputedStyle(element).fontWeight,
+          isButton: element.tagName === "BUTTON",
         };
       }),
     contentSelector,
   );
   for (const [index, row] of layout.entries()) {
     expect(row.height).toBeGreaterThanOrEqual(44);
+    if (row.isButton) expect(row.weight).toBe("700");
     expect(row.contentTop).toBeGreaterThanOrEqual(row.top);
     expect(row.contentBottom).toBeLessThanOrEqual(row.bottom);
     expect(row.overflow).toBe(false);
@@ -111,6 +114,11 @@ for (const width of [320, 390, 1100]) {
     try {
       await page.route("**/api/**", (route) => route.fulfill({ json: {} }));
       await page.goto(url);
+      expect(
+        await page
+          .getByRole("link", { name: "Ordinary link" })
+          .evaluate((element) => getComputedStyle(element).fontWeight),
+      ).toBe("400");
       await page.getByRole("button", { name: "Running tasks" }).click();
       const rows = page.locator(".tasks-popover:popover-open .tasks-popover__task");
       await rows.nth(2).waitFor();

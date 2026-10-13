@@ -192,11 +192,9 @@ watch(
 .mc-popover__model.is-active {
   background: var(--color-user-bg);
   color: var(--color-user-text);
-  font-weight: 600;
 }
 
 .mc-popover__model-name {
-  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

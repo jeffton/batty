@@ -623,9 +623,8 @@ const genericEntries = computed(() => {
   border: 1px solid color-mix(in srgb, var(--color-info) 30%, transparent);
   border-radius: 0.5rem;
   padding: 0.35rem 0.7rem;
-  font: inherit;
+  font-family: inherit;
   font-size: 0.88rem;
-  font-weight: 600;
   color: var(--color-info);
   background: var(--color-bg-inline-code);
   cursor: pointer;

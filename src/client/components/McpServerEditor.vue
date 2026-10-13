@@ -75,14 +75,13 @@ const emit = defineEmits<{ save: []; cancel: [] }>();
   padding: 0.45rem 0.65rem;
   border: 0;
   border-radius: 0.45rem;
-  font: inherit;
+  font-family: inherit;
   font-size: 0.82rem;
   cursor: pointer;
 }
 .mcp-editor__save {
   background: var(--color-bg-selection);
   color: var(--color-accent-strong);
-  font-weight: 600;
 }
 .mcp-editor__cancel {
   background: var(--color-bg-elevated);

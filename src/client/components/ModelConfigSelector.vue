@@ -125,7 +125,6 @@ const emit = defineEmits<{
 .model-config-selector__model-label {
   color: var(--color-text-strong);
   font-size: 0.8rem;
-  font-weight: 600;
 }
 
 .model-config-selector__effort-label {

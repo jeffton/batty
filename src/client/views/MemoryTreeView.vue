@@ -198,9 +198,6 @@ nav {
   background: transparent;
   color: inherit;
 }
-.node-title {
-  font-weight: 600;
-}
 .node-meta {
   font-size: 0.9rem;
   opacity: 0.75;

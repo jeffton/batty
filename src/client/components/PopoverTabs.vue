@@ -67,9 +67,8 @@ async function handleKeydown(event: KeyboardEvent): Promise<void> {
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--color-text-subtle);
-  font: inherit;
+  font-family: inherit;
   font-size: 0.86rem;
-  font-weight: 650;
   cursor: pointer;
 }
 

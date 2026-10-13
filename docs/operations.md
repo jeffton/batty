@@ -48,7 +48,8 @@ Before pushing changes, run the complete source validation below. Installations 
 ```sh
 pnpm check
 pnpm test:all
-bash scripts/deploy.test.sh  # Linux deployment regression checks
+bash scripts/deploy.test.sh  # Shared deployment lifecycle checks
+bash scripts/deploy-macos.test.sh  # launchd activation checks, on macOS
 pnpm build
 node scripts/verify-offline.mjs
 ```
@@ -66,6 +67,20 @@ For the maintained installation, source is `/root/github/batty2`, tracking `main
 ```
 
 The script checks disk space, installs locked dependencies and builds an immutable release, atomically switches `/opt/batty2/current`, restarts `batty2.service` and verifies the build ID. It retains the active release and two healthy rollbacks. Pi Durable resumes committed work; shell jobs use stable execution receipts and detached Chromium can retain tabs, cookies and live page state. A kernel lifetime lock prevents concurrent database writers. Unsafe interrupted external actions are reported as errors rather than automatically repeated.
+
+### macOS and launchd
+
+Install Homebrew's `flock` (`brew install flock`) alongside Node and pnpm. Run deployment as the logged-in service user, without sudo:
+
+```sh
+./scripts/deploy-macos.sh
+```
+
+The script pulls source, builds an immutable release and hands activation to a launchd-owned worker. The worker switches the release, reloads the agent and verifies `/healthz` and its build ID. Failed activation restores the previous agent and release. A kernel lock rejects overlapping activations. The active release and two healthy rollback candidates are retained, including their client assets.
+
+Defaults are `~/Library/Application Support/Batty2/app` for releases, `~/Library/Application Support/Batty2/root` for state and `se.roybot.batty` for the launch agent. Configure `.batty/options.json` in the state root before deploying. `BATTY2_INSTALL_ROOT`, `BATTY2_ROOT` and `BATTY2_LABEL` override these defaults. An existing agent's listener and environment are preserved; a first install listens on loopback port 3147. The deployment command returns after handing off the worker, before activation completes. Logs are in `~/Library/Logs/Batty2`; the release's `ACTIVATION_RESULT` records `PENDING`, `SUCCEEDED` or `FAILED`, with details in `DEPLOY.log`. The cron CLI is installed at `~/.local/bin/batty2` with the installation's state root and listener.
+
+`BATTY2_ALLOW_DIRTY=1` explicitly permits deploying tracked edits and nonignored new files. Deployment does not copy state or import chats.
 
 ### Windows and IIS
 

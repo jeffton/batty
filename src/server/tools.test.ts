@@ -518,7 +518,7 @@ describe("durable tool bridge", () => {
     const second = JSON.parse((await inspect()).content[0].text);
     expect(first.catalog).toEqual(["mcp__test__echo"]);
     expect(second).toEqual(first);
-    expect(second.result.cwd).toBe(directory);
+    expect(second.result.cwd).toBe(await fs.realpath(directory));
     const status = await tools.mcp.getStatus();
     expect(status.servers.map((server) => server.name)).toEqual(["test"]);
     expect(status.servers[0]!.state).toBe("connected");

@@ -28,6 +28,13 @@ if health_matches_expected '{invalid' abc123 2>/dev/null; then
   exit 1
 fi
 
+# Asset manifests use relative paths on both BSD and GNU find.
+mkdir -p "$tmp/manifest assets/nested"
+printf 'chunk' > "$tmp/manifest assets/nested/chunk.js"
+write_client_asset_manifest "$tmp/manifest assets" "$tmp/manifest.txt"
+[[ $(<"$tmp/manifest.txt") == nested/chunk.js ]]
+[[ $(canonical_release_path "$tmp/manifest assets") == "$(cd "$tmp/manifest assets" && pwd -P)" ]]
+
 # A release carries only its own chunks and the explicitly listed chunks from
 # the two newest retained releases, never inherited/stale assets.
 releases="$tmp/releases"

@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 
-# Deployment lifecycle helpers. Keep these independent of systemd and the live
-# filesystem so scripts/deploy.test.sh can exercise them with temporary dirs.
+# Deployment lifecycle helpers shared by Linux and macOS.
+
+canonical_release_path() {
+  (cd "$1" && pwd -P)
+}
 
 preflight_disk() {
   local path=$1
@@ -37,7 +40,7 @@ newest_release_paths() {
 write_client_asset_manifest() {
   local assets_dir=$1
   local manifest=$2
-  find "$assets_dir" -type f -printf '%P\n' | LC_ALL=C sort > "$manifest"
+  (cd "$assets_dir" && find . -type f | cut -c3- | LC_ALL=C sort) > "$manifest"
 }
 
 copy_retained_client_assets() {
@@ -47,13 +50,13 @@ copy_retained_client_assets() {
   local target_assets="$new_release/dist/client/assets"
   local retained=0 release manifest asset canonical_active=
   if [[ -e "$active_release" || -L "$active_release" ]]; then
-    canonical_active=$(readlink -f "$active_release")
+    canonical_active=$(canonical_release_path "$active_release")
   fi
 
   while IFS= read -r release; do
     [[ -n "$release" && "$release" != "$new_release" ]] || continue
     manifest="$release/CLIENT_ASSETS.txt"
-    if [[ ! -f "$release/HEALTHY" && ( "$(readlink -f "$release")" != "$canonical_active" || -f "$manifest" ) ]]; then
+    if [[ ! -f "$release/HEALTHY" && ( "$(canonical_release_path "$release")" != "$canonical_active" || -f "$manifest" ) ]]; then
       continue
     fi
 
@@ -61,7 +64,7 @@ copy_retained_client_assets() {
       # One-time migration: legacy releases have no ownership manifest. Copy
       # the active release's assets for its open clients, but never inherit
       # this catch-all set again on subsequent deployments.
-      [[ "$(readlink -f "$release")" == "$canonical_active" ]] || continue
+      [[ "$(canonical_release_path "$release")" == "$canonical_active" ]] || continue
       cp -a "$release/dist/client/assets/." "$target_assets/"
       retained=$((retained + 1))
       if (( retained >= 2 )); then break; fi
@@ -85,11 +88,11 @@ prune_releases() {
   local releases_dir=$1
   local active_release=$2
   local keep=0 release canonical_active
-  canonical_active=$(readlink -f "$active_release")
+  canonical_active=$(canonical_release_path "$active_release")
 
   while IFS= read -r release; do
     [[ -d "$release" ]] || continue
-    if [[ "$(readlink -f "$release")" == "$canonical_active" ]]; then
+    if [[ "$(canonical_release_path "$release")" == "$canonical_active" ]]; then
       continue
     fi
     # Pre-manifest releases predate the health marker. Keep two legacy rollback

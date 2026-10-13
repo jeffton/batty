@@ -69,9 +69,6 @@ watch(
 <template>
   <section class="settings-popover__section">
     <div class="settings-popover__group-title">Environment variables</div>
-    <div class="settings-popover__help">
-      Stored in <code>.batty/environment.json</code>. Settings read at startup require a restart.
-    </div>
     <div v-for="name in environmentNames" :key="name" class="settings-popover__environment-row">
       <code>{{ name }}</code>
       <DeleteButton

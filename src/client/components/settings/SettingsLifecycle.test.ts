@@ -79,18 +79,12 @@ describe("Settings popover lifecycle", () => {
     wrapper.unmount();
   });
 
-  it("keeps one credentials/instructions editor open and resets editors and errors on reopening", async () => {
-    const { wrapper, store, loadAgents, toggle } = setup();
+  it("resets credentials editors and errors on reopening while preserving drafts", async () => {
+    const { wrapper, store, toggle } = setup();
     vi.spyOn(store, "setBraveSearchApiKey").mockRejectedValue(new Error("Invalid search key"));
     await toggle("open");
-    const agents = section(wrapper, "Batty AGENTS file");
-    const auth = section(wrapper, "Auth");
-    await agents.get("button").trigger("click");
-    await flushPromises();
-    expect(loadAgents).toHaveBeenCalledTimes(1);
-    expect(agents.get<HTMLTextAreaElement>("textarea").element.value).toBe("Agent instructions");
+    const auth = section(wrapper, "Brave Search API key");
     await auth.get("button").trigger("click");
-    expect(agents.find("textarea").exists()).toBe(false);
     await auth.get("input").setValue("invalid");
     await auth.get(".settings-popover__editor button").trigger("click");
     await flushPromises();
@@ -101,10 +95,6 @@ describe("Settings popover lifecycle", () => {
     await auth.get("button").trigger("click");
     expect(auth.text()).not.toContain("Invalid search key");
     expect(auth.get<HTMLInputElement>("input").element.value).toBe("invalid");
-    await agents.get("button").trigger("click");
-    await flushPromises();
-    expect(auth.find("input").exists()).toBe(false);
-    expect(agents.find("textarea").exists()).toBe(true);
     wrapper.unmount();
   });
 });

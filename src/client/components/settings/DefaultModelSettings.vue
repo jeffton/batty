@@ -68,15 +68,14 @@ watch(
 </script>
 
 <template>
-  <section class="settings-popover__section">
-    <div class="settings-popover__group-title">Default model</div>
-    <div class="settings-popover__help">Used when starting new sessions.</div>
+  <div class="settings-popover__editor">
+    <div class="settings-popover__group-title">Main model</div>
     <ModelConfigSelector
       :model-label="defaultModelLabel"
       :effort-label="
         defaultThinkingOptions.length > 0 ? defaultThinkingLevel : 'Effort unavailable'
       "
-      aria-label="Choose default model and effort"
+      aria-label="Choose main model and effort"
       @refresh-models="store.refreshModels"
       :popover-id="DEFAULT_MODEL_POPOVER_ID"
       :anchor-name="DEFAULT_MODEL_ANCHOR"
@@ -91,5 +90,5 @@ watch(
     <div v-if="defaultModelError" class="settings-popover__error" role="alert">
       {{ defaultModelError }}
     </div>
-  </section>
+  </div>
 </template>

@@ -327,6 +327,21 @@ export function removeEnvironmentVariable(name: string): Promise<{ names: string
   return request(`/api/settings/environment/${encodeURIComponent(name)}`, { method: "DELETE" });
 }
 
+export function getAssistantAgentsFile(workspaceId: string): Promise<{ content: string }> {
+  return request(`/api/settings/assistant-agents/${encodeURIComponent(workspaceId)}`);
+}
+
+export function setAssistantAgentsFile(
+  workspaceId: string,
+  content: string,
+): Promise<{ content: string }> {
+  return request(`/api/settings/assistant-agents/${encodeURIComponent(workspaceId)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+}
+
 export function getBattyAgentsFile(): Promise<{ content: string }> {
   return request("/api/settings/agents");
 }

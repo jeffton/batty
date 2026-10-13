@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Check, Palette, Save } from "@lucide/vue";
+import { Check, Save } from "@lucide/vue";
 import { ref, watch } from "vue";
 import { useAppStore } from "@/client/stores/app";
 import { APP_COLOR_OPTIONS, type AppColor } from "@/shared/appearance";
@@ -20,7 +20,7 @@ async function saveAppearance(): Promise<void> {
   appearanceSaving.value = true;
   appearanceError.value = "";
   try {
-    await store.setAppearance({ title, color: appearanceColor.value });
+    await store.setAppearance({ title, color: store.settings.appearance.color });
     appearanceTitle.value = store.settings.appearance.title;
   } catch (error) {
     appearanceError.value = error instanceof Error ? error.message : String(error);
@@ -29,11 +29,32 @@ async function saveAppearance(): Promise<void> {
   }
 }
 
+async function saveColor(color: AppColor): Promise<void> {
+  appearanceColor.value = color;
+  appearanceSaving.value = true;
+  appearanceError.value = "";
+  try {
+    await store.setAppearance({ title: store.settings.appearance.title, color });
+  } catch (error) {
+    appearanceColor.value = store.settings.appearance.color;
+    appearanceError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    appearanceSaving.value = false;
+  }
+}
+
 watch(
-  () => store.settings.appearance,
-  (appearance) => {
-    appearanceTitle.value = appearance.title;
-    appearanceColor.value = appearance.color;
+  () => store.settings.appearance.color,
+  (color) => {
+    appearanceColor.value = color;
+  },
+  { immediate: true },
+);
+
+watch(
+  () => store.settings.appearance.title,
+  (title) => {
+    appearanceTitle.value = title;
   },
   { immediate: true },
 );
@@ -50,23 +71,28 @@ watch(
 
 <template>
   <section class="settings-popover__section">
-    <div class="settings-popover__section-title-row">
-      <Palette :size="15" />
-      <div class="settings-popover__group-title">Appearance</div>
+    <div class="settings-popover__inline">
+      <label class="settings-popover__field">
+        <span>App title</span>
+        <input
+          v-model="appearanceTitle"
+          class="settings-popover__input settings-popover__input--title"
+          type="text"
+          maxlength="40"
+          autocomplete="off"
+          :disabled="appearanceSaving"
+          @keydown.enter="saveAppearance"
+        />
+      </label>
+      <button
+        class="settings-popover__action settings-popover__action--primary"
+        type="button"
+        :disabled="appearanceSaving || !appearanceTitle.trim()"
+        @click="saveAppearance"
+      >
+        <Save :size="14" /> {{ appearanceSaving ? "Saving…" : "Save" }}
+      </button>
     </div>
-
-    <label class="settings-popover__field">
-      <span>App title</span>
-      <input
-        v-model="appearanceTitle"
-        class="settings-popover__input settings-popover__input--title"
-        type="text"
-        maxlength="40"
-        autocomplete="off"
-        :disabled="appearanceSaving"
-        @keydown.enter="saveAppearance"
-      />
-    </label>
 
     <fieldset class="settings-popover__color-fieldset">
       <legend>Color</legend>
@@ -78,7 +104,8 @@ watch(
           :title="color.label"
         >
           <input
-            v-model="appearanceColor"
+            :checked="appearanceColor === color.id"
+            @change="saveColor(color.id)"
             type="radio"
             name="app-color"
             :value="color.id"
@@ -97,14 +124,6 @@ watch(
       </div>
     </fieldset>
 
-    <button
-      class="settings-popover__action settings-popover__action--primary"
-      type="button"
-      :disabled="appearanceSaving || !appearanceTitle.trim()"
-      @click="saveAppearance"
-    >
-      <Save :size="14" /> {{ appearanceSaving ? "Saving…" : "Save appearance" }}
-    </button>
     <div v-if="appearanceError" class="settings-popover__error" role="alert">
       {{ appearanceError }}
     </div>

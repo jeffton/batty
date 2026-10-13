@@ -5,8 +5,6 @@ import FullPopover from "@/client/components/FullPopover.vue";
 import PopoverTabs from "./PopoverTabs.vue";
 import AppearanceSettings from "./settings/AppearanceSettings.vue";
 import AssistantSettings from "./settings/AssistantSettings.vue";
-import DefaultModelSettings from "./settings/DefaultModelSettings.vue";
-import AgentsFileSettings from "./settings/AgentsFileSettings.vue";
 import AuthSettings from "./settings/AuthSettings.vue";
 import EnvironmentSettings from "./settings/EnvironmentSettings.vue";
 import "./settings/settings.css";
@@ -63,9 +61,7 @@ function handlePopoverToggle(event: Event): void {
       tabindex="0"
     >
       <template v-if="tab === 'Assistant'">
-        <AssistantSettings @close="closePopover" />
-        <DefaultModelSettings :open="open" />
-        <AgentsFileSettings v-model:expanded-item-id="expandedItemId" :open="open" />
+        <AssistantSettings :open="open" />
       </template>
       <AppearanceSettings v-else-if="tab === 'Appearance'" :open="open" />
       <template v-else>

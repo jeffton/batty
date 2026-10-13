@@ -3,8 +3,10 @@ import { Save } from "@lucide/vue";
 import { computed, ref, watch } from "vue";
 import { useAppStore } from "@/client/stores/app";
 import MemorySettings from "./MemorySettings.vue";
+import DefaultModelSettings from "./DefaultModelSettings.vue";
+import AgentsFileSettings from "./AgentsFileSettings.vue";
 
-const emit = defineEmits<{ close: [] }>();
+const props = defineProps<{ open: boolean }>();
 const store = useAppStore();
 const assistantWorkspaceSaving = ref(false);
 const assistantWorkspaceError = ref("");
@@ -50,8 +52,9 @@ async function savePushTitle(): Promise<void> {
 </script>
 
 <template>
-  <section class="settings-popover__section" aria-labelledby="assistant-settings-title">
-    <h2 id="assistant-settings-title" class="settings-popover__group-title">Assistant</h2>
+  <section class="settings-popover__section" aria-label="Assistant settings">
+    <DefaultModelSettings :open="props.open" />
+    <AgentsFileSettings />
     <label class="settings-popover__field">
       <span>Workspace</span>
       <select
@@ -69,27 +72,29 @@ async function savePushTitle(): Promise<void> {
     <div v-if="assistantWorkspaceError" class="settings-popover__error" role="alert">
       {{ assistantWorkspaceError }}
     </div>
-    <label class="settings-popover__field">
-      <span>Push sender</span>
-      <input
-        v-model="pushTitle"
-        class="settings-popover__input"
-        type="text"
-        :disabled="pushTitleSaving"
-        @keydown.enter.prevent="savePushTitle"
-      />
-    </label>
-    <button
-      class="settings-popover__action settings-popover__action--primary"
-      type="button"
-      :disabled="pushTitleSaving || !pushTitle.trim()"
-      @click="savePushTitle"
-    >
-      <Save :size="14" /> {{ pushTitleSaving ? "Saving…" : "Save push sender" }}
-    </button>
+    <div class="settings-popover__inline">
+      <label class="settings-popover__field">
+        <span>Push sender</span>
+        <input
+          v-model="pushTitle"
+          class="settings-popover__input"
+          type="text"
+          :disabled="pushTitleSaving"
+          @keydown.enter.prevent="savePushTitle"
+        />
+      </label>
+      <button
+        class="settings-popover__action settings-popover__action--primary"
+        type="button"
+        :disabled="pushTitleSaving || !pushTitle.trim()"
+        @click="savePushTitle"
+      >
+        <Save :size="14" /> {{ pushTitleSaving ? "Saving…" : "Save" }}
+      </button>
+    </div>
     <div v-if="pushTitleError" class="settings-popover__error" role="alert">
       {{ pushTitleError }}
     </div>
-    <MemorySettings @close="emit('close')" />
+    <MemorySettings />
   </section>
 </template>

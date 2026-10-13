@@ -4,7 +4,10 @@ import { computed, ref, watch } from "vue";
 import ModelConfigSelector from "@/client/components/ModelConfigSelector.vue";
 import { useAppStore } from "@/client/stores/app";
 
-const emit = defineEmits<{ close: [] }>();
+import FullPopover from "../FullPopover.vue";
+import MemoryTreeView from "@/client/views/MemoryTreeView.vue";
+
+const treeOpen = ref(false);
 const store = useAppStore();
 const memoryLanguage = ref("");
 const memoryLanguageSaving = ref(false);
@@ -52,7 +55,7 @@ async function saveMemoryModel(modelId: string): Promise<void> {
 </script>
 
 <template>
-  <div class="settings-popover__group-title">Memory model</div>
+  <div class="settings-popover__group-title">Memory</div>
   <div class="settings-popover__help">Used to build OptChat memory summaries.</div>
   <ModelConfigSelector
     :model-label="memoryModelLabel"
@@ -72,31 +75,38 @@ async function saveMemoryModel(modelId: string): Promise<void> {
     {{ memoryModelError }}
   </div>
   <form class="settings-popover__editor" @submit.prevent="saveMemoryLanguage">
-    <label class="settings-popover__field">
-      <span>Memory language</span>
-      <input
-        v-model="memoryLanguage"
-        class="settings-popover__input"
-        type="text"
-        autocomplete="off"
-        :disabled="memoryLanguageSaving"
-      />
-    </label>
-    <div class="settings-popover__help">
-      Used for new summaries. Existing memory stays unchanged.
+    <div class="settings-popover__inline">
+      <label class="settings-popover__field">
+        <span>Memory language</span>
+        <input
+          v-model="memoryLanguage"
+          class="settings-popover__input"
+          type="text"
+          autocomplete="off"
+          :disabled="memoryLanguageSaving"
+        />
+      </label>
+      <button
+        class="settings-popover__action settings-popover__action--primary"
+        type="submit"
+        :disabled="memoryLanguageSaving || !memoryLanguage.trim()"
+      >
+        <Save :size="14" /> {{ memoryLanguageSaving ? "Saving…" : "Save" }}
+      </button>
     </div>
-    <button
-      class="settings-popover__action settings-popover__action--primary"
-      type="submit"
-      :disabled="memoryLanguageSaving || !memoryLanguage.trim()"
-    >
-      <Save :size="14" /> {{ memoryLanguageSaving ? "Saving…" : "Save memory language" }}
-    </button>
     <div v-if="memoryLanguageError" class="settings-popover__error" role="alert">
       {{ memoryLanguageError }}
     </div>
   </form>
-  <RouterLink to="/memory-tree" class="memory-tree-link" @click="emit('close')">
+  <button class="settings-popover__action" type="button" popovertarget="settings-memory-tree">
     Memory tree
-  </RouterLink>
+  </button>
+  <FullPopover
+    class="settings-popover"
+    popover-id="settings-memory-tree"
+    title="Memory tree"
+    @toggle="treeOpen = ($event as ToggleEvent).newState === 'open'"
+  >
+    <MemoryTreeView v-if="treeOpen" embedded />
+  </FullPopover>
 </template>

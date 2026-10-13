@@ -4,6 +4,8 @@ import { ByteCache } from "@/shared/byte-cache";
 import { getMemoryTree, expandMemoryNode } from "@/client/lib/api";
 import type { MemoryTreeNode, MemoryTreeOverview, MemoryTreeExpansion } from "@/shared/memory-tree";
 
+defineProps<{ embedded?: boolean }>();
+
 const overview = ref<MemoryTreeOverview>();
 const path = ref<MemoryTreeNode[]>([]);
 const expansion = ref<MemoryTreeExpansion>();
@@ -75,8 +77,8 @@ onMounted(load);
 <template>
   <main ref="container" class="memory-tree" :aria-busy="loading">
     <header>
-      <RouterLink to="/">Back to chat</RouterLink>
-      <h1 ref="heading" tabindex="-1">Memory tree</h1>
+      <RouterLink v-if="!embedded" to="/">Back to chat</RouterLink>
+      <h1 v-if="!embedded" ref="heading" tabindex="-1">Memory tree</h1>
       <p v-if="overview">
         {{ overview.prepared.toLocaleString() }} prepared messages ·
         {{ overview.total.toLocaleString() }} indexed

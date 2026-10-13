@@ -58,8 +58,8 @@ describe("Assistant settings", () => {
       const appearance = wrapper.get("#settings-test-Appearance-panel");
       const auth = wrapper.get("#settings-test-Auth-panel");
       expect(assistant.isVisible()).toBe(true);
-      expect(assistant.text()).toContain("Default model");
-      expect(assistant.text()).toContain("Memory model");
+      expect(assistant.text()).toContain("Main model");
+      expect(assistant.text()).toContain("Memory");
       expect(assistant.text()).toContain("Push sender");
       expect(appearance.isVisible()).toBe(false);
       expect(appearance.text()).toContain("App title");
@@ -93,11 +93,11 @@ describe("Assistant settings", () => {
 
   it("groups workspace, push identity and memory without changing stored values", async () => {
     const { wrapper, store, save } = setup();
-    const section = wrapper.get('[aria-labelledby="assistant-settings-title"]');
+    const section = wrapper.get('[aria-label="Assistant settings"]');
     expect(section.text()).toContain("Push sender");
-    expect(section.text()).toContain("Memory model");
+    expect(section.text()).toContain("Memory");
     expect(section.text()).toContain("Memory tree");
-    expect(section.text()).not.toContain("Default model");
+    expect(section.text()).toContain("Main model");
     expect(section.get("select").element.value).toBe("roy");
     expect(section.get("input").element.value).toBe("Roy");
     expect(save).not.toHaveBeenCalled();

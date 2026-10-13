@@ -17,6 +17,7 @@ import {
   setMemoryLanguage,
 } from "./options";
 import { listWorkspaces } from "./workspaces";
+import { registerAssistantAgentsRoutes } from "./routes/assistant-agents";
 import { changeAssistantWorkspace } from "./assistant-settings";
 import { PasskeyAuthService, formatSetupCode } from "./passkeys";
 import { verifyAuthToken, authCacheScope } from "./auth";
@@ -386,6 +387,7 @@ app.put<{ Params: { name: string }; Body: { value: string } }>(
 app.delete<{ Params: { name: string } }>("/api/settings/environment/:name", async (request) => ({
   names: await updateEnvironmentFile(config.battyDir, request.params.name),
 }));
+registerAssistantAgentsRoutes(app, config);
 app.get("/api/settings/agents", async () => ({
   content: await fs.readFile(path.join(stateDirPath(config.battyDir), "AGENTS.md"), "utf8"),
 }));

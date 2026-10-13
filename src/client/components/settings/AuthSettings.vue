@@ -215,8 +215,6 @@ watch(
 
 <template>
   <section class="settings-popover__section">
-    <div class="settings-popover__group-title">Auth</div>
-
     <article class="settings-popover__item">
       <div class="settings-popover__item-top">
         <div class="settings-popover__item-meta">

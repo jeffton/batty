@@ -295,6 +295,41 @@
   cursor: default;
 }
 
+.settings-popover .settings-popover__inline {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.settings-popover .settings-popover__inline .settings-popover__field {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-popover .settings-popover__inline .settings-popover__action {
+  flex-shrink: 0;
+}
+
+.settings-popover .settings-popover__instruction-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.settings-popover .settings-popover__file-editor {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+}
+
+.settings-popover .settings-popover__file-editor textarea {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+}
+
 .settings-popover .settings-popover__section--logout {
   align-items: flex-start;
 }

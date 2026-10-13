@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      import { createApp, h } from "vue";
+      import { createPinia } from "pinia";
+      import CronPopover from "./CronPopover.vue";
+      import TasksControl from "./TasksControl.vue";
+      import { useAppStore } from "../stores/app";
+      import "../styles.css";
+      const pinia = createPinia();
+      const store = useAppStore(pinia);
+      store.workspaces = [
+        { id: "fixture", label: "Assistant workspace with a long descriptive label" },
+      ];
+      createApp({
+        render: () => [
+          h("button", { popovertarget: "cron", style: "anchor-name: --cron" }, "Cron"),
+          h(CronPopover, { popoverId: "cron", anchorName: "--cron" }),
+          h("div", { style: "position: fixed; bottom: 1rem; right: 1rem" }, [
+            h(TasksControl, {
+              memoryPending: 1,
+              cronRuns: [],
+              subagents: [
+                {
+                  sessionId: "agent-1",
+                  prompt: "Review a substantial change and verify deployment across environments",
+                  workspaceId: "fixture",
+                  model: "provider/model",
+                  thinkingLevel: "medium",
+                },
+                {
+                  sessionId: "agent-2",
+                  prompt: "Check the complete mobile interface and its existing behavior",
+                  workspaceId: "fixture",
+                  model: "provider/model",
+                  thinkingLevel: "medium",
+                },
+              ],
+            }),
+          ]),
+        ],
+      })
+        .use(pinia)
+        .mount("#app");
+    </script>
+  </body>
+</html>

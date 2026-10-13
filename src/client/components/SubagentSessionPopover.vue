@@ -201,7 +201,6 @@ onBeforeUnmount(() => {
         <CircleAlert :size="17" />
       </span>
       <SessionHeaderStatus
-        :model="session?.model"
         :context-tokens="session?.contextTokens"
         :context-window="session?.contextWindow"
         :context-percent="session?.contextPercent"

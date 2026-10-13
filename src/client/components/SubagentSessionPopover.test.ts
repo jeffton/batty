@@ -100,6 +100,31 @@ test("worker connection waits for a snapshot and recovers from offline without a
   expect(sources).toHaveLength(2);
 });
 
+test.each(["Subagent", "Cron run"])(
+  "%s header shows session status without provider usage",
+  (headerTitle) => {
+    const wrapper = mount(SubagentSessionPopover, {
+      props: { popoverId: "worker-popover", sessionId: "worker", headerTitle },
+      global: {
+        stubs: {
+          FullPopover: {
+            template: '<div><slot name="header-actions" /><slot /></div>',
+          },
+          SessionTranscriptView: true,
+          ProviderUsageIndicator: true,
+        },
+      },
+    });
+    try {
+      expect(wrapper.findComponent({ name: "ProviderUsageIndicator" }).exists()).toBe(false);
+      expect(wrapper.get('[aria-label="Connecting"]').exists()).toBe(true);
+      expect(wrapper.get('[aria-label="ctx ?/? · ?"]').exists()).toBe(true);
+    } finally {
+      wrapper.unmount();
+    }
+  },
+);
+
 test("header stop follows active state, prevents duplicate requests and exposes failures", async () => {
   const sources: FakeSource[] = [];
   class FakeSource {

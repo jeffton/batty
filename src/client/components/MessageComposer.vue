@@ -461,34 +461,32 @@ defineExpose({ clear, restore });
           :compacting="props.compacting"
         />
 
-        <div class="composer__send-actions">
-          <StreamingStopControl
-            v-if="props.streaming"
-            :class="[
-              'composer__stream-actions',
-              {
-                'composer__stream-actions--tasks':
-                  props.memoryPending ||
-                  props.compacting ||
-                  props.subagents?.length ||
-                  props.cronRuns?.length,
-              },
-            ]"
-            :disabled="actionsDisabled"
-            @stop="emit('stop')"
-          />
-          <button
-            class="composer__icon-button composer__send"
-            type="button"
-            aria-label="Send prompt"
-            title="Send prompt"
-            :disabled="!hasPayload || actionsDisabled || pendingFiles > 0"
-            @pointerdown="triggerActionEarly($event)"
-            @click="triggerActionClick()"
-          >
-            <SendHorizontal :size="18" />
-          </button>
-        </div>
+        <StreamingStopControl
+          v-if="props.streaming"
+          :class="[
+            'composer__stream-actions',
+            {
+              'composer__stream-actions--tasks':
+                props.memoryPending ||
+                props.compacting ||
+                props.subagents?.length ||
+                props.cronRuns?.length,
+            },
+          ]"
+          :disabled="actionsDisabled"
+          @stop="emit('stop')"
+        />
+        <button
+          class="composer__icon-button composer__send"
+          type="button"
+          aria-label="Send prompt"
+          title="Send prompt"
+          :disabled="!hasPayload || actionsDisabled || pendingFiles > 0"
+          @pointerdown="triggerActionEarly($event)"
+          @click="triggerActionClick()"
+        >
+          <SendHorizontal :size="18" />
+        </button>
       </div>
     </div>
 
@@ -603,7 +601,8 @@ defineExpose({ clear, restore });
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 0.25rem;
+  justify-content: space-between;
+  gap: 0.75rem;
   padding: 0 calc(var(--safe-area-right) + 0.4rem) 0 calc(var(--safe-area-left) + 0.4rem);
 }
 
@@ -640,13 +639,6 @@ defineExpose({ clear, restore });
   color: var(--color-accent-strong);
 }
 
-.composer__stream-actions,
-.composer__send-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-}
-
 .composer__stream-actions {
   flex-shrink: 0;
   margin-inline: 0;
@@ -654,12 +646,5 @@ defineExpose({ clear, restore });
 
 .composer__stream-actions--tasks :deep(.streaming-stop-control__spinner) {
   display: none;
-}
-
-.composer__send-actions {
-  min-width: 0;
-  flex-shrink: 1;
-  justify-content: flex-end;
-  margin-left: auto;
 }
 </style>

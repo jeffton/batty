@@ -6,6 +6,7 @@ import SettingsPopover from "./SettingsPopover.vue";
 import ToolsPopover from "./ToolsPopover.vue";
 import CronPopover from "./CronPopover.vue";
 import SessionHeaderStatus from "./SessionHeaderStatus.vue";
+import ProviderUsageIndicator from "./ProviderUsageIndicator.vue";
 const store = useAppStore();
 async function logout() {
   try {
@@ -47,8 +48,8 @@ async function logout() {
       <Wrench :size="17" />
     </button>
     <div class="header__spacer" />
+    <ProviderUsageIndicator :model="store.activeSession?.model" />
     <SessionHeaderStatus
-      :model="store.activeSession?.model"
       :context-tokens="store.activeSession?.contextTokens"
       :context-window="store.activeSession?.contextWindow"
       :context-percent="store.activeSession?.contextPercent"

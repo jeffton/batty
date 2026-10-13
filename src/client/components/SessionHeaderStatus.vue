@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { LoaderCircle, Wifi, WifiOff } from "@lucide/vue";
 import { computed } from "vue";
-import ProviderUsageIndicator from "@/client/components/ProviderUsageIndicator.vue";
 import { formatTokenCount } from "@/client/lib/formatting";
 
 const props = defineProps<{
-  model?: string;
   contextTokens?: number | null;
   contextWindow?: number | null;
   contextPercent?: number | null;
@@ -58,7 +56,6 @@ const contextArcClass = computed(() => {
 
 <template>
   <div class="session-header-status">
-    <ProviderUsageIndicator :model="props.model" />
     <div
       class="session-header-status__context"
       :aria-label="contextUsageLabel"

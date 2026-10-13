@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      import { createApp, h } from "vue";
+      import MessageComposer from "./MessageComposer.vue";
+      import "../styles.css";
+      const params = new URLSearchParams(location.search);
+      createApp({
+        setup: () => () =>
+          h(MessageComposer, {
+            streaming: params.has("streaming"),
+            memoryPending: params.has("tasks") ? 1 : 0,
+          }),
+      }).mount("#app");
+    </script>
+  </body>
+</html>

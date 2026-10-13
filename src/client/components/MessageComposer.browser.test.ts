@@ -71,6 +71,35 @@ for (const width of [320, 1100]) {
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
           true,
         );
+        if (query === "?streaming&tasks") {
+          const positions = async () =>
+            Promise.all(
+              ["Add files", "Stop", "Send prompt"].map((name) =>
+                page.getByRole("button", { name, exact: true }).boundingBox(),
+              ),
+            );
+          const before = await positions();
+          const tasks = await page
+            .getByRole("button", { name: "Running tasks", exact: true })
+            .boundingBox();
+          await page.evaluate(() => window.dispatchEvent(new Event("fixture:finish-agent")));
+          await page
+            .getByRole("button", { name: "Running tasks", exact: true })
+            .waitFor({ state: "detached" });
+          expect(await positions()).toEqual(before);
+          const stop = await page.getByRole("button", { name: "Stop", exact: true }).boundingBox();
+          expect(stop!.x).toBeGreaterThanOrEqual(tasks!.x + tasks!.width);
+          await page.evaluate(() => window.dispatchEvent(new Event("fixture:finish-main")));
+          await page
+            .getByRole("button", { name: "Stop", exact: true })
+            .waitFor({ state: "detached" });
+          expect(await page.getByRole("button", { name: "Add files" }).boundingBox()).toEqual(
+            before[0],
+          );
+          expect(await page.getByRole("button", { name: "Send prompt" }).boundingBox()).toEqual(
+            before[2],
+          );
+        }
       }
     } finally {
       await page.close();

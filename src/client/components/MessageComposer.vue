@@ -454,28 +454,32 @@ defineExpose({ clear, restore });
           <Paperclip :size="18" />
         </button>
 
-        <TasksControl
-          :subagents="props.subagents ?? []"
-          :cron-runs="props.cronRuns ?? []"
-          :memory-pending="props.memoryPending"
-          :compacting="props.compacting"
-        />
+        <div class="composer__tasks-slot">
+          <TasksControl
+            :subagents="props.subagents ?? []"
+            :cron-runs="props.cronRuns ?? []"
+            :memory-pending="props.memoryPending"
+            :compacting="props.compacting"
+          />
+        </div>
 
-        <StreamingStopControl
-          v-if="props.streaming"
-          :class="[
-            'composer__stream-actions',
-            {
-              'composer__stream-actions--tasks':
-                props.memoryPending ||
-                props.compacting ||
-                props.subagents?.length ||
-                props.cronRuns?.length,
-            },
-          ]"
-          :disabled="actionsDisabled"
-          @stop="emit('stop')"
-        />
+        <div class="composer__stop-slot">
+          <StreamingStopControl
+            v-if="props.streaming"
+            :class="[
+              'composer__stream-actions',
+              {
+                'composer__stream-actions--tasks':
+                  props.memoryPending ||
+                  props.compacting ||
+                  props.subagents?.length ||
+                  props.cronRuns?.length,
+              },
+            ]"
+            :disabled="actionsDisabled"
+            @stop="emit('stop')"
+          />
+        </div>
         <button
           class="composer__icon-button composer__send"
           type="button"
@@ -598,11 +602,10 @@ defineExpose({ clear, restore });
 
 .composer__actions-row {
   min-width: 0;
-  display: flex;
-  flex-wrap: nowrap;
+  display: grid;
+  grid-template-columns: 44px minmax(44px, 6rem) 44px 44px;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
   padding: 0 calc(var(--safe-area-right) + 0.4rem) 0 calc(var(--safe-area-left) + 0.4rem);
 }
 
@@ -635,13 +638,32 @@ defineExpose({ clear, restore });
   display: block;
 }
 
+.composer__tasks-slot {
+  width: 100%;
+  max-width: 6rem;
+  min-width: 0;
+}
+
+.composer__tasks-slot :deep(.tasks-control) {
+  width: 100%;
+  overflow: hidden;
+}
+
+.composer__stop-slot {
+  min-height: 44px;
+}
+
 .composer__send {
   color: var(--color-accent-strong);
 }
 
 .composer__stream-actions {
-  flex-shrink: 0;
-  margin-inline: 0;
+  position: relative;
+}
+
+.composer__stream-actions :deep(.streaming-stop-control__spinner) {
+  position: absolute;
+  right: calc(100% + 0.3rem);
 }
 
 .composer__stream-actions--tasks :deep(.streaming-stop-control__spinner) {

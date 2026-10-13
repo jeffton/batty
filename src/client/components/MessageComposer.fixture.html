@@ -6,16 +6,30 @@
   <body>
     <div id="app"></div>
     <script type="module">
-      import { createApp, h } from "vue";
+      import { createApp, h, ref } from "vue";
       import MessageComposer from "./MessageComposer.vue";
       import "../styles.css";
       const params = new URLSearchParams(location.search);
       createApp({
-        setup: () => () =>
-          h(MessageComposer, {
-            streaming: params.has("streaming"),
-            memoryPending: params.has("tasks") ? 1 : 0,
-          }),
+        setup: () => {
+          const streaming = ref(params.has("streaming"));
+          const subagents = ref(
+            params.has("tasks")
+              ? [{ sessionId: "fixture-agent", prompt: "Fixture task", workspaceId: "fixture" }]
+              : [],
+          );
+          window.addEventListener("fixture:finish-agent", () => {
+            subagents.value = [];
+          });
+          window.addEventListener("fixture:finish-main", () => {
+            streaming.value = false;
+          });
+          return () =>
+            h(MessageComposer, {
+              streaming: streaming.value,
+              subagents: subagents.value,
+            });
+        },
       }).mount("#app");
     </script>
   </body>

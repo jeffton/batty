@@ -41,7 +41,7 @@ function job(workspaceId: string): CronJob {
 afterEach(() => vi.clearAllMocks());
 
 describe("cron popover", () => {
-  it("lists jobs and logs from every workspace and opens run sessions with icon buttons", async () => {
+  it("lists jobs across workspaces and makes each session log one full-row button", async () => {
     const run: CronRunLog = {
       runId: "run-second",
       jobId: "second",
@@ -59,7 +59,7 @@ describe("cron popover", () => {
       { ...job(id), ...(id === "second" ? { delivery: "direct" as const } : {}) },
     ]);
     vi.mocked(api.listWorkspaceCronRunLogs).mockImplementation(async (id) =>
-      id === "second" ? [run] : [],
+      id === "second" ? [run, { ...run, runId: "no-session", sessionId: undefined }] : [],
     );
     const wrapper = mount(CronPopover, {
       props: { popoverId: "cron-test", anchorName: "--cron" },
@@ -93,9 +93,15 @@ describe("cron popover", () => {
       await wrapper.get("#cron-test-cron-tab").trigger("keydown", { key: "ArrowRight" });
       expect(wrapper.get("#cron-test-logs-tab").attributes("aria-selected")).toBe("true");
       expect(wrapper.get("#cron-test-logs-panel").text()).toContain("Completed");
-      expect(
-        wrapper.get('button[aria-label="Open cron run session"]').attributes("popovertarget"),
-      ).toBe("cron-test-cron-run-second");
+      const rows = wrapper.get("#cron-test-logs-panel").findAll(".cron-popover__run");
+      expect(rows[0]!.element.tagName).toBe("BUTTON");
+      expect(rows[0]!.attributes("aria-label")).toBe("Open cron run session: Job in second");
+      expect(rows[0]!.attributes("popovertarget")).toBe("cron-test-cron-run-second");
+      expect(rows[0]!.text()).toContain("Job in second");
+      expect(rows[0]!.find("button").exists()).toBe(false);
+      expect(rows[0]!.get("svg").attributes("aria-hidden")).toBe("true");
+      expect(rows[1]!.element.tagName).toBe("ARTICLE");
+      expect(rows[1]!.attributes("popovertarget")).toBeUndefined();
       expect(
         wrapper
           .findAllComponents({ name: "SubagentSessionPopover" })

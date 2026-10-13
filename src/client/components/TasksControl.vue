@@ -93,24 +93,28 @@ function sessionToggle(taskId: string, event: Event): void {
   >
     <header class="tasks-popover__header">Running tasks</header>
     <div class="tasks-popover__list">
-      <article v-for="task in tasks" :key="task.id" class="tasks-popover__task">
+      <component
+        :is="task.sessionId ? 'button' : 'article'"
+        v-for="task in tasks"
+        :key="task.id"
+        class="tasks-popover__task"
+        :type="task.sessionId ? 'button' : undefined"
+        :popovertarget="task.sessionId ? sessionPopoverId(task.id) : undefined"
+        :aria-label="task.sessionId ? `Open task session: ${task.title}` : undefined"
+        @click.prevent="task.sessionId && openSession(task)"
+      >
         <span class="tasks-popover__details">
           <strong>{{ task.title }}</strong>
           <span>{{ task.detail }}</span>
         </span>
-        <button
+        <PanelRightOpen
           v-if="task.sessionId"
-          type="button"
           class="tasks-popover__open"
-          :popovertarget="sessionPopoverId(task.id)"
-          :aria-label="`Open task session: ${task.title}`"
-          title="Open session"
-          @click.prevent="openSession(task)"
-        >
-          <PanelRightOpen :size="16" />
-        </button>
+          :size="16"
+          aria-hidden="true"
+        />
         <span v-else class="spinner" aria-hidden="true" />
-      </article>
+      </component>
       <p v-if="!tasks.length" class="tasks-popover__empty">No running tasks.</p>
     </div>
   </BasePopover>
@@ -213,31 +217,34 @@ function sessionToggle(taskId: string, event: Event): void {
   height: auto;
   width: 100%;
   padding: 0.75rem 1rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: inherit;
+  font: inherit;
   text-align: left;
 }
 
-.tasks-popover__task:not(:last-of-type) {
-  border-bottom: 1px solid var(--color-border-soft);
-}
-
-.tasks-popover__open {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  min-width: 44px;
-  min-height: 44px;
-  padding: 0;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.5rem;
-  background: var(--color-bg-panel);
-  color: var(--color-text);
+button.tasks-popover__task {
   cursor: pointer;
 }
 
+button.tasks-popover__task:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.tasks-popover__task + .tasks-popover__task {
+  border-top: 1px solid var(--color-border-soft);
+}
+
+.tasks-popover__open {
+  flex: 0 0 auto;
+  color: var(--color-text);
+}
+
 @media (hover: hover) {
-  .tasks-popover__open:hover {
+  button.tasks-popover__task:hover {
     background: var(--color-bg-elevated-soft);
   }
 }

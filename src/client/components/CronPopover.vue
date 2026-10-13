@@ -142,39 +142,43 @@ onBeforeUnmount(() => {
           </div>
         </template>
         <template v-else>
-          <article v-for="run in logs" :key="run.runId" class="cron-popover__run">
-            <div class="cron-popover__run-content">
-              <div class="cron-popover__run-heading">
-                <span class="cron-popover__status">{{ statusLabel(run.status) }}</span>
-                <strong>{{ run.scheduleLabel }}</strong>
-              </div>
-              <div class="cron-popover__run-prompt">{{ run.prompt }}</div>
-              <div class="cron-popover__run-details">
-                <span>{{ workspaceLabel(run.workspaceId) }}</span>
-                <span>{{ formatTimestamp(run.startedAtMs) }}</span>
-                <span v-if="run.durationMs != null"
-                  >{{ Math.round(run.durationMs / 1000) }} sec</span
-                >
-              </div>
-              <p v-if="run.error" class="cron-popover__error">{{ run.error }}</p>
-            </div>
-            <template v-if="run.sessionId">
-              <button
-                type="button"
-                class="cron-popover__icon-btn"
-                :popovertarget="sessionPopoverId('cron', run.runId)"
-                aria-label="Open cron run session"
-                title="Open session"
-              >
-                <PanelRightOpen :size="16" />
-              </button>
-              <SubagentSessionPopover
-                :popover-id="sessionPopoverId('cron', run.runId)"
-                :session-id="run.sessionId"
-                header-title="Cron run"
+          <template v-for="run in logs" :key="run.runId">
+            <component
+              :is="run.sessionId ? 'button' : 'article'"
+              class="cron-popover__run"
+              :type="run.sessionId ? 'button' : undefined"
+              :popovertarget="run.sessionId ? sessionPopoverId('cron', run.runId) : undefined"
+              :aria-label="run.sessionId ? `Open cron run session: ${run.prompt}` : undefined"
+            >
+              <span class="cron-popover__run-content">
+                <span class="cron-popover__run-heading">
+                  <span class="cron-popover__status">{{ statusLabel(run.status) }}</span>
+                  <strong>{{ run.scheduleLabel }}</strong>
+                </span>
+                <span class="cron-popover__run-prompt">{{ run.prompt }}</span>
+                <span class="cron-popover__run-details">
+                  <span>{{ workspaceLabel(run.workspaceId) }}</span>
+                  <span>{{ formatTimestamp(run.startedAtMs) }}</span>
+                  <span v-if="run.durationMs != null"
+                    >{{ Math.round(run.durationMs / 1000) }} sec</span
+                  >
+                </span>
+                <span v-if="run.error" class="cron-popover__error">{{ run.error }}</span>
+              </span>
+              <PanelRightOpen
+                v-if="run.sessionId"
+                class="cron-popover__open"
+                :size="16"
+                aria-hidden="true"
               />
-            </template>
-          </article>
+            </component>
+            <SubagentSessionPopover
+              v-if="run.sessionId"
+              :popover-id="sessionPopoverId('cron', run.runId)"
+              :session-id="run.sessionId"
+              header-title="Cron run"
+            />
+          </template>
           <div v-if="!loading && !logs.length" class="cron-popover__empty">
             No cron runs have been logged yet.
           </div>
@@ -208,10 +212,30 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
+  min-height: 44px;
+  width: 100%;
   padding: 0.75rem 1rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
 }
-.cron-popover__run:not(:last-of-type) {
-  border-bottom: 1px solid var(--color-border-soft);
+button.cron-popover__run {
+  cursor: pointer;
+}
+button.cron-popover__run:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+@media (hover: hover) {
+  button.cron-popover__run:hover {
+    background: var(--color-bg-elevated-soft);
+  }
+}
+.cron-popover__run ~ .cron-popover__run {
+  border-top: 1px solid var(--color-border-soft);
 }
 .cron-popover__run-content {
   display: flex;
@@ -252,17 +276,9 @@ onBeforeUnmount(() => {
   font-size: 0.74rem;
   overflow-wrap: anywhere;
 }
-.cron-popover__icon-btn {
-  display: inline-flex;
+.cron-popover__open {
   flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.5rem;
-  background: var(--color-bg-panel);
   color: var(--color-text);
-  cursor: pointer;
 }
 .cron-popover__empty {
   display: flex;

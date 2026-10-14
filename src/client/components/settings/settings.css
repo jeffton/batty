@@ -2,6 +2,10 @@
   background: var(--color-bg-panel-strong);
 }
 
+.settings-popover--panel-surface {
+  background: var(--color-bg-panel);
+}
+
 .settings-popover .full-popover__header {
   border-bottom: 0;
   background: var(--color-bg-panel-strong);

@@ -74,7 +74,11 @@ async function save(): Promise<void> {
       <FilePenLine :size="16" aria-hidden="true" /> {{ assistant.label }} AGENTS.md
     </button>
   </div>
-  <FullPopover class="settings-popover" popover-id="settings-agents-editor" :title="title">
+  <FullPopover
+    class="settings-popover settings-popover--panel-surface"
+    popover-id="settings-agents-editor"
+    :title="title"
+  >
     <template #header-actions>
       <button
         class="settings-popover__action settings-popover__action--primary"

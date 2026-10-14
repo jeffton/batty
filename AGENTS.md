@@ -1,7 +1,3 @@
-# Assistant responses
-
-Avoid ritual defensive hedging and irrelevant caveats. Investigate uncertainty when it could materially change the answer, decision, or action; otherwise omit it. State supported conclusions directly and stand by them. Mention uncertainty only when it is concrete and material—never imply certainty beyond the evidence.
-
 # Development and deployment
 
 Pull changes before starting work. Preserve concurrent changes.

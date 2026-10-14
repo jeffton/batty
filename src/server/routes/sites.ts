@@ -1,10 +1,15 @@
 import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { appBasePath } from "../app-shell";
 import { resolveSiteFile, setSitePublic } from "../sites";
 import type { RouteContext } from "./context";
 
-export function registerSiteRoutes({ app, config, routePath }: RouteContext): void {
+export function registerSiteRoutes({
+  app,
+  config,
+  routePath,
+}: Pick<RouteContext, "app" | "config" | "routePath">): void {
   app.patch<{
     Params: { siteId: string };
     Body: { public?: unknown };
@@ -20,12 +25,16 @@ export function registerSiteRoutes({ app, config, routePath }: RouteContext): vo
     );
   });
 
+  function publicPath(requestPath: string): string {
+    return `${appBasePath(config.baseUrl)}${requestPath.slice(1)}`;
+  }
+
   function capabilityUrl(siteId: string, accessToken: string, requestPath: string): string {
     const encodedPath = requestPath
       .split("/")
       .map((segment) => encodeURIComponent(segment))
       .join("/");
-    return `${routePath("/site-preview")}/${encodeURIComponent(siteId)}/${encodeURIComponent(accessToken)}/${encodedPath}`;
+    return `${publicPath("/site-preview")}/${encodeURIComponent(siteId)}/${encodeURIComponent(accessToken)}/${encodedPath}`;
   }
 
   async function serveSite(
@@ -42,7 +51,7 @@ export function registerSiteRoutes({ app, config, routePath }: RouteContext): vo
     }
     if (!resolved.descriptor.public && !request.auth && !hasCapability) {
       if (request.headers.accept?.includes("text/html")) {
-        const loginUrl = `${routePath("/login")}?returnTo=${encodeURIComponent(request.url)}`;
+        const loginUrl = `${publicPath("/login")}?returnTo=${encodeURIComponent(publicPath(request.url))}`;
         return reply.redirect(loginUrl);
       }
       return reply.code(401).send({ error: "Authentication required" });
@@ -69,8 +78,8 @@ export function registerSiteRoutes({ app, config, routePath }: RouteContext): vo
 
   function withTrailingSlash(requestUrl: string): string {
     const queryIndex = requestUrl.indexOf("?");
-    if (queryIndex === -1) return `${requestUrl}/`;
-    return `${requestUrl.slice(0, queryIndex)}/${requestUrl.slice(queryIndex)}`;
+    if (queryIndex === -1) return `${publicPath(requestUrl)}/`;
+    return `${publicPath(requestUrl.slice(0, queryIndex))}/${requestUrl.slice(queryIndex)}`;
   }
 
   app.get<{ Params: { siteId: string } }>(routePath("/sites/:siteId"), (request, reply) =>

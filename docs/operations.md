@@ -60,7 +60,7 @@ The pre-push offline verification script exercises the production build's offlin
 
 The Linux deployment uses systemd. [deploy/batty2.service](../deploy/batty2.service) and [deploy/nginx.conf](../deploy/nginx.conf) are installation templates; adapt paths, hostname and certificate paths to your installation. The nginx template contains an example hostname, not the live site's canonical origin.
 
-For the maintained installation, source is `/root/github/batty2`, tracking `main` in `jeffton/batty`; state is `/var/lib/batty2/.batty`. The canonical URL is `https://batty.roybot.se`, proxied to loopback port 3148. The service is **`batty2.service`**. The Batty1 code and data are an archive, not a deployment target.
+For the maintained installation, source is `/root/github/batty`, tracking `main` in `jeffton/batty`; state is `/var/lib/batty2/.batty`. The canonical URL is `https://batty.roybot.se`, proxied to loopback port 3148. The service is **`batty2.service`**. Batty1 history is retained in Git; archived data is not a deployment target.
 
 ```sh
 ./scripts/deploy.sh

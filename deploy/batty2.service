@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/github/batty2
+WorkingDirectory=/root/github/batty
 Environment=BATTY_HOST=127.0.0.1
 Environment=BATTY_PORT=3148
 Environment=BATTY_SELF_PATH=/opt/batty2/current

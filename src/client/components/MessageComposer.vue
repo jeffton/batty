@@ -574,6 +574,13 @@ defineExpose({ clear, restore });
   }
 }
 
+@media (prefers-color-scheme: dark) {
+  .composer__chip {
+    background: var(--color-bg-selection);
+    box-shadow: inset 0 0 0 1px var(--color-border-strong);
+  }
+}
+
 .composer__chip:disabled {
   opacity: 0.5;
 }

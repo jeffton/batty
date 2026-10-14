@@ -2,11 +2,12 @@ import { expect, test } from "vite-plus/test";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { defineExtension, defineTask, defineTool, LiveDoc } from "@earendil-works/pi-durable";
+import { defineExtension, defineTask, defineTool } from "@earendil-works/pi-durable";
 
 import { Type } from "@earendil-works/pi-ai";
 
 import { OrchestrationDoc } from "./orchestration.js";
+import { WorkerDoc } from "./orchestration-state.js";
 import { orchestrationHistory } from "./orchestration-test-history";
 
 import { decodeRuntimeNotice } from "./runtime-notices.js";
@@ -82,7 +83,7 @@ test.each(["complete", "restart", "cron-run", "cron-resume", "cron-restart"])(
           });
         if (last.role === "user" && text.includes("preflight review"))
           return fauxAssistantMessage([fauxText("preflight complete")]);
-        if (last.role === "toolResult" && text.includes("preflight complete")) {
+        if (text.includes("preflight complete")) {
           const sessionId = JSON.stringify(request.messages).match(/Session ID: (\d+)/)![1];
           return call({ action: "resume", async: true, sessionId, prompt: "nested review" });
         }
@@ -94,7 +95,7 @@ test.each(["complete", "restart", "cron-run", "cron-resume", "cron-restart"])(
         }
         if (last.role === "toolResult" && last.toolName === "review_gate")
           return fauxAssistantMessage([fauxText("review findings")]);
-        if (last.role === "toolResult" && text.includes("review findings"))
+        if (text.includes("review findings"))
           return fauxAssistantMessage([fauxText("implementation final report after review")]);
         return fauxAssistantMessage([fauxText("noted")]);
       }),
@@ -122,11 +123,8 @@ test.each(["complete", "restart", "cron-run", "cron-resume", "cron-restart"])(
         const state = (await orchestrationHistory(harness))!;
         const outer = Object.values(state.workers).find((w) => w.parentId === main.id);
         if (!outer) return false;
-        const live = await harness.snapshot(LiveDoc, outer.id, context);
-        for (const slot of live?.tools ?? []) {
-          if (slot.taskId && Object.values(state.joins ?? {}).includes(slot.taskId)) return true;
-        }
-        return false;
+        const completion = (await harness.snapshot(WorkerDoc, outer.id, context))?.completion;
+        return Object.keys(completion?.waits ?? {}).length > 0;
       });
       const pendingHistory = JSON.stringify((await main.context(context)).messages);
       expect(pendingHistory).not.toContain("implementation final report after review");
@@ -175,12 +173,12 @@ test.each(["complete", "restart", "cron-run", "cron-resume", "cron-restart"])(
       outerMessages.filter(
         (m) => m.role === "user" && JSON.stringify(m.content).includes("review findings"),
       ),
-    ).toHaveLength(0);
+    ).toHaveLength(1);
     expect(
       outerMessages.filter(
         (m) => m.role === "toolResult" && JSON.stringify(m.content).includes("review findings"),
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
     expect(outerMessages.findLast((m) => m.role === "assistant")).toMatchObject({
       content: [{ type: "text", text: "implementation final report after review" }],
     });
@@ -244,8 +242,19 @@ test.each(
     const inner = Object.values((await orchestrationHistory(harness))!.workers).find(
       (w) => w.parentId === outer.id,
     )!;
-    const result = messages.findLast((m) => m.role === "toolResult" && m.toolName === "subagent")!;
-    expect(result.content).toEqual([
+    const result = messages.findLast(
+      (m) =>
+        (m.role === "user" &&
+          Boolean(decodeRuntimeNotice(m.content)?.text.startsWith("Subagent result."))) ||
+        (m.role === "toolResult" &&
+          m.toolName === "subagent" &&
+          JSON.stringify(m.content).includes("Subagent result.")),
+    )!;
+    expect(
+      result.role === "user"
+        ? [{ type: "text", text: decodeRuntimeNotice(result.content)!.text }]
+        : result.content,
+    ).toEqual([
       {
         type: "text",
         text: fail

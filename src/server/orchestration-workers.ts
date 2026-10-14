@@ -150,6 +150,58 @@ export function createWorkers(
     };
     return child.id;
   };
+  // Joining is background assignment work, not a live model tool round. The
+  // delivery owns the wait so the worker can receive steering while suspended.
+  const AwaitChild = defineTask<
+    { target: TaskId<string>; workerId: string; parentId: ConversationId },
+    { phase: "wait" },
+    null
+  >({
+    name: "batty.await-child",
+    version: 1,
+    initial: () => ({ phase: "wait" }),
+    phases: {
+      wait: async (task, runtime, ctx) => {
+        const settled = await runtime.waitForTask(task.input.target, ctx);
+        const artifacts = (await runtime.snapshot(DeliveryRecord, String(task.input.target), ctx))
+          ?.artifacts;
+        const text =
+          `Subagent ${settled.state.outcome.status === "completed" ? "result" : settled.state.outcome.status}. Session ID: ${task.input.workerId}\n\n${
+            settled.state.outcome.status === "completed"
+              ? reportWithArtifacts(
+                  reportWithAttachments(settled.state.outcome.result, artifacts?.sentFiles),
+                  artifacts,
+                )
+              : ""
+          }`.trimEnd();
+        const parent = (await runtime.conversation(task.input.parentId, ctx))!;
+        const submission = await parent.submit(
+          {
+            type: "input",
+            content: encodeRuntimeNotice({
+              kind: "subagent",
+              text,
+              data: {
+                subagent: { sessionId: task.input.workerId },
+                ...(artifacts ? { runtimeResultArtifacts: artifacts } : {}),
+              },
+            }),
+            whenBusy: "steer",
+            requestId: `batty-join:${task.id}`,
+          },
+          ctx,
+        );
+        await runtime.commit(async (tx) => {
+          const completion = (await tx.doc(WorkerDoc, task.input.parentId)).completion!;
+          if (!completion.inputs.includes(submission.id)) completion.inputs.push(submission.id);
+          return { status: "terminal", outcome: { status: "completed", result: null } };
+        }, ctx);
+      },
+    },
+    abort: async (_, runtime, ctx) => {
+      await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
+    },
+  });
   const subagent = defineTool({
     name: "subagent",
     description:
@@ -191,9 +243,31 @@ export function createWorkers(
         if (worker!.parentId !== api.conversationId)
           throw new Error("Await requires a child of this session");
         const target = await api.memo("batty.await", worker!.active!, ctx);
+        const waiting = (await api.getTask(target, ctx))!.state.status !== "terminal";
         await api.commit(async (tx) => {
           const doc = await tx.doc(OrchestrationDoc);
-          (await tx.doc(DeliveryRecord, String(target), {})).join = api.taskId;
+          const report = await tx.submissionByRequest(api.conversationId, `batty-report:${target}`);
+          const metadata = await tx.doc(WorkerDoc, api.conversationId);
+          const completion = (metadata.completion ??= {
+            owner:
+              api.conversationId === doc.mainId
+                ? doc.runs[doc.inlineContext!.runId]!.taskId
+                : doc.workers[String(api.conversationId)]!.active!,
+            inputs: [...(await tx.doc(LiveDoc, api.conversationId)).run!.inputs],
+            waits: {},
+          });
+          let waiter = completion.waits[String(target)];
+          if (waiting && waiter === undefined) {
+            waiter = await tx.createTask(
+              AwaitChild,
+              { target, workerId: workerId!, parentId: api.conversationId },
+              {
+                ownership: { kind: "task", taskId: completion.owner },
+              },
+            );
+            completion.waits[String(target)] = waiter;
+          }
+          (await tx.doc(DeliveryRecord, String(target), {})).join = waiter ?? api.taskId;
           const live = await tx.doc(LiveDoc, api.conversationId);
           doc.joinParents ??= {};
           // Inputs survive generation handovers; taskId changes every tool round.
@@ -208,15 +282,17 @@ export function createWorkers(
           }
           // A faster parallel child may have queued its report before this join.
           // Withdraw it atomically before the tool round admits steering inputs.
-          const report = await tx.submissionByRequest(api.conversationId, `batty-report:${target}`);
           if (report?.status === "queued") {
             tx.settleSubmission(report.id, { status: "unanswered", reason: "aborted" });
             const inbox = await tx.doc(InboxDoc, api.conversationId);
             inbox.items = inbox.items.filter((item) => item.id !== report.id);
           }
         }, ctx);
-        // No terminate control: the generation remains live while this tool waits.
-        // waitForTask replays safely after restart; completion resumes the model.
+        if (waiting)
+          return {
+            ...reply(`Awaiting subagent. Session ID: ${workerId}`),
+            control: { terminate: true as const },
+          };
         const settled = await api.waitForTask(target, ctx);
         const artifacts = (await api.snapshot(DeliveryRecord, String(target), ctx))?.artifacts;
         return {
@@ -399,6 +475,7 @@ export function createWorkers(
 
   return {
     Anchor,
+    AwaitChild,
     createWorker,
     subagent,
     stopWorker,

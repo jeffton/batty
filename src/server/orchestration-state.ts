@@ -117,6 +117,11 @@ export const WorkerDoc = defineDoc<{
   isSubagent: boolean;
   isCron: boolean;
   cronJobId?: string;
+  completion?: {
+    owner: TaskId<string>;
+    inputs: SubmissionId[];
+    waits: Record<string, TaskId<null>>;
+  };
 }>({
   kind: "batty.worker",
   version: 1,

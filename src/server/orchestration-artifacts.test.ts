@@ -64,7 +64,7 @@ test.each(
       Array.from({ length: 30 }, () => (request) => {
         const last = request.messages.findLast((m) => m.role !== "system")!;
         const text = JSON.stringify(last.content);
-        if (last.role === "toolResult" && text.includes("helper done")) joinedModelInput = text;
+        if (text.includes("helper done")) joinedModelInput = text;
         if (last.role === "user" && text.includes("cron finished")) reportModelInput = text;
         if (last.role === "user" && text.includes("artifact outer"))
           return fauxAssistantMessage(
@@ -331,15 +331,12 @@ test.each([
         }
         if (last.role === "toolResult" && text.includes("child ready"))
           return fauxAssistantMessage([fauxText("slow findings")]);
-        if (last.role === "toolResult" && text.includes("slow findings") && late)
+        if (text.includes("slow findings") && late)
           return fauxAssistantMessage(
             [fauxToolCall("join_gate", { parent: false, between: true })],
             { stopReason: "toolUse" },
           );
-        if (
-          last.role === "toolResult" &&
-          (text.includes("slow findings") || text.includes("continue joins"))
-        ) {
+        if (text.includes("slow findings") || text.includes("continue joins")) {
           const started = request.messages.filter(
             (m) =>
               m.role === "toolResult" && JSON.stringify(m.content).includes("Started. Session ID:"),
@@ -349,7 +346,7 @@ test.each([
             sessionId: JSON.stringify(started[1]!.content).match(/Session ID: (\d+)/)![1]!,
           });
         }
-        if (last.role === "toolResult" && text.includes("fast findings"))
+        if (text.includes("fast findings"))
           return fauxAssistantMessage([fauxToolCall("join_gate", { parent: true })], {
             stopReason: "toolUse",
           });
@@ -402,7 +399,7 @@ test.each([
         (await parent.context(context)).messages.filter(
           (m) => m.role === "user" && JSON.stringify(m.content).includes("findings"),
         ),
-      ).toHaveLength(0);
+      ).toHaveLength(late ? 2 : 1);
     } finally {
       releaseChild();
       releaseParent();

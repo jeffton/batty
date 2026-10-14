@@ -121,7 +121,7 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
   };
   const Delivery = createDeliveryTask(services);
   const workers = createWorkers(services, Delivery);
-  const { Anchor, subagent } = workers;
+  const { Anchor, AwaitChild, subagent } = workers;
   const scheduler = createCronScheduler(services, Delivery, workers, onError);
   const {
     cron,
@@ -139,7 +139,7 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
   const extension = defineExtension({
     name: "batty-orchestration",
     tools: [subagent, cron],
-    tasks: [Anchor, Delivery],
+    tasks: [Anchor, AwaitChild, Delivery],
     hooks: orchestrationHooks(services),
   });
   return {

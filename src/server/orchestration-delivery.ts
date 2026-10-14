@@ -16,6 +16,7 @@ import {
   type AgentChange,
   type AgentState,
   type SubmissionId,
+  type SettledSubmissionRecord,
 } from "@earendil-works/pi-durable";
 
 import { NO_REPLY_SENTINEL } from "../shared/agent-notification.js";
@@ -56,6 +57,12 @@ function deliveryNotice(input: DeliveryInput): RuntimeNotice {
     }),
     ...(marker ? { data: { cron: JSON.parse(marker[1]!) } } : {}),
   };
+}
+
+function submissionEnd(submission: SettledSubmissionRecord) {
+  return submission.status === "done" && submission.type === "input"
+    ? submission.answer
+    : (submission.entry ?? 0);
 }
 
 type DeliveryState =
@@ -179,6 +186,11 @@ export function createDeliveryTask(services: OrchestrationServices) {
             );
             live.run = { taskId: generation, inputs: [submission.id] };
             submissionId = submission.id;
+            (await tx.doc(WorkerDoc, task.input.childId)).completion = {
+              owner: task.id,
+              inputs: [submission.id],
+              waits: {},
+            };
           }, ctx);
           if (submissionId === undefined) {
             if (wakeRequest)
@@ -200,6 +212,12 @@ export function createDeliveryTask(services: OrchestrationServices) {
               `batty-deliver:${task.id}`,
             );
             admitted = existing !== undefined;
+            const metadata = await tx.doc(WorkerDoc, task.input.childId);
+            metadata.completion ??= {
+              owner: task.id,
+              inputs: existing ? [existing.id] : [],
+              waits: {},
+            };
             if (!existing && task.input.change) {
               await configure(tx, task.input.childId, task.input.change);
               if (task.input.workspaceId) {
@@ -238,7 +256,20 @@ export function createDeliveryTask(services: OrchestrationServices) {
             )
           ).id;
         }
-        const settled = await (await services.harness.submission(submissionId, ctx))!.wait(ctx);
+        const original = await (await services.harness.submission(submissionId, ctx))!.wait(ctx);
+        let settled = original;
+        // An await tool ends only the model turn, not this assignment. Join
+        // receipts and every admitted continuation must settle before reporting.
+        // These waits belong to Delivery, leaving the conversation steerable.
+        const completion = (await runtime.snapshot(WorkerDoc, task.input.childId, ctx))!
+          .completion!;
+        for (const wait of Object.values(completion.waits)) await runtime.waitForTask(wait, ctx);
+        for (const id of completion.inputs) {
+          const candidate = await (await services.harness.submission(id, ctx))!.wait(ctx);
+          // Registration can race steering admission. Transcript order, not
+          // bookkeeping insertion order, identifies the final answer.
+          if (submissionEnd(candidate) >= submissionEnd(settled)) settled = candidate;
+        }
         let artifacts: AgentTurnArtifacts | undefined;
         if (settled.status === "done" && settled.type === "input") {
           const child = (await services.harness.conversation(task.input.childId, ctx))!;
@@ -246,7 +277,7 @@ export function createDeliveryTask(services: OrchestrationServices) {
           let cursor;
           do {
             const page = await child.entries(
-              { minEntryId: settled.entry, maxEntryId: settled.answer },
+              { minEntryId: original.entry, maxEntryId: settled.answer },
               200,
               cursor,
               ctx,
@@ -257,6 +288,19 @@ export function createDeliveryTask(services: OrchestrationServices) {
           artifacts = runtimeResultArtifacts(entries);
         }
         await runtime.commit(async (tx) => {
+          const metadata = await tx.doc(WorkerDoc, task.input.childId);
+          const live = await tx.doc(LiveDoc, task.input.childId);
+          // Admission and assignment completion share the mutation line. A
+          // final boundary can start a queued steering run before its first
+          // request hook executes; register those inputs here as well.
+          for (const id of live.run?.inputs ?? [])
+            if (!metadata.completion!.inputs.includes(id)) metadata.completion!.inputs.push(id);
+          if (live.run || JSON.stringify(metadata.completion) !== JSON.stringify(completion))
+            return {
+              status: "running",
+              checkpoint: { phase: "deliver", retryAt: runtime.now() + 1 },
+            };
+          delete metadata.completion;
           const state = await tx.doc(OrchestrationDoc);
           const worker = state.workers[task.input.workerId];
           let text: string;
@@ -421,6 +465,10 @@ export function createDeliveryTask(services: OrchestrationServices) {
             Object.assign(await tx.doc(ArchivedRun, run.id, run), run);
             delete doc.runs[run.id];
           }
+          const metadata = await tx.doc(WorkerDoc, task.input.childId);
+          if (metadata.completion?.owner === task.id) delete metadata.completion;
+          const doc = await tx.doc(OrchestrationDoc);
+          if (doc.joinParents) delete doc.joinParents[String(task.input.childId)];
           await archiveWorker(tx, task.input.workerId, task.id);
           return { status: "terminal", outcome: { status: "completed", result: text } };
         }, ctx);
@@ -433,9 +481,10 @@ export function createDeliveryTask(services: OrchestrationServices) {
       );
       if (record && record.status === "queued")
         await (await services.harness.submission(record.id, ctx))!.abort(ctx);
-      if (record && record.status === "placed") {
+      if (record) {
         const live = await runtime.snapshot(LiveDoc, task.input.childId, ctx);
-        if (live?.run?.inputs.includes(record.id)) {
+        const completion = (await runtime.snapshot(WorkerDoc, task.input.childId, ctx))?.completion;
+        if (live?.run && (completion?.owner === task.id || live.run.inputs.includes(record.id))) {
           await services.harness.abortTask(live.run.taskId, ctx);
           await services.harness.waitForTask(live.run.taskId, ctx);
         }
@@ -453,6 +502,10 @@ export function createDeliveryTask(services: OrchestrationServices) {
           Object.assign(await tx.doc(ArchivedRun, run.id, run), run);
           delete doc.runs[run.id];
         }
+        const metadata = await tx.doc(WorkerDoc, task.input.childId);
+        if (metadata.completion?.owner === task.id) delete metadata.completion;
+        const doc = await tx.doc(OrchestrationDoc);
+        if (doc.joinParents) delete doc.joinParents[String(task.input.childId)];
         await archiveWorker(tx, task.input.workerId, task.id);
         return { status: "terminal", outcome: { status: "aborted", result: "Stopped." } };
       }, ctx);

@@ -1,7 +1,7 @@
 import { restoreInlineAgent } from "./orchestration-lifecycle.js";
 import { LiveDoc, GenerationTask, hook, configure, type EntryId } from "@earendil-works/pi-durable";
 import { decodeRuntimeNotice } from "./runtime-notices.js";
-import { OrchestrationDoc, type OrchestrationServices } from "./orchestration-state.js";
+import { OrchestrationDoc, WorkerDoc, type OrchestrationServices } from "./orchestration-state.js";
 
 export function orchestrationHooks(services: OrchestrationServices) {
   return [
@@ -17,12 +17,20 @@ export function orchestrationHooks(services: OrchestrationServices) {
       // Inline turns use the originating workspace for tools. Save main's cwd
       // in the same commit so reopening can restore it after interruption.
       beforeRequest: async (_request, api, ctx) => {
+        await services.harness.commit(async (tx) => {
+          const completion = (await tx.doc(WorkerDoc, api.conversationId)).completion;
+          if (!completion) return;
+          const live = await tx.doc(LiveDoc, api.conversationId);
+          for (const id of live.run?.inputs ?? [])
+            if (!completion.inputs.includes(id)) completion.inputs.push(id);
+        }, ctx);
         if (api.conversationId !== services.main.id) return;
         // The active run's admitted inputs survive zooms and later steering.
         // Read those immutable input entries rather than the prepared last user.
         const live = await api.snapshot(LiveDoc, services.main.id, ctx);
         const entries: EntryId[] = [];
-        for (const id of live?.run?.inputs ?? []) {
+        const completion = (await api.snapshot(WorkerDoc, services.main.id, ctx))?.completion;
+        for (const id of new Set([...(completion?.inputs ?? []), ...(live?.run?.inputs ?? [])])) {
           const submission = await (await services.harness.submission(id, ctx))!.status(ctx);
           if (submission.entry !== undefined) entries.push(submission.entry);
         }
@@ -70,6 +78,7 @@ export function orchestrationHooks(services: OrchestrationServices) {
       },
       afterTools: async (_assistant, _results, api, ctx) => {
         if (api.conversationId !== services.main.id) return;
+        if ((await api.snapshot(WorkerDoc, services.main.id, ctx))?.completion) return;
         const live = await api.snapshot(LiveDoc, services.main.id, ctx);
         const controls = [];
         for (const tool of live?.tools ?? []) {
@@ -112,6 +121,7 @@ export function orchestrationHooks(services: OrchestrationServices) {
           (message.stopReason !== "stop" && message.stopReason !== "length")
         )
           return;
+        if ((await api.snapshot(WorkerDoc, services.main.id, ctx))?.completion) return;
         await services.main.commit(async (tx) => {
           const doc = await tx.doc(OrchestrationDoc);
           if (!doc.inlineContext) return;

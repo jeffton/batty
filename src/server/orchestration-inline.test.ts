@@ -240,8 +240,12 @@ test("stopping a waiting inline cron does not abort main or withdraw ordinary qu
     }, context);
     await orchestration.tick();
     const run = (await orchestration.listRunningCron())[0]!;
+    const scheduledJob = (await orchestration.listJobs()).find((entry) => entry.id === job.id);
     await orchestration.stopRunning(run.id);
     await until(async () => (await orchestration.listRunLogs())[0]?.status === "aborted");
+    expect((await orchestration.listJobs()).find((entry) => entry.id === job.id)).toEqual(
+      scheduledJob,
+    );
     expect((await user.status(context)).status).toBe("placed");
     expect((await queuedUser.status(context)).status).toBe("queued");
     release();

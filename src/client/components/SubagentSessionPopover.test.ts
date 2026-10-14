@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi } from "vite-plus/test";
 import { flushPromises, mount } from "@vue/test-utils";
 import SubagentSessionPopover from "./SubagentSessionPopover.vue";
 import type { SessionState } from "@/shared/types";
-import { stopSubagent } from "@/client/lib/api";
+import { stopCronRun, stopSubagent } from "@/client/lib/api";
 
 const session = {
   id: "worker",
@@ -29,9 +29,11 @@ vi.mock("@/client/lib/api", () => ({
   getSession: vi.fn(async () => session),
   getSessionMessages: vi.fn(),
   stopSubagent: vi.fn(async () => ({ ok: true })),
+  stopCronRun: vi.fn(async () => ({ ok: true })),
 }));
 
 afterEach(() => {
+  vi.clearAllMocks();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -161,6 +163,75 @@ test("header stop follows active state, prevents duplicate requests and exposes 
     sources[0]!.onerror!();
     await wrapper.vm.$nextTick();
     expect(wrapper.get('[aria-label="Stop subagent"]').attributes("disabled")).toBeDefined();
+  } finally {
+    wrapper.unmount();
+  }
+});
+
+test("cron header stops only the current run and follows completion while viewing its log", async () => {
+  const sources: {
+    onmessage?: (event: { data: string }) => void;
+    onerror?: () => void;
+  }[] = [];
+  vi.stubGlobal(
+    "EventSource",
+    class {
+      onmessage?: (event: { data: string }) => void;
+      onerror?: () => void;
+      close = vi.fn();
+      addEventListener = vi.fn();
+      constructor() {
+        sources.push(this);
+      }
+    },
+  );
+  const wrapper = mount(SubagentSessionPopover, {
+    props: {
+      popoverId: "cron-popover",
+      sessionId: "cron-session",
+      headerTitle: "Cron run",
+      cronRun: { runId: "current-run", status: "running" },
+    },
+    global: {
+      stubs: {
+        FullPopover: {
+          name: "FullPopover",
+          template: '<div><header><slot name="header-actions" /></header><slot /></div>',
+        },
+        SessionHeaderStatus: true,
+        SessionTranscriptView: true,
+      },
+    },
+  });
+  try {
+    wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState: "open" });
+    await flushPromises();
+    expect(wrapper.get('[aria-label="Stop cron run"]').attributes("disabled")).toBeDefined();
+    sources[0]!.onmessage!({
+      data: JSON.stringify({ type: "reset", state: { ...session, isCronSession: true } }),
+    });
+    await wrapper.vm.$nextTick();
+    let reject!: (error: Error) => void;
+    vi.mocked(stopCronRun).mockReturnValueOnce(
+      new Promise((_, fail) => {
+        reject = fail;
+      }),
+    );
+    const stop = wrapper.get('header button[aria-label="Stop cron run"]');
+    await stop.trigger("click");
+    await stop.trigger("click");
+    expect(stopCronRun).toHaveBeenCalledExactlyOnceWith("current-run");
+    expect(stopSubagent).not.toHaveBeenCalled();
+    expect(stop.attributes("disabled")).toBeDefined();
+    reject(new Error("Cron stop failed"));
+    await flushPromises();
+    expect(wrapper.get('[role="alert"]').attributes("aria-label")).toBe("Cron stop failed");
+    expect(stop.attributes("disabled")).toBeUndefined();
+    sources[0]!.onerror!();
+    await wrapper.vm.$nextTick();
+    expect(stop.attributes("disabled")).toBeDefined();
+    await wrapper.setProps({ cronRun: { runId: "current-run", status: "error" } });
+    expect(wrapper.find('[aria-label="Stop cron run"]').exists()).toBe(false);
   } finally {
     wrapper.unmount();
   }

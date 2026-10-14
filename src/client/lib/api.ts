@@ -390,6 +390,14 @@ export function updateCronDelivery(
   });
 }
 
+export function stopCronRun(runId: string): Promise<{ ok: true }> {
+  return request("/api/cron", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "stop-running", runId }),
+  });
+}
+
 export function listWorkspaceCronJobs(workspaceId: string): Promise<CronJob[]> {
   return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/cron-jobs`);
 }

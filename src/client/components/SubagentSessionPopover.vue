@@ -1,24 +1,25 @@
 <script setup lang="ts">
 import { CircleAlert, LoaderCircle } from "@lucide/vue";
-import { onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import SessionHeaderStatus from "@/client/components/SessionHeaderStatus.vue";
 import StreamingStopControl from "@/client/components/StreamingStopControl.vue";
 import SessionTranscriptView from "@/client/components/SessionTranscriptView.vue";
-import { getSessionMessages, getSession, stopSubagent } from "@/client/lib/api";
+import { getSessionMessages, getSession, stopSubagent, stopCronRun } from "@/client/lib/api";
 import { applyServerEvent } from "@/client/lib/session-events";
 import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
 import { sessionEventsPath, sessionHistoryCursor } from "@/client/lib/session-stream";
 import { prependHistoryPage } from "@/client/lib/session-pagination";
 import { createSessionConnection } from "@/client/lib/session-connection";
 import { RECENT_SESSION_MESSAGE_WINDOW } from "@/shared/session-history";
-import type { ServerEvent, SessionState } from "@/shared/types";
+import type { CronRunLog, ServerEvent, SessionState } from "@/shared/types";
 
 const props = withDefaults(
   defineProps<{
     popoverId: string;
     sessionId: string;
     headerTitle?: string;
+    cronRun?: Pick<CronRunLog, "runId" | "status">;
   }>(),
   {
     headerTitle: "Subagent",
@@ -29,6 +30,9 @@ const session = ref<SessionState | undefined>(undefined);
 const loading = ref(false);
 const loadingOlderMessages = ref(false);
 const stopping = ref(false);
+const canStop = computed(() =>
+  props.cronRun ? props.cronRun.status === "running" : session.value?.canStopSubagent,
+);
 const errorMessage = ref<string | undefined>(undefined);
 const connectionState = ref<"online" | "connecting" | "offline">("connecting");
 let connection: ReturnType<typeof createSessionConnection> | undefined;
@@ -129,13 +133,13 @@ async function loadOlderMessages(): Promise<void> {
 }
 
 async function stop(): Promise<void> {
-  if (!session.value?.canStopSubagent || stopping.value || connectionState.value !== "online")
-    return;
+  if (!canStop.value || stopping.value || connectionState.value !== "online") return;
   const generation = loadGeneration;
   stopping.value = true;
   errorMessage.value = undefined;
   try {
-    await stopSubagent(props.sessionId);
+    if (props.cronRun) await stopCronRun(props.cronRun.runId);
+    else await stopSubagent(props.sessionId);
   } catch (error) {
     if (generation === loadGeneration)
       errorMessage.value = error instanceof Error ? error.message : String(error);
@@ -186,8 +190,8 @@ onBeforeUnmount(() => {
   >
     <template #header-actions>
       <StreamingStopControl
-        v-if="session?.canStopSubagent"
-        label="Stop subagent"
+        v-if="canStop"
+        :label="props.cronRun ? 'Stop cron run' : 'Stop subagent'"
         :disabled="stopping || connectionState !== 'online'"
         @stop="stop"
       />

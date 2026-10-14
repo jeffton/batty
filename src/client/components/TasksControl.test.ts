@@ -25,7 +25,7 @@ describe("compose tasks", () => {
     const showPopover = vi.fn();
     const wrapper = mount(TasksControl, {
       attachTo: document.body,
-      props: { subagents: [agent], cronRuns: [] },
+      props: { subagents: [], cronRuns: [run] },
       global: {
         stubs: {
           BasePopover: defineComponent({
@@ -35,7 +35,8 @@ describe("compose tasks", () => {
             template: "<div><slot /></div>",
           }),
           SubagentSessionPopover: {
-            props: ["popoverId", "sessionId"],
+            name: "SubagentSessionPopover",
+            props: ["popoverId", "sessionId", "cronRun"],
             template: '<div :id="popoverId" />',
           },
         },
@@ -48,8 +49,11 @@ describe("compose tasks", () => {
       await row.get("strong").trigger("click");
       expect(hidePopover).toHaveBeenCalledOnce();
       expect(showPopover).toHaveBeenCalledOnce();
-      await wrapper.setProps({ subagents: [] });
+      const details = wrapper.getComponent({ name: "SubagentSessionPopover" });
+      expect(details.props("cronRun")).toEqual(run);
+      await wrapper.setProps({ cronRuns: [] });
       expect(document.getElementById(target.id)).toBe(target);
+      expect(details.props("cronRun")).toBeUndefined();
     } finally {
       wrapper.unmount();
     }

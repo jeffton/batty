@@ -38,10 +38,14 @@ function job(workspaceId: string): CronJob {
   };
 }
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.useRealTimers();
+});
 
 describe("cron popover", () => {
   it("lists jobs across workspaces and makes each session log one full-row button", async () => {
+    vi.useFakeTimers();
     const run: CronRunLog = {
       runId: "run-second",
       jobId: "second",
@@ -52,7 +56,7 @@ describe("cron popover", () => {
       session: { kind: "daily-detached" },
       scheduleLabel: "Every 1h",
       startedAtMs: 2000,
-      status: "success",
+      status: "running",
       sessionId: "cron-session",
     };
     vi.mocked(api.listWorkspaceCronJobs).mockImplementation(async (id) => [
@@ -92,7 +96,7 @@ describe("cron popover", () => {
       expect(api.listRunningSubagents).not.toHaveBeenCalled();
       await wrapper.get("#cron-test-cron-tab").trigger("keydown", { key: "ArrowRight" });
       expect(wrapper.get("#cron-test-logs-tab").attributes("aria-selected")).toBe("true");
-      expect(wrapper.get("#cron-test-logs-panel").text()).toContain("Completed");
+      expect(wrapper.get("#cron-test-logs-panel").text()).toContain("Running");
       const rows = wrapper.get("#cron-test-logs-panel").findAll(".cron-popover__run");
       expect(rows[0]!.element.tagName).toBe("BUTTON");
       expect(rows[0]!.attributes("popovertarget")).toBe("cron-test-cron-run-second");
@@ -104,6 +108,14 @@ describe("cron popover", () => {
           .findAllComponents({ name: "SubagentSessionPopover" })
           .map((popover) => popover.props("sessionId")),
       ).toEqual(["cron-session"]);
+      const details = wrapper.getComponent({ name: "SubagentSessionPopover" });
+      expect(details.props("cronRun")).toEqual(run);
+      vi.mocked(api.listWorkspaceCronRunLogs).mockImplementation(async (id) =>
+        id === "second" ? [{ ...run, status: "error" }] : [],
+      );
+      await vi.advanceTimersByTimeAsync(3000);
+      await flushPromises();
+      expect(details.props("cronRun").status).toBe("error");
     } finally {
       wrapper.unmount();
     }

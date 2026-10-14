@@ -176,6 +176,7 @@ onBeforeUnmount(() => {
               v-if="run.sessionId"
               :popover-id="sessionPopoverId('cron', run.runId)"
               :session-id="run.sessionId"
+              :cron-run="run"
               header-title="Cron run"
             />
           </template>

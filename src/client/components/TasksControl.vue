@@ -124,6 +124,7 @@ function sessionToggle(taskId: string, event: Event): void {
       :popover-id="sessionPopoverId(task.id)"
       :session-id="task.sessionId"
       :header-title="task.id.startsWith('cron-') ? 'Cron run' : 'Subagent'"
+      :cron-run="props.cronRuns.find((run) => task.id === `cron-${run.runId}`)"
       @toggle="sessionToggle(task.id, $event)"
     />
   </template>

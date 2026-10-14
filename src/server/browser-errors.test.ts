@@ -20,6 +20,47 @@ const report = {
 };
 
 describe("browser error endpoint", () => {
+  it("stores bounded request/lifecycle context and distinguishes operations in deduplication", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "batty-errors-fetch-"));
+    const file = path.join(dir, "browser-errors.json");
+    const app = fastify();
+    app.decorateRequest("auth", true);
+    registerBrowserErrorRoutes(app, file);
+    const send = (operation: string) =>
+      app.inject({
+        method: "POST",
+        url: "/api/browser-errors",
+        headers: { origin: "http://localhost:80" },
+        payload: {
+          ...report,
+          stage: "fetch",
+          operation,
+          startedVisibility: "visible",
+          visibility: "visible",
+          suspended: true,
+          lifecycle: "reconnect",
+        },
+      });
+    try {
+      expect((await send("/api/main?token=secret")).statusCode).toBe(400);
+      expect((await send("main")).statusCode).toBe(204);
+      expect((await send("main")).statusCode).toBe(204);
+      expect((await send("history")).statusCode).toBe(204);
+      const stored = JSON.parse(await fs.readFile(file, "utf8"));
+      expect(stored).toHaveLength(2);
+      expect(stored[0]).toMatchObject({
+        operation: "main",
+        suspended: true,
+        lifecycle: "reconnect",
+        visibility: "visible",
+        startedVisibility: "visible",
+      });
+      expect(stored[1].operation).toBe("history");
+      expect(JSON.stringify(stored)).not.toContain("secret");
+    } finally {
+      await app.close();
+    }
+  });
   it("expires old reports and caps the persistent log", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "batty-errors-retention-"));
     const file = path.join(dir, "browser-errors.json");

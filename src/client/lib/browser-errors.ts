@@ -8,10 +8,38 @@ import {
   safeErrorStack,
   type ErrorStage,
   type BrowserErrorReport,
+  type FetchOperation,
+  type LifecycleEvent,
 } from "@/shared/browser-errors";
 
 declare const __BATTY_BUILD_ID__: string;
 let authenticated = false;
+let lifecycle: LifecycleEvent = "startup";
+let suspensions = 0;
+
+export function recordErrorLifecycle(event: LifecycleEvent): void {
+  lifecycle = event;
+  if (event === "hidden" || event === "pagehide") suspensions += 1;
+}
+
+export async function withFetchDiagnostics<T>(
+  operation: FetchOperation,
+  request: () => Promise<T>,
+): Promise<T> {
+  const startedVisibility = document.visibilityState;
+  const startedSuspensions = suspensions;
+  try {
+    return await request();
+  } catch (error) {
+    reportBrowserError(error, "fetch", {
+      operation,
+      startedVisibility,
+      suspended: suspensions !== startedSuspensions,
+      status: error instanceof Error ? (error as Error & { status?: number }).status : undefined,
+    });
+    throw error;
+  }
+}
 let recent: { key: string; time: number }[] = [];
 export function authorizeErrorReporting(value: boolean): void {
   authenticated = value;
@@ -21,7 +49,12 @@ export function authorizeErrorReporting(value: boolean): void {
 export function reportBrowserError(
   error: unknown,
   stage: ErrorStage,
-  extra: { correlationId?: string; status?: number; hasFiles?: boolean } = {},
+  extra: Partial<
+    Pick<
+      BrowserErrorReport,
+      "correlationId" | "status" | "hasFiles" | "operation" | "startedVisibility" | "suspended"
+    >
+  > = {},
 ): void {
   try {
     if (!authenticated || !navigator.onLine) return;
@@ -32,7 +65,19 @@ export function reportBrowserError(
     const errorName = safeErrorName(
       error instanceof Error || error instanceof DOMException ? error.name : "Unknown",
     );
-    const key = JSON.stringify([stage, errorName, message, stack, extra.status, extra.hasFiles]);
+    const key = JSON.stringify([
+      stage,
+      errorName,
+      message,
+      stack,
+      extra.status,
+      extra.hasFiles,
+      extra.operation,
+      extra.startedVisibility,
+      extra.suspended,
+      document.visibilityState,
+      lifecycle,
+    ]);
     if (recent.length >= 10 || recent.some((entry) => entry.key === key)) return;
     recent.push({ key, time: now });
     const report: BrowserErrorReport = {
@@ -47,6 +92,11 @@ export function reportBrowserError(
       stack,
       status: extra.status,
       hasFiles: extra.hasFiles,
+      operation: extra.operation,
+      startedVisibility: extra.startedVisibility,
+      suspended: extra.suspended,
+      visibility: document.visibilityState,
+      lifecycle,
     };
     // Separate transport: never feed telemetry failures back into telemetry or UI.
     void fetch(withBaseUrl("/api/browser-errors"), {
@@ -62,6 +112,11 @@ export function reportBrowserError(
 }
 
 export function installBrowserErrorReporting(app: App): void {
+  document.addEventListener("visibilitychange", () =>
+    recordErrorLifecycle(document.visibilityState === "hidden" ? "hidden" : "visible"),
+  );
+  for (const event of ["pagehide", "pageshow", "online", "offline"] as const)
+    window.addEventListener(event, () => recordErrorLifecycle(event));
   window.addEventListener("error", (event) =>
     reportBrowserError(event.error ?? new Error(event.message), "window"),
   );

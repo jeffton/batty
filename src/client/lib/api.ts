@@ -27,7 +27,26 @@ import type {
 } from "@/shared/types";
 
 import type { MemoryTreeOverview, MemoryTreeExpansion } from "@/shared/memory-tree";
-import { authorizeErrorReporting, reportBrowserError } from "./browser-errors";
+import {
+  authorizeErrorReporting,
+  reportBrowserError,
+  withFetchDiagnostics,
+} from "./browser-errors";
+import type { FetchOperation } from "@/shared/browser-errors";
+
+// Only requests used by handlers that can set the main composer error banner.
+const bannerRequests: Record<string, FetchOperation> = {
+  "/api/bootstrap": "bootstrap",
+  "/api/workspaces": "workspaces",
+  "/api/main": "main",
+  "/api/main/messages": "history",
+  "/api/push/public-key": "push-key",
+  "/api/push/subscriptions": "push-sync",
+  "/api/push/subscriptions/delete": "push-delete",
+  "/api/logout": "logout",
+  "/api/main/stop": "stop",
+  "/api/main/queue/remove": "queue-remove",
+};
 
 class HttpError extends Error {
   constructor(
@@ -46,7 +65,13 @@ export function expandMemoryNode(id: number, count: number): Promise<MemoryTreeE
   return request(`/api/memory/tree/${id}/${count}`);
 }
 
-async function request<T>(input: string, init?: RequestInit): Promise<T> {
+function request<T>(input: string, init?: RequestInit): Promise<T> {
+  const operation = bannerRequests[input.split("?")[0]!];
+  const execute = () => performRequest<T>(input, init);
+  return operation ? withFetchDiagnostics(operation, execute) : execute();
+}
+
+async function performRequest<T>(input: string, init?: RequestInit): Promise<T> {
   const response = await fetch(withBaseUrl(input), {
     credentials: "include",
     signal: !init?.method || init.method === "GET" ? AbortSignal.timeout(20_000) : undefined,

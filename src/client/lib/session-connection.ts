@@ -1,4 +1,5 @@
 import type { ServerEvent } from "@/shared/types";
+import { recordErrorLifecycle } from "./browser-errors";
 
 type ConnectionOptions = {
   path: () => string;
@@ -29,6 +30,7 @@ export function createSessionConnection(options: ConnectionOptions) {
 
   function connect() {
     stopSource();
+    recordErrorLifecycle("reconnect");
     options.onConnecting();
     const current = new EventSource(options.path());
     source = current;

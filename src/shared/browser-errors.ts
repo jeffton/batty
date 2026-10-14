@@ -6,8 +6,36 @@ export const errorStages = [
   "submit",
   "cache-read",
   "cache-write",
+  "fetch",
 ] as const;
 export type ErrorStage = (typeof errorStages)[number];
+
+export const fetchOperations = [
+  "bootstrap",
+  "workspaces",
+  "main",
+  "history",
+  "push-key",
+  "push-sync",
+  "push-delete",
+  "logout",
+  "stop",
+  "queue-remove",
+  "version",
+  "app-shell",
+] as const;
+export type FetchOperation = (typeof fetchOperations)[number];
+export const lifecycleEvents = [
+  "startup",
+  "hidden",
+  "visible",
+  "pagehide",
+  "pageshow",
+  "online",
+  "offline",
+  "reconnect",
+] as const;
+export type LifecycleEvent = (typeof lifecycleEvents)[number];
 
 export interface BrowserErrorReport {
   timestamp: string;
@@ -21,6 +49,11 @@ export interface BrowserErrorReport {
   stack: string;
   status?: number;
   hasFiles?: boolean;
+  operation?: FetchOperation;
+  visibility?: DocumentVisibilityState;
+  startedVisibility?: DocumentVisibilityState;
+  suspended?: boolean;
+  lifecycle?: LifecycleEvent;
 }
 
 // Unknown error text can contain a prompt, filename, server body or credentials.
@@ -58,6 +91,7 @@ const diagnosticMessages = new Set([
   "Cache transaction aborted: write",
   "Cache transaction aborted: clear",
   "Failed to fetch",
+  "Fetch is aborted",
   "Load failed",
   "NetworkError when attempting to fetch resource.",
   "The operation was aborted.",

@@ -1,4 +1,5 @@
 import { withBaseUrl } from "./base-url";
+import { withFetchDiagnostics } from "./browser-errors";
 
 const blockers = new Set<() => boolean>();
 declare const __BATTY_BUILD_ID__: string;
@@ -24,7 +25,17 @@ export function initializeBuild(buildId: string | undefined): void {
   loadedBuild ??= buildId;
 }
 
-async function fetchAvailable(path: string, label: string): Promise<Response> {
+function fetchAvailable<T>(
+  path: string,
+  label: string,
+  read: (response: Response) => Promise<T>,
+): Promise<T> {
+  return withFetchDiagnostics(path === "/api/version" ? "version" : "app-shell", async () =>
+    read(await fetchAvailableResponse(path, label)),
+  );
+}
+
+async function fetchAvailableResponse(path: string, label: string): Promise<Response> {
   for (let attempt = 0; ; attempt += 1) {
     const response = await fetch(withBaseUrl(path), {
       cache: "no-store",
@@ -43,15 +54,16 @@ async function fetchAvailable(path: string, label: string): Promise<Response> {
 export async function checkAppUpdate(): Promise<void> {
   if (checking) return checking;
   checking = (async () => {
-    const response = await fetchAvailable("/api/version", "Version");
-    const { buildId } = await response.json();
+    const { buildId } = await fetchAvailable("/api/version", "Version", (response) =>
+      response.json(),
+    );
     initializeBuild(buildId);
     pendingBuild = buildId !== loadedBuild ? buildId : undefined;
     if (!pendingBuild || reloading || !canReloadApp()) return;
     if (sessionStorage.getItem("batty:reload-build") === pendingBuild) return;
     // Verify online HTML before navigating; an offline cached shell must not loop.
-    const shell = await fetchAvailable("/index.html", "App shell");
-    const html = new DOMParser().parseFromString(await shell.text(), "text/html");
+    const shell = await fetchAvailable("/index.html", "App shell", (response) => response.text());
+    const html = new DOMParser().parseFromString(shell, "text/html");
     if (html.querySelector('meta[name="batty-build"]')?.getAttribute("content") !== pendingBuild)
       return;
     // Worker updates run independently, without plugin-controlled page reloads.

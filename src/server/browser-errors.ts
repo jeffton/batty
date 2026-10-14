@@ -4,6 +4,8 @@ import type { FastifyInstance } from "fastify";
 import {
   errorStages,
   errorNames,
+  fetchOperations,
+  lifecycleEvents,
   safeErrorMessage,
   safeErrorStack,
   type BrowserErrorReport,
@@ -82,6 +84,11 @@ export function registerBrowserErrorRoutes(app: FastifyInstance, file: string): 
             stack: { type: "string", maxLength: 2048 },
             status: { type: "integer", minimum: 100, maximum: 599 },
             hasFiles: { type: "boolean" },
+            operation: { type: "string", enum: fetchOperations },
+            visibility: { type: "string", enum: ["hidden", "visible"] },
+            startedVisibility: { type: "string", enum: ["hidden", "visible"] },
+            suspended: { type: "boolean" },
+            lifecycle: { type: "string", enum: lifecycleEvents },
           },
         },
       },
@@ -110,6 +117,11 @@ export function registerBrowserErrorRoutes(app: FastifyInstance, file: string): 
         report.stack,
         report.status,
         report.buildId,
+        report.operation,
+        report.visibility,
+        report.startedVisibility,
+        report.suspended,
+        report.lifecycle,
       ]);
       if (recent.length >= 20) return reply.code(429).send({ error: "Report limit reached" });
       if (recent.some((entry) => entry.key === key)) return reply.code(204).send();

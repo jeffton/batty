@@ -207,7 +207,7 @@ function normalizeStoredOptions(options: StoredAppOptions | undefined): AppOptio
         ? options.authSecret.trim()
         : createAuthSecret(),
     workspacesRoots,
-    pushTitle: options?.pushTitle ?? "Roy",
+    pushTitle: options?.pushTitle ?? "Batty",
     webPushSubject:
       typeof options?.webPushSubject === "string" ? options.webPushSubject.trim() : "",
     cronDailySessionStartTime: normalizeDailySessionStartTime(options?.cronDailySessionStartTime),

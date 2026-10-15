@@ -18,7 +18,7 @@ it("persists a global push title without changing other settings", async () => {
         appTitle: "App title",
       }),
     );
-    expect((await loadAppOptions(directory)).pushTitle).toBe("Roy");
+    expect((await loadAppOptions(directory)).pushTitle).toBe("Batty");
     await setPushTitle(directory, "Custom title");
     const config = await loadConfig(directory);
     expect(config.pushTitle).toBe("Custom title");

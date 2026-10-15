@@ -223,6 +223,7 @@ function sessionToggle(taskId: string, event: Event): void {
   background: transparent;
   color: inherit;
   font-family: inherit;
+  font-weight: 400;
   text-align: left;
 }
 

@@ -222,6 +222,7 @@ onBeforeUnmount(() => {
   background: transparent;
   color: inherit;
   font-family: inherit;
+  font-weight: 400;
   text-align: left;
 }
 button.cron-popover__run {

@@ -29,6 +29,7 @@ type MemoryRequests = {
   main: () => Conversation;
   harness: () => Harness;
   rootSessionId: () => string;
+  assistantWorkspaceId: () => Promise<string | undefined>;
   load: (context: Context) => Promise<void>;
   conversationalView: (
     maximum: number,
@@ -45,6 +46,7 @@ export function createMemoryRequests({
   main,
   harness,
   rootSessionId,
+  assistantWorkspaceId,
   load,
   conversationalView,
   preparedView,
@@ -54,6 +56,13 @@ export function createMemoryRequests({
   report,
 }: MemoryRequests) {
   const validPackets = new Set<string>();
+  async function canAccessMemory(conversationId: ConversationId, workspaceId?: string) {
+    return conversationPolicy(
+      conversationId === main().id ? "assistant" : "worker",
+      workspaceId,
+      await assistantWorkspaceId(),
+    ).mainMemory;
+  }
   async function mainSnapshot(context: Context) {
     const live = await harness().snapshot(LiveDoc, main().id, context);
     const runId = live?.run?.inputs[0];
@@ -119,13 +128,8 @@ export function createMemoryRequests({
         outputLimits: { maxBytes: Number.MAX_SAFE_INTEGER, maxLines: Number.MAX_SAFE_INTEGER },
         execute: async ({ id, n }, api, context) => {
           const worker = await api.snapshot(WorkerDoc, api.conversationId, context);
-          if (
-            !conversationPolicy(
-              api.conversationId === main().id ? "assistant" : "worker",
-              worker?.workspaceId,
-            ).mainMemory
-          )
-            throw new Error("Main memory is available only to Roy workers");
+          if (!(await canAccessMemory(api.conversationId, worker?.workspaceId)))
+            throw new Error("Main memory is available only in the assistant workspace");
           const snapshot =
             api.conversationId === main().id
               ? await mainSnapshot(context)
@@ -141,13 +145,8 @@ export function createMemoryRequests({
         replay: "safe",
         execute: async ({ id }, api, context) => {
           const worker = await api.snapshot(WorkerDoc, api.conversationId, context);
-          if (
-            !conversationPolicy(
-              api.conversationId === main().id ? "assistant" : "worker",
-              worker?.workspaceId,
-            ).mainMemory
-          )
-            throw new Error("Main memory is available only to Roy workers");
+          if (!(await canAccessMemory(api.conversationId, worker?.workspaceId)))
+            throw new Error("Main memory is available only in the assistant workspace");
           return { output: [{ type: "text", text: await date(id, context) }] };
         },
       }),
@@ -163,13 +162,8 @@ export function createMemoryRequests({
         replay: "safe",
         execute: async (options, api, context) => {
           const worker = await api.snapshot(WorkerDoc, api.conversationId, context);
-          if (
-            !conversationPolicy(
-              api.conversationId === main().id ? "assistant" : "worker",
-              worker?.workspaceId,
-            ).mainMemory
-          )
-            throw new Error("Main memory is available only to Roy workers");
+          if (!(await canAccessMemory(api.conversationId, worker?.workspaceId)))
+            throw new Error("Main memory is available only in the assistant workspace");
           return {
             output: [{ type: "text", text: JSON.stringify(await search(options, context)) }],
           };
@@ -188,7 +182,7 @@ export function createMemoryRequests({
         beforeRequest: async ({ messages }, api, context) => {
           if (api.conversationId !== main().id) {
             const worker = await api.snapshot(WorkerDoc, api.conversationId, context);
-            if (!conversationPolicy("worker", worker?.workspaceId).mainMemory) {
+            if (!(await canAccessMemory(api.conversationId, worker?.workspaceId))) {
               const isolated = withoutMainMemory(messages);
               const system = getCurrentSystemMessage(messages);
               return {

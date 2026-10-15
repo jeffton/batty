@@ -120,7 +120,11 @@ export function createWorkers(
       ...change,
       cwd: ws.path,
     });
-    (await tx.doc(AgentDoc, child.id)).tools = workerTools(parentAgent, ws.id);
+    (await tx.doc(AgentDoc, child.id)).tools = workerTools(
+      parentAgent,
+      ws.id,
+      await services.assistantWorkspaceId(),
+    );
     for (const message of prefix) {
       const kind =
         message.role === "system"

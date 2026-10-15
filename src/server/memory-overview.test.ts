@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vite-plus/test";
@@ -23,12 +23,18 @@ import { createMemory, MemoryIndexDoc } from "./memory";
 import { createTools } from "./tools";
 import { createOrchestration, OrchestrationDoc, WorkerDoc } from "./orchestration";
 import { isMainMemoryView } from "./main-memory-policy";
+import { listWorkspaces } from "./workspaces";
+import { setAssistantWorkspace } from "./options";
+import type { AppConfig } from "./config";
 
-test("fresh Roy worker pins its overview across tools and later inputs while new workers see current memory", async () => {
+test("fresh assistant-workspace worker pins its overview across tools and later inputs while new workers see current memory", async () => {
   const models = createModels();
   const faux = fauxProvider();
   models.setProvider(faux.provider);
-  const memory = createMemory({ nodeBytes: 1000 }, models);
+  const memory = createMemory(
+    { nodeBytes: 1000, getAssistantWorkspaceId: async () => "assistant" },
+    models,
+  );
   const registry = createRegistry();
   registry.install(memory.extension);
   let main: Awaited<ReturnType<Harness["root"]>>;
@@ -74,7 +80,7 @@ test("fresh Roy worker pins its overview across tools and later inputs while new
     const worker = async () => {
       const child = await harness.createConversation({ ownership: { kind: "ownerless" } }, context);
       await child.commit(async (tx) => {
-        (await tx.doc(WorkerDoc, child.id)).workspaceId = "roy";
+        (await tx.doc(WorkerDoc, child.id)).workspaceId = "assistant";
       }, context);
       await child.configure({ model: { provider: "faux", modelId: "faux-1" } }, context);
       return child;
@@ -113,26 +119,40 @@ async function until(check: () => Promise<boolean>) {
 }
 
 test.each([
-  { kind: "fresh", target: "roy", copy: false },
-  { kind: "nested", target: "roy", copy: false },
-  { kind: "nested", target: "roy", copy: true, parent: "other" },
-  { kind: "cron", target: "roy", copy: false },
+  { kind: "fresh", target: "assistant", copy: false },
+  { kind: "nested", target: "assistant", copy: false },
+  { kind: "nested", target: "assistant", copy: true, parent: "other" },
+  { kind: "cron", target: "assistant", copy: false },
+  { kind: "fresh", target: "assistant", copy: true },
+  { kind: "fresh", target: "assistant", copy: "chat-only" },
   { kind: "fresh", target: "roy", copy: true },
-  { kind: "fresh", target: "roy", copy: "chat-only" },
   { kind: "fresh", target: "other", copy: true },
   { kind: "nested", target: "other", copy: true },
   { kind: "cron", target: "other", copy: "chat-only" },
 ] as const)(
   "$kind worker in $target (copy=$copy) receives only permitted main memory",
   async (scenario) => {
-    const { kind, target, copy } = scenario;
-    const parent = scenario.parent ?? "roy";
+    const { kind, copy } = scenario;
     const directory = await mkdtemp(join(tmpdir(), "batty-overview-"));
+    const roots = [join(directory, "projects"), join(directory, "second")];
+    for (const name of ["assistant", "roy", "other"]) {
+      await mkdir(join(roots[0]!, name), { recursive: true });
+    }
+    await mkdir(roots[1]!);
+    const config = { battyDir: directory, workspacesRoots: roots } as AppConfig;
+    const workspaces = await listWorkspaces(config);
+    const id = (label: string) => workspaces.find((workspace) => workspace.label === label)!.id;
+    const assistantId = id("assistant");
+    await setAssistantWorkspace(directory, assistantId);
+    const target = id(scenario.target);
+    const parent = id(scenario.parent ?? "assistant");
     const models = createModels();
     const faux = fauxProvider({ tokensPerSecond: 100_000 });
     models.setProvider(faux.provider);
     const memory = createMemory(
       {
+        getAssistantWorkspaceId: async () =>
+          (await listWorkspaces(config)).find((workspace) => workspace.isAssistant)?.id,
         nodeBytes: 80,
         viewBytes: 100,
         compress: async () => {
@@ -141,27 +161,8 @@ test.each([
       },
       models,
     );
-    const tools = await createTools({ battyDir: directory, workspacesRoots: [directory] } as any);
-    const orchestration = createOrchestration({
-      workspaces: [
-        {
-          id: "roy",
-          path: directory,
-          label: "Test",
-          kind: "workspace",
-          isPinned: false,
-          isAssistant: false,
-        },
-        {
-          id: "other",
-          path: join(directory, "other"),
-          label: "Other",
-          kind: "workspace",
-          isPinned: false,
-          isAssistant: false,
-        },
-      ],
-    });
+    const tools = await createTools(config);
+    const orchestration = createOrchestration(config);
     const registry = createRegistry();
     registry.install(tools.extension);
     registry.install(orchestration.extension);
@@ -173,7 +174,10 @@ test.each([
       context,
     );
     const main = await harness.root(context, {
-      agent: { cwd: directory, model: { provider: "faux", modelId: "faux-1" } },
+      agent: {
+        cwd: workspaces.find((workspace) => workspace.id === assistantId)!.path,
+        model: { provider: "faux", modelId: "faux-1" },
+      },
     });
     try {
       tools.bindHarness(harness);
@@ -239,18 +243,19 @@ text(await tools.memory_date({id}));`;
               const text = JSON.stringify(
                 request.messages.filter((message) => message.role !== "system"),
               );
-              expect(text.match(/<chat>/g) ?? []).toHaveLength(target === "roy" ? 1 : 0);
+              expect(text.match(/<chat>/g) ?? []).toHaveLength(target === assistantId ? 1 : 0);
               const system = request.messages.findLast((message) => message.role === "system");
               const names = system?.toolsAdded?.map((tool) => tool.name) ?? [];
               expect(names).not.toContain("memory_overview");
-              expect(names.includes("memory_zoom")).toBe(target === "roy");
-              expect(names.includes("memory_date")).toBe(target === "roy");
+              expect(names.includes("memory_zoom")).toBe(target === assistantId);
+              expect(names.includes("memory_date")).toBe(target === assistantId);
+              expect(names.includes("memory_search")).toBe(target === assistantId);
               inspected.push(request.messages.length);
               return fauxAssistantMessage(
                 [
                   fauxToolCall("codemode", {
                     code:
-                      target === "roy"
+                      target === assistantId
                         ? code
                         : "text(ALL_TOOLS); text(await searchTools('main memory')); try { text(await describeTool('memory_zoom')); } catch (error) { text(String(error)); }",
                   }),
@@ -264,7 +269,7 @@ text(await tools.memory_date({id}));`;
           if (last.role === "toolResult" && last.toolName === "codemode") {
             const output = JSON.stringify(last.content);
             expect(last.isError).toBeFalsy();
-            if (target === "roy") {
+            if (target === assistantId) {
               expect(output).toContain(`0:${secret}`);
               expect(output).toContain("1970-01-01T00:00:00.001Z");
             } else {
@@ -324,6 +329,7 @@ test("automatic worker overview uses the built catalog without waiting for pendi
   let compressions = 0;
   const memory = createMemory(
     {
+      getAssistantWorkspaceId: async () => "assistant",
       nodeBytes: 80,
       compress: async () => {
         compressions++;
@@ -367,7 +373,7 @@ test("automatic worker overview uses the built catalog without waiting for pendi
     const before = await harness.snapshot(MemoryIndexDoc, main.id, context);
     const worker = await harness.createConversation({ ownership: { kind: "ownerless" } }, context);
     await worker.commit(async (tx) => {
-      (await tx.doc(WorkerDoc, worker.id)).workspaceId = "roy";
+      (await tx.doc(WorkerDoc, worker.id)).workspaceId = "assistant";
     }, context);
     let overview = "";
     faux.setResponses([

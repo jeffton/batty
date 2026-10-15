@@ -183,6 +183,8 @@ export class Runtime {
     const orchestration = createOrchestration(config);
     const memory = createMemory(
       {
+        getAssistantWorkspaceId: async () =>
+          (await listWorkspaces(config)).find((workspace) => workspace.isAssistant)?.id,
         noiseBackupDir: path.join(dir, "memory-backups"),
         rebuildRequested: existsSync(path.join(dir, "memory-rebuild.request")),
         get memoryLanguage() {

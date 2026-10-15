@@ -62,6 +62,7 @@ export { NODE_BYTES } from "./memory-compression";
 export { MemoryIndexDoc, MemoryMaintenanceDoc, MemoryNodesDoc } from "./memory-documents";
 
 export type MemoryConfig = {
+  getAssistantWorkspaceId?: () => Promise<string | undefined>;
   memoryLanguage?: string;
   memoryModel?: string | { provider: string; modelId: string };
   memoryReasoning?: "minimal" | "low" | "medium" | "high";
@@ -720,6 +721,7 @@ export function createMemory(config: MemoryConfig, models: Models) {
     main: () => main,
     harness: () => harness,
     rootSessionId: () => rootSessionId,
+    assistantWorkspaceId: async () => config.getAssistantWorkspaceId?.(),
     load,
     conversationalView,
     preparedView: () => ({

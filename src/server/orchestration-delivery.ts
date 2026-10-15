@@ -227,6 +227,7 @@ export function createDeliveryTask(services: OrchestrationServices) {
                 (await tx.doc(AgentDoc, task.input.childId)).tools = workerTools(
                   childAgent,
                   task.input.workspaceId,
+                  await services.assistantWorkspaceId(),
                 );
               }
             }

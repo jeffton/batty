@@ -56,6 +56,12 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
   let contextFor = options.contextFor;
   let prepareAgent = options.prepareAgent;
   let browserLifecycle: WorkerBrowserLifecycle | undefined;
+  const workspaceList = async () =>
+    typeof options.workspaces === "function"
+      ? await options.workspaces()
+      : (options.workspaces ?? []);
+  const assistantWorkspaceId = async () =>
+    (await workspaceList()).find((workspace) => workspace.isAssistant)?.id;
   const preparedContext = async (
     parentId: ConversationId,
     mode: ContextMode,
@@ -65,7 +71,8 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
     if (!contextFor)
       throw new Error("Context copying requires orchestration.setContextProvider(fn)");
     const copied = await contextFor(parentId, mode);
-    const messages = conversationPolicy("worker", workspaceId).mainMemory
+    const messages = conversationPolicy("worker", workspaceId, await assistantWorkspaceId())
+      .mainMemory
       ? copied
       : withoutMainMemory(copied);
     if (mode !== "chat-only") return messages;
@@ -81,10 +88,7 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
   const onError = options.onError ?? console.error;
   const workspace = async (id?: string, parentId?: ConversationId) => {
     if (options.resolveWorkspace) return options.resolveWorkspace(id, parentId);
-    const list =
-      typeof options.workspaces === "function"
-        ? await options.workspaces()
-        : (options.workspaces ?? []);
+    const list = await workspaceList();
     const inherited =
       parentId === undefined
         ? undefined
@@ -117,6 +121,7 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
       return browserLifecycle;
     },
     workspace,
+    assistantWorkspaceId,
     preparedContext,
   };
   const Delivery = createDeliveryTask(services);

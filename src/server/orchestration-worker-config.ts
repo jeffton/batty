@@ -20,8 +20,13 @@ export function modelChange(model?: string, effort?: string): AgentChange {
   }
   return change;
 }
-export function workerTools(agent: Agent, workspaceId: string): string[] {
-  const memoryTools = conversationPolicy("worker", workspaceId).mainMemory
+export function workerTools(
+  agent: Agent,
+  workspaceId: string,
+  assistantWorkspaceId: string | undefined,
+): string[] {
+  const mainMemory = conversationPolicy("worker", workspaceId, assistantWorkspaceId).mainMemory;
+  const memoryTools = mainMemory
     ? agent.extensions.flatMap((extension) =>
         extension.name === "batty-optchat" ? (extension.tools ?? []) : [],
       )
@@ -31,9 +36,7 @@ export function workerTools(agent: Agent, workspaceId: string): string[] {
       [...agent.tools, ...memoryTools]
         .filter(
           (tool) =>
-            tool.name !== "memory_overview" &&
-            (conversationPolicy("worker", workspaceId).mainMemory ||
-              !MAIN_MEMORY_TOOLS.has(tool.name)),
+            tool.name !== "memory_overview" && (mainMemory || !MAIN_MEMORY_TOOLS.has(tool.name)),
         )
         .map((tool) => tool.name),
     ),

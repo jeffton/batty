@@ -209,10 +209,17 @@ export async function createTools(
     );
     const worker = await api.snapshot(WorkerDoc, api.conversationId, ctx);
     const isMain = harness && api.conversationId === (await harness.root(ctx)).id;
+    const assistantWorkspaceId = (await listWorkspaces(config)).find(
+      (workspace) => workspace.isAssistant,
+    )?.id;
     return [...all.values()].filter(
       (tool) =>
         tool.name !== "memory_overview" &&
-        (conversationPolicy(isMain ? "assistant" : "worker", worker?.workspaceId).mainMemory ||
+        (conversationPolicy(
+          isMain ? "assistant" : "worker",
+          worker?.workspaceId,
+          assistantWorkspaceId,
+        ).mainMemory ||
           !MAIN_MEMORY_TOOLS.has(tool.name)),
     );
   };

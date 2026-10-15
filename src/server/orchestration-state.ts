@@ -178,6 +178,7 @@ export interface OrchestrationServices {
   readonly prepareAgent: PrepareAgent | undefined;
   readonly browserLifecycle: WorkerBrowserLifecycle | undefined;
   workspace(id?: string, parentId?: ConversationId): Promise<Pick<WorkspaceInfo, "id" | "path">>;
+  assistantWorkspaceId(): Promise<string | undefined>;
   preparedContext(
     parentId: ConversationId,
     mode: ContextMode,

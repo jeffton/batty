@@ -265,11 +265,13 @@ export function createSitesTool({
     name: "sites",
     label: "Sites",
     description:
-      "Create, share, and delete hosted HTML sites. Create allocates a directory; use file tools to build or change its contents.",
-    promptSnippet: "Create and share interactive HTML sites with the user.",
+      "Create, share, and delete hosted HTML sites. Create allocates a directory; use file tools to build or change its contents. Share attaches the site to the current response as a native site attachment that opens the site popover; ordinary links do not.",
+    promptSnippet:
+      "Create and deliver interactive HTML sites as native site attachments, not Markdown links.",
     promptGuidelines: [
       "Call create to allocate a site directory, then use write/edit tools to create index.html and its assets there.",
-      "After building and checking the site, call share so it appears in the final response.",
+      "After building and checking the site, call share to attach it to your response. Do not replace the native site attachment with a plain URL or Markdown link; those do not open the site popover.",
+      "To deliver a site from a subagent or other report, call attach_artifacts with its listed site ref in your own turn. Do not recreate or reshare it, or copy its URL as a substitute for attaching it.",
       "Use the browser URL from the result with the browser tool to inspect the site without changing its public setting.",
       "Use delete to permanently remove a site.",
     ],
@@ -305,7 +307,7 @@ export function createSitesTool({
         content: [
           {
             type: "text",
-            text: `Shared site ${site.descriptor.id}.\nDirectory: ${site.directory}\nUser URL: ${site.descriptor.url}\nBrowser URL: ${site.browserUrl}`,
+            text: `Shared site ${site.descriptor.id}. Attached to this response as a native site attachment; do not replace it with a URL or Markdown link.\nDirectory: ${site.directory}\nUser URL: ${site.descriptor.url}\nBrowser URL: ${site.browserUrl}`,
           },
         ],
         details: { sites: [site.descriptor] },

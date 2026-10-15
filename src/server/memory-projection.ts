@@ -9,8 +9,6 @@ export type MemoryLeaf = {
   ordinal: number;
 };
 export function projectEntry(entry: EntryRecord): MemoryLeaf[] {
-  const imported =
-    (entry.data as { provenance?: { source?: string } } | undefined)?.provenance?.source === "roy";
   const leaves: MemoryLeaf[] = [];
   const append = (kind: MemoryLeaf["kind"], text: string, timestamp: number) =>
     leaves.push({
@@ -36,12 +34,6 @@ export function projectEntry(entry: EntryRecord): MemoryLeaf[] {
         message.timestamp,
       );
     } else if (message.role === "assistant") {
-      if (
-        imported &&
-        ((message.stopReason !== "stop" && message.stopReason !== "length") ||
-          message.content.some((part) => part.type === "toolCall"))
-      )
-        continue;
       const text = message.content
         .flatMap((part) => (part.type === "text" ? [part.text] : []))
         .join("\n");
@@ -50,7 +42,6 @@ export function projectEntry(entry: EntryRecord): MemoryLeaf[] {
         if (part.type === "toolCall")
           append("tool", `${part.name} ${JSON.stringify(part.arguments)}`, message.timestamp);
     } else if (message.role === "toolResult") {
-      if (imported) continue;
       append(
         "echo",
         message.content

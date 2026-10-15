@@ -24,6 +24,4 @@ test("projection keeps tools and exact text but excludes reasoning", () => {
     { kind: "tool", text: 'read {"path":"file"}', source: 9, ordinal: 1 },
   ]);
   expect(JSON.stringify(projectEntry(entry))).not.toContain("secret");
-  const imported = { ...entry, data: { provenance: { source: "roy" } } };
-  expect(projectEntry(imported as EntryRecord)).toEqual([]);
 });

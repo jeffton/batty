@@ -386,6 +386,7 @@ onBeforeUnmount(() => {
             <AttachedFilesList v-if="attachedFiles.length" :files="attachedFiles" />
             <SharedSitesList
               v-if="sharedSites.length"
+              class="message__notice-sites"
               :sites="sharedSites"
               :id-prefix="props.message.id"
             />
@@ -762,6 +763,17 @@ onBeforeUnmount(() => {
   display: block;
 }
 
+.message__notice-sites :deep(.shared-sites__card),
+.message__notice-sites :deep(.shared-sites__open) {
+  border-color: color-mix(in srgb, currentColor 25%, transparent);
+  background: var(--color-bg-inline-code);
+  color: inherit;
+}
+
+.message__notice-sites :deep(.shared-sites__meta span) {
+  color: inherit;
+}
+
 .message__notice-actions {
   margin-top: 0.45rem;
 }
@@ -816,7 +828,8 @@ onBeforeUnmount(() => {
 
 @media (hover: hover) {
   .message__diff-button:hover,
-  .message__notice-btn:hover {
+  .message__notice-btn:hover,
+  .message__notice-sites :deep(.shared-sites__open:hover) {
     background: color-mix(in srgb, var(--color-bg-inline-code) 90%, currentColor);
   }
 }

@@ -383,7 +383,11 @@ onBeforeUnmount(() => {
           </template>
           <template v-else>{{ props.message.text }}</template>
           <div v-if="hasReplyArtifacts" class="message__artifacts">
-            <AttachedFilesList v-if="attachedFiles.length" :files="attachedFiles" />
+            <AttachedFilesList
+              v-if="attachedFiles.length"
+              class="message__notice-files"
+              :files="attachedFiles"
+            />
             <SharedSitesList
               v-if="sharedSites.length"
               class="message__notice-sites"
@@ -763,6 +767,7 @@ onBeforeUnmount(() => {
   display: block;
 }
 
+.message__notice-files :deep(.attached-files__card),
 .message__notice-sites :deep(.shared-sites__card),
 .message__notice-sites :deep(.shared-sites__open) {
   border-color: color-mix(in srgb, currentColor 25%, transparent);
@@ -770,6 +775,14 @@ onBeforeUnmount(() => {
   color: inherit;
 }
 
+.message__notice-files :deep(.attached-files__preview),
+.message__notice-files :deep(.transcript-image) {
+  background: var(--color-bg-inline-code);
+}
+
+.message__notice-files :deep(.attached-files__facts),
+.message__notice-files :deep(.attached-files__download),
+.message__notice-files :deep(.transcript-image__error),
 .message__notice-sites :deep(.shared-sites__meta span) {
   color: inherit;
 }

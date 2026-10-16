@@ -17,6 +17,23 @@ const artifacts = {
       downloadUrl: "/fixture.jpg",
       previewUrl: "/fixture.jpg",
     },
+    {
+      id: "document",
+      name: "Report.pdf",
+      size: 456,
+      mimeType: "application/pdf",
+      kind: "file" as const,
+      downloadUrl: "/fixture.pdf",
+    },
+    {
+      id: "video",
+      name: "Wildlife.mp4",
+      size: 789,
+      mimeType: "video/mp4",
+      kind: "video" as const,
+      downloadUrl: "/fixture.mp4",
+      previewUrl: "/fixture.mp4",
+    },
   ],
   sites: [{ id: "s", name: "Morning report", url: "https://example.com/report", public: false }],
   fileChanges: [

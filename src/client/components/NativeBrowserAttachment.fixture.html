@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <div id="app" style="height: 90vh; display: flex"></div>
+    <script type="module">
+      import { createApp, h, ref } from "vue";
+      import { createPinia } from "pinia";
+      import SessionTranscriptView from "./SessionTranscriptView.vue";
+      import { mergeSessionState } from "../lib/session-state.ts";
+      import "../styles.css";
+
+      const session = ref();
+      const stream = new EventSource("/api/main/events");
+      stream.onmessage = ({ data }) => {
+        const event = JSON.parse(data);
+        if (event.type === "reset")
+          session.value = session.value
+            ? mergeSessionState(event.state, session.value)
+            : event.state;
+      };
+      window.addEventListener("pagehide", () => stream.close());
+      createApp({
+        setup: () => () =>
+          session.value
+            ? h(SessionTranscriptView, {
+                session: session.value,
+                alwaysShowDetails: false,
+                showTimestamps: false,
+              })
+            : h("p", "Connecting"),
+      })
+        .use(createPinia())
+        .mount("#app");
+    </script>
+  </body>
+</html>

@@ -5,6 +5,7 @@ import {
   artifactRefs,
   reportWithArtifacts,
   mergeResponseArtifacts,
+  responseArtifacts,
 } from "./artifact-forwarding";
 import { encodeRuntimeNotice } from "./runtime-notices";
 import { runtimeResultArtifacts } from "./runtime-result-artifacts";
@@ -86,6 +87,39 @@ test("forwarding adds to existing response metadata without removing sites or du
       { fileChanges: [diff], sites: [other] },
     ),
   ).toEqual({ fileChanges: [diff], sites: [site, other] });
+});
+
+test("native browser attachments belong to their response without forwarding received worker browsers", () => {
+  const received = { ...browser, id: "received", browserId: "worker" };
+  const selected = { ...browser, id: "selected", browserId: "forwarded" };
+  const entries = [
+    {
+      model: [
+        { role: "toolResult", toolName: "browser", details: { sites: [browser] } },
+        { role: "toolResult", toolName: "browser", details: { sites: [browser] } },
+        { role: "toolResult", toolName: "subagent", details: { sites: [received] } },
+        {
+          role: "toolResult",
+          toolName: "codemode",
+          details: {
+            sites: [received, browser],
+            calls: [
+              { name: "subagent", sites: [received] },
+              { name: "browser", details: { sites: [browser] } },
+            ],
+          },
+        },
+        {
+          role: "toolResult",
+          toolName: "attach_artifacts",
+          details: {
+            forwardedArtifacts: { sites: [selected] },
+          },
+        },
+      ],
+    },
+  ] as never;
+  expect(responseArtifacts(entries)).toEqual({ sites: [selected, browser] });
 });
 
 test("rejects unreceived refs rather than loading another workspace or fabricating an artifact", async () => {

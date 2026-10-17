@@ -36,7 +36,7 @@ export async function createHistoryIndex(db: SqliteDatabase) {
     );
   });
   return {
-    async forwardedArtifacts(conversationId: number, answerId: number) {
+    async responseArtifacts(conversationId: number, answerId: number) {
       const submission = await db.get<{ input: number | null }>(
         "SELECT MIN(json_extract(record, '$.entry')) AS input FROM submissions WHERE conversation_id = ? AND json_extract(record, '$.answer') = ?",
         conversationId,
@@ -45,8 +45,11 @@ export async function createHistoryIndex(db: SqliteDatabase) {
       if (submission?.input == null) return [];
       const rows = await db.all<{ record: string }>(
         `SELECT record FROM entries WHERE conversation_id = ? AND id >= ? AND id <= ?
-          AND EXISTS (SELECT 1 FROM json_each(json_extract(record, '$.model'))
-            WHERE json_extract(value, '$.role') = 'toolResult' AND json_type(value, '$.details.forwardedArtifacts') = 'object')
+          AND EXISTS (SELECT 1 FROM json_each(json_extract(record, '$.model')) AS message
+            WHERE json_extract(message.value, '$.role') = 'toolResult' AND (
+              json_type(message.value, '$.details.forwardedArtifacts') = 'object'
+              OR EXISTS (SELECT 1 FROM json_each(json_extract(message.value, '$.details.sites')) AS site
+                WHERE json_type(site.value, '$.browserId') = 'text')))
           ORDER BY id`,
         conversationId,
         submission.input,

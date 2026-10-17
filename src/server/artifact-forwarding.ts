@@ -50,7 +50,7 @@ export function reportWithArtifacts(text: string, artifacts: AgentTurnArtifacts 
 }
 
 type ArtifactDetails = AgentTurnArtifacts & {
-  calls?: Array<AgentTurnArtifacts & { details?: AgentTurnArtifacts }>;
+  calls?: Array<AgentTurnArtifacts & { name?: string; details?: AgentTurnArtifacts }>;
 };
 
 export function artifactsFromModelMessages(
@@ -97,6 +97,28 @@ export function forwardedResponseArtifacts(entries: readonly EntryRecord[]): Age
     }
   }
   return mergeResponseArtifacts(...sources);
+}
+
+/** Browser tools attach their own live session; received reports still require explicit forwarding. */
+export function responseArtifacts(entries: readonly EntryRecord[]): AgentTurnArtifacts {
+  const browsers = entries.flatMap((entry) =>
+    (entry.model ?? []).flatMap((message) => {
+      if (message.role !== "toolResult") return [];
+      const details = message.details as ArtifactDetails | undefined;
+      const owned =
+        message.toolName === "browser"
+          ? [details]
+          : message.toolName === "codemode"
+            ? (details?.calls ?? [])
+                .filter((call) => call.name === "browser")
+                .map((call) => call.details ?? call)
+            : [];
+      return owned.flatMap((artifacts) =>
+        (artifacts?.sites ?? []).filter((site) => site.browserId),
+      );
+    }),
+  );
+  return mergeResponseArtifacts(forwardedResponseArtifacts(entries), { sites: browsers });
 }
 
 export function createAttachArtifactsTool() {

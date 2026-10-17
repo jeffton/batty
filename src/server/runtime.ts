@@ -34,7 +34,7 @@ import { stateDirPath } from "./options";
 import { listWorkspaces } from "./workspaces";
 import { normalizeMessage, normalizeBlocks } from "./pi-state";
 import { hydrateRuntimeResultArtifacts } from "./runtime-result-artifacts-history";
-import { forwardedResponseArtifacts, mergeResponseArtifacts } from "./artifact-forwarding";
+import { responseArtifacts, mergeResponseArtifacts } from "./artifact-forwarding";
 import { queuedPromptDisplay } from "./queued-prompt-display";
 import { createHistoryIndex } from "./history-index";
 import { createMemorySearch } from "./memory-search";
@@ -484,12 +484,12 @@ export class Runtime {
       messages.map(async (message) => {
         await hydrateRuntimeResultArtifacts(this.storage, conversationId, message);
         if (message.role === "assistant" && message.turnPhase === "final") {
-          const entries = await this.historyIndex.forwardedArtifacts(
+          const entries = await this.historyIndex.responseArtifacts(
             conversationId,
             Number(message.id.split(":")[0]),
           );
           if (entries.length) {
-            const artifacts = mergeResponseArtifacts(message, forwardedResponseArtifacts(entries));
+            const artifacts = mergeResponseArtifacts(message, responseArtifacts(entries));
             message.fileChanges = artifacts.fileChanges;
             message.sites = artifacts.sites;
             message.sentFiles = artifacts.sentFiles;

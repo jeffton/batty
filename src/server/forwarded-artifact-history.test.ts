@@ -62,11 +62,11 @@ test("response projection retains only explicitly selected metadata, scoped to i
         }),
       );
     });
-    const entries = await index.forwardedArtifacts(1, 7);
+    const entries = await index.responseArtifacts(1, 7);
     expect(entries.map((entry) => entry.id)).toEqual([5]);
     expect(forwardedResponseArtifacts(entries)).toEqual(selected);
-    expect(await index.forwardedArtifacts(1, 8)).toEqual([]);
-    expect(await index.forwardedArtifacts(2, 7)).toEqual([]);
+    expect(await index.responseArtifacts(1, 8)).toEqual([]);
+    expect(await index.responseArtifacts(2, 7)).toEqual([]);
     const plan = await db.all<{ detail: string }>(
       "EXPLAIN QUERY PLAN SELECT record FROM submissions WHERE conversation_id = 1 AND json_extract(record, '$.answer') = 7",
     );

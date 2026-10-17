@@ -7,6 +7,11 @@ import fastify from "fastify";
 import vue from "@vitejs/plugin-vue";
 import { chromium } from "patchright";
 import { BrowserService } from "../src/server/browser-service";
+import { CloudBrowserStreams } from "../src/server/cloud-browser-stream";
+
+const inputMode = process.env.BENCH_INPUT ?? "native";
+const constantCapture = process.env.BENCH_CONSTANT_CAPTURE === "1";
+if (constantCapture) CloudBrowserStreams.prototype.scrolling = () => {};
 import { registerCloudBrowserRoutes } from "../src/server/routes/cloud-browser";
 import {
   closeBrowserFixtureServer,
@@ -21,6 +26,12 @@ const dispatchScroll = service.cloudScroll.bind(service);
 service.cloudScroll = async (id, command) => {
   const started = performance.now();
   await dispatchScroll(id, command);
+  scrollOperationMs.push(performance.now() - started);
+};
+const dispatchTouch = service.cloudTouch.bind(service);
+service.cloudTouch = async (id, command, owner) => {
+  const started = performance.now();
+  await dispatchTouch(id, command, owner);
   scrollOperationMs.push(performance.now() - started);
 };
 const backend = fastify();
@@ -127,6 +138,10 @@ try {
     `${server.resolvedUrls!.local[0]}src/client/components/BrowserPopover.fixture.html`,
   );
   await page.evaluate("globalThis.__name = value => value");
+  if (inputMode === "wheel")
+    await page.addScriptTag({
+      content: `document.addEventListener("pointerdown", event => Object.defineProperty(event, "pointerType", { value: "mouse" }), true);`,
+    });
   await page.evaluate(() => {
     const records: Array<{ time: number; mark: number; pixelsWidth: number }> = [];
     const inputs: Array<{ time: number; position: number }> = [];
@@ -234,14 +249,14 @@ try {
   const started = await page.evaluate(() => performance.now());
   await touch.send("Input.dispatchTouchEvent", {
     type: "touchStart",
-    touchPoints: [{ x: bounds.x + 200, y: bounds.y + 500 }],
+    touchPoints: [{ x: bounds.x + 200, y: bounds.y + bounds.height - 20 }],
   });
   const wallStart = Date.now();
   for (let i = 1; i <= 90; i++) {
-    // A continuous 3s drag; leave the captured element as the pointer moves.
+    // A continuous 3s drag inside the real viewport.
     await touch.send("Input.dispatchTouchEvent", {
       type: "touchMove",
-      touchPoints: [{ x: bounds.x + 200, y: bounds.y + 500 - i * 8 }],
+      touchPoints: [{ x: bounds.x + 200, y: bounds.y + bounds.height - 20 - i * 8 }],
     });
     const remaining = wallStart + i * 33 - Date.now();
     if (remaining > 0) await new Promise((r) => setTimeout(r, remaining));
@@ -250,7 +265,7 @@ try {
   await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   const target = await service.cloudTarget(id);
   // Assert the final remote scroll event's mark actually reaches the viewer.
-  await new Promise((r) => setTimeout(r, 200));
+  await new Promise((r) => setTimeout(r, 1200));
   const finalMark = await target.page.evaluate(() => Number(document.documentElement.dataset.mark));
   await page.waitForFunction(
     (mark) =>
@@ -317,11 +332,15 @@ try {
   );
   await verifyCoverage();
   const finalScroll = await target.page.evaluate(() => scrollY);
-  if (Math.abs(finalScroll - 720) > 1)
+  if (inputMode === "wheel" && Math.abs(finalScroll - 720) > 1)
     throw new Error(`Gesture distance changed: expected 720 CSS pixels, got ${finalScroll}`);
+  if (inputMode === "native" && finalScroll < 600)
+    throw new Error(`Native gesture did not reach the remote page: ${finalScroll}`);
   console.log(
     JSON.stringify(
       {
+        inputMode,
+        constantCapture,
         link: { rttMs: 60, downMbit: 20 },
         dimensions,
         finalDimensions: await image.evaluate((e) => ({

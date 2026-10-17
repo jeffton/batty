@@ -222,6 +222,49 @@ test("capture targets retain view fences without querying page status", async ()
   }
 }, 30_000);
 
+test("native touch ownership survives competing viewers and releases on coordinate changes", async () => {
+  const f = await fixture();
+  try {
+    const opened = await f.service.execute("shared", { action: "open", url: f.url, cloud: true });
+    const id = opened.details.sites![0]!.browserId!;
+    await f.service.cloudControl(id, { action: "viewport", width: 390, height: 640, mobile: true });
+    const { page, state } = await f.service.cloudTarget(id);
+    await page.setContent(
+      `<meta name="viewport" content="width=device-width"><body style="height:3000px" ontouchcancel="this.dataset.cancelled='yes'"></body>`,
+    );
+    const command = {
+      action: "touch" as const,
+      ...state,
+      phase: "start" as const,
+      x: 100,
+      y: 300,
+      elapsedMs: 0,
+    };
+    // setContent keeps the same page but may change its revision.
+    Object.assign(command, await f.service.cloudState(id));
+    await f.service.cloudTouch(id, command, "first-viewer");
+    await expect(f.service.cloudTouch(id, command, "other-viewer")).rejects.toThrow("active touch");
+    await f.service.cloudReleaseTouch(id, "other-viewer");
+    await f.service.cloudTouch(
+      id,
+      { ...command, phase: "move", y: 260, elapsedMs: 30 },
+      "first-viewer",
+    );
+    await f.service.cloudControl(id, { action: "viewport", width: 640, height: 390, mobile: true });
+    await expect.poll(() => page.locator("body").getAttribute("data-cancelled")).toBe("yes");
+    await expect(
+      f.service.cloudTouch(id, { ...command, phase: "move", elapsedMs: 60 }, "first-viewer"),
+    ).rejects.toThrow("view changed");
+    const next = { ...command, ...(await f.service.cloudState(id)), x: 100, y: 100 };
+    await f.service.cloudTouch(id, next, "other-viewer");
+    await f.service.cloudReleaseTouch(id, "other-viewer");
+    await f.service.cloudTouch(id, next, "first-viewer");
+    await f.service.cloudTouch(id, { ...next, phase: "cancel", elapsedMs: 30 }, "first-viewer");
+  } finally {
+    await f.close();
+  }
+}, 30_000);
+
 test("direct wheel input targets iframe and nested scrollers without synthetic hover events", async () => {
   const f = await fixture();
   try {
@@ -632,10 +675,19 @@ test("motion downsamples direct native frames and idle requests a final full-den
     // Restart asks Chromium for a compositor paint even when the page is static.
     f.paint("sharp-final");
     expect(f.frames.at(-1)!.image).toBe(Buffer.from("sharp-final").toString("base64"));
+    f.streams.scrolling("id", true);
+    await vi.advanceTimersByTimeAsync(1000);
+    // A held finger can pause without repeatedly restarting capture.
+    expect(f.starts()).toHaveLength(4);
+    f.streams.scrolling("id", false);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(f.starts()).toHaveLength(4);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(f.starts()).toHaveLength(5);
     stop();
     f.streams.scrolling("id");
     await vi.advanceTimersByTimeAsync(1000);
-    expect(f.starts()).toHaveLength(3);
+    expect(f.starts()).toHaveLength(5);
   } finally {
     await f.streams.close();
     vi.useRealTimers();
@@ -1002,6 +1054,7 @@ test("WebSocket scroll coalesces pending deltas and preserves its anchor without
 async function scrollSocketFixture(
   cloudScroll: BrowserService["cloudScroll"],
   onControl = () => {},
+  touch: Partial<Pick<BrowserService, "cloudTouch" | "cloudReleaseTouch">> = {},
 ) {
   const app = fastify();
   const connection = Object.assign(new EventEmitter(), {
@@ -1025,6 +1078,7 @@ async function scrollSocketFixture(
       cloudCaptureTarget: async () => ({ page, state }),
       cloudState: async () => state,
       cloudScroll,
+      ...touch,
       cloudControl: async () => {
         onControl();
         return state;
@@ -1135,6 +1189,58 @@ test("distinct scroll anchors stay FIFO and a fence drains all earlier input bef
     ).toHaveLength(1);
   } finally {
     releases.forEach((release) => release());
+    await f.close();
+  }
+});
+
+test("a busy-agent touch rejection releases ownership before disconnect and a fresh viewer can touch", async () => {
+  let active = false;
+  let busy = false;
+  const cloudTouch = vi.fn<BrowserService["cloudTouch"]>(async (_id, command) => {
+    if (busy) throw Object.assign(new Error("Browser is busy"), { statusCode: 409 });
+    if (command.phase === "start") {
+      if (active) throw new Error("Browser already has an active touch");
+      active = true;
+    }
+  });
+  const release = vi.fn(async () => {
+    active = false;
+  });
+  const f = await scrollSocketFixture(
+    async () => {},
+    () => {},
+    { cloudTouch, cloudReleaseTouch: release },
+  );
+  const command = {
+    action: "touch",
+    pageId: "p",
+    revision: "r",
+    x: 100,
+    y: 300,
+    phase: "start",
+    elapsedMs: 0,
+  };
+  try {
+    f.send(command);
+    await expect.poll(() => active).toBe(true);
+    busy = true;
+    f.send({ ...command, phase: "end", elapsedMs: 30 });
+    await expect
+      .poll(() => f.messages.some((message) => message.event === "scroll-error"))
+      .toBe(true);
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(active).toBe(false);
+    f.socket.terminate();
+    busy = false;
+    const next = await f.app.injectWS("/api/cloud-browser/id/socket", {
+      headers: { origin: "https://batty.example" },
+    });
+    next.send(JSON.stringify(command));
+    await expect.poll(() => active).toBe(true);
+    next.terminate();
+    await expect.poll(() => active).toBe(false);
+    expect(release).toHaveBeenCalledTimes(2);
+  } finally {
     await f.close();
   }
 });

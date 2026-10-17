@@ -188,6 +188,74 @@ test("streams gesture deltas without HTTP round-trip gating and preserves nested
   }
 });
 
+test("native touch preserves boundaries under backpressure and never synthesizes a second mouse click", async () => {
+  const wrapper = create();
+  try {
+    const events = await open(wrapper);
+    events.send("state", { ...state, mobile: true });
+    await frame(wrapper, events);
+    const image = wrapper.get("canvas");
+    const callbacks = new Map<number, FrameRequestCallback>();
+    let next = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callbacks.set(++next, callback);
+      return next;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => callbacks.delete(id));
+    events.bufferedAmount = 20000;
+    await image.trigger("pointerdown", {
+      pointerType: "touch",
+      pointerId: 1,
+      button: 0,
+      clientX: 100,
+      clientY: 200,
+    });
+    for (let i = 1; i <= 10; i++)
+      await image.trigger("pointermove", { pointerId: 1, clientX: 100, clientY: 200 - i * 5 });
+    await image.trigger("pointerup", { pointerId: 1, clientX: 100, clientY: 150 });
+    await image.trigger("pointerdown", {
+      pointerType: "touch",
+      pointerId: 2,
+      button: 0,
+      clientX: 100,
+      clientY: 150,
+    });
+    await image.trigger("pointercancel");
+    events.bufferedAmount = 0;
+    const [id, callback] = callbacks.entries().next().value!;
+    callbacks.delete(id);
+    callback(0);
+    const touches = events.sent.filter((command) => command.action === "touch");
+    expect(touches.map((command) => command.phase)).toEqual([
+      "start",
+      "move",
+      "end",
+      "start",
+      "cancel",
+    ]);
+    expect(touches[1]).toMatchObject({ x: 320, y: 400 });
+    expect(commands()).toEqual([]);
+    expect(events.sent.some((command) => command.action === "scroll")).toBe(false);
+    await image.trigger("pointerdown", {
+      pointerType: "touch",
+      pointerId: 3,
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+    });
+    await image.trigger("pointerup", { pointerId: 3, clientX: 100, clientY: 100 });
+    expect(
+      events.sent
+        .filter((command) => command.action === "touch")
+        .slice(-2)
+        .map((command) => command.phase),
+    ).toEqual(["start", "end"]);
+    expect(commands()).toEqual([]);
+  } finally {
+    wrapper.unmount();
+  }
+});
+
 test("a stalled socket keeps exactly one animation-frame retry across repeated input", async () => {
   const wrapper = create();
   try {

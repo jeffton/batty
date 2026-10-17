@@ -4,6 +4,7 @@ import type { BrowserDescriptor } from "@/shared/types";
 import type {
   CloudBrowserControl,
   CloudBrowserState,
+  CloudBrowserTouch,
   CloudBrowserViewport,
 } from "@/shared/cloud-browser";
 import os from "node:os";
@@ -197,6 +198,17 @@ export class BrowserService {
   private disposed = false;
   private readonly cloudOwners = new Map<string, string>();
   private readonly activeAgentSessions = new Set<string>();
+  private readonly cloudTouches = new Map<
+    string,
+    {
+      owner: string;
+      session: BrowserSession;
+      page: Page;
+      connection: CDPSession;
+      startedAt: number;
+      elapsedMs: number;
+    }
+  >();
 
   constructor(
     private readonly tailscaleProxy?: BrowserProxy,
@@ -249,6 +261,15 @@ export class BrowserService {
             }
 
             if (session?.useTailscale) await this.requireTailscaleProxy();
+            if (
+              session &&
+              (input.viewport ||
+                !["attach", "pages", "snapshot", "screenshot", "frames", "wait"].includes(
+                  input.action,
+                ))
+            )
+              for (const [id, touch] of this.cloudTouches)
+                if (touch.session === session) await this.cancelCloudTouch(id);
 
             if (input.action === "open") {
               const url = validateUrl(required(input.url, "url", input.action));
@@ -515,7 +536,7 @@ export class BrowserService {
 
   private cloudInputPage(
     session: BrowserSession,
-    command: Extract<CloudBrowserControl, { revision: string }>,
+    command: Extract<CloudBrowserControl, { revision: string }> | CloudBrowserTouch,
   ): Page {
     const page = this.resolvePage(session);
     const current = this.cloudView(session, page);
@@ -532,6 +553,81 @@ export class BrowserService {
         });
     }
     return page;
+  }
+
+  private async cancelCloudTouch(id: string, owner?: string): Promise<void> {
+    const touch = this.cloudTouches.get(id);
+    if (!touch || (owner !== undefined && touch.owner !== owner)) return;
+    this.cloudTouches.delete(id);
+    if (!touch.page.isClosed())
+      await touch.connection.send("Input.dispatchTouchEvent", {
+        type: "touchCancel",
+        touchPoints: [],
+      });
+  }
+
+  async cloudTouch(id: string, command: CloudBrowserTouch, owner: string): Promise<void> {
+    await this.cloudOperation(
+      id,
+      async (session) => {
+        try {
+          const page = this.cloudInputPage(session, command);
+          await session.pageIdentityPromises.get(page);
+          let touch = this.cloudTouches.get(id);
+          if (command.phase === "start") {
+            if (touch)
+              throw Object.assign(new Error("Browser already has an active touch."), {
+                statusCode: 409,
+              });
+            touch = {
+              owner,
+              session,
+              page,
+              connection: session.pageEmulation.get(page)!,
+              startedAt: (Date.now() - command.elapsedMs) / 1000,
+              elapsedMs: 0,
+            };
+            this.cloudTouches.set(id, touch);
+          }
+          if (
+            !touch ||
+            touch.owner !== owner ||
+            touch.page !== page ||
+            command.elapsedMs < touch.elapsedMs
+          )
+            throw Object.assign(new Error("Browser touch sequence changed."), { statusCode: 409 });
+          touch.elapsedMs = command.elapsedMs;
+          await touch.connection.send("Input.dispatchTouchEvent", {
+            type: (
+              {
+                start: "touchStart",
+                move: "touchMove",
+                end: "touchEnd",
+                cancel: "touchCancel",
+              } as const
+            )[command.phase],
+            touchPoints:
+              command.phase === "end" || command.phase === "cancel"
+                ? []
+                : [{ x: command.x, y: command.y, id: 1, radiusX: 1, radiusY: 1, force: 0.5 }],
+            timestamp: touch.startedAt + command.elapsedMs / 1000,
+          });
+          if (command.phase === "end" || command.phase === "cancel") this.cloudTouches.delete(id);
+        } catch (error) {
+          await this.cancelCloudTouch(id, owner);
+          throw error;
+        }
+      },
+      true,
+      false,
+    );
+  }
+
+  async cloudReleaseTouch(id: string, owner: string): Promise<void> {
+    const touch = this.cloudTouches.get(id);
+    if (!touch || touch.owner !== owner) return;
+    const sessionId = await this.cloudOwner(id);
+    await this.serialized(sessionId, () => this.cancelCloudTouch(id, owner));
   }
 
   async cloudScroll(
@@ -570,6 +666,7 @@ export class BrowserService {
     return this.cloudOperation(
       id,
       async (session) => {
+        await this.cancelCloudTouch(id);
         if ("revision" in command) {
           const page = this.cloudInputPage(session, command);
           // Viewer input keeps the capture running. Revisions fence agent actions,
@@ -748,6 +845,7 @@ export class BrowserService {
 
   async dispose(): Promise<void> {
     this.disposed = true;
+    for (const id of this.cloudTouches.keys()) await this.cancelCloudTouch(id);
     await Promise.all(
       [...this.sessions.keys()].map(async (sessionId) => {
         const session = this.sessions.get(sessionId);
@@ -1306,6 +1404,8 @@ export class BrowserService {
   private async closeSessionNow(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId);
     this.sessions.delete(sessionId);
+    for (const [id, touch] of this.cloudTouches)
+      if (touch.session === session) this.cloudTouches.delete(id);
     await closePersistentBrowser(
       browserSessionDirectory(this.persistenceRoot, sessionId),
       session?.browser,

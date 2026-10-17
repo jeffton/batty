@@ -53,6 +53,13 @@ beforeAll(async () => {
     <div id="pane"><div style="height:1000px">Inner scrolling</div></div>
     <button id="edge" onclick="document.body.dataset.clicks=String(Number(document.body.dataset.clicks||0)+1)">Edge click</button>`),
   );
+  backend.get("/touch", (_request, reply) =>
+    reply.type("text/html").send(`<!doctype html>
+    <meta name="viewport" content="width=device-width"><style>body{margin:0;height:6000px}#pane{position:absolute;top:100px;left:20px;width:300px;height:450px;overflow:auto;overscroll-behavior:contain}#pane div{height:5000px;background:linear-gradient(red,blue)}#drag{position:fixed;top:100px;right:0;width:50px;height:450px;touch-action:none;background:green}</style>
+    <button style="height:60px;width:120px" onclick="document.body.dataset.clicks=String(Number(document.body.dataset.clicks||0)+1)">Tap</button>
+    <div id="pane"><div>Nested</div></div><div id="drag" onpointermove="this.dataset.moves=String(Number(this.dataset.moves||0)+1)"></div>
+    <script>document.addEventListener('touchstart',()=>document.body.dataset.starts=String(Number(document.body.dataset.starts||0)+1),{passive:true});document.addEventListener('touchend',()=>{document.body.dataset.releaseInner=String(document.querySelector('#pane').scrollTop);document.body.dataset.releaseOuter=String(scrollY)},{passive:true});document.addEventListener('touchcancel',()=>document.body.dataset.cancels=String(Number(document.body.dataset.cancels||0)+1),{passive:true});</script>`),
+  );
   backend.get("/popup", (_request, reply) =>
     reply.type("text/html").send("<title>Popup target</title><p>Popup</p>"),
   );
@@ -106,17 +113,12 @@ async function tapRemote(page: Page, x: number, y: number) {
   const state = await service.cloudState(attachedBrowserId);
   await expect.poll(() => image.getAttribute("data-revision")).toBe(state.revision);
   const bounds = (await image.boundingBox())!;
-  const done = page.waitForResponse(
-    (r) => r.url().endsWith("/control") && r.request().postDataJSON().action === "click",
-  );
   await page.touchscreen.tap(
     bounds.x + (x * bounds.width) / state.width,
     bounds.y + (y * bounds.height) / state.height,
   );
-  const response = await done;
-  expect(response.status()).toBe(200);
 }
-async function swipe(page: Page, x: number, y: number, distance: number) {
+async function swipe(page: Page, x: number, y: number, distance: number, steps = 5, delay = 35) {
   const image = page.locator(".cloud-browser__image");
   const state = await service.cloudState(attachedBrowserId);
   await expect.poll(() => image.getAttribute("data-revision")).toBe(state.revision);
@@ -129,12 +131,14 @@ async function swipe(page: Page, x: number, y: number, distance: number) {
       type: "touchStart",
       touchPoints: [{ x: px, y: py }],
     });
-    for (let step = 1; step <= 5; step++) {
+    const started = Date.now();
+    for (let step = 1; step <= steps; step++) {
+      const remaining = started + step * delay - Date.now();
+      if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
       await touch.send("Input.dispatchTouchEvent", {
         type: "touchMove",
-        touchPoints: [{ x: px, y: py - (distance * step) / 5 }],
+        touchPoints: [{ x: px, y: py - (distance * step) / steps }],
       });
-      await new Promise((resolve) => setTimeout(resolve, 35));
     }
     await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   } finally {
@@ -266,6 +270,8 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
         Number(await image.getAttribute("data-scroll-start")),
     );
 
+    // Let the native fling settle before switching this mobile viewer to a mouse wheel.
+    await new Promise((resolve) => setTimeout(resolve, 700));
     // Wheel is routed too, and remains anchored to the nested container.
     await image.hover({ position: { x: 100, y: 190 } });
     // Chromium's injected device-pixel wheel is normalized by viewer DPR before DOM delivery.
@@ -316,6 +322,94 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
     await popover.getByRole("button", { name: "Close popover" }).click();
     expect(await service.hasSession("integration")).toBe(true);
   } finally {
+    await context.close();
+  }
+}, 60_000);
+
+test("native touch retains nested and outer momentum, taps once, drags and cancels across rotation/disconnect", async () => {
+  await service.execute("integration", { action: "open", url: `${backendUrl}/touch`, cloud: true });
+  attachedBrowserId = (await service.execute("integration", { action: "attach" })).details
+    .sites![0]!.browserId!;
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+    deviceScaleFactor: 3,
+  });
+  await context.addCookies([
+    { name: "cloud-auth", value: "test", url: server.resolvedUrls!.local[0]! },
+  ]);
+  const page = await context.newPage();
+  const touch = await context.newCDPSession(page);
+  try {
+    await page.goto(url);
+    await page.getByRole("button", { name: "Open browser", exact: true }).click();
+    const canvas = page.locator(".cloud-browser__image");
+    await expect.poll(() => canvas.getAttribute("data-frame")).not.toBeNull();
+    await tapRemote(page, 40, 25);
+    await expect.poll(() => inspect("document.body.dataset.clicks")).toBe("1");
+    await swipe(page, 150, 500, 280, 10, 16);
+    await expect.poll(() => inspect("document.body.dataset.releaseInner")).not.toBeUndefined();
+    const releaseInner = Number(await inspect("document.body.dataset.releaseInner"));
+    await expect
+      .poll(() => inspect("document.querySelector('#pane').scrollTop"))
+      .toBeGreaterThan(releaseInner + 30);
+    expect(await inspect("scrollY")).toBe(0);
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    // A touch-action:none surface receives touch-driven pointer movement, not page scrolling.
+    await swipe(page, 340, 400, 120);
+    await expect
+      .poll(() => inspect("Number(document.querySelector('#drag').dataset.moves||0)"))
+      .toBeGreaterThan(2);
+    expect(await inspect("scrollY")).toBe(0);
+    // Start outside both nested pane and custom drag surface.
+    await swipe(page, 325, 600, 280, 10, 16);
+    await expect
+      .poll(() => inspect("Number(document.body.dataset.releaseOuter)"))
+      .toBeGreaterThan(0);
+    const releaseOuter = Number(await inspect("document.body.dataset.releaseOuter"));
+    await expect.poll(() => inspect("scrollY")).toBeGreaterThan(releaseOuter + 30);
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    const send = async (type: "touchStart" | "touchMove" | "touchCancel", x = 200, y = 300) => {
+      const bounds = (await canvas.boundingBox())!;
+      await touch.send("Input.dispatchTouchEvent", {
+        type,
+        touchPoints: type === "touchCancel" ? [] : [{ x: bounds.x + x, y: bounds.y + y }],
+      });
+    };
+    await send("touchStart");
+    await send("touchMove", 200, 270);
+    await send("touchCancel");
+    await expect.poll(() => inspect("Number(document.body.dataset.cancels||0)")).toBeGreaterThan(0);
+    // Rotation cancels a held remote finger before changing the coordinate system.
+    const cancels = Number(await inspect("document.body.dataset.cancels"));
+    await send("touchStart");
+    await page.setViewportSize({ width: 844, height: 390 });
+    await expect
+      .poll(async () => (await service.cloudState(attachedBrowserId)).width)
+      .toBeGreaterThan(750);
+    await expect
+      .poll(() => inspect("Number(document.body.dataset.cancels)"))
+      .toBeGreaterThan(cancels);
+    await send("touchCancel");
+    // Closing the viewer cancels a touch without closing the browser or its page.
+    const beforeClose = Number(await inspect("document.body.dataset.cancels"));
+    const starts = Number(await inspect("document.body.dataset.starts"));
+    await expect
+      .poll(() => canvas.getAttribute("data-revision"))
+      .toBe((await service.cloudState(attachedBrowserId)).revision);
+    await send("touchStart", 200, 100);
+    await expect
+      .poll(() => inspect("Number(document.body.dataset.starts)"))
+      .toBeGreaterThan(starts);
+    const remotePage = (await service.cloudTarget(attachedBrowserId)).page;
+    await page.getByRole("button", { name: "Close popover" }).click();
+    await expect
+      .poll(() => inspect("Number(document.body.dataset.cancels)"))
+      .toBeGreaterThan(beforeClose);
+    expect(remotePage.isClosed()).toBe(false);
+  } finally {
+    await touch.detach();
     await context.close();
   }
 }, 60_000);

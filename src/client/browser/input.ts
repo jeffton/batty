@@ -1,5 +1,5 @@
 import { computed, ref, type Ref } from "vue";
-import type { CloudBrowserState } from "@/shared/cloud-browser";
+import type { CloudBrowserState, CloudBrowserTouch } from "@/shared/cloud-browser";
 import type { Point, RemoteFrame } from "./types";
 
 type Gesture = {
@@ -12,6 +12,15 @@ type Gesture = {
   frame: RemoteFrame;
   rect: DOMRect;
   anchor: Point;
+  nativeTouch: boolean;
+  startedAt: number;
+};
+type ScrollInput = Point & {
+  action: "scroll";
+  deltaX: number;
+  deltaY: number;
+  pageId: string;
+  revision: string;
 };
 
 export function useBrowserInput({
@@ -40,9 +49,7 @@ export function useBrowserInput({
   const editing = computed(() => focused.value && dismissedFocus.value !== focused.value.id);
   let gesture: Gesture | undefined;
   let inputTimer: ReturnType<typeof setTimeout> | undefined;
-  const scrollPending: Array<
-    Point & { deltaX: number; deltaY: number; pageId: string; revision: string }
-  > = [];
+  const scrollPending: Array<ScrollInput | CloudBrowserTouch> = [];
   let scrollDirty = false;
   let nextFenceId = 1;
   let scrollFence:
@@ -57,6 +64,11 @@ export function useBrowserInput({
   let scrollAnimation: number | undefined;
 
   function updateFocus(value: CloudBrowserState): void {
+    if (
+      gesture &&
+      (gesture.frame.revision !== value.revision || gesture.frame.pageId !== value.pageId)
+    )
+      cancelGesture();
     if (state.value?.focused?.id !== value.focused?.id) {
       clearTimeout(inputTimer);
       inputTimer = undefined;
@@ -66,7 +78,36 @@ export function useBrowserInput({
     }
   }
   function cancelGesture(): void {
+    const start = gesture;
     gesture = undefined;
+    if (start?.nativeTouch) addTouch(start, "cancel", start.lastX, start.lastY);
+  }
+  function addTouch(
+    start: Gesture,
+    phase: CloudBrowserTouch["phase"],
+    clientX: number,
+    clientY: number,
+  ): void {
+    const command: CloudBrowserTouch = {
+      action: "touch",
+      phase,
+      ...point(clientX, clientY, start.rect, start.frame),
+      pageId: start.frame.pageId,
+      revision: start.frame.revision,
+      elapsedMs: performance.now() - start.startedAt,
+    };
+    const last = scrollPending.at(-1);
+    if (phase === "move" && last?.action === "touch" && last.phase === "move")
+      scrollPending[scrollPending.length - 1] = command;
+    else {
+      if (scrollPending.length >= 64) {
+        error.value = "Browser touch connection is busy.";
+        scheduleReconnect();
+        return;
+      }
+      scrollPending.push(command);
+    }
+    flushScroll();
   }
   function stop(): void {
     gesture = undefined;
@@ -119,12 +160,25 @@ export function useBrowserInput({
       rect,
       frame,
       anchor: point(event.clientX, event.clientY, rect, frame),
+      nativeTouch: event.pointerType === "touch" && !!state.value?.mobile,
+      startedAt: performance.now(),
     };
     image.value!.setPointerCapture(event.pointerId);
+    if (gesture.nativeTouch) {
+      dismissedFocus.value = "";
+      addTouch(gesture, "start", event.clientX, event.clientY);
+    }
   }
   function pointerMove(event: PointerEvent): void {
     const start = gesture;
     if (!start || start.pointerId !== event.pointerId) return;
+    if (start.nativeTouch) {
+      if (start.lastX !== event.clientX || start.lastY !== event.clientY)
+        addTouch(start, "move", event.clientX, event.clientY);
+      start.lastX = event.clientX;
+      start.lastY = event.clientY;
+      return;
+    }
     if (
       !start.moved &&
       Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY) < 6
@@ -145,6 +199,10 @@ export function useBrowserInput({
     if (!start || start.pointerId !== event.pointerId) return;
     pointerMove(event);
     gesture = undefined;
+    if (start.nativeTouch) {
+      addTouch(start, "end", event.clientX, event.clientY);
+      return;
+    }
     if (!start.moved) {
       dismissedFocus.value = "";
       void control({
@@ -158,7 +216,7 @@ export function useBrowserInput({
   function addScroll(anchor: Point, frame: RemoteFrame, deltaX: number, deltaY: number): void {
     const last = scrollPending.at(-1);
     if (
-      last &&
+      last?.action === "scroll" &&
       last.pageId === frame.pageId &&
       last.revision === frame.revision &&
       last.x === anchor.x &&
@@ -167,12 +225,13 @@ export function useBrowserInput({
       last.deltaX += deltaX;
       last.deltaY += deltaY;
     } else {
-      if (scrollPending.length === 2) flushScroll();
-      if (scrollPending.length === 2) {
+      if (scrollPending.length >= 2) flushScroll();
+      if (scrollPending.length >= 2) {
         error.value = "Browser connection is busy; scroll target could not be queued.";
         return;
       }
       scrollPending.push({
+        action: "scroll",
         ...anchor,
         pageId: frame.pageId,
         revision: frame.revision,
@@ -196,9 +255,15 @@ export function useBrowserInput({
     }
     while (scrollPending.length && socket.bufferedAmount <= 16384) {
       const pending = scrollPending[0]!;
+      if (pending.action === "touch") {
+        socket.send(JSON.stringify(pending));
+        scrollPending.shift();
+        scrollDirty = true;
+        continue;
+      }
       const deltaX = Math.max(-10000, Math.min(10000, pending.deltaX));
       const deltaY = Math.max(-10000, Math.min(10000, pending.deltaY));
-      socket.send(JSON.stringify({ action: "scroll", ...pending, deltaX, deltaY }));
+      socket.send(JSON.stringify({ ...pending, deltaX, deltaY }));
       scrollDirty = true;
       pending.deltaX -= deltaX;
       pending.deltaY -= deltaY;
@@ -217,6 +282,7 @@ export function useBrowserInput({
     scheduleReconnect();
   }
   async function drainScroll(): Promise<void> {
+    cancelGesture();
     flushScroll();
     if (scrollPending.length)
       throw new Error("Browser connection is busy; wait for scrolling to settle.");

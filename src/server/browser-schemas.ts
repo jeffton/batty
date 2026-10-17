@@ -176,8 +176,16 @@ export const CloudBrowserControlSchema = Type.Union([
   }),
 ]);
 
+export const CloudBrowserTouchSchema = command("touch", {
+  ...target,
+  ...point,
+  phase: Type.String({ enum: ["start", "move", "end", "cancel"] }),
+  elapsedMs: Type.Number({ minimum: 0, maximum: 3_600_000 }),
+});
+
 export const CloudBrowserSocketCommandSchema = Type.Union([
   command("ack", { frameId: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }) }),
   command("flush", { requestId: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }) }),
   scrollCommand,
+  CloudBrowserTouchSchema,
 ]);

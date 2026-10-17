@@ -15,7 +15,7 @@ export class CloudBrowserStreams {
     {
       subscribers: Set<Subscriber>;
       stop: () => Promise<void>;
-      scrolling: () => void;
+      scrolling: (touchActive?: boolean) => void;
       frame?: BrowserFramePacket;
       state?: CloudBrowserState;
     }
@@ -25,8 +25,8 @@ export class CloudBrowserStreams {
 
   constructor(private readonly browser: BrowserService) {}
 
-  scrolling(id: string): void {
-    this.streams.get(id)?.scrolling();
+  scrolling(id: string, touchActive?: boolean): void {
+    this.streams.get(id)?.scrolling(touchActive);
   }
 
   async subscribe(id: string, subscriber: Subscriber): Promise<() => void> {
@@ -46,6 +46,7 @@ export class CloudBrowserStreams {
       let previousSignal: string | undefined;
       let idleTimer: ReturnType<typeof setTimeout> | undefined;
       let moving = false;
+      let touching = false;
       let activeMode: boolean | undefined;
       let captureQueue = Promise.resolve();
       const broadcast = (event: Parameters<Subscriber>[0], value: unknown) => {
@@ -192,19 +193,27 @@ export class CloudBrowserStreams {
       timer.unref();
       stream = {
         subscribers,
-        scrolling: () => {
+        scrolling: (touchActive) => {
           if (stopped) return;
+          if (touchActive !== undefined) touching = touchActive;
           if (!moving) {
             moving = true;
             updateCapture();
           }
           if (idleTimer) clearTimeout(idleTimer);
-          idleTimer = setTimeout(() => {
-            idleTimer = undefined;
-            if (stopped) return;
-            moving = false;
-            updateCapture();
-          }, 150);
+          idleTimer = undefined;
+          // Keep the motion capture mode stable while a finger is held, then
+          // through the fling. A pause in touchmove is not the end of a gesture.
+          if (touching) return;
+          idleTimer = setTimeout(
+            () => {
+              idleTimer = undefined;
+              if (stopped) return;
+              moving = false;
+              updateCapture();
+            },
+            touchActive === false ? 1000 : 150,
+          );
           idleTimer.unref();
         },
         stop: async () => {

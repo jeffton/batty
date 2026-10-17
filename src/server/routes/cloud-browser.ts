@@ -1,7 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { Check } from "typebox/value";
 import type { FastifyInstance } from "fastify";
 import websocket from "@fastify/websocket";
-import type { CloudBrowserControl } from "@/shared/cloud-browser";
+import type { CloudBrowserControl, CloudBrowserTouch } from "@/shared/cloud-browser";
 import type { BrowserService } from "../browser-service";
 import { CloudBrowserControlSchema, CloudBrowserSocketCommandSchema } from "../browser-schemas";
 import { CloudBrowserStreams } from "../cloud-browser-stream";
@@ -56,7 +57,19 @@ export async function registerCloudBrowserRoutes(
       let closed = false;
       let unsubscribe: (() => void) | undefined;
       let scrolling = false;
-      const pendingScroll: ScrollCommand[] = [];
+      const touchOwner = randomUUID();
+      let touchHeld = false;
+      const releaseTouch = async () => {
+        if (!touchHeld) return;
+        streams.scrolling(request.params.browserId, false);
+        touchHeld = false;
+        try {
+          await browser.cloudReleaseTouch(request.params.browserId, touchOwner);
+        } catch (error) {
+          request.log.warn({ err: error }, "Cloud browser touch cancellation failed");
+        }
+      };
+      const pendingScroll: Array<ScrollCommand | CloudBrowserTouch> = [];
       let fenceRequestId: number | undefined;
       let fenceQueued = false;
       let lastFenceRequestId = 0;
@@ -91,15 +104,24 @@ export async function registerCloudBrowserRoutes(
           while (!closed && pendingScroll.length) {
             const command = pendingScroll.shift()!;
             try {
-              await browser.cloudScroll(request.params.browserId, command);
-              streams.scrolling(request.params.browserId);
+              if (command.action === "touch") {
+                await browser.cloudTouch(request.params.browserId, command, touchOwner);
+                // Hold the motion quality across touch pauses and the release fling.
+                touchHeld = command.phase === "start" || command.phase === "move";
+                streams.scrolling(request.params.browserId, touchHeld);
+              } else {
+                await browser.cloudScroll(request.params.browserId, command);
+                streams.scrolling(request.params.browserId);
+              }
             } catch (error) {
               const { message, statusCode } = error as Error & { statusCode?: number };
+              if (command.action === "touch") await releaseTouch();
               writer.send("scroll-error", { error: message, statusCode });
             }
           }
         } finally {
           scrolling = false;
+          if (closed) await releaseTouch();
           drain();
         }
       };
@@ -111,6 +133,7 @@ export async function registerCloudBrowserRoutes(
             throw new Error("Invalid browser socket command.");
           const command = parsed as
             | ScrollCommand
+            | CloudBrowserTouch
             | { action: "ack"; frameId: number }
             | { action: "flush"; requestId: number };
           if (command.action === "ack") writer.acknowledge(command.frameId);
@@ -123,11 +146,12 @@ export async function registerCloudBrowserRoutes(
             lastFenceRequestId = command.requestId;
             drain();
           } else {
-            const next = command as ScrollCommand;
+            const next = command;
             const last = pendingScroll.at(-1);
             // Only coalesce the same exact anchor; nested and outer scroll targets stay FIFO.
             if (
-              last &&
+              last?.action === "scroll" &&
+              next.action === "scroll" &&
               last.pageId === next.pageId &&
               last.revision === next.revision &&
               last.x === next.x &&
@@ -135,12 +159,23 @@ export async function registerCloudBrowserRoutes(
             ) {
               last.deltaX += next.deltaX;
               last.deltaY += next.deltaY;
-            } else if (pendingScroll.length < 2) pendingScroll.push({ ...next });
+            } else if (
+              last?.action === "touch" &&
+              next.action === "touch" &&
+              last.phase === "move" &&
+              next.phase === "move" &&
+              last.pageId === next.pageId &&
+              last.revision === next.revision
+            ) {
+              pendingScroll[pendingScroll.length - 1] = next;
+            } else if (pendingScroll.length < (next.action === "touch" ? 64 : 2))
+              pendingScroll.push({ ...next });
             else {
               writer.send("scroll-error", {
                 error: "Browser scroll input queue is full. Wait for pending input to finish.",
                 statusCode: 409,
               });
+              if (next.action === "touch") socket.close(1013, "Browser input queue is full");
               return;
             }
             void scroll();
@@ -174,6 +209,8 @@ export async function registerCloudBrowserRoutes(
         fenceRequestId = undefined;
         writer.close();
         unsubscribe?.();
+        // The input loop repeats this after any in-flight start has completed.
+        void releaseTouch();
         clearInterval(heartbeat);
         clearTimeout(reauthenticate);
       });

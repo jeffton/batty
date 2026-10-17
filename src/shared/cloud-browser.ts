@@ -27,6 +27,13 @@ export interface CloudBrowserFrame {
 }
 
 type ViewTarget = { pageId: string; revision: string };
+export type CloudBrowserTouch = ViewTarget & {
+  action: "touch";
+  phase: "start" | "move" | "end" | "cancel";
+  x: number;
+  y: number;
+  elapsedMs: number;
+};
 export type CloudBrowserControl =
   | (ViewTarget & { action: "click"; x: number; y: number })
   | (ViewTarget & {

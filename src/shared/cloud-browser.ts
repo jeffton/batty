@@ -1,3 +1,9 @@
+export interface CloudBrowserViewport {
+  width: number;
+  height: number;
+  mobile: boolean;
+}
+
 export interface CloudBrowserState {
   pageId: string;
   revision: string;
@@ -5,6 +11,7 @@ export interface CloudBrowserState {
   title: string;
   width: number;
   height: number;
+  mobile: boolean;
   focused?: { id: string; value: string; type: string; multiline: boolean };
   pages: Array<{ id: string; title: string; url: string; active: boolean }>;
 }
@@ -34,7 +41,7 @@ export type CloudBrowserControl =
   | { action: "navigate"; url: string }
   | { action: "back" | "reload" }
   | { action: "switch" | "close-page"; pageId: string }
-  | { action: "viewport"; width: number; height: number };
+  | ({ action: "viewport" } & CloudBrowserViewport);
 
 export const CLOUD_BROWSER_KEYS = [
   "Enter",

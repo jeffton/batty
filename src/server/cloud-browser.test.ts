@@ -53,7 +53,7 @@ test("cloud attachment shares agent state and controls, survives detach, and can
     expect((await service.execute("shared", { action: "attach" })).details.sites).toEqual([site]);
     // Existing generic artifacts keep the live handle intact when forwarded.
     expect(mergeResponseArtifacts({ sites: [site] }).sites![0]!.browserId).toBe(id);
-    expect(artifactRefs({ sites: [site] })[0]!.ref).toMatch(/^site:/);
+    expect(artifactRefs({ sites: [site] })[0]!.ref).toMatch(/^browser:/);
     let state = await service.cloudState(id);
     await service.cloudControl(id, { action: "click", ...state, x: 40, y: 30 });
     expect(
@@ -113,7 +113,7 @@ test("cloud attachment shares agent state and controls, survives detach, and can
         })
       ).text,
     ).not.toContain("wrong field");
-    await service.cloudControl(id, { action: "viewport", width: 390, height: 640 });
+    await service.cloudControl(id, { action: "viewport", width: 390, height: 640, mobile: false });
     await expect(
       service.cloudControl(id, { action: "click", ...state, x: 40, y: 30 }),
     ).rejects.toThrow("view changed");
@@ -171,6 +171,61 @@ test("cloud attachment shares agent state and controls, survives detach, and can
       (await service.execute("shared", { action: "attach" })).details.sites![0]!.browserId,
     ).not.toBe(id);
     await expect(service.cloudState(id)).rejects.toThrow("session ended");
+  } finally {
+    await service.closeSession("shared");
+    await service.dispose();
+    await f.close();
+  }
+}, 30_000);
+
+test("mobile emulation survives service reconnect without replacing the page or login", async () => {
+  const f = await fixture();
+  let service = f.service;
+  try {
+    const opened = await service.execute("shared", { action: "open", url: f.url, cloud: true });
+    const attached = await service.execute("shared", { action: "attach" });
+    expect(opened.details.sites).toEqual(attached.details.sites);
+    const id = attached.details.sites![0]!.browserId!;
+    const before = await service.cloudTarget(id);
+    await before.page.evaluate(() => {
+      document.cookie = "login=retained";
+      localStorage.setItem("login", "retained");
+    });
+    await service.cloudControl(id, { action: "viewport", width: 358, height: 757, mobile: true });
+    const target = await service.cloudTarget(id);
+    expect(target.page).toBe(before.page);
+    expect(
+      await target.page.evaluate(() => [
+        screen.width,
+        screen.height,
+        navigator.maxTouchPoints,
+        navigator.userAgent.includes("Mobile"),
+      ]),
+    ).toEqual([358, 757, 1, true]);
+    await service.dispose();
+    service = new BrowserService(undefined, 4, f.root);
+    const restored = await service.cloudTarget(id);
+    expect(restored.state.pageId).toBe(before.state.pageId);
+    expect(restored.state.mobile).toBe(true);
+    expect(
+      await restored.page.evaluate(() => [
+        screen.width,
+        navigator.maxTouchPoints,
+        navigator.userAgent.includes("Mobile"),
+        document.cookie,
+        localStorage.getItem("login"),
+      ]),
+    ).toEqual([358, 1, true, "login=retained", "retained"]);
+    await service.cloudControl(id, { action: "viewport", width: 1200, height: 850, mobile: false });
+    expect(
+      await restored.page.evaluate(() => [
+        innerWidth,
+        screen.width,
+        navigator.maxTouchPoints,
+        navigator.userAgent.includes("Mobile"),
+        localStorage.getItem("login"),
+      ]),
+    ).toEqual([1200, 1200, 0, false, "retained"]);
   } finally {
     await service.closeSession("shared");
     await service.dispose();
@@ -238,9 +293,9 @@ test("cloud routes require auth, same-origin control and bounded allowlisted com
     expect((await control({ action: "reload" }, "https://attacker.example")).statusCode).toBe(403);
     expect((await control({ action: "evaluate", script: "steal()" })).statusCode).toBe(400);
     expect((await control({ action: "reload", script: "steal()" })).statusCode).toBe(400);
-    expect((await control({ action: "viewport", width: 20_000, height: 640 })).statusCode).toBe(
-      400,
-    );
+    expect(
+      (await control({ action: "viewport", width: 20_000, height: 640, mobile: false })).statusCode,
+    ).toBe(400);
     const state = (
       await app.inject({ url: `${endpoint}/state`, headers: { authorization: "test" } })
     ).json();
@@ -360,6 +415,56 @@ test("screencast throttling delivers the latest final paint even without subsequ
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(frames.map((frame) => frame.image)).toEqual(["first", "final"]);
     stop();
+  } finally {
+    await streams.close();
+  }
+});
+
+test("stream failures distinguish navigation interruption, permanent expiry and service disconnect", async () => {
+  const connection = new EventEmitter() as EventEmitter & {
+    send: () => Promise<void>;
+    detach: () => Promise<void>;
+  };
+  connection.send = async () => {};
+  connection.detach = async () => {};
+  const page = { context: () => ({ newCDPSession: async () => connection }) };
+  const state = {
+    pageId: "p",
+    revision: "r",
+    width: 390,
+    height: 640,
+    mobile: true,
+    url: "https://example.com",
+    title: "",
+    pages: [],
+  };
+  let failure: Error | undefined;
+  const streams = new CloudBrowserStreams({
+    cloudTarget: async () => {
+      if (failure) throw failure;
+      return { page, state };
+    },
+  } as unknown as BrowserService);
+  const errors: Array<{ retryable: boolean; statusCode?: number }> = [];
+  const listener = (event: string, data: unknown) => {
+    if (event === "browser-error") errors.push(data as (typeof errors)[number]);
+  };
+  try {
+    const first = await streams.subscribe("id", listener);
+    failure = new Error("Execution context was destroyed, most likely because of a navigation");
+    await expect.poll(() => errors.length).toBe(1);
+    expect(errors[0]!.retryable).toBe(true);
+    first();
+    failure = undefined;
+    const second = await streams.subscribe("id", listener);
+    await streams.close();
+    expect(errors[1]!.retryable).toBe(true);
+    second();
+    const third = await streams.subscribe("id", listener);
+    failure = Object.assign(new Error("Browser session ended."), { statusCode: 410 });
+    await expect.poll(() => errors.length).toBe(3);
+    expect(errors[2]).toMatchObject({ retryable: false, statusCode: 410 });
+    third();
   } finally {
     await streams.close();
   }

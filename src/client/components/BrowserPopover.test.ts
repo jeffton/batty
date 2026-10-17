@@ -9,6 +9,7 @@ const state = {
   title: "Example",
   width: 1280,
   height: 800,
+  mobile: false,
   pages: [],
 };
 class FakeEvents extends EventTarget {
@@ -148,6 +149,7 @@ test("contextual field replaces values, accepts clearing, and never sends a draf
       isComposing: true,
       cancelable: true,
     });
+    await input.trigger("compositionstart");
     input.element.dispatchEvent(composing);
     await flushPromises();
     expect(composing.defaultPrevented).toBe(false);
@@ -254,11 +256,62 @@ test("blocks stale painted targets and accepts identical pixels with a fresh rev
     expect(commands()).toEqual([
       { action: "click", pageId: "page-1", revision: "next", x: 320, y: 200 },
     ]);
-    events.send("browser-error", { error: "Browser session ended" });
+    events.send("browser-error", {
+      error: "Browser session ended",
+      retryable: false,
+      statusCode: 410,
+    });
     await flushPromises();
     expect(wrapper.get('[role="alert"]').text()).toContain("Browser session ended");
     expect(events.closed).toBe(true);
   } finally {
     wrapper.unmount();
+  }
+});
+
+test("reconnects transient stream/network failures with backoff, but stops for expired and permanent failures", async () => {
+  vi.useFakeTimers();
+  const wrapper = create();
+  try {
+    const first = await open(wrapper);
+    first.send("browser-error", { error: "Execution context was destroyed", retryable: true });
+    await flushPromises();
+    expect(wrapper.get('[role="status"]').text()).toBe("Reconnecting…");
+    expect(first.closed).toBe(true);
+    fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushPromises();
+    expect(FakeEvents.instances).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(FakeEvents.instances).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await flushPromises();
+    const second = FakeEvents.instances.at(-1)!;
+    expect(second).not.toBe(first);
+    await frame(wrapper, second);
+    expect(wrapper.find('[role="status"]').exists()).toBe(false);
+    second.send("browser-error", { error: "Unsupported capture", retryable: false });
+    await flushPromises();
+    expect(wrapper.get('[role="alert"]').text()).toContain("Unsupported capture");
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(FakeEvents.instances).toHaveLength(2);
+    await wrapper.get('[role="alert"] button').trigger("click");
+    await flushPromises();
+    const third = FakeEvents.instances.at(-1)!;
+    third.onerror?.();
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 410,
+      json: async () => ({ error: "Browser session ended" }),
+    });
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushPromises();
+    expect(wrapper.get('[role="alert"]').text()).toContain("Browser session ended");
+    expect(wrapper.find('[role="alert"] button').exists()).toBe(false);
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(FakeEvents.instances).toHaveLength(3);
+  } finally {
+    wrapper.unmount();
+    vi.useRealTimers();
   }
 });

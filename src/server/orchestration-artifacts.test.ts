@@ -13,7 +13,7 @@ import { decodeRuntimeNotice } from "./runtime-notices.js";
 
 import { entryMessages } from "./runtime.js";
 
-import { artifactRefs } from "./artifact-forwarding";
+import { artifactRefs, createAttachArtifactsTool } from "./artifact-forwarding";
 
 import { fixture, until } from "./orchestration-test-fixture.js";
 
@@ -160,8 +160,16 @@ test.each(
   15000,
 );
 
-test("async subagent reports expose stored attachment paths in parent model input", async () => {
+test("async subagent reports expose artifacts and parent forwards the same live browser", async () => {
   const { faux, orchestration, open, registry } = await fixture();
+  const browser = {
+    id: "browser-child-session",
+    browserId: "child-session",
+    name: "Cloud browser",
+    url: "/api/cloud-browser/child-session/state",
+    public: false,
+  };
+  const browserRef = artifactRefs({ sites: [browser] })[0]!.ref;
   const file = {
     id: "child-file",
     name: "chosen.png",
@@ -175,6 +183,7 @@ test("async subagent reports expose stored attachment paths in parent model inpu
     defineExtension({
       name: "async-attachment-fixture",
       tools: [
+        createAttachArtifactsTool(),
         defineTool({
           name: "attach-fixture",
           description: "Emit a child attachment",
@@ -183,7 +192,10 @@ test("async subagent reports expose stored attachment paths in parent model inpu
             content: [{ type: "text", text: "Attached" }],
             details: {
               sentFiles: [file],
-              sites: [{ id: "async-site", name: "Async demo", url: "/async-site", public: false }],
+              sites: [
+                { id: "async-site", name: "Async demo", url: "/async-site", public: false },
+                browser,
+              ],
               fileChanges: [{ path: "async.ts", patch: "saved patch" }],
             },
           }),
@@ -208,7 +220,12 @@ test("async subagent reports expose stored attachment paths in parent model inpu
         });
       if (last.role === "toolResult" && last.toolName === "attach-fixture")
         return fauxAssistantMessage([fauxText("child artifact ready")]);
-      if (last.role === "user" && text.includes("child artifact ready")) reportInput = text;
+      if (last.role === "user" && text.includes("child artifact ready")) {
+        reportInput = text;
+        return fauxAssistantMessage([fauxToolCall("attach_artifacts", { refs: [browserRef] })], {
+          stopReason: "toolUse",
+        });
+      }
       return fauxAssistantMessage([fauxText("parent acknowledged")]);
     }),
   );
@@ -224,6 +241,18 @@ test("async subagent reports expose stored attachment paths in parent model inpu
   expect(reportInput).toContain("call attach_artifacts");
   expect(reportInput).toContain("async.ts");
   expect(reportInput).toContain("Async demo");
+  expect(browserRef).toMatch(/^browser:/);
+  expect(reportInput).toContain(browserRef);
+  expect(reportInput).toContain(browser.browserId);
+  const entries = (await main.context(context)).entries;
+  const forwardedCall = entries
+    .flatMap((entry) => entry.model ?? [])
+    .findLast(
+      (message) => message.role === "toolResult" && message.toolName === "attach_artifacts",
+    );
+  expect(forwardedCall?.role).toBe("toolResult");
+  if (forwardedCall?.role === "toolResult")
+    expect(forwardedCall.details).toMatchObject({ forwardedArtifacts: { sites: [browser] } });
 });
 
 test.each([

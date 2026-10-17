@@ -12,6 +12,13 @@ import { runtimeResultArtifacts } from "./runtime-result-artifacts";
 const diff = { path: "/repo/a.ts", patch: "--- a.ts\n+++ a.ts\n@@ -1 +1 @@\n-old\n+new\n" };
 const site = { id: "site-id", name: "Demo", url: "https://example.test/demo", public: false };
 const other = { ...site, id: "draft", name: "Discarded" };
+const browser = {
+  id: "browser-live",
+  browserId: "live",
+  name: "Cloud browser",
+  url: "/api/cloud-browser/live/state",
+  public: false,
+};
 
 function apiFor(messages: unknown[]) {
   return {
@@ -29,7 +36,7 @@ function apiFor(messages: unknown[]) {
 test.each(["notice", "sync", "codemode"])(
   "forwards only selected saved objects received via %s, including replay",
   async (source) => {
-    const artifacts = { fileChanges: [diff], sites: [site, other] };
+    const artifacts = { fileChanges: [diff], sites: [site, browser, other] };
     const messages =
       source === "notice"
         ? [
@@ -49,13 +56,15 @@ test.each(["notice", "sync", "codemode"])(
                 source === "sync" ? artifacts : { calls: [{ name: "subagent", ...artifacts }] },
             },
           ];
-    const refs = artifactRefs({ fileChanges: [diff], sites: [site] }).map((item) => item.ref);
+    const refs = artifactRefs({ fileChanges: [diff], sites: [site, browser] }).map(
+      (item) => item.ref,
+    );
     const tool = createAttachArtifactsTool();
     const result = await tool.execute({ refs }, apiFor(messages), context);
     expect(result.details).toEqual({
       fileChanges: [diff],
-      sites: [site],
-      forwardedArtifacts: { fileChanges: [diff], sites: [site] },
+      sites: [site, browser],
+      forwardedArtifacts: { fileChanges: [diff], sites: [site, browser] },
     });
     expect(await tool.execute({ refs }, apiFor(messages), context)).toEqual(result);
     expect(

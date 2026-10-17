@@ -156,8 +156,8 @@ export function createBrowserTool({
     promptGuidelines: [
       "Use this tool when a page requires JavaScript or multi-step interaction that web_search content cannot handle.",
       "Start with action=open. Browser state and cookies persist within the current Batty session only.",
-      "Set cloud=true to enable interactive shared VPS browsing on the same browser. Use action=attach to send a native button opening the live browser in a private popover. The user and agent share tabs, login and page state; this does not transfer the session to local Safari.",
-      "Closing the popover only disconnects the viewer. action=close ends the browser and invalidates its attachments; browsers expire after one hour without browser activity. Cloud attachments can be forwarded with attach_artifacts like sites.",
+      "Set cloud=true on action=open to enable shared VPS browsing and attach its live-browser button. Use action=attach to attach that same browser again in a private popover. The user and agent share tabs, login and page state; this does not transfer the session to local Safari.",
+      "Closing the popover only disconnects the viewer. action=close ends the browser and invalidates its attachments; browsers expire after one hour without browser activity. Forward a received browser artifact with attach_artifacts and its browser: ref; this preserves the same live session and login, not a snapshot or a new browser. Forwarding does not reset expiry or bypass Batty authentication.",
       "Set useTailscale=true on the initial open to route that browser session through the configured SSH destination. Close the session before changing its routing.",
       "Use action=pages to list tabs and popups, action=switch with pageId to activate one, and newPage=true on open to create a tab.",
       "Reuse the active page for sequential research; use newPage=true only when comparing pages. Close rejected or finished research tabs immediately with action=close-page, and use action=pages periodically to keep the tab count low.",

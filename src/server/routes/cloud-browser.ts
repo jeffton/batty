@@ -49,8 +49,9 @@ const controlSchema = Type.Union([
   command("switch", { pageId: target.pageId }),
   command("close-page", { pageId: target.pageId }),
   command("viewport", {
-    width: Type.Integer({ minimum: 320, maximum: 1920 }),
-    height: Type.Integer({ minimum: 320, maximum: 1200 }),
+    width: Type.Integer({ minimum: 1, maximum: 10000 }),
+    height: Type.Integer({ minimum: 1, maximum: 10000 }),
+    mobile: Type.Boolean(),
   }),
 ]);
 

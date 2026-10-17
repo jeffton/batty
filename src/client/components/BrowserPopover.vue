@@ -27,9 +27,14 @@ const image = ref<HTMLImageElement>();
 const viewport = ref<HTMLElement>();
 const editor = ref<HTMLInputElement | HTMLTextAreaElement>();
 const address = ref("");
+const addressInput = ref<HTMLInputElement>();
+let addressWasFocused = false;
 const text = ref("");
 const error = ref("");
 const connection = ref("Connecting…");
+const reconnecting = ref(false);
+let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+let reconnectAttempt = 0;
 const ended = ref(false);
 const open = ref(false);
 const dismissedFocus = ref("");
@@ -54,6 +59,7 @@ const ready = computed(() => !ended.value && !!state.value);
 const frameReady = computed(
   () =>
     ready.value &&
+    !reconnecting.value &&
     !!displayedFrame.value &&
     displayedFrame.value.pageId === state.value?.pageId &&
     displayedFrame.value.revision === state.value?.revision,
@@ -77,7 +83,7 @@ async function request(
       ended.value = true;
       stream?.close();
     }
-    throw new Error(body.error);
+    throw Object.assign(new Error(body.error), { statusCode: response.status });
   }
   return (await response.json()) as BrowserState;
 }
@@ -105,6 +111,22 @@ function stopViewing(): void {
   clearTimeout(inputTimer);
   inputTimer = undefined;
   clearTimeout(resizeTimer);
+  clearTimeout(reconnectTimer);
+  reconnectTimer = undefined;
+}
+function scheduleReconnect(): void {
+  stopViewing();
+  if (!open.value || document.hidden || ended.value) return;
+  reconnecting.value = true;
+  connection.value = "Reconnecting…";
+  const delay = Math.min(1000 * 2 ** reconnectAttempt++, 15000);
+  reconnectTimer = setTimeout(() => void startViewing(), delay);
+}
+function onOffline(): void {
+  if (open.value && !ended.value) scheduleReconnect();
+}
+function onOnline(): void {
+  if (reconnecting.value && open.value && !document.hidden) void startViewing();
 }
 async function startViewing(): Promise<void> {
   stopViewing();
@@ -115,9 +137,11 @@ async function startViewing(): Promise<void> {
   ended.value = false;
   error.value = "";
   connection.value = "Connecting…";
-  incomingFrame.value = undefined;
-  displayedFrame.value = undefined;
-  state.value = undefined;
+  if (!reconnecting.value) {
+    incomingFrame.value = undefined;
+    displayedFrame.value = undefined;
+    state.value = undefined;
+  }
   try {
     const initial = await request("state", {}, abort.signal);
     if (current !== generation) return;
@@ -130,7 +154,7 @@ async function startViewing(): Promise<void> {
       connection.value = "Live";
     };
     events.onerror = () => {
-      connection.value = "Reconnecting…";
+      if (current === generation) scheduleReconnect();
     };
     events.addEventListener("state", (event) => {
       if (current === generation) updateState(JSON.parse((event as MessageEvent).data));
@@ -138,17 +162,36 @@ async function startViewing(): Promise<void> {
     events.addEventListener("frame", (event) => {
       if (current !== generation) return;
       const next = JSON.parse((event as MessageEvent).data) as BrowserFrame;
+      reconnecting.value = false;
+      reconnectAttempt = 0;
+      connection.value = "Live";
       if (next.image === displayedFrame.value?.image) displayedFrame.value = next;
       incomingFrame.value = next;
     });
     events.addEventListener("browser-error", (event) => {
       if (current !== generation) return;
-      error.value = JSON.parse((event as MessageEvent).data).error;
-      ended.value = true;
+      const failure = JSON.parse((event as MessageEvent).data) as {
+        error: string;
+        retryable: boolean;
+        statusCode?: number;
+      };
       events.close();
+      if (failure.retryable) scheduleReconnect();
+      else {
+        reconnecting.value = false;
+        displayedFrame.value = undefined;
+        error.value = failure.error;
+        ended.value = failure.statusCode === 410;
+      }
     });
   } catch (cause) {
-    if (current === generation && !abort.signal.aborted) error.value = (cause as Error).message;
+    if (current !== generation || abort.signal.aborted) return;
+    const status = (cause as { statusCode?: number }).statusCode;
+    if (!status || status >= 500 || status === 429) scheduleReconnect();
+    else {
+      reconnecting.value = false;
+      error.value = (cause as Error).message;
+    }
   }
 }
 function onToggle(event: Event): void {
@@ -166,14 +209,25 @@ function resizeView(): void {
 }
 async function fitViewport(): Promise<void> {
   await nextTick();
-  // Keep the remote layout stable while the phone keyboard is open.
-  if (!ready.value || editing.value || document.activeElement?.tagName === "INPUT") return;
+  if (!ready.value) return;
   const rect = viewport.value?.getBoundingClientRect();
   if (!rect?.width || !rect.height) return;
-  const width = Math.max(320, Math.min(1920, Math.round(rect.width)));
-  const height = Math.max(320, Math.min(1200, Math.round(rect.height)));
-  if (state.value?.width !== width || state.value.height !== height)
-    await control({ action: "viewport", width, height });
+  const width = Math.max(1, Math.min(10000, Math.round(rect.width)));
+  const height = Math.max(1, Math.min(10000, Math.round(rect.height)));
+  const mobile = navigator.maxTouchPoints > 0 && matchMedia("(pointer: coarse)").matches;
+  // Keep keyboard-only height changes stable, but still fit rotation/device changes.
+  if (
+    (editing.value || document.activeElement?.tagName === "INPUT") &&
+    state.value?.width === width &&
+    state.value.mobile === mobile
+  )
+    return;
+  if (
+    state.value?.width !== width ||
+    state.value.height !== height ||
+    state.value.mobile !== mobile
+  )
+    await control({ action: "viewport", width, height, mobile });
 }
 function scheduleResize(): void {
   clearTimeout(resizeTimer);
@@ -181,7 +235,7 @@ function scheduleResize(): void {
 }
 function onVisibility(): void {
   if (document.hidden) stopViewing();
-  else if (open.value) void startViewing();
+  else if (open.value && !ended.value) void startViewing();
 }
 function control(command: Record<string, unknown>): Promise<boolean> {
   const current = generation;
@@ -210,7 +264,14 @@ function control(command: Record<string, unknown>): Promise<boolean> {
   queue = result;
   return result;
 }
+function addressPointerDown(event: PointerEvent): void {
+  addressWasFocused = document.activeElement === event.currentTarget;
+}
+function selectAddress(event: Event): void {
+  (event.currentTarget as HTMLInputElement).select();
+}
 function navigate(): void {
+  addressInput.value?.blur();
   editor.value?.blur();
   const value = address.value.trim();
   const url = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `https://${value}`;
@@ -324,6 +385,10 @@ function frameLoaded(): void {
   if (image.value?.getAttribute("src") === imageSource.value)
     displayedFrame.value = incomingFrame.value;
 }
+function beginComposition(): void {
+  clearTimeout(inputTimer);
+  inputTimer = undefined;
+}
 function scheduleInput(event: Event): void {
   clearTimeout(inputTimer);
   inputTimer = undefined;
@@ -367,6 +432,8 @@ function dismissInput(): void {
 onMounted(() => {
   document.addEventListener("visibilitychange", onVisibility);
   window.addEventListener("resize", resizeView);
+  window.addEventListener("online", onOnline);
+  window.addEventListener("offline", onOffline);
   window.visualViewport?.addEventListener("resize", resizeView);
   window.visualViewport?.addEventListener("scroll", resizeView);
   resizeObserver = new ResizeObserver(scheduleResize);
@@ -378,6 +445,8 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect();
   document.removeEventListener("visibilitychange", onVisibility);
   window.removeEventListener("resize", resizeView);
+  window.removeEventListener("online", onOnline);
+  window.removeEventListener("offline", onOffline);
   window.visualViewport?.removeEventListener("resize", resizeView);
   window.visualViewport?.removeEventListener("scroll", resizeView);
 });
@@ -410,8 +479,12 @@ onBeforeUnmount(() => {
           ↻
         </button>
         <input
+          ref="addressInput"
           v-model="address"
           aria-label="Browser address"
+          @focus="selectAddress"
+          @pointerdown="addressPointerDown"
+          @click="!addressWasFocused && selectAddress($event)"
           type="text"
           inputmode="url"
           enterkeyhint="go"
@@ -423,14 +496,16 @@ onBeforeUnmount(() => {
     </template>
     <div class="cloud-browser">
       <div v-if="error" class="cloud-browser__error" role="alert">
-        {{ error }} <button type="button" @click="startViewing">Reconnect</button>
+        {{ error }} <button v-if="!ended" type="button" @click="startViewing">Reconnect</button>
       </div>
+      <div v-if="reconnecting" class="cloud-browser__connection" role="status">Reconnecting…</div>
       <div ref="viewport" class="cloud-browser__viewport">
         <img
           v-if="incomingFrame"
           ref="image"
           class="cloud-browser__image"
           :src="imageSource"
+          :data-revision="displayedFrame?.revision"
           :width="incomingFrame.width"
           :height="incomingFrame.height"
           alt="Live browser page. Tap to click; swipe to scroll."
@@ -455,7 +530,7 @@ onBeforeUnmount(() => {
           rows="2"
           aria-label="Focused browser field"
           @input="scheduleInput"
-          @compositionstart="clearTimeout(inputTimer)"
+          @compositionstart="beginComposition"
           @compositionend="scheduleInput"
         />
         <input
@@ -468,7 +543,7 @@ onBeforeUnmount(() => {
           placeholder="Type here…"
           enterkeyhint="go"
           @input="scheduleInput"
-          @compositionstart="clearTimeout(inputTimer)"
+          @compositionstart="beginComposition"
           @compositionend="scheduleInput"
           @keydown.enter="submitInput"
         />
@@ -514,6 +589,11 @@ onBeforeUnmount(() => {
   font-size: 1rem;
 }
 .cloud-browser__address input,
+.cloud-browser__address button {
+  height: var(--button-size);
+  min-height: var(--button-size);
+}
+.cloud-browser__address input,
 .cloud-browser__editor input,
 .cloud-browser__editor textarea {
   flex: 1;
@@ -528,7 +608,8 @@ onBeforeUnmount(() => {
 .cloud-browser__address button:disabled {
   opacity: 0.5;
 }
-.cloud-browser__error {
+.cloud-browser__error,
+.cloud-browser__connection {
   flex-shrink: 0;
   padding: 0.5rem;
   overflow-wrap: anywhere;

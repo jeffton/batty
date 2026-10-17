@@ -32,7 +32,8 @@ export interface SentFileDescriptor {
 }
 
 export interface SiteDescriptor {
-  /** Private live-browser handle, rendered without an iframe or publication controls. */
+  /** Private live-browser handle. Artifact forwarding preserves this session and its expiry;
+   * rendered without an iframe or publication controls, under Batty authentication. */
   browserId?: string;
   id: string;
   name: string;

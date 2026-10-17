@@ -1,11 +1,15 @@
 import fs from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import type { SiteDescriptor } from "@/shared/types";
-import type { CloudBrowserControl, CloudBrowserState } from "@/shared/cloud-browser";
+import type {
+  CloudBrowserControl,
+  CloudBrowserState,
+  CloudBrowserViewport,
+} from "@/shared/cloud-browser";
 import os from "node:os";
 import path from "node:path";
 import { inspect } from "node:util";
-import type { Browser, BrowserContext, Frame, Page } from "patchright";
+import type { Browser, BrowserContext, CDPSession, Frame, Page } from "patchright";
 import {
   browserSessionDirectory,
   closePersistentBrowser,
@@ -108,6 +112,7 @@ export interface BrowserActionResult {
 }
 
 interface BrowserIdentity {
+  platform: string;
   userAgent: string;
   userAgentMetadata: {
     brands: Array<{ brand: string; version: string }>;
@@ -128,6 +133,9 @@ interface BrowserSession {
   context: BrowserContext;
   useTailscale: boolean;
   identity: BrowserIdentity;
+  cloudViewport?: CloudBrowserViewport;
+  pageEmulation: WeakMap<Page, CDPSession>;
+  pageViewports: WeakMap<Page, CloudBrowserViewport>;
   pageIdentityPromises: WeakMap<Page, Promise<void>>;
   pages: Map<string, Page>;
   pageIds: WeakMap<Page, string>;
@@ -161,7 +169,7 @@ function present(value: string | undefined, name: string, action: BrowserAction)
   return value;
 }
 
-function browserIdentity(version: string): BrowserIdentity {
+function browserIdentity(version: string, mobile = false): BrowserIdentity {
   const majorVersion = version.split(".")[0]!;
   const brands = [
     { brand: "Not_A Brand", version: "8" },
@@ -169,7 +177,10 @@ function browserIdentity(version: string): BrowserIdentity {
     { brand: "Chromium", version: majorVersion },
   ];
   return {
-    userAgent: `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${majorVersion}.0.0.0 Safari/537.36`,
+    platform: mobile ? "Linux armv8l" : "Linux x86_64",
+    userAgent: mobile
+      ? `Mozilla/5.0 (Linux; Android 13; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${majorVersion}.0.0.0 Mobile Safari/537.36`
+      : `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${majorVersion}.0.0.0 Safari/537.36`,
     userAgentMetadata: {
       brands,
       fullVersionList: [
@@ -177,12 +188,12 @@ function browserIdentity(version: string): BrowserIdentity {
         { brand: "Google Chrome", version },
         { brand: "Chromium", version },
       ],
-      platform: "Linux",
-      platformVersion: "",
-      architecture: "x86",
+      platform: mobile ? "Android" : "Linux",
+      platformVersion: mobile ? "13.0.0" : "",
+      architecture: mobile ? "" : "x86",
       model: "",
-      mobile: false,
-      bitness: "64",
+      mobile,
+      bitness: mobile ? "" : "64",
       wow64: false,
     },
   };
@@ -293,12 +304,17 @@ export class BrowserService {
               );
               if (input.cloud) await this.enableCloud(sessionId, session);
               if (created && input.cloud && !input.viewport)
-                await this.resolvePage(session).setViewportSize({ width: 390, height: 640 });
+                await this.setViewport(session, this.resolvePage(session), {
+                  width: 390,
+                  height: 640,
+                });
               session.cloudInteraction++;
               const page = await this.pageForOpen(session, input, created);
               await this.configurePage(session, page, input);
               await page.goto(url, { waitUntil: "domcontentloaded" });
-              return await this.snapshotResult(session, input, page);
+              const result = await this.snapshotResult(session, input, page);
+              if (input.cloud) result.details.sites = [await this.cloudAttachment(session)];
+              return result;
             }
 
             if (!session) {
@@ -307,17 +323,7 @@ export class BrowserService {
 
             if (input.cloud) await this.enableCloud(sessionId, session);
             if (input.action === "attach") {
-              const cloud = await readBrowserJson<{ id: string }>(
-                path.join(session.directory, "cloud.json"),
-              );
-              if (!cloud) throw new Error("Enable cloud=true before attaching this browser.");
-              const site: SiteDescriptor = {
-                id: `browser-${cloud.id}`,
-                browserId: cloud.id,
-                name: "Cloud browser",
-                url: `/api/cloud-browser/${cloud.id}/state`,
-                public: false,
-              };
+              const site = await this.cloudAttachment(session);
               return {
                 text: "Live cloud browser attached. The user and agent share this browser session.",
                 details: { action: "attach", sites: [site] },
@@ -329,7 +335,7 @@ export class BrowserService {
               session.cloudInteraction++;
             const page = this.resolvePage(session, input.pageId);
             await this.configurePage(session, page, input);
-            if (input.viewport) await page.setViewportSize(input.viewport);
+            if (input.viewport) await this.setViewport(session, page, input.viewport);
 
             if (input.action === "switch") {
               session.activePageId = this.pageId(session, page);
@@ -361,6 +367,18 @@ export class BrowserService {
       ),
       signal,
     );
+  }
+
+  private async cloudAttachment(session: BrowserSession): Promise<SiteDescriptor> {
+    const cloud = await readBrowserJson<{ id: string }>(path.join(session.directory, "cloud.json"));
+    if (!cloud) throw new Error("Enable cloud=true before attaching this browser.");
+    return {
+      id: `browser-${cloud.id}`,
+      browserId: cloud.id,
+      name: "Cloud browser",
+      url: `/api/cloud-browser/${cloud.id}/state`,
+      public: false,
+    };
   }
 
   private async enableCloud(sessionId: string, session: BrowserSession): Promise<void> {
@@ -416,6 +434,7 @@ export class BrowserService {
     return {
       pageId,
       ...viewport,
+      mobile: session.pageViewports.get(page)?.mobile ?? false,
       revision: createHash("sha256")
         .update(
           JSON.stringify([
@@ -466,6 +485,7 @@ export class BrowserService {
   private async cloudStateFor(session: BrowserSession): Promise<CloudBrowserState> {
     if (!session.pages.size) throw this.cloudEnded();
     const page = this.resolvePage(session);
+    await session.pageIdentityPromises.get(page);
     return {
       ...this.cloudView(session, page),
       url: page.url(),
@@ -488,8 +508,17 @@ export class BrowserService {
       });
     return this.serialized(owner, async () => {
       await this.cloudOwner(id);
-      const session =
-        this.sessions.get(owner) ?? (await this.createSession(owner, undefined, undefined));
+      let session = this.sessions.get(owner);
+      if (!session) {
+        try {
+          session = await this.createSession(owner, undefined, undefined);
+        } catch (error) {
+          if (["ESRCH", "ECONNREFUSED"].includes((error as NodeJS.ErrnoException).code ?? ""))
+            throw this.cloudEnded();
+          throw error;
+        }
+      }
+      if (!session.browser.isConnected()) throw this.cloudEnded();
       try {
         return await operation(session);
       } finally {
@@ -621,12 +650,22 @@ export class BrowserService {
                 });
               await this.resolvePage(session, command.pageId).close();
               break;
-            case "viewport":
-              await this.resolvePage(session).setViewportSize({
+            case "viewport": {
+              const page = this.resolvePage(session);
+              const modeChanged =
+                (session.pageViewports.get(page)?.mobile ?? false) !== command.mobile;
+              session.cloudViewport = {
                 width: command.width,
                 height: command.height,
-              });
+                mobile: command.mobile,
+              };
+              await this.setViewport(session, page, command);
+              // Server-selected mobile HTML needs a new request with the mobile UA.
+              // Keep the existing page, cookies, storage and browser context.
+              if (modeChanged && /^https?:/.test(page.url()))
+                await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 });
               break;
+            }
           }
         }
         return this.cloudStateFor(session);
@@ -743,6 +782,9 @@ export class BrowserService {
       context,
       useTailscale: receipt.useTailscale,
       identity,
+      cloudViewport: registry?.cloudViewport,
+      pageEmulation: new WeakMap(),
+      pageViewports: new WeakMap(),
       pageIdentityPromises: new WeakMap(),
       pages: new Map(),
       pageIds: new WeakMap(),
@@ -781,7 +823,7 @@ export class BrowserService {
       if (registry?.activePageId && session.pages.has(registry.activePageId))
         session.activePageId = registry.activePageId;
       if (!session.pages.size) this.registerPage(session, await context.newPage(), true);
-      if (created && viewport) await this.resolvePage(session).setViewportSize(viewport);
+      if (created && viewport) await this.setViewport(session, this.resolvePage(session), viewport);
     } catch (error) {
       await context.close().catch(() => {});
       throw error;
@@ -876,11 +918,11 @@ export class BrowserService {
         );
       }
       this.registerPage(session, page, true);
-      if (input.viewport) await page.setViewportSize(input.viewport);
+      if (input.viewport) await this.setViewport(session, page, input.viewport);
       return page;
     }
     const page = this.resolvePage(session, input.pageId);
-    if (input.viewport && !sessionCreated) await page.setViewportSize(input.viewport);
+    if (input.viewport && !sessionCreated) await this.setViewport(session, page, input.viewport);
     return page;
   }
 
@@ -909,8 +951,58 @@ export class BrowserService {
   }
 
   private async configureBrowserIdentity(session: BrowserSession, page: Page): Promise<void> {
-    const cdpSession = await session.context.newCDPSession(page);
-    await cdpSession.send("Emulation.setUserAgentOverride", session.identity);
+    const connection = await session.context.newCDPSession(page);
+    session.pageEmulation.set(page, connection);
+    if (session.cloudViewport) {
+      await page.setViewportSize(session.cloudViewport);
+      await this.emulateViewport(session, page, session.cloudViewport);
+    } else await connection.send("Emulation.setUserAgentOverride", session.identity);
+  }
+
+  private async setViewport(
+    session: BrowserSession,
+    page: Page,
+    viewport: BrowserViewport,
+  ): Promise<void> {
+    await session.pageIdentityPromises.get(page);
+    await page.setViewportSize(viewport);
+    if (session.cloudViewport) {
+      session.cloudViewport = {
+        ...session.cloudViewport,
+        width: viewport.width,
+        height: viewport.height,
+      };
+      await this.emulateViewport(session, page, session.cloudViewport);
+    }
+  }
+
+  private async emulateViewport(
+    session: BrowserSession,
+    page: Page,
+    viewport: CloudBrowserViewport,
+  ): Promise<void> {
+    const connection = session.pageEmulation.get(page)!;
+    await connection.send(
+      "Emulation.setUserAgentOverride",
+      browserIdentity(session.browser.version(), viewport.mobile),
+    );
+    await connection.send("Emulation.setDeviceMetricsOverride", {
+      width: viewport.width,
+      height: viewport.height,
+      screenWidth: viewport.width,
+      screenHeight: viewport.height,
+      deviceScaleFactor: 1,
+      mobile: viewport.mobile,
+      screenOrientation: {
+        type: viewport.width > viewport.height ? "landscapePrimary" : "portraitPrimary",
+        angle: viewport.width > viewport.height ? 90 : 0,
+      },
+    });
+    await connection.send("Emulation.setTouchEmulationEnabled", {
+      enabled: viewport.mobile,
+      maxTouchPoints: 1,
+    });
+    session.pageViewports.set(page, { ...viewport });
   }
 
   private async configurePage(
@@ -1189,6 +1281,7 @@ export class BrowserService {
       }
     }
     await writeBrowserJson(path.join(session.directory, "registry.json"), {
+      cloudViewport: session.cloudViewport,
       activePageId: session.activePageId,
       nextPageNumber: session.nextPageNumber,
       nextFrameNumber: session.nextFrameNumber,

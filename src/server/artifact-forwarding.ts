@@ -6,13 +6,16 @@ import type { AgentTurnArtifacts } from "./agent-turn-file-changes";
 import { decodeRuntimeNotice } from "./runtime-notices";
 
 export const ARTIFACT_FORWARDING_INSTRUCTION =
-  "Files, diffs and sites belong to the execution scope that produced them. To attach selected existing artifacts from a report to your own response, call attach_artifacts with the listed refs. This reuses the original immutable objects, including file IDs and diff contents, without copying files. Use attach_files only to import local files. Links or copied patch text do not forward response metadata. Do not automatically forward every draft. Do not rerun actions or reconstruct diffs.";
+  "Files, diffs, sites and live browsers belong to the execution scope that produced them. To attach selected existing artifacts from a report to your own response, call attach_artifacts with the listed refs. This reuses the original immutable descriptors, including file IDs, diff contents and live browser handles, without copying files or opening another browser. Forwarded browsers share the same live session, login and expiry; forwarding does not publish them or keep them alive. Use attach_files only to import local files. Links or copied patch text do not forward response metadata. Do not automatically forward every draft. Do not rerun actions or reconstruct diffs.";
 
 export function artifactRefs(artifacts: AgentTurnArtifacts = {}) {
   return [
     ...(artifacts.sentFiles ?? []).map((file) => ({ kind: "file" as const, value: file })),
     ...(artifacts.fileChanges ?? []).map((diff) => ({ kind: "diff" as const, value: diff })),
-    ...(artifacts.sites ?? []).map((site) => ({ kind: "site" as const, value: site })),
+    ...(artifacts.sites ?? []).map((site) => ({
+      kind: site.browserId ? ("browser" as const) : ("site" as const),
+      value: site,
+    })),
   ].map((item) => ({
     ...item,
     ref: `${item.kind}:${createHash("sha256").update(JSON.stringify(item.value)).digest("hex")}`,
@@ -33,7 +36,13 @@ export function reportWithArtifacts(text: string, artifacts: AgentTurnArtifacts 
           ? { path: value.path }
           : kind === "file"
             ? { name: value.name, id: value.id, downloadUrl: value.downloadUrl }
-            : { name: value.name, url: value.url }),
+            : {
+                id: value.id,
+                name: value.name,
+                url: value.url,
+                public: value.public,
+                ...(kind === "browser" ? { browserId: value.browserId } : {}),
+              }),
       }),
     ),
     ARTIFACT_FORWARDING_INSTRUCTION,
@@ -66,7 +75,9 @@ export function mergeResponseArtifacts(...sources: AgentTurnArtifacts[]): AgentT
   );
   const items = [...unique.values()];
   const fileChanges = items.flatMap((item) => (item.kind === "diff" ? [item.value] : []));
-  const sites = items.flatMap((item) => (item.kind === "site" ? [item.value] : []));
+  const sites = items.flatMap((item) =>
+    item.kind === "site" || item.kind === "browser" ? [item.value] : [],
+  );
   const sentFiles = items.flatMap((item) => (item.kind === "file" ? [item.value] : []));
   return {
     ...(fileChanges.length ? { fileChanges } : {}),
@@ -91,13 +102,13 @@ export function forwardedResponseArtifacts(entries: readonly EntryRecord[]): Age
 export function createAttachArtifactsTool() {
   return defineTool({
     name: "attach_artifacts",
-    description: `Attach selected existing files, diffs and sites from reports to the current response. ${ARTIFACT_FORWARDING_INSTRUCTION}`,
+    description: `Attach selected existing files, diffs, sites and live browsers from reports to the current response. ${ARTIFACT_FORWARDING_INSTRUCTION}`,
     parameters: Type.Object(
       {
         refs: Type.Array(Type.String(), {
           minItems: 1,
           description:
-            "Stable file/diff/site refs listed in a received report. Only artifacts already present in this conversation can be forwarded.",
+            "Stable file/diff/site/browser refs listed in a received report. Only artifacts already present in this conversation can be forwarded.",
         }),
       },
       { additionalProperties: false },
@@ -125,7 +136,9 @@ export function createAttachArtifactsTool() {
         throw new Error(`Artifact refs not received in this conversation: ${missing.join(", ")}`);
       const selected = [...wanted].map((ref) => found.get(ref)!);
       const fileChanges = selected.flatMap((item) => (item.kind === "diff" ? [item.value] : []));
-      const sites = selected.flatMap((item) => (item.kind === "site" ? [item.value] : []));
+      const sites = selected.flatMap((item) =>
+        item.kind === "site" || item.kind === "browser" ? [item.value] : [],
+      );
       const sentFiles = selected.flatMap((item) => (item.kind === "file" ? [item.value] : []));
       return {
         output: [

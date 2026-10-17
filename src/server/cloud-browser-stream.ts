@@ -103,7 +103,17 @@ export class CloudBrowserStreams {
           .cloudTarget(id)
           .then(sync)
           .catch((error) => {
-            broadcast("browser-error", { error: (error as Error).message });
+            const statusCode = (error as { statusCode?: number }).statusCode;
+            const message = (error as Error).message;
+            broadcast("browser-error", {
+              error: message,
+              statusCode,
+              retryable:
+                statusCode !== 410 &&
+                /Execution context was destroyed|Frame was detached|Cannot find context|Target closed|Session closed|has been closed/i.test(
+                  message,
+                ),
+            });
             void stream!.stop();
           })
           .finally(() => {
@@ -148,7 +158,8 @@ export class CloudBrowserStreams {
       [...this.streams.values()].map(async (stream) => {
         for (const subscriber of stream.subscribers)
           subscriber("browser-error", {
-            error: "Browser viewer disconnected. Reopen to reconnect.",
+            error: "Browser viewer disconnected.",
+            retryable: true,
           });
         await stream.stop();
       }),

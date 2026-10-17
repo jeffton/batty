@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Browser } from "patchright";
+import type { CloudBrowserViewport } from "@/shared/cloud-browser";
 
 async function profileBrowserPid(directory: string): Promise<number | undefined> {
   if (process.platform === "win32") {
@@ -60,6 +61,7 @@ export interface PersistentBrowserReceipt {
   useTailscale: boolean;
 }
 export interface PersistentBrowserRegistry {
+  cloudViewport?: CloudBrowserViewport;
   activePageId?: string;
   nextPageNumber: number;
   nextFrameNumber: number;

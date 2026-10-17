@@ -46,7 +46,16 @@ test("Runtime response and reopened history reuse files and distinct same-path i
         downloadUrl: "/api/sent-files/original-file-id",
       },
     ],
-    sites: [{ id: "selected", name: "Chosen site", url: "/chosen", public: false }],
+    sites: [
+      { id: "selected", name: "Chosen site", url: "/chosen", public: false },
+      {
+        id: "browser-live-session",
+        browserId: "live-session",
+        name: "Cloud browser",
+        url: "/api/cloud-browser/live-session/state",
+        public: false,
+      },
+    ],
   };
   const inventory = {
     sentFiles: selected.sentFiles,
@@ -92,7 +101,7 @@ test("Runtime response and reopened history reuse files and distinct same-path i
       if (response?.role === "assistant") {
         expect(response.fileChanges).toHaveLength(2);
         expect(response.sentFiles).toEqual(selected.sentFiles);
-        expect(response.sites).toHaveLength(1);
+        expect(response.sites).toEqual(selected.sites);
       }
     };
     await check();

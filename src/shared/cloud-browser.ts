@@ -5,6 +5,7 @@ export interface CloudBrowserState {
   title: string;
   width: number;
   height: number;
+  focused?: { id: string; value: string; type: string; multiline: boolean };
   pages: Array<{ id: string; title: string; url: string; active: boolean }>;
 }
 
@@ -27,8 +28,9 @@ export type CloudBrowserControl =
       deltaY: number;
     })
   | (ViewTarget & { action: "drag"; x: number; y: number; endX: number; endY: number })
+  | (ViewTarget & { action: "fill-focused"; focusId: string; value: string })
   | (ViewTarget & { action: "text"; text: string })
-  | (ViewTarget & { action: "key"; key: string })
+  | (ViewTarget & { action: "key"; key: string; focusId?: string })
   | { action: "navigate"; url: string }
   | { action: "back" | "reload" }
   | { action: "switch" | "close-page"; pageId: string }

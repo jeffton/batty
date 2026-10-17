@@ -8,8 +8,7 @@ import fastify from "fastify";
 import { BrowserService } from "@/server/browser-service";
 import { registerCloudBrowserRoutes } from "@/server/routes/cloud-browser";
 import vue from "@vitejs/plugin-vue";
-import { chromium, type Browser } from "patchright";
-import sharp from "sharp";
+import { chromium, type Browser, type Page } from "patchright";
 import type { ViteDevServer } from "vite";
 import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
@@ -17,7 +16,6 @@ import { afterAll, beforeAll, expect, test } from "vite-plus/test";
 let server: ViteDevServer;
 let browser: Browser;
 let url: string;
-let jpeg: string;
 let root: string;
 let service: BrowserService;
 const backend = fastify();
@@ -33,9 +31,22 @@ beforeAll(async () => {
   });
   backend.get("/target", (_request, reply) =>
     reply.type("text/html").send(`<!doctype html>
-    <html><head><title>Shared target</title></head><body style="margin:0;height:3000px">
-    <button style="width:160px;height:60px" onclick="window.clicks=(window.clicks||0)+1">Tap me</button>
-    <input style="display:block;width:200px;height:40px" id="typed"></body></html>`),
+    <html><head><meta name="viewport" content="width=device-width"><title>Shared target</title></head>
+    <body style="margin:0;font:16px sans-serif">
+      <button style="width:160px;height:50px" onclick="document.body.dataset.clicks=String(Number(document.body.dataset.clicks||0)+1)">Tap me</button>
+      <form onsubmit="event.preventDefault();document.body.dataset.submitted='yes'">
+        <input style="display:block;width:200px;height:40px" id="typed" value="original">
+      </form>
+      <div id="inner" onscroll="document.body.dataset.firstScrollAt ||= String(Date.now())" style="height:160px;width:250px;overflow:auto;overscroll-behavior:contain;background:lightblue">
+        <div style="height:900px">Inner scroll</div><button id="inner-bottom">Inner bottom</button>
+      </div>
+      <div style="height:2400px">Long page</div>
+      <button id="bottom" style="height:55px" onclick="document.body.dataset.bottomClicked='yes'">Page bottom</button>
+      <a id="popup" target="_blank" href="/popup">Open popup</a>
+    </body></html>`),
+  );
+  backend.get("/popup", (_request, reply) =>
+    reply.type("text/html").send("<title>Popup target</title><p>Popup</p>"),
   );
   const reservation = net.createServer();
   reservation.listen(0, "127.0.0.1");
@@ -62,11 +73,6 @@ beforeAll(async () => {
   closeStreams = registerCloudBrowserRoutes(backend, service, server.resolvedUrls!.local[0]!);
   await backend.listen({ host: "127.0.0.1", port });
   browser = await chromium.launch({ headless: true });
-  jpeg = (
-    await sharp({ create: { width: 1280, height: 800, channels: 3, background: "#f3c68c" } })
-      .jpeg()
-      .toBuffer()
-  ).toString("base64");
 }, 30_000);
 afterAll(async () => {
   await browser?.close();
@@ -78,84 +84,60 @@ afterAll(async () => {
   if (root) await fs.rm(root, { recursive: true, force: true });
 });
 
-test("mobile native attachment opens an interactive image, maps coordinates, and keeps remote size stable when view shrinks", async () => {
-  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
-  const commands: Record<string, unknown>[] = [];
-  const state = {
-    pageId: "page-1",
-    revision: "painted-revision",
-    url: "https://example.org",
-    title: "Example",
-    width: 1280,
-    height: 800,
-    pages: [{ id: "page-1", title: "Example", url: "https://example.org", active: true }],
-  };
+async function inspect(script: string) {
+  // Read the same live page without an agent action invalidating its revision.
+  return (await service.cloudTarget(attachedBrowserId)).page.evaluate(
+    (source) => globalThis.eval(source),
+    script,
+  );
+}
+async function tapRemote(page: Page, x: number, y: number) {
+  const image = page.locator(".cloud-browser__image");
+  const bounds = (await image.boundingBox())!;
+  const state = await service.cloudState(attachedBrowserId);
+  const done = page.waitForResponse(
+    (r) => r.url().endsWith("/control") && r.request().postDataJSON().action === "click",
+  );
+  await page.touchscreen.tap(
+    bounds.x + (x * bounds.width) / state.width,
+    bounds.y + (y * bounds.height) / state.height,
+  );
+  const response = await done;
+  expect(response.status()).toBe(200);
+}
+async function swipe(page: Page, x: number, y: number, distance: number) {
+  const image = page.locator(".cloud-browser__image");
+  const bounds = (await image.boundingBox())!;
+  const state = await service.cloudState(attachedBrowserId);
+  const px = bounds.x + (x * bounds.width) / state.width;
+  const py = bounds.y + (y * bounds.height) / state.height;
+  const touch = await page.context().newCDPSession(page);
   try {
-    await page.route("**/api/cloud-browser/opaque/**", async (route) => {
-      const request = route.request();
-      if (request.url().endsWith("/events")) {
-        await route.fulfill({
-          contentType: "text/event-stream",
-          body: `event: frame\ndata: ${JSON.stringify({ image: jpeg, pageId: "page-1", revision: "painted-revision", width: 1280, height: 800 })}\n\n`,
-        });
-      } else {
-        if (request.method() === "POST") commands.push(request.postDataJSON());
-        await route.fulfill({ json: state });
-      }
+    await touch.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x: px, y: py }],
     });
-    await page.goto(url);
-    await page.getByRole("button", { name: "Open browser", exact: true }).click();
-    const popover = page.locator("#site-preview--cloud");
-    const image = popover.getByRole("img");
-    await image.waitFor();
-    await expect
-      .poll(() =>
-        image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0),
-      )
-      .toBe(true);
-    expect(await popover.locator("iframe").count()).toBe(0);
-    expect(await popover.getByRole("switch").count()).toBe(0);
-    const bounds = (await image.boundingBox())!;
-    await image.click({ position: { x: bounds.width / 4, y: bounds.height / 4 } });
-    await expect.poll(() => commands.length).toBe(1);
-    expect(commands[0]).toEqual({
-      action: "click",
-      pageId: "page-1",
-      revision: "painted-revision",
-      x: 320,
-      y: 200,
-    });
-    await page.setViewportSize({ width: 390, height: 400 });
-    const text = popover.getByRole("textbox", { name: "Text for focused browser field" });
-    await text.fill("Hello from iPhone");
-    await popover.getByRole("button", { name: "Send", exact: true }).click();
-    await expect.poll(() => commands.length).toBe(2);
-    expect(commands[1]).toEqual({
-      action: "text",
-      text: "Hello from iPhone",
-      pageId: "page-1",
-      revision: "painted-revision",
-    });
-    expect(commands.some((command) => command.action === "viewport")).toBe(false);
-    await popover.getByRole("button", { name: "Close popover" }).click();
-    expect(commands.some((command) => command.action === "close-page")).toBe(false);
-    await page.getByRole("button", { name: "Open site", exact: true }).click();
-    const ordinary = page.locator("#site-preview--ordinary");
-    expect(await ordinary.locator("iframe").count()).toBe(1);
-    expect(await ordinary.getByRole("switch").count()).toBe(1);
+    for (let step = 1; step <= 5; step++) {
+      await touch.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [{ x: px, y: py - (distance * step) / 5 }],
+      });
+      await new Promise((resolve) => setTimeout(resolve, 35));
+    }
+    await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   } finally {
-    await page.close();
+    await touch.detach();
   }
-});
+}
 
-test("real authenticated popover stream and touch controls change the agent's persistent page", async () => {
+test("mobile live session fits its viewport, edits contextually, scrolls nested content and reaches/clicks the page bottom", async () => {
   await service.execute("integration", {
     action: "open",
     url: `${backendUrl}/target`,
     cloud: true,
   });
-  const attachment = await service.execute("integration", { action: "attach" });
-  attachedBrowserId = attachment.details.sites![0]!.browserId!;
+  attachedBrowserId = (await service.execute("integration", { action: "attach" })).details
+    .sites![0]!.browserId!;
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
     hasTouch: true,
@@ -171,63 +153,106 @@ test("real authenticated popover stream and touch controls change the agent's pe
     const image = popover.getByRole("img");
     await expect.poll(() => image.count()).toBe(1);
     await expect
-      .poll(() =>
-        image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0),
-      )
+      .poll(() => image.evaluate((e: HTMLImageElement) => e.complete && e.naturalWidth > 0))
       .toBe(true);
-    await expect
-      .poll(() => popover.getByRole("button", { name: "Enter", exact: true }).isEnabled())
-      .toBe(true);
+    const remote = await service.cloudState(attachedBrowserId);
     const bounds = (await image.boundingBox())!;
-    const tapped = page.waitForResponse((response) => response.url().endsWith("/control"));
-    await page.touchscreen.tap(
-      bounds.x + (bounds.width * 40) / 390,
-      bounds.y + (bounds.height * 30) / 640,
+    expect(Math.abs(remote.width - bounds.width)).toBeLessThan(2);
+    expect(Math.abs(remote.height - bounds.height)).toBeLessThan(2);
+    expect(await popover.getByRole("textbox", { name: "Focused browser field" }).count()).toBe(0);
+    await tapRemote(page, 40, 25);
+    await expect.poll(() => inspect("document.body.dataset.clicks")).toBe("1");
+    await tapRemote(page, 80, 75);
+    const input = popover.getByRole("textbox", { name: "Focused browser field" });
+    await input.waitFor();
+    await input.tap();
+    await input.fill("Live shared browser æøå");
+    await expect
+      .poll(() => inspect("document.querySelector('#typed').value"))
+      .toBe("Live shared browser æøå");
+    await input.fill("");
+    await expect.poll(() => inspect("document.querySelector('#typed').value")).toBe("");
+    await input.fill("edited");
+    await input.press("Enter");
+    await expect.poll(() => inspect("document.body.dataset.submitted")).toBe("yes");
+    await page.setViewportSize({ width: 390, height: 430 });
+    await expect
+      .poll(async () => (await input.boundingBox())!.y + (await input.boundingBox())!.height)
+      .toBeLessThan(430);
+    expect((await service.cloudState(attachedBrowserId)).height).toBe(remote.height);
+    await popover.getByRole("button", { name: "Done", exact: true }).click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect.poll(async () => (await image.boundingBox())!.height).toBe(remote.height);
+    await image.evaluate((element) => {
+      element.addEventListener(
+        "pointermove",
+        () => {
+          element.setAttribute("data-scroll-start", String(Date.now()));
+        },
+        { once: true },
+      );
+    });
+    // Remote inner container, not the local popover, owns this scroll gesture.
+    await swipe(page, 100, 220, 130);
+    await expect
+      .poll(() => inspect("document.querySelector('#inner').scrollTop"))
+      .toBeGreaterThan(80);
+    expect(await inspect("window.scrollY")).toBe(0);
+    console.log(
+      "Touch move to remote scroll (local fixture, ms):",
+      Number(await inspect("document.body.dataset.firstScrollAt")) -
+        Number(await image.getAttribute("data-scroll-start")),
     );
-    expect((await tapped).status()).toBe(200);
+
+    // Wheel is routed too, and remains anchored to the nested container.
+    await image.hover({ position: { x: 100, y: 190 } });
+    await page.mouse.wheel(0, 1200);
     await expect
-      .poll(
-        async () =>
-          (await service.execute("integration", { action: "evaluate", script: "window.clicks" }))
-            .text,
+      .poll(() => inspect("document.querySelector('#inner').scrollTop"))
+      .toBeGreaterThan(700);
+    // Scroll the outer page from outside the inner container.
+    for (let i = 0; i < 7; i++) await swipe(page, 300, 650, 420);
+    await expect
+      .poll(() =>
+        inspect("window.scrollY + innerHeight >= document.documentElement.scrollHeight - 2"),
       )
-      .toContain("result:\n1");
-    await expect
-      .poll(() => popover.getByRole("button", { name: "Enter", exact: true }).isEnabled())
       .toBe(true);
-    const focused = page.waitForResponse((response) => response.url().endsWith("/control"));
-    await page.touchscreen.tap(
-      bounds.x + (bounds.width * 80) / 390,
-      bounds.y + (bounds.height * 85) / 640,
+    const bottom = (await inspect(
+      "JSON.stringify(document.querySelector('#bottom').getBoundingClientRect().toJSON())",
+    )) as string;
+    const rect = JSON.parse(bottom);
+    await tapRemote(page, rect.x + 30, rect.y + 20);
+    await expect.poll(() => inspect("document.body.dataset.bottomClicked")).toBe("yes");
+    expect(await popover.evaluate((e) => e.scrollHeight - e.clientHeight)).toBe(0);
+    await page.screenshot({ path: "/tmp/batty-cloud-browser-mobile-bottom.png" });
+    // A target=_blank page becomes the one visible page; Back returns to its opener.
+    const popupRect = JSON.parse(
+      (await inspect(
+        "JSON.stringify(document.querySelector('#popup').getBoundingClientRect().toJSON())",
+      )) as string,
     );
-    expect((await focused).status()).toBe(200);
+    await tapRemote(page, popupRect.x + 10, popupRect.y + 5);
     await expect
-      .poll(() => popover.getByRole("button", { name: "Send", exact: true }).isDisabled())
-      .toBe(true);
-    await popover
-      .getByRole("textbox", { name: "Text for focused browser field" })
-      .fill("Live shared browser æøå");
+      .poll(async () => (await service.cloudState(attachedBrowserId)).title)
+      .toBe("Popup target");
     await expect
-      .poll(() => popover.getByRole("button", { name: "Send", exact: true }).isEnabled())
-      .toBe(true);
-    const typed = page.waitForResponse((response) => response.url().endsWith("/control"));
-    await popover.getByRole("button", { name: "Send", exact: true }).click();
-    expect((await typed).status()).toBe(200);
+      .poll(async () => (await service.cloudState(attachedBrowserId)).width)
+      .toBe(remote.width);
+    const popup = (await service.cloudTarget(attachedBrowserId)).page;
+    await popup.evaluate(() => history.pushState({}, "", "#section"));
+    await popover.getByRole("button", { name: "Go back" }).click();
     await expect
-      .poll(
-        async () =>
-          (
-            await service.execute("integration", {
-              action: "evaluate",
-              script: "document.querySelector('#typed').value",
-            })
-          ).text,
-      )
-      .toContain("Live shared browser æøå");
+      .poll(async () => (await service.cloudState(attachedBrowserId)).url)
+      .toBe(`${backendUrl}/popup`);
+    expect(popup.isClosed()).toBe(false);
+    await popover.getByRole("button", { name: "Go back" }).click();
+    await expect
+      .poll(async () => (await service.cloudState(attachedBrowserId)).title)
+      .toBe("Shared target");
+    await page.screenshot({ path: "/tmp/batty-cloud-browser-mobile.png" });
     await popover.getByRole("button", { name: "Close popover" }).click();
     expect(await service.hasSession("integration")).toBe(true);
-    expect((await service.cloudState(attachedBrowserId)).title).toBe("Shared target");
   } finally {
     await context.close();
   }
-}, 30_000);
+}, 60_000);

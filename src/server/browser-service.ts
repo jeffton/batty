@@ -432,6 +432,37 @@ export class BrowserService {
     };
   }
 
+  private async focusedInput(page: Page) {
+    for (const frame of page.frames()) {
+      const focused = await frame.evaluate((id) => {
+        if (!document.hasFocus()) return;
+        let element = document.activeElement;
+        while (element?.shadowRoot?.activeElement) element = element.shadowRoot.activeElement;
+        if (!(element instanceof HTMLElement)) return;
+        const input =
+          element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+            ? element
+            : undefined;
+        if (
+          (!input && !element.isContentEditable) ||
+          (input && (input.disabled || input.readOnly)) ||
+          (element instanceof HTMLInputElement &&
+            !["text", "search", "email", "url", "tel", "password", "number"].includes(element.type))
+        )
+          return;
+        const marked = element as HTMLElement & { __battyInputId?: string };
+        marked.__battyInputId ??= id;
+        return {
+          id: marked.__battyInputId,
+          value: input ? input.value : element.innerText,
+          type: element instanceof HTMLInputElement ? element.type : "text",
+          multiline: element instanceof HTMLTextAreaElement || element.isContentEditable,
+        };
+      }, randomUUID());
+      if (focused) return { frame, focused };
+    }
+  }
+
   private async cloudStateFor(session: BrowserSession): Promise<CloudBrowserState> {
     if (!session.pages.size) throw this.cloudEnded();
     const page = this.resolvePage(session);
@@ -439,6 +470,7 @@ export class BrowserService {
       ...this.cloudView(session, page),
       url: page.url(),
       title: await page.title(),
+      focused: (await this.focusedInput(page))?.focused,
       pages: await this.pageDetails(session),
     };
   }
@@ -507,7 +539,8 @@ export class BrowserService {
                 statusCode: 400,
               });
           }
-          session.cloudInteraction++;
+          // Viewer input keeps the capture running. Revisions fence agent actions,
+          // navigation and viewport changes, not individual wheel/typing events.
           switch (command.action) {
             case "click":
               await page.mouse.click(command.x, command.y);
@@ -525,10 +558,22 @@ export class BrowserService {
                 await page.mouse.up();
               }
               break;
+            case "fill-focused": {
+              const target = await this.focusedInput(page);
+              if (!target || target.focused.id !== command.focusId)
+                throw Object.assign(new Error("The focused field changed."), { statusCode: 409 });
+              await target.frame.locator(":focus").last().fill(command.value);
+              break;
+            }
             case "text":
               await page.keyboard.insertText(command.text);
               break;
             case "key":
+              if (
+                command.focusId &&
+                (await this.focusedInput(page))?.focused.id !== command.focusId
+              )
+                throw Object.assign(new Error("The focused field changed."), { statusCode: 409 });
               await page.keyboard.press(command.key);
               break;
           }
@@ -541,12 +586,24 @@ export class BrowserService {
                 timeout: 30_000,
               });
               break;
-            case "back":
-              await this.resolvePage(session).goBack({
-                waitUntil: "domcontentloaded",
-                timeout: 30_000,
-              });
+            case "back": {
+              const page = this.resolvePage(session);
+              const connection = await page.context().newCDPSession(page);
+              let currentIndex: number;
+              try {
+                ({ currentIndex } = await connection.send("Page.getNavigationHistory"));
+              } finally {
+                await connection.detach();
+              }
+              const opener = await page.opener();
+              if (currentIndex === 0 && opener && !opener.isClosed()) {
+                session.activePageId = this.pageId(session, opener);
+                await page.close();
+              } else {
+                await page.goBack({ waitUntil: "domcontentloaded", timeout: 30_000 });
+              }
               break;
+            }
             case "reload":
               await this.resolvePage(session).reload({
                 waitUntil: "domcontentloaded",
@@ -765,6 +822,9 @@ export class BrowserService {
     page.on("framenavigated", (frame) => {
       if (frame === page.mainFrame())
         session.navigations.set(page, (session.navigations.get(page) ?? 0) + 1);
+    });
+    page.on("popup", (popup) => {
+      if (!session.rejectedPages.has(popup)) this.registerPage(session, popup, true);
     });
     page.on("frameattached", (frame) => this.registerFrame(session, frame));
     page.on("framedetached", (frame) => this.unregisterFrame(session, frame));

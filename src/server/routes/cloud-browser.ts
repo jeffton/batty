@@ -30,8 +30,17 @@ const controlSchema = Type.Union([
     endX: Type.Number({ minimum: 0, maximum: 10_000 }),
     endY: Type.Number({ minimum: 0, maximum: 10_000 }),
   }),
+  command("fill-focused", {
+    ...target,
+    focusId: Type.String({ minLength: 1, maxLength: 100 }),
+    value: Type.String({ maxLength: 10_000 }),
+  }),
   command("text", { ...target, text: Type.String({ minLength: 1, maxLength: 10_000 }) }),
-  command("key", { ...target, key: Type.String({ enum: [...CLOUD_BROWSER_KEYS] }) }),
+  command("key", {
+    ...target,
+    key: Type.String({ enum: [...CLOUD_BROWSER_KEYS] }),
+    focusId: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
+  }),
   command("navigate", {
     url: Type.String({ minLength: 1, maxLength: 8192, pattern: "^https?://" }),
   }),

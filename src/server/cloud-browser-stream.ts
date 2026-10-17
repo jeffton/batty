@@ -85,7 +85,7 @@ export class CloudBrowserStreams {
           const { pageId, revision, width, height } = next.state;
           latestFrame = { image: event.data, pageId, revision, width, height };
           if (frameTimer) return;
-          const delay = 100 - (Date.now() - lastFrameAt);
+          const delay = 33 - (Date.now() - lastFrameAt);
           if (delay <= 0) flushFrame();
           else frameTimer = setTimeout(flushFrame, delay);
         });
@@ -109,7 +109,7 @@ export class CloudBrowserStreams {
           .finally(() => {
             pending = undefined;
           });
-      }, 500);
+      }, 100);
       timer.unref();
       stream = {
         subscribers,

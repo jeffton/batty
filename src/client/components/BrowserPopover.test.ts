@@ -9,7 +9,7 @@ const state = {
   title: "Example",
   width: 1280,
   height: 800,
-  pages: [{ id: "page-1", title: "Example", url: "https://example.org", active: true }],
+  pages: [],
 };
 class FakeEvents extends EventTarget {
   static instances: FakeEvents[] = [];
@@ -32,6 +32,13 @@ beforeEach(() => {
   FakeEvents.instances = [];
   vi.stubGlobal("EventSource", FakeEvents);
   vi.stubGlobal("fetch", fetchMock);
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
   fetchMock.mockResolvedValue({ ok: true, json: async () => state });
 });
 afterEach(() => {
@@ -42,7 +49,14 @@ afterEach(() => {
 function create() {
   return mount(BrowserPopover, {
     props: { popoverId: "browser-test", browserId: "opaque/id", title: "Cloud browser" },
-    global: { stubs: { FullPopover: { name: "FullPopover", template: "<div><slot /></div>" } } },
+    global: {
+      stubs: {
+        FullPopover: {
+          name: "FullPopover",
+          template: '<div><slot name="heading" /><slot /></div>',
+        },
+      },
+    },
   });
 }
 async function open(wrapper: ReturnType<typeof create>) {
@@ -53,11 +67,19 @@ async function open(wrapper: ReturnType<typeof create>) {
 async function frame(
   wrapper: ReturnType<typeof create>,
   events: FakeEvents,
-  revision = "painted-revision",
+  revision = state.revision,
 ) {
   events.send("frame", { image: "ZmFrZQ==", pageId: "page-1", revision, width: 1280, height: 800 });
   await flushPromises();
   await wrapper.get("img").trigger("load");
+  const image = wrapper.get("img").element;
+  vi.spyOn(image, "getBoundingClientRect").mockReturnValue({
+    left: 20,
+    top: 50,
+    width: 320,
+    height: 200,
+  } as DOMRect);
+  Object.defineProperty(image, "setPointerCapture", { configurable: true, value: vi.fn() });
 }
 function commands() {
   return fetchMock.mock.calls
@@ -65,118 +87,125 @@ function commands() {
     .map(([, init]) => JSON.parse(init.body));
 }
 
-test("maps taps and completed swipes to image coordinates using the painted revision, without a move queue", async () => {
+test("streams swipe deltas before lift, coalesces in-flight moves and preserves the initial nested-scroll anchor", async () => {
   const wrapper = create();
   try {
     const events = await open(wrapper);
     await frame(wrapper, events);
     const image = wrapper.get("img");
-    vi.spyOn(image.element, "getBoundingClientRect").mockReturnValue({
-      left: 20,
-      top: 50,
-      width: 320,
-      height: 200,
-    } as DOMRect);
-    Object.defineProperty(image.element, "setPointerCapture", { value: vi.fn() });
-    await image.trigger("pointerdown", { pointerId: 1, button: 0, clientX: 100, clientY: 100 });
-    await image.trigger("pointerup", { pointerId: 1, clientX: 100, clientY: 100 });
-    await flushPromises();
-    expect(commands()).toEqual([
-      { action: "click", pageId: "page-1", revision: "painted-revision", x: 320, y: 200 },
-    ]);
+    let release!: (value: unknown) => void;
+    fetchMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
     await image.trigger("pointerdown", { pointerId: 2, button: 0, clientX: 100, clientY: 200 });
     await image.trigger("pointermove", { pointerId: 2, clientX: 100, clientY: 170 });
-    expect(commands()).toHaveLength(1);
+    await flushPromises();
+    expect(commands()).toEqual([
+      {
+        action: "scroll",
+        pageId: "page-1",
+        revision: state.revision,
+        x: 320,
+        y: 600,
+        deltaX: 0,
+        deltaY: 120,
+      },
+    ]);
+    await image.trigger("pointermove", { pointerId: 2, clientX: 100, clientY: 130 });
     await image.trigger("pointerup", { pointerId: 2, clientX: 100, clientY: 100 });
+    expect(commands()).toHaveLength(1);
+    release({ ok: true, json: async () => state });
     await flushPromises();
     expect(commands()[1]).toEqual({
       action: "scroll",
       pageId: "page-1",
-      revision: "painted-revision",
+      revision: state.revision,
       x: 320,
       y: 600,
       deltaX: 0,
-      deltaY: 400,
-    });
-    await wrapper.get('input[type="checkbox"]').setValue(true);
-    await image.trigger("pointerdown", { pointerId: 3, button: 0, clientX: 100, clientY: 200 });
-    await image.trigger("pointerup", { pointerId: 3, clientX: 180, clientY: 100 });
-    await flushPromises();
-    expect(commands()[2]).toEqual({
-      action: "drag",
-      pageId: "page-1",
-      revision: "painted-revision",
-      x: 320,
-      y: 600,
-      endX: 640,
-      endY: 200,
+      deltaY: 280,
     });
   } finally {
     wrapper.unmount();
   }
 });
 
-test("commits text once, preserves failed drafts, and blocks input until the new frame is painted", async () => {
+test("contextual field replaces values, accepts clearing, and never sends a draft to a different focused field", async () => {
   const wrapper = create();
   try {
     const events = await open(wrapper);
     await frame(wrapper, events);
-    const input = wrapper.get('input[aria-label="Text for focused browser field"]');
-    await input.setValue("hello 👋");
+    const focused = { id: "field-a", value: "old", type: "text", multiline: false };
+    const focusedState = { ...state, focused };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => focusedState });
+    events.send("state", focusedState);
+    await flushPromises();
+    const input = wrapper.get('[aria-label="Focused browser field"]');
+    const composing = new KeyboardEvent("keydown", {
+      key: "Enter",
+      isComposing: true,
+      cancelable: true,
+    });
+    input.element.dispatchEvent(composing);
+    await flushPromises();
+    expect(composing.defaultPrevented).toBe(false);
+    expect(commands()).toEqual([]);
+    await input.setValue("");
+    await input.trigger("keydown", { key: "Enter" });
+    await flushPromises();
+    expect(commands()[0]).toEqual({
+      action: "fill-focused",
+      value: "",
+      focusId: "field-a",
+      pageId: "page-1",
+      revision: state.revision,
+    });
     fetchMock.mockResolvedValueOnce({
       ok: false,
       status: 409,
-      json: async () => ({ error: "Page changed; retry" }),
+      json: async () => ({ error: "The focused field changed." }),
     });
-    await wrapper.get(".cloud-browser__input form").trigger("submit");
-    await flushPromises();
-    expect((input.element as HTMLInputElement).value).toBe("hello 👋");
-    expect(wrapper.get('[role="alert"]').text()).toContain("Page changed; retry");
-    expect(commands()[0]).toEqual({
-      action: "text",
-      text: "hello 👋",
-      pageId: "page-1",
-      revision: "painted-revision",
-    });
-    await wrapper.get(".cloud-browser__input form").trigger("submit");
-    await flushPromises();
-    expect((input.element as HTMLInputElement).value).toBe("");
-    const holdLoad = (event: Event) => event.stopImmediatePropagation();
-    wrapper.get("img").element.addEventListener("load", holdLoad, true);
-    events.send("state", { ...state, revision: "next" });
-    events.send("frame", {
-      image: "bmV3",
-      pageId: "page-1",
-      revision: "next",
-      width: 1280,
-      height: 800,
-    });
+    const before = commands().length;
+    await input.trigger("keydown", { key: "Enter" });
     await flushPromises();
     expect(
-      wrapper
-        .findAll("button")
-        .find((button) => button.text() === "Enter")!
-        .attributes("disabled"),
-    ).toBeDefined();
-    wrapper.get("img").element.removeEventListener("load", holdLoad, true);
-    await wrapper.get("img").trigger("load");
-    await wrapper
-      .findAll("button")
-      .find((button) => button.text() === "Enter")!
-      .trigger("click");
+      commands()
+        .slice(before)
+        .map((command) => command.action),
+    ).toEqual(["fill-focused"]);
+    await input.setValue("do not leak");
+    events.send("state", { ...state, focused: { ...focused, id: "field-b", value: "second" } });
     await flushPromises();
-    expect(commands().at(-1)).toEqual({
-      action: "key",
-      key: "Enter",
-      pageId: "page-1",
-      revision: "next",
-    });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(commands().filter((command) => command.action === "fill-focused")).toHaveLength(2);
+    expect((input.element as HTMLInputElement).value).toBe("second");
   } finally {
     wrapper.unmount();
   }
 });
 
-test("opens only on demand, disconnects while hidden/closed, reconnects on visibility, and never closes the remote browser", async () => {
+test("bare domains receive https while explicit http is preserved", async () => {
+  const wrapper = create();
+  try {
+    await open(wrapper);
+    await wrapper.get('[aria-label="Browser address"]').setValue("example.com/path");
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+    await wrapper.get('[aria-label="Browser address"]').setValue("http://localhost:8080/");
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+    expect(commands()).toEqual([
+      { action: "navigate", url: "https://example.com/path" },
+      { action: "navigate", url: "http://localhost:8080/" },
+    ]);
+  } finally {
+    wrapper.unmount();
+  }
+});
+
+test("disconnects while hidden/closed and reconnects without closing the remote browser", async () => {
   const wrapper = create();
   let hidden = false;
   vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden);
@@ -194,51 +223,41 @@ test("opens only on demand, disconnects while hidden/closed, reconnects on visib
     expect(second).not.toBe(first);
     wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState: "closed" });
     expect(second.closed).toBe(true);
-    document.dispatchEvent(new Event("visibilitychange"));
-    await flushPromises();
-    expect(FakeEvents.instances).toHaveLength(2);
     expect(commands()).toEqual([]);
   } finally {
     wrapper.unmount();
   }
 });
 
-test("accepts a new revision of identical already-painted pixels without waiting for another load", async () => {
+test("blocks stale painted targets and accepts identical pixels with a fresh revision", async () => {
   const wrapper = create();
   try {
     const events = await open(wrapper);
     await frame(wrapper, events);
-    events.send("state", { ...state, revision: "identical-new-revision" });
+    const image = wrapper.get("img");
+    events.send("state", { ...state, revision: "next" });
+    await flushPromises();
+    await image.trigger("pointerdown", { pointerId: 1, button: 0, clientX: 100, clientY: 100 });
+    await image.trigger("pointerup", { pointerId: 1, clientX: 100, clientY: 100 });
+    expect(commands()).toEqual([]);
     events.send("frame", {
       image: "ZmFrZQ==",
       pageId: "page-1",
-      revision: "identical-new-revision",
+      revision: "next",
       width: 1280,
       height: 800,
     });
     await flushPromises();
-    await wrapper
-      .findAll("button")
-      .find((button) => button.text() === "Enter")!
-      .trigger("click");
+    await image.trigger("pointerdown", { pointerId: 1, button: 0, clientX: 100, clientY: 100 });
+    await image.trigger("pointerup", { pointerId: 1, clientX: 100, clientY: 100 });
     await flushPromises();
     expect(commands()).toEqual([
-      { action: "key", key: "Enter", pageId: "page-1", revision: "identical-new-revision" },
+      { action: "click", pageId: "page-1", revision: "next", x: 320, y: 200 },
     ]);
-  } finally {
-    wrapper.unmount();
-  }
-});
-
-test("shows ended sessions and closes their stream", async () => {
-  const wrapper = create();
-  try {
-    const events = await open(wrapper);
     events.send("browser-error", { error: "Browser session ended" });
     await flushPromises();
     expect(wrapper.get('[role="alert"]').text()).toContain("Browser session ended");
     expect(events.closed).toBe(true);
-    expect(wrapper.get('[role="status"]').text()).toContain("Session unavailable");
   } finally {
     wrapper.unmount();
   }

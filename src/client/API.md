@@ -30,9 +30,9 @@ Tool details `subagent.sessionId`, nested codemode `calls[].subagent.sessionId`,
 
 A `SiteDescriptor` with `browserId` is a private live-browser attachment, rendered by `BrowserPopover` rather than a site iframe. Its opaque ID locates a browser instance; every API request still requires Batty authentication.
 
-- `GET /api/cloud-browser/:browserId/state`: `CloudBrowserState` (active page, viewport, revision and tabs).
+- `GET /api/cloud-browser/:browserId/state`: `CloudBrowserState` (active page, viewport, revision, tabs and focused editable field).
 - `GET /api/cloud-browser/:browserId/events`: authenticated SSE `state`, `frame` (base64 JPEG + page/viewport revision) and terminal `browser-error` events. Closing the viewer stops streaming, not Chromium; background clients disconnect and reconnect when visible.
-- `POST /api/cloud-browser/:browserId/control`: allowlisted `CloudBrowserControl`; requires a matching `Origin`, returns state. Pointer/text/key commands require the displayed page and revision. Busy/stale requests return 409; expired handles return 410. Generic CDP/evaluation is unavailable.
+- `POST /api/cloud-browser/:browserId/control`: allowlisted `CloudBrowserControl`; requires a matching `Origin`, returns state. Pointer/text/key commands require the displayed page and revision. `fill-focused` also requires the focused field ID and replaces its value, including empty strings. Contextual Enter includes the same field ID so changed focus rejects submission. Viewer input preserves the revision/capture; agent actions, navigation and viewport changes invalidate it. Busy/stale requests return 409; expired handles return 410. Generic CDP/evaluation is unavailable.
 
 Types are in `shared/cloud-browser.ts`; new viewer controls must also be added to the server schema.
 

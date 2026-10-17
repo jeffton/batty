@@ -60,7 +60,9 @@ onBeforeUnmount(removeFromStack);
   >
     <header class="full-popover__header">
       <div class="full-popover__heading">
-        <div class="full-popover__title">{{ props.title }}</div>
+        <slot name="heading">
+          <div class="full-popover__title">{{ props.title }}</div>
+        </slot>
         <div v-if="props.subtitle" class="full-popover__subtitle">{{ props.subtitle }}</div>
       </div>
       <div class="full-popover__header-actions">

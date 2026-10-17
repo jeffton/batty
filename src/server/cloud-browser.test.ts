@@ -70,6 +70,36 @@ test("cloud attachment shares agent state and controls, survives detach, and can
         })
       ).text,
     ).toContain("iPhone æøå");
+    state = await service.cloudState(id);
+    const inputId = state.focused!.id;
+    await service.cloudControl(id, {
+      action: "fill-focused",
+      ...state,
+      focusId: inputId,
+      value: "",
+    });
+    expect((await service.cloudState(id)).focused!.value).toBe("");
+    await service.cloudControl(id, {
+      action: "fill-focused",
+      ...state,
+      focusId: inputId,
+      value: "iPhone æøå",
+    });
+    // A second viewer/page script may change focus without changing the agent revision.
+    const target = await service.cloudTarget(id);
+    await target.page.locator("#other").click();
+    await expect(
+      service.cloudControl(id, {
+        action: "fill-focused",
+        ...state,
+        focusId: inputId,
+        value: "wrong field",
+      }),
+    ).rejects.toThrow("focused field changed");
+    await expect(
+      service.cloudControl(id, { action: "key", ...state, focusId: inputId, key: "Enter" }),
+    ).rejects.toThrow("focused field changed");
+    await target.page.locator("#text").click();
     const beforeFocusChange = await service.cloudState(id);
     await service.execute("shared", { action: "click", selector: "#other" });
     await expect(
@@ -95,6 +125,16 @@ test("cloud attachment shares agent state and controls, survives detach, and can
       y: 300,
       deltaX: 0,
       deltaY: 300,
+    });
+    // Continuous viewer scroll does not invalidate its painted revision/restart capture.
+    expect((await service.cloudState(id)).revision).toBe(state.revision);
+    await service.cloudControl(id, {
+      action: "scroll",
+      ...state,
+      x: 200,
+      y: 300,
+      deltaX: 0,
+      deltaY: 100,
     });
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(

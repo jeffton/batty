@@ -2,6 +2,7 @@
 import { Check, Copy, ExternalLink } from "@lucide/vue";
 import { computed, onBeforeUnmount, ref } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
+import BrowserPopover from "@/client/components/BrowserPopover.vue";
 import { setSitePublic } from "@/client/lib/api";
 import type { SiteDescriptor } from "@/shared/types";
 
@@ -76,14 +77,23 @@ onBeforeUnmount(() => {
     <article v-for="site in displayedSites" :key="site.id" class="shared-sites__card">
       <div class="shared-sites__meta">
         <strong>{{ site.name }}</strong>
-        <span>{{ site.public ? "Public site" : "Private site" }}</span>
+        <span>{{
+          site.browserId ? "Cloud browser" : site.public ? "Public site" : "Private site"
+        }}</span>
       </div>
       <button type="button" class="shared-sites__open" :popovertarget="popoverId(site.id)">
         <ExternalLink :size="15" />
-        Open site
+        {{ site.browserId ? "Open browser" : "Open site" }}
       </button>
 
+      <BrowserPopover
+        v-if="site.browserId"
+        :popover-id="popoverId(site.id)"
+        :browser-id="site.browserId"
+        :title="site.name"
+      />
       <FullPopover
+        v-else
         :popover-id="popoverId(site.id)"
         :title="site.name"
         :subtitle="absoluteUrl(site.url)"

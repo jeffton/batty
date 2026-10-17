@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      import { createApp, h } from "vue";
+      import SharedSitesList from "./SharedSitesList.vue";
+      import "../styles.css";
+      createApp({
+        render: () =>
+          h(SharedSitesList, {
+            sites: [
+              { id: "cloud", name: "Shared browser", browserId: "opaque", url: "/", public: false },
+              { id: "ordinary", name: "Ordinary site", url: "https://example.org", public: false },
+            ],
+          }),
+      }).mount("#app");
+    </script>
+  </body>
+</html>

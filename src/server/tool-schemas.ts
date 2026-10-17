@@ -46,6 +46,7 @@ export const BrowserToolSchema = Type.Object(
     action: StringEnum(
       [
         "open",
+        "attach",
         "pages",
         "switch",
         "close-page",
@@ -77,6 +78,12 @@ export const BrowserToolSchema = Type.Object(
     ),
     newPage: Type.Optional(
       Type.Boolean({ description: "Open the URL in a new page and make it active." }),
+    ),
+    cloud: Type.Optional(
+      Type.Boolean({
+        description:
+          "Enable shared interactive VPS access to this browser. Use action=attach to send a native browser button. Existing headless behavior is the default.",
+      }),
     ),
     useTailscale: Type.Optional(
       Type.Boolean({

@@ -32,6 +32,8 @@ export interface SentFileDescriptor {
 }
 
 export interface SiteDescriptor {
+  /** Private live-browser handle, rendered without an iframe or publication controls. */
+  browserId?: string;
   id: string;
   name: string;
   url: string;

@@ -36,6 +36,14 @@ Settings use `/api/settings/mcp`; connection status and actions use `/api/mcp`. 
 
 Detached browser instances and tabs survive Batty restarts. Every conversation's browser expires after **60 minutes without browser activity**, including main and interrupted workers. Active and queued browser calls are protected during cleanup. Expiry runs at startup and each minute without resetting the persisted inactivity clock. Explicit stop closes the matching worker browser. After expiry, `browser open` starts a new instance.
 
+### Shared cloud browser
+
+`browser({action: "open", url: "https://example.com", cloud: true})` enables interactive VPS access; `browser({action: "attach"})` attaches a private live-browser button. It opens a popover, not a local browser session or a copy of cookies. Agent and human share the same Chromium pages, login and live state. Existing tool calls stay headless by default. A new cloud browser uses a 390 × 640 viewport unless specified; an existing browser keeps its viewport.
+
+The popover supports tabs, navigation, tap, swipe scrolling, drag mode, text insertion and common keys. Viewing counts as browser activity. Closing/backgrounding the viewer disconnects streaming without closing Chromium. `action: "close"` or idle expiry permanently invalidates its handles. Attachments survive service restarts and can be explicitly forwarded like sites.
+
+JPEG screencasting uses CDP internally and authenticated SSE through Batty, with one producer per session and dropped frames for slow viewers. Controls are same-origin, allowlisted HTTP commands serialized with agent actions; busy operations and stale-view input are rejected. No desktop, extra public port, iframe capability link or public-sharing option is exposed. Local iPhone passkeys, clipboard and file pickers are not forwarded.
+
 ## Offline reading
 
 The main thread opens from an authentication-scoped IndexedDB cache before network requests. It fills at least the latest 24 hours, retaining up to seven days within a 32 MiB soft budget, and reports an error rather than exceeding 128 MiB or dropping the latest day. Quota failures preserve the previous complete cache. Logout invalidates cached reading across tabs. Worker sessions are excluded, but their main-thread notices remain.

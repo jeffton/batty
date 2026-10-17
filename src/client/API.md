@@ -26,6 +26,16 @@ The authenticated root route contains one main chat. Workspace listings never se
 
 Tool details `subagent.sessionId`, nested codemode `calls[].subagent.sessionId`, and custom-message `data.subagent.sessionId` / `data.cron.sessionId` identify transcripts. Cron log entries expose `sessionId` when a transcript exists. Worker popovers have no composer. Their header offers Stop while the session is active; `POST /api/sessions/:sessionId/stop` aborts the worker’s current delivery chain and queued tail.
 
+## Shared cloud browser
+
+A `SiteDescriptor` with `browserId` is a private live-browser attachment, rendered by `BrowserPopover` rather than a site iframe. Its opaque ID locates a browser instance; every API request still requires Batty authentication.
+
+- `GET /api/cloud-browser/:browserId/state`: `CloudBrowserState` (active page, viewport, revision and tabs).
+- `GET /api/cloud-browser/:browserId/events`: authenticated SSE `state`, `frame` (base64 JPEG + page/viewport revision) and terminal `browser-error` events. Closing the viewer stops streaming, not Chromium; background clients disconnect and reconnect when visible.
+- `POST /api/cloud-browser/:browserId/control`: allowlisted `CloudBrowserControl`; requires a matching `Origin`, returns state. Pointer/text/key commands require the displayed page and revision. Busy/stale requests return 409; expired handles return 410. Generic CDP/evaluation is unavailable.
+
+Types are in `shared/cloud-browser.ts`; new viewer controls must also be added to the server schema.
+
 ## Existing settings/auth APIs
 
 Existing shapes are consumed for models, provider usage, passkey auth, logout, provider auth, appearance/default model, Brave Search, environment variables, AGENTS.md, MCP settings/auth/status, and site visibility. Exact routes and request bodies are in `lib/api.ts`. MCP settings and connections are global, shared by all workspaces.

@@ -28,6 +28,7 @@ import { appBasePath, renderAppShell } from "./app-shell";
 import { registerBrowserErrorRoutes } from "./browser-errors";
 import { registerCronRoutes } from "./routes/cron";
 import { registerSiteRoutes } from "./routes/sites";
+import { registerCloudBrowserRoutes } from "./routes/cloud-browser";
 import { registerMcpRoutes } from "./routes/mcp";
 import { registerMemoryTreeRoutes } from "./routes/memory-tree";
 import { Runtime, context } from "./runtime";
@@ -111,6 +112,11 @@ registerAuthRoutes(routeContext);
 registerBrowserErrorRoutes(app, path.join(stateDirPath(config.battyDir), "browser-errors.json"));
 registerCronRoutes(app, runtime.orchestration);
 registerSiteRoutes(routeContext);
+const closeCloudBrowsers = registerCloudBrowserRoutes(
+  app,
+  runtime.tools.browserService,
+  config.baseUrl,
+);
 registerMcpRoutes({ ...routeContext, mcp: runtime.tools.mcp });
 registerMemoryTreeRoutes(app, runtime.memory);
 app.get("/api/push/public-key", async () => ({ publicKey: webPush.getPublicKey() }));
@@ -487,6 +493,7 @@ async function shutdown() {
   closing = true;
   // Close the harness first: checkpoint work, do not drain or cancel admitted runs.
   stopPushCompletions();
+  await closeCloudBrowsers();
   await runtime.close();
   closeEventStreams();
   await app.close();

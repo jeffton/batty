@@ -154,6 +154,7 @@ export async function connectPersistentBrowser(
     "--disable-quic",
     "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
     "--window-size=1365,768",
+    "--force-device-scale-factor=3",
     "--remote-debugging-address=127.0.0.1",
     "--remote-debugging-port=0",
     `--user-data-dir=${profile}`,

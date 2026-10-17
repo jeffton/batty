@@ -1033,12 +1033,6 @@ export class BrowserService {
         angle: viewport.width > viewport.height ? 90 : 0,
       },
     });
-    // Headless Chromium's screencast captures the native surface, not the emulated
-    // JS DPR. Size that surface explicitly while keeping the CSS viewport above.
-    await connection.send("Emulation.setVisibleSize", {
-      width: Math.ceil(viewport.width * (viewport.deviceScaleFactor ?? 1)),
-      height: Math.ceil(viewport.height * (viewport.deviceScaleFactor ?? 1)),
-    });
     await connection.send("Emulation.setTouchEmulationEnabled", {
       enabled: viewport.mobile,
       maxTouchPoints: 1,

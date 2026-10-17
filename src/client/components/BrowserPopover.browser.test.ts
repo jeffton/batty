@@ -45,6 +45,14 @@ beforeAll(async () => {
       <a id="popup" target="_blank" href="/popup">Open popup</a>
     </body></html>`),
   );
+  backend.get("/coverage", (_request, reply) =>
+    reply.type("text/html").send(`<!doctype html>
+    <meta name="viewport" content="width=device-width"><title>Full viewport coverage</title>
+    <style>html,body{margin:0}body{height:3000px}#coverage{position:fixed;inset:0;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;pointer-events:none}#coverage div:nth-child(1){background:red}#coverage div:nth-child(2){background:lime}#coverage div:nth-child(3){background:blue}#coverage div:nth-child(4){background:yellow}#edge{position:fixed;left:80vw;top:80vh;width:15vw;height:10vh}#pane{position:fixed;left:5vw;top:35vh;width:35vw;height:20vh;overflow:auto;background:#ccc;overscroll-behavior:contain}</style>
+    <div id="coverage"><div></div><div></div><div></div><div></div></div>
+    <div id="pane"><div style="height:1000px">Inner scrolling</div></div>
+    <button id="edge" onclick="document.body.dataset.clicks=String(Number(document.body.dataset.clicks||0)+1)">Edge click</button>`),
+  );
   backend.get("/popup", (_request, reply) =>
     reply.type("text/html").send("<title>Popup target</title><p>Popup</p>"),
   );
@@ -380,5 +388,98 @@ test("desktop/mobile switching keeps login, CSS screen matches the viewer, and n
   } finally {
     await desktop.close();
     await mobile.close();
+  }
+}, 60_000);
+
+test("DPR3 binary frames fill the actual popover, retain edge input alignment and rotate without padded quadrants", async () => {
+  await service.execute("integration", {
+    action: "open",
+    url: `${backendUrl}/coverage`,
+    cloud: true,
+  });
+  attachedBrowserId = (await service.execute("integration", { action: "attach" })).details
+    .sites![0]!.browserId!;
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 3,
+    isMobile: true,
+    hasTouch: true,
+  });
+  await context.addCookies([
+    { name: "cloud-auth", value: "test", url: server.resolvedUrls!.local[0]! },
+  ]);
+  const page = await context.newPage();
+  try {
+    await page.goto(url);
+    await page.getByRole("button", { name: "Open browser", exact: true }).click();
+    const canvas = page.locator(".cloud-browser__image");
+    const colors = () =>
+      canvas.evaluate((element: HTMLCanvasElement) => {
+        const context = element.getContext("2d")!;
+        return [
+          [0.1, 0.1],
+          [0.9, 0.1],
+          [0.1, 0.95],
+          [0.9, 0.95],
+        ].map(([x, y]) =>
+          [
+            ...context.getImageData(
+              Math.floor(element.width * x!),
+              Math.floor(element.height * y!),
+              1,
+              1,
+            ).data,
+          ]
+            .slice(0, 3)
+            .map((value) => value > 230),
+        );
+      });
+    const expected = [
+      [true, false, false],
+      [false, true, false],
+      [false, false, true],
+      [true, true, false],
+    ];
+    await expect.poll(() => canvas.getAttribute("data-frame")).not.toBeNull();
+    const original = await service.cloudTarget(attachedBrowserId);
+    await expect.poll(() => canvas.getAttribute("data-revision")).toBe(original.state.revision);
+    await page.screenshot({ path: "/tmp/cloud-coverage-portrait.png" });
+    // A large bitmap is insufficient: all four viewport corners must contain the page.
+    await expect.poll(colors).toEqual(expected);
+    expect(
+      await canvas.evaluate((element: HTMLCanvasElement) => [element.width, element.height]),
+    ).toEqual([original.state.width * 3, original.state.height * 3]);
+    await tapRemote(page, original.state.width * 0.875, original.state.height * 0.85);
+    await expect.poll(() => inspect("document.body.dataset.clicks")).toBe("1");
+    await swipe(page, original.state.width * 0.2, original.state.height * 0.45, 80);
+    await expect
+      .poll(() => inspect("document.querySelector('#pane').scrollTop"))
+      .toBeGreaterThan(60);
+    expect(await inspect("scrollY")).toBe(0);
+    await expect.poll(colors).toEqual(expected);
+    await swipe(page, original.state.width * 0.7, original.state.height * 0.65, 120);
+    await expect.poll(() => inspect("scrollY")).toBeGreaterThan(90);
+    await expect.poll(colors).toEqual(expected);
+    await service.execute("integration", { action: "click", selector: "#edge" });
+    await expect.poll(() => inspect("document.body.dataset.clicks")).toBe("2");
+    await page.setViewportSize({ width: 844, height: 390 });
+    await expect
+      .poll(async () => (await service.cloudState(attachedBrowserId)).width)
+      .toBeGreaterThan(750);
+    const rotated = await service.cloudState(attachedBrowserId);
+    await expect.poll(() => canvas.getAttribute("data-revision")).toBe(rotated.revision);
+    await expect.poll(colors).toEqual(expected);
+    await tapRemote(page, rotated.width * 0.875, rotated.height * 0.85);
+    await expect.poll(() => inspect("document.body.dataset.clicks")).toBe("3");
+    expect((await service.cloudTarget(attachedBrowserId)).page).toBe(original.page);
+    expect(await inspect("[innerWidth,innerHeight,devicePixelRatio]")).toEqual([
+      rotated.width,
+      rotated.height,
+      3,
+    ]);
+    await page.screenshot({ path: "/tmp/cloud-coverage-landscape.png" });
+    await page.getByRole("button", { name: "Close popover" }).click();
+  } finally {
+    await context.close();
   }
 }, 60_000);

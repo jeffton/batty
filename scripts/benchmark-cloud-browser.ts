@@ -19,7 +19,7 @@ const service = new BrowserService(undefined, 4, root);
 const backend = fastify();
 backend.get("/target", (_request, reply) =>
   reply.type("text/html").send(`<!doctype html>
-<meta name="viewport" content="width=device-width"><style>body{margin:0;font:16px Arial;line-height:1.5}p{padding:8px;margin:0;border-bottom:1px solid #ccc}#mark{position:fixed;top:0;left:0;width:24px;height:24px;z-index:3;background:rgb(16,16,16)}</style>
+<meta name="viewport" content="width=device-width"><style>body{margin:0;font:16px Arial;line-height:1.5;background:#f2f5f8}p{padding:8px;margin:0;border-bottom:1px solid #ccc}#mark{position:fixed;top:0;left:0;width:24px;height:24px;z-index:3;background:rgb(16,16,16)}</style>
 <div id="mark"></div>${Array.from({ length: 600 }, (_, i) => `<p>Row ${i}: Crisp browser text — æøå 0123456789</p>`).join("")}
 <script>window.n=0;onscroll=()=>{const n=++window.n;document.documentElement.dataset.mark=String(n);document.documentElement.dataset.firstScrollAt ||= String(Date.now());document.querySelector('#mark').style.background='rgb('+[n%8,Math.floor(n/8)%8,Math.floor(n/64)%8].map(x=>16+x*32).join(',')+')'}</script>`),
 );
@@ -171,6 +171,23 @@ try {
   await page.waitForFunction(
     () => JSON.parse(document.documentElement.dataset.bench ?? '{"records":[]}').records.length > 0,
   );
+  const verifyCoverage = async () => {
+    const covered = await image.evaluate((element) => {
+      const canvas =
+        element instanceof HTMLCanvasElement ? element : document.createElement("canvas");
+      if (element instanceof HTMLImageElement) {
+        canvas.width = element.naturalWidth;
+        canvas.height = element.naturalHeight;
+        canvas.getContext("2d")!.drawImage(element, 0, 0);
+      }
+      const pixel = canvas
+        .getContext("2d")!
+        .getImageData(canvas.width - 3, canvas.height - 3, 1, 1).data;
+      return [...pixel].slice(0, 3).some((value) => value < 250);
+    });
+    if (!covered) throw new Error("Page does not cover the bottom-right viewport corner.");
+  };
+  await verifyCoverage();
   const dimensions = await image.evaluate((e) => ({
     css: [e.clientWidth, e.clientHeight],
     pixels:
@@ -243,6 +260,7 @@ try {
     },
     { started, ended, finalMark, initialWidth: dimensions.pixels[0] },
   );
+  await verifyCoverage();
   const finalScroll = await target.page.evaluate(() => scrollY);
   if (Math.abs(finalScroll - 720) > 1)
     throw new Error(`Gesture distance changed: expected 720 CSS pixels, got ${finalScroll}`);

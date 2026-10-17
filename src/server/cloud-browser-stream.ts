@@ -40,10 +40,10 @@ export class CloudBrowserStreams {
       let lastFrameAt = 0;
       let latestFrame: CloudBrowserFrame | undefined;
       let frameTimer: ReturnType<typeof setTimeout> | undefined;
+      let previousSignal: string | undefined;
       let idleTimer: ReturnType<typeof setTimeout> | undefined;
-      let motionTimer: ReturnType<typeof setTimeout> | undefined;
       let moving = false;
-      let captureMode: boolean | undefined;
+      let activeMode: boolean | undefined;
       let captureQueue = Promise.resolve();
       const broadcast = (event: Parameters<Subscriber>[0], value: unknown) => {
         for (const listener of subscribers) listener(event, value);
@@ -64,35 +64,6 @@ export class CloudBrowserStreams {
         latestFrame = undefined;
         lastFrameAt = 0;
       };
-      const capture = (connection: CDPSession, next: Target) => {
-        captureQueue = captureQueue.then(async () => {
-          if (stopped || cdp !== connection || captureMode === moving) return;
-          const mode = moving;
-          if (captureMode !== undefined) {
-            await connection.send("Page.stopScreencast");
-            if (stopped || cdp !== connection) return;
-          }
-          // Discard a throttled low-resolution paint before requesting the final sharp paint.
-          clearPaint();
-          const density = mode
-            ? Math.min(2, next.state.deviceScaleFactor)
-            : next.state.deviceScaleFactor;
-          await connection.send("Emulation.setVisibleSize", {
-            width: Math.ceil(next.state.width * density),
-            height: Math.ceil(next.state.height * density),
-          });
-          await connection.send("Page.startScreencast", {
-            format: "jpeg",
-            quality: mode ? 80 : 85,
-            maxWidth: Math.ceil(next.state.width * density),
-            maxHeight: Math.ceil(next.state.height * density),
-            everyNthFrame: 1,
-          });
-          if (stopped || cdp !== connection) return;
-          captureMode = mode;
-        });
-        return captureQueue;
-      };
       const fail = (error: unknown) => {
         if (stopped) return;
         const statusCode = (error as { statusCode?: number }).statusCode;
@@ -108,14 +79,42 @@ export class CloudBrowserStreams {
         });
         void stream!.stop();
       };
+      const configure = (connection: CDPSession, next: Target) => {
+        captureQueue = captureQueue.then(async () => {
+          if (stopped || cdp !== connection || activeMode === moving) return;
+          const mode = moving;
+          if (activeMode !== undefined) {
+            await connection.send("Page.stopScreencast");
+            if (stopped || cdp !== connection) return;
+          }
+          clearPaint();
+          previousSignal = undefined;
+          const density = mode
+            ? Math.min(2, next.state.deviceScaleFactor)
+            : next.state.deviceScaleFactor;
+          // Native compositor capture, never Page.captureScreenshot or a surface
+          // resize. Limits downsample the real raster; they never upscale 1x
+          // browsers launched before native high-density rendering was enabled.
+          await connection.send("Page.startScreencast", {
+            format: "jpeg",
+            quality: mode ? 80 : 85,
+            maxWidth: Math.ceil(next.state.width * density),
+            maxHeight: Math.ceil(next.state.height * density),
+            everyNthFrame: 1,
+          });
+          if (!stopped && cdp === connection) activeMode = mode;
+        });
+        return captureQueue;
+      };
       const updateCapture = () => {
-        if (cdp && target && !stopped) void capture(cdp, target).catch(fail);
+        if (!stopped && cdp && target) void configure(cdp, target).catch(fail);
       };
       const detach = async () => {
         clearPaint();
         const previous = cdp;
         cdp = undefined;
-        captureMode = undefined;
+        activeMode = undefined;
+        previousSignal = undefined;
         if (previous) {
           // A closed target has already stopped producing frames.
           await previous.send("Page.stopScreencast").catch(() => {});
@@ -145,8 +144,14 @@ export class CloudBrowserStreams {
             .send("Page.screencastFrameAck", { sessionId: event.sessionId })
             .catch(() => {});
           if (stopped || connection !== cdp) return;
-          // Bind pixels to the revision at screencast startup, never label an old
-          // paint with a later agent interaction. A revision change restarts capture.
+          // Never label pixels from a different compositor surface as this view.
+          if (
+            event.metadata.deviceWidth !== next.state.width ||
+            event.metadata.deviceHeight !== next.state.height
+          )
+            return;
+          if (event.data === previousSignal) return;
+          previousSignal = event.data;
           const { pageId, revision, width, height } = next.state;
           latestFrame = { image: event.data, pageId, revision, width, height };
           if (frameTimer) return;
@@ -154,7 +159,7 @@ export class CloudBrowserStreams {
           if (delay <= 0) flushFrame();
           else frameTimer = setTimeout(flushFrame, delay);
         });
-        await capture(connection, next);
+        await configure(connection, next);
       };
       const timer = setInterval(() => {
         if (pending || stopped) return;
@@ -171,16 +176,9 @@ export class CloudBrowserStreams {
         subscribers,
         scrolling: () => {
           if (stopped) return;
-          if (!moving && !motionTimer) {
-            // Let the first input paint through the existing capture before
-            // reconfiguring it; restarting immediately captures pre-scroll pixels.
-            motionTimer = setTimeout(() => {
-              motionTimer = undefined;
-              if (stopped) return;
-              moving = true;
-              updateCapture();
-            }, 60);
-            motionTimer.unref();
+          if (!moving) {
+            moving = true;
+            updateCapture();
           }
           if (idleTimer) clearTimeout(idleTimer);
           idleTimer = setTimeout(() => {
@@ -195,8 +193,6 @@ export class CloudBrowserStreams {
           if (stopped) return;
           stopped = true;
           clearInterval(timer);
-          if (motionTimer) clearTimeout(motionTimer);
-          motionTimer = undefined;
           if (idleTimer) clearTimeout(idleTimer);
           idleTimer = undefined;
           this.streams.delete(id);

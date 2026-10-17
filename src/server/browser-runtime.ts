@@ -13,6 +13,7 @@ async function launchBrowser(): Promise<Browser> {
       "--disable-quic",
       "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
       "--window-size=1365,768",
+      "--force-device-scale-factor=3",
     ],
   });
 

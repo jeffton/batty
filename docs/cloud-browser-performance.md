@@ -1,28 +1,26 @@
 # Cloud browser rendering
 
-The CSS viewport stays mobile-sized; capture uses a separate physical surface at the viewer’s DPR (up to 3). Headless Chromium requires `Emulation.setVisibleSize` in addition to device-metrics emulation: changing JavaScript DPR alone leaves screencast bitmaps at 1×.
+Chromium launches with native device scale factor 3. CDP device metrics set the page’s CSS viewport, mobile layout and requested DPR independently. Native compositor capture supplies real high-density pixels; `setVisibleSize` is not used because enlarging that surface pads the page rather than rendering it at Retina density. Existing Chromium processes retain their launch settings and live state until closed.
 
-Frames travel as binary JPEG over an authenticated, same-origin WebSocket. There are at most two unacknowledged frames and one replaceable latest frame per viewer. The client decodes one bitmap at a time and paints atomically on animation frames; discarded frames release their credits. It never predicts or locally pans remote content.
+CDP screencast JPEG frames travel directly over an authenticated, same-origin binary WebSocket. Capture does not run through the agent/input queue or trigger screenshots. Each viewer retains at most two unacknowledged frames and one replaceable latest paint. The client decodes one bitmap at a time and paints atomically; discarded frames release their credits. It never predicts or locally pans remote content.
 
-Continuous scrolling sends coalesced CSS deltas without HTTP round-trip gating. Anchor groups stay separate; an explicit drain fence prevents a subsequent HTTP click from overtaking scroll input. During sustained movement, capture uses at most 2× density/JPEG80. After 150 ms idle it requests full density/JPEG85. Resolution changes preserve the same page, login and click-coordinate system.
+Scrolling sends coalesced CSS deltas without HTTP round-trip gating. Anchor groups stay separate; a drain fence prevents a later click from overtaking scroll input. Screencast limits downsample to at most 2× density/JPEG80 during motion; after 150 ms idle, capture returns to the requested density/JPEG85. These limits do not upscale lower-density source pixels. Resolution changes preserve the page, login and CSS-coordinate input system.
 
-## Measurement
+## Verification
 
-Run `pnpm exec tsx scripts/benchmark-cloud-browser.ts`. The benchmark uses a real remote Chromium page, native touch input in an emulated 390×844/DPR3 viewer, a TCP relay with 60 ms RTT and 20 Mbit/s downstream, and a three-second drag after initial frames settle. A color marker in the remote page identifies actual presented paints. It reports cadence, transport bytes, first response, final paint and full-resolution refinement separately.
+A large bitmap alone does not prove correct rendering. The binary-popover regression test checks page colors in all four viewport corners, edge clicks, nested scrolling, outer scrolling and rotation at DPR3. A 358×757 CSS viewport produces 1074×2271 pixels at rest and 716×1514 during motion, with the page filling the image.
 
-Median of three runs against `06490c4` and the binary/retina pipeline:
+Run `pnpm exec tsx scripts/benchmark-cloud-browser.ts` for repeatable performance measurements. It uses a real remote Chromium page, native touch input in an emulated 390×844/DPR3 viewer, a TCP relay with 60 ms RTT and 20 Mbit/s downstream, and a three-second drag. A remote color marker identifies presented paints. The benchmark rejects padded images and reports cadence, bytes, first response, final paint and full-resolution refinement separately.
 
-| Measurement                       |    `06490c4` | Binary/retina |
-| --------------------------------- | -----------: | ------------: |
-| Presented changed frames/s        |          9.1 |          15.1 |
-| 95th-percentile frame gap         |       124 ms |        100 ms |
-| First changed paint               |       199 ms |        273 ms |
-| Final changed paint after release |       229 ms |        197 ms |
-| Full-density final refinement     | 229 ms at 1× |  431 ms at 3× |
-| Transport bytes per gesture       |      3.32 MB |       3.19 MB |
+A measured run presented 38 distinct motion frames in three seconds (12.77 fps), with a 98 ms p95 frame gap, 367 ms first motion paint, 539 ms final native-density paint after lift and 5.83 MB transferred. The final raster was 1074×2271 and scrolling moved exactly 720 CSS pixels. PNG delivered 6.38 fps and used 8.74 MB under the same setup; JPEG is retained. Frame gaps are not input-to-visible latency measurements.
 
-Higher density improves sharpness and steady-motion cadence; the first changed paint remains slower in this software-rendered benchmark. Full-density refinement is deliberately separate from motion feedback.
+These tests emulate mobile Chromium, not a physical iPhone. Browser composition and network conditions affect performance.
 
-This measures emulated mobile Chromium, not a physical iPhone. Capture/encoding, browser decode/composition and link conditions affect the result. The raster is 1074×2271 for a 358×757 CSS viewport at rest, and 716×1514 during motion; rotation is covered by the live browser fixture.
+## Design references
+
+- [Chromium compositor capture](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/content/browser/devtools/protocol/page_handler.cc): screencast limits downsample the actual compositor surface; they cannot create Retina detail.
+- [Cua native capture](https://github.com/trycua/cua/blob/main/libs/cua-spacesd/crates/cua-spacesd-desktop/src/linux_stream.rs): damage-driven capture separate from input.
+- [Selkies](https://github.com/selkies-project/selkies): independent capture/encoding and bounded-latency streaming; WebRTC is not a prerequisite for interactive video.
+- [OpenAI computer-use example](https://github.com/openai/openai-cua-sample-app/blob/main/python-app/app/browser.py): discrete screenshots serve agent observations, not a continuous interactive video loop.
 
 See [runtime](runtime.md#shared-cloud-browser) and [client API](../src/client/API.md#shared-cloud-browser) for authentication and lifecycle details.

@@ -199,18 +199,21 @@ describe("main mutation snapshots", () => {
 });
 
 describe("stream recovery", () => {
-  it("clears a recovered version-check error without clearing unrelated errors", async () => {
+  it.each([
+    new Error("Version check failed: 502"),
+    new DOMException("The operation timed out", "TimeoutError"),
+    new TypeError("Failed to fetch"),
+    new Error("App shell check failed: 503"),
+  ])("keeps background update failures out of the banner: %s", async (error) => {
     const check = vi.spyOn(updates, "checkAppUpdate");
     const store = useAppStore();
-    check.mockRejectedValueOnce(new Error("Version check failed: 502"));
-    await store.checkForUpdates();
-    expect(store.lastError).toBe("Error: Version check failed: 502");
-    check.mockResolvedValueOnce();
+    check.mockRejectedValueOnce(error);
     await store.checkForUpdates();
     expect(store.lastError).toBeUndefined();
-    check.mockRejectedValueOnce(new Error("Version check failed: 502"));
-    await store.checkForUpdates();
     store.lastError = "Upload failed";
+    check.mockRejectedValueOnce(error);
+    await store.checkForUpdates();
+    expect(store.lastError).toBe("Upload failed");
     check.mockResolvedValueOnce();
     await store.checkForUpdates();
     expect(store.lastError).toBe("Upload failed");

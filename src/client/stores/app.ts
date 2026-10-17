@@ -33,7 +33,6 @@ let connection: ReturnType<typeof createSessionConnection> | undefined;
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 let expandedHistory = false;
 let uploads = 0;
-let updateError: string | undefined;
 let bootstrapping: Promise<void> | undefined;
 blockAppReload(() => uploads > 0);
 export const useAppStore = defineStore("app", {
@@ -209,14 +208,12 @@ export const useAppStore = defineStore("app", {
     async checkForUpdates() {
       try {
         await checkAppUpdate();
-        if (updateError && this.lastError === updateError) this.lastError = undefined;
-        updateError = undefined;
-        // Resume may have attempted bootstrap while the backend was restarting.
-        if (this.bootstrapFailed) await this.recoverConnection();
-      } catch (error) {
-        updateError = String(error);
-        this.lastError = updateError;
+      } catch {
+        // Background update failures are recorded by fetch diagnostics, not the chat banner.
+        return;
       }
+      // Resume may have attempted bootstrap while the backend was restarting.
+      if (this.bootstrapFailed) await this.recoverConnection();
     },
     openStream() {
       this.closeStream();

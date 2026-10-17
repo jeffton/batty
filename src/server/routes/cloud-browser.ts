@@ -51,7 +51,6 @@ export function registerCloudBrowserRoutes(
   baseUrl: string,
 ): () => Promise<void> {
   const streams = new CloudBrowserStreams(browser);
-  const origin = new URL(baseUrl).origin;
   const prefix = "/api/cloud-browser/:browserId";
   app.get<{ Params: { browserId: string } }>(`${prefix}/state`, async (request) =>
     browser.cloudState(request.params.browserId),
@@ -69,6 +68,7 @@ export function registerCloudBrowserRoutes(
     },
     async (request, reply) => {
       // Credentials alone must not let another site drive a logged-in browser.
+      const origin = new URL(baseUrl, `${request.protocol}://${request.host}`).origin;
       if (request.headers.origin !== origin)
         return reply.code(403).send({ error: "Same-origin browser control required." });
       return browser.cloudControl(request.params.browserId, request.body);

@@ -9,6 +9,7 @@ pnpm check
 pnpm test:all
 bash scripts/deploy.test.sh
 pnpm build
+node scripts/verify-startup.mjs
 node scripts/verify-offline.mjs
 ```
 

@@ -51,8 +51,11 @@ pnpm test:all
 bash scripts/deploy.test.sh  # Shared deployment lifecycle checks
 bash scripts/deploy-macos.test.sh  # launchd activation checks, on macOS
 pnpm build
+node scripts/verify-startup.mjs
 node scripts/verify-offline.mjs
 ```
+
+The startup smoke check launches the packaged server with isolated runtime data at root and prefixed base paths. It verifies health/build ID, the rendered public base, authentication and HTTPS-origin browser controls without accessing installation data or model providers.
 
 The pre-push offline verification script exercises the production build's offline reload, private image previews and incremental reconnect against local fixtures. It is a browser regression gate, not an installation health check. Client API details are in [src/client/API.md](../src/client/API.md).
 

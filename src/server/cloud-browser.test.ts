@@ -262,6 +262,33 @@ test("cloud routes require auth, same-origin control and bounded allowlisted com
   }
 }, 30_000);
 
+test("relative app base paths derive the control origin from the trusted HTTPS request", async () => {
+  const app = fastify({ trustProxy: ["127.0.0.1"] });
+  const closeStreams = registerCloudBrowserRoutes(
+    app,
+    {
+      cloudControl: async () => ({ ok: true }),
+    } as unknown as BrowserService,
+    "/",
+  );
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/cloud-browser/test/control",
+      payload: { action: "reload" },
+      headers: {
+        host: "batty.example",
+        "x-forwarded-proto": "https",
+        origin: "https://batty.example",
+      },
+    });
+    expect(response.statusCode).toBe(200);
+  } finally {
+    await closeStreams();
+    await app.close();
+  }
+});
+
 test("screencast throttling delivers the latest final paint even without subsequent animation", async () => {
   const connection = new EventEmitter() as EventEmitter & {
     send: () => Promise<void>;

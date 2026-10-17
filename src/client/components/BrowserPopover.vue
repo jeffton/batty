@@ -7,6 +7,7 @@ import type {
   CloudBrowserFrame as BrowserFrame,
 } from "@/shared/cloud-browser";
 
+type RemoteFrame = Omit<BrowserFrame, "image"> & { frameId: number };
 type Point = { x: number; y: number };
 type Gesture = {
   pointerId: number;
@@ -15,15 +16,19 @@ type Gesture = {
   lastX: number;
   lastY: number;
   moved: boolean;
-  frame: BrowserFrame;
+  frame: RemoteFrame;
   rect: DOMRect;
   anchor: Point;
 };
 const props = defineProps<{ popoverId: string; browserId: string; title: string }>();
 const state = ref<BrowserState>();
-const incomingFrame = ref<BrowserFrame>();
-const displayedFrame = ref<BrowserFrame>();
-const image = ref<HTMLImageElement>();
+const displayedFrame = ref<RemoteFrame>();
+const image = ref<HTMLCanvasElement>();
+let pendingFrame:
+  | { frame: RemoteFrame; jpeg: Blob; socket: WebSocket; generation: number }
+  | undefined;
+let painting = false;
+const hasFrame = ref(false);
 const viewport = ref<HTMLElement>();
 const editor = ref<HTMLInputElement | HTMLTextAreaElement>();
 const address = ref("");
@@ -39,22 +44,30 @@ const ended = ref(false);
 const open = ref(false);
 const dismissedFocus = ref("");
 const viewStyle = ref<Record<string, string>>({});
-let stream: EventSource | undefined;
+let stream: WebSocket | undefined;
 let controller: AbortController | undefined;
 let generation = 0;
 let gesture: Gesture | undefined;
 let resizeObserver: ResizeObserver | undefined;
 let resizeTimer: ReturnType<typeof setTimeout> | undefined;
 let inputTimer: ReturnType<typeof setTimeout> | undefined;
-let scrollPending:
-  | (Point & { deltaX: number; deltaY: number; pageId: string; revision: string })
+const scrollPending: Array<
+  Point & { deltaX: number; deltaY: number; pageId: string; revision: string }
+> = [];
+let scrollDirty = false;
+let nextFenceId = 1;
+let scrollFence:
+  | {
+      id: number;
+      promise: Promise<void>;
+      resolve: () => void;
+      reject: (error: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
   | undefined;
-let scrolling = false;
+let scrollAnimation: number | undefined;
 let queue: Promise<unknown> = Promise.resolve();
 const endpoint = computed(() => `/api/cloud-browser/${encodeURIComponent(props.browserId)}`);
-const imageSource = computed(() =>
-  incomingFrame.value ? `data:image/jpeg;base64,${incomingFrame.value.image}` : undefined,
-);
 const ready = computed(() => !ended.value && !!state.value);
 const frameReady = computed(
   () =>
@@ -107,7 +120,16 @@ function stopViewing(): void {
   controller?.abort();
   controller = undefined;
   gesture = undefined;
-  scrollPending = undefined;
+  scrollPending.length = 0;
+  scrollDirty = false;
+  if (scrollFence) {
+    clearTimeout(scrollFence.timer);
+    scrollFence.reject(new Error("Browser view disconnected"));
+    scrollFence = undefined;
+  }
+  pendingFrame = undefined;
+  if (scrollAnimation !== undefined) cancelAnimationFrame(scrollAnimation);
+  scrollAnimation = undefined;
   clearTimeout(inputTimer);
   inputTimer = undefined;
   clearTimeout(resizeTimer);
@@ -138,7 +160,7 @@ async function startViewing(): Promise<void> {
   error.value = "";
   connection.value = "Connecting…";
   if (!reconnecting.value) {
-    incomingFrame.value = undefined;
+    hasFrame.value = false;
     displayedFrame.value = undefined;
     state.value = undefined;
   }
@@ -148,42 +170,52 @@ async function startViewing(): Promise<void> {
     updateState(initial);
     await fitViewport();
     if (current !== generation) return;
-    const events = new EventSource(withBaseUrl(`${endpoint.value}/events`));
-    stream = events;
-    events.onopen = () => {
-      connection.value = "Live";
-    };
-    events.onerror = () => {
+    const url = new URL(withBaseUrl(`${endpoint.value}/socket`), window.location.href);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    const socket = new WebSocket(url);
+    socket.binaryType = "arraybuffer";
+    stream = socket;
+    socket.onclose = () => {
       if (current === generation) scheduleReconnect();
     };
-    events.addEventListener("state", (event) => {
-      if (current === generation) updateState(JSON.parse((event as MessageEvent).data));
-    });
-    events.addEventListener("frame", (event) => {
+    socket.onmessage = (event: MessageEvent<string | ArrayBuffer>) => {
       if (current !== generation) return;
-      const next = JSON.parse((event as MessageEvent).data) as BrowserFrame;
-      reconnecting.value = false;
-      reconnectAttempt = 0;
-      connection.value = "Live";
-      if (next.image === displayedFrame.value?.image) displayedFrame.value = next;
-      incomingFrame.value = next;
-    });
-    events.addEventListener("browser-error", (event) => {
-      if (current !== generation) return;
-      const failure = JSON.parse((event as MessageEvent).data) as {
-        error: string;
-        retryable: boolean;
-        statusCode?: number;
-      };
-      events.close();
-      if (failure.retryable) scheduleReconnect();
-      else {
-        reconnecting.value = false;
-        displayedFrame.value = undefined;
-        error.value = failure.error;
-        ended.value = failure.statusCode === 410;
+      if (typeof event.data !== "string") {
+        const length = new DataView(event.data).getUint32(0);
+        const frame = JSON.parse(
+          new TextDecoder().decode(new Uint8Array(event.data, 4, length)),
+        ) as RemoteFrame;
+        if (pendingFrame) acknowledge(pendingFrame.socket, pendingFrame.frame.frameId);
+        pendingFrame = {
+          frame,
+          jpeg: new Blob([event.data.slice(4 + length)], { type: "image/jpeg" }),
+          socket,
+          generation: current,
+        };
+        void paintFrames();
+        return;
       }
-    });
+      const message = JSON.parse(event.data);
+      if (message.event === "state") updateState(message.data);
+      else if (message.event === "scroll-error") {
+        error.value = message.data.error;
+        if (scrollFence) failScrollFence(message.data.error);
+      } else if (message.event === "scroll-drained" && message.data.requestId === scrollFence?.id) {
+        clearTimeout(scrollFence.timer);
+        scrollFence.resolve();
+        scrollFence = undefined;
+      } else if (message.event === "browser-error") {
+        const failure = message.data as { error: string; retryable: boolean; statusCode?: number };
+        if (failure.retryable) scheduleReconnect();
+        else {
+          stopViewing();
+          reconnecting.value = false;
+          displayedFrame.value = undefined;
+          error.value = failure.error;
+          ended.value = failure.statusCode === 410;
+        }
+      }
+    };
   } catch (cause) {
     if (current !== generation || abort.signal.aborted) return;
     const status = (cause as { statusCode?: number }).statusCode;
@@ -192,6 +224,56 @@ async function startViewing(): Promise<void> {
       reconnecting.value = false;
       error.value = (cause as Error).message;
     }
+  }
+}
+function acknowledge(socket: WebSocket, frameId: number): void {
+  if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ action: "ack", frameId }));
+}
+async function paintFrames(): Promise<void> {
+  if (painting) return;
+  painting = true;
+  let decodingGeneration = generation;
+  try {
+    while (pendingFrame) {
+      const next = pendingFrame;
+      decodingGeneration = next.generation;
+      pendingFrame = undefined;
+      const bitmap = await createImageBitmap(next.jpeg);
+      try {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        if (next.generation !== generation || next.socket !== stream) continue;
+        if (
+          next.frame.pageId === state.value?.pageId &&
+          next.frame.revision === state.value?.revision
+        ) {
+          const canvas = image.value!;
+          if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+            canvas.width = bitmap.width;
+            canvas.height = bitmap.height;
+          }
+          canvas.getContext("2d", { alpha: false })!.drawImage(bitmap, 0, 0);
+          displayedFrame.value = next.frame;
+          hasFrame.value = true;
+          canvas.dataset.frame = String(next.frame.frameId);
+          reconnecting.value = false;
+          reconnectAttempt = 0;
+          connection.value = "Live";
+        }
+      } finally {
+        bitmap.close();
+        acknowledge(next.socket, next.frame.frameId);
+      }
+    }
+  } catch (cause) {
+    if (decodingGeneration === generation) {
+      stopViewing();
+      reconnecting.value = false;
+      displayedFrame.value = undefined;
+      error.value = `Browser image could not be decoded: ${(cause as Error).message}`;
+    }
+  } finally {
+    painting = false;
+    if (pendingFrame) void paintFrames();
   }
 }
 function onToggle(event: Event): void {
@@ -215,19 +297,22 @@ async function fitViewport(): Promise<void> {
   const width = Math.max(1, Math.min(10000, Math.round(rect.width)));
   const height = Math.max(1, Math.min(10000, Math.round(rect.height)));
   const mobile = navigator.maxTouchPoints > 0 && matchMedia("(pointer: coarse)").matches;
+  const deviceScaleFactor = Math.min(3, Math.max(1, window.devicePixelRatio));
   // Keep keyboard-only height changes stable, but still fit rotation/device changes.
   if (
     (editing.value || document.activeElement?.tagName === "INPUT") &&
     state.value?.width === width &&
-    state.value.mobile === mobile
+    state.value.mobile === mobile &&
+    state.value.deviceScaleFactor === deviceScaleFactor
   )
     return;
   if (
     state.value?.width !== width ||
     state.value.height !== height ||
-    state.value.mobile !== mobile
+    state.value.mobile !== mobile ||
+    state.value.deviceScaleFactor !== deviceScaleFactor
   )
-    await control({ action: "viewport", width, height, mobile });
+    await control({ action: "viewport", width, height, mobile, deviceScaleFactor });
 }
 function scheduleResize(): void {
   clearTimeout(resizeTimer);
@@ -243,6 +328,8 @@ function control(command: Record<string, unknown>): Promise<boolean> {
     if (current !== generation || !ready.value || !controller) return false;
     error.value = "";
     try {
+      await drainScroll();
+      if (current !== generation || !controller) return false;
       const value = await request(
         "control",
         {
@@ -277,7 +364,7 @@ function navigate(): void {
   const url = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `https://${value}`;
   void control({ action: "navigate", url });
 }
-function point(clientX: number, clientY: number, rect: DOMRect, frame: BrowserFrame): Point {
+function point(clientX: number, clientY: number, rect: DOMRect, frame: RemoteFrame): Point {
   return {
     x: Math.max(
       0,
@@ -336,37 +423,88 @@ function pointerUp(event: PointerEvent): void {
     });
   }
 }
-function addScroll(anchor: Point, frame: BrowserFrame, deltaX: number, deltaY: number): void {
+function addScroll(anchor: Point, frame: RemoteFrame, deltaX: number, deltaY: number): void {
+  const last = scrollPending.at(-1);
   if (
-    scrollPending &&
-    scrollPending.pageId === frame.pageId &&
-    scrollPending.revision === frame.revision
+    last &&
+    last.pageId === frame.pageId &&
+    last.revision === frame.revision &&
+    last.x === anchor.x &&
+    last.y === anchor.y
   ) {
-    scrollPending.deltaX += deltaX;
-    scrollPending.deltaY += deltaY;
-  } else
-    scrollPending = { ...anchor, pageId: frame.pageId, revision: frame.revision, deltaX, deltaY };
-  void flushScroll();
-}
-async function flushScroll(): Promise<void> {
-  if (scrolling) return;
-  scrolling = true;
-  try {
-    while (scrollPending) {
-      const pending = scrollPending;
-      scrollPending = undefined;
-      if (
-        !(await control({
-          action: "scroll",
-          ...pending,
-          deltaX: Math.max(-10000, Math.min(10000, pending.deltaX)),
-          deltaY: Math.max(-10000, Math.min(10000, pending.deltaY)),
-        }))
-      )
-        scrollPending = undefined;
+    last.deltaX += deltaX;
+    last.deltaY += deltaY;
+  } else {
+    if (scrollPending.length === 2) flushScroll();
+    if (scrollPending.length === 2) {
+      error.value = "Browser connection is busy; scroll target could not be queued.";
+      return;
     }
-  } finally {
-    scrolling = false;
+    scrollPending.push({
+      ...anchor,
+      pageId: frame.pageId,
+      revision: frame.revision,
+      deltaX,
+      deltaY,
+    });
+  }
+  // Native pointer events are already display-coalesced. Send immediately rather
+  // than adding another animation-frame of latency; stalled transports coalesce below.
+  flushScroll();
+}
+function flushScroll(): void {
+  if (scrollAnimation !== undefined) cancelAnimationFrame(scrollAnimation);
+  scrollAnimation = undefined;
+  if (!scrollPending.length || stream?.readyState !== WebSocket.OPEN) return;
+  // Never pile input into a stalled socket. Preserve totals in one coalesced slot.
+  if (stream.bufferedAmount > 16384) {
+    scrollAnimation = requestAnimationFrame(flushScroll);
+    return;
+  }
+  while (scrollPending.length && stream.bufferedAmount <= 16384) {
+    const pending = scrollPending[0]!;
+    const deltaX = Math.max(-10000, Math.min(10000, pending.deltaX));
+    const deltaY = Math.max(-10000, Math.min(10000, pending.deltaY));
+    stream.send(JSON.stringify({ action: "scroll", ...pending, deltaX, deltaY }));
+    scrollDirty = true;
+    pending.deltaX -= deltaX;
+    pending.deltaY -= deltaY;
+    if (!pending.deltaX && !pending.deltaY) scrollPending.shift();
+  }
+  if (scrollPending.length) scrollAnimation = requestAnimationFrame(flushScroll);
+}
+function failScrollFence(message: string): void {
+  const fence = scrollFence;
+  if (!fence) return;
+  clearTimeout(fence.timer);
+  scrollFence = undefined;
+  fence.reject(new Error(message));
+  error.value = message;
+  // A failed fence cannot authorize another HTTP action on this connection.
+  scheduleReconnect();
+}
+async function drainScroll(): Promise<void> {
+  flushScroll();
+  if (scrollPending.length)
+    throw new Error("Browser connection is busy; wait for scrolling to settle.");
+  while (scrollDirty) {
+    if (stream?.readyState !== WebSocket.OPEN) throw new Error("Browser is disconnected.");
+    scrollDirty = false;
+    const id = nextFenceId++;
+    let resolve!: () => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<void>((done, fail) => {
+      resolve = done;
+      reject = fail;
+    });
+    const timer = setTimeout(() => {
+      if (scrollFence?.id === id) {
+        failScrollFence("Browser scrolling did not settle.");
+      }
+    }, 8000);
+    scrollFence = { id, promise, resolve, reject, timer };
+    stream.send(JSON.stringify({ action: "flush", requestId: id }));
+    await promise;
   }
 }
 function wheel(event: WheelEvent): void {
@@ -380,10 +518,6 @@ function wheel(event: WheelEvent): void {
     (event.deltaX * unit * frame.width) / rect.width,
     (event.deltaY * unit * frame.height) / rect.height,
   );
-}
-function frameLoaded(): void {
-  if (image.value?.getAttribute("src") === imageSource.value)
-    displayedFrame.value = incomingFrame.value;
 }
 function beginComposition(): void {
   clearTimeout(inputTimer);
@@ -500,18 +634,13 @@ onBeforeUnmount(() => {
       </div>
       <div v-if="reconnecting" class="cloud-browser__connection" role="status">Reconnecting…</div>
       <div ref="viewport" class="cloud-browser__viewport">
-        <img
-          v-if="incomingFrame"
+        <canvas
+          v-show="hasFrame"
           ref="image"
           class="cloud-browser__image"
-          :src="imageSource"
           :data-revision="displayedFrame?.revision"
-          :width="incomingFrame.width"
-          :height="incomingFrame.height"
-          alt="Live browser page. Tap to click; swipe to scroll."
-          draggable="false"
-          @load="frameLoaded"
-          @error="error = 'Browser image could not be loaded'"
+          role="img"
+          aria-label="Live browser page. Tap to click; swipe to scroll."
           @pointerdown.prevent="pointerDown"
           @pointermove.prevent="pointerMove"
           @pointerup.prevent="pointerUp"
@@ -520,7 +649,7 @@ onBeforeUnmount(() => {
           @wheel.prevent="wheel"
           @contextmenu.prevent
         />
-        <p v-else>{{ ended ? "Session unavailable" : connection }}</p>
+        <p v-if="!hasFrame">{{ ended ? "Session unavailable" : connection }}</p>
       </div>
       <div v-if="editing" class="cloud-browser__editor">
         <textarea
@@ -559,6 +688,7 @@ onBeforeUnmount(() => {
   gap: 0.4rem;
 }
 .cloud-browser {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -613,6 +743,15 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   padding: 0.5rem;
   overflow-wrap: anywhere;
+}
+.cloud-browser__connection {
+  position: absolute;
+  z-index: 1;
+  top: 0.4rem;
+  right: 0.4rem;
+  border-radius: 0.4rem;
+  background: var(--color-bg-panel);
+  pointer-events: none;
 }
 .cloud-browser__viewport {
   display: flex;

@@ -2,6 +2,7 @@ export interface CloudBrowserViewport {
   width: number;
   height: number;
   mobile: boolean;
+  deviceScaleFactor?: number;
 }
 
 export interface CloudBrowserState {
@@ -12,6 +13,7 @@ export interface CloudBrowserState {
   width: number;
   height: number;
   mobile: boolean;
+  deviceScaleFactor: number;
   focused?: { id: string; value: string; type: string; multiline: boolean };
   pages: Array<{ id: string; title: string; url: string; active: boolean }>;
 }

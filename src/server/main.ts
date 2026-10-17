@@ -112,7 +112,7 @@ registerAuthRoutes(routeContext);
 registerBrowserErrorRoutes(app, path.join(stateDirPath(config.battyDir), "browser-errors.json"));
 registerCronRoutes(app, runtime.orchestration);
 registerSiteRoutes(routeContext);
-const closeCloudBrowsers = registerCloudBrowserRoutes(
+const closeCloudBrowsers = await registerCloudBrowserRoutes(
   app,
   runtime.tools.browserService,
   config.baseUrl,

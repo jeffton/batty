@@ -63,6 +63,7 @@ beforeAll(async () => {
       proxy: {
         "/api/cloud-browser": {
           target: backendUrl,
+          ws: true,
           rewrite: (requestPath) => requestPath.replace("/opaque/", `/${attachedBrowserId}/`),
         },
       },
@@ -70,7 +71,7 @@ beforeAll(async () => {
   });
   await server.listen();
   url = `${server.resolvedUrls!.local[0]}src/client/components/BrowserPopover.fixture.html`;
-  closeStreams = registerCloudBrowserRoutes(backend, service, server.resolvedUrls!.local[0]!);
+  closeStreams = await registerCloudBrowserRoutes(backend, service, server.resolvedUrls!.local[0]!);
   await backend.listen({ host: "127.0.0.1", port });
   browser = await chromium.launch({ headless: true });
 }, 30_000);
@@ -145,6 +146,7 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
     viewport: { width: 390, height: 844 },
     isMobile: true,
     hasTouch: true,
+    deviceScaleFactor: 3,
   });
   await context.addCookies([
     { name: "cloud-auth", value: "test", url: server.resolvedUrls!.local[0]! },
@@ -157,10 +159,17 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
     const image = popover.getByRole("img");
     await expect.poll(() => image.count()).toBe(1);
     await expect
-      .poll(() => image.evaluate((e: HTMLImageElement) => e.complete && e.naturalWidth > 0))
+      .poll(() =>
+        image.evaluate((e: HTMLCanvasElement) => e.dataset.frame !== undefined && e.width > 0),
+      )
       .toBe(true);
     const remote = await service.cloudState(attachedBrowserId);
     expect(remote.mobile).toBe(true);
+    expect(remote.deviceScaleFactor).toBe(3);
+    expect(await image.evaluate((e: HTMLCanvasElement) => [e.width, e.height])).toEqual([
+      remote.width * 3,
+      remote.height * 3,
+    ]);
     expect(await inspect("document.body.dataset.serverMobile")).toBe("true");
     expect(
       await inspect(
@@ -251,7 +260,8 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
 
     // Wheel is routed too, and remains anchored to the nested container.
     await image.hover({ position: { x: 100, y: 190 } });
-    await page.mouse.wheel(0, 1200);
+    // Chromium's injected device-pixel wheel is normalized by viewer DPR before DOM delivery.
+    await page.mouse.wheel(0, 1200 * 3);
     await expect
       .poll(() => inspect("document.querySelector('#inner').scrollTop"))
       .toBeGreaterThan(700);
@@ -318,6 +328,7 @@ test("desktop/mobile switching keeps login, CSS screen matches the viewer, and n
     viewport: { width: 390, height: 844 },
     isMobile: true,
     hasTouch: true,
+    deviceScaleFactor: 3,
   });
   for (const context of [desktop, mobile])
     await context.addCookies([
@@ -350,7 +361,9 @@ test("desktop/mobile switching keeps login, CSS screen matches the viewer, and n
     const popover = page.locator("#site-preview--cloud");
     const image = popover.getByRole("img");
     await expect
-      .poll(() => image.evaluate((e: HTMLImageElement) => e.complete && e.naturalWidth > 0))
+      .poll(() =>
+        image.evaluate((e: HTMLCanvasElement) => e.dataset.frame !== undefined && e.width > 0),
+      )
       .toBe(true);
     expect(await inspect("document.documentElement.scrollWidth === innerWidth")).toBe(true);
     await mobile.setOffline(true);

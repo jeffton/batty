@@ -435,6 +435,7 @@ export class BrowserService {
       pageId,
       ...viewport,
       mobile: session.pageViewports.get(page)?.mobile ?? false,
+      deviceScaleFactor: session.pageViewports.get(page)?.deviceScaleFactor ?? 1,
       revision: createHash("sha256")
         .update(
           JSON.stringify([
@@ -499,6 +500,7 @@ export class BrowserService {
     id: string,
     operation: (session: BrowserSession) => Promise<T>,
     rejectBusy = false,
+    persistRegistry = rejectBusy,
   ): Promise<T> {
     if (this.disposed) throw this.cloudEnded();
     const owner = await this.cloudOwner(id);
@@ -523,7 +525,7 @@ export class BrowserService {
         return await operation(session);
       } finally {
         if (session.browser.isConnected()) {
-          if (rejectBusy) await this.persistRegistry(session);
+          if (persistRegistry) await this.persistRegistry(session);
           await this.touchSession(owner);
         }
       }
@@ -545,29 +547,61 @@ export class BrowserService {
     });
   }
 
+  private cloudInputPage(
+    session: BrowserSession,
+    command: Extract<CloudBrowserControl, { revision: string }>,
+  ): Page {
+    const page = this.resolvePage(session);
+    const current = this.cloudView(session, page);
+    if (command.pageId !== current.pageId || command.revision !== current.revision)
+      throw Object.assign(new Error("The browser view changed. Wait for a fresh frame."), {
+        statusCode: 409,
+      });
+    if ("x" in command) {
+      const points = [[command.x, command.y]];
+      if (command.action === "drag") points.push([command.endX, command.endY]);
+      if (points.some(([x, y]) => x! < 0 || y! < 0 || x! >= current.width || y! >= current.height))
+        throw Object.assign(new Error("Pointer is outside the browser viewport."), {
+          statusCode: 400,
+        });
+    }
+    return page;
+  }
+
+  async cloudScroll(
+    id: string,
+    command: Extract<CloudBrowserControl, { action: "scroll" }>,
+  ): Promise<void> {
+    await this.cloudOperation(
+      id,
+      async (session) => {
+        const page = this.cloudInputPage(session, command);
+        await session.pageIdentityPromises.get(page);
+        const connection = session.pageEmulation.get(page)!;
+        await connection.send("Input.dispatchMouseEvent", {
+          type: "mouseMoved",
+          x: command.x,
+          y: command.y,
+        });
+        await connection.send("Input.dispatchMouseEvent", {
+          type: "mouseWheel",
+          x: command.x,
+          y: command.y,
+          deltaX: command.deltaX,
+          deltaY: command.deltaY,
+        });
+      },
+      true,
+      false,
+    );
+  }
+
   async cloudControl(id: string, command: CloudBrowserControl): Promise<CloudBrowserState> {
     return this.cloudOperation(
       id,
       async (session) => {
         if ("revision" in command) {
-          const page = this.resolvePage(session);
-          const current = this.cloudView(session, page);
-          if (command.pageId !== current.pageId || command.revision !== current.revision)
-            throw Object.assign(new Error("The browser view changed. Wait for a fresh frame."), {
-              statusCode: 409,
-            });
-          if ("x" in command) {
-            const points = [[command.x, command.y]];
-            if (command.action === "drag") points.push([command.endX, command.endY]);
-            if (
-              points.some(
-                ([x, y]) => x! < 0 || y! < 0 || x! >= current.width || y! >= current.height,
-              )
-            )
-              throw Object.assign(new Error("Pointer is outside the browser viewport."), {
-                statusCode: 400,
-              });
-          }
+          const page = this.cloudInputPage(session, command);
           // Viewer input keeps the capture running. Revisions fence agent actions,
           // navigation and viewport changes, not individual wheel/typing events.
           switch (command.action) {
@@ -658,6 +692,7 @@ export class BrowserService {
                 width: command.width,
                 height: command.height,
                 mobile: command.mobile,
+                deviceScaleFactor: command.deviceScaleFactor ?? 1,
               };
               await this.setViewport(session, page, command);
               // Server-selected mobile HTML needs a new request with the mobile UA.
@@ -991,12 +1026,18 @@ export class BrowserService {
       height: viewport.height,
       screenWidth: viewport.width,
       screenHeight: viewport.height,
-      deviceScaleFactor: 1,
+      deviceScaleFactor: viewport.deviceScaleFactor ?? 1,
       mobile: viewport.mobile,
       screenOrientation: {
         type: viewport.width > viewport.height ? "landscapePrimary" : "portraitPrimary",
         angle: viewport.width > viewport.height ? 90 : 0,
       },
+    });
+    // Headless Chromium's screencast captures the native surface, not the emulated
+    // JS DPR. Size that surface explicitly while keeping the CSS viewport above.
+    await connection.send("Emulation.setVisibleSize", {
+      width: Math.ceil(viewport.width * (viewport.deviceScaleFactor ?? 1)),
+      height: Math.ceil(viewport.height * (viewport.deviceScaleFactor ?? 1)),
     });
     await connection.send("Emulation.setTouchEmulationEnabled", {
       enabled: viewport.mobile,

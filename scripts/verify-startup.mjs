@@ -7,6 +7,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { once } from "node:events";
+import http from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 
 const repo = process.cwd();
@@ -105,6 +106,33 @@ for (const baseUrl of ["/", "/batty"]) {
       });
     assert.equal((await control("https://attacker.example")).status, 403);
     assert.equal((await control("https://smoke.example")).status, 410);
+    const upgrade = (headers = {}) =>
+      new Promise((resolve, reject) => {
+        const request = http.get(`${origin}/api/cloud-browser/${id}/socket`, {
+          agent: false,
+          headers: {
+            connection: "Upgrade",
+            upgrade: "websocket",
+            "sec-websocket-version": "13",
+            "sec-websocket-key": crypto.randomBytes(16).toString("base64"),
+            ...headers,
+          },
+          timeout: 2000,
+        });
+        request.on("response", (response) => {
+          response.resume();
+          resolve(response.statusCode);
+        });
+        request.on("upgrade", (response, socket) => {
+          socket.destroy();
+          resolve(response.statusCode);
+        });
+        request.on("error", reject);
+        request.on("timeout", () => request.destroy(new Error("WebSocket upgrade timed out")));
+      });
+    assert.equal(await upgrade({ origin }), 401);
+    assert.equal(await upgrade({ cookie, origin: "https://attacker.example" }), 403);
+    assert.equal(await upgrade({ cookie, origin }), 410);
     for (let attempt = 0; attempt < 3; attempt++) {
       await delay(200);
       assert.equal(child.exitCode, null);

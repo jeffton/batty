@@ -1,17 +1,30 @@
 // @vitest-environment node
-import { expect, test } from "vite-plus/test";
+import { expect, test, vi } from "vite-plus/test";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
 import { once, EventEmitter } from "node:events";
-import { createCloudBrowserEventWriter } from "./cloud-browser-events";
+import {
+  createCloudBrowserSocketWriter,
+  encodeBrowserFrame,
+  type BrowserFramePacket,
+} from "./cloud-browser-events";
 import fastify from "fastify";
 import { BrowserService } from "./browser-service";
 import { CloudBrowserStreams } from "./cloud-browser-stream";
 import { registerCloudBrowserRoutes } from "./routes/cloud-browser";
 import type { CloudBrowserFrame } from "@/shared/cloud-browser";
 import { artifactRefs, mergeResponseArtifacts } from "./artifact-forwarding";
+
+function decodePacket(value: unknown): CloudBrowserFrame & { frameId: number } {
+  const { packet } = value as BrowserFramePacket;
+  const end = 4 + packet.readUInt32BE(0);
+  return {
+    ...JSON.parse(packet.subarray(4, end).toString()),
+    image: packet.subarray(end).toString("base64"),
+  };
+}
 
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-cloud-browser-"));
@@ -245,14 +258,14 @@ test("cloud stream delivers real JPEG frames to multiple viewers without closing
       receive = resolve;
     });
     const stop = await streams.subscribe(id, (event, data) => {
-      if (event === "frame") receive(data as CloudBrowserFrame);
+      if (event === "frame") receive(decodePacket(data));
     });
     const first = await frame;
     expect(Buffer.from(first.image, "base64").subarray(0, 2).toString("hex")).toBe("ffd8");
     expect(first.width).toBe(390);
     let second: CloudBrowserFrame | undefined;
     const stopSecond = await streams.subscribe(id, (event, data) => {
-      if (event === "frame") second = data as CloudBrowserFrame;
+      if (event === "frame") second = decodePacket(data);
     });
     expect(second?.revision).toBe(first.revision);
     stop();
@@ -275,14 +288,14 @@ test("cloud routes require auth, same-origin control and bounded allowlisted com
     if (request.headers.authorization !== "test")
       return reply.code(401).send({ error: "Authentication required" });
   });
-  const closeStreams = registerCloudBrowserRoutes(app, f.service, "https://batty.example");
+  const closeStreams = await registerCloudBrowserRoutes(app, f.service, "https://batty.example");
   try {
     await f.service.execute("shared", { action: "open", url: f.url, cloud: true });
     const id = (await f.service.execute("shared", { action: "attach" })).details.sites![0]!
       .browserId!;
     const endpoint = `/api/cloud-browser/${id}`;
     expect((await app.inject(`${endpoint}/state`)).statusCode).toBe(401);
-    expect((await app.inject(`${endpoint}/events`)).statusCode).toBe(401);
+    expect((await app.inject(`${endpoint}/socket`)).statusCode).toBe(401);
     const control = (payload: Record<string, unknown>, origin = "https://batty.example") =>
       app.inject({
         method: "POST",
@@ -359,7 +372,7 @@ test("cloud routes require auth, same-origin control and bounded allowlisted com
 
 test("relative app base paths derive the control origin from the trusted HTTPS request", async () => {
   const app = fastify({ trustProxy: ["127.0.0.1"] });
-  const closeStreams = registerCloudBrowserRoutes(
+  const closeStreams = await registerCloudBrowserRoutes(
     app,
     {
       cloudControl: async () => ({ ok: true }),
@@ -397,6 +410,7 @@ test("screencast throttling delivers the latest final paint even without subsequ
     revision: "r",
     width: 390,
     height: 640,
+    deviceScaleFactor: 1,
     url: "https://example.com",
     title: "",
     pages: [],
@@ -407,16 +421,135 @@ test("screencast throttling delivers the latest final paint even without subsequ
   const frames: CloudBrowserFrame[] = [];
   try {
     const stop = await streams.subscribe("id", (event, value) => {
-      if (event === "frame") frames.push(value as CloudBrowserFrame);
+      if (event === "frame") frames.push(decodePacket(value));
     });
-    connection.emit("Page.screencastFrame", { sessionId: 1, data: "first" });
-    connection.emit("Page.screencastFrame", { sessionId: 2, data: "intermediate" });
-    connection.emit("Page.screencastFrame", { sessionId: 3, data: "final" });
+    connection.emit("Page.screencastFrame", {
+      sessionId: 1,
+      data: Buffer.from("first").toString("base64"),
+    });
+    connection.emit("Page.screencastFrame", {
+      sessionId: 2,
+      data: Buffer.from("intermediate").toString("base64"),
+    });
+    connection.emit("Page.screencastFrame", {
+      sessionId: 3,
+      data: Buffer.from("final").toString("base64"),
+    });
     await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(frames.map((frame) => frame.image)).toEqual(["first", "final"]);
+    expect(frames.map((frame) => Buffer.from(frame.image, "base64").toString())).toEqual([
+      "first",
+      "final",
+    ]);
     stop();
   } finally {
     await streams.close();
+  }
+});
+
+test("capture uses 2x JPEG80 during scrolling and restores native sharp final paint after idle, including revised viewports", async () => {
+  vi.useFakeTimers();
+  let state = {
+    pageId: "p",
+    revision: "r",
+    width: 358,
+    height: 757,
+    deviceScaleFactor: 3,
+    mobile: true,
+    url: "https://example.com",
+    title: "",
+    pages: [],
+  };
+  const starts: Array<Record<string, number>> = [];
+  const page = {
+    context: () => ({
+      newCDPSession: async () => {
+        const connection = Object.assign(new EventEmitter(), {
+          send: async (method: string, parameters: Record<string, number>) => {
+            if (method === "Page.startScreencast") {
+              starts.push(parameters);
+              connection.emit("Page.screencastFrame", {
+                sessionId: starts.length,
+                data: Buffer.from(`paint-${starts.length}`).toString("base64"),
+              });
+            }
+          },
+          detach: async () => {},
+        });
+        return connection;
+      },
+    }),
+  };
+  const streams = new CloudBrowserStreams({
+    cloudTarget: async () => ({ page, state }),
+  } as unknown as BrowserService);
+  const frames: CloudBrowserFrame[] = [];
+  try {
+    const stop = await streams.subscribe("id", (event, value) => {
+      if (event === "frame") frames.push(decodePacket(value));
+    });
+    expect(starts).toHaveLength(1);
+    expect(starts[0]).toMatchObject({ quality: 85, maxWidth: 1074, maxHeight: 2271 });
+    streams.scrolling("id");
+    await vi.advanceTimersByTimeAsync(60);
+    expect(starts[1]).toMatchObject({ quality: 80, maxWidth: 716, maxHeight: 1514 });
+    await vi.advanceTimersByTimeAsync(40);
+    streams.scrolling("id");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(starts).toHaveLength(2); // Repeated wheel events debounce idle, not restart capture.
+    state = { ...state, revision: "rotated", width: 757, height: 358 };
+    streams.scrolling("id");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(starts[2]).toMatchObject({ quality: 80, maxWidth: 1514, maxHeight: 716 });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(starts).toHaveLength(4);
+    expect(starts[3]).toMatchObject({ quality: 85, maxWidth: 2271, maxHeight: 1074 });
+    expect(frames.at(-1)).toMatchObject({
+      revision: "rotated",
+      width: 757,
+      height: 358,
+      image: Buffer.from("paint-4").toString("base64"),
+    });
+    stop();
+    streams.scrolling("id");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(starts).toHaveLength(4);
+  } finally {
+    await streams.close();
+    vi.useRealTimers();
+  }
+});
+
+test("stopped streams cannot be restarted by a pending motion capture or idle callback", async () => {
+  vi.useFakeTimers();
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const starts = vi.fn();
+  const connection = Object.assign(new EventEmitter(), {
+    send: async (method: string) => {
+      if (method === "Page.startScreencast") starts();
+      if (method === "Page.stopScreencast") await blocked;
+    },
+    detach: async () => {},
+  });
+  const state = { pageId: "p", revision: "r", width: 358, height: 757, deviceScaleFactor: 3 };
+  const page = { context: () => ({ newCDPSession: async () => connection }) };
+  const streams = new CloudBrowserStreams({
+    cloudTarget: async () => ({ page, state }),
+  } as unknown as BrowserService);
+  try {
+    const stop = await streams.subscribe("id", () => {});
+    streams.scrolling("id");
+    await vi.advanceTimersByTimeAsync(60);
+    stop();
+    release();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(starts).toHaveBeenCalledTimes(1);
+  } finally {
+    release();
+    await streams.close();
+    vi.useRealTimers();
   }
 });
 
@@ -434,6 +567,7 @@ test("stream failures distinguish navigation interruption, permanent expiry and 
     width: 390,
     height: 640,
     mobile: true,
+    deviceScaleFactor: 1,
     url: "https://example.com",
     title: "",
     pages: [],
@@ -470,35 +604,416 @@ test("stream failures distinguish navigation interruption, permanent expiry and 
   }
 });
 
-test("slow SSE viewers recover the latest state and final frame after drain without queued history", () => {
-  const response = Object.assign(new EventEmitter(), {
-    writableNeedDrain: true,
-    destroyed: false,
-    writableEnded: false,
-    write(value: string) {
+test("binary packet retains exact JPEG bytes and CSS dimensions", () => {
+  const frame = {
+    image: Buffer.from([255, 216, 1, 255, 217]).toString("base64"),
+    pageId: "p",
+    revision: "r",
+    width: 390,
+    height: 640,
+  };
+  expect(decodePacket(encodeBrowserFrame(frame, 42))).toEqual({ ...frame, frameId: 42 });
+});
+
+test("slow viewers keep two unacknowledged paints and the final latest paint, with bounded socket writes", () => {
+  const writes: Array<string | Buffer> = [];
+  const callbacks: Array<(error?: Error) => void> = [];
+  const socket = {
+    readyState: 1,
+    send(value: string | Buffer, _options: unknown, callback: (error?: Error) => void) {
       writes.push(value);
-      return true;
+      callbacks.push(callback);
     },
-    end() {
-      this.writableEnded = true;
-    },
-  });
-  const writes: string[] = [];
-  const writer = createCloudBrowserEventWriter(
-    response as unknown as Parameters<typeof createCloudBrowserEventWriter>[0],
+    close: vi.fn(),
+    terminate: vi.fn(),
+  };
+  const writer = createCloudBrowserSocketWriter(
+    socket as unknown as Parameters<typeof createCloudBrowserSocketWriter>[0],
   );
-  writer.start();
+  const paint = (frameId: number) =>
+    encodeBrowserFrame(
+      { image: "//g=", pageId: "p", revision: "r", width: 390, height: 640 },
+      frameId,
+    );
+  writer.send("frame", paint(1));
   writer.send("state", { pageId: "old" });
-  writer.send("frame", { image: "old" });
   writer.send("state", { pageId: "new" });
-  writer.send("frame", { image: "final" });
-  expect(writes).toEqual([]);
-  response.writableNeedDrain = false;
-  response.emit("drain");
-  expect(writes).toEqual([
-    'event: state\ndata: {"pageId":"new"}\n\n',
-    'event: frame\ndata: {"image":"final"}\n\n',
-  ]);
+  writer.send("frame", paint(2));
+  expect(writes).toHaveLength(1);
+  callbacks.shift()!(); // First socket write completed, latest state wins.
+  expect(JSON.parse(writes[1] as string)).toEqual({ event: "state", data: { pageId: "new" } });
+  callbacks.shift()!();
+  callbacks.shift()!();
+  for (let i = 3; i <= 100; i++) writer.send("frame", paint(i));
+  expect(writes).toHaveLength(3);
+  expect(() => writer.acknowledge(99)).toThrow("Invalid browser frame acknowledgement");
+  writer.acknowledge(1);
+  expect(decodePacket({ packet: writes[3] }).frameId).toBe(100);
+  callbacks.shift()!();
+  expect(() => writer.acknowledge(1)).toThrow("Invalid browser frame acknowledgement");
   writer.close();
-  expect(response.listenerCount("drain")).toBe(0);
+  writer.send("frame", paint(101));
+  expect(writes).toHaveLength(4);
+});
+
+test("scroll drain fences have priority over paints and cannot replace a queued fence", () => {
+  const writes: Array<string | Buffer> = [];
+  const callbacks: Array<(error?: Error) => void> = [];
+  const socket = {
+    readyState: 1,
+    send(value: string | Buffer, _options: unknown, callback: (error?: Error) => void) {
+      writes.push(value);
+      callbacks.push(callback);
+    },
+    close: vi.fn(),
+    terminate: vi.fn(),
+  };
+  const writer = createCloudBrowserSocketWriter(
+    socket as unknown as Parameters<typeof createCloudBrowserSocketWriter>[0],
+  );
+  const sent = vi.fn();
+  writer.send(
+    "frame",
+    encodeBrowserFrame({ image: "//g=", pageId: "p", revision: "r", width: 390, height: 640 }, 1),
+  );
+  writer.send("state", { pageId: "p" });
+  writer.send("scroll-drained", { requestId: 1 }, sent);
+  expect(() => writer.send("scroll-drained", { requestId: 2 })).toThrow("already pending");
+  writer.send("scroll-error", { error: "Rejected scroll.", statusCode: 409 });
+  callbacks.shift()!();
+  expect(JSON.parse(writes[1] as string).event).toBe("scroll-error");
+  callbacks.shift()!();
+  expect(JSON.parse(writes[2] as string)).toEqual({
+    event: "scroll-drained",
+    data: { requestId: 1 },
+  });
+  expect(sent).not.toHaveBeenCalled();
+  callbacks.shift()!();
+  expect(sent).toHaveBeenCalledOnce();
+  expect(JSON.parse(writes[3] as string).event).toBe("state");
+  writer.close();
+});
+
+test("WebSocket upgrades enforce ordinary auth, same origin and permanent browser expiry", async () => {
+  const app = fastify();
+  let expired = false;
+  const target = vi.fn(async () => {
+    if (expired) throw Object.assign(new Error("Browser session ended."), { statusCode: 410 });
+    return {};
+  });
+  app.addHook("onRequest", async (request, reply) => {
+    if (request.headers.authorization !== "test")
+      return reply.code(401).send({ error: "Authentication required" });
+  });
+  const close = await registerCloudBrowserRoutes(
+    app,
+    { cloudTarget: target } as unknown as BrowserService,
+    "https://batty.example",
+  );
+  await app.ready();
+  try {
+    await expect(
+      app.injectWS("/api/cloud-browser/id/socket", {
+        headers: { origin: "https://batty.example" },
+      }),
+    ).rejects.toThrow("401");
+    await expect(
+      app.injectWS("/api/cloud-browser/id/socket", {
+        headers: { authorization: "test", origin: "https://attacker.example" },
+      }),
+    ).rejects.toThrow("403");
+    expect(target).not.toHaveBeenCalled();
+    expired = true;
+    await expect(
+      app.injectWS("/api/cloud-browser/id/socket", {
+        headers: { authorization: "test", origin: "https://batty.example" },
+      }),
+    ).rejects.toThrow("410");
+  } finally {
+    await close();
+    await app.close();
+  }
+});
+
+test("WebSocket scroll coalesces pending deltas and preserves its anchor without state round trips", async () => {
+  const app = fastify();
+  const connection = Object.assign(new EventEmitter(), {
+    send: async () => {},
+    detach: async () => {},
+  });
+  const page = { context: () => ({ newCDPSession: async () => connection }) };
+  const state = {
+    pageId: "p",
+    revision: "r",
+    width: 390,
+    height: 640,
+    deviceScaleFactor: 3,
+    mobile: true,
+    pages: [],
+  };
+  let release!: () => void;
+  const scroll = vi.fn(async () => {
+    await new Promise<void>((resolve) => {
+      release = resolve;
+    });
+  });
+  const close = await registerCloudBrowserRoutes(
+    app,
+    {
+      cloudTarget: async () => ({ page, state }),
+      cloudScroll: scroll,
+    } as unknown as BrowserService,
+    "https://batty.example",
+  );
+  await app.ready();
+  const socket = await app.injectWS("/api/cloud-browser/id/socket", {
+    headers: { origin: "https://batty.example" },
+  });
+  const messages: Array<{ event: string; data: unknown }> = [];
+  socket.on("message", (data, binary) => {
+    if (!binary) messages.push(JSON.parse(data.toString()));
+  });
+  try {
+    const command = {
+      action: "scroll",
+      pageId: "p",
+      revision: "r",
+      x: 10,
+      y: 20,
+      deltaX: 1,
+      deltaY: 10,
+    };
+    socket.send(JSON.stringify(command));
+    await expect.poll(() => scroll.mock.calls.length).toBe(1);
+    socket.send(JSON.stringify({ ...command, x: 30, deltaY: 20 }));
+    socket.send(JSON.stringify({ ...command, x: 30, deltaY: 30 }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    release();
+    await expect.poll(() => scroll.mock.calls.length).toBe(2);
+    expect(scroll.mock.calls[1]).toEqual(["id", { ...command, x: 30, deltaX: 2, deltaY: 50 }]);
+    release();
+    scroll.mockImplementationOnce(async () => {
+      throw Object.assign(new Error("The browser view changed."), { statusCode: 409 });
+    });
+    socket.send(JSON.stringify(command));
+    await expect
+      .poll(() => messages.some((message) => message.event === "scroll-error"))
+      .toBe(true);
+    expect(socket.readyState).toBe(1);
+    socket.send(JSON.stringify({ action: "ack", frameId: 999 }));
+    await expect
+      .poll(() => messages.some((message) => message.event === "browser-error"))
+      .toBe(true);
+  } finally {
+    socket.terminate();
+    await close();
+    await app.close();
+  }
+});
+
+async function scrollSocketFixture(
+  cloudScroll: BrowserService["cloudScroll"],
+  onControl = () => {},
+) {
+  const app = fastify();
+  const connection = Object.assign(new EventEmitter(), {
+    send: async () => {},
+    detach: async () => {},
+  });
+  const page = { context: () => ({ newCDPSession: async () => connection }) };
+  const state = {
+    pageId: "p",
+    revision: "r",
+    width: 390,
+    height: 640,
+    deviceScaleFactor: 3,
+    mobile: true,
+    pages: [],
+  };
+  const closeStreams = await registerCloudBrowserRoutes(
+    app,
+    {
+      cloudTarget: async () => ({ page, state }),
+      cloudScroll,
+      cloudControl: async () => {
+        onControl();
+        return state;
+      },
+    } as unknown as BrowserService,
+    "https://batty.example",
+  );
+  await app.ready();
+  const socket = await app.injectWS("/api/cloud-browser/id/socket", {
+    headers: { origin: "https://batty.example" },
+  });
+  const messages: Array<{ event: string; data: { requestId?: number; statusCode?: number } }> = [];
+  socket.on("message", (data, binary) => {
+    if (!binary) messages.push(JSON.parse(data.toString()));
+  });
+  return {
+    app,
+    socket,
+    messages,
+    send: (value: unknown) => socket.send(JSON.stringify(value)),
+    async close() {
+      socket.terminate();
+      await closeStreams();
+      await app.close();
+    },
+  };
+}
+
+const wheelCommand = {
+  action: "scroll",
+  pageId: "p",
+  revision: "r",
+  x: 10,
+  y: 20,
+  deltaX: 0,
+  deltaY: 10,
+} as const;
+
+test("distinct scroll anchors stay FIFO and a fence drains all earlier input before HTTP control", async () => {
+  const order: string[] = [];
+  const releases: Array<() => void> = [];
+  const scroll = vi.fn<BrowserService["cloudScroll"]>(async (_id, command) => {
+    await new Promise<void>((resolve) => {
+      releases.push(resolve);
+    });
+    order.push(`scroll:${command.x}`);
+  });
+  const f = await scrollSocketFixture(scroll, () => {
+    order.push("click");
+  });
+  try {
+    f.send(wheelCommand);
+    await expect.poll(() => scroll.mock.calls.length).toBe(1);
+    f.send({ ...wheelCommand, x: 20 });
+    f.send({ ...wheelCommand, x: 30 });
+    f.send({ ...wheelCommand, x: 40 }); // Active + two pending anchor groups is the bound.
+    f.send({ action: "flush", requestId: 1 });
+    await expect
+      .poll(() =>
+        f.messages.some((event) => event.event === "scroll-error" && event.data.statusCode === 409),
+      )
+      .toBe(true);
+    expect(f.messages.filter((event) => event.event === "scroll-drained")).toEqual([]);
+    releases.shift()!();
+    await expect.poll(() => scroll.mock.calls.length).toBe(2);
+    expect(scroll.mock.calls[1]![1].x).toBe(20);
+    expect(f.messages.filter((event) => event.event === "scroll-drained")).toEqual([]);
+    releases.shift()!();
+    await expect.poll(() => scroll.mock.calls.length).toBe(3);
+    expect(scroll.mock.calls[2]![1].x).toBe(30);
+    expect(f.messages.filter((event) => event.event === "scroll-drained")).toEqual([]);
+    releases.shift()!();
+    await expect
+      .poll(() => f.messages.filter((event) => event.event === "scroll-drained"))
+      .toEqual([{ event: "scroll-drained", data: { requestId: 1 } }]);
+    const response = await f.app.inject({
+      method: "POST",
+      url: "/api/cloud-browser/id/control",
+      headers: { origin: "https://batty.example" },
+      payload: { action: "click", pageId: "p", revision: "r", x: 50, y: 50 },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(order).toEqual(["scroll:10", "scroll:20", "scroll:30", "click"]);
+    f.send({ action: "flush", requestId: 2 });
+    await expect
+      .poll(() =>
+        f.messages.some((event) => event.event === "scroll-drained" && event.data.requestId === 2),
+      )
+      .toBe(true);
+    scroll.mockImplementationOnce(async () => {
+      throw Object.assign(new Error("Stale scroll rejected."), { statusCode: 409 });
+    });
+    f.send(wheelCommand);
+    f.send({ action: "flush", requestId: 3 });
+    await expect
+      .poll(() =>
+        f.messages.some((event) => event.event === "scroll-drained" && event.data.requestId === 3),
+      )
+      .toBe(true);
+    const fenceIndex = f.messages.findIndex(
+      (event) => event.event === "scroll-drained" && event.data.requestId === 3,
+    );
+    expect(f.messages[fenceIndex - 1]!.event).toBe("scroll-error");
+    f.send({ action: "flush", requestId: 3 }); // Reusing an already completed fence is invalid too.
+    await expect.poll(() => f.messages.some((event) => event.event === "browser-error")).toBe(true);
+    expect(
+      f.messages.filter((event) => event.event === "scroll-drained" && event.data.requestId === 3),
+    ).toHaveLength(1);
+  } finally {
+    releases.forEach((release) => release());
+    await f.close();
+  }
+});
+
+test.each([1, 2])(
+  "a second pending flush (%i) cannot replace or falsely acknowledge an active fence",
+  async (requestId) => {
+    let release!: () => void;
+    const scroll = vi.fn<BrowserService["cloudScroll"]>(async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    });
+    const f = await scrollSocketFixture(scroll);
+    try {
+      f.send(wheelCommand);
+      await expect.poll(() => scroll.mock.calls.length).toBe(1);
+      f.send({ action: "flush", requestId: 1 });
+      f.send({ action: "flush", requestId });
+      await expect
+        .poll(() => f.messages.some((event) => event.event === "browser-error"))
+        .toBe(true);
+      expect(f.messages.some((event) => event.event === "scroll-drained")).toBe(false);
+      release();
+    } finally {
+      release?.();
+      await f.close();
+    }
+  },
+);
+
+test("live WebSocket viewers close at ten minutes to revalidate authentication", async () => {
+  const app = fastify();
+  const connection = Object.assign(new EventEmitter(), {
+    send: async () => {},
+    detach: async () => {},
+  });
+  const page = { context: () => ({ newCDPSession: async () => connection }) };
+  const state = {
+    pageId: "p",
+    revision: "r",
+    width: 390,
+    height: 640,
+    deviceScaleFactor: 1,
+    mobile: true,
+    pages: [],
+  };
+  const close = await registerCloudBrowserRoutes(
+    app,
+    { cloudTarget: async () => ({ page, state }) } as unknown as BrowserService,
+    "https://batty.example",
+  );
+  await app.ready();
+  vi.useFakeTimers();
+  const socket = await app.injectWS("/api/cloud-browser/id/socket", {
+    headers: { origin: "https://batty.example" },
+  });
+  const serverSocket = [...app.websocketServer.clients][0]!;
+  const closing = vi.spyOn(serverSocket, "close");
+  try {
+    for (let i = 0; i < 40; i++) {
+      serverSocket.emit("pong");
+      await vi.advanceTimersByTimeAsync(15_000);
+    }
+    expect(closing).toHaveBeenCalledWith(1001, "Authentication revalidation");
+  } finally {
+    vi.useRealTimers();
+    socket.terminate();
+    await close();
+    await app.close();
+  }
 });

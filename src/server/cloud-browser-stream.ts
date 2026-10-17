@@ -1,23 +1,31 @@
 import type { CDPSession } from "patchright";
 import type { BrowserService } from "./browser-service";
 import type { CloudBrowserFrame, CloudBrowserState } from "@/shared/cloud-browser";
+import { encodeBrowserFrame, type BrowserFramePacket } from "./cloud-browser-events";
 
 type Subscriber = (event: "frame" | "state" | "browser-error", data: unknown) => void;
 type Target = Awaited<ReturnType<BrowserService["cloudTarget"]>>;
 
-/** One producer per live browser; slow viewers drop frames in the HTTP transport. */
+/** One producer per live browser; each WebSocket viewer retains only its latest paint. */
 export class CloudBrowserStreams {
   private readonly streams = new Map<
     string,
     {
       subscribers: Set<Subscriber>;
       stop: () => Promise<void>;
-      frame?: CloudBrowserFrame;
+      scrolling: () => void;
+      frame?: BrowserFramePacket;
       state?: CloudBrowserState;
     }
   >();
 
+  private nextFrameId = 1;
+
   constructor(private readonly browser: BrowserService) {}
+
+  scrolling(id: string): void {
+    this.streams.get(id)?.scrolling();
+  }
 
   async subscribe(id: string, subscriber: Subscriber): Promise<() => void> {
     // Validate before opening an HTTP stream, including expired attachment handles.
@@ -32,6 +40,11 @@ export class CloudBrowserStreams {
       let lastFrameAt = 0;
       let latestFrame: CloudBrowserFrame | undefined;
       let frameTimer: ReturnType<typeof setTimeout> | undefined;
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+      let motionTimer: ReturnType<typeof setTimeout> | undefined;
+      let moving = false;
+      let captureMode: boolean | undefined;
+      let captureQueue = Promise.resolve();
       const broadcast = (event: Parameters<Subscriber>[0], value: unknown) => {
         for (const listener of subscribers) listener(event, value);
       };
@@ -41,16 +54,68 @@ export class CloudBrowserStreams {
         const frame = latestFrame;
         latestFrame = undefined;
         lastFrameAt = Date.now();
-        stream!.frame = frame;
-        broadcast("frame", frame);
+        const encoded = encodeBrowserFrame(frame, this.nextFrameId++);
+        stream!.frame = encoded;
+        broadcast("frame", encoded);
       };
-      const detach = async () => {
+      const clearPaint = () => {
         if (frameTimer) clearTimeout(frameTimer);
         frameTimer = undefined;
         latestFrame = undefined;
         lastFrameAt = 0;
+      };
+      const capture = (connection: CDPSession, next: Target) => {
+        captureQueue = captureQueue.then(async () => {
+          if (stopped || cdp !== connection || captureMode === moving) return;
+          const mode = moving;
+          if (captureMode !== undefined) {
+            await connection.send("Page.stopScreencast");
+            if (stopped || cdp !== connection) return;
+          }
+          // Discard a throttled low-resolution paint before requesting the final sharp paint.
+          clearPaint();
+          const density = mode
+            ? Math.min(2, next.state.deviceScaleFactor)
+            : next.state.deviceScaleFactor;
+          await connection.send("Emulation.setVisibleSize", {
+            width: Math.ceil(next.state.width * density),
+            height: Math.ceil(next.state.height * density),
+          });
+          await connection.send("Page.startScreencast", {
+            format: "jpeg",
+            quality: mode ? 80 : 85,
+            maxWidth: Math.ceil(next.state.width * density),
+            maxHeight: Math.ceil(next.state.height * density),
+            everyNthFrame: 1,
+          });
+          if (stopped || cdp !== connection) return;
+          captureMode = mode;
+        });
+        return captureQueue;
+      };
+      const fail = (error: unknown) => {
+        if (stopped) return;
+        const statusCode = (error as { statusCode?: number }).statusCode;
+        const message = (error as Error).message;
+        broadcast("browser-error", {
+          error: message,
+          statusCode,
+          retryable:
+            statusCode !== 410 &&
+            /Execution context was destroyed|Frame was detached|Cannot find context|Target closed|Session closed|has been closed/i.test(
+              message,
+            ),
+        });
+        void stream!.stop();
+      };
+      const updateCapture = () => {
+        if (cdp && target && !stopped) void capture(cdp, target).catch(fail);
+      };
+      const detach = async () => {
+        clearPaint();
         const previous = cdp;
         cdp = undefined;
+        captureMode = undefined;
         if (previous) {
           // A closed target has already stopped producing frames.
           await previous.send("Page.stopScreencast").catch(() => {});
@@ -85,37 +150,18 @@ export class CloudBrowserStreams {
           const { pageId, revision, width, height } = next.state;
           latestFrame = { image: event.data, pageId, revision, width, height };
           if (frameTimer) return;
-          const delay = 33 - (Date.now() - lastFrameAt);
+          const delay = 16 - (Date.now() - lastFrameAt);
           if (delay <= 0) flushFrame();
           else frameTimer = setTimeout(flushFrame, delay);
         });
-        await connection.send("Page.startScreencast", {
-          format: "jpeg",
-          quality: 70,
-          maxWidth: 1600,
-          maxHeight: 1600,
-          everyNthFrame: 1,
-        });
+        await capture(connection, next);
       };
       const timer = setInterval(() => {
         if (pending || stopped) return;
         pending = this.browser
           .cloudTarget(id)
           .then(sync)
-          .catch((error) => {
-            const statusCode = (error as { statusCode?: number }).statusCode;
-            const message = (error as Error).message;
-            broadcast("browser-error", {
-              error: message,
-              statusCode,
-              retryable:
-                statusCode !== 410 &&
-                /Execution context was destroyed|Frame was detached|Cannot find context|Target closed|Session closed|has been closed/i.test(
-                  message,
-                ),
-            });
-            void stream!.stop();
-          })
+          .catch(fail)
           .finally(() => {
             pending = undefined;
           });
@@ -123,10 +169,36 @@ export class CloudBrowserStreams {
       timer.unref();
       stream = {
         subscribers,
+        scrolling: () => {
+          if (stopped) return;
+          if (!moving && !motionTimer) {
+            // Let the first input paint through the existing capture before
+            // reconfiguring it; restarting immediately captures pre-scroll pixels.
+            motionTimer = setTimeout(() => {
+              motionTimer = undefined;
+              if (stopped) return;
+              moving = true;
+              updateCapture();
+            }, 60);
+            motionTimer.unref();
+          }
+          if (idleTimer) clearTimeout(idleTimer);
+          idleTimer = setTimeout(() => {
+            idleTimer = undefined;
+            if (stopped) return;
+            moving = false;
+            updateCapture();
+          }, 150);
+          idleTimer.unref();
+        },
         stop: async () => {
           if (stopped) return;
           stopped = true;
           clearInterval(timer);
+          if (motionTimer) clearTimeout(motionTimer);
+          motionTimer = undefined;
+          if (idleTimer) clearTimeout(idleTimer);
+          idleTimer = undefined;
           this.streams.delete(id);
           await detach();
         },

@@ -4,6 +4,7 @@ import { defineTool, type Cursor, type EntryRecord } from "@earendil-works/pi-du
 import type { JsonValue } from "@earendil-works/chord";
 import type { AgentTurnArtifacts } from "./agent-turn-file-changes";
 import { decodeRuntimeNotice } from "./runtime-notices";
+import { decodeSiteAttachmentDescriptor } from "./site-attachments";
 
 export const ARTIFACT_FORWARDING_INSTRUCTION =
   "Files, diffs, sites and live browsers belong to the execution scope that produced them. To attach selected existing artifacts from a report to your own response, call attach_artifacts with the listed refs. This reuses the original immutable descriptors, including file IDs, diff contents and live browser handles, without copying files or opening another browser. Forwarded browsers share the same live session, login and expiry; forwarding does not publish them or keep them alive. Use attach_files only to import local files. Links or copied patch text do not forward response metadata. Do not automatically forward every draft. Do not rerun actions or reconstruct diffs.";
@@ -12,13 +13,22 @@ export function artifactRefs(artifacts: AgentTurnArtifacts = {}) {
   return [
     ...(artifacts.sentFiles ?? []).map((file) => ({ kind: "file" as const, value: file })),
     ...(artifacts.fileChanges ?? []).map((diff) => ({ kind: "diff" as const, value: diff })),
-    ...(artifacts.sites ?? []).map((site) => ({
-      kind: site.browserId ? ("browser" as const) : ("site" as const),
+    ...(artifacts.sites ?? []).map(decodeSiteAttachmentDescriptor).map((site) => ({
+      kind: site.kind,
       value: site,
     })),
   ].map((item) => ({
     ...item,
-    ref: `${item.kind}:${createHash("sha256").update(JSON.stringify(item.value)).digest("hex")}`,
+    // A discriminator does not create a new version of an existing attachment.
+    ref: `${item.kind}:${createHash("sha256")
+      .update(
+        JSON.stringify(
+          item.kind === "site" || item.kind === "browser"
+            ? Object.fromEntries(Object.entries(item.value).filter(([key]) => key !== "kind"))
+            : item.value,
+        ),
+      )
+      .digest("hex")}`,
   }));
 }
 
@@ -41,7 +51,7 @@ export function reportWithArtifacts(text: string, artifacts: AgentTurnArtifacts 
                 name: value.name,
                 url: value.url,
                 public: value.public,
-                ...(kind === "browser" ? { browserId: value.browserId } : {}),
+                ...(value.kind === "browser" ? { browserId: value.browserId } : {}),
               }),
       }),
     ),
@@ -114,7 +124,9 @@ export function responseArtifacts(entries: readonly EntryRecord[]): AgentTurnArt
                 .map((call) => call.details ?? call)
             : [];
       return owned.flatMap((artifacts) =>
-        (artifacts?.sites ?? []).filter((site) => site.browserId),
+        (artifacts?.sites ?? [])
+          .map(decodeSiteAttachmentDescriptor)
+          .filter((site) => site.kind === "browser"),
       );
     }),
   );

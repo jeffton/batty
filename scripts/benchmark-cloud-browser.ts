@@ -16,12 +16,19 @@ import {
 // Repeatable synthetic mobile link: 30ms each way, 20Mbit/s downstream.
 const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-cloud-bench-"));
 const service = new BrowserService(undefined, 4, root);
+const scrollOperationMs: number[] = [];
+const dispatchScroll = service.cloudScroll.bind(service);
+service.cloudScroll = async (id, command) => {
+  const started = performance.now();
+  await dispatchScroll(id, command);
+  scrollOperationMs.push(performance.now() - started);
+};
 const backend = fastify();
 backend.get("/target", (_request, reply) =>
   reply.type("text/html").send(`<!doctype html>
 <meta name="viewport" content="width=device-width"><style>body{margin:0;font:16px Arial;line-height:1.5;background:#f2f5f8}p{padding:8px;margin:0;border-bottom:1px solid #ccc}#mark{position:fixed;top:0;left:0;width:24px;height:24px;z-index:3;background:rgb(16,16,16)}</style>
 <div id="mark"></div>${Array.from({ length: 600 }, (_, i) => `<p>Row ${i}: Crisp browser text — æøå 0123456789</p>`).join("")}
-<script>window.n=0;onscroll=()=>{const n=++window.n;document.documentElement.dataset.mark=String(n);document.documentElement.dataset.firstScrollAt ||= String(Date.now());document.querySelector('#mark').style.background='rgb('+[n%8,Math.floor(n/8)%8,Math.floor(n/64)%8].map(x=>16+x*32).join(',')+')'}</script>`),
+<script>window.n=0;window.scrollRecords=[];onscroll=()=>{const n=++window.n;window.scrollRecords.push({mark:n,y:scrollY});document.documentElement.dataset.scrollRecords=JSON.stringify(window.scrollRecords);document.documentElement.dataset.mark=String(n);document.documentElement.dataset.firstScrollAt ||= String(Date.now());document.querySelector('#mark').style.background='rgb('+[n%8,Math.floor(n/8)%8,Math.floor(n/64)%8].map(x=>16+x*32).join(',')+')'}</script>`),
 );
 const reservation = net.createServer();
 reservation.listen(0, "127.0.0.1");
@@ -122,11 +129,33 @@ try {
   await page.evaluate("globalThis.__name = value => value");
   await page.evaluate(() => {
     const records: Array<{ time: number; mark: number; pixelsWidth: number }> = [];
+    const inputs: Array<{ time: number; position: number }> = [];
+    let originY = 0;
     const publish = () => {
-      document.documentElement.dataset.bench = JSON.stringify({ records });
+      document.documentElement.dataset.bench = JSON.stringify({ records, inputs });
     };
+    document.addEventListener(
+      "pointerdown",
+      (event) => {
+        if ((event.target as Element).classList.contains("cloud-browser__image"))
+          originY = event.clientY;
+      },
+      true,
+    );
+    document.addEventListener(
+      "pointermove",
+      (event) => {
+        if (!(event.target as Element).classList.contains("cloud-browser__image")) return;
+        const position = originY - event.clientY;
+        if (position < 6) return;
+        inputs.push({ time: performance.now(), position });
+        publish();
+      },
+      true,
+    );
     document.addEventListener("bench-reset", () => {
       records.length = 0;
+      inputs.length = 0;
       publish();
     });
     const sample = (image: HTMLImageElement | HTMLCanvasElement) => {
@@ -237,10 +266,18 @@ try {
       return e.width >= Math.round(e.clientWidth * devicePixelRatio);
     });
   const stats = await page.evaluate(
-    ({ started, ended, finalMark, initialWidth }) => {
+    ({ started, ended, finalMark, initialWidth, remoteScrolls }) => {
       const bench = JSON.parse(document.documentElement.dataset.bench!);
       const records = bench.records as Array<{ time: number; mark: number; pixelsWidth: number }>;
       const changed = records.filter((r, i) => i === 0 || r.mark !== records[i - 1]!.mark);
+      const inputs = bench.inputs as Array<{ time: number; position: number }>;
+      const inputAges = changed
+        .flatMap((paint) => {
+          const remote = remoteScrolls.find((scroll) => scroll.mark === paint.mark);
+          const input = remote && inputs.findLast((move) => move.position <= remote.y + 1);
+          return input ? [paint.time - input.time] : [];
+        })
+        .sort((a, b) => a - b);
       const moving = changed.filter((r) => r.time >= started && r.time <= ended);
       const gaps = moving
         .slice(1)
@@ -248,6 +285,12 @@ try {
         .sort((a, b) => a - b);
       return {
         firstPaintMs: changed.find((r) => r.mark > 0)!.time - started,
+        firstInputToVisibleMs: changed.find((r) => r.mark > 0)!.time - inputs[0]!.time,
+        reflectedInputAgeMs: {
+          p50: inputAges[Math.floor(inputAges.length * 0.5)],
+          p95: inputAges[Math.floor(inputAges.length * 0.95)],
+          samples: inputAges.length,
+        },
         fullResolutionFinalPaintMs:
           records.find((r) => r.mark === finalMark && r.pixelsWidth === initialWidth)!.time - ended,
         gestureMs: ended - started,
@@ -258,7 +301,19 @@ try {
         remoteScrollEvents: finalMark,
       };
     },
-    { started, ended, finalMark, initialWidth: dimensions.pixels[0] },
+    {
+      started,
+      ended,
+      finalMark,
+      initialWidth: dimensions.pixels[0],
+      remoteScrolls: await target.page.evaluate(
+        () =>
+          JSON.parse(document.documentElement.dataset.scrollRecords!) as Array<{
+            mark: number;
+            y: number;
+          }>,
+      ),
+    },
   );
   await verifyCoverage();
   const finalScroll = await target.page.evaluate(() => scrollY);
@@ -283,7 +338,12 @@ try {
           scrollY,
         })),
         ...stats,
-        inputToRemoteScrollMs:
+        scrollOperationMs: {
+          p50: scrollOperationMs.sort((a, b) => a - b)[Math.floor(scrollOperationMs.length * 0.5)],
+          p95: scrollOperationMs[Math.floor(scrollOperationMs.length * 0.95)],
+          samples: scrollOperationMs.length,
+        },
+        runnerToRemoteScrollMs:
           Number(await target.page.evaluate(() => document.documentElement.dataset.firstScrollAt)) -
           wallStart,
         wireBytes,

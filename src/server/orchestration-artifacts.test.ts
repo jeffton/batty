@@ -34,7 +34,13 @@ test.each(
       kind: "image",
       downloadUrl: "/api/sent-files/f",
     };
-    const site = { id: "s", name: "Site", url: "/api/sites/s", public: false };
+    const site = {
+      kind: "site" as const,
+      id: "s",
+      name: "Site",
+      url: "/api/sites/s",
+      public: false as const,
+    };
     registry.install(
       defineExtension({
         name: "artifact-fixture",
@@ -163,11 +169,12 @@ test.each(
 test("async subagent reports expose artifacts and parent forwards the same live browser", async () => {
   const { faux, orchestration, open, registry } = await fixture();
   const browser = {
+    kind: "browser" as const,
     id: "browser-child-session",
     browserId: "child-session",
     name: "Cloud browser",
     url: "/api/cloud-browser/child-session/state",
-    public: false,
+    public: false as const,
   };
   const browserRef = artifactRefs({ sites: [browser] })[0]!.ref;
   const file = {
@@ -193,7 +200,13 @@ test("async subagent reports expose artifacts and parent forwards the same live 
             details: {
               sentFiles: [file],
               sites: [
-                { id: "async-site", name: "Async demo", url: "/async-site", public: false },
+                {
+                  kind: "site" as const,
+                  id: "async-site",
+                  name: "Async demo",
+                  url: "/async-site",
+                  public: false as const,
+                },
                 browser,
               ],
               fileChanges: [{ path: "async.ts", patch: "saved patch" }],

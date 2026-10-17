@@ -65,7 +65,8 @@ test("cloud attachment shares agent state and controls, survives detach, and can
     expect(site.public).toBe(false);
     expect((await service.execute("shared", { action: "attach" })).details.sites).toEqual([site]);
     // Existing generic artifacts keep the live handle intact when forwarded.
-    expect(mergeResponseArtifacts({ sites: [site] }).sites![0]!.browserId).toBe(id);
+    const forwarded = mergeResponseArtifacts({ sites: [site] }).sites![0]!;
+    expect(forwarded.kind === "browser" && forwarded.browserId).toBe(id);
     expect(artifactRefs({ sites: [site] })[0]!.ref).toMatch(/^browser:/);
     let state = await service.cloudState(id);
     await service.cloudControl(id, { action: "click", ...state, x: 40, y: 30 });
@@ -187,6 +188,73 @@ test("cloud attachment shares agent state and controls, survives detach, and can
   } finally {
     await service.closeSession("shared");
     await service.dispose();
+    await f.close();
+  }
+}, 30_000);
+
+test("capture targets retain view fences without querying page status", async () => {
+  const f = await fixture();
+  try {
+    const opened = await f.service.execute("shared", { action: "open", url: f.url, cloud: true });
+    const id = opened.details.sites![0]!.browserId!;
+    const full = await f.service.cloudTarget(id);
+    const title = vi.spyOn(full.page, "title");
+    const frames = vi.spyOn(full.page, "frames");
+    const capture = await f.service.cloudCaptureTarget(id);
+    expect(capture.page).toBe(full.page);
+    expect(full.state).toMatchObject(capture.state);
+    expect(title).not.toHaveBeenCalled();
+    expect(frames).not.toHaveBeenCalled();
+    await f.service.cloudControl(id, { action: "click", ...capture.state, x: 40, y: 30 });
+    await f.service.execute("shared", { action: "click", selector: "#text" });
+    await expect(
+      f.service.cloudScroll(id, {
+        action: "scroll",
+        ...capture.state,
+        x: 40,
+        y: 30,
+        deltaX: 0,
+        deltaY: 10,
+      }),
+    ).rejects.toThrow("view changed");
+  } finally {
+    await f.close();
+  }
+}, 30_000);
+
+test("direct wheel input targets iframe and nested scrollers without synthetic hover events", async () => {
+  const f = await fixture();
+  try {
+    const opened = await f.service.execute("shared", { action: "open", url: f.url, cloud: true });
+    const id = opened.details.sites![0]!.browserId!;
+    const { page } = await f.service.cloudTarget(id);
+    await page.setContent(`
+      <body style="margin:0;height:3000px" onmousemove="this.dataset.moves=String(Number(this.dataset.moves||0)+1)">
+      <iframe style="display:block;width:160px;height:160px;border:0" srcdoc="<body style='margin:0;height:2000px'>Frame</body>"></iframe>
+      <div id="pane" style="position:absolute;left:180px;top:0;width:160px;height:160px;overflow:auto;overscroll-behavior:contain"><div style="height:2000px">Pane</div></div>
+      </body>`);
+    const frame = page.frames().find((frame) => frame !== page.mainFrame())!;
+    await frame.waitForLoadState();
+    const state = await f.service.cloudState(id);
+    const scroll = (x: number, deltaY: number) =>
+      f.service.cloudScroll(id, {
+        action: "scroll",
+        ...state,
+        x,
+        y: 80,
+        deltaX: 0,
+        deltaY,
+      });
+    const moves = await page.locator("body").getAttribute("data-moves");
+    await scroll(80, 120);
+    await expect.poll(() => frame.evaluate(() => scrollY)).toBe(120);
+    await scroll(240, 90);
+    await expect.poll(() => page.locator("#pane").evaluate((pane) => pane.scrollTop)).toBe(90);
+    await scroll(80, -40);
+    await expect.poll(() => frame.evaluate(() => scrollY)).toBe(80);
+    expect(await page.evaluate(() => scrollY)).toBe(0);
+    expect(await page.locator("body").getAttribute("data-moves")).toBe(moves);
+  } finally {
     await f.close();
   }
 }, 30_000);
@@ -458,8 +526,13 @@ function streamFixture() {
       },
     }),
   };
+  const cloudTarget = vi.fn(async () => ({ page, state }));
+  const cloudCaptureTarget = vi.fn(async () => ({ page, state }));
+  const cloudState = vi.fn(async () => state);
   const streams = new CloudBrowserStreams({
-    cloudTarget: async () => ({ page, state }),
+    cloudTarget,
+    cloudCaptureTarget,
+    cloudState,
   } as unknown as BrowserService);
   const frames: CloudBrowserFrame[] = [];
   const paint = (image: string, connection = connections.at(-1)!, dimensions = state) => {
@@ -473,6 +546,9 @@ function streamFixture() {
     streams,
     connections,
     frames,
+    cloudTarget,
+    cloudCaptureTarget,
+    cloudState,
     paint,
     revise: () => {
       state = { ...state, revision: "rotated", width: 757, height: 358 };
@@ -489,6 +565,27 @@ function streamFixture() {
       ),
   };
 }
+
+test("capture polling avoids full status work until its cadence or a view change", async () => {
+  vi.useFakeTimers();
+  const f = streamFixture();
+  try {
+    await f.subscribe();
+    await vi.advanceTimersByTimeAsync(400);
+    expect(f.cloudCaptureTarget).toHaveBeenCalledTimes(4);
+    expect(f.cloudTarget).toHaveBeenCalledTimes(1);
+    expect(f.cloudState).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.cloudState).toHaveBeenCalledTimes(1);
+    f.revise();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.cloudTarget).toHaveBeenCalledTimes(2);
+    expect(f.starts().at(-1)).toMatchObject({ maxWidth: 2271, maxHeight: 1074 });
+  } finally {
+    await f.streams.close();
+    vi.useRealTimers();
+  }
+});
 
 test("direct screencast ACKs immediately and throttles to the latest final paint", async () => {
   vi.useFakeTimers();
@@ -659,11 +756,14 @@ test("stream failures distinguish navigation interruption, permanent expiry and 
     pages: [],
   };
   let failure: Error | undefined;
+  const target = async () => {
+    if (failure) throw failure;
+    return { page, state };
+  };
   const streams = new CloudBrowserStreams({
-    cloudTarget: async () => {
-      if (failure) throw failure;
-      return { page, state };
-    },
+    cloudTarget: target,
+    cloudCaptureTarget: target,
+    cloudState: async () => (await target()).state,
   } as unknown as BrowserService);
   const errors: Array<{ retryable: boolean; statusCode?: number }> = [];
   const listener = (event: string, data: unknown) => {
@@ -847,6 +947,8 @@ test("WebSocket scroll coalesces pending deltas and preserves its anchor without
     app,
     {
       cloudTarget: async () => ({ page, state }),
+      cloudCaptureTarget: async () => ({ page, state }),
+      cloudState: async () => state,
       cloudScroll: scroll,
     } as unknown as BrowserService,
     "https://batty.example",
@@ -920,6 +1022,8 @@ async function scrollSocketFixture(
     app,
     {
       cloudTarget: async () => ({ page, state }),
+      cloudCaptureTarget: async () => ({ page, state }),
+      cloudState: async () => state,
       cloudScroll,
       cloudControl: async () => {
         onControl();
@@ -1082,6 +1186,8 @@ test("live WebSocket viewers close at ten minutes to revalidate authentication",
     app,
     {
       cloudTarget: async () => ({ page, state }),
+      cloudCaptureTarget: async () => ({ page, state }),
+      cloudState: async () => state,
     } as unknown as BrowserService,
     "https://batty.example",
   );

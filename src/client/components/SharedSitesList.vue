@@ -4,9 +4,9 @@ import { computed, onBeforeUnmount, ref } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import BrowserPopover from "@/client/components/BrowserPopover.vue";
 import { setSitePublic } from "@/client/lib/api";
-import type { SiteDescriptor } from "@/shared/types";
+import type { SiteAttachmentDescriptor, SiteDescriptor } from "@/shared/types";
 
-const props = defineProps<{ sites: SiteDescriptor[]; idPrefix?: string }>();
+const props = defineProps<{ sites: SiteAttachmentDescriptor[]; idPrefix?: string }>();
 const publicById = ref<Record<string, boolean>>({});
 const savingId = ref<string>();
 const copiedId = ref<string>();
@@ -14,10 +14,9 @@ const previewRevisionById = ref<Record<string, number>>({});
 let copiedTimeout: number | undefined;
 
 const displayedSites = computed(() =>
-  props.sites.map((site) => ({
-    ...site,
-    public: publicById.value[site.id] ?? site.public,
-  })),
+  props.sites.map((site) =>
+    site.kind === "site" ? { ...site, public: publicById.value[site.id] ?? site.public } : site,
+  ),
 );
 
 function popoverId(siteId: string): string {
@@ -78,16 +77,16 @@ onBeforeUnmount(() => {
       <div class="shared-sites__meta">
         <strong>{{ site.name }}</strong>
         <span>{{
-          site.browserId ? "Cloud browser" : site.public ? "Public site" : "Private site"
+          site.kind === "browser" ? "Cloud browser" : site.public ? "Public site" : "Private site"
         }}</span>
       </div>
       <button type="button" class="shared-sites__open" :popovertarget="popoverId(site.id)">
         <ExternalLink :size="15" />
-        {{ site.browserId ? "Open browser" : "Open site" }}
+        {{ site.kind === "browser" ? "Open browser" : "Open site" }}
       </button>
 
       <BrowserPopover
-        v-if="site.browserId"
+        v-if="site.kind === 'browser'"
         :popover-id="popoverId(site.id)"
         :browser-id="site.browserId"
         :title="site.name"
@@ -136,11 +135,15 @@ onBeforeUnmount(() => {
 <style scoped>
 .shared-sites {
   display: grid;
+  clear: both;
+  width: 100%;
+  min-width: 0;
   gap: 0.6rem;
 }
 
 .shared-sites__card {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem;
   padding: 0.7rem;
@@ -151,6 +154,7 @@ onBeforeUnmount(() => {
 
 .shared-sites__meta {
   display: grid;
+  flex: 1 1 8rem;
   gap: 0.1rem;
   min-width: 0;
   margin-right: auto;
@@ -178,6 +182,12 @@ onBeforeUnmount(() => {
   color: var(--color-text);
   font-family: inherit;
   cursor: pointer;
+}
+
+.shared-sites__open {
+  flex: 0 0 auto;
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 .shared-sites__header-btn {

@@ -14,7 +14,12 @@ import TranscriptImage from "@/client/components/TranscriptImage.vue";
 import { isAttachmentOutputToolCall } from "@/client/lib/transcript";
 import { hasNoReplyText } from "@/shared/chat-only-context";
 import type { ToolDisplayState } from "@/client/lib/transcript";
-import type { SentFileDescriptor, SiteDescriptor, UiContentBlock, UiMessage } from "@/shared/types";
+import type {
+  SentFileDescriptor,
+  SiteAttachmentDescriptor,
+  UiContentBlock,
+  UiMessage,
+} from "@/shared/types";
 
 type AssistantSegment = {
   kind: "reply" | "interim" | "plain";
@@ -224,7 +229,7 @@ const noticeArtifacts = computed(() =>
     ? (props.message.data?.runtimeResultArtifacts as
         | {
             sentFiles?: SentFileDescriptor[];
-            sites?: SiteDescriptor[];
+            sites?: SiteAttachmentDescriptor[];
             fileChanges?: import("@/shared/types").AgentTurnFileChange[];
           }
         | undefined)
@@ -267,21 +272,25 @@ const attachedFiles = computed<SentFileDescriptor[]>(() => {
   return files;
 });
 
-function isSiteDescriptor(candidate: unknown): candidate is SiteDescriptor {
+function isSiteAttachmentDescriptor(candidate: unknown): candidate is SiteAttachmentDescriptor {
   return (
     !!candidate &&
     typeof candidate === "object" &&
-    typeof (candidate as SiteDescriptor).id === "string" &&
-    typeof (candidate as SiteDescriptor).name === "string" &&
-    typeof (candidate as SiteDescriptor).url === "string" &&
-    typeof (candidate as SiteDescriptor).public === "boolean"
+    typeof (candidate as SiteAttachmentDescriptor).id === "string" &&
+    typeof (candidate as SiteAttachmentDescriptor).name === "string" &&
+    typeof (candidate as SiteAttachmentDescriptor).url === "string" &&
+    (((candidate as SiteAttachmentDescriptor).kind === "site" &&
+      typeof (candidate as SiteAttachmentDescriptor).public === "boolean") ||
+      ((candidate as SiteAttachmentDescriptor).kind === "browser" &&
+        (candidate as { public?: unknown }).public === false &&
+        typeof (candidate as { browserId?: unknown }).browserId === "string"))
   );
 }
 
-const sharedSites = computed<SiteDescriptor[]>(() => {
+const sharedSites = computed<SiteAttachmentDescriptor[]>(() => {
   if (noticeArtifacts.value) return noticeArtifacts.value.sites ?? [];
   if (props.message.role !== "assistant") return [];
-  const sites: SiteDescriptor[] = [...(props.message.sites ?? [])];
+  const sites: SiteAttachmentDescriptor[] = [...(props.message.sites ?? [])];
   const seen = new Set(sites.map((site) => site.id));
   for (const block of props.message.blocks) {
     if (block.type !== "toolCall" || (block.name !== "sites" && block.name !== "attach_files")) {
@@ -290,7 +299,7 @@ const sharedSites = computed<SiteDescriptor[]>(() => {
     const candidates = toolStateFor(block.id)?.resultDetails?.sites;
     if (!Array.isArray(candidates)) continue;
     for (const candidate of candidates) {
-      if (!isSiteDescriptor(candidate) || seen.has(candidate.id)) continue;
+      if (!isSiteAttachmentDescriptor(candidate) || seen.has(candidate.id)) continue;
       seen.add(candidate.id);
       sites.push(candidate);
     }
@@ -793,6 +802,7 @@ onBeforeUnmount(() => {
 
 .message__artifacts {
   display: grid;
+  clear: both;
   gap: 0.6rem;
   margin-top: 0.5rem;
 }

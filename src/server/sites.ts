@@ -43,6 +43,7 @@ function browserSiteUrl(baseUrl: string, siteId: string, accessToken: string): s
 
 function descriptor(manifest: SiteManifest, baseUrl: string): SiteDescriptor {
   return {
+    kind: "site",
     id: manifest.id,
     name: manifest.name,
     url: siteUrl(baseUrl, manifest.id),

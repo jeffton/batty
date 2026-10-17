@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
-import type { SiteDescriptor } from "@/shared/types";
+import type { BrowserDescriptor } from "@/shared/types";
 import type {
   CloudBrowserControl,
   CloudBrowserState,
@@ -20,60 +20,16 @@ import {
 } from "./browser-persistence";
 import { DEFAULT_BROWSER_MAX_TABS } from "./options";
 import type { BrowserProxy } from "./ssh-socks-proxy";
+import type { BrowserAction, BrowserActionInput } from "./browser-schemas";
+export type { BrowserAction, BrowserActionInput } from "./browser-schemas";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_BROWSER_SESSIONS = 8;
 const SCREENSHOTS_DIR = path.join(os.tmpdir(), "batty-browser-screenshots");
 
-export type BrowserAction =
-  | "open"
-  | "attach"
-  | "pages"
-  | "switch"
-  | "close-page"
-  | "frames"
-  | "snapshot"
-  | "screenshot"
-  | "click"
-  | "fill"
-  | "press"
-  | "select"
-  | "upload"
-  | "download"
-  | "wait"
-  | "scroll"
-  | "hover"
-  | "back"
-  | "reload"
-  | "evaluate"
-  | "close";
-
 export interface BrowserViewport {
   width: number;
   height: number;
-}
-
-export interface BrowserActionInput {
-  action: BrowserAction;
-  url?: string;
-  pageId?: string;
-  frameId?: string;
-  newPage?: boolean;
-  cloud?: boolean;
-  selector?: string;
-  value?: string;
-  values?: string[];
-  paths?: string[];
-  key?: string;
-  state?: "attached" | "detached" | "visible" | "hidden";
-  script?: string;
-  args?: unknown;
-  deltaX?: number;
-  deltaY?: number;
-  viewport?: BrowserViewport;
-  fullPage?: boolean;
-  timeoutMs?: number;
-  useTailscale?: boolean;
 }
 
 interface BrowserPageDetails {
@@ -102,7 +58,7 @@ export interface BrowserActionResult {
     frames?: BrowserFrameDetails[];
     downloadPaths?: string[];
     screenshotPath?: string;
-    sites?: SiteDescriptor[];
+    sites?: BrowserDescriptor[];
   };
   image?: {
     data: string;
@@ -369,11 +325,12 @@ export class BrowserService {
     );
   }
 
-  private async cloudAttachment(session: BrowserSession): Promise<SiteDescriptor> {
+  private async cloudAttachment(session: BrowserSession): Promise<BrowserDescriptor> {
     const cloud = await readBrowserJson<{ id: string }>(path.join(session.directory, "cloud.json"));
     if (!cloud) throw new Error("Enable cloud=true before attaching this browser.");
     return {
       id: `browser-${cloud.id}`,
+      kind: "browser",
       browserId: cloud.id,
       name: "Cloud browser",
       url: `/api/cloud-browser/${cloud.id}/state`,
@@ -536,7 +493,16 @@ export class BrowserService {
     return this.cloudOperation(id, (session) => this.cloudStateFor(session));
   }
 
-  /** The stream observes the same Page object that agent actions use, never another browser. */
+  /** Capture polling reads only local page metadata, not titles, frames or focused fields. */
+  async cloudCaptureTarget(id: string) {
+    return this.cloudOperation(id, async (session) => {
+      const page = this.resolvePage(session);
+      await session.pageIdentityPromises.get(page);
+      return { page, state: this.cloudView(session, page) };
+    });
+  }
+
+  /** Full viewer status observes the same Page object that agent actions use. */
   async cloudTarget(id: string) {
     return this.cloudOperation(id, async (session) => {
       const page = this.resolvePage(session);
@@ -575,25 +541,29 @@ export class BrowserService {
     await this.cloudOperation(
       id,
       async (session) => {
-        const page = this.cloudInputPage(session, command);
-        await session.pageIdentityPromises.get(page);
-        const connection = session.pageEmulation.get(page)!;
-        await connection.send("Input.dispatchMouseEvent", {
-          type: "mouseMoved",
-          x: command.x,
-          y: command.y,
-        });
-        await connection.send("Input.dispatchMouseEvent", {
-          type: "mouseWheel",
-          x: command.x,
-          y: command.y,
-          deltaX: command.deltaX,
-          deltaY: command.deltaY,
-        });
+        await this.dispatchCloudScroll(session, command);
       },
       true,
       false,
     );
+  }
+
+  private async dispatchCloudScroll(
+    session: BrowserSession,
+    command: Extract<CloudBrowserControl, { action: "scroll" }>,
+  ): Promise<void> {
+    const page = this.cloudInputPage(session, command);
+    await session.pageIdentityPromises.get(page);
+    const connection = session.pageEmulation.get(page)!;
+    // Wheel events carry their own CSS-coordinate target; avoid an extra
+    // mousemove/hover dispatch and CDP acknowledgement for every scroll delta.
+    await connection.send("Input.dispatchMouseEvent", {
+      type: "mouseWheel",
+      x: command.x,
+      y: command.y,
+      deltaX: command.deltaX,
+      deltaY: command.deltaY,
+    });
   }
 
   async cloudControl(id: string, command: CloudBrowserControl): Promise<CloudBrowserState> {
@@ -609,8 +579,7 @@ export class BrowserService {
               await page.mouse.click(command.x, command.y);
               break;
             case "scroll":
-              await page.mouse.move(command.x, command.y);
-              await page.mouse.wheel(command.deltaX, command.deltaY);
+              await this.dispatchCloudScroll(session, command);
               break;
             case "drag":
               await page.mouse.move(command.x, command.y);

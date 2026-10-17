@@ -1,6 +1,11 @@
 import { generateUnifiedPatch } from "@earendil-works/pi-coding-agent";
-import type { AgentTurnFileChange, SentFileDescriptor, SiteDescriptor } from "@/shared/types";
+import type {
+  AgentTurnFileChange,
+  SentFileDescriptor,
+  SiteAttachmentDescriptor,
+} from "@/shared/types";
 import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE } from "./runtime-notices";
+import { decodeSiteAttachmentDescriptor } from "./site-attachments";
 
 export const AGENT_TURN_FILE_CHANGES_CUSTOM_TYPE = "batty-agent-turn-file-changes";
 
@@ -14,7 +19,7 @@ export interface DurableFileChange extends AgentTurnFileChange {
 export interface AgentTurnArtifacts {
   fileChanges?: AgentTurnFileChange[];
   sentFiles?: SentFileDescriptor[];
-  sites?: SiteDescriptor[];
+  sites?: SiteAttachmentDescriptor[];
 }
 
 interface PersistedAgentTurnFileChanges {
@@ -26,7 +31,7 @@ interface PersistedAgentTurnFileChanges {
 interface ArtifactData {
   battyFileChanges?: DurableFileChange[];
   sentFiles?: SentFileDescriptor[];
-  sites?: SiteDescriptor[];
+  sites?: SiteAttachmentDescriptor[];
 }
 
 function persistedFileChanges(value: unknown): PersistedAgentTurnFileChanges | undefined {
@@ -72,9 +77,9 @@ export function agentTurnArtifactsByReplyEntryId(
   const result = new Map<string, AgentTurnArtifacts>();
   const changes = new Map<string, DurableFileChange>();
   const sentFiles: SentFileDescriptor[] = [];
-  const sites: SiteDescriptor[] = [];
+  const sites: SiteAttachmentDescriptor[] = [];
   const deliveredSentFiles: SentFileDescriptor[] = [];
-  const deliveredSites: SiteDescriptor[] = [];
+  const deliveredSites: SiteAttachmentDescriptor[] = [];
   let hasReply = false;
   let backgroundResultPending = false;
 
@@ -124,7 +129,7 @@ export function agentTurnArtifactsByReplyEntryId(
           changes.set(change.path, { ...change, before: first ? first.before : change.before });
         }
         appendUniqueById(sentFiles, message.details?.sentFiles ?? []);
-        appendUniqueById(sites, message.details?.sites ?? []);
+        appendUniqueById(sites, message.details?.sites?.map(decodeSiteAttachmentDescriptor) ?? []);
         continue;
       }
 
@@ -148,7 +153,10 @@ export function agentTurnArtifactsByReplyEntryId(
             appendUniqueById(deliveredSentFiles, message.details?.sentFiles ?? []);
           }
           if (message.toolCallId?.startsWith("cron-sites:")) {
-            appendUniqueById(deliveredSites, message.details?.sites ?? []);
+            appendUniqueById(
+              deliveredSites,
+              message.details?.sites?.map(decodeSiteAttachmentDescriptor) ?? [],
+            );
           }
         }
         if (message.role === "assistant") {
@@ -199,7 +207,7 @@ export function agentTurnArtifactsByReplyEntryId(
       }
       if (message.role === "toolResult") {
         appendUniqueById(sentFiles, message.details?.sentFiles ?? []);
-        appendUniqueById(sites, message.details?.sites ?? []);
+        appendUniqueById(sites, message.details?.sites?.map(decodeSiteAttachmentDescriptor) ?? []);
         for (const change of message.details?.battyFileChanges ?? []) {
           const first = changes.get(change.path);
           changes.set(change.path, { ...change, before: first ? first.before : change.before });

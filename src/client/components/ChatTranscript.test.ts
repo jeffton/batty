@@ -94,7 +94,17 @@ for (const location of ["history", "tail"] as const) {
 test("artifact-only and error-only replies each render exactly one action stack", () => {
   for (const extra of [
     { errorMessage: "Failed", stopReason: "error" as const },
-    { sites: [{ id: "s", name: "Site", url: "https://example.com" }] },
+    {
+      sites: [
+        {
+          kind: "site" as const,
+          id: "s",
+          name: "Site",
+          url: "https://example.com",
+          public: false as const,
+        },
+      ],
+    },
   ]) {
     const message = {
       id: "reply",

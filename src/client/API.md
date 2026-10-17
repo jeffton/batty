@@ -28,7 +28,7 @@ Tool details `subagent.sessionId`, nested codemode `calls[].subagent.sessionId`,
 
 ## Shared cloud browser
 
-A `SiteDescriptor` with `browserId` is a private live-browser attachment, rendered by `BrowserPopover` rather than a site iframe. Its opaque ID locates a browser instance; every API request still requires Batty authentication.
+The `sites` attachment envelope contains a discriminated `SiteAttachmentDescriptor` union: `SiteDescriptor` (`kind: "site"`) or `BrowserDescriptor` (`kind: "browser"`, required `browserId`, `public: false`). A browser is rendered by `BrowserPopover` rather than a site iframe. Its opaque ID locates a browser instance; every API request still requires Batty authentication.
 
 - `GET /api/cloud-browser/:browserId/state`: `CloudBrowserState` (active page, viewport, revision, tabs and focused editable field).
 - `GET /api/cloud-browser/:browserId/socket`: authenticated, same-origin WebSocket. Text messages are `{event,data}` for state/errors and `scroll-drained`. Binary frames contain a 4-byte big-endian JSON-header length, `{frameId,pageId,revision,width,height}`, then JPEG bytes. Viewers ACK presented/discarded frame IDs; two frames can be outstanding and one latest paint replaces history. Scroll commands use CSS coordinates and `{action:"flush",requestId}` orders later HTTP controls after prior scrolling. Transient failures reconnect with backoff; 410 stays closed. This replaces the SSE `/events` endpoint.

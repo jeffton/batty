@@ -1,286 +1,56 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
-import { withBaseUrl } from "@/client/lib/base-url";
-import type {
-  CloudBrowserState as BrowserState,
-  CloudBrowserFrame as BrowserFrame,
-} from "@/shared/cloud-browser";
+import { useBrowserTransport } from "@/client/browser/transport";
 
-type RemoteFrame = Omit<BrowserFrame, "image"> & { frameId: number };
-type Point = { x: number; y: number };
-type Gesture = {
-  pointerId: number;
-  clientX: number;
-  clientY: number;
-  lastX: number;
-  lastY: number;
-  moved: boolean;
-  frame: RemoteFrame;
-  rect: DOMRect;
-  anchor: Point;
-};
 const props = defineProps<{ popoverId: string; browserId: string; title: string }>();
-const state = ref<BrowserState>();
-const displayedFrame = ref<RemoteFrame>();
-const image = ref<HTMLCanvasElement>();
-let pendingFrame:
-  | { frame: RemoteFrame; jpeg: Blob; socket: WebSocket; generation: number }
-  | undefined;
-let painting = false;
-const hasFrame = ref(false);
 const viewport = ref<HTMLElement>();
-const editor = ref<HTMLInputElement | HTMLTextAreaElement>();
 const address = ref("");
 const addressInput = ref<HTMLInputElement>();
 let addressWasFocused = false;
-const text = ref("");
-const error = ref("");
-const connection = ref("Connecting…");
-const reconnecting = ref(false);
-let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-let reconnectAttempt = 0;
-const ended = ref(false);
-const open = ref(false);
-const dismissedFocus = ref("");
 const viewStyle = ref<Record<string, string>>({});
-let stream: WebSocket | undefined;
-let controller: AbortController | undefined;
-let generation = 0;
-let gesture: Gesture | undefined;
 let resizeObserver: ResizeObserver | undefined;
 let resizeTimer: ReturnType<typeof setTimeout> | undefined;
-let inputTimer: ReturnType<typeof setTimeout> | undefined;
-const scrollPending: Array<
-  Point & { deltaX: number; deltaY: number; pageId: string; revision: string }
-> = [];
-let scrollDirty = false;
-let nextFenceId = 1;
-let scrollFence:
-  | {
-      id: number;
-      promise: Promise<void>;
-      resolve: () => void;
-      reject: (error: Error) => void;
-      timer: ReturnType<typeof setTimeout>;
-    }
-  | undefined;
-let scrollAnimation: number | undefined;
-let queue: Promise<unknown> = Promise.resolve();
-const endpoint = computed(() => `/api/cloud-browser/${encodeURIComponent(props.browserId)}`);
-const ready = computed(() => !ended.value && !!state.value);
-const frameReady = computed(
-  () =>
-    ready.value &&
-    !reconnecting.value &&
-    !!displayedFrame.value &&
-    displayedFrame.value.pageId === state.value?.pageId &&
-    displayedFrame.value.revision === state.value?.revision,
-);
-const focused = computed(() => state.value?.focused);
-const editing = computed(() => focused.value && dismissedFocus.value !== focused.value.id);
+const browser = useBrowserTransport(() => props.browserId, {
+  onState: (value, previous) => {
+    if (previous?.url !== value.url) address.value = value.url;
+    if (previous?.pageId !== value.pageId) scheduleResize();
+  },
+  onStop: () => clearTimeout(resizeTimer),
+  fitViewport,
+});
+const {
+  state,
+  ready,
+  error,
+  connection,
+  reconnecting,
+  ended,
+  control,
+  startViewing,
+  stopViewing,
+  onToggle,
+  onVisibility,
+  onOnline,
+  onOffline,
+} = browser;
+const { image, displayedFrame, hasFrame } = browser.frames;
+const {
+  editor,
+  text,
+  focused,
+  editing,
+  pointerDown,
+  pointerMove,
+  pointerUp,
+  cancelGesture,
+  wheel,
+  beginComposition,
+  scheduleInput,
+  submitInput,
+  dismissInput,
+} = browser.input;
 
-async function request(
-  path: string,
-  init: RequestInit,
-  signal: AbortSignal,
-): Promise<BrowserState> {
-  const response = await fetch(withBaseUrl(`${endpoint.value}/${path}`), {
-    credentials: "include",
-    ...init,
-    signal,
-  });
-  if (!response.ok) {
-    const body = (await response.json()) as { error: string };
-    if (response.status === 404 || response.status === 410) {
-      ended.value = true;
-      stream?.close();
-    }
-    throw Object.assign(new Error(body.error), { statusCode: response.status });
-  }
-  return (await response.json()) as BrowserState;
-}
-function updateState(value: BrowserState): void {
-  const pageChanged = state.value?.pageId !== value.pageId;
-  if (state.value?.url !== value.url) address.value = value.url;
-  if (state.value?.focused?.id !== value.focused?.id) {
-    clearTimeout(inputTimer);
-    inputTimer = undefined;
-    text.value = value.focused?.value ?? "";
-  } else if (document.activeElement !== editor.value && !inputTimer) {
-    text.value = value.focused?.value ?? "";
-  }
-  state.value = value;
-  if (pageChanged) scheduleResize();
-}
-function stopViewing(): void {
-  generation++;
-  stream?.close();
-  stream = undefined;
-  controller?.abort();
-  controller = undefined;
-  gesture = undefined;
-  scrollPending.length = 0;
-  scrollDirty = false;
-  if (scrollFence) {
-    clearTimeout(scrollFence.timer);
-    scrollFence.reject(new Error("Browser view disconnected"));
-    scrollFence = undefined;
-  }
-  pendingFrame = undefined;
-  if (scrollAnimation !== undefined) cancelAnimationFrame(scrollAnimation);
-  scrollAnimation = undefined;
-  clearTimeout(inputTimer);
-  inputTimer = undefined;
-  clearTimeout(resizeTimer);
-  clearTimeout(reconnectTimer);
-  reconnectTimer = undefined;
-}
-function scheduleReconnect(): void {
-  stopViewing();
-  if (!open.value || document.hidden || ended.value) return;
-  reconnecting.value = true;
-  connection.value = "Reconnecting…";
-  const delay = Math.min(1000 * 2 ** reconnectAttempt++, 15000);
-  reconnectTimer = setTimeout(() => void startViewing(), delay);
-}
-function onOffline(): void {
-  if (open.value && !ended.value) scheduleReconnect();
-}
-function onOnline(): void {
-  if (reconnecting.value && open.value && !document.hidden) void startViewing();
-}
-async function startViewing(): Promise<void> {
-  stopViewing();
-  if (!open.value || document.hidden) return;
-  const current = generation;
-  const abort = new AbortController();
-  controller = abort;
-  ended.value = false;
-  error.value = "";
-  connection.value = "Connecting…";
-  if (!reconnecting.value) {
-    hasFrame.value = false;
-    displayedFrame.value = undefined;
-    state.value = undefined;
-  }
-  try {
-    const initial = await request("state", {}, abort.signal);
-    if (current !== generation) return;
-    updateState(initial);
-    await fitViewport();
-    if (current !== generation) return;
-    const url = new URL(withBaseUrl(`${endpoint.value}/socket`), window.location.href);
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    const socket = new WebSocket(url);
-    socket.binaryType = "arraybuffer";
-    stream = socket;
-    socket.onclose = () => {
-      if (current === generation) scheduleReconnect();
-    };
-    socket.onmessage = (event: MessageEvent<string | ArrayBuffer>) => {
-      if (current !== generation) return;
-      if (typeof event.data !== "string") {
-        const length = new DataView(event.data).getUint32(0);
-        const frame = JSON.parse(
-          new TextDecoder().decode(new Uint8Array(event.data, 4, length)),
-        ) as RemoteFrame;
-        if (pendingFrame) acknowledge(pendingFrame.socket, pendingFrame.frame.frameId);
-        pendingFrame = {
-          frame,
-          jpeg: new Blob([event.data.slice(4 + length)], { type: "image/jpeg" }),
-          socket,
-          generation: current,
-        };
-        void paintFrames();
-        return;
-      }
-      const message = JSON.parse(event.data);
-      if (message.event === "state") updateState(message.data);
-      else if (message.event === "scroll-error") {
-        error.value = message.data.error;
-        if (scrollFence) failScrollFence(message.data.error);
-      } else if (message.event === "scroll-drained" && message.data.requestId === scrollFence?.id) {
-        clearTimeout(scrollFence.timer);
-        scrollFence.resolve();
-        scrollFence = undefined;
-      } else if (message.event === "browser-error") {
-        const failure = message.data as { error: string; retryable: boolean; statusCode?: number };
-        if (failure.retryable) scheduleReconnect();
-        else {
-          stopViewing();
-          reconnecting.value = false;
-          displayedFrame.value = undefined;
-          error.value = failure.error;
-          ended.value = failure.statusCode === 410;
-        }
-      }
-    };
-  } catch (cause) {
-    if (current !== generation || abort.signal.aborted) return;
-    const status = (cause as { statusCode?: number }).statusCode;
-    if (!status || status >= 500 || status === 429) scheduleReconnect();
-    else {
-      reconnecting.value = false;
-      error.value = (cause as Error).message;
-    }
-  }
-}
-function acknowledge(socket: WebSocket, frameId: number): void {
-  if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ action: "ack", frameId }));
-}
-async function paintFrames(): Promise<void> {
-  if (painting) return;
-  painting = true;
-  let decodingGeneration = generation;
-  try {
-    while (pendingFrame) {
-      const next = pendingFrame;
-      decodingGeneration = next.generation;
-      pendingFrame = undefined;
-      const bitmap = await createImageBitmap(next.jpeg);
-      try {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        if (next.generation !== generation || next.socket !== stream) continue;
-        if (
-          next.frame.pageId === state.value?.pageId &&
-          next.frame.revision === state.value?.revision
-        ) {
-          const canvas = image.value!;
-          if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
-            canvas.width = bitmap.width;
-            canvas.height = bitmap.height;
-          }
-          canvas.getContext("2d", { alpha: false })!.drawImage(bitmap, 0, 0);
-          displayedFrame.value = next.frame;
-          hasFrame.value = true;
-          canvas.dataset.frame = String(next.frame.frameId);
-          reconnecting.value = false;
-          reconnectAttempt = 0;
-          connection.value = "Live";
-        }
-      } finally {
-        bitmap.close();
-        acknowledge(next.socket, next.frame.frameId);
-      }
-    }
-  } catch (cause) {
-    if (decodingGeneration === generation) {
-      stopViewing();
-      reconnecting.value = false;
-      displayedFrame.value = undefined;
-      error.value = `Browser image could not be decoded: ${(cause as Error).message}`;
-    }
-  } finally {
-    painting = false;
-    if (pendingFrame) void paintFrames();
-  }
-}
-function onToggle(event: Event): void {
-  open.value = (event as ToggleEvent).newState === "open";
-  if (open.value) void startViewing();
-  else stopViewing();
-}
 function resizeView(): void {
   const visual = window.visualViewport;
   viewStyle.value = {
@@ -318,39 +88,6 @@ function scheduleResize(): void {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => void fitViewport(), 120);
 }
-function onVisibility(): void {
-  if (document.hidden) stopViewing();
-  else if (open.value && !ended.value) void startViewing();
-}
-function control(command: Record<string, unknown>): Promise<boolean> {
-  const current = generation;
-  const operation = async () => {
-    if (current !== generation || !ready.value || !controller) return false;
-    error.value = "";
-    try {
-      await drainScroll();
-      if (current !== generation || !controller) return false;
-      const value = await request(
-        "control",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(command),
-        },
-        controller.signal,
-      );
-      if (current !== generation) return false;
-      updateState(value);
-      return true;
-    } catch (cause) {
-      if (current === generation) error.value = (cause as Error).message;
-      return false;
-    }
-  };
-  const result = queue.then(operation);
-  queue = result;
-  return result;
-}
 function addressPointerDown(event: PointerEvent): void {
   addressWasFocused = document.activeElement === event.currentTarget;
 }
@@ -363,205 +100,6 @@ function navigate(): void {
   const value = address.value.trim();
   const url = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `https://${value}`;
   void control({ action: "navigate", url });
-}
-function point(clientX: number, clientY: number, rect: DOMRect, frame: RemoteFrame): Point {
-  return {
-    x: Math.max(
-      0,
-      Math.min(frame.width - 1, Math.round(((clientX - rect.left) * frame.width) / rect.width)),
-    ),
-    y: Math.max(
-      0,
-      Math.min(frame.height - 1, Math.round(((clientY - rect.top) * frame.height) / rect.height)),
-    ),
-  };
-}
-function pointerDown(event: PointerEvent): void {
-  if (!frameReady.value || event.button !== 0 || gesture) return;
-  const rect = image.value!.getBoundingClientRect();
-  const frame = displayedFrame.value!;
-  gesture = {
-    pointerId: event.pointerId,
-    clientX: event.clientX,
-    clientY: event.clientY,
-    lastX: event.clientX,
-    lastY: event.clientY,
-    moved: false,
-    rect,
-    frame,
-    anchor: point(event.clientX, event.clientY, rect, frame),
-  };
-  image.value!.setPointerCapture(event.pointerId);
-}
-function pointerMove(event: PointerEvent): void {
-  const start = gesture;
-  if (!start || start.pointerId !== event.pointerId) return;
-  if (!start.moved && Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY) < 6)
-    return;
-  start.moved = true;
-  addScroll(
-    start.anchor,
-    start.frame,
-    ((start.lastX - event.clientX) * start.frame.width) / start.rect.width,
-    ((start.lastY - event.clientY) * start.frame.height) / start.rect.height,
-  );
-  start.lastX = event.clientX;
-  start.lastY = event.clientY;
-}
-function pointerUp(event: PointerEvent): void {
-  const start = gesture;
-  if (!start || start.pointerId !== event.pointerId) return;
-  pointerMove(event);
-  gesture = undefined;
-  if (!start.moved) {
-    dismissedFocus.value = "";
-    void control({
-      action: "click",
-      ...start.anchor,
-      pageId: start.frame.pageId,
-      revision: start.frame.revision,
-    });
-  }
-}
-function addScroll(anchor: Point, frame: RemoteFrame, deltaX: number, deltaY: number): void {
-  const last = scrollPending.at(-1);
-  if (
-    last &&
-    last.pageId === frame.pageId &&
-    last.revision === frame.revision &&
-    last.x === anchor.x &&
-    last.y === anchor.y
-  ) {
-    last.deltaX += deltaX;
-    last.deltaY += deltaY;
-  } else {
-    if (scrollPending.length === 2) flushScroll();
-    if (scrollPending.length === 2) {
-      error.value = "Browser connection is busy; scroll target could not be queued.";
-      return;
-    }
-    scrollPending.push({
-      ...anchor,
-      pageId: frame.pageId,
-      revision: frame.revision,
-      deltaX,
-      deltaY,
-    });
-  }
-  // Native pointer events are already display-coalesced. Send immediately rather
-  // than adding another animation-frame of latency; stalled transports coalesce below.
-  flushScroll();
-}
-function flushScroll(): void {
-  if (scrollAnimation !== undefined) cancelAnimationFrame(scrollAnimation);
-  scrollAnimation = undefined;
-  if (!scrollPending.length || stream?.readyState !== WebSocket.OPEN) return;
-  // Never pile input into a stalled socket. Preserve totals in one coalesced slot.
-  if (stream.bufferedAmount > 16384) {
-    scrollAnimation = requestAnimationFrame(flushScroll);
-    return;
-  }
-  while (scrollPending.length && stream.bufferedAmount <= 16384) {
-    const pending = scrollPending[0]!;
-    const deltaX = Math.max(-10000, Math.min(10000, pending.deltaX));
-    const deltaY = Math.max(-10000, Math.min(10000, pending.deltaY));
-    stream.send(JSON.stringify({ action: "scroll", ...pending, deltaX, deltaY }));
-    scrollDirty = true;
-    pending.deltaX -= deltaX;
-    pending.deltaY -= deltaY;
-    if (!pending.deltaX && !pending.deltaY) scrollPending.shift();
-  }
-  if (scrollPending.length) scrollAnimation = requestAnimationFrame(flushScroll);
-}
-function failScrollFence(message: string): void {
-  const fence = scrollFence;
-  if (!fence) return;
-  clearTimeout(fence.timer);
-  scrollFence = undefined;
-  fence.reject(new Error(message));
-  error.value = message;
-  // A failed fence cannot authorize another HTTP action on this connection.
-  scheduleReconnect();
-}
-async function drainScroll(): Promise<void> {
-  flushScroll();
-  if (scrollPending.length)
-    throw new Error("Browser connection is busy; wait for scrolling to settle.");
-  while (scrollDirty) {
-    if (stream?.readyState !== WebSocket.OPEN) throw new Error("Browser is disconnected.");
-    scrollDirty = false;
-    const id = nextFenceId++;
-    let resolve!: () => void;
-    let reject!: (error: Error) => void;
-    const promise = new Promise<void>((done, fail) => {
-      resolve = done;
-      reject = fail;
-    });
-    const timer = setTimeout(() => {
-      if (scrollFence?.id === id) {
-        failScrollFence("Browser scrolling did not settle.");
-      }
-    }, 8000);
-    scrollFence = { id, promise, resolve, reject, timer };
-    stream.send(JSON.stringify({ action: "flush", requestId: id }));
-    await promise;
-  }
-}
-function wheel(event: WheelEvent): void {
-  if (!frameReady.value) return;
-  const frame = displayedFrame.value!;
-  const rect = image.value!.getBoundingClientRect();
-  const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? rect.height : 1;
-  addScroll(
-    point(event.clientX, event.clientY, rect, frame),
-    frame,
-    (event.deltaX * unit * frame.width) / rect.width,
-    (event.deltaY * unit * frame.height) / rect.height,
-  );
-}
-function beginComposition(): void {
-  clearTimeout(inputTimer);
-  inputTimer = undefined;
-}
-function scheduleInput(event: Event): void {
-  clearTimeout(inputTimer);
-  inputTimer = undefined;
-  if ((event as InputEvent).isComposing) return;
-  inputTimer = setTimeout(() => void sendText(), 50);
-}
-async function sendText(): Promise<boolean> {
-  clearTimeout(inputTimer);
-  inputTimer = undefined;
-  const frame = displayedFrame.value;
-  const focus = focused.value;
-  if (!frameReady.value || !frame || !focus) return false;
-  return control({
-    action: "fill-focused",
-    value: text.value,
-    focusId: focus.id,
-    pageId: frame.pageId,
-    revision: frame.revision,
-  });
-}
-async function submitInput(event: KeyboardEvent): Promise<void> {
-  if (event.isComposing || event.keyCode === 229) return;
-  event.preventDefault();
-  const frame = displayedFrame.value;
-  const focusId = focused.value?.id;
-  if (!(await sendText())) return;
-  if (frameReady.value && frame && focusId && focused.value?.id === focusId)
-    await control({
-      action: "key",
-      key: "Enter",
-      focusId,
-      pageId: frame.pageId,
-      revision: frame.revision,
-    });
-}
-function dismissInput(): void {
-  void sendText();
-  dismissedFocus.value = focused.value?.id ?? "";
-  editor.value?.blur();
 }
 onMounted(() => {
   document.addEventListener("visibilitychange", onVisibility);
@@ -622,7 +160,8 @@ onBeforeUnmount(() => {
           type="text"
           inputmode="url"
           enterkeyhint="go"
-          autocapitalize="off"
+          autocapitalize="none"
+          autocorrect="off"
           :spellcheck="false"
           placeholder="Address"
         />
@@ -644,8 +183,8 @@ onBeforeUnmount(() => {
           @pointerdown.prevent="pointerDown"
           @pointermove.prevent="pointerMove"
           @pointerup.prevent="pointerUp"
-          @pointercancel="gesture = undefined"
-          @lostpointercapture="gesture = undefined"
+          @pointercancel="cancelGesture"
+          @lostpointercapture="cancelGesture"
           @wheel.prevent="wheel"
           @contextmenu.prevent
         />

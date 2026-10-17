@@ -12,11 +12,21 @@ test("response projection retains only explicitly selected metadata, scoped to i
     const index = await createHistoryIndex(db);
     const selected = {
       fileChanges: [{ path: "a", patch: "saved diff" }],
-      sites: [{ id: "s", name: "Chosen", url: "/s", public: false }],
+      sites: [
+        { kind: "site" as const, id: "s", name: "Chosen", url: "/s", public: false as const },
+      ],
     };
     const draft = {
       fileChanges: [{ path: "b", patch: "discarded" }],
-      sites: [{ id: "draft", name: "Draft", url: "/draft", public: false }],
+      sites: [
+        {
+          kind: "site" as const,
+          id: "draft",
+          name: "Draft",
+          url: "/draft",
+          public: false as const,
+        },
+      ],
     };
     await db.transaction(async (tx) => {
       for (const [id, conversationId, details] of [

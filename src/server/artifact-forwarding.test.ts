@@ -11,14 +11,21 @@ import { encodeRuntimeNotice } from "./runtime-notices";
 import { runtimeResultArtifacts } from "./runtime-result-artifacts";
 
 const diff = { path: "/repo/a.ts", patch: "--- a.ts\n+++ a.ts\n@@ -1 +1 @@\n-old\n+new\n" };
-const site = { id: "site-id", name: "Demo", url: "https://example.test/demo", public: false };
+const site = {
+  kind: "site" as const,
+  id: "site-id",
+  name: "Demo",
+  url: "https://example.test/demo",
+  public: false as const,
+};
 const other = { ...site, id: "draft", name: "Discarded" };
 const browser = {
+  kind: "browser" as const,
   id: "browser-live",
   browserId: "live",
   name: "Cloud browser",
   url: "/api/cloud-browser/live/state",
-  public: false,
+  public: false as const,
 };
 
 function apiFor(messages: unknown[]) {

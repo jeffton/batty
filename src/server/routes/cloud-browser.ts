@@ -1,72 +1,12 @@
-import { Type } from "typebox";
 import { Check } from "typebox/value";
 import type { FastifyInstance } from "fastify";
 import websocket from "@fastify/websocket";
-import { CLOUD_BROWSER_KEYS, type CloudBrowserControl } from "@/shared/cloud-browser";
+import type { CloudBrowserControl } from "@/shared/cloud-browser";
 import type { BrowserService } from "../browser-service";
+import { CloudBrowserControlSchema, CloudBrowserSocketCommandSchema } from "../browser-schemas";
 import { CloudBrowserStreams } from "../cloud-browser-stream";
 import { createCloudBrowserSocketWriter } from "../cloud-browser-events";
 
-const target = {
-  pageId: Type.String({ minLength: 1, maxLength: 100 }),
-  revision: Type.String({ minLength: 1, maxLength: 100 }),
-};
-const point = {
-  x: Type.Number({ minimum: 0, maximum: 10_000 }),
-  y: Type.Number({ minimum: 0, maximum: 10_000 }),
-};
-const command = (action: string, fields = {}) =>
-  Type.Object({ action: Type.Literal(action), ...fields }, { additionalProperties: false });
-const controlSchema = Type.Union([
-  command("click", { ...target, ...point }),
-  command("scroll", {
-    ...target,
-    ...point,
-    deltaX: Type.Number({ minimum: -10_000, maximum: 10_000 }),
-    deltaY: Type.Number({ minimum: -10_000, maximum: 10_000 }),
-  }),
-  command("drag", {
-    ...target,
-    ...point,
-    endX: Type.Number({ minimum: 0, maximum: 10_000 }),
-    endY: Type.Number({ minimum: 0, maximum: 10_000 }),
-  }),
-  command("fill-focused", {
-    ...target,
-    focusId: Type.String({ minLength: 1, maxLength: 100 }),
-    value: Type.String({ maxLength: 10_000 }),
-  }),
-  command("text", { ...target, text: Type.String({ minLength: 1, maxLength: 10_000 }) }),
-  command("key", {
-    ...target,
-    key: Type.String({ enum: [...CLOUD_BROWSER_KEYS] }),
-    focusId: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
-  }),
-  command("navigate", {
-    url: Type.String({ minLength: 1, maxLength: 8192, pattern: "^https?://" }),
-  }),
-  command("back"),
-  command("reload"),
-  command("switch", { pageId: target.pageId }),
-  command("close-page", { pageId: target.pageId }),
-  command("viewport", {
-    width: Type.Integer({ minimum: 1, maximum: 10000 }),
-    height: Type.Integer({ minimum: 1, maximum: 10000 }),
-    mobile: Type.Boolean(),
-    deviceScaleFactor: Type.Optional(Type.Number({ minimum: 1, maximum: 3 })),
-  }),
-]);
-
-const socketCommandSchema = Type.Union([
-  command("ack", { frameId: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }) }),
-  command("flush", { requestId: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }) }),
-  command("scroll", {
-    ...target,
-    ...point,
-    deltaX: Type.Number({ minimum: -10_000, maximum: 10_000 }),
-    deltaY: Type.Number({ minimum: -10_000, maximum: 10_000 }),
-  }),
-]);
 type ScrollCommand = Extract<CloudBrowserControl, { action: "scroll" }>;
 
 export async function registerCloudBrowserRoutes(
@@ -83,11 +23,11 @@ export async function registerCloudBrowserRoutes(
   app.post<{ Params: { browserId: string }; Body: CloudBrowserControl }>(
     `${prefix}/control`,
     {
-      schema: { body: controlSchema },
+      schema: { body: CloudBrowserControlSchema },
       bodyLimit: 64 * 1024,
       // AJV's removeAdditional mutates union branches before discriminating actions.
       validatorCompiler: () => (data) =>
-        Check(controlSchema, data)
+        Check(CloudBrowserControlSchema, data)
           ? { value: data }
           : { error: new Error("Invalid browser control command.") },
     },
@@ -167,7 +107,7 @@ export async function registerCloudBrowserRoutes(
         try {
           if (isBinary) throw new Error("Browser commands must be JSON text.");
           const parsed: unknown = JSON.parse(data.toString());
-          if (!Check(socketCommandSchema, parsed))
+          if (!Check(CloudBrowserSocketCommandSchema, parsed))
             throw new Error("Invalid browser socket command.");
           const command = parsed as
             | ScrollCommand

@@ -47,20 +47,36 @@ test("Runtime response and reopened history reuse files and distinct same-path i
       },
     ],
     sites: [
-      { id: "selected", name: "Chosen site", url: "/chosen", public: false },
       {
+        kind: "site" as const,
+        id: "selected",
+        name: "Chosen site",
+        url: "/chosen",
+        public: false as const,
+      },
+      {
+        kind: "browser" as const,
         id: "browser-live-session",
         browserId: "live-session",
         name: "Cloud browser",
         url: "/api/cloud-browser/live-session/state",
-        public: false,
+        public: false as const,
       },
     ],
   };
   const inventory = {
     sentFiles: selected.sentFiles,
     fileChanges: [...selected.fileChanges, { path: "draft.ts", patch: "discarded draft" }],
-    sites: [...selected.sites, { id: "draft", name: "Draft", url: "/draft", public: false }],
+    sites: [
+      ...selected.sites,
+      {
+        kind: "site" as const,
+        id: "draft",
+        name: "Draft",
+        url: "/draft",
+        public: false as const,
+      },
+    ],
   };
   const faux = fauxProvider({ models: [{ id: "artifact-test" }] });
   faux.setResponses([

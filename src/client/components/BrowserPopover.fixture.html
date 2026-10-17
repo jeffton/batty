@@ -13,8 +13,21 @@
         render: () =>
           h(SharedSitesList, {
             sites: [
-              { id: "cloud", name: "Shared browser", browserId: "opaque", url: "/", public: false },
-              { id: "ordinary", name: "Ordinary site", url: "https://example.org", public: false },
+              {
+                kind: "browser",
+                id: "cloud",
+                name: "Shared browser",
+                browserId: "opaque",
+                url: "/",
+                public: false,
+              },
+              {
+                kind: "site",
+                id: "ordinary",
+                name: "Ordinary site",
+                url: "https://example.org",
+                public: false,
+              },
             ],
           }),
       }).mount("#app");

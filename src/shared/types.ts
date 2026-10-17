@@ -32,14 +32,24 @@ export interface SentFileDescriptor {
 }
 
 export interface SiteDescriptor {
-  /** Private live-browser handle. Artifact forwarding preserves this session and its expiry;
-   * rendered without an iframe or publication controls, under Batty authentication. */
-  browserId?: string;
+  kind: "site";
   id: string;
   name: string;
   url: string;
   public: boolean;
 }
+
+/** Forwarding preserves the live session and expiry, under Batty authentication. */
+export interface BrowserDescriptor {
+  kind: "browser";
+  id: string;
+  name: string;
+  url: string;
+  public: false;
+  browserId: string;
+}
+
+export type SiteAttachmentDescriptor = SiteDescriptor | BrowserDescriptor;
 
 export interface CodemodeCall {
   id: string;
@@ -59,7 +69,7 @@ export interface ToolExecutionDetails {
   diff?: string;
   firstChangedLine?: number;
   sentFiles?: SentFileDescriptor[];
-  sites?: SiteDescriptor[];
+  sites?: SiteAttachmentDescriptor[];
   [key: string]: unknown;
 }
 
@@ -78,7 +88,7 @@ export interface UiAssistantMessage {
   errorMessage?: string;
   fileChanges?: AgentTurnFileChange[];
   sentFiles?: SentFileDescriptor[];
-  sites?: SiteDescriptor[];
+  sites?: SiteAttachmentDescriptor[];
 }
 
 export type UiMessage =

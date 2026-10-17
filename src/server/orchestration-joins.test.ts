@@ -19,6 +19,7 @@ test.each(["complete", "restart", "cron-run", "cron-resume", "cron-restart"])(
   async (mode) => {
     const { faux, orchestration, open, registry } = await fixture();
     let release!: () => void;
+    let reviewStarted = false;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
@@ -32,6 +33,7 @@ test.each(["complete", "restart", "cron-run", "cron-resume", "cron-restart"])(
             parameters: Type.Object({}),
             replay: "safe",
             execute: async (_, __, ctx) => {
+              reviewStarted = true;
               await new Promise<void>((resolve, reject) => {
                 const abort = () => reject(ctx.abortSignal!.reason);
                 ctx.abortSignal!.addEventListener("abort", abort, { once: true });
@@ -123,8 +125,11 @@ test.each(["complete", "restart", "cron-run", "cron-resume", "cron-restart"])(
         const state = (await orchestrationHistory(harness))!;
         const outer = Object.values(state.workers).find((w) => w.parentId === main.id);
         if (!outer) return false;
+        const inner = Object.values(state.workers).find((w) => w.parentId === outer.id);
         const completion = (await harness.snapshot(WorkerDoc, outer.id, context))?.completion;
-        return Object.keys(completion?.waits ?? {}).length > 0;
+        // cron-resume can already have a wait for the preflight. Hold the gate
+        // until the actual review delivery is awaited, not merely any delivery.
+        return reviewStarted && !!inner?.active && !!completion?.waits[String(inner.active)];
       });
       const pendingHistory = JSON.stringify((await main.context(context)).messages);
       expect(pendingHistory).not.toContain("implementation final report after review");

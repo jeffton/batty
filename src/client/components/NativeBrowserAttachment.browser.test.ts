@@ -111,11 +111,38 @@ test("main browser tools render a live attachment through SSE, reload and reopen
     };
     const sites = async () =>
       (await runtime.messages("main")).messages.flatMap((message) =>
-        message.role === "assistant" && message.turnPhase === "final" ? (message.sites ?? []) : [],
+        message.role === "assistant" && message.turnPhase === "final"
+          ? (message.sites ?? []).filter((site) => site.kind === "browser")
+          : [],
       );
     await submit();
     const buttons = page.getByRole("button", { name: "Open browser", exact: true });
     await expect.poll(() => buttons.count()).toBe(1);
+    for (const width of [390, 1280, 320]) {
+      await page.setViewportSize({ width, height: 844 });
+      const layout = await buttons.first().evaluate((button) => {
+        const card = button.closest(".shared-sites__card")!;
+        const bubble = card.closest(".message__segment")!;
+        const rect = card.getBoundingClientRect();
+        const buttonRect = button.getBoundingClientRect();
+        const style = getComputedStyle(card);
+        return {
+          cardRight: rect.right,
+          contentRight:
+            bubble.getBoundingClientRect().right -
+            parseFloat(getComputedStyle(bubble).paddingRight),
+          buttonRight: buttonRect.right,
+          expectedButtonRight:
+            rect.right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth),
+          overflow: document.documentElement.scrollWidth > window.innerWidth,
+        };
+      });
+      expect(Math.abs(layout.cardRight - layout.contentRight)).toBeLessThan(1);
+      expect(Math.abs(layout.buttonRight - layout.expectedButtonRight)).toBeLessThan(1);
+      expect(layout.overflow).toBe(false);
+      await page.screenshot({ path: `/tmp/batty-browser-attachment-${width}.png` });
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
     const [attached] = await sites();
     expect(attached?.browserId).toBeTruthy();
     const service = runtime.tools.browserService;

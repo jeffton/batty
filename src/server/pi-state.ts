@@ -5,7 +5,7 @@ import type {
   AgentTurnFileChange,
   SentFileDescriptor,
   SessionState,
-  SiteDescriptor,
+  SiteAttachmentDescriptor,
   ToolExecutionDetails,
   UiAssistantTurnPhase,
   UiContentBlock,
@@ -14,6 +14,7 @@ import type {
 import { sanitizeTerminalBlocks, stripTerminalFormatting } from "./terminal-output";
 import { agentTurnArtifactsByReplyEntryId } from "./agent-turn-file-changes";
 import { buildRuntimeNoticeMessage, decodeRuntimeNotice } from "./runtime-notices";
+import { decodeSiteAttachmentDescriptor } from "./site-attachments";
 
 export type UiImageResolver = (image: {
   mimeType: string;
@@ -36,7 +37,7 @@ interface AssistantLikeMessage {
   errorMessage?: string;
   battyFileChanges?: AgentTurnFileChange[];
   battySentFiles?: SentFileDescriptor[];
-  battySites?: SiteDescriptor[];
+  battySites?: SiteAttachmentDescriptor[];
 }
 
 interface ToolResultLikeMessage {
@@ -72,13 +73,20 @@ interface CustomLikeMessage {
 }
 
 function normalizeToolDetails(details: unknown): ToolExecutionDetails | undefined {
-  return details && typeof details === "object" ? (details as ToolExecutionDetails) : undefined;
+  if (!details || typeof details !== "object") return undefined;
+  const result = details as ToolExecutionDetails;
+  return result.sites
+    ? { ...result, sites: result.sites.map(decodeSiteAttachmentDescriptor) }
+    : result;
 }
 
 function normalizeCustomData(data: unknown): CustomMessageData | undefined {
-  return data && typeof data === "object" && !Array.isArray(data)
-    ? (data as CustomMessageData)
-    : undefined;
+  if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+  const result = data as CustomMessageData;
+  const artifacts = result.runtimeResultArtifacts as ToolExecutionDetails | undefined;
+  return artifacts
+    ? { ...result, runtimeResultArtifacts: normalizeToolDetails(artifacts) }
+    : result;
 }
 
 const UPLOADED_FILE_REFERENCE_PATTERN =
@@ -299,7 +307,7 @@ export function normalizeMessage(
         const artifacts = notice.data?.runtimeResultArtifacts as
           | {
               sentFiles?: SentFileDescriptor[];
-              sites?: SiteDescriptor[];
+              sites?: SiteAttachmentDescriptor[];
               fileChanges?: AgentTurnFileChange[];
             }
           | undefined;
@@ -311,7 +319,7 @@ export function normalizeMessage(
           stopReason: "stop",
           blocks: [{ type: "text", text: direct.text }],
           sentFiles: artifacts?.sentFiles,
-          sites: artifacts?.sites,
+          sites: artifacts?.sites?.map(decodeSiteAttachmentDescriptor),
           fileChanges: artifacts?.fileChanges,
         };
       }
@@ -343,7 +351,7 @@ export function normalizeMessage(
       errorMessage: assistant.errorMessage,
       fileChanges: assistant.battyFileChanges,
       sentFiles: assistant.battySentFiles,
-      sites: assistant.battySites,
+      sites: assistant.battySites?.map(decodeSiteAttachmentDescriptor),
     };
   }
 

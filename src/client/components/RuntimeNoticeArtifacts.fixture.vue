@@ -35,7 +35,15 @@ const artifacts = {
       previewUrl: "/fixture.mp4",
     },
   ],
-  sites: [{ id: "s", name: "Morning report", url: "https://example.com/report", public: false }],
+  sites: [
+    {
+      kind: "site" as const,
+      id: "s",
+      name: "Morning report",
+      url: "https://example.com/report",
+      public: false as const,
+    },
+  ],
   fileChanges: [
     { path: "hello.ts", patch: "--- a/hello.ts\n+++ b/hello.ts\n@@ -1 +1 @@\n-before\n+after\n" },
   ],

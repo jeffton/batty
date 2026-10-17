@@ -4,7 +4,9 @@ import type { CloudBrowserFrame, CloudBrowserState } from "@/shared/cloud-browse
 import { encodeBrowserFrame, type BrowserFramePacket } from "./cloud-browser-events";
 
 type Subscriber = (event: "frame" | "state" | "browser-error", data: unknown) => void;
-type Target = Awaited<ReturnType<BrowserService["cloudTarget"]>>;
+type Target = Awaited<ReturnType<BrowserService["cloudCaptureTarget"]>>;
+const CAPTURE_POLL_MS = 100;
+const STATUS_POLL_MS = 500;
 
 /** One producer per live browser; each WebSocket viewer retains only its latest paint. */
 export class CloudBrowserStreams {
@@ -37,6 +39,7 @@ export class CloudBrowserStreams {
       let target: Target | undefined;
       let stopped = false;
       let pending: Promise<void> | undefined;
+      let nextStatusAt = Date.now() + STATUS_POLL_MS;
       let lastFrameAt = 0;
       let latestFrame: CloudBrowserFrame | undefined;
       let frameTimer: ReturnType<typeof setTimeout> | undefined;
@@ -121,12 +124,15 @@ export class CloudBrowserStreams {
           await previous.detach().catch(() => {});
         }
       };
-      const sync = async (next: Target) => {
+      const syncState = (state: CloudBrowserState) => {
         if (stopped) return;
-        if (JSON.stringify(stream!.state) !== JSON.stringify(next.state)) {
-          stream!.state = next.state;
-          broadcast("state", next.state);
+        if (JSON.stringify(stream!.state) !== JSON.stringify(state)) {
+          stream!.state = state;
+          broadcast("state", state);
         }
+      };
+      const syncCapture = async (next: Target) => {
+        if (stopped) return;
         if (target?.page === next.page && target.state.revision === next.state.revision && cdp)
           return;
         await detach();
@@ -161,16 +167,28 @@ export class CloudBrowserStreams {
         });
         await configure(connection, next);
       };
+      const refresh = async () => {
+        const next = await this.browser.cloudCaptureTarget(id);
+        if (stopped) return;
+        if (target?.page !== next.page || target.state.revision !== next.state.revision || !cdp) {
+          // Publish matching status before pixels from a new page/revision.
+          const full = await this.browser.cloudTarget(id);
+          syncState(full.state);
+          await syncCapture(full);
+          nextStatusAt = Date.now() + STATUS_POLL_MS;
+        } else if (Date.now() >= nextStatusAt) {
+          syncState(await this.browser.cloudState(id));
+          nextStatusAt = Date.now() + STATUS_POLL_MS;
+        }
+      };
       const timer = setInterval(() => {
         if (pending || stopped) return;
-        pending = this.browser
-          .cloudTarget(id)
-          .then(sync)
+        pending = refresh()
           .catch(fail)
           .finally(() => {
             pending = undefined;
           });
-      }, 100);
+      }, CAPTURE_POLL_MS);
       timer.unref();
       stream = {
         subscribers,
@@ -202,7 +220,8 @@ export class CloudBrowserStreams {
       this.streams.set(id, stream);
       subscribers.add(subscriber);
       try {
-        await sync(initial);
+        syncState(initial.state);
+        await syncCapture(initial);
       } catch (error) {
         await stream.stop();
         throw error;

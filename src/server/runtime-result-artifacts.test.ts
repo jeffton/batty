@@ -11,7 +11,13 @@ const file = {
   kind: "image",
   downloadUrl: "/api/sent-files/f",
 };
-const site = { id: "s", name: "Report", url: "https://example.com", public: false };
+const site = {
+  kind: "site" as const,
+  id: "s",
+  name: "Report",
+  url: "https://example.com",
+  public: false as const,
+};
 function entry(model: unknown[]): EntryRecord {
   return { model } as unknown as EntryRecord;
 }

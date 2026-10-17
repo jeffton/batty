@@ -1,9 +1,10 @@
 import type { EntryRecord } from "@earendil-works/pi-durable";
 import { generateUnifiedPatch } from "@earendil-works/pi-coding-agent";
 import type { AgentTurnArtifacts, DurableFileChange } from "./agent-turn-file-changes";
-import type { SentFileDescriptor, SiteDescriptor } from "@/shared/types";
+import type { SentFileDescriptor, SiteAttachmentDescriptor } from "@/shared/types";
 import { artifactRefs, mergeResponseArtifacts } from "./artifact-forwarding";
 import { decodeRuntimeNotice } from "./runtime-notices";
+import { decodeSiteAttachmentDescriptor } from "./site-attachments";
 
 export type RuntimeResultArtifacts = AgentTurnArtifacts & {
   battyFileChanges?: DurableFileChange[];
@@ -13,7 +14,7 @@ export type RuntimeResultArtifacts = AgentTurnArtifacts & {
 /** Only the answered input's own transcript contributes report artifacts. */
 export function runtimeResultArtifacts(entries: readonly EntryRecord[]): RuntimeResultArtifacts {
   const files = new Map<string, SentFileDescriptor>();
-  const sites = new Map<string, SiteDescriptor>();
+  const sites = new Map<string, SiteAttachmentDescriptor>();
   const changes = new Map<string, DurableFileChange>();
   const mutations: DurableFileChange[] = [];
   const mutationKeys = new Set<string>();
@@ -23,7 +24,8 @@ export function runtimeResultArtifacts(entries: readonly EntryRecord[]): Runtime
   >();
   const add = (details: RuntimeResultArtifacts | undefined) => {
     for (const file of details?.sentFiles ?? []) files.set(file.id, file);
-    for (const site of details?.sites ?? []) sites.set(site.id, site);
+    for (const site of details?.sites ?? [])
+      sites.set(site.id, decodeSiteAttachmentDescriptor(site));
     // Saved diffs are immutable artifacts, not mutation snapshots. Only local
     // snapshots are aggregated; forwarded patches never enter that calculation.
     const saved = mergeResponseArtifacts(details?.forwardedArtifacts ?? {}, {

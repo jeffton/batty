@@ -129,11 +129,13 @@ test("discovery paginates, inspects running reports and archived results, and fo
     expect(JSON.stringify(running.content)).toContain("explicit progress");
     expect(running.details).toEqual(artifacts);
     expect(JSON.stringify(running.content)).not.toContain("private tool transcript");
-    // A hidden cron session is not discoverable even by main.
+    // Cron sessions follow the same workspace policy as ordinary workers.
     await main.commit(async (tx) => {
       (await tx.doc(WorkerDoc, worker.id)).isCron = true;
     }, context);
-    expect((await probe({ action: "inspect", sessionId: String(worker.id) })).isError).toBe(true);
+    expect(!!(await probe({ action: "inspect", sessionId: String(worker.id) })).isError).toBe(
+      false,
+    );
     await main.commit(async (tx) => {
       (await tx.doc(WorkerDoc, worker.id)).isCron = false;
     }, context);
@@ -342,7 +344,7 @@ test("nested readers gain and lose cross-workspace discovery on resume", async (
   await check(false);
 });
 
-test("cron descendants in the assistant workspace discover only their own run tree", async () => {
+test("main discovers and inspects cron descendants in the assistant workspace", async () => {
   const { faux, orchestration, open } = await fixture(10_000, console.error, "test");
   const { harness, main } = await open();
   faux.setResponses(
@@ -392,12 +394,14 @@ test("cron descendants in the assistant workspace discover only their own run tr
       (message) => message.role === "toolResult" && message.toolName === "subagent",
     )!;
     if (args.action === "list")
-      expect(JSON.parse((result.content[0] as { text: string }).text).workers).toEqual([]);
-    else expect(result.role === "toolResult" && result.isError).toBe(true);
+      expect(JSON.parse((result.content[0] as { text: string }).text).workers).toEqual(
+        expect.arrayContaining([expect.objectContaining({ sessionId: String(helper.id) })]),
+      );
+    else expect(result.role === "toolResult" && !!result.isError).toBe(false);
   }
 });
 
-test("cron discovery separates runs of the same job and other jobs across nested workspace moves", async () => {
+test("cron and ordinary workers coordinate by current workspace across jobs and runs", async () => {
   const { faux, orchestration, open } = await fixture(10_000, console.error, "test");
   const { harness, main } = await open();
   faux.setResponses(
@@ -407,12 +411,15 @@ test("cron discovery separates runs of the same job and other jobs across nested
       if (last.role === "user" && text.includes("probe:"))
         return call(JSON.parse((last.content as string).slice(6)));
       if (last.role === "user" && text.includes("cron root"))
-        return call({ action: "run", prompt: "cron child", workspaceId: "other", async: false });
+        return call({
+          action: "run",
+          prompt: "cron child",
+          async: false,
+        });
       if (last.role === "user" && text.includes("cron child"))
         return call({
           action: "run",
           prompt: "cron grandchild",
-          workspaceId: "test",
           async: false,
         });
       return done();
@@ -447,7 +454,7 @@ test("cron discovery separates runs of the same job and other jobs across nested
   const first = await fire(job.id, Date.now() - 3000);
   const second = await fire(job.id, Date.now() - 2000);
   const third = await fire(otherJob.id, Date.now() - 1000);
-  // An ordinary assistant-workspace reader must not see any cron run.
+  // Ordinary assistant-workspace readers also see cron jobs and runs.
   await (
     await main.submit(
       {
@@ -479,17 +486,21 @@ test("cron discovery separates runs of the same job and other jobs across nested
     )!;
     return result;
   };
+  const all = [...first, ...second, ...third, ordinary];
   for (const group of [first, second, third, [ordinary]]) {
     for (const reader of group) {
+      const visible = all.filter(
+        (target) => reader.workspaceId === "test" || reader.workspaceId === target.workspaceId,
+      );
       const result = await probe(reader, { action: "list", limit: 100 });
       const listed = JSON.parse((result.content[0] as { text: string }).text).workers;
       expect(listed.map((worker: { sessionId: string }) => worker.sessionId).sort()).toEqual(
-        group.map((worker) => String(worker.id)).sort(),
+        visible.map((worker) => String(worker.id)).sort(),
       );
       for (const target of [...first, ...second, ...third, ordinary]) {
         const inspected = await probe(reader, { action: "inspect", sessionId: String(target.id) });
         expect(inspected.role === "toolResult" && !!inspected.isError).toBe(
-          !group.includes(target),
+          !visible.includes(target),
         );
       }
     }
@@ -506,6 +517,7 @@ test("cron discovery separates runs of the same job and other jobs across nested
   expect(resumed.role === "toolResult" && !!resumed.isError).toBe(false);
   await until(async () => (await orchestration.listRunning()).length === 0);
   expect((await harness.snapshot(WorkerDoc, grandchild.id, context))!.workspaceId).toBe("other");
+  // A project cron descendant cannot manage workers outside its current workspace.
   for (const target of [second[0]!, ordinary]) {
     const rejected = await probe(grandchild, { action: "stop", sessionId: String(target.id) });
     expect(rejected.role === "toolResult" && rejected.isError).toBe(true);
@@ -516,7 +528,7 @@ test("cron discovery separates runs of the same job and other jobs across nested
     JSON.parse((moved.content[0] as { text: string }).text)
       .workers.map((worker: { sessionId: string }) => worker.sessionId)
       .sort(),
-  ).toEqual(first.map((worker) => String(worker.id)).sort());
+  ).toEqual([...third, grandchild].map((worker) => String(worker.id)).sort());
 });
 
 test("inspect authorizes against the same snapshot as output during a workspace-changing resume", async () => {

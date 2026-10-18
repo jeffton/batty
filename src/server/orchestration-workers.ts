@@ -54,11 +54,11 @@ export function createWorkers(
   async function workerScope(tx: Tx, id: ConversationId, mainId: ConversationId) {
     while (id !== mainId) {
       const metadata = await tx.doc(WorkerDoc, id);
-      if (metadata.isCron) return { cronRoot: id };
-      if (!metadata.isSubagent || metadata.parentId === undefined) return undefined;
+      if (metadata.isCron) return true;
+      if (!metadata.isSubagent || metadata.parentId === undefined) return false;
       id = metadata.parentId;
     }
-    return { cronRoot: undefined };
+    return true;
   }
 
   async function coordinationScope(tx: Tx, callerId: ConversationId, assistantId?: string) {
@@ -70,13 +70,10 @@ export function createWorkers(
       callerId === state.mainId ||
       (assistantId !== undefined && caller.workspaceId === assistantId);
     return {
-      canDelegate: (workspaceId: string) =>
-        scope.cronRoot !== undefined || coordinator || workspaceId === caller.workspaceId,
+      canDelegate: (workspaceId: string) => coordinator || workspaceId === caller.workspaceId,
       visible: async (candidate: { id: ConversationId; workspaceId: string }) => {
         const candidateScope = await workerScope(tx, candidate.id, state.mainId!);
         if (!candidateScope) return false;
-        if (scope.cronRoot !== undefined || candidateScope.cronRoot !== undefined)
-          return scope.cronRoot !== undefined && scope.cronRoot === candidateScope.cronRoot;
         return coordinator || candidate.workspaceId === caller.workspaceId;
       },
     };
@@ -243,7 +240,7 @@ export function createWorkers(
   const subagent = defineTool({
     name: "subagent",
     description:
-      "Run, await, queue, resume, steer or stop subagents. run creates a new session and rejects sessionId; await/queue/resume/steer/stop require sessionId. queue/resume/steer/stop use the same coordination scope as discovery; worker await joins a direct child. Project workers delegate within their own workspace; assistant coordinators and cron-run trees may delegate across workspaces. These are coordination guardrails, not a security boundary. list discovers subagents (stable sessionId, workspace, status), scanning up to limit conversations per page (default 50, max 100); pass nextCursor back as cursor even for empty pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. Main and non-cron workers in the configured assistant workspace can discover/inspect subagents across workspaces; other ordinary workers see peers in their own workspace only. Detached cron workers and their descendants can discover/inspect only their own cron-run tree, across workspaces; ordinary workers and other cron runs are excluded. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple async helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
+      "Run, await, queue, resume, steer or stop subagents. run creates a new session and rejects sessionId; await/queue/resume/steer/stop require sessionId. queue/resume/steer/stop use the same coordination scope as discovery; worker await joins a direct child. Project workers, including cron workers, delegate within their own workspace; main and assistant-workspace coordinators may delegate across workspaces. These are coordination guardrails, not a security boundary. list discovers subagents (stable sessionId, workspace, status), scanning up to limit conversations per page (default 50, max 100); pass nextCursor back as cursor even for empty pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. All assigned workers, including cron roots and descendants, can discover, inspect and explicitly manage ordinary and cron workers in their own workspace. Main and workers in the configured assistant workspace can do so across all workspaces. Cron runs and their queues remain distinct; cron ancestry does not restrict coordination. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple async helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
     replay: "safe",
     parameters: Type.Object({
       action: Type.Union(

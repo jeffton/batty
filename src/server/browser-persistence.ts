@@ -9,6 +9,15 @@ import type { CloudBrowserViewport } from "@/shared/cloud-browser";
 import { createBrowserDisplay, stopBrowserDisplay, type BrowserDisplay } from "./browser-display";
 import { stopBrowserChild } from "./browser-process";
 import { browserAbortable } from "./browser-abort";
+import {
+  prepareBrowserIsolation,
+  assertBrowserIsolation,
+  ownsBrowserProcess,
+  enableBrowserProfile,
+  isolatedBrowserEnvironment,
+  removeBrowserIsolation,
+  type BrowserIsolation,
+} from "./browser-isolation";
 
 async function profileBrowserPid(directory: string): Promise<number | undefined> {
   if (process.platform === "win32") {
@@ -114,7 +123,13 @@ export async function connectPersistentBrowser(
   const { chromium } = await import("patchright");
   const connect = async (endpoint: string) => {
     signal?.throwIfAborted();
-    const pending = chromium.connectOverCDP(endpoint, { timeout: 30_000 });
+    const isolation = await readBrowserJson<BrowserIsolation>(
+      path.join(directory, "isolation.json"),
+    );
+    const pending = chromium.connectOverCDP(endpoint, {
+      timeout: 30_000,
+      artifactsDir: isolation ? path.join(isolation.directory, "artifacts") : undefined,
+    });
     void pending.then(
       (browser) => {
         if (signal?.aborted) void browser.close().catch(() => {});
@@ -130,6 +145,7 @@ export async function connectPersistentBrowser(
     // A dead browser is an explicit interruption, never silently replaced with
     // an empty profile/page. action=close lets the user clear the dead session.
     process.kill(receipt.pid, 0);
+    await assertBrowserIsolation(directory, receipt.pid);
     const browser = await connect(receipt.endpoint);
     return { browser, receipt, created: false };
   }
@@ -153,6 +169,7 @@ export async function connectPersistentBrowser(
           throw error;
         });
       if (pid && port) {
+        await assertBrowserIsolation(directory, pid);
         const [number, browserPath] = port.trim().split("\n");
         receipt = {
           pid,
@@ -179,31 +196,33 @@ export async function connectPersistentBrowser(
   if (!options) throw new Error("No persistent browser session exists");
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   const profile = path.join(directory, "profile");
-  await fs.mkdir(profile, { recursive: true, mode: 0o700 });
-  // Chromium profile preferences, not command-line feature names: both native
-  // bubbles obscure our streamed webpage. Write only before a new process owns
-  // the profile; never race Chrome's preference writer in an active session.
-  const preferencesFile = path.join(profile, "Default", "Preferences");
-  const preferences =
-    (await readBrowserJson<Record<string, unknown> & { translate?: Record<string, unknown> }>(
-      preferencesFile,
-    )) ?? {};
-  await writeBrowserJson(preferencesFile, {
-    ...preferences,
-    credentials_enable_service: false,
-    translate: { ...preferences.translate, enabled: false },
-  });
+  let isolation: BrowserIsolation | undefined;
   let display: BrowserDisplay | undefined;
   let child: ChildProcess | undefined;
   try {
+    isolation = await prepareBrowserIsolation(directory, chromium.executablePath());
+    await fs.mkdir(profile, { recursive: true, mode: 0o700 });
+    // Chromium profile preferences, not command-line feature names: both native
+    // bubbles obscure our streamed webpage. Write only before a new process owns
+    // the profile; never race Chrome's preference writer in an active session.
+    const preferencesFile = path.join(profile, "Default", "Preferences");
+    const preferences =
+      (await readBrowserJson<Record<string, unknown> & { translate?: Record<string, unknown> }>(
+        preferencesFile,
+      )) ?? {};
+    await writeBrowserJson(preferencesFile, {
+      ...preferences,
+      credentials_enable_service: false,
+      translate: { ...preferences.translate, enabled: false },
+    });
+    if (isolation) await enableBrowserProfile(isolation);
     if (process.platform === "linux") {
-      display = await createBrowserDisplay(directory, signal);
+      display = await createBrowserDisplay(directory, signal, isolation);
       signal?.throwIfAborted();
       await writeBrowserJson(path.join(directory, "display.json"), display);
     }
     const args = [
       ...(display ? ["--kiosk", "--app=about:blank", "--window-position=0,0"] : ["--headless=new"]),
-      "--no-sandbox",
       "--disable-dev-shm-usage",
       "--disable-quic",
       "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
@@ -211,7 +230,7 @@ export async function connectPersistentBrowser(
       "--force-device-scale-factor=3",
       "--remote-debugging-address=127.0.0.1",
       "--remote-debugging-port=0",
-      `--user-data-dir=${profile}`,
+      `--user-data-dir=${isolation ? path.join(isolation.directory, "profile") : profile}`,
       "--no-first-run",
       "--no-default-browser-check",
       "--disable-background-networking",
@@ -230,14 +249,30 @@ export async function connectPersistentBrowser(
     const log = await fs.open(path.join(directory, "chromium.log"), "a", 0o600);
     try {
       signal?.throwIfAborted();
-      child = spawn(chromium.executablePath(), args, {
-        detached: true,
-        env: display
-          ? { ...process.env, DISPLAY: display.display, XAUTHORITY: display.authority }
-          : process.env,
-        windowsHide: true,
-        stdio: ["ignore", log.fd, log.fd],
-      });
+      const env = isolation ? isolatedBrowserEnvironment(isolation) : process.env;
+      child = spawn(
+        isolation ? "/usr/bin/setpriv" : chromium.executablePath(),
+        [
+          ...(isolation
+            ? [
+                `--reuid=${isolation.uid}`,
+                `--regid=${isolation.gid}`,
+                "--clear-groups",
+                "--no-new-privs",
+                "--",
+                isolation.executable,
+              ]
+            : []),
+          ...args,
+        ],
+        {
+          detached: true,
+          cwd: isolation ? "/" : undefined,
+          env: display ? { ...env, DISPLAY: display.display, XAUTHORITY: display.authority } : env,
+          windowsHide: true,
+          stdio: ["ignore", log.fd, log.fd],
+        },
+      );
       await new Promise<void>((resolve, reject) => {
         child!.once("spawn", resolve);
         child!.once("error", reject);
@@ -297,6 +332,7 @@ export async function connectPersistentBrowser(
         [error, ...cleanupErrors],
         "Persistent browser launch and cleanup failed",
       );
+    await removeBrowserIsolation(directory);
     for (const name of [
       "launch.json",
       "process.json",
@@ -315,7 +351,7 @@ export async function closePersistentBrowser(directory: string, browser?: Browse
     const pid = await profileBrowserPid(directory);
     if (pid) receipt = { pid };
   }
-  if (receipt) {
+  if (receipt && (await ownsBrowserProcess(directory, receipt.pid))) {
     await terminateBrowser(receipt.pid, "SIGTERM");
     const deadline = Date.now() + 5000;
     while (Date.now() < deadline) {
@@ -345,7 +381,9 @@ export async function closePersistentBrowser(directory: string, browser?: Browse
   }
   // The Chromium process is already terminated. A failed CDP disconnect must not
   // retain dead launch receipts; failed display cleanup must retain its ownership.
-  if (displayStopped)
+  if (displayStopped) {
+    await removeBrowserIsolation(directory);
     await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
   if (errors.length) throw new AggregateError(errors, "Persistent browser cleanup failed");
 }

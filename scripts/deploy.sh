@@ -20,6 +20,8 @@ git archive HEAD | tar -x -C "$build"
 (
   cd "$build"
   pnpm install --frozen-lockfile
+  pnpm exec patchright install chromium
+  bash scripts/setup-browser-isolation.sh
   BATTY_BUILD_ID="$revision" pnpm build
 )
 release="/opt/batty2/releases/${revision}.$(date +%s)"

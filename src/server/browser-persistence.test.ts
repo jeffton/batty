@@ -13,6 +13,11 @@ import { createBrowserDisplay, stopBrowserDisplay } from "./browser-display";
 import { chromium } from "patchright";
 
 vi.hoisted(() => vi.resetModules());
+// Failure fixtures launch fake executables, not the installed unprivileged Chromium.
+vi.mock("./browser-isolation", async (original) => ({
+  ...(await original<typeof import("./browser-isolation")>()),
+  prepareBrowserIsolation: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("patchright", () => ({
   chromium: { executablePath: vi.fn(), connectOverCDP: vi.fn() },
 }));
@@ -21,6 +26,7 @@ vi.mock("./browser-display", () => ({
   stopBrowserDisplay: vi.fn(),
 }));
 afterAll(() => {
+  vi.doUnmock("./browser-isolation");
   vi.doUnmock("patchright");
   vi.doUnmock("./browser-display");
   vi.resetModules();

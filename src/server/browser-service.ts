@@ -1,5 +1,8 @@
 import fs from "node:fs/promises";
+import mime from "mime-types";
 import { browserAbortable } from "./browser-abort";
+import { copyIsolatedBrowserDownload } from "./browser-download";
+import type { BrowserIsolation } from "./browser-isolation";
 import { createHash, randomUUID } from "node:crypto";
 import type { BrowserDescriptor } from "@/shared/types";
 import type {
@@ -1426,9 +1429,15 @@ export class BrowserService {
       case "upload": {
         const paths = input.paths ?? [];
         if (paths.length === 0) throw new Error("paths is required for browser upload");
-        await frame
-          .locator(required(input.selector, "selector", input.action))
-          .setInputFiles(paths);
+        await frame.locator(required(input.selector, "selector", input.action)).setInputFiles(
+          await Promise.all(
+            paths.map(async (file) => ({
+              name: path.basename(file),
+              mimeType: mime.lookup(file) || "application/octet-stream",
+              buffer: await fs.readFile(file),
+            })),
+          ),
+        );
         return {};
       }
       case "download": {
@@ -1439,7 +1448,14 @@ export class BrowserService {
         const dir = await fs.mkdtemp(path.join(os.tmpdir(), "batty-browser-download-"));
         session.downloadDirs.add(dir);
         const downloadPath = path.join(dir, safeDownloadName(download.suggestedFilename()));
-        await download.saveAs(downloadPath);
+        const isolation = await readBrowserJson<BrowserIsolation>(
+          path.join(session.directory, "isolation.json"),
+        );
+        if (isolation) {
+          await copyIsolatedBrowserDownload((await download.path())!, downloadPath, isolation);
+        } else {
+          await download.saveAs(downloadPath);
+        }
         return {
           text: `Downloaded ${download.suggestedFilename()}.\nSaved to: ${downloadPath}`,
           downloadPaths: [downloadPath],

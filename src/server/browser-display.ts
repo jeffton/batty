@@ -6,6 +6,7 @@ import { randomBytes } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { stopBrowserChild } from "./browser-process";
 import { browserAbortable } from "./browser-abort";
+import { isolatedBrowserEnvironment, type BrowserIsolation } from "./browser-isolation";
 
 export interface BrowserDisplay {
   pid: number;
@@ -53,9 +54,10 @@ function displayReady(child: ChildProcess): Promise<string> {
 export async function createBrowserDisplay(
   directory: string,
   signal?: AbortSignal,
+  isolation?: BrowserIsolation,
 ): Promise<BrowserDisplay> {
   signal?.throwIfAborted();
-  const authority = path.join(directory, "Xauthority");
+  const authority = path.join(isolation?.directory ?? directory, "Xauthority");
   await fs.writeFile(authority, "", { mode: 0o600 });
   const cookie = randomBytes(16).toString("hex");
   const auth = async (display: string) =>
@@ -63,14 +65,30 @@ export async function createBrowserDisplay(
       signal,
       timeout: 10_000,
     });
+  const allowBrowser = async () => {
+    if (!isolation) return;
+    await fs.chown(authority, 0, isolation.gid);
+    await fs.chmod(authority, 0o640);
+  };
   await auth(":0");
+  await allowBrowser();
   const log = await fs.open(path.join(directory, "display.log"), "a", 0o600);
   let child: ChildProcess | undefined;
   try {
     signal?.throwIfAborted();
     child = spawn(
-      "Xvfb",
+      isolation ? "/usr/bin/setpriv" : "Xvfb",
       [
+        ...(isolation
+          ? [
+              `--reuid=${isolation.uid}`,
+              `--regid=${isolation.gid}`,
+              "--clear-groups",
+              "--no-new-privs",
+              "--",
+              "/usr/bin/Xvfb",
+            ]
+          : []),
         "-displayfd",
         "1",
         "-screen",
@@ -81,10 +99,16 @@ export async function createBrowserDisplay(
         "-auth",
         authority,
       ],
-      { detached: true, stdio: ["ignore", "pipe", log.fd] },
+      {
+        detached: true,
+        cwd: isolation ? "/" : undefined,
+        env: isolation ? isolatedBrowserEnvironment(isolation) : process.env,
+        stdio: ["ignore", "pipe", log.fd],
+      },
     );
     const display = await browserAbortable(displayReady(child), signal);
     await auth(display);
+    await allowBrowser();
     child.stdout!.destroy();
     child.unref();
     return { pid: child.pid!, display, authority };

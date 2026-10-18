@@ -39,6 +39,16 @@ Main chat submissions use the default model and thinking level selected in Setti
 
 Cloud state, WebSocket admission, controls, touch input and capture setup share a 15-second deadline, including queue admission and persistent-session reconnection. A running operation that exceeds it closes only that unresponsive browser session and releases its queue; bounded process cleanup can add a few seconds. A queued request that expires does not close the browser being used by its predecessor. Timeouts return HTTP 504 or an explicit socket error, without automatic reconnect retries. Reopening an ended browser requires an explicit new session; no login or empty browser is silently substituted.
 
+## Chromium isolation
+
+Linux installations running Batty as root launch tool Chromium and its private Xvfb as the dedicated `batty-browser` account, with supplementary groups cleared and a minimal environment. Chromium's namespace and seccomp sandbox remain enabled; there is no `--no-sandbox` mode or root-browser fallback. Ordinary macOS/Windows and non-root Linux browsing use their current user with Chromium's sandbox enabled.
+
+Install Patchright's pinned Chromium (`pnpm exec patchright install chromium`), then run `sudo bash scripts/setup-browser-isolation.sh`. Linux deployment runs the setup script before activation. It creates a locked, no-login system account, root-owned browser binaries under `/opt/batty-browser`, private profiles/artifacts under `/var/lib/batty-browser`, and an executable-scoped AppArmor `userns` allowance on Ubuntu. It does not change global user-namespace restrictions or expose `/root`. Repeat setup after a Chromium dependency update. Missing setup fails explicitly.
+
+Control receipts stay in Batty's root-only state directory; only the browser profile, downloads and private X cookie are accessible to the browser UID. Uploads transfer file contents rather than giving Chromium access to agent filesystem paths. Explicit close/expiry removes isolated session files. Existing root-browser processes cannot reattach after this change: close and reopen them. This is a breaking browser lifecycle change.
+
+After building/deploying, verify with `sudo node dist/server/verify-browser-isolation.mjs` (installed release: `/opt/batty2/current/dist/server/verify-browser-isolation.mjs`). Set `BATTY_BROWSER_SSH_DESTINATION=user@host` to include an SSH SOCKS navigation check. The isolated smoke command checks UID, cleared groups/capabilities, `chrome://sandbox` namespace/seccomp status, unprivileged Xvfb, H.264 frames and private upload/download fixtures. It never opens installation data or uses credentials. The account boundary protects service/root files, not sessions from other sessions sharing that browser UID; CDP and authenticated agent access remain trusted.
+
 ## Native cloud-browser video
 
 Linux browser sessions require `Xvfb`, `xauth` and FFmpeg with `x11grab` and `libx264` (Ubuntu: `apt install xvfb xauth ffmpeg`). The Linux deployment preflight checks these binaries and performs a small H.264 encode before activating a release. Chromium owns a private authenticated 4096×4096 X display; display receipts and authority files stay in its private session directory. Browser and display processes survive service restarts; explicit browser close or expiry removes them. FFmpeg runs only while a viewer is attached.

@@ -175,7 +175,7 @@ export function useBrowserTransport(
     } catch (cause) {
       if (current !== generation || abort.signal.aborted) return;
       const status = (cause as { statusCode?: number }).statusCode;
-      if (!status || status >= 500 || status === 429) scheduleReconnect();
+      if (!status || (status >= 500 && status !== 504) || status === 429) scheduleReconnect();
       else {
         reconnecting.value = false;
         error.value = (cause as Error).message;

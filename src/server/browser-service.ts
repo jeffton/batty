@@ -37,6 +37,7 @@ import type { BrowserAction, BrowserActionInput } from "./browser-schemas";
 export type { BrowserAction, BrowserActionInput } from "./browser-schemas";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const CLOUD_OPERATION_TIMEOUT_MS = 15_000;
 const MAX_BROWSER_SESSIONS = 8;
 const SCREENSHOTS_DIR = path.join(os.tmpdir(), "batty-browser-screenshots");
 
@@ -531,33 +532,67 @@ export class BrowserService {
     persistRegistry = rejectBusy,
   ): Promise<T> {
     if (this.disposed) throw this.cloudEnded();
-    const owner = await this.cloudOwner(id);
-    if (rejectBusy && this.activeAgentSessions.has(owner))
-      throw Object.assign(new Error("Browser is busy. Try again when the agent finishes."), {
-        statusCode: 409,
-      });
-    return this.serialized(owner, async () => {
-      await this.cloudOwner(id);
-      let session = this.sessions.get(owner);
-      if (!session) {
-        try {
-          session = await this.createSession(owner, undefined, undefined);
-        } catch (error) {
-          if (["ESRCH", "ECONNREFUSED"].includes((error as NodeJS.ErrnoException).code ?? ""))
-            throw this.cloudEnded();
-          throw error;
-        }
-      }
-      if (!session.browser.isConnected()) throw this.cloudEnded();
-      try {
-        return await operation(session);
-      } finally {
-        if (session.browser.isConnected()) {
-          if (persistRegistry) await this.persistRegistry(session);
-          await this.touchSession(owner);
-        }
-      }
-    });
+    const controller = new AbortController();
+    let running = false;
+    const deadline = setTimeout(
+      () =>
+        controller.abort(
+          Object.assign(
+            new Error(
+              running
+                ? "Cloud browser operation timed out. The unresponsive browser session was closed."
+                : "Cloud browser queue timed out. Another operation is still using the browser.",
+            ),
+            { statusCode: 504 },
+          ),
+        ),
+      CLOUD_OPERATION_TIMEOUT_MS,
+    );
+    const signal = controller.signal;
+    try {
+      const owner = await browserAbortable(this.cloudOwner(id), signal);
+      if (rejectBusy && this.activeAgentSessions.has(owner))
+        throw Object.assign(new Error("Browser is busy. Try again when the agent finishes."), {
+          statusCode: 409,
+        });
+      return await this.serialized(
+        owner,
+        async () => {
+          running = true;
+          signal.throwIfAborted();
+          await this.cloudOwner(id);
+          signal.throwIfAborted();
+          let session = this.sessions.get(owner);
+          if (!session) {
+            try {
+              session = await this.createSession(owner, undefined, undefined, signal);
+            } catch (error) {
+              if (["ESRCH", "ECONNREFUSED"].includes((error as NodeJS.ErrnoException).code ?? ""))
+                throw this.cloudEnded();
+              throw error;
+            }
+          }
+          signal.throwIfAborted();
+          if (!session.browser.isConnected()) throw this.cloudEnded();
+          try {
+            return await operation(session);
+          } finally {
+            // An abandoned CDP promise may settle after timeout/closure. Never
+            // persist it or touch a newer session that reused the same owner.
+            if (!signal.aborted && session.browser.isConnected()) {
+              if (persistRegistry) await this.persistRegistry(session);
+              signal.throwIfAborted();
+              await this.touchSession(owner);
+            }
+          }
+        },
+        this.queues,
+        false,
+        signal,
+      );
+    } finally {
+      clearTimeout(deadline);
+    }
   }
 
   async cloudVideoGeometry(id: string, state: CloudBrowserState): Promise<NativeCaptureGeometry> {
@@ -793,8 +828,7 @@ export class BrowserService {
   async cloudReleaseTouch(id: string, owner: string): Promise<void> {
     const touch = this.cloudTouches.get(id);
     if (!touch || touch.owner !== owner) return;
-    const sessionId = await this.cloudOwner(id);
-    await this.serialized(sessionId, () => this.cancelCloudTouch(id, owner));
+    await this.cloudOperation(id, () => this.cancelCloudTouch(id, owner), false, false);
   }
 
   async cloudScroll(
@@ -1680,9 +1714,9 @@ export class BrowserService {
           await this.startups.get(sessionId)?.catch(() => {});
           await this.closeSession(sessionId);
         } catch (cleanupError) {
-          throw new AggregateError(
-            [error, cleanupError],
-            "Browser open cancellation and cleanup failed",
+          throw Object.assign(
+            new AggregateError([error, cleanupError], "Browser cancellation and cleanup failed"),
+            { statusCode: (error as { statusCode?: number })?.statusCode },
           );
         }
       }

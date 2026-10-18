@@ -608,6 +608,31 @@ test("blocks stale painted targets and accepts identical pixels with a fresh rev
   }
 });
 
+test("a server-side cloud deadline is shown without an automatic reconnect loop", async () => {
+  vi.useFakeTimers();
+  const wrapper = create();
+  try {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 504,
+      json: async () => ({ error: "Cloud browser queue timed out." }),
+    });
+    wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState: "open" });
+    await flushPromises();
+    expect(wrapper.get('[role="alert"]').text()).toContain("Cloud browser queue timed out.");
+    expect(wrapper.find('[role="status"]').exists()).toBe(false);
+    expect(FakeEvents.instances).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await wrapper.get('[role="alert"] button').trigger("click");
+    await flushPromises();
+    expect(FakeEvents.instances).toHaveLength(1);
+  } finally {
+    wrapper.unmount();
+    vi.useRealTimers();
+  }
+});
+
 test("reconnects transient stream/network failures with backoff, but stops for expired and permanent failures", async () => {
   vi.useFakeTimers();
   const wrapper = create();

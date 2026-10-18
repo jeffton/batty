@@ -154,7 +154,8 @@ export async function registerCloudBrowserRoutes(
         writer.send("browser-error", {
           error: message,
           statusCode,
-          retryable: statusCode !== 410 && statusCode !== 400 && statusCode !== 403,
+          retryable:
+            statusCode !== 410 && statusCode !== 400 && statusCode !== 403 && statusCode !== 504,
         });
       };
       const scroll = async () => {

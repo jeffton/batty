@@ -35,6 +35,10 @@ Main chat submissions use the default model and thinking level selected in Setti
 
 `browser.open` applies `timeoutMs` (default 30 seconds, range 1–60 seconds) to queue admission, SSH/display/Chromium startup, CDP attachment, navigation and the returned snapshot. Expiry or worker cancellation interrupts the action, closes its browser session and reaps owned startup processes before releasing its action queue. Bounded process cleanup can add a few seconds; a timeout while waiting behind another action does not close that action’s browser. Other browser actions retain their Playwright action/navigation timeout semantics.
 
+## Cloud-browser operation deadlines
+
+Cloud state, WebSocket admission, controls, touch input and capture setup share a 15-second deadline, including queue admission and persistent-session reconnection. A running operation that exceeds it closes only that unresponsive browser session and releases its queue; bounded process cleanup can add a few seconds. A queued request that expires does not close the browser being used by its predecessor. Timeouts return HTTP 504 or an explicit socket error, without automatic reconnect retries. Reopening an ended browser requires an explicit new session; no login or empty browser is silently substituted.
+
 ## Native cloud-browser video
 
 Linux browser sessions require `Xvfb`, `xauth` and FFmpeg with `x11grab` and `libx264` (Ubuntu: `apt install xvfb xauth ffmpeg`). The Linux deployment preflight checks these binaries and performs a small H.264 encode before activating a release. Chromium owns a private authenticated 4096×4096 X display; display receipts and authority files stay in its private session directory. Browser and display processes survive service restarts; explicit browser close or expiry removes them. FFmpeg runs only while a viewer is attached.

@@ -17,4 +17,6 @@ Run Linux deployment regression checks on Linux. Get an independent review and a
 
 Installations deploy validated commits. Deployment installs locked dependencies, builds and verifies service health and the expected build ID; do not rerun source checks, test suites or fixture-based offline tests there. The offline browser gate belongs before push.
 
+Native cloud-browser viewing (H.264 capture/streaming) is intentionally Linux-only. macOS and Windows deployments must not add support, port it, or introduce a fallback unless the user explicitly requests that work. This restriction does not apply to ordinary headless browser tools, which remain cross-platform.
+
 See [operations](docs/operations.md) for deployment commands and platform-specific verification.

@@ -1,0 +1,220 @@
+[
+  {
+    "file": "/tmp/h264-prototype-h264-mobile.json",
+    "codec": "h264",
+    "profile": {
+      "rttMs": 60,
+      "downMbit": 20
+    },
+    "continuous": false,
+    "input_to_canvas_ms": {
+      "n": 40,
+      "p50": 189.5,
+      "p95": 247.6
+    },
+    "duration_seconds": 70.311,
+    "tcp_down_bytes": 9751558,
+    "tcp_down_mbit": 1.11,
+    "displayed_fps": 30.04,
+    "changed_marker_fps": 0.6,
+    "cpu_tree_core_percent": 133.8,
+    "static_psnr_db": 37.91,
+    "safari_support": {
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Safari/605.1.15",
+      "decoder": "function",
+      "supported": {
+        "config": {
+          "codec": "avc1.42c020",
+          "hardwareAcceleration": "no-preference",
+          "optimizeForLatency": true
+        },
+        "supported": true
+      }
+    },
+    "safari_decoded": {
+      "width": 716,
+      "height": 1514,
+      "pixel": [14, 14, 14, 255]
+    },
+    "image_directory": "/tmp/batty-h264-gR42bq"
+  },
+  {
+    "file": "/tmp/h264-prototype-jpeg-mobile.json",
+    "codec": "jpeg",
+    "profile": {
+      "rttMs": 60,
+      "downMbit": 20
+    },
+    "continuous": false,
+    "input_to_canvas_ms": {
+      "n": 40,
+      "p50": 233.7,
+      "p95": 248.8
+    },
+    "duration_seconds": 69.23,
+    "tcp_down_bytes": 51100441,
+    "tcp_down_mbit": 5.905,
+    "displayed_fps": 5.71,
+    "changed_marker_fps": 0.61,
+    "cpu_tree_core_percent": 73.4,
+    "static_psnr_db": 29.0,
+    "safari_support": {
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Safari/605.1.15",
+      "decoder": "function",
+      "supported": {
+        "config": {
+          "codec": "avc1.42c020",
+          "hardwareAcceleration": "no-preference",
+          "optimizeForLatency": true
+        },
+        "supported": true
+      }
+    },
+    "safari_decoded": null,
+    "image_directory": "/tmp/batty-h264-CKyNDG"
+  },
+  {
+    "file": "/tmp/h264-prototype-h264-local.json",
+    "codec": "h264",
+    "profile": {
+      "rttMs": 0,
+      "downMbit": 1000
+    },
+    "continuous": false,
+    "input_to_canvas_ms": {
+      "n": 20,
+      "p50": 129.7,
+      "p95": 165.4
+    },
+    "duration_seconds": 35.347,
+    "tcp_down_bytes": 5334079,
+    "tcp_down_mbit": 1.207,
+    "displayed_fps": 30.06,
+    "changed_marker_fps": 0.62,
+    "cpu_tree_core_percent": 129.3,
+    "static_psnr_db": 37.95,
+    "safari_support": {
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Safari/605.1.15",
+      "decoder": "function",
+      "supported": {
+        "config": {
+          "codec": "avc1.42c020",
+          "hardwareAcceleration": "no-preference",
+          "optimizeForLatency": true
+        },
+        "supported": true
+      }
+    },
+    "safari_decoded": {
+      "width": 716,
+      "height": 1514,
+      "pixel": [14, 14, 14, 255]
+    },
+    "image_directory": "/tmp/batty-h264-BK5Ek1"
+  },
+  {
+    "file": "/tmp/h264-prototype-jpeg-local.json",
+    "codec": "jpeg",
+    "profile": {
+      "rttMs": 0,
+      "downMbit": 1000
+    },
+    "continuous": false,
+    "input_to_canvas_ms": {
+      "n": 20,
+      "p50": 116.5,
+      "p95": 139.9
+    },
+    "duration_seconds": 34.951,
+    "tcp_down_bytes": 45843002,
+    "tcp_down_mbit": 10.493,
+    "displayed_fps": 9.86,
+    "changed_marker_fps": 0.63,
+    "cpu_tree_core_percent": 79.3,
+    "static_psnr_db": 29.0,
+    "safari_support": {
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Safari/605.1.15",
+      "decoder": "function",
+      "supported": {
+        "config": {
+          "codec": "avc1.42c020",
+          "hardwareAcceleration": "no-preference",
+          "optimizeForLatency": true
+        },
+        "supported": true
+      }
+    },
+    "safari_decoded": null,
+    "image_directory": "/tmp/batty-h264-SotvwP"
+  },
+  {
+    "file": "/tmp/h264-prototype-h264-drag.json",
+    "codec": "h264",
+    "profile": {
+      "rttMs": 60,
+      "downMbit": 20
+    },
+    "continuous": true,
+    "input_to_canvas_ms": {
+      "n": 0
+    },
+    "duration_seconds": 7.935,
+    "tcp_down_bytes": 1913778,
+    "tcp_down_mbit": 1.929,
+    "displayed_fps": 30.11,
+    "changed_marker_fps": 28.69,
+    "cpu_tree_core_percent": 159.9,
+    "static_psnr_db": 37.95,
+    "safari_support": {
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Safari/605.1.15",
+      "decoder": "function",
+      "supported": {
+        "config": {
+          "codec": "avc1.42c020",
+          "hardwareAcceleration": "no-preference",
+          "optimizeForLatency": true
+        },
+        "supported": true
+      }
+    },
+    "safari_decoded": {
+      "width": 716,
+      "height": 1514,
+      "pixel": [14, 14, 14, 255]
+    },
+    "image_directory": "/tmp/batty-h264-ujE5uh"
+  },
+  {
+    "file": "/tmp/h264-prototype-jpeg-drag.json",
+    "codec": "jpeg",
+    "profile": {
+      "rttMs": 60,
+      "downMbit": 20
+    },
+    "continuous": true,
+    "input_to_canvas_ms": {
+      "n": 0
+    },
+    "duration_seconds": 7.949,
+    "tcp_down_bytes": 14298779,
+    "tcp_down_mbit": 14.39,
+    "displayed_fps": 14.54,
+    "changed_marker_fps": 14.15,
+    "cpu_tree_core_percent": 211.3,
+    "static_psnr_db": 29.04,
+    "safari_support": {
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Safari/605.1.15",
+      "decoder": "function",
+      "supported": {
+        "config": {
+          "codec": "avc1.42c020",
+          "hardwareAcceleration": "no-preference",
+          "optimizeForLatency": true
+        },
+        "supported": true
+      }
+    },
+    "safari_decoded": null,
+    "image_directory": "/tmp/batty-h264-Kv1zm8"
+  }
+]

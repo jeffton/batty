@@ -8,7 +8,7 @@ import { fitCloudViewport } from "@/shared/browser-geometry";
 const props = defineProps<{ popoverId: string; browserId: string; title: string }>();
 const viewport = ref<HTMLElement>();
 const address = ref("");
-const credentialsOpen = ref(false);
+const credentialsVisible = ref(false);
 const addressInput = ref<HTMLInputElement>();
 let addressWasFocused = false;
 const viewStyle = ref<Record<string, string>>({});
@@ -16,12 +16,13 @@ let resizeObserver: ResizeObserver | undefined;
 let resizeTimer: ReturnType<typeof setTimeout> | undefined;
 const browser = useBrowserTransport(() => props.browserId, {
   onState: (value, previous) => {
+    credentialsVisible.value = true;
     if (previous?.url !== value.url) address.value = value.url;
     if (previous?.pageId !== value.pageId) scheduleResize();
   },
   onStop: () => {
     clearTimeout(resizeTimer);
-    credentialsOpen.value = false;
+    credentialsVisible.value = false;
   },
   fitViewport,
 });
@@ -29,7 +30,6 @@ const {
   state,
   ready,
   error,
-  connection,
   reconnecting,
   ended,
   control,
@@ -158,17 +158,6 @@ onBeforeUnmount(() => {
         >
           ↻
         </button>
-        <button
-          type="button"
-          :disabled="!ready"
-          aria-label="Fill saved login"
-          @click="
-            dismissInput();
-            credentialsOpen = true;
-          "
-        >
-          Login
-        </button>
         <input
           ref="addressInput"
           v-model="address"
@@ -190,7 +179,6 @@ onBeforeUnmount(() => {
       <div v-if="error" class="cloud-browser__error" role="alert">
         {{ error }} <button v-if="!ended" type="button" @click="startViewing">Reconnect</button>
       </div>
-      <div v-if="reconnecting" class="cloud-browser__connection" role="status">Reconnecting…</div>
       <div ref="viewport" class="cloud-browser__viewport">
         <canvas
           v-show="hasFrame"
@@ -212,15 +200,23 @@ onBeforeUnmount(() => {
           @wheel.prevent="wheel"
           @contextmenu.prevent
         />
-        <p v-if="!hasFrame">{{ ended ? "Session unavailable" : connection }}</p>
+        <div
+          v-if="reconnecting || (!hasFrame && !ended && !error)"
+          class="cloud-browser__connection"
+          role="status"
+          :aria-label="reconnecting ? 'Reconnecting browser' : 'Connecting browser'"
+        >
+          <span class="cloud-browser__spinner" aria-hidden="true" />
+        </div>
+        <p v-if="!hasFrame && ended">Session unavailable</p>
       </div>
       <BrowserCredentials
-        v-if="credentialsOpen"
+        v-if="credentialsVisible && state?.login"
+        :key="`${browserId}:${state.pageId}:${state.revision}:${state.url}:${state.login.id}`"
         :browser-id="browserId"
         :state="state"
-        @close="credentialsOpen = false"
       />
-      <div v-if="editing && !credentialsOpen" class="cloud-browser__editor">
+      <div v-if="editing && !(credentialsVisible && state?.login)" class="cloud-browser__editor">
         <textarea
           v-if="focused?.multiline"
           ref="editor"
@@ -316,13 +312,26 @@ onBeforeUnmount(() => {
 .cloud-browser__connection {
   position: absolute;
   z-index: 1;
-  top: 0.4rem;
-  right: 0.4rem;
-  border-radius: 0.4rem;
-  background: var(--color-bg-panel);
+  inset: 0;
+  display: grid;
+  place-items: center;
   pointer-events: none;
 }
+.cloud-browser__spinner {
+  width: 2rem;
+  height: 2rem;
+  border: 3px solid var(--color-border-soft);
+  border-top-color: var(--color-text);
+  border-radius: 50%;
+  animation: browser-spin 0.8s linear infinite;
+}
+@keyframes browser-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .cloud-browser__viewport {
+  position: relative;
   display: flex;
   align-items: flex-start;
   justify-content: center;

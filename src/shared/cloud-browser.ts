@@ -5,7 +5,14 @@ export interface CloudBrowserViewport {
   deviceScaleFactor?: number;
 }
 
+export interface CloudBrowserLogin {
+  id: string;
+  username: boolean;
+  password: boolean;
+}
+
 export interface CloudBrowserState {
+  login?: CloudBrowserLogin;
   pageId: string;
   revision: string;
   url: string;
@@ -30,6 +37,7 @@ export interface CloudBrowserFrame {
 }
 
 export interface CloudBrowserCredentialTarget {
+  loginId: string;
   pageId: string;
   revision: string;
   url: string;

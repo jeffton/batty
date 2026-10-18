@@ -121,6 +121,88 @@ test("local credential handoff is explicit, document-bound, one-shot and authent
     expect(
       (await app.inject({ method: "POST", url: `${endpoint}/prepare`, headers })).statusCode,
     ).toBe(409);
+    // Discovery must not turn general input fields or account creation into login.
+    for (const content of [
+      '<form><input type="search"><button>Search</button></form>',
+      '<form action="/login"><input type="tel" autocomplete="one-time-code"><button>Continue</button></form>',
+      '<form action="/login"><input name="otp"><button>Continue</button></form>',
+      '<form><input type="email"><button>Subscribe</button></form>',
+      '<form action="/signup"><input autocomplete="username"><button>Continue</button></form>',
+      '<form action="/signup"><input type="email"><input type="password"><button>Create account</button></form>',
+      '<form><input autocomplete="username"><input type="password" autocomplete="new-password"></form>',
+      '<form><input type="email"><input type="password"><button>Create account</button></form>',
+      '<iframe srcdoc="<input autocomplete=username><input type=password autocomplete=current-password>"></iframe>',
+    ]) {
+      await page.setContent(content);
+      expect((await service.cloudState(id)).login).toBeUndefined();
+      expect(
+        (await app.inject({ method: "POST", url: `${endpoint}/prepare`, headers })).statusCode,
+      ).toBe(409);
+    }
+    await page.setContent(
+      '<form><input autocomplete="username"><input type="password" autocomplete="current-password"><input autocomplete="one-time-code" id="code"></form>',
+    );
+    expect((await service.cloudState(id)).login).toBeDefined();
+    await page.locator("#code").focus();
+    expect((await service.cloudState(id)).login).toBeUndefined();
+    expect((await service.cloudState(id)).focused!.type).toBe("text");
+    // Both steps expose a local autofill pair, but only existing remote fields are filled.
+    await page.setContent(
+      '<form action="/ax/claim"><input type="email" name="email"><button>Continue</button></form>',
+    );
+    let detected = (await service.cloudState(id)).login!;
+    expect(detected).toMatchObject({ username: true, password: false });
+    target = await prepare();
+    expect(target.loginId).toBe(detected.id);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `${endpoint}/fill`,
+          headers,
+          payload: { target, username, password: "" },
+        })
+      ).statusCode,
+    ).toBe(204);
+    expect(await page.locator('[name="email"]').inputValue()).toBe(username);
+    await page.setContent(
+      '<form><input type="password" autocomplete="current-password"><button>Sign in</button></form>',
+    );
+    detected = (await service.cloudState(id)).login!;
+    expect(detected).toMatchObject({ username: false, password: true });
+    target = await prepare();
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `${endpoint}/fill`,
+          headers,
+          payload: { target, username: "", password },
+        })
+      ).statusCode,
+    ).toBe(204);
+    await page.locator("input").focus();
+    expect((await service.cloudState(id)).focused!.value).toBe("");
+    // A same-document step replacement and a form purpose change reject prepared targets.
+    target = await prepare();
+    await page.locator("input").evaluate((input) => {
+      input.outerHTML = '<input type="password" autocomplete="current-password">';
+    });
+    expect((await fill(target)).statusCode).toBe(409);
+    target = await prepare();
+    await page.locator("input").evaluate((input) => {
+      input.setAttribute("autocomplete", "new-password");
+    });
+    expect((await fill(target)).statusCode).toBe(409);
+    await page.route("http://insecure-login.test/**", (route) =>
+      route.fulfill({ contentType: "text/html", body: html }),
+    );
+    await page.goto("http://insecure-login.test/");
+    expect(await page.evaluate(() => isSecureContext)).toBe(false);
+    expect((await service.cloudState(id)).login).toMatchObject({ username: true, password: true });
+    target = await prepare();
+    expect((await fill(target)).statusCode).toBe(204);
+    await page.goto(url);
     const malformed = await app.inject({
       method: "POST",
       url: `${endpoint}/fill`,

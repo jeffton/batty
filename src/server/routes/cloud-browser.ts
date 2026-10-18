@@ -27,6 +27,7 @@ export async function registerCloudBrowserRoutes(
     {
       target: Type.Object(
         {
+          loginId: Type.String({ maxLength: 100 }),
           pageId: Type.String({ maxLength: 200 }),
           revision: Type.String({ maxLength: 100 }),
           url: Type.String({ maxLength: 16384 }),
@@ -36,7 +37,7 @@ export async function registerCloudBrowserRoutes(
         { additionalProperties: false },
       ),
       username: Type.String({ maxLength: 4096 }),
-      password: Type.String({ minLength: 1, maxLength: 16384 }),
+      password: Type.String({ maxLength: 16384 }),
     },
     { additionalProperties: false },
   );

@@ -163,7 +163,7 @@ test("WebKit decodes production H.264, forwards taps and resumes after viewer re
   }
 }, 30_000);
 
-test("WebKit mobile local credential panel fills the live document without submitting or exposing values to controls", async () => {
+test("WebKit bottom autofill pair detects login steps without submitting or exposing values to controls", async () => {
   const { webkit } = await import("playwright-core");
   const viewer = await webkit.launch({ headless: true });
   const context = await viewer.newContext({
@@ -190,7 +190,21 @@ test("WebKit mobile local credential panel fills the live document without submi
     });
     await page.goto(url);
     await page.getByRole("button", { name: "Open browser", exact: true }).click();
-    await page.getByRole("button", { name: "Fill saved login", exact: true }).click();
+    expect(await page.getByRole("button", { name: "Fill saved login", exact: true }).count()).toBe(
+      0,
+    );
+    await expect
+      .poll(
+        () =>
+          page
+            .locator(".cloud-browser__image")
+            .evaluate(
+              (canvas: HTMLCanvasElement) => canvas.width > 0 && canvas.dataset.frame !== undefined,
+            ),
+        { timeout: 10000 },
+      )
+      .toBe(true);
+    await expect.poll(() => page.getByRole("status").count()).toBe(0);
     await page.locator('.browser-credentials [name="username"]').fill("test-local-user");
     await page.locator('.browser-credentials [name="password"]').fill("test-local-password");
     expect(await page.locator(".browser-credentials__origin").innerText()).toBe(
@@ -199,8 +213,11 @@ test("WebKit mobile local credential panel fills the live document without submi
     const bounds = (await page.locator(".browser-credentials").boundingBox())!;
     expect(bounds.x).toBeGreaterThanOrEqual(0);
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
-    await page.getByRole("button", { name: "Fill remote login", exact: true }).click();
-    await expect.poll(() => page.locator(".browser-credentials").count()).toBe(0);
+    await page.screenshot({ path: "/tmp/batty-bottom-login-mobile.png" });
+    await page.getByRole("button", { name: "Fill", exact: true }).click();
+    await expect
+      .poll(() => page.locator('.browser-credentials [name="password"]').inputValue())
+      .toBe("");
     const remote = (await service.cloudTarget(attachedBrowserId)).page;
     expect(await remote.locator('[name="username"]').inputValue()).toBe("test-local-user");
     expect(await remote.locator('[name="password"]').inputValue()).toBe("test-local-password");
@@ -208,6 +225,41 @@ test("WebKit mobile local credential panel fills the live document without submi
       await remote.evaluate(() => (window as unknown as { submitted?: boolean }).submitted),
     ).toBeUndefined();
     expect(controls.join("\n")).not.toContain("test-local-password");
+    await page.locator('.browser-credentials [name="password"]').fill("discard-on-step-change");
+    await remote.setContent(
+      '<form action="/ax/claim"><input type="email" name="email"><button>Continue</button></form>',
+    );
+    await expect
+      .poll(() => page.locator('.browser-credentials [name="password"]').inputValue())
+      .toBe("");
+    await expect
+      .poll(() => page.locator('.browser-credentials [name="password"]').getAttribute("required"))
+      .toBeNull();
+    await page.locator('.browser-credentials [name="username"]').fill("multistep-user");
+    await page.getByRole("button", { name: "Fill", exact: true }).click();
+    await expect.poll(() => remote.locator('[name="email"]').inputValue()).toBe("multistep-user");
+    await remote.setContent(
+      '<form><input type="password" autocomplete="current-password"><button>Sign in</button></form>',
+    );
+    await expect
+      .poll(() => page.locator('.browser-credentials [name="username"]').inputValue())
+      .toBe("");
+    await expect
+      .poll(() => page.locator('.browser-credentials [name="username"]').getAttribute("required"))
+      .toBeNull();
+    await expect
+      .poll(() => page.locator('.browser-credentials [name="password"]').getAttribute("required"))
+      .not.toBeNull();
+    await page.locator('.browser-credentials [name="password"]').fill("multistep-password");
+    await page.getByRole("button", { name: "Fill", exact: true }).click();
+    await expect.poll(() => remote.locator("input").inputValue()).toBe("multistep-password");
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.screenshot({ path: "/tmp/batty-bottom-login-desktop.png" });
+    const desktopBounds = (await page.locator(".browser-credentials").boundingBox())!;
+    expect(desktopBounds.x).toBeGreaterThanOrEqual(0);
+    expect(desktopBounds.x + desktopBounds.width).toBeLessThanOrEqual(1440);
+    await remote.setContent('<form><input type="email"><button>Subscribe</button></form>');
+    await expect.poll(() => page.locator(".browser-credentials").count()).toBe(0);
   } finally {
     await context.close();
     await viewer.close();
@@ -592,8 +644,8 @@ test("desktop/mobile switching keeps login, CSS screen matches the viewer, and n
     expect(await inspect("document.documentElement.scrollWidth === innerWidth")).toBe(true);
     await mobile.setOffline(true);
     await expect
-      .poll(() => popover.getByRole("status").textContent(), { timeout: 5000 })
-      .toBe("Reconnecting…");
+      .poll(() => popover.getByRole("status").getAttribute("aria-label"), { timeout: 5000 })
+      .toBe("Reconnecting browser");
     await mobile.setOffline(false);
     await expect.poll(() => popover.getByRole("status").count(), { timeout: 10000 }).toBe(0);
     expect((await service.cloudTarget(attachedBrowserId)).page).toBe(original.page);

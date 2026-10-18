@@ -59,13 +59,13 @@ Tool-controlled browsers do not support WebAuthn/passkeys, including when a clou
 
 The policy runs before website scripts in frames and on navigation. Reconnected browser documents also receive it without reloading or clearing page state. An already pending WebAuthn request/native dialog is not cancelled, and scripts that cached the original API before installation can retain it; reload explicitly or replace the browser if needed. This capability policy is not a security boundary against hostile page scripts. Device passkeys are not forwarded to the VPS.
 
-### Local credential panel
+### Local credential inputs
 
-The cloud-browser header’s **Login** button opens a local username/password form using standard `autocomplete="username"` and `autocomplete="current-password"` fields. Choose a login with the device’s password manager, verify the displayed remote origin, then explicitly select **Fill remote login**. Password-manager suggestions and manual selection depend on the client; physical iOS AutoFill has not been verified. Batty does not impersonate the remote origin for AutoFill.
+A detected sign-in form replaces the bottom keyboard bridge with local username/password inputs using `autocomplete="username"` and `autocomplete="current-password"`. Verify the displayed remote origin, choose a login on the device, then select **Fill**. This only fills remote fields; sign in on the remote page separately. Both local inputs remain available on username-only and password-only steps for password-manager compatibility; only the fields present in that remote step are filled, and unused values are discarded. Password-manager suggestions depend on the client. This paired-input flow has not been physically tested on iOS; Batty does not impersonate the remote origin for AutoFill.
 
-The authenticated, same-origin credential endpoint fills one visible username/password pair in the active top-level document without submitting the form. A one-use document token, session, page revision and exact URL bind the operation; navigation, replacement fields and ambiguous forms are rejected. Embedded, shadow-DOM and multi-step logins are outside this experiment.
+Detection requires a password sign-in signal or an identifiable username sign-in form, not an arbitrary email/search field. Signup, reset, ambiguous, embedded and shadow-DOM forms are unsupported and retain the ordinary keyboard bridge. The authenticated, same-origin endpoint binds each one-use fill to the session, document, form identity, page revision and exact URL. Navigation and replaced targets are rejected.
 
-Credentials bypass chat, agent tools and request/error logs, and local fields clear after filling or closing the panel. They are sent to the VPS and remote page, which remain trusted recipients; this is not a vault or protection against an agent inspecting the remote page. There is no server-side credential storage. The remote website controls its own input-event behavior, login and cookies.
+Credentials bypass chat, agent tools and request/error logs. Local inputs clear after a handoff, navigation, form replacement or disconnection. Existing remote password values are not returned in viewer state. Credentials are sent to the VPS and remote page, which remain trusted recipients; this is not a vault or protection against an agent inspecting the page. No credentials are stored server-side. The website controls its own input-event behavior, login and cookies.
 
 ## Checks
 

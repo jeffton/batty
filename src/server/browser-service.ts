@@ -24,7 +24,7 @@ import {
   type PersistentBrowserRegistry,
 } from "./browser-persistence";
 import { DEFAULT_BROWSER_MAX_TABS } from "./options";
-import { fillCredentialFields, prepareCredentialFields } from "./browser-credentials";
+import { credentialDocumentOperation } from "./browser-credentials";
 import { installWebAuthnPolicy } from "./browser-webauthn";
 import {
   NATIVE_BROWSER_SCALE,
@@ -503,7 +503,12 @@ export class BrowserService {
         marked.__battyInputId ??= id;
         return {
           id: marked.__battyInputId,
-          value: input ? input.value : element.innerText,
+          value:
+            element instanceof HTMLInputElement && element.type === "password"
+              ? ""
+              : input
+                ? input.value
+                : element.innerText,
           type: element instanceof HTMLInputElement ? element.type : "text",
           multiline: element instanceof HTMLTextAreaElement || element.isContentEditable,
         };
@@ -521,6 +526,12 @@ export class BrowserService {
       url: page.url(),
       title: await page.title(),
       focused: (await this.focusedInput(page))?.focused,
+      login: (
+        await page.evaluate(credentialDocumentOperation, {
+          action: "detect" as const,
+          id: randomUUID(),
+        })
+      ).login,
       pages: await this.pageDetails(session),
     };
   }
@@ -687,20 +698,29 @@ export class BrowserService {
         if (!/^https?:/.test(url))
           throw Object.assign(new Error("Open a website login page first."), { statusCode: 400 });
         const token = randomUUID();
-        if (!(await page.evaluate(prepareCredentialFields, token)))
-          throw Object.assign(
-            new Error(
-              "Show one username and password form on the page first. Embedded and multi-step logins are not supported.",
-            ),
-            { statusCode: 409 },
-          );
+        const { login } = await page.evaluate(credentialDocumentOperation, {
+          action: "prepare" as const,
+          id: token,
+          token,
+        });
+        if (!login)
+          throw Object.assign(new Error("No unambiguous sign-in form is visible on this page."), {
+            statusCode: 409,
+          });
         this.cloudInputPage(session, view);
         if (page.url() !== url)
           throw Object.assign(
             new Error("The login page changed. Open the credential panel again."),
             { statusCode: 409 },
           );
-        return { pageId: view.pageId, revision: view.revision, url, origin, token };
+        return {
+          pageId: view.pageId,
+          revision: view.revision,
+          url,
+          origin,
+          token,
+          loginId: login.id,
+        };
       },
       true,
       false,
@@ -715,7 +735,13 @@ export class BrowserService {
         // Never expose Patchright errors/call arguments containing credentials.
         let filled = false;
         try {
-          filled = await page.evaluate(fillCredentialFields, command);
+          filled = !!(
+            await page.evaluate(credentialDocumentOperation, {
+              action: "fill" as const,
+              id: randomUUID(),
+              credentials: command,
+            })
+          ).filled;
         } catch {
           throw Object.assign(
             new Error("Credential fill failed. Open the credential panel again."),

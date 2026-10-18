@@ -1,65 +1,78 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { withBaseUrl } from "@/client/lib/base-url";
 import type { CloudBrowserCredentialTarget, CloudBrowserState } from "@/shared/cloud-browser";
 
-const props = defineProps<{ browserId: string; state?: CloudBrowserState }>();
-const emit = defineEmits<{ close: [] }>();
+const props = defineProps<{ browserId: string; state: CloudBrowserState }>();
 const target = ref<CloudBrowserCredentialTarget>();
+const origin = computed(() => new URL(props.state.url).origin);
 const username = ref("");
 const password = ref("");
 const error = ref("");
 const busy = ref(true);
 const controller = new AbortController();
 const initialBrowserId = props.browserId;
+const initialKey = identity();
 const endpoint = `/api/cloud-browser/${encodeURIComponent(initialBrowserId)}/credentials`;
+function identity(): string {
+  return JSON.stringify([
+    props.browserId,
+    props.state.pageId,
+    props.state.revision,
+    props.state.url,
+    props.state.login?.id,
+  ]);
+}
 function clear(): void {
   username.value = "";
   password.value = "";
 }
-onBeforeUnmount(() => {
+function invalidate(): void {
   controller.abort();
   clear();
-});
+  target.value = undefined;
+}
+onBeforeUnmount(invalidate);
 watch(
-  () => [props.browserId, props.state?.pageId, props.state?.revision],
+  identity,
   () => {
-    if (
-      props.browserId !== initialBrowserId ||
-      (target.value &&
-        (props.state?.pageId !== target.value.pageId ||
-          props.state?.revision !== target.value.revision))
-    ) {
-      clear();
-      emit("close");
-    }
+    if (identity() !== initialKey) invalidate();
   },
+  { flush: "sync" },
 );
-onMounted(async () => {
+async function prepare(): Promise<void> {
+  const response = await fetch(withBaseUrl(`${endpoint}/prepare`), {
+    method: "POST",
+    signal: controller.signal,
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error();
+  const value = (await response.json()) as CloudBrowserCredentialTarget;
+  if (
+    controller.signal.aborted ||
+    identity() !== initialKey ||
+    props.state.pageId !== value.pageId ||
+    props.state.revision !== value.revision ||
+    props.state.url !== value.url ||
+    props.state.login?.id !== value.loginId
+  )
+    throw new Error();
+  target.value = value;
+}
+async function refresh(): Promise<void> {
+  busy.value = true;
+  error.value = "";
   try {
-    const response = await fetch(withBaseUrl(`${endpoint}/prepare`), {
-      method: "POST",
-      signal: controller.signal,
-      cache: "no-store",
-    });
-    if (!response.ok) throw new Error();
-    target.value = await response.json();
-    if (
-      props.state?.pageId !== target.value!.pageId ||
-      props.state?.revision !== target.value!.revision
-    ) {
-      emit("close");
-    }
+    await prepare();
   } catch {
-    if (!controller.signal.aborted)
-      error.value =
-        "Show a single username and password form, then reopen this panel. Embedded and multi-step logins are not supported.";
+    if (!controller.signal.aborted) error.value = "Login fields changed. Retry to refresh.";
   } finally {
     busy.value = false;
   }
-});
+}
+onMounted(refresh);
 async function fill(): Promise<void> {
-  if (!target.value || busy.value) return;
+  if (!target.value || busy.value || controller.signal.aborted || identity() !== initialKey) return;
   busy.value = true;
   error.value = "";
   try {
@@ -75,14 +88,16 @@ async function fill(): Promise<void> {
       cache: "no-store",
     });
     clear();
+    target.value = undefined;
     if (!response.ok) throw new Error();
-    emit("close");
+    // Each handoff is one-shot. Keep the pair available for correction without
+    // retaining credentials across steps, navigation or reconnects.
+    await prepare();
   } catch {
     clear();
     target.value = undefined;
     if (!controller.signal.aborted)
-      error.value =
-        "Could not complete credential fill. The page or session may have changed. Close and reopen this panel.";
+      error.value = "Login fields changed or fill failed. Retry to refresh.";
   } finally {
     busy.value = false;
   }
@@ -90,71 +105,69 @@ async function fill(): Promise<void> {
 </script>
 
 <template>
-  <section class="browser-credentials" aria-label="Fill remote login">
-    <p v-if="target" class="browser-credentials__origin">{{ target.origin }}</p>
-    <p>
-      Choose a saved login on this device. Selected credentials are sent to the remote browser, not
-      chat. Then sign in on the remote page.
+  <form
+    class="browser-credentials"
+    autocomplete="on"
+    aria-label="Remote login"
+    @submit.prevent="fill"
+  >
+    <div class="browser-credentials__origin">{{ target?.origin || origin }}</div>
+    <p v-if="error" role="alert">
+      {{ error }} <button type="button" :disabled="busy" @click="refresh">Retry</button>
     </p>
-    <p v-if="error" role="alert">{{ error }}</p>
-    <form v-if="target" autocomplete="on" @submit.prevent="fill">
-      <label
-        >Username
-        <input
-          v-model="username"
-          name="username"
-          autocomplete="username"
-          autocapitalize="none"
-          autocorrect="off"
-          :spellcheck="false"
-          :disabled="busy"
-        />
-      </label>
-      <label
-        >Password
-        <input
-          v-model="password"
-          type="password"
-          name="password"
-          autocomplete="current-password"
-          :disabled="busy"
-          required
-        />
-      </label>
-      <button type="submit" :disabled="busy">Fill remote login</button>
-    </form>
-    <button type="button" @click="emit('close')">Cancel</button>
-  </section>
+    <div class="browser-credentials__fields">
+      <input
+        v-model="username"
+        type="text"
+        name="username"
+        autocomplete="username"
+        aria-label="Username or email"
+        placeholder="Username or email"
+        autocapitalize="none"
+        autocorrect="off"
+        :spellcheck="false"
+        :required="state.login?.username"
+        :disabled="busy || !target"
+        enterkeyhint="next"
+      />
+      <input
+        v-model="password"
+        type="password"
+        name="password"
+        autocomplete="current-password"
+        aria-label="Password"
+        placeholder="Password"
+        :required="state.login?.password"
+        :disabled="busy || !target"
+        enterkeyhint="done"
+      />
+      <button type="submit" :disabled="busy || !target">Fill</button>
+    </div>
+  </form>
 </template>
 
 <style scoped>
 .browser-credentials {
-  position: absolute;
-  z-index: 2;
-  inset: 0;
-  padding: 1rem;
-  overflow: auto;
-  background: var(--color-bg-panel);
-}
-p {
-  margin: 0 0 0.8rem;
+  flex-shrink: 0;
+  padding: 0.4rem;
+  border-top: 1px solid var(--color-border-soft);
 }
 .browser-credentials__origin {
-  font-weight: 600;
+  font-size: 0.8rem;
   overflow-wrap: anywhere;
+  margin-bottom: 0.3rem;
 }
-form,
-label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
+p {
+  margin: 0 0 0.3rem;
 }
-form {
-  gap: 0.8rem;
-  margin-bottom: 0.8rem;
+.browser-credentials__fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 0.35rem;
 }
 input,
 button {
+  min-width: 0;
   min-height: 2.4rem;
   padding: 0.35rem 0.5rem;
   border: 1px solid var(--color-border-soft);
@@ -163,5 +176,13 @@ button {
   color: var(--color-text);
   font: inherit;
   font-size: 1rem;
+}
+@media (max-width: 420px) {
+  .browser-credentials__fields {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  input[name="username"] {
+    grid-column: 1 / -1;
+  }
 }
 </style>

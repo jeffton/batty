@@ -640,7 +640,8 @@ test("reconnects transient stream/network failures with backoff, but stops for e
     const first = await open(wrapper);
     first.send("browser-error", { error: "Execution context was destroyed", retryable: true });
     await flushPromises();
-    expect(wrapper.get('[role="status"]').text()).toBe("Reconnecting…");
+    expect(wrapper.get('[role="status"]').attributes("aria-label")).toBe("Reconnecting browser");
+    expect(wrapper.find(".cloud-browser__viewport .cloud-browser__spinner").exists()).toBe(true);
     expect(first.closed).toBe(true);
     fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     await vi.advanceTimersByTimeAsync(1000);

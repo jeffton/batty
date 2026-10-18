@@ -125,6 +125,7 @@ export function useBrowserInput({
     scrollAnimation = undefined;
     clearTimeout(inputTimer);
     inputTimer = undefined;
+    text.value = "";
   }
   function scrollError(message: string): void {
     error.value = message;

@@ -639,6 +639,35 @@ test("DPR3 binary frames fill the actual popover, retain edge input alignment an
       3,
     ]);
     await page.screenshot({ path: "/tmp/cloud-coverage-landscape.png" });
+    for (const viewport of [
+      { width: 2400, height: 1000 },
+      { width: 1000, height: 2400 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await expect
+        .poll(async () => {
+          const bounds = await page.locator(".cloud-browser__viewport").boundingBox();
+          const width = Math.round(bounds!.width);
+          const height = Math.round(bounds!.height);
+          const ratio = Math.min(1, 1365 / Math.max(width, height));
+          const state = await service.cloudState(attachedBrowserId);
+          return (
+            Math.max(state.width, state.height) === 1365 &&
+            state.width === Math.round(width * ratio) &&
+            state.height === Math.round(height * ratio)
+          );
+        })
+        .toBe(true);
+      const fitted = await service.cloudState(attachedBrowserId);
+      await expect.poll(() => canvas.getAttribute("data-revision")).toBe(fitted.revision);
+      await expect.poll(colors).toEqual(expected);
+      expect(await page.locator(".cloud-browser__error").count()).toBe(0);
+      const clicks = Number(await inspect("document.body.dataset.clicks"));
+      await tapRemote(page, fitted.width * 0.875, fitted.height * 0.85);
+      await expect.poll(() => inspect("Number(document.body.dataset.clicks)")).toBe(clicks + 1);
+      expect((await service.cloudTarget(attachedBrowserId)).page).toBe(original.page);
+    }
+    await page.screenshot({ path: "/tmp/cloud-coverage-oversize.png" });
     await page.getByRole("button", { name: "Close popover" }).click();
   } finally {
     await context.close();

@@ -21,7 +21,11 @@ import {
   type PersistentBrowserRegistry,
 } from "./browser-persistence";
 import { DEFAULT_BROWSER_MAX_TABS } from "./options";
-import { NATIVE_BROWSER_SCALE, NATIVE_BROWSER_SIZE } from "./browser-display";
+import {
+  NATIVE_BROWSER_SCALE,
+  NATIVE_BROWSER_SIZE,
+  fitCloudViewport,
+} from "@/shared/browser-geometry";
 import type { NativeCaptureGeometry } from "./native-browser-video";
 import type { BrowserProxy } from "./ssh-socks-proxy";
 import type { BrowserAction, BrowserActionInput } from "./browser-schemas";
@@ -94,6 +98,7 @@ interface BrowserSession {
   useTailscale: boolean;
   identity: BrowserIdentity;
   cloudViewport?: CloudBrowserViewport;
+  cloudEnabled: boolean;
   pageEmulation: WeakMap<Page, CDPSession>;
   nativeWindowRevisions: Map<number, string>;
   nativeCapturePage?: Page;
@@ -370,6 +375,16 @@ export class BrowserService {
     if (!cloud) {
       cloud = { id: randomUUID(), sessionId };
       await writeBrowserJson(file, cloud);
+    }
+    session.cloudEnabled = true;
+    for (const page of session.pages.values()) {
+      await session.pageIdentityPromises.get(page);
+      const viewport = page.viewportSize();
+      if (viewport) {
+        const fitted = fitCloudViewport(viewport);
+        if (fitted.width !== viewport.width || fitted.height !== viewport.height)
+          await this.setViewport(session, page, fitted);
+      }
     }
     this.cloudOwners.set(cloud.id, sessionId);
   }
@@ -819,12 +834,12 @@ export class BrowserService {
               const page = this.resolvePage(session);
               const modeChanged =
                 (session.pageViewports.get(page)?.mobile ?? false) !== command.mobile;
-              session.cloudViewport = {
+              session.cloudViewport = fitCloudViewport({
                 width: command.width,
                 height: command.height,
                 mobile: command.mobile,
                 deviceScaleFactor: command.deviceScaleFactor ?? 1,
-              };
+              });
               await this.setViewport(session, page, command);
               // Server-selected mobile HTML needs a new request with the mobile UA.
               // Keep the existing page, cookies, storage and browser context.
@@ -950,6 +965,7 @@ export class BrowserService {
       useTailscale: receipt.useTailscale,
       identity,
       cloudViewport: registry?.cloudViewport,
+      cloudEnabled: !!(await readBrowserJson(path.join(directory, "cloud.json"))),
       pageEmulation: new WeakMap(),
       nativeWindowRevisions: new Map(),
       pageViewports: new WeakMap(),
@@ -1122,9 +1138,16 @@ export class BrowserService {
     const connection = await session.context.newCDPSession(page);
     session.pageEmulation.set(page, connection);
     if (session.cloudViewport) {
+      session.cloudViewport = fitCloudViewport(session.cloudViewport);
       await page.setViewportSize(session.cloudViewport);
       await this.emulateViewport(session, page, session.cloudViewport);
-    } else await connection.send("Emulation.setUserAgentOverride", session.identity);
+    } else {
+      if (session.cloudEnabled) {
+        const viewport = page.viewportSize();
+        if (viewport) await page.setViewportSize(fitCloudViewport(viewport));
+      }
+      await connection.send("Emulation.setUserAgentOverride", session.identity);
+    }
   }
 
   private async setViewport(
@@ -1133,6 +1156,7 @@ export class BrowserService {
     viewport: BrowserViewport,
   ): Promise<void> {
     await session.pageIdentityPromises.get(page);
+    if (session.cloudEnabled) viewport = fitCloudViewport(viewport);
     await page.setViewportSize(viewport);
     if (session.cloudViewport) {
       session.cloudViewport = {

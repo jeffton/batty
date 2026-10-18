@@ -61,6 +61,73 @@ async function fixture() {
   };
 }
 
+test("oversized cloud viewports fit the display across attach, tool resize, API rotation and restore", async () => {
+  const f = await fixture();
+  let service = f.service;
+  try {
+    await service.execute("shared", {
+      action: "open",
+      url: f.url,
+      viewport: { width: 2400, height: 1600 },
+    });
+    const page = () =>
+      service.execute("shared", {
+        action: "evaluate",
+        script: "({width:innerWidth,height:innerHeight})",
+      });
+    expect((await page()).text).toContain("2400");
+    const attachment = await service.execute("shared", { action: "attach", cloud: true });
+    const id = attachment.details.sites![0]!.browserId;
+    expect(await service.cloudState(id)).toMatchObject({ width: 1365, height: 910 });
+    for (const [width, height, fittedWidth, fittedHeight] of [
+      [2400, 1600, 1365, 910],
+      [1600, 2400, 910, 1365],
+      [390, 844, 390, 844],
+      [844, 390, 844, 390],
+    ]) {
+      const state = await service.cloudControl(id, {
+        action: "viewport",
+        width: width!,
+        height: height!,
+        mobile: false,
+      });
+      expect(state).toMatchObject({ width: fittedWidth, height: fittedHeight });
+      const geometry = await service.cloudVideoGeometry(id, state);
+      expect(Math.max(geometry.width, geometry.height)).toBeLessThanOrEqual(4096);
+      await service.cloudControl(id, { action: "click", ...state, x: 40, y: 30 });
+    }
+    await service.execute("shared", {
+      action: "evaluate",
+      script: "window.scrollTo(0,0)",
+      viewport: { width: 4000, height: 2000 },
+    });
+    let state = await service.cloudState(id);
+    expect(state).toMatchObject({ width: 1365, height: 683 });
+    await service.cloudControl(id, {
+      action: "scroll",
+      ...state,
+      x: 100,
+      y: 200,
+      deltaX: 0,
+      deltaY: 300,
+    });
+    await expect
+      .poll(async () => (await service.cloudTarget(id)).page.evaluate(() => scrollY))
+      .toBeGreaterThan(0);
+    await service.dispose();
+    service = new BrowserService(undefined, 4, f.root);
+    state = await service.cloudState(id);
+    expect(state).toMatchObject({ width: 1365, height: 683 });
+    await service.cloudVideoGeometry(id, state);
+    expect(
+      (await service.execute("shared", { action: "evaluate", script: "window.clicks" })).text,
+    ).toContain("4");
+  } finally {
+    await service.dispose();
+    await f.close();
+  }
+});
+
 test("cloud attachment shares agent state and controls, survives detach, and cannot resurrect expired handles", async () => {
   const f = await fixture();
   let service = f.service;

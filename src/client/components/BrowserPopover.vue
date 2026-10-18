@@ -2,6 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import { useBrowserTransport } from "@/client/browser/transport";
+import { fitCloudViewport } from "@/shared/browser-geometry";
 
 const props = defineProps<{ popoverId: string; browserId: string; title: string }>();
 const viewport = ref<HTMLElement>();
@@ -64,8 +65,10 @@ async function fitViewport(): Promise<void> {
   if (!ready.value) return;
   const rect = viewport.value?.getBoundingClientRect();
   if (!rect?.width || !rect.height) return;
-  const width = Math.max(1, Math.min(10000, Math.round(rect.width)));
-  const height = Math.max(1, Math.min(10000, Math.round(rect.height)));
+  const { width, height } = fitCloudViewport({
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+  });
   const mobile = navigator.maxTouchPoints > 0 && matchMedia("(pointer: coarse)").matches;
   const deviceScaleFactor = Math.min(3, Math.max(1, window.devicePixelRatio));
   // Keep keyboard-only height changes stable, but still fit rotation/device changes.

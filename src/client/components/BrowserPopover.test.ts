@@ -163,6 +163,35 @@ function commands() {
     .map(([, init]) => JSON.parse(init.body));
 }
 
+test.each([
+  [2400, 1600, 1365, 910],
+  [1600, 2400, 910, 1365],
+  [390, 844, 390, 844],
+  [844, 390, 844, 390],
+])(
+  "fits the viewer %ix%i to a proportional %ix%i viewport",
+  async (width, height, fittedWidth, fittedHeight) => {
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    const wrapper = create();
+    vi.spyOn(
+      wrapper.get(".cloud-browser__viewport").element,
+      "getBoundingClientRect",
+    ).mockReturnValue({ width, height } as DOMRect);
+    try {
+      await open(wrapper);
+      expect(commands()).toContainEqual({
+        action: "viewport",
+        width: fittedWidth,
+        height: fittedHeight,
+        mobile: false,
+        deviceScaleFactor: window.devicePixelRatio,
+      });
+    } finally {
+      wrapper.unmount();
+    }
+  },
+);
+
 test("streams gesture deltas without HTTP round-trip gating and preserves nested anchor/totals", async () => {
   const wrapper = create();
   try {

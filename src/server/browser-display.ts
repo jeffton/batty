@@ -11,8 +11,8 @@ export interface BrowserDisplay {
   display: string;
   authority: string;
 }
-export const NATIVE_BROWSER_SCALE = 3;
-export const NATIVE_BROWSER_SIZE = 4096;
+import { NATIVE_BROWSER_SIZE } from "@/shared/browser-geometry";
+export { NATIVE_BROWSER_SCALE, NATIVE_BROWSER_SIZE } from "@/shared/browser-geometry";
 
 function displayReady(child: ChildProcess): Promise<string> {
   return new Promise((resolve, reject) => {

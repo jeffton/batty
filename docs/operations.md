@@ -37,6 +37,14 @@ Linux browser sessions require `Xvfb`, `xauth` and FFmpeg with `x11grab` and `li
 
 Cloud video uses H.264/WebCodecs, not JPEG. Viewers require H.264 `VideoDecoder` support. Cloud viewports fit proportionally within 1365 CSS pixels per dimension and scale to the viewer; oversized tool/API requests are fitted too. Headless sessions without cloud viewing retain the larger viewport range. Native cloud-browser viewing is intentionally Linux-only for this installation; macOS/Windows deployments must not port it or add a fallback unless the user explicitly requests it. macOS/Windows tool browsing and ordinary headless browser sessions remain available and are not Linux-only. A headless process created before native capture cannot acquire an X display; viewing returns an explicit error and preserves the process, tabs and cookies. Replacing it requires an explicit browser close/open. This is a breaking transport/platform change; there is no automatic migration or compatibility fallback.
 
+### Local credential panel
+
+The cloud-browser header’s **Login** button opens a local username/password form using standard `autocomplete="username"` and `autocomplete="current-password"` fields. Choose a login with the device’s password manager, verify the displayed remote origin, then explicitly select **Fill remote login**. Password-manager suggestions and manual selection depend on the client; physical iOS AutoFill has not been verified. Batty does not impersonate the remote origin for AutoFill.
+
+The authenticated, same-origin credential endpoint fills one visible username/password pair in the active top-level document without submitting the form. A one-use document token, session, page revision and exact URL bind the operation; navigation, replacement fields and ambiguous forms are rejected. Embedded, shadow-DOM and multi-step logins are outside this experiment.
+
+Credentials bypass chat, agent tools and request/error logs, and local fields clear after filling or closing the panel. They are sent to the VPS and remote page, which remain trusted recipients; this is not a vault or protection against an agent inspecting the remote page. There is no server-side credential storage. The remote website controls its own input-event behavior, login and cookies.
+
 ## Checks
 
 `pnpm test` runs the server/shared and client-component groups. Server tests use Node and reusable threads; component tests use isolated happy-dom environments. Durable replay, process cancellation, browser persistence and SQLite scaling regressions remain in the standard suite.

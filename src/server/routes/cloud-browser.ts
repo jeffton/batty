@@ -1,8 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { Check } from "typebox/value";
+import { Type } from "typebox";
 import type { FastifyInstance } from "fastify";
 import websocket from "@fastify/websocket";
-import type { CloudBrowserControl, CloudBrowserTouch } from "@/shared/cloud-browser";
+import type {
+  CloudBrowserControl,
+  CloudBrowserTouch,
+  CloudBrowserCredentials,
+} from "@/shared/cloud-browser";
 import type { BrowserService } from "../browser-service";
 import { CloudBrowserControlSchema, CloudBrowserSocketCommandSchema } from "../browser-schemas";
 import { CloudBrowserStreams } from "../cloud-browser-stream";
@@ -18,6 +23,61 @@ export async function registerCloudBrowserRoutes(
   await app.register(websocket, { options: { maxPayload: 2048, perMessageDeflate: false } });
   const streams = new CloudBrowserStreams(browser);
   const prefix = "/api/cloud-browser/:browserId";
+  const credentialSchema = Type.Object(
+    {
+      target: Type.Object(
+        {
+          pageId: Type.String({ maxLength: 200 }),
+          revision: Type.String({ maxLength: 100 }),
+          url: Type.String({ maxLength: 16384 }),
+          origin: Type.String({ maxLength: 2048 }),
+          token: Type.String({ maxLength: 100 }),
+        },
+        { additionalProperties: false },
+      ),
+      username: Type.String({ maxLength: 4096 }),
+      password: Type.String({ minLength: 1, maxLength: 16384 }),
+    },
+    { additionalProperties: false },
+  );
+  const sameOrigin = (request: { protocol: string; host: string; headers: { origin?: string } }) =>
+    request.headers.origin === new URL(baseUrl, `${request.protocol}://${request.host}`).origin;
+  app.post<{ Params: { browserId: string } }>(
+    `${prefix}/credentials/prepare`,
+    async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
+      if (!sameOrigin(request))
+        return reply.code(403).send({ error: "Same-origin browser control required." });
+      return browser.prepareCloudCredentials(request.params.browserId);
+    },
+  );
+  app.post<{ Params: { browserId: string }; Body: CloudBrowserCredentials }>(
+    `${prefix}/credentials/fill`,
+    {
+      bodyLimit: 64 * 1024,
+      // Parser/validation errors may contain submitted JSON. Do not pass them to
+      // the global error logger or echo their messages back to the client.
+      errorHandler: (_error, _request, reply) => {
+        const status = (_error as { statusCode?: number }).statusCode ?? 500;
+        return reply
+          .code(status)
+          .header("Cache-Control", "no-store")
+          .send({ error: "Credential fill failed. Reopen the login panel and try again." });
+      },
+      schema: { body: credentialSchema },
+      validatorCompiler: () => (data) =>
+        Check(credentialSchema, data)
+          ? { value: data }
+          : { error: new Error("Invalid credential request.") },
+    },
+    async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
+      if (!sameOrigin(request))
+        return reply.code(403).send({ error: "Same-origin browser control required." });
+      await browser.fillCloudCredentials(request.params.browserId, request.body);
+      return reply.code(204).send();
+    },
+  );
   app.get<{ Params: { browserId: string } }>(`${prefix}/state`, async (request) =>
     browser.cloudState(request.params.browserId),
   );

@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
+import BrowserCredentials from "@/client/components/BrowserCredentials.vue";
 import { useBrowserTransport } from "@/client/browser/transport";
 import { fitCloudViewport } from "@/shared/browser-geometry";
 
 const props = defineProps<{ popoverId: string; browserId: string; title: string }>();
 const viewport = ref<HTMLElement>();
 const address = ref("");
+const credentialsOpen = ref(false);
 const addressInput = ref<HTMLInputElement>();
 let addressWasFocused = false;
 const viewStyle = ref<Record<string, string>>({});
@@ -17,7 +19,10 @@ const browser = useBrowserTransport(() => props.browserId, {
     if (previous?.url !== value.url) address.value = value.url;
     if (previous?.pageId !== value.pageId) scheduleResize();
   },
-  onStop: () => clearTimeout(resizeTimer),
+  onStop: () => {
+    clearTimeout(resizeTimer);
+    credentialsOpen.value = false;
+  },
   fitViewport,
 });
 const {
@@ -153,6 +158,17 @@ onBeforeUnmount(() => {
         >
           ↻
         </button>
+        <button
+          type="button"
+          :disabled="!ready"
+          aria-label="Fill saved login"
+          @click="
+            dismissInput();
+            credentialsOpen = true;
+          "
+        >
+          Login
+        </button>
         <input
           ref="addressInput"
           v-model="address"
@@ -198,7 +214,13 @@ onBeforeUnmount(() => {
         />
         <p v-if="!hasFrame">{{ ended ? "Session unavailable" : connection }}</p>
       </div>
-      <div v-if="editing" class="cloud-browser__editor">
+      <BrowserCredentials
+        v-if="credentialsOpen"
+        :browser-id="browserId"
+        :state="state"
+        @close="credentialsOpen = false"
+      />
+      <div v-if="editing && !credentialsOpen" class="cloud-browser__editor">
         <textarea
           v-if="focused?.multiline"
           ref="editor"

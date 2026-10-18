@@ -60,6 +60,13 @@ beforeAll(async () => {
     <div id="pane"><div>Nested</div></div><div id="drag" onpointermove="this.dataset.moves=String(Number(this.dataset.moves||0)+1)"></div>
     <script>document.addEventListener('touchstart',()=>document.body.dataset.starts=String(Number(document.body.dataset.starts||0)+1),{passive:true});document.addEventListener('touchend',()=>{document.body.dataset.releaseInner=String(document.querySelector('#pane').scrollTop);document.body.dataset.releaseOuter=String(scrollY)},{passive:true});document.addEventListener('touchcancel',()=>document.body.dataset.cancels=String(Number(document.body.dataset.cancels||0)+1),{passive:true});</script>`),
   );
+  backend.get("/login", (_request, reply) =>
+    reply
+      .type("text/html")
+      .send(
+        `<!doctype html><meta name="viewport" content="width=device-width"><form onsubmit="event.preventDefault();window.submitted=true"><label>Username<input autocomplete="username" name="username"></label><label>Password<input name="password" type="password" autocomplete="current-password"></label><button>Sign in</button></form>`,
+      ),
+  );
   backend.get("/popup", (_request, reply) =>
     reply.type("text/html").send("<title>Popup target</title><p>Popup</p>"),
   );
@@ -150,6 +157,57 @@ test("WebKit decodes production H.264, forwards taps and resumes after viewer re
     // Reload drops the decoder/socket; a periodic keyframe must initialize a fresh viewer.
     await open();
     expect(await inspect("document.body.dataset.clicks")).toBe("1");
+  } finally {
+    await context.close();
+    await viewer.close();
+  }
+}, 30_000);
+
+test("WebKit mobile local credential panel fills the live document without submitting or exposing values to controls", async () => {
+  const { webkit } = await import("playwright-core");
+  const viewer = await webkit.launch({ headless: true });
+  const context = await viewer.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+    deviceScaleFactor: 3,
+  });
+  try {
+    await service.execute("integration", {
+      action: "open",
+      url: `${backendUrl}/login`,
+      cloud: true,
+    });
+    attachedBrowserId = (await service.execute("integration", { action: "attach" })).details
+      .sites![0]!.browserId!;
+    await context.addCookies([
+      { name: "cloud-auth", value: "test", url: server.resolvedUrls!.local[0]! },
+    ]);
+    const page = await context.newPage();
+    const controls: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().endsWith("/control")) controls.push(request.postData() ?? "");
+    });
+    await page.goto(url);
+    await page.getByRole("button", { name: "Open browser", exact: true }).click();
+    await page.getByRole("button", { name: "Fill saved login", exact: true }).click();
+    await page.locator('.browser-credentials [name="username"]').fill("test-local-user");
+    await page.locator('.browser-credentials [name="password"]').fill("test-local-password");
+    expect(await page.locator(".browser-credentials__origin").innerText()).toBe(
+      new URL(backendUrl).origin,
+    );
+    const bounds = (await page.locator(".browser-credentials").boundingBox())!;
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+    await page.getByRole("button", { name: "Fill remote login", exact: true }).click();
+    await expect.poll(() => page.locator(".browser-credentials").count()).toBe(0);
+    const remote = (await service.cloudTarget(attachedBrowserId)).page;
+    expect(await remote.locator('[name="username"]').inputValue()).toBe("test-local-user");
+    expect(await remote.locator('[name="password"]').inputValue()).toBe("test-local-password");
+    expect(
+      await remote.evaluate(() => (window as unknown as { submitted?: boolean }).submitted),
+    ).toBeUndefined();
+    expect(controls.join("\n")).not.toContain("test-local-password");
   } finally {
     await context.close();
     await viewer.close();

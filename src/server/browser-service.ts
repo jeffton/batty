@@ -3,6 +3,8 @@ import { createHash, randomUUID } from "node:crypto";
 import type { BrowserDescriptor } from "@/shared/types";
 import type {
   CloudBrowserControl,
+  CloudBrowserCredentials,
+  CloudBrowserCredentialTarget,
   CloudBrowserState,
   CloudBrowserTouch,
   CloudBrowserViewport,
@@ -21,6 +23,7 @@ import {
   type PersistentBrowserRegistry,
 } from "./browser-persistence";
 import { DEFAULT_BROWSER_MAX_TABS } from "./options";
+import { fillCredentialFields, prepareCredentialFields } from "./browser-credentials";
 import {
   NATIVE_BROWSER_SCALE,
   NATIVE_BROWSER_SIZE,
@@ -609,6 +612,63 @@ export class BrowserService {
         state: await this.cloudStateFor(session),
       };
     });
+  }
+
+  async prepareCloudCredentials(id: string): Promise<CloudBrowserCredentialTarget> {
+    return this.cloudOperation(
+      id,
+      async (session) => {
+        const page = this.resolvePage(session);
+        const view = this.cloudView(session, page);
+        const url = page.url();
+        const origin = new URL(url).origin;
+        if (!/^https?:/.test(url))
+          throw Object.assign(new Error("Open a website login page first."), { statusCode: 400 });
+        const token = randomUUID();
+        if (!(await page.evaluate(prepareCredentialFields, token)))
+          throw Object.assign(
+            new Error(
+              "Show one username and password form on the page first. Embedded and multi-step logins are not supported.",
+            ),
+            { statusCode: 409 },
+          );
+        this.cloudInputPage(session, view);
+        if (page.url() !== url)
+          throw Object.assign(
+            new Error("The login page changed. Open the credential panel again."),
+            { statusCode: 409 },
+          );
+        return { pageId: view.pageId, revision: view.revision, url, origin, token };
+      },
+      true,
+      false,
+    );
+  }
+
+  async fillCloudCredentials(id: string, command: CloudBrowserCredentials): Promise<void> {
+    await this.cloudOperation(
+      id,
+      async (session) => {
+        const page = this.cloudInputPage(session, command.target);
+        // Never expose Patchright errors/call arguments containing credentials.
+        let filled = false;
+        try {
+          filled = await page.evaluate(fillCredentialFields, command);
+        } catch {
+          throw Object.assign(
+            new Error("Credential fill failed. Open the credential panel again."),
+            { statusCode: 409 },
+          );
+        }
+        if (!filled)
+          throw Object.assign(
+            new Error("The login page or fields changed. Open the credential panel again."),
+            { statusCode: 409 },
+          );
+      },
+      true,
+      false,
+    );
   }
 
   private cloudInputPage(

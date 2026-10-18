@@ -29,6 +29,20 @@ export interface CloudBrowserFrame {
   height: number;
 }
 
+export interface CloudBrowserCredentialTarget {
+  pageId: string;
+  revision: string;
+  url: string;
+  origin: string;
+  token: string;
+}
+
+export interface CloudBrowserCredentials {
+  target: CloudBrowserCredentialTarget;
+  username: string;
+  password: string;
+}
+
 type ViewTarget = { pageId: string; revision: string };
 export type CloudBrowserTouch = ViewTarget & {
   action: "touch";

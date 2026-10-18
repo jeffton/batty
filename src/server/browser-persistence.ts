@@ -1,4 +1,4 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
@@ -6,6 +6,8 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Browser } from "patchright";
 import type { CloudBrowserViewport } from "@/shared/cloud-browser";
+import { createBrowserDisplay, stopBrowserDisplay, type BrowserDisplay } from "./browser-display";
+import { stopBrowserChild } from "./browser-process";
 
 async function profileBrowserPid(directory: string): Promise<number | undefined> {
   if (process.platform === "win32") {
@@ -147,77 +149,117 @@ export async function connectPersistentBrowser(
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   const profile = path.join(directory, "profile");
   await fs.mkdir(profile, { recursive: true, mode: 0o700 });
-  const args = [
-    "--headless=new",
-    "--no-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-quic",
-    "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
-    "--window-size=1365,768",
-    "--force-device-scale-factor=3",
-    "--remote-debugging-address=127.0.0.1",
-    "--remote-debugging-port=0",
-    `--user-data-dir=${profile}`,
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--disable-background-networking",
-    "--disable-component-update",
-    "--lang=en-US",
-    ...(options.userAgent ? [`--user-agent=${options.userAgent}`] : []),
-    ...(options.proxyServer
-      ? [`--proxy-server=${options.proxyServer}`, "--proxy-bypass-list=<-loopback>"]
-      : []),
-    "about:blank",
-  ];
-  await writeBrowserJson(path.join(directory, "launch.json"), {
-    useTailscale: options.useTailscale,
-  });
-  const log = await fs.open(path.join(directory, "chromium.log"), "a", 0o600);
-  const child = spawn(chromium.executablePath(), args, {
-    detached: true,
-    windowsHide: true,
-    stdio: ["ignore", log.fd, log.fd],
-  });
+  let display: BrowserDisplay | undefined;
+  let child: ChildProcess | undefined;
   try {
-    await new Promise<void>((resolve, reject) => {
-      child.once("spawn", resolve);
-      child.once("error", reject);
-    });
-  } finally {
-    await log.close();
-  }
-  child.unref();
-  const pid = child.pid!;
-  await writeBrowserJson(path.join(directory, "process.json"), {
-    pid,
-    useTailscale: options.useTailscale,
-  });
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null || child.signalCode !== null)
-      throw new Error(
-        `Persistent Chromium exited: ${await fs.readFile(path.join(directory, "chromium.log"), "utf8")}`,
-      );
-    const portFile = await fs
-      .readFile(path.join(profile, "DevToolsActivePort"), "utf8")
-      .catch((error) => {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-        throw error;
-      });
-    if (portFile) {
-      const [port, browserPath] = portFile.trim().split("\n");
-      receipt = {
-        pid,
-        endpoint: `ws://127.0.0.1:${port}${browserPath}`,
-        useTailscale: options.useTailscale,
-      };
-      await writeBrowserJson(path.join(directory, "browser.json"), receipt);
-      return { browser: await chromium.connectOverCDP(receipt.endpoint), receipt, created: true };
+    if (process.platform === "linux") {
+      display = await createBrowserDisplay(directory);
+      await writeBrowserJson(path.join(directory, "display.json"), display);
     }
-    await delay(50);
+    const args = [
+      ...(display ? ["--kiosk", "--app=about:blank", "--window-position=0,0"] : ["--headless=new"]),
+      "--no-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-quic",
+      "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+      "--window-size=1365,768",
+      "--force-device-scale-factor=3",
+      "--remote-debugging-address=127.0.0.1",
+      "--remote-debugging-port=0",
+      `--user-data-dir=${profile}`,
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--disable-background-networking",
+      "--disable-component-update",
+      "--disable-infobars",
+      "--lang=en-US",
+      ...(options.userAgent ? [`--user-agent=${options.userAgent}`] : []),
+      ...(options.proxyServer
+        ? [`--proxy-server=${options.proxyServer}`, "--proxy-bypass-list=<-loopback>"]
+        : []),
+      "about:blank",
+    ];
+    await writeBrowserJson(path.join(directory, "launch.json"), {
+      useTailscale: options.useTailscale,
+    });
+    const log = await fs.open(path.join(directory, "chromium.log"), "a", 0o600);
+    try {
+      child = spawn(chromium.executablePath(), args, {
+        detached: true,
+        env: display
+          ? { ...process.env, DISPLAY: display.display, XAUTHORITY: display.authority }
+          : process.env,
+        windowsHide: true,
+        stdio: ["ignore", log.fd, log.fd],
+      });
+      await new Promise<void>((resolve, reject) => {
+        child!.once("spawn", resolve);
+        child!.once("error", reject);
+      });
+    } finally {
+      await log.close();
+    }
+    child.unref();
+    const pid = child.pid!;
+    await writeBrowserJson(path.join(directory, "process.json"), {
+      pid,
+      useTailscale: options.useTailscale,
+    });
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      if (child.exitCode !== null || child.signalCode !== null)
+        throw new Error(
+          `Persistent Chromium exited: ${await fs.readFile(path.join(directory, "chromium.log"), "utf8")}`,
+        );
+      const portFile = await fs
+        .readFile(path.join(profile, "DevToolsActivePort"), "utf8")
+        .catch((error) => {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+          throw error;
+        });
+      if (portFile) {
+        const [port, browserPath] = portFile.trim().split("\n");
+        receipt = {
+          pid,
+          endpoint: `ws://127.0.0.1:${port}${browserPath}`,
+          useTailscale: options.useTailscale,
+        };
+        await writeBrowserJson(path.join(directory, "browser.json"), receipt);
+        return { browser: await chromium.connectOverCDP(receipt.endpoint), receipt, created: true };
+      }
+      await delay(50);
+    }
+    throw new Error(`Persistent Chromium did not expose CDP within 30 seconds: ${directory}`);
+  } catch (error) {
+    const cleanupErrors: unknown[] = [];
+    try {
+      if (child?.pid) {
+        await terminateBrowser(child.pid, "SIGKILL");
+        await stopBrowserChild(child);
+      }
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError);
+    }
+    try {
+      if (display) await stopBrowserDisplay(display);
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError);
+    }
+    if (cleanupErrors.length)
+      throw new AggregateError(
+        [error, ...cleanupErrors],
+        "Persistent browser launch and cleanup failed",
+      );
+    for (const name of [
+      "launch.json",
+      "process.json",
+      "browser.json",
+      "display.json",
+      "profile/DevToolsActivePort",
+    ])
+      await fs.rm(path.join(directory, name), { force: true });
+    throw error;
   }
-  await terminateBrowser(pid, "SIGKILL");
-  throw new Error(`Persistent Chromium did not expose CDP within 30 seconds: ${directory}`);
 }
 
 export async function closePersistentBrowser(directory: string, browser?: Browser): Promise<void> {
@@ -240,6 +282,18 @@ export async function closePersistentBrowser(directory: string, browser?: Browse
     }
     await terminateBrowser(receipt.pid, "SIGKILL");
   }
-  await browser?.close();
+  const errors: unknown[] = [];
+  try {
+    await browser?.close();
+  } catch (error) {
+    errors.push(error);
+  }
+  try {
+    const display = await readBrowserJson<BrowserDisplay>(path.join(directory, "display.json"));
+    if (display) await stopBrowserDisplay(display);
+  } catch (error) {
+    errors.push(error);
+  }
+  if (errors.length) throw new AggregateError(errors, "Persistent browser cleanup failed");
   await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

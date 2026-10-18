@@ -87,6 +87,7 @@ export function useBrowserInput({
     phase: CloudBrowserTouch["phase"],
     clientX: number,
     clientY: number,
+    timestamp = performance.now(),
   ): void {
     const command: CloudBrowserTouch = {
       action: "touch",
@@ -94,7 +95,9 @@ export function useBrowserInput({
       ...point(clientX, clientY, start.rect, start.frame),
       pageId: start.frame.pageId,
       revision: start.frame.revision,
-      elapsedMs: performance.now() - start.startedAt,
+      // Preserve the finger's clock when the viewer main thread is busy. Handler
+      // execution time can turn a fast release into a pause and suppress inertia.
+      elapsedMs: timestamp - start.startedAt,
     };
     const last = scrollPending.at(-1);
     if (phase === "move" && last?.action === "touch" && last.phase === "move")
@@ -161,12 +164,12 @@ export function useBrowserInput({
       frame,
       anchor: point(event.clientX, event.clientY, rect, frame),
       nativeTouch: event.pointerType === "touch" && !!state.value?.mobile,
-      startedAt: performance.now(),
+      startedAt: event.timeStamp,
     };
     image.value!.setPointerCapture(event.pointerId);
     if (gesture.nativeTouch) {
       dismissedFocus.value = "";
-      addTouch(gesture, "start", event.clientX, event.clientY);
+      addTouch(gesture, "start", event.clientX, event.clientY, event.timeStamp);
     }
   }
   function pointerMove(event: PointerEvent): void {
@@ -174,7 +177,7 @@ export function useBrowserInput({
     if (!start || start.pointerId !== event.pointerId) return;
     if (start.nativeTouch) {
       if (start.lastX !== event.clientX || start.lastY !== event.clientY)
-        addTouch(start, "move", event.clientX, event.clientY);
+        addTouch(start, "move", event.clientX, event.clientY, event.timeStamp);
       start.lastX = event.clientX;
       start.lastY = event.clientY;
       return;
@@ -200,7 +203,7 @@ export function useBrowserInput({
     pointerMove(event);
     gesture = undefined;
     if (start.nativeTouch) {
-      addTouch(start, "end", event.clientX, event.clientY);
+      addTouch(start, "end", event.clientX, event.clientY, event.timeStamp);
       return;
     }
     if (!start.moved) {

@@ -1,5 +1,7 @@
 # Isolated H.264 prototype
 
+This records the standalone experiment at `470668d`. Run its original scripts from an isolated worktree at that revision; their JPEG adapter is not compatible with the production H.264 backend. For actual popover/native-touch integration results, see [production measurements](cloud-browser-production-measurements.md).
+
 **GO for the video direction, not for deploying this prototype as the default browser.** Native software H.264 doubled useful scroll updates and used roughly one seventh of JPEG's movement bandwidth. Median input response improved by 44 ms on the synthetic mobile link; local response did not improve and mobile p95 was essentially unchanged.
 
 The prototype is `scripts/prototype-h264.ts` with a small standalone viewer. It is not imported by the application. No production routes, browser launch defaults, profiles or services change.

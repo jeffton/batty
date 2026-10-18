@@ -100,6 +100,62 @@ afterAll(async () => {
   if (root) await fs.rm(root, { recursive: true, force: true });
 });
 
+test("WebKit decodes production H.264, forwards taps and resumes after viewer reconnect", async () => {
+  const { webkit } = await import("playwright-core");
+  const viewer = await webkit.launch({ headless: true });
+  const context = await viewer.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+    deviceScaleFactor: 3,
+  });
+  try {
+    await service.execute("integration", {
+      action: "open",
+      url: `${backendUrl}/target`,
+      cloud: true,
+    });
+    attachedBrowserId = (await service.execute("integration", { action: "attach" })).details
+      .sites![0]!.browserId!;
+    await context.addCookies([
+      { name: "cloud-auth", value: "test", url: server.resolvedUrls!.local[0]! },
+    ]);
+    const page = await context.newPage();
+    const open = async () => {
+      await page.goto(url);
+      await page.getByRole("button", { name: "Open browser", exact: true }).click();
+      await expect
+        .poll(
+          () =>
+            page
+              .locator(".cloud-browser__image")
+              .evaluate((e: HTMLCanvasElement) => e.width > 0 && e.dataset.frame !== undefined),
+          { timeout: 10_000 },
+        )
+        .toBe(true)
+        .catch(async (error) => {
+          console.error("WebKit native video fixture:", await page.locator("body").innerText());
+          throw error;
+        });
+    };
+    await open();
+    const canvas = page.locator(".cloud-browser__image");
+    const state = await service.cloudState(attachedBrowserId);
+    const bounds = (await canvas.boundingBox())!;
+    await page.touchscreen.tap(
+      bounds.x + (40 * bounds.width) / state.width,
+      bounds.y + (25 * bounds.height) / state.height,
+    );
+    await expect.poll(() => inspect("document.body.dataset.clicks")).toBe("1");
+    // Reload drops the decoder/socket; a periodic keyframe must initialize a fresh viewer.
+    await open();
+    expect(await inspect("document.body.dataset.clicks")).toBe("1");
+  } finally {
+    await context.close();
+    await viewer.close();
+  }
+}, 30_000);
+
 async function inspect(script: string) {
   // Read the same live page without an agent action invalidating its revision.
   return (await service.cloudTarget(attachedBrowserId)).page.evaluate(
@@ -127,20 +183,28 @@ async function swipe(page: Page, x: number, y: number, distance: number, steps =
   const py = bounds.y + (y * bounds.height) / state.height;
   const touch = await page.context().newCDPSession(page);
   try {
+    // CDP acknowledgements/compositor scheduling can stall under full-suite CPU
+    // load. Keep the simulated finger's clock independent of dispatch latency.
+    const started = Date.now();
     await touch.send("Input.dispatchTouchEvent", {
       type: "touchStart",
       touchPoints: [{ x: px, y: py }],
+      timestamp: started / 1000,
     });
-    const started = Date.now();
     for (let step = 1; step <= steps; step++) {
       const remaining = started + step * delay - Date.now();
       if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
       await touch.send("Input.dispatchTouchEvent", {
         type: "touchMove",
         touchPoints: [{ x: px, y: py - (distance * step) / steps }],
+        timestamp: (started + step * delay) / 1000,
       });
     }
-    await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await touch.send("Input.dispatchTouchEvent", {
+      type: "touchEnd",
+      touchPoints: [],
+      timestamp: (started + steps * delay + 1) / 1000,
+    });
   } finally {
     await touch.detach();
   }
@@ -179,8 +243,8 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
     expect(remote.mobile).toBe(true);
     expect(remote.deviceScaleFactor).toBe(3);
     expect(await image.evaluate((e: HTMLCanvasElement) => [e.width, e.height])).toEqual([
-      remote.width * 3,
-      remote.height * 3,
+      Math.ceil((remote.width * 3) / 2) * 2,
+      Math.ceil((remote.height * 3) / 2) * 2,
     ]);
     expect(await inspect("document.body.dataset.serverMobile")).toBe("true");
     expect(
@@ -542,7 +606,10 @@ test("DPR3 binary frames fill the actual popover, retain edge input alignment an
     await expect.poll(colors).toEqual(expected);
     expect(
       await canvas.evaluate((element: HTMLCanvasElement) => [element.width, element.height]),
-    ).toEqual([original.state.width * 3, original.state.height * 3]);
+    ).toEqual([
+      Math.ceil((original.state.width * 3) / 2) * 2,
+      Math.ceil((original.state.height * 3) / 2) * 2,
+    ]);
     await tapRemote(page, original.state.width * 0.875, original.state.height * 0.85);
     await expect.poll(() => inspect("document.body.dataset.clicks")).toBe("1");
     await swipe(page, original.state.width * 0.2, original.state.height * 0.45, 80);

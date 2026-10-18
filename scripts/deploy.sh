@@ -11,6 +11,7 @@ releases_dir=/opt/batty2/releases
 minimum_free_kb=${BATTY2_DEPLOY_MIN_FREE_KB:-4194304}
 preflight_disk /opt/batty2 "$minimum_free_kb"
 preflight_disk /tmp "$minimum_free_kb"
+preflight_browser_video
 
 revision=$(git rev-parse --short HEAD)
 build=$(mktemp -d /tmp/batty2-build.XXXXXX)

@@ -12,7 +12,15 @@ import {
 } from "./cloud-browser-events";
 import fastify from "fastify";
 import { BrowserService } from "./browser-service";
-import { CloudBrowserStreams } from "./cloud-browser-stream";
+vi.mock("./cloud-browser-stream", () => ({
+  CloudBrowserStreams: class {
+    async subscribe() {
+      return () => {};
+    }
+    async close() {}
+    scrolling() {}
+  },
+}));
 import { registerCloudBrowserRoutes } from "./routes/cloud-browser";
 import type { CloudBrowserFrame } from "@/shared/cloud-browser";
 import { artifactRefs, mergeResponseArtifacts } from "./artifact-forwarding";
@@ -357,76 +365,6 @@ test("mobile emulation survives service reconnect without replacing the page or 
   }
 }, 30_000);
 
-test("cloud stream delivers real JPEG frames to multiple viewers without closing the agent browser", async () => {
-  const f = await fixture();
-  const streams = new CloudBrowserStreams(f.service);
-  try {
-    await f.service.execute("shared", { action: "open", url: f.url, cloud: true });
-    const id = (await f.service.execute("shared", { action: "attach" })).details.sites![0]!
-      .browserId!;
-    let receive!: (frame: CloudBrowserFrame) => void;
-    const frame = new Promise<CloudBrowserFrame>((resolve) => {
-      receive = resolve;
-    });
-    const stop = await streams.subscribe(id, (event, data) => {
-      if (event === "frame") receive(decodePacket(data));
-    });
-    const first = await frame;
-    expect(Buffer.from(first.image, "base64").subarray(0, 2).toString("hex")).toBe("ffd8");
-    expect(first.width).toBe(390);
-    let second: CloudBrowserFrame | undefined;
-    const stopSecond = await streams.subscribe(id, (event, data) => {
-      if (event === "frame") second = decodePacket(data);
-    });
-    expect(second?.revision).toBe(first.revision);
-    stop();
-    stopSecond();
-    expect((await f.service.execute("shared", { action: "snapshot" })).text).toContain(
-      "Shared browser",
-    );
-    await streams.close();
-    expect(await f.service.hasSession("shared")).toBe(true);
-  } finally {
-    await streams.close();
-    await f.close();
-  }
-}, 30_000);
-
-test("native compositor streams asynchronous animation and stays quiet for ten seconds on a static page", async () => {
-  const f = await fixture();
-  const streams = new CloudBrowserStreams(f.service);
-  try {
-    await f.service.execute("shared", { action: "open", url: f.url, cloud: true });
-    const id = (await f.service.execute("shared", { action: "attach" })).details.sites![0]!
-      .browserId!;
-    await f.service.cloudControl(id, { action: "viewport", width: 358, height: 757, mobile: true });
-    const frames: CloudBrowserFrame[] = [];
-    await streams.subscribe(id, (event, data) => {
-      if (event === "frame") frames.push(decodePacket(data));
-    });
-    await expect.poll(() => frames.length).toBeGreaterThan(0);
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    const initial = frames.length;
-    const target = await f.service.cloudTarget(id);
-    await target.page.evaluate(() => {
-      let tick = 0;
-      const timer = setInterval(() => {
-        document.body.style.background = `rgb(${++tick * 10}, 50, 100)`;
-        if (tick === 10) clearInterval(timer);
-      }, 70);
-    });
-    await expect.poll(() => frames.length - initial).toBeGreaterThanOrEqual(5);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    const settled = frames.length;
-    await new Promise((resolve) => setTimeout(resolve, 10_000));
-    expect(frames).toHaveLength(settled);
-    expect(frames.at(-1)).toMatchObject({ width: 358, height: 757 });
-  } finally {
-    await streams.close();
-    await f.close();
-  }
-}, 20_000);
-
 test("cloud routes require auth, same-origin control and bounded allowlisted commands", async () => {
   const f = await fixture();
   const app = fastify();
@@ -543,317 +481,21 @@ test("relative app base paths derive the control origin from the trusted HTTPS r
   }
 });
 
-function streamFixture() {
-  let state = {
-    pageId: "p",
-    revision: "r",
-    width: 358,
-    height: 757,
-    deviceScaleFactor: 3,
-    url: "https://example.com",
-    title: "",
-    pages: [],
-  };
-  const connections: Array<
-    EventEmitter & { send: ReturnType<typeof vi.fn>; detach: ReturnType<typeof vi.fn> }
-  > = [];
-  const page = {
-    context: () => ({
-      newCDPSession: async () => {
-        const connection = Object.assign(new EventEmitter(), {
-          send: vi.fn(async (_method: string, _parameters?: unknown) => {}),
-          detach: vi.fn(async () => {}),
-        });
-        connections.push(connection);
-        return connection;
-      },
-    }),
-  };
-  const cloudTarget = vi.fn(async () => ({ page, state }));
-  const cloudCaptureTarget = vi.fn(async () => ({ page, state }));
-  const cloudState = vi.fn(async () => state);
-  const streams = new CloudBrowserStreams({
-    cloudTarget,
-    cloudCaptureTarget,
-    cloudState,
-  } as unknown as BrowserService);
-  const frames: CloudBrowserFrame[] = [];
-  const paint = (image: string, connection = connections.at(-1)!, dimensions = state) => {
-    connection.emit("Page.screencastFrame", {
-      sessionId: 1,
-      data: Buffer.from(image).toString("base64"),
-      metadata: { deviceWidth: dimensions.width, deviceHeight: dimensions.height },
-    });
-  };
-  return {
-    streams,
-    connections,
-    frames,
-    cloudTarget,
-    cloudCaptureTarget,
-    cloudState,
-    paint,
-    revise: () => {
-      state = { ...state, revision: "rotated", width: 757, height: 358 };
-    },
-    subscribe: () =>
-      streams.subscribe("id", (event, value) => {
-        if (event === "frame") frames.push(decodePacket(value));
-      }),
-    starts: () =>
-      connections.flatMap((connection) =>
-        connection.send.mock.calls
-          .filter(([method]) => method === "Page.startScreencast")
-          .map(([, parameters]) => parameters),
-      ),
-  };
-}
-
-test("capture polling avoids full status work until its cadence or a view change", async () => {
-  vi.useFakeTimers();
-  const f = streamFixture();
-  try {
-    await f.subscribe();
-    await vi.advanceTimersByTimeAsync(400);
-    expect(f.cloudCaptureTarget).toHaveBeenCalledTimes(4);
-    expect(f.cloudTarget).toHaveBeenCalledTimes(1);
-    expect(f.cloudState).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(100);
-    expect(f.cloudState).toHaveBeenCalledTimes(1);
-    f.revise();
-    await vi.advanceTimersByTimeAsync(100);
-    expect(f.cloudTarget).toHaveBeenCalledTimes(2);
-    expect(f.starts().at(-1)).toMatchObject({ maxWidth: 2271, maxHeight: 1074 });
-  } finally {
-    await f.streams.close();
-    vi.useRealTimers();
-  }
-});
-
-test("direct screencast ACKs immediately and throttles to the latest final paint", async () => {
-  vi.useFakeTimers();
-  const f = streamFixture();
-  try {
-    await f.subscribe();
-    f.paint("first");
-    f.paint("intermediate");
-    f.paint("final");
-    expect(
-      f.connections[0]!.send.mock.calls.filter(([method]) => method === "Page.screencastFrameAck"),
-    ).toHaveLength(3);
-    await vi.advanceTimersByTimeAsync(30);
-    expect(f.frames.map((frame) => Buffer.from(frame.image, "base64").toString())).toEqual([
-      "first",
-      "final",
-    ]);
-    expect(f.frames.at(-1)).toMatchObject({ pageId: "p", revision: "r", width: 358, height: 757 });
-    expect(f.starts()).toEqual([
-      { format: "jpeg", quality: 85, maxWidth: 1074, maxHeight: 2271, everyNthFrame: 1 },
-    ]);
-  } finally {
-    await f.streams.close();
-    vi.useRealTimers();
-  }
-});
-
-test("motion downsamples direct native frames and idle requests a final full-density compositor paint", async () => {
-  vi.useFakeTimers();
-  const f = streamFixture();
-  try {
-    const stop = await f.subscribe();
-    f.streams.scrolling("id");
-    await vi.advanceTimersByTimeAsync(100);
-    expect(f.starts()).toHaveLength(2);
-    expect(f.starts()[1]).toMatchObject({ quality: 80, maxWidth: 716, maxHeight: 1514 });
-    f.paint("motion");
-    f.streams.scrolling("id");
-    await vi.advanceTimersByTimeAsync(100);
-    expect(f.starts()).toHaveLength(2);
-    await vi.advanceTimersByTimeAsync(50);
-    expect(f.starts()).toHaveLength(3);
-    expect(f.starts()[2]).toMatchObject({ quality: 85, maxWidth: 1074, maxHeight: 2271 });
-    // Restart asks Chromium for a compositor paint even when the page is static.
-    f.paint("sharp-final");
-    expect(f.frames.at(-1)!.image).toBe(Buffer.from("sharp-final").toString("base64"));
-    f.streams.scrolling("id", true);
-    await vi.advanceTimersByTimeAsync(1000);
-    // A held finger can pause without repeatedly restarting capture.
-    expect(f.starts()).toHaveLength(4);
-    f.streams.scrolling("id", false);
-    await vi.advanceTimersByTimeAsync(999);
-    expect(f.starts()).toHaveLength(4);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(f.starts()).toHaveLength(5);
-    stop();
-    f.streams.scrolling("id");
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(f.starts()).toHaveLength(5);
-  } finally {
-    await f.streams.close();
-    vi.useRealTimers();
-  }
-});
-
-test("revision changes discard old paints and retain CSS metadata through rotation", async () => {
-  vi.useFakeTimers();
-  const f = streamFixture();
-  try {
-    await f.subscribe();
-    const old = f.connections[0]!;
-    f.paint("old");
-    f.paint("throttled-old");
-    f.revise();
-    await vi.advanceTimersByTimeAsync(100);
-    const before = f.frames.length;
-    f.paint("detached", old, { width: 358, height: 757 } as never);
-    await vi.advanceTimersByTimeAsync(20);
-    expect(f.frames).toHaveLength(before);
-    f.paint("rotated");
-    expect(f.frames.at(-1)).toMatchObject({ revision: "rotated", width: 757, height: 358 });
-    expect(f.starts().at(-1)).toMatchObject({ maxWidth: 2271, maxHeight: 1074 });
-  } finally {
-    await f.streams.close();
-    vi.useRealTimers();
-  }
-});
-
-test("stopping during a pending mode change prevents late restart and idle resurrection", async () => {
-  vi.useFakeTimers();
-  const f = streamFixture();
-  let release!: () => void;
-  const blocked = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  try {
-    const stop = await f.subscribe();
-    f.connections[0]!.send.mockImplementation(async (method: string) => {
-      if (method === "Page.stopScreencast") await blocked;
-    });
-    f.streams.scrolling("id");
-    await vi.advanceTimersByTimeAsync(0);
-    stop();
-    release();
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(f.starts()).toHaveLength(1);
-    expect(f.connections[0]!.detach).toHaveBeenCalledOnce();
-    f.paint("after-stop");
-    expect(f.frames).toEqual([]);
-  } finally {
-    release?.();
-    await f.streams.close();
-    vi.useRealTimers();
-  }
-});
-
-test("idle animation streams genuine paints, repeated static paints never start screenshot feedback", async () => {
-  vi.useFakeTimers();
-  const f = streamFixture();
-  try {
-    await f.subscribe();
-    f.paint("A");
-    await vi.advanceTimersByTimeAsync(20);
-    f.paint("B");
-    await vi.advanceTimersByTimeAsync(20);
-    f.paint("C");
-    for (let i = 1; i <= 20; i++) setTimeout(() => f.paint("C"), i * 5);
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(f.frames.map((frame) => Buffer.from(frame.image, "base64").toString())).toEqual([
-      "A",
-      "B",
-      "C",
-    ]);
-    expect(f.starts()).toHaveLength(1);
-    const methods = f.connections[0]!.send.mock.calls.map(([method]) => method);
-    expect(new Set(methods)).toEqual(new Set(["Page.startScreencast", "Page.screencastFrameAck"]));
-  } finally {
-    await f.streams.close();
-    vi.useRealTimers();
-  }
-});
-
-test("different surface geometry is ACKed but never mislabeled as the current viewport", async () => {
-  vi.useFakeTimers();
-  const f = streamFixture();
-  try {
-    await f.subscribe();
-    f.paint("wrong-geometry", f.connections[0], { width: 1074, height: 2271 } as never);
-    await vi.advanceTimersByTimeAsync(20);
-    expect(f.frames).toEqual([]);
-    expect(f.connections[0]!.send).toHaveBeenCalledWith("Page.screencastFrameAck", {
-      sessionId: 1,
-    });
-  } finally {
-    await f.streams.close();
-    vi.useRealTimers();
-  }
-});
-
-test("stream failures distinguish navigation interruption, permanent expiry and service disconnect", async () => {
-  const connection = new EventEmitter() as EventEmitter & {
-    send: () => Promise<void>;
-    detach: () => Promise<void>;
-  };
-  connection.send = async () => {};
-  connection.detach = async () => {};
-  const page = { context: () => ({ newCDPSession: async () => connection }) };
-  const state = {
-    pageId: "p",
-    revision: "r",
-    width: 390,
-    height: 640,
-    mobile: true,
-    deviceScaleFactor: 1,
-    url: "https://example.com",
-    title: "",
-    pages: [],
-  };
-  let failure: Error | undefined;
-  const target = async () => {
-    if (failure) throw failure;
-    return { page, state };
-  };
-  const streams = new CloudBrowserStreams({
-    cloudTarget: target,
-    cloudCaptureTarget: target,
-    cloudState: async () => (await target()).state,
-  } as unknown as BrowserService);
-  const errors: Array<{ retryable: boolean; statusCode?: number }> = [];
-  const listener = (event: string, data: unknown) => {
-    if (event === "browser-error") errors.push(data as (typeof errors)[number]);
-  };
-  try {
-    const first = await streams.subscribe("id", listener);
-    failure = new Error("Execution context was destroyed, most likely because of a navigation");
-    await expect.poll(() => errors.length).toBe(1);
-    expect(errors[0]!.retryable).toBe(true);
-    first();
-    failure = undefined;
-    const second = await streams.subscribe("id", listener);
-    await streams.close();
-    expect(errors[1]!.retryable).toBe(true);
-    second();
-    const third = await streams.subscribe("id", listener);
-    failure = Object.assign(new Error("Browser session ended."), { statusCode: 410 });
-    await expect.poll(() => errors.length).toBe(3);
-    expect(errors[2]).toMatchObject({ retryable: false, statusCode: 410 });
-    third();
-  } finally {
-    await streams.close();
-  }
-});
-
-test("binary packet retains exact JPEG bytes and CSS dimensions", () => {
+test("binary packet retains exact H.264 bytes and decoder metadata", () => {
   const frame = {
-    image: Buffer.from([255, 216, 1, 255, 217]).toString("base64"),
+    image: Buffer.from([0, 0, 0, 1, 0x65, 255]).toString("base64"),
     pageId: "p",
     revision: "r",
     width: 390,
     height: 640,
+    codec: "avc1.42c01f",
+    key: true,
+    streamId: "encoder",
   };
   expect(decodePacket(encodeBrowserFrame(frame, 42))).toEqual({ ...frame, frameId: 42 });
 });
 
-test("slow viewers keep two unacknowledged paints and the final latest paint, with bounded socket writes", () => {
+test("slow viewers bound socket writes and recover an overflowing GOP only at a keyframe", () => {
   const writes: Array<string | Buffer> = [];
   const callbacks: Array<(error?: Error) => void> = [];
   const socket = {
@@ -870,7 +512,16 @@ test("slow viewers keep two unacknowledged paints and the final latest paint, wi
   );
   const paint = (frameId: number) =>
     encodeBrowserFrame(
-      { image: "//g=", pageId: "p", revision: "r", width: 390, height: 640 },
+      {
+        image: "//g=",
+        pageId: "p",
+        revision: "r",
+        width: 390,
+        height: 640,
+        codec: "avc1.42c01f",
+        streamId: "encoder",
+        key: frameId === 1 || frameId === 100,
+      },
       frameId,
     );
   writer.send("frame", paint(1));
@@ -882,16 +533,20 @@ test("slow viewers keep two unacknowledged paints and the final latest paint, wi
   expect(JSON.parse(writes[1] as string)).toEqual({ event: "state", data: { pageId: "new" } });
   callbacks.shift()!();
   callbacks.shift()!();
-  for (let i = 3; i <= 100; i++) writer.send("frame", paint(i));
-  expect(writes).toHaveLength(3);
+  writer.send("frame", paint(3));
+  callbacks.shift()!();
+  writer.send("frame", paint(4));
+  callbacks.shift()!();
+  for (let i = 5; i <= 100; i++) writer.send("frame", paint(i));
+  expect(writes).toHaveLength(5); // Four decoder ACKs are outstanding; queued GOPs overflow.
   expect(() => writer.acknowledge(99)).toThrow("Invalid browser frame acknowledgement");
   writer.acknowledge(1);
-  expect(decodePacket({ packet: writes[3] }).frameId).toBe(100);
+  expect(decodePacket({ packet: writes[5] }).frameId).toBe(100);
   callbacks.shift()!();
   expect(() => writer.acknowledge(1)).toThrow("Invalid browser frame acknowledgement");
   writer.close();
   writer.send("frame", paint(101));
-  expect(writes).toHaveLength(4);
+  expect(writes).toHaveLength(6);
 });
 
 test("scroll drain fences have priority over paints and cannot replace a queued fence", () => {
@@ -912,7 +567,19 @@ test("scroll drain fences have priority over paints and cannot replace a queued 
   const sent = vi.fn();
   writer.send(
     "frame",
-    encodeBrowserFrame({ image: "//g=", pageId: "p", revision: "r", width: 390, height: 640 }, 1),
+    encodeBrowserFrame(
+      {
+        image: "//g=",
+        pageId: "p",
+        revision: "r",
+        width: 390,
+        height: 640,
+        codec: "avc1.42c01f",
+        streamId: "encoder",
+        key: true,
+      },
+      1,
+    ),
   );
   writer.send("state", { pageId: "p" });
   writer.send("scroll-drained", { requestId: 1 }, sent);
@@ -930,6 +597,142 @@ test("scroll drain fences have priority over paints and cannot replace a queued 
   expect(sent).toHaveBeenCalledOnce();
   expect(JSON.parse(writes[3] as string).event).toBe("state");
   writer.close();
+});
+
+function videoWriterFixture() {
+  const packets: Buffer[] = [];
+  const callbacks: Array<(error?: Error) => void> = [];
+  const socket = {
+    readyState: 1,
+    send(value: string | Buffer, _options: unknown, callback: (error?: Error) => void) {
+      if (Buffer.isBuffer(value)) packets.push(value);
+      callbacks.push(callback);
+    },
+    close: vi.fn(),
+    terminate: vi.fn(),
+  };
+  const writer = createCloudBrowserSocketWriter(
+    socket as unknown as Parameters<typeof createCloudBrowserSocketWriter>[0],
+  );
+  const frame = (id: number, key = false, streamId = "first", bytes = 4) =>
+    writer.send(
+      "frame",
+      encodeBrowserFrame(
+        {
+          image: Buffer.alloc(bytes).toString("base64"),
+          pageId: "p",
+          revision: "r",
+          width: 390,
+          height: 640,
+          codec: "avc1.42c01f",
+          key,
+          streamId,
+        },
+        id,
+      ),
+    );
+  return {
+    writer,
+    socket,
+    frame,
+    complete: (error?: Error) => callbacks.shift()!(error),
+    ids: () => packets.map((packet) => decodePacket({ packet }).frameId),
+  };
+}
+
+test("a newly attached decoder waits for a keyframe and preserves every dependent delta in order", () => {
+  const f = videoWriterFixture();
+  f.frame(1); // Joining an existing producer mid-GOP cannot initialize the decoder.
+  expect(f.ids()).toEqual([]);
+  f.frame(2, true);
+  f.frame(3);
+  f.frame(4);
+  f.frame(5);
+  f.frame(6);
+  f.frame(7);
+  expect(f.ids()).toEqual([2]); // At most one socket write is active.
+  f.complete();
+  f.complete();
+  f.complete();
+  f.complete();
+  expect(f.ids()).toEqual([2, 3, 4, 5]); // Four frames await decoder ACKs; later deltas stay queued.
+  f.writer.acknowledge(2);
+  expect(f.ids()).toEqual([2, 3, 4, 5, 6]);
+  f.complete();
+  f.writer.acknowledge(3);
+  expect(f.ids()).toEqual([2, 3, 4, 5, 6, 7]);
+  f.complete();
+  expect(() => f.writer.acknowledge(2)).toThrow("Invalid browser frame acknowledgement");
+  expect(() => f.writer.acknowledge(99)).toThrow("Invalid browser frame acknowledgement");
+  f.writer.close();
+});
+
+test("the ninth queued dependent frame overflows the GOP and waits for a fresh keyframe", () => {
+  const f = videoWriterFixture();
+  for (let id = 1; id <= 4; id++) {
+    f.frame(id, id === 1);
+    f.complete();
+  }
+  for (let id = 5; id <= 12; id++) f.frame(id);
+  expect(f.ids()).toEqual([1, 2, 3, 4]);
+  f.writer.acknowledge(1);
+  expect(f.ids()).toEqual([1, 2, 3, 4, 5]); // Eight queued frames fit without dropping deltas.
+  f.complete();
+  f.frame(13);
+  f.frame(14); // Nine queued frames now exceed the frame-count bound.
+  f.writer.acknowledge(2);
+  expect(f.ids()).toEqual([1, 2, 3, 4, 5]);
+  f.frame(15);
+  expect(f.ids()).toEqual([1, 2, 3, 4, 5]); // Later deltas cannot recover the broken GOP.
+  f.frame(16, true);
+  expect(f.ids()).toEqual([1, 2, 3, 4, 5, 16]);
+  f.complete();
+  f.writer.close();
+});
+
+test("encoder changes and byte-budget overflow both require a fresh keyframe", () => {
+  const f = videoWriterFixture();
+  f.frame(1, true);
+  f.complete();
+  f.frame(2);
+  f.complete();
+  f.frame(3);
+  f.complete();
+  f.frame(4);
+  f.complete();
+  f.frame(5, false, "first", 1024 * 1024);
+  f.frame(6, false, "first", 1024 * 1024); // Exceeds 2 MiB including metadata.
+  f.writer.acknowledge(1);
+  expect(f.ids()).toEqual([1, 2, 3, 4]);
+  f.frame(7);
+  expect(f.ids()).toEqual([1, 2, 3, 4]);
+  f.frame(8, true);
+  f.complete();
+  f.writer.acknowledge(2);
+  f.frame(9, false, "new-encoder");
+  expect(f.ids()).toEqual([1, 2, 3, 4, 8]);
+  f.frame(10, true, "new-encoder");
+  expect(f.ids()).toEqual([1, 2, 3, 4, 8, 10]);
+  f.complete();
+  f.writer.close();
+});
+
+test("write errors terminate transport and terminal browser errors close only after their write", () => {
+  const failed = videoWriterFixture();
+  failed.frame(1, true);
+  failed.complete(new Error("socket lost"));
+  failed.frame(2);
+  expect(failed.socket.terminate).toHaveBeenCalledOnce();
+  expect(failed.ids()).toEqual([1]);
+  const ended = videoWriterFixture();
+  ended.frame(1, true);
+  ended.writer.send("browser-error", { error: "expired", statusCode: 410, retryable: false });
+  ended.frame(2);
+  ended.complete();
+  expect(ended.socket.close).not.toHaveBeenCalled();
+  ended.complete();
+  expect(ended.socket.close).toHaveBeenCalledWith(1000, "Browser stream ended");
+  expect(ended.ids()).toEqual([1]);
 });
 
 test("WebSocket upgrades enforce ordinary auth, same origin and permanent browser expiry", async () => {

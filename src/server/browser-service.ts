@@ -20,6 +20,8 @@ import {
   type PersistentBrowserRegistry,
 } from "./browser-persistence";
 import { DEFAULT_BROWSER_MAX_TABS } from "./options";
+import { NATIVE_BROWSER_SCALE, NATIVE_BROWSER_SIZE, type BrowserDisplay } from "./browser-display";
+import type { NativeCaptureGeometry } from "./native-browser-video";
 import type { BrowserProxy } from "./ssh-socks-proxy";
 import type { BrowserAction, BrowserActionInput } from "./browser-schemas";
 export type { BrowserAction, BrowserActionInput } from "./browser-schemas";
@@ -92,6 +94,8 @@ interface BrowserSession {
   identity: BrowserIdentity;
   cloudViewport?: CloudBrowserViewport;
   pageEmulation: WeakMap<Page, CDPSession>;
+  nativeWindowRevisions: Map<number, string>;
+  nativeCapturePage?: Page;
   pageViewports: WeakMap<Page, CloudBrowserViewport>;
   pageIdentityPromises: WeakMap<Page, Promise<void>>;
   pages: Map<string, Page>;
@@ -510,6 +514,73 @@ export class BrowserService {
     });
   }
 
+  async cloudVideoGeometry(id: string, state: CloudBrowserState): Promise<NativeCaptureGeometry> {
+    if (process.platform !== "linux")
+      throw Object.assign(
+        new Error(
+          "Native H.264 cloud viewing requires a Linux host with Xvfb, xauth and FFmpeg/libx264.",
+        ),
+        { statusCode: 501 },
+      );
+    return this.cloudOperation(id, async (session) => {
+      const page = this.cloudInputPage(session, state);
+      const display = await readBrowserJson<BrowserDisplay>(
+        path.join(session.directory, "display.json"),
+      );
+      if (!display)
+        throw Object.assign(
+          new Error(
+            "This browser predates native H.264 capture. The existing browser and login are unchanged; a new browser process is required.",
+          ),
+          { statusCode: 426 },
+        );
+      process.kill(display.pid, 0);
+      const width = state.width * NATIVE_BROWSER_SCALE;
+      const height = state.height * NATIVE_BROWSER_SCALE;
+      if (width > NATIVE_BROWSER_SIZE || height > NATIVE_BROWSER_SIZE)
+        throw Object.assign(
+          new Error(
+            `Native cloud viewport exceeds ${Math.floor(NATIVE_BROWSER_SIZE / NATIVE_BROWSER_SCALE)} CSS pixels per dimension`,
+          ),
+          { statusCode: 400 },
+        );
+      const connection = session.pageEmulation.get(page)!;
+      const { windowId } = await connection.send("Browser.getWindowForTarget");
+      if (session.nativeWindowRevisions.get(windowId) !== state.revision) {
+        await connection.send("Browser.setWindowBounds", {
+          windowId,
+          bounds: { windowState: "normal" },
+        });
+        await connection.send("Browser.setWindowBounds", {
+          windowId,
+          bounds: { left: 0, top: 0, width: state.width, height: state.height },
+        });
+        await connection.send("Browser.setWindowBounds", {
+          windowId,
+          bounds: { windowState: "fullscreen" },
+        });
+        await connection.send("Emulation.setDeviceMetricsOverride", {
+          width: state.width,
+          height: state.height,
+          deviceScaleFactor: state.deviceScaleFactor,
+          mobile: state.mobile,
+          screenWidth: state.width,
+          screenHeight: state.height,
+          screenOrientation: {
+            type: state.width > state.height ? "landscapePrimary" : "portraitPrimary",
+            angle: state.width > state.height ? 90 : 0,
+          },
+        });
+        session.nativeWindowRevisions.set(windowId, state.revision);
+      }
+      if (session.nativeCapturePage !== page) {
+        await page.bringToFront();
+        session.nativeCapturePage = page;
+      }
+      return { display: display.display, authority: display.authority, x: 0, y: 0, width, height };
+    });
+  }
+
   async cloudState(id: string): Promise<CloudBrowserState> {
     return this.cloudOperation(id, (session) => this.cloudStateFor(session));
   }
@@ -536,7 +607,10 @@ export class BrowserService {
 
   private cloudInputPage(
     session: BrowserSession,
-    command: Extract<CloudBrowserControl, { revision: string }> | CloudBrowserTouch,
+    command:
+      | Extract<CloudBrowserControl, { revision: string }>
+      | CloudBrowserTouch
+      | Pick<CloudBrowserState, "pageId" | "revision">,
   ): Page {
     const page = this.resolvePage(session);
     const current = this.cloudView(session, page);
@@ -886,6 +960,7 @@ export class BrowserService {
       identity,
       cloudViewport: registry?.cloudViewport,
       pageEmulation: new WeakMap(),
+      nativeWindowRevisions: new Map(),
       pageViewports: new WeakMap(),
       pageIdentityPromises: new WeakMap(),
       pages: new Map(),

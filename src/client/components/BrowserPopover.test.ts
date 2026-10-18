@@ -40,7 +40,13 @@ class FakeEvents {
     }
     if (type === "frame") {
       const metadata = new TextEncoder().encode(
-        JSON.stringify({ ...(data as object), frameId: ++this.frameId }),
+        JSON.stringify({
+          codec: "avc1.42E01F",
+          key: true,
+          streamId: `stream-${(data as { revision: string }).revision}`,
+          ...(data as object),
+          frameId: ++this.frameId,
+        }),
       );
       const packet = new Uint8Array(4 + metadata.length);
       new DataView(packet.buffer).setUint32(0, metadata.length);
@@ -49,13 +55,50 @@ class FakeEvents {
     } else this.onmessage?.({ data: JSON.stringify({ event: type, data }) });
   }
 }
+class FakeDecoder {
+  static instances: FakeDecoder[] = [];
+  static holdNext = false;
+  static async isConfigSupported() {
+    return { supported: true };
+  }
+  state = "unconfigured";
+  private hold = FakeDecoder.holdNext;
+  constructor(readonly callbacks: VideoDecoderInit) {
+    FakeDecoder.holdNext = false;
+    FakeDecoder.instances.push(this);
+  }
+  configure() {
+    this.state = "configured";
+  }
+  decode(chunk: EncodedVideoChunk) {
+    if (!this.hold) this.emit(chunk.timestamp);
+  }
+  emit(timestamp: number) {
+    this.callbacks.output({
+      timestamp,
+      displayWidth: 3840,
+      displayHeight: 2400,
+      close: vi.fn(),
+    } as unknown as VideoFrame);
+  }
+  close() {
+    this.state = "closed";
+  }
+}
 const fetchMock = vi.fn();
 beforeEach(() => {
   FakeEvents.instances = [];
   vi.stubGlobal("WebSocket", FakeEvents);
+  FakeDecoder.instances = [];
+  FakeDecoder.holdNext = false;
+  vi.stubGlobal("VideoDecoder", FakeDecoder);
   vi.stubGlobal(
-    "createImageBitmap",
-    vi.fn(async () => ({ width: 1280, height: 800, close: vi.fn() })),
+    "EncodedVideoChunk",
+    class {
+      constructor(init: EncodedVideoChunkInit) {
+        Object.assign(this, init);
+      }
+    },
   );
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
     void Promise.resolve().then(() => callback(0));
@@ -256,6 +299,42 @@ test("native touch preserves boundaries under backpressure and never synthesizes
   }
 });
 
+test("native touch uses source timestamps when event handlers run late", async () => {
+  const wrapper = create();
+  try {
+    const events = await open(wrapper);
+    events.send("state", { ...state, mobile: true });
+    await frame(wrapper, events);
+    const image = wrapper.get("canvas").element;
+    const now = vi.spyOn(performance, "now");
+    const send = (type: string, timestamp: number, handledAt: number, y: number) => {
+      now.mockReturnValue(handledAt);
+      const event = new Event(type);
+      Object.defineProperties(event, {
+        timeStamp: { value: timestamp },
+        pointerId: { value: 1 },
+        pointerType: { value: "touch" },
+        button: { value: 0 },
+        clientX: { value: 100 },
+        clientY: { value: y },
+      });
+      image.dispatchEvent(event);
+    };
+    send("pointerdown", 1000, 1100, 200);
+    send("pointermove", 1016, 1150, 170);
+    send("pointerup", 1032, 1400, 170);
+    const touches = events.sent.filter((command) => command.action === "touch");
+    expect(touches.map((command) => [command.phase, command.elapsedMs])).toEqual([
+      ["start", 0],
+      ["move", 16],
+      ["end", 32],
+    ]);
+    expect(commands()).toEqual([]);
+  } finally {
+    wrapper.unmount();
+  }
+});
+
 test("a stalled socket keeps exactly one animation-frame retry across repeated input", async () => {
   const wrapper = create();
   try {
@@ -320,28 +399,23 @@ test("a timed-out scroll fence disconnects before a second control can bypass pe
   }
 });
 
-test("decodes one frame at a time, drops superseded pixels and ACKs stale frames without enabling wrong-target clicks", async () => {
+test("a new view discards the old decoder and ACKs its frames without painting stale pixels", async () => {
   const wrapper = create();
   try {
     const events = await open(wrapper);
-    let release!: (bitmap: ImageBitmap) => void;
-    vi.mocked(createImageBitmap).mockReturnValueOnce(
-      new Promise((resolve) => {
-        release = resolve;
-      }),
-    );
+    FakeDecoder.holdNext = true;
     events.send("frame", { pageId: "page-1", revision: state.revision, width: 1280, height: 800 });
     await flushPromises();
     events.send("state", { ...state, revision: "next" });
     events.send("frame", { pageId: "page-1", revision: "next", width: 1280, height: 800 });
     events.send("frame", { pageId: "page-1", revision: "next", width: 1280, height: 800 });
-    expect(events.sent).toEqual([{ action: "ack", frameId: 2 }]);
-    release({ width: 3840, height: 2400, close: vi.fn() } as unknown as ImageBitmap);
+    FakeDecoder.instances[0]!.emit(1);
     await flushPromises();
-    expect(createImageBitmap).toHaveBeenCalledTimes(2);
+    expect(FakeDecoder.instances).toHaveLength(2);
+    expect(FakeDecoder.instances[0]!.state).toBe("closed");
     expect(events.sent).toEqual([
-      { action: "ack", frameId: 2 },
       { action: "ack", frameId: 1 },
+      { action: "ack", frameId: 2 },
       { action: "ack", frameId: 3 },
     ]);
     expect(wrapper.get("canvas").attributes("data-revision")).toBe("next");
@@ -354,17 +428,12 @@ test("a late decoder failure cannot disconnect a reopened browser view", async (
   const wrapper = create();
   try {
     const first = await open(wrapper);
-    let reject!: (error: Error) => void;
-    vi.mocked(createImageBitmap).mockReturnValueOnce(
-      new Promise((_resolve, fail) => {
-        reject = fail;
-      }),
-    );
+    FakeDecoder.holdNext = true;
     first.send("frame", { pageId: "page-1", revision: state.revision, width: 1280, height: 800 });
     await flushPromises();
     const second = await open(wrapper);
     second.send("frame", { pageId: "page-1", revision: state.revision, width: 1280, height: 800 });
-    reject(new Error("Old decoder cancelled"));
+    FakeDecoder.instances[0]!.callbacks.error(new DOMException("Old decoder cancelled"));
     await flushPromises();
     expect(second.closed).toBe(false);
     expect(wrapper.get("canvas").attributes("data-revision")).toBe(state.revision);

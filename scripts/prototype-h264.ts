@@ -14,6 +14,16 @@ import { CloudBrowserStreams } from "../src/server/cloud-browser-stream";
 import { createCloudBrowserSocketWriter } from "../src/server/cloud-browser-events";
 import type { BrowserService } from "../src/server/browser-service";
 
+// Historical JPEG instrumentation must run in the isolated 470668d worktree.
+if (
+  !(
+    await fs.readFile(new URL("../src/server/cloud-browser-stream.ts", import.meta.url), "utf8")
+  ).includes("Page.startScreencast")
+)
+  throw new Error(
+    "Historical JPEG harness: run from a 470668d worktree. For current production use scripts/benchmark-production-browser.ts; see docs/cloud-browser-performance.md.",
+  );
+
 // Isolated Linux prototype. No production service, user profile or exposed listener.
 const requireWebsocket = createRequire(import.meta.resolve("@fastify/websocket"));
 const { WebSocketServer } = requireWebsocket("ws") as { WebSocketServer: typeof SocketServer };

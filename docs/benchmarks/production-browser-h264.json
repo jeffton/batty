@@ -1,0 +1,1365 @@
+{
+  "historicalRevision": "470668d",
+  "h264Revision": "uncommitted production integration atop 470668d",
+  "viewer": "actual BrowserPopover in mobile-emulated Chromium; not physical iPhone",
+  "runs": [
+    {
+      "label": "h264-mobile-accepted",
+      "trials": 20,
+      "profile": {
+        "rttMs": 60,
+        "downMbit": 20
+      },
+      "endpoint": "actual BrowserPopover + production routes/BrowserService/native touch",
+      "latencyEndpoint": "pointermove to matching canvas marker (same viewer monotonic clock)",
+      "latencyMs": {
+        "p50": 378,
+        "p95": 467.60000002384186,
+        "samples": [
+          379.3000000715256, 382.10000002384186, 378, 394.7000000476837, 342.89999997615814,
+          343.39999997615814, 412.60000002384186, 357.60000002384186, 379.60000002384186,
+          361.10000002384186, 331, 356.39999997615814, 432.2999999523163, 342.10000002384186,
+          543.6999999284744, 467.60000002384186, 315.89999997615814, 430.6999999284744,
+          417.89999997615814, 334.39999997615814
+        ]
+      },
+      "continuous": {
+        "durationMs": 6017.139659,
+        "canvasFps": 11.632931166100075,
+        "changedMarkerFps": 10.137268587601495,
+        "downstreamBytes": 1777466,
+        "downstreamMbit": 2.36320391512455
+      },
+      "geometry": {
+        "css": [358, 757],
+        "pixels": [1074, 2272]
+      },
+      "remote": {
+        "dpr": 3,
+        "width": 358,
+        "height": 757,
+        "scrollY": 1828
+      },
+      "errors": [],
+      "completedAt": "2026-10-18T08:20:08.626325+00:00",
+      "measurementValidity": {
+        "validForPerformanceComparison": false,
+        "hostContention": "no confirmed overlap in supplied timestamps",
+        "note": "Corresponding JPEG mobile control is contended; pairing invalid."
+      }
+    },
+    {
+      "label": "h264-local-accepted",
+      "trials": 20,
+      "profile": {
+        "rttMs": 0,
+        "downMbit": 1000
+      },
+      "endpoint": "actual BrowserPopover + production routes/BrowserService/native touch",
+      "latencyEndpoint": "pointermove to matching canvas marker (same viewer monotonic clock)",
+      "latencyMs": {
+        "p50": 180.30000007152557,
+        "p95": 262.7999999523163,
+        "samples": [
+          143.20000004768372, 152.89999997615814, 156.29999995231628, 180.30000007152557,
+          156.39999997615814, 199.10000002384186, 188.29999995231628, 189.20000004768372,
+          161.39999997615814, 158.5, 230.39999997615814, 262.7999999523163, 173.30000007152557,
+          230.29999995231628, 222.39999997615814, 218.89999997615814, 414.5, 224.80000007152557,
+          159.89999997615814, 146.5
+        ]
+      },
+      "continuous": {
+        "durationMs": 6079.372900999995,
+        "canvasFps": 29.214527587925193,
+        "changedMarkerFps": 25.728703273456844,
+        "downstreamBytes": 2719346,
+        "downstreamMbit": 3.5784559286405284
+      },
+      "geometry": {
+        "css": [358, 757],
+        "pixels": [1074, 2272]
+      },
+      "remote": {
+        "dpr": 3,
+        "width": 358,
+        "height": 757,
+        "scrollY": 1827.3333740234375
+      },
+      "errors": [],
+      "completedAt": "2026-10-18T08:21:00.027136+00:00",
+      "measurementValidity": {
+        "validForPerformanceComparison": false,
+        "hostContention": "confirmed concurrent tests",
+        "note": "Overlaps 08:20:31\u201308:20:59.750 UTC tests."
+      }
+    },
+    {
+      "label": "jpeg-mobile-accepted",
+      "trials": 20,
+      "profile": {
+        "rttMs": 60,
+        "downMbit": 20
+      },
+      "endpoint": "actual BrowserPopover + production routes/BrowserService/native touch",
+      "latencyEndpoint": "pointermove to matching canvas marker (same viewer monotonic clock)",
+      "latencyMs": {
+        "p50": 284.60000002384186,
+        "p95": 317.60000002384186,
+        "samples": [
+          268.2999999523163, 284.39999997615814, 301.5, 285.60000002384186, 285.2000000476837,
+          301.89999997615814, 284.39999997615814, 268, 268.89999997615814, 284.5,
+          301.40000009536743, 409.10000002384186, 317.2000000476837, 253.19999992847443,
+          287.3000000715256, 267.39999997615814, 284.60000002384186, 251.79999995231628,
+          285.89999997615814, 317.60000002384186
+        ]
+      },
+      "continuous": {
+        "durationMs": 6012.042413000003,
+        "canvasFps": 13.971823489241178,
+        "changedMarkerFps": 13.805492257226401,
+        "downstreamBytes": 10636579,
+        "downstreamMbit": 14.153697887427056
+      },
+      "geometry": {
+        "css": [358, 757],
+        "pixels": [1074, 2271]
+      },
+      "remote": {
+        "dpr": 3,
+        "width": 358,
+        "height": 757,
+        "scrollY": 1826.3333740234375
+      },
+      "errors": [],
+      "completedAt": "2026-10-18T08:21:52.197944+00:00",
+      "measurementValidity": {
+        "validForPerformanceComparison": false,
+        "hostContention": "confirmed concurrent tests/build",
+        "note": "Overlaps 08:21:16\u201308:21:41.720 UTC tests and build after 08:21:42 UTC."
+      }
+    },
+    {
+      "label": "jpeg-local-accepted",
+      "trials": 20,
+      "profile": {
+        "rttMs": 0,
+        "downMbit": 1000
+      },
+      "endpoint": "actual BrowserPopover + production routes/BrowserService/native touch",
+      "latencyEndpoint": "pointermove to matching canvas marker (same viewer monotonic clock)",
+      "latencyMs": {
+        "p50": 168.40000009536743,
+        "p95": 185.20000004768372,
+        "samples": [
+          202, 169.09999990463257, 168.60000002384186, 168.19999992847443, 151.20000004768372,
+          168.70000004768372, 168.5, 168.40000009536743, 167.70000004768372, 169,
+          184.09999990463257, 168.39999997615814, 167.70000004768372, 185.20000004768372, 151,
+          152.79999995231628, 151.39999997615814, 168.69999992847443, 167.29999995231628, 168.5
+        ]
+      },
+      "continuous": {
+        "durationMs": 6024.333568000002,
+        "canvasFps": 36.35397818746921,
+        "changedMarkerFps": 21.247987251123554,
+        "downstreamBytes": 27636043,
+        "downstreamMbit": 36.69922017173401
+      },
+      "geometry": {
+        "css": [358, 757],
+        "pixels": [1074, 2271]
+      },
+      "remote": {
+        "dpr": 3,
+        "width": 358,
+        "height": 757,
+        "scrollY": 1826.3333740234375
+      },
+      "errors": [],
+      "completedAt": "2026-10-18T08:22:41.301762+00:00",
+      "measurementValidity": {
+        "validForPerformanceComparison": false,
+        "hostContention": "possible concurrent build, end unknown",
+        "note": "Build started after 08:21:42 UTC with unknown end time."
+      }
+    }
+  ],
+  "experiments": [
+    {
+      "label": "h264-mobile-credit4",
+      "trials": 20,
+      "profile": {
+        "rttMs": 60,
+        "downMbit": 20
+      },
+      "endpoint": "actual BrowserPopover + production routes/BrowserService/native touch",
+      "latencyEndpoint": "pointermove to matching canvas marker (same viewer monotonic clock)",
+      "latencyMs": {
+        "p50": 332.6999999284744,
+        "p95": 366.7999999523163,
+        "samples": [
+          322.2999999523163, 327.09999990463257, 362.8000000715256, 332.6999999284744,
+          350.39999997615814, 332.7999999523163, 333.5, 378.5, 307, 347.2999999523163,
+          307.8000000715256, 366.7999999523163, 334.6999999284744, 349.6999999284744,
+          295.89999997615814, 323.2000000476837, 349, 325.2999999523163, 326.5, 330.5
+        ]
+      },
+      "continuous": {
+        "durationMs": 6057.069071999998,
+        "canvasFps": 30.23205594579479,
+        "changedMarkerFps": 27.40818258822055,
+        "downstreamBytes": 2500851,
+        "downstreamMbit": 3.303050990863788
+      },
+      "geometry": {
+        "css": [358, 757],
+        "pixels": [1074, 2272]
+      },
+      "remote": {
+        "dpr": 3,
+        "width": 358,
+        "height": 757,
+        "scrollY": 1826.3333740234375
+      },
+      "errors": [],
+      "wireSummary": null,
+      "completedAt": "2026-10-18T08:26:22.388939+00:00",
+      "measurementValidity": {
+        "validForCrossCodecComparison": false,
+        "note": "Exploratory H264 sample does not overlap confirmed initial test intervals; its initial historical JPEG control was contended. Final clean pair supersedes cross-codec comparisons from this sample."
+      }
+    },
+    {
+      "label": "h264-mobile-credit4-repeat",
+      "trials": 20,
+      "profile": {
+        "rttMs": 60,
+        "downMbit": 20
+      },
+      "endpoint": "actual BrowserPopover + production routes/BrowserService/native touch",
+      "latencyEndpoint": "pointermove to matching canvas marker (same viewer monotonic clock)",
+      "latencyMs": {
+        "p50": 340.7000000476837,
+        "p95": 366.10000002384186,
+        "samples": [
+          353.7000000476837, 361.7999999523163, 325.6999999284744, 314, 328.39999997615814,
+          361.7999999523163, 324.7999999523163, 357.59999990463257, 308.7999999523163,
+          345.89999997615814, 328.3000000715256, 350.7999999523163, 346.2000000476837,
+          331.3000000715256, 331.2999999523163, 344, 340.7000000476837, 385.3000000715256,
+          324.6999999284744, 366.10000002384186
+        ]
+      },
+      "continuous": {
+        "durationMs": 6047.685732999998,
+        "canvasFps": 30.26294030097569,
+        "changedMarkerFps": 23.64808996196461,
+        "downstreamBytes": 2636753,
+        "downstreamMbit": 3.4879497598391502
+      },
+      "touchOperationMs": {
+        "p50": 32.56443700000091,
+        "p95": 37.58817699999963,
+        "samples": 237
+      },
+      "geometry": {
+        "css": [358, 757],
+        "pixels": [1074, 2272]
+      },
+      "remote": {
+        "dpr": 3,
+        "width": 358,
+        "height": 757,
+        "scrollY": 1828
+      },
+      "errors": [],
+      "responseStages": [
+        {
+          "trial": 1,
+          "inputToNetworkEventMs": 317.770563976158,
+          "networkEventToCanvasMs": 35.92943607152574,
+          "streamId": "fe4e7431-8dbb-4bce-b031-3eb7aac00ef7",
+          "frameId": 53
+        },
+        {
+          "trial": 2,
+          "inputToNetworkEventMs": 343.0768469284749,
+          "networkEventToCanvasMs": 18.723153023841405,
+          "streamId": "3ac919cf-7c06-42d3-897d-273c1fd9bf17",
+          "frameId": 101
+        },
+        {
+          "trial": 3,
+          "inputToNetworkEventMs": 294.87438092847424,
+          "networkEventToCanvasMs": 30.82561899999928,
+          "streamId": "44c7518e-0e31-4bdd-9ba5-767e207ca131",
+          "frameId": 151
+        },
+        {
+          "trial": 4,
+          "inputToNetworkEventMs": 291.41305892847595,
+          "networkEventToCanvasMs": 22.586941071524052,
+          "streamId": "e7af465e-b7e4-46c1-bf3b-ac8867bf7aad",
+          "frameId": 199
+        },
+        {
+          "trial": 5,
+          "inputToNetworkEventMs": 299.6886489523167,
+          "networkEventToCanvasMs": 28.711351023841416,
+          "streamId": "e600d171-a751-4de6-98dc-bab771771e1d",
+          "frameId": 247
+        },
+        {
+          "trial": 6,
+          "inputToNetworkEventMs": 323.4918809523151,
+          "networkEventToCanvasMs": 38.30811899999935,
+          "streamId": "9aec2745-7c40-4200-9fec-08b9566b1aad",
+          "frameId": 294
+        },
+        {
+          "trial": 7,
+          "inputToNetworkEventMs": 306.05586697615945,
+          "networkEventToCanvasMs": 18.744132976156834,
+          "streamId": "ef9c47e1-a0ec-427c-8d72-ff1d893971db",
+          "frameId": 343
+        },
+        {
+          "trial": 8,
+          "inputToNetworkEventMs": 335.55045292847717,
+          "networkEventToCanvasMs": 22.049546976155398,
+          "streamId": "2c4ba011-2e63-4acd-8b6f-cc0f7cd4cca3",
+          "frameId": 391
+        },
+        {
+          "trial": 9,
+          "inputToNetworkEventMs": 295.4170779523156,
+          "networkEventToCanvasMs": 13.38292200000069,
+          "streamId": "58b6d9c7-5480-424b-935c-4e0c55e24f8f",
+          "frameId": 439
+        },
+        {
+          "trial": 10,
+          "inputToNetworkEventMs": 311.583504000002,
+          "networkEventToCanvasMs": 34.31649597615615,
+          "streamId": "e90fe0b2-7add-44e4-8e52-b958190bbb14",
+          "frameId": 488
+        },
+        {
+          "trial": 11,
+          "inputToNetworkEventMs": 292.5861750238437,
+          "networkEventToCanvasMs": 35.713825047681894,
+          "streamId": "fbe993ad-93eb-4647-b361-eb5f1d62ca3a",
+          "frameId": 536
+        },
+        {
+          "trial": 12,
+          "inputToNetworkEventMs": 286.7630559761601,
+          "networkEventToCanvasMs": 64.03694397615618,
+          "streamId": "42d10292-b6f4-4b9f-b89c-814224877a1f",
+          "frameId": 583
+        },
+        {
+          "trial": 13,
+          "inputToNetworkEventMs": 306.02085100000113,
+          "networkEventToCanvasMs": 40.179149047682586,
+          "streamId": "c61c6bde-bd2c-43af-85e8-5eccfdc3a477",
+          "frameId": 630
+        },
+        {
+          "trial": 14,
+          "inputToNetworkEventMs": 304.7064969999992,
+          "networkEventToCanvasMs": 26.593503071526357,
+          "streamId": "a141f84a-0c91-46c8-b6e6-7aa911e74738",
+          "frameId": 678
+        },
+        {
+          "trial": 15,
+          "inputToNetworkEventMs": 311.7010629523138,
+          "networkEventToCanvasMs": 19.59893700000248,
+          "streamId": "9bdd2049-a3e2-408f-8439-7ed7ccfdff85",
+          "frameId": 727
+        },
+        {
+          "trial": 16,
+          "inputToNetworkEventMs": 306.54972802384145,
+          "networkEventToCanvasMs": 37.45027197615855,
+          "streamId": "7c59d1bc-079d-46db-8830-c4238d8ebd6c",
+          "frameId": 776
+        },
+        {
+          "trial": 17,
+          "inputToNetworkEventMs": 301.4890860000014,
+          "networkEventToCanvasMs": 39.21091404768231,
+          "streamId": "0ea46a2f-30f6-46ff-adc7-c06da3376fd2",
+          "frameId": 823
+        },
+        {
+          "trial": 18,
+          "inputToNetworkEventMs": 355.2236120238449,
+          "networkEventToCanvasMs": 30.076388047680666,
+          "streamId": "e266acbe-7470-4e4f-9c71-dd59903243a1",
+          "frameId": 872
+        },
+        {
+          "trial": 19,
+          "inputToNetworkEventMs": 286.8780619523168,
+          "networkEventToCanvasMs": 37.82193797615764,
+          "streamId": "714ff1c1-9af5-4c5e-940b-3af8710fccd8",
+          "frameId": 922
+        },
+        {
+          "trial": 20,
+          "inputToNetworkEventMs": 345.0554610238396,
+          "networkEventToCanvasMs": 21.04453900000226,
+          "streamId": "f494573d-6e1a-4298-abe3-5a650d2f1338",
+          "frameId": 969
+        }
+      ],
+      "clockCorrelation": {
+        "clientToHostOffset": 2820.744434976158,
+        "uncertaintyMs": 3.3537320000000364
+      },
+      "wireSummary": {
+        "streamIds": 42,
+        "skippedFrameIdsWithinStream": 0
+      },
+      "completedAt": "2026-10-18T08:31:21.002820+00:00",
+      "measurementValidity": {
+        "validForCrossCodecComparison": false,
+        "note": "Exploratory H264 sample does not overlap confirmed initial test intervals; its initial historical JPEG control was contended. Final clean pair supersedes cross-codec comparisons from this sample."
+      }
+    },
+    {
+      "label": "h264-mobile-credit4-constant",
+      "trials": 20,
+      "profile": {
+        "rttMs": 60,
+        "downMbit": 20
+      },
+      "endpoint": "actual BrowserPopover + production routes/BrowserService/native touch",
+      "latencyEndpoint": "pointermove to matching canvas marker (same viewer monotonic clock)",
+      "latencyMs": {
+        "p50": 335.5,
+        "p95": 398.6999999284744,
+        "samples": [
+          231.69999992847443, 279.7000000476837, 326.89999997615814, 340.5, 361.3000000715256,
+          374.60000002384186, 326, 426.1999999284744, 325.60000002384186, 398.6999999284744, 340,
+          287.60000002384186, 335.5, 317.5, 293.89999997615814, 373.5, 367.2999999523163,
+          379.2000000476837, 335.5, 312.5
+        ]
+      },
+      "continuous": {
+        "durationMs": 6058.148728,
+        "canvasFps": 25.77830656345188,
+        "changedMarkerFps": 21.316676581315978,
+        "downstreamBytes": 8764932,
+        "downstreamMbit": 11.574403196130973
+      },
+      "geometry": {
+        "css": [358, 757],
+        "pixels": [1074, 2272]
+      },
+      "remote": {
+        "dpr": 3,
+        "width": 358,
+        "height": 757,
+        "scrollY": 1828.6666259765625
+      },
+      "errors": [],
+      "clockCorrelation": {
+        "clientToHostOffset": 2918.491333452316,
+        "uncertaintyMs": 3.178666499999963
+      },
+      "wireSummary": {
+        "streamIds": 1,
+        "skippedFrameIdsWithinStream": 47
+      },
+      "completedAt": "2026-10-18T08:28:02.107566+00:00",
+      "measurementValidity": {
+        "validForCrossCodecComparison": false,
+        "note": "Exploratory H264 sample does not overlap confirmed initial test intervals; its initial historical JPEG control was contended. Final clean pair supersedes cross-codec comparisons from this sample."
+      }
+    },
+    {
+      "label": "h264-mobile-credit4-constant2",
+      "trials": 20,
+      "profile": {
+        "rttMs": 60,
+        "downMbit": 20
+      },
+      "endpoint": "actual BrowserPopover + production routes/BrowserService/native touch",
+      "latencyEndpoint": "pointermove to matching canvas marker (same viewer monotonic clock)",
+      "latencyMs": {
+        "p50": 262.5,
+        "p95": 325.10000002384186,
+        "samples": [
+          210.5, 277.39999997615814, 265.90000009536743, 264.5, 264.2999999523163,
+          222.89999997615814, 309, 297.3000000715256, 260.5, 230.5, 232.10000002384186, 214.5,
+          191.89999997615814, 296.10000002384186, 262.5, 272.89999997615814, 325.10000002384186,
+          248.39999997615814, 332.2999999523163, 233
+        ]
+      },
+      "continuous": {
+        "durationMs": 6055.810728999997,
+        "canvasFps": 30.10702883315118,
+        "changedMarkerFps": 27.62568030294641,
+        "downstreamBytes": 2518618,
+        "downstreamMbit": 3.327208346111441
+      },
+      "geometry": {
+        "css": [358, 757],
+        "pixels": [716, 1514]
+      },
+      "remote": {
+        "dpr": 3,
+        "width": 358,
+        "height": 757,
+        "scrollY": 1827.6666259765625
+      },
+      "errors": [],
+      "clockCorrelation": {
+        "clientToHostOffset": 2829.5832700238416,
+        "uncertaintyMs": 3.6048859999998513
+      },
+      "wireSummary": {
+        "streamIds": 1,
+        "skippedFrameIdsWithinStream": 3
+      },
+      "completedAt": "2026-10-18T08:29:08.706317+00:00",
+      "measurementValidity": {
+        "validForCrossCodecComparison": false,
+        "note": "Exploratory H264 sample does not overlap confirmed initial test intervals; its initial historical JPEG control was contended. Final clean pair supersedes cross-codec comparisons from this sample."
+      }
+    }
+  ],
+  "ffmpegProbeExperiment": {
+    "retained": false,
+    "candidateInputArguments": ["-probesize", "32", "-analyzeduration", "0"],
+    "runs": [
+      {
+        "label": "h264-probe-control",
+        "trials": 20,
+        "profile": {
+          "rttMs": 60,
+          "downMbit": 20
+        },
+        "endpoint": "actual BrowserPopover + production routes/BrowserService/native touch",
+        "latencyEndpoint": "pointermove to matching canvas marker (same viewer monotonic clock)",
+        "latencyMs": {
+          "p50": 325.89999997615814,
+          "p95": 377.89999997615814,
+          "samples": [
+            325.89999997615814, 328.39999997615814, 323.89999997615814, 312.2000000476837, 293,
+            281.8000000715256, 310.3000000715256, 362.5, 377.89999997615814, 365.2000000476837,
+            307.09999990463257, 347, 316.89999997615814, 357, 327.89999997615814, 338.6999999284744,
+            327.2999999523163, 316.10000002384186, 382.2999999523163, 304.10000002384186
+          ]
+        },
+        "continuous": {
+          "durationMs": 6077.223563000007,
+          "canvasFps": 30.281468734208783,
+          "changedMarkerFps": 23.993513477924992,
+          "downstreamBytes": 2228384,
+          "downstreamMbit": 2.933423760899082
+        },
+        "touchOperationMs": {
+          "p50": 32.44122899999638,
+          "p95": 37.78174299999955,
+          "samples": 238
+        },
+        "geometry": {
+          "css": [358, 757],
+          "pixels": [1074, 2272]
+        },
+        "remote": {
+          "dpr": 3,
+          "width": 358,
+          "height": 757,
+          "scrollY": 1828
+        },
+        "errors": [],
+        "responseStages": [
+          {
+            "trial": 1,
+            "inputToNetworkEventMs": 309.49047690463294,
+            "networkEventToCanvasMs": 16.409523071525655,
+            "streamId": "010e6322-db5b-4a6a-b074-b882cf5b7177",
+            "frameId": 52
+          },
+          {
+            "trial": 2,
+            "inputToNetworkEventMs": 285.45367790463206,
+            "networkEventToCanvasMs": 42.94632207152608,
+            "streamId": "3ed516bf-4343-44a3-946b-741182459bdd",
+            "frameId": 100
+          },
+          {
+            "trial": 3,
+            "inputToNetworkEventMs": 272.5124769284739,
+            "networkEventToCanvasMs": 51.387523047684226,
+            "streamId": "3a955560-bf03-4641-bf50-4046f7ff14ae",
+            "frameId": 148
+          },
+          {
+            "trial": 4,
+            "inputToNetworkEventMs": 303.1353339523157,
+            "networkEventToCanvasMs": 9.064666095368011,
+            "streamId": "1acbb59e-66e4-44a2-b482-e7497202f066",
+            "frameId": 196
+          },
+          {
+            "trial": 5,
+            "inputToNetworkEventMs": 285.73532995231653,
+            "networkEventToCanvasMs": 7.264670047683467,
+            "streamId": "62b7ab50-05d6-4b58-a013-3b43e85c7a62",
+            "frameId": 243
+          },
+          {
+            "trial": 6,
+            "inputToNetworkEventMs": 260.68159600000035,
+            "networkEventToCanvasMs": 21.11840407152522,
+            "streamId": "2f570c4a-1454-4b45-bb8e-9b1ec64dae91",
+            "frameId": 291
+          },
+          {
+            "trial": 7,
+            "inputToNetworkEventMs": 284.9099299761565,
+            "networkEventToCanvasMs": 25.390070095367264,
+            "streamId": "dc21ce02-5031-43cd-84fe-1519c2b1b873",
+            "frameId": 336
+          },
+          {
+            "trial": 8,
+            "inputToNetworkEventMs": 338.55333295231685,
+            "networkEventToCanvasMs": 23.94666704768315,
+            "streamId": "b1db6e4c-44e5-446f-8bed-d35986161368",
+            "frameId": 384
+          },
+          {
+            "trial": 9,
+            "inputToNetworkEventMs": 356.44636597616045,
+            "networkEventToCanvasMs": 21.45363399999769,
+            "streamId": "ab2fb2cb-399c-4bf4-afb5-4a823f59e7e0",
+            "frameId": 434
+          },
+          {
+            "trial": 10,
+            "inputToNetworkEventMs": 324.70174197616143,
+            "networkEventToCanvasMs": 40.49825807152229,
+            "streamId": "1faa56f8-6fe4-4199-937e-dcafa03d8141",
+            "frameId": 485
+          },
+          {
+            "trial": 11,
+            "inputToNetworkEventMs": 275.7675899046335,
+            "networkEventToCanvasMs": 31.332409999999072,
+            "streamId": "0771cdb8-c1ff-4246-b10b-b5c8f1140f3a",
+            "frameId": 534
+          },
+          {
+            "trial": 12,
+            "inputToNetworkEventMs": 306.3452459523178,
+            "networkEventToCanvasMs": 40.65475404768222,
+            "streamId": "a1636648-6886-45e4-954a-d8e58da8f01a",
+            "frameId": 580
+          },
+          {
+            "trial": 13,
+            "inputToNetworkEventMs": 296.3425179046353,
+            "networkEventToCanvasMs": 20.557482071522827,
+            "streamId": "429a229a-a18b-4b7b-82be-3ae607c1601e",
+            "frameId": 628
+          },
+          {
+            "trial": 14,
+            "inputToNetworkEventMs": 302.08744495231804,
+            "networkEventToCanvasMs": 54.91255504768196,
+            "streamId": "f9808fce-3a9b-4e1f-9917-ed3fb890601e",
+            "frameId": 674
+          },
+          {
+            "trial": 15,
+            "inputToNetworkEventMs": 309.7861249046364,
+            "networkEventToCanvasMs": 18.1138750715254,
+            "streamId": "8590fe3e-528a-4045-9562-26cafe0e8303",
+            "frameId": 723
+          },
+          {
+            "trial": 16,
+            "inputToNetworkEventMs": 307.65704392846965,
+            "networkEventToCanvasMs": 31.04295600000478,
+            "streamId": "a54eeda6-e12f-42c5-9e4a-c619cab60402",
+            "frameId": 772
+          },
+          {
+            "trial": 17,
+            "inputToNetworkEventMs": 319.0700109046302,
+            "networkEventToCanvasMs": 8.229989047686104,
+            "streamId": "625173d8-f8ec-4130-93f9-1663f9fe4e41",
+            "frameId": 819
+          },
+          {
+            "trial": 18,
+            "inputToNetworkEventMs": 293.0595129523135,
+            "networkEventToCanvasMs": 23.040487071528332,
+            "streamId": "050dabe2-33e5-4a8a-98c9-8e5f81bdd301",
+            "frameId": 867
+          },
+          {
+            "trial": 19,
+            "inputToNetworkEventMs": 320.80964195231354,
+            "networkEventToCanvasMs": 61.49035800000274,
+            "streamId": "cf1cd4ea-7160-4cd1-b38e-004cd6b419ed",
+            "frameId": 913
+          },
+          {
+            "trial": 20,
+            "inputToNetworkEventMs": 243.11460599999555,
+            "networkEventToCanvasMs": 60.98539402384631,
+            "streamId": "48826a66-e202-454c-8c4e-29b393c0fd9e",
+            "frameId": 962
+          }
+        ],
+        "clockCorrelation": {
+          "clientToHostOffset": 2710.9722510476836,
+          "uncertaintyMs": 3.249956999999995
+        },
+        "wireSummary": {
+          "streamIds": 40,
+          "skippedFrameIdsWithinStream": 0
+        },
+        "completedAt": "2026-10-18T08:36:26.130670+00:00"
+      },
+      {
+        "label": "h264-probe32",
+        "trials": 20,
+        "profile": {
+          "rttMs": 60,
+          "downMbit": 20
+        },
+        "endpoint": "actual BrowserPopover + production routes/BrowserService/native touch",
+        "latencyEndpoint": "pointermove to matching canvas marker (same viewer monotonic clock)",
+        "latencyMs": {
+          "p50": 355.8000000715256,
+          "p95": 391.5,
+          "samples": [
+            373.5, 367.3000000715256, 311.7000000476837, 364.09999990463257, 355.8000000715256, 322,
+            356.7999999523163, 384.7999999523163, 298.10000002384186, 316, 329.8000000715256,
+            314.89999997615814, 302.60000002384186, 340.89999997615814, 356.89999997615814,
+            393.10000002384186, 357.5, 356.90000009536743, 391.5, 312.39999997615814
+          ]
+        },
+        "continuous": {
+          "durationMs": 6086.475138000002,
+          "canvasFps": 30.5659633206045,
+          "changedMarkerFps": 21.527640833328977,
+          "downstreamBytes": 2235762,
+          "downstreamMbit": 2.9386624597101894
+        },
+        "touchOperationMs": {
+          "p50": 32.483069000001706,
+          "p95": 36.316886999993585,
+          "samples": 240
+        },
+        "geometry": {
+          "css": [358, 757],
+          "pixels": [1074, 2272]
+        },
+        "remote": {
+          "dpr": 3,
+          "width": 358,
+          "height": 757,
+          "scrollY": 1827.6666259765625
+        },
+        "errors": [],
+        "responseStages": [
+          {
+            "trial": 1,
+            "inputToNetworkEventMs": 331.96006447615855,
+            "networkEventToCanvasMs": 41.53993552384145,
+            "streamId": "2a16c923-131d-4b11-a5c5-411ae5538860",
+            "frameId": 55
+          },
+          {
+            "trial": 2,
+            "inputToNetworkEventMs": 341.26559650000036,
+            "networkEventToCanvasMs": 26.034403571525218,
+            "streamId": "7ae461f5-14eb-43a2-a4c9-922b8ed47c9c",
+            "frameId": 105
+          },
+          {
+            "trial": 3,
+            "inputToNetworkEventMs": 287.4686464999995,
+            "networkEventToCanvasMs": 24.231353547684193,
+            "streamId": "3e49ba4b-3ef2-4dfa-8455-ce72e5768f1b",
+            "frameId": 154
+          },
+          {
+            "trial": 4,
+            "inputToNetworkEventMs": 333.1699384046333,
+            "networkEventToCanvasMs": 30.930061499999283,
+            "streamId": "1c93b053-f631-4dce-9f08-ad12550c4deb",
+            "frameId": 201
+          },
+          {
+            "trial": 5,
+            "inputToNetworkEventMs": 282.49207447615845,
+            "networkEventToCanvasMs": 73.30792559536712,
+            "streamId": "c47cf940-729d-4f8d-8616-2c04b90f0a14",
+            "frameId": 250
+          },
+          {
+            "trial": 6,
+            "inputToNetworkEventMs": 288.8258944523168,
+            "networkEventToCanvasMs": 33.17410554768321,
+            "streamId": "cd5ccb83-caac-4912-a48d-4a574bd5d5a9",
+            "frameId": 299
+          },
+          {
+            "trial": 7,
+            "inputToNetworkEventMs": 322.7532634046329,
+            "networkEventToCanvasMs": 34.046736547683395,
+            "streamId": "bbf5c263-d55f-4107-b766-ca9bb29df3b3",
+            "frameId": 346
+          },
+          {
+            "trial": 8,
+            "inputToNetworkEventMs": 326.3487564046336,
+            "networkEventToCanvasMs": 58.45124354768268,
+            "streamId": "426c7101-ee2d-4465-bdf8-b74f2a82d30a",
+            "frameId": 395
+          },
+          {
+            "trial": 9,
+            "inputToNetworkEventMs": 268.82879047616007,
+            "networkEventToCanvasMs": 29.271209547681792,
+            "streamId": "9e66837a-2b27-43aa-b5ce-f102467a3e9c",
+            "frameId": 445
+          },
+          {
+            "trial": 10,
+            "inputToNetworkEventMs": 294.0752345000001,
+            "networkEventToCanvasMs": 21.92476549999992,
+            "streamId": "0f4e2311-bfe3-4a1f-bc49-0d7af65eb782",
+            "frameId": 491
+          },
+          {
+            "trial": 11,
+            "inputToNetworkEventMs": 288.710934499999,
+            "networkEventToCanvasMs": 41.08906557152659,
+            "streamId": "53e28190-fac9-47c4-abc2-edb061a0c81d",
+            "frameId": 538
+          },
+          {
+            "trial": 12,
+            "inputToNetworkEventMs": 290.04225242847315,
+            "networkEventToCanvasMs": 24.857747547684994,
+            "streamId": "5c2f65c9-f195-4770-b4c2-7aa46b4c5717",
+            "frameId": 586
+          },
+          {
+            "trial": 13,
+            "inputToNetworkEventMs": 277.0557644523178,
+            "networkEventToCanvasMs": 25.54423557152404,
+            "streamId": "a5199a1d-5f99-4815-8c01-92e26c5a05d0",
+            "frameId": 634
+          },
+          {
+            "trial": 14,
+            "inputToNetworkEventMs": 320.58818940463243,
+            "networkEventToCanvasMs": 20.31181057152571,
+            "streamId": "7f68aff5-3dbd-409c-8670-3c09ff07854f",
+            "frameId": 683
+          },
+          {
+            "trial": 15,
+            "inputToNetworkEventMs": 315.4403224523194,
+            "networkEventToCanvasMs": 41.459677523838764,
+            "streamId": "e8f62708-6aaa-4f2a-ba3e-7f8afd6c4f22",
+            "frameId": 730
+          },
+          {
+            "trial": 16,
+            "inputToNetworkEventMs": 380.87373442847456,
+            "networkEventToCanvasMs": 12.226265595367295,
+            "streamId": "5fdef7a3-c0e5-49f3-9f05-cea850d2b164",
+            "frameId": 782
+          },
+          {
+            "trial": 17,
+            "inputToNetworkEventMs": 326.48003447616065,
+            "networkEventToCanvasMs": 31.019965523839346,
+            "streamId": "78ca1c43-4171-4516-bf91-3ab259e1c9fc",
+            "frameId": 832
+          },
+          {
+            "trial": 18,
+            "inputToNetworkEventMs": 340.03661049999937,
+            "networkEventToCanvasMs": 16.863389595368062,
+            "streamId": "aabd8a42-bec0-4126-bbb5-e58fedd26251",
+            "frameId": 880
+          },
+          {
+            "trial": 19,
+            "inputToNetworkEventMs": 340.36833445231605,
+            "networkEventToCanvasMs": 51.13166554768395,
+            "streamId": "77108f0a-55c8-4728-824b-f6ee8a976ecf",
+            "frameId": 929
+          },
+          {
+            "trial": 20,
+            "inputToNetworkEventMs": 288.0255284523155,
+            "networkEventToCanvasMs": 24.374471523842658,
+            "streamId": "43d73ea4-da70-4f5f-bc91-a13f0564ef25",
+            "frameId": 979
+          }
+        ],
+        "clockCorrelation": {
+          "clientToHostOffset": 2787.3265014999997,
+          "uncertaintyMs": 3.338506499999994
+        },
+        "wireSummary": {
+          "streamIds": 42,
+          "skippedFrameIdsWithinStream": 0
+        },
+        "completedAt": "2026-10-18T08:37:28.259435+00:00"
+      }
+    ]
+  },
+  "initialComparisonValidity": {
+    "validForPerformanceComparison": false,
+    "reason": "Confirmed concurrent tests overlap initial H264 local and JPEG mobile samples; later build end is unknown for JPEG local. Initial pairings are not an idle-host control.",
+    "confirmedResourceActivityUtc": [
+      {
+        "kind": "pnpm tests",
+        "start": "2026-10-18T08:20:31Z",
+        "end": "2026-10-18T08:20:59.750Z"
+      },
+      {
+        "kind": "pnpm tests",
+        "start": "2026-10-18T08:21:16Z",
+        "end": "2026-10-18T08:21:41.720Z"
+      },
+      {
+        "kind": "build",
+        "after": "2026-10-18T08:21:42Z",
+        "end": null
+      }
+    ]
+  },
+  "finalCleanMobilePair": {
+    "status": "accepted",
+    "authoritativeComparison": true,
+    "profile": {
+      "rttMs": 60,
+      "downMbit": 20
+    },
+    "historicalRevision": "470668d",
+    "candidateIncludes": "four video credits; adaptive DPR3 idle / DPR2 motion; PointerEvent.timeStamp input fix",
+    "benchmarkSourceSha256": "a6999ca40c72455002aa8add49ec561095208c55134d3fe8b92ad4c155343e65",
+    "runs": [
+      {
+        "label": "jpeg-mobile-final-clean",
+        "trials": 20,
+        "profile": {
+          "rttMs": 60,
+          "downMbit": 20
+        },
+        "endpoint": "actual BrowserPopover + production routes/BrowserService/native touch",
+        "latencyEndpoint": "source pointermove event.timeStamp to matching canvas marker (same viewer monotonic clock)",
+        "inputTimeline": "explicit CDP epoch timestamps: sparse move at +80ms; 180 continuous moves at 30Hz over 6s",
+        "latencyMs": {
+          "p50": 300,
+          "p95": 333.1999999284744,
+          "samples": [
+            334.59999990463257, 276.89999997615814, 297.6999999284744, 296.6999999284744,
+            298.2999999523163, 313.2999999523163, 300, 284.5, 312.6999999284744, 333.1999999284744,
+            300.89999997615814, 318.2999999523163, 285.10000002384186, 300, 300.6999999284744,
+            318.39999997615814, 300, 298.7999999523163, 316.7999999523163, 331.1999999284744
+          ]
+        },
+        "continuous": {
+          "durationMs": 6040.68202,
+          "canvasFps": 13.408598056633894,
+          "changedMarkerFps": 13.24305980902113,
+          "downstreamBytes": 10352167,
+          "downstreamMbit": 13.709931382880505
+        },
+        "touchOperationMs": {
+          "p50": 42.220468999999866,
+          "p95": 63.6355939999994,
+          "samples": 193
+        },
+        "geometry": {
+          "css": [358, 757],
+          "pixels": [1074, 2271]
+        },
+        "remote": {
+          "dpr": 3,
+          "width": 358,
+          "height": 757,
+          "scrollY": 1827.3333740234375
+        },
+        "errors": [],
+        "responseStages": [
+          {
+            "trial": 1,
+            "inputToNetworkEventMs": 321.26441642847476,
+            "networkEventToCanvasMs": 13.335583476157808,
+            "frameId": 16
+          },
+          {
+            "trial": 2,
+            "inputToNetworkEventMs": 274.79756045231625,
+            "networkEventToCanvasMs": 2.1024395238418947,
+            "frameId": 32
+          },
+          {
+            "trial": 3,
+            "inputToNetworkEventMs": 291.24847145231706,
+            "networkEventToCanvasMs": 6.451528476156454,
+            "frameId": 48
+          },
+          {
+            "trial": 4,
+            "inputToNetworkEventMs": 285.8783034523185,
+            "networkEventToCanvasMs": 10.821696476155921,
+            "frameId": 68
+          },
+          {
+            "trial": 5,
+            "inputToNetworkEventMs": 297.5287144284739,
+            "networkEventToCanvasMs": 0.7712855238405609,
+            "frameId": 84
+          },
+          {
+            "trial": 6,
+            "inputToNetworkEventMs": 307.6518924523152,
+            "networkEventToCanvasMs": 5.6481074999992416,
+            "frameId": 100
+          },
+          {
+            "trial": 7,
+            "inputToNetworkEventMs": 283.5523724523191,
+            "networkEventToCanvasMs": 16.447627547680895,
+            "frameId": 117
+          },
+          {
+            "trial": 8,
+            "inputToNetworkEventMs": 271.6846584523191,
+            "networkEventToCanvasMs": 12.815341547680873,
+            "frameId": 135
+          },
+          {
+            "trial": 9,
+            "inputToNetworkEventMs": 305.17971345231854,
+            "networkEventToCanvasMs": 7.5202864761558885,
+            "frameId": 151
+          },
+          {
+            "trial": 10,
+            "inputToNetworkEventMs": 320.0743454523181,
+            "networkEventToCanvasMs": 13.125654476156342,
+            "frameId": 166
+          },
+          {
+            "trial": 11,
+            "inputToNetworkEventMs": 298.52506745231585,
+            "networkEventToCanvasMs": 2.37493252384229,
+            "frameId": 182
+          },
+          {
+            "trial": 12,
+            "inputToNetworkEventMs": 317.7998034523189,
+            "networkEventToCanvasMs": 0.5001964999974007,
+            "frameId": 198
+          },
+          {
+            "trial": 13,
+            "inputToNetworkEventMs": 275.38107345231765,
+            "networkEventToCanvasMs": 9.718926571524207,
+            "frameId": 215
+          },
+          {
+            "trial": 14,
+            "inputToNetworkEventMs": 293.97769845231596,
+            "networkEventToCanvasMs": 6.022301547684037,
+            "frameId": 229
+          },
+          {
+            "trial": 15,
+            "inputToNetworkEventMs": 285.29845945231864,
+            "networkEventToCanvasMs": 15.401540476155787,
+            "frameId": 244
+          },
+          {
+            "trial": 16,
+            "inputToNetworkEventMs": 303.07575945231656,
+            "networkEventToCanvasMs": 15.324240523841581,
+            "frameId": 260
+          },
+          {
+            "trial": 17,
+            "inputToNetworkEventMs": 285.5965934284759,
+            "networkEventToCanvasMs": 14.403406571524101,
+            "frameId": 277
+          },
+          {
+            "trial": 18,
+            "inputToNetworkEventMs": 298.77043145231437,
+            "networkEventToCanvasMs": 0.0295685000019148,
+            "frameId": 293
+          },
+          {
+            "trial": 19,
+            "inputToNetworkEventMs": 305.2069434523146,
+            "networkEventToCanvasMs": 11.593056500001694,
+            "frameId": 309
+          },
+          {
+            "trial": 20,
+            "inputToNetworkEventMs": 318.0541564523155,
+            "networkEventToCanvasMs": 13.145843476158916,
+            "frameId": 327
+          }
+        ],
+        "clockCorrelation": {
+          "clientToHostOffset": 2843.2745984761577,
+          "uncertaintyMs": 10.476552500000025
+        },
+        "wireSummary": {
+          "streamIds": 1,
+          "skippedFrameIdsWithinStream": 317,
+          "skipInterpretation": "JPEG independent-image replacement is expected; H264 missing dependent frames would require GOP recovery."
+        },
+        "completedAt": "2026-10-18T08:51:14.877244+00:00",
+        "measurementValidity": {
+          "validForPerformanceComparison": true,
+          "hostCoordination": "Parent confirmed momentum worker heavy tests finished; parent paused heavywork for sequential JPEG then H264 pair.",
+          "comparison": "previous production vs candidate including source event timestamp fix, not codec-only isolation",
+          "sourceEventTimeline": "Identical benchmark explicit CDP source timestamps; historical production input unchanged."
+        },
+        "sourceEventToHandlerMs": {
+          "p50": 29.200000047683716,
+          "p95": 31.90000009536743,
+          "scope": "all 200 sparse and continuous viewer pointermove events",
+          "samples": 200
+        }
+      },
+      {
+        "label": "h264-mobile-final-clean",
+        "trials": 20,
+        "profile": {
+          "rttMs": 60,
+          "downMbit": 20
+        },
+        "endpoint": "actual BrowserPopover + production routes/BrowserService/native touch",
+        "latencyEndpoint": "source pointermove event.timeStamp to matching canvas marker (same viewer monotonic clock)",
+        "inputTimeline": "explicit CDP epoch timestamps: sparse move at +80ms; 180 continuous moves at 30Hz over 6s",
+        "latencyMs": {
+          "p50": 347.6999999284744,
+          "p95": 397.6999999284744,
+          "samples": [
+            404.60000002384186, 342.5, 329.6999999284744, 397.39999997615814, 374.60000002384186,
+            397.6999999284744, 347.6999999284744, 309.10000002384186, 340.1999999284744,
+            357.09999990463257, 351.60000002384186, 338.2999999523163, 339, 359.89999997615814,
+            328.1999999284744, 395.89999997615814, 338.1999999284744, 357.6999999284744,
+            338.60000002384186, 386.89999997615814
+          ]
+        },
+        "continuous": {
+          "durationMs": 6076.460591000003,
+          "canvasFps": 30.106032786038007,
+          "changedMarkerFps": 26.96309529738569,
+          "downstreamBytes": 2133821,
+          "downstreamMbit": 2.8092946122753832
+        },
+        "touchOperationMs": {
+          "p50": 21.249904999996943,
+          "p95": 36.49266400000124,
+          "samples": 237
+        },
+        "geometry": {
+          "css": [358, 757],
+          "pixels": [1074, 2272]
+        },
+        "remote": {
+          "dpr": 3,
+          "width": 358,
+          "height": 757,
+          "scrollY": 1826.3333740234375
+        },
+        "errors": [],
+        "responseStages": [
+          {
+            "trial": 1,
+            "inputToNetworkEventMs": 376.96176449999984,
+            "networkEventToCanvasMs": 27.638235523842013,
+            "streamId": "5f3b1f12-4dce-4d94-a6c0-6ee75e107dc5",
+            "frameId": 54
+          },
+          {
+            "trial": 2,
+            "inputToNetworkEventMs": 294.2954194761587,
+            "networkEventToCanvasMs": 48.20458052384129,
+            "streamId": "831b9852-9c36-4e6c-8991-ca4800bf6891",
+            "frameId": 101
+          },
+          {
+            "trial": 3,
+            "inputToNetworkEventMs": 282.9959895000011,
+            "networkEventToCanvasMs": 46.70401042847334,
+            "streamId": "4353e701-0a64-4383-ac6a-e465517e1c1e",
+            "frameId": 150
+          },
+          {
+            "trial": 4,
+            "inputToNetworkEventMs": 371.30383249999977,
+            "networkEventToCanvasMs": 26.09616747615837,
+            "streamId": "867aadcb-8529-47d5-8dbe-0b72921cf98e",
+            "frameId": 196
+          },
+          {
+            "trial": 5,
+            "inputToNetworkEventMs": 347.15051649999987,
+            "networkEventToCanvasMs": 27.44948352384199,
+            "streamId": "f4d8754d-7d37-4dd2-8f35-ae71415df634",
+            "frameId": 246
+          },
+          {
+            "trial": 6,
+            "inputToNetworkEventMs": 375.2312875000007,
+            "networkEventToCanvasMs": 22.468712428473737,
+            "streamId": "06aa3ffb-3ddb-45cb-b536-0bc270cad591",
+            "frameId": 296
+          },
+          {
+            "trial": 7,
+            "inputToNetworkEventMs": 322.0212884761586,
+            "networkEventToCanvasMs": 25.67871145231402,
+            "streamId": "b63b0c51-ffd4-4db6-8022-776fdef5077e",
+            "frameId": 346
+          },
+          {
+            "trial": 8,
+            "inputToNetworkEventMs": 288.5475234999976,
+            "networkEventToCanvasMs": 20.552476523840596,
+            "streamId": "0f0a8161-35d9-4850-bdbd-b9e3d0169dbb",
+            "frameId": 393
+          },
+          {
+            "trial": 9,
+            "inputToNetworkEventMs": 328.3359754999983,
+            "networkEventToCanvasMs": 11.864024428472476,
+            "streamId": "dd5a18ec-32c4-4bac-8800-4e92ad339697",
+            "frameId": 441
+          },
+          {
+            "trial": 10,
+            "inputToNetworkEventMs": 340.8406614761552,
+            "networkEventToCanvasMs": 16.25933842847371,
+            "streamId": "3fd2923c-2dda-4d2c-993d-1e2474b0fd6e",
+            "frameId": 488
+          },
+          {
+            "trial": 11,
+            "inputToNetworkEventMs": 286.7474855000037,
+            "networkEventToCanvasMs": 64.85251452383818,
+            "streamId": "f0f2ac9b-b9c7-49ce-86df-d4317399ebd0",
+            "frameId": 535
+          },
+          {
+            "trial": 12,
+            "inputToNetworkEventMs": 318.44838049999817,
+            "networkEventToCanvasMs": 19.85161945231448,
+            "streamId": "b7221fd5-e8c2-4e88-bbb9-72b84287a234",
+            "frameId": 581
+          },
+          {
+            "trial": 13,
+            "inputToNetworkEventMs": 334.8820485000033,
+            "networkEventToCanvasMs": 4.117951499996707,
+            "streamId": "f9c06932-4b86-4817-b16c-e668d16d033a",
+            "frameId": 629
+          },
+          {
+            "trial": 14,
+            "inputToNetworkEventMs": 351.1184104999993,
+            "networkEventToCanvasMs": 8.781589476155204,
+            "streamId": "1ecdf990-e824-4b93-8c11-a81b6c37262e",
+            "frameId": 675
+          },
+          {
+            "trial": 15,
+            "inputToNetworkEventMs": 302.7668535000048,
+            "networkEventToCanvasMs": 25.433146428469627,
+            "streamId": "a7750baf-d699-4761-a332-0241cc350bfc",
+            "frameId": 723
+          },
+          {
+            "trial": 16,
+            "inputToNetworkEventMs": 360.06893649999984,
+            "networkEventToCanvasMs": 35.831063476158306,
+            "streamId": "425c715d-52ff-466b-b201-5a5c5345d9bb",
+            "frameId": 771
+          },
+          {
+            "trial": 17,
+            "inputToNetworkEventMs": 303.86940850000246,
+            "networkEventToCanvasMs": 34.33059142847196,
+            "streamId": "b8967cd8-0da2-4122-80f9-55f4bc94736a",
+            "frameId": 821
+          },
+          {
+            "trial": 18,
+            "inputToNetworkEventMs": 340.21483750000334,
+            "networkEventToCanvasMs": 17.485162428471085,
+            "streamId": "a3508469-8be3-4a7e-8eda-6ae42d279f9d",
+            "frameId": 869
+          },
+          {
+            "trial": 19,
+            "inputToNetworkEventMs": 308.9672625000021,
+            "networkEventToCanvasMs": 29.63273752383975,
+            "streamId": "20450920-aec3-439c-bda1-de39188f5810",
+            "frameId": 916
+          },
+          {
+            "trial": 20,
+            "inputToNetworkEventMs": 370.61576747616346,
+            "networkEventToCanvasMs": 16.284232499994687,
+            "streamId": "9b738a3d-ffb5-40aa-88d6-b0fbe780e35f",
+            "frameId": 964
+          }
+        ],
+        "clockCorrelation": {
+          "clientToHostOffset": 2793.198792476158,
+          "uncertaintyMs": 4.133904500000199
+        },
+        "wireSummary": {
+          "streamIds": 43,
+          "skippedFrameIdsWithinStream": 0,
+          "skipInterpretation": "JPEG independent-image replacement is expected; H264 missing dependent frames would require GOP recovery."
+        },
+        "completedAt": "2026-10-18T08:52:08.823035+00:00",
+        "measurementValidity": {
+          "validForPerformanceComparison": true,
+          "hostCoordination": "Parent confirmed momentum worker heavy tests finished; parent paused heavywork for sequential JPEG then H264 pair.",
+          "comparison": "previous production vs candidate including source event timestamp fix, not codec-only isolation",
+          "sourceEventTimeline": "Identical benchmark explicit CDP source timestamps; historical production input unchanged."
+        },
+        "sourceEventToHandlerMs": {
+          "p50": 30.700000047683716,
+          "p95": 64.10000002384186,
+          "scope": "all 200 sparse and continuous viewer pointermove events",
+          "samples": 200
+        }
+      }
+    ],
+    "conclusions": {
+      "h264RelativeChangedFps": 2.0360170297666795,
+      "h264TrafficReductionPercent": 79.50905417525773,
+      "h264MedianFirstResponseIncreaseMs": 47.699999928474426,
+      "physicalIPhoneMeasured": false,
+      "coldResponseImprovement": false
+    }
+  }
+}

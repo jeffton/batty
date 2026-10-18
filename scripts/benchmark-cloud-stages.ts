@@ -20,6 +20,16 @@ import {
   createBrowserFixtureServer,
 } from "../src/client/test/browser-fixture";
 
+// Historical JPEG instrumentation must run in the isolated 470668d worktree.
+if (
+  !(
+    await fs.readFile(new URL("../src/server/cloud-browser-stream.ts", import.meta.url), "utf8")
+  ).includes("Page.startScreencast")
+)
+  throw new Error(
+    "Historical JPEG harness: run from a 470668d worktree. For current production use scripts/benchmark-production-browser.ts; see docs/cloud-browser-performance.md.",
+  );
+
 // Isolated benchmark only: no production trace hooks or active user sessions.
 const rttMs = Number(process.env.BENCH_RTT_MS ?? 60);
 const downMbit = Number(process.env.BENCH_DOWN_MBIT ?? 20);

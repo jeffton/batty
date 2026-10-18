@@ -1,14 +1,19 @@
-import type { CDPSession } from "patchright";
 import type { BrowserService } from "./browser-service";
 import type { CloudBrowserFrame, CloudBrowserState } from "@/shared/cloud-browser";
-import { encodeBrowserFrame, type BrowserFramePacket } from "./cloud-browser-events";
+import { encodeBrowserFrame } from "./cloud-browser-events";
+import { startNativeBrowserVideo } from "./native-browser-video";
 
 type Subscriber = (event: "frame" | "state" | "browser-error", data: unknown) => void;
-type Target = Awaited<ReturnType<BrowserService["cloudCaptureTarget"]>>;
-const CAPTURE_POLL_MS = 100;
-const STATUS_POLL_MS = 500;
+type Target = Awaited<ReturnType<BrowserService["cloudTarget"]>>;
+type Capture = { stop: () => Promise<void> };
+export type NativeCaptureFactory = (
+  target: Target,
+  density: number,
+  frame: (value: CloudBrowserFrame) => void,
+  error: (value: Error) => void,
+) => Promise<Capture>;
 
-/** One producer per live browser; each WebSocket viewer retains only its latest paint. */
+/** One native H.264 producer per browser. Viewer flow control respects GOP dependencies. */
 export class CloudBrowserStreams {
   private readonly streams = new Map<
     string,
@@ -16,57 +21,38 @@ export class CloudBrowserStreams {
       subscribers: Set<Subscriber>;
       stop: () => Promise<void>;
       scrolling: (touchActive?: boolean) => void;
-      frame?: BrowserFramePacket;
       state?: CloudBrowserState;
     }
   >();
-
   private nextFrameId = 1;
 
-  constructor(private readonly browser: BrowserService) {}
+  constructor(
+    private readonly browser: BrowserService,
+    private readonly createCapture?: NativeCaptureFactory,
+  ) {}
 
   scrolling(id: string, touchActive?: boolean): void {
     this.streams.get(id)?.scrolling(touchActive);
   }
 
   async subscribe(id: string, subscriber: Subscriber): Promise<() => void> {
-    // Validate before opening an HTTP stream, including expired attachment handles.
     const initial = await this.browser.cloudTarget(id);
     let stream = this.streams.get(id);
     if (!stream) {
-      const subscribers = new Set<Subscriber>();
-      let cdp: CDPSession | undefined;
+      const subscribers = new Set<Subscriber>([subscriber]);
       let target: Target | undefined;
+      let capture: Capture | undefined;
       let stopped = false;
-      let pending: Promise<void> | undefined;
-      let nextStatusAt = Date.now() + STATUS_POLL_MS;
-      let lastFrameAt = 0;
-      let latestFrame: CloudBrowserFrame | undefined;
-      let frameTimer: ReturnType<typeof setTimeout> | undefined;
-      let previousSignal: string | undefined;
-      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+      let epoch = 0;
+      let nextStatusAt = Date.now() + 500;
+      let refreshPending: Promise<void> | undefined;
+      let captureQueue = Promise.resolve();
+      let activeMode: boolean | undefined;
       let moving = false;
       let touching = false;
-      let activeMode: boolean | undefined;
-      let captureQueue = Promise.resolve();
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
       const broadcast = (event: Parameters<Subscriber>[0], value: unknown) => {
         for (const listener of subscribers) listener(event, value);
-      };
-      const flushFrame = () => {
-        frameTimer = undefined;
-        if (stopped || !latestFrame) return;
-        const frame = latestFrame;
-        latestFrame = undefined;
-        lastFrameAt = Date.now();
-        const encoded = encodeBrowserFrame(frame, this.nextFrameId++);
-        stream!.frame = encoded;
-        broadcast("frame", encoded);
-      };
-      const clearPaint = () => {
-        if (frameTimer) clearTimeout(frameTimer);
-        frameTimer = undefined;
-        latestFrame = undefined;
-        lastFrameAt = 0;
       };
       const fail = (error: unknown) => {
         if (stopped) return;
@@ -76,54 +62,61 @@ export class CloudBrowserStreams {
           error: message,
           statusCode,
           retryable:
-            statusCode !== 410 &&
+            statusCode === undefined &&
             /Execution context was destroyed|Frame was detached|Cannot find context|Target closed|Session closed|has been closed/i.test(
               message,
             ),
         });
         void stream!.stop();
       };
-      const configure = (connection: CDPSession, next: Target) => {
+      const configure = (next: Target, changed = false) => {
         captureQueue = captureQueue.then(async () => {
-          if (stopped || cdp !== connection || activeMode === moving) return;
+          if (stopped || (!changed && activeMode === moving)) return;
+          const generation = ++epoch;
+          const previous = capture;
+          capture = undefined;
+          await previous?.stop();
+          if (stopped || generation !== epoch) return;
           const mode = moving;
-          if (activeMode !== undefined) {
-            await connection.send("Page.stopScreencast");
-            if (stopped || cdp !== connection) return;
-          }
-          clearPaint();
-          previousSignal = undefined;
           const density = mode
             ? Math.min(2, next.state.deviceScaleFactor)
             : next.state.deviceScaleFactor;
-          // Native compositor capture, never Page.captureScreenshot or a surface
-          // resize. Limits downsample the real raster; they never upscale 1x
-          // browsers launched before native high-density rendering was enabled.
-          await connection.send("Page.startScreencast", {
-            format: "jpeg",
-            quality: mode ? 80 : 85,
-            maxWidth: Math.ceil(next.state.width * density),
-            maxHeight: Math.ceil(next.state.height * density),
-            everyNthFrame: 1,
-          });
-          if (!stopped && cdp === connection) activeMode = mode;
+          const frame = (value: CloudBrowserFrame) => {
+            if (!stopped && generation === epoch)
+              broadcast("frame", encodeBrowserFrame(value, this.nextFrameId++));
+          };
+          const error = (value: Error) => {
+            if (generation === epoch) fail(value);
+          };
+          let created: Capture;
+          try {
+            created = this.createCapture
+              ? await this.createCapture(next, density, frame, error)
+              : startNativeBrowserVideo(
+                  await this.browser.cloudVideoGeometry(id, next.state),
+                  next.state,
+                  density,
+                  frame,
+                  error,
+                );
+          } catch (cause) {
+            // A navigation/input revision can win while a capture setup waits for the session queue.
+            // Discard that setup; the next poll observes the authoritative view.
+            if ((cause as { statusCode?: number }).statusCode === 409) {
+              target = undefined;
+              activeMode = undefined;
+              return;
+            }
+            throw cause;
+          }
+          if (stopped || generation !== epoch) {
+            await created.stop();
+            return;
+          }
+          capture = created;
+          activeMode = mode;
         });
         return captureQueue;
-      };
-      const updateCapture = () => {
-        if (!stopped && cdp && target) void configure(cdp, target).catch(fail);
-      };
-      const detach = async () => {
-        clearPaint();
-        const previous = cdp;
-        cdp = undefined;
-        activeMode = undefined;
-        previousSignal = undefined;
-        if (previous) {
-          // A closed target has already stopped producing frames.
-          await previous.send("Page.stopScreencast").catch(() => {});
-          await previous.detach().catch(() => {});
-        }
       };
       const syncState = (state: CloudBrowserState) => {
         if (stopped) return;
@@ -132,64 +125,28 @@ export class CloudBrowserStreams {
           broadcast("state", state);
         }
       };
-      const syncCapture = async (next: Target) => {
-        if (stopped) return;
-        if (target?.page === next.page && target.state.revision === next.state.revision && cdp)
-          return;
-        await detach();
-        if (stopped) return;
-        target = next;
-        stream!.frame = undefined;
-        const connection = await next.page.context().newCDPSession(next.page);
-        if (stopped) {
-          await connection.detach();
-          return;
-        }
-        cdp = connection;
-        connection.on("Page.screencastFrame", (event) => {
-          void connection
-            .send("Page.screencastFrameAck", { sessionId: event.sessionId })
-            .catch(() => {});
-          if (stopped || connection !== cdp) return;
-          // Never label pixels from a different compositor surface as this view.
-          if (
-            event.metadata.deviceWidth !== next.state.width ||
-            event.metadata.deviceHeight !== next.state.height
-          )
-            return;
-          if (event.data === previousSignal) return;
-          previousSignal = event.data;
-          const { pageId, revision, width, height } = next.state;
-          latestFrame = { image: event.data, pageId, revision, width, height };
-          if (frameTimer) return;
-          const delay = 16 - (Date.now() - lastFrameAt);
-          if (delay <= 0) flushFrame();
-          else frameTimer = setTimeout(flushFrame, delay);
-        });
-        await configure(connection, next);
-      };
       const refresh = async () => {
         const next = await this.browser.cloudCaptureTarget(id);
         if (stopped) return;
-        if (target?.page !== next.page || target.state.revision !== next.state.revision || !cdp) {
-          // Publish matching status before pixels from a new page/revision.
+        if (target?.page !== next.page || target.state.revision !== next.state.revision) {
           const full = await this.browser.cloudTarget(id);
           syncState(full.state);
-          await syncCapture(full);
-          nextStatusAt = Date.now() + STATUS_POLL_MS;
+          target = full;
+          await configure(full, true);
+          nextStatusAt = Date.now() + 500;
         } else if (Date.now() >= nextStatusAt) {
           syncState(await this.browser.cloudState(id));
-          nextStatusAt = Date.now() + STATUS_POLL_MS;
+          nextStatusAt = Date.now() + 500;
         }
       };
       const timer = setInterval(() => {
-        if (pending || stopped) return;
-        pending = refresh()
+        if (refreshPending || stopped) return;
+        refreshPending = refresh()
           .catch(fail)
           .finally(() => {
-            pending = undefined;
+            refreshPending = undefined;
           });
-      }, CAPTURE_POLL_MS);
+      }, 100);
       timer.unref();
       stream = {
         subscribers,
@@ -198,19 +155,17 @@ export class CloudBrowserStreams {
           if (touchActive !== undefined) touching = touchActive;
           if (!moving) {
             moving = true;
-            updateCapture();
+            if (target) void configure(target).catch(fail);
           }
           if (idleTimer) clearTimeout(idleTimer);
           idleTimer = undefined;
-          // Keep the motion capture mode stable while a finger is held, then
-          // through the fling. A pause in touchmove is not the end of a gesture.
           if (touching) return;
           idleTimer = setTimeout(
             () => {
               idleTimer = undefined;
               if (stopped) return;
               moving = false;
-              updateCapture();
+              if (target) void configure(target).catch(fail);
             },
             touchActive === false ? 1000 : 150,
           );
@@ -219,18 +174,19 @@ export class CloudBrowserStreams {
         stop: async () => {
           if (stopped) return;
           stopped = true;
+          epoch++;
           clearInterval(timer);
           if (idleTimer) clearTimeout(idleTimer);
-          idleTimer = undefined;
           this.streams.delete(id);
-          await detach();
+          await capture?.stop();
+          capture = undefined;
         },
       };
       this.streams.set(id, stream);
-      subscribers.add(subscriber);
       try {
+        target = initial;
         syncState(initial.state);
-        await syncCapture(initial);
+        await configure(initial, true);
       } catch (error) {
         await stream.stop();
         throw error;
@@ -240,7 +196,7 @@ export class CloudBrowserStreams {
         throw Object.assign(new Error("Too many browser viewers."), { statusCode: 429 });
       stream.subscribers.add(subscriber);
       if (stream.state) subscriber("state", stream.state);
-      if (stream.frame) subscriber("frame", stream.frame);
+      // A delta cannot initialize a decoder. The next periodic IDR starts this viewer.
     }
     const current = stream;
     return () => {
@@ -253,10 +209,7 @@ export class CloudBrowserStreams {
     await Promise.all(
       [...this.streams.values()].map(async (stream) => {
         for (const subscriber of stream.subscribers)
-          subscriber("browser-error", {
-            error: "Browser viewer disconnected.",
-            retryable: true,
-          });
+          subscriber("browser-error", { error: "Browser viewer disconnected.", retryable: true });
         await stream.stop();
       }),
     );

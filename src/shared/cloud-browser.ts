@@ -20,6 +20,9 @@ export interface CloudBrowserState {
 
 export interface CloudBrowserFrame {
   image: string;
+  codec: string;
+  key: boolean;
+  streamId: string;
   pageId: string;
   revision: string;
   width: number;

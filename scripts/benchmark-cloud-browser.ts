@@ -9,6 +9,16 @@ import { chromium } from "patchright";
 import { BrowserService } from "../src/server/browser-service";
 import { CloudBrowserStreams } from "../src/server/cloud-browser-stream";
 
+// Historical JPEG instrumentation must run in the isolated 470668d worktree.
+if (
+  !(
+    await fs.readFile(new URL("../src/server/cloud-browser-stream.ts", import.meta.url), "utf8")
+  ).includes("Page.startScreencast")
+)
+  throw new Error(
+    "Historical JPEG harness: run from a 470668d worktree. For current production use scripts/benchmark-production-browser.ts; see docs/cloud-browser-performance.md.",
+  );
+
 const inputMode = process.env.BENCH_INPUT ?? "native";
 const constantCapture = process.env.BENCH_CONSTANT_CAPTURE === "1";
 if (constantCapture) CloudBrowserStreams.prototype.scrolling = () => {};

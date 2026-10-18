@@ -18,6 +18,16 @@ preflight_disk() {
   fi
 }
 
+preflight_browser_video() {
+  local executable demuxers
+  for executable in Xvfb xauth ffmpeg; do
+    command -v "$executable" >/dev/null || { printf 'Native browser video requires %s.\n' "$executable" >&2; return 1; }
+  done
+  demuxers=$(ffmpeg -hide_banner -demuxers 2>/dev/null) || return 1
+  [[ "$demuxers" == *' x11grab '* ]] || { echo 'FFmpeg requires x11grab support.' >&2; return 1; }
+  ffmpeg -hide_banner -loglevel error -f lavfi -i color=size=16x16 -frames:v 1 -c:v libx264 -f null - || return 1
+}
+
 health_matches_expected() {
   local response=$1
   local expected_build_id=$2

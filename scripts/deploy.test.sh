@@ -13,6 +13,18 @@ if preflight_disk "$tmp" 999999999999; then
   exit 1
 fi
 
+# Native video preflight rejects builds lacking the capture demuxer or encoder.
+(
+  Xvfb() { :; }
+  xauth() { :; }
+  ffmpeg() { [[ "$*" == *-demuxers* ]] && printf ' D  x11grab X11 capture\n'; return 0; }
+  preflight_browser_video
+  ffmpeg() { [[ "$*" == *-demuxers* ]] && printf ' D  other Other input\n'; return 0; }
+  if preflight_browser_video; then echo 'Accepted FFmpeg without x11grab.' >&2; exit 1; fi
+  ffmpeg() { if [[ "$*" == *-demuxers* ]]; then printf ' D  x11grab X11 capture\n'; else return 1; fi; }
+  if preflight_browser_video; then echo 'Accepted a missing H.264 encoder.' >&2; exit 1; fi
+)
+
 # Health gate requires both a successful response and the exact new build ID.
 health_matches_expected '{"ok":true,"buildId":"abc123"}' abc123
 if health_matches_expected '{"ok":true,"buildId":"old"}' abc123; then

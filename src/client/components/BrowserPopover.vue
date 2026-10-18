@@ -177,6 +177,11 @@ onBeforeUnmount(() => {
           v-show="hasFrame"
           ref="image"
           class="cloud-browser__image"
+          :style="
+            displayedFrame
+              ? { aspectRatio: `${displayedFrame.width} / ${displayedFrame.height}` }
+              : undefined
+          "
           :data-revision="displayedFrame?.revision"
           role="img"
           aria-label="Live browser page. Tap to click; swipe to scroll."
@@ -311,7 +316,7 @@ onBeforeUnmount(() => {
   height: auto;
   max-width: 100%;
   max-height: 100%;
-  object-fit: contain;
+  object-fit: fill;
   touch-action: none;
   user-select: none;
 }

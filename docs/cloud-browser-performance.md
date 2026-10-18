@@ -1,43 +1,66 @@
 # Cloud browser rendering
 
-Chromium launches with native device scale factor 3. CDP device metrics set the page’s CSS viewport, mobile layout and requested DPR independently. Native compositor capture supplies real high-density pixels; `setVisibleSize` is not used because enlarging that surface pads the page rather than rendering it at Retina density. Existing Chromium processes retain their launch settings and live state until closed.
+Each viewed browser has a private headed Chromium/X11 display. Native FFmpeg x11grab → software H.264 capture supplies high-density pixels; the authenticated, same-origin binary WebSocket carries Annex-B access units and their codec, keyframe, stream and page/revision metadata. The popover uses WebCodecs `VideoDecoder` and canvas. Each viewer permits four unacknowledged video frames; its bounded dependent-frame queue discards an overflowing GOP and waits for a keyframe. There is no production JPEG fallback or local scroll prediction. Agent screenshots remain separate from the continuous video path.
 
-CDP screencast JPEG frames travel directly over an authenticated, same-origin binary WebSocket. Capture does not run through the agent/input queue or trigger screenshots. Each viewer retains at most two unacknowledged frames and one replaceable latest paint. The client decodes one bitmap at a time and paints atomically; discarded frames release their credits. It never predicts or locally pans remote content.
+Chromium launches at native device scale factor 3. CDP device metrics set CSS viewport, mobile layout and requested DPR. Motion capture scales to at most 2× density; idle capture uses requested density. Wheel idle is 150 ms; touch holds motion capture through pauses and one second after release. Density changes restart the encoder, not the browser/page. H.264 dimensions round up to even pixels: 358×757 CSS produces 1074×2272 at rest and 716×1514 in motion.
 
-Capture-target polling reads local page/revision/viewport metadata every 100 ms. Full status (titles, tabs and focused fields) is read every 500 ms and immediately on capture-target changes, before publishing their pixels. Both retain the browser service’s session queue and revision guards; continuous frame delivery does not require status reads.
+Capture-target polling reads local page/revision/viewport metadata every 100 ms. Full status (titles, tabs and focused fields) is read every 500 ms and on capture-target changes. Status retains session queues and revision guards; continuous video does not require full status reads.
 
-Mobile finger input sends native CDP touch start/move/end/cancel events in CSS coordinates. Chromium owns hit testing, nested scrolling, touch-action handling, taps and release inertia. Only pending moves coalesce; gesture boundaries remain ordered. There is no additional mouse click for a native tap. Desktop wheel input sends coalesced CSS deltas with separate anchor groups. Both use WebSocket input without HTTP round-trip gating; a drain fence orders later HTTP controls after input dispatch, not after the resulting fling has finished. Disconnects, coordinate changes and agent interactions cancel held touches. A live touch belongs to its originating viewer.
+Mobile finger input sends native CDP touch start/move/end/cancel events in CSS coordinates. Chromium owns hit testing, nested scrolling, touch-action handling, taps and release inertia. Only pending moves coalesce; gesture boundaries remain ordered. Native taps do not also send mouse clicks. Desktop wheel input sends coalesced CSS deltas with separate anchor groups. Both use WebSocket input without HTTP round-trip gating. A drain fence orders later HTTP controls after input dispatch, not after the resulting fling. Disconnects, coordinate changes and agent interactions cancel held touches; a live touch belongs to its originating viewer.
 
-Screencast limits downsample to at most 2× density/JPEG80 during motion. Wheel input returns to requested density/JPEG85 after 150 ms idle. Native touch holds motion capture through finger pauses and for one second after release to cover momentum; changing capture modes requires a stop/start. These limits do not upscale lower-density source pixels. Resolution changes preserve the page, login and CSS-coordinate input system.
+`client/browser/transport.ts` owns generations/reconnects, `frames.ts` owns video decoding/painting and credits, and `input.ts` owns gestures, focus and scroll fences. `BrowserPopover.vue` handles layout and viewport sizing. Tool/viewer command schemas live in `server/browser-schemas.ts`; HTTP and WebSocket retain transport-specific guards around browser service operations.
 
-`client/browser/transport.ts` owns viewing generations and reconnects, `frames.ts` owns decoding/painting and frame credits, and `input.ts` owns gestures, focus and scroll fences. `BrowserPopover.vue` handles layout and viewport sizing. Tool and viewer command schemas live in `server/browser-schemas.ts`; the service owns browser operations while HTTP and WebSocket retain their transport-specific guards.
+## Production-path benchmark
 
-## Verification
+The [accepted clean mobile comparison](cloud-browser-production-measurements.md#authoritative-clean-mobile-comparison) measures the actual popover, native touch, production routes and BrowserService against isolated historical JPEG code: about twice the useful updates and 79.5% less traffic, with 348 versus 300 ms median first response. It is not interchangeable with the standalone prototype or the contended initial controls.
 
-See [stage measurements](cloud-browser-stage-measurements.md) for correlated input, CDP, screencast, transport and decode timings, including settled single-move trials and relay byte validation.
+```sh
+BENCH_LABEL=h264-mobile node_modules/.bin/tsx scripts/benchmark-production-browser.ts
+BENCH_LABEL=h264-local BENCH_RTT_MS=0 BENCH_DOWN_MBIT=1000 \
+  node_modules/.bin/tsx scripts/benchmark-production-browser.ts
+```
 
-A large bitmap alone does not prove correct rendering. The binary-popover regression test checks page colors in all four viewport corners, edge clicks, nested scrolling, outer scrolling and rotation at DPR3. A 358×757 CSS viewport produces 1074×2271 pixels at rest and 716×1514 during motion, with the page filling the image.
+The harness launches only its own temporary browser/profile/display and loopback listeners. It does not attach to a user browser. Defaults: 20 isolated one-move trials, then a six-second continuous native-touch drag, in an emulated 390×844/DPR3 viewer. The remote page is 358×757 CSS. The FIFO relay adds 60 ms RTT and 20 Mbit/s downstream, or zero added RTT/1 Gbit/s for the local comparison. The relay's FIFO drain prevents the TCP chunk reordering observed in earlier timer-per-chunk experiments.
 
-Run `pnpm exec tsx scripts/benchmark-cloud-browser.ts` for repeatable performance measurements. It uses a real remote Chromium page, native touch input in an emulated 390×844/DPR3 viewer, a TCP relay, and a three-second drag. Defaults are 60 ms RTT and 20 Mbit/s downstream; set `BENCH_RTT_MS=0 BENCH_DOWN_MBIT=1000` for a near-local baseline through the same relay. `BENCH_CONSTANT_CAPTURE=1` keeps full DPR3 during motion for a fixed-capture comparison. A remote color marker identifies presented paints. The benchmark rejects padded images and reports cadence, bytes, first response, final paint and full-resolution refinement separately. The local baseline still includes browser/CDP scheduling and the relay process; neither setup represents a physical iPhone.
+Latency is the viewer pointermove's source `event.timeStamp` → matching marker pixels drawn on canvas, using one viewer monotonic clock. Explicit CDP timestamps preserve the intended source gesture timeline identically in both implementations; previous production input stays unchanged in the historical control. Every accepted sparse trial must contain exactly one pointermove and one remote scroll event. Holding the finger before release excludes momentum from the single-move trial; the continuous workload uses the full native gesture path. It reports both canvas frames and changed-marker frames, plus downstream TCP bytes during the continuous interval. Capture restarts, frame credits, status polling, decoder and input queues are left intact.
 
-A measured run presented 38 distinct motion frames in three seconds (12.77 fps), with a 98 ms p95 frame gap, 367 ms first motion paint, 539 ms final native-density paint after lift and 5.83 MB transferred. The final raster was 1074×2271 and scrolling moved exactly 720 CSS pixels. PNG delivered 6.38 fps and used 8.74 MB under the same setup; JPEG is retained. Frame gaps are not input-to-visible latency measurements.
+These measurements end at canvas draw, not physical screen presentation. They do not measure a physical iPhone/Safari or David's network. Sparse first-response tests include a return from idle to motion capture; continuous throughput is a separate metric.
 
-The benchmark records actual viewer pointer moves and remote scroll positions. Matching the rendered marker to its cumulative input position gives first-input-to-visible time and the p50/p95 age of reflected input on the viewer’s own monotonic clock. Server scroll-operation duration includes guards, queueing and CDP acknowledgement; it does not isolate those costs.
+### Historical control without a production codec switch
 
-A three-run direct-wheel comparison on the synthetic link reduced median server-operation p50 from 48.1 to 42.6 ms by removing the redundant mousemove before each positioned wheel event. Median first-input-to-visible time was 296 vs 302 ms; reflected-input-age p50 was 300 vs 306 ms. This saves input-side work but does not demonstrate lower visible latency. That comparison used wheel-based finger input.
+Run the **same new harness** in a detached historical worktree. `470668d` contains the preceding production adaptive-JPEG stream; its unrelated standalone H.264 prototype is not used by this control.
 
-A native-touch experiment on the same synthetic link measured 318 ms first-input-to-visible and 13.4 fps, versus a preceding wheel run at 273 ms and 13.1 fps. It demonstrates no first-response improvement; native touch includes Chromium's movement threshold. End-to-end tests verify continued nested and document scrolling after finger lift, single taps, touch-driven drag surfaces, cancellation, rotation and disconnects. There is no local prediction or viewport enlargement.
+```sh
+git worktree add --detach /tmp/batty-jpeg-production-baseline 470668d
+ln -s "$PWD/node_modules" /tmp/batty-jpeg-production-baseline/node_modules
+cp scripts/benchmark-production-browser.ts /tmp/batty-jpeg-production-baseline/scripts/
+cd /tmp/batty-jpeg-production-baseline
+BENCH_LABEL=jpeg-mobile node_modules/.bin/tsx scripts/benchmark-production-browser.ts
+BENCH_LABEL=jpeg-local BENCH_RTT_MS=0 BENCH_DOWN_MBIT=1000 \
+  node_modules/.bin/tsx scripts/benchmark-production-browser.ts
+```
 
-`BENCH_INPUT=wheel` selects wheel-based finger input for comparisons. `BENCH_CONSTANT_CAPTURE=1` disables motion quality changes in the isolated benchmark, keeping full DPR3 capture. A fixed-capture comparison measured 452 ms/8.4 fps for wheel and 519 ms/8.1 fps for native touch. Retaining full DPR3 during all motion costs bandwidth on this link. The native benchmark keeps the finger inside the viewport and allows inertia to settle before sampling the final paint; native scroll distance includes touch slop and momentum rather than equalling finger travel. Reflected-input-age matching uses scroll position and is not slop-corrected for native gestures.
+The worktree and installed dependencies remain isolated from live runtime data. Run codec/profile cases sequentially with full test/build gates paused to avoid CPU contention. There is no environment variable that restores JPEG in the production application.
 
-These tests emulate mobile Chromium, not a physical iPhone. Browser composition and network conditions affect performance.
+## Historical JPEG measurements
 
-## Design references
+The scripts `benchmark-cloud-browser.ts`, `benchmark-cloud-stages.ts` and `prototype-h264.ts` instrument the historical JPEG transport. Their current-checkout entry points reject a non-JPEG backend; run the original versions from the `470668d` worktree to reproduce historical data. Their image/codec assumptions are not a current production benchmark.
 
-- [CDP native touch input](https://chromedevtools.github.io/devtools-protocol/tot/Input/#method-dispatchTouchEvent) and [Puppeteer's touch implementation](https://github.com/puppeteer/puppeteer/blob/main/packages/puppeteer-core/src/cdp/Input.ts): browser-recognized touch gestures rather than DOM event simulation.
-- [Chromium compositor capture](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/content/browser/devtools/protocol/page_handler.cc): screencast limits downsample the actual compositor surface; they cannot create Retina detail.
-- [Cua native capture](https://github.com/trycua/cua/blob/main/libs/cua-spacesd/crates/cua-spacesd-desktop/src/linux_stream.rs): damage-driven capture separate from input.
-- [Selkies](https://github.com/selkies-project/selkies): independent capture/encoding and bounded-latency streaming; WebRTC is not a prerequisite for interactive video.
-- [OpenAI computer-use example](https://github.com/openai/openai-cua-sample-app/blob/main/python-app/app/browser.py): discrete screenshots serve agent observations, not a continuous interactive video loop.
+- [Stage measurements](cloud-browser-stage-measurements.md): fixed-DPR3 JPEG, 40 settled moves per profile. Local total 200/233 ms p50/p95; synthetic mobile 421/450 ms. Chromium→CDP JPEG accounted for about 95–111 ms, mobile image transport 207 ms and decode 25–27 ms. This is not the adaptive-JPEG control above.
+- [Standalone H.264 prototype](h264-prototype.md): same headed target for both codec paths, mirrored input and a fixture adapter rather than actual BrowserService/popover integration. Mobile 190 vs 234 ms median, 28.7 vs 14.2 changed frames/s and 1.93 vs 14.39 Mbit/s. These gains cannot be presented as production integration measurements.
+- Earlier three-second JPEG drag: 38 distinct motion frames (12.77 fps), 98 ms p95 frame gap, 367 ms first paint, 539 ms final native-density refinement and 5.83 MB. PNG gave 6.38 fps and 8.74 MB. Frame gaps are not input latency.
+- Removing the redundant pre-wheel mousemove reduced median server operation p50 from 48.1 to 42.6 ms across three runs, but first input→visible stayed 296 vs 302 ms. Native touch later gave 318 ms/13.4 fps vs wheel's 273 ms/13.1 fps; its purpose was correct inertia/nested scrolling, not a demonstrated latency win.
+- Fixed-DPR3 captures during motion measured 452 ms/8.4 fps for wheel and 519 ms/8.1 fps for native touch. Continuous reflected-input-age matching used cumulative position and was not slop-corrected; settled one-move trials are the stronger latency comparison.
+
+## Verification and references
+
+Raster size alone does not prove correct rendering. Browser tests exercise four viewport corners, edge clicks, nested and outer scrolling, rotation, tap deduplication, touch cancellation and disconnects. Codec support detection is not equivalent to decoding a complete live stream on a physical iPhone.
+
+- [CDP native touch](https://chromedevtools.github.io/devtools-protocol/tot/Input/#method-dispatchTouchEvent)
+- [WebCodecs low-latency configuration](https://developer.mozilla.org/en-US/docs/Web/API/VideoDecoder/configure)
+- [FFmpeg x11grab](https://ffmpeg.org/ffmpeg-devices.html#x11grab)
+- [Cua native capture](https://github.com/trycua/cua/blob/main/libs/cua-spacesd/crates/cua-spacesd-desktop/src/linux_stream.rs)
+- [Selkies](https://github.com/selkies-project/selkies)
+- [OpenAI computer-use example](https://github.com/openai/openai-cua-sample-app/blob/main/python-app/app/browser.py): discrete agent observations, not a continuous interactive video loop.
 
 See [runtime](runtime.md#shared-cloud-browser) and [client API](../src/client/API.md#shared-cloud-browser) for authentication and lifecycle details.

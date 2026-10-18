@@ -31,6 +31,12 @@ Main chat submissions use the default model and thinking level selected in Setti
 
 `BATTY_HOST` and `BATTY_PORT` control the listener; `BATTY_SELF_PATH` selects the application files. `BATTY_PROVIDER_AUTH_PATH` selects the SDK's locked provider credential store. Application secrets and passkeys remain in the data root. Environment settings are stored in `.batty/environment.json`.
 
+## Native cloud-browser video
+
+Linux browser sessions require `Xvfb`, `xauth` and FFmpeg with `x11grab` and `libx264` (Ubuntu: `apt install xvfb xauth ffmpeg`). The Linux deployment preflight checks these binaries and performs a small H.264 encode before activating a release. Chromium owns a private authenticated 4096×4096 X display; display receipts and authority files stay in its private session directory. Browser and display processes survive service restarts; explicit browser close or expiry removes them. FFmpeg runs only while a viewer is attached.
+
+Cloud video uses H.264/WebCodecs, not JPEG. Viewers require H.264 `VideoDecoder` support and a viewport no larger than 1365 CSS pixels per dimension. macOS/Windows tool browsing remains available, but native cloud video requires Linux. A headless process created before native capture cannot acquire an X display; viewing returns an explicit error and preserves the process, tabs and cookies. Replacing it requires an explicit browser close/open. This is a breaking transport/platform change; there is no automatic migration or compatibility fallback.
+
 ## Checks
 
 `pnpm test` runs the server/shared and client-component groups. Server tests use Node and reusable threads; component tests use isolated happy-dom environments. Durable replay, process cancellation, browser persistence and SQLite scaling regressions remain in the standard suite.

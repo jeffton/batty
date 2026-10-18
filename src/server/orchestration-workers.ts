@@ -13,6 +13,7 @@ import {
   type Agent,
   type AgentChange,
   type ConversationId,
+  type Cursor,
   type TaskId,
   type Tx,
 } from "@earendil-works/pi-durable";
@@ -210,15 +211,17 @@ export function createWorkers(
   const subagent = defineTool({
     name: "subagent",
     description:
-      "Run, await, queue, resume, steer or stop subagents. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple async helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
+      "Run, await, queue, resume, steer or stop subagents. list discovers subagents (stable sessionId, workspace, status), scanning up to limit conversations per page (default 50, max 100); pass nextCursor back as cursor even for empty pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. Main can discover all its subagents; workers can discover/inspect non-cron peers in their own workspace only. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple async helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
     replay: "safe",
     parameters: Type.Object({
       action: Type.Union(
-        (["run", "await", "queue", "resume", "steer", "stop", "report"] as const).map((value) =>
-          Type.Literal(value),
-        ),
+        (
+          ["run", "await", "queue", "resume", "steer", "stop", "report", "list", "inspect"] as const
+        ).map((value) => Type.Literal(value)),
       ),
       sessionId: Type.Optional(Type.String()),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+      cursor: Type.Optional(Type.String()),
       prompt: Type.Optional(Type.String()),
       model: Type.Optional(Type.String()),
       effort: Type.Optional(Type.String()),
@@ -259,6 +262,14 @@ export function createWorkers(
               cursor = page.next;
             } while (cursor);
             const artifacts = runtimeResultArtifacts(entries);
+            const worker = await tx.doc(WorkerDoc, api.conversationId);
+            if (!worker.latestReport || Number(worker.latestReport.taskId) <= Number(api.taskId))
+              worker.latestReport = {
+                taskId: api.taskId,
+                assignmentId: metadata.completion!.owner,
+                text: args.prompt!,
+                artifacts: artifacts as typeof artifacts & Record<string, JsonValue>,
+              };
             return encodeRuntimeNotice({
               kind: "subagent",
               text: `[subagent ${api.conversationId} report]\n${reportWithArtifacts(reportWithAttachments(args.prompt!, artifacts.sentFiles), artifacts)}`,
@@ -286,6 +297,144 @@ export function createWorkers(
         return reply(`Reported to parent. Session ID: ${api.conversationId}. Work may continue.`);
       }
       const state = await api.snapshot(OrchestrationDoc, ctx);
+      if (args.action === "list" || args.action === "inspect") {
+        if (args.action === "inspect" && !args.sessionId)
+          throw new Error("inspect requires sessionId");
+        const page =
+          args.action === "list"
+            ? await api.commit(
+                (tx) =>
+                  tx.scanConversations(
+                    {},
+                    args.limit ?? 50,
+                    args.cursor ? (JSON.parse(args.cursor) as Cursor) : undefined,
+                  ),
+                ctx,
+              )
+            : undefined;
+        const ids = page ? page.items.map((item) => String(item.id)) : [args.sessionId!];
+        // Preload only archive seeds outside the transaction. Authorization,
+        // workspace and output pointers are read together under the mutation line.
+        const seeds = new Map<string, NonNullable<typeof state>["workers"][string]>();
+        for (const id of ids) {
+          const candidate = state?.workers[id] ?? (await api.snapshot(ArchivedWorker, id, ctx));
+          if (candidate) seeds.set(id, candidate);
+        }
+        return api.commit(async (tx) => {
+          const state = await tx.doc(OrchestrationDoc);
+          const findWorker = async (id: string) => {
+            const seed = seeds.get(id);
+            return state.workers[id] ?? (seed ? await tx.doc(ArchivedWorker, id, seed) : undefined);
+          };
+          const caller = await tx.doc(WorkerDoc, api.conversationId);
+          const isMain = api.conversationId === state?.mainId;
+          const discoverable = async (id: ConversationId) => {
+            while (id !== state?.mainId) {
+              const metadata = await tx.doc(WorkerDoc, id);
+              if (!metadata?.isSubagent || metadata.isCron || metadata.parentId === undefined)
+                return false;
+              id = metadata.parentId;
+            }
+            return true;
+          };
+          if (!isMain && !(await discoverable(api.conversationId)))
+            throw new Error("Subagent discovery requires main or a non-cron assigned subagent");
+          const visible = async (candidate: NonNullable<typeof state>["workers"][string]) => {
+            const metadata = await tx.doc(WorkerDoc, candidate.id);
+            return (
+              metadata?.isSubagent &&
+              (await discoverable(candidate.id)) &&
+              (isMain || candidate.workspaceId === caller!.workspaceId)
+            );
+          };
+          const summary = async (candidate: NonNullable<typeof state>["workers"][string]) => {
+            const task =
+              candidate.active === undefined ? undefined : await tx.task(candidate.active);
+            return {
+              sessionId: String(candidate.id),
+              workspaceId: candidate.workspaceId,
+              status:
+                task?.state.status === "terminal"
+                  ? task.state.outcome.status
+                  : task
+                    ? "running"
+                    : "idle",
+              ...(candidate.startedAtMs === undefined
+                ? {}
+                : { startedAtMs: candidate.startedAtMs }),
+            };
+          };
+          if (args.action === "list") {
+            const workers = [];
+            for (const id of ids) {
+              const candidate = await findWorker(id);
+              if (candidate && (await visible(candidate))) workers.push(await summary(candidate));
+            }
+            return reply(
+              JSON.stringify({
+                workers,
+                ...(page?.next ? { nextCursor: JSON.stringify(page.next) } : {}),
+              }),
+            );
+          }
+          if (!args.sessionId) throw new Error("inspect requires sessionId");
+          const candidate = await findWorker(args.sessionId);
+          if (!candidate || !(await visible(candidate)))
+            throw new Error("Unknown or inaccessible subagent");
+          const status = await summary(candidate);
+          const task = candidate.active === undefined ? undefined : await tx.task(candidate.active);
+          const metadata = (await tx.doc(WorkerDoc, candidate.id))!;
+          const latest = metadata.latestReport;
+          const resultAssignment =
+            metadata.latestResultAssignment ??
+            (task?.state.status === "terminal" && task.state.outcome.status === "completed"
+              ? candidate.active
+              : undefined);
+          const completed =
+            resultAssignment === undefined ? undefined : await tx.task(resultAssignment);
+          const result =
+            completed?.state.status === "terminal" &&
+            completed.state.outcome.status === "completed" &&
+            (!latest || Number(resultAssignment) >= Number(latest.assignmentId))
+              ? {
+                  kind: "result",
+                  assignmentId: String(resultAssignment),
+                  text: completed.state.outcome.result as string,
+                  artifacts:
+                    (await tx.doc(DeliveryRecord, String(resultAssignment), {})).artifacts ?? {},
+                }
+              : latest
+                ? {
+                    kind: "report",
+                    assignmentId: String(latest.assignmentId),
+                    text: latest.text,
+                    artifacts: latest.artifacts,
+                  }
+                : undefined;
+          // Descriptors in details are consumed by attach_artifacts, not automatically attached.
+          return {
+            ...reply(
+              JSON.stringify({
+                ...status,
+                ...(result
+                  ? {
+                      latest: {
+                        kind: result.kind,
+                        assignmentId: result.assignmentId,
+                        text: reportWithArtifacts(result.text.slice(0, 16_000), result.artifacts),
+                        truncated: result.text.length > 16_000,
+                      },
+                    }
+                  : {}),
+              }),
+            ),
+            details: JSON.parse(JSON.stringify(result?.artifacts ?? {})) as Record<
+              string,
+              JsonValue
+            >,
+          };
+        }, ctx);
+      }
       const existingCall = (await api.snapshot(DeliveryRecord, String(api.taskId), ctx))?.call;
       const workerId = existingCall?.workerId ?? args.sessionId;
       const worker = workerId

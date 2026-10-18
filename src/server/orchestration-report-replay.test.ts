@@ -5,6 +5,7 @@ import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { Type } from "@earendil-works/pi-ai";
 import { decodeRuntimeNotice } from "./runtime-notices";
 import { fixture, until } from "./orchestration-test-fixture";
+import { OrchestrationDoc, WorkerDoc } from "./orchestration-state";
 
 test("report accepted before tool settlement is delivered once across restart", async () => {
   const { faux, orchestration, open, registry } = await fixture();
@@ -67,12 +68,18 @@ test("report accepted before tool settlement is delivered once across restart", 
   );
   await (await main.submit({ type: "input", content: "launch replay" }, context)).wait(context);
   await until(async () => delivered);
+  const worker = Object.values((await harness.snapshot(OrchestrationDoc, context))!.workers)[0]!;
+  const report = (await harness.snapshot(WorkerDoc, worker.id, context))!.latestReport;
+  expect(report?.text).toBe("durable progress");
   await harness.close(context);
   ({ harness, main } = await open());
   harness.resume();
   await until(async () => (await orchestration.listRunning()).length === 0);
   await main.waitForIdle(context);
   expect(executions).toBe(2);
+  const metadata = (await harness.snapshot(WorkerDoc, worker.id, context))!;
+  expect(metadata.latestReport).toEqual(report);
+  expect(metadata.latestResultAssignment).toBe(worker.active);
   const notices = (await main.context(context)).messages.flatMap((message) =>
     message.role === "user" ? [decodeRuntimeNotice(message.content)] : [],
   );

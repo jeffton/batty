@@ -221,6 +221,10 @@ export function createDeliveryTask(services: OrchestrationServices) {
             if (!existing && task.input.change) {
               await configure(tx, task.input.childId, task.input.change);
               if (task.input.workspaceId) {
+                if (metadata.workspaceId !== task.input.workspaceId) {
+                  delete metadata.latestReport;
+                  delete metadata.latestResultAssignment;
+                }
                 (await tx.doc(OrchestrationDoc)).workers[task.input.workerId]!.workspaceId =
                   task.input.workspaceId;
                 (await tx.doc(WorkerDoc, task.input.childId)).workspaceId = task.input.workspaceId;
@@ -467,6 +471,7 @@ export function createDeliveryTask(services: OrchestrationServices) {
             delete doc.runs[run.id];
           }
           const metadata = await tx.doc(WorkerDoc, task.input.childId);
+          metadata.latestResultAssignment = task.id;
           if (metadata.completion?.owner === task.id) delete metadata.completion;
           const doc = await tx.doc(OrchestrationDoc);
           if (doc.joinParents) delete doc.joinParents[String(task.input.childId)];

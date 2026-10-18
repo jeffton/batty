@@ -117,6 +117,13 @@ export const WorkerDoc = defineDoc<{
   isSubagent: boolean;
   isCron: boolean;
   cronJobId?: string;
+  latestResultAssignment?: TaskId<string>;
+  latestReport?: {
+    taskId: TaskId;
+    assignmentId: TaskId<string>;
+    text: string;
+    artifacts: AgentTurnArtifacts & Record<string, JsonValue>;
+  };
   completion?: {
     owner: TaskId<string>;
     inputs: SubmissionId[];

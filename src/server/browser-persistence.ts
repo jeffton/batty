@@ -180,6 +180,19 @@ export async function connectPersistentBrowser(
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   const profile = path.join(directory, "profile");
   await fs.mkdir(profile, { recursive: true, mode: 0o700 });
+  // Chromium profile preferences, not command-line feature names: both native
+  // bubbles obscure our streamed webpage. Write only before a new process owns
+  // the profile; never race Chrome's preference writer in an active session.
+  const preferencesFile = path.join(profile, "Default", "Preferences");
+  const preferences =
+    (await readBrowserJson<Record<string, unknown> & { translate?: Record<string, unknown> }>(
+      preferencesFile,
+    )) ?? {};
+  await writeBrowserJson(preferencesFile, {
+    ...preferences,
+    credentials_enable_service: false,
+    translate: { ...preferences.translate, enabled: false },
+  });
   let display: BrowserDisplay | undefined;
   let child: ChildProcess | undefined;
   try {

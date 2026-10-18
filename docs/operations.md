@@ -45,6 +45,14 @@ Linux browser sessions require `Xvfb`, `xauth` and FFmpeg with `x11grab` and `li
 
 Cloud video uses H.264/WebCodecs, not JPEG. Viewers require H.264 `VideoDecoder` support. Cloud viewports fit proportionally within 1365 CSS pixels per dimension and scale to the viewer; oversized tool/API requests are fitted too. Headless sessions without cloud viewing retain the larger viewport range. Native cloud-browser viewing is intentionally Linux-only for this installation; macOS/Windows deployments must not port it or add a fallback unless the user explicitly requests it. macOS/Windows tool browsing and ordinary headless browser sessions remain available and are not Linux-only. A headless process created before native capture cannot acquire an X display; viewing returns an explicit error and preserves the process, tabs and cookies. Replacing it requires an explicit browser close/open. This is a breaking transport/platform change; there is no automatic migration or compatibility fallback.
 
+### Native browser prompts
+
+New Chromium processes read profile preferences `credentials_enable_service=false` and `translate.enabled=false`. These disable Chrome’s password-saving offers and automatic Translate bubbles, not webpage password fields, Batty’s client-side Login/AutoFill panel, or a website’s language controls. Manual Chrome translation remains available.
+
+Preferences are written before process launch, never into a profile owned by a running browser. Existing browsers retain their runtime preferences, tabs and login across deploy/reconnect; applying these defaults requires a new browser process. An existing native bubble must be dismissed separately; no page reload or browser restart is needed just to close it.
+
+The preference names and behavior are documented in Chromium’s [password-manager preferences](https://chromium.googlesource.com/chromium/src/+/refs/tags/153.0.8010.12/components/password_manager/core/common/password_manager_pref_names.h) and [Translate preferences](https://chromium.googlesource.com/chromium/src/+/refs/tags/153.0.8010.12/components/translate/core/browser/translate_pref_names.h). They are not command-line feature switches.
+
 ### Remote website passkeys
 
 Tool-controlled browsers do not support WebAuthn/passkeys, including when a cloud viewer attaches later. A context-wide script hides `PublicKeyCredential` and rejects public-key credential requests and creation with `NotAllowedError`, including conditional mediation. Password and other credential types retain their browser behavior. Websites must offer their own password or alternative login; passkey-only sites are unsupported. This does not affect passkey authentication to Batty itself.

@@ -18,7 +18,10 @@ import {
   createBrowserFixtureServer,
 } from "../src/client/test/browser-fixture";
 
-// Repeatable synthetic mobile link: 30ms each way, 20Mbit/s downstream.
+// Repeatable synthetic mobile link. Set BENCH_RTT_MS=0 and BENCH_DOWN_MBIT=1000
+// for a local baseline; defaults to 60ms RTT and 20Mbit/s downstream.
+const rttMs = Number(process.env.BENCH_RTT_MS ?? 60);
+const downMbit = Number(process.env.BENCH_DOWN_MBIT ?? 20);
 const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-cloud-bench-"));
 const service = new BrowserService(undefined, 4, root);
 const scrollOperationMs: number[] = [];
@@ -58,7 +61,7 @@ const relay = net.createServer((client) => {
     let next = 0;
     from.on("data", (data: Buffer) => {
       const now = Date.now();
-      next = Math.max(now + 30, next) + (data.length / bytesPerSecond) * 1000;
+      next = Math.max(now + rttMs / 2, next) + (data.length / bytesPerSecond) * 1000;
       setTimeout(
         () => {
           if (!to.destroyed) to.write(data);
@@ -68,8 +71,8 @@ const relay = net.createServer((client) => {
     });
     from.on("end", () => setTimeout(() => to.end(), Math.max(0, next - Date.now()) + 1));
   }
-  forward(client, upstream, 10_000_000);
-  forward(upstream, client, 2_500_000);
+  forward(client, upstream, 1_250_000_000);
+  forward(upstream, client, (downMbit * 1_000_000) / 8);
 });
 relay.listen(0, "127.0.0.1");
 await once(relay, "listening");
@@ -341,7 +344,7 @@ try {
       {
         inputMode,
         constantCapture,
-        link: { rttMs: 60, downMbit: 20 },
+        link: { rttMs, downMbit },
         dimensions,
         finalDimensions: await image.evaluate((e) => ({
           css: [e.clientWidth, e.clientHeight],

@@ -50,6 +50,38 @@ export function createWorkers(
   services: OrchestrationServices,
   Delivery: ReturnType<typeof createDeliveryTask>,
 ) {
+  // Tool-level coordination only: these rules are not an OS security boundary.
+  async function workerScope(tx: Tx, id: ConversationId, mainId: ConversationId) {
+    while (id !== mainId) {
+      const metadata = await tx.doc(WorkerDoc, id);
+      if (metadata.isCron) return { cronRoot: id };
+      if (!metadata.isSubagent || metadata.parentId === undefined) return undefined;
+      id = metadata.parentId;
+    }
+    return { cronRoot: undefined };
+  }
+
+  async function coordinationScope(tx: Tx, callerId: ConversationId, assistantId?: string) {
+    const state = await tx.doc(OrchestrationDoc);
+    const caller = await tx.doc(WorkerDoc, callerId);
+    const scope = await workerScope(tx, callerId, state.mainId!);
+    if (!scope) throw new Error("Subagent tools require main or an assigned worker");
+    const coordinator =
+      callerId === state.mainId ||
+      (assistantId !== undefined && caller.workspaceId === assistantId);
+    return {
+      canDelegate: (workspaceId: string) =>
+        scope.cronRoot !== undefined || coordinator || workspaceId === caller.workspaceId,
+      visible: async (candidate: { id: ConversationId; workspaceId: string }) => {
+        const candidateScope = await workerScope(tx, candidate.id, state.mainId!);
+        if (!candidateScope) return false;
+        if (scope.cronRoot !== undefined || candidateScope.cronRoot !== undefined)
+          return scope.cronRoot !== undefined && scope.cronRoot === candidateScope.cronRoot;
+        return coordinator || candidate.workspaceId === caller.workspaceId;
+      },
+    };
+  }
+
   async function captureStop(workerId: string, ctx: Context) {
     const state = (await services.harness.snapshot(OrchestrationDoc, ctx))!;
     const worker =
@@ -211,7 +243,7 @@ export function createWorkers(
   const subagent = defineTool({
     name: "subagent",
     description:
-      "Run, await, queue, resume, steer or stop subagents. list discovers subagents (stable sessionId, workspace, status), scanning up to limit conversations per page (default 50, max 100); pass nextCursor back as cursor even for empty pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. Main and non-cron workers in the configured assistant workspace can discover/inspect subagents across workspaces; other ordinary workers see peers in their own workspace only. Detached cron workers and their descendants can discover/inspect only their own cron-run tree, across workspaces; ordinary workers and other cron runs are excluded. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple async helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
+      "Run, await, queue, resume, steer or stop subagents. run creates a new session and rejects sessionId; await/queue/resume/steer/stop require sessionId. queue/resume/steer/stop use the same coordination scope as discovery; worker await joins a direct child. Project workers delegate within their own workspace; assistant coordinators and cron-run trees may delegate across workspaces. These are coordination guardrails, not a security boundary. list discovers subagents (stable sessionId, workspace, status), scanning up to limit conversations per page (default 50, max 100); pass nextCursor back as cursor even for empty pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. Main and non-cron workers in the configured assistant workspace can discover/inspect subagents across workspaces; other ordinary workers see peers in their own workspace only. Detached cron workers and their descendants can discover/inspect only their own cron-run tree, across workspaces; ordinary workers and other cron runs are excluded. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple async helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
     replay: "safe",
     parameters: Type.Object({
       action: Type.Union(
@@ -232,6 +264,12 @@ export function createWorkers(
       ),
     }),
     execute: async (args, api, ctx) => {
+      if (args.action === "run" && args.sessionId !== undefined)
+        throw new Error(
+          "run creates a new subagent; omit sessionId. Use queue or resume for an existing session",
+        );
+      if (["await", "queue", "resume", "steer", "stop"].includes(args.action) && !args.sessionId)
+        throw new Error(`${args.action} requires sessionId`);
       if (args.action === "report") {
         if (args.sessionId !== undefined)
           throw new Error("Report targets the actual parent; omit sessionId");
@@ -327,34 +365,7 @@ export function createWorkers(
             const seed = seeds.get(id);
             return state.workers[id] ?? (seed ? await tx.doc(ArchivedWorker, id, seed) : undefined);
           };
-          const caller = await tx.doc(WorkerDoc, api.conversationId);
-          const isMain = api.conversationId === state?.mainId;
-          // Each detached cron run creates a distinct root conversation. Descendants
-          // retain that scope across workspace moves; job IDs would conflate runs.
-          const discoveryScope = async (
-            id: ConversationId,
-          ): Promise<{ cronRoot?: ConversationId } | undefined> => {
-            while (id !== state.mainId) {
-              const metadata = await tx.doc(WorkerDoc, id);
-              if (metadata.isCron) return { cronRoot: id };
-              if (!metadata.isSubagent || metadata.parentId === undefined) return undefined;
-              id = metadata.parentId;
-            }
-            return {};
-          };
-          const scope = await discoveryScope(api.conversationId);
-          if (!scope) throw new Error("Subagent discovery requires main or an assigned worker");
-          const visible = async (candidate: NonNullable<typeof state>["workers"][string]) => {
-            const candidateScope = await discoveryScope(candidate.id);
-            if (!candidateScope) return false;
-            if (scope.cronRoot !== undefined || candidateScope.cronRoot !== undefined)
-              return scope.cronRoot !== undefined && scope.cronRoot === candidateScope.cronRoot;
-            return (
-              isMain ||
-              (assistantWorkspaceId !== undefined && caller.workspaceId === assistantWorkspaceId) ||
-              candidate.workspaceId === caller.workspaceId
-            );
-          };
+          const { visible } = await coordinationScope(tx, api.conversationId, assistantWorkspaceId);
           const summary = async (candidate: NonNullable<typeof state>["workers"][string]) => {
             const task =
               candidate.active === undefined ? undefined : await tx.task(candidate.active);
@@ -449,6 +460,14 @@ export function createWorkers(
         ? (state?.workers[workerId] ?? (await api.snapshot(ArchivedWorker, workerId, ctx)))
         : undefined;
       if (args.action !== "run" && !worker) throw new Error(`Unknown subagent: ${workerId}`);
+      const assistantWorkspaceId = await services.assistantWorkspaceId();
+      if (worker && !existingCall && args.action !== "await")
+        await api.commit(async (tx) => {
+          const current = (await tx.doc(OrchestrationDoc)).workers[workerId!] ?? worker;
+          const scope = await coordinationScope(tx, api.conversationId, assistantWorkspaceId);
+          if (!(await scope.visible(current)))
+            throw new Error("Subagent is outside this session's coordination scope");
+        }, ctx);
       const active =
         worker?.active === undefined ? undefined : await api.getTask(worker.active, ctx);
       const running = active !== undefined && active.state.status !== "terminal";
@@ -579,12 +598,19 @@ export function createWorkers(
           const call = await tx.doc(DeliveryRecord, String(api.taskId), {});
           const prior = call.call;
           if (prior) return { ...prior };
+          const scope = await coordinationScope(tx, api.conversationId, assistantWorkspaceId);
+          if (!scope.canDelegate(ws.id))
+            throw new Error(
+              "Project workers delegate within their own workspace; ask the assistant coordinator for cross-workspace work",
+            );
           if (args.sessionId && !doc.workers[args.sessionId]) {
             doc.workers[args.sessionId] = {
               ...(await tx.doc(ArchivedWorker, args.sessionId, worker!)),
             };
           }
           const currentWorker = args.sessionId ? doc.workers[args.sessionId] : undefined;
+          if (currentWorker && !(await scope.visible(currentWorker)))
+            throw new Error("Subagent is outside this session's coordination scope");
           const currentTask =
             currentWorker?.active === undefined ? undefined : await tx.task(currentWorker.active);
           const currentlyRunning =

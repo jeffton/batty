@@ -495,21 +495,22 @@ test("cron discovery separates runs of the same job and other jobs across nested
     }
   }
   const grandchild = first.find((worker) => worker.prompt === "cron grandchild")!;
-  await (
-    await main.submit(
-      {
-        type: "input",
-        content: `probe:${JSON.stringify({
-          action: "resume",
-          sessionId: String(grandchild.id),
-          prompt: "moved",
-          workspaceId: "other",
-        })}`,
-      },
-      context,
-    )
-  ).wait(context);
+  const root = first.find((worker) => worker.prompt === "cron root")!;
+  const resumed = await probe(root, {
+    action: "resume",
+    sessionId: String(grandchild.id),
+    prompt: "moved",
+    workspaceId: "other",
+    async: true,
+  });
+  expect(resumed.role === "toolResult" && !!resumed.isError).toBe(false);
   await until(async () => (await orchestration.listRunning()).length === 0);
+  expect((await harness.snapshot(WorkerDoc, grandchild.id, context))!.workspaceId).toBe("other");
+  for (const target of [second[0]!, ordinary]) {
+    const rejected = await probe(grandchild, { action: "stop", sessionId: String(target.id) });
+    expect(rejected.role === "toolResult" && rejected.isError).toBe(true);
+    expect(JSON.stringify(rejected.content)).toContain("coordination scope");
+  }
   const moved = await probe(grandchild, { action: "list", limit: 100 });
   expect(
     JSON.parse((moved.content[0] as { text: string }).text)
@@ -574,7 +575,8 @@ test("inspect authorizes against the same snapshot as output during a workspace-
                         prompt: "moved target",
                         workspaceId: "other",
                       },
-                      api,
+                      // A coordinator moves the target while a project worker inspects it.
+                      { ...api, conversationId: main.id },
                       ctx,
                     );
                     release();

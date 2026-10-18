@@ -44,7 +44,8 @@ const artifacts = {
 test.each([false, true])(
   "nonterminal report forwards artifacts only to actual parent (nested=%s)",
   async (nested) => {
-    const { faux, orchestration, open, registry } = await fixture();
+    // The coordinator parent may delegate this nested report across workspaces.
+    const { faux, orchestration, open, registry } = await fixture(10_000, console.error, "other");
     let release!: () => void;
     let continued = false;
     let forwarded = false;

@@ -199,6 +199,7 @@ test.each([
       await memory.prepare();
       const inspected: number[] = [];
       let navigated = 0;
+      let rejectedDelegation = false;
       const overview = await memory.prepare();
       const line = overview.match(/(\d+)\+(\d+)\|/)!;
       const code = `text(await searchTools("memory_overview"));
@@ -266,6 +267,12 @@ text(await tools.memory_date({id}));`;
               );
             }
           }
+          if (last.role === "toolResult" && last.toolName === "subagent" && last.isError) {
+            expect(JSON.stringify(last.content)).toContain(
+              "Project workers delegate within their own workspace",
+            );
+            rejectedDelegation = true;
+          }
           if (last.role === "toolResult" && last.toolName === "codemode") {
             const output = JSON.stringify(last.content);
             expect(last.isError).toBeFalsy();
@@ -301,8 +308,10 @@ text(await tools.memory_date({id}));`;
         ).wait(context);
         await until(async () => (await orchestration.listRunning()).length === 0);
       }
-      expect(inspected).toHaveLength(1);
-      expect(navigated).toBe(1);
+      const blocked = kind === "nested" && parent !== assistantId && parent !== target;
+      expect(rejectedDelegation).toBe(blocked);
+      expect(inspected).toHaveLength(blocked ? 0 : 1);
+      expect(navigated).toBe(blocked ? 0 : 1);
     } finally {
       orchestration.close();
       await harness.close(context);

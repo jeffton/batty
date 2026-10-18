@@ -8,6 +8,7 @@ import type { Browser } from "patchright";
 import type { CloudBrowserViewport } from "@/shared/cloud-browser";
 import { createBrowserDisplay, stopBrowserDisplay, type BrowserDisplay } from "./browser-display";
 import { stopBrowserChild } from "./browser-process";
+import { browserAbortable } from "./browser-abort";
 
 async function profileBrowserPid(directory: string): Promise<number | undefined> {
   if (process.platform === "win32") {
@@ -107,8 +108,21 @@ export async function persistentBrowserDisplay(
 export async function connectPersistentBrowser(
   directory: string,
   options?: { useTailscale: boolean; proxyServer?: string; userAgent?: string },
+  signal?: AbortSignal,
 ): Promise<{ browser: Browser; receipt: PersistentBrowserReceipt; created: boolean }> {
+  signal?.throwIfAborted();
   const { chromium } = await import("patchright");
+  const connect = async (endpoint: string) => {
+    signal?.throwIfAborted();
+    const pending = chromium.connectOverCDP(endpoint, { timeout: 30_000 });
+    void pending.then(
+      (browser) => {
+        if (signal?.aborted) void browser.close().catch(() => {});
+      },
+      () => {},
+    );
+    return browserAbortable(pending, signal);
+  };
   let receipt = await readBrowserJson<PersistentBrowserReceipt>(
     path.join(directory, "browser.json"),
   );
@@ -116,7 +130,7 @@ export async function connectPersistentBrowser(
     // A dead browser is an explicit interruption, never silently replaced with
     // an empty profile/page. action=close lets the user clear the dead session.
     process.kill(receipt.pid, 0);
-    const browser = await chromium.connectOverCDP(receipt.endpoint);
+    const browser = await connect(receipt.endpoint);
     return { browser, receipt, created: false };
   }
   const starting = await readBrowserJson<{ pid: number; useTailscale: boolean }>(
@@ -128,6 +142,7 @@ export async function connectPersistentBrowser(
   if (starting || intent) {
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
+      signal?.throwIfAborted();
       let pid = starting?.pid;
       if (!pid) pid = await profileBrowserPid(directory);
       if (pid) process.kill(pid, 0);
@@ -150,7 +165,7 @@ export async function connectPersistentBrowser(
         });
         await writeBrowserJson(path.join(directory, "browser.json"), receipt);
         return {
-          browser: await chromium.connectOverCDP(receipt.endpoint),
+          browser: await connect(receipt.endpoint),
           receipt,
           created: false,
         };
@@ -169,7 +184,8 @@ export async function connectPersistentBrowser(
   let child: ChildProcess | undefined;
   try {
     if (process.platform === "linux") {
-      display = await createBrowserDisplay(directory);
+      display = await createBrowserDisplay(directory, signal);
+      signal?.throwIfAborted();
       await writeBrowserJson(path.join(directory, "display.json"), display);
     }
     const args = [
@@ -200,6 +216,7 @@ export async function connectPersistentBrowser(
     });
     const log = await fs.open(path.join(directory, "chromium.log"), "a", 0o600);
     try {
+      signal?.throwIfAborted();
       child = spawn(chromium.executablePath(), args, {
         detached: true,
         env: display
@@ -223,6 +240,7 @@ export async function connectPersistentBrowser(
     });
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
+      signal?.throwIfAborted();
       if (child.exitCode !== null || child.signalCode !== null)
         throw new Error(
           `Persistent Chromium exited: ${await fs.readFile(path.join(directory, "chromium.log"), "utf8")}`,
@@ -241,7 +259,7 @@ export async function connectPersistentBrowser(
           useTailscale: options.useTailscale,
         };
         await writeBrowserJson(path.join(directory, "browser.json"), receipt);
-        return { browser: await chromium.connectOverCDP(receipt.endpoint), receipt, created: true };
+        return { browser: await connect(receipt.endpoint), receipt, created: true };
       }
       await delay(50);
     }
@@ -300,16 +318,21 @@ export async function closePersistentBrowser(directory: string, browser?: Browse
   }
   const errors: unknown[] = [];
   try {
-    await browser?.close();
+    if (browser) await browserAbortable(browser.close(), AbortSignal.timeout(2000));
   } catch (error) {
     errors.push(error);
   }
+  let displayStopped = true;
   try {
     const display = await readBrowserJson<BrowserDisplay>(path.join(directory, "display.json"));
     if (display) await stopBrowserDisplay(display);
   } catch (error) {
+    displayStopped = false;
     errors.push(error);
   }
+  // The Chromium process is already terminated. A failed CDP disconnect must not
+  // retain dead launch receipts; failed display cleanup must retain its ownership.
+  if (displayStopped)
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   if (errors.length) throw new AggregateError(errors, "Persistent browser cleanup failed");
-  await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

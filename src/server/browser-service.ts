@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { browserAbortable } from "./browser-abort";
 import { createHash, randomUUID } from "node:crypto";
 import type { BrowserDescriptor } from "@/shared/types";
 import type {
@@ -207,6 +208,7 @@ export class BrowserService {
   private readonly sessions = new Map<string, BrowserSession>();
   private readonly queues = new Map<string, Promise<void>>();
   private readonly lifecycleQueues = new Map<string, Promise<void>>();
+  private readonly startups = new Map<string, Promise<BrowserSession>>();
   private readonly epochs = new Map<string, number>();
   private disposed = false;
   private readonly cloudOwners = new Map<string, string>();
@@ -236,6 +238,25 @@ export class BrowserService {
     input: BrowserActionInput,
     signal?: AbortSignal,
   ): Promise<BrowserActionResult> {
+    if (input.action !== "open") return this.executeAction(sessionId, input, signal);
+    const controller = new AbortController();
+    const deadline = setTimeout(
+      () => controller.abort(new Error(`Browser open exceeded timeoutMs (${timeout(input)} ms)`)),
+      timeout(input),
+    );
+    const cancellation = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    try {
+      return await this.executeAction(sessionId, input, cancellation);
+    } finally {
+      clearTimeout(deadline);
+    }
+  }
+
+  private async executeAction(
+    sessionId: string,
+    input: BrowserActionInput,
+    signal?: AbortSignal,
+  ): Promise<BrowserActionResult> {
     signal?.throwIfAborted();
     if (this.disposed) throw new Error("Browser service is disposed");
     if (input.action === "close") {
@@ -254,6 +275,7 @@ export class BrowserService {
           await this.withSessionLifecycle(sessionId, async () => {
             if (await this.hasSession(sessionId)) await this.touchSession(sessionId);
           });
+          signal?.throwIfAborted();
           try {
             let session = this.sessions.get(sessionId);
             if (
@@ -262,7 +284,7 @@ export class BrowserService {
                 path.join(browserSessionDirectory(this.persistenceRoot, sessionId), "launch.json"),
               ))
             )
-              session = await this.createSession(sessionId, undefined, undefined);
+              session = await this.createSession(sessionId, undefined, undefined, signal);
             if (
               session &&
               input.useTailscale != null &&
@@ -291,7 +313,9 @@ export class BrowserService {
                 sessionId,
                 input.viewport,
                 input.useTailscale ?? false,
+                signal,
               );
+              signal?.throwIfAborted();
               if (input.cloud) await this.enableCloud(sessionId, session);
               if (created && input.cloud && !input.viewport)
                 await this.setViewport(session, this.resolvePage(session), {
@@ -301,6 +325,7 @@ export class BrowserService {
               session.cloudInteraction++;
               const page = await this.pageForOpen(session, input, created);
               await this.configurePage(session, page, input);
+              signal?.throwIfAborted();
               await page.goto(url, { waitUntil: "domcontentloaded" });
               const result = await this.snapshotResult(session, input, page);
               if (input.cloud) result.details.sites = [await this.cloudAttachment(session)];
@@ -346,7 +371,7 @@ export class BrowserService {
             return await this.snapshotResult(session, input, page, frame, output);
           } finally {
             const session = this.sessions.get(sessionId);
-            if (session?.browser.isConnected()) {
+            if (!signal?.aborted && session?.browser.isConnected()) {
               await this.persistRegistry(session);
               await this.touchSession(sessionId);
             }
@@ -354,8 +379,9 @@ export class BrowserService {
         },
         this.queues,
         true,
+        input.action === "open" ? signal : undefined,
       ),
-      signal,
+      input.action === "open" ? undefined : signal,
     );
   }
 
@@ -1002,16 +1028,35 @@ export class BrowserService {
     sessionId: string,
     viewport: BrowserViewport | undefined,
     useTailscale: boolean | undefined,
+    signal?: AbortSignal,
+  ): Promise<BrowserSession> {
+    const pending = this.createSessionNow(sessionId, viewport, useTailscale, signal);
+    this.startups.set(sessionId, pending);
+    try {
+      return await pending;
+    } finally {
+      if (this.startups.get(sessionId) === pending) this.startups.delete(sessionId);
+    }
+  }
+
+  private async createSessionNow(
+    sessionId: string,
+    viewport: BrowserViewport | undefined,
+    useTailscale: boolean | undefined,
+    signal?: AbortSignal,
   ): Promise<BrowserSession> {
     if (this.sessions.size >= MAX_BROWSER_SESSIONS) {
       throw new Error(`Browser session limit reached (${MAX_BROWSER_SESSIONS})`);
     }
     const epoch = this.epochs.get(sessionId) ?? 0;
     const directory = browserSessionDirectory(this.persistenceRoot, sessionId);
-    const proxyServer = useTailscale ? await this.requireTailscaleProxy() : undefined;
+    signal?.throwIfAborted();
+    const proxyServer = useTailscale ? await this.requireTailscaleProxy(signal) : undefined;
+    signal?.throwIfAborted();
     const { browser, receipt, created } = await connectPersistentBrowser(
       directory,
       useTailscale === undefined ? undefined : { useTailscale, proxyServer },
+      signal,
     );
     const identity = browserIdentity(browser.version());
     const context = browser.contexts()[0]!;
@@ -1052,10 +1097,13 @@ export class BrowserService {
     });
     try {
       for (const page of context.pages()) {
-        const target = await this.targetId(context, page);
+        const target = await browserAbortable(this.targetId(context, page), signal);
         this.registerPage(session, page, false, registry?.pages[target]);
         for (const frame of page.frames()) {
-          const marker = await frame.evaluate(() => (globalThis as any).__battyFrameId);
+          const marker = await browserAbortable(
+            frame.evaluate(() => (globalThis as any).__battyFrameId),
+            signal,
+          );
           if (typeof marker === "string" && registry?.frames[`${target}:${marker}`]) {
             const current = session.frameIds.get(frame)!;
             session.frames.delete(current);
@@ -1066,10 +1114,20 @@ export class BrowserService {
       }
       if (registry?.activePageId && session.pages.has(registry.activePageId))
         session.activePageId = registry.activePageId;
-      if (!session.pages.size) this.registerPage(session, await context.newPage(), true);
-      if (created && viewport) await this.setViewport(session, this.resolvePage(session), viewport);
+      if (!session.pages.size)
+        this.registerPage(session, await browserAbortable(context.newPage(), signal), true);
+      if (created && viewport)
+        await browserAbortable(
+          this.setViewport(session, this.resolvePage(session), viewport),
+          signal,
+        );
+      signal?.throwIfAborted();
     } catch (error) {
-      await context.close().catch(() => {});
+      try {
+        await closePersistentBrowser(directory, browser);
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], "Browser startup and cleanup failed");
+      }
       throw error;
     }
     if ((this.epochs.get(sessionId) ?? 0) !== epoch) {
@@ -1542,13 +1600,13 @@ export class BrowserService {
     });
   }
 
-  private async requireTailscaleProxy(): Promise<string> {
+  private async requireTailscaleProxy(signal?: AbortSignal): Promise<string> {
     if (!this.tailscaleProxy) {
       throw new Error(
         "Tailscale browser routing is not configured. Set browserTailscaleSshDestination in options.json.",
       );
     }
-    return this.tailscaleProxy.ensureStarted();
+    return this.tailscaleProxy.ensureStarted(signal);
   }
 
   private async closeSessionNow(sessionId: string): Promise<void> {
@@ -1556,21 +1614,34 @@ export class BrowserService {
     this.sessions.delete(sessionId);
     for (const [id, touch] of this.cloudTouches)
       if (touch.session === session) this.cloudTouches.delete(id);
-    await closePersistentBrowser(
-      browserSessionDirectory(this.persistenceRoot, sessionId),
-      session?.browser,
-    );
-    if (session)
-      await Promise.all(
+    const errors: unknown[] = [];
+    try {
+      await closePersistentBrowser(
+        browserSessionDirectory(this.persistenceRoot, sessionId),
+        session?.browser,
+      );
+    } catch (error) {
+      errors.push(error);
+    }
+    if (session) {
+      const downloads = await Promise.allSettled(
         [...session.downloadDirs].map((dir) => fs.rm(dir, { recursive: true, force: true })),
       );
-    const entries = await fs
-      .readdir(this.persistenceRoot, { withFileTypes: true })
-      .catch((error) => {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-        throw error;
-      });
-    if (!entries.some((entry) => entry.isDirectory())) await this.tailscaleProxy?.dispose();
+      for (const result of downloads) if (result.status === "rejected") errors.push(result.reason);
+    }
+    try {
+      const entries = await fs
+        .readdir(this.persistenceRoot, { withFileTypes: true })
+        .catch((error) => {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+          throw error;
+        });
+      if (!this.startups.size && !entries.some((entry) => entry.isDirectory()))
+        await this.tailscaleProxy?.dispose();
+    } catch (error) {
+      errors.push(error);
+    }
+    if (errors.length) throw new AggregateError(errors, "Browser session cleanup failed");
   }
 
   private async serialized<T>(
@@ -1578,6 +1649,7 @@ export class BrowserService {
     operation: () => Promise<T>,
     queues = this.queues,
     agentAction = false,
+    signal?: AbortSignal,
   ): Promise<T> {
     const previous = queues.get(sessionId) ?? Promise.resolve();
     let release!: () => void;
@@ -1585,10 +1657,34 @@ export class BrowserService {
       release = resolve;
     });
     queues.set(sessionId, current);
-    await previous;
+    try {
+      await browserAbortable(previous, signal);
+    } catch (error) {
+      // Keep later callers behind the actual predecessor, not an abandoned waiter.
+      void previous.finally(() => {
+        release();
+        if (queues.get(sessionId) === current) queues.delete(sessionId);
+      });
+      throw error;
+    }
     if (agentAction) this.activeAgentSessions.add(sessionId);
     try {
-      return await operation();
+      signal?.throwIfAborted();
+      return await browserAbortable(operation(), signal);
+    } catch (error) {
+      if (signal?.aborted) {
+        try {
+          // Startup must finish its own cancellation cleanup before removal/retry.
+          await this.startups.get(sessionId)?.catch(() => {});
+          await this.closeSession(sessionId);
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [error, cleanupError],
+            "Browser open cancellation and cleanup failed",
+          );
+        }
+      }
+      throw error;
     } finally {
       if (agentAction) this.activeAgentSessions.delete(sessionId);
       release();

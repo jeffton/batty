@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { randomBytes } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { stopBrowserChild } from "./browser-process";
+import { browserAbortable } from "./browser-abort";
 
 export interface BrowserDisplay {
   pid: number;
@@ -49,16 +50,24 @@ function displayReady(child: ChildProcess): Promise<string> {
 }
 
 /** A session-private X server survives service restarts alongside persistent Chromium. */
-export async function createBrowserDisplay(directory: string): Promise<BrowserDisplay> {
+export async function createBrowserDisplay(
+  directory: string,
+  signal?: AbortSignal,
+): Promise<BrowserDisplay> {
+  signal?.throwIfAborted();
   const authority = path.join(directory, "Xauthority");
   await fs.writeFile(authority, "", { mode: 0o600 });
   const cookie = randomBytes(16).toString("hex");
   const auth = async (display: string) =>
-    promisify(execFile)("xauth", ["-f", authority, "add", display, "MIT-MAGIC-COOKIE-1", cookie]);
+    promisify(execFile)("xauth", ["-f", authority, "add", display, "MIT-MAGIC-COOKIE-1", cookie], {
+      signal,
+      timeout: 10_000,
+    });
   await auth(":0");
   const log = await fs.open(path.join(directory, "display.log"), "a", 0o600);
   let child: ChildProcess | undefined;
   try {
+    signal?.throwIfAborted();
     child = spawn(
       "Xvfb",
       [
@@ -74,7 +83,7 @@ export async function createBrowserDisplay(directory: string): Promise<BrowserDi
       ],
       { detached: true, stdio: ["ignore", "pipe", log.fd] },
     );
-    const display = await displayReady(child);
+    const display = await browserAbortable(displayReady(child), signal);
     await auth(display);
     child.stdout!.destroy();
     child.unref();

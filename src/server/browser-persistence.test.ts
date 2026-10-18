@@ -69,6 +69,44 @@ test("display cleanup still runs when closing the CDP connection rejects", async
   expect(stopBrowserDisplay).toHaveBeenCalledWith(display);
 });
 
+test.skipIf(process.platform !== "linux")(
+  "cancelling a stalled CDP handshake reaps startup and clears launch receipts",
+  async () => {
+    const executable = path.join(directory, "fake-chromium");
+    await fs.writeFile(executable, "#!/bin/sh\nexec sleep 60\n", { mode: 0o700 });
+    vi.mocked(chromium.executablePath).mockReturnValue(executable);
+    const controller = new AbortController();
+    let launchedPid: number | undefined;
+    vi.mocked(chromium.connectOverCDP).mockImplementation(async () => {
+      launchedPid = JSON.parse(await fs.readFile(path.join(directory, "process.json"), "utf8")).pid;
+      controller.abort(new Error("CDP deadline"));
+      return new Promise(() => {});
+    });
+    await fs.mkdir(path.join(directory, "profile"));
+    await fs.writeFile(
+      path.join(directory, "profile", "DevToolsActivePort"),
+      "12345\n/devtools/browser/test",
+    );
+    await expect(
+      connectPersistentBrowser(directory, { useTailscale: true }, controller.signal),
+    ).rejects.toThrow("CDP deadline");
+    await expectLaunchCleaned();
+    expect(() => process.kill(launchedPid!, 0)).toThrow("ESRCH");
+  },
+);
+
+test("a stalled CDP disconnect is bounded and does not retain dead launch receipts", async () => {
+  const display = { pid: 123456, display: ":456", authority: path.join(directory, "Xauthority") };
+  await fs.writeFile(path.join(directory, "display.json"), JSON.stringify(display));
+  const started = Date.now();
+  await expect(
+    closePersistentBrowser(directory, { close: () => new Promise(() => {}) } as unknown as Browser),
+  ).rejects.toThrow("Persistent browser cleanup failed");
+  expect(Date.now() - started).toBeLessThan(4000);
+  expect(stopBrowserDisplay).toHaveBeenCalledWith(display);
+  await expect(fs.stat(directory)).rejects.toThrow("ENOENT");
+});
+
 async function expectLaunchCleaned() {
   expect(stopBrowserDisplay).toHaveBeenCalledTimes(1);
   const files = await fs.readdir(directory);

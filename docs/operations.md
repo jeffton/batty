@@ -31,6 +31,10 @@ Main chat submissions use the default model and thinking level selected in Setti
 
 `BATTY_HOST` and `BATTY_PORT` control the listener; `BATTY_SELF_PATH` selects the application files. `BATTY_PROVIDER_AUTH_PATH` selects the SDK's locked provider credential store. Application secrets and passkeys remain in the data root. Environment settings are stored in `.batty/environment.json`.
 
+## Browser open deadlines
+
+`browser.open` applies `timeoutMs` (default 30 seconds, range 1–60 seconds) to queue admission, SSH/display/Chromium startup, CDP attachment, navigation and the returned snapshot. Expiry or worker cancellation interrupts the action, closes its browser session and reaps owned startup processes before releasing its action queue. Bounded process cleanup can add a few seconds; a timeout while waiting behind another action does not close that action’s browser. Other browser actions retain their Playwright action/navigation timeout semantics.
+
 ## Native cloud-browser video
 
 Linux browser sessions require `Xvfb`, `xauth` and FFmpeg with `x11grab` and `libx264` (Ubuntu: `apt install xvfb xauth ffmpeg`). The Linux deployment preflight checks these binaries and performs a small H.264 encode before activating a release. Chromium owns a private authenticated 4096×4096 X display; display receipts and authority files stay in its private session directory. Browser and display processes survive service restarts; explicit browser close or expiry removes them. FFmpeg runs only while a viewer is attached.

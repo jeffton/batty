@@ -3,7 +3,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { readBrowserJson, writeBrowserJson } from "./browser-persistence";
 import net from "node:net";
-import { once } from "node:events";
+import { stopBrowserChild } from "./browser-process";
+import { browserAbortable } from "./browser-abort";
 import { setTimeout as delay } from "node:timers/promises";
 
 const START_TIMEOUT_MS = 15_000;
@@ -65,18 +66,11 @@ async function acceptsSocksConnections(port: number): Promise<boolean> {
   });
 }
 
-async function stopChild(child: ChildProcess): Promise<void> {
-  if (!isRunning(child)) return;
-  child.kill("SIGTERM");
-  await Promise.race([once(child, "exit"), delay(3_000)]);
-  if (!isRunning(child)) return;
-  child.kill("SIGKILL");
-  await once(child, "exit");
-}
+const stopChild = stopBrowserChild;
 
 export interface BrowserProxy {
   setPersistenceRoot?(root: string): void;
-  ensureStarted(): Promise<string>;
+  ensureStarted(signal?: AbortSignal): Promise<string>;
   dispose(): Promise<void>;
 }
 
@@ -84,6 +78,8 @@ export class SshSocksProxy implements BrowserProxy {
   private child?: ChildProcess;
   private port?: number;
   private startPromise?: Promise<string>;
+  private startupController?: AbortController;
+  private startupWaiters = 0;
   private persistenceFile?: string;
 
   constructor(
@@ -96,11 +92,14 @@ export class SshSocksProxy implements BrowserProxy {
     this.persistenceFile = path.join(root, "ssh-proxy.json");
   }
 
-  async ensureStarted(): Promise<string> {
+  async ensureStarted(signal?: AbortSignal): Promise<string> {
+    signal?.throwIfAborted();
+    if (this.startPromise) return this.waitForStartup(signal);
     if (!this.child && this.persistenceFile) {
       const receipt = await readBrowserJson<{ pid: number; port: number; destination: string }>(
         this.persistenceFile,
       );
+      if (this.startPromise) return this.waitForStartup(signal);
       if (receipt) {
         if (receipt.destination !== this.destination)
           throw new Error(
@@ -109,6 +108,7 @@ export class SshSocksProxy implements BrowserProxy {
         process.kill(receipt.pid, 0);
         const deadline = Date.now() + START_TIMEOUT_MS;
         while (!(await acceptsSocksConnections(receipt.port))) {
+          signal?.throwIfAborted();
           process.kill(receipt.pid, 0);
           if (Date.now() >= deadline)
             throw new Error("Persistent browser SSH tunnel is unavailable");
@@ -127,12 +127,32 @@ export class SshSocksProxy implements BrowserProxy {
       return this.serverUrl(this.port);
     }
 
-    this.startPromise ??= this.start();
-    const startPromise = this.startPromise;
+    if (!this.startPromise) {
+      this.startupController = new AbortController();
+      const pending = this.start(this.startupController.signal).finally(() => {
+        if (this.startPromise === pending) {
+          this.startPromise = undefined;
+          this.startupController = undefined;
+        }
+      });
+      this.startPromise = pending;
+    }
+    return this.waitForStartup(signal);
+  }
+
+  private async waitForStartup(signal?: AbortSignal): Promise<string> {
+    const pending = this.startPromise!;
+    this.startupWaiters++;
     try {
-      return await startPromise;
+      return await browserAbortable(pending, signal);
     } finally {
-      if (this.startPromise === startPromise) this.startPromise = undefined;
+      this.startupWaiters--;
+      if (!this.startupWaiters && signal?.aborted && this.startPromise === pending) {
+        this.startupController!.abort(signal.reason);
+        // The final consumer owns cancellation cleanup; concurrent consumers
+        // retain the shared startup independently of this worker's lifetime.
+        await pending.catch(() => {});
+      }
     }
   }
 
@@ -154,7 +174,7 @@ export class SshSocksProxy implements BrowserProxy {
     }
   }
 
-  private async start(): Promise<string> {
+  private async start(signal?: AbortSignal): Promise<string> {
     if (this.destination.startsWith("-")) {
       throw new Error("browserTailscaleSshDestination cannot start with a hyphen");
     }
@@ -176,6 +196,7 @@ export class SshSocksProxy implements BrowserProxy {
       ? path.join(path.dirname(this.persistenceFile), "ssh-proxy.log")
       : undefined;
     if (logPath) await fs.mkdir(path.dirname(logPath), { recursive: true, mode: 0o700 });
+    signal?.throwIfAborted();
     const log = logPath ? await fs.open(logPath, "w", 0o600) : undefined;
     const child = spawn(
       this.sshPath,
@@ -213,41 +234,47 @@ export class SshSocksProxy implements BrowserProxy {
       if (this.child === child) this.child = undefined;
     });
 
-    await log?.close();
-    if (this.persistenceFile && child.pid)
-      await writeBrowserJson(this.persistenceFile, {
-        pid: child.pid,
-        port,
-        destination: this.destination,
-      });
-    const deadline = Date.now() + START_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      if (spawnError) throw spawnError;
-      if (!isRunning(child)) {
-        throw new Error(stderr.trim() || `SSH tunnel exited before becoming ready`);
-      }
-      if (logPath) {
-        stderr = (await fs.readFile(logPath, "utf8")).slice(-4_000);
-        forwardingReady ||= stderr.includes(forwardingMessage);
-      }
-      if (forwardingReady && (await acceptsSocksConnections(port))) {
-        if (this.persistenceFile) {
-          await writeBrowserJson(this.persistenceFile, {
-            pid: child.pid,
-            port,
-            destination: this.destination,
-          });
-          child.unref();
+    try {
+      await log?.close();
+      if (this.persistenceFile && child.pid)
+        await writeBrowserJson(this.persistenceFile, {
+          pid: child.pid,
+          port,
+          destination: this.destination,
+        });
+      const deadline = Date.now() + START_TIMEOUT_MS;
+      while (Date.now() < deadline) {
+        signal?.throwIfAborted();
+        if (spawnError) throw spawnError;
+        if (!isRunning(child)) {
+          throw new Error(stderr.trim() || `SSH tunnel exited before becoming ready`);
         }
-        return this.serverUrl(port);
+        if (logPath) {
+          stderr = (await fs.readFile(logPath, "utf8")).slice(-4_000);
+          forwardingReady ||= stderr.includes(forwardingMessage);
+        }
+        if (forwardingReady && (await acceptsSocksConnections(port))) {
+          if (this.persistenceFile) {
+            await writeBrowserJson(this.persistenceFile, {
+              pid: child.pid,
+              port,
+              destination: this.destination,
+            });
+            child.unref();
+          }
+          return this.serverUrl(port);
+        }
+        await delay(50);
       }
-      await delay(50);
-    }
 
-    await stopChild(child);
-    throw new Error(
-      `SSH SOCKS tunnel did not become ready within ${START_TIMEOUT_MS / 1_000} seconds`,
-    );
+      throw new Error(
+        `SSH SOCKS tunnel did not become ready within ${START_TIMEOUT_MS / 1_000} seconds`,
+      );
+    } catch (error) {
+      await stopChild(child);
+      if (this.persistenceFile) await fs.rm(this.persistenceFile, { force: true });
+      throw error;
+    }
   }
 
   private serverUrl(port: number): string {

@@ -26,6 +26,7 @@ export const until = async (check: () => Promise<boolean>) => {
 export async function fixture(
   tokensPerSecond = 10000,
   onError: (error: unknown) => void = console.error,
+  assistantWorkspaceId?: string,
 ) {
   const directory = await mkdtemp(join(tmpdir(), "batty-orchestration-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
@@ -48,7 +49,7 @@ export async function fixture(
         label: "Test",
         kind: "workspace",
         isPinned: false,
-        isAssistant: false,
+        isAssistant: assistantWorkspaceId === "test",
       },
       {
         id: "other",
@@ -56,7 +57,7 @@ export async function fixture(
         label: "Other",
         kind: "workspace",
         isPinned: false,
-        isAssistant: false,
+        isAssistant: assistantWorkspaceId === "other",
       },
     ],
   });

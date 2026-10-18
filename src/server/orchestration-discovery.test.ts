@@ -221,10 +221,19 @@ test("discovery paginates, inspects running reports and archived results, and fo
   }
 }, 15_000);
 
-test.each(["test", "other"])(
-  "workers discover and inspect only same-workspace peers (%s)",
-  async (workspaceId) => {
-    const { faux, open, orchestration } = await fixture();
+test.each([
+  { workspaceId: "test", assistantWorkspaceId: undefined, visible: true },
+  { workspaceId: "other", assistantWorkspaceId: undefined, visible: false },
+  { workspaceId: "other", assistantWorkspaceId: "other", visible: true },
+  { workspaceId: "other", assistantWorkspaceId: "test", visible: false },
+])(
+  "worker discovery uses the reader workspace: %j",
+  async ({ workspaceId, assistantWorkspaceId, visible }) => {
+    const { faux, open, orchestration } = await fixture(
+      10_000,
+      console.error,
+      assistantWorkspaceId,
+    );
     const { harness, main } = await open();
     faux.setResponses([
       call({ action: "run", prompt: "first", workspaceId: "test" }),
@@ -265,13 +274,76 @@ test.each(["test", "other"])(
     const list = JSON.parse((results[0]!.content[0] as { text: string }).text);
     expect(
       list.workers.some((worker: { sessionId: string }) => worker.sessionId === String(first.id)),
-    ).toBe(workspaceId === "test");
-    expect(results[1]!.role === "toolResult" && !!results[1]!.isError).toBe(workspaceId !== "test");
+    ).toBe(visible);
+    expect(results[1]!.role === "toolResult" && !!results[1]!.isError).toBe(!visible);
   },
 );
 
-test("cron descendants are hidden and cannot discover ordinary peers", async () => {
-  const { faux, orchestration, open } = await fixture();
+test("nested readers gain and lose cross-workspace discovery on resume", async () => {
+  const { faux, orchestration, open } = await fixture(10_000, console.error, "other");
+  const { harness, main } = await open();
+  let targetId: string;
+  faux.setResponses(
+    Array.from({ length: 100 }, () => (request) => {
+      const last = request.messages.findLast((message) => message.role !== "system")!;
+      const text = JSON.stringify(last.content);
+      if (last.role === "user" && text.includes("probe:"))
+        return call(JSON.parse((last.content as string).slice(6)));
+      if (last.role === "user" && text.includes("parent assignment"))
+        return call({ action: "run", prompt: "reader assignment", workspaceId: "test" });
+      if (last.role === "user" && text.includes("reader assignment"))
+        return call({ action: "list", limit: 100 });
+      if (last.role === "toolResult" && text.includes("workers"))
+        return call({ action: "inspect", sessionId: targetId });
+      return done();
+    }),
+  );
+  const probe = async (args: Record<string, JsonValue>) => {
+    await (
+      await main.submit({ type: "input", content: `probe:${JSON.stringify(args)}` }, context)
+    ).wait(context);
+    await until(async () => (await orchestration.listRunning()).length === 0);
+    await main.waitForIdle(context);
+  };
+  await probe({ action: "run", prompt: "target assignment", workspaceId: "other" });
+  targetId = String(Object.values((await orchestrationHistory(harness)).workers)[0]!.id);
+  await probe({ action: "run", prompt: "parent assignment", workspaceId: "other" });
+  const reader = Object.values((await orchestrationHistory(harness)).workers).find(
+    (worker) => worker.prompt === "reader assignment",
+  )!;
+  // Being spawned by an assistant-workspace parent does not grant its child access.
+  const check = async (visible: boolean) => {
+    const messages = (await (await harness.conversation(reader.id, context))!.context(context))
+      .messages;
+    const results = messages
+      .filter((message) => message.role === "toolResult" && message.toolName === "subagent")
+      .slice(-2);
+    expect(results).toHaveLength(2);
+    const listed = JSON.parse((results[0]!.content[0] as { text: string }).text).workers;
+    expect(listed.some((worker: { sessionId: string }) => worker.sessionId === targetId)).toBe(
+      visible,
+    );
+    expect(results[1]!.role === "toolResult" && !!results[1]!.isError).toBe(!visible);
+  };
+  await check(false);
+  await probe({
+    action: "resume",
+    sessionId: String(reader.id),
+    prompt: "reader assignment",
+    workspaceId: "other",
+  });
+  await check(true);
+  await probe({
+    action: "resume",
+    sessionId: String(reader.id),
+    prompt: "reader assignment",
+    workspaceId: "test",
+  });
+  await check(false);
+});
+
+test("cron descendants in the assistant workspace discover only their own run tree", async () => {
+  const { faux, orchestration, open } = await fixture(10_000, console.error, "test");
   const { harness, main } = await open();
   faux.setResponses(
     Array.from({ length: 50 }, () => (request) => {
@@ -305,8 +377,10 @@ test("cron descendants are hidden and cannot discover ordinary peers", async () 
   const denied = helperMessages.find(
     (message) => message.role === "toolResult" && message.toolName === "subagent",
   );
-  expect(denied?.role === "toolResult" && denied.isError).toBe(true);
-  expect(JSON.stringify(denied)).toContain("non-cron assigned subagent");
+  expect(denied?.role === "toolResult" && !!denied.isError).toBe(false);
+  expect(JSON.parse((denied!.content[0] as { text: string }).text).workers).toEqual(
+    expect.arrayContaining([expect.objectContaining({ sessionId: String(helper.id) })]),
+  );
   for (const args of [
     { action: "list", limit: 100 },
     { action: "inspect", sessionId: String(helper.id) },
@@ -321,6 +395,127 @@ test("cron descendants are hidden and cannot discover ordinary peers", async () 
       expect(JSON.parse((result.content[0] as { text: string }).text).workers).toEqual([]);
     else expect(result.role === "toolResult" && result.isError).toBe(true);
   }
+});
+
+test("cron discovery separates runs of the same job and other jobs across nested workspace moves", async () => {
+  const { faux, orchestration, open } = await fixture(10_000, console.error, "test");
+  const { harness, main } = await open();
+  faux.setResponses(
+    Array.from({ length: 300 }, () => (request) => {
+      const last = request.messages.findLast((message) => message.role !== "system")!;
+      const text = JSON.stringify(last.content);
+      if (last.role === "user" && text.includes("probe:"))
+        return call(JSON.parse((last.content as string).slice(6)));
+      if (last.role === "user" && text.includes("cron root"))
+        return call({ action: "run", prompt: "cron child", workspaceId: "other", async: false });
+      if (last.role === "user" && text.includes("cron child"))
+        return call({
+          action: "run",
+          prompt: "cron grandchild",
+          workspaceId: "test",
+          async: false,
+        });
+      return done();
+    }),
+  );
+  const job = await orchestration.addJob({
+    prompt: "cron root",
+    workspaceId: "test",
+    session: { kind: "daily-detached" },
+    schedule: { kind: "every", every: "1h" },
+  });
+  const otherJob = await orchestration.addJob({
+    prompt: "cron root",
+    workspaceId: "other",
+    session: { kind: "daily-detached" },
+    schedule: { kind: "at", in: "1h" },
+  });
+  const fire = async (jobId: string, scheduledAt: number) => {
+    const before = Object.keys((await orchestrationHistory(harness)).workers);
+    await main.commit(async (tx) => {
+      (await tx.doc(OrchestrationDoc)).jobs[jobId]!.nextAt = scheduledAt;
+    }, context);
+    await orchestration.tick();
+    await until(async () => (await orchestration.listRunningCron()).length === 0);
+    await main.waitForIdle(context);
+    const added = Object.values((await orchestrationHistory(harness)).workers).filter(
+      (worker) => !before.includes(String(worker.id)),
+    );
+    expect(added).toHaveLength(3);
+    return added;
+  };
+  const first = await fire(job.id, Date.now() - 3000);
+  const second = await fire(job.id, Date.now() - 2000);
+  const third = await fire(otherJob.id, Date.now() - 1000);
+  // An ordinary assistant-workspace reader must not see any cron run.
+  await (
+    await main.submit(
+      {
+        type: "input",
+        content: `probe:${JSON.stringify({
+          action: "run",
+          prompt: "ordinary",
+          workspaceId: "test",
+        })}`,
+      },
+      context,
+    )
+  ).wait(context);
+  await until(async () => (await orchestration.listRunning()).length === 0);
+  await main.waitForIdle(context);
+  const ordinary = Object.values((await orchestrationHistory(harness)).workers).find(
+    (worker) => worker.prompt === "ordinary",
+  )!;
+  const probe = async (reader: typeof ordinary, args: Record<string, JsonValue>) => {
+    const conversation = (await harness.conversation(reader.id, context))!;
+    await (
+      await conversation.submit(
+        { type: "input", content: `probe:${JSON.stringify(args)}` },
+        context,
+      )
+    ).wait(context);
+    const result = (await conversation.context(context)).messages.findLast(
+      (message) => message.role === "toolResult" && message.toolName === "subagent",
+    )!;
+    return result;
+  };
+  for (const group of [first, second, third, [ordinary]]) {
+    for (const reader of group) {
+      const result = await probe(reader, { action: "list", limit: 100 });
+      const listed = JSON.parse((result.content[0] as { text: string }).text).workers;
+      expect(listed.map((worker: { sessionId: string }) => worker.sessionId).sort()).toEqual(
+        group.map((worker) => String(worker.id)).sort(),
+      );
+      for (const target of [...first, ...second, ...third, ordinary]) {
+        const inspected = await probe(reader, { action: "inspect", sessionId: String(target.id) });
+        expect(inspected.role === "toolResult" && !!inspected.isError).toBe(
+          !group.includes(target),
+        );
+      }
+    }
+  }
+  const grandchild = first.find((worker) => worker.prompt === "cron grandchild")!;
+  await (
+    await main.submit(
+      {
+        type: "input",
+        content: `probe:${JSON.stringify({
+          action: "resume",
+          sessionId: String(grandchild.id),
+          prompt: "moved",
+          workspaceId: "other",
+        })}`,
+      },
+      context,
+    )
+  ).wait(context);
+  await until(async () => (await orchestration.listRunning()).length === 0);
+  const moved = await probe(grandchild, { action: "list", limit: 100 });
+  expect(
+    JSON.parse((moved.content[0] as { text: string }).text)
+      .workers.map((worker: { sessionId: string }) => worker.sessionId)
+      .sort(),
+  ).toEqual(first.map((worker) => String(worker.id)).sort());
 });
 
 test("inspect authorizes against the same snapshot as output during a workspace-changing resume", async () => {

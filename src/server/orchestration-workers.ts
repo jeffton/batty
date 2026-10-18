@@ -211,7 +211,7 @@ export function createWorkers(
   const subagent = defineTool({
     name: "subagent",
     description:
-      "Run, await, queue, resume, steer or stop subagents. list discovers subagents (stable sessionId, workspace, status), scanning up to limit conversations per page (default 50, max 100); pass nextCursor back as cursor even for empty pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. Main can discover all its subagents; workers can discover/inspect non-cron peers in their own workspace only. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple async helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
+      "Run, await, queue, resume, steer or stop subagents. list discovers subagents (stable sessionId, workspace, status), scanning up to limit conversations per page (default 50, max 100); pass nextCursor back as cursor even for empty pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. Main and non-cron workers in the configured assistant workspace can discover/inspect subagents across workspaces; other ordinary workers see peers in their own workspace only. Detached cron workers and their descendants can discover/inspect only their own cron-run tree, across workspaces; ordinary workers and other cron runs are excluded. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple async helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
     replay: "safe",
     parameters: Type.Object({
       action: Type.Union(
@@ -320,6 +320,7 @@ export function createWorkers(
           const candidate = state?.workers[id] ?? (await api.snapshot(ArchivedWorker, id, ctx));
           if (candidate) seeds.set(id, candidate);
         }
+        const assistantWorkspaceId = await services.assistantWorkspaceId();
         return api.commit(async (tx) => {
           const state = await tx.doc(OrchestrationDoc);
           const findWorker = async (id: string) => {
@@ -328,23 +329,30 @@ export function createWorkers(
           };
           const caller = await tx.doc(WorkerDoc, api.conversationId);
           const isMain = api.conversationId === state?.mainId;
-          const discoverable = async (id: ConversationId) => {
-            while (id !== state?.mainId) {
+          // Each detached cron run creates a distinct root conversation. Descendants
+          // retain that scope across workspace moves; job IDs would conflate runs.
+          const discoveryScope = async (
+            id: ConversationId,
+          ): Promise<{ cronRoot?: ConversationId } | undefined> => {
+            while (id !== state.mainId) {
               const metadata = await tx.doc(WorkerDoc, id);
-              if (!metadata?.isSubagent || metadata.isCron || metadata.parentId === undefined)
-                return false;
+              if (metadata.isCron) return { cronRoot: id };
+              if (!metadata.isSubagent || metadata.parentId === undefined) return undefined;
               id = metadata.parentId;
             }
-            return true;
+            return {};
           };
-          if (!isMain && !(await discoverable(api.conversationId)))
-            throw new Error("Subagent discovery requires main or a non-cron assigned subagent");
+          const scope = await discoveryScope(api.conversationId);
+          if (!scope) throw new Error("Subagent discovery requires main or an assigned worker");
           const visible = async (candidate: NonNullable<typeof state>["workers"][string]) => {
-            const metadata = await tx.doc(WorkerDoc, candidate.id);
+            const candidateScope = await discoveryScope(candidate.id);
+            if (!candidateScope) return false;
+            if (scope.cronRoot !== undefined || candidateScope.cronRoot !== undefined)
+              return scope.cronRoot !== undefined && scope.cronRoot === candidateScope.cronRoot;
             return (
-              metadata?.isSubagent &&
-              (await discoverable(candidate.id)) &&
-              (isMain || candidate.workspaceId === caller!.workspaceId)
+              isMain ||
+              (assistantWorkspaceId !== undefined && caller.workspaceId === assistantWorkspaceId) ||
+              candidate.workspaceId === caller.workspaceId
             );
           };
           const summary = async (candidate: NonNullable<typeof state>["workers"][string]) => {

@@ -25,6 +25,7 @@ import {
 } from "./browser-persistence";
 import { DEFAULT_BROWSER_MAX_TABS } from "./options";
 import { fillCredentialFields, prepareCredentialFields } from "./browser-credentials";
+import { installWebAuthnPolicy } from "./browser-webauthn";
 import {
   NATIVE_BROWSER_SCALE,
   NATIVE_BROWSER_SIZE,
@@ -1096,6 +1097,7 @@ export class BrowserService {
       this.registerPage(session, page, false);
     });
     try {
+      await browserAbortable(installWebAuthnPolicy(context), signal);
       for (const page of context.pages()) {
         const target = await browserAbortable(this.targetId(context, page), signal);
         this.registerPage(session, page, false, registry?.pages[target]);

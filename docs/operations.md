@@ -41,6 +41,12 @@ Linux browser sessions require `Xvfb`, `xauth` and FFmpeg with `x11grab` and `li
 
 Cloud video uses H.264/WebCodecs, not JPEG. Viewers require H.264 `VideoDecoder` support. Cloud viewports fit proportionally within 1365 CSS pixels per dimension and scale to the viewer; oversized tool/API requests are fitted too. Headless sessions without cloud viewing retain the larger viewport range. Native cloud-browser viewing is intentionally Linux-only for this installation; macOS/Windows deployments must not port it or add a fallback unless the user explicitly requests it. macOS/Windows tool browsing and ordinary headless browser sessions remain available and are not Linux-only. A headless process created before native capture cannot acquire an X display; viewing returns an explicit error and preserves the process, tabs and cookies. Replacing it requires an explicit browser close/open. This is a breaking transport/platform change; there is no automatic migration or compatibility fallback.
 
+### Remote website passkeys
+
+Tool-controlled browsers do not support WebAuthn/passkeys, including when a cloud viewer attaches later. A context-wide script hides `PublicKeyCredential` and rejects public-key credential requests and creation with `NotAllowedError`, including conditional mediation. Password and other credential types retain their browser behavior. Websites must offer their own password or alternative login; passkey-only sites are unsupported. This does not affect passkey authentication to Batty itself.
+
+The policy runs before website scripts in frames and on navigation. Reconnected browser documents also receive it without reloading or clearing page state. An already pending WebAuthn request/native dialog is not cancelled, and scripts that cached the original API before installation can retain it; reload explicitly or replace the browser if needed. This capability policy is not a security boundary against hostile page scripts. Device passkeys are not forwarded to the VPS.
+
 ### Local credential panel
 
 The cloud-browser header’s **Login** button opens a local username/password form using standard `autocomplete="username"` and `autocomplete="current-password"` fields. Choose a login with the device’s password manager, verify the displayed remote origin, then explicitly select **Fill remote login**. Password-manager suggestions and manual selection depend on the client; physical iOS AutoFill has not been verified. Batty does not impersonate the remote origin for AutoFill.

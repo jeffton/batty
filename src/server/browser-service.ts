@@ -15,12 +15,13 @@ import {
   browserSessionDirectory,
   closePersistentBrowser,
   connectPersistentBrowser,
+  persistentBrowserDisplay,
   readBrowserJson,
   writeBrowserJson,
   type PersistentBrowserRegistry,
 } from "./browser-persistence";
 import { DEFAULT_BROWSER_MAX_TABS } from "./options";
-import { NATIVE_BROWSER_SCALE, NATIVE_BROWSER_SIZE, type BrowserDisplay } from "./browser-display";
+import { NATIVE_BROWSER_SCALE, NATIVE_BROWSER_SIZE } from "./browser-display";
 import type { NativeCaptureGeometry } from "./native-browser-video";
 import type { BrowserProxy } from "./ssh-socks-proxy";
 import type { BrowserAction, BrowserActionInput } from "./browser-schemas";
@@ -524,17 +525,7 @@ export class BrowserService {
       );
     return this.cloudOperation(id, async (session) => {
       const page = this.cloudInputPage(session, state);
-      const display = await readBrowserJson<BrowserDisplay>(
-        path.join(session.directory, "display.json"),
-      );
-      if (!display)
-        throw Object.assign(
-          new Error(
-            "This browser predates native H.264 capture. The existing browser and login are unchanged; a new browser process is required.",
-          ),
-          { statusCode: 426 },
-        );
-      process.kill(display.pid, 0);
+      const display = await persistentBrowserDisplay(session.directory);
       const width = state.width * NATIVE_BROWSER_SCALE;
       const height = state.height * NATIVE_BROWSER_SCALE;
       if (width > NATIVE_BROWSER_SIZE || height > NATIVE_BROWSER_SIZE)

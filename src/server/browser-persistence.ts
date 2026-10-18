@@ -88,6 +88,22 @@ export async function writeBrowserJson(file: string, value: unknown): Promise<vo
   await fs.rename(`${file}.tmp`, file);
 }
 
+/** Resolve the live display owned by this persistent browser, without exposing its receipt. */
+export async function persistentBrowserDisplay(
+  directory: string,
+): Promise<Pick<BrowserDisplay, "display" | "authority">> {
+  const display = await readBrowserJson<BrowserDisplay>(path.join(directory, "display.json"));
+  if (!display)
+    throw Object.assign(
+      new Error(
+        "This browser predates native H.264 capture. The existing browser and login are unchanged; a new browser process is required.",
+      ),
+      { statusCode: 426 },
+    );
+  process.kill(display.pid, 0);
+  return { display: display.display, authority: display.authority };
+}
+
 export async function connectPersistentBrowser(
   directory: string,
   options?: { useTailscale: boolean; proxyServer?: string; userAgent?: string },

@@ -4,7 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import type { Browser } from "patchright";
-import { closePersistentBrowser, connectPersistentBrowser } from "./browser-persistence";
+import {
+  closePersistentBrowser,
+  connectPersistentBrowser,
+  persistentBrowserDisplay,
+} from "./browser-persistence";
 import { createBrowserDisplay, stopBrowserDisplay } from "./browser-display";
 import { chromium } from "patchright";
 
@@ -33,6 +37,26 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await fs.rm(directory, { recursive: true, force: true });
+});
+
+test("native viewing rejects a missing or dead display without replacing the browser", async () => {
+  await expect(persistentBrowserDisplay(directory)).rejects.toMatchObject({ statusCode: 426 });
+  expect(await fs.readdir(directory)).toEqual([]);
+
+  const display = { pid: 123456, display: ":456", authority: path.join(directory, "Xauthority") };
+  const receipt = JSON.stringify(display);
+  await fs.writeFile(path.join(directory, "display.json"), receipt);
+  const dead = Object.assign(new Error("Display process is gone"), { code: "ESRCH" });
+  const kill = vi.spyOn(process, "kill").mockImplementation(() => {
+    throw dead;
+  });
+  try {
+    await expect(persistentBrowserDisplay(directory)).rejects.toBe(dead);
+    expect(kill).toHaveBeenCalledWith(display.pid, 0);
+    expect(await fs.readFile(path.join(directory, "display.json"), "utf8")).toBe(receipt);
+  } finally {
+    kill.mockRestore();
+  }
 });
 
 test("display cleanup still runs when closing the CDP connection rejects", async () => {

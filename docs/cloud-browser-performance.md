@@ -14,6 +14,8 @@ Screencast limits downsample to at most 2× density/JPEG80 during motion. Wheel 
 
 ## Verification
 
+See [stage measurements](cloud-browser-stage-measurements.md) for correlated input, CDP, screencast, transport and decode timings, including settled single-move trials and relay byte validation.
+
 A large bitmap alone does not prove correct rendering. The binary-popover regression test checks page colors in all four viewport corners, edge clicks, nested scrolling, outer scrolling and rotation at DPR3. A 358×757 CSS viewport produces 1074×2271 pixels at rest and 716×1514 during motion, with the page filling the image.
 
 Run `pnpm exec tsx scripts/benchmark-cloud-browser.ts` for repeatable performance measurements. It uses a real remote Chromium page, native touch input in an emulated 390×844/DPR3 viewer, a TCP relay, and a three-second drag. Defaults are 60 ms RTT and 20 Mbit/s downstream; set `BENCH_RTT_MS=0 BENCH_DOWN_MBIT=1000` for a near-local baseline through the same relay. `BENCH_CONSTANT_CAPTURE=1` keeps full DPR3 during motion for a fixed-capture comparison. A remote color marker identifies presented paints. The benchmark rejects padded images and reports cadence, bytes, first response, final paint and full-resolution refinement separately. The local baseline still includes browser/CDP scheduling and the relay process; neither setup represents a physical iPhone.

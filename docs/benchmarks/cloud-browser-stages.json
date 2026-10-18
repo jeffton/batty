@@ -1,0 +1,941 @@
+{
+  "description": "Isolated DPR3/JPEG85 native-touch stage benchmark; ms unless named bytes. Continuous rows are associations, settled rows are first marker response to a single move. CDP ack overlaps render stages. Canvas draw completion is not physical display presentation.",
+  "profiles": {
+    "local": {
+      "runs": [
+        {
+          "profile": {
+            "rttMs": 0,
+            "downMbit": 1000,
+            "constantCapture": true,
+            "workload": "continuous"
+          },
+          "clock_bounds": {
+            "viewerClock": {
+              "offset": 3741.118101976158,
+              "uncertainty": 0.39946899999995367
+            },
+            "remoteClock": {
+              "offset": 4447.899306023842,
+              "uncertainty": 0.5796829999999318
+            },
+            "endViewerClock": {
+              "offset": 3741.0922524046327,
+              "uncertainty": 0.3379445000000487
+            },
+            "endRemoteClock": {
+              "offset": 4447.975446,
+              "uncertainty": 0.4423690000003262
+            }
+          },
+          "relay": {
+            "drag_seconds": 7.927,
+            "down_released_bytes_during_drag": 56905212,
+            "effective_down_mbit": 57.43,
+            "total_down_released_bytes": 66640146,
+            "received_frame_bytes_entire_trace": 66636323
+          },
+          "counts": {
+            "sent": 242,
+            "server_received": 242,
+            "executed": 174,
+            "coalesced": 68,
+            "screencast_received": 331,
+            "transmitted": 249,
+            "received_frames": 249,
+            "canvas_drawn": 249,
+            "correlated_rows": 149
+          },
+          "first_reflected_frame": {
+            "input_to_send_reflected": 0.10000002384185791,
+            "send_to_receive_reflected": 1.294151952316497,
+            "receive_to_dispatch_reflected": 1.400126999999884,
+            "dispatch_to_scroll_event": 64.28692502384183,
+            "scroll_event_to_screencast_receipt": 99.53805597615792,
+            "screencast_receipt_to_ws_send": 1.1198960000001534,
+            "ws_send_to_client_receive": 20.660843999999997,
+            "receive_to_decode_start": 0.7000000476837158,
+            "decode": 17.0,
+            "decode_to_canvas_paint": 16.799999952316284,
+            "input_to_canvas_paint": 222.89999997615814,
+            "frame_bytes": 268259,
+            "server_buffered_bytes": 0
+          }
+        },
+        {
+          "profile": {
+            "rttMs": 0,
+            "downMbit": 1000,
+            "constantCapture": true,
+            "workload": "continuous"
+          },
+          "clock_bounds": {
+            "viewerClock": {
+              "offset": 2482.1408929284744,
+              "uncertainty": 0.2894139999998515
+            },
+            "remoteClock": {
+              "offset": 3133.7514914284743,
+              "uncertainty": 0.339529500000026
+            },
+            "endViewerClock": {
+              "offset": 2482.060551404633,
+              "uncertainty": 0.6314485000002605
+            },
+            "endRemoteClock": {
+              "offset": 3133.6163814284737,
+              "uncertainty": 0.7787684999993871
+            }
+          },
+          "relay": {
+            "drag_seconds": 7.941,
+            "down_released_bytes_during_drag": 56661916,
+            "effective_down_mbit": 57.083,
+            "total_down_released_bytes": 65586118,
+            "received_frame_bytes_entire_trace": 65581896
+          },
+          "counts": {
+            "sent": 242,
+            "server_received": 242,
+            "executed": 176,
+            "coalesced": 66,
+            "screencast_received": 341,
+            "transmitted": 245,
+            "received_frames": 245,
+            "canvas_drawn": 245,
+            "correlated_rows": 154
+          },
+          "first_reflected_frame": {
+            "input_to_send_reflected": 0.09999990463256836,
+            "send_to_receive_reflected": 1.3429410715252743,
+            "receive_to_dispatch_reflected": 1.452925000000505,
+            "dispatch_to_scroll_event": 64.3147324284746,
+            "scroll_event_to_screencast_receipt": 77.6422755715248,
+            "screencast_receipt_to_ws_send": 13.223676000000523,
+            "ws_send_to_client_receive": 13.523449928474292,
+            "receive_to_decode_start": 29.40000009536743,
+            "decode": 19.199999928474426,
+            "decode_to_canvas_paint": 13.600000023841858,
+            "input_to_canvas_paint": 233.79999995231628,
+            "frame_bytes": 268259,
+            "server_buffered_bytes": 0
+          }
+        },
+        {
+          "profile": {
+            "rttMs": 0,
+            "downMbit": 1000,
+            "constantCapture": true,
+            "workload": "continuous"
+          },
+          "clock_bounds": {
+            "viewerClock": {
+              "offset": 2496.8406664046324,
+              "uncertainty": 0.2500645000000077
+            },
+            "remoteClock": {
+              "offset": 3108.6617555000003,
+              "uncertainty": 0.31376449999993383
+            },
+            "endViewerClock": {
+              "offset": 2496.774458976157,
+              "uncertainty": 0.43283400000018446
+            },
+            "endRemoteClock": {
+              "offset": 3108.604813547685,
+              "uncertainty": 0.6312035000000833
+            }
+          },
+          "relay": {
+            "drag_seconds": 7.926,
+            "down_released_bytes_during_drag": 57772373,
+            "effective_down_mbit": 58.31,
+            "total_down_released_bytes": 65350789,
+            "received_frame_bytes_entire_trace": 65346577
+          },
+          "counts": {
+            "sent": 242,
+            "server_received": 242,
+            "executed": 174,
+            "coalesced": 68,
+            "screencast_received": 330,
+            "transmitted": 244,
+            "received_frames": 244,
+            "canvas_drawn": 244,
+            "correlated_rows": 142
+          },
+          "first_reflected_frame": {
+            "input_to_send_reflected": 0.10000002384185791,
+            "send_to_receive_reflected": 0.7433165476841168,
+            "receive_to_dispatch_reflected": 0.7232070000000022,
+            "dispatch_to_scroll_event": 32.15456549999999,
+            "scroll_event_to_screencast_receipt": 62.63149650000014,
+            "screencast_receipt_to_ws_send": 1.1823759999997492,
+            "ws_send_to_client_receive": 8.865038404632287,
+            "receive_to_decode_start": 0.9000000953674316,
+            "decode": 16.399999976158142,
+            "decode_to_canvas_paint": 11.899999976158142,
+            "input_to_canvas_paint": 135.60000002384186,
+            "frame_bytes": 268259,
+            "server_buffered_bytes": 0
+          }
+        }
+      ],
+      "pooled_stages": {
+        "input_to_send": {
+          "n": 726,
+          "p50": 0.1,
+          "p95": 0.2
+        },
+        "send_to_server_receive": {
+          "n": 726,
+          "p50": 4.88,
+          "p95": 20.58
+        },
+        "receive_to_operation": {
+          "n": 524,
+          "p50": 11.58,
+          "p95": 36.21
+        },
+        "operation_to_service_guard": {
+          "n": 524,
+          "p50": 0.98,
+          "p95": 23.98
+        },
+        "service_guard_to_cdp_send": {
+          "n": 524,
+          "p50": 0.02,
+          "p95": 0.06
+        },
+        "cdp_send_to_ack": {
+          "n": 524,
+          "p50": 39.72,
+          "p95": 68.5
+        },
+        "cdp_send_to_ack_touchStart": {
+          "n": 3,
+          "p50": 4.61,
+          "p95": 5.43
+        },
+        "cdp_send_to_ack_touchMove": {
+          "n": 518,
+          "p50": 39.85,
+          "p95": 70.08
+        },
+        "cdp_send_to_ack_touchEnd": {
+          "n": 3,
+          "p50": 36.1,
+          "p95": 38.11
+        },
+        "input_to_send_reflected": {
+          "n": 445,
+          "p50": 0.1,
+          "p95": 0.2
+        },
+        "send_to_receive_reflected": {
+          "n": 445,
+          "p50": 3.5,
+          "p95": 16.25
+        },
+        "receive_to_dispatch_reflected": {
+          "n": 445,
+          "p50": 14.7,
+          "p95": 42.28
+        },
+        "dispatch_to_scroll_event": {
+          "n": 445,
+          "p50": 82.38,
+          "p95": 116.05
+        },
+        "scroll_event_to_screencast_receipt": {
+          "n": 445,
+          "p50": 94.42,
+          "p95": 134.37
+        },
+        "screencast_receipt_to_ws_send": {
+          "n": 445,
+          "p50": 7.96,
+          "p95": 26.21
+        },
+        "ws_send_to_client_receive": {
+          "n": 445,
+          "p50": 10.87,
+          "p95": 31.0
+        },
+        "receive_to_decode_start": {
+          "n": 445,
+          "p50": 1.4,
+          "p95": 25.3
+        },
+        "decode": {
+          "n": 445,
+          "p50": 16.9,
+          "p95": 27.5
+        },
+        "decode_to_canvas_paint": {
+          "n": 445,
+          "p50": 9.8,
+          "p95": 16.2
+        },
+        "input_to_canvas_paint": {
+          "n": 445,
+          "p50": 250.9,
+          "p95": 316.2
+        },
+        "frame_bytes": {
+          "n": 445,
+          "p50": 268345,
+          "p95": 273321
+        },
+        "server_buffered_bytes": {
+          "n": 445,
+          "p50": 0,
+          "p95": 0
+        }
+      }
+    },
+    "mobile": {
+      "runs": [
+        {
+          "profile": {
+            "rttMs": 60,
+            "downMbit": 20,
+            "constantCapture": true,
+            "workload": "continuous"
+          },
+          "clock_bounds": {
+            "viewerClock": {
+              "offset": 2567.180368976158,
+              "uncertainty": 0.24528400000008332
+            },
+            "remoteClock": {
+              "offset": 3267.306588476158,
+              "uncertainty": 0.3318045000000893
+            },
+            "endViewerClock": {
+              "offset": 2567.1126719046333,
+              "uncertainty": 0.47015399999963847
+            },
+            "endRemoteClock": {
+              "offset": 3267.2609299523174,
+              "uncertainty": 0.42759399999977177
+            }
+          },
+          "relay": {
+            "drag_seconds": 7.935,
+            "down_released_bytes_during_drag": 18848778,
+            "effective_down_mbit": 19.004,
+            "total_down_released_bytes": 22213083,
+            "received_frame_bytes_entire_trace": 22210481
+          },
+          "counts": {
+            "sent": 242,
+            "server_received": 242,
+            "executed": 176,
+            "coalesced": 66,
+            "screencast_received": 353,
+            "transmitted": 83,
+            "received_frames": 83,
+            "canvas_drawn": 83,
+            "correlated_rows": 71
+          },
+          "first_reflected_frame": {
+            "input_to_send_reflected": 0.10000002384185791,
+            "send_to_receive_reflected": 31.17353297615773,
+            "receive_to_dispatch_reflected": 1.819445000000087,
+            "dispatch_to_scroll_event": 50.4332414761584,
+            "scroll_event_to_screencast_receipt": 65.5292945238416,
+            "screencast_receipt_to_ws_send": 4.162248999999974,
+            "ws_send_to_client_receive": 227.8822370238422,
+            "receive_to_decode_start": 1.0,
+            "decode": 11.5,
+            "decode_to_canvas_paint": 6.200000047683716,
+            "input_to_canvas_paint": 399.8000000715256,
+            "frame_bytes": 268259,
+            "server_buffered_bytes": 0
+          }
+        },
+        {
+          "profile": {
+            "rttMs": 60,
+            "downMbit": 20,
+            "constantCapture": true,
+            "workload": "continuous"
+          },
+          "clock_bounds": {
+            "viewerClock": {
+              "offset": 2531.215171476158,
+              "uncertainty": 0.3107795000000806
+            },
+            "remoteClock": {
+              "offset": 3277.4134199761584,
+              "uncertainty": 0.339439000000084
+            },
+            "endViewerClock": {
+              "offset": 2530.9720654046323,
+              "uncertainty": 0.5883785000005446
+            },
+            "endRemoteClock": {
+              "offset": 3277.3384824999994,
+              "uncertainty": 0.7062534999995478
+            }
+          },
+          "relay": {
+            "drag_seconds": 7.932,
+            "down_released_bytes_during_drag": 18820800,
+            "effective_down_mbit": 18.981,
+            "total_down_released_bytes": 22466034,
+            "received_frame_bytes_entire_trace": 22463422
+          },
+          "counts": {
+            "sent": 242,
+            "server_received": 242,
+            "executed": 182,
+            "coalesced": 60,
+            "screencast_received": 366,
+            "transmitted": 84,
+            "received_frames": 84,
+            "canvas_drawn": 84,
+            "correlated_rows": 71
+          },
+          "first_reflected_frame": {
+            "input_to_send_reflected": 0.09999990463256836,
+            "send_to_receive_reflected": 31.000703523841366,
+            "receive_to_dispatch_reflected": 1.5460460000003877,
+            "dispatch_to_scroll_event": 51.05149895231625,
+            "scroll_event_to_screencast_receipt": 84.74525404768337,
+            "screencast_receipt_to_ws_send": 3.0257030000002487,
+            "ws_send_to_client_receive": 229.23079450000023,
+            "receive_to_decode_start": 2.3000000715255737,
+            "decode": 12.0,
+            "decode_to_canvas_paint": 2.0999999046325684,
+            "input_to_canvas_paint": 417.09999990463257,
+            "frame_bytes": 268259,
+            "server_buffered_bytes": 0
+          }
+        },
+        {
+          "profile": {
+            "rttMs": 60,
+            "downMbit": 20,
+            "constantCapture": true,
+            "workload": "continuous"
+          },
+          "clock_bounds": {
+            "viewerClock": {
+              "offset": 2470.96497,
+              "uncertainty": 0.29197400000020934
+            },
+            "remoteClock": {
+              "offset": 3197.7547290476837,
+              "uncertainty": 0.35490900000013426
+            },
+            "endViewerClock": {
+              "offset": 2470.8083145,
+              "uncertainty": 0.6191935000006197
+            },
+            "endRemoteClock": {
+              "offset": 3197.6870655000002,
+              "uncertainty": 0.7980774999996356
+            }
+          },
+          "relay": {
+            "drag_seconds": 7.927,
+            "down_released_bytes_during_drag": 18790710,
+            "effective_down_mbit": 18.963,
+            "total_down_released_bytes": 22229656,
+            "received_frame_bytes_entire_trace": 22227054
+          },
+          "counts": {
+            "sent": 242,
+            "server_received": 242,
+            "executed": 176,
+            "coalesced": 66,
+            "screencast_received": 355,
+            "transmitted": 83,
+            "received_frames": 83,
+            "canvas_drawn": 83,
+            "correlated_rows": 70
+          },
+          "first_reflected_frame": {
+            "input_to_send_reflected": 0.10000002384185791,
+            "send_to_receive_reflected": 31.075924928474706,
+            "receive_to_dispatch_reflected": 1.4279659999992873,
+            "dispatch_to_scroll_event": 51.08586795231622,
+            "scroll_event_to_screencast_receipt": 115.0419640476839,
+            "screencast_receipt_to_ws_send": 1.1534879999999248,
+            "ws_send_to_client_receive": 201.01478902384224,
+            "receive_to_decode_start": 0.8999999761581421,
+            "decode": 13.200000047683716,
+            "decode_to_canvas_paint": 1.600000023841858,
+            "input_to_canvas_paint": 416.60000002384186,
+            "frame_bytes": 268259,
+            "server_buffered_bytes": 0
+          }
+        }
+      ],
+      "pooled_stages": {
+        "input_to_send": {
+          "n": 726,
+          "p50": 0.1,
+          "p95": 0.2
+        },
+        "send_to_server_receive": {
+          "n": 726,
+          "p50": 32.07,
+          "p95": 42.37
+        },
+        "receive_to_operation": {
+          "n": 534,
+          "p50": 13.81,
+          "p95": 35.34
+        },
+        "operation_to_service_guard": {
+          "n": 534,
+          "p50": 0.58,
+          "p95": 8.96
+        },
+        "service_guard_to_cdp_send": {
+          "n": 534,
+          "p50": 0.02,
+          "p95": 0.07
+        },
+        "cdp_send_to_ack": {
+          "n": 534,
+          "p50": 41.1,
+          "p95": 65.17
+        },
+        "cdp_send_to_ack_touchStart": {
+          "n": 3,
+          "p50": 6.22,
+          "p95": 7.31
+        },
+        "cdp_send_to_ack_touchMove": {
+          "n": 528,
+          "p50": 41.18,
+          "p95": 65.17
+        },
+        "cdp_send_to_ack_touchEnd": {
+          "n": 3,
+          "p50": 33.96,
+          "p95": 44.11
+        },
+        "input_to_send_reflected": {
+          "n": 212,
+          "p50": 0.1,
+          "p95": 0.1
+        },
+        "send_to_receive_reflected": {
+          "n": 212,
+          "p50": 31.45,
+          "p95": 40.96
+        },
+        "receive_to_dispatch_reflected": {
+          "n": 212,
+          "p50": 15.39,
+          "p95": 42.37
+        },
+        "dispatch_to_scroll_event": {
+          "n": 212,
+          "p50": 77.17,
+          "p95": 116.94
+        },
+        "scroll_event_to_screencast_receipt": {
+          "n": 212,
+          "p50": 95.89,
+          "p95": 126.39
+        },
+        "screencast_receipt_to_ws_send": {
+          "n": 212,
+          "p50": 11.75,
+          "p95": 33.56
+        },
+        "ws_send_to_client_receive": {
+          "n": 212,
+          "p50": 155.19,
+          "p95": 167.18
+        },
+        "receive_to_decode_start": {
+          "n": 212,
+          "p50": 1.0,
+          "p95": 3.0
+        },
+        "decode": {
+          "n": 212,
+          "p50": 15.9,
+          "p95": 24.5
+        },
+        "decode_to_canvas_paint": {
+          "n": 212,
+          "p50": 8.6,
+          "p95": 16.2
+        },
+        "input_to_canvas_paint": {
+          "n": 212,
+          "p50": 417.0,
+          "p95": 467.9
+        },
+        "frame_bytes": {
+          "n": 212,
+          "p50": 268079,
+          "p95": 273396
+        },
+        "server_buffered_bytes": {
+          "n": 212,
+          "p50": 0,
+          "p95": 0
+        }
+      }
+    },
+    "settled-local": {
+      "runs": [
+        {
+          "profile": {
+            "rttMs": 0,
+            "downMbit": 1000,
+            "constantCapture": true,
+            "workload": "settled"
+          },
+          "clock_bounds": {
+            "viewerClock": {
+              "offset": 2477.337929976158,
+              "uncertainty": 0.26686900000004243
+            },
+            "remoteClock": {
+              "offset": 3123.2290109523165,
+              "uncertainty": 0.3334339999998974
+            },
+            "endViewerClock": {
+              "offset": 2477.214805952317,
+              "uncertainty": 0.6932329999981448
+            },
+            "endRemoteClock": {
+              "offset": 3123.213447452319,
+              "uncertainty": 0.7893824999991921
+            }
+          },
+          "relay": {
+            "drag_seconds": 68.724,
+            "down_released_bytes_during_drag": 136688170,
+            "effective_down_mbit": 15.912,
+            "total_down_released_bytes": 139899687,
+            "received_frame_bytes_entire_trace": 139892797
+          },
+          "counts": {
+            "sent": 120,
+            "server_received": 120,
+            "executed": 120,
+            "coalesced": 0,
+            "screencast_received": 569,
+            "transmitted": 511,
+            "received_frames": 511,
+            "canvas_drawn": 511,
+            "correlated_rows": 40
+          },
+          "first_reflected_frame": {
+            "input_to_send_reflected": 0.40000009536743164,
+            "send_to_receive_reflected": 1.1937429523159153,
+            "receive_to_dispatch_reflected": 1.5352560000001176,
+            "dispatch_to_scroll_event": 14.562082000000373,
+            "scroll_event_to_screencast_receipt": 150.76678300000003,
+            "screencast_receipt_to_ws_send": 1.5256549999994604,
+            "ws_send_to_client_receive": 39.51648095231667,
+            "receive_to_decode_start": 1.2000000476837158,
+            "decode": 26.100000023841858,
+            "decode_to_canvas_paint": 13.199999928474426,
+            "input_to_canvas_paint": 250.0,
+            "frame_bytes": 268100,
+            "server_buffered_bytes": 0
+          }
+        }
+      ],
+      "pooled_stages": {
+        "input_to_send": {
+          "n": 120,
+          "p50": 0.1,
+          "p95": 0.3
+        },
+        "send_to_server_receive": {
+          "n": 120,
+          "p50": 2.22,
+          "p95": 2.91
+        },
+        "receive_to_operation": {
+          "n": 120,
+          "p50": 0.23,
+          "p95": 0.42
+        },
+        "operation_to_service_guard": {
+          "n": 120,
+          "p50": 0.96,
+          "p95": 1.9
+        },
+        "service_guard_to_cdp_send": {
+          "n": 120,
+          "p50": 0.04,
+          "p95": 0.1
+        },
+        "cdp_send_to_ack": {
+          "n": 120,
+          "p50": 3.39,
+          "p95": 50.08
+        },
+        "cdp_send_to_ack_touchStart": {
+          "n": 40,
+          "p50": 3.26,
+          "p95": 4.23
+        },
+        "cdp_send_to_ack_touchMove": {
+          "n": 40,
+          "p50": 3.14,
+          "p95": 3.58
+        },
+        "cdp_send_to_ack_touchEnd": {
+          "n": 40,
+          "p50": 29.06,
+          "p95": 62.21
+        },
+        "input_to_send_reflected": {
+          "n": 40,
+          "p50": 0.1,
+          "p95": 0.2
+        },
+        "send_to_receive_reflected": {
+          "n": 40,
+          "p50": 1.56,
+          "p95": 2.5
+        },
+        "receive_to_dispatch_reflected": {
+          "n": 40,
+          "p50": 1.2,
+          "p95": 1.54
+        },
+        "dispatch_to_scroll_event": {
+          "n": 40,
+          "p50": 13.8,
+          "p95": 49.95
+        },
+        "scroll_event_to_screencast_receipt": {
+          "n": 40,
+          "p50": 111.16,
+          "p95": 140.41
+        },
+        "screencast_receipt_to_ws_send": {
+          "n": 40,
+          "p50": 1.44,
+          "p95": 8.1
+        },
+        "ws_send_to_client_receive": {
+          "n": 40,
+          "p50": 26.16,
+          "p95": 43.73
+        },
+        "receive_to_decode_start": {
+          "n": 40,
+          "p50": 1.2,
+          "p95": 23.9
+        },
+        "decode": {
+          "n": 40,
+          "p50": 24.4,
+          "p95": 28.1
+        },
+        "decode_to_canvas_paint": {
+          "n": 40,
+          "p50": 0.4,
+          "p95": 15.7
+        },
+        "input_to_canvas_paint": {
+          "n": 40,
+          "p50": 200.0,
+          "p95": 233.3
+        },
+        "frame_bytes": {
+          "n": 40,
+          "p50": 274951,
+          "p95": 275896
+        },
+        "server_buffered_bytes": {
+          "n": 40,
+          "p50": 0,
+          "p95": 0
+        }
+      }
+    },
+    "settled-mobile": {
+      "runs": [
+        {
+          "profile": {
+            "rttMs": 60,
+            "downMbit": 20,
+            "constantCapture": true,
+            "workload": "settled"
+          },
+          "clock_bounds": {
+            "viewerClock": {
+              "offset": 2543.695406476158,
+              "uncertainty": 0.2517195000000356
+            },
+            "remoteClock": {
+              "offset": 3281.572997,
+              "uncertainty": 0.3885640000000876
+            },
+            "endViewerClock": {
+              "offset": 2543.4859150715347,
+              "uncertainty": 0.6337980000025709
+            },
+            "endRemoteClock": {
+              "offset": 3281.5114410000097,
+              "uncertainty": 0.7978179999990971
+            }
+          },
+          "relay": {
+            "drag_seconds": 68.856,
+            "down_released_bytes_during_drag": 65743338,
+            "effective_down_mbit": 7.638,
+            "total_down_released_bytes": 67082332,
+            "received_frame_bytes_entire_trace": 67078102
+          },
+          "counts": {
+            "sent": 120,
+            "server_received": 120,
+            "executed": 120,
+            "coalesced": 0,
+            "screencast_received": 627,
+            "transmitted": 245,
+            "received_frames": 245,
+            "canvas_drawn": 245,
+            "correlated_rows": 40
+          },
+          "first_reflected_frame": {
+            "input_to_send_reflected": 0.40000009536743164,
+            "send_to_receive_reflected": 32.03799750000053,
+            "receive_to_dispatch_reflected": 1.6749959999997373,
+            "dispatch_to_scroll_event": 66.0645970000005,
+            "scroll_event_to_screencast_receipt": 91.02752700000019,
+            "screencast_receipt_to_ws_send": 2.7151429999994434,
+            "ws_send_to_client_receive": 214.87973947615774,
+            "receive_to_decode_start": 1.1999999284744263,
+            "decode": 35.800000071525574,
+            "decode_to_canvas_paint": 4.100000023841858,
+            "input_to_canvas_paint": 449.90000009536743,
+            "frame_bytes": 268100,
+            "server_buffered_bytes": 0
+          }
+        }
+      ],
+      "pooled_stages": {
+        "input_to_send": {
+          "n": 120,
+          "p50": 0.1,
+          "p95": 0.2
+        },
+        "send_to_server_receive": {
+          "n": 120,
+          "p50": 31.12,
+          "p95": 32.42
+        },
+        "receive_to_operation": {
+          "n": 120,
+          "p50": 0.24,
+          "p95": 0.4
+        },
+        "operation_to_service_guard": {
+          "n": 120,
+          "p50": 0.99,
+          "p95": 7.84
+        },
+        "service_guard_to_cdp_send": {
+          "n": 120,
+          "p50": 0.05,
+          "p95": 0.1
+        },
+        "cdp_send_to_ack": {
+          "n": 120,
+          "p50": 3.63,
+          "p95": 40.24
+        },
+        "cdp_send_to_ack_touchStart": {
+          "n": 40,
+          "p50": 3.28,
+          "p95": 3.97
+        },
+        "cdp_send_to_ack_touchMove": {
+          "n": 40,
+          "p50": 3.31,
+          "p95": 6.18
+        },
+        "cdp_send_to_ack_touchEnd": {
+          "n": 40,
+          "p50": 26.7,
+          "p95": 45.41
+        },
+        "input_to_send_reflected": {
+          "n": 40,
+          "p50": 0.1,
+          "p95": 0.2
+        },
+        "send_to_receive_reflected": {
+          "n": 40,
+          "p50": 30.87,
+          "p95": 31.54
+        },
+        "receive_to_dispatch_reflected": {
+          "n": 40,
+          "p50": 1.3,
+          "p95": 1.9
+        },
+        "dispatch_to_scroll_event": {
+          "n": 40,
+          "p50": 51.35,
+          "p95": 67.28
+        },
+        "scroll_event_to_screencast_receipt": {
+          "n": 40,
+          "p50": 95.44,
+          "p95": 117.17
+        },
+        "screencast_receipt_to_ws_send": {
+          "n": 40,
+          "p50": 1.45,
+          "p95": 5.92
+        },
+        "ws_send_to_client_receive": {
+          "n": 40,
+          "p50": 206.94,
+          "p95": 235.46
+        },
+        "receive_to_decode_start": {
+          "n": 40,
+          "p50": 1.3,
+          "p95": 1.6
+        },
+        "decode": {
+          "n": 40,
+          "p50": 27.3,
+          "p95": 32.7
+        },
+        "decode_to_canvas_paint": {
+          "n": 40,
+          "p50": 0.5,
+          "p95": 12.5
+        },
+        "input_to_canvas_paint": {
+          "n": 40,
+          "p50": 421.3,
+          "p95": 450.2
+        },
+        "frame_bytes": {
+          "n": 40,
+          "p50": 274951,
+          "p95": 275896
+        },
+        "server_buffered_bytes": {
+          "n": 40,
+          "p50": 0,
+          "p95": 0
+        }
+      }
+    }
+  }
+}

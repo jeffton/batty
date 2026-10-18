@@ -28,6 +28,7 @@ import {
 
 import { reportWithAttachments } from "./attachment-contract.js";
 import { reportWithArtifacts } from "./artifact-forwarding.js";
+import { runtimeResultArtifacts } from "./runtime-result-artifacts.js";
 
 import { ArchivedWorker, DeliveryRecord } from "./orchestration-history";
 
@@ -209,11 +210,11 @@ export function createWorkers(
   const subagent = defineTool({
     name: "subagent",
     description:
-      "Run, await, queue, resume, steer or stop subagents. Start a subagent, await it, then use its result. Start multiple async helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
+      "Run, await, queue, resume, steer or stop subagents. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple async helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
     replay: "safe",
     parameters: Type.Object({
       action: Type.Union(
-        (["run", "await", "queue", "resume", "steer", "stop"] as const).map((value) =>
+        (["run", "await", "queue", "resume", "steer", "stop", "report"] as const).map((value) =>
           Type.Literal(value),
         ),
       ),
@@ -228,6 +229,62 @@ export function createWorkers(
       ),
     }),
     execute: async (args, api, ctx) => {
+      if (args.action === "report") {
+        if (args.sessionId !== undefined)
+          throw new Error("Report targets the actual parent; omit sessionId");
+        if (!args.prompt?.trim()) throw new Error("report requires prompt");
+        const metadata = await api.snapshot(WorkerDoc, api.conversationId, ctx);
+        if (!metadata?.isSubagent || metadata.parentId === undefined || !metadata.completion)
+          throw new Error("Only an assigned subagent can report to its parent");
+        const parentId = metadata.parentId;
+        // Pin both text and attachment descriptors across safe tool replay. Only
+        // this assignment contributes artifacts, never an earlier resumed run.
+        const content = await api.memo(
+          "batty.progress-report",
+          await api.commit(async (tx) => {
+            const source = await tx.submissionByRequest(
+              api.conversationId,
+              `batty-deliver:${metadata.completion!.owner}`,
+            );
+            if (!source?.entry) throw new Error("Missing subagent assignment entry");
+            const entries = [];
+            let cursor;
+            do {
+              const page = await tx.scanEntries(
+                { conversationId: api.conversationId, minEntryId: source.entry },
+                200,
+                cursor,
+              );
+              entries.unshift(...[...page.items].reverse());
+              cursor = page.next;
+            } while (cursor);
+            const artifacts = runtimeResultArtifacts(entries);
+            return encodeRuntimeNotice({
+              kind: "subagent",
+              text: `[subagent ${api.conversationId} report]\n${reportWithArtifacts(reportWithAttachments(args.prompt!, artifacts.sentFiles), artifacts)}`,
+              data: {
+                runtimeResultArtifacts: artifacts,
+                runtimeNotice: {
+                  text: `Subagent ${api.conversationId} report`,
+                  markdown: args.prompt!,
+                },
+                subagent: { sessionId: String(api.conversationId) },
+              },
+            });
+          }, ctx),
+          ctx,
+        );
+        await (await api.conversation(parentId, ctx))!.submit(
+          {
+            type: "input",
+            content,
+            whenBusy: "steer",
+            requestId: `batty-progress:${api.taskId}`,
+          },
+          ctx,
+        );
+        return reply(`Reported to parent. Session ID: ${api.conversationId}. Work may continue.`);
+      }
       const state = await api.snapshot(OrchestrationDoc, ctx);
       const existingCall = (await api.snapshot(DeliveryRecord, String(api.taskId), ctx))?.call;
       const workerId = existingCall?.workerId ?? args.sessionId;

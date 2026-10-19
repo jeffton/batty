@@ -17,6 +17,89 @@ import { suppressAgentCompletionNotification } from "../shared/agent-notificatio
 
 import { cleanup, fixture, until } from "./orchestration-test-fixture.js";
 
+// A detached cron's final report is a normal main turn, not an inline assignment.
+test.each(["daily-detached", "main-detached"] as const)(
+  "main can await a worker started from a completed %s report",
+  async (kind) => {
+    const { faux, orchestration, open, registry } = await fixture();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    registry.install(
+      defineExtension({
+        name: "cron-report-await",
+        tools: [
+          defineTool({
+            name: "hold_report_worker",
+            description: "Keep the worker running until main has awaited it",
+            parameters: Type.Object({}),
+            replay: "safe",
+            execute: async () => {
+              await gate;
+              return { output: [{ type: "text", text: "worker released" }] };
+            },
+          }),
+        ],
+      }),
+    );
+    const { harness, main } = await open();
+    await main.configure({ cwd: "/tmp" }, context);
+    const call = (args: Record<string, string>) =>
+      fauxAssistantMessage([fauxToolCall("subagent", args)], { stopReason: "toolUse" });
+    faux.setResponses(
+      Array.from({ length: 20 }, () => (request) => {
+        const last = request.messages.findLast((message) => message.role !== "system")!;
+        const text = JSON.stringify(last.content);
+        if (last.role === "user" && text.includes("scheduled report source"))
+          return fauxAssistantMessage([fauxText("cron finished")]);
+        if (last.role === "user" && text.includes("cron finished"))
+          return call({ action: "run", prompt: "blocked report helper" });
+        if (last.role === "user" && text.includes("blocked report helper"))
+          return fauxAssistantMessage([fauxToolCall("hold_report_worker", {})], {
+            stopReason: "toolUse",
+          });
+        if (last.role === "toolResult" && text.includes("Started. Session ID:"))
+          return call({ action: "await", sessionId: text.match(/Session ID: (\d+)/)![1]! });
+        return fauxAssistantMessage([fauxText("report work completed")]);
+      }),
+    );
+    const job = await orchestration.addJob({
+      workspaceId: "test",
+      prompt: "scheduled report source",
+      session: { kind },
+      schedule: { kind: "at", in: "1h" },
+    });
+    try {
+      await main.commit(async (tx) => {
+        (await tx.doc(OrchestrationDoc)).jobs[job.id]!.nextAt = Date.now() - 1;
+      }, context);
+      await orchestration.tick();
+      await until(async () =>
+        (await main.context(context)).messages.some(
+          (message) =>
+            message.role === "toolResult" &&
+            message.toolName === "subagent" &&
+            !JSON.stringify(message.content).includes("Started. Session ID:"),
+        ),
+      );
+      const messages = (await main.context(context)).messages;
+      const awaited = messages.findLast(
+        (message) => message.role === "toolResult" && message.toolName === "subagent",
+      )!;
+      expect(awaited).toMatchObject({ isError: false });
+      expect(JSON.stringify(awaited.content)).toContain("Awaiting subagent. Session ID:");
+      expect((await harness.snapshot(OrchestrationDoc, context))!.inlineContext).toBeUndefined();
+      expect((await orchestration.listRunLogs(job.id))[0]!.status).toBe("completed");
+      expect((await main.agent(context)).cwd).toBe("/tmp");
+    } finally {
+      release();
+    }
+    await until(async () => (await orchestration.listRunning()).length === 0);
+    await main.waitForIdle(context);
+  },
+);
+
 test.each(
   (["new", "daily-detached", "main-detached", "daily-inline", "main-inline"] as const).flatMap(
     (kind) =>

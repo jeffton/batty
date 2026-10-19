@@ -36,6 +36,7 @@ export function orchestrationHooks(services: OrchestrationServices) {
         }
         const agent = await services.main.agent(ctx);
         await services.main.commit(async (tx) => {
+          const doc = await tx.doc(OrchestrationDoc);
           let origin: { cwd: string; runId: string } | undefined;
           for (const id of entries) {
             const entry = await tx.entry(id);
@@ -49,8 +50,16 @@ export function orchestrationHooks(services: OrchestrationServices) {
                       .join("")
                 : "";
             const notice = decodeRuntimeNotice(text);
-            if (notice?.kind === "cron" && notice.data?.cron) {
-              origin = notice.data.cron as { cwd: string; runId: string };
+            const cron =
+              notice?.kind === "cron"
+                ? (notice.data?.cron as { cwd?: string; runId: string } | undefined)
+                : undefined;
+            // Final reports also carry cron metadata, but are ordinary main inputs.
+            if (
+              cron?.cwd !== undefined &&
+              doc.runs[cron.runId]?.sessionId === String(services.main.id)
+            ) {
+              origin = { cwd: cron.cwd, runId: cron.runId };
               break;
             }
             // Already-admitted inline runs retain their immutable old input.
@@ -60,7 +69,6 @@ export function orchestrationHooks(services: OrchestrationServices) {
               break;
             }
           }
-          const doc = await tx.doc(OrchestrationDoc);
           if (origin) {
             doc.inlineContext ??= {
               cwd: agent.cwd ?? null,

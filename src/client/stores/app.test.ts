@@ -84,6 +84,7 @@ beforeEach(() => {
     "EventSource",
     class {
       addEventListener() {}
+      removeEventListener() {}
       close() {}
     },
   );
@@ -239,6 +240,7 @@ describe("stream recovery", () => {
       class {
         close = vi.fn();
         addEventListener = vi.fn();
+        removeEventListener = vi.fn();
         constructor() {
           streams.push(this);
         }
@@ -280,6 +282,7 @@ describe("stream recovery", () => {
       class {
         close = vi.fn();
         addEventListener = vi.fn();
+        removeEventListener = vi.fn();
         constructor() {
           streams.push(this);
         }

@@ -1,5 +1,6 @@
 import type { ServerEvent } from "@/shared/types";
 import { recordErrorLifecycle } from "./browser-errors";
+import { listenForPushForeground } from "./push-foreground";
 
 type ConnectionOptions = {
   path: () => string;
@@ -18,12 +19,15 @@ export function createSessionConnection(options: ConnectionOptions) {
   let lastActivity = 0;
   let lastWatchdog = 0;
   let active = false;
+  let stopPushForeground: (() => void) | undefined;
 
   function stopSource() {
     clearTimeout(retry);
     clearInterval(watchdog);
     retry = undefined;
     watchdog = undefined;
+    stopPushForeground?.();
+    stopPushForeground = undefined;
     source?.close();
     source = undefined;
   }
@@ -34,6 +38,7 @@ export function createSessionConnection(options: ConnectionOptions) {
     options.onConnecting();
     const current = new EventSource(options.path());
     source = current;
+    stopPushForeground = listenForPushForeground(current);
     lastActivity = Date.now();
     lastWatchdog = lastActivity;
     const touch = () => {

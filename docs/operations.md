@@ -77,6 +77,12 @@ Detection requires a password sign-in signal or an identifiable username sign-in
 
 Credentials bypass chat, agent tools and request/error logs. Local inputs clear after a handoff, navigation, form replacement or disconnection. Existing remote password values are not returned in viewer state. Credentials are sent to the VPS and remote page, which remain trusted recipients; this is not a vault or protection against an agent inspecting the page. No credentials are stored server-side. The website controls its own input-event behavior, login and cookies.
 
+## Foreground push suppression
+
+Before delivering a completion push, the server sends a one-use foreground challenge over the existing authenticated session SSE streams. A client acknowledges only while `document.visibilityState === "visible"`. Any valid acknowledgement within one second suppresses that completion's push to all of the owner's devices. Hidden, suspended or disconnected clients do not suppress delivery; without an acknowledgement, push goes to all subscriptions normally. Suppressed completions are not queued for later delivery.
+
+This uses no periodic client presence traffic. Challenges are bound to live stream IDs and a specific delivery, expire after one second and cannot be reused. Batty has one authenticated owner per installation; stream/challenge state belongs to that installation's push service, not a global cross-installation registry. The authenticated acknowledgement endpoint shares the normal API authentication boundary. Actual Web Push delivery and service-worker `showNotification()` are unchanged; there are no silent pushes.
+
 ## Checks
 
 `pnpm test` runs the server/shared and client-component groups. Server tests use Node and reusable threads; component tests use isolated happy-dom environments. Durable replay, process cancellation, browser persistence and SQLite scaling regressions remain in the standard suite.

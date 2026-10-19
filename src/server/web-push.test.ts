@@ -155,6 +155,39 @@ describe("WebPushService", () => {
     expect(await persistedEndpoints()).toEqual([]);
   });
 
+  it("suppresses all owner devices for one visible client without deferring that message", async () => {
+    const service = new WebPushService(createConfig(tempDir));
+    await service.upsertSubscription(subscription("https://fcm.googleapis.com/phone"));
+    await service.upsertSubscription(subscription("https://fcm.googleapis.com/desktop"));
+    const hidden = service.foreground.connect(() => {});
+    const visible = service.foreground.connect((event, data) => {
+      if (event === "push-foreground") {
+        const { clientId, challengeId } = data as { clientId: string; challengeId: string };
+        service.foreground.acknowledge(clientId, challengeId);
+      }
+    });
+    await service.notifyAgentCompleted(createSession());
+    expect(webPushMocks.sendNotification).not.toHaveBeenCalled();
+    hidden();
+    visible();
+    await service.notifyAgentCompleted({ ...createSession(), sessionId: "after-switch" });
+    expect(webPushMocks.sendNotification).toHaveBeenCalledTimes(2);
+    for (const call of webPushMocks.sendNotification.mock.calls) {
+      expect(JSON.parse(call[1]).data.sessionId).toBe("after-switch");
+      expect(call[2]).toEqual({ TTL: 60, urgency: "high" });
+    }
+  });
+
+  it("delivers to every device after the foreground deadline when streams do not ack", async () => {
+    const service = new WebPushService(createConfig(tempDir));
+    await service.upsertSubscription(subscription("https://fcm.googleapis.com/phone"));
+    await service.upsertSubscription(subscription("https://fcm.googleapis.com/desktop"));
+    const disconnect = service.foreground.connect(() => {});
+    await service.notifyAgentCompleted(createSession());
+    expect(webPushMocks.sendNotification).toHaveBeenCalledTimes(2);
+    disconnect();
+  });
+
   it("uses the live global push title across workspaces", async () => {
     const config = createConfig(tempDir);
     const service = new WebPushService(config);

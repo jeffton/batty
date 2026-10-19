@@ -47,6 +47,7 @@ test("worker connection waits for a snapshot and recovers from offline without a
     onerror?: () => void;
     close = vi.fn();
     addEventListener = vi.fn();
+    removeEventListener = vi.fn();
     constructor() {
       sources.push(this);
     }
@@ -110,6 +111,7 @@ test("header stop follows active state, prevents duplicate requests and exposes 
     onerror?: () => void;
     close = vi.fn();
     addEventListener = vi.fn();
+    removeEventListener = vi.fn();
     constructor() {
       sources.push(this);
     }
@@ -180,6 +182,7 @@ test("cron header stops only the current run and follows completion while viewin
       onerror?: () => void;
       close = vi.fn();
       addEventListener = vi.fn();
+      removeEventListener = vi.fn();
       constructor() {
         sources.push(this);
       }

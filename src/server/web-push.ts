@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import webpush from "web-push";
+import { PushForeground } from "./push-foreground";
 import {
   buildAgentCompletionNotificationContent,
   suppressAgentCompletionNotification,
@@ -150,6 +151,8 @@ function sessionUrl(baseUrl: string): string {
 }
 
 export class WebPushService {
+  readonly foreground = new PushForeground();
+
   private readonly vapidKeysPath: string;
   private readonly subscriptionsPath: string;
   private readonly subject: string;
@@ -225,7 +228,7 @@ export class WebPushService {
     }
 
     const subscriptions = await this.serializeSubscriptions(() => this.readSubscriptions());
-    if (subscriptions.length === 0) {
+    if (subscriptions.length === 0 || (await this.foreground.isVisible())) {
       return;
     }
 

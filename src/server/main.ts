@@ -131,6 +131,12 @@ app.post<{ Body: { endpoint: string } }>("/api/push/subscriptions/delete", async
   await webPush.removeSubscription(request.body.endpoint);
   return { ok: true };
 });
+app.post<{ Body: { clientId: string; challengeId: string } }>(
+  "/api/push/foreground/ack",
+  async (request) => ({
+    ok: webPush.foreground.acknowledge(request.body.clientId, request.body.challengeId),
+  }),
+);
 runtime.harness.resume();
 const buildId =
   process.env.BATTY_BUILD_ID ??
@@ -274,7 +280,7 @@ app.get<{ Params: { workspaceId: string } }>(
 );
 app.get("/api/memory/status", async () => runtime.memory.status());
 app.get("/api/memory/usage", async () => runtime.memory.usage());
-const closeEventStreams = registerSessionRoutes(app, runtime, transcriptImages);
+const closeEventStreams = registerSessionRoutes(app, runtime, transcriptImages, webPush.foreground);
 app.post("/api/main/stop", async () => {
   await runtime.tools.abortConversation(runtime.main.id);
   await runtime.main.abort(context);

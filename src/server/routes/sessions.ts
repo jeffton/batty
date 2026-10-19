@@ -5,12 +5,14 @@ import type { TranscriptImages } from "../transcript-images";
 import { retainInput } from "../input-receipts";
 import { preparePromptFiles, type UploadedFile } from "../uploads";
 import { streamSession } from "../session-sse";
+import type { PushForeground } from "../push-foreground";
 
 /** Shared HTTP boundary for archive pages, live projections and accepted inputs. */
 export function registerSessionRoutes(
   app: FastifyInstance,
   runtime: Runtime,
   transcriptImages: TranscriptImages,
+  foreground?: PushForeground,
 ) {
   const config = runtime.config;
   app.get<{ Querystring: { after?: string } }>("/api/main", async (request) =>
@@ -61,6 +63,11 @@ export function registerSessionRoutes(
           Connection: "keep-alive",
           "X-Accel-Buffering": "no",
         });
+        const disconnectForeground = foreground?.connect((event, data) => {
+          if (!reply.raw.destroyed && !reply.raw.writableEnded && !reply.raw.writableNeedDrain)
+            reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        });
+        reply.raw.once("close", () => disconnectForeground?.());
         streamSession(
           reply.raw,
           runtime,

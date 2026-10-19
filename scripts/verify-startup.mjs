@@ -61,7 +61,7 @@ for (const baseUrl of ["/", "/batty"]) {
     });
     const origin = `http://127.0.0.1:${port}`;
     const get = (route, init) =>
-      fetch(`${origin}${route}`, { ...init, signal: AbortSignal.timeout(2000) });
+      fetch(`${origin}${route}`, { ...init, signal: init?.signal ?? AbortSignal.timeout(2000) });
     let healthy = false;
     for (let attempt = 0; attempt < 100; attempt++) {
       if (child.exitCode !== null || child.signalCode !== null)
@@ -86,12 +86,43 @@ for (const baseUrl of ["/", "/batty"]) {
     const id = "00000000-0000-0000-0000-000000000000";
     const route = `/api/cloud-browser/${id}/state`;
     assert.equal((await get(route)).status, 401);
+    const foregroundAck = (headers = {}) =>
+      get("/api/push/foreground/ack", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify({ clientId: id, challengeId: id }),
+      });
+    assert.equal((await foregroundAck()).status, 401);
     const payload = Buffer.from(
       JSON.stringify({ issuedAt: Date.now(), expiresAt: Date.now() + 60_000 }),
     ).toString("base64url");
     const signature = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
     const cookie = `batty2-auth=${payload}.${signature}`;
     assert.equal((await get(route, { headers: { cookie } })).status, 410);
+    const ack = await foregroundAck({ cookie });
+    assert.equal(ack.status, 200);
+    assert.deepEqual(await ack.json(), { ok: false });
+    const streamAbort = new AbortController();
+    try {
+      const response = await get("/api/main/events", {
+        headers: { cookie },
+        signal: AbortSignal.any([streamAbort.signal, AbortSignal.timeout(5000)]),
+      });
+      assert.equal(response.status, 200);
+      const reader = response.body.getReader();
+      let packet = "";
+      while (!packet.includes("\n\n")) {
+        const { value, done } = await reader.read();
+        assert(!done, "Session SSE ended before push stream identity");
+        packet += new TextDecoder().decode(value);
+      }
+      assert(packet.startsWith("event: push-client\ndata: "));
+      const identity = JSON.parse(packet.split("\n")[1].slice(6));
+      assert.match(identity.clientId, /^[a-f0-9-]{36}$/);
+      await reader.cancel();
+    } finally {
+      streamAbort.abort();
+    }
     const control = (requestOrigin) =>
       get(`/api/cloud-browser/${id}/control`, {
         method: "POST",

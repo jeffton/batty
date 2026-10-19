@@ -49,6 +49,9 @@ function connectionFixture() {
     addEventListener(name: string, listener: () => void) {
       this.listeners.set(name, listener);
     }
+    removeEventListener(name: string) {
+      this.listeners.delete(name);
+    }
     constructor(public url: string) {
       sources.push(this);
     }
@@ -158,6 +161,7 @@ test("main and worker streams reconnect at their latest cursor; closing rejects 
       onopen?: () => void;
       close = vi.fn();
       addEventListener = vi.fn();
+      removeEventListener = vi.fn();
       constructor(public url: string) {
         sources.push(this);
       }

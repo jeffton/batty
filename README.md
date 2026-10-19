@@ -37,6 +37,10 @@ Main runs receive a prepared memory overview. Workers in the assistant's workspa
 - [Moving sites and importing schedules](docs/migration.md)
 - [Client API](src/client/API.md)
 
+## License
+
+[MIT](LICENSE) © 2026 David Thomas Nilsson.
+
 ## References
 
 - [Pi Durable](https://github.com/earendil-works/pi/tree/main/packages/durable)

@@ -45,7 +45,6 @@ test.each([true, "chat-only"] as const)(
             [
               fauxToolCall("subagent", {
                 action: "run",
-                async: true,
                 prompt: "worker task",
                 includePreviousContext: mode,
               }),
@@ -107,7 +106,6 @@ test("worker agent preparation applies workspace-scoped tools before generation 
           [
             fauxToolCall("subagent", {
               action: "run",
-              async: true,
               workspaceId: "other",
               prompt: "use worker scoped tool",
             }),
@@ -143,10 +141,9 @@ test("NO_REPLY subagent results still reach their parent", async () => {
   const { faux, orchestration, open } = await fixture();
   const { main } = await open();
   faux.setResponses([
-    fauxAssistantMessage(
-      [fauxToolCall("subagent", { action: "run", async: true, prompt: "silent helper" })],
-      { stopReason: "toolUse" },
-    ),
+    fauxAssistantMessage([fauxToolCall("subagent", { action: "run", prompt: "silent helper" })], {
+      stopReason: "toolUse",
+    }),
     ...Array.from(
       { length: 5 },
       () => (request: { messages: readonly import("@earendil-works/pi-ai").Message[] }) => {
@@ -171,7 +168,7 @@ test("workers spawned by a worker deliver async replies only to their parent", a
   const { faux, orchestration, open } = await fixture();
   const { harness, main } = await open();
   const call = (prompt: string) =>
-    fauxAssistantMessage([fauxToolCall("subagent", { action: "run", async: true, prompt })], {
+    fauxAssistantMessage([fauxToolCall("subagent", { action: "run", prompt })], {
       stopReason: "toolUse",
     });
   faux.setResponses(
@@ -200,107 +197,100 @@ test("workers spawned by a worker deliver async replies only to their parent", a
   expect(outerHistory).toContain("leaf answer");
 }, 15000);
 
-test.each([undefined, false])(
-  "main run/resume is async with async=%s and idle results start a turn",
-  async (asyncOption) => {
-    const { faux, orchestration, open, registry } = await fixture();
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    registry.install(
-      defineExtension({
-        name: "main-async-test",
-        tools: [
-          defineTool({
-            name: "hold_worker",
-            description: "hold worker",
-            parameters: Type.Object({}),
-            replay: "safe",
-            execute: async () => {
-              await gate;
-              return { output: [{ type: "text", text: "released" }] };
-            },
-          }),
-        ],
-      }),
-    );
-    const { harness, main } = await open();
-    let workerId: string | undefined;
-    faux.setResponses(
-      Array.from({ length: 40 }, () => (request) => {
-        const last = request.messages.findLast((m) => m.role !== "system")!;
-        const text = JSON.stringify(last.content);
-        if (
-          last.role === "user" &&
-          (text.includes("launch async test") || text.includes("resume async test"))
-        )
-          return fauxAssistantMessage(
-            [
-              fauxToolCall("subagent", {
-                action: text.includes("resume async test") ? "resume" : "run",
-                ...(workerId ? { sessionId: workerId } : {}),
-                ...(asyncOption === undefined ? {} : { async: asyncOption }),
-                prompt: "held implementation",
-              }),
-            ],
-            { stopReason: "toolUse" },
-          );
-        if (last.role === "user" && text.includes("held implementation"))
-          return fauxAssistantMessage([fauxToolCall("hold_worker", {})], { stopReason: "toolUse" });
-        if (last.role === "toolResult" && last.toolName === "hold_worker")
-          return fauxAssistantMessage([fauxText("held worker final")]);
-        return fauxAssistantMessage([fauxText("main available")]);
-      }),
-    );
-    try {
-      await (
-        await main.submit({ type: "input", content: "launch async test" }, context)
-      ).wait(context);
-      const state = (await orchestrationHistory(harness))!;
-      workerId = String(Object.values(state.workers)[0]!.id);
-      const running = await orchestration.listRunning();
-      expect(running).toHaveLength(1);
-      expect(running[0]!.startedAtMs).toBeGreaterThan(Date.now() - 60000);
-      expect(running[0]!.startedAtMs).toBeLessThanOrEqual(Date.now());
-      expect(running[0]!.startedAtMs).toBe(state.workers[workerId]!.startedAtMs);
-      const result = (await main.context(context)).messages.find(
-        (m) => m.role === "toolResult" && m.toolName === "subagent",
-      );
-      expect(result).toMatchObject({
-        details: { subagent: { async: true, respondIn: "session" } },
-      });
-    } finally {
-      release();
-    }
-    await until(async () => (await orchestration.listRunning()).length === 0);
-    await main.waitForIdle(context);
-    let history = (await main.context(context)).messages;
-    expect(
-      history.some(
-        (m) => m.role === "user" && JSON.stringify(m.content).includes("held worker final"),
-      ),
-    ).toBe(true);
-    expect(history.at(-1)).toMatchObject({
-      role: "assistant",
-      content: [{ type: "text", text: "main available" }],
-    });
+test("main run/resume returns immediately and idle results start a turn", async () => {
+  const { faux, orchestration, open, registry } = await fixture();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  registry.install(
+    defineExtension({
+      name: "main-async-test",
+      tools: [
+        defineTool({
+          name: "hold_worker",
+          description: "hold worker",
+          parameters: Type.Object({}),
+          replay: "safe",
+          execute: async () => {
+            await gate;
+            return { output: [{ type: "text", text: "released" }] };
+          },
+        }),
+      ],
+    }),
+  );
+  const { harness, main } = await open();
+  let workerId: string | undefined;
+  faux.setResponses(
+    Array.from({ length: 40 }, () => (request) => {
+      const last = request.messages.findLast((m) => m.role !== "system")!;
+      const text = JSON.stringify(last.content);
+      if (
+        last.role === "user" &&
+        (text.includes("launch async test") || text.includes("resume async test"))
+      )
+        return fauxAssistantMessage(
+          [
+            fauxToolCall("subagent", {
+              action: text.includes("resume async test") ? "resume" : "run",
+              ...(workerId ? { sessionId: workerId } : {}),
+              prompt: "held implementation",
+            }),
+          ],
+          { stopReason: "toolUse" },
+        );
+      if (last.role === "user" && text.includes("held implementation"))
+        return fauxAssistantMessage([fauxToolCall("hold_worker", {})], { stopReason: "toolUse" });
+      if (last.role === "toolResult" && last.toolName === "hold_worker")
+        return fauxAssistantMessage([fauxText("held worker final")]);
+      return fauxAssistantMessage([fauxText("main available")]);
+    }),
+  );
+  try {
     await (
-      await main.submit({ type: "input", content: "resume async test" }, context)
+      await main.submit({ type: "input", content: "launch async test" }, context)
     ).wait(context);
-    await until(async () => (await orchestration.listRunning()).length === 0);
-    await main.waitForIdle(context);
-    history = (await main.context(context)).messages;
-    const starts = history.filter((m) => m.role === "toolResult" && m.toolName === "subagent");
-    expect(starts).toHaveLength(2);
-    for (const start of starts)
-      expect(start).toMatchObject({
-        content: [{ type: "text", text: `Started. Session ID: ${workerId}` }],
-        details: { subagent: { async: true } },
-      });
-  },
-  15000,
-);
+    const state = (await orchestrationHistory(harness))!;
+    workerId = String(Object.values(state.workers)[0]!.id);
+    const running = await orchestration.listRunning();
+    expect(running).toHaveLength(1);
+    expect(running[0]!.startedAtMs).toBeGreaterThan(Date.now() - 60000);
+    expect(running[0]!.startedAtMs).toBeLessThanOrEqual(Date.now());
+    expect(running[0]!.startedAtMs).toBe(state.workers[workerId]!.startedAtMs);
+    const result = (await main.context(context)).messages.find(
+      (m) => m.role === "toolResult" && m.toolName === "subagent",
+    );
+    expect(result).toMatchObject({
+      details: { subagent: { respondIn: "session" } },
+    });
+  } finally {
+    release();
+  }
+  await until(async () => (await orchestration.listRunning()).length === 0);
+  await main.waitForIdle(context);
+  let history = (await main.context(context)).messages;
+  expect(
+    history.some(
+      (m) => m.role === "user" && JSON.stringify(m.content).includes("held worker final"),
+    ),
+  ).toBe(true);
+  expect(history.at(-1)).toMatchObject({
+    role: "assistant",
+    content: [{ type: "text", text: "main available" }],
+  });
+  await (await main.submit({ type: "input", content: "resume async test" }, context)).wait(context);
+  await until(async () => (await orchestration.listRunning()).length === 0);
+  await main.waitForIdle(context);
+  history = (await main.context(context)).messages;
+  const starts = history.filter((m) => m.role === "toolResult" && m.toolName === "subagent");
+  expect(starts).toHaveLength(2);
+  for (const start of starts)
+    expect(start).toMatchObject({
+      content: [{ type: "text", text: `Started. Session ID: ${workerId}` }],
+      details: { subagent: { respondIn: "session" } },
+    });
+}, 15000);
 
 test("async reports steer a busy main before its final reply", async () => {
   const { faux, orchestration, open, registry } = await fixture();

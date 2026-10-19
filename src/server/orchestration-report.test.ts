@@ -104,7 +104,6 @@ test.each([false, true])(
           return call("subagent", {
             action: "run",
             prompt: "inner assignment",
-            async: true,
             workspaceId: "test",
           });
         if (last.role === "user" && text.includes("inner assignment"))

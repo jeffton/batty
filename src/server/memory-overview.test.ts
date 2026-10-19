@@ -219,7 +219,6 @@ text(await tools.memory_date({id}));`;
                   fauxToolCall("subagent", {
                     action: "run",
                     prompt: kind === "nested" ? "launch nested catalog" : "inspect catalog",
-                    async: true,
                     workspaceId: kind === "nested" ? parent : target,
                     includePreviousContext: copy,
                   }),
@@ -232,7 +231,6 @@ text(await tools.memory_date({id}));`;
                   fauxToolCall("subagent", {
                     action: "run",
                     prompt: "inspect catalog",
-                    async: true,
                     workspaceId: target,
                     includePreviousContext: copy,
                   }),

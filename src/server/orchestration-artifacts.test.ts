@@ -17,13 +17,9 @@ import { artifactRefs, createAttachArtifactsTool } from "./artifact-forwarding";
 
 import { fixture, until } from "./orchestration-test-fixture.js";
 
-test.each(
-  ([false, true] as const).flatMap((sync) =>
-    (["assistant", "direct"] as const).map((delivery) => [sync, delivery] as const),
-  ),
-)(
-  "cron preserves helper artifacts through synchronous=%s joins, delivery=%s",
-  async (sync, delivery) => {
+test.each(["assistant", "direct"] as const)(
+  "cron preserves helper artifacts through explicit joins, delivery=%s",
+  async (delivery) => {
     const { faux, orchestration, open, registry } = await fixture();
     const file = {
       id: "f",
@@ -74,7 +70,7 @@ test.each(
         if (last.role === "user" && text.includes("cron finished")) reportModelInput = text;
         if (last.role === "user" && text.includes("artifact outer"))
           return fauxAssistantMessage(
-            [fauxToolCall("subagent", { action: "run", prompt: "artifact inner", async: !sync })],
+            [fauxToolCall("subagent", { action: "run", prompt: "artifact inner" })],
             { stopReason: "toolUse" },
           );
         if (last.role === "user" && text.includes("artifact inner"))
@@ -338,12 +334,10 @@ test.each([
             [
               fauxToolCall("subagent", {
                 action: "run",
-                async: true,
                 prompt: "slow parallel child",
               }),
               fauxToolCall("subagent", {
                 action: "run",
-                async: true,
                 prompt: "fast parallel child",
               }),
             ],

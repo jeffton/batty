@@ -43,6 +43,19 @@ describe("subagent tool session buttons", () => {
     },
   );
 
+  it("shows the immediate start result without an async detail flag", async () => {
+    const wrapper = mountCall("run", { resultId: "worker-42" });
+    await wrapper.setProps({
+      resultDetails: { subagent: { sessionId: "worker-42", respondIn: "session" } },
+      resultBlocks: [{ type: "text", text: "Started. Session ID: worker-42" }],
+    });
+    expect(wrapper.getComponent({ name: "CodeBlock" }).props("code")).toBe(
+      "Started. Session ID: worker-42",
+    );
+    expect(wrapper.find(".tool-call__result").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
   it("uses the returned session ID instead of the requested ID", () => {
     const wrapper = mountCall("run", { sessionId: "requested", resultId: "created" });
     expect(wrapper.getComponent({ name: "SubagentSessionPopover" }).props("sessionId")).toBe(

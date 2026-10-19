@@ -240,7 +240,7 @@ export function createWorkers(
   const subagent = defineTool({
     name: "subagent",
     description:
-      "Run, await, queue, resume, steer or stop subagents. run creates a new session and rejects sessionId; await/queue/resume/steer/stop require sessionId. queue/resume/steer/stop use the same coordination scope as discovery; worker await joins a direct child. Project workers, including cron workers, delegate within their own workspace; main and assistant-workspace coordinators may delegate across workspaces. These are coordination guardrails, not a security boundary. list discovers subagents (stable sessionId, workspace, status), scanning up to limit conversations per page (default 50, max 100); pass nextCursor back as cursor even for empty pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. All assigned workers, including cron roots and descendants, can discover, inspect and explicitly manage ordinary and cron workers in their own workspace. Main and workers in the configured assistant workspace can do so across all workspaces. Cron runs and their queues remain distinct; cron ancestry does not restrict coordination. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple async helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
+      "Run, await, queue, resume, steer or stop subagents. Workers always run asynchronously: run, queue and resume return a Session ID immediately, without waiting for completion. Start workers with run, then use await to join their results. run creates a new session and rejects sessionId; await/queue/resume/steer/stop require sessionId. queue/resume/steer/stop use the same coordination scope as discovery; worker await joins a direct child. Project workers, including cron workers, delegate within their own workspace; main and assistant-workspace coordinators may delegate across workspaces. These are coordination guardrails, not a security boundary. list discovers subagents (stable sessionId, workspace, status), scanning up to limit conversations per page (default 50, max 100); pass nextCursor back as cursor even for empty pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. All assigned workers, including cron roots and descendants, can discover, inspect and explicitly manage ordinary and cron workers in their own workspace. Main and workers in the configured assistant workspace can do so across all workspaces. Cron runs and their queues remain distinct; cron ancestry does not restrict coordination. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
     replay: "safe",
     parameters: Type.Object({
       action: Type.Union(
@@ -254,7 +254,6 @@ export function createWorkers(
       prompt: Type.Optional(Type.String()),
       model: Type.Optional(Type.String()),
       effort: Type.Optional(Type.String()),
-      async: Type.Optional(Type.Boolean()),
       workspaceId: Type.Optional(Type.String()),
       includePreviousContext: Type.Optional(
         Type.Union([Type.Boolean(), Type.Literal("chat-only")]),
@@ -586,8 +585,6 @@ export function createWorkers(
               ws.id,
             )
           : [];
-      const isAsync =
-        api.conversationId === state!.mainId || args.action === "queue" || args.async === true;
       const change = modelChange(args.model, args.effort);
       const admit = () =>
         api.commit(async (tx) => {
@@ -618,12 +615,10 @@ export function createWorkers(
             throw new Error("Subagent is finished; use resume");
           let child = currentWorker?.id;
           if (child === undefined) {
-            const owner = isAsync
-              ? await tx.createTask(Anchor, null, {
-                  ownership: { kind: "conversation" },
-                  background: true,
-                })
-              : api.taskId;
+            const owner = await tx.createTask(Anchor, null, {
+              ownership: { kind: "conversation" },
+              background: true,
+            });
             child = await createWorker(
               tx,
               owner,
@@ -646,19 +641,16 @@ export function createWorkers(
               args.prompt!,
               args.includePreviousContext ?? false,
             ),
-            report: isAsync,
+            report: true,
             change: { ...change, cwd: ws.path } as RunChange,
             workspaceId: ws.id,
           };
           if (args.action === "queue" && currentWorker?.active !== undefined)
             input.previous = currentWorker.active;
-          const taskId = await tx.createTask(
-            Delivery,
-            input,
-            isAsync
-              ? { ownership: { kind: "conversation" }, background: true }
-              : { ownership: { kind: "task", taskId: api.taskId } },
-          );
+          const taskId = await tx.createTask(Delivery, input, {
+            ownership: { kind: "conversation" },
+            background: true,
+          });
           doc.workers[id]!.active = taskId;
           doc.workers[id]!.startedAtMs = Date.now();
           doc.calls[String(api.taskId)] = { workerId: id, taskId };
@@ -676,41 +668,14 @@ export function createWorkers(
             sessionId: result.workerId,
             prompt: args.prompt,
             workspaceId: ws.id,
-            async: isAsync,
-            respondIn: isAsync ? "session" : "tool-call",
+            respondIn: "session",
             includePreviousContext: args.includePreviousContext ?? false,
           },
         },
         ctx,
       );
       services.harness.resume();
-      if (isAsync) return reply(`Started. Session ID: ${result.workerId}`);
-      const settled = await api.waitForTask(result.taskId, ctx);
-      const artifacts = (await api.snapshot(DeliveryRecord, String(result.taskId), ctx))?.artifacts;
-      return {
-        ...reply(
-          `Subagent ${settled.state.outcome.status === "completed" ? "result" : settled.state.outcome.status}. Session ID: ${result.workerId}\n\n${
-            settled.state.outcome.status === "completed"
-              ? reportWithArtifacts(
-                  reportWithAttachments(settled.state.outcome.result, artifacts?.sentFiles),
-                  artifacts,
-                )
-              : ""
-          }`.trimEnd(),
-        ),
-        details: {
-          conversationId: Number(result.workerId),
-          subagent: {
-            sessionId: result.workerId,
-            prompt: args.prompt,
-            workspaceId: ws.id,
-            async: isAsync,
-            respondIn: "tool-call",
-            includePreviousContext: args.includePreviousContext ?? false,
-          },
-          ...artifacts,
-        } as unknown as Record<string, JsonValue>,
-      };
+      return reply(`Started. Session ID: ${result.workerId}`);
     },
   });
 

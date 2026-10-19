@@ -130,16 +130,16 @@ test.each([
       );
     let outerId = "";
     let childId = "";
-    const call = (args: { action: string; async?: boolean; prompt?: string; sessionId?: string }) =>
+    const call = (args: { action: string; prompt?: string; sessionId?: string }) =>
       fauxAssistantMessage([fauxToolCall("subagent", args)], { stopReason: "toolUse" });
     faux.setResponses(
       Array.from({ length: 80 }, () => (request) => {
         const last = request.messages.findLast((m) => m.role !== "system")!;
         const text = JSON.stringify(last.content);
         if (last.role === "user" && text.includes("launch responsive test"))
-          return call({ action: "run", async: true, prompt: "outer responsive worker" });
+          return call({ action: "run", prompt: "outer responsive worker" });
         if (last.role === "user" && text.includes("outer responsive worker"))
-          return call({ action: "run", async: true, prompt: "blocked responsive child" });
+          return call({ action: "run", prompt: "blocked responsive child" });
         if (last.role === "user" && text.includes("blocked responsive child"))
           return fauxAssistantMessage([fauxToolCall("hang_child", {})], { stopReason: "toolUse" });
         if (last.role === "toolResult" && text.includes("Started. Session ID:")) {

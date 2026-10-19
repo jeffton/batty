@@ -678,7 +678,7 @@ describe("durable tool bridge", () => {
         const last = request.messages.findLast((message) => message.role !== "system");
         if (last?.role === "user" && last.content === "launch worker")
           return fauxAssistantMessage(
-            [fauxToolCall("subagent", { action: "run", async: true, prompt: "worker shell" })],
+            [fauxToolCall("subagent", { action: "run", prompt: "worker shell" })],
             { stopReason: "toolUse" },
           );
         if (
@@ -751,7 +751,7 @@ describe("durable tool bridge", () => {
       orchestration.close();
     });
     const code =
-      'return await Promise.all([tools.subagent({action:"run",async:true,prompt:"first worker"}), tools.subagent({action:"run",async:true,prompt:"second worker"})])';
+      'return await Promise.all([tools.subagent({action:"run",prompt:"first worker"}), tools.subagent({action:"run",prompt:"second worker"})])';
     faux.setResponses(
       Array.from({ length: 15 }, () => (request) => {
         const last = request.messages.findLast((message) => message.role !== "system");

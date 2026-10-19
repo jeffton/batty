@@ -151,7 +151,6 @@ test("a worker's cron tool defaults to its originating workspace", async () => {
           [
             fauxToolCall("subagent", {
               action: "run",
-              async: true,
               workspaceId: "other",
               prompt: "schedule future worker task",
             }),

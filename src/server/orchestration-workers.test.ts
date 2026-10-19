@@ -19,10 +19,9 @@ test("worker stop availability covers preparation before its first model turn", 
   });
   orchestration.setPrepareAgent(async () => prepare);
   faux.setResponses([
-    fauxAssistantMessage(
-      [fauxToolCall("subagent", { action: "run", async: true, prompt: "prepared worker" })],
-      { stopReason: "toolUse" },
-    ),
+    fauxAssistantMessage([fauxToolCall("subagent", { action: "run", prompt: "prepared worker" })], {
+      stopReason: "toolUse",
+    }),
     fauxAssistantMessage([fauxText("accepted")]),
     fauxAssistantMessage([fauxText("finished")]),
     fauxAssistantMessage([fauxText("received")]),
@@ -63,7 +62,6 @@ test("stopping an already completed worker closes its retained browser; resume a
             fauxToolCall("subagent", {
               action: "run",
               prompt: "finish browser worker",
-              async: true,
             }),
           ],
           { stopReason: "toolUse" },
@@ -85,7 +83,6 @@ test("stopping an already completed worker closes its retained browser; resume a
               action: "resume",
               sessionId: workerId,
               prompt: "finish resumed browser",
-              async: true,
             }),
           ],
           { stopReason: "toolUse" },
@@ -121,7 +118,7 @@ test("queue admits the current report before delivering the queued prompt", asyn
       if (last.role === "toolResult") return fauxAssistantMessage([fauxText("accepted")]);
       if (text.includes("start queue test"))
         return fauxAssistantMessage(
-          [fauxToolCall("subagent", { action: "run", async: true, prompt: "first worker prompt" })],
+          [fauxToolCall("subagent", { action: "run", prompt: "first worker prompt" })],
           { stopReason: "toolUse" },
         );
       if (text.includes("queue next"))
@@ -193,7 +190,7 @@ test("concurrent queues chain transactionally and defer worker configuration", a
       const text = JSON.stringify(last.content);
       if (last.role === "user" && text.includes("launch probe"))
         return fauxAssistantMessage(
-          [fauxToolCall("subagent", { action: "run", async: true, prompt: "first probe" })],
+          [fauxToolCall("subagent", { action: "run", prompt: "first probe" })],
           { stopReason: "toolUse" },
         );
       if (last.role === "user" && text.includes("queue pair"))
@@ -266,7 +263,7 @@ test("concurrent resumes admit only one new worker turn", async () => {
       const text = JSON.stringify(last.content);
       if (last.role === "user" && text.includes("initial launch"))
         return fauxAssistantMessage(
-          [fauxToolCall("subagent", { action: "run", async: true, prompt: "initial worker" })],
+          [fauxToolCall("subagent", { action: "run", prompt: "initial worker" })],
           { stopReason: "toolUse" },
         );
       if (last.role === "user" && text.includes("resume pair"))
@@ -274,13 +271,11 @@ test("concurrent resumes admit only one new worker turn", async () => {
           [
             fauxToolCall("subagent", {
               action: "resume",
-              async: true,
               sessionId: workerId,
               prompt: "resumed-one",
             }),
             fauxToolCall("subagent", {
               action: "resume",
-              async: true,
               sessionId: workerId,
               prompt: "resumed-two",
             }),
@@ -317,7 +312,7 @@ test.each(["tool", "host"])(
         const text = JSON.stringify(last.content);
         if (last.role === "user" && text.includes("launch stoppable"))
           return fauxAssistantMessage(
-            [fauxToolCall("subagent", { action: "run", async: true, prompt: "long worker task" })],
+            [fauxToolCall("subagent", { action: "run", prompt: "long worker task" })],
             { stopReason: "toolUse" },
           );
         if (last.role === "user" && text.includes("queue stoppable"))
@@ -371,7 +366,7 @@ test("closing in-flight background work resumes the same child input and report"
       const text = JSON.stringify(last.content);
       if (text.includes("start slow"))
         return fauxAssistantMessage(
-          [fauxToolCall("subagent", { action: "run", async: true, prompt: "slow child" })],
+          [fauxToolCall("subagent", { action: "run", prompt: "slow child" })],
           { stopReason: "toolUse" },
         );
       if (text.includes("slow child"))

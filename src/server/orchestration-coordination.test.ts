@@ -147,7 +147,7 @@ test.each(
         const text = JSON.stringify(last.content);
         if (last.role === "user" && text.includes("project cron"))
           return descendant
-            ? call({ action: "run", prompt: "project child", async: false })
+            ? call({ action: "run", prompt: "project child" })
             : call({
                 action,
                 ...(action === "resume" ? { sessionId: String(target.id) } : {}),
@@ -174,7 +174,7 @@ test.each(
       (await tx.doc(OrchestrationDoc)).jobs[job.id]!.nextAt = Date.now() - 1;
     }, context);
     await orchestration.tick();
-    await until(async () => (await orchestration.listRunningCron()).length === 0);
+    await until(async () => (await orchestration.listRunning()).length === 0);
     await main.waitForIdle(context);
     const workers = Object.values((await orchestrationHistory(harness)).workers);
     const reader = workers.find(

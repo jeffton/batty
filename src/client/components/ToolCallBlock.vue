@@ -24,7 +24,6 @@ const OUTPUT_TAIL_LINE_COUNT = 20;
 
 type SubagentResultDetails = {
   respondIn?: unknown;
-  async?: unknown;
   workspaceId?: unknown;
   sessionId?: unknown;
   sessionPath?: unknown;
@@ -252,14 +251,6 @@ const visibleResultBlocks = computed(() => {
     return props.resultBlocks.filter((block) => block.type !== "text");
   }
 
-  if (
-    props.name === "subagent" &&
-    subagentRespondIn.value === "session" &&
-    subagentDetails.value?.async !== true
-  ) {
-    return props.status === "error" ? props.resultBlocks : [];
-  }
-
   if (props.name === "edit") {
     if (props.status === "running") {
       return props.resultBlocks;
@@ -353,14 +344,6 @@ const showResultSection = computed(() => {
 
   if (props.name === "attach_files") {
     return props.status === "error" || hasVisibleSentFiles.value || hasResultContent.value;
-  }
-
-  if (
-    props.name === "subagent" &&
-    subagentRespondIn.value === "session" &&
-    subagentDetails.value?.async !== true
-  ) {
-    return props.status === "error";
   }
 
   return props.status === "error" || hasResultContent.value;
@@ -529,8 +512,7 @@ const genericEntries = computed(() => {
             block.type === 'text' &&
             (isPiShellToolName(props.name) ||
               ['find', 'grep'].includes(props.name) ||
-              (props.name === 'subagent' &&
-                (subagentRespondIn !== 'tool-call' || subagentDetails?.async === true)))
+              (props.name === 'subagent' && subagentRespondIn !== 'tool-call'))
           "
           :code="block.text"
           :language="isPiShellToolName(props.name) ? shellLanguage : undefined"

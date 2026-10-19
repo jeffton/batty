@@ -69,25 +69,24 @@ test.each(["complete", "restart", "cron-run", "cron-resume", "cron-restart"])(
       },
     });
     registry.install(defineExtension({ name: "await-successor-test", tasks: [successor] }));
-    const call = (args: { action: string; async?: boolean; prompt?: string; sessionId?: string }) =>
+    const call = (args: { action: string; prompt?: string; sessionId?: string }) =>
       fauxAssistantMessage([fauxToolCall("subagent", args)], { stopReason: "toolUse" });
     faux.setResponses(
       Array.from({ length: 30 }, () => (request) => {
         const last = request.messages.findLast((m) => m.role !== "system")!;
         const text = JSON.stringify(last.content);
         if (last.role === "user" && text.includes("launch await test"))
-          return call({ action: "run", async: true, prompt: "outer implementation" });
+          return call({ action: "run", prompt: "outer implementation" });
         if (last.role === "user" && text.includes("outer implementation"))
           return call({
             action: "run",
-            async: true,
             prompt: mode === "cron-resume" ? "preflight review" : "nested review",
           });
         if (last.role === "user" && text.includes("preflight review"))
           return fauxAssistantMessage([fauxText("preflight complete")]);
         if (text.includes("preflight complete")) {
           const sessionId = JSON.stringify(request.messages).match(/Session ID: (\d+)/)![1];
-          return call({ action: "resume", async: true, sessionId, prompt: "nested review" });
+          return call({ action: "resume", sessionId, prompt: "nested review" });
         }
         if (last.role === "user" && text.includes("nested review"))
           return fauxAssistantMessage([fauxToolCall("review_gate", {})], { stopReason: "toolUse" });
@@ -191,11 +190,9 @@ test.each(["complete", "restart", "cron-run", "cron-resume", "cron-restart"])(
   15000,
 );
 
-test.each(
-  [false, true].flatMap((awaitChild) => [false, true].map((fail) => ({ awaitChild, fail }))),
-)(
-  "worker delegation exposes session ID ($awaitChild, failed=$fail)",
-  async ({ awaitChild, fail }) => {
+test.each([false, true])(
+  "worker delegation exposes session ID and joins results (failed=%s)",
+  async (fail) => {
     const { faux, orchestration, open } = await fixture(10000, () => {});
     const { harness, main } = await open();
     faux.setResponses(
@@ -212,7 +209,6 @@ test.each(
             [
               fauxToolCall("subagent", {
                 action: "run",
-                async: awaitChild,
                 prompt: "inner sync worker",
               }),
             ],
@@ -267,10 +263,11 @@ test.each(
           : `Subagent result. Session ID: ${inner.id}\n\nnested synchronous answer`,
       },
     ]);
-    if (!awaitChild)
-      expect(result).toMatchObject({
-        details: { subagent: { async: false, respondIn: "tool-call" } },
-      });
+    expect(
+      messages.find((message) => message.role === "toolResult" && message.toolName === "subagent"),
+    ).toMatchObject({
+      content: [{ type: "text", text: `Started. Session ID: ${inner.id}` }],
+    });
   },
   15000,
 );

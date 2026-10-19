@@ -369,7 +369,7 @@ test("main discovers and inspects cron descendants in the assistant workspace", 
     (await tx.doc(OrchestrationDoc)).jobs[job.id]!.nextAt = Date.now() - 1;
   }, context);
   await orchestration.tick();
-  await until(async () => (await orchestration.listRunningCron()).length === 0);
+  await until(async () => (await orchestration.listRunning()).length === 0);
   await main.waitForIdle(context);
   const state = await orchestrationHistory(harness);
   const helper = Object.values(state.workers).find((worker) => worker.prompt === "hidden helper")!;
@@ -414,13 +414,11 @@ test("cron and ordinary workers coordinate by current workspace across jobs and 
         return call({
           action: "run",
           prompt: "cron child",
-          async: false,
         });
       if (last.role === "user" && text.includes("cron child"))
         return call({
           action: "run",
           prompt: "cron grandchild",
-          async: false,
         });
       return done();
     }),
@@ -443,7 +441,7 @@ test("cron and ordinary workers coordinate by current workspace across jobs and 
       (await tx.doc(OrchestrationDoc)).jobs[jobId]!.nextAt = scheduledAt;
     }, context);
     await orchestration.tick();
-    await until(async () => (await orchestration.listRunningCron()).length === 0);
+    await until(async () => (await orchestration.listRunning()).length === 0);
     await main.waitForIdle(context);
     const added = Object.values((await orchestrationHistory(harness)).workers).filter(
       (worker) => !before.includes(String(worker.id)),
@@ -512,7 +510,6 @@ test("cron and ordinary workers coordinate by current workspace across jobs and 
     sessionId: String(grandchild.id),
     prompt: "moved",
     workspaceId: "other",
-    async: true,
   });
   expect(resumed.role === "toolResult" && !!resumed.isError).toBe(false);
   await until(async () => (await orchestration.listRunning()).length === 0);

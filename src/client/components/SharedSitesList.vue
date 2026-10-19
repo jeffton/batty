@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, ref } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import BrowserPopover from "@/client/components/BrowserPopover.vue";
 import { setSitePublic } from "@/client/lib/api";
+import { withBaseUrl } from "@/client/lib/base-url";
 import type { SiteAttachmentDescriptor, SiteDescriptor } from "@/shared/types";
 
 const props = defineProps<{ sites: SiteAttachmentDescriptor[]; idPrefix?: string }>();
@@ -27,11 +28,15 @@ function absoluteUrl(url: string): string {
   return new URL(url, window.location.href).toString();
 }
 
+function siteUrl(site: SiteDescriptor): string {
+  // Stored attachment URLs retain the base path from when they were created.
+  return withBaseUrl(`/sites/${encodeURIComponent(site.id)}/`);
+}
+
 function previewUrl(site: SiteDescriptor): string {
+  const url = siteUrl(site);
   const revision = previewRevisionById.value[site.id] ?? 0;
-  if (revision === 0) return site.url;
-  const separator = site.url.includes("?") ? "&" : "?";
-  return `${site.url}${separator}batty_preview=${revision}`;
+  return revision === 0 ? url : `${url}?batty_preview=${revision}`;
 }
 
 function refreshPreview(site: SiteDescriptor, event: Event): void {
@@ -43,7 +48,7 @@ function refreshPreview(site: SiteDescriptor, event: Event): void {
 }
 
 async function copyUrl(site: SiteDescriptor): Promise<void> {
-  await navigator.clipboard.writeText(absoluteUrl(site.url));
+  await navigator.clipboard.writeText(absoluteUrl(siteUrl(site)));
   copiedId.value = site.id;
   if (copiedTimeout !== undefined) window.clearTimeout(copiedTimeout);
   copiedTimeout = window.setTimeout(() => {
@@ -95,7 +100,7 @@ onBeforeUnmount(() => {
         v-else
         :popover-id="popoverId(site.id)"
         :title="site.name"
-        :subtitle="absoluteUrl(site.url)"
+        :subtitle="absoluteUrl(siteUrl(site))"
         @toggle="refreshPreview(site, $event)"
       >
         <template #header-actions>

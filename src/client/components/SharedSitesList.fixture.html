@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      import { createApp, h } from "vue";
+      import SharedSitesList from "./SharedSitesList.vue";
+      const params = new URLSearchParams(location.search);
+      window.__BATTY_BASE_URL__ = params.get("base");
+      const id = params.get("id");
+      createApp({
+        render: () =>
+          h(SharedSitesList, {
+            sites: [
+              {
+                kind: "site",
+                id,
+                name: "Gallery",
+                url: `/old-installation/sites/${id}/`,
+                public: false,
+              },
+            ],
+          }),
+      }).mount("#app");
+    </script>
+  </body>
+</html>

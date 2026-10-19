@@ -1,6 +1,6 @@
 import { withBaseUrl } from "./base-url";
 
-/** Acknowledge only a live stream's current challenge while the app is visible. */
+/** Acknowledge only a live stream's current challenge while the app is visible and focused. */
 export function listenForPushForeground(source: EventSource): () => void {
   let clientId: string | undefined;
   let closed = false;
@@ -12,7 +12,13 @@ export function listenForPushForeground(source: EventSource): () => void {
       clientId: string;
       challengeId: string;
     };
-    if (closed || data.clientId !== clientId || document.visibilityState !== "visible") return;
+    if (
+      closed ||
+      data.clientId !== clientId ||
+      document.visibilityState !== "visible" ||
+      !document.hasFocus()
+    )
+      return;
     void fetch(withBaseUrl("/api/push/foreground/ack"), {
       method: "POST",
       credentials: "include",

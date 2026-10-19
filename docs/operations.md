@@ -79,7 +79,7 @@ Credentials bypass chat, agent tools and request/error logs. Local inputs clear 
 
 ## Foreground push suppression
 
-Before delivering a completion push, the server sends a one-use foreground challenge over the existing authenticated session SSE streams. A client acknowledges only while `document.visibilityState === "visible"`. Any valid acknowledgement within one second suppresses that completion's push to all of the owner's devices. Hidden, suspended or disconnected clients do not suppress delivery; without an acknowledgement, push goes to all subscriptions normally. Suppressed completions are not queued for later delivery.
+Before delivering a completion push, the server sends a one-use foreground challenge over the existing authenticated session SSE streams. A client acknowledges only while `document.visibilityState === "visible"` and `document.hasFocus()` is true; a partially visible but unfocused window does not suppress push. Any valid acknowledgement within one second suppresses that completion's push to all of the owner's devices. Hidden, suspended or disconnected clients do not suppress delivery; without an acknowledgement, push goes to all subscriptions normally. Suppressed completions are not queued for later delivery.
 
 This uses no periodic client presence traffic. Challenges are bound to live stream IDs and a specific delivery, expire after one second and cannot be reused. Batty has one authenticated owner per installation; stream/challenge state belongs to that installation's push service, not a global cross-installation registry. The authenticated acknowledgement endpoint shares the normal API authentication boundary. Actual Web Push delivery and service-worker `showNotification()` are unchanged; there are no silent pushes.
 

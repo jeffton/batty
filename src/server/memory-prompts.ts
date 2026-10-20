@@ -98,8 +98,10 @@ Use memory_search({query}) to find forgotten topics in original text, then memor
 
 Navigating: memory_zoom(id, n) opens line id+n into the two lines of n/2
 messages it was made from; memory_zoom(id, 1) gives its uncompressed non-thought
-text projection. Images are represented by placeholders; complete message
-metadata, attachment bytes and reasoning remain in the permanent archive. Zoom
+text projection and original images as image blocks. Overview images use
+placeholders; explicit leaf zoom retrieves their archived image data. Full
+message metadata and reasoning remain in the permanent archive. Codemode
+returns the zoom text to the script and forwards images to the model automatically. Zoom
 whenever a summary only mentions something you need, such as what your
 last reply said, a decision, a past attempt or where a file is, before
 you act, guess or ask. memory_date(id) gives the date and time of message id.`;

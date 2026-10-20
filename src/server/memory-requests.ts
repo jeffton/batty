@@ -1,6 +1,6 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord";
-import { Type, type Message } from "@earendil-works/pi-ai";
+import { Type, type ImageContent, type Message, type TextContent } from "@earendil-works/pi-ai";
 import { getCurrentSystemMessage } from "@earendil-works/pi-ai/utils/transcript";
 import {
   defineExtension,
@@ -36,7 +36,12 @@ type MemoryRequests = {
     context: Context,
   ) => Promise<{ view: string; snapshot: MemorySnapshot }>;
   preparedView: () => { view: string; snapshot: MemorySnapshot };
-  zoom: (id: number, count: number, context: Context, snapshot?: MemorySnapshot) => Promise<string>;
+  zoom: (
+    id: number,
+    count: number,
+    context: Context,
+    snapshot?: MemorySnapshot,
+  ) => Promise<(TextContent | ImageContent)[]>;
   date: (id: number, context: Context) => Promise<string>;
   search: (options: MemorySearchOptions, context: Context) => ReturnType<MemorySearch["search"]>;
   report: (error: unknown) => void;
@@ -122,7 +127,7 @@ export function createMemoryRequests({
       defineTool({
         name: "memory_zoom",
         description:
-          "Open prepared main-memory line id+n into its two child summaries; n=1 returns uncompressed non-thought text, not full message metadata, image bytes or reasoning.",
+          "Open prepared main-memory line id+n into its two child summaries; n=1 returns uncompressed non-thought text and original images from that message. No reasoning or full message metadata.",
         parameters: Type.Object({ id: Type.Integer(), n: Type.Integer() }),
         replay: "safe",
         outputLimits: { maxBytes: Number.MAX_SAFE_INTEGER, maxLines: Number.MAX_SAFE_INTEGER },
@@ -134,7 +139,7 @@ export function createMemoryRequests({
             api.conversationId === main().id
               ? await mainSnapshot(context)
               : (await api.snapshot(WorkerMemory, api.conversationId, context))?.snapshot;
-          return { output: [{ type: "text", text: await zoom(id, n, context, snapshot) }] };
+          return { output: await zoom(id, n, context, snapshot) };
         },
       }),
       defineTool({

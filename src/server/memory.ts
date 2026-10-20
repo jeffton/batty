@@ -2,7 +2,7 @@ import { chmod, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { BACKGROUND_CONTEXT, withCancel, awaitWithContext } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord";
-import type { Models } from "@earendil-works/pi-ai";
+import type { ImageContent, Models, TextContent } from "@earendil-works/pi-ai";
 import {
   LiveDoc,
   ProviderDoc,
@@ -669,6 +669,36 @@ export function createMemory(config: MemoryConfig, models: Models) {
     );
     return (await Promise.all(children)).join("\n");
   }
+  async function zoomOutput(
+    id: number,
+    count: number,
+    context: Context,
+    snapshot?: MemorySnapshot,
+  ): Promise<(TextContent | ImageContent)[]> {
+    const output: (TextContent | ImageContent)[] = [
+      { type: "text", text: await zoom(id, count, context, snapshot) },
+    ];
+    if (count !== 1) return output;
+    const leaf = await leafAt(id, context);
+    const record = await storage.entry(main.id, leaf.source as EntryId, context);
+    if (!record) throw new Error(`Missing original entry for memory message ${id}`);
+    // Ordinals count projected leaves, not model messages: assistants can emit
+    // separate text and tool-call leaves, while system/thinking emit none.
+    let ordinal = leaf.ordinal;
+    for (const message of record.entry.model ?? []) {
+      const count = projectEntry({ ...record.entry, model: [message] }).length;
+      if (ordinal < count) {
+        if (
+          (message.role === "user" || message.role === "toolResult") &&
+          typeof message.content !== "string"
+        )
+          output.push(...message.content.filter((part) => part.type === "image"));
+        return output;
+      }
+      ordinal -= count;
+    }
+    throw new Error(`Missing original message for memory message ${id}`);
+  }
   async function browserSummary(part: Part, generation: number, context = BACKGROUND_CONTEXT) {
     const text = await nodeAt(part, context, generation);
     const summary =
@@ -736,7 +766,7 @@ export function createMemory(config: MemoryConfig, models: Models) {
         prepared: index.viewCount,
       },
     }),
-    zoom,
+    zoom: zoomOutput,
     date,
     search,
     report,

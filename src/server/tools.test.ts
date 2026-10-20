@@ -404,6 +404,44 @@ describe("durable tool bridge", () => {
     expect(copied).toHaveLength(1);
     expect(copied[0]).toMatchObject({ content: [{ type: "text", text: "ordinary".repeat(5) }] });
   });
+  it.each(["memory_search", "memory_date"])(
+    "keeps %s text out of project context",
+    async (name) => {
+      const { tools, run } = await fixture();
+      tools.registerTools([
+        {
+          name,
+          description: "main-memory text",
+          parameters: Type.Object({}),
+          replay: "safe",
+          execute: async () => ({ output: [{ type: "text", text: "private memory text" }] }),
+        },
+      ]);
+      const result = await run(`text(await tools.${name}({}));`);
+      expect(result.isError).toBe(false);
+      expect(result.content).toEqual([{ type: "text", text: "private memory text" }]);
+      expect(withoutMainMemory([result])).toEqual([]);
+    },
+  );
+  it("forwards leaf-zoom images through codemode without leaking them to project context", async () => {
+    const { tools, run } = await fixture();
+    const image = { type: "image" as const, mimeType: "image/png", data: "cHJpdmF0ZQ==" };
+    tools.registerTools([
+      {
+        name: "memory_zoom",
+        description: "main-memory leaf with image",
+        parameters: Type.Object({}),
+        replay: "safe",
+        execute: async () => ({
+          output: [{ type: "text", text: "archived screenshot" }, image],
+        }),
+      },
+    ]);
+    const result = await run("text(await tools.memory_zoom({}));");
+    expect(result.isError).toBe(false);
+    expect(result.content).toEqual([{ type: "text", text: "archived screenshot" }, image]);
+    expect(withoutMainMemory([result])).toEqual([]);
+  });
   it("preserves nested faults and returned errors alongside successful batched calls", async () => {
     const { directory, tools, run } = await fixture();
     await fs.writeFile(path.join(directory, "present.txt"), "hello");

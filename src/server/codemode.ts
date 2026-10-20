@@ -14,6 +14,7 @@ import {
   type ToolExecutionApi,
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { Compile } from "typebox/compile";
 import type { McpService } from "./mcp-service";
@@ -57,6 +58,7 @@ export function createCodemodeTool(
       );
       const calls: CodemodeCall[] = [];
       const ordinaryOutputs = new Set<string>();
+      const memoryImages: ImageContent[] = [];
       let usedMainMemory = false;
       let ordinal = 0;
       const aborts: Promise<void>[] = [];
@@ -181,6 +183,8 @@ export function createCodemodeTool(
                 .join("\n") ?? "";
             if (MAIN_MEMORY_TOOLS.has(tool.name)) usedMainMemory = true;
             else if (independentOfMainMemory) ordinaryOutputs.add(text);
+            if (tool.name === "memory_zoom" && !result.isError)
+              memoryImages.push(...(result.output ?? []).filter((block) => block.type === "image"));
             if (result.isError && result.structuredOutput === undefined) throw new Error(text);
             call.status = result.isError ? "error" : "ok";
             if (result.structuredOutput !== undefined) return result.structuredOutput;
@@ -255,7 +259,7 @@ export function createCodemodeTool(
             for (const key of result.storeWrites.delete) delete state.values[key];
             Object.assign(state.values, result.storeWrites.set);
           }, ctx);
-        const content = [...result.output];
+        const content = [...result.output, ...memoryImages];
         if (result.ok && result.value !== undefined)
           content.push({
             type: "text",

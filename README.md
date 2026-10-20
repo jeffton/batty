@@ -24,7 +24,7 @@ Device frame: [Apple Frames](https://www.macstories.net/shortcuts/) by Federico 
 
 [OptChat](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449) gives the permanent conversation a navigable memory tree. Original history is retained; hierarchical summaries keep older context available without sending the entire archive on every turn.
 
-- `memory_zoom` expands summaries or retrieves original non-thought text.
+- `memory_zoom` expands summaries or retrieves original non-thought text and images at leaf zoom (`n=1`).
 - `memory_date` retrieves the timestamp of an original entry.
 - `memory_search` searches original text by literal words.
 

@@ -31,6 +31,10 @@ Main chat submissions use the default model and thinking level selected in Setti
 
 `BATTY_HOST` and `BATTY_PORT` control the listener; `BATTY_SELF_PATH` selects the application files. `BATTY_PROVIDER_AUTH_PATH` selects the SDK's locked provider credential store. Application secrets and passkeys remain in the data root. Environment settings are stored in `.batty/environment.json`.
 
+## Remote instances
+
+See [remote instances](remote-instances.md) for node-token provisioning, remote workers and offline mirrors.
+
 ## Browser open deadlines
 
 `browser.open` applies `timeoutMs` (default 30 seconds, range 1–60 seconds) to queue admission, SSH/display/Chromium startup, CDP attachment, navigation and the returned snapshot. Expiry or worker cancellation interrupts the action, closes its browser session and reaps owned startup processes before releasing its action queue. Bounded process cleanup can add a few seconds; a timeout while waiting behind another action does not close that action’s browser. Other browser actions retain their Playwright action/navigation timeout semantics.

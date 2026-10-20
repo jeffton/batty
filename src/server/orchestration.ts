@@ -31,6 +31,8 @@ import {
 } from "./orchestration-state.js";
 import { createDeliveryTask } from "./orchestration-delivery.js";
 import { createWorkers } from "./orchestration-workers.js";
+import { createRemoteCommands } from "./remote-command.js";
+import { createRemoteJoin } from "./remote-join.js";
 import { createCronScheduler } from "./orchestration-cron.js";
 export { OrchestrationDoc, WorkerDoc } from "./orchestration-state.js";
 export type {
@@ -56,6 +58,7 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
   let contextFor = options.contextFor;
   let prepareAgent = options.prepareAgent;
   let browserLifecycle: WorkerBrowserLifecycle | undefined;
+  let remoteWorkers: import("./orchestration-state").RemoteWorkerService | undefined;
   const workspaceList = async () =>
     typeof options.workspaces === "function"
       ? await options.workspaces()
@@ -108,6 +111,9 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
     return found;
   };
   const services: OrchestrationServices = {
+    get remoteWorkers() {
+      return remoteWorkers;
+    },
     get harness() {
       return harness;
     },
@@ -127,6 +133,8 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
   const Delivery = createDeliveryTask(services);
   const workers = createWorkers(services, Delivery);
   const { Anchor, AwaitChild, subagent } = workers;
+  const nodeCommands = createRemoteCommands(workers.command, () => ({ harness, main }));
+  const RemoteJoin = createRemoteJoin(services);
   const scheduler = createCronScheduler(services, Delivery, workers, onError);
   const {
     cron,
@@ -146,11 +154,18 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
   const extension = defineExtension({
     name: "batty-orchestration",
     tools: [subagent, cron],
-    tasks: [Anchor, AwaitChild, Delivery],
+    tasks: [Anchor, AwaitChild, Delivery, nodeCommands.Command, RemoteJoin],
     hooks: orchestrationHooks(services),
   });
   return {
     extension,
+    nodeCommand: nodeCommands.execute,
+    queryWorkers: (args: import("./orchestration-workers").WorkerCommand) =>
+      workers.query(args, context),
+    remoteJoinTask: RemoteJoin,
+    setRemoteWorkers(value: import("./orchestration-state").RemoteWorkerService) {
+      remoteWorkers = value;
+    },
     setWorkerBrowserLifecycle(lifecycle: WorkerBrowserLifecycle) {
       browserLifecycle = lifecycle;
     },

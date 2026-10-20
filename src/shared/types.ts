@@ -321,6 +321,7 @@ export type PromptDisposition =
 export type PromptSubmissionResult = PromptDisposition & { clientMessageId: string };
 
 export interface SessionState {
+  remote?: { nodeId: string; error?: string };
   id: string;
   revision?: number;
   streamId?: string;

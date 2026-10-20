@@ -34,6 +34,7 @@ const canStop = computed(() =>
   props.cronRun ? props.cronRun.status === "running" : session.value?.canStopSubagent,
 );
 const errorMessage = ref<string | undefined>(undefined);
+const displayError = computed(() => errorMessage.value ?? session.value?.remote?.error);
 const connectionState = ref<"online" | "connecting" | "offline">("connecting");
 let connection: ReturnType<typeof createSessionConnection> | undefined;
 let loadGeneration = 0;
@@ -196,11 +197,11 @@ onBeforeUnmount(() => {
         @stop="stop"
       />
       <span
-        v-if="errorMessage && session"
+        v-if="displayError && session"
         class="subagent-session-popover__header-error"
         role="alert"
-        :aria-label="errorMessage"
-        :title="errorMessage"
+        :aria-label="displayError"
+        :title="displayError"
       >
         <CircleAlert :size="17" />
       </span>
@@ -208,7 +209,7 @@ onBeforeUnmount(() => {
         :context-tokens="session?.contextTokens"
         :context-window="session?.contextWindow"
         :context-percent="session?.contextPercent"
-        :connection-state="connectionState"
+        :connection-state="session?.remote?.error ? 'offline' : connectionState"
       />
     </template>
 

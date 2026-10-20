@@ -476,6 +476,20 @@ export function createDeliveryTask(services: OrchestrationServices) {
           const doc = await tx.doc(OrchestrationDoc);
           if (doc.joinParents) delete doc.joinParents[String(task.input.childId)];
           await archiveWorker(tx, task.input.workerId, task.id);
+          if (task.input.remoteAssignment) {
+            await tx.appendEntry(task.input.childId, {
+              kind: "batty.remote-result",
+              data: {
+                assignment: task.input.remoteAssignment,
+                assignmentId: String(task.id),
+                text,
+                failed,
+                ...(artifacts
+                  ? { artifacts: artifacts as AgentTurnArtifacts & Record<string, JsonValue> }
+                  : {}),
+              },
+            });
+          }
           return { status: "terminal", outcome: { status: "completed", result: text } };
         }, ctx);
       },
@@ -513,6 +527,16 @@ export function createDeliveryTask(services: OrchestrationServices) {
         const doc = await tx.doc(OrchestrationDoc);
         if (doc.joinParents) delete doc.joinParents[String(task.input.childId)];
         await archiveWorker(tx, task.input.workerId, task.id);
+        if (task.input.remoteAssignment)
+          await tx.appendEntry(task.input.childId, {
+            kind: "batty.remote-result",
+            data: {
+              assignment: task.input.remoteAssignment,
+              assignmentId: String(task.id),
+              text: "Stopped.",
+              failed: true,
+            },
+          });
         return { status: "terminal", outcome: { status: "aborted", result: "Stopped." } };
       }, ctx);
     },

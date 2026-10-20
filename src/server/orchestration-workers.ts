@@ -16,6 +16,7 @@ import {
   type Cursor,
   type TaskId,
   type Tx,
+  type ToolExecutionApi,
 } from "@earendil-works/pi-durable";
 
 import type { WorkspaceInfo } from "../shared/types.js";
@@ -41,6 +42,44 @@ import {
   type OrchestrationServices,
 } from "./orchestration-state.js";
 import type { createDeliveryTask } from "./orchestration-delivery.js";
+
+export type WorkerCommand = {
+  action:
+    | "run"
+    | "await"
+    | "queue"
+    | "resume"
+    | "steer"
+    | "stop"
+    | "report"
+    | "list"
+    | "inspect"
+    | "workspaces";
+  nodeId?: string;
+  sessionId?: string;
+  limit?: number;
+  cursor?: string;
+  prompt?: string;
+  model?: string;
+  effort?: string;
+  workspaceId?: string;
+  includePreviousContext?: boolean | "chat-only";
+};
+
+/** The same lifecycle service is called by model tools and authenticated node commands. */
+export type WorkerCommandContext = Pick<
+  ToolExecutionApi,
+  | "taskId"
+  | "conversationId"
+  | "agent"
+  | "snapshot"
+  | "commit"
+  | "memo"
+  | "getTask"
+  | "waitForTask"
+  | "conversation"
+  | "details"
+> & { remoteAssignment?: { grantId: string; requestId: string } };
 
 function reply(text: string) {
   return { output: [{ type: "text" as const, text }] };
@@ -237,16 +276,158 @@ export function createWorkers(
       await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), ctx);
     },
   });
-  const subagent = defineTool({
+  const queryWorkers = async (
+    args: WorkerCommand,
+    api: Pick<WorkerCommandContext, "conversationId" | "snapshot" | "commit">,
+    ctx: Context,
+  ) => {
+    const state = await api.snapshot(OrchestrationDoc, ctx);
+    if (args.action === "inspect" && !args.sessionId) throw new Error("inspect requires sessionId");
+    const page =
+      args.action === "list"
+        ? await api.commit(
+            (tx) =>
+              tx.scanConversations(
+                {},
+                args.limit ?? 50,
+                args.cursor ? (JSON.parse(args.cursor) as Cursor) : undefined,
+              ),
+            ctx,
+          )
+        : undefined;
+    const ids = page ? page.items.map((item) => String(item.id)) : [args.sessionId!];
+    // Preload only archive seeds outside the transaction. Authorization,
+    // workspace and output pointers are read together under the mutation line.
+    const seeds = new Map<string, NonNullable<typeof state>["workers"][string]>();
+    for (const id of ids) {
+      const candidate = state?.workers[id] ?? (await api.snapshot(ArchivedWorker, id, ctx));
+      if (candidate) seeds.set(id, candidate);
+    }
+    const assistantWorkspaceId = await services.assistantWorkspaceId();
+    const local = await api.commit(async (tx) => {
+      const state = await tx.doc(OrchestrationDoc);
+      const findWorker = async (id: string) => {
+        const seed = seeds.get(id);
+        return state.workers[id] ?? (seed ? await tx.doc(ArchivedWorker, id, seed) : undefined);
+      };
+      const { visible } = await coordinationScope(tx, api.conversationId, assistantWorkspaceId);
+      const summary = async (candidate: NonNullable<typeof state>["workers"][string]) => {
+        const task = candidate.active === undefined ? undefined : await tx.task(candidate.active);
+        return {
+          sessionId: String(candidate.id),
+          workspaceId: candidate.workspaceId,
+          status:
+            task?.state.status === "terminal"
+              ? task.state.outcome.status
+              : task
+                ? "running"
+                : "idle",
+          ...(candidate.startedAtMs === undefined ? {} : { startedAtMs: candidate.startedAtMs }),
+          ...(task?.state.status === "terminal"
+            ? {
+                terminalCursor: String(
+                  (await tx.scanEntries({ conversationId: candidate.id }, 1)).items[0]?.id ?? 0,
+                ),
+              }
+            : {}),
+        };
+      };
+      if (args.action === "list") {
+        const workers = [];
+        for (const id of ids) {
+          const candidate = await findWorker(id);
+          if (candidate && (await visible(candidate))) workers.push(await summary(candidate));
+        }
+        return reply(
+          JSON.stringify({
+            workers,
+            ...(page?.next ? { nextCursor: JSON.stringify(page.next) } : {}),
+          }),
+        );
+      }
+      if (!args.sessionId) throw new Error("inspect requires sessionId");
+      const candidate = await findWorker(args.sessionId);
+      if (!candidate || !(await visible(candidate)))
+        throw new Error("Unknown or inaccessible subagent");
+      const status = await summary(candidate);
+      const task = candidate.active === undefined ? undefined : await tx.task(candidate.active);
+      const metadata = (await tx.doc(WorkerDoc, candidate.id))!;
+      const latest = metadata.latestReport;
+      const resultAssignment =
+        metadata.latestResultAssignment ??
+        (task?.state.status === "terminal" && task.state.outcome.status === "completed"
+          ? candidate.active
+          : undefined);
+      const completed =
+        resultAssignment === undefined ? undefined : await tx.task(resultAssignment);
+      const result =
+        completed?.state.status === "terminal" &&
+        completed.state.outcome.status === "completed" &&
+        (!latest || Number(resultAssignment) >= Number(latest.assignmentId))
+          ? {
+              kind: "result",
+              assignmentId: String(resultAssignment),
+              text: completed.state.outcome.result as string,
+              artifacts:
+                (await tx.doc(DeliveryRecord, String(resultAssignment), {})).artifacts ?? {},
+            }
+          : latest
+            ? {
+                kind: "report",
+                assignmentId: String(latest.assignmentId),
+                text: latest.text,
+                artifacts: latest.artifacts,
+              }
+            : undefined;
+      // Descriptors in details are consumed by attach_artifacts, not automatically attached.
+      return {
+        ...reply(
+          JSON.stringify({
+            ...status,
+            ...(result
+              ? {
+                  latest: {
+                    kind: result.kind,
+                    assignmentId: result.assignmentId,
+                    text: reportWithArtifacts(result.text.slice(0, 16_000), result.artifacts),
+                    truncated: result.text.length > 16_000,
+                  },
+                }
+              : {}),
+          }),
+        ),
+        details: JSON.parse(JSON.stringify(result?.artifacts ?? {})) as Record<string, JsonValue>,
+      };
+    }, ctx);
+    return local;
+  };
+  const workerTool = {
     name: "subagent",
     description:
-      "Run, await, queue, resume, steer or stop subagents. Workers always run asynchronously: run, queue and resume return a Session ID immediately, without waiting for completion. Start workers with run, then use await to join their results. run creates a new session and rejects sessionId; await/queue/resume/steer/stop require sessionId. queue/resume/steer/stop use the same coordination scope as discovery; worker await joins a direct child. Project workers, including cron workers, delegate within their own workspace; main and assistant-workspace coordinators may delegate across workspaces. These are coordination guardrails, not a security boundary. list discovers subagents (stable sessionId, workspace, status), scanning up to limit conversations per page (default 50, max 100); pass nextCursor back as cursor even for empty pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. All assigned workers, including cron roots and descendants, can discover, inspect and explicitly manage ordinary and cron workers in their own workspace. Main and workers in the configured assistant workspace can do so across all workspaces. Cron runs and their queues remain distinct; cron ancestry does not restrict coordination. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
-    replay: "safe",
+      "Run, await, queue, resume, steer or stop subagents. Remote instances: workspaces lists configured nodes and their workspaces, including isAssistant. Pass nodeId to run remotely; returned remote Session IDs work with lifecycle actions without repeating nodeId. Remote workers use the receiving installation's models, tools and context; includePreviousContext is not supported remotely. Coordinator list includes remote mirrors. File artifacts are imported locally; sites and live browsers are not relayed. Workers always run asynchronously: run, queue and resume return a Session ID immediately, without waiting for completion. Start workers with run, then use await to join their results. run creates a new session and rejects sessionId; await/queue/resume/steer/stop require sessionId. queue/resume/steer/stop use the same coordination scope as discovery; worker await joins a direct child. Project workers, including cron workers, delegate within their own workspace; main and assistant-workspace coordinators may delegate across workspaces. These are coordination guardrails, not a security boundary. list discovers subagents (stable sessionId, workspace, status), scanning up to limit conversations per page (default 50, max 100); pass nextCursor back as cursor even for empty pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. All assigned workers, including cron roots and descendants, can discover, inspect and explicitly manage ordinary and cron workers in their own workspace. Main and workers in the configured assistant workspace can do so across all workspaces. Cron runs and their queues remain distinct; cron ancestry does not restrict coordination. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
+    replay: "safe" as const,
     parameters: Type.Object({
       action: Type.Union(
         (
-          ["run", "await", "queue", "resume", "steer", "stop", "report", "list", "inspect"] as const
+          [
+            "run",
+            "await",
+            "queue",
+            "resume",
+            "steer",
+            "stop",
+            "report",
+            "list",
+            "inspect",
+            "workspaces",
+          ] as const
         ).map((value) => Type.Literal(value)),
+      ),
+      nodeId: Type.Optional(
+        Type.String({
+          description:
+            "Remote installation ID. Use workspaces to discover configured nodes and their workspaces. Omit for local execution; remote session IDs already identify the node.",
+        }),
       ),
       sessionId: Type.Optional(Type.String()),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
@@ -259,7 +440,27 @@ export function createWorkers(
         Type.Union([Type.Boolean(), Type.Literal("chat-only")]),
       ),
     }),
-    execute: async (args, api, ctx) => {
+    execute: async (args: WorkerCommand, api: WorkerCommandContext, ctx: Context) => {
+      const remoteCoordinator = async () => {
+        const state = await api.snapshot(OrchestrationDoc, ctx);
+        if (api.conversationId === state?.mainId) return true;
+        const caller = await api.snapshot(WorkerDoc, api.conversationId, ctx);
+        const assistant = await services.assistantWorkspaceId();
+        return assistant !== undefined && caller?.workspaceId === assistant;
+      };
+      if (args.action === "workspaces") {
+        if (!(await remoteCoordinator()))
+          throw new Error("Remote discovery requires the assistant coordinator");
+        if (!services.remoteWorkers) return reply("[]");
+        return reply(JSON.stringify(await services.remoteWorkers.workspaces(args.nodeId)));
+      }
+      if (args.nodeId || args.sessionId?.startsWith("remote:")) {
+        if (!(await remoteCoordinator()))
+          throw new Error("Remote delegation requires the assistant coordinator");
+        if (api.remoteAssignment) throw new Error("Node commands cannot re-export remote workers");
+        if (!services.remoteWorkers) throw new Error("Remote instances are not configured");
+        return services.remoteWorkers.command(args, api, ctx);
+      }
       if (args.action === "run" && args.sessionId !== undefined)
         throw new Error(
           "run creates a new subagent; omit sessionId. Use queue or resume for an existing session",
@@ -304,6 +505,22 @@ export function createWorkers(
                 text: args.prompt!,
                 artifacts: artifacts as typeof artifacts & Record<string, JsonValue>,
               };
+            const assignment = await tx.task(metadata.completion!.owner);
+            if ((assignment?.input as DeliveryInput | undefined)?.remoteAssignment) {
+              const receipt = await tx.doc(DeliveryRecord, `remote-report:${api.taskId}`, {});
+              if (!receipt.directDelivered) {
+                await tx.appendEntry(api.conversationId, {
+                  kind: "batty.remote-report",
+                  data: {
+                    assignment: (assignment!.input as unknown as DeliveryInput).remoteAssignment!,
+                    assignmentId: String(metadata.completion!.owner),
+                    text: args.prompt!,
+                    artifacts: artifacts as typeof artifacts & Record<string, JsonValue>,
+                  },
+                });
+                receipt.directDelivered = true;
+              }
+            }
             return encodeRuntimeNotice({
               kind: "subagent",
               text: `[subagent ${api.conversationId} report]\n${reportWithArtifacts(reportWithAttachments(args.prompt!, artifacts.sentFiles), artifacts)}`,
@@ -319,6 +536,11 @@ export function createWorkers(
           }, ctx),
           ctx,
         );
+        const assignment = await api.getTask(metadata.completion.owner, ctx);
+        if ((assignment?.input as DeliveryInput | undefined)?.remoteAssignment)
+          return reply(
+            `Reported to remote parent. Session ID: ${api.conversationId}. Work may continue.`,
+          );
         await (await api.conversation(parentId, ctx))!.submit(
           {
             type: "input",
@@ -332,123 +554,19 @@ export function createWorkers(
       }
       const state = await api.snapshot(OrchestrationDoc, ctx);
       if (args.action === "list" || args.action === "inspect") {
-        if (args.action === "inspect" && !args.sessionId)
-          throw new Error("inspect requires sessionId");
-        const page =
-          args.action === "list"
-            ? await api.commit(
-                (tx) =>
-                  tx.scanConversations(
-                    {},
-                    args.limit ?? 50,
-                    args.cursor ? (JSON.parse(args.cursor) as Cursor) : undefined,
-                  ),
-                ctx,
-              )
-            : undefined;
-        const ids = page ? page.items.map((item) => String(item.id)) : [args.sessionId!];
-        // Preload only archive seeds outside the transaction. Authorization,
-        // workspace and output pointers are read together under the mutation line.
-        const seeds = new Map<string, NonNullable<typeof state>["workers"][string]>();
-        for (const id of ids) {
-          const candidate = state?.workers[id] ?? (await api.snapshot(ArchivedWorker, id, ctx));
-          if (candidate) seeds.set(id, candidate);
+        const local = await queryWorkers(args, api, ctx);
+        if (
+          args.action === "list" &&
+          !api.remoteAssignment &&
+          services.remoteWorkers &&
+          !args.cursor &&
+          (await remoteCoordinator())
+        ) {
+          const result = JSON.parse(local.output[0]!.text) as { workers: unknown[] };
+          result.workers.push(...services.remoteWorkers.list());
+          return reply(JSON.stringify(result));
         }
-        const assistantWorkspaceId = await services.assistantWorkspaceId();
-        return api.commit(async (tx) => {
-          const state = await tx.doc(OrchestrationDoc);
-          const findWorker = async (id: string) => {
-            const seed = seeds.get(id);
-            return state.workers[id] ?? (seed ? await tx.doc(ArchivedWorker, id, seed) : undefined);
-          };
-          const { visible } = await coordinationScope(tx, api.conversationId, assistantWorkspaceId);
-          const summary = async (candidate: NonNullable<typeof state>["workers"][string]) => {
-            const task =
-              candidate.active === undefined ? undefined : await tx.task(candidate.active);
-            return {
-              sessionId: String(candidate.id),
-              workspaceId: candidate.workspaceId,
-              status:
-                task?.state.status === "terminal"
-                  ? task.state.outcome.status
-                  : task
-                    ? "running"
-                    : "idle",
-              ...(candidate.startedAtMs === undefined
-                ? {}
-                : { startedAtMs: candidate.startedAtMs }),
-            };
-          };
-          if (args.action === "list") {
-            const workers = [];
-            for (const id of ids) {
-              const candidate = await findWorker(id);
-              if (candidate && (await visible(candidate))) workers.push(await summary(candidate));
-            }
-            return reply(
-              JSON.stringify({
-                workers,
-                ...(page?.next ? { nextCursor: JSON.stringify(page.next) } : {}),
-              }),
-            );
-          }
-          if (!args.sessionId) throw new Error("inspect requires sessionId");
-          const candidate = await findWorker(args.sessionId);
-          if (!candidate || !(await visible(candidate)))
-            throw new Error("Unknown or inaccessible subagent");
-          const status = await summary(candidate);
-          const task = candidate.active === undefined ? undefined : await tx.task(candidate.active);
-          const metadata = (await tx.doc(WorkerDoc, candidate.id))!;
-          const latest = metadata.latestReport;
-          const resultAssignment =
-            metadata.latestResultAssignment ??
-            (task?.state.status === "terminal" && task.state.outcome.status === "completed"
-              ? candidate.active
-              : undefined);
-          const completed =
-            resultAssignment === undefined ? undefined : await tx.task(resultAssignment);
-          const result =
-            completed?.state.status === "terminal" &&
-            completed.state.outcome.status === "completed" &&
-            (!latest || Number(resultAssignment) >= Number(latest.assignmentId))
-              ? {
-                  kind: "result",
-                  assignmentId: String(resultAssignment),
-                  text: completed.state.outcome.result as string,
-                  artifacts:
-                    (await tx.doc(DeliveryRecord, String(resultAssignment), {})).artifacts ?? {},
-                }
-              : latest
-                ? {
-                    kind: "report",
-                    assignmentId: String(latest.assignmentId),
-                    text: latest.text,
-                    artifacts: latest.artifacts,
-                  }
-                : undefined;
-          // Descriptors in details are consumed by attach_artifacts, not automatically attached.
-          return {
-            ...reply(
-              JSON.stringify({
-                ...status,
-                ...(result
-                  ? {
-                      latest: {
-                        kind: result.kind,
-                        assignmentId: result.assignmentId,
-                        text: reportWithArtifacts(result.text.slice(0, 16_000), result.artifacts),
-                        truncated: result.text.length > 16_000,
-                      },
-                    }
-                  : {}),
-              }),
-            ),
-            details: JSON.parse(JSON.stringify(result?.artifacts ?? {})) as Record<
-              string,
-              JsonValue
-            >,
-          };
-        }, ctx);
+        return local;
       }
       const existingCall = (await api.snapshot(DeliveryRecord, String(api.taskId), ctx))?.call;
       const workerId = existingCall?.workerId ?? args.sessionId;
@@ -469,6 +587,7 @@ export function createWorkers(
       const running = active !== undefined && active.state.status !== "terminal";
       if (
         args.action === "await" &&
+        !api.remoteAssignment &&
         (api.conversationId !== state!.mainId || state!.inlineContext)
       ) {
         // Only joining a direct child is acyclic. Pin the delivery across replay,
@@ -549,6 +668,7 @@ export function createWorkers(
               ? `Awaiting subagent. Session ID: ${workerId}`
               : `Subagent finished. Session ID: ${workerId}`,
           ),
+          details: { assignmentId: String(worker!.active) },
           ...(running ? { control: { terminate: true as const } } : {}),
         };
       if (args.action === "stop") {
@@ -641,7 +761,8 @@ export function createWorkers(
               args.prompt!,
               args.includePreviousContext ?? false,
             ),
-            report: true,
+            report: api.remoteAssignment === undefined,
+            ...(api.remoteAssignment ? { remoteAssignment: api.remoteAssignment } : {}),
             change: { ...change, cwd: ws.path } as RunChange,
             workspaceId: ws.id,
           };
@@ -677,9 +798,22 @@ export function createWorkers(
       services.harness.resume();
       return reply(`Started. Session ID: ${result.workerId}`);
     },
-  });
+  };
+  const subagent = defineTool(workerTool);
 
   return {
+    command: workerTool.execute,
+    query(args: WorkerCommand, ctx: Context) {
+      return queryWorkers(
+        args,
+        {
+          conversationId: services.main.id,
+          snapshot: services.harness.snapshot.bind(services.harness),
+          commit: (fn, context) => services.main.commit(fn, context),
+        },
+        ctx,
+      );
+    },
     Anchor,
     AwaitChild,
     createWorker,

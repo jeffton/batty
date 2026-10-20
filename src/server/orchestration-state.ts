@@ -164,6 +164,7 @@ export type RunChange = {
 };
 export type DeliveryInput = {
   delivery?: CronDelivery;
+  remoteAssignment?: { grantId: string; requestId: string };
   workerId: string;
   childId: ConversationId;
   mainId: ConversationId;
@@ -181,7 +182,22 @@ export interface WorkerBrowserLifecycle {
   stop(id: string, taskId: string): Promise<void>;
 }
 
+export interface RemoteWorkerService {
+  join(
+    input: { node: string; session: string; assignmentId: string; parentId: ConversationId },
+    signal: AbortSignal,
+  ): Promise<void>;
+  command(
+    args: import("./orchestration-workers").WorkerCommand,
+    api: import("./orchestration-workers").WorkerCommandContext,
+    context: Context,
+  ): Promise<import("@earendil-works/pi-durable").ToolExecutionResult>;
+  list(): unknown[];
+  workspaces(node?: string): Promise<unknown>;
+}
+
 export interface OrchestrationServices {
+  readonly remoteWorkers?: RemoteWorkerService;
   readonly harness: Harness;
   readonly main: Conversation;
   readonly prepareAgent: PrepareAgent | undefined;

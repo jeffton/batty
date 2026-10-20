@@ -44,6 +44,7 @@ import { ProviderUsageService } from "./provider-usage";
 import { createTools } from "./tools";
 import { createWorkerBrowserCleanup } from "./browser-worker-cleanup";
 import { createOrchestration } from "./orchestration";
+import { RemoteWorkers, parseRemoteSession } from "./remote-workers";
 import { OrchestrationDoc } from "./orchestration-state";
 import { createMemory, type MemoryConfig } from "./memory";
 import { createResources } from "./resources";
@@ -137,6 +138,7 @@ export async function historyPage(
 }
 
 export class Runtime {
+  remotes!: RemoteWorkers;
   readonly streamId = randomUUID();
   private revision = 0;
   private readonly workerBrowserCleanup: ReturnType<typeof createWorkerBrowserCleanup>;
@@ -293,6 +295,9 @@ export class Runtime {
     await runtime.workerBrowserCleanup.bind(harness);
     await beforeStart?.(runtime);
     await orchestration.bind(harness, main);
+    runtime.remotes = await RemoteWorkers.open(runtime);
+    orchestration.setRemoteWorkers(runtime.remotes);
+    runtime.remotes.start();
     if (resume) harness.resume();
     return runtime;
   }
@@ -327,6 +332,7 @@ export class Runtime {
     includeHistory = true,
     after?: string,
   ): Promise<SessionState> {
+    if (parseRemoteSession(id)) return this.remotes.state(id, includeHistory, after);
     const conversation = await this.conversation(id);
     const agent = await conversation.agent(context);
     const live = view
@@ -462,6 +468,7 @@ export class Runtime {
   }
 
   async messages(id: string, before?: string, limit = PAGE_SIZE): Promise<SessionMessagesPage> {
+    if (parseRemoteSession(id)) return this.remotes.messages(id, before, limit);
     const conversation = await this.conversation(id);
     const page = await this.history(conversation.id, before, limit);
     await this.attachClientIds(conversation.id, page.messages);
@@ -529,6 +536,7 @@ export class Runtime {
   }
 
   async close(): Promise<void> {
+    await this.remotes.close();
     await this.orchestration.close();
     await this.providerAuth.dispose();
     await this.workerBrowserCleanup.close();

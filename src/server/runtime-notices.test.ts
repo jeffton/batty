@@ -5,7 +5,6 @@ import { normalizeMessage } from "./pi-state";
 import { projectEntry } from "./memory";
 import {
   buildCronRuntimeNotice,
-  buildSubagentRuntimeNotice,
   decodeRuntimeNotice,
   encodeRuntimeNotice,
 } from "./runtime-notices";
@@ -59,7 +58,7 @@ test.each(["daily-inline", "main-inline", "daily-detached", "main-detached"])(
     const notice = buildCronRuntimeNotice({
       scheduleLabel: "hourly",
       prompt: "Do the scheduled task",
-      session: { kind, includePreviousContext: "chat-only" },
+      session: { kind },
     });
     expect(notice.text).toContain("Assigned scheduled task:\nDo the scheduled task");
     expect(notice.text).toContain(
@@ -68,12 +67,3 @@ test.each(["daily-inline", "main-inline", "daily-detached", "main-detached"])(
     expect(notice.text).not.toContain("NO_REPLY");
   },
 );
-
-test("worker assignments distinguish copied context from ownership of main", () => {
-  expect(buildSubagentRuntimeNotice(0, "Review only", true).text).toContain(
-    "not the main assistant",
-  );
-  expect(buildSubagentRuntimeNotice(0, "Review only", "chat-only").text).toContain(
-    "chat only, without tool calls, results or thinking",
-  );
-});

@@ -255,7 +255,6 @@ export class Runtime {
       );
     }
     tools.bindHarness(harness);
-    orchestration.setContextProvider((parentId, mode) => memory.contextFor(parentId, mode));
     tools.registerTools([
       ...(orchestration.extension.tools ?? []),
       ...(memory.extension.tools ?? []),

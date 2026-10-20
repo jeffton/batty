@@ -26,7 +26,7 @@ OptChat retains originals and builds immutable binary summaries. Each main run p
 
 Packets persist the exact view, input boundary, generation and covered message counts for retry and restart. Compression runs on a separate writer queue; complete prefixes publish through short, atomic generation/checkpoint-checked commits. Repairs publish child generations with unchanged nodes inherited from the previous prefix, so pinned zooms retain their tree. Completed nodes and checkpoints survive restart; an interrupted inference without a committed node may repeat.
 
-Fresh workers targeting the assistant workspace receive main memory and pin their overview and generation on the first model request for their lifetime. Copied-context workers retain their copied snapshot; workers in other workspaces receive no main-memory overview or navigation tools. Pi Durable compacts worker context while retaining original history. Main-inline cron uses OptChat; main declines native compaction.
+Fresh workers targeting the assistant workspace receive main memory and pin their overview and generation on the first model request for their lifetime. Workers start without a copied parent transcript. Workers in other workspaces receive no main-memory overview or navigation tools. Pi Durable compacts worker context while retaining original history. Main-inline cron uses OptChat; main declines native compaction.
 
 Settings → Memory controls the summarization model and free-text language. The defaults are `openai-codex/gpt-6-luna` and English. `BATTY_MEMORY_REASONING` controls reasoning; `BATTY_MEMORY_MODEL` is not used. Changing language does not rewrite existing summaries or original messages. `scripts/prepare-memory.ts` prepares memory without starting HTTP.
 

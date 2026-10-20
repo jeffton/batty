@@ -10,74 +10,52 @@ import { orchestrationHistory } from "./orchestration-test-history";
 
 import { fixture, until } from "./orchestration-test-fixture.js";
 
-test.each([true, "chat-only"] as const)(
-  "context mode %s copies only prepared context into linear worker storage",
-  async (mode) => {
-    const { faux, orchestration, open } = await fixture();
-    const { harness, main } = await open();
-    await main.configure(
-      { instructions: "explicit parent instructions", thinkingLevel: "medium" },
-      context,
-    );
-    await main.commit(async (tx) => {
-      await tx.appendEntry(main.id, {
-        kind: "pi.user",
-        model: [{ role: "user", content: "archive-only", timestamp: 1 }],
-      });
-    }, context);
-    const calls: unknown[] = [];
-    orchestration.setContextProvider(async (parentId, requestedMode) => {
-      calls.push([parentId, requestedMode]);
-      return [
-        { role: "user", content: "frozen-visible", timestamp: 2 },
-        fauxAssistantMessage([
-          { type: "thinking", thinking: "hidden thought" },
-          fauxText("visible assistant text"),
-          fauxToolCall("read", { path: "omitted-in-chat" }),
-        ]),
-      ];
+test("fresh workers receive only their task, not the parent transcript", async () => {
+  const { faux, orchestration, open } = await fixture();
+  const { harness, main } = await open();
+  await main.configure(
+    { instructions: "explicit parent instructions", thinkingLevel: "medium" },
+    context,
+  );
+  await main.commit(async (tx) => {
+    await tx.appendEntry(main.id, {
+      kind: "pi.user",
+      model: [{ role: "user", content: "archive-only", timestamp: 1 }],
     });
-    faux.setResponses(
-      Array.from({ length: 10 }, () => (request) => {
-        const last = request.messages.findLast((message) => message.role !== "system")!;
-        if (last.role === "user" && JSON.stringify(last.content).includes("launch"))
-          return fauxAssistantMessage(
-            [
-              fauxToolCall("subagent", {
-                action: "run",
-                prompt: "worker task",
-                includePreviousContext: mode,
-              }),
-            ],
-            { stopReason: "toolUse" },
-          );
-        return fauxAssistantMessage([fauxText("done")]);
-      }),
-    );
-    await (await main.submit({ type: "input", content: "launch" }, context)).wait(context);
-    await until(async () => (await orchestration.listRunning()).length === 0);
-    const worker = Object.values((await orchestrationHistory(harness))!.workers)[0]!;
-    const child = (await harness.conversation(worker.id, context))!;
-    const view = await child.viewState(context);
-    expect(view.value.conversation.parent).toBeUndefined();
-    const copied = JSON.stringify(view.value.entries);
-    expect(copied).toContain("frozen-visible");
-    expect(copied).toContain("visible assistant text");
-    expect(copied).not.toContain("archive-only");
-    if (mode === "chat-only") {
-      expect(copied).not.toContain("hidden thought");
-      expect(copied).not.toContain("omitted-in-chat");
-    } else expect(copied).toContain("hidden thought");
-    expect(calls).toEqual([[main.id, mode]]);
-    expect(await child.agent(context)).toMatchObject({
-      instructions: "explicit parent instructions",
-      thinkingLevel: "medium",
-      model: { provider: "faux", modelId: "faux-1" },
-    });
-    view.dispose();
-  },
-  15000,
-);
+  }, context);
+  faux.setResponses(
+    Array.from({ length: 10 }, () => (request) => {
+      const last = request.messages.findLast((message) => message.role !== "system")!;
+      if (last.role === "user" && JSON.stringify(last.content).includes("launch"))
+        return fauxAssistantMessage(
+          [
+            fauxToolCall("subagent", {
+              action: "run",
+              prompt: "worker task",
+            }),
+          ],
+          { stopReason: "toolUse" },
+        );
+      return fauxAssistantMessage([fauxText("done")]);
+    }),
+  );
+  await (await main.submit({ type: "input", content: "launch" }, context)).wait(context);
+  await until(async () => (await orchestration.listRunning()).length === 0);
+  const worker = Object.values((await orchestrationHistory(harness))!.workers)[0]!;
+  const child = (await harness.conversation(worker.id, context))!;
+  const view = await child.viewState(context);
+  expect(view.value.conversation.parent).toBeUndefined();
+  const copied = JSON.stringify(view.value.entries);
+  expect(copied).not.toContain("archive-only");
+  expect(copied).not.toContain("launch");
+  expect(copied).toContain("worker task");
+  expect(await child.agent(context)).toMatchObject({
+    instructions: "explicit parent instructions",
+    thinkingLevel: "medium",
+    model: { provider: "faux", modelId: "faux-1" },
+  });
+  view.dispose();
+}, 15000);
 
 test("worker agent preparation applies workspace-scoped tools before generation admission", async () => {
   const { faux, orchestration, open, registry } = await fixture();

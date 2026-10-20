@@ -773,7 +773,6 @@ export function createMemory(config: MemoryConfig, models: Models) {
   });
   return {
     extension: requests.extension,
-    contextFor: requests.contextFor,
     validateRequest: requests.validateRequest,
     async bind(
       open: Harness,

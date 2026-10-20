@@ -128,13 +128,6 @@ export function createCronScheduler(
         const inline =
           job.delivery !== "direct" &&
           (job.session.kind === "daily-inline" || job.session.kind === "main-inline");
-        const prefix = inline
-          ? []
-          : await services.preparedContext(
-              services.main.id,
-              job.session.includePreviousContext ?? false,
-              ws.id,
-            );
         await services.main.commit(async (tx) => {
           const doc = await tx.doc(OrchestrationDoc);
           const current = doc.jobs[job.id];
@@ -157,7 +150,6 @@ export function createCronScheduler(
                 job.prompt,
                 agent,
                 modelChange(job.model, job.thinkingLevel),
-                prefix,
               );
           if (!inline) {
             const metadata = await tx.doc(WorkerDoc, child);
@@ -303,9 +295,6 @@ export function createCronScheduler(
       )
     )
       throw new Error("Invalid cron session mode");
-    const mode = input.session.includePreviousContext;
-    if (mode !== undefined && typeof mode !== "boolean" && mode !== "chat-only")
-      throw new Error("Invalid cron context mode");
     const ws = await services.workspace(input.workspaceId);
     let schedule: Schedule;
     if (input.schedule.kind === "at") {
@@ -426,9 +415,6 @@ export function createCronScheduler(
       session: Type.Optional(
         Type.Object({
           kind: Type.String(),
-          includePreviousContext: Type.Optional(
-            Type.Union([Type.Boolean(), Type.Literal("chat-only")]),
-          ),
         }),
       ),
       schedule: Type.Optional(

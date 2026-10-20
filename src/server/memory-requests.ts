@@ -23,7 +23,6 @@ import { WorkerDoc } from "./orchestration";
 import { conversationPolicy } from "./conversation-policy";
 import { MAIN_MEMORY_TOOLS, isMainMemoryView, withoutMainMemory } from "./main-memory-policy";
 import { MEMORY_PROMPT } from "./memory-prompts";
-import { snapshotFromView } from "./memory-snapshot";
 
 type MemoryRequests = {
   main: () => Conversation;
@@ -206,7 +205,6 @@ export function createMemoryRequests({
                 ],
               };
             }
-            const copiedView = messages.find(isMainMemoryView);
             let snapshot = await harness().snapshot(WorkerMemory, api.conversationId, context);
             if (!snapshot?.view) {
               await load(context);
@@ -217,10 +215,8 @@ export function createMemoryRequests({
                 : undefined;
               const prepared = preparedView();
               const candidate = {
-                view: copiedView ? (copiedView.content as string) : (packet?.view ?? prepared.view),
-                snapshot: copiedView
-                  ? snapshotFromView(copiedView.content as string)
-                  : (packet?.snapshot ?? prepared.snapshot),
+                view: packet?.view ?? prepared.view,
+                snapshot: packet?.snapshot ?? prepared.snapshot,
               };
               const conversation = (await harness().conversation(api.conversationId, context))!;
               snapshot = await conversation.commit(async (tx) => {
@@ -274,26 +270,6 @@ export function createMemoryRequests({
   });
   return {
     extension,
-    async contextFor(
-      parentId: ConversationId,
-      mode: boolean | "chat-only",
-      context = BACKGROUND_CONTEXT,
-    ): Promise<readonly Message[]> {
-      if (mode === false) return [];
-      if (parentId !== main().id)
-        return (await (await harness().conversation(parentId, context))!.context(context)).messages;
-      const active = await harness().snapshot(LiveDoc, main().id, context);
-      const runId = active?.run?.inputs[0];
-      if (runId) {
-        const packet = await packetForRun(runId, context);
-        return runMessages((await main().context(context)).messages, packet, context);
-      }
-      const { view } = await conversationalView(
-        (await main().entries({}, 1, undefined, context)).items[0]?.id ?? 0,
-        context,
-      );
-      return [{ role: "user", content: view, timestamp: 0 }];
-    },
     validateRequest(request: { messages: readonly Message[] }, options?: { sessionId?: string }) {
       if (options?.sessionId !== rootSessionId()) return;
       const admitted = request.messages.some(

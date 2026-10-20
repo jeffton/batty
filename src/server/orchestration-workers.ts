@@ -2,7 +2,7 @@ import { workerTools } from "./orchestration-worker-config.js";
 import { modelChange } from "./orchestration-worker-config.js";
 import type { Context, JsonValue } from "@earendil-works/chord";
 
-import { Type, type Message } from "@earendil-works/pi-ai";
+import { Type } from "@earendil-works/pi-ai";
 import {
   AgentDoc,
   LiveDoc,
@@ -63,7 +63,6 @@ export type WorkerCommand = {
   model?: string;
   effort?: string;
   workspaceId?: string;
-  includePreviousContext?: boolean | "chat-only";
 };
 
 /** The same lifecycle service is called by model tools and authenticated node commands. */
@@ -177,7 +176,6 @@ export function createWorkers(
     prompt: string,
     parentAgent: Agent,
     change: AgentChange,
-    prefix: readonly Message[],
   ) => {
     const ownership = { kind: "task" as const, taskId: owner };
     const child = await tx.createConversation({ ownership });
@@ -195,21 +193,6 @@ export function createWorkers(
       ws.id,
       await services.assistantWorkspaceId(),
     );
-    for (const message of prefix) {
-      const kind =
-        message.role === "system"
-          ? "pi.system"
-          : message.role === "assistant"
-            ? "pi.assistant"
-            : message.role === "user"
-              ? "pi.user"
-              : "pi.tool-result";
-      await tx.appendEntry(child.id, {
-        kind,
-        model: [message],
-        ...(message.role === "toolResult" ? { data: { diagnostics: [] } } : {}),
-      });
-    }
     const metadata = await tx.doc(WorkerDoc, child.id);
     metadata.workspaceId = ws.id;
     metadata.parentId = parentId;
@@ -404,7 +387,7 @@ export function createWorkers(
   const workerTool = {
     name: "subagent",
     description:
-      "Run, await, queue, resume, steer or stop subagents. Remote instances: workspaces lists configured nodes and their workspaces, including isAssistant. Pass nodeId to run remotely; returned remote Session IDs work with lifecycle actions without repeating nodeId. Remote workers use the receiving installation's models, tools and context; includePreviousContext is not supported remotely. Coordinator list includes remote mirrors. File artifacts are imported locally; sites and live browsers are not relayed. Workers always run asynchronously: run, queue and resume return a Session ID immediately, without waiting for completion. Start workers with run, then use await to join their results. run creates a new session and rejects sessionId; await/queue/resume/steer/stop require sessionId. queue/resume/steer/stop use the same coordination scope as discovery; worker await joins a direct child. Project workers, including cron workers, delegate within their own workspace; main and assistant-workspace coordinators may delegate across workspaces. These are coordination guardrails, not a security boundary. list discovers subagents (stable sessionId, workspace, status), scanning up to limit conversations per page (default 50, max 100); pass nextCursor back as cursor even for empty pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. All assigned workers, including cron roots and descendants, can discover, inspect and explicitly manage ordinary and cron workers in their own workspace. Main and workers in the configured assistant workspace can do so across all workspaces. Cron runs and their queues remain distinct; cron ancestry does not restrict coordination. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
+      "Run, await, queue, resume, steer or stop subagents. Remote instances: workspaces lists configured nodes and their workspaces, including isAssistant. Pass nodeId to run remotely; returned remote Session IDs work with lifecycle actions without repeating nodeId. Remote workers use the receiving installation's models, tools and context. Coordinator list includes remote mirrors. File artifacts are imported locally; sites and live browsers are not relayed. Workers always run asynchronously: run, queue and resume return a Session ID immediately, without waiting for completion. Start workers with run, then use await to join their results. run creates a new session and rejects sessionId; await/queue/resume/steer/stop require sessionId. queue/resume/steer/stop use the same coordination scope as discovery; worker await joins a direct child. Project workers, including cron workers, delegate within their own workspace; main and assistant-workspace coordinators may delegate across workspaces. These are coordination guardrails, not a security boundary. list discovers subagents (stable sessionId, workspace, status), scanning up to limit conversations per page (default 50, max 100); pass nextCursor back as cursor even for empty pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. All assigned workers, including cron roots and descendants, can discover, inspect and explicitly manage ordinary and cron workers in their own workspace. Main and workers in the configured assistant workspace can do so across all workspaces. Cron runs and their queues remain distinct; cron ancestry does not restrict coordination. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
     replay: "safe" as const,
     parameters: Type.Object({
       action: Type.Union(
@@ -436,9 +419,6 @@ export function createWorkers(
       model: Type.Optional(Type.String()),
       effort: Type.Optional(Type.String()),
       workspaceId: Type.Optional(Type.String()),
-      includePreviousContext: Type.Optional(
-        Type.Union([Type.Boolean(), Type.Literal("chat-only")]),
-      ),
     }),
     execute: async (args: WorkerCommand, api: WorkerCommandContext, ctx: Context) => {
       const remoteCoordinator = async () => {
@@ -697,14 +677,6 @@ export function createWorkers(
         api.conversationId,
       );
       const inherited = await api.agent(ctx);
-      const prefix =
-        args.action === "run" && !existingCall
-          ? await services.preparedContext(
-              api.conversationId,
-              args.includePreviousContext ?? false,
-              ws.id,
-            )
-          : [];
       const change = modelChange(args.model, args.effort);
       const admit = () =>
         api.commit(async (tx) => {
@@ -747,7 +719,6 @@ export function createWorkers(
               args.prompt!,
               inherited,
               change,
-              prefix,
             );
           }
           const id = String(child);
@@ -756,11 +727,7 @@ export function createWorkers(
             childId: child,
             mainId: doc.mainId!,
             prompt: args.prompt!,
-            notice: buildSubagentRuntimeNotice(
-              0,
-              args.prompt!,
-              args.includePreviousContext ?? false,
-            ),
+            notice: buildSubagentRuntimeNotice(0, args.prompt!),
             report: api.remoteAssignment === undefined,
             ...(api.remoteAssignment ? { remoteAssignment: api.remoteAssignment } : {}),
             change: { ...change, cwd: ws.path } as RunChange,
@@ -790,7 +757,6 @@ export function createWorkers(
             prompt: args.prompt,
             workspaceId: ws.id,
             respondIn: "session",
-            includePreviousContext: args.includePreviousContext ?? false,
           },
         },
         ctx,

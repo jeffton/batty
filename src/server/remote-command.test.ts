@@ -482,7 +482,7 @@ test("node await stays independent of an active receiver inline cron", async () 
   );
 });
 
-test("node commands reject caller reports and copied context without admitting workers", async () => {
+test("node commands require request IDs and reject caller reports without admitting workers", async () => {
   const { orchestration, open } = await fixture();
   const { harness } = await open();
   await expect(orchestration.nodeCommand("node-a", "", { action: "list" })).rejects.toThrow(
@@ -491,12 +491,5 @@ test("node commands reject caller reports and copied context without admitting w
   await expect(
     orchestration.nodeCommand("node-a", "report", { action: "report", prompt: "forged report" }),
   ).rejects.toThrow("Reports originate");
-  await expect(
-    orchestration.nodeCommand("node-a", "copy", {
-      action: "run",
-      prompt: "copy private context",
-      includePreviousContext: true,
-    }),
-  ).rejects.toThrow("do not copy caller context");
   expect(Object.values((await orchestrationHistory(harness)).workers)).toHaveLength(0);
 });

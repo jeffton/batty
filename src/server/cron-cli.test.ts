@@ -5,7 +5,7 @@ import { expect, test, vi } from "vite-plus/test";
 import { parseCronArgs, runCronCli } from "./cron-cli";
 import { loadConfig } from "./config";
 
-test("wake workout preserves prompt, model, workspace and detached context", async () => {
+test("wake workout preserves prompt, model and workspace", async () => {
   const { body } = await parseCronArgs([
     "cron",
     "add",
@@ -23,8 +23,6 @@ test("wake workout preserves prompt, model, workspace and detached context", asy
     "3m",
     "--session",
     "daily-detached",
-    "--daily-context",
-    "chat-only",
   ]);
   expect(body).toEqual({
     action: "add",
@@ -34,7 +32,7 @@ test("wake workout preserves prompt, model, workspace and detached context", asy
     model: "openai-codex/gpt-6.1-sol",
     thinkingLevel: "medium",
     schedule: { kind: "at", in: "3m" },
-    session: { kind: "daily-detached", includePreviousContext: "chat-only" },
+    session: { kind: "daily-detached" },
   });
 });
 
@@ -94,8 +92,5 @@ test("ambiguous schedules and malformed flags fail before contacting service", a
     "one schedule",
   );
   await expect(parseCronArgs(["cron", "add", "--enabled", "no"])).rejects.toThrow("true or false");
-  await expect(parseCronArgs(["cron", "add", "--daily-context", "false"])).rejects.toThrow(
-    "requires --session",
-  );
   await expect(parseCronArgs(["cron", "list", "--unknown"])).rejects.toThrow();
 });

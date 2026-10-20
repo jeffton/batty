@@ -190,7 +190,7 @@ test("imported cron preserves identity and interval phase across restart without
     prompt: "legacy prompt",
     model: "faux/faux-2",
     thinkingLevel: "high",
-    session: { kind: "daily-detached" as const, includePreviousContext: "chat-only" as const },
+    session: { kind: "daily-detached" as const },
     schedule: { kind: "every" as const, every: "5m", everyMs: 300000 },
     createdAt: 1000,
     updatedAt: 2000,
@@ -297,27 +297,23 @@ test("cron isolates a bad job and its timer continues after the job is repaired"
   await until(async () => (await orchestration.listRunLogs(bad.id))[0]?.status === "completed");
 }, 15000);
 
-test("cron admission retries updated job fields rather than admitting a stale snapshot", async () => {
+test("fresh cron workers do not inherit the main transcript", async () => {
   const { faux, orchestration, open } = await fixture();
   const { harness, main } = await open();
   faux.setResponses(Array.from({ length: 10 }, () => fauxAssistantMessage([fauxText("done")])));
   const job = await orchestration.addJob({
     title: "Scheduled test task",
-    prompt: "old prompt",
-    session: { kind: "new", includePreviousContext: true },
+    prompt: "scheduled task prompt",
+    session: { kind: "new" },
     schedule: { kind: "at", in: "1h" },
   });
   await main.commit(async (tx) => {
     (await tx.doc(OrchestrationDoc)).jobs[job.id]!.nextAt = Date.now() - 1;
+    await tx.appendEntry(main.id, {
+      kind: "pi.user",
+      model: [{ role: "user", content: "private parent transcript", timestamp: 1 }],
+    });
   }, context);
-  let changed = false;
-  orchestration.setContextProvider(async () => {
-    if (!changed) {
-      changed = true;
-      await orchestration.updateJob(job.id, { prompt: "new prompt" });
-    }
-    return [];
-  });
   await orchestration.tick();
   await until(async () => (await orchestration.listRunLogs(job.id))[0]?.status === "completed");
   const run = (await orchestration.listRunLogs(job.id))[0]!;
@@ -325,6 +321,6 @@ test("cron admission retries updated job fields rather than admitting a stale sn
   expect(child?.isCron).toBe(true);
   const worker = (await harness.conversation(Number(run.sessionId) as never, context))!;
   const transcript = JSON.stringify((await worker.context(context)).messages);
-  expect(transcript).toContain("new prompt");
-  expect(transcript).not.toContain("old prompt");
+  expect(transcript).toContain("scheduled task prompt");
+  expect(transcript).not.toContain("private parent transcript");
 }, 15000);

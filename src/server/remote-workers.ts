@@ -470,8 +470,6 @@ export class RemoteWorkers {
     const node = args.nodeId ?? parsed?.node;
     if (!node || (parsed && args.nodeId && parsed.node !== args.nodeId))
       throw new Error("Remote command requires a matching nodeId/sessionId");
-    if (args.includePreviousContext)
-      throw new Error("Remote workers use their own context; omit includePreviousContext");
     const requestId = `tool:${api.conversationId}:${api.taskId}`;
     const { nodeId: _nodeId, ...command } = args;
     if (parsed) command.sessionId = parsed.session;

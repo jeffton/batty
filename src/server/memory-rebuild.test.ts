@@ -184,10 +184,8 @@ test("generation publication includes originals admitted while rebuilding and su
       }),
     context,
   );
-  // Live old generation remains usable and can admit new messages throughout.
-  expect(JSON.stringify(await state.memory.contextFor(state.main.id, true))).toContain(
-    "concurrent new decision",
-  );
+  // The old generation remains queryable while the replacement is built.
+  expect(await state.memory.zoom(0, 1)).toContain("older");
   release();
   await rebuilding;
   expect(await state.memory.date(0)).toBe(date);

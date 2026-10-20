@@ -2,7 +2,6 @@ import { archiveWorker, removeCompletedOneShot } from "./orchestration-lifecycle
 import { orchestrationHooks } from "./orchestration-hooks.js";
 
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { type Message } from "@earendil-works/pi-ai";
 import {
   LiveDoc,
   defineExtension,
@@ -14,20 +13,15 @@ import {
 import type { AppConfig } from "./config.js";
 import { listWorkspaces } from "./workspaces.js";
 
-import { withoutMainMemory } from "./main-memory-policy.js";
-
 import { ArchivedWorker, ArchivedRun, DeliveryRecord, indexRun } from "./orchestration-history";
-import { conversationPolicy } from "./conversation-policy";
 
 import {
   OrchestrationDoc,
   WorkerDoc,
   type OrchestrationConfig,
   type OrchestrationServices,
-  type ContextProvider,
   type PrepareAgent,
   type WorkerBrowserLifecycle,
-  type ContextMode,
 } from "./orchestration-state.js";
 import { createDeliveryTask } from "./orchestration-delivery.js";
 import { createWorkers } from "./orchestration-workers.js";
@@ -36,8 +30,6 @@ import { createRemoteJoin } from "./remote-join.js";
 import { createCronScheduler } from "./orchestration-cron.js";
 export { OrchestrationDoc, WorkerDoc } from "./orchestration-state.js";
 export type {
-  ContextMode,
-  ContextProvider,
   PrepareAgent,
   CronJobInput,
   CronJob,
@@ -55,7 +47,6 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
     "workspacesRoots" in input ? { config: input, workspaces: () => listWorkspaces(input) } : input;
   let harness: Harness;
   let main: Conversation;
-  let contextFor = options.contextFor;
   let prepareAgent = options.prepareAgent;
   let browserLifecycle: WorkerBrowserLifecycle | undefined;
   let remoteWorkers: import("./orchestration-state").RemoteWorkerService | undefined;
@@ -65,29 +56,6 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
       : (options.workspaces ?? []);
   const assistantWorkspaceId = async () =>
     (await workspaceList()).find((workspace) => workspace.isAssistant)?.id;
-  const preparedContext = async (
-    parentId: ConversationId,
-    mode: ContextMode,
-    workspaceId: string,
-  ): Promise<readonly Message[]> => {
-    if (mode === false) return [];
-    if (!contextFor)
-      throw new Error("Context copying requires orchestration.setContextProvider(fn)");
-    const copied = await contextFor(parentId, mode);
-    const messages = conversationPolicy("worker", workspaceId, await assistantWorkspaceId())
-      .mainMemory
-      ? copied
-      : withoutMainMemory(copied);
-    if (mode !== "chat-only") return messages;
-    return messages.flatMap<Message>((message) => {
-      if (message.role === "user") return [message];
-      if (message.role !== "assistant") return [];
-      const content = message.content.filter(
-        (part) => part.type !== "thinking" && part.type !== "toolCall",
-      );
-      return content.length ? [{ ...message, content }] : [];
-    });
-  };
   const onError = options.onError ?? console.error;
   const workspace = async (id?: string, parentId?: ConversationId) => {
     if (options.resolveWorkspace) return options.resolveWorkspace(id, parentId);
@@ -128,7 +96,6 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
     },
     workspace,
     assistantWorkspaceId,
-    preparedContext,
   };
   const Delivery = createDeliveryTask(services);
   const workers = createWorkers(services, Delivery);
@@ -168,9 +135,6 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
     },
     setWorkerBrowserLifecycle(lifecycle: WorkerBrowserLifecycle) {
       browserLifecycle = lifecycle;
-    },
-    setContextProvider(provider: ContextProvider) {
-      contextFor = provider;
     },
     setPrepareAgent(provider: PrepareAgent) {
       prepareAgent = provider;

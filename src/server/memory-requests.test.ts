@@ -131,7 +131,6 @@ test("a run's tool loop preserves reasoning signatures and its frozen view verba
     context,
   );
   const requests: { role: string; content: unknown }[][] = [];
-  let copied: readonly { role: string; content: unknown }[] = [];
   fixtureState.faux.setResponses([
     (request) => {
       requests.push(request.messages);
@@ -145,7 +144,6 @@ test("a run's tool loop preserves reasoning signatures and its frozen view verba
     },
     async (request) => {
       requests.push(request.messages);
-      copied = await state.memory.contextFor(state.main.id, true);
       return fauxAssistantMessage([fauxText("done")]);
     },
   ]);
@@ -171,12 +169,6 @@ test("a run's tool loop preserves reasoning signatures and its frozen view verba
   for (const request of requests)
     expect(request.filter((message) => message.role === "system")).toHaveLength(1);
   expect(JSON.stringify(requests[0]![0])).toContain('"name":"check"');
-  expect(copied.filter((message) => message.role !== "system")).toEqual(
-    requests[1]!.filter((message) => message.role !== "system"),
-  );
-  expect(
-    copied.some((message) => message.role === "user" && message.content === "archived input"),
-  ).toBe(false);
   expect(
     (await state.main.context(context)).messages.some(
       (message) => message.role === "user" && message.content === "archived input",
@@ -189,23 +181,4 @@ test("a run's tool loop preserves reasoning signatures and its frozen view verba
       ),
     ),
   ).toBe(true);
-  const idle = await state.memory.contextFor(state.main.id, true);
-  expect(idle).toHaveLength(1);
-  expect(idle[0]!.role).toBe("user");
-  expect(await state.memory.contextFor(state.main.id, false)).toEqual([]);
-  const child = await state.harness.createConversation(
-    { ownership: { kind: "ownerless" } },
-    context,
-  );
-  await child.commit(
-    (tx) =>
-      tx.appendEntry(child.id, {
-        kind: "pi.user",
-        model: [{ role: "user", content: "worker input", timestamp: 1 }],
-      }),
-    context,
-  );
-  expect(await state.memory.contextFor(child.id, true)).toEqual(
-    (await child.context(context)).messages,
-  );
 });

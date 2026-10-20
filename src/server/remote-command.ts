@@ -86,7 +86,6 @@ export function createRemoteCommands(
     async execute(grantId: string, requestId: string, args: WorkerCommand) {
       if (!requestId.trim()) throw new Error("Node command requires requestId");
       if (args.action === "report") throw new Error("Reports originate in the assigned worker");
-      if (args.includePreviousContext) throw new Error("Node commands do not copy caller context");
       const { harness, main } = host();
       const id = await main.commit(async (tx) => {
         const receipt = await tx.doc(Receipt, JSON.stringify([grantId, requestId]), {});

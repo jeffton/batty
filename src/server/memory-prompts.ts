@@ -73,7 +73,7 @@ than it was. Output only the line; non-ASCII characters cost 2-4 bytes.`;
 export const MASTER_PROMPT = `Main turns receive a prepared main-memory view.
 Workers with main-memory access also receive this view and can navigate it
 with memory_zoom(id, n) and memory_date(id). Other workers have no main-memory
-view or navigation tools; copied parent context does not grant memory access.
+view or navigation tools.
 Navigation tools always address main memory, not the worker's own context. Summaries keep little of tool
 output, so say in your reply what you learned that will matter later.
 Do not sleep or poll for subagent results; use subagent await.`;

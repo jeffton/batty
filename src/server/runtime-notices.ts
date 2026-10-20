@@ -1,5 +1,4 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { PreviousContextMode } from "@/shared/types";
 
 export const BATTY_RUNTIME_NOTICE_CUSTOM_TYPE = "batty-runtime-notice";
 const NOTICE_OPEN = "<batty-runtime-notice>";
@@ -12,7 +11,7 @@ export interface RuntimeNotice {
 }
 
 // Durable inputs use provider-compatible user messages. The envelope preserves
-// their application type through queued admission, storage and context copies.
+// their application type through queued admission, storage.
 export function encodeRuntimeNotice(notice: RuntimeNotice): string {
   return `${NOTICE_OPEN}${JSON.stringify(notice)}${NOTICE_CLOSE}`;
 }
@@ -33,22 +32,11 @@ export function decodeRuntimeNotice(content: unknown): RuntimeNotice | undefined
   }
 }
 
-function contextInstructions(mode: PreviousContextMode = false): string {
-  return mode === "chat-only"
-    ? "Copied parent context contains chat only, without tool calls, results or thinking."
-    : "";
-}
-
-export function buildSubagentRuntimeNotice(
-  _depth: number,
-  prompt: string,
-  includePreviousContext: PreviousContextMode = false,
-): RuntimeNotice {
+export function buildSubagentRuntimeNotice(_depth: number, prompt: string): RuntimeNotice {
   return {
     kind: "subagent",
     text: [
       "You are a subagent carrying out an assigned task, not the main assistant. Work only on this task in this execution scope.",
-      contextInstructions(includePreviousContext),
       "Make your final response self-contained.",
       "Assigned task:",
       prompt.trim(),
@@ -71,7 +59,7 @@ export function buildCronRuntimeNotice({
 }: {
   scheduleLabel: string;
   prompt: string;
-  session: { kind: string; includePreviousContext?: PreviousContextMode };
+  session: { kind: string };
   phase?: "run" | "delivery" | "skipped";
   now?: Date;
 }): RuntimeNotice {
@@ -84,12 +72,7 @@ export function buildCronRuntimeNotice({
         ? [
             inline
               ? "Execute the scheduled task in main, using the scheduled workspace."
-              : [
-                  "You run in a separate execution scope, not the main assistant. Execute the scheduled task and make your final response self-contained.",
-                  contextInstructions(session.includePreviousContext),
-                ]
-                  .filter(Boolean)
-                  .join(" "),
+              : "You run in a separate execution scope, not the main assistant. Execute the scheduled task and make your final response self-contained.",
           ]
         : ["This is a runtime report, not a user request."]),
       `${phase === "run" ? "Assigned scheduled task" : "Scheduled prompt (for reference)"}:\n${prompt.trim()}`,

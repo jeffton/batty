@@ -1,6 +1,6 @@
 import type { Context, JsonValue } from "@earendil-works/chord";
 
-import { type Message, type ModelThinkingLevel } from "@earendil-works/pi-ai";
+import { type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
   defineDoc,
   type Agent,
@@ -22,11 +22,6 @@ import type { AgentTurnArtifacts } from "./agent-turn-file-changes.js";
 
 import { type WorkerRecord } from "./orchestration-history";
 
-export type ContextMode = boolean | "chat-only";
-export type ContextProvider = (
-  parentId: ConversationId,
-  mode: ContextMode,
-) => Promise<readonly Message[]>;
 export type PrepareAgent = (cwd: string, agent: Agent, context: Context) => Promise<AgentChange>;
 export type InlineContext = {
   cwd: string | null;
@@ -48,7 +43,6 @@ export type Schedule =
   | { kind: "cron"; expression: string; timezone: string };
 export type CronSession = {
   kind: "new" | "daily-inline" | "main-inline" | "daily-detached" | "main-detached";
-  includePreviousContext?: ContextMode;
 };
 export type CronDelivery = "direct" | "assistant";
 export type CronJobInput = {
@@ -146,8 +140,6 @@ export interface OrchestrationConfig {
     | readonly WorkspaceInfo[]
     | (() => readonly WorkspaceInfo[] | Promise<readonly WorkspaceInfo[]>);
   mainId?: ConversationId;
-  /** Prepared provider context, not immutable storage history. Required for context copies. */
-  contextFor?: ContextProvider;
   prepareAgent?: PrepareAgent;
   /** Used when the host's workspace list is managed by a service. */
   resolveWorkspace?: (
@@ -204,9 +196,4 @@ export interface OrchestrationServices {
   readonly browserLifecycle: WorkerBrowserLifecycle | undefined;
   workspace(id?: string, parentId?: ConversationId): Promise<Pick<WorkspaceInfo, "id" | "path">>;
   assistantWorkspaceId(): Promise<string | undefined>;
-  preparedContext(
-    parentId: ConversationId,
-    mode: ContextMode,
-    workspaceId: string,
-  ): Promise<readonly Message[]>;
 }

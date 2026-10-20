@@ -119,20 +119,17 @@ async function until(check: () => Promise<boolean>) {
 }
 
 test.each([
-  { kind: "fresh", target: "assistant", copy: false },
-  { kind: "nested", target: "assistant", copy: false },
-  { kind: "nested", target: "assistant", copy: true, parent: "other" },
-  { kind: "cron", target: "assistant", copy: false },
-  { kind: "fresh", target: "assistant", copy: true },
-  { kind: "fresh", target: "assistant", copy: "chat-only" },
-  { kind: "fresh", target: "roy", copy: true },
-  { kind: "fresh", target: "other", copy: true },
-  { kind: "nested", target: "other", copy: true },
-  { kind: "cron", target: "other", copy: "chat-only" },
+  { kind: "fresh", target: "assistant" },
+  { kind: "nested", target: "assistant" },
+  { kind: "nested", target: "assistant", parent: "other" },
+  { kind: "cron", target: "assistant" },
+  { kind: "fresh", target: "roy" },
+  { kind: "fresh", target: "other" },
+  { kind: "nested", target: "other" },
 ] as const)(
-  "$kind worker in $target (copy=$copy) receives only permitted main memory",
+  "$kind worker in $target receives permitted main memory without parent transcript",
   async (scenario) => {
-    const { kind, copy } = scenario;
+    const { kind } = scenario;
     const directory = await mkdtemp(join(tmpdir(), "batty-overview-"));
     const roots = [join(directory, "projects"), join(directory, "second")];
     for (const name of ["assistant", "roy", "other"]) {
@@ -185,7 +182,6 @@ test.each([
         ...(memory.extension.tools ?? []),
         ...(orchestration.extension.tools ?? []),
       ]);
-      orchestration.setContextProvider((id, mode) => memory.contextFor(id, mode));
       await orchestration.bind(harness, main);
       await memory.bind(harness, main, storage);
       const secret = "exact archived decision " + "x".repeat(200);
@@ -220,7 +216,6 @@ text(await tools.memory_date({id}));`;
                     action: "run",
                     prompt: kind === "nested" ? "launch nested catalog" : "inspect catalog",
                     workspaceId: kind === "nested" ? parent : target,
-                    includePreviousContext: copy,
                   }),
                 ],
                 { stopReason: "toolUse" },
@@ -232,7 +227,6 @@ text(await tools.memory_date({id}));`;
                     action: "run",
                     prompt: "inspect catalog",
                     workspaceId: target,
-                    includePreviousContext: copy,
                   }),
                 ],
                 { stopReason: "toolUse" },
@@ -242,7 +236,8 @@ text(await tools.memory_date({id}));`;
               const text = JSON.stringify(
                 request.messages.filter((message) => message.role !== "system"),
               );
-              expect(text.match(/<chat>/g) ?? []).toHaveLength(target === assistantId ? 1 : 0);
+              expect(text).not.toContain("launch catalog");
+              expect(text).toContain("inspect catalog");
               const system = request.messages.findLast((message) => message.role === "system");
               const names = system?.toolsAdded?.map((tool) => tool.name) ?? [];
               expect(names).not.toContain("memory_overview");
@@ -292,7 +287,7 @@ text(await tools.memory_date({id}));`;
           title: "Scheduled test task",
           workspaceId: target,
           prompt: "inspect catalog",
-          session: { kind: "main-detached", includePreviousContext: copy },
+          session: { kind: "main-detached" },
           schedule: { kind: "at", in: "1h" },
         });
         await main.commit(async (tx) => {

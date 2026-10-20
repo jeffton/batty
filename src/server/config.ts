@@ -22,7 +22,6 @@ export interface AppConfig {
   webPushDir: string;
   webPushSubject: string;
   pushTitle: string;
-  cronDailySessionStartTime: string;
   braveSearchKey?: string;
   browserTailscaleSshDestination?: string;
   browserMaxTabs: number;
@@ -132,7 +131,6 @@ export async function loadConfig(battyDir: string): Promise<AppConfig> {
     webPushDir: path.join(stateDir, "web-push"),
     webPushSubject: options.webPushSubject,
     pushTitle: options.pushTitle,
-    cronDailySessionStartTime: options.cronDailySessionStartTime,
     braveSearchKey: options.braveSearchKey,
     browserTailscaleSshDestination: options.browserTailscaleSshDestination,
     browserMaxTabs: options.browserMaxTabs ?? DEFAULT_BROWSER_MAX_TABS,

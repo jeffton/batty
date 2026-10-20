@@ -108,7 +108,6 @@ try {
   >;
   const options = {
     webPushSubject: source.webPushSubject,
-    cronDailySessionStartTime: source.cronDailySessionStartTime,
     baseUrl: "/",
     appTitle: "Batty smoke",
     appColor: "neutral",

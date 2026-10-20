@@ -287,7 +287,6 @@ text(await tools.memory_date({id}));`;
           title: "Scheduled test task",
           workspaceId: target,
           prompt: "inspect catalog",
-          session: { kind: "main-detached" },
           schedule: { kind: "at", in: "1h" },
         });
         await main.commit(async (tx) => {

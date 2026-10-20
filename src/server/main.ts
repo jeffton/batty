@@ -273,7 +273,6 @@ app.get<{ Params: { workspaceId: string } }>(
         prompt: job?.prompt ?? "",
         model: job?.model ?? `${config.defaultProvider}/${config.defaultModel}`,
         thinkingLevel: job?.thinkingLevel ?? config.defaultThinkingLevel,
-        session: job?.session ?? { kind: "new" },
         scheduleLabel: job ? scheduleLabel(job.schedule) : "",
         startedAtMs: run.startedAt,
         sessionId: run.sessionId,

@@ -17,100 +17,94 @@ import { suppressAgentCompletionNotification } from "../shared/agent-notificatio
 
 import { cleanup, fixture, until } from "./orchestration-test-fixture.js";
 
-// A detached cron's final report is a normal main turn, not an inline assignment.
-test.each(["daily-detached", "main-detached"] as const)(
-  "main can await a worker started from a completed %s report",
-  async (kind) => {
-    const { faux, orchestration, open, registry } = await fixture();
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    registry.install(
-      defineExtension({
-        name: "cron-report-await",
-        tools: [
-          defineTool({
-            name: "hold_report_worker",
-            description: "Keep the worker running until main has awaited it",
-            parameters: Type.Object({}),
-            replay: "safe",
-            execute: async () => {
-              await gate;
-              return { output: [{ type: "text", text: "worker released" }] };
-            },
-          }),
-        ],
-      }),
+// A cron's final report is a normal main turn.
+test("main can await a worker started from a completed cron report", async () => {
+  const { faux, orchestration, open, registry } = await fixture();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  registry.install(
+    defineExtension({
+      name: "cron-report-await",
+      tools: [
+        defineTool({
+          name: "hold_report_worker",
+          description: "Keep the worker running until main has awaited it",
+          parameters: Type.Object({}),
+          replay: "safe",
+          execute: async () => {
+            await gate;
+            return { output: [{ type: "text", text: "worker released" }] };
+          },
+        }),
+      ],
+    }),
+  );
+  const { harness, main } = await open();
+  await main.configure({ cwd: "/tmp" }, context);
+  const call = (args: Record<string, string>) =>
+    fauxAssistantMessage([fauxToolCall("subagent", args)], { stopReason: "toolUse" });
+  faux.setResponses(
+    Array.from({ length: 20 }, () => (request) => {
+      const last = request.messages.findLast((message) => message.role !== "system")!;
+      const text = JSON.stringify(last.content);
+      if (last.role === "user" && text.includes("scheduled report source"))
+        return fauxAssistantMessage([fauxText("cron finished")]);
+      if (last.role === "user" && text.includes("cron finished"))
+        return call({ action: "run", prompt: "blocked report helper" });
+      if (last.role === "user" && text.includes("blocked report helper"))
+        return fauxAssistantMessage([fauxToolCall("hold_report_worker", {})], {
+          stopReason: "toolUse",
+        });
+      if (last.role === "toolResult" && text.includes("Started. Session ID:"))
+        return call({ action: "await", sessionId: text.match(/Session ID: (\d+)/)![1]! });
+      return fauxAssistantMessage([fauxText("report work completed")]);
+    }),
+  );
+  const job = await orchestration.addJob({
+    title: "Scheduled test task",
+    workspaceId: "test",
+    prompt: "scheduled report source",
+    schedule: { kind: "at", in: "1h" },
+  });
+  try {
+    await main.commit(async (tx) => {
+      (await tx.doc(OrchestrationDoc)).jobs[job.id]!.nextAt = Date.now() - 1;
+    }, context);
+    await orchestration.tick();
+    await until(async () =>
+      (await main.context(context)).messages.some(
+        (message) =>
+          message.role === "toolResult" &&
+          message.toolName === "subagent" &&
+          !JSON.stringify(message.content).includes("Started. Session ID:"),
+      ),
     );
-    const { harness, main } = await open();
-    await main.configure({ cwd: "/tmp" }, context);
-    const call = (args: Record<string, string>) =>
-      fauxAssistantMessage([fauxToolCall("subagent", args)], { stopReason: "toolUse" });
-    faux.setResponses(
-      Array.from({ length: 20 }, () => (request) => {
-        const last = request.messages.findLast((message) => message.role !== "system")!;
-        const text = JSON.stringify(last.content);
-        if (last.role === "user" && text.includes("scheduled report source"))
-          return fauxAssistantMessage([fauxText("cron finished")]);
-        if (last.role === "user" && text.includes("cron finished"))
-          return call({ action: "run", prompt: "blocked report helper" });
-        if (last.role === "user" && text.includes("blocked report helper"))
-          return fauxAssistantMessage([fauxToolCall("hold_report_worker", {})], {
-            stopReason: "toolUse",
-          });
-        if (last.role === "toolResult" && text.includes("Started. Session ID:"))
-          return call({ action: "await", sessionId: text.match(/Session ID: (\d+)/)![1]! });
-        return fauxAssistantMessage([fauxText("report work completed")]);
-      }),
-    );
-    const job = await orchestration.addJob({
-      title: "Scheduled test task",
-      workspaceId: "test",
-      prompt: "scheduled report source",
-      session: { kind },
-      schedule: { kind: "at", in: "1h" },
-    });
-    try {
-      await main.commit(async (tx) => {
-        (await tx.doc(OrchestrationDoc)).jobs[job.id]!.nextAt = Date.now() - 1;
-      }, context);
-      await orchestration.tick();
-      await until(async () =>
-        (await main.context(context)).messages.some(
-          (message) =>
-            message.role === "toolResult" &&
-            message.toolName === "subagent" &&
-            !JSON.stringify(message.content).includes("Started. Session ID:"),
-        ),
-      );
-      const messages = (await main.context(context)).messages;
-      const awaited = messages.findLast(
-        (message) => message.role === "toolResult" && message.toolName === "subagent",
-      )!;
-      expect(awaited).toMatchObject({ isError: false });
-      expect(JSON.stringify(awaited.content)).toContain("Awaiting subagent. Session ID:");
-      expect((await harness.snapshot(OrchestrationDoc, context))!.inlineContext).toBeUndefined();
-      expect((await orchestration.listRunLogs(job.id))[0]!.status).toBe("completed");
-      expect((await main.agent(context)).cwd).toBe("/tmp");
-    } finally {
-      release();
-    }
-    await until(async () => (await orchestration.listRunning()).length === 0);
-    await main.waitForIdle(context);
-  },
-);
+    const messages = (await main.context(context)).messages;
+    const awaited = messages.findLast(
+      (message) => message.role === "toolResult" && message.toolName === "subagent",
+    )!;
+    expect(awaited).toMatchObject({ isError: false });
+    expect(JSON.stringify(awaited.content)).toContain("Awaiting subagent. Session ID:");
+    expect((await orchestration.listRunLogs(job.id))[0]!.status).toBe("completed");
+    expect((await main.agent(context)).cwd).toBe("/tmp");
+  } finally {
+    release();
+  }
+  await until(async () => (await orchestration.listRunning()).length === 0);
+  await main.waitForIdle(context);
+}, 15000);
 
-test.each(
-  (["new", "daily-detached", "main-detached", "daily-inline", "main-inline"] as const).flatMap(
-    (kind) =>
-      (
-        ["NO_REPLY", " \nNO_REPLY\t", "normal result", "NO_REPLY with details", "error"] as const
-      ).map((output) => ({ kind, output })),
-  ),
-)(
-  "cron $kind with $output preserves history and only delivers non-silent results",
-  async ({ kind, output }) => {
+test.each([
+  "NO_REPLY",
+  " \nNO_REPLY\t",
+  "normal result",
+  "NO_REPLY with details",
+  "error",
+] as const)(
+  "cron with $output preserves history and only delivers non-silent results",
+  async (output) => {
     const { faux, orchestration, open } = await fixture();
     const { harness, main } = await open();
     await main.configure({ cwd: "/tmp" }, context);
@@ -137,7 +131,6 @@ test.each(
       title: "Scheduled test task",
       workspaceId: "test",
       prompt: "scheduled task",
-      session: { kind },
       schedule: { kind: "at", in: "1h" },
     });
     await main.commit(async (tx) => {
@@ -157,7 +150,6 @@ test.each(
     expect((await harness.getTask(run.taskId, context))!.state.outcome?.status).toBe("completed");
     if (output === "error") expect(run.output).toBe(`Task ${run.sessionId} failed: model_error`);
     else expect(run.output).toBe(output);
-    const inline = kind.endsWith("inline");
     const silent = output.trim() === "NO_REPLY";
     const entries = (await main.context(context)).entries.slice(before);
     const reports = entries.filter((entry) =>
@@ -167,8 +159,8 @@ test.each(
         return notice?.text.includes(" result]");
       }),
     );
-    expect(reports).toHaveLength(!inline && !silent ? 1 : 0);
-    if (!inline && silent) expect(entries).toHaveLength(0);
+    expect(reports).toHaveLength(silent ? 0 : 1);
+    if (silent) expect(entries).toHaveLength(0);
     const child = (await harness.conversation(Number(run.sessionId) as never, context))!;
     if (output !== "error")
       expect((await child.context(context)).messages).toContainEqual(
@@ -178,12 +170,12 @@ test.each(
     // Drain the serialized push observer before asserting the silent cases.
     await new Promise<void>((resolve) => setImmediate(resolve));
     if (silent) expect(delivered).toHaveLength(0);
-    else if (output !== "error" || !inline) expect(delivered).toHaveLength(1);
+    else if (output !== "error") expect(delivered).toHaveLength(1);
     expect(reportError).not.toHaveBeenCalled();
   },
 );
 
-test("silent detached cron creates no report or steering while main is busy", async () => {
+test("silent cron creates no report or steering while main is busy", async () => {
   const { faux, orchestration, open, registry } = await fixture();
   let entered = false;
   let release!: () => void;
@@ -220,7 +212,6 @@ test("silent detached cron creates no report or steering while main is busy", as
   const job = await orchestration.addJob({
     title: "Scheduled test task",
     prompt: "silent scheduled task",
-    session: { kind: "main-detached" },
     schedule: { kind: "at", in: "1h" },
   });
   try {
@@ -250,17 +241,10 @@ test("silent detached cron creates no report or steering while main is busy", as
 });
 
 test.each(
-  (
-    [
-      ["main-detached", false],
-      ["main-detached", true],
-      ["daily-detached", false],
-      ["daily-detached", true],
-    ] as const
-  ).flatMap(([kind, busy]) =>
-    (["assistant", "direct"] as const).map((delivery) => [kind, busy, delivery] as const),
+  ([false, true] as const).flatMap((busy) =>
+    (["assistant", "direct"] as const).map((delivery) => [busy, delivery] as const),
   ),
-)("cron %s final (main busy=%s, delivery=%s)", async (kind, busy, delivery) => {
+)("cron final (main busy=%s, delivery=%s)", async (busy, delivery) => {
   const { faux, orchestration, open, registry } = await fixture();
   let entered = false;
   let release!: () => void;
@@ -320,7 +304,6 @@ test.each(
     title: "Scheduled test task",
     prompt: "scheduled work",
     delivery,
-    session: { kind },
     schedule: { kind: "at", in: "1h" },
   });
   try {
@@ -371,38 +354,34 @@ test.each(
   if (busy) expect(replies.at(-2)).toMatchObject({ content: [fauxText("main finished first")] });
 });
 
-test.each(["new", "daily-inline", "main-inline"] as const)(
-  "direct cron %s displays unchanged output without a main generation",
-  async (kind) => {
-    const { faux, orchestration, open } = await fixture();
-    const { main } = await open();
-    faux.setResponses([
-      (request) => {
-        const prompt = JSON.stringify(request.messages);
-        expect(prompt).toContain("You run in a separate execution scope");
-        expect(prompt).not.toContain("You run inline in the permanent main conversation");
-        return fauxAssistantMessage([fauxText("full briefing\nunchanged")]);
-      },
-    ]);
-    const job = await orchestration.addJob({
-      title: "Scheduled test task",
-      prompt: "brief",
-      delivery: "direct",
-      session: { kind },
-      schedule: { kind: "at", in: "1h" },
-    });
-    await main.commit(async (tx) => {
-      (await tx.doc(OrchestrationDoc)).jobs[job.id]!.nextAt = Date.now() - 1;
-    }, context);
-    await orchestration.tick();
-    await until(async () => (await orchestration.listRunLogs(job.id))[0]?.status === "completed");
-    await main.waitForIdle(context);
-    expect(entryMessages((await main.context(context)).entries)).toMatchObject([
-      { role: "assistant", blocks: [fauxText("full briefing\nunchanged")] },
-    ]);
-    expect((await orchestration.listRunLogs(job.id))[0]!.sessionId).not.toBe(String(main.id));
-  },
-);
+test("direct cron displays unchanged output without a main generation", async () => {
+  const { faux, orchestration, open } = await fixture();
+  const { main } = await open();
+  faux.setResponses([
+    (request) => {
+      const prompt = JSON.stringify(request.messages);
+      expect(prompt).toContain("You run in a separate execution scope");
+      expect(prompt).not.toContain("You run inline in the permanent main conversation");
+      return fauxAssistantMessage([fauxText("full briefing\nunchanged")]);
+    },
+  ]);
+  const job = await orchestration.addJob({
+    title: "Scheduled test task",
+    prompt: "brief",
+    delivery: "direct",
+    schedule: { kind: "at", in: "1h" },
+  });
+  await main.commit(async (tx) => {
+    (await tx.doc(OrchestrationDoc)).jobs[job.id]!.nextAt = Date.now() - 1;
+  }, context);
+  await orchestration.tick();
+  await until(async () => (await orchestration.listRunLogs(job.id))[0]?.status === "completed");
+  await main.waitForIdle(context);
+  expect(entryMessages((await main.context(context)).entries)).toMatchObject([
+    { role: "assistant", blocks: [fauxText("full briefing\nunchanged")] },
+  ]);
+  expect((await orchestration.listRunLogs(job.id))[0]!.sessionId).not.toBe(String(main.id));
+});
 
 test.each(["NO_REPLY", "error"])("direct cron handles %s", async (output) => {
   const { faux, orchestration, open } = await fixture();

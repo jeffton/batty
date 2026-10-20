@@ -35,7 +35,6 @@ test("reopen retires only completed unchanged one-shots and preserves archived m
         id === "recurring"
           ? { kind: "every", every: "1h", everyMs: 3600000 }
           : { kind: "at", at: new Date(now - 10000).toISOString() },
-      session: { kind: "main-detached" },
       createdAt: now - 20000,
       updatedAt: id === "edited" ? now : now - 20000,
       ...(id === "rearmed" ? { nextAt: now + 3600000 } : {}),
@@ -90,7 +89,7 @@ test("reopen retires only completed unchanged one-shots and preserves archived m
   expect(run).toMatchObject({
     status: "completed",
     output: "retained output",
-    job: { prompt: "original completed", session: { kind: "main-detached" } },
+    job: { prompt: "original completed" },
   });
   await harness.close(context);
   await state.open();
@@ -99,7 +98,7 @@ test("reopen retires only completed unchanged one-shots and preserves archived m
   expect(retainedRuns[1]).toMatchObject({
     status: "failed",
     output: "retained output",
-    job: { prompt: "original completed", session: { kind: "main-detached" } },
+    job: { prompt: "original completed" },
   });
 });
 
@@ -190,7 +189,6 @@ test("imported cron preserves identity and interval phase across restart without
     prompt: "legacy prompt",
     model: "faux/faux-2",
     thinkingLevel: "high",
-    session: { kind: "daily-detached" as const },
     schedule: { kind: "every" as const, every: "5m", everyMs: 300000 },
     createdAt: 1000,
     updatedAt: 2000,
@@ -219,7 +217,6 @@ test("cutover reconciles a legacy occurrence executed after the disabled import"
     workspaceId: "test",
     enabled: false,
     prompt: "legacy",
-    session: { kind: "daily-detached" as const },
     schedule: { kind: "every" as const, every: "5m", everyMs: 300000 },
     createdAt: 1000,
     updatedAt: 2000,
@@ -245,7 +242,6 @@ test("cron import rejects invalid settings before persistence and accepts histor
     workspaceId: "test",
     enabled: false,
     prompt: "done",
-    session: { kind: "new" as const },
     schedule: { kind: "at" as const, at: "2020-01-01T00:00:00.000Z" },
     createdAt: 1000,
     updatedAt: 2000,
@@ -304,7 +300,6 @@ test("fresh cron workers do not inherit the main transcript", async () => {
   const job = await orchestration.addJob({
     title: "Scheduled test task",
     prompt: "scheduled task prompt",
-    session: { kind: "new" },
     schedule: { kind: "at", in: "1h" },
   });
   await main.commit(async (tx) => {

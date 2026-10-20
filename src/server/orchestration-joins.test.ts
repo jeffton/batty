@@ -106,7 +106,6 @@ test.each(["complete", "restart", "cron-run", "cron-resume", "cron-restart"])(
         const job = await orchestration.addJob({
           title: "Scheduled test task",
           prompt: "outer implementation",
-          session: { kind: "daily-detached" },
           schedule: { kind: "at", in: "1h" },
         });
         await main.commit(async (tx) => {

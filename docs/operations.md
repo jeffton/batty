@@ -173,8 +173,7 @@ This is a breaking change without aliases or history migration. Instructions and
 Deployment installs `/usr/local/bin/batty2`. It authenticates with the local state secret and calls the running scheduler; it does not start another scheduler.
 
 ```sh
-batty2 cron add --workspace my-project --title 'Task review' --prompt 'Review outstanding tasks' --in 3m \
-  --session main-detached
+batty2 cron add --workspace my-project --title 'Task review' --prompt 'Review outstanding tasks' --in 3m
 batty2 cron list
 batty2 cron list --workspace my-project
 batty2 cron get JOB_ID

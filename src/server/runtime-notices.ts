@@ -53,26 +53,21 @@ export function buildSubagentSteeringRuntimeNotice(prompt: string): RuntimeNotic
 export function buildCronRuntimeNotice({
   scheduleLabel,
   prompt,
-  session,
   phase = "run",
   now = new Date(),
 }: {
   scheduleLabel: string;
   prompt: string;
-  session: { kind: string };
   phase?: "run" | "delivery" | "skipped";
   now?: Date;
 }): RuntimeNotice {
-  const inline = session.kind === "daily-inline" || session.kind === "main-inline";
   return {
     kind: "cron",
     text: [
       `Cron ${phase === "run" ? "run triggered" : phase === "delivery" ? "result delivered" : "run skipped"}. Current time: ${now.toISOString()}. Schedule: ${scheduleLabel}.`,
       ...(phase === "run"
         ? [
-            inline
-              ? "Execute the scheduled task in main, using the scheduled workspace."
-              : "You run in a separate execution scope, not the main assistant. Execute the scheduled task and make your final response self-contained.",
+            "You run in a separate execution scope, not the main assistant. Execute the scheduled task and make your final response self-contained.",
           ]
         : ["This is a runtime report, not a user request."]),
       `${phase === "run" ? "Assigned scheduled task" : "Scheduled prompt (for reference)"}:\n${prompt.trim()}`,

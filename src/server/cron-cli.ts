@@ -10,7 +10,7 @@ Actions: add, update, remove, list, get, import, list-running, list-run-logs, st
 Options:
   --workspace ID --title TEXT --prompt TEXT --model PROVIDER/MODEL --thinking LEVEL
   --in DURATION | --at ISO_DATE | --every DURATION | --cron EXPRESSION
-  --timezone ZONE --session MODE
+  --timezone ZONE
   --delivery direct|assistant --enabled true|false --run-id ID --limit NUMBER
   --json FILE  Read request fields from JSON file (use - for stdin).
 list returns compact summaries across all workspaces; --workspace ID filters them.
@@ -37,7 +37,6 @@ export async function parseCronArgs(args: string[]) {
       every: { type: "string" },
       cron: { type: "string" },
       timezone: { type: "string" },
-      session: { type: "string" },
       enabled: { type: "string" },
       delivery: { type: "string" },
       "run-id": { type: "string" },
@@ -94,7 +93,6 @@ export async function parseCronArgs(args: string[]) {
         ? { kind: "cron", expression: values.cron, timezone: values.timezone }
         : { kind: key === "in" ? "at" : key, [key]: values[key] };
   } else if (values.timezone) throw new Error("--timezone requires --cron");
-  if (values.session) body.session = { kind: values.session };
   return { root: values.root, help: false, body };
 }
 

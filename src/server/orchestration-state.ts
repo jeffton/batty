@@ -5,7 +5,6 @@ import {
   defineDoc,
   type Agent,
   type AgentChange,
-  type AgentState,
   type Conversation,
   type ConversationId,
   type Harness,
@@ -23,16 +22,6 @@ import type { AgentTurnArtifacts } from "./agent-turn-file-changes.js";
 import { type WorkerRecord } from "./orchestration-history";
 
 export type PrepareAgent = (cwd: string, agent: Agent, context: Context) => Promise<AgentChange>;
-export type InlineContext = {
-  cwd: string | null;
-  model: ModelRef | null;
-  thinkingLevel: ModelThinkingLevel;
-  runId: string;
-  selection?: {
-    extensions: NonNullable<AgentState["extensions"]> | null;
-    tools: NonNullable<AgentState["tools"]> | null;
-  };
-};
 export type ScheduleInput =
   | { kind: "at"; at?: string; in?: string }
   | { kind: "every"; every: string }
@@ -41,9 +30,6 @@ export type Schedule =
   | { kind: "at"; at: string }
   | { kind: "every"; every: string; everyMs: number }
   | { kind: "cron"; expression: string; timezone: string };
-export type CronSession = {
-  kind: "new" | "daily-inline" | "main-inline" | "daily-detached" | "main-detached";
-};
 export type CronDelivery = "direct" | "assistant";
 export type CronJobInput = {
   title: string;
@@ -54,7 +40,6 @@ export type CronJobInput = {
   model?: string;
   thinkingLevel?: string;
   schedule: ScheduleInput;
-  session?: CronSession;
 };
 export type CronJob = {
   title: string;
@@ -66,7 +51,6 @@ export type CronJob = {
   model?: string;
   thinkingLevel?: string;
   schedule: Schedule;
-  session: CronSession;
   nextAt?: number;
   retryAt?: number;
   createdAt: number;
@@ -90,7 +74,6 @@ export type CronRun = {
 /** Session-wide worker registry; subagent results belong to their spawning parent. */
 export const OrchestrationDoc = defineDoc<{
   mainId?: ConversationId;
-  inlineContext?: InlineContext;
   workers: Record<string, Worker>;
   calls: Record<string, { workerId: string; taskId: TaskId<string> }>;
   joins?: Record<string, TaskId>;
@@ -165,7 +148,6 @@ export type DeliveryInput = {
   report: boolean;
   previous?: TaskId<string>;
   runId?: string;
-  inline?: boolean;
   change?: RunChange;
   workspaceId?: string;
 };

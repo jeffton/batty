@@ -62,7 +62,7 @@ test("compact cron list and explicit details preserve full jobs and workspace fi
       },
     ]);
     expect(full.prompt).toBe("A very detailed private prompt");
-    expect(full.session).toEqual({ kind: "new" });
+    expect(full).not.toHaveProperty("session");
     expect(
       (
         await app.inject({

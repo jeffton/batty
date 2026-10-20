@@ -45,7 +45,6 @@ import { createTools } from "./tools";
 import { createWorkerBrowserCleanup } from "./browser-worker-cleanup";
 import { createOrchestration } from "./orchestration";
 import { RemoteWorkers, parseRemoteSession } from "./remote-workers";
-import { OrchestrationDoc } from "./orchestration-state";
 import { createMemory, type MemoryConfig } from "./memory";
 import { createResources } from "./resources";
 import type { SessionState, SessionMessagesPage, UiMessage, ModelOption } from "@/shared/types";
@@ -522,15 +521,7 @@ export class Runtime {
     };
     const thinkingLevel = (this.config.defaultThinkingLevel ?? "medium") as ModelThinkingLevel;
     await this.main.commit(async (tx) => {
-      const doc = await tx.doc(OrchestrationDoc);
-      // An inline cron owns the active configuration until it finishes. Update
-      // the saved main configuration so queued user input gets the default.
-      if (doc.inlineContext) {
-        doc.inlineContext.model = model;
-        doc.inlineContext.thinkingLevel = thinkingLevel;
-      } else {
-        await configure(tx, this.main.id, { model, thinkingLevel });
-      }
+      await configure(tx, this.main.id, { model, thinkingLevel });
     }, context);
   }
 

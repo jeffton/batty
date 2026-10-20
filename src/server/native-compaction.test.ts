@@ -134,10 +134,10 @@ test("non-root workers compact natively and preserve original storage across res
   }
 });
 
-test("main and main-inline cron decline native summaries and retain OptChat run heads", async () => {
+test("main declines native summaries and retains OptChat run heads", async () => {
   const fixtureState = await fixture();
   const { main } = await fixtureState.open();
-  for (const input of ["Main input", "Main-inline cron input"]) {
+  for (const input of ["Main input"]) {
     const originals = await seed(main);
     await submit(main, input);
     const active = await main.context(context);
@@ -150,7 +150,7 @@ test("main and main-inline cron decline native summaries and retain OptChat run 
     (tx) => tx.scanTasks({ conversationId: main.id, kind: "pi.compaction" }, 100),
     context,
   );
-  expect(tasks.items).toHaveLength(2);
+  expect(tasks.items).toHaveLength(1);
   for (const task of tasks.items) {
     expect(task.state).toMatchObject({
       status: "terminal",
@@ -158,7 +158,7 @@ test("main and main-inline cron decline native summaries and retain OptChat run 
     });
   }
   expect(fixtureState.summaries()).toBe(0);
-  expect(fixtureState.requests).toHaveLength(2);
+  expect(fixtureState.requests).toHaveLength(1);
   expect(fixtureState.requests.every((request) => request.includes("<chat>"))).toBe(true);
   expect(fixtureState.requests.every((request) => request.includes("batty-optchat:"))).toBe(true);
 });

@@ -32,7 +32,6 @@ test("scheduled task notices do not expose execution instructions", () => {
     buildCronRuntimeNotice({
       prompt: "Private scheduled prompt",
       scheduleLabel: "hourly",
-      session: { kind: "main-inline" },
     }),
   );
   expect(queuedPromptDisplay(content)).toEqual({

@@ -52,18 +52,12 @@ test.each([
   });
 });
 
-test.each(["daily-inline", "main-inline", "daily-detached", "main-detached"])(
-  "cron roles describe the actual %s scope",
-  (kind) => {
-    const notice = buildCronRuntimeNotice({
-      scheduleLabel: "hourly",
-      prompt: "Do the scheduled task",
-      session: { kind },
-    });
-    expect(notice.text).toContain("Assigned scheduled task:\nDo the scheduled task");
-    expect(notice.text).toContain(
-      kind.endsWith("inline") ? "in main, using the scheduled workspace" : "not the main assistant",
-    );
-    expect(notice.text).not.toContain("NO_REPLY");
-  },
-);
+test("cron notice describes the separate scheduled worker scope", () => {
+  const notice = buildCronRuntimeNotice({
+    scheduleLabel: "hourly",
+    prompt: "Do the scheduled task",
+  });
+  expect(notice.text).toContain("Assigned scheduled task:\nDo the scheduled task");
+  expect(notice.text).toContain("not the main assistant");
+  expect(notice.text).not.toContain("NO_REPLY");
+});

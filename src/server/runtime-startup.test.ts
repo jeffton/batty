@@ -133,7 +133,6 @@ test("startup observers see a due inline cron reply even with explicit resume di
     const job = await runtime.orchestration.addJob({
       title: "Scheduled test task",
       prompt: "startup cron task",
-      session: { kind: "main-inline" },
       schedule: { kind: "at", in: "1h" },
     });
     await runtime.main.commit(async (tx) => {

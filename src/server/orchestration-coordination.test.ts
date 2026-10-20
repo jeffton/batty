@@ -168,7 +168,6 @@ test.each(
       title: "Scheduled test task",
       prompt: "project cron",
       workspaceId: "other",
-      session: { kind: "daily-detached" },
       schedule: { kind: "at", in: "1h" },
     });
     await main.commit(async (tx) => {
@@ -200,22 +199,25 @@ test.each(["run", "resume"])(
     const { faux, open, orchestration } = await fixture(10_000, console.error, "test");
     const { harness, main } = await open();
     let readerId: string | undefined;
-    faux.setResponses(
-      Array.from({ length: 30 }, () => (request) => {
-        const last = request.messages.findLast((message) => message.role !== "system")!;
-        const text = JSON.stringify(last.content);
-        if (last.role === "user" && text.includes("launch"))
-          return call({ action: "run", prompt: "reader", workspaceId: "other" });
-        if (last.role === "user" && text.includes("reader"))
-          return call({
-            action,
-            ...(action === "resume" ? { sessionId: readerId! } : {}),
-            prompt: "cross workspace",
-            workspaceId: "test",
-          });
-        return done();
-      }),
-    );
+    const responses = () =>
+      Array.from(
+        { length: 30 },
+        () => (request: { messages: readonly import("@earendil-works/pi-ai").Message[] }) => {
+          const last = request.messages.findLast((message) => message.role !== "system")!;
+          const text = JSON.stringify(last.content);
+          if (last.role === "user" && text.includes("launch"))
+            return call({ action: "run", prompt: "reader", workspaceId: "other" });
+          if (last.role === "user" && text.includes("reader"))
+            return call({
+              action,
+              ...(action === "resume" ? { sessionId: readerId! } : {}),
+              prompt: "cross workspace",
+              workspaceId: "test",
+            });
+          return done();
+        },
+      );
+    faux.setResponses(responses());
     // For resume, target an idle peer in the reader's workspace.
     if (action === "resume") {
       faux.setResponses([
@@ -227,17 +229,7 @@ test.each(["run", "resume"])(
       await until(async () => (await orchestration.listRunning()).length === 0);
       await main.waitForIdle(context);
       readerId = String(Object.values((await orchestrationHistory(harness)).workers)[0]!.id);
-      faux.setResponses([
-        call({ action: "run", prompt: "reader", workspaceId: "other" }),
-        call({
-          action: "resume",
-          sessionId: readerId,
-          prompt: "cross workspace",
-          workspaceId: "test",
-        }),
-        done(),
-        done(),
-      ]);
+      faux.setResponses(responses());
     }
     await (await main.submit({ type: "input", content: "launch" }, context)).wait(context);
     await until(async () => (await orchestration.listRunning()).length === 0);

@@ -35,7 +35,6 @@ export type {
   CronJob,
   CronRun,
   ScheduleInput,
-  CronSession,
   CronDelivery,
   OrchestrationConfig,
   WorkerBrowserLifecycle,

@@ -8,7 +8,6 @@ import { expect, test, vi } from "vite-plus/test";
 import { fauxProvider, fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/faux";
 import { loadConfig } from "../config";
 import { Runtime, context } from "../runtime";
-import { OrchestrationDoc } from "../orchestration-state";
 import { TranscriptImages } from "../transcript-images";
 import { registerSessionRoutes } from "./sessions";
 
@@ -78,30 +77,6 @@ test("main HTTP input replaces a persisted model and follows changed settings wi
       expect(response.statusCode).toBe(404);
       expect(response.json().message).toBe("Unknown subagent");
     }
-
-    // An active inline cron keeps its own settings; its saved main settings
-    // receive the new default for the user message queued behind it.
-    await runtime.main.configure(
-      { model: { provider: "faux", modelId: "old" }, thinkingLevel: "high" },
-      context,
-    );
-    await runtime.main.commit(async (tx) => {
-      (await tx.doc(OrchestrationDoc)).inlineContext = {
-        cwd: config.selfPath,
-        model: { provider: "faux", modelId: "default" },
-        thinkingLevel: "medium",
-        runId: "inline-model-test",
-      };
-    }, context);
-    await runtime.useDefaultModel();
-    expect((await runtime.main.agent(context)).model?.modelId).toBe("old");
-    expect((await runtime.main.agent(context)).thinkingLevel).toBe("high");
-    expect(
-      (await runtime.harness.snapshot(OrchestrationDoc, context))?.inlineContext,
-    ).toMatchObject({
-      model: { provider: "faux", modelId: "new" },
-      thinkingLevel: "off",
-    });
   } finally {
     closeStreams?.();
     await app.close();

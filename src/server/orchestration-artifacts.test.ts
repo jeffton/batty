@@ -265,14 +265,9 @@ test("async subagent reports expose artifacts and parent forwards the same live 
     expect(forwardedCall.details).toMatchObject({ forwardedArtifacts: { sites: [browser] } });
 });
 
-test.each([
-  ["daily-detached", false],
-  ["main-inline", false],
-  ["daily-detached", true],
-  ["main-inline", true],
-] as const)(
-  "cron %s joins parallel children (late=%s) and finishes postprocessing before delivery",
-  async (kind, late) => {
+test.each([false, true] as const)(
+  "cron joins parallel children (late=%s) and finishes postprocessing before delivery",
+  async (late) => {
     const { faux, orchestration, open, registry } = await fixture();
     let releaseChild!: () => void;
     let releaseParent!: () => void;
@@ -395,7 +390,6 @@ test.each([
     const job = await orchestration.addJob({
       title: "Scheduled test task",
       prompt: "parallel cron",
-      session: { kind: kind as "daily-detached" | "main-inline" },
       schedule: { kind: "at", in: "1h" },
     });
     await main.commit(async (tx) => {
@@ -447,12 +441,11 @@ test.each([
     await until(async () => (await orchestration.listRunningCron()).length === 0);
     await main.waitForIdle(context);
     expect((await orchestration.listRunLogs(job.id))[0]!.output).toBe("combined cron final");
-    if (kind === "daily-detached")
-      expect(
-        (await main.context(context)).messages.filter(
-          (m) => m.role === "user" && JSON.stringify(m.content).includes("combined cron final"),
-        ),
-      ).toHaveLength(1);
+    expect(
+      (await main.context(context)).messages.filter(
+        (m) => m.role === "user" && JSON.stringify(m.content).includes("combined cron final"),
+      ),
+    ).toHaveLength(1);
   },
   15000,
 );

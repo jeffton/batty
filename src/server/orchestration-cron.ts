@@ -1,9 +1,5 @@
 import { modelChange } from "./orchestration-worker-config.js";
-import {
-  restoreInlineAgent,
-  archiveWorker,
-  removeCompletedOneShot,
-} from "./orchestration-lifecycle.js";
+import { archiveWorker, removeCompletedOneShot } from "./orchestration-lifecycle.js";
 import { randomUUID } from "node:crypto";
 
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -97,10 +93,6 @@ export function createCronScheduler(
               ? "aborted"
               : "failed";
         current.finishedAt = Date.now();
-        if (doc.inlineContext?.runId === current.id) {
-          await restoreInlineAgent(tx, services.main.id, doc.inlineContext);
-          delete doc.inlineContext;
-        }
         removeCompletedOneShot(doc.jobs, current);
         Object.assign(await tx.doc(ArchivedRun, current.id, current), current);
         delete doc.runs[current.id];
@@ -125,38 +117,29 @@ export function createCronScheduler(
       try {
         const ws = await services.workspace(job.workspaceId);
         const agent = await services.main.agent(context);
-        const inline =
-          job.delivery !== "direct" &&
-          (job.session.kind === "daily-inline" || job.session.kind === "main-inline");
         await services.main.commit(async (tx) => {
           const doc = await tx.doc(OrchestrationDoc);
           const current = doc.jobs[job.id];
           if (!current?.enabled || JSON.stringify(current) !== JSON.stringify(job)) return;
           const runId = `${job.id}:${job.nextAt}`;
           if (doc.runs[runId]) return;
-          const anchor = inline
-            ? undefined
-            : await tx.createTask(Anchor, null, {
-                ownership: { kind: "conversation" },
-                background: true,
-              });
-          const child = inline
-            ? services.main.id
-            : await createWorker(
-                tx,
-                anchor!,
-                services.main.id,
-                ws,
-                job.prompt,
-                agent,
-                modelChange(job.model, job.thinkingLevel),
-              );
-          if (!inline) {
-            const metadata = await tx.doc(WorkerDoc, child);
-            metadata.isCron = true;
-            metadata.isSubagent = false;
-            metadata.cronJobId = job.id;
-          }
+          const anchor = await tx.createTask(Anchor, null, {
+            ownership: { kind: "conversation" },
+            background: true,
+          });
+          const child = await createWorker(
+            tx,
+            anchor,
+            services.main.id,
+            ws,
+            job.prompt,
+            agent,
+            modelChange(job.model, job.thinkingLevel),
+          );
+          const metadata = await tx.doc(WorkerDoc, child);
+          metadata.isCron = true;
+          metadata.isSubagent = false;
+          metadata.cronJobId = job.id;
           const taskId = await tx.createTask(
             Delivery,
             {
@@ -168,30 +151,19 @@ export function createCronScheduler(
                 ...buildCronRuntimeNotice({
                   scheduleLabel: JSON.stringify(job.schedule),
                   prompt: job.prompt,
-                  session:
-                    job.delivery === "direct" && job.session.kind.endsWith("inline")
-                      ? {
-                          ...job.session,
-                          kind:
-                            job.session.kind === "daily-inline"
-                              ? "daily-detached"
-                              : "main-detached",
-                        }
-                      : job.session,
                   now: new Date(now),
                 }),
                 data: { cron: { workspaceId: ws.id, cwd: ws.path, runId } },
               },
-              report: !inline,
+              report: true,
               delivery: job.delivery ?? "assistant",
               runId,
-              inline,
               change: { ...modelChange(job.model, job.thinkingLevel), cwd: ws.path } as RunChange,
               workspaceId: ws.id,
             },
             { ownership: { kind: "conversation" }, background: true },
           );
-          if (!inline) doc.workers[String(child)]!.active = taskId;
+          doc.workers[String(child)]!.active = taskId;
           doc.runs[runId] = {
             id: runId,
             jobId: job.id,
@@ -246,13 +218,6 @@ export function createCronScheduler(
     validateDelivery(input.delivery);
     if (!input.prompt.trim()) throw new Error("Cron prompt is required");
     modelChange(input.model, input.thinkingLevel);
-    if (
-      input.session &&
-      !["new", "daily-inline", "main-inline", "daily-detached", "main-detached"].includes(
-        input.session.kind,
-      )
-    )
-      throw new Error("Invalid cron session mode");
     const ws = await services.workspace(input.workspaceId);
     const now = Date.now();
     const schedule = normalizeSchedule(input.schedule, now);
@@ -263,7 +228,6 @@ export function createCronScheduler(
       enabled: input.enabled ?? true,
       prompt: input.prompt,
       schedule,
-      session: input.session ?? { kind: "new" },
       delivery: input.delivery ?? "assistant",
       createdAt: now,
       updatedAt: now,
@@ -289,12 +253,6 @@ export function createCronScheduler(
       if (value !== undefined && !Number.isFinite(value)) throw new Error("Invalid cron timestamp");
     }
     modelChange(input.model, input.thinkingLevel);
-    if (
-      !["new", "daily-inline", "main-inline", "daily-detached", "main-detached"].includes(
-        input.session.kind,
-      )
-    )
-      throw new Error("Invalid cron session mode");
     const ws = await services.workspace(input.workspaceId);
     let schedule: Schedule;
     if (input.schedule.kind === "at") {
@@ -309,7 +267,6 @@ export function createCronScheduler(
       workspaceId: ws.id,
       enabled: input.enabled,
       prompt: input.prompt,
-      session: structuredClone(input.session),
       ...(input.delivery !== undefined ? { delivery: input.delivery } : {}),
       schedule,
       createdAt: input.createdAt,
@@ -330,13 +287,6 @@ export function createCronScheduler(
   const updateJob = async (id: string, input: Partial<CronJobInput>) => {
     validateDelivery(input.delivery);
     modelChange(input.model, input.thinkingLevel);
-    if (
-      input.session &&
-      !["new", "daily-inline", "main-inline", "daily-detached", "main-detached"].includes(
-        input.session.kind,
-      )
-    )
-      throw new Error("Invalid cron session mode");
     const title = input.title !== undefined ? jobTitle(input.title) : undefined;
     const ws = input.workspaceId ? await services.workspace(input.workspaceId) : undefined;
     const now = Date.now();
@@ -353,7 +303,6 @@ export function createCronScheduler(
       if (input.enabled !== undefined) job.enabled = input.enabled;
       if (input.model !== undefined) job.model = input.model;
       if (input.thinkingLevel !== undefined) job.thinkingLevel = input.thinkingLevel;
-      if (input.session !== undefined) job.session = input.session;
       if (input.delivery !== undefined) job.delivery = input.delivery;
       if (ws) job.workspaceId = ws.id;
       if (schedule) job.schedule = schedule;
@@ -361,16 +310,9 @@ export function createCronScheduler(
         job.nextAt = nextAt(job.schedule, now);
       // Cosmetic renames must not mark an executing one-shot as edited for retirement.
       if (
-        [
-          "prompt",
-          "enabled",
-          "model",
-          "thinkingLevel",
-          "session",
-          "delivery",
-          "workspaceId",
-          "schedule",
-        ].some((field) => input[field as keyof CronJobInput] !== undefined)
+        ["prompt", "enabled", "model", "thinkingLevel", "delivery", "workspaceId", "schedule"].some(
+          (field) => input[field as keyof CronJobInput] !== undefined,
+        )
       ) {
         job.updatedAt = now;
         delete job.retryAt;
@@ -398,7 +340,7 @@ export function createCronScheduler(
   const cron = defineTool({
     name: "cron",
     description:
-      "Manage scheduled tasks. add requires title, prompt and schedule; update accepts title. list returns compact summaries across all workspaces unless workspaceId filters them, without prompts; get requires jobId and returns full job details including prompt. daily-inline/main-inline use main's continuing context; daily-detached/main-detached use separate workers. delivery=assistant (default) lets the main assistant handle the result; delivery=direct shows the result unchanged to the user and always runs in a separate worker. Return NO_REPLY for no user-visible output.",
+      "Manage scheduled tasks. add requires title, prompt and schedule; update accepts title. list returns compact summaries across all workspaces unless workspaceId filters them, without prompts; get requires jobId and returns full job details including prompt. Each run starts a fresh worker in the selected workspace. Workers in the assistant workspace receive main OptChat memory. delivery=assistant (default) lets the main assistant handle the result; delivery=direct shows the result unchanged to the user. Return NO_REPLY for no user-visible output.",
     replay: "unsafe",
     parameters: Type.Object({
       action: Type.String(),
@@ -412,11 +354,6 @@ export function createCronScheduler(
       model: Type.Optional(Type.String()),
       thinkingLevel: Type.Optional(Type.String()),
       limit: Type.Optional(Type.Number()),
-      session: Type.Optional(
-        Type.Object({
-          kind: Type.String(),
-        }),
-      ),
       schedule: Type.Optional(
         Type.Object({
           kind: Type.String(),

@@ -1,8 +1,4 @@
-import {
-  restoreInlineAgent,
-  archiveWorker,
-  removeCompletedOneShot,
-} from "./orchestration-lifecycle.js";
+import { archiveWorker, removeCompletedOneShot } from "./orchestration-lifecycle.js";
 import type { JsonValue } from "@earendil-works/chord";
 
 import {
@@ -10,11 +6,8 @@ import {
   AgentDoc,
   LiveDoc,
   InboxDoc,
-  GenerationTask,
   configure,
   defineTask,
-  type AgentChange,
-  type AgentState,
   type SubmissionId,
   type SettledSubmissionRecord,
 } from "@earendil-works/pi-durable";
@@ -53,7 +46,6 @@ function deliveryNotice(input: DeliveryInput): RuntimeNotice {
     ...buildCronRuntimeNotice({
       scheduleLabel: "persisted scheduled run",
       prompt: marker ? input.prompt.slice(marker[0].length) : input.prompt,
-      session: { kind: input.inline ? "main-inline" : "main-detached" },
     }),
     ...(marker ? { data: { cron: JSON.parse(marker[1]!) } } : {}),
   };
@@ -100,167 +92,65 @@ export function createDeliveryTask(services: OrchestrationServices) {
         if (task.state.checkpoint.retryAt !== undefined)
           await runtime.sleep(task.state.checkpoint.retryAt, ctx);
         let submissionId: SubmissionId | undefined;
-        let wakeRequest: string | undefined;
-        if (task.input.inline) {
-          let prepared: AgentChange = {};
-          let preparedFrom: AgentState | undefined;
-          if (services.prepareAgent) {
-            const live = await runtime.snapshot(LiveDoc, task.input.childId, ctx);
-            const inbox = await runtime.snapshot(InboxDoc, task.input.childId, ctx);
-            const state = await runtime.snapshot(OrchestrationDoc, ctx);
-            if (!live?.run && !inbox?.items.length && !state?.inlineContext) {
-              preparedFrom = await runtime.snapshot(AgentDoc, task.input.childId, ctx);
-              const agent = await services.main.agent(ctx);
-              prepared = await services.prepareAgent(
-                task.input.change?.cwd ?? agent.cwd!,
-                agent,
-                ctx,
-              );
-            }
-          }
-          await runtime.commit(async (tx) => {
-            const existing = await tx.submissionByRequest(
-              task.input.childId,
-              `batty-deliver:${task.id}`,
-            );
-            if (existing) {
-              submissionId = existing.id;
-              return;
-            }
-            const live = await tx.doc(LiveDoc, task.input.childId);
-            const inbox = await tx.doc(InboxDoc, task.input.childId);
-            const doc = await tx.doc(OrchestrationDoc);
-            if (live.run || inbox.items.length || doc.inlineContext) {
-              // A failed main run can leave an idle inbox. A passive submission
-              // wakes its normal boundary without bypassing older user inputs.
-              if (!live.run && inbox.items.length && !doc.inlineContext)
-                wakeRequest = `batty-inline-wake:${task.id}:${inbox.items[0]!.id}`;
-              return {
-                status: "running",
-                checkpoint: { phase: "deliver", retryAt: runtime.now() + 50 },
-              };
-            }
-            const storedAgent = await tx.doc(AgentDoc, task.input.childId);
-            if (
-              services.prepareAgent &&
-              (preparedFrom === undefined ||
-                JSON.stringify(storedAgent) !== JSON.stringify(preparedFrom))
-            )
-              return {
-                status: "running",
-                checkpoint: { phase: "deliver", retryAt: runtime.now() + 50 },
-              };
-            doc.inlineContext = {
-              cwd: storedAgent.cwd ?? null,
-              model: storedAgent.model ?? null,
-              thinkingLevel: storedAgent.thinkingLevel ?? "off",
-              runId: task.input.runId!,
-              selection: {
-                extensions: storedAgent.extensions ?? null,
-                tools: storedAgent.tools ?? null,
-              },
-            };
-            await configure(tx, task.input.childId, { ...task.input.change, ...prepared });
-            // Atomic idle-only admission keeps scoped settings out of unrelated main turns.
-            const entry = await tx.appendEntry(task.input.childId, {
-              kind: "pi.user",
-              model: [
-                {
-                  role: "user",
-                  content: encodeRuntimeNotice(deliveryNotice(task.input)),
-                  timestamp: runtime.now(),
-                },
-              ],
-            });
-            const submission = await tx.createSubmission({
-              conversationId: task.input.childId,
-              type: "input",
-              status: "placed",
-              entry: entry.id,
-              requestId: `batty-deliver:${task.id}`,
-            });
-            const generation = await tx.createTask(
-              GenerationTask,
-              {},
-              { ownership: { kind: "conversation" }, conversationId: task.input.childId },
-            );
-            live.run = { taskId: generation, inputs: [submission.id] };
-            submissionId = submission.id;
-            (await tx.doc(WorkerDoc, task.input.childId)).completion = {
-              owner: task.id,
-              inputs: [submission.id],
-              waits: {},
-            };
-          }, ctx);
-          if (submissionId === undefined) {
-            if (wakeRequest)
-              await services.main.submit(
-                { type: "write", entry: { kind: "batty.cron-wake" }, requestId: wakeRequest },
-                ctx,
-              );
-            return;
-          }
-        } else {
-          let admitted = false;
-          const childAgent = await (await services.harness.conversation(
+        let admitted = false;
+        const childAgent = await (await services.harness.conversation(
+          task.input.childId,
+          ctx,
+        ))!.agent(ctx);
+        await runtime.commit(async (tx) => {
+          const existing = await tx.submissionByRequest(
             task.input.childId,
-            ctx,
-          ))!.agent(ctx);
+            `batty-deliver:${task.id}`,
+          );
+          admitted = existing !== undefined;
+          const metadata = await tx.doc(WorkerDoc, task.input.childId);
+          metadata.completion ??= {
+            owner: task.id,
+            inputs: existing ? [existing.id] : [],
+            waits: {},
+          };
+          if (!existing && task.input.change) {
+            await configure(tx, task.input.childId, task.input.change);
+            if (task.input.workspaceId) {
+              if (metadata.workspaceId !== task.input.workspaceId) {
+                delete metadata.latestReport;
+                delete metadata.latestResultAssignment;
+              }
+              (await tx.doc(OrchestrationDoc)).workers[task.input.workerId]!.workspaceId =
+                task.input.workspaceId;
+              (await tx.doc(WorkerDoc, task.input.childId)).workspaceId = task.input.workspaceId;
+              (await tx.doc(AgentDoc, task.input.childId)).tools = workerTools(
+                childAgent,
+                task.input.workspaceId,
+                await services.assistantWorkspaceId(),
+              );
+            }
+          }
+        }, ctx);
+        if (services.prepareAgent && !admitted) {
+          const child = (await services.harness.conversation(task.input.childId, ctx))!;
+          const agent = await child.agent(ctx);
+          const prepared = await services.prepareAgent(agent.cwd!, agent, ctx);
           await runtime.commit(async (tx) => {
             const existing = await tx.submissionByRequest(
               task.input.childId,
               `batty-deliver:${task.id}`,
             );
-            admitted = existing !== undefined;
-            const metadata = await tx.doc(WorkerDoc, task.input.childId);
-            metadata.completion ??= {
-              owner: task.id,
-              inputs: existing ? [existing.id] : [],
-              waits: {},
-            };
-            if (!existing && task.input.change) {
-              await configure(tx, task.input.childId, task.input.change);
-              if (task.input.workspaceId) {
-                if (metadata.workspaceId !== task.input.workspaceId) {
-                  delete metadata.latestReport;
-                  delete metadata.latestResultAssignment;
-                }
-                (await tx.doc(OrchestrationDoc)).workers[task.input.workerId]!.workspaceId =
-                  task.input.workspaceId;
-                (await tx.doc(WorkerDoc, task.input.childId)).workspaceId = task.input.workspaceId;
-                (await tx.doc(AgentDoc, task.input.childId)).tools = workerTools(
-                  childAgent,
-                  task.input.workspaceId,
-                  await services.assistantWorkspaceId(),
-                );
-              }
-            }
+            if (!existing) await configure(tx, task.input.childId, prepared);
           }, ctx);
-          if (services.prepareAgent && !admitted) {
-            const child = (await services.harness.conversation(task.input.childId, ctx))!;
-            const agent = await child.agent(ctx);
-            const prepared = await services.prepareAgent(agent.cwd!, agent, ctx);
-            await runtime.commit(async (tx) => {
-              const existing = await tx.submissionByRequest(
-                task.input.childId,
-                `batty-deliver:${task.id}`,
-              );
-              if (!existing) await configure(tx, task.input.childId, prepared);
-            }, ctx);
-          }
-          const child = (await runtime.conversation(task.input.childId, ctx))!;
-          submissionId = (
-            await child.submit(
-              {
-                type: "input",
-                content: encodeRuntimeNotice(deliveryNotice(task.input)),
-                requestId: `batty-deliver:${task.id}`,
-                whenBusy: "followUp",
-              },
-              ctx,
-            )
-          ).id;
         }
+        const child = (await runtime.conversation(task.input.childId, ctx))!;
+        submissionId = (
+          await child.submit(
+            {
+              type: "input",
+              content: encodeRuntimeNotice(deliveryNotice(task.input)),
+              requestId: `batty-deliver:${task.id}`,
+              whenBusy: "followUp",
+            },
+            ctx,
+          )
+        ).id;
         const original = await (await services.harness.submission(submissionId, ctx))!.wait(ctx);
         let settled = original;
         // An await tool ends only the model turn, not this assignment. Join
@@ -458,10 +348,6 @@ export function createDeliveryTask(services: OrchestrationServices) {
           }
           if (task.input.runId) {
             const doc = await tx.doc(OrchestrationDoc);
-            if (doc.inlineContext?.runId === task.input.runId) {
-              await restoreInlineAgent(tx, task.input.mainId, doc.inlineContext);
-              delete doc.inlineContext;
-            }
             const run = doc.runs[task.input.runId]!;
             run.status = failed ? "failed" : "completed";
             run.finishedAt = runtime.now();
@@ -512,10 +398,6 @@ export function createDeliveryTask(services: OrchestrationServices) {
       await runtime.commit(async (tx) => {
         if (task.input.runId) {
           const doc = await tx.doc(OrchestrationDoc);
-          if (doc.inlineContext?.runId === task.input.runId) {
-            await restoreInlineAgent(tx, task.input.mainId, doc.inlineContext);
-            delete doc.inlineContext;
-          }
           const run = doc.runs[task.input.runId]!;
           run.status = "aborted";
           run.finishedAt = runtime.now();

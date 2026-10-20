@@ -21,8 +21,6 @@ test("wake workout preserves prompt, model and workspace", async () => {
     "medium",
     "--in",
     "3m",
-    "--session",
-    "daily-detached",
   ]);
   expect(body).toEqual({
     action: "add",
@@ -32,7 +30,6 @@ test("wake workout preserves prompt, model and workspace", async () => {
     model: "openai-codex/gpt-6.1-sol",
     thinkingLevel: "medium",
     schedule: { kind: "at", in: "3m" },
-    session: { kind: "daily-detached" },
   });
 });
 

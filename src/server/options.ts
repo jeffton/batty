@@ -29,7 +29,6 @@ export interface StoredAppOptions {
   workspacesRoots?: string[];
   webPushSubject?: string;
   pushTitle?: string;
-  cronDailySessionStartTime?: string;
   braveSearchKey?: string;
   browserTailscaleSshDestination?: string;
   browserMaxTabs?: number;
@@ -50,7 +49,6 @@ export interface AppOptions {
   workspacesRoots: string[];
   webPushSubject: string;
   pushTitle: string;
-  cronDailySessionStartTime: string;
   braveSearchKey?: string;
   browserTailscaleSshDestination?: string;
   browserMaxTabs?: number;
@@ -64,8 +62,6 @@ export interface AppOptions {
   appColor: AppColor;
 }
 
-const DEFAULT_CRON_DAILY_SESSION_START_TIME = "04:00";
-
 export function stateDirPath(battyDir: string): string {
   return path.join(battyDir, ".batty");
 }
@@ -76,35 +72,6 @@ export function optionsFilePath(projectRoot: string): string {
 
 function createAuthSecret(): string {
   return crypto.randomBytes(32).toString("base64url");
-}
-
-function normalizeDailySessionStartTime(value: unknown): string {
-  if (value == null) {
-    return DEFAULT_CRON_DAILY_SESSION_START_TIME;
-  }
-  if (typeof value !== "string") {
-    throw new Error(
-      `Invalid cronDailySessionStartTime in options.json: ${String(value)}. Expected HH:MM.`,
-    );
-  }
-
-  const trimmed = value.trim();
-  const match = /^(\d{1,2}):(\d{2})$/.exec(trimmed);
-  if (!match) {
-    throw new Error(
-      `Invalid cronDailySessionStartTime in options.json: ${trimmed}. Expected HH:MM.`,
-    );
-  }
-
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  if (hours > 23 || minutes > 59) {
-    throw new Error(
-      `Invalid cronDailySessionStartTime in options.json: ${trimmed}. Expected HH:MM.`,
-    );
-  }
-
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
 export function normalizeBaseUrl(value: unknown): string {
@@ -210,7 +177,6 @@ function normalizeStoredOptions(options: StoredAppOptions | undefined): AppOptio
     pushTitle: options?.pushTitle ?? "Batty",
     webPushSubject:
       typeof options?.webPushSubject === "string" ? options.webPushSubject.trim() : "",
-    cronDailySessionStartTime: normalizeDailySessionStartTime(options?.cronDailySessionStartTime),
     braveSearchKey: normalizeOptionalString(options?.braveSearchKey),
     browserTailscaleSshDestination: normalizeOptionalString(
       options?.browserTailscaleSshDestination,

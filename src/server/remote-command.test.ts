@@ -385,12 +385,12 @@ test("node stop aborts both active delivery and queued tail without running queu
   expect((await main.context(context)).messages).toHaveLength(0);
 });
 
-test("node await stays independent of an active receiver inline cron", async () => {
+test("node await stays independent of an active receiver cron", async () => {
   const { faux, orchestration, open, registry } = await fixture();
   const entered = new Set<string>();
   const release: Record<string, () => void> = {};
   const gates = Object.fromEntries(
-    ["inline", "remote"].map((kind) => [
+    ["cron", "remote"].map((kind) => [
       kind,
       new Promise<void>((resolve) => {
         release[kind] = resolve;
@@ -399,7 +399,7 @@ test("node await stays independent of an active receiver inline cron", async () 
   );
   registry.install(
     defineExtension({
-      name: "node-inline-await-fixture",
+      name: "node-cron-await-fixture",
       tools: [
         defineTool({
           name: "await_isolation_gate",
@@ -422,9 +422,7 @@ test("node await stays independent of an active receiver inline cron", async () 
         return fauxAssistantMessage(
           [
             fauxToolCall("await_isolation_gate", {
-              kind: JSON.stringify(last.content).includes("receiver inline cron")
-                ? "inline"
-                : "remote",
+              kind: JSON.stringify(last.content).includes("receiver cron") ? "cron" : "remote",
             }),
           ],
           { stopReason: "toolUse" },
@@ -433,10 +431,9 @@ test("node await stays independent of an active receiver inline cron", async () 
     }),
   );
   const job = await orchestration.addJob({
-    title: "Receiver inline cron",
+    title: "Receiver cron",
     workspaceId: "test",
-    prompt: "receiver inline cron",
-    session: { kind: "main-inline" },
+    prompt: "receiver cron",
     schedule: { kind: "at", in: "1h" },
   });
   await main.commit(async (tx) => {
@@ -444,8 +441,7 @@ test("node await stays independent of an active receiver inline cron", async () 
   }, context);
   await orchestration.tick();
   try {
-    await until(async () => entered.has("inline"));
-    expect((await harness.snapshot(OrchestrationDoc, context))?.inlineContext).toBeDefined();
+    await until(async () => entered.has("cron"));
     const id = sessionId(
       await orchestration.nodeCommand("node-a", "inline-overlap-run", {
         action: "run",
@@ -469,11 +465,10 @@ test("node await stays independent of an active receiver inline cron", async () 
     expect(await harness.snapshot(WorkerDoc, main.id, context)).toEqual(beforeWorker);
     expect(await entries(harness, String(main.id))).toEqual(beforeMain);
     const afterState = await harness.snapshot(OrchestrationDoc, context);
-    expect(afterState?.inlineContext).toEqual(beforeState?.inlineContext);
     expect(afterState?.joinParents).toEqual(beforeState?.joinParents);
   } finally {
     release.remote!();
-    release.inline!();
+    release.cron!();
   }
   await until(
     async () =>

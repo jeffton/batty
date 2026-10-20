@@ -201,17 +201,6 @@ export type CronJobScheduleInput =
       timezone?: string;
     };
 
-export type CronJobSession =
-  | {
-      kind: "new";
-    }
-  | {
-      kind: "daily-inline";
-    }
-  | {
-      kind: "daily-detached";
-    };
-
 export interface RunningSubagent {
   sessionId: string;
   sessionPath: string;
@@ -230,7 +219,6 @@ export interface RunningCronJob {
   prompt: string;
   model: string;
   thinkingLevel: string;
-  session: CronJobSession;
   scheduleLabel: string;
   startedAtMs: number;
   sessionId?: string;
@@ -271,7 +259,6 @@ export interface CronJob {
   prompt: string;
   model: string;
   thinkingLevel: string;
-  session: CronJobSession;
   createdAt: number;
   updatedAt: number;
   schedule: CronJobSchedule;
@@ -287,7 +274,6 @@ export interface CreateCronJobInput {
   prompt: string;
   model: string;
   thinkingLevel: string;
-  session?: CronJobSession;
   schedule: CronJobScheduleInput;
 }
 
@@ -299,7 +285,6 @@ export interface UpdateCronJobInput {
   prompt?: string;
   model?: string;
   thinkingLevel?: string;
-  session?: CronJobSession;
   schedule?: CronJobScheduleInput;
 }
 

@@ -1,32 +1,7 @@
-import {
-  AgentDoc,
-  configure,
-  type ConversationId,
-  type TaskId,
-  type Tx,
-} from "@earendil-works/pi-durable";
+import { type TaskId, type Tx } from "@earendil-works/pi-durable";
 import { ArchivedWorker } from "./orchestration-history.js";
-import {
-  OrchestrationDoc,
-  type CronJob,
-  type CronRun,
-  type InlineContext,
-} from "./orchestration-state.js";
+import { OrchestrationDoc, type CronJob, type CronRun } from "./orchestration-state.js";
 
-export async function restoreInlineAgent(tx: Tx, id: ConversationId, saved: InlineContext) {
-  await configure(tx, id, {
-    cwd: saved.cwd,
-    model: saved.model,
-    thinkingLevel: saved.thinkingLevel,
-  });
-  if (saved.selection) {
-    const state = await tx.doc(AgentDoc, id);
-    if (saved.selection.extensions === null) delete state.extensions;
-    else state.extensions = saved.selection.extensions;
-    if (saved.selection.tools === null) delete state.tools;
-    else state.tools = saved.selection.tools;
-  }
-}
 export function removeCompletedOneShot(jobs: Record<string, CronJob>, run: CronRun) {
   const job = jobs[run.jobId];
   if (

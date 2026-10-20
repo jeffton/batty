@@ -568,7 +568,7 @@ export function createWorkers(
       if (
         args.action === "await" &&
         !api.remoteAssignment &&
-        (api.conversationId !== state!.mainId || state!.inlineContext)
+        api.conversationId !== state!.mainId
       ) {
         // Only joining a direct child is acyclic. Pin the delivery across replay,
         // even when a later queue/resume changes the worker's active task.
@@ -581,10 +581,7 @@ export function createWorkers(
           const report = await tx.submissionByRequest(api.conversationId, `batty-report:${target}`);
           const metadata = await tx.doc(WorkerDoc, api.conversationId);
           const completion = (metadata.completion ??= {
-            owner:
-              api.conversationId === doc.mainId
-                ? doc.runs[doc.inlineContext!.runId]!.taskId
-                : doc.workers[String(api.conversationId)]!.active!,
+            owner: doc.workers[String(api.conversationId)]!.active!,
             inputs: [...(await tx.doc(LiveDoc, api.conversationId)).run!.inputs],
             waits: {},
           });

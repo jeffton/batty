@@ -15,7 +15,6 @@ import type { RemoteConnection, RemoteGrant } from "@/shared/remotes";
 const props = defineProps<{ open: boolean }>();
 const connections = ref<RemoteConnection[]>([]);
 const grants = ref<RemoteGrant[]>([]);
-const connectionId = ref("");
 const connectionLabel = ref("");
 const connectionUrl = ref("");
 const connectionToken = ref("");
@@ -48,12 +47,11 @@ async function perform(action: () => Promise<void>): Promise<void> {
 async function addConnection(): Promise<void> {
   await perform(async () => {
     await addRemoteConnection({
-      id: connectionId.value.trim(),
+      id: crypto.randomUUID(),
       label: connectionLabel.value.trim(),
       url: connectionUrl.value.trim(),
       token: connectionToken.value.trim(),
     });
-    connectionId.value = "";
     connectionLabel.value = "";
     connectionUrl.value = "";
     connectionToken.value = "";
@@ -153,26 +151,12 @@ watch(
           :disabled="pending"
         />
       </SettingsField>
-      <SettingsField label="Connection ID">
-        <input
-          v-model="connectionId"
-          class="settings-popover__input"
-          required
-          pattern="[a-zA-Z0-9][a-zA-Z0-9_-]*"
-          placeholder="work"
-          autocapitalize="none"
-          autocomplete="off"
-          spellcheck="false"
-          :disabled="pending"
-        />
-      </SettingsField>
       <SettingsField label="Remote URL">
         <input
           v-model="connectionUrl"
           class="settings-popover__input"
           type="url"
           required
-          placeholder="https://work.example.com/batty/"
           autocapitalize="none"
           autocomplete="off"
           spellcheck="false"
@@ -225,13 +209,7 @@ watch(
     <div v-if="!grants.length && !pending" class="settings-popover__help">No incoming access.</div>
     <form class="settings-popover__editor" @submit.prevent="issueGrant">
       <SettingsField label="Grant name">
-        <input
-          v-model="grantLabel"
-          class="settings-popover__input"
-          placeholder="Home installation"
-          required
-          :disabled="pending"
-        />
+        <input v-model="grantLabel" class="settings-popover__input" required :disabled="pending" />
         <template #action>
           <button
             class="settings-popover__action settings-popover__action--primary"

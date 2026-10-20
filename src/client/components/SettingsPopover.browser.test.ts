@@ -71,7 +71,8 @@ test("Remote settings provisions connections and grants on mobile without retain
     await page.getByRole("tab", { name: "Remote", exact: true }).click();
     expect(await page.getByRole("textbox", { name: "New token", exact: true }).count()).toBe(0);
     await page.getByRole("textbox", { name: "Connection name", exact: true }).fill("Work");
-    await page.getByRole("textbox", { name: "Connection ID", exact: true }).fill("work");
+    expect(await page.getByRole("textbox", { name: "Connection ID", exact: true }).count()).toBe(0);
+    expect(await page.locator("#settings-Remote-panel [placeholder]").count()).toBe(0);
     await page
       .getByRole("textbox", { name: "Remote URL", exact: true })
       .fill("https://work.example.com/batty/");
@@ -94,12 +95,12 @@ test("Remote settings provisions connections and grants on mobile without retain
       { action: "grant-add", label: "Office" },
       {
         action: "connection-add",
-        id: "work",
+        id: expect.stringMatching(/^[0-9a-f-]{36}$/),
         label: "Work",
         url: "https://work.example.com/batty/",
         token: "outgoing-private-token",
       },
-      { action: "connection-remove", id: "work" },
+      { action: "connection-remove", id: requests[1]!.id },
       { action: "grant-revoke", id: "grant" },
     ]);
     expect(

@@ -10,7 +10,7 @@ Open **Settings → Remote** on each installation.
 
 1. On the receiving Batty, enter a name under **Incoming access** and select **Create token**.
 2. Copy the token. It is displayed only until you leave the Remote tab or close Settings.
-3. On the initiating Batty, fill in **Connections** with a name, a stable connection ID (for example `work`), the receiving Batty's URL and the token. Select **Add connection**.
+3. On the initiating Batty, fill in **Connections** with a name, the receiving Batty's URL and the token. Select **Add connection**. Settings generates the internal connection ID; the CLI accepts an explicit ID.
 
 The connection is saved only after authentication with the receiver succeeds. Saved connection lists never display tokens. Incoming access lists show grant names and IDs, not tokens; create a new grant if a token is lost. Removal and revocation ask for confirmation. **Remove connection** disconnects and removes the locally saved credential; **Revoke access** invalidates the incoming token on the receiver. These are separate operations.
 

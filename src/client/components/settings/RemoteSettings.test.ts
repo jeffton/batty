@@ -52,7 +52,8 @@ it("loads only when open and uses existing provisioning actions for connections"
     await wrapper.setProps({ open: true });
     await flushPromises();
     expect(wrapper.text()).toContain("work · https://work.test/batty/");
-    await wrapper.get('input[placeholder="work"]').setValue(" home ");
+    expect(wrapper.find("[placeholder]").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("Connection ID");
     await wrapper.get('input[type="url"]').setValue("https://home.test/batty/");
     await wrapper.get('input[type="password"]').setValue(" private-token ");
     await wrapper.get("input").setValue("Home installation");
@@ -69,7 +70,7 @@ it("loads only when open and uses existing provisioning actions for connections"
     await wrapper.get("form").trigger("submit");
     await flushPromises();
     expect(addRemoteConnection).toHaveBeenLastCalledWith({
-      id: "home",
+      id: expect.stringMatching(/^[0-9a-f-]{36}$/),
       label: "Home installation",
       url: "https://home.test/batty/",
       token: "private-token",
@@ -90,7 +91,7 @@ it("shows an issued token once, copies it, and clears all secrets when leaving t
   vi.stubGlobal("navigator", { clipboard: { writeText } });
   try {
     await flushPromises();
-    await wrapper.get('input[placeholder="Home installation"]').setValue("  Office  ");
+    await wrapper.findAll("form")[1]!.get("input").setValue("  Office  ");
     vi.mocked(issueRemoteGrant).mockResolvedValueOnce({ id: "new", token: "issued-secret" });
     await wrapper.findAll("form")[1]!.trigger("submit");
     await flushPromises();
@@ -132,7 +133,7 @@ it("does not reveal a token that arrives after the settings close", async () => 
         finish = resolve;
       }),
     );
-    await wrapper.get('input[placeholder="Home installation"]').setValue("Late grant");
+    await wrapper.findAll("form")[1]!.get("input").setValue("Late grant");
     await wrapper.findAll("form")[1]!.trigger("submit");
     await wrapper.setProps({ open: false });
     finish({ id: "late", token: "late-secret" });
@@ -156,7 +157,7 @@ it("keeps an in-flight mutation locked across reopen and never reveals its old t
         finish = resolve;
       }),
     );
-    await wrapper.get('input[placeholder="Home installation"]').setValue("Slow grant");
+    await wrapper.findAll("form")[1]!.get("input").setValue("Slow grant");
     await wrapper.findAll("form")[1]!.trigger("submit");
     expect(issueRemoteGrant).toHaveBeenCalledOnce();
     await wrapper.setProps({ open: false });

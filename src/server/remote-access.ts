@@ -3,18 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { stateDirPath } from "./options";
 
-export interface RemoteGrant {
-  id: string;
-  label: string;
-}
-
-export interface RemoteConnection {
-  id: string;
-  label: string;
-  url: string;
-  instanceId?: string;
-  grantId?: string;
-}
+import type { RemoteConnection, RemoteGrant } from "../shared/remotes";
 
 export interface RemoteConnectionCredentials extends RemoteConnection {
   token: string;

@@ -4,6 +4,20 @@ A remote Batty runs ordinary workers with its own workspaces, tools, instruction
 
 ## Provisioning
 
+### Settings
+
+Open **Settings → Remote** on each installation.
+
+1. On the receiving Batty, enter a name under **Incoming access** and select **Create token**.
+2. Copy the token. It is displayed only until you leave the Remote tab or close Settings.
+3. On the initiating Batty, fill in **Connections** with a name, a stable connection ID (for example `work`), the receiving Batty's URL and the token. Select **Add connection**.
+
+The connection is saved only after authentication with the receiver succeeds. Saved connection lists never display tokens. Incoming access lists show grant names and IDs, not tokens; create a new grant if a token is lost. Removal and revocation ask for confirmation. **Remove connection** disconnects and removes the locally saved credential; **Revoke access** invalidates the incoming token on the receiver. These are separate operations.
+
+Settings and the CLI use the same owner-authenticated provisioning API and credential store.
+
+### CLI
+
 Run commands on the installation being configured. Use `--root PATH` before `remote` when its installation root differs from `/var/lib/batty2`. The local service must be running: the CLI uses its authenticated loopback API, so grants and connections take effect without a restart.
 
 On the receiving installation:

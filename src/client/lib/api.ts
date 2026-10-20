@@ -6,6 +6,7 @@ import type {
 } from "@simplewebauthn/browser";
 import { withBaseUrl } from "@/client/lib/base-url";
 import type { AppAppearance } from "@/shared/appearance";
+import type { RemoteSettings } from "@/shared/remotes";
 import type {
   AppSettingsStatus,
   BootstrapPayload,
@@ -55,6 +56,39 @@ class HttpError extends Error {
   ) {
     super(message);
   }
+}
+
+export function getRemoteSettings(): Promise<RemoteSettings> {
+  return request("/api/remotes");
+}
+
+function provisionRemote<T>(body: Record<string, string>): Promise<T> {
+  return request("/api/remotes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export function issueRemoteGrant(label: string): Promise<{ id: string; token: string }> {
+  return provisionRemote({ action: "grant-add", label });
+}
+
+export function revokeRemoteGrant(id: string): Promise<{ ok: true }> {
+  return provisionRemote({ action: "grant-revoke", id });
+}
+
+export function addRemoteConnection(input: {
+  id: string;
+  label: string;
+  url: string;
+  token: string;
+}): Promise<{ ok: true }> {
+  return provisionRemote({ ...input, action: "connection-add" });
+}
+
+export function removeRemoteConnection(id: string): Promise<{ ok: true }> {
+  return provisionRemote({ action: "connection-remove", id });
 }
 
 export function getMemoryTree(): Promise<MemoryTreeOverview> {

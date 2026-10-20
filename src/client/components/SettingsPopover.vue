@@ -7,6 +7,7 @@ import AppearanceSettings from "./settings/AppearanceSettings.vue";
 import AssistantSettings from "./settings/AssistantSettings.vue";
 import AuthSettings from "./settings/AuthSettings.vue";
 import EnvironmentSettings from "./settings/EnvironmentSettings.vue";
+import RemoteSettings from "./settings/RemoteSettings.vue";
 import "./settings/settings.css";
 
 const props = defineProps<{
@@ -15,7 +16,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{ logout: [] }>();
-const tabs = ["Assistant", "Appearance", "Auth"] as const;
+const tabs = ["Assistant", "Appearance", "Auth", "Remote"] as const;
 const activeTab = ref<string>("Assistant");
 const open = ref(false);
 const expandedItemId = ref<string>();
@@ -64,6 +65,7 @@ function handlePopoverToggle(event: Event): void {
         <AssistantSettings :open="open" />
       </template>
       <AppearanceSettings v-else-if="tab === 'Appearance'" :open="open" />
+      <RemoteSettings v-else-if="tab === 'Remote'" :open="open && activeTab === 'Remote'" />
       <template v-else>
         <AuthSettings v-model:expanded-item-id="expandedItemId" :open="open" />
         <EnvironmentSettings :open="open" />

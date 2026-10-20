@@ -1,8 +1,58 @@
 import Fastify from "fastify";
 import { afterEach, expect, it, vi } from "vite-plus/test";
-import { setAssistantWorkspace, setMemoryLanguage, setPushTitle } from "./api";
+import {
+  addRemoteConnection,
+  getRemoteSettings,
+  issueRemoteGrant,
+  removeRemoteConnection,
+  revokeRemoteGrant,
+  setAssistantWorkspace,
+  setMemoryLanguage,
+  setPushTitle,
+} from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
+
+it("sends owner-authenticated provisioning requests as JSON", async () => {
+  const requests: { method: string; body: unknown; credentials: RequestCredentials | undefined }[] =
+    [];
+  vi.stubGlobal("fetch", async (input: string, init: RequestInit) => {
+    expect(input).toBe("/api/remotes");
+    requests.push({
+      method: init.method ?? "GET",
+      body: init.body ? JSON.parse(String(init.body)) : undefined,
+      credentials: init.credentials,
+    });
+    return new Response(JSON.stringify({ ok: true }));
+  });
+  await getRemoteSettings();
+  await issueRemoteGrant("Office");
+  await addRemoteConnection({
+    id: "work",
+    label: "Work",
+    url: "https://work.test/",
+    token: "private",
+  });
+  await removeRemoteConnection("work");
+  await revokeRemoteGrant("grant");
+  expect(requests).toEqual([
+    { method: "GET", body: undefined, credentials: "include" },
+    { method: "POST", body: { action: "grant-add", label: "Office" }, credentials: "include" },
+    {
+      method: "POST",
+      body: {
+        action: "connection-add",
+        id: "work",
+        label: "Work",
+        url: "https://work.test/",
+        token: "private",
+      },
+      credentials: "include",
+    },
+    { method: "POST", body: { action: "connection-remove", id: "work" }, credentials: "include" },
+    { method: "POST", body: { action: "grant-revoke", id: "grant" }, credentials: "include" },
+  ]);
+});
 
 it.each([
   ["push-title", () => setPushTitle("Custom sender"), { title: "Custom sender" }],

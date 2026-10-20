@@ -53,10 +53,12 @@ describe("Assistant settings", () => {
         "Assistant",
         "Appearance",
         "Auth",
+        "Remote",
       ]);
       const assistant = wrapper.get("#settings-test-Assistant-panel");
       const appearance = wrapper.get("#settings-test-Appearance-panel");
       const auth = wrapper.get("#settings-test-Auth-panel");
+      const remote = wrapper.get("#settings-test-Remote-panel");
       expect(assistant.isVisible()).toBe(true);
       expect(appearance.isVisible()).toBe(false);
       expect(auth.isVisible()).toBe(false);
@@ -65,14 +67,14 @@ describe("Assistant settings", () => {
       expect(appearance.isVisible()).toBe(true);
       expect(document.activeElement?.id).toBe("settings-test-Appearance-tab");
       await wrapper.get("#settings-test-Appearance-tab").trigger("keydown", { key: "End" });
-      expect(auth.isVisible()).toBe(true);
-      expect(document.activeElement?.id).toBe("settings-test-Auth-tab");
-      await wrapper.get("#settings-test-Auth-tab").trigger("keydown", { key: "ArrowRight" });
+      expect(remote.isVisible()).toBe(true);
+      expect(document.activeElement?.id).toBe("settings-test-Remote-tab");
+      await wrapper.get("#settings-test-Remote-tab").trigger("keydown", { key: "ArrowRight" });
       expect(assistant.isVisible()).toBe(true);
       expect(assistant.get<HTMLInputElement>("input").element.value).toBe("Draft sender");
       await wrapper.get("#settings-test-Assistant-tab").trigger("keydown", { key: "ArrowLeft" });
-      expect(auth.isVisible()).toBe(true);
-      await wrapper.get("#settings-test-Auth-tab").trigger("keydown", { key: "Home" });
+      expect(remote.isVisible()).toBe(true);
+      await wrapper.get("#settings-test-Remote-tab").trigger("keydown", { key: "Home" });
       expect(assistant.isVisible()).toBe(true);
       expect(wrapper.get("#settings-test-Assistant-tab").attributes("aria-controls")).toBe(
         assistant.attributes("id"),

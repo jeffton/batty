@@ -327,6 +327,23 @@ test("node grants cannot access owner routes, revoke immediately, and reciprocal
     b = await openInstance(directory, "b");
     const grant = await connect(a, b, "b");
     await connect(b, a, "a");
+    const listing = await b.app.inject({ url: "/api/remotes", headers: b.owner });
+    expect(listing.statusCode).toBe(200);
+    expect(listing.json()).toEqual({
+      instanceId: b.runtime.remotes.access.identity().instanceId,
+      grants: [{ id: grant.id, label: "Grant for b" }],
+      connections: [
+        {
+          id: "a",
+          label: "a",
+          url: a.url,
+          instanceId: a.runtime.remotes.access.identity().instanceId,
+          grantId: a.runtime.remotes.access.listGrants()[0]!.id,
+        },
+      ],
+    });
+    expect(listing.body).not.toContain("token");
+    expect(listing.body).not.toContain("Hash");
     const auth = { authorization: `Bearer ${grant.token}` };
     expect((await b.app.inject({ url: "/api/node/identity" })).statusCode).toBe(401);
     expect(
@@ -385,6 +402,20 @@ test("node grants cannot access owner routes, revoke immediately, and reciprocal
       payload: { action: "grant-revoke", id: grant.id },
     });
     expect(revoked.statusCode).toBe(200);
+    expect((await b.app.inject({ url: "/api/remotes", headers: b.owner })).json().grants).toEqual(
+      [],
+    );
+    const removed = await a.app.inject({
+      method: "POST",
+      url: "/api/remotes",
+      headers: a.owner,
+      payload: { action: "connection-remove", id: "b" },
+    });
+    expect(removed.statusCode).toBe(200);
+    expect(
+      (await a.app.inject({ url: "/api/remotes", headers: a.owner })).json().connections,
+    ).toEqual([]);
+    expect(a.runtime.remotes.access.getConnection("b")).toBeUndefined();
     expect((await b.app.inject({ url: "/api/node/identity", headers: auth })).statusCode).toBe(401);
     expect(
       (

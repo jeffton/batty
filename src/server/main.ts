@@ -35,6 +35,7 @@ import { Runtime, context } from "./runtime";
 import { acquireLock } from "./lock";
 import { resolveUploadedFile } from "./uploads";
 import { registerSessionRoutes } from "./routes/sessions";
+import { registerRemoteRoutes, authenticateNode } from "./routes/remotes";
 import { resolveSentFile } from "./send-files";
 import type { AppColor } from "@/shared/appearance";
 import { WebPushService } from "./web-push";
@@ -66,6 +67,7 @@ if (setup)
   );
 const app = fastify({
   logger: true,
+  forceCloseConnections: true,
   trustProxy: ["127.0.0.1", "::1"],
   bodyLimit: 100 * 1024 * 1024,
 });
@@ -90,6 +92,9 @@ app.addHook("onRequest", async (request, reply) => {
   request.auth = verifyAuthToken(config.authSecret, request.cookies[config.cookieName]);
   const pathname = request.url.split("?", 1)[0]!;
   if (pathname.startsWith("/api/")) reply.header("Cache-Control", "no-store");
+  if (pathname.startsWith("/api/node/")) {
+    return authenticateNode(request, reply, runtime.remotes.access);
+  }
   const correlationId = request.headers["x-batty-correlation-id"];
   if (
     request.auth &&
@@ -109,6 +114,7 @@ const routeContext = {
   routePath: (route: string) => route,
 };
 registerAuthRoutes(routeContext);
+const closeRemoteStreams = registerRemoteRoutes(app, runtime);
 registerBrowserErrorRoutes(app, path.join(stateDirPath(config.battyDir), "browser-errors.json"));
 registerCronRoutes(app, runtime.orchestration);
 registerSiteRoutes(routeContext);
@@ -215,14 +221,17 @@ app.get<{ Params: { sessionId: string } }>(
   "/api/sessions/:sessionId/subagents",
   async (request) => {
     const conversation = await runtime.conversation(request.params.sessionId);
-    return (await runtime.orchestration.listRunning(conversation.id)).map((worker) => ({
-      ...worker,
-      sessionPath: `durable:${worker.sessionId}`,
-      parentSessionId: String(worker.parentId),
-      model: config.defaultModel,
-      thinkingLevel: config.defaultThinkingLevel,
-      startedAtMs: worker.startedAtMs,
-    }));
+    return [
+      ...(await runtime.orchestration.listRunning(conversation.id)).map((worker) => ({
+        ...worker,
+        sessionPath: `durable:${worker.sessionId}`,
+        parentSessionId: String(worker.parentId),
+        model: config.defaultModel,
+        thinkingLevel: config.defaultThinkingLevel,
+        startedAtMs: worker.startedAtMs,
+      })),
+      ...runtime.remotes.tasks(conversation.id),
+    ];
   },
 );
 function scheduleLabel(schedule: {
@@ -500,6 +509,7 @@ async function shutdown() {
   // Close the harness first: checkpoint work, do not drain or cancel admitted runs.
   stopPushCompletions();
   await closeCloudBrowsers();
+  closeRemoteStreams();
   await runtime.close();
   closeEventStreams();
   await app.close();

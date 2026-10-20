@@ -25,6 +25,95 @@ afterAll(async () => {
   if (server) await closeBrowserFixtureServer(server);
 });
 
+test("Remote settings provisions connections and grants on mobile without retaining tokens", async () => {
+  const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
+  const requests: Record<string, string>[] = [];
+  let grants: { id: string; label: string }[] = [];
+  let connections: { id: string; label: string; url: string }[] = [];
+  try {
+    await page.route("**/api/remotes", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({ json: { instanceId: "local", grants, connections } });
+        return;
+      }
+      const input = route.request().postDataJSON();
+      requests.push(input);
+      let body: unknown = { ok: true };
+      switch (input.action) {
+        case "grant-add":
+          grants = [{ id: "grant", label: input.label }];
+          body = { id: "grant", token: "issued-private-token" };
+          break;
+        case "grant-revoke":
+          grants = [];
+          break;
+        case "connection-add":
+          connections = [{ id: input.id, label: input.label, url: input.url }];
+          break;
+        case "connection-remove":
+          connections = [];
+          break;
+      }
+      await route.fulfill({ json: body });
+    });
+    await page.route("**/api/settings/environment", (route) =>
+      route.fulfill({ json: { names: [] } }),
+    );
+    await page.goto(url);
+    await page.getByRole("tab", { name: "Remote", exact: true }).click();
+    await page.getByText("No connections.", { exact: true }).waitFor();
+    await page.getByRole("textbox", { name: "Grant name", exact: true }).fill("Office");
+    await page.getByRole("button", { name: "Create token", exact: true }).click();
+    await expect
+      .poll(() => page.getByRole("textbox", { name: "New token", exact: true }).inputValue())
+      .toBe("issued-private-token");
+    await page.getByRole("tab", { name: "Auth", exact: true }).click();
+    await page.getByRole("tab", { name: "Remote", exact: true }).click();
+    expect(await page.getByRole("textbox", { name: "New token", exact: true }).count()).toBe(0);
+    await page.getByRole("textbox", { name: "Connection name", exact: true }).fill("Work");
+    expect(await page.getByRole("textbox", { name: "Connection ID", exact: true }).count()).toBe(0);
+    expect(await page.locator("#settings-Remote-panel [placeholder]").count()).toBe(0);
+    await page
+      .getByRole("textbox", { name: "Remote URL", exact: true })
+      .fill("https://work.example.com/batty/");
+    await page.getByLabel("Remote token", { exact: true }).fill("outgoing-private-token");
+    await page.getByRole("button", { name: "Add connection", exact: true }).click();
+    await page.getByRole("button", { name: "Remove connection Work", exact: true }).waitFor();
+    expect(await page.getByLabel("Remote token", { exact: true }).inputValue()).toBe("");
+    await page.getByRole("button", { name: "Remove connection Work", exact: true }).click();
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    expect(requests.some((request) => request.action === "connection-remove")).toBe(false);
+    await page.getByRole("button", { name: "Remove connection Work", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Confirm: Remove connection Work", exact: true })
+      .click();
+    await page.getByText("No connections.", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Revoke access Office", exact: true }).click();
+    await page.getByRole("button", { name: "Confirm: Revoke access Office", exact: true }).click();
+    await page.getByText("No incoming access.", { exact: true }).waitFor();
+    expect(requests).toEqual([
+      { action: "grant-add", label: "Office" },
+      {
+        action: "connection-add",
+        id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        label: "Work",
+        url: "https://work.example.com/batty/",
+        token: "outgoing-private-token",
+      },
+      { action: "connection-remove", id: requests[1]!.id },
+      { action: "grant-revoke", id: "grant" },
+    ]);
+    expect(
+      await page
+        .locator("#settings-Remote-panel")
+        .evaluate((element) => element.scrollWidth <= element.clientWidth),
+    ).toBe(true);
+    expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain("private-token");
+  } finally {
+    await page.close();
+  }
+});
+
 for (const width of [390]) {
   test(`settings controls, drafts and nested editors at ${width}px`, async () => {
     const page = await browser.newPage({ viewport: { width, height: 900 } });

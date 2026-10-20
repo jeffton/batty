@@ -3,6 +3,7 @@ import type { ConversationId } from "@earendil-works/pi-durable";
 import { Runtime } from "./runtime";
 import { OrchestrationDoc } from "./orchestration-state";
 import type { TranscriptImages } from "./transcript-images";
+import type { SessionState } from "../shared/types";
 
 /** A paused socket owns at most one event; do not materialize the next archive page before drain. */
 export async function writeStreamEvent(stream: ServerResponse, payload: string): Promise<void> {
@@ -23,10 +24,14 @@ export async function writeStreamEvent(stream: ServerResponse, payload: string):
 export function streamSession(
   stream: ServerResponse,
   runtime: Runtime,
-  conversationId: ConversationId,
+  conversationId: ConversationId | string,
   images: TranscriptImages,
   initialAfter: string | undefined,
   onError: (error: unknown) => void,
+  projection?: {
+    state(includeHistory: boolean, after?: string): Promise<SessionState>;
+    subscribe(changed: (history: boolean) => void): () => void;
+  },
 ) {
   let after = initialAfter;
   let closed = false;
@@ -44,7 +49,9 @@ export function streamSession(
         dirty = false;
         historyDirty = false;
         let state = await images.state(
-          await runtime.state(String(conversationId), undefined, includeHistory, after),
+          await (projection
+            ? projection.state(includeHistory, after)
+            : runtime.state(String(conversationId), undefined, includeHistory, after)),
         );
         if (includeHistory) {
           for (;;) {
@@ -57,7 +64,9 @@ export function streamSession(
             });
             if (closed || !state.hasMoreRecentMessages) break;
             state = await images.state(
-              await runtime.state(String(conversationId), undefined, true, after),
+              await (projection
+                ? projection.state(true, after)
+                : runtime.state(String(conversationId), undefined, true, after)),
             );
           }
         } else {
@@ -109,39 +118,43 @@ export function streamSession(
       void flush();
     }, 0);
   }
-  const unsubscribe = runtime.harness.subscribeCommits((publication) => {
-    let changed = false;
-    let entries = false;
-    for (const change of publication.changes) {
-      // Delivery tasks are owned by the parent, and orchestration is session-scoped.
-      // Their commits can change worker stop availability without a worker entry.
-      if (
-        ((change.type === "document" || change.type === "document.copy") &&
-          change.record.kind === OrchestrationDoc.definition.kind) ||
-        (change.type === "task" &&
-          change.value.kind === "batty.delivery" &&
-          (change.value.input as { workerId: string }).workerId === String(conversationId))
-      )
+  const unsubscribe =
+    projection?.subscribe(schedule) ??
+    runtime.harness.subscribeCommits((publication) => {
+      let changed = false;
+      let entries = false;
+      for (const change of publication.changes) {
+        // Delivery tasks are owned by the parent, and orchestration is session-scoped.
+        // Their commits can change worker stop availability without a worker entry.
+        if (
+          ((change.type === "document" || change.type === "document.copy") &&
+            change.record.kind === OrchestrationDoc.definition.kind) ||
+          (change.type === "task" &&
+            change.value.kind === "batty.delivery" &&
+            (change.value.input as { workerId: string }).workerId === String(conversationId))
+        )
+          changed = true;
+        const owner =
+          change.type === "document" || change.type === "document.copy"
+            ? change.conversationId
+            : change.type === "conversation"
+              ? change.value.id
+              : change.value.conversationId;
+        if (owner !== conversationId) continue;
         changed = true;
-      const owner =
-        change.type === "document" || change.type === "document.copy"
-          ? change.conversationId
-          : change.type === "conversation"
-            ? change.value.id
-            : change.value.conversationId;
-      if (owner !== conversationId) continue;
-      changed = true;
-      entries ||= change.type === "entry";
-    }
-    if (changed) schedule(entries);
-  });
-  let memory = JSON.stringify(runtime.memory.status());
-  const memoryTimer = setInterval(() => {
-    const next = JSON.stringify(runtime.memory.status());
-    if (next === memory) return;
-    memory = next;
-    schedule(false);
-  }, 2000);
+        entries ||= change.type === "entry";
+      }
+      if (changed) schedule(entries);
+    });
+  let memory = projection ? "" : JSON.stringify(runtime.memory.status());
+  const memoryTimer = projection
+    ? undefined
+    : setInterval(() => {
+        const next = JSON.stringify(runtime.memory.status());
+        if (next === memory) return;
+        memory = next;
+        schedule(false);
+      }, 2000);
   const heartbeat = setInterval(() => {
     if (!closed && !stream.writableNeedDrain) stream.write("event: heartbeat\ndata: {}\n\n");
   }, 5000);

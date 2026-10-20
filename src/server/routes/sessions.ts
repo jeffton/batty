@@ -6,6 +6,7 @@ import { retainInput } from "../input-receipts";
 import { preparePromptFiles, type UploadedFile } from "../uploads";
 import { streamSession } from "../session-sse";
 import type { PushForeground } from "../push-foreground";
+import { parseRemoteSession } from "../remote-workers";
 
 /** Shared HTTP boundary for archive pages, live projections and accepted inputs. */
 export function registerSessionRoutes(
@@ -45,7 +46,9 @@ export function registerSessionRoutes(
   );
 
   app.post<{ Params: { sessionId: string } }>("/api/sessions/:sessionId/stop", async (request) => {
-    await runtime.orchestration.stopWorker(request.params.sessionId);
+    if (parseRemoteSession(request.params.sessionId))
+      await runtime.remotes.stop(request.params.sessionId);
+    else await runtime.orchestration.stopWorker(request.params.sessionId);
     return { ok: true };
   });
 
@@ -54,7 +57,42 @@ export function registerSessionRoutes(
     app.get<{ Params: { sessionId?: string }; Querystring: { after?: string } }>(
       url,
       async (request, reply) => {
-        const conversation = await runtime.conversation(request.params.sessionId ?? "main");
+        const id = request.params.sessionId ?? "main";
+        if (parseRemoteSession(id)) {
+          // Read-only local projection: viewing history also works while the peer is offline.
+          await runtime.state(id);
+          reply.hijack();
+          eventStreams.add(reply.raw);
+          reply.raw.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+          });
+          streamSession(
+            reply.raw,
+            runtime,
+            id,
+            transcriptImages,
+            request.query.after,
+            (error) => app.log.error(error),
+            {
+              state: (history, after) => runtime.state(id, undefined, history, after),
+              subscribe: (changed) => {
+                let cursor = runtime.remotes.state(id).historyCursor;
+                const update = () => {
+                  const next = runtime.remotes.state(id).historyCursor;
+                  changed(next !== cursor);
+                  cursor = next;
+                };
+                runtime.remotes.changes.on("change", update);
+                return () => runtime.remotes.changes.off("change", update);
+              },
+            },
+          );
+          reply.raw.once("close", () => eventStreams.delete(reply.raw));
+          return;
+        }
+        const conversation = await runtime.conversation(id);
         reply.hijack();
         eventStreams.add(reply.raw);
         reply.raw.writeHead(200, {

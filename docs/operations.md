@@ -171,6 +171,7 @@ Deployment installs `/usr/local/bin/batty2`. It authenticates with the local sta
 ```sh
 batty2 cron add --workspace my-project --title 'Task review' --prompt 'Review outstanding tasks' --in 3m \
   --session main-detached
+batty2 cron list
 batty2 cron list --workspace my-project
 batty2 cron get JOB_ID
 batty2 cron update JOB_ID --title 'Weekly task review'
@@ -180,7 +181,7 @@ batty2 cron import --json job.json
 batty2 --help
 ```
 
-Jobs require a nonempty `title` on creation and import. `list` returns only ID, title, workspace, enabled status, schedule and next/retry times; `get JOB_ID` returns the full job including prompt and execution settings. The AI cron tool uses the same `title`, `list` and `get` fields/actions. This is a breaking list-response change; full job data is fetched explicitly, with no legacy aliases or title inference.
+Jobs require a nonempty `title` on creation and import. `list` includes all workspaces by default; `--workspace ID` (AI/API: `workspaceId`) explicitly filters it. It returns only ID, title, workspace, enabled status, schedule and next/retry times; `get JOB_ID` returns the full job including prompt and execution settings. The AI cron tool uses the same `title`, `list` and `get` fields/actions. This is a breaking list-response change; full job data is fetched explicitly, with no legacy aliases or title inference.
 
 `--root` defaults to `/var/lib/batty2`. `--json FILE` accepts request fields (`-` reads stdin); flags override them. See [migration](migration.md) for schedule imports.
 

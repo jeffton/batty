@@ -2,7 +2,7 @@ import Fastify from "fastify";
 import { expect, test } from "vite-plus/test";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { fixture, until } from "./orchestration-test-fixture";
-import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/faux";
+import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { OrchestrationDoc } from "./orchestration";
 import { registerCronRoutes } from "./routes/cron";
 import { parseCronArgs } from "./cron-cli";
@@ -77,6 +77,50 @@ test("compact cron list and explicit details preserve full jobs and workspace fi
   }
 });
 
+test("AI cron list defaults to all workspaces and preserves explicit filters", async () => {
+  const { orchestration, open, faux } = await fixture(10000, console.error, "test");
+  const { main } = await open();
+  const cron = orchestration.extension.tools!.find((tool) => tool.name === "cron")!;
+  await main.configure({ extensions: [orchestration.extension], tools: [cron] }, context);
+  const jobs = await Promise.all(
+    ["test", "other"].map((workspaceId) =>
+      orchestration.addJob({
+        title: workspaceId,
+        prompt: "Private prompt",
+        workspaceId,
+        schedule: { kind: "at", in: "1h" },
+      }),
+    ),
+  );
+  for (const workspaceId of [undefined, "other"]) {
+    faux.setResponses([
+      fauxAssistantMessage(
+        [fauxToolCall("cron", { action: "list", ...(workspaceId ? { workspaceId } : {}) })],
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage([fauxText("Listed.")]),
+    ]);
+    await (
+      await main.submit({ type: "input", content: "List scheduled tasks" }, context)
+    ).wait(context);
+    const result = (await main.context(context)).messages.findLast(
+      (message) => message.role === "toolResult" && message.toolName === "cron",
+    );
+    expect(result?.role).toBe("toolResult");
+    if (result?.role !== "toolResult") throw new Error("Missing cron result");
+    const text = result.content.find((block) => block.type === "text");
+    if (text?.type !== "text") throw new Error("Missing cron output");
+    const summaries = JSON.parse(text.text);
+    expect(summaries.map((job: { id: string }) => job.id).sort()).toEqual(
+      jobs
+        .filter((job) => !workspaceId || job.workspaceId === workspaceId)
+        .map((job) => job.id)
+        .sort(),
+    );
+    expect(text.text).not.toContain("Private prompt");
+  }
+});
+
 test("cron requires explicit nonblank titles on creation, import and rename", async () => {
   const { orchestration, open } = await fixture();
   await open();
@@ -119,7 +163,12 @@ test("renaming an executing one-shot preserves successful retirement", async () 
   await expect(orchestration.getJob(job.id)).rejects.toThrow("Unknown cron job");
 }, 15000);
 
-test("cron CLI supports get and explicit title updates", async () => {
+test("cron CLI supports all-workspace listing, filtering, get and title updates", async () => {
+  expect((await parseCronArgs(["cron", "list"])).body).toEqual({ action: "list" });
+  expect((await parseCronArgs(["cron", "list", "--workspace", "other"])).body).toEqual({
+    action: "list",
+    workspaceId: "other",
+  });
   expect((await parseCronArgs(["cron", "get", "job-id"])).body).toEqual({
     action: "get",
     jobId: "job-id",

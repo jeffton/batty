@@ -12,7 +12,8 @@ Options:
   --timezone ZONE --session MODE --daily-context true|false|chat-only
   --delivery direct|assistant --enabled true|false --run-id ID --limit NUMBER
   --json FILE  Read request fields from JSON file (use - for stdin).
-list returns compact summaries; get JOB_ID returns full details including prompt.
+list returns compact summaries across all workspaces; --workspace ID filters them.
+get JOB_ID returns full details including prompt.
 add requires --title, --prompt and a schedule.
 Outputs JSON. Uses the running Batty2 service; does not start a scheduler.
 `;

@@ -409,7 +409,7 @@ export function createCronScheduler(
   const cron = defineTool({
     name: "cron",
     description:
-      "Manage scheduled tasks. add requires title, prompt and schedule; update accepts title. list returns compact summaries without prompts; get requires jobId and returns full job details including prompt. daily-inline/main-inline use main's continuing context; daily-detached/main-detached use separate workers. delivery=assistant (default) lets the main assistant handle the result; delivery=direct shows the result unchanged to the user and always runs in a separate worker. Return NO_REPLY for no user-visible output.",
+      "Manage scheduled tasks. add requires title, prompt and schedule; update accepts title. list returns compact summaries across all workspaces unless workspaceId filters them, without prompts; get requires jobId and returns full job details including prompt. daily-inline/main-inline use main's continuing context; daily-detached/main-detached use separate workers. delivery=assistant (default) lets the main assistant handle the result; delivery=direct shows the result unchanged to the user and always runs in a separate worker. Return NO_REPLY for no user-visible output.",
     replay: "unsafe",
     parameters: Type.Object({
       action: Type.String(),
@@ -446,9 +446,7 @@ export function createCronScheduler(
       let result: unknown;
       switch (args.action) {
         case "list":
-          result = await listJobSummaries(
-            (await services.workspace(args.workspaceId, api.conversationId)).id,
-          );
+          result = await listJobSummaries(args.workspaceId);
           break;
         case "get":
           result = await getJob(args.jobId!);

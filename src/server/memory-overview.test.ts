@@ -289,6 +289,7 @@ text(await tools.memory_date({id}));`;
       );
       if (kind === "cron") {
         const job = await orchestration.addJob({
+          title: "Scheduled test task",
           workspaceId: target,
           prompt: "inspect catalog",
           session: { kind: "main-detached", includePreviousContext: copy },

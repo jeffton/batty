@@ -5,13 +5,15 @@ import { loadConfig } from "./config";
 import { createAuthToken } from "./auth";
 
 export const help = `Usage: batty2 [--root /var/lib/batty2] cron ACTION [JOB_ID] [options]
-Actions: add, update, remove, list, import, list-running, list-run-logs, stop-running
+Actions: add, update, remove, list, get, import, list-running, list-run-logs, stop-running
 Options:
-  --workspace ID --prompt TEXT --model PROVIDER/MODEL --thinking LEVEL
+  --workspace ID --title TEXT --prompt TEXT --model PROVIDER/MODEL --thinking LEVEL
   --in DURATION | --at ISO_DATE | --every DURATION | --cron EXPRESSION
   --timezone ZONE --session MODE --daily-context true|false|chat-only
   --delivery direct|assistant --enabled true|false --run-id ID --limit NUMBER
   --json FILE  Read request fields from JSON file (use - for stdin).
+list returns compact summaries; get JOB_ID returns full details including prompt.
+add requires --title, --prompt and a schedule.
 Outputs JSON. Uses the running Batty2 service; does not start a scheduler.
 `;
 
@@ -23,6 +25,7 @@ export async function parseCronArgs(args: string[]) {
       root: { type: "string", default: "/var/lib/batty2" },
       help: { type: "boolean" },
       workspace: { type: "string" },
+      title: { type: "string" },
       prompt: { type: "string" },
       model: { type: "string" },
       thinking: { type: "string" },
@@ -55,6 +58,7 @@ export async function parseCronArgs(args: string[]) {
   if (jobId) body.jobId = jobId;
   for (const [flag, field] of [
     ["workspace", "workspaceId"],
+    ["title", "title"],
     ["prompt", "prompt"],
     ["model", "model"],
     ["thinking", "thinkingLevel"],

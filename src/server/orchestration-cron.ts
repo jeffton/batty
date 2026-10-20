@@ -35,6 +35,11 @@ function validateDelivery(delivery?: CronDelivery) {
     throw new Error("Invalid cron delivery mode");
 }
 
+function jobTitle(title: string) {
+  if (typeof title !== "string" || !title.trim()) throw new Error("Cron title is required");
+  return title.trim();
+}
+
 function reply(text: string) {
   return { output: [{ type: "text" as const, text }] };
 }
@@ -53,6 +58,23 @@ export function createCronScheduler(
     Object.values((await snapshot()).jobs).filter(
       (j) => workspaceId === undefined || j.workspaceId === workspaceId,
     );
+  const listJobSummaries = async (workspaceId?: string) =>
+    (await listJobs(workspaceId)).map(
+      ({ id, title, workspaceId, enabled, schedule, nextAt, retryAt }) => ({
+        id,
+        title,
+        workspaceId,
+        enabled,
+        schedule,
+        nextAt,
+        retryAt,
+      }),
+    );
+  const getJob = async (id: string) => {
+    const job = (await snapshot()).jobs[id];
+    if (!job) throw new Error(`Unknown cron job: ${id}`);
+    return job;
+  };
   const listRunLogs = async (jobId?: string, limit = 100, workspaceId?: string) =>
     readRuns(services.harness, context, jobId, limit, workspaceId);
   const listRunningCron = async (jobId?: string) => {
@@ -228,6 +250,7 @@ export function createCronScheduler(
     timer.unref();
   };
   const addJob = async (input: CronJobInput) => {
+    const title = jobTitle(input.title);
     validateDelivery(input.delivery);
     if (!input.prompt.trim()) throw new Error("Cron prompt is required");
     modelChange(input.model, input.thinkingLevel);
@@ -242,6 +265,7 @@ export function createCronScheduler(
     const now = Date.now();
     const schedule = normalizeSchedule(input.schedule, now);
     const job: CronJob = {
+      title,
       id: randomUUID(),
       workspaceId: ws.id,
       enabled: input.enabled ?? true,
@@ -263,6 +287,7 @@ export function createCronScheduler(
     return job;
   };
   const importJob = async (input: CronJob) => {
+    const title = jobTitle(input.title);
     validateDelivery(input.delivery);
     if (!input.id || !input.prompt.trim()) throw new Error("Cron id and prompt are required");
     if (typeof input.enabled !== "boolean") throw new Error("Cron enabled must be boolean");
@@ -290,6 +315,7 @@ export function createCronScheduler(
       schedule = normalizeSchedule(input.schedule, Date.now());
     }
     const job: CronJob = {
+      title,
       id: input.id,
       workspaceId: ws.id,
       enabled: input.enabled,
@@ -322,6 +348,7 @@ export function createCronScheduler(
       )
     )
       throw new Error("Invalid cron session mode");
+    const title = input.title !== undefined ? jobTitle(input.title) : undefined;
     const ws = input.workspaceId ? await services.workspace(input.workspaceId) : undefined;
     const now = Date.now();
     const schedule = input.schedule ? normalizeSchedule(input.schedule, now) : undefined;
@@ -329,6 +356,7 @@ export function createCronScheduler(
       const doc = await tx.doc(OrchestrationDoc);
       const job = doc.jobs[id];
       if (!job) throw new Error(`Unknown cron job: ${id}`);
+      if (title !== undefined) job.title = title;
       if (input.prompt !== undefined) {
         if (!input.prompt.trim()) throw new Error("Cron prompt is required");
         job.prompt = input.prompt;
@@ -342,8 +370,22 @@ export function createCronScheduler(
       if (schedule) job.schedule = schedule;
       if (schedule || (input.enabled === true && job.nextAt === undefined))
         job.nextAt = nextAt(job.schedule, now);
-      job.updatedAt = now;
-      delete job.retryAt;
+      // Cosmetic renames must not mark an executing one-shot as edited for retirement.
+      if (
+        [
+          "prompt",
+          "enabled",
+          "model",
+          "thinkingLevel",
+          "session",
+          "delivery",
+          "workspaceId",
+          "schedule",
+        ].some((field) => input[field as keyof CronJobInput] !== undefined)
+      ) {
+        job.updatedAt = now;
+        delete job.retryAt;
+      }
       return JSON.parse(JSON.stringify(job)) as CronJob;
     }, context);
     await arm();
@@ -367,11 +409,12 @@ export function createCronScheduler(
   const cron = defineTool({
     name: "cron",
     description:
-      "Manage scheduled tasks. daily-inline/main-inline use main's continuing context; daily-detached/main-detached use separate workers. delivery=assistant (default) lets the main assistant handle the result; delivery=direct shows the result unchanged to the user and always runs in a separate worker. Return NO_REPLY for no user-visible output.",
+      "Manage scheduled tasks. add requires title, prompt and schedule; update accepts title. list returns compact summaries without prompts; get requires jobId and returns full job details including prompt. daily-inline/main-inline use main's continuing context; daily-detached/main-detached use separate workers. delivery=assistant (default) lets the main assistant handle the result; delivery=direct shows the result unchanged to the user and always runs in a separate worker. Return NO_REPLY for no user-visible output.",
     replay: "unsafe",
     parameters: Type.Object({
       action: Type.String(),
       jobId: Type.Optional(Type.String()),
+      title: Type.Optional(Type.String()),
       runId: Type.Optional(Type.String()),
       workspaceId: Type.Optional(Type.String()),
       enabled: Type.Optional(Type.Boolean()),
@@ -403,9 +446,12 @@ export function createCronScheduler(
       let result: unknown;
       switch (args.action) {
         case "list":
-          result = await listJobs(
+          result = await listJobSummaries(
             (await services.workspace(args.workspaceId, api.conversationId)).id,
           );
+          break;
+        case "get":
+          result = await getJob(args.jobId!);
           break;
         case "add":
           result = await addJob({
@@ -441,6 +487,8 @@ export function createCronScheduler(
   return {
     cron,
     listJobs,
+    listJobSummaries,
+    getJob,
     listRunLogs,
     listRunningCron,
     addJob,

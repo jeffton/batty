@@ -165,6 +165,7 @@ test.each(
       }),
     );
     const job = await orchestration.addJob({
+      title: "Scheduled test task",
       prompt: "project cron",
       workspaceId: "other",
       session: { kind: "daily-detached" },

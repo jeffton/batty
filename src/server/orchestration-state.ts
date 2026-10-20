@@ -52,6 +52,7 @@ export type CronSession = {
 };
 export type CronDelivery = "direct" | "assistant";
 export type CronJobInput = {
+  title: string;
   delivery?: CronDelivery;
   workspaceId?: string;
   enabled?: boolean;
@@ -62,6 +63,7 @@ export type CronJobInput = {
   session?: CronSession;
 };
 export type CronJob = {
+  title: string;
   delivery?: CronDelivery;
   id: string;
   workspaceId: string;

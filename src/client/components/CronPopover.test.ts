@@ -23,9 +23,10 @@ vi.mock("@/client/stores/app", () => ({
 
 function job(workspaceId: string): CronJob {
   return {
+    title: `Job in ${workspaceId}`,
     id: workspaceId,
     workspaceId,
-    prompt: `Job in ${workspaceId}`,
+    prompt: `Detailed prompt in ${workspaceId}`,
     enabled: true,
     model: "provider/model",
     thinkingLevel: "medium",
@@ -88,6 +89,7 @@ describe("cron popover", () => {
       expect(cronPanel.text()).toContain("Job in first");
       expect(cronPanel.text()).toContain("Job in second");
       expect(cronPanel.text()).toContain("Second workspace");
+      expect(cronPanel.text()).not.toContain("Detailed prompt");
       const jobDetails = cronPanel.findAll(".cron-popover__run-details");
       expect(jobDetails[0]!.text()).toContain("Delivery: Via assistant");
       expect(jobDetails[1]!.text()).toContain("Delivery: Direct");

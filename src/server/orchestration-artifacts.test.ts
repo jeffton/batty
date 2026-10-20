@@ -93,6 +93,7 @@ test.each(["assistant", "direct"] as const)(
       }),
     );
     const job = await orchestration.addJob({
+      title: "Scheduled test task",
       workspaceId: "test",
       prompt: "artifact outer",
       delivery,
@@ -392,6 +393,7 @@ test.each([
       }),
     );
     const job = await orchestration.addJob({
+      title: "Scheduled test task",
       prompt: "parallel cron",
       session: { kind: kind as "daily-detached" | "main-inline" },
       schedule: { kind: "at", in: "1h" },

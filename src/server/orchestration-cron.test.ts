@@ -26,6 +26,7 @@ test("reopen retires only completed unchanged one-shots and preserves archived m
   ];
   for (const id of cases) {
     await state.orchestration.importJob({
+      title: "Scheduled test task",
       id,
       workspaceId: "test",
       prompt: `original ${id}`,
@@ -106,6 +107,7 @@ test("a persisted cron admission survives reopen and reports exactly once to mai
   const fixtureState = await fixture();
   let { harness, main } = await fixtureState.open();
   const job = await fixtureState.orchestration.addJob({
+    title: "Scheduled test task",
     workspaceId: "test",
     prompt: "worker task",
     schedule: { kind: "at", in: "1h" },
@@ -162,6 +164,7 @@ test("a worker's cron tool defaults to its originating workspace", async () => {
           [
             fauxToolCall("cron", {
               action: "add",
+              title: "Scheduled test task",
               prompt: "future scheduled task",
               schedule: { kind: "at", in: "1h" },
             }),
@@ -180,6 +183,7 @@ test("imported cron preserves identity and interval phase across restart without
   const { orchestration, open } = await fixture();
   let { harness } = await open();
   const job = {
+    title: "Imported task",
     id: "legacy-job",
     workspaceId: "other",
     enabled: false,
@@ -210,6 +214,7 @@ test("cutover reconciles a legacy occurrence executed after the disabled import"
   await open();
   const oldOccurrence = Date.now() - 1000;
   const imported = {
+    title: "Cutover task",
     id: "cutover-job",
     workspaceId: "test",
     enabled: false,
@@ -235,6 +240,7 @@ test("cron import rejects invalid settings before persistence and accepts histor
   const { orchestration, open } = await fixture();
   await open();
   const base = {
+    title: "Historical task",
     id: "historical",
     workspaceId: "test",
     enabled: false,
@@ -267,10 +273,12 @@ test("cron isolates a bad job and its timer continues after the job is repaired"
   const { main } = await open();
   faux.setResponses(Array.from({ length: 10 }, () => fauxAssistantMessage([fauxText("done")])));
   const bad = await orchestration.addJob({
+    title: "Scheduled test task",
     prompt: "bad workspace",
     schedule: { kind: "at", in: "1h" },
   });
   const good = await orchestration.addJob({
+    title: "Scheduled test task",
     prompt: "good workspace",
     schedule: { kind: "at", in: "1h" },
   });
@@ -294,6 +302,7 @@ test("cron admission retries updated job fields rather than admitting a stale sn
   const { harness, main } = await open();
   faux.setResponses(Array.from({ length: 10 }, () => fauxAssistantMessage([fauxText("done")])));
   const job = await orchestration.addJob({
+    title: "Scheduled test task",
     prompt: "old prompt",
     session: { kind: "new", includePreviousContext: true },
     schedule: { kind: "at", in: "1h" },

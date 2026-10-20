@@ -131,6 +131,7 @@ test("startup observers see a due inline cron reply even with explicit resume di
   try {
     runtime = await Runtime.open(config, { resume: false });
     const job = await runtime.orchestration.addJob({
+      title: "Scheduled test task",
       prompt: "startup cron task",
       session: { kind: "main-inline" },
       schedule: { kind: "at", in: "1h" },

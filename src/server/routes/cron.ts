@@ -14,7 +14,9 @@ export function registerCronRoutes(app: FastifyInstance, orchestration: Runtime[
     const input = request.body;
     switch (input.action) {
       case "list":
-        return orchestration.listJobs(input.workspaceId);
+        return orchestration.listJobSummaries(input.workspaceId);
+      case "get":
+        return orchestration.getJob(input.jobId!);
       case "import":
         return orchestration.importJob(input as unknown as CronJob);
       case "add":

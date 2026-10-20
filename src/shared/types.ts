@@ -266,6 +266,7 @@ export interface CronJobState {
 export type CronDelivery = "direct" | "assistant";
 
 export interface CronJob {
+  title: string;
   delivery?: CronDelivery;
   id: string;
   workspaceId: string;
@@ -282,6 +283,7 @@ export interface CronJob {
 }
 
 export interface CreateCronJobInput {
+  title: string;
   delivery?: CronDelivery;
   workspaceId: string;
   enabled?: boolean;
@@ -293,6 +295,7 @@ export interface CreateCronJobInput {
 }
 
 export interface UpdateCronJobInput {
+  title?: string;
   delivery?: CronDelivery;
   workspaceId?: string;
   enabled?: boolean;

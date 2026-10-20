@@ -360,6 +360,7 @@ test("main discovers and inspects cron descendants in the assistant workspace", 
     }),
   );
   const job = await orchestration.addJob({
+    title: "Scheduled test task",
     prompt: "hidden cron",
     workspaceId: "test",
     session: { kind: "daily-detached" },
@@ -424,12 +425,14 @@ test("cron and ordinary workers coordinate by current workspace across jobs and 
     }),
   );
   const job = await orchestration.addJob({
+    title: "Scheduled test task",
     prompt: "cron root",
     workspaceId: "test",
     session: { kind: "daily-detached" },
     schedule: { kind: "every", every: "1h" },
   });
   const otherJob = await orchestration.addJob({
+    title: "Scheduled test task",
     prompt: "cron root",
     workspaceId: "other",
     session: { kind: "daily-detached" },

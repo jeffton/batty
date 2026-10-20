@@ -126,7 +126,7 @@ onBeforeUnmount(() => {
                 <span class="cron-popover__status">{{ job.enabled ? "Enabled" : "Paused" }}</span>
                 <strong>{{ job.scheduleLabel }}</strong>
               </div>
-              <div class="cron-popover__run-prompt">{{ job.prompt }}</div>
+              <div class="cron-popover__run-prompt">{{ job.title }}</div>
               <div class="cron-popover__run-details">
                 <span>{{ workspaceLabel(job.workspaceId) }}</span>
                 <span>{{ job.model }} · {{ job.thinkingLevel }}</span>

@@ -11,6 +11,8 @@ test("wake workout preserves prompt, model, workspace and detached context", asy
     "add",
     "--workspace",
     "roy",
+    "--title",
+    "Scheduled test task",
     "--prompt",
     "David's activity\npt.md",
     "--model",
@@ -26,6 +28,7 @@ test("wake workout preserves prompt, model, workspace and detached context", asy
   ]);
   expect(body).toEqual({
     action: "add",
+    title: "Scheduled test task",
     workspaceId: "roy",
     prompt: "David's activity\npt.md",
     model: "openai-codex/gpt-6.1-sol",

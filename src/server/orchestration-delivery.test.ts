@@ -65,6 +65,7 @@ test.each(["daily-detached", "main-detached"] as const)(
       }),
     );
     const job = await orchestration.addJob({
+      title: "Scheduled test task",
       workspaceId: "test",
       prompt: "scheduled report source",
       session: { kind },
@@ -133,6 +134,7 @@ test.each(
       fauxAssistantMessage([fauxText("report received")]),
     ]);
     const job = await orchestration.addJob({
+      title: "Scheduled test task",
       workspaceId: "test",
       prompt: "scheduled task",
       session: { kind },
@@ -216,6 +218,7 @@ test("silent detached cron creates no report or steering while main is busy", as
   await until(async () => entered);
   const before = (await main.context(context)).entries.length;
   const job = await orchestration.addJob({
+    title: "Scheduled test task",
     prompt: "silent scheduled task",
     session: { kind: "main-detached" },
     schedule: { kind: "at", in: "1h" },
@@ -314,6 +317,7 @@ test.each(
     : undefined;
   if (busy) await until(async () => entered);
   const job = await orchestration.addJob({
+    title: "Scheduled test task",
     prompt: "scheduled work",
     delivery,
     session: { kind },
@@ -381,6 +385,7 @@ test.each(["new", "daily-inline", "main-inline"] as const)(
       },
     ]);
     const job = await orchestration.addJob({
+      title: "Scheduled test task",
       prompt: "brief",
       delivery: "direct",
       session: { kind },
@@ -410,6 +415,7 @@ test.each(["NO_REPLY", "error"])("direct cron handles %s", async (output) => {
     fauxAssistantMessage([fauxText("failure handled")]),
   ]);
   const job = await orchestration.addJob({
+    title: "Scheduled test task",
     prompt: "brief",
     delivery: "direct",
     schedule: { kind: "at", in: "1h" },

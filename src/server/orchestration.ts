@@ -130,6 +130,8 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
   const scheduler = createCronScheduler(services, Delivery, workers, onError);
   const {
     cron,
+    listJobSummaries,
+    getJob,
     listJobs,
     listRunLogs,
     listRunningCron,
@@ -263,6 +265,8 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
       return harness.snapshot(WorkerDoc, id, context);
     },
     listJobs,
+    listJobSummaries,
+    getJob,
     importJob,
     addJob,
     updateJob,

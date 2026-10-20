@@ -57,6 +57,7 @@ test.each(["complete", "cancel", "restart"] as const)(
       },
     ]);
     const job = await orchestration.addJob({
+      title: "Scheduled test task",
       workspaceId: "test",
       prompt: "use scoped inline tools",
       session: { kind: "main-inline" },
@@ -116,6 +117,7 @@ test("inline cron tools use the originating workspace and restore main cwd", asy
     fauxAssistantMessage([fauxText("finished")]),
   ]);
   const job = await orchestration.addJob({
+    title: "Scheduled test task",
     workspaceId: "test",
     prompt: "inspect cwd",
     session: { kind: "daily-inline" },
@@ -165,6 +167,7 @@ test("inline workspace context survives a steer and subsequent tool round", asyn
     fauxAssistantMessage([fauxText("finished")]),
   ]);
   const job = await orchestration.addJob({
+    title: "Scheduled test task",
     workspaceId: "test",
     prompt: "inspect cwd twice",
     session: { kind: "main-inline" },
@@ -231,6 +234,7 @@ test("stopping a waiting inline cron does not abort main or withdraw ordinary qu
       context,
     );
     const job = await orchestration.addJob({
+      title: "Scheduled test task",
       prompt: "cron must not start",
       session: { kind: "main-inline" },
       schedule: { kind: "at", in: "1h" },
@@ -268,6 +272,7 @@ test("inline model/thinking overrides survive restart and restore the main agent
     },
   ]);
   const job = await orchestration.addJob({
+    title: "Scheduled test task",
     prompt: "scoped cron",
     model: "faux/faux-2",
     thinkingLevel: "high",
@@ -342,6 +347,7 @@ test("stopping an active inline cron preserves queued user input and restores sc
     },
   ]);
   const job = await orchestration.addJob({
+    title: "Scheduled test task",
     prompt: "cancel scoped cron",
     model: "faux/faux-2",
     thinkingLevel: "high",

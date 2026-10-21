@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Pencil, Plus, RotateCw, LogIn, LogOut, X } from "@lucide/vue";
+import { useAppStore } from "@/client/stores/app";
 import DeleteButton from "@/client/components/DeleteButton.vue";
 import McpServerEditor from "@/client/components/McpServerEditor.vue";
 import { computed, onBeforeUnmount, ref, useId, watch } from "vue";
@@ -24,6 +25,7 @@ import type {
 } from "@/shared/types";
 
 const props = defineProps<{ active: boolean }>();
+const store = useAppStore();
 type Server = McpSettingsResponse["servers"][number];
 const settings = ref<McpSettingsResponse>({ servers: [], errors: [] });
 const status = ref<McpStatus>({ servers: [], errors: [] });
@@ -45,7 +47,7 @@ const attempt = ref<McpAuthAttempt>();
 const statusBusy = ref("");
 let loadGeneration = 0;
 let lifecycleGeneration = 0;
-let pollTimer: ReturnType<typeof setTimeout> | undefined;
+let reconciledAttempt = "";
 let disposed = false;
 
 const visibleServers = computed(() =>
@@ -95,13 +97,7 @@ async function refreshAfterAuth(): Promise<void> {
   await load();
 }
 
-function stopPolling(): void {
-  if (pollTimer) clearTimeout(pollTimer);
-  pollTimer = undefined;
-}
-
 function clearAttempt(): void {
-  stopPolling();
   attempt.value = undefined;
   callbackInput.value = "";
 }
@@ -248,12 +244,18 @@ async function logout(server: Server): Promise<void> {
   await updateStatus(() => logoutMcpServer(server.name));
 }
 
-function schedulePoll(attemptId: string, requestGeneration: number): void {
-  stopPolling();
-  pollTimer = setTimeout(() => void pollAttempt(attemptId, requestGeneration), 1000);
+async function applyAttempt(result: McpAuthAttempt): Promise<void> {
+  if (
+    attempt.value?.attemptId === result.attemptId &&
+    attempt.value.status !== "pending" &&
+    result.status === "pending"
+  )
+    return;
+  attempt.value = result;
+  if (result.status === "completed") await refreshAfterAuth();
 }
 
-async function pollAttempt(attemptId: string, requestGeneration: number): Promise<void> {
+async function reconcileAttempt(attemptId: string, requestGeneration: number): Promise<void> {
   try {
     const result = await getMcpAuthAttempt(attemptId);
     if (
@@ -262,20 +264,19 @@ async function pollAttempt(attemptId: string, requestGeneration: number): Promis
       attempt.value?.attemptId !== attemptId
     )
       return;
-    attempt.value = result;
-    if (result.status === "pending") schedulePoll(attemptId, requestGeneration);
-    else if (result.status === "completed") await refreshAfterAuth();
+    if (!store.mcpAuthAttempts[attemptId]) await applyAttempt(result);
   } catch (cause) {
     if (
       !disposed &&
       requestGeneration === lifecycleGeneration &&
-      attempt.value?.attemptId === attemptId
+      attempt.value?.attemptId === attemptId &&
+      !store.mcpAuthAttempts[attemptId]
     ) {
-      attempt.value = {
-        ...attempt.value,
-        status: "failed",
-        error: cause instanceof Error ? cause.message : String(cause),
-      };
+      if (cause instanceof Error && "status" in cause && cause.status === 404) {
+        attempt.value = { ...attempt.value, status: "failed", error: cause.message };
+      } else {
+        error.value = cause instanceof Error ? cause.message : String(cause);
+      }
     }
   }
 }
@@ -290,10 +291,8 @@ async function login(server: Server): Promise<void> {
       if (started.status === "pending") void cancelMcpAuthAttempt(started.attemptId);
       return;
     }
-    attempt.value = started;
     callbackInput.value = "";
-    if (started.status === "pending") schedulePoll(started.attemptId, lifecycleGeneration);
-    else if (started.status === "completed") await refreshAfterAuth();
+    await applyAttempt(store.mcpAuthAttempts[started.attemptId] ?? started);
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
   }
@@ -303,7 +302,7 @@ async function completeLogin(): Promise<void> {
   const active = attempt.value;
   if (!active || !callbackInput.value.trim()) return;
   const requestGeneration = lifecycleGeneration;
-  stopPolling();
+  const snapshotAtStart = store.mcpAuthAttempts[active.attemptId];
   try {
     const result = await completeMcpAuthAttempt(active.attemptId, callbackInput.value.trim());
     if (
@@ -312,9 +311,10 @@ async function completeLogin(): Promise<void> {
       attempt.value?.attemptId !== active.attemptId
     )
       return;
-    attempt.value = result;
-    if (result.status === "pending") schedulePoll(active.attemptId, requestGeneration);
-    if (result.status === "completed") await refreshAfterAuth();
+    const snapshot = store.mcpAuthAttempts[active.attemptId];
+    await applyAttempt(
+      result.status === "pending" && snapshot !== snapshotAtStart ? (snapshot ?? result) : result,
+    );
   } catch (cause) {
     if (
       attempt.value?.attemptId === active.attemptId &&
@@ -324,7 +324,6 @@ async function completeLogin(): Promise<void> {
         ...attempt.value,
         error: cause instanceof Error ? cause.message : String(cause),
       };
-      schedulePoll(active.attemptId, requestGeneration);
     }
   }
 }
@@ -343,6 +342,28 @@ async function cancelLogin(): Promise<void> {
     }
   }
 }
+
+watch(
+  () =>
+    [
+      attempt.value?.attemptId,
+      store.authAttemptsVersion,
+      store.mcpAuthAttempts[attempt.value?.attemptId ?? ""],
+    ] as const,
+  async ([id, version, snapshot], previous) => {
+    if (!id || disposed || !props.active) return;
+    if (previous && id === previous[0] && version === previous[1] && snapshot === previous[2])
+      return;
+    if (snapshot) {
+      await applyAttempt(snapshot);
+    } else {
+      const key = `${id}:${version}`;
+      if (reconciledAttempt === key) return;
+      reconciledAttempt = key;
+      await reconcileAttempt(id, lifecycleGeneration);
+    }
+  },
+);
 
 watch(
   () => props.active,

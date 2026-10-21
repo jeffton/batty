@@ -14,6 +14,7 @@ export function registerSessionRoutes(
   runtime: Runtime,
   transcriptImages: TranscriptImages,
   foreground?: PushForeground,
+  connectAppStatus?: (stream: import("node:http").ServerResponse) => void,
 ) {
   const config = runtime.config;
   app.get<{ Querystring: { after?: string } }>("/api/main", async (request) =>
@@ -101,6 +102,7 @@ export function registerSessionRoutes(
           Connection: "keep-alive",
           "X-Accel-Buffering": "no",
         });
+        if (conversation.id === runtime.main.id) connectAppStatus?.(reply.raw);
         const disconnectForeground = foreground?.connect((event, data) => {
           if (!reply.raw.destroyed && !reply.raw.writableEnded && !reply.raw.writableNeedDrain)
             reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);

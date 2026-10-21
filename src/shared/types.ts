@@ -401,6 +401,19 @@ export interface ProviderUsageWindow {
 
 export interface ProviderUsage {
   windows: ProviderUsageWindow[];
+  modelWindows?: Record<string, ProviderUsageWindow[]>;
+}
+
+export interface ProviderUsageUpdate {
+  provider: string;
+  usage?: ProviderUsage;
+  error?: string;
+}
+
+export interface ProviderAuthAttemptStatus {
+  attemptId: string;
+  completed: boolean;
+  error?: string;
 }
 
 export interface AppSettingsStatus {
@@ -483,6 +496,15 @@ export interface WorkspaceSnapshot {
 
 export type ServerEvent = (
   | { type: "orchestration-changed"; cron: boolean }
+  | { type: "build"; buildId: string }
+  | {
+      type: "auth-attempts";
+      provider: ProviderAuthAttemptStatus[];
+      mcp: McpAuthAttempt[];
+    }
+  | { type: "provider-auth-attempt"; attempt: ProviderAuthAttemptStatus }
+  | { type: "mcp-auth-attempt"; attempt: McpAuthAttempt }
+  | { type: "provider-usage"; update: ProviderUsageUpdate }
   | { type: "reset"; state: SessionState }
   | { type: "state"; state: SessionStateMetadata }
   | { type: "assistant"; assistant?: Extract<UiMessage, { role: "assistant" }> }

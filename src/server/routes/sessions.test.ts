@@ -10,6 +10,7 @@ import { loadConfig } from "../config";
 import { Runtime, context } from "../runtime";
 import { TranscriptImages } from "../transcript-images";
 import { registerSessionRoutes } from "./sessions";
+import { streamAppStatus } from "../app-status-stream";
 import { applyServerEvent } from "@/client/lib/session-events";
 import { sessionHistoryCursor } from "@/client/lib/session-stream";
 import type { ServerEvent, SessionState } from "@/shared/types";
@@ -55,6 +56,11 @@ test("multipart image → durable receipt → SSE → backend reopen reconciles 
       app,
       runtime,
       new TranscriptImages(join(directory, "previews"), config.baseUrl),
+      undefined,
+      (stream) =>
+        streamAppStatus(stream, runtime!, "fixture-build", (error) => {
+          throw error;
+        }),
     );
     return app.listen({ host: "127.0.0.1", port: 0 });
   };
@@ -92,6 +98,15 @@ test("multipart image → durable receipt → SSE → backend reopen reconciles 
   try {
     let url = await open();
     const nextEvent = await stream(`${url}/api/main/events`);
+    expect(await nextEvent((event) => event.type === "build")).toEqual({
+      type: "build",
+      buildId: "fixture-build",
+    });
+    expect(await nextEvent((event) => event.type === "auth-attempts")).toEqual({
+      type: "auth-attempts",
+      provider: [],
+      mcp: [],
+    });
     let client = applyServerEvent(undefined, await nextEvent((event) => event.type === "reset"));
     const form = new FormData();
     form.set("text", "HTTP image test");

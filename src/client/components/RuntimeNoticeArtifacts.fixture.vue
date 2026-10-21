@@ -80,7 +80,10 @@ messages.push({
       current-thinking-level="medium"
       :thinking-options="[]"
     />
-    <ProviderUsageIndicator model="fixture/model" />
+    <ProviderUsageIndicator
+      model="fixture/model"
+      :update="{ provider: 'fixture', error: 'Fixture usage unavailable' }"
+    />
   </nav>
   <main style="padding: 12px; max-width: 800px; height: 100vh; overflow-y: auto">
     <ChatMessage

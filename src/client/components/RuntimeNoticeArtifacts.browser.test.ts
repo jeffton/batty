@@ -62,9 +62,6 @@ for (const width of [320]) {
   test(`small popovers dismiss on Escape and outside click at ${width}px (${colorScheme})`, async () => {
     const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
     page.setDefaultTimeout(5000);
-    await page.route("**/api/provider-usage?*", (route) =>
-      route.fulfill({ status: 503, json: { error: "Fixture usage unavailable" } }),
-    );
     try {
       await page.goto(url, { waitUntil: "domcontentloaded" });
       for (const { name, selector } of [

@@ -35,6 +35,7 @@ import { Runtime, context } from "./runtime";
 import { acquireLock } from "./lock";
 import { resolveUploadedFile } from "./uploads";
 import { registerSessionRoutes } from "./routes/sessions";
+import { streamAppStatus } from "./app-status-stream";
 import { registerRemoteRoutes, authenticateNode } from "./routes/remotes";
 import { resolveSentFile } from "./send-files";
 import type { AppColor } from "@/shared/appearance";
@@ -298,7 +299,13 @@ app.get<{ Params: { workspaceId: string } }>(
 );
 app.get("/api/memory/status", async () => runtime.memory.status());
 app.get("/api/memory/usage", async () => runtime.memory.usage());
-const closeEventStreams = registerSessionRoutes(app, runtime, transcriptImages, webPush.foreground);
+const closeEventStreams = registerSessionRoutes(
+  app,
+  runtime,
+  transcriptImages,
+  webPush.foreground,
+  (stream) => streamAppStatus(stream, runtime, buildId, (error) => app.log.error(error)),
+);
 app.post("/api/main/stop", async () => {
   await runtime.tools.abortConversation(runtime.main.id);
   await runtime.main.abort(context);

@@ -5,7 +5,7 @@ import { getPackageDir, type McpServerConfig } from "@earendil-works/pi-coding-a
 import { toLlmContent } from "@earendil-works/pi-mcp";
 import { Type } from "typebox";
 import type { AppConfig } from "./config";
-import type { McpSettingsResponse, McpStatus } from "@/shared/types";
+import type { McpAuthAttempt, McpSettingsResponse, McpStatus } from "@/shared/types";
 import { stateDirPath } from "./options";
 import type { ToolRegistration } from "@earendil-works/pi-durable";
 
@@ -28,6 +28,21 @@ export class McpService {
       task?: Promise<void>;
     }
   >();
+  private readonly attemptListeners = new Set<(attempt: McpAuthAttempt) => void>();
+
+  subscribeAttempts(listener: (attempt: McpAuthAttempt) => void): () => void {
+    this.attemptListeners.add(listener);
+    return () => this.attemptListeners.delete(listener);
+  }
+
+  listAuthAttempts(): McpAuthAttempt[] {
+    return [...this.attempts.keys()].map((id) => this.getAuthAttempt(id));
+  }
+
+  private emitAttempt(id: string): void {
+    for (const listener of this.attemptListeners) listener(this.getAuthAttempt(id));
+  }
+
   private closing = false;
   private constructor(
     private readonly config: AppConfig,
@@ -242,6 +257,7 @@ export class McpService {
       controller: new AbortController(),
     };
     this.attempts.set(attempt.state.attemptId, attempt);
+    this.emitAttempt(attempt.state.attemptId);
     attempt.task = (async () => {
       try {
         const connection = (await this.connections()).find((value: any) => value.name === name);
@@ -261,6 +277,7 @@ export class McpService {
           prompt: {
             showAuthorizationUrl: (url: URL) => {
               attempt.state.authorizationUrl = url.href;
+              this.emitAttempt(attempt.state.attemptId);
             },
             promptForRedirectUrl: (signal: AbortSignal) =>
               new Promise<string | undefined>((resolve) => {
@@ -278,12 +295,16 @@ export class McpService {
         });
         if (attempt.state.status === "pending") {
           await connection.reconnect();
-          attempt.state.status = "completed";
+          if (attempt.state.status === "pending") {
+            attempt.state.status = "completed";
+            this.emitAttempt(attempt.state.attemptId);
+          }
         }
       } catch (error) {
         if (attempt.state.status === "pending") {
           attempt.state.status = "failed";
           attempt.state.error = String(error);
+          this.emitAttempt(attempt.state.attemptId);
         }
       }
     })();
@@ -295,8 +316,16 @@ export class McpService {
     if (!attempt) throw Object.assign(new Error("MCP sign-in not found"), { statusCode: 404 });
     return attempt;
   }
-  getAuthAttempt(id: string): any {
-    return { ...this.attempt(id).state };
+  getAuthAttempt(id: string): McpAuthAttempt {
+    const state = this.attempt(id).state;
+    return {
+      attemptId: state.attemptId,
+      serverName: state.serverName,
+      status: state.status,
+      ...(state.authorizationUrl ? { authorizationUrl: state.authorizationUrl } : {}),
+      ...(state.prompt ? { prompt: state.prompt } : {}),
+      ...(state.error ? { error: state.error } : {}),
+    };
   }
   async completeAuth(id: string, callbackUrl: string): Promise<any> {
     const attempt = this.attempt(id);
@@ -309,6 +338,7 @@ export class McpService {
     const attempt = this.attempt(id);
     if (attempt.state.status === "pending") {
       attempt.state.status = "cancelled";
+      this.emitAttempt(id);
       attempt.controller.abort();
       attempt.input?.(undefined);
     }

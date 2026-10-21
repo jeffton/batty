@@ -51,12 +51,12 @@ async function fetchAvailableResponse(path: string, label: string): Promise<Resp
   }
 }
 
-export async function checkAppUpdate(): Promise<void> {
+export async function checkAppUpdate(availableBuild?: string): Promise<void> {
   if (checking) return checking;
   checking = (async () => {
-    const { buildId } = await fetchAvailable("/api/version", "Version", (response) =>
-      response.json(),
-    );
+    const buildId =
+      availableBuild ??
+      (await fetchAvailable("/api/version", "Version", (response) => response.json())).buildId;
     initializeBuild(buildId);
     pendingBuild = buildId !== loadedBuild ? buildId : undefined;
     if (!pendingBuild || reloading || !canReloadApp()) return;

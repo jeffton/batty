@@ -45,6 +45,23 @@ it("defers a changed build during drafts/uploads and focused input, then reloads
   unblock();
 });
 
+it("uses SSE build IDs without version requests and still verifies the online shell", async () => {
+  const reload = responses();
+  const { initializeBuild, blockAppReload, checkAppUpdate } = await import("./app-updates");
+  initializeBuild("old");
+  let busy = true;
+  const unblock = blockAppReload(() => busy);
+  await checkAppUpdate("old");
+  await checkAppUpdate("new");
+  expect(fetch).not.toHaveBeenCalled();
+  busy = false;
+  await checkAppUpdate("new");
+  expect(fetch).toHaveBeenCalledOnce();
+  expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe("/index.html");
+  expect(reload).toHaveBeenCalledOnce();
+  unblock();
+});
+
 it("does not reload an unchanged build", async () => {
   const reload = responses();
   const { initializeBuild, checkAppUpdate } = await import("./app-updates");

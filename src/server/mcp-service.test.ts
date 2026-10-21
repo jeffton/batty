@@ -31,7 +31,10 @@ for (const action of ["cancel", "dispose"] as const) {
     };
     const service: McpService = new (McpService as any)({ battyDir: "/tmp" }, modules);
     (service as any).session = Promise.resolve([connection]);
+    const events = vi.fn();
+    service.subscribeAttempts(events);
     const attempt = service.startAuth("remote");
+    expect(events).toHaveBeenLastCalledWith(attempt);
     const signal = await started.promise;
     expect(signal.aborted).toBe(false);
     try {
@@ -39,6 +42,9 @@ for (const action of ["cancel", "dispose"] as const) {
       else await service.dispose();
       expect(signal.aborted).toBe(true);
       expect(service.getAuthAttempt(attempt.attemptId).status).toBe("cancelled");
+      expect(events).toHaveBeenLastCalledWith({ ...attempt, status: "cancelled" });
+      expect(service.listAuthAttempts()).toEqual([{ ...attempt, status: "cancelled" }]);
+      expect(JSON.stringify(events.mock.calls)).not.toContain("controller");
       expect(reconnected).not.toHaveBeenCalled();
     } finally {
       await service.dispose();

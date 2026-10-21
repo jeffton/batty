@@ -224,7 +224,9 @@ export function cancelMcpAuthAttempt(attemptId: string): Promise<McpAuthAttempt>
   return request(`/api/mcp/auth/${encodeURIComponent(attemptId)}`, { method: "DELETE" });
 }
 
-export function getOpenAIAuthAttemptStatus(attemptId: string): Promise<{ completed: boolean }> {
+export function getOpenAIAuthAttemptStatus(
+  attemptId: string,
+): Promise<{ completed: boolean; error?: string }> {
   return request(`/api/provider-auth/openai/attempt/${encodeURIComponent(attemptId)}`);
 }
 

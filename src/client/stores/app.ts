@@ -205,9 +205,9 @@ export const useAppStore = defineStore("app", {
         else this.openStream();
       }
     },
-    async checkForUpdates() {
+    async checkForUpdates(buildId?: string) {
       try {
-        await checkAppUpdate();
+        await checkAppUpdate(buildId);
       } catch {
         // Background update failures are recorded by fetch diagnostics, not the chat banner.
         return;
@@ -227,16 +227,41 @@ export const useAppStore = defineStore("app", {
         onConnecting: () => {
           this.connectionState = "connecting";
         },
-        onOpen: () => {
-          void this.checkForUpdates();
-        },
         onWatchdog: () => {
-          void this.checkForUpdates();
+          // Retry a blocked reload locally; healthy streams never poll /api/version.
+          if (this.serverBuildId) void this.checkForUpdates(this.serverBuildId);
         },
         onError: () => {
           this.connectionState = "offline";
         },
         onEvent: (event) => {
+          if (event.type === "build") {
+            this.serverBuildId = event.buildId;
+            void this.checkForUpdates(event.buildId);
+            return;
+          }
+          if (event.type === "auth-attempts") {
+            this.providerAuthAttempts = Object.fromEntries(
+              event.provider.map((attempt) => [attempt.attemptId, attempt]),
+            );
+            this.mcpAuthAttempts = Object.fromEntries(
+              event.mcp.map((attempt) => [attempt.attemptId, attempt]),
+            );
+            this.authAttemptsVersion++;
+            return;
+          }
+          if (event.type === "provider-auth-attempt") {
+            this.providerAuthAttempts[event.attempt.attemptId] = event.attempt;
+            return;
+          }
+          if (event.type === "mcp-auth-attempt") {
+            this.mcpAuthAttempts[event.attempt.attemptId] = event.attempt;
+            return;
+          }
+          if (event.type === "provider-usage") {
+            this.providerUsage = event.update;
+            return;
+          }
           if (event.type === "orchestration-changed") {
             this.orchestrationVersion++;
             if (event.cron) this.cronVersion++;
@@ -269,6 +294,9 @@ export const useAppStore = defineStore("app", {
       this.closeStream();
       this.authenticated = false;
       this.activeSession = undefined;
+      this.providerUsage = undefined;
+      this.providerAuthAttempts = {};
+      this.mcpAuthAttempts = {};
     },
     setAuthError(error: unknown) {
       this.authError = error instanceof Error ? error.message : String(error);

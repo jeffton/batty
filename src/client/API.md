@@ -14,6 +14,14 @@ The authenticated root route contains one main chat. Workspace listings never se
 - `POST /api/main/stop`: `{ ok: true }`.
 - `POST /api/main/queue/remove`: `{ kind, index }`, kind `steer` or `followUp`, index copied from the queued prompt's durable submission identifier; return `SessionState`.
 
+## Installation status
+
+Main SSE replays `build`, `auth-attempts` and the latest `provider-usage` snapshot on connection. OAuth transitions arrive as `provider-auth-attempt` / `mcp-auth-attempt`; missing attempts are reconciled once after start/reconnect, not polled. Reconnect snapshots recover completion, failure and cancellation.
+
+Build IDs travel over SSE. The connection watchdog remains; blocked reloads are retried locally, and resume/online checks can query `/api/version`. Reload still verifies the online HTML build and respects drafts, uploads and focused inputs.
+
+Provider usage has one server-wide subscription timer while clients are connected. Requests share in-flight work and a one-minute account cache, including failures; additional clients cannot increase the provider fetch rate. SSE publishes changed snapshots, with common and model-specific windows. Disconnects retain the last received values. Provider failures remain visible alongside the last successful limits; an error-only indicator appears only when no successful limits are available.
+
 ## Read-only worker sessions
 
 - `GET /api/sessions/:id`: `SessionState`.

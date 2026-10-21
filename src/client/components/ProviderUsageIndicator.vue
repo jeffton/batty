@@ -1,13 +1,19 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, useId, watch } from "vue";
+import { computed, onUnmounted, ref, useId } from "vue";
 import BasePopover from "@/client/components/BasePopover.vue";
-import { getProviderUsage } from "@/client/lib/api";
 import { usageWindowDisplay } from "@/client/lib/provider-usage";
-import type { ProviderUsageWindow } from "@/shared/types";
+import type { ProviderUsageUpdate } from "@/shared/types";
 
-const props = defineProps<{ model?: string }>();
-const windows = ref<ProviderUsageWindow[]>([]);
-const error = ref("");
+const props = defineProps<{ model?: string; update?: ProviderUsageUpdate }>();
+const update = computed(() =>
+  props.model?.startsWith(`${props.update?.provider}/`) ? props.update : undefined,
+);
+const windows = computed(() => {
+  const usage = update.value?.usage;
+  const model = props.model?.slice(props.model.indexOf("/") + 1).toLowerCase();
+  return [...(usage?.windows ?? []), ...(usage?.modelWindows?.[model ?? ""] ?? [])];
+});
+const error = computed(() => update.value?.error ?? "");
 const now = ref(Date.now());
 const rows = computed(() =>
   windows.value.map((window) => ({
@@ -19,44 +25,6 @@ const chartHeight = computed(() => Math.max(28, rows.value.length * 10 + 4));
 const popoverId = `usage-${useId()}`;
 const anchorName = `--${popoverId}`;
 
-watch(
-  () => props.model,
-  (model, _, onCleanup) => {
-    windows.value = [];
-    error.value = "";
-    if (!model) return;
-    const separator = model.indexOf("/");
-    const provider = model.slice(0, separator);
-    const modelId = model.slice(separator + 1);
-    let disposed = false;
-    let pending = false;
-    async function refresh() {
-      if (pending) return;
-      pending = true;
-      try {
-        const usage = await getProviderUsage(provider, modelId);
-        if (!disposed) {
-          windows.value = usage.windows;
-          error.value = "";
-        }
-      } catch (cause) {
-        if (!disposed) {
-          windows.value = [];
-          error.value = cause instanceof Error ? cause.message : String(cause);
-        }
-      } finally {
-        pending = false;
-      }
-    }
-    void refresh();
-    const timer = setInterval(() => void refresh(), 60_000);
-    onCleanup(() => {
-      disposed = true;
-      clearInterval(timer);
-    });
-  },
-  { immediate: true },
-);
 const clock = setInterval(() => {
   now.value = Date.now();
 }, 15_000);

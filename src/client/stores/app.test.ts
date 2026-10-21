@@ -202,6 +202,85 @@ describe("main mutation snapshots", () => {
 });
 
 describe("stream recovery", () => {
+  it("uses SSE build IDs for background reload checks and retains usage across disconnects", async () => {
+    vi.useFakeTimers();
+    const check = vi.spyOn(updates, "checkAppUpdate").mockResolvedValue();
+    const streams: any[] = [];
+    vi.stubGlobal(
+      "EventSource",
+      class {
+        close = vi.fn();
+        listeners = new Map<string, () => void>();
+        addEventListener(name: string, callback: () => void) {
+          this.listeners.set(name, callback);
+        }
+        removeEventListener(name: string) {
+          this.listeners.delete(name);
+        }
+        constructor() {
+          streams.push(this);
+        }
+      },
+    );
+    const store = useAppStore();
+    store.activeSession = state();
+    store.openStream();
+    const emit = (event: object) => streams[0].onmessage({ data: JSON.stringify(event) });
+    streams[0].onopen();
+    expect(check).not.toHaveBeenCalled();
+    emit({ type: "build", buildId: "server-build" });
+    const usage = {
+      provider: "openai-codex",
+      usage: {
+        windows: [{ id: "primary", usedPercent: 25, windowSeconds: 100, resetsAt: 100_000 }],
+      },
+    };
+    emit({ type: "provider-usage", update: usage });
+    for (let i = 0; i < 15; i++) {
+      streams[0].listeners.get("heartbeat")();
+      await vi.advanceTimersByTimeAsync(5000);
+    }
+    expect(check).toHaveBeenCalled();
+    expect(check.mock.calls.every(([build]) => build === "server-build")).toBe(true);
+    expect(streams).toHaveLength(1);
+    streams[0].onerror();
+    expect(store.providerUsage).toEqual(usage);
+    expect(store.connectionState).toBe("offline");
+    store.closeStream();
+    check.mockRestore();
+    vi.useRealTimers();
+  });
+  it("replaces auth snapshots on reconnect and applies live updates without transcript changes", () => {
+    const streams: any[] = [];
+    vi.stubGlobal(
+      "EventSource",
+      class {
+        addEventListener() {}
+        removeEventListener() {}
+        close() {}
+        constructor() {
+          streams.push(this);
+        }
+      },
+    );
+    const store = useAppStore();
+    store.activeSession = state();
+    store.openStream();
+    const emit = (event: object) => streams[0].onmessage({ data: JSON.stringify(event) });
+    emit({ type: "auth-attempts", provider: [{ attemptId: "p", completed: false }], mcp: [] });
+    emit({ type: "provider-auth-attempt", attempt: { attemptId: "p", completed: true } });
+    emit({
+      type: "mcp-auth-attempt",
+      attempt: { attemptId: "m", serverName: "example", status: "completed" },
+    });
+    expect(store.providerAuthAttempts.p?.completed).toBe(true);
+    expect(store.mcpAuthAttempts.m?.status).toBe("completed");
+    expect(store.activeSession).toEqual(state());
+    emit({ type: "auth-attempts", provider: [], mcp: [] });
+    expect(store.providerAuthAttempts).toEqual({});
+    expect(store.mcpAuthAttempts).toEqual({});
+    expect(store.authAttemptsVersion).toBe(2);
+  });
   it.each([
     new Error("Version check failed: 502"),
     new DOMException("The operation timed out", "TimeoutError"),

@@ -48,7 +48,7 @@ async function logout() {
       <Wrench :size="17" />
     </button>
     <div class="header__spacer" />
-    <ProviderUsageIndicator :model="store.activeSession?.model" />
+    <ProviderUsageIndicator :model="store.activeSession?.model" :update="store.providerUsage" />
     <SessionHeaderStatus
       :context-tokens="store.activeSession?.contextTokens"
       :context-window="store.activeSession?.contextWindow"

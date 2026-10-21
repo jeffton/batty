@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AuthEvent, AuthPrompt, Credential } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type {
+  ProviderAuthAttemptStatus,
   ProviderAuthProviderStatus,
   ProviderAuthStartResponse,
   ProviderAuthStatus,
@@ -90,6 +91,32 @@ function statusForProvider(
 export class ProviderAuthService {
   private readonly attempts = new Map<string, ProviderAuthAttempt>();
   private startQueue = Promise.resolve();
+  private readonly attemptListeners = new Set<(attempt: ProviderAuthAttemptStatus) => void>();
+
+  subscribeAttempts(listener: (attempt: ProviderAuthAttemptStatus) => void): () => void {
+    this.attemptListeners.add(listener);
+    return () => this.attemptListeners.delete(listener);
+  }
+
+  listAuthAttempts(): ProviderAuthAttemptStatus[] {
+    this.cleanupExpiredAttempts();
+    return [...this.attempts].map(([attemptId, attempt]) => this.attemptStatus(attemptId, attempt));
+  }
+
+  private attemptStatus(
+    attemptId: string,
+    attempt: ProviderAuthAttempt,
+  ): ProviderAuthAttemptStatus {
+    return {
+      attemptId,
+      completed: attempt.completed,
+      ...(attempt.finalError ? { error: attempt.finalError.message } : {}),
+    };
+  }
+
+  private emitAttempt(attemptId: string, attempt: ProviderAuthAttempt): void {
+    for (const listener of this.attemptListeners) listener(this.attemptStatus(attemptId, attempt));
+  }
 
   constructor(
     private readonly modelRuntime: Pick<ModelRuntime, "login">,
@@ -129,10 +156,12 @@ export class ProviderAuthService {
 
   async dispose(): Promise<void> {
     const attempts = [...this.attempts.values()];
-    for (const attempt of attempts) {
+    for (const [attemptId, attempt] of this.attempts) {
       clearTimeout(attempt.timeout);
       if (!attempt.completed && !attempt.finalError) {
         const error = new Error("Auth attempt cancelled");
+        attempt.finalError = error;
+        this.emitAttempt(attemptId, attempt);
         attempt.manualInput.reject(error);
         attempt.abort.abort(error);
       }
@@ -141,9 +170,11 @@ export class ProviderAuthService {
     this.attempts.clear();
   }
 
-  getAttemptStatus(attemptId: string): { completed: boolean } {
+  getAttemptStatus(attemptId: string): ProviderAuthAttemptStatus {
     this.cleanupExpiredAttempts();
-    return { completed: this.requireAttempt(attemptId).completed };
+    const attempt = this.attempts.get(attemptId);
+    if (!attempt) throw Object.assign(new Error("Unknown auth attempt"), { statusCode: 404 });
+    return this.attemptStatus(attemptId, attempt);
   }
 
   start(providerId: "openai"): Promise<ProviderAuthStartResponse> {
@@ -174,6 +205,7 @@ export class ProviderAuthService {
       }
       const error = new Error("Auth attempt expired");
       attempt.finalError = error;
+      this.emitAttempt(attemptId, attempt);
       authInfo.reject(error);
       manualInput.reject(error);
       abort.abort(error);
@@ -204,6 +236,7 @@ export class ProviderAuthService {
         if (attempt) {
           attempt.completed = true;
           clearTimeout(attempt.timeout);
+          this.emitAttempt(attemptId, attempt);
         }
       })
       .catch((error) => {
@@ -213,6 +246,7 @@ export class ProviderAuthService {
         if (attempt) {
           attempt.finalError = normalized;
           clearTimeout(attempt.timeout);
+          this.emitAttempt(attemptId, attempt);
         }
       });
 
@@ -224,6 +258,8 @@ export class ProviderAuthService {
       timeout,
       abort,
     });
+
+    this.emitAttempt(attemptId, this.attempts.get(attemptId)!);
 
     try {
       const info = await authInfo.promise;
@@ -247,7 +283,6 @@ export class ProviderAuthService {
     const attempt = this.requireAttempt(attemptId);
 
     if (attempt.completed) {
-      this.attempts.delete(attemptId);
       return;
     }
 
@@ -263,7 +298,6 @@ export class ProviderAuthService {
       }
     } finally {
       clearTimeout(attempt.timeout);
-      this.attempts.delete(attemptId);
     }
   }
 
@@ -281,7 +315,7 @@ export class ProviderAuthService {
   private cleanupExpiredAttempts(): void {
     const now = Date.now();
     for (const [attemptId, attempt] of this.attempts) {
-      if (attempt.completed && now > attempt.expiresAt) {
+      if ((attempt.completed || attempt.finalError) && now > attempt.expiresAt) {
         this.attempts.delete(attemptId);
         continue;
       }
@@ -290,6 +324,7 @@ export class ProviderAuthService {
       }
       const error = new Error("Auth attempt expired");
       attempt.finalError = error;
+      this.emitAttempt(attemptId, attempt);
       attempt.manualInput.reject(error);
       clearTimeout(attempt.timeout);
     }

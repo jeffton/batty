@@ -21,7 +21,7 @@ import { fixture, cleanup } from "./memory-test-fixture";
 
 test("fatal memory preparation aborts without dispatching raw canonical history", async () => {
   const models = createModels();
-  const faux = fauxProvider();
+  const faux = fauxProvider({ models: [{ id: "faux-1", contextWindow: 10_000, maxTokens: 256 }] });
   models.setProvider(faux.provider);
   let calls = 0;
   faux.setResponses([
@@ -53,7 +53,7 @@ test("fatal memory preparation aborts without dispatching raw canonical history"
     (tx) =>
       tx.appendEntry(main.id, {
         kind: "pi.user",
-        model: [{ role: "user", content: "private original", timestamp: 1 }],
+        model: [{ role: "user", content: "private original".repeat(2000), timestamp: 1 }],
       }),
     context,
   );

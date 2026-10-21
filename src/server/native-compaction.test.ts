@@ -19,7 +19,10 @@ async function fixture() {
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const models = createModels();
   const faux = fauxProvider({
-    models: [{ id: "tiny", contextWindow: 256, maxTokens: 64 }],
+    models: [
+      { id: "tiny", contextWindow: 256, maxTokens: 64 },
+      { id: "main", contextWindow: 32_000, maxTokens: 4096 },
+    ],
   });
   models.setProvider(faux.provider);
   const requests: string[] = [];
@@ -136,9 +139,11 @@ test("non-root workers compact natively and preserve original storage across res
 
 test("main declines native summaries and retains OptChat run heads", async () => {
   const fixtureState = await fixture();
-  const { main } = await fixtureState.open();
+  const { main, harness } = await fixtureState.open();
+  await main.configure({ model: { provider: "faux", modelId: "main" } }, context);
   for (const input of ["Main input"]) {
     const originals = await seed(main);
+    await harness.waitForTask(await main.compact(undefined, context), context);
     await submit(main, input);
     const active = await main.context(context);
     expect(active.head?.kind).toBe("batty.run-head");

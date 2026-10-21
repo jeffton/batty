@@ -1,11 +1,14 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord";
 import { Type, type ImageContent, type Message, type TextContent } from "@earendil-works/pi-ai";
-import { getCurrentSystemMessage } from "@earendil-works/pi-ai/utils/transcript";
+import { getCurrentSystemMessage, normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
+import { clampMaxTokensToContext } from "@earendil-works/pi-ai/api/simple-options";
 import {
   defineExtension,
   defineTool,
   GenerationTask,
+  type GenerationCheckpoint,
+  DEFAULT_COMPACTION_POLICY,
   CompactionTask,
   hook,
   LiveDoc,
@@ -17,7 +20,7 @@ import {
   type Harness,
 } from "@earendil-works/pi-durable";
 import type { MemorySearchOptions, MemorySearch } from "./memory-search";
-import { Packets, WorkerMemory, type MemoryPacket, type MemorySnapshot } from "./memory-documents";
+import { Packets, WorkerMemory, type MemorySnapshot } from "./memory-documents";
 import { decodeRuntimeNotice } from "./runtime-notices";
 import { WorkerDoc } from "./orchestration";
 import { conversationPolicy } from "./conversation-policy";
@@ -32,6 +35,7 @@ type MemoryRequests = {
   load: (context: Context) => Promise<void>;
   conversationalView: (
     maximum: number,
+    fits: (view: string) => boolean,
     context: Context,
   ) => Promise<{ view: string; snapshot: MemorySnapshot }>;
   preparedView: () => { view: string; snapshot: MemorySnapshot };
@@ -75,32 +79,36 @@ export function createMemoryRequests({
       : undefined;
   }
   let packetQueue: Promise<unknown> = Promise.resolve();
-  function packetForRun(runId: SubmissionId, context: Context) {
-    const result = packetQueue.then(() => createPacket(runId, context));
+  function packetForRun(runId: SubmissionId, fits: (view: string) => boolean, context: Context) {
+    const result = packetQueue.then(() => createPacket(runId, fits, context));
     packetQueue = result.catch(() => undefined);
     return result;
   }
-  async function createPacket(runId: SubmissionId, context: Context) {
+  async function createPacket(
+    runId: SubmissionId,
+    fits: (view: string) => boolean,
+    context: Context,
+  ) {
     const packet = await harness().snapshot(Packets, main().id, String(runId), context);
-    if (packet) return packet;
+    if (packet && fits(packet.view)) return packet;
     const input = await (await harness().submission(runId, context))!.status(context);
     if (!input.entry) throw new Error("Main run input has no entry");
     const candidate = {
-      ...(await conversationalView(input.entry - 1, context)),
+      ...(await conversationalView(input.entry - 1, fits, context)),
       boundary: input.entry as number,
     };
     return main().commit(async (tx) => {
-      await tx.doc(Packets, main().id, String(runId), candidate);
-      await tx.appendEntry(main().id, { kind: "batty.run-head", head: input.entry });
+      Object.assign(await tx.doc(Packets, main().id, String(runId), candidate), candidate);
+      if (!packet) await tx.appendEntry(main().id, { kind: "batty.run-head", head: input.entry });
       return candidate;
     }, context);
   }
-  async function runMessages(
+  async function runTail(
     messages: readonly Message[],
-    packet: MemoryPacket,
+    boundary: EntryId,
     context: Context,
   ): Promise<Message[]> {
-    const entry = await main().commit((tx) => tx.entry(packet.boundary as EntryId), context);
+    const entry = await main().commit((tx) => tx.entry(boundary), context);
     const original = entry!.model![0]!;
     const start = messages.findIndex(
       (message) =>
@@ -115,7 +123,6 @@ export function createMemoryRequests({
     const system = getCurrentSystemMessage(messages);
     return [
       ...(system ? [{ ...system, timestamp: 0 }] : []),
-      { role: "user", content: packet.view, timestamp: 0 },
       ...messages.slice(start).filter((message) => message.role !== "system"),
     ];
   }
@@ -249,8 +256,39 @@ export function createMemoryRequests({
           try {
             const live = (await api.snapshot(LiveDoc, main().id, context))!;
             const runId = live.run!.inputs[0]!;
-            const packet = await packetForRun(runId, context);
-            const prepared = await runMessages(messages, packet, context);
+            const input = await (await harness().submission(runId, context))!.status(context);
+            const tail = await runTail(messages, input.entry!, context);
+            const task = (await harness().getTask(api.taskId, context))!;
+            const checkpoint = task.state.checkpoint as unknown as GenerationCheckpoint;
+            if (checkpoint.phase !== "request")
+              throw new Error("Memory admission outside model request");
+            const model = api.models.getModel(checkpoint.model.provider, checkpoint.model.modelId)!;
+            const reserve = Math.min(DEFAULT_COMPACTION_POLICY.reserveTokens, model.maxTokens);
+            const system = tail[0]?.role === "system" ? tail.slice(0, 1) : [];
+            // This synthetic prefix replaces canonical history. Its newer timestamp
+            // tells the SDK not to reuse assistant usage measured for another prefix.
+            // Original input, reasoning and tool messages remain byte-for-byte intact.
+            const timestamp =
+              tail.reduce((latest, message) => Math.max(latest, message.timestamp), 0) + 1;
+            const makeMessages = (view: string): Message[] => [
+              ...system,
+              { role: "user", content: view, timestamp },
+              ...tail.slice(system.length),
+            ];
+            // Use the provider SDK's estimator and safety margin, leaving the same
+            // answer reserve as native compaction (up to the model's output limit).
+            const fits = (view: string) =>
+              clampMaxTokensToContext(
+                model,
+                normalizeContext({ messages: makeMessages(view) }),
+                model.maxTokens,
+              ) >= reserve;
+            if (!fits(""))
+              throw new Error(
+                "Active main turn exceeds the model's input budget; memory preparation cannot reduce it",
+              );
+            const packet = await packetForRun(runId, fits, context);
+            const prepared = makeMessages(packet.view);
             validPackets.clear();
             validPackets.add(packet.view);
             return { messages: prepared };

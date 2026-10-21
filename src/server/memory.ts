@@ -117,6 +117,7 @@ export function createMemory(config: MemoryConfig, models: Models) {
   let overviewNodes = new Map<string, string>();
   let overviewParts: Part[] = [];
   let overviewGeneration = 0;
+  let overviewChanged = Promise.withResolvers<void>();
   async function readTree<T extends MemoryLeaf | { text: string }>(
     kind: string,
     name: string,
@@ -212,6 +213,9 @@ export function createMemory(config: MemoryConfig, models: Models) {
     overviewNodes = current;
     overviewParts = parts;
     overviewGeneration = generation;
+    const changed = overviewChanged;
+    overviewChanged = Promise.withResolvers<void>();
+    changed.resolve();
   }
   let serial: Promise<unknown> = Promise.resolve();
   let writer: Promise<unknown> = Promise.resolve();
@@ -733,18 +737,33 @@ export function createMemory(config: MemoryConfig, models: Models) {
         node: childText,
       },
       maximum,
-      budget,
       context,
     );
   }
-  async function conversationalView(maximum: number, context: Context) {
-    let captured = await exclusive(() => captureView(maximum, context));
-    if (captured.overflow) {
-      // Only an oversized raw backlog needs to wait for compression.
-      await awaitWithContext(settle(context), context);
-      captured = await exclusive(() => captureView(maximum, context));
+  async function conversationalView(
+    maximum: number,
+    fits: (view: string) => boolean,
+    context: Context,
+  ) {
+    let settling: Promise<unknown> | undefined;
+    for (;;) {
+      // Subscribe before capture so a publication between capture and wait is not lost.
+      const changed = overviewChanged.promise;
+      const captured = await exclusive(() => captureView(maximum, context));
+      const view = snapshotView(captured.view, captured.snapshot);
+      if (fits(view)) return { view, snapshot: captured.snapshot };
+      if (captured.snapshot.prepared === captured.snapshot.count)
+        throw new Error("Main context exceeds the model's input budget after memory preparation");
+      // Memory's display target is not a request limit. Only real model pressure
+      // waits, and a usable published prefix releases the request immediately.
+      if (!settling) {
+        settling = settle(background.context);
+        void settling.catch((error) => {
+          if (!background.context.abortSignal?.aborted) report(error);
+        });
+      }
+      await awaitWithContext(Promise.race([changed, settling]), context);
     }
-    return { view: snapshotView(captured.view, captured.snapshot), snapshot: captured.snapshot };
   }
   const compress = createMemoryCompressor(config, models, recordMemoryCall, report);
   const requests = createMemoryRequests({

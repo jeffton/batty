@@ -2,7 +2,7 @@ import type { Context } from "@earendil-works/chord";
 import type { MemorySnapshot } from "./memory-documents";
 import type { MemoryLeaf } from "./memory-projection";
 import { isMemoryNoise } from "./memory-noise";
-import { key, renderView, utf8Bytes, type Part } from "./memory-view";
+import { key, renderView, type Part } from "./memory-view";
 
 export function snapshotView(view: string, snapshot: MemorySnapshot) {
   return `${view}\n<!-- batty-optchat:${JSON.stringify(snapshot)} -->`;
@@ -25,7 +25,6 @@ type SnapshotSource = {
 export async function captureMemorySnapshot(
   source: SnapshotSource,
   maximum: number,
-  budget: number,
   context: Context,
 ) {
   // Search or another turn may already have indexed entries beyond this input.
@@ -58,10 +57,8 @@ export async function captureMemorySnapshot(
     nodes.set(key(part), isMemoryNoise(leaf) ? "" : `${leaf.kind}: ${leaf.text}`);
   }
   const view = renderView(parts, nodes);
-  const bytes = utf8Bytes(view);
   return {
     view,
     snapshot: { generation: source.generation, count, prepared },
-    overflow: prepared < count && bytes > budget,
   };
 }

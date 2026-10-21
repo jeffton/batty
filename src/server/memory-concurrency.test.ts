@@ -1,6 +1,7 @@
 import { expect, test } from "vite-plus/test";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { Type } from "@earendil-works/pi-ai";
+import { buildBaseOptions } from "@earendil-works/pi-ai/api/simple-options";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { GenerationTask, defineExtension, defineTool, hook } from "@earendil-works/pi-durable";
 import { Packets, MemoryIndexDoc } from "./memory-documents";
@@ -50,7 +51,7 @@ test("new main runs finish with the raw tail while maintenance is still compress
     context,
   );
   await state.memory.prepare();
-  const raw = `fresh decision ${"x".repeat(150)}`;
+  const raw = `fresh decision ${"x".repeat(140_000)}`;
   await state.main.commit(
     (tx) =>
       tx.appendEntry(state.main.id, {
@@ -135,8 +136,8 @@ test("new main input is answered before a slow repair publishes its replacement 
   expect((await repair).generation).toBe(1);
 });
 
-test("oversized raw history waits for compression without dispatching an oversized packet", async () => {
-  const f = await fixture();
+test("oversized raw history waits for model capacity, not the memory view target", async () => {
+  const f = await fixture({ contextWindow: 10_000, maxTokens: 256 });
   const started = gate(),
     blocked = gate();
   const state = await f.open({
@@ -156,7 +157,7 @@ test("oversized raw history waits for compression without dispatching an oversiz
     (tx) =>
       tx.appendEntry(state.main.id, {
         kind: "pi.user",
-        model: [{ role: "user", content: "large original ".repeat(100), timestamp: 1 }],
+        model: [{ role: "user", content: "large original ".repeat(2000), timestamp: 1 }],
       }),
     context,
   );
@@ -164,6 +165,7 @@ test("oversized raw history waits for compression without dispatching an oversiz
   f.faux.setResponses([
     (request) => {
       called = true;
+      expect(buildBaseOptions(f.models.getModel("faux", "faux-1")!, request).maxTokens).toBe(256);
       expect(view(request.messages)).toContain("retained decision");
       expect(view(request.messages)).not.toContain("large original");
       return fauxAssistantMessage([fauxText("done")]);

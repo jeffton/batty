@@ -14,11 +14,11 @@ afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
 
-export async function fixture() {
+export async function fixture(model?: { contextWindow: number; maxTokens: number }) {
   const directory = await mkdtemp(join(tmpdir(), "batty-memory-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const models = createModels();
-  const faux = fauxProvider();
+  const faux = fauxProvider(model ? { models: [{ id: "faux-1", ...model }] } : undefined);
   models.setProvider(faux.provider);
   let compressions = 0;
   const open = async (options: Partial<MemoryConfig> = {}) => {

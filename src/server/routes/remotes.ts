@@ -6,7 +6,7 @@ import { context } from "../runtime";
 import { listWorkspaces } from "../workspaces";
 import { nodeRequest, type RemoteWorkerSummary } from "../remote-workers";
 import { normalizeRemoteUrl } from "../remote-access";
-import type { RemoteGrant } from "../../shared/remotes";
+import type { RemoteDiscovery, RemoteGrant } from "../../shared/remotes";
 import type { WorkerCommand } from "../orchestration-workers";
 import { streamSession, writeStreamEvent } from "../session-sse";
 import { resolveSentFile } from "../send-files";
@@ -100,9 +100,14 @@ export function registerRemoteRoutes(app: FastifyInstance, runtime: Runtime) {
     ...access.identity(),
     grantId: request.nodeGrant!.id,
   }));
-  app.get("/api/node/workspaces", async () => ({
-    workspaces: await listWorkspaces(runtime.config),
-  }));
+  app.get("/api/node/workspaces", async (): Promise<RemoteDiscovery> => {
+    const main = await runtime.main.agent(context);
+    return {
+      workspaces: await listWorkspaces(runtime.config),
+      models: await runtime.listModels(),
+      defaultModel: main.model && `${main.model.provider}/${main.model.modelId}`,
+    };
+  });
   app.post<{ Body: { requestId: string; command: WorkerCommand } }>(
     "/api/node/commands",
     async (request) => {

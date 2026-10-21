@@ -55,7 +55,7 @@ Removing a connection does not revoke the receiving grant. Use a separate grant 
 
 ## Workers
 
-The subagent tool's `workspaces` action discovers configured nodes and their workspaces, including which workspace is the remote assistant workspace. Set `nodeId` to the connection ID and `workspaceId` to the receiving installation's workspace ID when starting a remote worker. Omit `nodeId` for local execution.
+The subagent tool's `workspaces` action discovers configured nodes, their workspaces (including the remote assistant workspace), available models and `defaultModel`. Model entries include provider-qualified IDs, supported thinking levels and image support from the receiving installation's model catalog. Pass an ID as `model` when starting a worker; omitting it uses the receiving main agent's model. Set `nodeId` on discovery to query one connection. Set `nodeId` to the connection ID and `workspaceId` to the receiving installation's workspace ID when starting a remote worker. Omit `nodeId` for local execution.
 
 Remote session IDs have the form `remote:NODE_ID:SESSION_ID`, for example `remote:work:123`. Use that ID with the ordinary lifecycle actions (`inspect`, `await`, `steer`, `queue`, `resume`, `stop`). Workers are visible on both installations; the initiating installation can also discover and control existing workers on the receiver.
 

@@ -1,3 +1,11 @@
+import type { ModelOption, WorkspaceInfo } from "./types";
+
+export interface RemoteDiscovery {
+  workspaces: WorkspaceInfo[];
+  models: ModelOption[];
+  defaultModel?: string;
+}
+
 export interface RemoteGrant {
   id: string;
   label: string;

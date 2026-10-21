@@ -355,6 +355,20 @@ test("node grants cannot access owner routes, revoke immediately, and reciprocal
       ).statusCode,
     ).toBe(401);
     expect((await b.app.inject({ url: "/api/node/identity", headers: auth })).statusCode).toBe(200);
+    expect((await b.app.inject({ url: "/api/node/workspaces" })).statusCode).toBe(401);
+    await b.runtime.main.configure({ model: { provider: "faux", modelId: "selected-b" } }, context);
+    const nodes = await a.runtime.remotes.workspaces("b");
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]).toMatchObject({
+      nodeId: "b",
+      defaultModel: "faux/selected-b",
+      workspaces: [expect.objectContaining({ id: "work", isAssistant: true })],
+    });
+    expect(nodes[0]!.models).toEqual(await b.runtime.listModels());
+    expect(nodes[0]!.models).toContainEqual(
+      expect.objectContaining({ id: "faux/model-b", thinkingLevels: expect.any(Array) }),
+    );
+    await b.runtime.main.configure({ model: { provider: "faux", modelId: "model-b" } }, context);
     expect((await b.app.inject({ url: "/api/remotes", headers: auth })).statusCode).toBe(401);
     expect((await b.app.inject({ url: "/api/node/identity", headers: b.owner })).statusCode).toBe(
       401,

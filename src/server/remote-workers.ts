@@ -11,6 +11,7 @@ import type {
   SessionMessagesPage,
 } from "../shared/types";
 import { RemoteAccess, type RemoteConnectionCredentials } from "./remote-access";
+import type { RemoteDiscovery } from "../shared/remotes";
 import type { Runtime } from "./runtime";
 import type { WorkerCommand, WorkerCommandContext } from "./orchestration-workers";
 import { stateDirPath } from "./options";
@@ -358,7 +359,7 @@ export class RemoteWorkers {
       ).map(async (connection) => ({
         nodeId: connection.id,
         label: connection.label,
-        ...(await nodeRequest<{ workspaces: unknown[] }>(connection, "workspaces")),
+        ...(await nodeRequest<RemoteDiscovery>(connection, "workspaces")),
       })),
     );
   }

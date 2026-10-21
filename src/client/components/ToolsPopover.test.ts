@@ -46,7 +46,14 @@ describe("Workspaces and tools", () => {
     store.activeSession = { id: "main" } as NonNullable<typeof store.activeSession>;
     vi.mocked(getSessionResources).mockResolvedValue({
       skills: [{ name: "Notes", description: "Local notes", filePath: "/skills/notes.md" }],
-      tools: [{ name: "read", description: "Read files" }],
+      tools: [
+        { name: "read", description: "Read files" },
+        { name: "subagent", description: "Remote workspaces and model discovery" },
+        { name: "cron", description: "Schedule workers" },
+        { name: "memory_search", description: "Search main memory" },
+        { name: "attach_artifacts", description: "Forward artifacts" },
+        { name: "codemode", description: "Run nested tools" },
+      ],
     });
     try {
       wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState: "open" });
@@ -64,7 +71,12 @@ describe("Workspaces and tools", () => {
       expect(wrapper.get("#tools-test-MCPs-panel").isVisible()).toBe(true);
       expect(wrapper.getComponent({ name: "McpSettingsPanel" }).props("active")).toBe(true);
       await wrapper.get("#tools-test-MCPs-tab").trigger("keydown", { key: "ArrowRight" });
-      expect(wrapper.get("#tools-test-Tools-panel").text()).toContain("Read files");
+      const toolsPanel = wrapper.get("#tools-test-Tools-panel");
+      expect(toolsPanel.text()).toContain("Read files");
+      for (const tool of (await vi.mocked(getSessionResources).mock.results[0]!.value).tools) {
+        expect(toolsPanel.text()).toContain(tool.name);
+        expect(toolsPanel.text()).toContain(tool.description);
+      }
       await wrapper.get("#tools-test-Tools-tab").trigger("keydown", { key: "ArrowRight" });
       expect(wrapper.get("#tools-test-Workspaces-tab").attributes("aria-selected")).toBe("true");
       store.workspaces = [];

@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from "vite-plus/test";
 import {
   addRemoteConnection,
   getRemoteSettings,
+  getMainMessages,
   issueRemoteGrant,
   removeRemoteConnection,
   revokeRemoteGrant,
@@ -11,7 +12,37 @@ import {
   setPushTitle,
 } from "./api";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+it.each(["lifecycle", "timeout"])(
+  "history fetch retains both cancellation and deadline: %s",
+  async (cause) => {
+    const lifecycle = new AbortController();
+    const deadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    let signal!: AbortSignal;
+    vi.stubGlobal("fetch", async (_input: string, init: RequestInit) => {
+      signal = init.signal!;
+      return new Response(
+        JSON.stringify({ messages: [], hasMoreMessages: false, totalMessageCount: 0 }),
+      );
+    });
+    await getMainMessages({ before: "message", signal: lifecycle.signal });
+    expect(timeout).toHaveBeenCalledWith(20_000);
+    expect(signal.aborted).toBe(false);
+    const controller = cause === "lifecycle" ? lifecycle : deadline;
+    const reason = new DOMException(
+      "cancelled",
+      cause === "lifecycle" ? "AbortError" : "TimeoutError",
+    );
+    controller.abort(reason);
+    expect(signal.aborted).toBe(true);
+    expect(signal.reason).toBe(reason);
+  },
+);
 
 it("sends owner-authenticated provisioning requests as JSON", async () => {
   const requests: { method: string; body: unknown; credentials: RequestCredentials | undefined }[] =

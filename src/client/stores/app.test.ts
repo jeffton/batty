@@ -163,6 +163,181 @@ describe("caught cache diagnostics", () => {
   });
 });
 
+describe("reading history lifecycle", () => {
+  const message = (id: string) => ({
+    id,
+    role: "user" as const,
+    timestamp: Date.now(),
+    blocks: [{ type: "text" as const, text: id }],
+  });
+  const history = () => ({
+    ...state(),
+    hasMoreMessages: true,
+    totalMessageCount: 2,
+    messages: [message("new")],
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("does not start background fetches while hidden and resumes from the current boundary", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    const fetch = vi.spyOn(api, "getMainMessages").mockResolvedValue({
+      messages: [message("old")],
+      totalMessageCount: 2,
+      hasMoreMessages: false,
+    });
+    const store = useAppStore();
+    store.authenticated = true;
+    store.bootstrapped = true;
+    store.activeSession = history();
+    await store.populateReadingCache();
+    expect(fetch).not.toHaveBeenCalled();
+    visibility.mockReturnValue("visible");
+    await store.recoverConnection();
+    await flushPromises();
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch.mock.calls[0]![0].before).toBe("new");
+    expect(store.activeSession.messages.map((message) => message.id)).toEqual(["old", "new"]);
+  });
+
+  it("cancels on suspension, coalesces resume and ignores a late page from the cancelled request", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    let resolve!: (page: Awaited<ReturnType<typeof api.getMainMessages>>) => void;
+    const fetch = vi.spyOn(api, "getMainMessages").mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    vi.mocked(api.getMain).mockResolvedValue(history());
+    wrapper = mount(App, { global: { plugins: [pinia], stubs: { RouterView: true } } });
+    await flushPromises();
+    const store = useAppStore();
+    const signal = fetch.mock.calls[0]![0].signal!;
+    await store.populateReadingCache();
+    expect(fetch).toHaveBeenCalledOnce();
+    visibility.mockReturnValue("hidden");
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(signal.aborted).toBe(true);
+    fetch.mockResolvedValue({
+      messages: [message("old")],
+      totalMessageCount: 2,
+      hasMoreMessages: false,
+    });
+    visibility.mockReturnValue("visible");
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("pageshow"));
+    await flushPromises();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    resolve({ messages: [message("stale")], totalMessageCount: 99, hasMoreMessages: false });
+    await flushPromises();
+    expect(store.activeSession?.messages.map((message) => message.id)).toEqual(["old", "new"]);
+    expect(store.lastError).toBeUndefined();
+  });
+
+  it("recovers through SSE reset and does not duplicate an in-flight history request", async () => {
+    let stream: { onmessage: (event: { data: string }) => void };
+    vi.stubGlobal(
+      "EventSource",
+      class {
+        addEventListener() {}
+        removeEventListener() {}
+        close() {}
+        constructor() {
+          stream = this as unknown as typeof stream;
+        }
+      },
+    );
+    const fetch = vi.spyOn(api, "getMainMessages").mockRejectedValueOnce(new Error("HTTP 500"));
+    const store = useAppStore();
+    store.authenticated = true;
+    store.activeSession = history();
+    store.openStream();
+    await store.populateReadingCache();
+    expect(store.lastError).toContain("HTTP 500");
+    let resolve!: (page: Awaited<ReturnType<typeof api.getMainMessages>>) => void;
+    fetch.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const reset = () =>
+      stream!.onmessage({
+        data: JSON.stringify({
+          type: "reset",
+          state: history(),
+          streamId: "generation-a",
+          revision: 1,
+        }),
+      });
+    reset();
+    reset();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    resolve({ messages: [message("old")], totalMessageCount: 2, hasMoreMessages: false });
+    await flushPromises();
+    expect(store.activeSession?.messages.map((message) => message.id)).toEqual(["old", "new"]);
+    expect(store.lastError).toBeUndefined();
+  });
+
+  it.each([
+    new DOMException("Fetch is aborted", "AbortError"),
+    new DOMException("Timed out", "TimeoutError"),
+    new Error("HTTP 500"),
+  ])(
+    "keeps real failures visible and clears only the owned error after recovery: %s",
+    async (error) => {
+      const fetch = vi.spyOn(api, "getMainMessages").mockRejectedValueOnce(error);
+      const store = useAppStore();
+      store.authenticated = true;
+      store.activeSession = history();
+      await store.populateReadingCache();
+      expect(store.lastError).toBe(`Reading history: ${String(error)}`);
+      fetch.mockResolvedValue({
+        messages: [message("old")],
+        totalMessageCount: 2,
+        hasMoreMessages: false,
+      });
+      await store.populateReadingCache();
+      expect(store.lastError).toBeUndefined();
+      store.activeSession = history();
+      fetch.mockRejectedValueOnce(error);
+      await store.populateReadingCache();
+      store.lastError = "Unrelated failure";
+      await store.populateReadingCache();
+      expect(store.lastError).toBe("Unrelated failure");
+    },
+  );
+
+  it("does not report owned cancellation or merge a response after the auth epoch changes", async () => {
+    let reject!: (error: unknown) => void;
+    const fetch = vi.spyOn(api, "getMainMessages").mockImplementationOnce(
+      ({ signal }) =>
+        new Promise((_, fail) => {
+          reject = fail;
+          signal!.addEventListener("abort", () =>
+            reject(new DOMException("Fetch is aborted", "AbortError")),
+          );
+        }),
+    );
+    const store = useAppStore();
+    store.authenticated = true;
+    store.activeSession = history();
+    const pending = store.populateReadingCache();
+    store.pauseReadingCache();
+    await pending;
+    expect(store.lastError).toBeUndefined();
+    let resolve!: (page: Awaited<ReturnType<typeof api.getMainMessages>>) => void;
+    fetch.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const stale = store.populateReadingCache();
+    localStorage.setItem(cache.CACHE_EPOCH_KEY, "replacement-account");
+    resolve({ messages: [message("other-account")], totalMessageCount: 2, hasMoreMessages: false });
+    await stale;
+    expect(store.activeSession?.messages.map((message) => message.id)).toEqual(["new"]);
+  });
+});
+
 describe("main mutation snapshots", () => {
   it.each(mutations)(
     "does not apply a stale %s HTTP response after SSE progressed",

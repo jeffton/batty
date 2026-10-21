@@ -32,6 +32,8 @@ let cacheSubscribed = false;
 let connection: ReturnType<typeof createSessionConnection> | undefined;
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 let expandedHistory = false;
+let readingHistory: AbortController | undefined;
+let readingHistoryError: string | undefined;
 let uploads = 0;
 let bootstrapping: Promise<void> | undefined;
 blockAppReload(() => uploads > 0);
@@ -176,33 +178,63 @@ export const useAppStore = defineStore("app", {
         this.lastError = cacheError;
       }
     },
+    pauseReadingCache() {
+      readingHistory?.abort();
+      readingHistory = undefined;
+    },
     async populateReadingCache() {
-      const sessionId = this.activeSession?.id;
-      while (
-        this.activeSession?.id === sessionId &&
-        this.activeSession?.hasMoreMessages &&
-        (this.activeSession.messages[0]?.timestamp ?? 0) > Date.now() - CACHE_DAY_MS
-      ) {
-        const requested = this.activeSession;
-        const before = requested.messages[0]?.id;
-        try {
-          const page = await api.getMainMessages({ before, limit: 500 });
-          if (this.activeSession?.id !== sessionId || !page.messages.length) break;
-          this.activeSession = prependHistoryPage(this.activeSession, requested, page);
+      if (
+        readingHistory ||
+        !this.authenticated ||
+        document.visibilityState === "hidden" ||
+        !navigator.onLine
+      )
+        return;
+      const controller = new AbortController();
+      readingHistory = controller;
+      const sessionId = this.activeSession?.sessionId;
+      const authEpoch = localStorage.getItem(CACHE_EPOCH_KEY);
+      const current = () =>
+        !controller.signal.aborted &&
+        this.authenticated &&
+        localStorage.getItem(CACHE_EPOCH_KEY) === authEpoch &&
+        this.activeSession?.sessionId === sessionId;
+      try {
+        while (
+          current() &&
+          this.activeSession?.hasMoreMessages &&
+          (this.activeSession.messages[0]?.timestamp ?? 0) > Date.now() - CACHE_DAY_MS
+        ) {
+          const requested = this.activeSession;
+          const before = requested.messages[0]?.id;
+          const page = await api.getMainMessages({ before, limit: 500, signal: controller.signal });
+          if (!current()) return;
+          if (readingHistoryError && this.lastError === readingHistoryError)
+            this.lastError = undefined;
+          readingHistoryError = undefined;
+          if (!page.messages.length) break;
+          this.activeSession = prependHistoryPage(this.activeSession!, requested, page);
           if (this.activeSession.messages[0]?.id === before) break;
           await this.persistMainCache();
-        } catch (error) {
-          this.lastError = `Reading history: ${String(error)}`;
-          break;
         }
+        if (current()) await this.persistMainCache();
+      } catch (error) {
+        // Only our lifecycle cancellation is expected. Timeouts, HTTP errors and
+        // unowned browser aborts remain visible and retain fetch diagnostics.
+        if (current()) {
+          readingHistoryError = `Reading history: ${String(error)}`;
+          this.lastError = readingHistoryError;
+        }
+      } finally {
+        if (readingHistory === controller) readingHistory = undefined;
       }
-      await this.persistMainCache();
     },
     async recoverConnection() {
       if (this.bootstrapFailed || !this.bootstrapped || !this.activeSession) await this.bootstrap();
       else if (this.authenticated) {
         if (connection) connection.recover();
         else this.openStream();
+        void this.populateReadingCache();
       }
     },
     async checkForUpdates(buildId?: string) {
@@ -269,13 +301,17 @@ export const useAppStore = defineStore("app", {
           }
           if (event.type === "error") this.lastError = event.message;
           this.activeSession = applyServerEvent(this.activeSession, event);
-          if (event.type === "reset") this.connectionState = "online";
+          if (event.type === "reset") {
+            this.connectionState = "online";
+            void this.populateReadingCache();
+          }
           if (!expandedHistory) this.activeSession = recentSessionWindow(this.activeSession);
         },
       });
       connection.open();
     },
     closeStream() {
+      this.pauseReadingCache();
       clearTimeout(reconnectTimer);
       reconnectTimer = undefined;
       connection?.close();

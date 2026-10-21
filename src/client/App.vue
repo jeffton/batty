@@ -10,16 +10,21 @@ const online = () => {
   void store.persistMainCache();
 };
 const visible = () => {
-  if (document.visibilityState !== "hidden") online();
+  if (document.visibilityState === "hidden") store.pauseReadingCache();
+  else online();
 };
 onMounted(() => {
   window.addEventListener("online", online);
+  window.addEventListener("offline", store.pauseReadingCache);
+  window.addEventListener("pagehide", store.pauseReadingCache);
   window.addEventListener("pageshow", online);
   document.addEventListener("visibilitychange", visible);
   void store.bootstrap();
 });
 onUnmounted(() => {
   window.removeEventListener("online", online);
+  window.removeEventListener("offline", store.pauseReadingCache);
+  window.removeEventListener("pagehide", store.pauseReadingCache);
   window.removeEventListener("pageshow", online);
   document.removeEventListener("visibilitychange", visible);
   store.closeStream();

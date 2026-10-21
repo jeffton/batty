@@ -465,11 +465,16 @@ export function getMain(after?: string): Promise<SessionState> {
 export function getMainMessages(options: {
   before?: string;
   limit?: number;
+  signal?: AbortSignal;
 }): Promise<SessionMessagesPage> {
   const query = new URLSearchParams();
   if (options.before) query.set("before", options.before);
   if (options.limit) query.set("limit", String(options.limit));
-  return request(`/api/main/messages?${query}`);
+  return request(`/api/main/messages?${query}`, {
+    signal: options.signal
+      ? AbortSignal.any([options.signal, AbortSignal.timeout(20_000)])
+      : AbortSignal.timeout(20_000),
+  });
 }
 export async function submitMainPrompt(
   kind: "prompt" | "steer",

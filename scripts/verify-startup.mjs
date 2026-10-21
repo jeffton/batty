@@ -86,6 +86,7 @@ for (const baseUrl of ["/", "/batty"]) {
     const id = "00000000-0000-0000-0000-000000000000";
     const route = `/api/cloud-browser/${id}/state`;
     assert.equal((await get(route)).status, 401);
+    assert.equal((await get("/api/cron/running")).status, 401);
     const foregroundAck = (headers = {}) =>
       get("/api/push/foreground/ack", {
         method: "POST",
@@ -99,6 +100,9 @@ for (const baseUrl of ["/", "/batty"]) {
     const signature = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
     const cookie = `batty2-auth=${payload}.${signature}`;
     assert.equal((await get(route, { headers: { cookie } })).status, 410);
+    const runningCron = await get("/api/cron/running", { headers: { cookie } });
+    assert.equal(runningCron.status, 200);
+    assert.deepEqual(await runningCron.json(), []);
     const ack = await foregroundAck({ cookie });
     assert.equal(ack.status, 200);
     assert.deepEqual(await ack.json(), { ok: false });

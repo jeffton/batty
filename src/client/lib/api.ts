@@ -440,6 +440,10 @@ export function listRunningSubagents(sessionId: string): Promise<RunningSubagent
   return request(`/api/sessions/${encodeURIComponent(sessionId)}/subagents`);
 }
 
+export function listRunningCronRuns(): Promise<CronRunLog[]> {
+  return request("/api/cron/running");
+}
+
 export function listWorkspaceCronRunLogs(workspaceId: string): Promise<CronRunLog[]> {
   return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/cron-run-logs`);
 }

@@ -22,7 +22,10 @@ The authenticated root route contains one main chat. Workspace listings never se
 - `GET /api/sessions/:id/resources`: `SessionResourcesResponse` (used for the main session too).
 - `GET /api/sessions/:mainId/subagents`: `RunningSubagent[]`.
 - `GET /api/workspaces/:id/cron-jobs`: `CronJob[]`.
-- `GET /api/workspaces/:id/cron-run-logs`: `CronRunLog[]`.
+- `GET /api/workspaces/:id/cron-run-logs`: `CronRunLog[]`, fetched when viewing Logs.
+- `GET /api/cron/running`: active `CronRunLog[]` across workspaces, without reading run history.
+
+The existing session SSE sends `orchestration-changed` on connection and durable orchestration changes. Clients refresh Running tasks from active-run endpoints, and refresh the selected Cron tab only while open. Remote task-list changes invalidate Running tasks without refreshing local cron history. Reconnecting refreshes both views; neither view polls.
 
 Tool details `subagent.sessionId`, nested codemode `calls[].subagent.sessionId`, and custom-message `data.subagent.sessionId` / `data.cron.sessionId` identify transcripts. Cron log entries expose `sessionId` when a transcript exists. Worker popovers have no composer. Their header offers Stop while the session is active; `POST /api/sessions/:sessionId/stop` aborts the worker’s current delivery chain and queued tail.
 

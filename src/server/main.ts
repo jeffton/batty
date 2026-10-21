@@ -258,32 +258,42 @@ app.get<{ Params: { workspaceId: string } }>(
       state: { nextRunAtMs: job.nextAt },
     })),
 );
+function cronRunLog(
+  run: import("./orchestration").CronRun,
+  jobs: import("./orchestration").CronJob[],
+) {
+  const job = jobs.find((item) => item.id === run.jobId) ?? run.job;
+  return {
+    runId: run.id,
+    jobId: run.jobId,
+    workspaceId: run.workspaceId,
+    prompt: job?.prompt ?? "",
+    model: job?.model ?? `${config.defaultProvider}/${config.defaultModel}`,
+    thinkingLevel: job?.thinkingLevel ?? config.defaultThinkingLevel,
+    scheduleLabel: job ? scheduleLabel(job.schedule) : "",
+    startedAtMs: run.startedAt,
+    sessionId: run.sessionId,
+    sessionPath: `durable:${run.sessionId}`,
+    status: run.status === "running" ? "running" : run.status === "completed" ? "success" : "error",
+    completedAtMs: run.finishedAt,
+    durationMs: run.finishedAt ? run.finishedAt - run.startedAt : undefined,
+    error: run.status === "failed" ? run.output : undefined,
+  };
+}
+app.get("/api/cron/running", async () => {
+  const [runs, jobs] = await Promise.all([
+    runtime.orchestration.listRunningCron(),
+    runtime.orchestration.listJobs(),
+  ]);
+  return runs.map((run) => cronRunLog(run, jobs));
+});
 app.get<{ Params: { workspaceId: string } }>(
   "/api/workspaces/:workspaceId/cron-run-logs",
   async (request) => {
     const jobs = await runtime.orchestration.listJobs();
     return (
       await runtime.orchestration.listRunLogs(undefined, 100, request.params.workspaceId)
-    ).map((run) => {
-      const job = jobs.find((item) => item.id === run.jobId) ?? run.job;
-      return {
-        runId: run.id,
-        jobId: run.jobId,
-        workspaceId: run.workspaceId,
-        prompt: job?.prompt ?? "",
-        model: job?.model ?? `${config.defaultProvider}/${config.defaultModel}`,
-        thinkingLevel: job?.thinkingLevel ?? config.defaultThinkingLevel,
-        scheduleLabel: job ? scheduleLabel(job.schedule) : "",
-        startedAtMs: run.startedAt,
-        sessionId: run.sessionId,
-        sessionPath: `durable:${run.sessionId}`,
-        status:
-          run.status === "running" ? "running" : run.status === "completed" ? "success" : "error",
-        completedAtMs: run.finishedAt,
-        durationMs: run.finishedAt ? run.finishedAt - run.startedAt : undefined,
-        error: run.status === "failed" ? run.output : undefined,
-      };
-    });
+    ).map((run) => cronRunLog(run, jobs));
   },
 );
 app.get("/api/memory/status", async () => runtime.memory.status());

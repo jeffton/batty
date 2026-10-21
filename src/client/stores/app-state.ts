@@ -11,6 +11,8 @@ export type ConnectionState = "online" | "offline" | "connecting";
 export type AppActionContext = ReturnType<typeof createAppState> & Record<string, any>;
 export function createAppState() {
   return {
+    orchestrationVersion: 0,
+    cronVersion: 0,
     authenticated: false,
     bootstrapped: false,
     bootstrapFailed: false,

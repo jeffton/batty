@@ -237,6 +237,11 @@ export const useAppStore = defineStore("app", {
           this.connectionState = "offline";
         },
         onEvent: (event) => {
+          if (event.type === "orchestration-changed") {
+            this.orchestrationVersion++;
+            if (event.cron) this.cronVersion++;
+            return;
+          }
           if (event.type === "error") this.lastError = event.message;
           this.activeSession = applyServerEvent(this.activeSession, event);
           if (event.type === "reset") this.connectionState = "online";

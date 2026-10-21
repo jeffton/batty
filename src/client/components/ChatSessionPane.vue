@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 import ChatHeader from "@/client/components/ChatHeader.vue";
 import MessageComposer from "@/client/components/MessageComposer.vue";
 import SessionTranscriptView from "@/client/components/SessionTranscriptView.vue";
-import { getMain, listRunningSubagents, listWorkspaceCronRunLogs } from "@/client/lib/api";
+import { getMain, listRunningSubagents, listRunningCronRuns } from "@/client/lib/api";
 import { applySessionResponse } from "@/client/lib/session-events";
 import { promptSubmissionId, retainPromptRetry, clearPromptRetry } from "@/client/lib/prompt-retry";
 import { useAppStore } from "@/client/stores/app";
@@ -42,29 +42,29 @@ const activeOptimisticMessages = computed(() => {
 const isUnavailable = computed(() => store.connectionState !== "online");
 
 watch(
-  [() => store.activeSession?.sessionId, isUnavailable],
-  ([sessionId, offline], _previous, onCleanup) => {
-    subagents.value = [];
-    cronRuns.value = [];
-    subagentError.value = undefined;
+  [() => store.activeSession?.sessionId, isUnavailable, () => store.orchestrationVersion],
+  ([sessionId, offline], previous, onCleanup) => {
+    if (sessionId !== previous?.[0] || offline) {
+      subagents.value = [];
+      cronRuns.value = [];
+      subagentError.value = undefined;
+    }
     if (!sessionId || offline) return;
 
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
     onCleanup(() => {
       cancelled = true;
-      clearTimeout(timer);
     });
 
     async function refresh(): Promise<void> {
       try {
-        const [agents, workspaceRuns] = await Promise.all([
+        const [agents, runs] = await Promise.all([
           listRunningSubagents(sessionId!),
-          Promise.all(store.workspaces.map((workspace) => listWorkspaceCronRunLogs(workspace.id))),
+          listRunningCronRuns(),
         ]);
         if (cancelled) return;
         subagents.value = agents;
-        cronRuns.value = workspaceRuns.flat().filter((run) => run.status === "running");
+        cronRuns.value = runs;
         subagentError.value = undefined;
       } catch (error) {
         if (cancelled) return;
@@ -74,8 +74,6 @@ watch(
         } else {
           subagentError.value = error instanceof Error ? error.message : String(error);
         }
-      } finally {
-        if (!cancelled) timer = setTimeout(() => void refresh(), 1_500);
       }
     }
 

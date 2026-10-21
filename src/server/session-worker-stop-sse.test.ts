@@ -28,6 +28,7 @@ test("worker SSE refreshes stop availability for parent-owned delivery completio
   );
   const runtime = {
     streamId: "test",
+    main: { id: 1 },
     state,
     nextRevision: () => 2,
     harness: {

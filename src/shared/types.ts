@@ -482,6 +482,7 @@ export interface WorkspaceSnapshot {
 }
 
 export type ServerEvent = (
+  | { type: "orchestration-changed"; cron: boolean }
   | { type: "reset"; state: SessionState }
   | { type: "state"; state: SessionStateMetadata }
   | { type: "assistant"; assistant?: Extract<UiMessage, { role: "assistant" }> }

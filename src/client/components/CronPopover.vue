@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { PanelRightOpen } from "@lucide/vue";
-import { onBeforeUnmount, ref } from "vue";
+import { onBeforeUnmount, ref, watch } from "vue";
 import FullPopover from "./FullPopover.vue";
 import PopoverTabs from "./PopoverTabs.vue";
 import SubagentSessionPopover from "./SubagentSessionPopover.vue";
@@ -17,8 +17,7 @@ const jobs = ref<CronJob[]>([]);
 const logs = ref<CronRunLog[]>([]);
 const error = ref("");
 const loading = ref(false);
-let open = false;
-let timer: ReturnType<typeof setTimeout> | undefined;
+const open = ref(false);
 let generation = 0;
 
 function tabId(tab: Tab) {
@@ -43,21 +42,23 @@ function statusLabel(status: CronRunLog["status"]) {
   return status === "running" ? "Running" : status === "success" ? "Completed" : "Failed";
 }
 async function refresh() {
-  clearTimeout(timer);
   const request = ++generation;
+  const tab = activeTab.value;
   loading.value = true;
   try {
-    const workspaceData = await Promise.all(
-      store.workspaces.map(async (workspace) => ({
-        jobs: await listWorkspaceCronJobs(workspace.id),
-        logs: await listWorkspaceCronRunLogs(workspace.id),
-      })),
-    );
-    if (request !== generation) return;
-    jobs.value = workspaceData.flatMap((data) => data.jobs);
-    logs.value = workspaceData
-      .flatMap((data) => data.logs)
-      .sort((a, b) => b.startedAtMs - a.startedAtMs);
+    if (tab === "cron") {
+      const data = await Promise.all(
+        store.workspaces.map((workspace) => listWorkspaceCronJobs(workspace.id)),
+      );
+      if (request !== generation) return;
+      jobs.value = data.flat();
+    } else {
+      const data = await Promise.all(
+        store.workspaces.map((workspace) => listWorkspaceCronRunLogs(workspace.id)),
+      );
+      if (request !== generation) return;
+      logs.value = data.flat().sort((a, b) => b.startedAtMs - a.startedAtMs);
+    }
     error.value = "";
   } catch (cause) {
     if (request === generation)
@@ -65,23 +66,22 @@ async function refresh() {
   } finally {
     if (request === generation) {
       loading.value = false;
-      if (open) timer = setTimeout(() => void refresh(), 3000);
     }
   }
 }
 function toggle(event: Event) {
-  open = (event as ToggleEvent).newState === "open";
-  clearTimeout(timer);
-  if (open) void refresh();
-  else {
+  open.value = (event as ToggleEvent).newState === "open";
+}
+watch(
+  [open, activeTab, () => store.cronVersion, () => store.connectionState, () => store.workspaces],
+  () => {
     generation++;
     loading.value = false;
-  }
-}
+    if (open.value && store.connectionState === "online") void refresh();
+  },
+);
 onBeforeUnmount(() => {
-  open = false;
   generation++;
-  clearTimeout(timer);
 });
 </script>
 

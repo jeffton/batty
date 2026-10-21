@@ -1,4 +1,5 @@
 import { flushPromises, mount } from "@vue/test-utils";
+import { reactive } from "vue";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import CronPopover from "./CronPopover.vue";
 import * as api from "@/client/lib/api";
@@ -10,16 +11,17 @@ vi.mock("@/client/lib/api", () => ({
   listWorkspaceCronJobs: vi.fn(),
   listWorkspaceCronRunLogs: vi.fn(),
 }));
-vi.mock("@/client/stores/app", () => ({
-  useAppStore: () => ({
-    activeSession: { id: "main" },
-    selectedWorkspaceId: "first",
-    workspaces: [
-      { id: "first", label: "First workspace" },
-      { id: "second", label: "Second workspace" },
-    ],
-  }),
-}));
+const appStore = reactive({
+  activeSession: { id: "main" },
+  selectedWorkspaceId: "first",
+  cronVersion: 0,
+  connectionState: "online",
+  workspaces: [
+    { id: "first", label: "First workspace" },
+    { id: "second", label: "Second workspace" },
+  ],
+});
+vi.mock("@/client/stores/app", () => ({ useAppStore: () => appStore }));
 
 function job(workspaceId: string): CronJob {
   return {
@@ -44,7 +46,7 @@ afterEach(() => {
 });
 
 describe("cron popover", () => {
-  it("lists jobs across workspaces and makes each session log one full-row button", async () => {
+  it("loads logs lazily and refreshes them from events without polling", async () => {
     vi.useFakeTimers();
     const run: CronRunLog = {
       runId: "run-second",
@@ -81,7 +83,7 @@ describe("cron popover", () => {
       await flushPromises();
       expect(api.listWorkspaceCronJobs).toHaveBeenCalledWith("first");
       expect(api.listWorkspaceCronJobs).toHaveBeenCalledWith("second");
-      expect(api.listWorkspaceCronRunLogs).toHaveBeenCalledWith("second");
+      expect(api.listWorkspaceCronRunLogs).not.toHaveBeenCalled();
       expect(wrapper.findAll('[role="tab"]').map((tab) => tab.text())).toEqual(["Cron", "Logs"]);
       const cronPanel = wrapper.get("#cron-test-cron-panel");
       expect(cronPanel.text()).toContain("Job in first");
@@ -94,7 +96,16 @@ describe("cron popover", () => {
       expect(cronPanel.find("select").exists()).toBe(false);
       expect(api.updateCronDelivery).not.toHaveBeenCalled();
       expect(api.listRunningSubagents).not.toHaveBeenCalled();
+      const jobsRequests = vi.mocked(api.listWorkspaceCronJobs).mock.calls.length;
+      await vi.advanceTimersByTimeAsync(30_000);
+      await flushPromises();
+      expect(api.listWorkspaceCronJobs).toHaveBeenCalledTimes(jobsRequests);
+      appStore.cronVersion++;
+      await flushPromises();
+      expect(api.listWorkspaceCronJobs).toHaveBeenCalledTimes(jobsRequests + 2);
       await wrapper.get("#cron-test-cron-tab").trigger("keydown", { key: "ArrowRight" });
+      await flushPromises();
+      expect(api.listWorkspaceCronRunLogs).toHaveBeenCalledWith("second");
       expect(wrapper.get("#cron-test-logs-tab").attributes("aria-selected")).toBe("true");
       expect(wrapper.get("#cron-test-logs-panel").text()).toContain("Running");
       const rows = wrapper.get("#cron-test-logs-panel").findAll(".cron-popover__run");
@@ -110,12 +121,24 @@ describe("cron popover", () => {
       ).toEqual(["cron-session"]);
       const details = wrapper.getComponent({ name: "SubagentSessionPopover" });
       expect(details.props("cronRun")).toEqual(run);
+      const logsRequests = vi.mocked(api.listWorkspaceCronRunLogs).mock.calls.length;
+      await vi.advanceTimersByTimeAsync(30_000);
+      await flushPromises();
+      expect(api.listWorkspaceCronRunLogs).toHaveBeenCalledTimes(logsRequests);
       vi.mocked(api.listWorkspaceCronRunLogs).mockImplementation(async (id) =>
         id === "second" ? [{ ...run, status: "error" }] : [],
       );
-      await vi.advanceTimersByTimeAsync(3000);
+      appStore.cronVersion++;
       await flushPromises();
+      expect(api.listWorkspaceCronRunLogs).toHaveBeenCalledTimes(logsRequests + 2);
       expect(details.props("cronRun").status).toBe("error");
+      wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState: "closed" });
+      appStore.cronVersion++;
+      await flushPromises();
+      expect(api.listWorkspaceCronRunLogs).toHaveBeenCalledTimes(logsRequests + 2);
+      wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState: "open" });
+      await flushPromises();
+      expect(api.listWorkspaceCronRunLogs).toHaveBeenCalledTimes(logsRequests + 4);
     } finally {
       wrapper.unmount();
     }

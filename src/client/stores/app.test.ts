@@ -38,6 +38,7 @@ vi.mock("@/client/lib/api", async (importOriginal) => ({
   logout: vi.fn(),
   submitMainPrompt: vi.fn(),
   listRunningSubagents: vi.fn(),
+  listRunningCronRuns: vi.fn(),
   getMemoryStatus: vi.fn(),
 }));
 
@@ -92,6 +93,7 @@ beforeEach(() => {
   vi.mocked(api.getMain).mockResolvedValue(state());
   vi.mocked(api.listWorkspaces).mockResolvedValue([]);
   vi.mocked(api.listRunningSubagents).mockResolvedValue([]);
+  vi.mocked(api.listRunningCronRuns).mockResolvedValue([]);
   vi.mocked(api.logout).mockResolvedValue({ ok: true });
 });
 afterEach(() => {
@@ -472,6 +474,15 @@ describe("optimistic prompt reconciliation", () => {
         wrapper!.findComponent(composer).vm.$emit("removeQueuedPrompt", prompt),
     };
   }
+
+  it("refreshes running cron status when orchestration changes", async () => {
+    const { store } = mountPane();
+    await flushPromises();
+    expect(api.listRunningCronRuns).toHaveBeenCalledTimes(1);
+    store.orchestrationVersion++;
+    await flushPromises();
+    expect(api.listRunningCronRuns).toHaveBeenCalledTimes(2);
+  });
 
   it("keeps the message after HTTP success, reset and stream state until the matching user message", async () => {
     let resolve!: (value: Awaited<ReturnType<typeof api.submitMainPrompt>>) => void;

@@ -38,6 +38,9 @@ export function streamSession(
   let flushing = false;
   let dirty = true;
   let historyDirty = true;
+  const notifyOrchestration = !projection && Number(conversationId) === runtime.main.id;
+  let orchestrationDirty = notifyOrchestration;
+  let cronDirty = notifyOrchestration;
   let scheduled: ReturnType<typeof setTimeout> | undefined;
   const write = (event: object) => writeStreamEvent(stream, `data: ${JSON.stringify(event)}\n\n`);
   async function flush() {
@@ -48,6 +51,12 @@ export function streamSession(
         const includeHistory = historyDirty;
         dirty = false;
         historyDirty = false;
+        if (orchestrationDirty) {
+          const cron = cronDirty;
+          orchestrationDirty = false;
+          cronDirty = false;
+          await write({ type: "orchestration-changed", cron });
+        }
         let state = await images.state(
           await (projection
             ? projection.state(includeHistory, after)
@@ -134,6 +143,14 @@ export function streamSession(
             (change.value.input as { workerId: string }).workerId === String(conversationId))
         )
           changed = true;
+        if (
+          notifyOrchestration &&
+          (change.type === "document" || change.type === "document.copy") &&
+          change.record.kind === OrchestrationDoc.definition.kind
+        ) {
+          orchestrationDirty = true;
+          cronDirty = true;
+        }
         const owner =
           change.type === "document" || change.type === "document.copy"
             ? change.conversationId
@@ -146,6 +163,17 @@ export function streamSession(
       }
       if (changed) schedule(entries);
     });
+  let remoteTasks = notifyOrchestration
+    ? JSON.stringify(runtime.remotes.tasks(Number(conversationId)))
+    : "";
+  const remoteChanged = () => {
+    const next = JSON.stringify(runtime.remotes.tasks(Number(conversationId)));
+    if (next === remoteTasks) return;
+    remoteTasks = next;
+    orchestrationDirty = true;
+    schedule(false);
+  };
+  if (notifyOrchestration) runtime.remotes.changes.on("change", remoteChanged);
   let memory = projection ? "" : JSON.stringify(runtime.memory.status());
   const memoryTimer = projection
     ? undefined
@@ -165,6 +193,7 @@ export function streamSession(
     clearInterval(memoryTimer);
     clearInterval(heartbeat);
     unsubscribe();
+    if (notifyOrchestration) runtime.remotes.changes.off("change", remoteChanged);
   }
   stream.once("close", close);
   void flush();

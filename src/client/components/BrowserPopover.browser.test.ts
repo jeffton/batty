@@ -128,7 +128,13 @@ test("WebKit decodes production H.264, forwards taps and resumes after viewer re
       { name: "cloud-auth", value: "test", url: server.resolvedUrls!.local[0]! },
     ]);
     const page = await context.newPage();
+    const navigations: string[] = [];
+    page.on("framenavigated", (frame) => {
+      if (frame === page.mainFrame()) navigations.push(frame.url());
+    });
+    let expectedNavigations = 0;
     const open = async () => {
+      expectedNavigations++;
       await page.goto(url);
       await page.getByRole("button", { name: "Open browser", exact: true }).click();
       await expect
@@ -141,9 +147,15 @@ test("WebKit decodes production H.264, forwards taps and resumes after viewer re
         )
         .toBe(true)
         .catch(async (error) => {
-          console.error("WebKit native video fixture:", await page.locator("body").innerText());
+          console.error("WebKit native video fixture:", {
+            body: await page.locator("body").innerText(),
+            navigations,
+          });
           throw error;
         });
+      // Only our explicit navigation may reload the fixture. Optimizer/HMR
+      // reloads discard the popover and must not be mistaken for codec failures.
+      expect(navigations).toEqual(Array(expectedNavigations).fill(url));
     };
     await open();
     const canvas = page.locator(".cloud-browser__image");

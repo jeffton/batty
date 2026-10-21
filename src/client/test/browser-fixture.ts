@@ -10,17 +10,13 @@ export async function createBrowserFixtureServer(fixture: string, config: Inline
       ...config,
       configFile: false,
       cacheDir,
-      // These imports are reached after the HTML scan. Prebundle them before
-      // navigation so dependency discovery cannot reload an active fixture.
+      // Vite can also transform the app entry while serving a fixture. Scan
+      // both graphs before navigation so discovering app dependencies cannot
+      // reoptimize shared chunks and reload an active fixture.
       optimizeDeps: {
-        entries: [fixture],
-        include: [
-          "@pierre/diffs",
-          "@oddbird/css-anchor-positioning/fn",
-          "@simplewebauthn/browser",
-          "pinia-plugin-persistedstate",
-          "vue-router",
-        ],
+        entries: [fixture, "src/client/main.ts"],
+        // The SFC scanner does not discover this on-demand import.
+        include: ["@pierre/diffs"],
       },
     });
   } catch (error) {

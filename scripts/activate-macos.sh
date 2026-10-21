@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 install_root=$1
 release=$2
 plist=$3
@@ -34,6 +34,14 @@ previous=
 [[ ! -f "$plist" ]] || cp "$plist" "$release/previous-agent.plist"
 was_loaded=0
 if launchctl print "$domain/$label" >/dev/null 2>&1; then was_loaded=1; fi
+https_label="$label.https"
+https_plist="$(dirname "$plist")/$https_label.plist"
+https_changed=0
+https_was_loaded=0
+if [[ -f "$release/https-agent.plist" ]]; then
+  [[ ! -f "$https_plist" ]] || cp "$https_plist" "$release/previous-https-agent.plist"
+  if launchctl print "$domain/$https_label" >/dev/null 2>&1; then https_was_loaded=1; fi
+fi
 
 switch_release() {
   python3 - "$install_root" "$1" <<'PY'
@@ -46,15 +54,42 @@ os.replace(next_path, root + '/current')
 PY
 }
 stop_agent() {
-  launchctl bootout "$domain/$label"
+  local agent_label=${1:-$label}
+  launchctl bootout "$domain/$agent_label" || return $?
   # bootout returns before launchd removes the terminating job.
-  while launchctl print "$domain/$label" >/dev/null 2>&1; do sleep 0.1; done
+  while launchctl print "$domain/$agent_label" >/dev/null 2>&1; do sleep 0.1; done
+}
+start_https() {
+  [[ -f "$release/https-agent.plist" ]] || return 0
+  https_changed=1
+  if (( https_was_loaded )); then stop_agent "$https_label"; fi
+  cp "$release/https-agent.plist" "$https_plist"
+  launchctl bootstrap "$domain" "$https_plist"
+  # A loaded KeepAlive job may still be failing to start (e.g. a port conflict).
+  for attempt in {1..10}; do
+    sleep 1
+    if launchctl print "$domain/$https_label" | grep -q 'state = running'; then return 0; fi
+  done
+  echo 'HTTPS proxy did not start; see https-error.log.' >&2
+  return 1
+}
+restore_https() {
+  if launchctl print "$domain/$https_label" >/dev/null 2>&1; then stop_agent "$https_label" || return $?; fi
+  if [[ -f "$release/previous-https-agent.plist" ]]; then
+    cp "$release/previous-https-agent.plist" "$https_plist" || return $?
+    if (( https_was_loaded )); then launchctl bootstrap "$domain" "$https_plist" || return $?; fi
+  else
+    rm -f "$https_plist" || return $?
+  fi
 }
 rollback() {
   local status=$?
   trap - ERR
   printf 'FAILED\n' > "$release/ACTIVATION_RESULT"
   echo 'Activation failed; restoring previous installation.' >&2
+  if (( https_changed )); then
+    restore_https || echo 'HTTPS rollback failed; continuing Batty rollback. See https-error.log.' >&2
+  fi
   if launchctl print "$domain/$label" >/dev/null 2>&1; then stop_agent; fi
   if [[ -n "$previous" ]]; then switch_release "$previous"; else rm -f "$install_root/current"; fi
   if [[ -f "$release/previous-agent.plist" ]]; then
@@ -73,6 +108,7 @@ launchctl bootstrap "$domain" "$plist"
 for attempt in {1..60}; do
   response=$(curl --fail --silent --max-time 2 --noproxy '*' "http://$host:$port/healthz" || true)
   if [[ -n "$response" ]] && health_matches_expected "$response" "$revision"; then
+    start_https
     touch "$release/HEALTHY"
     printf 'SUCCEEDED\n' > "$release/ACTIVATION_RESULT"
     trap - ERR

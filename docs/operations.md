@@ -141,6 +141,40 @@ Defaults are `~/Library/Application Support/Batty2/app` for releases, `~/Library
 
 `BATTY2_ALLOW_DIRTY=1` explicitly permits deploying tracked edits and nonignored new files. Deployment does not copy state or import chats.
 
+#### Optional LAN HTTPS with Caddy
+
+Install Caddy (`brew install caddy`) and create `https/Caddyfile` beside the installation's `app` directory (default `~/Library/Application Support/Batty2/https/Caddyfile`). Deployment validates this file and installs a second launch agent, `<BATTY2_LABEL>.https`, which restarts with each deployment and at login. Without a Caddyfile, deployment leaves HTTPS services untouched. Configuration and CA storage remain outside releases and Git.
+
+Example Caddyfile; replace `my-mac.local` with the Mac's LAN hostname (`scutil --get LocalHostName`, plus `.local`):
+
+```caddyfile
+{
+    admin off
+    persist_config off
+    auto_https disable_redirects
+    skip_install_trust
+    storage file_system ./data
+}
+
+https://my-mac.local:3443 {
+    tls internal
+    reverse_proxy 127.0.0.1:3147
+}
+```
+
+Caddy runs with the HTTPS directory as its working directory. Keep `data` when reinstalling: it contains the CA and private keys. Only distribute `data/pki/authorities/local/root.crt` to clients that should trust this installation; never distribute private keys. Trust installation is manual, including on the Mac. Passkeys belong to the HTTPS hostname; localhost passkeys do not transfer.
+
+Keep Batty's `BATTY_HOST` on `127.0.0.1` in its launch agent (and `.batty/environment.json`, if configured), and match the proxy's upstream to `BATTY_PORT`. Caddy listens on all interfaces by default; use its `bind` directive to restrict it to a particular LAN address if needed. The script does not open firewall ports, create tunnels or configure router forwarding. Use only on trusted networks. Batty authentication is unchanged.
+
+Activation verifies Batty's health/build ID and that the HTTPS launch agent starts. A failure restores the previous release and launch agents; the user-owned Caddyfile is not rolled back. HTTPS logs are `https.log` and `https-error.log` alongside the Batty logs. After setup or configuration changes, verify the actual hostname and CA trust from each client:
+
+```sh
+curl --cacert "$HOME/Library/Application Support/Batty2/https/data/pki/authorities/local/root.crt" \
+  https://my-mac.local:3443/healthz
+```
+
+To remove HTTPS, boot out the HTTPS launch agent, delete its plist from `~/Library/LaunchAgents`, and remove the Caddyfile. Retain the CA storage if its trust should survive a later reinstall.
+
 ### Windows and IIS
 
 Windows requires PowerShell 7 (`pwsh.exe` on the service account’s PATH) and the same Node/pnpm versions as local setup. Agents use the `powershell` tool; interrupted commands are reported as errors rather than replayed after a restart. Detached Chromium survives service restarts, and Windows kernel file-sharing locks prevent concurrent database writers. Linux agents use durable Bash supervisors; `BATTY_BASH_PATH` selects a custom executable (default `/bin/bash`).

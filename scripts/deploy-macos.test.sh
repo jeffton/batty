@@ -3,6 +3,7 @@ set -euo pipefail
 [[ $(uname -s) == Darwin ]] || { echo 'macOS required.' >&2; exit 1; }
 script_dir=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d)
+tmp=$(cd "$tmp" && pwd -P)
 trap 'rm -rf -- "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/app/releases/old.1" "$tmp/app/releases/new.2"
 export MOCK_STATE="$tmp/state"
@@ -11,12 +12,15 @@ printf 'loaded' > "$MOCK_STATE"
 cat > "$tmp/bin/launchctl" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
+state=$MOCK_STATE
+if [[ ${!#} == *.https || ${!#} == *.https.plist ]]; then state="$MOCK_STATE.https"; fi
 case $1 in
-  print) [[ $(<"$MOCK_STATE") == loaded ]] ;;
-  bootout) printf 'stopped' > "$MOCK_STATE" ;;
+  print) [[ $(<"$state") == loaded ]] && printf 'state = running\n' ;;
+  bootout) printf 'stopped' > "$state" ;;
   bootstrap)
-    if [[ -f "$MOCK_STATE.fail" ]]; then rm "$MOCK_STATE.fail"; exit 5; fi
-    printf 'loaded' > "$MOCK_STATE"
+    [[ ! -f "$state.always-fail" ]] || exit 5
+    if [[ -f "$state.fail" ]]; then rm "$state.fail"; exit 5; fi
+    printf 'loaded' > "$state"
     ;;
   *) exit 99 ;;
 esac
@@ -120,4 +124,54 @@ fi
 [[ $(readlink "$tmp/app/current") == "$release" ]]
 cmp "$tmp/agent.plist" "$tmp/before-overlap.plist"
 wait "$holder"
+# A configured HTTPS proxy is activated with Batty, and a failed proxy reload
+# restores both existing agents and the previous release.
+https_plist="$tmp/test.batty.https.plist"
+printf 'old HTTPS agent\n' > "$https_plist"
+cp "$https_plist" "$tmp/original-https.plist"
+printf 'loaded' > "$MOCK_STATE.https"
+mkdir -p "$tmp/https" "$tmp/logs"
+cat > "$tmp/bin/caddy" <<'MOCK'
+#!/bin/bash
+[[ $1 == validate && $PWD == "$MOCK_HTTPS_ROOT" ]] || exit 1
+[[ ! -f "$MOCK_HTTPS_ROOT/invalid" ]]
+MOCK
+chmod +x "$tmp/bin/caddy"
+export MOCK_HTTPS_ROOT="$tmp/https"
+printf '# user-owned Caddy configuration\n' > "$tmp/https/Caddyfile"
+PATH="$tmp/bin:$PATH" python3 "$script_dir/configure-macos-https.py" \
+  "$tmp/https" "$release/https-agent.plist" test.batty "$tmp/logs"
+# Invalid Caddy configuration must fail before a launch agent is written.
+touch "$tmp/https/invalid"
+if PATH="$tmp/bin:$PATH" python3 "$script_dir/configure-macos-https.py" \
+  "$tmp/https" "$tmp/invalid-agent.plist" test.batty "$tmp/logs"; then
+  echo 'Expected invalid Caddy configuration rejection.' >&2; exit 1
+fi
+[[ ! -f "$tmp/invalid-agent.plist" ]]
+rm "$tmp/https/invalid"
+ln -sfn "$tmp/app/releases/old.1" "$tmp/app/current"
+cp "$tmp/agent.plist" "$tmp/before-https.plist"
+touch "$MOCK_STATE.https.fail"
+if bash "$script_dir/activate-macos.sh" "$tmp/app" "$release" "$tmp/agent.plist"; then
+  echo 'Expected HTTPS activation failure.' >&2; exit 1
+fi
+[[ $(readlink "$tmp/app/current") == "$tmp/app/releases/old.1" ]]
+cmp "$tmp/agent.plist" "$tmp/before-https.plist"
+cmp "$https_plist" "$tmp/original-https.plist"
+[[ $(<"$MOCK_STATE.https") == loaded ]]
+[[ $(<"$release/ACTIVATION_RESULT") == FAILED ]]
+# Even persistent proxy failure (including its rollback bootstrap) cannot
+# prevent the previous Batty release/agent from being restored.
+touch "$MOCK_STATE.https.always-fail"
+if bash "$script_dir/activate-macos.sh" "$tmp/app" "$release" "$tmp/agent.plist"; then
+  echo 'Expected persistent HTTPS activation failure.' >&2; exit 1
+fi
+[[ $(readlink "$tmp/app/current") == "$tmp/app/releases/old.1" ]]
+cmp "$tmp/agent.plist" "$tmp/before-https.plist"
+[[ $(<"$MOCK_STATE") == loaded ]]
+[[ $(<"$release/ACTIVATION_RESULT") == FAILED ]]
+rm "$MOCK_STATE.https.always-fail"
+bash "$script_dir/activate-macos.sh" "$tmp/app" "$release" "$tmp/agent.plist"
+cmp "$https_plist" "$release/https-agent.plist"
+[[ $(<"$release/ACTIVATION_RESULT") == SUCCEEDED ]]
 printf 'macOS activation tests passed\n'

@@ -38,6 +38,12 @@ copy_retained_client_assets "$install_root/releases" "$release" "$install_root/c
 python3 "$build/scripts/configure-macos.py" "$plist" "$release/agent.plist" "$label" \
   "$(command -v node)" "$install_root/current" "$data_root" "$log_dir" "$PATH" "$HOME/.local/bin/batty2"
 plutil -lint "$release/agent.plist"
+# HTTPS is opt-in; configuration and CA storage stay outside releases/source.
+https_root="$(dirname "$install_root")/https"
+if [[ -f "$https_root/Caddyfile" ]]; then
+  python3 "$build/scripts/configure-macos-https.py" "$https_root" "$release/https-agent.plist" "$label" "$log_dir"
+  plutil -lint "$release/https-agent.plist"
+fi
 # A launchd-owned worker survives stopping Batty, including self-deploy turns.
 python3 - "$release" "$install_root" "$plist" "$label.deploy.$(date +%s)" <<'PY'
 import plistlib, sys

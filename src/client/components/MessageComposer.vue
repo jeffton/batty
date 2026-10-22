@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Paperclip, SendHorizontal } from "@lucide/vue";
 import { blockAppReload } from "@/client/lib/app-updates";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useId, watch } from "vue";
 import ComposerQueuedPrompts from "@/client/components/ComposerQueuedPrompts.vue";
 import StreamingStopControl from "@/client/components/StreamingStopControl.vue";
 import TasksControl from "@/client/components/TasksControl.vue";
@@ -30,6 +30,7 @@ const emit = defineEmits<{
   removeQueuedPrompt: [prompt: QueuedPrompt];
 }>();
 
+const textareaId = `chat-message-${useId()}`;
 const text = ref("");
 const fileInput = ref<HTMLInputElement>();
 const textarea = ref<HTMLTextAreaElement>();
@@ -393,8 +394,9 @@ defineExpose({ clear, restore });
 </script>
 
 <template>
-  <div
+  <form
     :class="['composer', dragging ? 'is-dragging' : '', inputFocused ? 'composer--kbd' : '']"
+    @submit.prevent="runAction"
     @dragenter.prevent="dragging = true"
     @dragover.prevent
     @dragleave.prevent="dragging = false"
@@ -418,6 +420,7 @@ defineExpose({ clear, restore });
           v-for="(file, index) in files"
           :key="`${file.name}-${index}`"
           class="composer__chip"
+          type="button"
           :disabled="props.disabled"
           @click="removeFile(index)"
         >
@@ -425,12 +428,13 @@ defineExpose({ clear, restore });
         </button>
       </div>
 
+      <label :for="textareaId" class="composer__label">Chat message</label>
       <textarea
+        :id="textareaId"
         ref="textarea"
         v-model="text"
         class="composer__input"
         name="chat-message"
-        aria-label="Chat message"
         rows="1"
         autocomplete="off"
         autocorrect="on"
@@ -502,7 +506,7 @@ defineExpose({ clear, restore });
       :disabled="actionsDisabled"
       @change="onFileInputChange"
     />
-  </div>
+  </form>
 </template>
 
 <style scoped>
@@ -583,6 +587,18 @@ defineExpose({ clear, restore });
 
 .composer__chip:disabled {
   opacity: 0.5;
+}
+
+.composer__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 .composer__input {

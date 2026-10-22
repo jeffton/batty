@@ -5,11 +5,13 @@
   </head>
   <body>
     <div id="app"></div>
+    <output id="submissions" hidden>[]</output>
     <script type="module">
       import { createApp, h, ref } from "vue";
       import MessageComposer from "./MessageComposer.vue";
       import "../styles.css";
       const params = new URLSearchParams(location.search);
+      const submissions = [];
       createApp({
         setup: () => {
           const streaming = ref(params.has("streaming"));
@@ -28,6 +30,10 @@
             h(MessageComposer, {
               streaming: streaming.value,
               subagents: subagents.value,
+              onSubmit: (text) => {
+                submissions.push(text);
+                document.getElementById("submissions").textContent = JSON.stringify(submissions);
+              },
             });
         },
       }).mount("#app");

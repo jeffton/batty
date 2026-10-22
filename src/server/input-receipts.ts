@@ -9,6 +9,7 @@ import type { JsonObject } from "@earendil-works/pi-durable";
 
 const InputReceipt = defineDocFamily<{ entryId: number }, { entryId: number }>({
   kind: "batty.input-receipt",
+  checkpointWhen: () => false,
   version: 1,
   scope: "conversation",
   history: "latest",

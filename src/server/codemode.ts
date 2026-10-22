@@ -25,10 +25,17 @@ import { isPiShellToolName } from "../shared/pi-tools";
 
 export const CodemodeCalls = defineDoc<{
   calls: Record<string, { taskId: number; name: string; args: JsonValue }>;
-}>({ kind: "batty.codemode-calls", version: 1, scope: "task", initial: () => ({ calls: {} }) });
+}>({
+  kind: "batty.codemode-calls",
+  version: 1,
+  scope: "task",
+  checkpointWhen: () => false,
+  initial: () => ({ calls: {} }),
+});
 
 export const CodemodeStore = defineDoc<{ values: Record<string, JsonValue> }>({
   kind: "batty.codemode-store",
+  checkpointWhen: () => false,
   version: 1,
   scope: "conversation",
   history: "rewindable",
@@ -234,9 +241,13 @@ export function createCodemodeTool(
             }),
         },
       ];
+      let workerExited: Promise<void> | undefined;
       const sandbox = new CodemodeSandbox({
         tools,
         globals,
+        onWorkerStarted: (exited) => {
+          workerExited = exited;
+        },
         timeoutMs: 300_000,
         memoryLimitBytes: 256 * 1024 * 1024,
       });
@@ -325,8 +336,10 @@ export function createCodemodeTool(
           ...(control ? { control } : {}),
         };
       } finally {
-        sandboxes.delete(sandbox);
         await sandbox.close();
+        // SDK close() requests shutdown; keep ownership until the worker actually exits.
+        await workerExited;
+        sandboxes.delete(sandbox);
         await Promise.all(aborts);
         if (abortErrors.length)
           throw new AggregateError(abortErrors, "Failed to cancel nested codemode tools");

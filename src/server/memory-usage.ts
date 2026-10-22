@@ -47,6 +47,7 @@ export const MemoryUsageDoc = defineDoc<{
   since: number | null;
 }>({
   kind: "batty.memory-usage",
+  checkpointWhen: () => false,
   version: 1,
   scope: "conversation",
   history: "latest",

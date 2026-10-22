@@ -41,7 +41,8 @@ ln -sfn "$release" /opt/batty2/next
 mv -Tf /opt/batty2/next /opt/batty2/current
 install -m 755 scripts/batty2 /usr/local/bin/batty2
 systemctl restart batty2.service
-for attempt in {1..60}; do
+# Durable schema migrations can rebuild large tables before the listener opens.
+for attempt in {1..300}; do
   response=$(curl --fail --silent http://127.0.0.1:3148/healthz || true)
   if [[ -n "$response" ]] && health_matches_expected "$response" "$revision"; then
     touch /opt/batty2/current/HEALTHY

@@ -89,8 +89,13 @@ export function createDeliveryTask(services: OrchestrationServices) {
         );
       },
       deliver: async (task, runtime, ctx) => {
-        if (task.state.checkpoint.retryAt !== undefined)
-          await runtime.sleep(task.state.checkpoint.retryAt, ctx);
+        if (
+          task.state.checkpoint.retryAt !== undefined &&
+          task.state.checkpoint.retryAt > runtime.now()
+        ) {
+          await runtime.sleepUntil(task.state.checkpoint.retryAt, task.state.checkpoint, ctx);
+          return;
+        }
         let submissionId: SubmissionId | undefined;
         let admitted = false;
         const childAgent = await (await services.harness.conversation(

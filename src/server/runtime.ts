@@ -222,7 +222,7 @@ export class Runtime {
           stream: { timeoutMs: 300_000 },
         },
         env: ({ cwd }) => new NodeExecutionEnv({ cwd: cwd ?? config.selfPath }),
-        onReport: (error) => console.error("Durable runtime", error),
+        onReport: (error, info) => console.error("Durable runtime", info, error),
       },
       context,
     );

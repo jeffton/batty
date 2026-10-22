@@ -20,6 +20,7 @@ const Receipt = defineDocFamily<
   Record<string, never>
 >({
   kind: "batty.node-command",
+  checkpointWhen: () => false,
   version: 1,
   scope: "session",
   family: true,

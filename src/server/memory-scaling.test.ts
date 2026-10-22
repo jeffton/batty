@@ -17,6 +17,7 @@ import {
 
 const Leaves = defineDocFamily<MemoryLeaf, MemoryLeaf>({
   kind: "batty.memory-leaf",
+  checkpointWhen: () => false,
   version: 1,
   family: true,
   scope: "conversation",

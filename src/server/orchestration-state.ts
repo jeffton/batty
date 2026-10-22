@@ -110,6 +110,7 @@ export const WorkerDoc = defineDoc<{
   };
 }>({
   kind: "batty.worker",
+  checkpointWhen: () => false,
   version: 1,
   scope: "conversation",
   history: "latest",

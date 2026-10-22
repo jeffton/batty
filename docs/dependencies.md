@@ -1,3 +1,15 @@
+# Pi dependency review — 2026-10-22
+
+All seven Pi/Chord packages: **1.2.0 → 1.4.0**, pinned together at the current stable release. Durable's SQLite schema 2 rebuilds the task table and prevents opening it with older SDKs; deployment requires a verified SQLite-aware backup and space for the table rewrite. Rollback across this boundary requires restoring that backup, not merely selecting an older release.
+
+Batty declares explicit document checkpoint policies, retaining delta storage and existing periodic policies. Delivery retries use persistent `sleepUntil()` with the existing checkpoint; nested tools expose the harness clock through `now()`. Sleeping tasks remain nonterminal in worker/cron status handling. Runtime reports include task/reason metadata for crash-loop parkings. Codemode retains worker ownership until `onWorkerStarted`'s exit promise settles, since SDK `close()` requests shutdown without waiting for exit.
+
+Chord's removed object/link APIs and Pi AI's removed frame/transcript-tool APIs are not used by Batty. Existing Contexts come from Chord. The built-in generation/backoff task migrations are upstream-owned; Batty's task identities/checkpoints remain unchanged. No host compatibility layer or history conversion is introduced.
+
+Regression coverage includes a real 1.2 SQLite fixture migrating without rewriting persisted records, sleeping task recovery, and an actual interrupted process reaching the restart limit followed by explicit retry. Existing nested-tool replay/cancellation, worker/cron recovery, memory and browser tests exercise the updated package set.
+
+Sources: [Pi 1.4.0](https://github.com/earendil-works/pi/releases/tag/v1.4.0), [Durable changelog](https://github.com/earendil-works/pi/blob/v1.4.0/packages/durable/CHANGELOG.md), [Chord changelog](https://github.com/earendil-works/pi/blob/v1.4.0/packages/chord/CHANGELOG.md), [Codemode changelog](https://github.com/earendil-works/pi/blob/v1.4.0/packages/codemode/CHANGELOG.md), [AI changelog](https://github.com/earendil-works/pi/blob/v1.4.0/packages/ai/CHANGELOG.md).
+
 # Browser dependency review — 2026-10-22
 
 Patchright and Playwright Core: **1.63.0 → 1.64.1**. Both installed browser manifests pin Chromium **156.0.8078.4**, revision **1248**, and WebKit **27.2**, revision **2370**. Chromium is deployed through the existing isolated-browser setup; WebKit is used for tests. Isolation grants read/traverse permissions to root-owned browser files copied from a private installer cache, while retaining the prohibition on non-root writes.

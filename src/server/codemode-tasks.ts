@@ -21,6 +21,7 @@ type Result = { result: ToolExecutionResult; structured: JsonValue | null };
 
 const NestedDetails = defineDoc<{ details: JsonValue }>({
   kind: "batty.codemode-nested-details",
+  checkpointWhen: () => false,
   version: 1,
   scope: "task",
   initial: () => ({ details: null }),
@@ -30,6 +31,7 @@ const NestedCalls = defineDoc<{
   calls: Record<string, { taskId: number; name: string; args: JsonValue }>;
 }>({
   kind: "batty.codemode-tool-calls",
+  checkpointWhen: () => false,
   version: 1,
   scope: "task",
   initial: () => ({ calls: {} }),
@@ -50,6 +52,7 @@ export function createCodemodeTasks(
   ): Promise<ToolExecutionApi> {
     let sequence = 0;
     return {
+      now: runtime.now.bind(runtime),
       taskId: runtime.taskId,
       conversationId: runtime.conversationId,
       callId,

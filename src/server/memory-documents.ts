@@ -7,6 +7,7 @@ export type MemoryPacket = { view: string; boundary: number; snapshot: MemorySna
 
 export const WorkerMemory = defineDoc<{ view: string | null; snapshot?: MemorySnapshot }>({
   kind: "batty.worker-memory",
+  checkpointWhen: () => false,
   version: 1,
   scope: "conversation",
   history: "latest",
@@ -32,6 +33,7 @@ export type MemoryRebuild = {
 };
 export const MemoryMaintenanceDoc = defineDoc<{ generation: number; settled: number }>({
   kind: "batty.memory-maintenance",
+  checkpointWhen: () => false,
   version: 1,
   scope: "conversation",
   history: "latest",
@@ -40,6 +42,7 @@ export const MemoryMaintenanceDoc = defineDoc<{ generation: number; settled: num
 });
 export const Rebuild = defineDoc<MemoryRebuild>({
   kind: "batty.memory-rebuild",
+  checkpointWhen: () => false,
   version: 1,
   scope: "conversation",
   history: "latest",
@@ -57,6 +60,7 @@ export const MemoryIndexDoc = defineDoc<MemoryIndex>({
 });
 export const Leaves = defineDocFamily<MemoryLeaf, MemoryLeaf>({
   kind: "batty.memory-leaf",
+  checkpointWhen: () => false,
   version: 1,
   family: true,
   scope: "conversation",
@@ -66,6 +70,7 @@ export const Leaves = defineDocFamily<MemoryLeaf, MemoryLeaf>({
 });
 export const MemoryNodesDoc = defineDocFamily<{ text: string }, { text: string }>({
   kind: "batty.memory-node",
+  checkpointWhen: () => false,
   version: 1,
   family: true,
   scope: "conversation",
@@ -75,6 +80,7 @@ export const MemoryNodesDoc = defineDocFamily<{ text: string }, { text: string }
 });
 export const GenerationCounter = defineDoc<{ next: number }>({
   kind: "batty.memory-generation-counter",
+  checkpointWhen: () => false,
   version: 1,
   scope: "conversation",
   history: "latest",
@@ -88,6 +94,7 @@ export const Generations = defineDocFamily<
   { parent: number; count: number }
 >({
   kind: "batty.memory-generation",
+  checkpointWhen: () => false,
   version: 1,
   family: true,
   scope: "conversation",
@@ -98,6 +105,7 @@ export const Generations = defineDocFamily<
 
 export const Packets = defineDocFamily<MemoryPacket, MemoryPacket>({
   kind: "batty.memory-packet",
+  checkpointWhen: () => false,
   version: 1,
   family: true,
   scope: "conversation",

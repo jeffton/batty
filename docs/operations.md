@@ -125,7 +125,7 @@ For the maintained installation, source is `/root/github/batty`, tracking `main`
 ./scripts/deploy.sh
 ```
 
-The script checks disk space, installs locked dependencies and builds an immutable release, atomically switches `/opt/batty2/current`, restarts `batty2.service` and verifies the build ID. It retains the active release and two healthy rollbacks. Pi Durable resumes committed work; shell jobs use stable execution receipts and detached Chromium can retain tabs, cookies and live page state. A kernel lifetime lock prevents concurrent database writers. Unsafe interrupted external actions are reported as errors rather than automatically repeated.
+The script checks disk space, installs locked dependencies and builds an immutable release, atomically switches `/opt/batty2/current`, restarts `batty2.service` and waits up to five minutes for health and the expected build ID, including time for durable database migrations. It retains the active release and two healthy rollbacks. Pi Durable resumes committed work; shell jobs use stable execution receipts and detached Chromium can retain tabs, cookies and live page state. A kernel lifetime lock prevents concurrent database writers. Unsafe interrupted external actions are reported as errors rather than automatically repeated.
 
 ### macOS and launchd
 
@@ -192,9 +192,17 @@ Staging pulls validated source, installs locked dependencies and builds without 
 
 Run activation outside the WinSW process tree. From the running assistant, use a one-shot Windows Task Scheduler task targeting the second command. A detached child process can still be terminated when the service stops.
 
+## Durable schema and recovery
+
+Pi Durable 1.4 migrates SQLite to schema 2 on open, rebuilding the task table atomically. Before upgrading a schema-1 installation, take a consistent SQLite online backup, verify `PRAGMA integrity_check`, and retain its checksum. Allow free disk space for both the rebuilt task table and its transaction journal/WAL. Do not copy a live database file without SQLite's backup API.
+
+Schema 2 cannot be opened by Pi Durable 1.3 or earlier. Rolling back across this boundary requires stopping the service and restoring the verified pre-migration database, including handling its WAL/SHM files while no process has the database open. That restore also discards work committed after the backup; changing only the release symlink is insufficient.
+
+Sleeping tasks retain their checkpoint and deadline without holding an invocation. Five consecutive crash-interrupted restarts without a new commit park a task with `restart_limit`; clean shutdowns do not count. Runtime reports log the task identity and reason. Inspect the cause before explicitly retrying a parked task through `Harness.retryTask()`; no automatic retry bypasses this guard.
+
 ## Codemode task receipts
 
-Codemode uses Pi Durable 1.2 native version 2 tasks and `output` receipts. Version 1 task migration and legacy `content` receipt conversion are unsupported. Old unfinished codemode calls cannot resume; completed transcripts and artifacts remain stored without history migration.
+Codemode uses Pi Durable 1.4 native version 2 tasks and `output` receipts. Version 1 task migration and legacy `content` receipt conversion are unsupported. Old unfinished codemode calls cannot resume; completed transcripts and artifacts remain stored without history migration.
 
 ## AI tool names
 

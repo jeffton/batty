@@ -21,6 +21,7 @@ export type WorkerRecord = {
 };
 export const ArchivedWorker = defineDocFamily<WorkerRecord, WorkerRecord>({
   kind: "batty.worker-record",
+  checkpointWhen: () => false,
   version: 1,
   scope: "session",
   family: true,
@@ -28,6 +29,7 @@ export const ArchivedWorker = defineDocFamily<WorkerRecord, WorkerRecord>({
 });
 export const ArchivedRun = defineDocFamily<CronRun, CronRun>({
   kind: "batty.cron-run",
+  checkpointWhen: () => false,
   version: 1,
   scope: "session",
   family: true,
@@ -43,6 +45,7 @@ export const DeliveryRecord = defineDocFamily<
   Record<string, never>
 >({
   kind: "batty.delivery-record",
+  checkpointWhen: () => false,
   version: 1,
   scope: "session",
   family: true,
@@ -52,6 +55,7 @@ export const DeliveryRecord = defineDocFamily<
 const PAGE_SIZE = 100;
 const RunHead = defineDocFamily<{ page: number }, { page: number }>({
   kind: "batty.run-head",
+  checkpointWhen: () => false,
   version: 1,
   scope: "session",
   family: true,
@@ -59,6 +63,7 @@ const RunHead = defineDocFamily<{ page: number }, { page: number }>({
 });
 const RunPage = defineDocFamily<{ ids: string[] }, { ids: string[] }>({
   kind: "batty.run-page",
+  checkpointWhen: () => false,
   version: 1,
   scope: "session",
   family: true,

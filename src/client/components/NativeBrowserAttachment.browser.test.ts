@@ -44,7 +44,9 @@ test("main browser tools render a live attachment through SSE, reload and reopen
       beforeStart: (runtime) => runtime.models.registerNativeProvider(faux.provider),
     });
   let runtime = await open();
-  const backend = fastify();
+  // Chromium can retain speculative TCP connections without sending a request.
+  // Close all fixture-owned connections when simulating a backend restart.
+  const backend = fastify({ forceCloseConnections: true });
   backend.addHook("onRequest", async (request, reply) => {
     if (request.url.startsWith("/api/") && !request.headers.cookie?.includes("cloud-auth=test"))
       return reply.code(401).send({ error: "Authentication required" });

@@ -1,3 +1,17 @@
+# Browser dependency review — 2026-10-22
+
+Patchright and Playwright Core: **1.63.0 → 1.64.1**. Both installed browser manifests pin Chromium **156.0.8078.4**, revision **1248**, and WebKit **27.2**, revision **2370**. Chromium is deployed through the existing isolated-browser setup; WebKit is used for tests. Isolation grants read/traverse permissions to root-owned browser files copied from a private installer cache, while retaining the prohibition on non-root writes.
+
+Patchright 1.64.1 follows Playwright 1.64.1. Playwright 1.64 adds WebMCP, recording and locator APIs; 1.64.1 fixes routed cross-origin redirects and Electron startup. Its breaking changes affect device-descriptor screen emulation, JSX test compilation, snapshot-update modes and hidden-iframe visibility. Batty does not use Playwright Test's JSX/snapshot runner; browser regressions cover the integration.
+
+The live-attachment fixture closes all owned backend connections during teardown: Chromium 156 can leave speculative TCP connections without an HTTP request. No runtime timeout or retry changes are required.
+
+Validation: `pnpm check`, all 760 tests (2 skips), Linux deployment regression checks, production build, startup and offline verification pass, including Chromium isolation and WebKit H.264 coverage.
+
+Dependency reviews check Patchright's current upstream release and browser revisions together. Historical version holds are not maintenance instructions; `AGENTS.md` defines the recurring checks.
+
+Sources: [Patchright 1.64.1](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/releases/tag/v1.64.1), [Playwright 1.64.0](https://github.com/microsoft/playwright/releases/tag/v1.64.0), [Playwright 1.64.1](https://github.com/microsoft/playwright/releases/tag/v1.64.1).
+
 # Dependency review — 2026-10-13
 
 Direct dependencies, development dependencies, catalogs, overrides and pnpm were checked against npm. Updates honor the 4320-minute minimum release age and explicit Pi/Chord exclusions.
@@ -25,7 +39,7 @@ Validation: `pnpm check`, all 511 tests (2 Windows-only skips), Linux deployment
 
 ## Held versions
 
-Playwright Core stays at 1.63.0 to match Patchright 1.63.0. Release age holds Source Sans 3 5.3.1, Lucide 1.55.0, DOMPurify 3.4.17, Marked 18.1.1, TypeBox 1.3.37, Virtua 0.53.4/0.53.5, Vue plugin 6.0.10, Happy DOM 21.0.0/21.0.1, pnpm 12.12.0/12.12.1, fast-uri@4 4.2.2, PostCSS 8.5.30 and find-my-way@9 9.10.0. Remaining direct packages, catalogs and maintained-major overrides are current under the policy; no override removal is warranted.
+Release age holds Source Sans 3 5.3.1, Lucide 1.55.0, DOMPurify 3.4.17, Marked 18.1.1, TypeBox 1.3.37, Virtua 0.53.4/0.53.5, Vue plugin 6.0.10, Happy DOM 21.0.0/21.0.1, pnpm 12.12.0/12.12.1, fast-uri@4 4.2.2, PostCSS 8.5.30 and find-my-way@9 9.10.0. Remaining direct packages, catalogs and maintained-major overrides are current under the policy; no override removal is warranted.
 
 ## Official sources
 
@@ -74,8 +88,6 @@ Validation: `pnpm check`, all 499 tests across 95 files, `pnpm build`, offline v
 ## Held versions
 
 Age policy holds `@fastify/static` 10.1.5 (latest 10.1.6), Source Sans 3 5.3.0 (5.3.1), Vue plugin 6.0.9 (6.0.10), Lucide at 1.54.0 (1.55.0), Virtua at 0.53.3 (0.53.4), Node types at 26.6.4 (26.6.5), Happy DOM at 20.14.6 (21.0.1), `fast-uri@4` 4.2.1 (4.2.2), `find-my-way@9` at 9.9.0 (9.10.0) and pnpm at 12.11.0 (12.11.2).
-
-Playwright Core remains 1.63.0 despite eligible 1.64.0, matching Patchright/patchright-core 1.63.0 and their browser revisions.
 
 Other checked packages are current: Readability 0.6.0; CSS anchor positioning 0.10.2; WebAuthn browser/server 14.0.0/14.0.3; Croner 10.0.1; DOMPurify 3.4.16; Fastify 5.12.5; Highlight.js 11.12.0; mime-types 3.0.2; Pinia 4.0.3 and persisted-state 4.7.1; Sharp 0.35.5; Turndown 7.2.4 and GFM 1.0.2; unpdf 1.8.1; Vue/compiler 3.5.43; web-push 3.6.7; all six Workbox packages 7.4.1; jsdom/Turndown/web-push types 30.0.0/5.0.6/3.6.4; Vue test-utils 2.5.1; tsx 4.23.15; TypeScript 7.0.2. Retained overrides: fast-uri@3 3.1.8, serialize-javascript 7.1.2, brace-expansion@2/@5 2.1.7/5.0.12, Vue compiler and Vite alias.
 

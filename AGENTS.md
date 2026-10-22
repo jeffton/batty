@@ -19,4 +19,10 @@ Installations deploy validated commits. Deployment installs locked dependencies,
 
 Native cloud-browser viewing (H.264 capture/streaming) is intentionally Linux-only. macOS and Windows deployments must not add support, port it, or introduce a fallback unless the user explicitly requests that work. This restriction does not apply to ordinary headless browser tools, which remain cross-platform.
 
+# Browser dependency maintenance
+
+Check current stable Patchright and Playwright releases together on every dependency review. Select Playwright Core using Patchright's upstream Playwright release and verify their installed `browsers.json` revisions agree; package version numbers need not match. Dated reviews in `docs/dependencies.md` record past decisions, not ongoing holds. Reassess any hold against current releases rather than carrying it forward.
+
+Install the selected Chromium and test-only WebKit revisions before the full test suite; on Linux, run `bash scripts/setup-browser-isolation.sh` to prepare Chromium for the unprivileged test browser. Linux deployment installs and isolates Patchright's pinned Chromium; verify `/opt/batty-browser` uses that revision after deploy.
+
 See [operations](docs/operations.md) for deployment commands and platform-specific verification.

@@ -18,7 +18,7 @@ if [[ ! -d "/opt/batty-browser/$revision" ]]; then
   cp -a "$source" "/opt/batty-browser/$revision"
 fi
 chown -R root:root "/opt/batty-browser/$revision"
-chmod -R go-w "/opt/batty-browser/$revision"
+chmod -R a+rX,go-w "/opt/batty-browser/$revision"
 # Namespace permission only for root-controlled browser binaries. Chromium still
 # applies its namespace/seccomp sandbox; this does not disable Ubuntu's policy globally.
 if [[ -d /etc/apparmor.d ]]; then

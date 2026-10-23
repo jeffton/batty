@@ -80,6 +80,13 @@ export type WorkerCommandContext = Pick<
   | "details"
 > & { remoteAssignment?: { grantId: string; requestId: string } };
 
+function missingWorker(id: string) {
+  return Object.assign(
+    new Error(`Subagent session ${id} not found. Start a new subagent instead.`),
+    { statusCode: 404 },
+  );
+}
+
 function reply(text: string) {
   return { output: [{ type: "text" as const, text }] };
 }
@@ -91,6 +98,7 @@ export function createWorkers(
   // Tool-level coordination only: these rules are not an OS security boundary.
   async function workerScope(tx: Tx, id: ConversationId, mainId: ConversationId) {
     while (id !== mainId) {
+      if (!(await tx.conversation(id))) return false;
       const metadata = await tx.doc(WorkerDoc, id);
       if (metadata.isCron) return true;
       if (!metadata.isSubagent || metadata.parentId === undefined) return false;
@@ -118,6 +126,8 @@ export function createWorkers(
   }
 
   async function captureStop(workerId: string, ctx: Context) {
+    if (!(await services.harness.conversation(Number(workerId) as ConversationId, ctx)))
+      return undefined;
     const state = (await services.harness.snapshot(OrchestrationDoc, ctx))!;
     const worker =
       state.workers[workerId] ?? (await services.harness.snapshot(ArchivedWorker, workerId, ctx));
@@ -148,7 +158,7 @@ export function createWorkers(
 
   async function stopWorker(workerId: string, ctx: Context) {
     const stop = await captureStop(workerId, ctx);
-    if (!stop) throw Object.assign(new Error("Unknown subagent"), { statusCode: 404 });
+    if (!stop) throw missingWorker(workerId);
     await applyStop(workerId, stop, ctx);
   }
 
@@ -290,6 +300,7 @@ export function createWorkers(
     const local = await api.commit(async (tx) => {
       const state = await tx.doc(OrchestrationDoc);
       const findWorker = async (id: string) => {
+        if (!(await tx.conversation(Number(id) as ConversationId))) return undefined;
         const seed = seeds.get(id);
         return state.workers[id] ?? (seed ? await tx.doc(ArchivedWorker, id, seed) : undefined);
       };
@@ -330,8 +341,8 @@ export function createWorkers(
       }
       if (!args.sessionId) throw new Error("inspect requires sessionId");
       const candidate = await findWorker(args.sessionId);
-      if (!candidate || !(await visible(candidate)))
-        throw new Error("Unknown or inaccessible subagent");
+      if (!candidate) throw missingWorker(args.sessionId);
+      if (!(await visible(candidate))) throw new Error("Unknown or inaccessible subagent");
       const status = await summary(candidate);
       const task = candidate.active === undefined ? undefined : await tx.task(candidate.active);
       const metadata = (await tx.doc(WorkerDoc, candidate.id))!;
@@ -553,10 +564,12 @@ export function createWorkers(
       const worker = workerId
         ? (state?.workers[workerId] ?? (await api.snapshot(ArchivedWorker, workerId, ctx)))
         : undefined;
-      if (args.action !== "run" && !worker) throw new Error(`Unknown subagent: ${workerId}`);
+      if (args.action !== "run" && (!worker || !(await api.conversation(worker.id, ctx))))
+        throw missingWorker(workerId!);
       const assistantWorkspaceId = await services.assistantWorkspaceId();
       if (worker && !existingCall && args.action !== "await")
         await api.commit(async (tx) => {
+          if (!(await tx.conversation(worker.id))) throw missingWorker(workerId!);
           const current = (await tx.doc(OrchestrationDoc)).workers[workerId!] ?? worker;
           const scope = await coordinationScope(tx, api.conversationId, assistantWorkspaceId);
           if (!(await scope.visible(current)))
@@ -680,6 +693,8 @@ export function createWorkers(
           const doc = await tx.doc(OrchestrationDoc);
           const call = await tx.doc(DeliveryRecord, String(api.taskId), {});
           const prior = call.call;
+          if (args.sessionId && !(await tx.conversation(Number(args.sessionId) as ConversationId)))
+            throw missingWorker(args.sessionId);
           if (prior) return { ...prior };
           const scope = await coordinationScope(tx, api.conversationId, assistantWorkspaceId);
           if (!scope.canDelegate(ws.id))

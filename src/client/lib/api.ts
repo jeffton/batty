@@ -50,7 +50,7 @@ const bannerRequests: Record<string, FetchOperation> = {
   "/api/main/queue/remove": "queue-remove",
 };
 
-class HttpError extends Error {
+export class HttpError extends Error {
   constructor(
     message: string,
     readonly status: number,

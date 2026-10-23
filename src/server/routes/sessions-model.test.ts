@@ -72,10 +72,18 @@ test("main HTTP input replaces a persisted model and follows changed settings wi
       );
     }
 
+    for (const url of ["/api/sessions/99999999", "/api/sessions/99999999/messages"]) {
+      const response = await app.inject(url);
+      expect(response.statusCode).toBe(404);
+      expect(response.json().message).toBe("Session not found");
+    }
+
     for (const sessionId of ["main", "99999999"]) {
       const response = await app.inject({ method: "POST", url: `/api/sessions/${sessionId}/stop` });
       expect(response.statusCode).toBe(404);
-      expect(response.json().message).toBe("Unknown subagent");
+      expect(response.json().message).toBe(
+        `Subagent session ${sessionId} not found. Start a new subagent instead.`,
+      );
     }
   } finally {
     closeStreams?.();

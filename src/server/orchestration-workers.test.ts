@@ -1,4 +1,6 @@
 import { expect, test, vi } from "vite-plus/test";
+import { DatabaseSync } from "node:sqlite";
+import { join } from "node:path";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
@@ -7,8 +9,59 @@ import { defineExtension, defineTool, LiveDoc } from "@earendil-works/pi-durable
 import { Type } from "@earendil-works/pi-ai";
 
 import { orchestrationHistory } from "./orchestration-test-history";
+import { ArchivedWorker } from "./orchestration-history";
 
 import { fixture, until } from "./orchestration-test-fixture.js";
+
+test("deleted worker references remain readable while local and node lifecycle commands fail clearly", async () => {
+  const { faux, orchestration, open, directory } = await fixture();
+  faux.setResponses(
+    Array.from({ length: 20 }, () => fauxAssistantMessage([fauxText("retained report")])),
+  );
+  const { harness, main } = await open();
+  const started = await orchestration.nodeCommand("peer", "start", {
+    action: "run",
+    prompt: "complete a worker",
+  });
+  const text = JSON.stringify(started.output);
+  const id = /Session ID: (\d+)/.exec(text)![1]!;
+  await until(async () => (await orchestration.listRunning()).length === 0);
+  expect(await harness.conversation(Number(id) as never, context)).toBeDefined();
+  const reference = await harness.snapshot(ArchivedWorker, id, context);
+  expect(reference).toBeDefined();
+
+  // Simulate deletion without deleting the archived reference in the parent.
+  const database = new DatabaseSync(join(directory, "session.sqlite"));
+  try {
+    database.prepare("DELETE FROM conversations WHERE id=?").run(Number(id));
+    const failure = `Subagent session ${id} not found. Start a new subagent instead.`;
+    await expect(
+      orchestration.queryWorkers({ action: "inspect", sessionId: id }),
+    ).rejects.toMatchObject({
+      message: failure,
+      statusCode: 404,
+    });
+    await expect(orchestration.stopWorker(id)).rejects.toMatchObject({
+      message: failure,
+      statusCode: 404,
+    });
+    expect(await orchestration.canStopWorker(id)).toBe(false);
+    for (const action of ["resume", "queue", "steer", "await", "stop"] as const) {
+      const result = await orchestration.nodeCommand("peer", action, {
+        action,
+        sessionId: id,
+        prompt: "must not recreate the session",
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result.output)).toContain(failure);
+    }
+    expect(await harness.conversation(Number(id) as never, context)).toBeUndefined();
+    expect(await harness.snapshot(ArchivedWorker, id, context)).toEqual(reference);
+    expect(await harness.conversation(main.id, context)).toBeDefined();
+  } finally {
+    database.close();
+  }
+});
 
 test("worker stop availability covers preparation before its first model turn", async () => {
   const { faux, orchestration, open } = await fixture();

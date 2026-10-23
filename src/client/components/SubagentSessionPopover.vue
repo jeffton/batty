@@ -5,7 +5,13 @@ import FullPopover from "@/client/components/FullPopover.vue";
 import SessionHeaderStatus from "@/client/components/SessionHeaderStatus.vue";
 import StreamingStopControl from "@/client/components/StreamingStopControl.vue";
 import SessionTranscriptView from "@/client/components/SessionTranscriptView.vue";
-import { getSessionMessages, getSession, stopSubagent, stopCronRun } from "@/client/lib/api";
+import {
+  HttpError,
+  getSessionMessages,
+  getSession,
+  stopSubagent,
+  stopCronRun,
+} from "@/client/lib/api";
 import { applyServerEvent } from "@/client/lib/session-events";
 import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
 import { sessionEventsPath, sessionHistoryCursor } from "@/client/lib/session-stream";
@@ -30,8 +36,11 @@ const session = ref<SessionState | undefined>(undefined);
 const loading = ref(false);
 const loadingOlderMessages = ref(false);
 const stopping = ref(false);
-const canStop = computed(() =>
-  props.cronRun ? props.cronRun.status === "running" : session.value?.canStopSubagent,
+const missing = ref(false);
+const canStop = computed(
+  () =>
+    !missing.value &&
+    (props.cronRun ? props.cronRun.status === "running" : session.value?.canStopSubagent),
 );
 const errorMessage = ref<string | undefined>(undefined);
 const displayError = computed(() => errorMessage.value ?? session.value?.remote?.error);
@@ -75,6 +84,17 @@ function openStream(): void {
   connection.open();
 }
 
+function handleSessionError(error: unknown): void {
+  if (error instanceof HttpError && error.status === 404) {
+    closeStream();
+    session.value = undefined;
+    missing.value = true;
+    errorMessage.value = undefined;
+  } else {
+    errorMessage.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
 async function ensureSessionLoaded(): Promise<void> {
   if (loading.value) {
     return;
@@ -84,6 +104,7 @@ async function ensureSessionLoaded(): Promise<void> {
   loading.value = true;
   connectionState.value = "connecting";
   errorMessage.value = undefined;
+  missing.value = false;
   try {
     const opened = normalizeSessionState(await getSession(props.sessionId));
     if (!opened) {
@@ -97,7 +118,7 @@ async function ensureSessionLoaded(): Promise<void> {
   } catch (error) {
     if (generation === loadGeneration) {
       connectionState.value = "offline";
-      errorMessage.value = error instanceof Error ? error.message : String(error);
+      handleSessionError(error);
     }
   } finally {
     if (generation === loadGeneration) {
@@ -117,6 +138,7 @@ async function loadOlderMessages(): Promise<void> {
     return;
   }
 
+  const generation = loadGeneration;
   loadingOlderMessages.value = true;
   try {
     const before = current.messages[0]?.id;
@@ -125,11 +147,12 @@ async function loadOlderMessages(): Promise<void> {
       limit: RECENT_SESSION_MESSAGE_WINDOW,
     });
     const latest = session.value;
-    if (latest) session.value = prependHistoryPage(latest, current, page);
+    if (generation === loadGeneration && latest)
+      session.value = prependHistoryPage(latest, current, page);
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : String(error);
+    if (generation === loadGeneration) handleSessionError(error);
   } finally {
-    loadingOlderMessages.value = false;
+    if (generation === loadGeneration) loadingOlderMessages.value = false;
   }
 }
 
@@ -142,8 +165,7 @@ async function stop(): Promise<void> {
     if (props.cronRun) await stopCronRun(props.cronRun.runId);
     else await stopSubagent(props.sessionId);
   } catch (error) {
-    if (generation === loadGeneration)
-      errorMessage.value = error instanceof Error ? error.message : String(error);
+    if (generation === loadGeneration) handleSessionError(error);
   } finally {
     stopping.value = false;
   }
@@ -159,6 +181,7 @@ function handlePopoverToggle(event: Event): void {
   loadGeneration += 1;
   closeStream();
   loading.value = false;
+  loadingOlderMessages.value = false;
   connectionState.value = "connecting";
 }
 
@@ -168,7 +191,9 @@ watch(
     loadGeneration += 1;
     closeStream();
     session.value = undefined;
+    missing.value = false;
     loading.value = false;
+    loadingOlderMessages.value = false;
     errorMessage.value = undefined;
     if (document.getElementById(props.popoverId)?.matches(":popover-open"))
       void ensureSessionLoaded();
@@ -206,6 +231,7 @@ onBeforeUnmount(() => {
         <CircleAlert :size="17" />
       </span>
       <SessionHeaderStatus
+        v-if="!missing"
         :context-tokens="session?.contextTokens"
         :context-window="session?.contextWindow"
         :context-percent="session?.contextPercent"
@@ -217,6 +243,10 @@ onBeforeUnmount(() => {
       <div v-if="loading && !session" class="subagent-session-popover__empty">
         <LoaderCircle :size="18" class="subagent-session-popover__spinner" />
         <span>Loading session…</span>
+      </div>
+
+      <div v-else-if="missing" class="subagent-session-popover__empty" role="status">
+        <span>This session is no longer available.</span>
       </div>
 
       <div

@@ -2,7 +2,13 @@ import { afterEach, expect, test, vi } from "vite-plus/test";
 import { flushPromises, mount } from "@vue/test-utils";
 import SubagentSessionPopover from "./SubagentSessionPopover.vue";
 import type { SessionState } from "@/shared/types";
-import { stopCronRun, stopSubagent } from "@/client/lib/api";
+import {
+  HttpError,
+  getSession,
+  getSessionMessages,
+  stopCronRun,
+  stopSubagent,
+} from "@/client/lib/api";
 
 const session = {
   id: "worker",
@@ -25,7 +31,8 @@ const session = {
   revision: 1,
 } satisfies SessionState;
 
-vi.mock("@/client/lib/api", () => ({
+vi.mock("@/client/lib/api", async (importOriginal) => ({
+  HttpError: (await importOriginal<typeof import("@/client/lib/api")>()).HttpError,
   getSession: vi.fn(async () => session),
   getSessionMessages: vi.fn(),
   stopSubagent: vi.fn(async () => ({ ok: true })),
@@ -236,6 +243,164 @@ test("cron header stops only the current run and follows completion while viewin
     await wrapper.setProps({ cronRun: { runId: "current-run", status: "error" } });
     expect(wrapper.find('[aria-label="Stop cron run"]').exists()).toBe(false);
   } finally {
+    wrapper.unmount();
+  }
+});
+
+test("missing local or remote sessions show an empty state, not a connection failure", async () => {
+  for (const sessionId of ["deleted-worker", "remote:peer:deleted-worker"]) {
+    vi.mocked(getSession).mockRejectedValueOnce(new HttpError("Session not found", 404));
+    const wrapper = mount(SubagentSessionPopover, {
+      props: { popoverId: "missing-popover", sessionId },
+      global: {
+        stubs: {
+          FullPopover: {
+            name: "FullPopover",
+            template: '<div><slot name="header-actions" /><slot /></div>',
+          },
+          SessionHeaderStatus: true,
+          SessionTranscriptView: true,
+        },
+      },
+    });
+    wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState: "open" });
+    await flushPromises();
+    expect(wrapper.get('[role="status"]').text()).toBe("This session is no longer available.");
+    expect(wrapper.findComponent({ name: "SessionHeaderStatus" }).exists()).toBe(false);
+    expect(wrapper.findComponent({ name: "SessionTranscriptView" }).exists()).toBe(false);
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+    wrapper.unmount();
+  }
+});
+
+test("closing during history loading does not lock history after reopening", async () => {
+  vi.stubGlobal(
+    "EventSource",
+    class {
+      close = vi.fn();
+      addEventListener = vi.fn();
+      removeEventListener = vi.fn();
+    },
+  );
+  const historySession = {
+    ...session,
+    totalMessageCount: 2,
+    hasMoreMessages: true,
+    messages: [
+      { id: "100:0", role: "user", timestamp: 1, blocks: [{ type: "text", text: "recent" }] },
+    ] as SessionState["messages"],
+  };
+  vi.mocked(getSession).mockResolvedValueOnce(historySession).mockResolvedValueOnce(historySession);
+  const wrapper = mount(SubagentSessionPopover, {
+    props: { popoverId: "history-popover", sessionId: "worker" },
+    global: {
+      stubs: {
+        FullPopover: {
+          name: "FullPopover",
+          template: '<div><slot name="header-actions" /><slot /></div>',
+        },
+        SessionHeaderStatus: true,
+        SessionTranscriptView: true,
+      },
+    },
+  });
+  const toggle = (newState: "open" | "closed") =>
+    wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState });
+  let finish!: (page: Awaited<ReturnType<typeof getSessionMessages>>) => void;
+  vi.mocked(getSessionMessages).mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  toggle("open");
+  await flushPromises();
+  const transcript = wrapper.getComponent({ name: "SessionTranscriptView" });
+  const pending = transcript.props("loadOlderMessages")();
+  await wrapper.vm.$nextTick();
+  expect(transcript.props("loadingOlderMessages")).toBe(true);
+  toggle("closed");
+  toggle("open");
+  await flushPromises();
+  expect(transcript.props("loadingOlderMessages")).toBe(false);
+  vi.mocked(getSessionMessages).mockResolvedValueOnce({
+    messages: [],
+    totalMessageCount: 1,
+    hasMoreMessages: false,
+  });
+  await transcript.props("loadOlderMessages")();
+  expect(getSessionMessages).toHaveBeenCalledTimes(2);
+  finish({
+    messages: [
+      { id: "99:0", role: "user", timestamp: 0, blocks: [{ type: "text", text: "stale" }] },
+    ],
+    totalMessageCount: 3,
+    hasMoreMessages: true,
+  });
+  await pending;
+  expect(transcript.props("session").messages.map((message: { id: string }) => message.id)).toEqual(
+    ["100:0"],
+  );
+  wrapper.unmount();
+});
+
+test("a deleted session clears a cached transcript when reopened", async () => {
+  const close = vi.fn();
+  vi.stubGlobal(
+    "EventSource",
+    class {
+      close = close;
+      addEventListener = vi.fn();
+      removeEventListener = vi.fn();
+    },
+  );
+  const wrapper = mount(SubagentSessionPopover, {
+    props: { popoverId: "cached-popover", sessionId: "worker" },
+    global: {
+      stubs: {
+        FullPopover: {
+          name: "FullPopover",
+          template: '<div><slot name="header-actions" /><slot /></div>',
+        },
+        SessionHeaderStatus: true,
+        SessionTranscriptView: true,
+      },
+    },
+  });
+  const toggle = (newState: "open" | "closed") =>
+    wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState });
+  toggle("open");
+  await flushPromises();
+  expect(wrapper.findComponent({ name: "SessionTranscriptView" }).exists()).toBe(true);
+  toggle("closed");
+  vi.mocked(getSession).mockRejectedValueOnce(new HttpError("Session not found", 404));
+  toggle("open");
+  await flushPromises();
+  expect(wrapper.findComponent({ name: "SessionTranscriptView" }).exists()).toBe(false);
+  expect(wrapper.get('[role="status"]').text()).toBe("This session is no longer available.");
+  expect(close).toHaveBeenCalled();
+  wrapper.unmount();
+});
+
+test("server and network errors remain errors, not missing-session empty states", async () => {
+  for (const error of [new HttpError("Server failed", 500), new TypeError("Network failed")]) {
+    vi.mocked(getSession).mockRejectedValueOnce(error);
+    const wrapper = mount(SubagentSessionPopover, {
+      props: { popoverId: "failed-popover", sessionId: "worker" },
+      global: {
+        stubs: {
+          FullPopover: {
+            name: "FullPopover",
+            template: '<div><slot name="header-actions" /><slot /></div>',
+          },
+          SessionHeaderStatus: true,
+          SessionTranscriptView: true,
+        },
+      },
+    });
+    wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState: "open" });
+    await flushPromises();
+    expect(wrapper.get(".subagent-session-popover__empty--error").text()).toBe(error.message);
+    expect(wrapper.find('[role="status"]').exists()).toBe(false);
     wrapper.unmount();
   }
 });

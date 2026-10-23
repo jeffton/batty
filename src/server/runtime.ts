@@ -31,6 +31,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { getSupportedThinkingLevels, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { AppConfig } from "./config";
 import { stateDirPath } from "./options";
+import { enableCodemodeAdapters } from "./codemode-native";
 import { listWorkspaces } from "./workspaces";
 import { normalizeMessage, normalizeBlocks } from "./pi-state";
 import { hydrateRuntimeResultArtifacts } from "./runtime-result-artifacts-history";
@@ -240,6 +241,7 @@ export class Runtime {
     // Main uses the installed extensions' tools. Older MCP discovery persisted a
     // fixed allowlist, which otherwise hides tools added by later releases.
     await main.configure({ tools: null }, context);
+    await enableCodemodeAdapters(harness, context);
     if (!(await main.agent(context)).model) {
       await main.configure(
         {

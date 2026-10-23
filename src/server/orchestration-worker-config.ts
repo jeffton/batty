@@ -36,8 +36,10 @@ export function workerTools(
       // Model tools exclude caller-only adapters; workers still need them for nested execution.
       [
         ...agent.tools,
-        ...agent.callable.filter(
-          (tool) => tool.callers?.length === 1 && tool.callers[0] === "tools",
+        ...agent.extensions.flatMap((extension) =>
+          (extension.tools ?? []).filter(
+            (tool) => tool.callers?.length === 1 && tool.callers[0] === "tools",
+          ),
         ),
         ...memoryTools,
       ]

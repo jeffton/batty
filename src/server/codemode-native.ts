@@ -1,6 +1,9 @@
 import type { Context, JsonValue } from "@earendil-works/chord";
 import {
   defineTool,
+  AgentDoc,
+  type Harness,
+  type Cursor,
   type ToolExecutionApi,
   type ToolExecutionResult,
   type ToolRegistration,
@@ -11,6 +14,25 @@ import type { McpService } from "./mcp-service";
 
 export type CodemodeResult = { result: ToolExecutionResult; structured: JsonValue | null };
 export const codemodeAdapterName = (replay: "safe" | "unsafe") => `batty_codemode_${replay}`;
+
+// Persisted worker allowlists predate caller-only adapters. Keep their public tools unchanged.
+export async function enableCodemodeAdapters(harness: Harness, ctx: Context) {
+  let cursor: Cursor | undefined;
+  do {
+    cursor = await harness.commit(async (tx) => {
+      const page = await tx.scanConversations({}, 100, cursor);
+      for (const conversation of page.items) {
+        const agent = await tx.doc(AgentDoc, conversation.id);
+        if (!Array.isArray(agent.tools) || !agent.tools.includes("codemode")) continue;
+        for (const replay of ["safe", "unsafe"] as const) {
+          const name = codemodeAdapterName(replay);
+          if (!agent.tools.includes(name)) agent.tools.push(name);
+        }
+      }
+      return page.next;
+    }, ctx);
+  } while (cursor !== undefined);
+}
 
 /** Native nested receipts retire with their caller; the envelope preserves Batty's program contract. */
 export function createCodemodeAdapters(

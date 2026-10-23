@@ -24,6 +24,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { createOrchestration, OrchestrationDoc } from "./orchestration";
 import { createTools } from "./tools";
 import { CodemodeCalls } from "./codemode";
+import { enableCodemodeAdapters } from "./codemode-native";
 import { persistentBashOperations } from "./durable-bash";
 import { stateDirPath } from "./options";
 import { withoutMainMemory } from "./main-memory-policy";
@@ -114,6 +115,63 @@ async function fixture(persistent = false) {
 }
 
 describe("durable tool bridge", () => {
+  it("enables native codemode when resuming a persisted worker with an old tool allowlist", async () => {
+    const { directory, tools, harness, faux, reopen } = await fixture(true);
+    await fs.writeFile(path.join(directory, "old-worker.txt"), "old worker resumed");
+    const worker = await harness.createConversation(
+      {
+        ownership: { kind: "ownerless" },
+        agent: {
+          model: { provider: "faux", modelId: "faux-1" },
+          cwd: directory,
+          tools: tools.extension.tools!.filter((tool) => !tool.name.startsWith("batty_codemode_")),
+        },
+      },
+      BACKGROUND_CONTEXT,
+    );
+    expect(
+      (await worker.agent(BACKGROUND_CONTEXT)).callable.some(
+        (tool) => tool.name === "batty_codemode_safe",
+      ),
+    ).toBe(false);
+    const restarted = await reopen();
+    await enableCodemodeAdapters(restarted.harness, BACKGROUND_CONTEXT);
+    await enableCodemodeAdapters(restarted.harness, BACKGROUND_CONTEXT);
+    const resumed = (await restarted.harness.conversation(worker.id, BACKGROUND_CONTEXT))!;
+    expect(
+      (await resumed.agent(BACKGROUND_CONTEXT)).tools.some((tool) =>
+        tool.name.startsWith("batty_codemode_"),
+      ),
+    ).toBe(false);
+    expect(
+      (await resumed.agent(BACKGROUND_CONTEXT)).callable.filter((tool) =>
+        tool.name.startsWith("batty_codemode_"),
+      ),
+    ).toHaveLength(2);
+    faux.setResponses([
+      fauxAssistantMessage(
+        [fauxToolCall("codemode", { code: 'text(await tools.read({path:"old-worker.txt"}));' })],
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage([fauxText("done")]),
+    ]);
+    expect(
+      (
+        await (
+          await resumed.submit({ type: "input", content: "resume smoke test" }, BACKGROUND_CONTEXT)
+        ).wait(BACKGROUND_CONTEXT)
+      ).status,
+    ).toBe("done");
+    const view = await resumed.viewState(BACKGROUND_CONTEXT);
+    expect(JSON.stringify(view.value.entries)).toContain("old worker resumed");
+    expect(
+      view.value.entries
+        .filter((entry) => entry.kind === "pi.tool-result")
+        .every((entry) => !(entry.model?.[0] as any)?.isError),
+    ).toBe(true);
+    view.dispose();
+  });
+
   it.skipIf(process.platform === "win32")(
     "cancels a native nested persistent shell on a sandbox deadline",
     async () => {

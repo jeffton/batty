@@ -2,7 +2,7 @@
 
 New calls use SDK 1.4 `api.executeTool()`. Caller-only safe/unsafe adapters preserve each target's replay policy and Batty's output, MCP structured value, details, control and image handling. Native nested results live in caller-scoped documents until settlement; terminal task records retain small receipts. Sandbox-local cancellation aborts native children, while service shutdown preserves replayable work. Workers retain caller-only tools without exposing them to the model.
 
-Existing callers consume their recorded legacy journal before admitting native calls, preventing repeated side effects. The legacy task definition remains registered for in-flight work.
+Existing callers consume their recorded legacy journal before admitting native calls, preventing repeated side effects. The legacy task definition remains registered for in-flight work. Startup adds only the internal adapter names to persisted explicit allowlists containing codemode, so resumed workers can use native calls without changing their public tools.
 
 ## Legacy codemode receipts
 

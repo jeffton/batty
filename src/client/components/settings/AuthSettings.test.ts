@@ -26,6 +26,39 @@ function setup() {
 }
 
 describe("Auth settings forms", () => {
+  it("groups provider families before other integrations regardless of connection status", async () => {
+    const { store, wrapper } = setup();
+    try {
+      store.providerAuth.providers = [
+        { id: "openrouter", name: "OpenRouter", connected: true },
+        { id: "anthropic", name: "Anthropic", connected: true },
+        { id: "openai-codex", name: "OpenAI Codex (legacy)", connected: true },
+        { id: "google", name: "Google", connected: false },
+        { id: "openai", name: "OpenAI", connected: false },
+      ];
+      await flushPromises();
+      const expected = [
+        "Edit ChatGPT subscription",
+        "Edit OpenAI Codex (legacy)",
+        "Edit Anthropic (Claude Pro/Max)",
+        "Edit Gemini API key",
+        "Edit OpenRouter API key",
+        "Edit Brave Search API key",
+      ];
+      const labels = () =>
+        wrapper
+          .findAll('button[aria-label^="Edit "]')
+          .map((button) => button.attributes("aria-label"));
+      expect(labels()).toEqual(expected);
+      store.providerAuth.providers[0]!.connected = false;
+      store.providerAuth.providers[4]!.connected = true;
+      await flushPromises();
+      expect(labels()).toEqual(expected);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it.each([
     ["openai-codex", "OpenAI Codex (legacy)", "Connect Codex (legacy)"],
     ["anthropic", "Anthropic (Claude Pro/Max)", "Connect Claude"],

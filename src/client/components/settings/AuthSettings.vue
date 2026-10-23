@@ -42,15 +42,10 @@ const apiKeyErrors = reactive<Record<string, string>>({
 });
 
 const providerOrder = computed(() => {
-  const supportedIds = new Set([...Object.keys(SUBSCRIPTION_PROVIDERS), "google", "openrouter"]);
-  return [...store.providerAuth.providers]
-    .filter((provider) => supportedIds.has(provider.id))
-    .sort((a, b) => {
-      if (a.connected !== b.connected) {
-        return a.connected ? -1 : 1;
-      }
-      return a.name.localeCompare(b.name);
-    });
+  const orderedIds = ["openai", "openai-codex", "anthropic", "google", "openrouter"];
+  return store.providerAuth.providers
+    .filter((provider) => orderedIds.includes(provider.id))
+    .sort((a, b) => orderedIds.indexOf(a.id) - orderedIds.indexOf(b.id));
 });
 const hasAuthAttempt = computed(() => authAttemptId.value.length > 0);
 const authExpiryLabel = computed(() =>
@@ -221,40 +216,6 @@ watch(
 <template>
   <section class="settings-popover__section">
     <SettingsCredential
-      :title="itemTitle(BRAVE_SEARCH_ITEM_ID)"
-      :status="itemStatusLabel(BRAVE_SEARCH_ITEM_ID)"
-      :connected="itemConnected(BRAVE_SEARCH_ITEM_ID)"
-      :expanded="isExpanded(BRAVE_SEARCH_ITEM_ID)"
-      :disabled="braveSearchSaving"
-      @toggle="toggleExpanded(BRAVE_SEARCH_ITEM_ID)"
-    >
-      <form class="settings-popover__editor" @submit.prevent="saveBraveSearchKey">
-        <SettingsField label="API key">
-          <input
-            v-model="braveSearchInput"
-            class="settings-popover__input"
-            type="text"
-            autocomplete="off"
-            placeholder="Paste Brave Search API key"
-            :disabled="braveSearchSaving"
-          />
-          <template #action>
-            <button
-              class="settings-popover__action settings-popover__action--primary"
-              type="submit"
-              :disabled="braveSearchSaving"
-            >
-              <Save :size="14" /> {{ braveSearchSaving ? "Saving…" : "Save" }}
-            </button>
-          </template>
-        </SettingsField>
-        <div v-if="braveSearchError" class="settings-popover__error" role="alert">
-          {{ braveSearchError }}
-        </div>
-      </form>
-    </SettingsCredential>
-
-    <SettingsCredential
       v-for="provider in providerOrder"
       :key="provider.id"
       :title="itemTitle(provider.id)"
@@ -388,6 +349,40 @@ watch(
         </SettingsField>
         <div v-if="apiKeyErrors[provider.id]" class="settings-popover__error" role="alert">
           {{ apiKeyErrors[provider.id] }}
+        </div>
+      </form>
+    </SettingsCredential>
+
+    <SettingsCredential
+      :title="itemTitle(BRAVE_SEARCH_ITEM_ID)"
+      :status="itemStatusLabel(BRAVE_SEARCH_ITEM_ID)"
+      :connected="itemConnected(BRAVE_SEARCH_ITEM_ID)"
+      :expanded="isExpanded(BRAVE_SEARCH_ITEM_ID)"
+      :disabled="braveSearchSaving"
+      @toggle="toggleExpanded(BRAVE_SEARCH_ITEM_ID)"
+    >
+      <form class="settings-popover__editor" @submit.prevent="saveBraveSearchKey">
+        <SettingsField label="API key">
+          <input
+            v-model="braveSearchInput"
+            class="settings-popover__input"
+            type="text"
+            autocomplete="off"
+            placeholder="Paste Brave Search API key"
+            :disabled="braveSearchSaving"
+          />
+          <template #action>
+            <button
+              class="settings-popover__action settings-popover__action--primary"
+              type="submit"
+              :disabled="braveSearchSaving"
+            >
+              <Save :size="14" /> {{ braveSearchSaving ? "Saving…" : "Save" }}
+            </button>
+          </template>
+        </SettingsField>
+        <div v-if="braveSearchError" class="settings-popover__error" role="alert">
+          {{ braveSearchError }}
         </div>
       </form>
     </SettingsCredential>

@@ -31,6 +31,16 @@ Main chat submissions use the default model and thinking level selected in Setti
 
 `BATTY_HOST` and `BATTY_PORT` control the listener; `BATTY_SELF_PATH` selects the application files. `BATTY_PROVIDER_AUTH_PATH` selects the SDK's locked provider credential store. Application secrets and passkeys remain in the data root. Environment settings are stored in `.batty/environment.json`.
 
+## Provider subscriptions
+
+Settings offers **ChatGPT subscription** (`openai`), **OpenAI Codex (legacy)** (`openai-codex`) and **Anthropic (Claude Pro/Max)** (`anthropic`). Credentials stay provider-scoped in the SDK store. ChatGPT and Codex use the SDK browser flow with a pasted callback URL when signing in from another machine. Anthropic uses the SDK’s copy-code flow.
+
+The ChatGPT flow can require organization approval (`3p_delegated_access_policy_denied`); Codex uses a separate authorization flow and remains subject to workspace Codex permissions. See [OpenAI authentication](https://developers.openai.com/codex/auth) and [Pi’s report](https://github.com/earendil-works/pi/issues/11033).
+
+Pi 1.4 supports Anthropic subscription OAuth technically, but [Anthropic’s authentication policy](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use) does not permit third-party apps to offer Claude.ai login or route Pro/Max subscription requests. SDK support is not permission for that use.
+
+Flows and IDs follow the installed [Pi SDK documentation](https://github.com/earendil-works/pi/blob/v1.4.0/packages/ai/README.md#oauth-providers) and [1.4.0 release notes](https://github.com/earendil-works/pi/releases/tag/v1.4.0). The generic provider-auth API uses `POST /api/provider-auth/start` with `{ providerId }`, `POST /api/provider-auth/complete` and `GET /api/provider-auth/attempt/:attemptId`; the OpenAI-specific paths are removed.
+
 ## Remote instances
 
 See [remote instances](remote-instances.md) for node-token provisioning, remote workers and offline mirrors.

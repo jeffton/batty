@@ -4,7 +4,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import AuthSettings from "./AuthSettings.vue";
 import { useAppStore } from "@/client/stores/app";
 
-vi.mock("@/client/lib/provider-auth", () => ({ watchOpenAIAuthAttempt: vi.fn() }));
+vi.mock("@/client/lib/provider-auth", () => ({ watchProviderAuthAttempt: vi.fn() }));
 
 beforeEach(() => setActivePinia(createPinia()));
 
@@ -13,6 +13,8 @@ function setup() {
   store.providerAuth = {
     providers: [
       { id: "openai", name: "OpenAI", connected: false },
+      { id: "openai-codex", name: "OpenAI Codex (legacy)", connected: false },
+      { id: "anthropic", name: "Anthropic (Claude Pro/Max)", connected: false },
       { id: "google", name: "Google", connected: false },
     ],
   };
@@ -24,6 +26,47 @@ function setup() {
 }
 
 describe("Auth settings forms", () => {
+  it.each([
+    ["openai-codex", "OpenAI Codex (legacy)", "Connect Codex (legacy)"],
+    ["anthropic", "Anthropic (Claude Pro/Max)", "Connect Claude"],
+  ])("keeps the %s attempt in its own editor", async (providerId, title, connectLabel) => {
+    const { store, wrapper } = setup();
+    const start = vi.spyOn(store, "startProviderAuth").mockResolvedValue({
+      attemptId: "attempt",
+      providerId,
+      authUrl: "https://example.test/login",
+      instructions: "Copy the code",
+      expiresAt: Date.now() + 60_000,
+    });
+    const complete = vi.spyOn(store, "completeProviderAuth").mockResolvedValue();
+    try {
+      await wrapper.get(`[aria-label="Edit ${title}"]`).trigger("click");
+      if (providerId === "anthropic") {
+        expect(wrapper.text()).toContain("Anthropic does not permit");
+        expect(wrapper.get("a").attributes("href")).toContain(
+          "legal-and-compliance#authentication-and-credential-use",
+        );
+      }
+      await wrapper
+        .findAll("button")
+        .find((button) => button.text() === connectLabel)!
+        .trigger("click");
+      await flushPromises();
+      expect(start).toHaveBeenCalledExactlyOnceWith(providerId);
+      await wrapper.get('[aria-label="Edit ChatGPT subscription"]').trigger("click");
+      expect(wrapper.find("textarea").exists()).toBe(false);
+      expect(wrapper.find('a[href="https://example.test/login"]').exists()).toBe(false);
+      await wrapper.get(`[aria-label="Edit ${title}"]`).trigger("click");
+      await wrapper.get("textarea").setValue(" code#state ");
+      await wrapper.get("form").trigger("submit");
+      await flushPromises();
+      expect(complete).toHaveBeenCalledWith("attempt", "code#state");
+      expect(wrapper.find("textarea").exists()).toBe(false);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it("keeps failed API-key drafts, then saves the trimmed key and closes its editor", async () => {
     const { store, wrapper } = setup();
     const save = vi.spyOn(store, "setProviderApiKey");
@@ -48,14 +91,14 @@ describe("Auth settings forms", () => {
 
   it("starts subscription login and submits a callback without changing its URL", async () => {
     const { store, wrapper } = setup();
-    const start = vi.spyOn(store, "startOpenAIProviderAuth").mockResolvedValue({
+    const start = vi.spyOn(store, "startProviderAuth").mockResolvedValue({
       attemptId: "attempt",
       providerId: "openai",
       authUrl: "https://example.test/login",
       instructions: "Finish sign-in",
       expiresAt: Date.now() + 60_000,
     });
-    const complete = vi.spyOn(store, "completeOpenAIProviderAuth").mockResolvedValue();
+    const complete = vi.spyOn(store, "completeProviderAuth").mockResolvedValue();
     try {
       await wrapper.get('[aria-label="Edit ChatGPT subscription"]').trigger("click");
       await wrapper
@@ -63,7 +106,7 @@ describe("Auth settings forms", () => {
         .find((button) => button.text() === "Connect ChatGPT")!
         .trigger("click");
       await flushPromises();
-      expect(start).toHaveBeenCalledOnce();
+      expect(start).toHaveBeenCalledExactlyOnceWith("openai");
       expect(wrapper.get("a").attributes("href")).toBe("https://example.test/login");
       const callback = "http://127.0.0.1:1455/auth/callback?code=abc&state=def";
       await wrapper.get("textarea").setValue(` ${callback} `);

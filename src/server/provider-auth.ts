@@ -8,6 +8,8 @@ import type {
   ProviderAuthStatus,
 } from "@/shared/types";
 
+import { SUBSCRIPTION_PROVIDERS, type SubscriptionProviderId } from "@/shared/provider-auth";
+
 const PROVIDER_AUTH_TTL_MS = 10 * 60 * 1000;
 const API_KEY_PROVIDER_NAMES = {
   google: "Gemini",
@@ -127,7 +129,9 @@ export class ProviderAuthService {
   getStatus(): ProviderAuthStatus {
     this.cleanupExpiredAttempts();
     const providers = [
-      statusForProvider(this.readCredential, "openai", "ChatGPT subscription"),
+      ...Object.entries(SUBSCRIPTION_PROVIDERS).map(([providerId, provider]) =>
+        statusForProvider(this.readCredential, providerId, provider.name),
+      ),
       ...Object.entries(API_KEY_PROVIDER_NAMES).map(([providerId, name]) =>
         statusForProvider(this.readCredential, providerId, name),
       ),
@@ -177,7 +181,7 @@ export class ProviderAuthService {
     return this.attemptStatus(attemptId, attempt);
   }
 
-  start(providerId: "openai"): Promise<ProviderAuthStartResponse> {
+  start(providerId: SubscriptionProviderId): Promise<ProviderAuthStartResponse> {
     const started = this.startQueue.then(() => this.startAttempt(providerId));
     this.startQueue = started.then(
       () => {},
@@ -186,7 +190,9 @@ export class ProviderAuthService {
     return started;
   }
 
-  private async startAttempt(providerId: "openai"): Promise<ProviderAuthStartResponse> {
+  private async startAttempt(
+    providerId: SubscriptionProviderId,
+  ): Promise<ProviderAuthStartResponse> {
     this.cleanupExpiredAttempts();
     const deviceId = await this.getDeviceId();
     await this.dispose();
@@ -222,7 +228,11 @@ export class ProviderAuthService {
       }
     };
     const prompt = async (request: AuthPrompt): Promise<string> =>
-      request.type === "select" ? "browser" : manualInput.promise;
+      request.type === "select"
+        ? providerId === "anthropic"
+          ? "copy_code"
+          : "browser"
+        : manualInput.promise;
 
     const loginPromise = this.modelRuntime
       .login(
@@ -287,7 +297,7 @@ export class ProviderAuthService {
     }
 
     if (!callbackUrl.trim()) {
-      throw new Error("Missing callback URL");
+      throw new Error("Missing authorization code or callback URL");
     }
 
     attempt.manualInput.resolve(callbackUrl.trim());

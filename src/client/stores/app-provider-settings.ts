@@ -1,5 +1,5 @@
 import {
-  completeOpenAIProviderAuth,
+  completeProviderAuth,
   getBattyAgentsFile,
   getModels,
   getProviderAuthStatus,
@@ -12,8 +12,9 @@ import {
   setMemoryModel as setMemoryModelRequest,
   setMemoryLanguage as setMemoryLanguageRequest,
   setProviderApiKey,
-  startOpenAIProviderAuth,
+  startProviderAuth,
 } from "@/client/lib/api";
+import type { SubscriptionProviderId } from "@/shared/provider-auth";
 import { applyAppAppearance } from "@/client/lib/appearance";
 import type { AppAppearance } from "@/shared/appearance";
 import type { AppActionContext } from "./app-state";
@@ -27,16 +28,16 @@ export const providerSettingsActions = {
     this.providerAuth = await getProviderAuthStatus();
   },
 
-  async startOpenAIProviderAuth() {
-    return startOpenAIProviderAuth();
+  async startProviderAuth(providerId: SubscriptionProviderId) {
+    return startProviderAuth(providerId);
   },
 
-  async completeOpenAIProviderAuth(
+  async completeProviderAuth(
     this: AppActionContext,
     attemptId: string,
     callbackUrl: string,
   ): Promise<void> {
-    this.providerAuth = await completeOpenAIProviderAuth(attemptId, callbackUrl);
+    this.providerAuth = await completeProviderAuth(attemptId, callbackUrl);
     await this.bootstrap();
   },
 

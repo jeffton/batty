@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { isSubscriptionProvider } from "@/shared/provider-auth";
 import path from "node:path";
 import { createReadStream } from "node:fs";
 import fastify from "fastify";
@@ -334,13 +335,18 @@ app.get<{ Querystring: { provider: string; model: string } }>(
   "/api/provider-usage",
   async (request) => runtime.providerUsage.getUsage(request.query.provider, request.query.model),
 );
-app.post("/api/provider-auth/openai/start", async () => runtime.providerAuth.start("openai"));
+app.post<{ Body: { providerId: string } }>("/api/provider-auth/start", async (request) => {
+  if (!isSubscriptionProvider(request.body.providerId)) {
+    throw Object.assign(new Error("Unsupported subscription provider"), { statusCode: 400 });
+  }
+  return runtime.providerAuth.start(request.body.providerId);
+});
 app.get<{ Params: { attemptId: string } }>(
-  "/api/provider-auth/openai/attempt/:attemptId",
+  "/api/provider-auth/attempt/:attemptId",
   async (request) => runtime.providerAuth.getAttemptStatus(request.params.attemptId),
 );
 app.post<{ Body: { attemptId: string; callbackUrl: string } }>(
-  "/api/provider-auth/openai/complete",
+  "/api/provider-auth/complete",
   async (request) => {
     await runtime.providerAuth.complete(request.body.attemptId, request.body.callbackUrl);
     return runtime.providerAuth.getStatus();

@@ -5,7 +5,12 @@ import SettingsField from "./SettingsField.vue";
 import { computed, reactive, ref, watch } from "vue";
 import { useAppStore } from "@/client/stores/app";
 import { formatShortDateTime } from "@/client/lib/formatting";
-import { watchOpenAIAuthAttempt } from "@/client/lib/provider-auth";
+import { watchProviderAuthAttempt } from "@/client/lib/provider-auth";
+import {
+  SUBSCRIPTION_PROVIDERS,
+  isSubscriptionProvider,
+  type SubscriptionProviderId,
+} from "@/shared/provider-auth";
 
 const props = defineProps<{ open: boolean }>();
 const expandedItemId = defineModel<string>("expandedItemId");
@@ -23,6 +28,7 @@ const apiKeyInputs = reactive<Record<"google" | "openrouter", string>>({
 });
 const braveSearchInput = ref("");
 const braveSearchSaving = ref(false);
+const authProviderId = ref<SubscriptionProviderId>("openai");
 const authAttemptId = ref("");
 const authUrl = ref("");
 const authInstructions = ref("");
@@ -36,7 +42,7 @@ const apiKeyErrors = reactive<Record<string, string>>({
 });
 
 const providerOrder = computed(() => {
-  const supportedIds = new Set(["openai", "google", "openrouter"]);
+  const supportedIds = new Set([...Object.keys(SUBSCRIPTION_PROVIDERS), "google", "openrouter"]);
   return [...store.providerAuth.providers]
     .filter((provider) => supportedIds.has(provider.id))
     .sort((a, b) => {
@@ -46,20 +52,16 @@ const providerOrder = computed(() => {
       return a.name.localeCompare(b.name);
     });
 });
-const hasOpenAIAttempt = computed(() => authAttemptId.value.length > 0);
+const hasAuthAttempt = computed(() => authAttemptId.value.length > 0);
 const authExpiryLabel = computed(() =>
   authExpiresAt.value == null ? "" : formatShortDateTime(authExpiresAt.value),
 );
-function isOpenAIProvider(providerId: string): boolean {
-  return providerId === "openai";
-}
-
 function itemTitle(itemId: string): string {
   if (itemId === BRAVE_SEARCH_ITEM_ID) {
     return "Brave Search API key";
   }
-  if (itemId === "openai") {
-    return "ChatGPT subscription";
+  if (isSubscriptionProvider(itemId)) {
+    return SUBSCRIPTION_PROVIDERS[itemId].name;
   }
   if (itemId === "google") {
     return "Gemini API key";
@@ -80,7 +82,7 @@ function itemConnected(itemId: string): boolean {
 }
 
 function itemStatusLabel(itemId: string): string {
-  if (itemId === "openai") {
+  if (isSubscriptionProvider(itemId)) {
     const provider = store.providerAuth.providers.find((candidate) => candidate.id === itemId);
     if (provider?.connected && provider.connectedEmail) {
       return `Connected · ${provider.connectedEmail}`;
@@ -110,13 +112,14 @@ function apiKeyPlaceholder(providerId: "google" | "openrouter"): string {
   return providerId === "google" ? "Paste Gemini API key" : "Paste OpenRouter API key";
 }
 
-async function startOpenAIAuth(): Promise<void> {
+async function startSubscriptionAuth(providerId: SubscriptionProviderId): Promise<void> {
   resetAttempt();
-  expandedItemId.value = "openai";
+  authProviderId.value = providerId;
+  expandedItemId.value = providerId;
   connectPending.value = true;
   authError.value = "";
   try {
-    const result = await store.startOpenAIProviderAuth();
+    const result = await store.startProviderAuth(providerId);
     authAttemptId.value = result.attemptId;
     authUrl.value = result.authUrl;
     authInstructions.value = result.instructions ?? "";
@@ -129,7 +132,7 @@ async function startOpenAIAuth(): Promise<void> {
   }
 }
 
-async function completeOpenAIAuth(): Promise<void> {
+async function completeSubscriptionAuth(): Promise<void> {
   if (!authAttemptId.value || !authInput.value.trim()) {
     return;
   }
@@ -137,7 +140,7 @@ async function completeOpenAIAuth(): Promise<void> {
   completePending.value = true;
   authError.value = "";
   try {
-    await store.completeOpenAIProviderAuth(authAttemptId.value, authInput.value.trim());
+    await store.completeProviderAuth(authAttemptId.value, authInput.value.trim());
     resetAttempt();
     expandedItemId.value = undefined;
   } catch (error) {
@@ -147,7 +150,7 @@ async function completeOpenAIAuth(): Promise<void> {
   }
 }
 
-watchOpenAIAuthAttempt(
+watchProviderAuthAttempt(
   computed(() => (completePending.value ? "" : authAttemptId.value)),
   async () => {
     resetAttempt();
@@ -259,36 +262,58 @@ watch(
       :connected="itemConnected(provider.id)"
       :expanded="isExpanded(provider.id)"
       :disabled="
-        provider.id === 'openai' ? connectPending || completePending : apiKeySaving[provider.id]
+        isSubscriptionProvider(provider.id)
+          ? connectPending || completePending
+          : apiKeySaving[provider.id]
       "
       @toggle="toggleExpanded(provider.id)"
     >
-      <template v-if="isOpenAIProvider(provider.id)">
+      <template v-if="isSubscriptionProvider(provider.id)">
         <div class="settings-popover__help">
-          Sign in with your ChatGPT subscription to use <code>openai/*</code> models.
+          Sign in with your subscription to use <code>{{ provider.id }}/*</code> models.
+        </div>
+        <div v-if="provider.id === 'openai'" class="settings-popover__help">
+          Work subscriptions may require organization approval. Codex (legacy) uses a separate
+          sign-in flow.
+        </div>
+        <div v-if="provider.id === 'openai-codex'" class="settings-popover__help">
+          Uses Codex subscription access, subject to your workspace’s Codex permissions.
+        </div>
+        <div v-if="provider.id === 'anthropic'" class="settings-popover__help">
+          Pi supports this login, but Anthropic does not permit Claude subscription login in
+          third-party apps.
+          <a
+            href="https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Anthropic policy</a
+          >
         </div>
         <button
           class="settings-popover__action"
           type="button"
           :disabled="connectPending || completePending"
-          @click="startOpenAIAuth"
+          @click="startSubscriptionAuth(provider.id)"
         >
           <LogIn :size="16" />
           {{
             connectPending
               ? "Starting…"
-              : hasOpenAIAttempt
+              : hasAuthAttempt && authProviderId === provider.id
                 ? "Restart connect flow"
                 : provider.connected
                   ? "Reconnect account"
-                  : "Connect ChatGPT"
+                  : SUBSCRIPTION_PROVIDERS[provider.id].connectLabel
           }}
         </button>
-        <div v-if="hasOpenAIAttempt" class="settings-popover__attempt">
+        <div
+          v-if="hasAuthAttempt && authProviderId === provider.id"
+          class="settings-popover__attempt"
+        >
           <div v-if="authInstructions" class="settings-popover__help">
             {{ authInstructions }}
           </div>
-          <div class="settings-popover__help">
+          <div v-if="provider.id !== 'anthropic'" class="settings-popover__help">
             Finish sign-in in your browser. If this stays open, paste the full callback URL from the
             address bar, even if the page cannot load.
           </div>
@@ -303,13 +328,19 @@ watch(
           >
             <ExternalLink :size="14" /> Open sign-in page
           </a>
-          <form class="settings-popover__editor" @submit.prevent="completeOpenAIAuth">
-            <SettingsField label="Callback URL">
+          <form class="settings-popover__editor" @submit.prevent="completeSubscriptionAuth">
+            <SettingsField
+              :label="provider.id === 'anthropic' ? 'Authorization code' : 'Callback URL'"
+            >
               <textarea
                 v-model="authInput"
                 class="settings-popover__input settings-popover__textarea"
                 rows="4"
-                placeholder="Paste the full http://127.0.0.1:1455/auth/callback URL"
+                :placeholder="
+                  provider.id === 'anthropic'
+                    ? 'Paste the code Anthropic shows (code#state)'
+                    : 'Paste the full callback URL'
+                "
                 :disabled="completePending"
               />
             </SettingsField>
@@ -322,7 +353,13 @@ watch(
             </button>
           </form>
         </div>
-        <div v-if="authError" class="settings-popover__error" role="alert">{{ authError }}</div>
+        <div
+          v-if="authError && authProviderId === provider.id"
+          class="settings-popover__error"
+          role="alert"
+        >
+          {{ authError }}
+        </div>
       </template>
 
       <form

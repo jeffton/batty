@@ -1,9 +1,9 @@
 import { watch, type Ref } from "vue";
-import { getOpenAIAuthAttemptStatus } from "./api";
+import { getProviderAuthAttemptStatus } from "./api";
 import { useAppStore } from "@/client/stores/app";
 import { reportBrowserError } from "./browser-errors";
 
-export function watchOpenAIAuthAttempt(
+export function watchProviderAuthAttempt(
   attemptId: Ref<string>,
   onCompleted: () => Promise<void>,
   onError: (error: unknown) => void,
@@ -45,7 +45,7 @@ export function watchOpenAIAuthAttempt(
       if (reconciled === key) return;
       reconciled = key;
       try {
-        const result = await getOpenAIAuthAttemptStatus(id);
+        const result = await getProviderAuthAttemptStatus(id);
         if (!cancelled) await finish(result);
       } catch (error) {
         if (!cancelled) {

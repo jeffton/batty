@@ -4,6 +4,7 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
   RegistrationResponseJSON,
 } from "@simplewebauthn/browser";
+import type { SubscriptionProviderId } from "@/shared/provider-auth";
 import { withBaseUrl } from "@/client/lib/base-url";
 import type { AppAppearance } from "@/shared/appearance";
 import type { RemoteSettings } from "@/shared/remotes";
@@ -224,23 +225,27 @@ export function cancelMcpAuthAttempt(attemptId: string): Promise<McpAuthAttempt>
   return request(`/api/mcp/auth/${encodeURIComponent(attemptId)}`, { method: "DELETE" });
 }
 
-export function getOpenAIAuthAttemptStatus(
+export function getProviderAuthAttemptStatus(
   attemptId: string,
 ): Promise<{ completed: boolean; error?: string }> {
-  return request(`/api/provider-auth/openai/attempt/${encodeURIComponent(attemptId)}`);
+  return request(`/api/provider-auth/attempt/${encodeURIComponent(attemptId)}`);
 }
 
-export function startOpenAIProviderAuth(): Promise<ProviderAuthStartResponse> {
-  return request("/api/provider-auth/openai/start", {
+export function startProviderAuth(
+  providerId: SubscriptionProviderId,
+): Promise<ProviderAuthStartResponse> {
+  return request("/api/provider-auth/start", {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ providerId }),
   });
 }
 
-export function completeOpenAIProviderAuth(
+export function completeProviderAuth(
   attemptId: string,
   callbackUrl: string,
 ): Promise<ProviderAuthStatus> {
-  return request("/api/provider-auth/openai/complete", {
+  return request("/api/provider-auth/complete", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ attemptId, callbackUrl }),

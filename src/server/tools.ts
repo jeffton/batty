@@ -38,6 +38,7 @@ import { McpService } from "./mcp-service";
 import { createCodemodeTool } from "./codemode";
 import { persistentBashOperations } from "./durable-bash";
 import { createBattyReadTool } from "./read-tool";
+import { createCodemodeAdapters } from "./codemode-native";
 import { createCodemodeTasks } from "./codemode-tasks";
 import { cancelPersistentBashJobs } from "./durable-bash-cancel";
 import { createBashAbortWatcher } from "./tools-abort-watcher";
@@ -215,6 +216,7 @@ export async function createTools(
     return [...all.values()].filter(
       (tool) =>
         tool.name !== "memory_overview" &&
+        !tool.name.startsWith("batty_codemode_") &&
         (conversationPolicy(
           isMain ? "assistant" : "worker",
           worker?.workspaceId,
@@ -225,7 +227,8 @@ export async function createTools(
   };
   const nestedTask = createCodemodeTasks(resolveTools, mcp, jobsDir);
   local.push(
-    createCodemodeTool(resolveTools, mcp, sandboxes, nestedTask, async (id, ctx) => {
+    ...createCodemodeAdapters(resolveTools, mcp),
+    createCodemodeTool(resolveTools, mcp, sandboxes, async (id, ctx) => {
       if (!harness)
         throw new Error("Tools must bindHarness() before cancelling nested codemode calls");
       await harness.abortTask(id, withoutAbortSignal(ctx));

@@ -33,7 +33,14 @@ export function workerTools(
     : [];
   return [
     ...new Set(
-      [...agent.tools, ...memoryTools]
+      // Model tools exclude caller-only adapters; workers still need them for nested execution.
+      [
+        ...agent.tools,
+        ...agent.callable.filter(
+          (tool) => tool.callers?.length === 1 && tool.callers[0] === "tools",
+        ),
+        ...memoryTools,
+      ]
         .filter(
           (tool) =>
             tool.name !== "memory_overview" && (mainMemory || !MAIN_MEMORY_TOOLS.has(tool.name)),

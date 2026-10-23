@@ -11,6 +11,7 @@ import {
 import {
   defineDoc,
   defineTool,
+  NestedCallDoc,
   type ToolExecutionApi,
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
@@ -19,8 +20,8 @@ import { Type } from "typebox";
 import { Compile } from "typebox/compile";
 import type { McpService } from "./mcp-service";
 import type { CodemodeCall } from "../shared/types";
-import type { createCodemodeTasks } from "./codemode-tasks";
 import { MAIN_MEMORY_TOOLS } from "./main-memory-policy";
+import { codemodeAdapterName, type CodemodeResult } from "./codemode-native";
 import { isPiShellToolName } from "../shared/pi-tools";
 
 export const CodemodeCalls = defineDoc<{
@@ -47,7 +48,6 @@ export function createCodemodeTool(
   resolveTools: (api: ToolExecutionApi, ctx: Context) => Promise<ToolRegistration[]>,
   mcp: McpService,
   sandboxes: Set<CodemodeSandbox>,
-  nested: ReturnType<typeof createCodemodeTasks>,
   abortNested: (id: import("@earendil-works/pi-durable").TaskId, ctx: Context) => Promise<void>,
 ) {
   return defineTool({
@@ -117,58 +117,84 @@ export function createCodemodeTool(
               throw new Error(
                 `Invalid arguments for ${tool.name}: ${JSON.stringify([...validator.Errors(args)])}`,
               );
-            const taskId = await api.commit(async (tx) => {
-              const journal = await tx.doc(CodemodeCalls, api.taskId);
-              const recorded = journal.calls[index];
-              if (recorded) {
-                if (
-                  recorded.name !== tool.name ||
-                  JSON.stringify(recorded.args) !== JSON.stringify(args)
-                )
-                  throw new Error(`Codemode replay changed nested call ${index}`);
-                return recorded.taskId as import("@earendil-works/pi-durable").TaskId<{
-                  result: import("@earendil-works/pi-durable").ToolExecutionResult;
-                  structured: JsonValue | null;
-                }>;
+            // Existing callers must consume their legacy receipts, never repeat side effects.
+            const legacy = (await api.snapshot(CodemodeCalls, api.taskId, ctx))?.calls[index];
+            let value: CodemodeResult;
+            if (legacy) {
+              if (legacy.name !== tool.name || JSON.stringify(legacy.args) !== JSON.stringify(args))
+                throw new Error(`Codemode replay changed nested call ${index}`);
+              const taskId =
+                legacy.taskId as import("@earendil-works/pi-durable").TaskId<CodemodeResult>;
+              const abort = () => {
+                // Harness shutdown must preserve resumable tasks. Explicit harness
+                // aborts already cascade through ownership; only sandbox-local
+                // deadlines/unawaited calls need an additional task abort.
+                if (ctx.abortSignal?.aborted) return;
+                aborts.push(
+                  abortNested(taskId, ctx).catch((error) => {
+                    abortErrors.push(error);
+                  }),
+                );
+              };
+              signal.addEventListener("abort", abort, { once: true });
+              let settled;
+              try {
+                settled = await api.waitForTask(taskId, withAbortSignal(signal, ctx));
+              } finally {
+                signal.removeEventListener("abort", abort);
               }
-              const taskId = await tx.createTask(
-                nested,
-                { name: tool.name, args: args as JsonValue, callId: `${api.callId}-${index}` },
-                { ownership: { kind: "task", taskId: api.taskId } },
-              );
-              journal.calls[index] = { taskId, name: tool.name, args: args as JsonValue };
-              return taskId;
-            }, ctx);
-            const abort = () => {
-              // Harness shutdown must preserve resumable tasks. Explicit harness
-              // aborts already cascade through ownership; only sandbox-local
-              // deadlines/unawaited calls need an additional task abort.
-              if (ctx.abortSignal?.aborted) return;
-              aborts.push(
-                abortNested(taskId, ctx).catch((error) => {
-                  abortErrors.push(error);
-                }),
-              );
-            };
-            signal.addEventListener("abort", abort, { once: true });
-            let settled;
-            try {
-              settled = await api.waitForTask(taskId, withAbortSignal(signal, ctx));
-            } finally {
-              signal.removeEventListener("abort", abort);
+              const outcome = settled.state.outcome;
+              if (outcome.status !== "completed") {
+                if (outcome.status === "aborted") call.status = "cancelled";
+                throw new Error(
+                  outcome.status === "faulted"
+                    ? outcome.error.message
+                    : outcome.status === "orphaned"
+                      ? outcome.reason
+                      : `Nested tool ${tool.name} ${outcome.status}`,
+                );
+              }
+              if ("released" in outcome.result)
+                throw new Error(`Legacy codemode result ${taskId} has been released`);
+              value = outcome.result;
+            } else {
+              const key = `codemode-${index}`;
+              let nested;
+              try {
+                nested = await api.executeTool(
+                  codemodeAdapterName(tool.replay ?? "unsafe"),
+                  { name: tool.name, args: args as JsonValue },
+                  withAbortSignal(signal, ctx),
+                  { key, progress: false },
+                );
+              } finally {
+                // A local sandbox abort cancels the native wait, not its child task.
+                // Admission has settled before executeTool rejects, so its slot is discoverable.
+                if (signal.aborted && !ctx.abortSignal?.aborted) {
+                  const cancel = (async () => {
+                    const slot = await api.snapshot(NestedCallDoc, api.taskId, key, ctx);
+                    if (slot?.taskId) await abortNested(slot.taskId, ctx);
+                  })().catch((error) => {
+                    abortErrors.push(error);
+                  });
+                  aborts.push(cancel);
+                  await cancel;
+                }
+              }
+              if (nested.isError || nested.structuredOutput === undefined)
+                throw new Error(
+                  nested.diagnostics
+                    .map((item) =>
+                      item.message.replaceAll(
+                        codemodeAdapterName(tool.replay ?? "unsafe"),
+                        tool.name,
+                      ),
+                    )
+                    .join("\n") || `Nested tool ${tool.name} failed`,
+                );
+              value = nested.structuredOutput as unknown as CodemodeResult;
             }
-            const outcome = settled.state.outcome;
-            if (outcome.status !== "completed") {
-              if (outcome.status === "aborted") call.status = "cancelled";
-              throw new Error(
-                outcome.status === "faulted"
-                  ? outcome.error.message
-                  : outcome.status === "orphaned"
-                    ? outcome.reason
-                    : `Nested tool ${tool.name} ${outcome.status}`,
-              );
-            }
-            const { result, structured } = outcome.result;
+            const { result, structured } = value;
             call.details = result.details ?? null;
             if (
               result.details &&

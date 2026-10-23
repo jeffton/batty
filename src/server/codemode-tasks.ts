@@ -108,6 +108,8 @@ export function createCodemodeTasks(
         const outcome = settled.state.outcome;
         if (outcome.status !== "completed")
           throw new Error(`Nested tool ${name} ${outcome.status}`);
+        if ("released" in outcome.result)
+          throw new Error(`Legacy codemode result ${taskId} has been released`);
         const { result, structured } = outcome.result;
         const output = result.output ?? [];
         const only = output[0];

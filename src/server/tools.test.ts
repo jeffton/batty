@@ -23,6 +23,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createOrchestration, OrchestrationDoc } from "./orchestration";
 import { createTools } from "./tools";
+import { CodemodeCalls } from "./codemode";
 import { persistentBashOperations } from "./durable-bash";
 import { stateDirPath } from "./options";
 import { withoutMainMemory } from "./main-memory-policy";
@@ -113,6 +114,138 @@ async function fixture(persistent = false) {
 }
 
 describe("durable tool bridge", () => {
+  it.skipIf(process.platform === "win32")(
+    "cancels a native nested persistent shell on a sandbox deadline",
+    async () => {
+      const { directory, config, run } = await fixture();
+      const result = await run(
+        '// @options: {"timeout_ms": 400}\nawait tools.bash({command:"echo running > started; sleep 10; echo leaked > leaked"});',
+      );
+      expect(result.isError).toBe(true);
+      const jobs = path.join(stateDirPath(config.battyDir), "jobs");
+      let receipts: any[] = [];
+      for (let attempt = 0; attempt < 100; attempt++) {
+        receipts = [];
+        for (const entry of await fs.readdir(jobs, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue;
+          try {
+            receipts.push(
+              JSON.parse(await fs.readFile(path.join(jobs, entry.name, "receipt.json"), "utf8")),
+            );
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          }
+        }
+        if (receipts.length && receipts.every((receipt) => receipt.status === "done")) break;
+        await delay(20);
+      }
+      expect(receipts).toHaveLength(1);
+      expect(receipts[0].status).toBe("done");
+      expect([130, 143, 137]).toContain(receipts[0].exitCode);
+      await expect(fs.access(path.join(directory, "leaked"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    },
+  );
+
+  it("consumes existing legacy journal receipts without repeating the effect", async () => {
+    const { tools, main, faux } = await fixture();
+    let effects = 0;
+    tools.registerTools([
+      {
+        name: "effect",
+        description: "side effect",
+        parameters: Type.Object({}),
+        execute: async () => {
+          effects++;
+          return { output: [{ type: "text", text: "legacy value" }] };
+        },
+      },
+    ]);
+    const codemode = tools.extension.tools!.find((tool) => tool.name === "codemode")!;
+    const legacyTask = tools.extension.tasks!.find(
+      (task) => task.definition.name === "batty.codemode-tool",
+    )! as ReturnType<typeof import("./codemode-tasks").createCodemodeTasks>;
+    const original = codemode.execute;
+    // Seed the exact journal/receipt left by the previous adapter in this live caller.
+    codemode.execute = async (_args, api, ctx) => {
+      const id = await api.commit(async (tx) => {
+        const id = await tx.createTask(
+          legacyTask,
+          { name: "effect", args: {}, callId: `${api.callId}-0` },
+          { ownership: { kind: "task", taskId: api.taskId } },
+        );
+        (await tx.doc(CodemodeCalls, api.taskId)).calls["0"] = {
+          taskId: id,
+          name: "effect",
+          args: {},
+        };
+        return id;
+      }, ctx);
+      await api.waitForTask(id, ctx);
+      return original({ code: "return await tools.effect({});" }, api, ctx);
+    };
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("codemode", { code: "legacy" })], {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage([fauxText("done")]),
+    ]);
+    expect(
+      (
+        await (
+          await main.submit({ type: "input", content: "run legacy" }, BACKGROUND_CONTEXT)
+        ).wait(BACKGROUND_CONTEXT)
+      ).status,
+    ).toBe("done");
+    expect(effects).toBe(1);
+    const view = await main.viewState(BACKGROUND_CONTEXT);
+    expect(JSON.stringify(view.value.entries)).toContain("legacy value");
+    view.dispose();
+  });
+
+  it("retires native nested payloads while retaining small task receipts and transcript results", async () => {
+    const { directory, tools, run } = await fixture(true);
+    const secret = "unique-nested-payload-".repeat(4096);
+    tools.registerTools([
+      {
+        name: "payload",
+        description: "large nested output",
+        parameters: Type.Object({}),
+        replay: "safe",
+        execute: async () => ({
+          output: [{ type: "text", text: secret }],
+          details: { retained: true },
+        }),
+      },
+    ]);
+    const result = await run("const value=await tools.payload({}); text(value.length);");
+    expect(result.isError).toBe(false);
+    expect(result.content[0].text).toBe(String(secret.length));
+    expect(result.details.calls[0].details).toEqual({ retained: true });
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(path.join(directory, "session.sqlite"), { readOnly: true });
+    try {
+      const tasks = db.prepare("SELECT kind, record FROM tasks").all();
+      expect(tasks.some((row) => row.kind === JSON.stringify("batty.codemode-tool"))).toBe(false);
+      expect(tasks.filter((row) => row.kind === JSON.stringify("pi.tool"))).toHaveLength(2);
+      expect(tasks.every((row) => !String(row.record).includes("unique-nested-payload-"))).toBe(
+        true,
+      );
+      const docs = db.prepare("SELECT record FROM documents").all();
+      expect(docs.every((row) => !String(row.record).includes("unique-nested-payload-"))).toBe(
+        true,
+      );
+      expect(
+        db
+          .prepare("SELECT COUNT(*) AS n FROM entries WHERE json_extract(record, '$.kind')=?")
+          .get("pi.tool-result")!.n,
+      ).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
   it("exposes only the platform's shell", async () => {
     const { tools } = await fixture();
     const names = tools.extension.tools!.map((tool) => tool.name);
@@ -370,7 +503,9 @@ describe("durable tool bridge", () => {
     expect((await recovered!.wait(BACKGROUND_CONTEXT)).status).toBe("done");
     expect(effects).toBe(1);
     const view = await restarted.main.viewState(BACKGROUND_CONTEXT);
-    expect(JSON.stringify(view.value.entries)).toContain("Nested tool interrupted by restart");
+    expect(JSON.stringify(view.value.entries)).toContain(
+      "Tool delegate was interrupted and may have partially run",
+    );
     view.dispose();
   });
 

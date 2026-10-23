@@ -1,5 +1,6 @@
 import type { Harness } from "@earendil-works/pi-durable";
 import { cancelPersistentBashJob } from "./durable-bash-cancel";
+import { codemodeAdapterName } from "./codemode-native";
 
 /** Only explicit durable abort receipts stop detached shells; shutdown leaves no such receipt. */
 export function createBashAbortWatcher(jobsDir: string) {
@@ -10,7 +11,37 @@ export function createBashAbortWatcher(jobsDir: string) {
     bind(harness: Harness) {
       unsubscribe?.();
       unsubscribe = harness.subscribeCommits((publication) => {
+        const cancel = (identity: string) => {
+          const work = new Promise<void>((resolve, reject) => {
+            queueMicrotask(() => {
+              cancelPersistentBashJob(jobsDir, identity).then(resolve, reject);
+            });
+          });
+          pending.add(work);
+          work.then(
+            () => pending.delete(work),
+            (error) => {
+              errors.push(error);
+              pending.delete(work);
+            },
+          );
+        };
         for (const change of publication.changes) {
+          if (change.type === "task") {
+            const task = change.value;
+            const input =
+              task.input as unknown as import("@earendil-works/pi-durable").ToolTaskInput;
+            if (
+              task.kind === "pi.tool" &&
+              task.state.status === "terminal" &&
+              task.state.outcome.status === "aborted" &&
+              input.kind === "nested" &&
+              input.call.name === codemodeAdapterName("safe") &&
+              input.call.arguments.name === "bash"
+            )
+              cancel(`${task.conversationId}-${task.id}-${input.call.id}`);
+            continue;
+          }
           if (change.type !== "entry") continue;
           const entry = change.value;
           if (entry.kind !== "pi.tool-result" || entry.byTaskId === undefined) continue;
@@ -34,19 +65,7 @@ export function createBashAbortWatcher(jobsDir: string) {
           )
             continue;
           const identity = `${entry.conversationId}-${entry.byTaskId}-${message.toolCallId}`;
-          const work = new Promise<void>((resolve, reject) => {
-            queueMicrotask(() => {
-              cancelPersistentBashJob(jobsDir, identity).then(resolve, reject);
-            });
-          });
-          pending.add(work);
-          work.then(
-            () => pending.delete(work),
-            (error) => {
-              errors.push(error);
-              pending.delete(work);
-            },
-          );
+          cancel(identity);
         }
       });
     },

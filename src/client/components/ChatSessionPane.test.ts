@@ -3,6 +3,7 @@ import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { useAppStore } from "@/client/stores/app";
 import ChatSessionPane from "./ChatSessionPane.vue";
+import MessageComposer from "./MessageComposer.vue";
 import type { SessionState } from "@/shared/types";
 
 vi.mock("@/client/lib/api", () => ({
@@ -25,6 +26,7 @@ test("initial main snapshot shows preparation and SSE memory errors without poll
   const wrapper = mount(ChatSessionPane, {
     global: {
       stubs: {
+        BasePopover: { template: "<div><slot /></div>" },
         ChatHeader: true,
         SessionTranscriptView: true,
         ModelConfigSelector: true,
@@ -43,9 +45,17 @@ test("initial main snapshot shows preparation and SSE memory errors without poll
       error: "Memory failed",
     };
     await wrapper.vm.$nextTick();
-    expect(wrapper.text()).toContain("Memory failed");
-    expect(wrapper.text()).not.toContain("Preparing memory");
+    expect(wrapper.getComponent(MessageComposer).props("error")).toBeUndefined();
+    expect(wrapper.getComponent(MessageComposer).props("memoryError")).toBe("Memory failed");
+    expect(wrapper.get(".tasks-popover__task").text()).toContain("Memory failed");
+    expect(wrapper.get(".tasks-popover__task").text()).toContain("Memory preparation failed");
     expect(wrapper.text()).not.toContain("Compacting");
+    store.lastError = "Main request failed";
+    store.activeSession.memoryPreparation.error = undefined;
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".tasks-control").exists()).toBe(false);
+    expect(wrapper.getComponent(MessageComposer).props("error")).toBe("Main request failed");
+    expect(wrapper.text()).not.toContain("Memory failed");
   } finally {
     wrapper.unmount();
   }

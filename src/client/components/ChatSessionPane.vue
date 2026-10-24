@@ -307,16 +307,12 @@ async function removeQueuedPrompt(prompt: QueuedPrompt): Promise<void> {
         :streaming="store.activeSession.isStreaming"
         :compacting="store.activeSession.isCompacting"
         :memory-pending="store.activeSession.memoryPreparation?.pending"
+        :memory-error="store.activeSession.memoryPreparation?.error"
         :subagents="subagents"
         :cron-runs="cronRuns"
         :session-key="store.activeSession.sessionId"
         :offline="isUnavailable"
-        :error="
-          promptError ??
-          store.activeSession.memoryPreparation?.error ??
-          subagentError ??
-          store.lastError
-        "
+        :error="promptError ?? subagentError ?? store.lastError"
         :actions-disabled="isUnavailable"
         :queued-prompts="store.activeSession.queuedPrompts"
         @submit="submitPrompt"

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Activity, PanelRightOpen } from "@lucide/vue";
+import { Activity, CircleAlert, PanelRightOpen } from "@lucide/vue";
 import { computed, nextTick, ref, useId } from "vue";
 import BasePopover from "./BasePopover.vue";
 import SubagentSessionPopover from "./SubagentSessionPopover.vue";
@@ -9,6 +9,7 @@ const props = defineProps<{
   subagents: RunningSubagent[];
   cronRuns: CronRunLog[];
   memoryPending?: number;
+  memoryError?: string;
   compacting?: boolean;
 }>();
 const popoverId = `tasks-${useId()}`;
@@ -20,12 +21,17 @@ const tasks = computed(() => {
   const runningCron = props.cronRuns.filter((run) => run.status === "running");
   const cronSessions = new Set(runningCron.map((run) => run.sessionId));
   return [
-    ...(props.memoryPending || props.compacting
+    ...(props.memoryPending || props.memoryError || props.compacting
       ? [
           {
             id: "memory",
-            title: props.memoryPending ? "Preparing memory" : "Compacting memory",
+            title: props.memoryError
+              ? "Memory preparation failed"
+              : props.memoryPending
+                ? "Preparing memory"
+                : "Compacting memory",
             detail: "Memory",
+            error: props.memoryError,
             sessionId: undefined,
           },
         ]
@@ -35,6 +41,7 @@ const tasks = computed(() => {
       title: run.prompt,
       detail: `Cron · ${run.workspaceId}`,
       sessionId: run.sessionId,
+      error: undefined,
     })),
     ...props.subagents
       .filter((agent) => !cronSessions.has(agent.sessionId))
@@ -43,6 +50,7 @@ const tasks = computed(() => {
         title: agent.prompt,
         detail: `Subagent · ${agent.workspaceId} · ${agent.model} · ${agent.thinkingLevel}`,
         sessionId: agent.sessionId,
+        error: undefined,
       })),
   ];
 });
@@ -78,7 +86,8 @@ function sessionToggle(taskId: string, event: Event): void {
     <Activity :size="17" aria-hidden="true" />
     <span class="tasks-control__info">
       <strong>{{ tasks.length }} {{ tasks.length === 1 ? "task" : "tasks" }}</strong>
-      <span v-if="tasks.length" class="spinner tasks-control__spinner" aria-hidden="true" />
+      <CircleAlert v-if="props.memoryError" :size="13" aria-label="Memory error" />
+      <span v-else-if="tasks.length" class="spinner tasks-control__spinner" aria-hidden="true" />
     </span>
   </button>
   <BasePopover
@@ -106,6 +115,7 @@ function sessionToggle(taskId: string, event: Event): void {
         <span class="tasks-popover__details">
           <strong>{{ task.title }}</strong>
           <span>{{ task.detail }}</span>
+          <span v-if="task.error" class="tasks-popover__error" role="alert">{{ task.error }}</span>
         </span>
         <PanelRightOpen
           v-if="task.sessionId"
@@ -113,6 +123,7 @@ function sessionToggle(taskId: string, event: Event): void {
           :size="16"
           aria-hidden="true"
         />
+        <CircleAlert v-else-if="task.error" :size="16" aria-hidden="true" />
         <span v-else class="spinner" aria-hidden="true" />
       </component>
       <p v-if="!tasks.length" class="tasks-popover__empty">No running tasks.</p>
@@ -269,6 +280,12 @@ button.tasks-popover__task:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tasks-popover__details > .tasks-popover__error {
+  color: var(--color-error);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .tasks-popover__empty {

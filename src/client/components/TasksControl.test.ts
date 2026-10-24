@@ -20,6 +20,29 @@ const run = {
 } as CronRunLog;
 
 describe("compose tasks", () => {
+  it("keeps memory errors on their task until recovery, including without a backlog", async () => {
+    const wrapper = mount(TasksControl, {
+      props: { subagents: [agent], cronRuns: [], memoryPending: 2, memoryError: "Invalid prompt" },
+      global: {
+        stubs: { BasePopover: { template: "<div><slot /></div>" }, SubagentSessionPopover: true },
+      },
+    });
+    try {
+      const memory = wrapper.get("article.tasks-popover__task");
+      expect(memory.get('[role="alert"]').text()).toBe("Invalid prompt");
+      expect(memory.find(".spinner").exists()).toBe(false);
+      expect(wrapper.get('button[aria-label="Running tasks"]').text()).toBe("2 tasks");
+      await wrapper.setProps({ memoryPending: 0 });
+      expect(wrapper.get("article.tasks-popover__task").text()).toContain("Invalid prompt");
+      await wrapper.setProps({ memoryError: undefined });
+      expect(wrapper.find("article.tasks-popover__task").exists()).toBe(false);
+      expect(wrapper.get('button[aria-label="Running tasks"]').text()).toBe("1 task");
+      expect(wrapper.get(".tasks-popover__task").text()).toContain("Research");
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it("opens the selected session from the row content and retains it after the task completes", async () => {
     const hidePopover = vi.fn();
     const showPopover = vi.fn();

@@ -16,6 +16,7 @@ const props = defineProps<{
   streaming?: boolean;
   compacting?: boolean;
   memoryPending?: number;
+  memoryError?: string;
   subagents?: RunningSubagent[];
   cronRuns?: CronRunLog[];
   offline?: boolean;
@@ -463,6 +464,7 @@ defineExpose({ clear, restore });
             :subagents="props.subagents ?? []"
             :cron-runs="props.cronRuns ?? []"
             :memory-pending="props.memoryPending"
+            :memory-error="props.memoryError"
             :compacting="props.compacting"
           />
         </div>
@@ -475,6 +477,7 @@ defineExpose({ clear, restore });
               {
                 'composer__stream-actions--tasks':
                   props.memoryPending ||
+                  props.memoryError ||
                   props.compacting ||
                   props.subagents?.length ||
                   props.cronRuns?.length,

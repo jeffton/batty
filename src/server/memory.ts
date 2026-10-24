@@ -348,7 +348,6 @@ export function createMemory(config: MemoryConfig, models: Models) {
     }, context);
     cache.set(`${Nodes.definition.kind}:${storedKey(part, generation)}`, { text });
     await releaseTrackers();
-    lastError = undefined;
   }
   async function publishPrefix(
     expected: { generation: number; settled: number },
@@ -523,6 +522,7 @@ export function createMemory(config: MemoryConfig, models: Models) {
         context,
       );
     }
+    if (maintenance.settled === index.count) lastError = undefined;
   }
   const reportRebuild = (error: unknown) => {
     if (background.context.abortSignal?.aborted) return;

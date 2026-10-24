@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { once } from "node:events";
 import http from "node:http";
+import sharp from "sharp";
 import { setTimeout as delay } from "node:timers/promises";
 
 const repo = process.cwd();
@@ -99,6 +100,59 @@ for (const baseUrl of ["/", "/batty"]) {
     ).toString("base64url");
     const signature = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
     const cookie = `batty2-auth=${payload}.${signature}`;
+    // Native nested tool-call IDs exceed Fastify's default 100-character parameter limit.
+    const toolCallId =
+      "call_b50e50d560364470ab737712f3e74b5a|ctc_047fbb1c4d566490016adc46e3f13881919e7d787565fa9778/codemode-2";
+    const attachmentId = "f9727304-cee1-4306-9b44-0404c77f45e4";
+    const attachmentName = "sommerhus-20261024.jpg";
+    const attachmentDir = path.join(
+      root,
+      ".batty/sent-files/assistant/123",
+      toolCallId.replace(/[^a-zA-Z0-9._-]+/g, "-"),
+    );
+    await fs.mkdir(attachmentDir, { recursive: true });
+    const original = await sharp({
+      create: { width: 1920, height: 1080, channels: 3, background: "teal" },
+    })
+      .jpeg()
+      .toBuffer();
+    await fs.writeFile(path.join(attachmentDir, attachmentName), original);
+    await fs.writeFile(
+      path.join(attachmentDir, "manifest.json"),
+      JSON.stringify({
+        workspaceId: "assistant",
+        sessionId: "123",
+        toolCallId,
+        createdAt: Date.now(),
+        files: [
+          {
+            id: attachmentId,
+            name: attachmentName,
+            storedName: attachmentName,
+            size: original.length,
+            mimeType: "image/jpeg",
+            kind: "image",
+          },
+        ],
+      }),
+    );
+    const attachmentRoute = `/api/sent-files/assistant/123/${encodeURIComponent(toolCallId)}/${attachmentId}`;
+    for (const query of ["preview=1", "download=1"])
+      assert.equal((await get(`${attachmentRoute}?${query}`)).status, 401);
+    const preview = await get(`${attachmentRoute}?preview=1`, { headers: { cookie } });
+    assert.equal(preview.status, 200);
+    assert.equal(preview.headers.get("content-type"), "image/webp");
+    const previewMetadata = await sharp(Buffer.from(await preview.arrayBuffer())).metadata();
+    assert.equal(previewMetadata.width, 768);
+    assert.equal(previewMetadata.height, 432);
+    const download = await get(`${attachmentRoute}?download=1`, { headers: { cookie } });
+    assert.equal(download.status, 200);
+    assert.equal(download.headers.get("content-type"), "image/jpeg");
+    assert.equal(
+      download.headers.get("content-disposition"),
+      `attachment; filename*=UTF-8''${attachmentName}`,
+    );
+    assert.deepEqual(Buffer.from(await download.arrayBuffer()), original);
     assert.equal((await get(route, { headers: { cookie } })).status, 410);
     const runningCron = await get("/api/cron/running", { headers: { cookie } });
     assert.equal(runningCron.status, 200);

@@ -70,6 +70,7 @@ if (setup)
 const app = fastify({
   logger: true,
   forceCloseConnections: true,
+  routerOptions: { maxParamLength: 256 },
   trustProxy: ["127.0.0.1", "::1"],
   bodyLimit: 100 * 1024 * 1024,
 });

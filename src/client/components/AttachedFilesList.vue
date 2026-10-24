@@ -14,6 +14,26 @@ const props = withDefaults(
   },
 );
 
+async function downloadSentFile(event: MouseEvent, file: SentFileDescriptor): Promise<void> {
+  event.preventDefault();
+  const response = await fetch(file.downloadUrl, { credentials: "include" });
+  if (!response.ok) {
+    throw new Error(`Download failed: ${response.status} ${response.statusText}`);
+  }
+
+  // Blob downloads keep iOS standalone apps out of the native URL preview.
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = file.name;
+  link.style.display = "none";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000);
+}
+
 function formatFileSize(size: number): string {
   if (!Number.isFinite(size) || size < 1024) {
     return `${Math.max(0, Math.floor(size || 0))} B`;
@@ -38,7 +58,11 @@ function formatFileSize(size: number): string {
       <TranscriptImage
         v-if="props.preview && file.kind === 'image' && file.previewUrl"
         :src="`${file.previewUrl}${file.previewUrl.includes('?') ? '&' : '?'}preview=1`"
-        :original-url="file.mimeType === 'image/svg+xml' ? file.downloadUrl : file.previewUrl"
+        :original-url="
+          file.mimeType === 'image/svg+xml'
+            ? `${file.previewUrl}${file.previewUrl.includes('?') ? '&' : '?'}preview=1`
+            : file.previewUrl
+        "
         :alt="file.name"
       />
       <video
@@ -60,9 +84,8 @@ function formatFileSize(size: number): string {
       <a
         :href="file.downloadUrl"
         :download="file.name"
-        target="_blank"
-        rel="noopener noreferrer"
         class="attached-files__download"
+        @click="downloadSentFile($event, file)"
       >
         Download
       </a>

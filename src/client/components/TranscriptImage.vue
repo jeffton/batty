@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { ref, useId, watch } from "vue";
+import ImagePopover from "./ImagePopover.vue";
+const popoverId = useId();
 const failed = ref(false);
 const props = defineProps<{
   src: string;
@@ -17,11 +19,10 @@ watch(
 </script>
 
 <template>
-  <a
+  <button
+    type="button"
     class="transcript-image"
-    :href="props.originalUrl ?? props.src"
-    target="_blank"
-    rel="noopener noreferrer"
+    :popovertarget="popoverId"
     :aria-label="`Open original: ${props.alt}`"
     :style="
       props.width && props.height ? { aspectRatio: `${props.width} / ${props.height}` } : undefined
@@ -41,12 +42,16 @@ watch(
       decoding="async"
       fetchpriority="low"
     />
-  </a>
+  </button>
+  <ImagePopover :popover-id="popoverId" :src="props.originalUrl ?? props.src" :alt="props.alt" />
 </template>
 
 <style scoped>
 .transcript-image {
   display: block;
+  padding: 0;
+  border: 0;
+  cursor: zoom-in;
   width: min(100%, 32rem);
   height: auto;
   max-height: 24rem;

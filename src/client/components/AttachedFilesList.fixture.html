@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      import { createApp } from "vue";
+      import AttachedFilesList from "./AttachedFilesList.vue";
+      const originalUrl = new URLSearchParams(location.search).get("original");
+      createApp(AttachedFilesList, {
+        files: [
+          {
+            id: "old-image",
+            name: "Cabin.jpg",
+            size: 123,
+            mimeType: new URLSearchParams(location.search).get("mime") ?? "image/jpeg",
+            kind: "image",
+            previewUrl: originalUrl,
+            downloadUrl: originalUrl + "?download=1",
+          },
+        ],
+      }).mount("#app");
+    </script>
+  </body>
+</html>

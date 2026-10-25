@@ -156,7 +156,9 @@ export class Runtime {
     readonly providerUsage: ProviderUsageService,
     private readonly historyIndex: Awaited<ReturnType<typeof createHistoryIndex>>,
   ) {
-    this.workerBrowserCleanup = createWorkerBrowserCleanup(tools.browserService);
+    this.workerBrowserCleanup = createWorkerBrowserCleanup(tools.browserService, async () =>
+      (await listWorkspaces(config)).map((workspace) => workspace.id),
+    );
     orchestration.setWorkerBrowserLifecycle({
       admit: (id, operation) => tools.browserService.withSessionLifecycle(id, operation),
       stop: (id, taskId) =>

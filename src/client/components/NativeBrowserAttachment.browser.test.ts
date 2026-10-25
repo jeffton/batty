@@ -15,6 +15,7 @@ import {
   fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
 import { loadConfig } from "@/server/config";
+import { workspaceBrowserKey } from "@/server/browser-service";
 import { Runtime, context } from "@/server/runtime";
 import { registerSessionRoutes } from "@/server/routes/sessions";
 import { registerCloudBrowserRoutes } from "@/server/routes/cloud-browser";
@@ -191,7 +192,7 @@ test("main browser tools render a live attachment through SSE, reload and reopen
     await closeStreams();
     await backend.close();
     await closeBrowserFixtureServer(server);
-    await runtime.tools.browserService.closeSession(String(runtime.main.id));
+    await runtime.tools.browserService.closeSession(workspaceBrowserKey("work"));
     await runtime.close();
     vi.unstubAllEnvs();
     await fs.rm(root, { recursive: true, force: true });

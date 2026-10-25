@@ -10,7 +10,7 @@ import {
 } from "@/shared/pi-tools";
 import type { ToolExecutionDetails, WorkspaceInfo } from "@/shared/types";
 import type { AppConfig } from "./config";
-import type { BrowserService } from "./browser-service";
+import { workspaceBrowserKey, type BrowserService } from "./browser-service";
 import { storeSentFiles } from "./send-files";
 import { ATTACHMENT_DELIVERY_INSTRUCTION, reportWithAttachments } from "./attachment-contract";
 import { createSite, deleteSite, getSite } from "./sites";
@@ -151,11 +151,11 @@ export function createBrowserTool({
     name: "browser",
     label: "Browser",
     description:
-      "Open and interact with JavaScript-driven web pages using session-scoped Chromium. Enable cloud for shared live browsing with the user.",
+      "Open and interact with JavaScript-driven web pages using workspace-shared Chromium. Enable cloud for shared live browsing with the user.",
     promptSnippet: "Browse and interact with dynamic web pages using Playwright.",
     promptGuidelines: [
       "Use this tool when a page requires JavaScript or multi-step interaction that web_search content cannot handle.",
-      "Start with action=open. Browser state and cookies persist within the current Batty session only.",
+      "The browser, profile, logins and tabs are shared with main and other subagents in this workspace. Use action=pages to see existing tabs and coordinate by pageId; use action=open to navigate or create a page.",
       "Set cloud=true on action=open to enable shared VPS browsing and attach its live-browser button. Use action=attach to attach that same browser again in a private popover. The user and agent share tabs, login and page state; this does not transfer the session to local Safari.",
       "Closing the popover only disconnects the viewer. action=close ends the browser and invalidates its attachments; browsers expire after one hour without browser activity. Forward a received browser artifact with attach_artifacts and its browser: ref; this preserves the same live session and login, not a snapshot or a new browser. Forwarding does not reset expiry or bypass Batty authentication.",
       "Set useTailscale=true on the initial open to route that browser session through the configured SSH destination. Close the session before changing its routing.",
@@ -177,7 +177,7 @@ export function createBrowserTool({
     execute: async (toolCallId, params, signal, _onUpdate, ctx) => {
       signal?.throwIfAborted();
       const result = await browserService.execute(
-        ctx.sessionManager.getSessionId(),
+        workspaceBrowserKey(workspace.id),
         {
           ...params,
           paths: params.paths?.map((value) => path.resolve(workspace.path, value)),

@@ -44,7 +44,11 @@ Settings use `/api/settings/mcp`; connection status and actions use `/api/mcp`. 
 
 ## Browser lifecycle
 
-Detached browser instances and tabs survive Batty restarts. Every conversation's browser expires after **60 minutes without browser activity**, including main and interrupted workers. Active and queued browser calls are protected during cleanup. Expiry runs at startup and each minute without resetting the persisted inactivity clock. Explicit stop closes the matching worker browser. After expiry, `browser open` starts a new instance.
+Each workspace shares one Chromium instance, profile, logins and tabs between main and its workers. Other workspaces have separate browsers. Agents can list tabs and address a specific `pageId` to coordinate; the active page is also shared. Browser actions are serialized per workspace.
+
+Detached browser instances and tabs survive Batty restarts and expire after **60 minutes without browser activity**. Active and queued browser calls are protected during cleanup. Expiry runs at startup and each minute without resetting the persisted inactivity clock. Stopping a worker does not close the shared browser. Explicit browser close invalidates its attachments for everyone using it; after close or expiry, `browser open` starts a new instance.
+
+Older conversation-owned browsers retain their live attachments until closed or expired; their profiles are not merged into the workspace browser.
 
 ### Shared cloud browser
 

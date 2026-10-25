@@ -1,23 +1,29 @@
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { ConversationId, Cursor, Harness } from "@earendil-works/pi-durable";
-import type { BrowserService } from "./browser-service";
+import { workspaceBrowserKey, type BrowserService } from "./browser-service";
 import { OrchestrationDoc } from "./orchestration";
 import { ArchivedWorker } from "./orchestration-history";
 
 export const BROWSER_IDLE_RETENTION_MS = 60 * 60_000;
 
-/** All conversation browsers expire on browser inactivity, including main and interrupted workers. */
+/** Shared workspace browsers and legacy conversation browsers expire on browser inactivity. */
 export function createWorkerBrowserCleanup(
   browser: Pick<
     BrowserService,
     "hasSession" | "expireIdleSession" | "withSessionLifecycle" | "closeSession"
   >,
+  workspaceIds: () => Promise<readonly string[]>,
 ) {
   let timer: ReturnType<typeof setInterval> | undefined;
   let pending: Promise<void> | undefined;
 
   async function sweep(harness: Harness) {
-    // Browser directories are hashed conversation IDs; enumerate owners, not processes.
+    for (const id of await workspaceIds()) {
+      const key = workspaceBrowserKey(id);
+      if (await browser.hasSession(key))
+        await browser.expireIdleSession(key, BROWSER_IDLE_RETENTION_MS);
+    }
+    // Retain idle cleanup for detached browsers created before workspace sharing.
     let cursor: Cursor | undefined;
     do {
       const page = await harness.commit((tx) => tx.scanConversations({}, 200, cursor), context);
@@ -30,6 +36,8 @@ export function createWorkerBrowserCleanup(
   }
 
   return {
+    // Worker lifecycle hooks only address legacy numeric conversation keys.
+    // Stopping a worker does not end the workspace browser used by its peers.
     async stop(harness: Harness, id: ConversationId, taskId: string) {
       await browser.withSessionLifecycle(String(id), async () => {
         const state = await harness.snapshot(OrchestrationDoc, context);

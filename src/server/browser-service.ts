@@ -209,6 +209,11 @@ function formatEvaluationResult(value: unknown): string {
       });
 }
 
+/** Separate workspace browsers from legacy conversation-owned browser keys. */
+export function workspaceBrowserKey(workspaceId: string): string {
+  return `workspace:${workspaceId}`;
+}
+
 export class BrowserService {
   private readonly sessions = new Map<string, BrowserSession>();
   private readonly queues = new Map<string, Promise<void>>();

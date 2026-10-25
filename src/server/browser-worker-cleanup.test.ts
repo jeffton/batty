@@ -3,7 +3,7 @@ import { expect, test, vi } from "vite-plus/test";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { BrowserService } from "./browser-service";
+import { BrowserService, workspaceBrowserKey } from "./browser-service";
 import { browserSessionDirectory, writeBrowserJson } from "./browser-persistence";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
@@ -169,14 +169,15 @@ test("startup and periodic sweeps cover main, interrupted and newly created conv
     (await tx.doc(OrchestrationDoc)).mainId = main.id;
     return child;
   }, context);
-  const present = new Set([String(main.id), String(child.id)]);
+  const workspaces = ["roy"];
+  const present = new Set([String(main.id), String(child.id), workspaceBrowserKey("roy")]);
   const browser = {
     hasSession: vi.fn(async (id: string) => present.has(id)),
     expireIdleSession: vi.fn(async () => {}),
     withSessionLifecycle: async <T>(_id: string, operation: () => Promise<T>) => operation(),
     closeSession: vi.fn(async () => {}),
   };
-  const cleanup = createWorkerBrowserCleanup(browser);
+  const cleanup = createWorkerBrowserCleanup(browser, async () => workspaces);
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
   try {
     await cleanup.bind(harness);
@@ -187,6 +188,8 @@ test("startup and periodic sweeps cover main, interrupted and newly created conv
       context,
     );
     present.add(String(next.id));
+    workspaces.push("project");
+    present.add(workspaceBrowserKey("project"));
     await vi.advanceTimersByTimeAsync(60_000);
     await vi.waitFor(() =>
       expect(browser.expireIdleSession).toHaveBeenCalledWith(
@@ -194,6 +197,18 @@ test("startup and periodic sweeps cover main, interrupted and newly created conv
         BROWSER_IDLE_RETENTION_MS,
       ),
     );
+    expect(browser.expireIdleSession).toHaveBeenCalledWith(
+      workspaceBrowserKey("project"),
+      BROWSER_IDLE_RETENTION_MS,
+    );
+    await main.commit(async (tx) => {
+      (await tx.doc(OrchestrationDoc)).workers[String(child.id)] = {
+        active: "worker-task",
+      } as any;
+    }, context);
+    await cleanup.stop(harness, child.id, "worker-task");
+    expect(browser.closeSession).toHaveBeenCalledWith(String(child.id));
+    expect(browser.closeSession).not.toHaveBeenCalledWith(workspaceBrowserKey("roy"));
   } finally {
     await cleanup.close();
     vi.useRealTimers();

@@ -209,7 +209,7 @@ function formatEvaluationResult(value: unknown): string {
       });
 }
 
-/** Separate workspace browsers from legacy conversation-owned browser keys. */
+/** Stable browser key shared by all agents in a workspace. */
 export function workspaceBrowserKey(workspaceId: string): string {
   return `workspace:${workspaceId}`;
 }
@@ -1046,7 +1046,7 @@ export class BrowserService {
     );
   }
 
-  /** Worker admission and expiry share a queue separate from potentially interrupted CDP actions. */
+  /** Browser action admission and expiry share a queue separate from CDP actions. */
   async withSessionLifecycle<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
     return this.serialized(sessionId, operation, this.lifecycleQueues);
   }

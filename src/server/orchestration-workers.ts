@@ -143,23 +143,20 @@ export function createWorkers(
     const targets: TaskId<string>[] = [];
     for (const id of candidates)
       if ((await services.harness.getTask(id, ctx))?.state.status !== "terminal") targets.push(id);
-    return { targets, browserTask: worker.active === undefined ? null : String(worker.active) };
+    return { targets };
   }
 
   async function applyStop(
-    workerId: string,
     stop: NonNullable<Awaited<ReturnType<typeof captureStop>>>,
     ctx: Context,
   ) {
     for (const target of [...stop.targets].reverse()) await services.harness.abortTask(target, ctx);
-    if (stop.browserTask !== null)
-      await services.browserLifecycle?.stop(workerId, stop.browserTask);
   }
 
   async function stopWorker(workerId: string, ctx: Context) {
     const stop = await captureStop(workerId, ctx);
     if (!stop) throw missingWorker(workerId);
-    await applyStop(workerId, stop, ctx);
+    await applyStop(stop, ctx);
   }
 
   const Anchor = defineTask<null, { phase: "done" }, null>({
@@ -665,7 +662,7 @@ export function createWorkers(
         // Capture the whole current delivery chain, not only its queued tail.
         // The memo keeps a replay from stopping later resumed work.
         const stop = await api.memo("batty.stop", (await captureStop(workerId!, ctx))!, ctx);
-        await applyStop(workerId!, stop, ctx);
+        await applyStop(stop, ctx);
         return reply(`Stopped. Session ID: ${workerId}`);
       }
       if (!args.prompt?.trim()) throw new Error(`${args.action} requires prompt`);
@@ -757,10 +754,7 @@ export function createWorkers(
           call.call = { workerId: id, taskId };
           return { workerId: id, taskId };
         }, ctx);
-      const result =
-        args.sessionId && services.browserLifecycle
-          ? await services.browserLifecycle.admit(args.sessionId, admit)
-          : await admit();
+      const result = await admit();
       await api.details(
         {
           conversationId: Number(result.workerId),

@@ -7,7 +7,7 @@ import http from "node:http";
 import { once } from "node:events";
 import { BrowserService } from "./browser-service";
 import { browserSessionDirectory } from "./browser-persistence";
-import { BROWSER_IDLE_RETENTION_MS } from "./browser-worker-cleanup";
+import { BROWSER_IDLE_RETENTION_MS } from "./browser-cleanup";
 
 test.each(["main", "interrupted"])(
   "%s browser expires on inactivity across restart, but not during a browser call",

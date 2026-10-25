@@ -43,7 +43,7 @@ import { conversationPolicy } from "./conversation-policy";
 import { ProviderAuthService } from "./provider-auth";
 import { ProviderUsageService } from "./provider-usage";
 import { createTools } from "./tools";
-import { createWorkerBrowserCleanup } from "./browser-worker-cleanup";
+import { createBrowserCleanup } from "./browser-cleanup";
 import { createOrchestration } from "./orchestration";
 import { RemoteWorkers, parseRemoteSession } from "./remote-workers";
 import { createMemory, type MemoryConfig } from "./memory";
@@ -141,7 +141,7 @@ export class Runtime {
   remotes!: RemoteWorkers;
   readonly streamId = randomUUID();
   private revision = 0;
-  private readonly workerBrowserCleanup: ReturnType<typeof createWorkerBrowserCleanup>;
+  private readonly browserCleanup: ReturnType<typeof createBrowserCleanup>;
   private constructor(
     readonly config: AppConfig,
     readonly models: ModelRuntime,
@@ -156,14 +156,9 @@ export class Runtime {
     readonly providerUsage: ProviderUsageService,
     private readonly historyIndex: Awaited<ReturnType<typeof createHistoryIndex>>,
   ) {
-    this.workerBrowserCleanup = createWorkerBrowserCleanup(tools.browserService, async () =>
+    this.browserCleanup = createBrowserCleanup(tools.browserService, async () =>
       (await listWorkspaces(config)).map((workspace) => workspace.id),
     );
-    orchestration.setWorkerBrowserLifecycle({
-      admit: (id, operation) => tools.browserService.withSessionLifecycle(id, operation),
-      stop: (id, taskId) =>
-        this.workerBrowserCleanup.stop(harness, Number(id) as ConversationId, taskId),
-    });
   }
 
   static async open(
@@ -294,7 +289,7 @@ export class Runtime {
     );
     // bind() admits due cron jobs and can resume the harness itself. Install
     // completion observers before that startup boundary, not only before resume.
-    await runtime.workerBrowserCleanup.bind(harness);
+    await runtime.browserCleanup.bind();
     await beforeStart?.(runtime);
     await orchestration.bind(harness, main);
     runtime.remotes = await RemoteWorkers.open(runtime);
@@ -533,7 +528,7 @@ export class Runtime {
     await this.remotes.close();
     await this.orchestration.close();
     await this.providerAuth.dispose();
-    await this.workerBrowserCleanup.close();
+    await this.browserCleanup.close();
     await this.harness.close(context);
     await this.memory.close();
     await this.tools.close();

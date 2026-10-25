@@ -21,7 +21,6 @@ import {
   type OrchestrationConfig,
   type OrchestrationServices,
   type PrepareAgent,
-  type WorkerBrowserLifecycle,
 } from "./orchestration-state.js";
 import { createDeliveryTask } from "./orchestration-delivery.js";
 import { createWorkers } from "./orchestration-workers.js";
@@ -37,7 +36,6 @@ export type {
   ScheduleInput,
   CronDelivery,
   OrchestrationConfig,
-  WorkerBrowserLifecycle,
 } from "./orchestration-state.js";
 export { parseDuration } from "./cron-schedule.js";
 const context = BACKGROUND_CONTEXT;
@@ -47,7 +45,6 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
   let harness: Harness;
   let main: Conversation;
   let prepareAgent = options.prepareAgent;
-  let browserLifecycle: WorkerBrowserLifecycle | undefined;
   let remoteWorkers: import("./orchestration-state").RemoteWorkerService | undefined;
   const workspaceList = async () =>
     typeof options.workspaces === "function"
@@ -90,9 +87,6 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
     get prepareAgent() {
       return prepareAgent;
     },
-    get browserLifecycle() {
-      return browserLifecycle;
-    },
     workspace,
     assistantWorkspaceId,
   };
@@ -131,9 +125,6 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
     remoteJoinTask: RemoteJoin,
     setRemoteWorkers(value: import("./orchestration-state").RemoteWorkerService) {
       remoteWorkers = value;
-    },
-    setWorkerBrowserLifecycle(lifecycle: WorkerBrowserLifecycle) {
-      browserLifecycle = lifecycle;
     },
     setPrepareAgent(provider: PrepareAgent) {
       prepareAgent = provider;

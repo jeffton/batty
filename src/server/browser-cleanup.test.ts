@@ -5,15 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import { BrowserService, workspaceBrowserKey } from "./browser-service";
 import { browserSessionDirectory, writeBrowserJson } from "./browser-persistence";
-import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
-import { createModels } from "@earendil-works/pi-ai/models";
-import { createRegistry, Harness } from "@earendil-works/pi-durable";
-import { MemoryStorage } from "@earendil-works/pi-durable/storage/memory";
-import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import { BROWSER_IDLE_RETENTION_MS, createWorkerBrowserCleanup } from "./browser-worker-cleanup";
-import { OrchestrationDoc, WorkerDoc } from "./orchestration";
+import { BROWSER_IDLE_RETENTION_MS, createBrowserCleanup } from "./browser-cleanup";
 
-test("resume admission cannot interleave with expiry reading persisted activity", async () => {
+test("browser admission cannot interleave with expiry reading persisted activity", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-browser-admission-"));
   const service = new BrowserService(undefined, 4, root);
   let release!: () => void;
@@ -130,7 +124,7 @@ test("an active browser call prevents expiry until it settles", async () => {
 });
 
 test("existing browser registry activity is retained, not just its older launch time", async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-browser-legacy-"));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-browser-registry-"));
   const service = new BrowserService(undefined, 4, root);
   try {
     const directory = browserSessionDirectory(root, "main");
@@ -152,66 +146,30 @@ test("existing browser registry activity is retained, not just its older launch 
   }
 });
 
-test("startup and periodic sweeps cover main, interrupted and newly created conversations", async () => {
-  const harness = await Harness.open(
-    new MemoryStorage(),
-    {
-      models: createModels(),
-      registry: createRegistry(),
-      env: () => new NodeExecutionEnv({ cwd: "/tmp" }),
-    },
-    context,
-  );
-  const main = await harness.root(context);
-  const child = await main.commit(async (tx) => {
-    const child = await tx.createConversation({ ownership: { kind: "ownerless" } });
-    (await tx.doc(WorkerDoc, child.id)).isSubagent = true;
-    (await tx.doc(OrchestrationDoc)).mainId = main.id;
-    return child;
-  }, context);
+test("startup and periodic sweeps cover workspace browsers and newly added workspaces", async () => {
   const workspaces = ["roy"];
-  const present = new Set([String(main.id), String(child.id), workspaceBrowserKey("roy")]);
+  const present = new Set([workspaceBrowserKey("roy"), workspaceBrowserKey("project")]);
   const browser = {
     hasSession: vi.fn(async (id: string) => present.has(id)),
     expireIdleSession: vi.fn(async () => {}),
-    withSessionLifecycle: async <T>(_id: string, operation: () => Promise<T>) => operation(),
-    closeSession: vi.fn(async () => {}),
   };
-  const cleanup = createWorkerBrowserCleanup(browser, async () => workspaces);
+  const cleanup = createBrowserCleanup(browser, async () => workspaces);
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
   try {
-    await cleanup.bind(harness);
-    for (const id of present)
-      expect(browser.expireIdleSession).toHaveBeenCalledWith(id, BROWSER_IDLE_RETENTION_MS);
-    const next = await main.commit(
-      (tx) => tx.createConversation({ ownership: { kind: "ownerless" } }),
-      context,
-    );
-    present.add(String(next.id));
+    await cleanup.bind();
+    expect(browser.expireIdleSession.mock.calls).toEqual([
+      [workspaceBrowserKey("roy"), BROWSER_IDLE_RETENTION_MS],
+    ]);
     workspaces.push("project");
-    present.add(workspaceBrowserKey("project"));
     await vi.advanceTimersByTimeAsync(60_000);
     await vi.waitFor(() =>
       expect(browser.expireIdleSession).toHaveBeenCalledWith(
-        String(next.id),
+        workspaceBrowserKey("project"),
         BROWSER_IDLE_RETENTION_MS,
       ),
     );
-    expect(browser.expireIdleSession).toHaveBeenCalledWith(
-      workspaceBrowserKey("project"),
-      BROWSER_IDLE_RETENTION_MS,
-    );
-    await main.commit(async (tx) => {
-      (await tx.doc(OrchestrationDoc)).workers[String(child.id)] = {
-        active: "worker-task",
-      } as any;
-    }, context);
-    await cleanup.stop(harness, child.id, "worker-task");
-    expect(browser.closeSession).toHaveBeenCalledWith(String(child.id));
-    expect(browser.closeSession).not.toHaveBeenCalledWith(workspaceBrowserKey("roy"));
   } finally {
     await cleanup.close();
     vi.useRealTimers();
-    await harness.close(context);
   }
 });

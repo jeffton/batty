@@ -152,11 +152,6 @@ export type DeliveryInput = {
   change?: RunChange;
   workspaceId?: string;
 };
-export interface WorkerBrowserLifecycle {
-  admit<T>(id: string, operation: () => Promise<T>): Promise<T>;
-  stop(id: string, taskId: string): Promise<void>;
-}
-
 export interface RemoteWorkerService {
   join(
     input: { node: string; session: string; assignmentId: string; parentId: ConversationId },
@@ -176,7 +171,6 @@ export interface OrchestrationServices {
   readonly harness: Harness;
   readonly main: Conversation;
   readonly prepareAgent: PrepareAgent | undefined;
-  readonly browserLifecycle: WorkerBrowserLifecycle | undefined;
   workspace(id?: string, parentId?: ConversationId): Promise<Pick<WorkspaceInfo, "id" | "path">>;
   assistantWorkspaceId(): Promise<string | undefined>;
 }

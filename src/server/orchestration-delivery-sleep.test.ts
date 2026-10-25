@@ -38,7 +38,6 @@ test("batty.delivery retry sleeps across reopen and completes its existing assig
       return main;
     },
     prepareAgent,
-    browserLifecycle: undefined,
     workspace: async () => ({ id: "test", path: directory }),
     assistantWorkspaceId: async () => "test",
   };

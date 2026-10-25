@@ -2,9 +2,18 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 export const SitesToolSchema = Type.Object(
   {
-    action: StringEnum(["create", "share", "delete"] as const, {
-      description: "Create a site directory, share an existing site, or delete a site.",
+    action: StringEnum(["create", "share", "delete", "function", "delete_function"] as const, {
+      description: "Create/share/delete a site, or register/remove a site-scoped backend function.",
     }),
+    functionName: Type.Optional(
+      Type.String({ description: "Backend function name for function/delete_function." }),
+    ),
+    code: Type.Optional(
+      Type.String({
+        description:
+          "QuickJS async function body. Read input with await tools.input(); return JSON. No Node/files/network except tools.request({connection, method, body}).",
+      }),
+    ),
     name: Type.Optional(
       Type.String({ description: "Display name. Required when creating a site." }),
     ),

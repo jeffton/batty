@@ -100,6 +100,39 @@ for (const baseUrl of ["/", "/batty"]) {
     ).toString("base64url");
     const signature = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
     const cookie = `batty2-auth=${payload}.${signature}`;
+    if (process.platform === "linux" && process.getuid?.() === 0) {
+      const siteId = "10000000-0000-0000-0000-000000000001";
+      const siteRoot = path.join(root, ".batty/sites", siteId);
+      await fs.mkdir(path.join(siteRoot, "functions"), { recursive: true });
+      await fs.writeFile(
+        path.join(siteRoot, "manifest.json"),
+        JSON.stringify({
+          id: siteId,
+          name: "Backend smoke",
+          public: false,
+          accessToken: "preview-only",
+          createdAt: Date.now(),
+        }),
+      );
+      await fs.writeFile(
+        path.join(siteRoot, "functions/echo.json"),
+        JSON.stringify({ code: "return { input: await tools.input(), process: typeof process };" }),
+      );
+      const call = (headers) =>
+        get(`/api/sites/${siteId}/functions/echo`, {
+          method: "POST",
+          headers: { "content-type": "application/json", ...headers },
+          body: JSON.stringify({ input: "packaged-backend" }),
+          signal: AbortSignal.timeout(10000),
+        });
+      assert.equal((await call({ origin })).status, 401);
+      assert.equal((await call({ cookie, origin: "https://attacker.invalid" })).status, 403);
+      const response = await call({ cookie, origin });
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), {
+        value: { input: "packaged-backend", process: "undefined" },
+      });
+    }
     // Native nested tool-call IDs exceed Fastify's default 100-character parameter limit.
     const toolCallId =
       "call_b50e50d560364470ab737712f3e74b5a|ctc_047fbb1c4d566490016adc46e3f13881919e7d787565fa9778/codemode-2";

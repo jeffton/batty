@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Check, Copy, ExternalLink } from "@lucide/vue";
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { createSiteMessageHandler } from "@/client/lib/site-functions";
 import FullPopover from "@/client/components/FullPopover.vue";
 import BrowserPopover from "@/client/components/BrowserPopover.vue";
 import { setSitePublic } from "@/client/lib/api";
@@ -8,6 +9,14 @@ import { withBaseUrl } from "@/client/lib/base-url";
 import type { SiteAttachmentDescriptor, SiteDescriptor } from "@/shared/types";
 
 const props = defineProps<{ sites: SiteAttachmentDescriptor[]; idPrefix?: string }>();
+const siteFrames = new Map<string, HTMLIFrameElement>();
+const siteMessage = createSiteMessageHandler(() => siteFrames.values());
+function setSiteFrame(siteId: string, element: unknown): void {
+  if (element instanceof HTMLIFrameElement) siteFrames.set(siteId, element);
+  else siteFrames.delete(siteId);
+}
+onMounted(() => window.addEventListener("message", siteMessage));
+onBeforeUnmount(() => window.removeEventListener("message", siteMessage));
 const publicById = ref<Record<string, boolean>>({});
 const savingId = ref<string>();
 const copiedId = ref<string>();
@@ -128,6 +137,8 @@ onBeforeUnmount(() => {
         </template>
         <iframe
           class="shared-sites__frame"
+          :ref="(element) => setSiteFrame(site.id, element)"
+          :data-site-id="site.id"
           :src="previewUrl(site)"
           :title="site.name"
           sandbox="allow-downloads allow-forms allow-modals allow-popups allow-scripts"

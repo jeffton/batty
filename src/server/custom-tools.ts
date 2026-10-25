@@ -14,6 +14,7 @@ import { workspaceBrowserKey, type BrowserService } from "./browser-service";
 import { storeSentFiles } from "./send-files";
 import { ATTACHMENT_DELIVERY_INSTRUCTION, reportWithAttachments } from "./attachment-contract";
 import { createSite, deleteSite, getSite } from "./sites";
+import { registerSiteFunction, deleteSiteFunction } from "./site-functions";
 import { runWebSearch } from "./web-search";
 import {
   AttachFilesToolSchema,
@@ -276,6 +277,9 @@ export function createSitesTool({
       "To deliver a site from a subagent or other report, call attach_artifacts with its listed site ref in your own turn. Do not recreate or reshare it, or copy its URL as a substitute for attaching it.",
       "Use the browser URL from the result with the browser tool to inspect the site without changing its public setting.",
       "Use delete to permanently remove a site.",
+      "Register backend code with action=function, siteId, functionName and code. Connections are host-admin grants, not function parameters. Code runs in QuickJS with only tools.input() and tools.request({connection, method, body}); return JSON. See docs/sites.md for examples and limits.",
+      `Load <script src="${config.baseUrl === "/" ? "" : config.baseUrl}/site-runtime.js"></script>, then await batty.call(functionName, input) inside the native Batty popover. Backend calls require Batty login; public static sharing does not grant backend access.`,
+      "Use only host-admin connections granted to this site in BATTY_SITE_CONNECTIONS. Never read or include secret values in tool arguments, code, HTML or outputs. Backend execution requires Linux systemd isolation; it never runs in the root Batty process.",
     ],
     parameters: SitesToolSchema,
     execute: async (_toolCallId, params) => {
@@ -296,6 +300,24 @@ export function createSitesTool({
 
       const siteId = params.siteId?.trim();
       if (!siteId) throw new Error(`siteId is required for sites ${params.action}`);
+      if (params.action === "function" || params.action === "delete_function") {
+        if (!params.functionName) throw new Error("functionName is required");
+        if (params.action === "function") {
+          if (!params.code) throw new Error("code is required");
+          await registerSiteFunction(config.sitesDir, siteId, params.functionName, {
+            code: params.code,
+          });
+        } else await deleteSiteFunction(config.sitesDir, siteId, params.functionName);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Site function ${params.functionName} ${params.action === "function" ? "registered" : "removed"}.`,
+            },
+          ],
+          details: {},
+        };
+      }
       if (params.action === "delete") {
         await deleteSite(config.sitesDir, siteId);
         return {

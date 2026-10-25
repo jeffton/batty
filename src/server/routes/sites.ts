@@ -2,6 +2,9 @@ import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { appBasePath } from "../app-shell";
+import { SITE_CLIENT_SCRIPT } from "@/shared/site-functions";
+import { executeSiteFunction } from "../site-functions";
+import { closeSiteFunctionRuntime } from "../site-isolation";
 import { resolveSiteFile, setSitePublic } from "../sites";
 import type { RouteContext } from "./context";
 
@@ -10,6 +13,31 @@ export function registerSiteRoutes({
   config,
   routePath,
 }: Pick<RouteContext, "app" | "config" | "routePath">): void {
+  app.addHook("onClose", closeSiteFunctionRuntime);
+  app.get(routePath("/site-runtime.js"), async (_request, reply) => {
+    return reply
+      .header("Access-Control-Allow-Origin", "*")
+      .type("application/javascript")
+      .send(SITE_CLIENT_SCRIPT);
+  });
+  app.post<{ Params: { siteId: string; name: string }; Body: { input?: unknown } }>(
+    routePath("/api/sites/:siteId/functions/:name"),
+    { bodyLimit: 4 * 1024 * 1024 },
+    async (request, reply) => {
+      if (!request.auth) return reply.code(401).send({ error: "Authentication required" });
+      if (request.headers.origin !== `${request.protocol}://${request.host}`)
+        return reply.code(403).send({ error: "Same-origin required" });
+      return {
+        value: await executeSiteFunction(
+          config.sitesDir,
+          request.params.siteId,
+          request.params.name,
+          request.body?.input,
+        ),
+      };
+    },
+  );
+
   app.patch<{
     Params: { siteId: string };
     Body: { public?: unknown };

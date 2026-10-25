@@ -99,15 +99,15 @@ This uses no periodic client presence traffic. Challenges are bound to live stre
 
 ## Checks
 
-`pnpm test` runs the server/shared and client-component groups. Server tests use Node and reusable threads; component tests use isolated happy-dom environments. Durable replay, process cancellation, browser persistence and SQLite scaling regressions remain in the standard suite.
+`pnpm test` runs the server/shared and client-component groups. Server tests reuse Node threads; files with module mocks belong in `mockedServerTests` in `vite.config.ts` and run with isolated module graphs. Component tests use isolated happy-dom environments. Durable replay, process cancellation, browser persistence and SQLite scaling regressions remain in the standard suite.
 
 ```sh
 pnpm test
 pnpm test:browser  # Browser fixtures, layout and native cache (Chromium/WebKit)
-pnpm test:all      # All three groups; required before pushing
+pnpm test:all      # All groups; required before pushing
 ```
 
-Browser fixture servers use separate temporary Vite caches. Viewport cases cover layout; dark-mode cases cover styling rather than repeating every interaction.
+Browser fixture servers use separate temporary Vite caches and a 30-second integration-test budget. Wait for observable state or events rather than fixed sleeps. Viewport cases cover layout; dark-mode cases cover styling rather than repeating every interaction.
 
 Before pushing changes, run the complete source validation below. Installations pull validated commits; deployment installs locked dependencies, builds the release and verifies the running service without repeating development checks or browser tests.
 

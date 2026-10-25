@@ -2,16 +2,11 @@
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { spawn } from "node:child_process";
-import { afterAll, afterEach, expect, test, vi } from "vite-plus/test";
+import { afterEach, expect, test, vi } from "vite-plus/test";
 import { startNativeBrowserVideo } from "./native-browser-video";
 
-vi.hoisted(() => vi.resetModules());
 vi.mock("node:child_process", () => ({ spawn: vi.fn() }));
 afterEach(() => vi.useRealTimers());
-afterAll(() => {
-  vi.doUnmock("node:child_process");
-  vi.resetModules();
-});
 
 function fakeEncoder() {
   const child = Object.assign(new EventEmitter(), {

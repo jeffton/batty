@@ -58,5 +58,6 @@ it("edits only the selected assistant instructions and can create an absent file
     expect(await fs.readFile(path.join(directory, "AGENTS.md"), "utf8")).toBe("Local instructions");
   } finally {
     await app.close();
+    await fs.rm(directory, { recursive: true, force: true });
   }
 });

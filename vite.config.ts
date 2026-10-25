@@ -3,6 +3,17 @@ import vue from "@vitejs/plugin-vue";
 import { VitePWA } from "vite-plugin-pwa";
 import { defineConfig } from "vite-plus";
 
+const mockedServerTests = [
+  "src/server/durable-bash.test.ts",
+  "src/server/native-browser-video-process.test.ts",
+  "src/server/browser-display.test.ts",
+  "src/server/browser-persistence.test.ts",
+  "src/server/web-push.test.ts",
+  "src/server/browser-credentials.test.ts",
+  "src/server/cloud-browser.test.ts",
+  "src/server/routes/assistant-agents.test.ts",
+];
+
 export default defineConfig({
   base: "./",
   define: { __BATTY_BUILD_ID__: JSON.stringify(process.env.BATTY_BUILD_ID ?? "dev") },
@@ -59,8 +70,19 @@ export default defineConfig({
           name: "server",
           environment: "node",
           include: ["src/server/**/*.test.ts", "src/shared/**/*.test.ts"],
+          exclude: mockedServerTests,
           pool: "threads",
           isolate: false,
+        },
+      },
+      {
+        test: {
+          // Module mocks need a fresh module graph; keep pure server tests fast.
+          name: "server-mocked",
+          environment: "node",
+          include: mockedServerTests,
+          pool: "threads",
+          isolate: true,
         },
       },
       {
@@ -76,6 +98,9 @@ export default defineConfig({
       {
         test: {
           name: "browser",
+          // Browser startup, fixture compilation and systemd-backed calls are
+          // integration work, not 5-second unit tests. Locator waits still fail fast.
+          testTimeout: 30_000,
           environment: "node",
           include: ["src/**/*.browser.test.ts"],
           pool: "forks",

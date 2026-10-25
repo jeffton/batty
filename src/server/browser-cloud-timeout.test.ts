@@ -13,6 +13,30 @@ import { browserSessionDirectory } from "./browser-persistence";
 import * as webauthn from "./browser-webauthn";
 import { CloudBrowserStreams } from "./cloud-browser-stream";
 
+function controlCloudDeadlines() {
+  const original = globalThis.setTimeout;
+  const deadlines: (() => void)[] = [];
+  const timer = vi
+    .spyOn(globalThis, "setTimeout")
+    .mockImplementation((callback, delay, ...args) => {
+      if (delay !== 15_000) return original(callback, delay, ...args);
+      // Chromium and cleanup keep real timers; only the operation deadline is held.
+      const handle = original(() => {}, delay);
+      deadlines.push(() => {
+        clearTimeout(handle);
+        callback(...args);
+      });
+      return handle;
+    });
+  return {
+    expireNext() {
+      expect(deadlines.length).toBeGreaterThan(0);
+      deadlines.shift()!();
+    },
+    restore: () => timer.mockRestore(),
+  };
+}
+
 test.each([false, true])(
   "lost touch acknowledgement releases state/WS and permits a fresh session (cleanup failure: %s)",
   async (cleanupFailure) => {
@@ -32,6 +56,7 @@ test.each([false, true])(
       >;
       queues: Map<string, Promise<void>>;
       cloudTouches: Map<string, unknown>;
+      serialized<T>(id: string, operation: () => Promise<T>): Promise<T>;
     };
     let acknowledge!: () => void;
     let started!: () => void;
@@ -63,7 +88,7 @@ test.each([false, true])(
       ).pid;
       if (cleanupFailure)
         vi.spyOn(session.browser, "close").mockRejectedValue(new Error("CDP detach failed"));
-      const began = Date.now();
+      const deadline = controlCloudDeadlines();
       const touch = service.cloudTouch(
         id,
         {
@@ -86,13 +111,17 @@ test.each([false, true])(
       });
       await dispatched;
       // Both routes used to queue forever behind the same unacknowledged CDP send.
+      const admission = vi.spyOn(internals, "serialized");
       const pendingState = app.inject({ url: `/api/cloud-browser/${id}/state` });
       const pendingSocket = app.injectWS(`/api/cloud-browser/${id}/socket`, {
         headers: { origin: "https://batty.example" },
       });
       const rejectedSocket = expect(pendingSocket).rejects.toThrow(/410|504/);
+      await vi.waitFor(() => expect(admission).toHaveBeenCalledTimes(2));
+      admission.mockRestore();
+      deadline.expireNext();
+      deadline.restore();
       await timedOut;
-      expect(Date.now() - began).toBeLessThan(23_000);
       const stateResponse = await pendingState;
       await rejectedSocket;
       // Queue admission can hit its own deadline while process cleanup finishes.
@@ -178,10 +207,17 @@ test("cloud queue deadlines leave an active predecessor intact, and reconnect st
       queues: Map<string, unknown>;
     };
     const predecessor = internals.serialized("worker", () => barrier);
-    await expect(service.cloudState(id)).rejects.toMatchObject({
+    const queueDeadline = controlCloudDeadlines();
+    const admission = vi.spyOn(internals, "serialized");
+    const queued = expect(service.cloudState(id)).rejects.toMatchObject({
       statusCode: 504,
       message: expect.stringContaining("queue timed out"),
     });
+    await vi.waitFor(() => expect(admission).toHaveBeenCalledOnce());
+    admission.mockRestore();
+    queueDeadline.expireNext();
+    queueDeadline.restore();
+    await queued;
     expect(await service.hasSession("worker")).toBe(true);
     release();
     await predecessor;
@@ -198,9 +234,12 @@ test("cloud queue deadlines leave an active predecessor intact, and reconnect st
       entered();
       return new Promise(() => {});
     });
+    const reconnectDeadline = controlCloudDeadlines();
     const pending = service.cloudState(id);
     const timeout = expect(pending).rejects.toMatchObject({ statusCode: 504 });
     await reconnecting;
+    reconnectDeadline.expireNext();
+    reconnectDeadline.restore();
     await timeout;
     policy.mockRestore();
     const after = service as unknown as typeof internals;

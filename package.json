@@ -9,7 +9,7 @@
     "dev:client": "vp dev",
     "build": "vp build && vp pack",
     "start": "node dist/server/main.mjs /var/lib/batty2",
-    "test": "vp test --run --project server --project client",
+    "test": "vp test --run --project server --project server-mocked --project client",
     "test:browser": "vp test --run --project browser",
     "test:all": "vp test --run",
     "typecheck": "tsc --noEmit",

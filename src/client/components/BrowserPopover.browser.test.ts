@@ -266,6 +266,10 @@ test("WebKit bottom autofill pair detects login steps without submitting or expo
     await page.getByRole("button", { name: "Fill", exact: true }).click();
     await expect.poll(() => remote.locator("input").inputValue()).toBe("multistep-password");
     await page.setViewportSize({ width: 1440, height: 1000 });
+    await expect
+      .poll(async () => (await service.cloudState(attachedBrowserId)).width)
+      .toBeGreaterThan(1000);
+    await page.locator(".browser-credentials").waitFor({ state: "visible" });
     await page.screenshot({ path: "/tmp/batty-bottom-login-desktop.png" });
     const desktopBounds = (await page.locator(".browser-credentials").boundingBox())!;
     expect(desktopBounds.x).toBeGreaterThanOrEqual(0);
@@ -285,6 +289,25 @@ async function inspect(script: string) {
     (source) => globalThis.eval(source),
     script,
   );
+}
+async function trackScrollEnd(selector?: string) {
+  const remote = (await service.cloudTarget(attachedBrowserId)).page;
+  // Arm before the gesture so a short fling cannot finish before we start waiting.
+  const completion = await remote.evaluateHandle((selector) => {
+    const target = selector ? document.querySelector(selector)! : document;
+    const completion = { ended: false };
+    target.addEventListener("scrollend", () => (completion.ended = true), { once: true });
+    return completion;
+  }, selector);
+  return async () => {
+    try {
+      await expect
+        .poll(() => completion.evaluate((value) => value.ended), { timeout: 5000 })
+        .toBe(true);
+    } finally {
+      await completion.dispose();
+    }
+  };
 }
 async function tapRemote(page: Page, x: number, y: number) {
   const image = page.locator(".cloud-browser__image");
@@ -445,6 +468,7 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
       .poll(async () => (await service.cloudState(attachedBrowserId)).width)
       .toBe(remote.width);
     // Remote inner container, not the local popover, owns this scroll gesture.
+    const innerSettled = await trackScrollEnd("#inner");
     await swipe(page, 100, 220, 130);
     await expect
       .poll(() => inspect("document.querySelector('#inner').scrollTop"))
@@ -457,7 +481,7 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
     );
 
     // Let the native fling settle before switching this mobile viewer to a mouse wheel.
-    await new Promise((resolve) => setTimeout(resolve, 700));
+    await innerSettled();
     // Wheel is routed too, and remains anchored to the nested container.
     await image.hover({ position: { x: 100, y: 190 } });
     // Chromium's injected device-pixel wheel is normalized by viewer DPR before DOM delivery.
@@ -534,6 +558,7 @@ test("native touch retains nested and outer momentum, taps once, drags and cance
     await expect.poll(() => canvas.getAttribute("data-frame")).not.toBeNull();
     await tapRemote(page, 40, 25);
     await expect.poll(() => inspect("document.body.dataset.clicks")).toBe("1");
+    const innerSettled = await trackScrollEnd("#pane");
     await swipe(page, 150, 500, 280, 10, 16);
     await expect.poll(() => inspect("document.body.dataset.releaseInner")).not.toBeUndefined();
     const releaseInner = Number(await inspect("document.body.dataset.releaseInner"));
@@ -541,7 +566,7 @@ test("native touch retains nested and outer momentum, taps once, drags and cance
       .poll(() => inspect("document.querySelector('#pane').scrollTop"))
       .toBeGreaterThan(releaseInner + 30);
     expect(await inspect("scrollY")).toBe(0);
-    await new Promise((resolve) => setTimeout(resolve, 700));
+    await innerSettled();
     // A touch-action:none surface receives touch-driven pointer movement, not page scrolling.
     await swipe(page, 340, 400, 120);
     await expect
@@ -549,13 +574,14 @@ test("native touch retains nested and outer momentum, taps once, drags and cance
       .toBeGreaterThan(2);
     expect(await inspect("scrollY")).toBe(0);
     // Start outside both nested pane and custom drag surface.
+    const outerSettled = await trackScrollEnd();
     await swipe(page, 325, 600, 280, 10, 16);
     await expect
       .poll(() => inspect("Number(document.body.dataset.releaseOuter)"))
       .toBeGreaterThan(0);
     const releaseOuter = Number(await inspect("document.body.dataset.releaseOuter"));
     await expect.poll(() => inspect("scrollY")).toBeGreaterThan(releaseOuter + 30);
-    await new Promise((resolve) => setTimeout(resolve, 700));
+    await outerSettled();
     const send = async (type: "touchStart" | "touchMove" | "touchCancel", x = 200, y = 300) => {
       const bounds = (await canvas.boundingBox())!;
       await touch.send("Input.dispatchTouchEvent", {
@@ -606,6 +632,8 @@ test("desktop/mobile switching keeps login, CSS screen matches the viewer, and n
     url: `${backendUrl}/target`,
     cloud: true,
   });
+  attachedBrowserId = (await service.execute("integration", { action: "attach" })).details
+    .sites![0]!.browserId!;
   const original = await service.cloudTarget(attachedBrowserId);
   await original.page.evaluate(() => {
     document.cookie = "login=retained;path=/";

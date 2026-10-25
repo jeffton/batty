@@ -516,14 +516,16 @@ test("contextual field replaces values, accepts clearing, and never sends a draf
         .slice(before)
         .map((command) => command.action),
     ).toEqual(["fill-focused"]);
+    vi.useFakeTimers();
     await input.setValue("do not leak");
     events.send("state", { ...state, focused: { ...focused, id: "field-b", value: "second" } });
     await flushPromises();
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    await vi.advanceTimersByTimeAsync(80);
     expect(commands().filter((command) => command.action === "fill-focused")).toHaveLength(2);
     expect((input.element as HTMLInputElement).value).toBe("second");
   } finally {
     wrapper.unmount();
+    vi.useRealTimers();
   }
 });
 

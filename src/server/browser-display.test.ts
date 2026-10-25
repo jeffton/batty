@@ -5,15 +5,10 @@ import { spawn, execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
+import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import { createBrowserDisplay, stopBrowserDisplay } from "./browser-display";
 
-vi.hoisted(() => vi.resetModules());
 vi.mock("node:child_process", () => ({ spawn: vi.fn(), execFile: vi.fn() }));
-afterAll(() => {
-  vi.doUnmock("node:child_process");
-  vi.resetModules();
-});
 let directory: string;
 beforeEach(async () => {
   vi.clearAllMocks();

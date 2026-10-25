@@ -15,9 +15,6 @@ vi.mock("node:child_process", async (importOriginal) => {
 
 test("failed stdin delivery rejects instead of polling for a missing receipt", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-bash-pipe-error-"));
-  // Server tests share a module cache; load the operation against this file's mock.
-  vi.resetModules();
-  const { persistentBashOperations } = await import("./durable-bash");
   const { spawn } = await vi.importActual<typeof childProcess>("node:child_process");
   const mock = vi.mocked(childProcess.spawn).mockImplementationOnce(() =>
     spawn(process.execPath, ["-e", "process.exit(0)"], {

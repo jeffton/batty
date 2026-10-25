@@ -11,6 +11,24 @@ import { browserSessionDirectory } from "./browser-persistence";
 import * as persistence from "./browser-persistence";
 import { SshSocksProxy } from "./ssh-socks-proxy";
 
+function controlOpenDeadline() {
+  const schedule = globalThis.setTimeout;
+  let expire!: () => void;
+  const timer = vi
+    .spyOn(globalThis, "setTimeout")
+    .mockImplementationOnce((callback, delay, ...args) => {
+      expect(delay).toBe(1000);
+      // Keep a cancellable handle without allowing wall-clock time to end the operation.
+      const handle = schedule(() => {}, delay);
+      expire = () => {
+        clearTimeout(handle);
+        callback(...args);
+      };
+      return handle;
+    });
+  return { expire: () => expire(), restore: () => timer.mockRestore() };
+}
+
 test("open deadline and worker cancellation interrupt a hung snapshot and release the action queue", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-open-timeout-"));
   const website = http.createServer((_, response) => response.end("<h1>Ready</h1>"));
@@ -38,7 +56,7 @@ test("open deadline and worker cancellation interrupt a hung snapshot and releas
         .spyOn(internals, "snapshotResult")
         .mockImplementation(() => new Promise(() => {}));
       const controller = new AbortController();
-      const started = Date.now();
+      const deadline = controlOpenDeadline();
       const pending = service.execute(
         "worker",
         { action: "open", url, timeoutMs: 1000 },
@@ -49,9 +67,10 @@ test("open deadline and worker cancellation interrupt a hung snapshot and releas
       );
       await vi.waitFor(() => expect(snapshot).toHaveBeenCalled());
       const pid = JSON.parse(await fs.readFile(path.join(directory, "process.json"), "utf8")).pid;
+      deadline.restore();
       if (interrupted) controller.abort(new Error("Worker stopped"));
+      else deadline.expire();
       await rejected;
-      expect(Date.now() - started).toBeLessThan(5000);
       expect(() => process.kill(pid, 0)).toThrow("ESRCH");
       expect(await service.hasSession("worker")).toBe(false);
       snapshot.mockRestore();
@@ -67,12 +86,16 @@ test("open deadline and worker cancellation interrupt a hung snapshot and releas
     const predecessor = internals.serialized("worker", () => barrier);
     const close = vi.spyOn(service, "closeSession");
     try {
+      const deadline = controlOpenDeadline();
       const waiting = service.execute("worker", { action: "open", url, timeoutMs: 1000 });
+      deadline.restore();
       let overtook = false;
       const following = internals.serialized("worker", async () => {
         overtook = true;
       });
-      await expect(waiting).rejects.toThrow("Browser open exceeded timeoutMs");
+      const rejected = expect(waiting).rejects.toThrow("Browser open exceeded timeoutMs");
+      deadline.expire();
+      await rejected;
       expect(close).not.toHaveBeenCalled();
       expect(overtook).toBe(false);
       expect(await service.hasSession("worker")).toBe(true);
@@ -91,6 +114,12 @@ test("open deadline and worker cancellation interrupt a hung snapshot and releas
     const disconnect = vi
       .spyOn(session.browser, "close")
       .mockImplementation(() => new Promise(() => {}));
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
+      expect(milliseconds).toBe(2000);
+      const controller = new AbortController();
+      queueMicrotask(() => controller.abort(new DOMException("Timed out", "TimeoutError")));
+      return controller.signal;
+    });
     try {
       await expect(service.closeSession("worker")).rejects.toThrow(
         "Browser session cleanup failed",
@@ -98,6 +127,7 @@ test("open deadline and worker cancellation interrupt a hung snapshot and releas
       expect(disposeProxy).toHaveBeenCalledTimes(proxyDisposals + 1);
       await expect(fs.stat(download)).rejects.toThrow("ENOENT");
     } finally {
+      timeout.mockRestore();
       disconnect.mockRestore();
     }
   } finally {

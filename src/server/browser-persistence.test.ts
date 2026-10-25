@@ -2,7 +2,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
+import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import type { Browser } from "patchright";
 import {
   closePersistentBrowser,
@@ -12,7 +12,6 @@ import {
 import { createBrowserDisplay, stopBrowserDisplay } from "./browser-display";
 import { chromium } from "patchright";
 
-vi.hoisted(() => vi.resetModules());
 // Failure fixtures launch fake executables, not the installed unprivileged Chromium.
 vi.mock("./browser-isolation", async (original) => ({
   ...(await original<typeof import("./browser-isolation")>()),
@@ -25,12 +24,6 @@ vi.mock("./browser-display", () => ({
   createBrowserDisplay: vi.fn(),
   stopBrowserDisplay: vi.fn(),
 }));
-afterAll(() => {
-  vi.doUnmock("./browser-isolation");
-  vi.doUnmock("patchright");
-  vi.doUnmock("./browser-display");
-  vi.resetModules();
-});
 let directory: string;
 beforeEach(async () => {
   vi.clearAllMocks();
@@ -104,13 +97,23 @@ test.skipIf(process.platform !== "linux")(
 test("a stalled CDP disconnect is bounded and does not retain dead launch receipts", async () => {
   const display = { pid: 123456, display: ":456", authority: path.join(directory, "Xauthority") };
   await fs.writeFile(path.join(directory, "display.json"), JSON.stringify(display));
-  const started = Date.now();
-  await expect(
-    closePersistentBrowser(directory, { close: () => new Promise(() => {}) } as unknown as Browser),
-  ).rejects.toThrow("Persistent browser cleanup failed");
-  expect(Date.now() - started).toBeLessThan(4000);
-  expect(stopBrowserDisplay).toHaveBeenCalledWith(display);
-  await expect(fs.stat(directory)).rejects.toThrow("ENOENT");
+  const controller = new AbortController();
+  const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => {
+    queueMicrotask(() => controller.abort(new DOMException("Timed out", "TimeoutError")));
+    return controller.signal;
+  });
+  try {
+    await expect(
+      closePersistentBrowser(directory, {
+        close: () => new Promise(() => {}),
+      } as unknown as Browser),
+    ).rejects.toThrow("Persistent browser cleanup failed");
+    expect(timeout).toHaveBeenCalledExactlyOnceWith(2000);
+    expect(stopBrowserDisplay).toHaveBeenCalledWith(display);
+    await expect(fs.stat(directory)).rejects.toThrow("ENOENT");
+  } finally {
+    timeout.mockRestore();
+  }
 });
 
 async function expectLaunchCleaned() {

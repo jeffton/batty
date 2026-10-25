@@ -11,7 +11,7 @@ const SUPERVISOR = String.raw`
 const fs = require('node:fs');
 const path = require('node:path');
 const {spawn} = require('node:child_process');
-const job = JSON.parse(process.argv[1]);
+const job = JSON.parse(fs.readFileSync(0, 'utf8'));
 try { fs.mkdirSync(path.join(job.directory,'claim')); } catch (error) { if (error.code === 'EEXIST') process.exit(0); throw error; }
 const receipt = path.join(job.directory, 'receipt.json');
 const save = value => { value.identity=job.identity; fs.writeFileSync(receipt+'.tmp', JSON.stringify(value)); fs.renameSync(receipt+'.tmp', receipt); };
@@ -41,30 +41,30 @@ export function persistentBashOperations(jobsDir: string, taskId: string): BashO
       const directory = path.join(jobsDir, bashJobKey(taskId));
       await fs.mkdir(directory, { recursive: true });
       await fs.writeFile(path.join(directory, "intent.json"), JSON.stringify({ identity: taskId }));
-      const supervisor = spawn(
-        process.execPath,
-        [
-          "-e",
-          SUPERVISOR,
-          JSON.stringify({
-            directory,
-            identity: taskId,
-            cancelPath: bashCancelPath(jobsDir, taskId),
-            command,
-            shell: process.env.BATTY_BASH_PATH ?? "/bin/bash",
-            cwd,
-            env: options.env ?? process.env,
-            timeout: options.timeout,
-          }),
-        ],
-        {
-          detached: true,
-          stdio: "ignore",
-        },
-      );
+      const payload = JSON.stringify({
+        directory,
+        identity: taskId,
+        cancelPath: bashCancelPath(jobsDir, taskId),
+        command,
+        shell: process.env.BATTY_BASH_PATH ?? "/bin/bash",
+        cwd,
+        env: options.env ?? process.env,
+        timeout: options.timeout,
+      });
+      const supervisor = spawn(process.execPath, ["-e", SUPERVISOR], {
+        detached: true,
+        stdio: ["pipe", "ignore", "ignore"],
+      });
       await new Promise<void>((resolve, reject) => {
         supervisor.once("spawn", resolve);
         supervisor.once("error", reject);
+      });
+      await new Promise<void>((resolve, reject) => {
+        supervisor.stdin.once("error", reject);
+        supervisor.stdin.end(payload, (error?: Error | null) => {
+          if (error) reject(error);
+          else resolve();
+        });
       });
       supervisor.unref();
       let position = 0;

@@ -170,7 +170,7 @@ export interface SessionSummary {
   };
 }
 
-export type CronJobSchedule =
+export type CronJobSingleSchedule =
   | {
       kind: "at";
       at: string;
@@ -185,7 +185,11 @@ export type CronJobSchedule =
       timezone?: string;
     };
 
-export type CronJobScheduleInput =
+export type CronJobSchedule =
+  | CronJobSingleSchedule
+  | { kind: "multiple"; triggers: (CronJobSingleSchedule & { nextAt?: number })[] };
+
+export type CronJobSingleScheduleInput =
   | {
       kind: "at";
       at?: string;
@@ -200,6 +204,10 @@ export type CronJobScheduleInput =
       expression: string;
       timezone?: string;
     };
+
+export type CronJobScheduleInput =
+  | CronJobSingleScheduleInput
+  | { kind: "multiple"; triggers: CronJobSingleScheduleInput[] };
 
 export interface RunningSubagent {
   sessionId: string;

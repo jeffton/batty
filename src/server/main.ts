@@ -237,13 +237,8 @@ app.get<{ Params: { sessionId: string } }>(
     ];
   },
 );
-function scheduleLabel(schedule: {
-  kind: string;
-  at?: string;
-  every?: string;
-  expression?: string;
-  timezone?: string;
-}) {
+function scheduleLabel(schedule: import("./orchestration-state").Schedule): string {
+  if (schedule.kind === "multiple") return schedule.triggers.map(scheduleLabel).join(" · ");
   return schedule.kind === "at"
     ? `At ${schedule.at}`
     : schedule.kind === "every"

@@ -8,4 +8,4 @@ Keeping public URLs requires the original hostname to route to the destination s
 
 ## Cron schedules
 
-Use `batty2 cron import --json job.json` with a full Batty2 job. Import preserves ID, timestamps and `nextAt`, and rejects collisions. Ordinary `add` does not accept an existing job ID. See [the CLI reference](operations.md#cron-cli).
+Use `batty2 cron import --json job.json` with a full Batty2 job. Import preserves ID, timestamps and `nextAt`, and rejects collisions. Multiple-trigger exports also include each trigger’s `nextAt`; consumed one-shots omit it. Preserve those fields when importing so intervals retain their cadence and consumed one-shots do not repeat. The job’s `nextAt` must equal the earliest remaining trigger deadline. Single-trigger jobs need no conversion. Ordinary `add` does not accept an existing job ID. See [the CLI reference](operations.md#cron-cli).

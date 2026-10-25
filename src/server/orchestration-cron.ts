@@ -17,13 +17,23 @@ import {
   type CronJob,
   type CronJobInput,
   type CronRun,
-  type Schedule,
   type RunChange,
   type OrchestrationServices,
 } from "./orchestration-state.js";
-import { normalizeSchedule, nextAt } from "./cron-schedule.js";
+import { advanceSchedule, normalizeSchedule, nextAt } from "./cron-schedule.js";
 import type { createDeliveryTask } from "./orchestration-delivery.js";
 import type { createWorkers } from "./orchestration-workers.js";
+
+const TriggerSchema = Type.Union([
+  Type.Object({ kind: Type.Literal("at"), at: Type.String() }),
+  Type.Object({ kind: Type.Literal("at"), in: Type.String() }),
+  Type.Object({ kind: Type.Literal("every"), every: Type.String() }),
+  Type.Object({
+    kind: Type.Literal("cron"),
+    expression: Type.String(),
+    timezone: Type.Optional(Type.String()),
+  }),
+]);
 
 const context = BACKGROUND_CONTEXT;
 function validateDelivery(delivery?: CronDelivery) {
@@ -176,14 +186,9 @@ export function createCronScheduler(
             job: structuredClone(job),
           };
           await indexRun(tx, doc.runs[runId]!);
-          current.nextAt =
-            current.schedule.kind === "every"
-              ? job.nextAt! +
-                (Math.floor((now - job.nextAt!) / current.schedule.everyMs) + 1) *
-                  current.schedule.everyMs
-              : nextAt(current.schedule, now);
+          current.nextAt = advanceSchedule(current.schedule, job.nextAt!, now);
           delete current.retryAt;
-          if (current.schedule.kind === "at") {
+          if (current.nextAt === undefined) {
             current.enabled = false;
             delete current.nextAt;
           }
@@ -254,13 +259,9 @@ export function createCronScheduler(
     }
     modelChange(input.model, input.thinkingLevel);
     const ws = await services.workspace(input.workspaceId);
-    let schedule: Schedule;
-    if (input.schedule.kind === "at") {
-      if (!Number.isFinite(Date.parse(input.schedule.at))) throw new Error("Invalid at schedule");
-      schedule = { kind: "at", at: input.schedule.at };
-    } else {
-      schedule = normalizeSchedule(input.schedule, Date.now());
-    }
+    const schedule = normalizeSchedule(input.schedule, Date.now(), true);
+    if (schedule.kind === "multiple" && input.nextAt !== nextAt(schedule, Date.now()))
+      throw new Error("Job nextAt must match the earliest trigger nextAt");
     const job: CronJob = {
       title,
       id: input.id,
@@ -340,7 +341,7 @@ export function createCronScheduler(
   const cron = defineTool({
     name: "cron",
     description:
-      "Manage scheduled tasks. add requires title, prompt and schedule; update accepts title. list returns compact summaries across all workspaces unless workspaceId filters them, without prompts; get requires jobId and returns full job details including prompt. Each run starts a fresh worker in the selected workspace. Workers in the assistant workspace receive main OptChat memory. delivery=assistant (default) lets the main assistant handle the result; delivery=direct shows the result unchanged to the user. Return NO_REPLY for no user-visible output.",
+      "Manage scheduled tasks. add requires title, prompt and schedule; update accepts title. Use schedule={kind:'multiple',triggers:[...]} to give one job several at/every/cron triggers. Due triggers coalesce into one run; each recurring trigger keeps its cadence. Replacing schedule resets all trigger deadlines. list returns compact summaries across all workspaces unless workspaceId filters them, without prompts; get requires jobId and returns full job details including prompt. Each run starts a fresh worker in the selected workspace. Workers in the assistant workspace receive main OptChat memory. delivery=assistant (default) lets the main assistant handle the result; delivery=direct shows the result unchanged to the user. Return NO_REPLY for no user-visible output.",
     replay: "unsafe",
     parameters: Type.Object({
       action: Type.String(),
@@ -355,14 +356,13 @@ export function createCronScheduler(
       thinkingLevel: Type.Optional(Type.String()),
       limit: Type.Optional(Type.Number()),
       schedule: Type.Optional(
-        Type.Object({
-          kind: Type.String(),
-          at: Type.Optional(Type.String()),
-          in: Type.Optional(Type.String()),
-          every: Type.Optional(Type.String()),
-          expression: Type.Optional(Type.String()),
-          timezone: Type.Optional(Type.String()),
-        }),
+        Type.Union([
+          TriggerSchema,
+          Type.Object({
+            kind: Type.Literal("multiple"),
+            triggers: Type.Array(TriggerSchema, { minItems: 1 }),
+          }),
+        ]),
       ),
     }),
     execute: async (args, api) => {

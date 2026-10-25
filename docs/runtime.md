@@ -16,6 +16,8 @@ A subagent can call `subagent({action: "report", prompt: "…"})` to send an exp
 
 Cron jobs have explicit titles. `cron({action: "list"})` returns compact summaries without prompts; `cron({action: "get", jobId: "…"})` returns a single full job. `add` requires a nonempty `title`; `update` can rename it without changing execution settings.
 
+A job can have one `at`, `every` or `cron` schedule, or `schedule: {kind: "multiple", triggers: [...]}` containing several of those triggers. They share one job ID, prompt and execution/delivery settings. Each trigger has its own durable deadline; the earliest is the job’s `nextAt`. All triggers due at admission coalesce into one run, including overdue occurrences after downtime. Intervals retain their independent cadence, and consumed one-shots stay consumed across restarts. Replacing `schedule` resets its deadlines. An exhausted job is disabled; an all-one-shot job is retired after its final successful run, while failures remain available for inspection. Existing single-trigger jobs and archived runs retain their format.
+
 Each cron run starts a fresh worker in the selected workspace. Workers in the assistant workspace receive main OptChat memory and navigation tools. Delivery can go through the assistant or directly to the user. Helpers stay with their cron parent; only the completed cron turn's final output is delivered onward.
 
 Outgoing prompts appear immediately, including attachment names, and survive refresh until the server publishes the matching message. Failed submissions restore the draft; cancelling queued input removes its outgoing entry.

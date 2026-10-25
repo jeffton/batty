@@ -84,10 +84,36 @@ test.each([
   }
 });
 
-test("ambiguous schedules and malformed flags fail before contacting service", async () => {
-  await expect(parseCronArgs(["cron", "add", "--in", "3m", "--every", "5m"])).rejects.toThrow(
-    "one schedule",
-  );
+test("repeated and mixed flags build one multi-trigger job", async () => {
+  const { body } = await parseCronArgs([
+    "cron",
+    "add",
+    "--at",
+    "2026-11-20T10:00:00+01:00",
+    "--at",
+    "2026-11-23T10:00:00+01:00",
+    "--every",
+    "5m",
+    "--cron",
+    "0 8,12,16,20 27 11 *",
+    "--timezone",
+    "Europe/Stockholm",
+  ]);
+  expect(body.schedule).toEqual({
+    kind: "multiple",
+    triggers: [
+      { kind: "at", at: "2026-11-20T10:00:00+01:00" },
+      { kind: "at", at: "2026-11-23T10:00:00+01:00" },
+      { kind: "every", every: "5m" },
+      { kind: "cron", expression: "0 8,12,16,20 27 11 *", timezone: "Europe/Stockholm" },
+    ],
+  });
+});
+
+test("malformed flags fail before contacting service", async () => {
+  await expect(
+    parseCronArgs(["cron", "add", "--at", "2026-11-20", "--timezone", "UTC"]),
+  ).rejects.toThrow("--timezone requires --cron");
   await expect(parseCronArgs(["cron", "add", "--enabled", "no"])).rejects.toThrow("true or false");
   await expect(parseCronArgs(["cron", "list", "--unknown"])).rejects.toThrow();
 });

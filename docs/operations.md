@@ -233,12 +233,17 @@ batty2 cron update JOB_ID --title 'Weekly task review'
 batty2 cron update JOB_ID --enabled false
 batty2 cron remove JOB_ID
 batty2 cron import --json job.json
+batty2 cron add --title 'Offer watch' --prompt 'Check relevant deals' \
+  --at 2026-11-20T10:00:00+01:00 --at 2026-11-23T10:00:00+01:00 \
+  --cron '0 8,12,16,20 27 11 *' --timezone Europe/Stockholm
 batty2 --help
 ```
 
 Jobs require a nonempty `title` on creation and import. `list` includes all workspaces by default; `--workspace ID` (AI/API: `workspaceId`) explicitly filters it. It returns only ID, title, workspace, enabled status, schedule and next/retry times; `get JOB_ID` returns the full job including prompt and execution settings. The AI cron tool uses the same `title`, `list` and `get` fields/actions. This is a breaking list-response change; full job data is fetched explicitly, with no legacy aliases or title inference.
 
-`--root` defaults to `/var/lib/batty2`. `--json FILE` accepts request fields (`-` reads stdin); flags override them. See [migration](migration.md) for schedule imports.
+`--root` defaults to `/var/lib/batty2`. `--json FILE` accepts request fields (`-` reads stdin); flags override them. Repeat or combine `--at`, `--in`, `--every` and `--cron` for multiple triggers on one job. `--timezone` applies to every `--cron` flag; use JSON for per-trigger timezones.
+
+The API and AI tool accept `schedule: {kind: "multiple", triggers: [{kind: "at", at: "2026-11-20T10:00:00+01:00"}, {kind: "cron", expression: "0 10 * * 1", timezone: "Europe/Stockholm"}]}`. Nested multiple schedules and empty trigger lists are rejected. Due triggers coalesce into one run; future triggers keep their deadlines. Editing only a title or prompt preserves deadlines, while replacing `schedule` resets all of them. See [migration](migration.md) for schedule imports.
 
 ## Push notifications
 

@@ -26,6 +26,7 @@ import { createDeliveryTask } from "./orchestration-delivery.js";
 import { createWorkers } from "./orchestration-workers.js";
 import { createRemoteCommands } from "./remote-command.js";
 import { createRemoteJoin } from "./remote-join.js";
+import { isOneShot } from "./cron-schedule.js";
 import { createCronScheduler } from "./orchestration-cron.js";
 export { OrchestrationDoc, WorkerDoc } from "./orchestration-state.js";
 export type {
@@ -171,7 +172,7 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
       // Retire historical successful one-shots using the latest archived run,
       // never merely because a definition is paused or its deadline has passed.
       for (const job of await listJobs()) {
-        if (job.schedule.kind !== "at" || job.enabled || job.nextAt !== undefined) continue;
+        if (!isOneShot(job.schedule) || job.enabled || job.nextAt !== undefined) continue;
         const runs = await listRunLogs(job.id, Infinity);
         const [run] = runs;
         if (!run) continue;

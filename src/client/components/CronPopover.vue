@@ -254,7 +254,11 @@ button.cron-popover__run:focus-visible {
   min-width: 0;
   font-size: 0.84rem;
 }
-.cron-popover__run-heading strong,
+.cron-popover__run-heading strong {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .cron-popover__run-prompt {
   overflow: hidden;
   text-overflow: ellipsis;

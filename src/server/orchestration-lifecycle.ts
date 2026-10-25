@@ -1,11 +1,17 @@
 import { type TaskId, type Tx } from "@earendil-works/pi-durable";
+import { isOneShot } from "./cron-schedule.js";
 import { ArchivedWorker } from "./orchestration-history.js";
 import { OrchestrationDoc, type CronJob, type CronRun } from "./orchestration-state.js";
 
 export function removeCompletedOneShot(jobs: Record<string, CronJob>, run: CronRun) {
   const job = jobs[run.jobId];
   if (
-    job?.schedule.kind === "at" &&
+    job &&
+    isOneShot(job.schedule) &&
+    (job.schedule.kind !== "multiple" ||
+      job.schedule.triggers.every(
+        (trigger) => trigger.kind === "at" && Date.parse(trigger.at) <= run.startedAt,
+      )) &&
     !job.enabled &&
     job.nextAt === undefined &&
     job.updatedAt <= run.startedAt &&

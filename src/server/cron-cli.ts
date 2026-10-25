@@ -9,8 +9,9 @@ export const help = `Usage: batty2 [--root /var/lib/batty2] cron ACTION [JOB_ID]
 Actions: add, update, remove, list, get, import, list-running, list-run-logs, stop-running
 Options:
   --workspace ID --title TEXT --prompt TEXT --model PROVIDER/MODEL --thinking LEVEL
-  --in DURATION | --at ISO_DATE | --every DURATION | --cron EXPRESSION
-  --timezone ZONE
+  --in DURATION --at ISO_DATE --every DURATION --cron EXPRESSION
+    Repeat or combine schedule flags for multiple triggers on one job.
+  --timezone ZONE  Applies to all --cron triggers.
   --delivery direct|assistant --enabled true|false --run-id ID --limit NUMBER
   --json FILE  Read request fields from JSON file (use - for stdin).
 list returns compact summaries across all workspaces; --workspace ID filters them.
@@ -32,10 +33,10 @@ export async function parseCronArgs(args: string[]) {
       prompt: { type: "string" },
       model: { type: "string" },
       thinking: { type: "string" },
-      in: { type: "string" },
-      at: { type: "string" },
-      every: { type: "string" },
-      cron: { type: "string" },
+      in: { type: "string", multiple: true },
+      at: { type: "string", multiple: true },
+      every: { type: "string", multiple: true },
+      cron: { type: "string", multiple: true },
       timezone: { type: "string" },
       enabled: { type: "string" },
       delivery: { type: "string" },
@@ -84,15 +85,16 @@ export async function parseCronArgs(args: string[]) {
     body.limit = limit;
   }
   const schedules = ["in", "at", "every", "cron"] as const;
-  const selected = schedules.filter((key) => values[key] !== undefined);
-  if (selected.length > 1) throw new Error("Choose only one schedule");
-  if (selected.length) {
-    const key = selected[0]!;
-    body.schedule =
+  if (values.timezone && !values.cron) throw new Error("--timezone requires --cron");
+  const triggers = schedules.flatMap((key) =>
+    (values[key] ?? []).map((value) =>
       key === "cron"
-        ? { kind: "cron", expression: values.cron, timezone: values.timezone }
-        : { kind: key === "in" ? "at" : key, [key]: values[key] };
-  } else if (values.timezone) throw new Error("--timezone requires --cron");
+        ? { kind: "cron", expression: value, timezone: values.timezone }
+        : { kind: key === "in" ? "at" : key, [key]: value },
+    ),
+  );
+  if (triggers.length)
+    body.schedule = triggers.length === 1 ? triggers[0] : { kind: "multiple", triggers };
   return { root: values.root, help: false, body };
 }
 

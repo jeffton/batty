@@ -22,14 +22,20 @@ import type { AgentTurnArtifacts } from "./agent-turn-file-changes.js";
 import { type WorkerRecord } from "./orchestration-history";
 
 export type PrepareAgent = (cwd: string, agent: Agent, context: Context) => Promise<AgentChange>;
-export type ScheduleInput =
+export type SingleScheduleInput =
   | { kind: "at"; at?: string; in?: string }
   | { kind: "every"; every: string }
   | { kind: "cron"; expression: string; timezone?: string };
-export type Schedule =
+export type ScheduleInput =
+  | SingleScheduleInput
+  | { kind: "multiple"; triggers: SingleScheduleInput[] };
+export type SingleSchedule =
   | { kind: "at"; at: string }
   | { kind: "every"; every: string; everyMs: number }
   | { kind: "cron"; expression: string; timezone: string };
+export type Schedule =
+  | SingleSchedule
+  | { kind: "multiple"; triggers: (SingleSchedule & { nextAt?: number })[] };
 export type CronDelivery = "direct" | "assistant";
 export type CronJobInput = {
   title: string;

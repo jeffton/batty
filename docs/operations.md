@@ -220,6 +220,12 @@ Batty-owned AI tools use snake_case. `web_search`, `attach_files` and `attach_ar
 
 This is a breaking change without aliases or history migration. Instructions and scripts must use the new names. Persisted calls retain their original names: unfinished calls or codemode scripts using renamed tools cannot resume under this release. Completed results and artifacts remain stored, but name-specific UI rendering uses the new names.
 
+## Image reads in codemode
+
+`tools.read` returns a string: file text or an image's text note. Image blocks are forwarded automatically to the model, even when the script ignores the return value or fails after the read completes. Image bytes do not enter the script. `text(await tools.read(...))` prints only the note; `await tools.read(...)` alone displays the image.
+
+This breaks scripts expecting an image object from `read`: remove `image(await tools.read(...))`. The `image(block)` helper remains available for explicitly supplied image data. Direct `read` calls are unchanged.
+
 ## Web search in codemode
 
 `tools.web_search` returns structured data, not formatted text. Search returns `{ action, query, count, country, freshness?, includeContent, results }`, with `{ title, link, snippet, age, content? }` per result. Content extraction returns `{ action, url, content }`. Page content includes existing error/challenge text and is not truncated in scripts. Model-facing text keeps its output limit and full-text file.

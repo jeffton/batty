@@ -734,6 +734,87 @@ describe("durable tool bridge", () => {
       expect(withoutMainMemory([result])).toEqual([]);
     },
   );
+  it.each([
+    ["text", 'text(await tools.read({path: "drawing.png"}));'],
+    ["return", 'return await tools.read({path: "drawing.png"});'],
+    ["ignored", 'await tools.read({path: "drawing.png"});'],
+    ["later failure", 'await tools.read({path: "drawing.png"}); throw new Error("after read");'],
+    ["obsolete image wrapper", 'image(await tools.read({path: "drawing.png"}));'],
+  ])("forwards image reads once with %s and keeps base64 out of text", async (mode, code) => {
+    const { directory, run } = await fixture();
+    const sharp = (await import("sharp")).default;
+    await sharp({ create: { width: 2, height: 2, channels: 3, background: "red" } })
+      .png()
+      .toFile(path.join(directory, "drawing.png"));
+    const result = await run(code);
+    expect(result.isError).toBe(mode === "later failure" || mode === "obsolete image wrapper");
+    const images = result.content.filter((block: any) => block.type === "image");
+    expect(images).toHaveLength(1);
+    expect(images[0]).toMatchObject({ mimeType: "image/png", data: expect.any(String) });
+    const text = result.content
+      .filter((block: any) => block.type === "text")
+      .map((block: any) => block.text)
+      .join("\n");
+    expect(text).not.toContain(images[0].data);
+    if (mode === "text" || mode === "return") expect(text).toBe("Read image file [image/png]");
+    if (mode === "ignored") expect(result.content).toEqual(images);
+    if (mode === "later failure") expect(text).toContain("after read");
+    if (mode === "obsolete image wrapper") expect(text).toContain("image");
+  });
+
+  it("declares image read notes as strings and preserves ordinary text reads", async () => {
+    const { directory, run } = await fixture();
+    await fs.writeFile(path.join(directory, "task.txt"), "ordinary text");
+    const result = await run(
+      'return {value: await tools.read({path: "task.txt"}), declaration: await describeTool("read")};',
+    );
+    expect(result.isError).toBe(false);
+    const { value, declaration } = JSON.parse(result.content[0].text);
+    expect(value).toBe("ordinary text");
+    expect(declaration).toContain("Promise<string>");
+    expect(declaration).toContain("automatically forward the image");
+  });
+
+  it("preserves explicit image helper output without automatically repeating it", async () => {
+    const { run } = await fixture();
+    const sharp = (await import("sharp")).default;
+    const data = await sharp({ create: { width: 2, height: 2, channels: 3, background: "red" } })
+      .png()
+      .toBuffer();
+    const image = { type: "image", mimeType: "image/png", data: data.toString("base64") };
+    const result = await run(`image(${JSON.stringify(image)});`);
+    expect(result.isError).toBe(false);
+    expect(result.content).toEqual([image]);
+  });
+
+  it("isolates memory-derived image reads while retaining independent image reads", async () => {
+    const { directory, tools, run } = await fixture();
+    const sharp = (await import("sharp")).default;
+    await sharp({ create: { width: 2, height: 2, channels: 3, background: "red" } })
+      .png()
+      .toFile(path.join(directory, "drawing.png"));
+    tools.registerTools([
+      {
+        name: "memory_zoom",
+        description: "main-memory image path",
+        parameters: Type.Object({}),
+        replay: "safe",
+        execute: async () => ({ output: [{ type: "text", text: "drawing.png" }] }),
+      },
+    ]);
+    const independent = await run(
+      'await Promise.all([tools.read({path: "drawing.png"}), tools.memory_zoom({})]);',
+    );
+    expect(independent.isError).toBe(false);
+    const image = independent.content.find((block: any) => block.type === "image");
+    expect(image).toBeDefined();
+    expect(withoutMainMemory([independent])[0]).toMatchObject({ content: [image] });
+    const derived = await run("await tools.read({path: await tools.memory_zoom({})});");
+    expect(derived.isError).toBe(false);
+    expect(derived.content.filter((block: any) => block.type === "image")).toHaveLength(1);
+    expect(withoutMainMemory([derived])).toEqual([]);
+  });
+
   it("forwards leaf-zoom images through codemode without leaking them to project context", async () => {
     const { tools, run } = await fixture();
     const image = { type: "image" as const, mimeType: "image/png", data: "cHJpdmF0ZQ==" };

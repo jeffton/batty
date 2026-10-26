@@ -66,7 +66,8 @@ export function createCodemodeTool(
       );
       const calls: CodemodeCall[] = [];
       const ordinaryOutputs = new Set<string>();
-      const memoryImages: ImageContent[] = [];
+      const forwardedImages: ImageContent[] = [];
+      const ordinaryImages = new Set<ImageContent>();
       let usedMainMemory = false;
       let ordinal = 0;
       const aborts: Promise<void>[] = [];
@@ -74,7 +75,10 @@ export function createCodemodeTool(
       let control: import("@earendil-works/pi-durable").ToolControl | undefined;
       const tools: CodemodeTool[] = registrations.map((tool) => ({
         name: tool.name,
-        description: tool.description,
+        description:
+          tool.name === "read"
+            ? `${tool.description} In codemode, read returns text only; image reads return a text note and automatically forward the image to the model. Do not wrap read in image().`
+            : tool.description,
         inputSchema: tool.parameters as unknown as CodemodeJsonSchema,
         outputSchema: isPiShellToolName(tool.name)
           ? {
@@ -219,10 +223,16 @@ export function createCodemodeTool(
                 .join("\n") ?? "";
             if (MAIN_MEMORY_TOOLS.has(tool.name)) usedMainMemory = true;
             else if (independentOfMainMemory) ordinaryOutputs.add(text);
-            if (tool.name === "memory_zoom" && !result.isError)
-              memoryImages.push(...(result.output ?? []).filter((block) => block.type === "image"));
+            const images = (result.output ?? []).filter((block) => block.type === "image");
+            if ((tool.name === "read" || tool.name === "memory_zoom") && !result.isError) {
+              forwardedImages.push(...images);
+              if (tool.name === "read" && independentOfMainMemory)
+                for (const image of images) ordinaryImages.add(image);
+            }
             if (result.isError && result.structuredOutput === undefined) throw new Error(text);
             call.status = result.isError ? "error" : "ok";
+            // Image bytes stay out of the script bridge and its text/return serialization.
+            if (tool.name === "read" && images.length > 0) return text;
             if (result.structuredOutput !== undefined) return result.structuredOutput;
             if (structured !== null) return structured;
             return text;
@@ -299,7 +309,7 @@ export function createCodemodeTool(
             for (const key of result.storeWrites.delete) delete state.values[key];
             Object.assign(state.values, result.storeWrites.set);
           }, ctx);
-        const content = [...result.output, ...memoryImages];
+        const content = [...result.output, ...forwardedImages];
         if (result.ok && result.value !== undefined)
           content.push({
             type: "text",
@@ -308,8 +318,8 @@ export function createCodemodeTool(
         if (!result.ok)
           content.push({ type: "text", text: result.error.stack ?? result.error.message });
         let budget = (parsed.options.maxOutputTokens ?? 10000) * 4;
-        const safeBlocks = content.map(
-          (block) => block.type === "text" && ordinaryOutputs.has(block.text),
+        const safeBlocks = content.map((block) =>
+          block.type === "text" ? ordinaryOutputs.has(block.text) : ordinaryImages.has(block),
         );
         const limited = content.map((block) => {
           if (block.type !== "text") return block;

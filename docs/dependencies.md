@@ -1,3 +1,53 @@
+# Dependency review — 2026-10-26
+
+Reviewed all direct/runtime and development dependencies, catalogs, overrides and pnpm against npm. Selection uses the 4320-minute release age, the existing exclusions and a cutoff of October 23, 09:00 UTC.
+
+## Updates
+
+| Package                                       | Version                                                       |
+| --------------------------------------------- | ------------------------------------------------------------- |
+| Fastify; multipart; static                    | 5.12.5 → 5.12.7; 10.1.3 → 10.1.6; 10.1.6 → 10.1.7             |
+| Source Sans 3; Lucide Vue; Pierre diffs       | 5.3.0 → 5.3.1; 1.54.0 → 1.61.0; 1.5.2 → 1.6.1                 |
+| DOMPurify; jsdom; Marked                      | 3.4.16 → 3.4.17; 30.1.2 → 30.1.3; 18.1.0 → 18.1.1             |
+| Pinia; TypeBox; unpdf; Virtua                 | 4.0.3 → 4.1.0; 1.3.36 → 1.4.3; 1.8.1 → 1.9.1; 0.53.3 → 0.53.6 |
+| Vue/compiler; Vue plugin                      | 3.5.43 → 3.5.44; 6.0.9 → 6.0.10                               |
+| Happy DOM                                     | 20.14.6 → 21.0.4                                              |
+| Vite Plus and aliased Vite catalog            | 1.1.0 → 1.4.0                                                 |
+| fast-uri@3/@4; PostCSS overrides              | 3.1.8 → 3.1.9; 4.2.1 → 4.2.3; 8.5.29 → 8.5.31                 |
+| serialize-javascript; find-my-way@9 overrides | 7.1.2 → 7.1.3; 9.9.0 → 9.10.0                                 |
+| pnpm                                          | 12.11.2 → 12.15.0                                             |
+
+Happy DOM 21 disables external CSS/iframe loading by default. The site-message bridge fixture uses local `srcdoc` to obtain a real child window without enabling network loading. The secure defaults remain enabled.
+
+Pierre 1.6 changes annotation callbacks, standalone file constructors, theme/highlighter APIs and metadata. Batty uses the unchanged `CodeView` API and parser-produced metadata. TypeBox 1.4 shares subschemas rather than recursively cloning; Batty does not mutate composed schemas. unpdf upgrades PDF.js to 6.4; the existing worker's document/page/text/destruction lifecycle remains compatible. Vue's stricter `defineModel` compilation does not affect Batty's constant options. No application API migration is required.
+
+Vite Plus crosses 1.2.0, 1.3.0 and 1.4.0, including Vitest 5.0.5, Vite 8.3.5, Rolldown 1.2.15 and tsdown 0.23.1. Existing projects, mocks, pack settings and catalog alias remain supported; optional `vpx` adoption is outside this review. pnpm's crossed releases preserve the workspace configuration and deployment's frozen-install workflow.
+
+Fastify's fixes include GHSA-389g-gv7q-r4x8; fast-uri fixes scheme/host/reference normalization vulnerabilities, and serialize-javascript fixes script-end escaping. Updated parent ranges still permit earlier affected versions, so the reviewed overrides remain pinned. Other updates provide compatible rendering, parsing, type, performance and asset fixes.
+
+## Checked versions retained
+
+Pi/Chord's seven packages remain aligned at 1.4.0; no durable schema, task, transcript, queue, provider or lifecycle migration boundary is crossed. Workbox's six packages remain aligned at 7.4.1. Patchright/Playwright Core remain at 1.64.1: installed manifests agree on Chromium 156.0.8078.4 revision 1248 and WebKit 27.2 revision 2370. Patchright 1.64.2 is age-held until October 28, 12:40 UTC; its official release notes are unavailable. serialize-javascript 7.1.4 is age-held until October 26, 14:53 UTC.
+
+Remaining stable pins checked: cookie 11.1.3, websocket 11.3.4, Readability 0.6.0, CSS anchor positioning 0.10.2, WebAuthn browser/server 14.0.0/14.0.3, Croner 10.0.1, Highlight.js 11.12.0, mime-types 3.0.2, persisted-state 4.7.1, Sharp 0.35.5, Turndown/GFM 7.2.4/1.0.2, Vue Router 5.4.0, web-push 3.6.7, jsdom/Node/Turndown/web-push/ws types 30.0.0/26.6.5/5.0.6/3.6.4/8.18.2, Vue test-utils 2.5.1, tsx 4.23.15, TypeScript 7.0.2 and PWA plugin 2.0.0. Maintained-major overrides retain Nano ID 3.3.20 and brace-expansion 2.1.7/5.0.12.
+
+## Validation
+
+`pnpm check`, `pnpm test` (769 passed, 2 skipped), `pnpm test:all` (812 passed, 2 skipped), Linux deployment lifecycle checks, build, packaged startup and offline verification pass. Frozen lockfile installation passes. Independent Sol review found no actionable findings. Ten lint warnings remain; an unchanged lifecycle test logs a caught localhost version-check connection refusal without failed assertions.
+
+## Official sources
+
+All crossed stable release notes/changelog entries were reviewed, including intermediate releases:
+
+- Fastify [5.12.6](https://github.com/fastify/fastify/releases/tag/v5.12.6), [5.12.7](https://github.com/fastify/fastify/releases/tag/v5.12.7); multipart [10.1.4](https://github.com/fastify/fastify-multipart/releases/tag/v10.1.4), [10.1.5](https://github.com/fastify/fastify-multipart/releases/tag/v10.1.5), [10.1.6](https://github.com/fastify/fastify-multipart/releases/tag/v10.1.6); [static 10.1.7](https://github.com/fastify/fastify-static/releases/tag/v10.1.7).
+- [Fontsource patch policy](https://github.com/fontsource/fontsource/blob/main/CHANGELOG.md); [Lucide releases](https://github.com/lucide-icons/lucide/releases) (1.55–1.61); Pierre [1.6.0](https://github.com/pierrecomputer/pierre/releases/tag/diffs-v1.6.0), [1.6.1](https://github.com/pierrecomputer/pierre/releases/tag/diffs-v1.6.1).
+- [DOMPurify 3.4.17](https://github.com/cure53/DOMPurify/releases/tag/3.4.17), [jsdom 30.1.3](https://github.com/jsdom/jsdom/releases/tag/v30.1.3), [Marked 18.1.1](https://github.com/markedjs/marked/releases/tag/v18.1.1), [Pinia 4.1.0](https://github.com/vuejs/pinia/releases/tag/v4.1.0).
+- TypeBox changelogs [1.3.37](https://github.com/sinclairzx81/typebox/blob/main/changelog/1.3.0.md), [1.4.0–1.4.3](https://github.com/sinclairzx81/typebox/blob/main/changelog/1.4.0.md); unpdf [1.9.0](https://github.com/unjs/unpdf/releases/tag/v1.9.0), [1.9.1](https://github.com/unjs/unpdf/releases/tag/v1.9.1); [Virtua releases](https://github.com/inokawa/virtua/releases) (0.53.4–0.53.6).
+- [Vue 3.5.44 changelog](https://github.com/vuejs/core/blob/v3.5.44/CHANGELOG.md), [Vue plugin 6.0.10 changelog](https://github.com/vitejs/vite-plugin-vue/blob/plugin-vue@6.0.10/packages/plugin-vue/CHANGELOG.md); [Happy DOM releases](https://github.com/capricorn86/happy-dom/releases) (21.0.0–21.0.4).
+- Vite Plus [1.2.0](https://github.com/voidzero-dev/vite-plus/releases/tag/v1.2.0), [1.3.0](https://github.com/voidzero-dev/vite-plus/releases/tag/v1.3.0), [1.4.0](https://github.com/voidzero-dev/vite-plus/releases/tag/v1.4.0); [pnpm releases](https://github.com/pnpm/pnpm/releases) (12.12.0, 12.12.1, 12.13.0, 12.14.0, 12.15.0).
+- fast-uri [3.1.9](https://github.com/fastify/fast-uri/releases/tag/v3.1.9), [4.2.2](https://github.com/fastify/fast-uri/releases/tag/v4.2.2), [4.2.3](https://github.com/fastify/fast-uri/releases/tag/v4.2.3); [PostCSS changelog](https://github.com/postcss/postcss/blob/8.5.31/CHANGELOG.md) (8.5.30–8.5.31); [serialize-javascript 7.1.3](https://github.com/yahoo/serialize-javascript/releases/tag/v7.1.3); [find-my-way 9.10.0](https://github.com/delvedor/find-my-way/releases/tag/v9.10.0).
+- [Patchright 1.64.1 upstream declaration](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/releases/tag/v1.64.1) and npm registry release timestamps for every reviewed package.
+
 # Pi dependency review — 2026-10-22
 
 All seven Pi/Chord packages: **1.2.0 → 1.4.0**, pinned together at the current stable release. Durable's SQLite schema 2 rebuilds the task table and prevents opening it with older SDKs; deployment requires a verified SQLite-aware backup and space for the table rewrite. Rollback across this boundary requires restoring that backup, not merely selecting an older release.

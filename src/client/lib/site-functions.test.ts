@@ -9,6 +9,7 @@ afterEach(() => {
 
 test("bridge binds the real iframe to its site; ignores forged senders and removes detached frames", async () => {
   const frame = document.createElement("iframe");
+  frame.srcdoc = "";
   frame.dataset.siteId = "own-site";
   document.body.append(frame);
   frames.push(frame);

@@ -2,7 +2,7 @@
 
 ## Local setup
 
-Requires Node.js **24.15.0+** and pnpm **12.11.2**. Install dependencies with `pnpm install`.
+Requires Node.js **24.15.0+** and pnpm **12.15.0**. Install dependencies with `pnpm install`.
 
 The server takes a data-root argument and stores state in its `.batty` directory. The package scripts use `/var/lib/batty2`; to use another root, run `pnpm exec tsx watch src/server/main.ts /absolute/data/root`.
 

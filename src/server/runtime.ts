@@ -217,6 +217,10 @@ export class Runtime {
           extensions: baseExtensions,
           compaction: { enabled: true },
           toolExecution: "parallel",
+          // Drain pending inputs together, preserving separate entries and native
+          // steer (post-tools) versus follow-up (final-answer) boundaries.
+          steeringMode: "all",
+          followUpMode: "all",
           stream: { timeoutMs: 300_000 },
         },
         env: ({ cwd }) => new NodeExecutionEnv({ cwd: cwd ?? config.selfPath }),

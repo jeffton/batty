@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -115,6 +115,124 @@ async function fixture(persistent = false) {
 }
 
 describe("durable tool bridge", () => {
+  it("returns structured web search results and declares both output contracts", async () => {
+    const { config, run } = await fixture();
+    config.braveSearchKey = "test-key";
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    cleanups.push(async () => fetchMock.mockRestore());
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        web: {
+          results: [
+            {
+              title: "Example",
+              url: "https://example.com/page",
+              description: "Snippet",
+              age: "1d",
+            },
+          ],
+        },
+      }),
+    );
+    const result = await run(
+      'return { data: await tools.web_search({action:"search", query:"example", country:"dk", freshness:"pw"}), declaration: await describeTool("web_search") };',
+    );
+    expect(result.isError).toBe(false);
+    const { data, declaration } = JSON.parse(result.content[0].text);
+    expect(data).toEqual({
+      action: "search",
+      query: "example",
+      count: 5,
+      country: "DK",
+      freshness: "pw",
+      includeContent: false,
+      results: [
+        { title: "Example", link: "https://example.com/page", snippet: "Snippet", age: "1d" },
+      ],
+    });
+    expect(declaration).toContain('action: "search"');
+    expect(declaration).toContain('action: "content"');
+    expect(declaration).toContain("results:");
+    expect(declaration).toContain("content:");
+    fetchMock.mockResolvedValueOnce(Response.json({ web: { results: [] } }));
+    const empty = await run(
+      'return (await tools.web_search({action:"search", query:"empty"})).results;',
+    );
+    expect(empty.isError).toBe(false);
+    expect(JSON.parse(empty.content[0].text)).toEqual([]);
+  });
+
+  it("keeps page failure text in structured content and rejects Brave failures", async () => {
+    const { config, run } = await fixture();
+    config.braveSearchKey = "test-key";
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    cleanups.push(async () => fetchMock.mockRestore());
+    fetchMock.mockResolvedValueOnce(
+      new Response("server error", { status: 500, statusText: "Failure" }),
+    );
+    const page = await run(
+      'return await tools.web_search({action:"content", url:"https://example.com/page"});',
+    );
+    expect(page.isError).toBe(false);
+    expect(JSON.parse(page.content[0].text)).toEqual({
+      action: "content",
+      url: "https://example.com/page",
+      content: "(HTTP 500: Failure)",
+    });
+    fetchMock.mockResolvedValueOnce(
+      new Response("Brave error body", { status: 500, statusText: "Failure" }),
+    );
+    const search = await run('return await tools.web_search({action:"search", query:"example"});');
+    expect(search.isError).toBe(true);
+    expect(JSON.stringify(search)).toContain("Brave error body");
+  });
+
+  it.each(["search", "content"] as const)(
+    "preserves full %s page data through codemode while spilling model-facing text",
+    async (action) => {
+      const { config, run } = await fixture();
+      config.braveSearchKey = "test-key";
+      const content =
+        "Challenge: verify you are human\\n" + "unfiltered page text\\n".repeat(3000) + "END";
+      const fetchMock = vi.spyOn(globalThis, "fetch");
+      cleanups.push(async () => fetchMock.mockRestore());
+      if (action === "search") {
+        fetchMock.mockResolvedValueOnce(
+          Response.json({ web: { results: [{ title: "Page", url: "https://example.com/page" }] } }),
+        );
+      }
+      fetchMock.mockResolvedValueOnce(
+        new Response(content, { headers: { "content-type": "text/plain" } }),
+      );
+      const params =
+        action === "search"
+          ? { action, query: "example", includeContent: true }
+          : { action, url: "https://example.com/page" };
+      const result = await run(`
+        const data = await tools.web_search(${JSON.stringify(params)});
+        const content = data.action === "search" ? data.results[0].content : data.content;
+        return { action: data.action, url: data.url, length: content.length, start: content.slice(0, 35), end: content.slice(-3) };
+      `);
+      expect(result.isError).toBe(false);
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        action,
+        ...(action === "content" ? { url: "https://example.com/page" } : {}),
+        length: content.length,
+        start: content.slice(0, 35),
+        end: "END",
+      });
+      const details = result.details.calls[0].details;
+      expect(details.truncated).toBe(true);
+      expect(details.content).toBeUndefined();
+      if (action === "search") expect(details.results[0].content).toBeUndefined();
+      const fullText = await fs.readFile(details.fullOutputPath, "utf8");
+      expect(fullText).toContain(content);
+      cleanups.push(() =>
+        fs.rm(path.dirname(details.fullOutputPath), { recursive: true, force: true }),
+      );
+    },
+  );
+
   it("enables native codemode when resuming a persisted worker with an old tool allowlist", async () => {
     const { directory, tools, harness, faux, reopen } = await fixture(true);
     await fs.writeFile(path.join(directory, "old-worker.txt"), "old worker resumed");

@@ -98,13 +98,13 @@ export interface WebSearchOptions {
   freshness?: string;
 }
 
-export interface WebSearchResultItem {
+export type WebSearchResultItem = {
   title: string;
   link: string;
   snippet: string;
   age: string;
   content?: string;
-}
+};
 
 export interface WebSearchResult {
   text: string;

@@ -23,6 +23,7 @@ import type { CodemodeCall } from "../shared/types";
 import { MAIN_MEMORY_TOOLS } from "./main-memory-policy";
 import { codemodeAdapterName, type CodemodeResult } from "./codemode-native";
 import { isPiShellToolName } from "../shared/pi-tools";
+import { WebSearchOutputSchema } from "./tool-schemas";
 
 export const CodemodeCalls = defineDoc<{
   calls: Record<string, { taskId: number; name: string; args: JsonValue }>;
@@ -96,7 +97,9 @@ export function createCodemodeTool(
                   isError: { type: "boolean" },
                 },
               }
-            : { type: "string" },
+            : tool.name === "web_search"
+              ? (WebSearchOutputSchema as unknown as CodemodeJsonSchema)
+              : { type: "string" },
         execute: async (input, { signal }) => {
           // Inputs fixed before memory was read cannot be derived from that read.
           const independentOfMainMemory = !usedMainMemory;

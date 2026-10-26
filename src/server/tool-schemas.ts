@@ -50,6 +50,31 @@ export const WebSearchToolSchema = Type.Object(
   },
 );
 
+export const WebSearchOutputSchema = Type.Union([
+  Type.Object({
+    action: Type.Literal("search"),
+    query: Type.String(),
+    count: Type.Number(),
+    country: Type.String(),
+    freshness: Type.Optional(Type.String()),
+    includeContent: Type.Boolean(),
+    results: Type.Array(
+      Type.Object({
+        title: Type.String(),
+        link: Type.String(),
+        snippet: Type.String(),
+        age: Type.String(),
+        content: Type.Optional(Type.String()),
+      }),
+    ),
+  }),
+  Type.Object({
+    action: Type.Literal("content"),
+    url: Type.String(),
+    content: Type.String(),
+  }),
+]);
+
 export { BrowserToolSchema } from "./browser-schemas";
 
 export const AttachFilesToolSchema = Type.Object(

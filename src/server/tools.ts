@@ -260,7 +260,7 @@ export async function createTools(
           "Use read for files and images; explicit limit removes the read byte cap.",
           "Use edit for exact unique replacements, merging overlapping changes.",
           "Use codemode instead of separate tool calls for independent batching, dependent chaining, and filtering results before returning them. Batch independent work with Promise.allSettled so one failure does not discard successful results, e.g. const results = await Promise.allSettled([tools.read({path: '/path/a'}), tools.read({path: '/path/b'})]); for (const result of results) text(result.status === 'fulfilled' ? result.value : String(result.reason));",
-          "MCP tools are available only through codemode. Discover tools with the awaited GLOBAL helpers: const matches = await searchTools('query'); text(matches); text(await describeTool(matches[0].name)); Do not use tools.searchTools or tools.describeTool. Nested tools return strings, except shell tools return {output, exit_code, truncated, wall_time_seconds, full_output_path?} and MCP calls return CallToolResult objects.",
+          "MCP tools are available only through codemode. Discover tools with the awaited GLOBAL helpers: const matches = await searchTools('query'); text(matches); text(await describeTool(matches[0].name)); Do not use tools.searchTools or tools.describeTool. Nested tools return strings, except web_search returns structured search/content objects with complete page content, shell tools return {output, exit_code, truncated, wall_time_seconds, full_output_path?} and MCP calls return CallToolResult objects.",
           ...guidelines,
         ].join("\n"),
       ),

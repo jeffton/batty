@@ -230,6 +230,7 @@ export function createWebSearchTool(config: AppConfig): ToolDefinition<typeof We
       'Use action="search" with query for web search.',
       'Use action="content" with url to extract readable markdown from a specific page.',
       "Set includeContent=true when you need the actual page text for the search results.",
+      "In codemode, web_search returns an object: search has action, query, count, country, freshness?, includeContent and results[{title, link, snippet, age, content?}]; content has action, url and content. Page content is complete, including error or challenge text; only the model-facing text is truncated.",
       "Large outputs are truncated and written to a temp file; use the read tool on the reported path when you need the full content.",
     ],
     parameters: WebSearchToolSchema,
@@ -256,6 +257,7 @@ export function createWebSearchTool(config: AppConfig): ToolDefinition<typeof We
       return {
         content: [{ type: "text", text: output.text }],
         details: output.details,
+        structuredContent: result.details,
       };
     },
   };

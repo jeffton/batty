@@ -97,7 +97,11 @@ function sentFileUrl(
   fileId: string,
   download: boolean,
 ): string {
-  const routeBase = [workspaceId, sessionId, toolCallId, fileId].map(encodeURIComponent).join("/");
+  // Use the same opaque storage segments on disk and over HTTP. Encoded slashes
+  // are decoded by some reverse proxies before routing.
+  const routeBase = [workspaceId, sessionId, toolCallId, fileId]
+    .map(sanitizeStorageSegment)
+    .join("/");
   const route = `/api/sent-files/${routeBase}${download ? "?download=1" : ""}`;
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
   return normalizedBaseUrl === "/" ? route : `${normalizedBaseUrl}${route}`;

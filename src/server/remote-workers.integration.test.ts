@@ -25,7 +25,7 @@ async function eventually(check: () => Promise<boolean>, label: string) {
   throw new Error(`Timed out waiting for ${label}`);
 }
 
-async function openInstance(directory: string, name: string) {
+async function openInstance(directory: string, name: string, fileStatus = 200) {
   const root = join(directory, name);
   const work = join(root, "work");
   await mkdir(join(root, ".batty", "skills"), { recursive: true });
@@ -57,7 +57,16 @@ async function openInstance(directory: string, name: string) {
   });
   // Match production shutdown, including unused HTTP-pool preconnections.
   const app = Fastify({ forceCloseConnections: true });
+  const fileRequests: string[] = [];
   const sessionStreams: Array<{ url: string; closed: boolean }> = [];
+  app.addHook("onRequest", async (request, reply) => {
+    if (request.url.startsWith("/api/node/files/")) {
+      fileRequests.push(request.url);
+      // Model a proxy that decodes escaped separators before upstream routing.
+      if (/%2f/i.test(request.url)) return reply.code(404).send("Proxy route not found");
+      if (fileStatus !== 200) return reply.code(fileStatus).send("File unavailable");
+    }
+  });
   app.addHook("onRequest", async (request, reply) => {
     if (/^\/api\/node\/sessions\/\d+\/events(?:\?|$)/.test(request.url)) {
       const stream = { url: request.url, closed: false };
@@ -86,6 +95,10 @@ async function openInstance(directory: string, name: string) {
     work,
     url,
     sessionStreams,
+    fileRequests,
+    setFileStatus(status: number) {
+      fileStatus = status;
+    },
     owner: { "x-test-owner": name },
     async close() {
       if (closed) return;
@@ -172,9 +185,12 @@ test("two runtimes execute remote native tools, deliver progress to the initiati
         bModelCalls++;
         expect(JSON.stringify(request.messages)).toContain("tools executed on b");
         expect(JSON.stringify(request.messages)).not.toContain("tools executed on a");
-        return fauxAssistantMessage([fauxToolCall("attach_files", { paths: ["origin.txt"] })], {
-          stopReason: "toolUse",
-        });
+        return fauxAssistantMessage(
+          [{ ...fauxToolCall("attach_files", { paths: ["origin.txt"] }), id: "call/attachment" }],
+          {
+            stopReason: "toolUse",
+          },
+        );
       },
       fauxAssistantMessage(
         [fauxToolCall("subagent", { action: "report", prompt: "B progress with evidence" })],
@@ -282,6 +298,8 @@ test("two runtimes execute remote native tools, deliver progress to the initiati
     expect(JSON.stringify(history)).toContain("B final complete");
     const copied = filesIn(history).find((file) => file.name === "origin.txt");
     expect(copied).toBeDefined();
+    expect(remote.fileRequests.length).toBeGreaterThan(0);
+    expect(remote.fileRequests.every((url) => !/%2f/i.test(url))).toBe(true);
     expect(copied!.downloadUrl).toContain("/api/sent-files/remote-b/");
     const segments = new URL(copied!.downloadUrl, local.url).pathname
       .split("/")
@@ -316,6 +334,159 @@ test("two runtimes execute remote native tools, deliver progress to the initiati
     vi.unstubAllEnvs();
   }
 }, 45_000);
+
+test.each([404, 408, 429, 503])(
+  "HTTP %i file failures do not strand a coordinator's remote await or terminal mirror",
+  async (status) => {
+    vi.stubEnv("PI_OFFLINE", "1");
+    const directory = await mkdtemp(join(tmpdir(), "batty-remote-import-failure-"));
+    let a: Awaited<ReturnType<typeof openInstance>> | undefined;
+    let b: Awaited<ReturnType<typeof openInstance>> | undefined;
+    try {
+      a = await openInstance(directory, "a");
+      b = await openInstance(directory, "b", status);
+      const local = a;
+      const remote = b;
+      await connect(local, remote, "b");
+      remote.faux.setResponses([
+        fauxAssistantMessage([fauxToolCall("attach_files", { paths: ["origin.txt"] })], {
+          stopReason: "toolUse",
+        }),
+        fauxAssistantMessage(
+          [
+            fauxToolCall("bash", {
+              command:
+                "printf ready > entered; for i in $(seq 1 400); do test -f release && exit 0; sleep 0.05; done; exit 1",
+            }),
+          ],
+          { stopReason: "toolUse" },
+        ),
+        fauxAssistantMessage([fauxText("Remote final despite missing attachment")]),
+      ]);
+      let started = false;
+      let remoteStarted = false;
+      let receivedImportFailure = false;
+      local.faux.setResponses(
+        Array.from({ length: 30 }, () => (request) => {
+          if (!started) {
+            started = true;
+            return fauxAssistantMessage(
+              [
+                fauxToolCall("subagent", {
+                  action: "run",
+                  workspaceId: "work",
+                  prompt: "Coordinate remote evidence",
+                }),
+              ],
+              { stopReason: "toolUse" },
+            );
+          }
+          const last = request.messages.findLast((message) => message.role !== "system");
+          if (
+            last?.role === "user" &&
+            JSON.stringify(last).includes("Coordinate remote evidence") &&
+            !remoteStarted
+          ) {
+            remoteStarted = true;
+            return fauxAssistantMessage(
+              [
+                fauxToolCall("subagent", {
+                  action: "run",
+                  nodeId: "b",
+                  workspaceId: "work",
+                  prompt: "Attach evidence and finish",
+                }),
+              ],
+              { stopReason: "toolUse" },
+            );
+          }
+          if (last?.role === "toolResult" && last.toolName === "subagent") {
+            const remoteId = /Session ID: (remote:b:\d+)/.exec(JSON.stringify(last))?.[1];
+            if (remoteId)
+              return fauxAssistantMessage(
+                [fauxToolCall("subagent", { action: "await", sessionId: remoteId })],
+                { stopReason: "toolUse" },
+              );
+          }
+          if (
+            last?.role === "user" &&
+            JSON.stringify(last).includes("Remote final despite missing attachment")
+          ) {
+            expect(JSON.stringify(last)).toContain("Remote attachment import failed");
+            expect(JSON.stringify(last)).toContain(`Remote file HTTP ${status}`);
+            receivedImportFailure = true;
+          }
+          return fauxAssistantMessage([fauxText("Coordinator finished")]);
+        }),
+      );
+      await (
+        await local.runtime.main.submit({ type: "input", content: "Start a coordinator" }, context)
+      ).wait(context);
+      await eventually(async () => {
+        const workers = await local.runtime.orchestration.listRunning();
+        for (const worker of workers) {
+          const conversation = await local.runtime.conversation(worker.sessionId);
+          if (
+            JSON.stringify((await conversation.context(context)).messages).includes(
+              "Awaiting subagent",
+            )
+          )
+            return true;
+        }
+        return false;
+      }, "coordinator awaiting remote");
+      await writeFile(join(remote.work, "release"), "release");
+      await eventually(
+        async () => (await local.runtime.orchestration.listRunning()).length === 0,
+        "coordinator delivery settling despite file failure",
+      );
+      await eventually(
+        async () => local.runtime.remotes.list()[0]?.status === "completed",
+        "terminal remote status",
+      );
+      const id = local.runtime.remotes.list()[0]!.sessionId;
+      await eventually(
+        async () =>
+          JSON.stringify(local.runtime.remotes.messages(id)).includes(
+            "Remote final despite missing attachment",
+          ),
+        "terminal history replay",
+      );
+      const history = JSON.stringify(local.runtime.remotes.messages(id));
+      expect(history).toContain(`Remote file HTTP ${status}`);
+      expect(filesIn(local.runtime.remotes.messages(id))).toEqual([]);
+      // Re-reading terminal assignment receipts retries transient errors, not 404s.
+      const requestsBefore = remote.fileRequests.length;
+      const mirror = local.runtime.remotes as unknown as {
+        importValue(node: string, value: unknown): Promise<unknown>;
+      };
+      const source = JSON.parse(
+        JSON.stringify((await remote.runtime.state(id.split(":")[2]!)).messages),
+      );
+      await mirror.importValue("b", source);
+      await mirror.importValue("b", source);
+      expect(remote.fileRequests.length - requestsBefore).toBe(status === 404 ? 0 : 2);
+      if (status !== 404) {
+        remote.setFileStatus(200);
+        const recovered = await mirror.importValue("b", source);
+        expect(filesIn(recovered).some((file) => file.name === "origin.txt")).toBe(true);
+        expect(JSON.stringify(recovered)).not.toContain("importErrors");
+        const recoveredRequests = remote.fileRequests.length;
+        await mirror.importValue("b", source);
+        expect(remote.fileRequests).toHaveLength(recoveredRequests);
+      }
+      expect(await transcript(local.runtime)).toContain("Coordinator finished");
+      expect(receivedImportFailure).toBe(true);
+    } finally {
+      if (b) await writeFile(join(b.work, "release"), "release");
+      await a?.close();
+      await b?.close();
+      await rm(directory, { recursive: true, force: true });
+      vi.unstubAllEnvs();
+    }
+  },
+  45_000,
+);
 
 test("node grants cannot access owner routes, revoke immediately, and reciprocal discovery never exports mirrors", async () => {
   vi.stubEnv("PI_OFFLINE", "1");

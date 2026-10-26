@@ -61,6 +61,8 @@ Remote session IDs have the form `remote:NODE_ID:SESSION_ID`, for example `remot
 
 Commands carry durable request IDs, so reconnect/replay does not start duplicate work. Reports stay bound to their assignment's initiating conversation, including later queue/resume assignments. Resumable SSE streams mirror status and conversation output locally. Historical workers are discovered without downloading their transcripts; active or assigned sessions are mirrored, and streams retire only after their terminal history cursor has arrived. Reports and completion results return to the initiating conversation for the corresponding assignment. The mirror persists under `.batty/remote-mirrors`, so received history remains available while the remote is offline; execution and live commands still require connectivity. File attachments are copied into local attachment storage. Hosted sites and live cloud-browser sessions are not relayed.
 
+Attachment import failures do not prevent result delivery or terminal status. Unavailable files are omitted and reported by name and error. Permanent HTTP 4xx errors (except 408 and 429) are cached for the process lifetime; transient errors can be retried on later projections. Sent-file URLs use the same URL-safe segments as attachment storage, avoiding encoded slashes through proxies.
+
 Connections are directional. Bidirectional connections are supported: each installation exports only its own native workers, not its imported mirrors, and workspace discovery does not recursively follow its outgoing connections.
 
 ## Credentials and URLs

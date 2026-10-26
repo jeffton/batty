@@ -54,6 +54,8 @@ type Assignment = {
 };
 type LocalIndex = { assignments: Assignment[]; origins: Record<string, string> };
 
+class PermanentFileImportError extends Error {}
+
 class NodeHttpError extends Error {
   constructor(
     readonly status: number,
@@ -620,7 +622,11 @@ export class RemoteWorkers {
         result = await this.assignment(input.node, input.assignmentId, signal);
       } catch (error) {
         signal.throwIfAborted();
-        if (error instanceof NodeHttpError && error.status < 500)
+        if (
+          error instanceof NodeHttpError &&
+          error.status < 500 &&
+          ![408, 429].includes(error.status)
+        )
           result = { status: "failed", text: String(error) };
         else {
           console.error(`Remote ${input.node} await reconnect`, error);
@@ -706,8 +712,20 @@ export class RemoteWorkers {
     );
   }
   private async importValue(node: string, value: unknown): Promise<unknown> {
-    if (Array.isArray(value)) return Promise.all(value.map((item) => this.importValue(node, item)));
-    if (!value || typeof value !== "object") return value;
+    return (await this.importTree(node, value)).value;
+  }
+  private async importTree(
+    node: string,
+    value: unknown,
+  ): Promise<{ value: unknown; errors: string[] }> {
+    if (Array.isArray(value)) {
+      const items = await Promise.all(value.map((item) => this.importTree(node, item)));
+      return {
+        value: items.map((item) => item.value).filter((item) => item !== undefined),
+        errors: items.flatMap((item) => item.errors),
+      };
+    }
+    if (!value || typeof value !== "object") return { value, errors: [] };
     const object = value as Record<string, unknown>;
     if (
       typeof object.downloadUrl === "string" &&
@@ -721,27 +739,41 @@ export class RemoteWorkers {
         this.importedFiles.set(key, pending);
       }
       try {
-        return await pending;
+        return { value: await pending, errors: [] };
       } catch (error) {
-        this.importedFiles.delete(key);
-        throw error;
+        // Keep permanent failures cached. Transient failures may be retried by
+        // later projections, but neither kind can hold an assignment open.
+        if (!(error instanceof PermanentFileImportError)) this.importedFiles.delete(key);
+        return {
+          value: undefined,
+          errors: [`${object.name}: ${String(error)}`],
+        };
       }
     }
-    return Object.fromEntries(
-      await Promise.all(
-        Object.entries(object)
-          .filter(([key]) => key !== "sites" && key !== "storedPath")
-          .map(async ([key, item]) => [key, await this.importValue(node, item)]),
-      ),
+    const entries = await Promise.all(
+      Object.entries(object)
+        .filter(([key]) => key !== "sites" && key !== "storedPath")
+        .map(async ([key, item]) => ({ key, ...(await this.importTree(node, item)) })),
     );
+    const errors = [...new Set(entries.flatMap((item) => item.errors))];
+    const imported = Object.fromEntries(
+      entries.filter((item) => item.value !== undefined).map((item) => [item.key, item.value]),
+    );
+    if (errors.length && "sentFiles" in object) imported.importErrors = errors;
+    if (object.type === "attachment" && imported.file === undefined)
+      return { value: { type: "text", text: errors.join("\n") }, errors };
+    return { value: imported, errors };
   }
   private async importFile(node: string, object: Record<string, unknown>) {
     const connection = this.connection(node);
+    if (!URL.canParse(String(object.downloadUrl), connection.url))
+      throw new PermanentFileImportError("Remote file URL is invalid");
     const source = new URL(String(object.downloadUrl), connection.url);
     const base = new URL(connection.url);
-    if (source.origin !== base.origin) throw new Error("Remote file URL has a foreign origin");
+    if (source.origin !== base.origin)
+      throw new PermanentFileImportError("Remote file URL has a foreign origin");
     const match = /\/api\/sent-files\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/.exec(source.pathname);
-    if (!match) throw new Error("Remote file does not use a sent-file manifest");
+    if (!match) throw new PermanentFileImportError("Remote file does not use a sent-file manifest");
     const toolCallId = `remote-${node}-${match.slice(1).join("-")}`;
     const response = await fetch(
       new URL(`api/node/files/${match.slice(1).join("/")}`, connection.url),
@@ -751,7 +783,12 @@ export class RemoteWorkers {
         headers: { authorization: `Bearer ${connection.token}` },
       },
     );
-    if (!response.ok) throw new Error(`Remote file HTTP ${response.status}`);
+    if (!response.ok) {
+      const message = `Remote file HTTP ${response.status}`;
+      if (response.status >= 400 && response.status < 500 && ![408, 429].includes(response.status))
+        throw new PermanentFileImportError(message);
+      throw new Error(message);
+    }
     const directory = path.join(this.directory, "downloads", toolCallId);
     await fs.mkdir(directory, { recursive: true });
     const temporary = path.join(directory, path.basename(String(object.name)));

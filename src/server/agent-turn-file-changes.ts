@@ -17,6 +17,7 @@ export interface DurableFileChange extends AgentTurnFileChange {
 }
 
 export interface AgentTurnArtifacts {
+  importErrors?: string[];
   fileChanges?: AgentTurnFileChange[];
   sentFiles?: SentFileDescriptor[];
   sites?: SiteAttachmentDescriptor[];

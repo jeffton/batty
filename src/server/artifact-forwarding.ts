@@ -33,6 +33,8 @@ export function artifactRefs(artifacts: AgentTurnArtifacts = {}) {
 }
 
 export function reportWithArtifacts(text: string, artifacts: AgentTurnArtifacts = {}): string {
+  if (artifacts.importErrors?.length)
+    text += `\n\nRemote attachment import failed:\n${artifacts.importErrors.join("\n")}`;
   const refs = artifactRefs(artifacts);
   if (!refs.length) return text;
   return [

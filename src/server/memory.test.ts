@@ -18,7 +18,7 @@ test("projection, immutable nodes and exact zoom survive reopen without resummar
   const first = await state.memory.prepare();
   expect(first).not.toContain("not summarized");
   expect(first).toContain("summary");
-  expect(await state.memory.zoom(0, 1)).toBe(`0+0|user: 0:${exact}`);
+  expect(await state.memory.zoom(0, 1)).toBe(`0+0|[1970-01-01T00:00:00.001Z] user: 0:${exact}`);
   expect(await state.memory.date(0)).toBe("1970-01-01T00:00:00.001Z");
   const calls = fixtureState.compressions();
   await state.harness.close(context);
@@ -26,7 +26,12 @@ test("projection, immutable nodes and exact zoom survive reopen without resummar
   cleanup.push(() => state.harness.close(context));
   expect(await state.memory.prepare()).toBe(first);
   expect(fixtureState.compressions()).toBe(calls);
-  expect(await state.memory.zoom(0, 2)).toContain("1+1|");
+  expect(await state.memory.zoom(0, 2)).toContain(
+    "1+1|[1970-01-01T00:00:00.002Z .. 1970-01-01T00:00:00.002Z]",
+  );
+  const expanded = await state.memory.zoom(0, 8);
+  expect(expanded).toContain("0+4|[1970-01-01T00:00:00.001Z .. 1970-01-01T00:00:00.004Z]");
+  expect(expanded).toContain("4+4|[1970-01-01T00:00:00.005Z .. 1970-01-01T00:00:00.008Z]");
   await expect(state.memory.zoom(1, 2)).rejects.toThrow("No line");
 });
 

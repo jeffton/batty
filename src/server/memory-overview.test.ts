@@ -202,8 +202,7 @@ test.each([
 text(ALL_TOOLS);
 let id = ${Number(line[1])}, n = ${Number(line[2])};
 while (n > 1) { text(await tools.memory_zoom({id, n})); n /= 2; }
-text(await tools.memory_zoom({id, n: 1}));
-text(await tools.memory_date({id}));`;
+text(await tools.memory_zoom({id, n: 1}));`;
       faux.setResponses(
         Array.from({ length: 40 }, () => (request) => {
           const last = request.messages.findLast((m) => m.role !== "system")!;
@@ -242,7 +241,7 @@ text(await tools.memory_date({id}));`;
               const names = system?.toolsAdded?.map((tool) => tool.name) ?? [];
               expect(names).not.toContain("memory_overview");
               expect(names.includes("memory_zoom")).toBe(target === assistantId);
-              expect(names.includes("memory_date")).toBe(target === assistantId);
+              expect(names.includes("memory_date")).toBe(false);
               expect(names.includes("memory_search")).toBe(target === assistantId);
               inspected.push(request.messages.length);
               return fauxAssistantMessage(
@@ -396,7 +395,7 @@ test("automatic worker overview uses the built catalog without waiting for pendi
     expect(overview).not.toContain("pending summary");
     expect(compressions).toBe(1);
     expect(await harness.snapshot(MemoryIndexDoc, main.id, context)).toEqual(before);
-    expect(await memory.zoom(0, 1)).toBe("0+0|user: built decision");
+    expect(await memory.zoom(0, 1)).toBe("0+0|[1970-01-01T00:00:00.001Z] user: built decision");
     expect(await memory.date(0)).toBe("1970-01-01T00:00:00.001Z");
   } finally {
     unblock();

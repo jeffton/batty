@@ -73,7 +73,9 @@ test("leaf and merge requests contain only their own sources, never the precedin
     expect(sources.some((source) => source.includes("\n"))).toBe(true);
     expect(overview).not.toContain("not summarized");
     for (const [i, text] of originals.entries()) {
-      expect(await memory.zoom(i, 1)).toBe(`${i}+0|user: ${text}`);
+      expect(await memory.zoom(i, 1)).toBe(
+        `${i}+0|[${new Date(i + 1).toISOString()}] user: ${text}`,
+      );
       expect(await memory.date(i)).toBe(new Date(i + 1).toISOString());
     }
     const calls = sources.length;

@@ -659,7 +659,7 @@ export function createMemory(config: MemoryConfig, models: Models) {
       throw new Error(`No line ${id}+${count}`);
     if (count === 1) {
       const leaf = await leafAt(id, context);
-      return `${id}+0|${leaf.kind}: ${leaf.text}`;
+      return `${id}+0|[${leaf.date}] ${leaf.kind}: ${leaf.text}`;
     }
     if (snapshot && id + count > snapshot.prepared)
       throw new Error(`No prepared line ${id}+${count} in this memory snapshot`);
@@ -667,10 +667,11 @@ export function createMemory(config: MemoryConfig, models: Models) {
     const children = [
       { start: id, count: count / 2 },
       { start: id + count / 2, count: count / 2 },
-    ].map(
-      async (part) =>
-        `${key(part)}|${(await nodeAt(part, context, generation)) ?? "(not summarized yet: zoom it)"}`,
-    );
+    ].map(async (part) => {
+      const startDate = (await leafAt(part.start, context)).date;
+      const endDate = (await leafAt(part.start + part.count - 1, context)).date;
+      return `${key(part)}|[${startDate} .. ${endDate}] ${(await nodeAt(part, context, generation)) ?? "(not summarized yet: zoom it)"}`;
+    });
     return (await Promise.all(children)).join("\n");
   }
   async function zoomOutput(
@@ -786,7 +787,6 @@ export function createMemory(config: MemoryConfig, models: Models) {
       },
     }),
     zoom: zoomOutput,
-    date,
     search,
     report,
   });

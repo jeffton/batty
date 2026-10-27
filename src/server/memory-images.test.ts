@@ -55,16 +55,31 @@ test("leaf zoom retrieves only the selected archived message's images without po
     await state.harness.close(context);
   });
   const cases = [
-    { id: 0, n: 1, images: [], text: "0+0|talk: look at screenshot" },
-    { id: 1, n: 1, images: [], text: '1+0|tool: read {"path":"screenshot.png"}' },
-    { id: 2, n: 1, images: [image], text: "2+0|echo: screenshot\n[image]" },
+    {
+      id: 0,
+      n: 1,
+      images: [],
+      text: `0+0|[${await state.memory.date(0)}] talk: look at screenshot`,
+    },
+    {
+      id: 1,
+      n: 1,
+      images: [],
+      text: `1+0|[${await state.memory.date(1)}] tool: read {"path":"screenshot.png"}`,
+    },
+    {
+      id: 2,
+      n: 1,
+      images: [image],
+      text: "2+0|[1970-01-01T00:00:00.002Z] echo: screenshot\n[image]",
+    },
     {
       id: 3,
       n: 1,
       images: [image, image],
-      text: "3+0|user: two screenshots\n[image image/png]\n[image image/png]",
+      text: "3+0|[1970-01-01T00:00:00.003Z] user: two screenshots\n[image image/png]\n[image image/png]",
     },
-    { id: 4, n: 1, images: [], text: "4+0|user: plain text" },
+    { id: 4, n: 1, images: [], text: "4+0|[1970-01-01T00:00:00.004Z] user: plain text" },
     { id: 2, n: 2, images: [], text: await state.memory.zoom(2, 2) },
   ];
   f.faux.setResponses(

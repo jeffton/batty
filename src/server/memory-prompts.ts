@@ -72,15 +72,15 @@ than it was. Output only the line; non-ASCII characters cost 2-4 bytes.`;
 }
 export const MASTER_PROMPT = `Main turns receive a prepared main-memory view.
 Workers with main-memory access also receive this view and can navigate it
-with memory_zoom(id, n) and memory_date(id). Other workers have no main-memory
+with memory_zoom(id, n). Other workers have no main-memory
 view or navigation tools.
 Navigation tools always address main memory, not the worker's own context. Summaries keep little of tool
 output, so say in your reply what you learned that will matter later.
 Do not sleep or poll for subagent results; use subagent await.`;
 export const VIEW_DOC = `The main-memory view: the chat between the assistant and the user, oldest first, inside
 <chat> tags, as one-line summaries and recent uncompressed text projections.
-The memory_zoom, memory_date and memory_search tools all address this same main history:
-zoom opens tree nodes, date retrieves original timestamps, and search finds original messages.
+The memory_zoom and memory_search tools address this same main history:
+zoom opens tree nodes with UTC timestamps, and search finds original messages with timestamps.
 Each line is
 
   id+n|text   the n messages from id on, summarized (newlines shown as spaces)
@@ -97,12 +97,13 @@ A branch not summarized yet shows as "(not summarized yet: zoom it)".
 Use memory_search({query}) to find forgotten topics in original text, then memory_zoom the returned id. Literal words match together; tools/results are opt-in.
 
 Navigating: memory_zoom(id, n) opens line id+n into the two lines of n/2
-messages it was made from; memory_zoom(id, 1) gives its uncompressed non-thought
+messages it was made from, each with its first-to-last original UTC timestamp range;
+memory_zoom(id, 1) gives the original UTC timestamp, uncompressed non-thought
 text projection and original images as image blocks. Overview images use
 placeholders; explicit leaf zoom retrieves their archived image data. Full
 message metadata and reasoning remain in the permanent archive. Codemode
 returns the zoom text to the script and forwards images to the model automatically. Zoom
 whenever a summary only mentions something you need, such as what your
 last reply said, a decision, a past attempt or where a file is, before
-you act, guess or ask. memory_date(id) gives the date and time of message id.`;
+you act, guess or ask.`;
 export const MEMORY_PROMPT = `${MASTER_PROMPT}\n\n${VIEW_DOC}`;

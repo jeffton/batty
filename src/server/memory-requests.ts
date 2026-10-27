@@ -45,7 +45,6 @@ type MemoryRequests = {
     context: Context,
     snapshot?: MemorySnapshot,
   ) => Promise<(TextContent | ImageContent)[]>;
-  date: (id: number, context: Context) => Promise<string>;
   search: (options: MemorySearchOptions, context: Context) => ReturnType<MemorySearch["search"]>;
   report: (error: unknown) => void;
 };
@@ -59,7 +58,6 @@ export function createMemoryRequests({
   conversationalView,
   preparedView,
   zoom,
-  date,
   search,
   report,
 }: MemoryRequests) {
@@ -133,7 +131,7 @@ export function createMemoryRequests({
       defineTool({
         name: "memory_zoom",
         description:
-          "Open prepared main-memory line id+n into its two child summaries; n=1 returns uncompressed non-thought text and original images from that message. No reasoning or full message metadata.",
+          "Open prepared main-memory line id+n into its two child summaries with UTC timestamp ranges; n=1 returns the original UTC timestamp, uncompressed non-thought text and original images from that message. No reasoning or full message metadata.",
         parameters: Type.Object({ id: Type.Integer(), n: Type.Integer() }),
         replay: "safe",
         outputLimits: { maxBytes: Number.MAX_SAFE_INTEGER, maxLines: Number.MAX_SAFE_INTEGER },
@@ -146,19 +144,6 @@ export function createMemoryRequests({
               ? await mainSnapshot(context)
               : (await api.snapshot(WorkerMemory, api.conversationId, context))?.snapshot;
           return { output: await zoom(id, n, context, snapshot) };
-        },
-      }),
-      defineTool({
-        name: "memory_date",
-        description:
-          "The date and time of main-memory message id (from the prepared overview or memory_zoom).",
-        parameters: Type.Object({ id: Type.Integer() }),
-        replay: "safe",
-        execute: async ({ id }, api, context) => {
-          const worker = await api.snapshot(WorkerDoc, api.conversationId, context);
-          if (!(await canAccessMemory(api.conversationId, worker?.workspaceId)))
-            throw new Error("Main memory is available only in the assistant workspace");
-          return { output: [{ type: "text", text: await date(id, context) }] };
         },
       }),
       defineTool({

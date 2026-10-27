@@ -37,8 +37,8 @@ for (const { width, colorScheme } of themedLayouts) {
       await page.goto(url, { waitUntil: "domcontentloaded" });
       await page.getByText("Cabin attached.").first().waitFor();
       const messages = page.locator("article.message");
-      expect(await messages.count()).toBe(3);
-      for (const message of await messages.all()) {
+      expect(await messages.count()).toBe(4);
+      for (const message of (await messages.all()).slice(0, 3)) {
         expect(await message.getByText("Cabin.jpg", { exact: true }).count()).toBe(1);
         expect(await message.locator(".shared-sites__meta strong").count()).toBe(1);
         const diff = message.getByRole("button", { name: "View changes" });
@@ -48,6 +48,9 @@ for (const { width, colorScheme } of themedLayouts) {
         await popover.locator(".agent-turn-diff-popover__viewer diffs-container").waitFor();
         await popover.getByRole("button", { name: "Close code changes" }).click();
       }
+      const input = messages.nth(3);
+      expect(await input.getByText("Input evidence.pdf", { exact: true }).count()).toBe(1);
+      expect(await input.locator(".shared-sites").count()).toBe(0);
       expect(await page.getByRole("button", { name: "Open cron session" }).count()).toBe(1);
       expect(await page.getByRole("button", { name: "Open subagent session" }).count()).toBe(1);
       expect(errors).toEqual([]);

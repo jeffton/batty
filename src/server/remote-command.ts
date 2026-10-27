@@ -7,6 +7,7 @@ import {
 } from "@earendil-works/pi-durable";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { JsonValue } from "@earendil-works/chord";
+import type { WorkerInputFile } from "./worker-files";
 import type { WorkerCommand, WorkerCommandContext } from "./orchestration-workers";
 
 type CommandResult = {
@@ -37,7 +38,7 @@ export function createRemoteCommands(
   host: () => { harness: Harness; main: Conversation },
 ) {
   const Command = defineTask<
-    { args: WorkerCommand; grantId: string; requestId: string },
+    { args: WorkerCommand; grantId: string; requestId: string; files?: WorkerInputFile[] },
     { phase: "execute" },
     CommandResult
   >({
@@ -59,6 +60,7 @@ export function createRemoteCommands(
           conversation: (id, context) => harness.conversation(id, context),
           details: async () => {},
           remoteAssignment: { grantId: task.input.grantId, requestId: task.input.requestId },
+          inputFiles: task.input.files,
         };
         let result: CommandResult;
         try {
@@ -84,13 +86,18 @@ export function createRemoteCommands(
   });
   return {
     Command,
-    async execute(grantId: string, requestId: string, args: WorkerCommand) {
+    async execute(
+      grantId: string,
+      requestId: string,
+      args: WorkerCommand,
+      files?: WorkerInputFile[],
+    ) {
       if (!requestId.trim()) throw new Error("Node command requires requestId");
       if (args.action === "report") throw new Error("Reports originate in the assigned worker");
       const { harness, main } = host();
       const id = await main.commit(async (tx) => {
         const receipt = await tx.doc(Receipt, JSON.stringify([grantId, requestId]), {});
-        const serialized = JSON.stringify(args);
+        const serialized = JSON.stringify(files ? { ...args, inputFiles: files } : args);
         if (receipt.taskId !== undefined) {
           if (receipt.args !== serialized)
             throw new Error("Node requestId was reused with different arguments");
@@ -99,7 +106,7 @@ export function createRemoteCommands(
         receipt.args = serialized;
         receipt.taskId = await tx.createTask(
           Command,
-          { args, grantId, requestId },
+          { args, grantId, requestId, ...(files ? { files } : {}) },
           { ownership: { kind: "conversation" }, background: true },
         );
         return receipt.taskId;

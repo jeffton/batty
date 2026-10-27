@@ -237,6 +237,8 @@ const noticeArtifacts = computed(() =>
 );
 
 const attachedFiles = computed<SentFileDescriptor[]>(() => {
+  if (isRuntimeNotice.value && props.message.role === "custom" && props.message.data?.inputFiles)
+    return props.message.data.inputFiles as SentFileDescriptor[];
   if (noticeArtifacts.value) return noticeArtifacts.value.sentFiles ?? [];
   if (props.message.role !== "assistant") {
     return [];

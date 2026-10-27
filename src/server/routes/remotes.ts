@@ -9,6 +9,12 @@ import { normalizeRemoteUrl } from "../remote-access";
 import type { RemoteDiscovery, RemoteGrant } from "../../shared/remotes";
 import type { WorkerCommand } from "../orchestration-workers";
 import { streamSession, writeStreamEvent } from "../session-sse";
+import {
+  receiveWorkerFiles,
+  MAX_WORKER_FILE_BYTES,
+  type WorkerFileMetadata,
+  type WorkerInputFile,
+} from "../worker-files";
 import { resolveSentFile } from "../send-files";
 import type { TranscriptImages } from "../transcript-images";
 import type { TaskId } from "@earendil-works/pi-durable";
@@ -108,22 +114,62 @@ export function registerRemoteRoutes(app: FastifyInstance, runtime: Runtime) {
       defaultModel: main.model && `${main.model.provider}/${main.model.modelId}`,
     };
   });
-  app.post<{ Body: { requestId: string; command: WorkerCommand } }>(
+  app.post<{ Body: { requestId: string; command: WorkerCommand; files?: WorkerFileMetadata[] } }>(
     "/api/node/commands",
     async (request) => {
-      const command = request.body.command;
+      let body = request.body;
+      let files: WorkerInputFile[] | undefined;
+      const parts = request.isMultipart()
+        ? request.parts({
+            limits: {
+              files: 32,
+              fields: 1,
+              parts: 33,
+              fileSize: MAX_WORKER_FILE_BYTES,
+              fieldSize: 1024 * 1024,
+            },
+          })
+        : undefined;
+      if (parts) {
+        const first = await parts.next();
+        if (
+          first.done ||
+          first.value.type !== "field" ||
+          first.value.fieldname !== "command" ||
+          typeof first.value.value !== "string" ||
+          first.value.valueTruncated
+        )
+          throw new Error("Worker command metadata must be the first multipart field");
+        body = JSON.parse(first.value.value);
+      }
+      const command = body.command;
+      if (!command || typeof body.requestId !== "string" || !body.requestId.trim())
+        throw new Error("Node command requires a command and requestId");
       if (
         !["run", "resume", "queue", "steer", "stop", "list", "inspect", "await"].includes(
           command.action,
         ) ||
         command.nodeId ||
+        command.files !== undefined ||
         command.sessionId?.startsWith("remote:")
       )
         throw new Error("Invalid node worker action");
+      if (parts) {
+        if (!["run", "queue", "resume", "steer"].includes(command.action))
+          throw new Error("Files are supported only on run, queue, resume and steer");
+        files = await receiveWorkerFiles(
+          { rootDir: runtime.config.sentFilesDir, baseUrl: runtime.config.baseUrl },
+          `node:${request.nodeGrant!.id}:${body.requestId}`,
+          body.files!,
+          parts,
+        );
+      } else if (body.files !== undefined)
+        throw new Error("Worker files require multipart transfer");
       return runtime.orchestration.nodeCommand(
         request.nodeGrant!.id,
-        request.body.requestId,
+        body.requestId,
         command,
+        files,
       );
     },
   );

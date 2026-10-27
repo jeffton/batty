@@ -1,7 +1,12 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { workerCommandBody } from "./worker-files";
+import { artifactRefs } from "./artifact-forwarding";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Fastify from "fastify";
+import multipart from "@fastify/multipart";
 import { expect, test, vi } from "vite-plus/test";
 import {
   fauxAssistantMessage,
@@ -13,7 +18,7 @@ import { getCurrentTools } from "@earendil-works/pi-ai/utils/transcript";
 import { loadConfig } from "./config";
 import { Runtime, context } from "./runtime";
 import { authenticateNode, registerRemoteRoutes } from "./routes/remotes";
-import { resolveSentFile } from "./send-files";
+import { resolveSentFile, storeSentFiles } from "./send-files";
 import type { SentFileDescriptor } from "../shared/types";
 
 async function eventually(check: () => Promise<boolean>, label: string) {
@@ -57,6 +62,7 @@ async function openInstance(directory: string, name: string, fileStatus = 200) {
   });
   // Match production shutdown, including unused HTTP-pool preconnections.
   const app = Fastify({ forceCloseConnections: true });
+  await app.register(multipart, { limits: { fileSize: 100 * 1024 * 1024 } });
   const fileRequests: string[] = [];
   const sessionStreams: Array<{ url: string; closed: boolean }> = [];
   app.addHook("onRequest", async (request, reply) => {
@@ -1077,6 +1083,278 @@ test("terminal metadata cannot retire a stream before its committed result curso
     restoreState?.();
     if (b) await writeFile(join(b.work, "release"), "release");
     await Promise.all([a?.close(), b?.close()]);
+    await rm(directory, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+  }
+}, 30_000);
+
+test("multipart node commands authenticate, reject corrupt/incomplete transfers before admission, and replay without duplicate work", async () => {
+  vi.stubEnv("PI_OFFLINE", "1");
+  const directory = await mkdtemp(join(tmpdir(), "batty-node-input-replay-"));
+  const remote = await openInstance(directory, "receiver");
+  try {
+    const grant = await remote.runtime.remotes.access.issue("sender");
+    let calls = 0;
+    remote.faux.setResponses(
+      Array.from({ length: 10 }, () => () => {
+        calls++;
+        return fauxAssistantMessage([fauxText("input processed")]);
+      }),
+    );
+    const source = join(directory, "evidence.txt");
+    const bytes = Buffer.from("durable input bytes");
+    await writeFile(source, bytes);
+    const [file] = await storeSentFiles({
+      rootDir: join(directory, "sender-files"),
+      workspaceId: "sender",
+      sessionId: "1",
+      toolCallId: "input",
+      cwd: directory,
+      paths: [source],
+    });
+    const files = [
+      {
+        name: file!.name,
+        size: file!.size,
+        mimeType: file!.mimeType,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        file: file!,
+      },
+    ];
+    const command = { action: "run", prompt: "process transferred input", workspaceId: "work" };
+    const send = async (body: FormData, token = grant.token) =>
+      fetch(new URL("api/node/commands", remote.url), {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+        body,
+      });
+    const denied = await send(await workerCommandBody(command, "denied", files), "invalid");
+    expect(denied.status).toBe(401);
+    await denied.body?.cancel();
+    const corrupt = await send(
+      await workerCommandBody(command, "attempt", [{ ...files[0]!, sha256: "0".repeat(64) }]),
+    );
+    expect(corrupt.status).toBe(400);
+    expect(await corrupt.text()).toContain("integrity check failed");
+    const missingBody = await workerCommandBody(command, "missing", files);
+    missingBody.delete("file-0");
+    const missing = await send(missingBody);
+    expect(missing.status).toBe(400);
+    expect(await missing.text()).toContain("Missing worker file parts");
+    expect(await remote.runtime.orchestration.listRunning()).toHaveLength(0);
+    expect(calls).toBe(0);
+    const first = await send(await workerCommandBody(command, "attempt", files));
+    expect(first.status).toBe(200);
+    const receipt = await first.json();
+    await eventually(
+      async () => (await remote.runtime.orchestration.listRunning()).length === 0,
+      "single imported assignment",
+    );
+    const duplicate = await send(await workerCommandBody(command, "attempt", files));
+    expect(duplicate.status).toBe(200);
+    expect(await duplicate.json()).toEqual(receipt);
+    expect(calls).toBe(1);
+    const changed = await send(
+      await workerCommandBody({ ...command, prompt: "different assignment" }, "attempt", files),
+    );
+    expect(changed.ok).toBe(false);
+    expect(await changed.text()).toContain("reused with different arguments");
+    const jsonPath = await remote.app.inject({
+      method: "POST",
+      url: "/api/node/commands",
+      headers: { authorization: `Bearer ${grant.token}` },
+      payload: {
+        requestId: "path-injection",
+        command: { ...command, files: [{ path: join(remote.work, "origin.txt") }] },
+      },
+    });
+    expect(jsonPath.statusCode).not.toBe(200);
+    expect(calls).toBe(1);
+    await remote.runtime.remotes.access.revoke(grant.id);
+    const revoked = await send(await workerCommandBody(command, "revoked", files));
+    expect(revoked.status).toBe(401);
+    await revoked.body?.cancel();
+  } finally {
+    await remote.close();
+    await rm(directory, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+  }
+}, 30_000);
+
+test("remote run/queue/steer/resume carry selected paths and received refs, images, immutable queued bytes and locally mirrored input attachments", async () => {
+  vi.stubEnv("PI_OFFLINE", "1");
+  const directory = await mkdtemp(join(tmpdir(), "batty-input-files-"));
+  let a: Awaited<ReturnType<typeof openInstance>> | undefined;
+  let b: Awaited<ReturnType<typeof openInstance>> | undefined;
+  try {
+    a = await openInstance(directory, "a");
+    b = await openInstance(directory, "b");
+    const local = a;
+    const remote = b;
+    await connect(local, remote, "b");
+    const source = join(local.work, "evidence.txt");
+    const image = join(local.work, "drawing.png");
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWP4z8AAAAMBAQCc479ZAAAAAElFTkSuQmCC",
+      "base64",
+    );
+    await writeFile(source, "original sender bytes");
+    await writeFile(image, png);
+    let next: Record<string, import("@earendil-works/chord").JsonValue> = {};
+    let id: string | undefined;
+    let parentSequence = 0;
+    let pendingParent = "";
+    local.faux.setResponses(
+      Array.from({ length: 80 }, () => (request) => {
+        const last = request.messages.findLast((message) => message.role !== "system")!;
+        const text = JSON.stringify(last.content);
+        if (last.role === "user" && text.includes("seed-parent-ref"))
+          return fauxAssistantMessage([fauxToolCall("attach_files", { paths: [source] })], {
+            stopReason: "toolUse",
+          });
+        if (
+          pendingParent &&
+          request.messages.some(
+            (message) =>
+              message.role === "user" && JSON.stringify(message.content).includes(pendingParent),
+          )
+        ) {
+          pendingParent = "";
+          return fauxAssistantMessage([fauxToolCall("subagent", next)], { stopReason: "toolUse" });
+        }
+        if (last.role === "toolResult" && last.toolName === "subagent")
+          id ??= /Session ID: (remote:b:\d+)/.exec(text)?.[1];
+        return fauxAssistantMessage([fauxText("parent acknowledged")]);
+      }),
+    );
+    const received: Array<{ phase: string; bytes: string; image: boolean; path: string }> = [];
+    remote.faux.setResponses(
+      Array.from({ length: 40 }, () => (request) => {
+        const last = request.messages.findLast((message) => message.role !== "system")!;
+        if (last.role === "user") {
+          const blocks =
+            typeof last.content === "string"
+              ? [{ type: "text" as const, text: last.content }]
+              : last.content;
+          const text = blocks
+            .filter((block) => block.type === "text")
+            .map((block) => block.text)
+            .join("\n");
+          const phase = /remote-phase-(run|queue|steer|resume)/.exec(text)?.[1];
+          if (phase) {
+            const path = /path="([^"]+)"/.exec(text)![1]!;
+            expect(path).toContain(remote.config.sentFilesDir);
+            expect(text).not.toContain(source);
+            expect(text).not.toContain("<batty-runtime-notice>");
+            received.push({
+              phase,
+              path,
+              bytes: readFileSync(path, "utf8"),
+              image: blocks.some(
+                (block) => block.type === "image" && block.data === png.toString("base64"),
+              ),
+            });
+            if (phase === "run")
+              return fauxAssistantMessage(
+                [
+                  fauxToolCall("bash", {
+                    command:
+                      "printf ready > input-entered; for i in $(seq 1 400); do test -f input-release && exit 0; sleep 0.05; done; exit 1",
+                  }),
+                ],
+                { stopReason: "toolUse" },
+              );
+          }
+        }
+        return fauxAssistantMessage([fauxText("remote file assignment complete")]);
+      }),
+    );
+    const parent = async (content: string) => {
+      if (content === "parent-command")
+        content = pendingParent = `parent-command-${++parentSequence}`;
+      await (await local.runtime.main.submit({ type: "input", content }, context)).wait(context);
+    };
+    await parent("seed-parent-ref");
+    const seeded = (await local.runtime.main.context(context)).messages.findLast(
+      (message) => message.role === "toolResult" && message.toolName === "attach_files",
+    )!;
+    const seedFiles = filesIn(seeded);
+    expect(seedFiles).toHaveLength(1);
+    const ref = artifactRefs({ sentFiles: seedFiles })[0]!.ref;
+    const send = async (action: string, phase: string, useRef = false) => {
+      next = {
+        action,
+        ...(id ? { sessionId: id } : { nodeId: "b", workspaceId: "work" }),
+        prompt: `remote-phase-${phase}`,
+        files: [useRef ? { ref } : { path: source }, { path: image }],
+      };
+      await parent("parent-command");
+      const result = (await local.runtime.main.context(context)).messages.findLast(
+        (message) => message.role === "toolResult" && message.toolName === "subagent",
+      );
+      expect(result, JSON.stringify(result)).toMatchObject({ isError: false });
+    };
+    await send("run", "run", true);
+    await eventually(async () => {
+      try {
+        await readFile(join(remote.work, "input-entered"));
+        return true;
+      } catch {
+        return false;
+      }
+    }, "remote input hold");
+    await send("queue", "queue");
+    await writeFile(source, "changed after queue");
+    await send("steer", "steer");
+    await writeFile(source, "changed after steer");
+    await writeFile(join(remote.work, "input-release"), "release");
+    await eventually(
+      async () => (await remote.runtime.orchestration.listRunning()).length === 0,
+      "queued remote file assignments",
+    );
+    expect(received.map(({ phase, bytes, image }) => ({ phase, bytes, image }))).toEqual([
+      { phase: "run", bytes: "original sender bytes", image: true },
+      { phase: "steer", bytes: "changed after queue", image: true },
+      { phase: "queue", bytes: "original sender bytes", image: true },
+    ]);
+    await send("resume", "resume");
+    await eventually(
+      async () => (await remote.runtime.orchestration.listRunning()).length === 0,
+      "resumed remote input assignment",
+    );
+    expect(received.at(-1)).toMatchObject({
+      phase: "resume",
+      bytes: "changed after steer",
+      image: true,
+    });
+    await eventually(async () => {
+      try {
+        return filesIn(local.runtime.remotes.state(id!)).length >= 8;
+      } catch {
+        return false;
+      }
+    }, "locally imported input attachments");
+    const mirrored = filesIn(local.runtime.remotes.state(id!));
+    expect(mirrored.every((file) => file.downloadUrl.startsWith("/api/sent-files/remote-b/"))).toBe(
+      true,
+    );
+    for (const file of mirrored) {
+      const match = /\/api\/sent-files\/([^/]+)\/([^/]+)\/([^/]+)\/([^/?]+)/.exec(
+        file.downloadUrl,
+      )!;
+      const resolved = await resolveSentFile({
+        rootDir: local.config.sentFilesDir,
+        workspaceId: match[1]!,
+        sessionId: match[2]!,
+        toolCallId: match[3]!,
+        fileId: match[4]!,
+      });
+      expect((await readFile(resolved.storedPath)).length).toBeGreaterThan(0);
+    }
+  } finally {
+    if (b) await writeFile(join(b.work, "input-release"), "release");
+    await a?.close();
+    await b?.close();
     await rm(directory, { recursive: true, force: true });
     vi.unstubAllEnvs();
   }

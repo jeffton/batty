@@ -42,7 +42,13 @@ export { parseDuration } from "./cron-schedule.js";
 const context = BACKGROUND_CONTEXT;
 export function createOrchestration(input: OrchestrationConfig | AppConfig = {}) {
   const options: OrchestrationConfig =
-    "workspacesRoots" in input ? { config: input, workspaces: () => listWorkspaces(input) } : input;
+    "workspacesRoots" in input
+      ? {
+          config: input,
+          workspaces: () => listWorkspaces(input),
+          fileStorage: { rootDir: input.sentFilesDir, baseUrl: input.baseUrl },
+        }
+      : input;
   let harness: Harness;
   let main: Conversation;
   let prepareAgent = options.prepareAgent;
@@ -76,6 +82,7 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
     return found;
   };
   const services: OrchestrationServices = {
+    fileStorage: options.fileStorage,
     get remoteWorkers() {
       return remoteWorkers;
     },

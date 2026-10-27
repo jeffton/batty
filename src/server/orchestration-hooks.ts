@@ -8,7 +8,14 @@ export function orchestrationHooks(services: OrchestrationServices) {
       beforeRequest: (request) => ({
         messages: request.messages.map((message) => {
           const notice = message.role === "user" && decodeRuntimeNotice(message.content);
-          return notice ? { ...message, content: notice.text } : message;
+          return notice && message.role === "user"
+            ? {
+                ...message,
+                content: Array.isArray(message.content)
+                  ? [{ type: "text" as const, text: notice.text }, ...message.content.slice(1)]
+                  : notice.text,
+              }
+            : message;
         }),
       }),
     }),

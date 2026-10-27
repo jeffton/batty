@@ -17,7 +17,8 @@ export function encodeRuntimeNotice(notice: RuntimeNotice): string {
 }
 export function decodeRuntimeNotice(content: unknown): RuntimeNotice | undefined {
   if (Array.isArray(content)) {
-    if (content.length !== 1 || content[0]?.type !== "text") return undefined;
+    if (content[0]?.type !== "text" || content.slice(1).some((block) => block?.type !== "image"))
+      return undefined;
     content = content[0].text;
   }
   if (typeof content !== "string" || !content.startsWith(NOTICE_OPEN)) return undefined;

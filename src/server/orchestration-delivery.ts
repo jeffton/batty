@@ -1,3 +1,4 @@
+import { encodeWorkerNotice } from "./worker-files.js";
 import { archiveWorker, removeCompletedOneShot } from "./orchestration-lifecycle.js";
 import type { JsonValue } from "@earendil-works/chord";
 
@@ -149,7 +150,7 @@ export function createDeliveryTask(services: OrchestrationServices) {
           await child.submit(
             {
               type: "input",
-              content: encodeRuntimeNotice(deliveryNotice(task.input)),
+              content: await encodeWorkerNotice(deliveryNotice(task.input), task.input.files ?? []),
               requestId: `batty-deliver:${task.id}`,
               whenBusy: "followUp",
             },

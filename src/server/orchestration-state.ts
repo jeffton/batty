@@ -126,6 +126,7 @@ export const WorkerDoc = defineDoc<{
 
 export interface OrchestrationConfig {
   config?: unknown;
+  fileStorage?: import("./worker-files").WorkerFileStorage;
   workspaces?:
     | readonly WorkspaceInfo[]
     | (() => readonly WorkspaceInfo[] | Promise<readonly WorkspaceInfo[]>);
@@ -152,6 +153,7 @@ export type DeliveryInput = {
   mainId: ConversationId;
   prompt: string;
   notice?: RuntimeNotice;
+  files?: import("./worker-files").WorkerInputFile[];
   report: boolean;
   previous?: TaskId<string>;
   runId?: string;
@@ -173,6 +175,7 @@ export interface RemoteWorkerService {
 }
 
 export interface OrchestrationServices {
+  readonly fileStorage?: import("./worker-files").WorkerFileStorage;
   readonly remoteWorkers?: RemoteWorkerService;
   readonly harness: Harness;
   readonly main: Conversation;

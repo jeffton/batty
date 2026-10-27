@@ -1,3 +1,9 @@
+import {
+  encodeWorkerNotice,
+  snapshotWorkerFiles,
+  type WorkerFileSource,
+  type WorkerInputFile,
+} from "./worker-files.js";
 import { workerTools } from "./orchestration-worker-config.js";
 import { modelChange } from "./orchestration-worker-config.js";
 import type { Context, JsonValue } from "@earendil-works/chord";
@@ -63,6 +69,7 @@ export type WorkerCommand = {
   model?: string;
   effort?: string;
   workspaceId?: string;
+  files?: WorkerFileSource[];
 };
 
 /** The same lifecycle service is called by model tools and authenticated node commands. */
@@ -78,7 +85,10 @@ export type WorkerCommandContext = Pick<
   | "waitForTask"
   | "conversation"
   | "details"
-> & { remoteAssignment?: { grantId: string; requestId: string } };
+> & {
+  remoteAssignment?: { grantId: string; requestId: string };
+  inputFiles?: WorkerInputFile[];
+};
 
 function missingWorker(id: string) {
   return Object.assign(
@@ -395,7 +405,7 @@ export function createWorkers(
   const workerTool = {
     name: "subagent",
     description:
-      "Run, await, queue, resume, steer or stop subagents. Remote instances: workspaces lists configured nodes, their workspaces (including isAssistant), available models with supported thinking levels, and defaultModel. Omit model to use the receiving main agent’s model. Pass nodeId to run remotely; returned remote Session IDs work with lifecycle actions without repeating nodeId. Remote workers use the receiving installation's models, tools and context. Coordinator list includes remote mirrors. File artifacts are imported locally; sites and live browsers are not relayed. Workers always run asynchronously: run, queue and resume return a Session ID immediately, without waiting for completion. Start workers with run, then use await to join their results. run creates a new session and rejects sessionId; await/queue/resume/steer/stop require sessionId. queue/resume/steer/stop use the same coordination scope as discovery; worker await joins a direct child. Project workers, including cron workers, delegate within their own workspace; main and assistant-workspace coordinators may delegate across workspaces. These are coordination guardrails, not a security boundary. list discovers subagents (stable sessionId, workspace, status), scanning up to limit conversations per page (default 50, max 100); pass nextCursor back as cursor even for empty pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. All assigned workers, including cron roots and descendants, can discover, inspect and explicitly manage ordinary and cron workers in their own workspace. Main and workers in the configured assistant workspace can do so across all workspaces. Cron runs and their queues remain distinct; cron ancestry does not restrict coordination. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
+      "Run, await, queue, resume, steer or stop subagents. Remote instances: workspaces lists configured nodes, their workspaces (including isAssistant), available models with supported thinking levels, and defaultModel. Omit model to use the receiving main agent’s model. Pass nodeId to run remotely; returned remote Session IDs work with lifecycle actions without repeating nodeId. Remote workers use the receiving installation's models, tools and context. Coordinator list includes remote mirrors. File artifacts are imported locally; sites and live browsers are not relayed. Send files with run, queue, resume or steer using files: [{path: 'local/path'}] or [{ref: 'file:...'}]. Selected files are immutable snapshots copied to the receiving installation; images are visible to its model. Maximum 32 files and 100 MiB total per message. Workers always run asynchronously: run, queue and resume return a Session ID immediately, without waiting for completion. Start workers with run, then use await to join their results. run creates a new session and rejects sessionId; await/queue/resume/steer/stop require sessionId. queue/resume/steer/stop use the same coordination scope as discovery; worker await joins a direct child. Project workers, including cron workers, delegate within their own workspace; main and assistant-workspace coordinators may delegate across workspaces. These are coordination guardrails, not a security boundary. list discovers subagents (stable sessionId, workspace, status), scanning up to limit conversations per page (default 50, max 100); pass nextCursor back as cursor even for empty pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. All assigned workers, including cron roots and descendants, can discover, inspect and explicitly manage ordinary and cron workers in their own workspace. Main and workers in the configured assistant workspace can do so across all workspaces. Cron runs and their queues remain distinct; cron ancestry does not restrict coordination. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
     replay: "safe" as const,
     parameters: Type.Object({
       action: Type.Union(
@@ -423,12 +433,23 @@ export function createWorkers(
       sessionId: Type.Optional(Type.String()),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
       cursor: Type.Optional(Type.String()),
+      files: Type.Optional(
+        Type.Array(
+          Type.Union([
+            Type.Object({ path: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+            Type.Object({ ref: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+          ]),
+          { minItems: 1, maxItems: 32 },
+        ),
+      ),
       prompt: Type.Optional(Type.String()),
       model: Type.Optional(Type.String()),
       effort: Type.Optional(Type.String()),
       workspaceId: Type.Optional(Type.String()),
     }),
     execute: async (args: WorkerCommand, api: WorkerCommandContext, ctx: Context) => {
+      if (args.files !== undefined && !["run", "queue", "resume", "steer"].includes(args.action))
+        throw new Error("files are supported only on run, queue, resume and steer");
       const remoteCoordinator = async () => {
         const state = await api.snapshot(OrchestrationDoc, ctx);
         if (api.conversationId === state?.mainId) return true;
@@ -666,12 +687,35 @@ export function createWorkers(
         return reply(`Stopped. Session ID: ${workerId}`);
       }
       if (!args.prompt?.trim()) throw new Error(`${args.action} requires prompt`);
+      const files =
+        api.inputFiles ??
+        (args.files
+          ? await snapshotWorkerFiles(
+              services.fileStorage ??
+                (() => {
+                  throw new Error("Worker file storage is not configured");
+                })(),
+              args.files,
+              api,
+              ctx,
+            )
+          : []);
       if (args.action === "steer") {
-        if (!running) throw new Error("Cannot steer a finished subagent; use resume");
+        const content = await encodeWorkerNotice(
+          buildSubagentSteeringRuntimeNotice(args.prompt),
+          files,
+        );
+        const submitted = await api.commit(
+          (tx) => tx.submissionByRequest(worker!.id, `batty-steer:${api.taskId}`),
+          ctx,
+        );
+        if (submitted) return reply(`Steered. Session ID: ${workerId}`);
+        if (!running || (await api.getTask(worker!.active!, ctx))?.state.status === "terminal")
+          throw new Error("Cannot steer a finished subagent; use resume");
         await (await api.conversation(worker!.id, ctx))!.submit(
           {
             type: "input",
-            content: encodeRuntimeNotice(buildSubagentSteeringRuntimeNotice(args.prompt)),
+            content,
             whenBusy: "steer",
             requestId: `batty-steer:${api.taskId}`,
           },
@@ -737,6 +781,7 @@ export function createWorkers(
             mainId: doc.mainId!,
             prompt: args.prompt!,
             notice: buildSubagentRuntimeNotice(0, args.prompt!),
+            ...(files.length ? { files } : {}),
             report: api.remoteAssignment === undefined,
             ...(api.remoteAssignment ? { remoteAssignment: api.remoteAssignment } : {}),
             change: { ...change, cwd: ws.path } as RunChange,

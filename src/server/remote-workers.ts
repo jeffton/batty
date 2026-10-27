@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { snapshotWorkerFiles, workerCommandBody } from "./worker-files";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
@@ -75,7 +76,7 @@ export async function nodeRequest<T>(
     redirect: "error",
     signal: init.signal ?? AbortSignal.timeout(30_000),
     headers: {
-      "content-type": "application/json",
+      ...(init.body instanceof FormData ? {} : { "content-type": "application/json" }),
       authorization: `Bearer ${connection.token}`,
       ...init.headers,
     },
@@ -474,7 +475,15 @@ export class RemoteWorkers {
     if (!node || (parsed && args.nodeId && parsed.node !== args.nodeId))
       throw new Error("Remote command requires a matching nodeId/sessionId");
     const requestId = `tool:${api.conversationId}:${api.taskId}`;
-    const { nodeId: _nodeId, ...command } = args;
+    const files = args.files
+      ? await snapshotWorkerFiles(
+          { rootDir: this.runtime.config.sentFilesDir, baseUrl: this.runtime.config.baseUrl },
+          args.files,
+          api,
+          _ctx,
+        )
+      : [];
+    const { nodeId: _nodeId, files: _files, ...command } = args;
     if (parsed) command.sessionId = parsed.session;
     if (["run", "queue", "resume"].includes(command.action)) {
       await this.persist(async () => {
@@ -497,7 +506,10 @@ export class RemoteWorkers {
       isError?: boolean;
     }>(this.connection(node), "commands", {
       method: "POST",
-      body: JSON.stringify({ requestId, command }),
+      ...(files.length ? { signal: AbortSignal.timeout(300_000) } : {}),
+      body: files.length
+        ? await workerCommandBody(command, requestId, files)
+        : JSON.stringify({ requestId, command }),
     });
     const text = Array.isArray(result.output)
       ? result.output

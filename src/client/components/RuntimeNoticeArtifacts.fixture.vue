@@ -68,6 +68,16 @@ messages.push({
   blocks: [{ type: "text", text: "Ordinary reply `inline code`" }],
   ...artifacts,
 });
+messages.push({
+  role: "custom",
+  id: "worker-input",
+  timestamp: 0,
+  customType: "batty-runtime-notice:subagent",
+  text: "Inspect the attached files",
+  data: {
+    inputFiles: [{ ...artifacts.sentFiles[1], id: "input-document", name: "Input evidence.pdf" }],
+  },
+});
 </script>
 <template>
   <nav>

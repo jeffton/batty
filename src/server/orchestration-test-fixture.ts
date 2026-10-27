@@ -41,6 +41,7 @@ export async function fixture(
   models.setProvider(faux.provider);
   const registry = createRegistry();
   const orchestration = createOrchestration({
+    fileStorage: { rootDir: join(directory, "sent-files") },
     onError,
     workspaces: [
       {

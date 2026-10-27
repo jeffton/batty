@@ -29,6 +29,7 @@ export interface StoreSentFilesOptions {
   toolCallId: string;
   cwd: string;
   paths: string[];
+  names?: string[];
   reuseExisting?: boolean;
 }
 
@@ -143,7 +144,7 @@ async function readManifest(
 
 export async function storeSentFiles(
   options: StoreSentFilesOptions,
-): Promise<SentFileDescriptor[]> {
+): Promise<(SentFileDescriptor & { storedPath: string })[]> {
   const paths = options.paths
     .map((filePath) => filePath.trim())
     .filter((filePath) => filePath.length > 0);
@@ -191,7 +192,7 @@ export async function storeSentFiles(
       throw new Error(`Path is not a file: ${inputPath}`);
     }
 
-    const originalName = path.basename(resolvedPath);
+    const originalName = options.names?.[index] ?? path.basename(resolvedPath);
     const storedName = `${String(index + 1).padStart(2, "0")}-${sanitizeStoredFileName(originalName)}`;
     const mimeType = mime.lookup(originalName) || "application/octet-stream";
     const file: StoredSentFileRecord = {

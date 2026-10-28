@@ -1,3 +1,4 @@
+import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE } from "@/server/runtime-notices";
 import { easyModeMessage } from "@/client/lib/easy-mode";
 import { isAttachmentOutputToolCall } from "@/client/lib/transcript";
 import type { ToolDisplayState, TranscriptMessageView } from "@/client/lib/transcript";
@@ -28,37 +29,39 @@ export interface TranscriptDisplayResult {
 
 interface TranscriptSection {
   key: string;
-  startIndex: number;
-  endIndex: number;
+  indices: number[];
+  independent?: boolean;
 }
 
 function transcriptSections(
   entries: TranscriptMessageView[],
   toolStatesByCallId: Map<string, ToolDisplayState>,
 ): TranscriptSection[] {
-  const starts: number[] = [];
+  const sections: TranscriptSection[] = [];
+  let current: TranscriptSection | undefined;
   let hasReply = false;
   entries.forEach((entry, index) => {
-    // Runtime inputs can arrive between a tool call and its final reply. They
-    // continue that work. After a reply, a notice starts independent work.
+    // Direct deliveries are independent outputs, even when inserted in the
+    // middle of another run. They neither own nor interrupt that run's details.
+    if (entry.message.role === "assistant" && entry.message.directDelivery) {
+      sections.push({ key: `turn:${entry.message.id}`, indices: [index], independent: true });
+      return;
+    }
+    // Runtime inputs during a tool round continue that work. After a reply,
+    // a notice starts independent work.
     if (
-      index === 0 ||
+      !current ||
       entry.message.role === "user" ||
       (entry.message.role === "custom" && hasReply)
     ) {
-      starts.push(index);
+      current = { key: `turn:${entry.message.id}`, indices: [] };
+      sections.push(current);
       hasReply = false;
     }
-    if (hasAssistantReply(collapsedMessage(entry, toolStatesByCallId))) {
-      hasReply = true;
-    }
+    current.indices.push(index);
+    if (hasAssistantReply(collapsedMessage(entry, toolStatesByCallId))) hasReply = true;
   });
-
-  return starts.map((startIndex, index) => ({
-    key: `turn:${entries[startIndex]!.message.id}`,
-    startIndex,
-    endIndex: starts[index + 1] ?? entries.length,
-  }));
+  return sections;
 }
 
 function collapsedMessage(
@@ -163,20 +166,46 @@ export function buildTranscriptDisplayEntries(
     isStreaming?: boolean;
   } = {},
 ): TranscriptDisplayResult {
+  const deliveryDetails = (entry: TranscriptMessageView): TranscriptMessageView | undefined => {
+    const message = entry.message;
+    if (message.role !== "assistant" || !message.directDelivery) return undefined;
+    return {
+      message: {
+        id: `${message.id}:delivery`,
+        role: "custom",
+        timestamp: message.timestamp,
+        customType: `${BATTY_RUNTIME_NOTICE_CUSTOM_TYPE}:cron`,
+        text: `Cron ${message.directDelivery.sessionId} result`,
+        data: { cron: message.directDelivery },
+      },
+      toolStatesByCallId: new Map(),
+    };
+  };
+
   if (options.alwaysShowDetails) {
     return {
-      entries: entries.map((entry) => ({ kind: "message", entry, showTimestamp: false })),
+      entries: entries.flatMap((entry) => {
+        const details = deliveryDetails(entry);
+        return (details ? [details, entry] : [entry]).map((entry) => ({
+          kind: "message" as const,
+          entry,
+          showTimestamp: false,
+        }));
+      }),
       latestExpandedSectionKey: undefined,
     };
   }
 
   const sections = transcriptSections(entries, toolStatesByCallId);
-  const latestSectionKey = options.isStreaming ? sections.at(-1)?.key : undefined;
-  const displayEntries: TranscriptDisplayEntry[] = [];
+  const latestSectionKey = options.isStreaming
+    ? sections.findLast((section) => !section.independent)?.key
+    : undefined;
+  const displayEntries: { order: number; entry: TranscriptDisplayEntry }[] = [];
 
   for (const section of sections) {
     const isRunning = section.key === latestSectionKey;
-    const sectionEntries = entries.slice(section.startIndex, section.endIndex);
+    const sectionEntries = section.indices.map((index) => entries[index]!);
+    const directDetails = deliveryDetails(sectionEntries[0]!);
     // A durable run can persist an aborted generation before resuming after a
     // server restart. Keep that original in details, not as a second answer.
     // Task identity is required: unrelated replies must never supersede it.
@@ -218,7 +247,14 @@ export function buildTranscriptDisplayEntries(
           resumedAbortIds.has(entry.message.id) || hidesExpandableDetails(entry, collapsed),
       };
     });
-    const canToggle = !isRunning && items.some((item) => item.hidesDetails);
+    const canToggle = !isRunning && (!!directDetails || items.some((item) => item.hidesDetails));
+
+    if (isExpanded && directDetails) {
+      displayEntries.push({
+        order: section.indices[0]! - 0.5,
+        entry: { kind: "message", entry: directDetails, showTimestamp: false },
+      });
+    }
 
     items.forEach((item, index) => {
       const toggle =
@@ -226,20 +262,26 @@ export function buildTranscriptDisplayEntries(
 
       if (item.visibleEntry) {
         displayEntries.push({
-          kind: "message",
-          entry: item.visibleEntry,
-          showTimestamp: false,
-          ...(toggle ? { detailsToggle: toggle } : {}),
+          order: section.indices[index]!,
+          entry: {
+            kind: "message",
+            entry: item.visibleEntry,
+            showTimestamp: false,
+            ...(toggle ? { detailsToggle: toggle } : {}),
+          },
         });
       }
     });
     if (canToggle && lastReplyIndex < 0) {
-      displayEntries.push({ kind: "details-toggle", ...detailsToggle(section, isExpanded) });
+      displayEntries.push({
+        order: section.indices.at(-1)! + 0.5,
+        entry: { kind: "details-toggle", ...detailsToggle(section, isExpanded) },
+      });
     }
   }
 
   return {
-    entries: displayEntries,
+    entries: displayEntries.sort((a, b) => a.order - b.order).map(({ entry }) => entry),
     latestExpandedSectionKey: latestSectionKey,
   };
 }

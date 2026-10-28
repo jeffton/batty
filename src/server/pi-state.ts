@@ -317,6 +317,7 @@ export function normalizeMessage(
           timestamp: message.timestamp,
           turnPhase: "final",
           stopReason: "stop",
+          directDelivery: notice.data!.cron as { sessionId: string; runId: string },
           blocks: [{ type: "text", text: direct.text }],
           sentFiles: artifacts?.sentFiles,
           sites: artifacts?.sites?.map(decodeSiteAttachmentDescriptor),

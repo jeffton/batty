@@ -61,3 +61,31 @@ test("cron notice describes the separate scheduled worker scope", () => {
   expect(notice.text).toContain("not the main assistant");
   expect(notice.text).not.toContain("NO_REPLY");
 });
+
+test.each([false, true])(
+  "direct cron projection retains source identity for transcript details (blocks=%s)",
+  (blocks) => {
+    const encoded = encodeRuntimeNotice({
+      kind: "cron",
+      text: "Full internal report",
+      data: {
+        directDelivery: { text: "3,26 km i Fur" },
+        cron: { sessionId: "596297", runId: "run-1" },
+      },
+    });
+    expect(
+      normalizeMessage(
+        {
+          role: "user",
+          content: blocks ? [{ type: "text", text: encoded }] : encoded,
+          timestamp: 1000,
+        },
+        0,
+      ),
+    ).toMatchObject({
+      role: "assistant",
+      blocks: [{ type: "text", text: "3,26 km i Fur" }],
+      directDelivery: { sessionId: "596297", runId: "run-1" },
+    });
+  },
+);

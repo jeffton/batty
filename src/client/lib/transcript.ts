@@ -222,6 +222,7 @@ function acceptsPendingAttachmentBlocks(message: UiMessage): boolean {
   return (
     message.role === "assistant" &&
     message.turnPhase === "final" &&
+    !message.directDelivery &&
     (message.blocks.some((block) => block.type === "text" || block.type === "image") ||
       (message.sentFiles?.length ?? 0) > 0 ||
       (message.sites?.length ?? 0) > 0)

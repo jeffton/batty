@@ -137,3 +137,64 @@ test("artifact-only and error-only replies each render exactly one action stack"
     }
   }
 });
+
+test("direct cron reply controls reveal only their own source session", async () => {
+  const sources: UiMessage[] = [
+    { ...messages[0]! },
+    { ...messages[1]! },
+    ...["run", "swim"].map((id) => ({
+      id,
+      role: "assistant" as const,
+      timestamp: 4,
+      turnPhase: "final" as const,
+      blocks: [{ type: "text" as const, text: id }],
+      directDelivery: { sessionId: `worker-${id}`, runId: id },
+    })),
+  ];
+  const entriesFor = (openDetailsSectionKey?: string) =>
+    buildTranscriptDisplayEntries(
+      sources.map((message) => ({ message, toolStatesByCallId: tools })),
+      tools,
+      { openDetailsSectionKey },
+    ).entries;
+  const wrapper = mount(ChatTranscript, {
+    props: {
+      historyEntries: [],
+      tailEntries: entriesFor(),
+      keptHistoryIndexes: [],
+      isStreaming: false,
+      isPinnedToBottom: true,
+    },
+    global: {
+      stubs: {
+        SubagentSessionPopover: {
+          props: ["sessionId"],
+          template: '<div class="source-session">{{ sessionId }}</div>',
+        },
+      },
+    },
+  });
+  try {
+    const articles = wrapper.findAll("article");
+    expect(articles.map((article) => article.text())).toEqual([
+      "Question",
+      "First answer",
+      "run",
+      "swim",
+    ]);
+    await articles[2]!.get('button[aria-label="Show details"]').trigger("click");
+    expect(wrapper.emitted("toggleDetails")).toEqual([["turn:run"]]);
+    await wrapper.setProps({ tailEntries: entriesFor("turn:run") });
+    expect(wrapper.findAll(".source-session").map((source) => source.text())).toEqual([
+      "worker-run",
+    ]);
+    expect(wrapper.text()).not.toContain("Work");
+    expect(wrapper.findAll('button[aria-label="Collapse details"]')).toHaveLength(1);
+    await wrapper.setProps({ tailEntries: entriesFor("turn:swim") });
+    expect(wrapper.findAll(".source-session").map((source) => source.text())).toEqual([
+      "worker-swim",
+    ]);
+  } finally {
+    wrapper.unmount();
+  }
+});

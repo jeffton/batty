@@ -3,6 +3,8 @@ import { promisify } from "node:util";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { isolatedBrowserExecutablePath } from "./browser-executable";
+
 const ROOT = "/var/lib/batty-browser";
 const USER = "batty-browser";
 
@@ -23,12 +25,7 @@ export async function prepareBrowserIsolation(
     Number((await promisify(execFile)("id", [flag, USER], { timeout: 5000 })).stdout.trim());
   const [uid, gid] = await Promise.all([id("-u"), id("-g")]);
   if (!uid || !gid) throw new Error("batty-browser must be an unprivileged account");
-  const installed = path.join(
-    "/opt/batty-browser",
-    path.basename(path.dirname(path.dirname(executable))),
-    path.basename(path.dirname(executable)),
-    path.basename(executable),
-  );
+  const installed = isolatedBrowserExecutablePath(executable);
   await fs.access(installed, fs.constants.X_OK);
   const isolated = await fs.mkdtemp(path.join(ROOT, "sessions", "browser-"));
   await fs.chown(isolated, 0, gid);

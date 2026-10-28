@@ -59,6 +59,20 @@ Linux installations running Batty as root launch tool Chromium and its private X
 
 Install Patchright's pinned Chromium (`pnpm exec patchright install chromium`), then run `sudo bash scripts/setup-browser-isolation.sh`. Linux deployment runs the setup script before activation. It creates a locked, no-login system account, root-owned browser binaries under `/opt/batty-browser`, private profiles/artifacts under `/var/lib/batty-browser`, and an executable-scoped AppArmor `userns` allowance on Ubuntu. It does not change global user-namespace restrictions or expose `/root`. Repeat setup after a Chromium dependency update. Missing setup fails explicitly.
 
+### Explicit security browser
+
+`BATTY_BROWSER_EXECUTABLE_PATH` selects one absolute full-Chrome executable for new persistent sessions and shared headless work. Without it, Patchright retains its bundled Chromium/headless-shell defaults. An invalid or unavailable explicit executable fails; it never falls back to the bundle. Existing detached browsers keep their current executable, tabs and login across deploys.
+
+On the maintained Linux installation, put the setting in root-owned `/etc/batty2/browser.env` and add `EnvironmentFile=/etc/batty2/browser.env` to a `batty2.service` drop-in. Deployment and isolation setup read this same file. Install the complete official Chrome for Testing archive under `/opt/batty-browser/chromium-VERSION/chrome-linux64/`, then set, for example:
+
+```sh
+BATTY_BROWSER_EXECUTABLE_PATH=/opt/batty-browser/chromium-security-156.0.8078.73/chrome-linux64/chrome
+```
+
+Run `systemctl daemon-reload` after changing the drop-in. Setup requires a real executable path in the isolated tree (no symlinks), applies root ownership/read-only browser permissions and the existing scoped AppArmor allowance. Deployment skips the unused bundled Chromium download when an explicit executable is configured. Never relabel a Playwright cache revision to point at another browser.
+
+Full Chrome is also used for headless work when explicitly selected, bypassing the separately bundled headless shell. This does not replace test fixtures that directly launch Patchright/Playwright. External Chrome is outside Patchright's pinned-browser compatibility guarantee; run the isolation smoke and shared-headless smoke against each selected build before activation. The isolation smoke covers CDP, evaluation, upload/download, sandboxing and H.264. Supply the same environment setting when running smoke commands manually.
+
 Control receipts stay in Batty's root-only state directory; only the browser profile, downloads and private X cookie are accessible to the browser UID. Uploads transfer file contents rather than giving Chromium access to agent filesystem paths. Explicit close/expiry removes isolated session files. Existing root-browser processes cannot reattach after this change: close and reopen them. This is a breaking browser lifecycle change.
 
 After building/deploying, verify with `sudo node dist/server/verify-browser-isolation.mjs` (installed release: `/opt/batty2/current/dist/server/verify-browser-isolation.mjs`). Set `BATTY_BROWSER_SSH_DESTINATION=user@host` to include an SSH SOCKS navigation check. The isolated smoke command checks UID, cleared groups/capabilities, `chrome://sandbox` namespace/seccomp status, unprivileged Xvfb, H.264 frames and private upload/download fixtures. It never opens installation data or uses credentials. The account boundary protects service/root files, not sessions from other sessions sharing that browser UID; CDP and authenticated agent access remain trusted.

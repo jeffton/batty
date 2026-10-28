@@ -47,6 +47,11 @@ export async function verifyBrowserIsolation(): Promise<void> {
     assert.match(status, /NoNewPrivs:\s+1\n/);
     const command = await fs.readFile(`/proc/${receipt.pid}/cmdline`, "utf8");
     assert(!command.includes("--no-sandbox"));
+    if (process.env.BATTY_BROWSER_EXECUTABLE_PATH)
+      assert.equal(
+        await fs.readlink(`/proc/${receipt.pid}/exe`),
+        process.env.BATTY_BROWSER_EXECUTABLE_PATH,
+      );
     const { page } = await service.cloudTarget(id);
     await page.goto("chrome://sandbox");
     const sandbox = await page.locator("body").innerText();
@@ -119,6 +124,8 @@ export async function verifyBrowserIsolation(): Promise<void> {
     console.log(
       JSON.stringify(
         {
+          browserVersion: page.context().browser()!.version(),
+          executable: await fs.readlink(`/proc/${receipt.pid}/exe`),
           uid: isolation.uid,
           gid: isolation.gid,
           supplementaryGroups: [],

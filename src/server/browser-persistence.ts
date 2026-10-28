@@ -9,6 +9,7 @@ import type { CloudBrowserViewport } from "@/shared/cloud-browser";
 import { createBrowserDisplay, stopBrowserDisplay, type BrowserDisplay } from "./browser-display";
 import { stopBrowserChild } from "./browser-process";
 import { browserAbortable } from "./browser-abort";
+import { browserExecutablePath } from "./browser-executable";
 import {
   prepareBrowserIsolation,
   assertBrowserIsolation,
@@ -200,7 +201,8 @@ export async function connectPersistentBrowser(
   let display: BrowserDisplay | undefined;
   let child: ChildProcess | undefined;
   try {
-    isolation = await prepareBrowserIsolation(directory, chromium.executablePath());
+    const executable = browserExecutablePath(() => chromium.executablePath());
+    isolation = await prepareBrowserIsolation(directory, executable);
     await fs.mkdir(profile, { recursive: true, mode: 0o700 });
     // Chromium profile preferences, not command-line feature names: both native
     // bubbles obscure our streamed webpage. Write only before a new process owns
@@ -251,7 +253,7 @@ export async function connectPersistentBrowser(
       signal?.throwIfAborted();
       const env = isolation ? isolatedBrowserEnvironment(isolation) : process.env;
       child = spawn(
-        isolation ? "/usr/bin/setpriv" : chromium.executablePath(),
+        isolation ? "/usr/bin/setpriv" : executable,
         [
           ...(isolation
             ? [

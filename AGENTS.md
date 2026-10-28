@@ -23,6 +23,6 @@ Native cloud-browser viewing (H.264 capture/streaming) is intentionally Linux-on
 
 Check current stable Patchright and Playwright releases together on every dependency review. Select Playwright Core using Patchright's upstream Playwright release and verify their installed `browsers.json` revisions agree; package version numbers need not match. Dated reviews in `docs/dependencies.md` record past decisions, not ongoing holds. Reassess any hold against current releases rather than carrying it forward.
 
-Install the selected Chromium and test-only WebKit revisions before the full test suite; on Linux, run `bash scripts/setup-browser-isolation.sh` to prepare Chromium for the unprivileged test browser. Linux deployment installs and isolates Patchright's pinned Chromium; verify `/opt/batty-browser` uses that revision after deploy.
+Install the selected Chromium and test-only WebKit revisions before the full test suite; on Linux, run `bash scripts/setup-browser-isolation.sh` to prepare Chromium for the unprivileged test browser. Linux deployment installs and isolates Patchright's pinned Chromium unless `/etc/batty2/browser.env` explicitly selects a security-patched full Chrome. Verify the selected executable/version after deploy; never relabel bundled cache revisions. Explicit browser selections cover both persistent tools and shared headless work, not direct-launch test fixtures.
 
 See [operations](docs/operations.md) for deployment commands and platform-specific verification.

@@ -220,23 +220,6 @@ app.get<{ Params: { sessionId: string } }>(
     };
   },
 );
-app.get<{ Params: { sessionId: string } }>(
-  "/api/sessions/:sessionId/subagents",
-  async (request) => {
-    const conversation = await runtime.conversation(request.params.sessionId);
-    return [
-      ...(await runtime.orchestration.listRunning(conversation.id)).map((worker) => ({
-        ...worker,
-        sessionPath: `durable:${worker.sessionId}`,
-        parentSessionId: String(worker.parentId),
-        model: config.defaultModel,
-        thinkingLevel: config.defaultThinkingLevel,
-        startedAtMs: worker.startedAtMs,
-      })),
-      ...runtime.remotes.tasks(conversation.id),
-    ];
-  },
-);
 function scheduleLabel(schedule: import("./orchestration-state").Schedule): string {
   if (schedule.kind === "multiple") return schedule.triggers.map(scheduleLabel).join(" · ");
   return schedule.kind === "at"

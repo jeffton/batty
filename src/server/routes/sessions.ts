@@ -46,6 +46,30 @@ export function registerSessionRoutes(
     },
   );
 
+  app.get<{ Params: { sessionId: string } }>(
+    "/api/sessions/:sessionId/subagents",
+    async (request) => {
+      const conversation = await runtime.conversation(request.params.sessionId);
+      const workers = await runtime.orchestration.listRunning(conversation.id);
+      return [
+        ...(await Promise.all(
+          workers.map(async (worker) => {
+            const agent = await (await runtime.conversation(worker.sessionId)).agent(context);
+            return {
+              ...worker,
+              sessionPath: `durable:${worker.sessionId}`,
+              parentSessionId: String(worker.parentId),
+              model: agent.model ? `${agent.model.provider}/${agent.model.modelId}` : undefined,
+              thinkingLevel: agent.thinkingLevel,
+              startedAtMs: worker.startedAtMs,
+            };
+          }),
+        )),
+        ...runtime.remotes.tasks(conversation.id),
+      ];
+    },
+  );
+
   app.post<{ Params: { sessionId: string } }>("/api/sessions/:sessionId/stop", async (request) => {
     if (parseRemoteSession(request.params.sessionId))
       await runtime.remotes.stop(request.params.sessionId);

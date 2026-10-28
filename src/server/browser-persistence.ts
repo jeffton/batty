@@ -16,7 +16,6 @@ import {
   ownsBrowserProcess,
   enableBrowserProfile,
   isolatedBrowserEnvironment,
-  removeBrowserIsolation,
   type BrowserIsolation,
 } from "./browser-isolation";
 
@@ -204,20 +203,28 @@ export async function connectPersistentBrowser(
     const executable = browserExecutablePath(() => chromium.executablePath());
     isolation = await prepareBrowserIsolation(directory, executable);
     await fs.mkdir(profile, { recursive: true, mode: 0o700 });
+    const initialized = await readBrowserJson<boolean>(path.join(directory, "profile-ready.json"));
+    // Existing isolated profiles are already initialized once their root directory
+    // belongs to Chromium. Ownership is transferred last, so interrupted setup retries
+    // without following files that an unprivileged browser could have modified.
+    const browserOwned = isolation && (await fs.stat(profile)).uid === isolation.uid;
     // Chromium profile preferences, not command-line feature names: both native
     // bubbles obscure our streamed webpage. Write only before a new process owns
     // the profile; never race Chrome's preference writer in an active session.
-    const preferencesFile = path.join(profile, "Default", "Preferences");
-    const preferences =
-      (await readBrowserJson<Record<string, unknown> & { translate?: Record<string, unknown> }>(
-        preferencesFile,
-      )) ?? {};
-    await writeBrowserJson(preferencesFile, {
-      ...preferences,
-      credentials_enable_service: false,
-      translate: { ...preferences.translate, enabled: false },
-    });
-    if (isolation) await enableBrowserProfile(isolation);
+    if (!initialized && !browserOwned) {
+      const preferencesFile = path.join(profile, "Default", "Preferences");
+      const preferences =
+        (await readBrowserJson<Record<string, unknown> & { translate?: Record<string, unknown> }>(
+          preferencesFile,
+        )) ?? {};
+      await writeBrowserJson(preferencesFile, {
+        ...preferences,
+        credentials_enable_service: false,
+        translate: { ...preferences.translate, enabled: false },
+      });
+      if (isolation) await enableBrowserProfile(isolation);
+    }
+    if (!initialized) await writeBrowserJson(path.join(directory, "profile-ready.json"), true);
     if (process.platform === "linux") {
       display = await createBrowserDisplay(directory, signal, isolation);
       signal?.throwIfAborted();
@@ -334,27 +341,42 @@ export async function connectPersistentBrowser(
         [error, ...cleanupErrors],
         "Persistent browser launch and cleanup failed",
       );
-    await removeBrowserIsolation(directory);
-    for (const name of [
-      "launch.json",
-      "process.json",
-      "browser.json",
-      "display.json",
-      "profile/DevToolsActivePort",
-    ])
-      await fs.rm(path.join(directory, name), { force: true });
+    await clearBrowserSessionReceipts(directory);
     throw error;
   }
 }
 
+/** End the live session, retaining this workspace's profile and login data. */
 export async function closePersistentBrowser(directory: string, browser?: Browser): Promise<void> {
   let receipt = await readBrowserJson<{ pid: number }>(path.join(directory, "process.json"));
   if (!receipt) {
     const pid = await profileBrowserPid(directory);
     if (pid) receipt = { pid };
   }
+  const errors: unknown[] = [];
   if (receipt && (await ownsBrowserProcess(directory, receipt.pid))) {
-    await terminateBrowser(receipt.pid, "SIGTERM");
+    let graceful = false;
+    try {
+      // CDP Browser.close flushes cookies/site storage; SIGTERM alone does not.
+      const running = await readBrowserJson<PersistentBrowserReceipt>(
+        path.join(directory, "browser.json"),
+      );
+      if (browser || running) {
+        await browserAbortable(
+          (async () => {
+            const connection = browser ?? (await connectPersistentBrowser(directory)).browser;
+            browser = connection;
+            const cdp = await connection.newBrowserCDPSession();
+            await cdp.send("Browser.close");
+          })(),
+          AbortSignal.timeout(2000),
+        );
+        graceful = true;
+      }
+    } catch (error) {
+      errors.push(error);
+    }
+    if (!graceful) await terminateBrowser(receipt.pid, "SIGTERM");
     const deadline = Date.now() + 5000;
     while (Date.now() < deadline) {
       try {
@@ -367,7 +389,6 @@ export async function closePersistentBrowser(directory: string, browser?: Browse
     }
     await terminateBrowser(receipt.pid, "SIGKILL");
   }
-  const errors: unknown[] = [];
   try {
     if (browser) await browserAbortable(browser.close(), AbortSignal.timeout(2000));
   } catch (error) {
@@ -383,9 +404,19 @@ export async function closePersistentBrowser(directory: string, browser?: Browse
   }
   // The Chromium process is already terminated. A failed CDP disconnect must not
   // retain dead launch receipts; failed display cleanup must retain its ownership.
-  if (displayStopped) {
-    await removeBrowserIsolation(directory);
-    await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  }
+  if (displayStopped) await clearBrowserSessionReceipts(directory);
   if (errors.length) throw new AggregateError(errors, "Persistent browser cleanup failed");
+}
+
+async function clearBrowserSessionReceipts(directory: string): Promise<void> {
+  for (const name of [
+    "launch.json",
+    "process.json",
+    "browser.json",
+    "display.json",
+    "registry.json",
+    "cloud.json",
+    "profile/DevToolsActivePort",
+  ])
+    await fs.rm(path.join(directory, name), { force: true });
 }

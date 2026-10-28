@@ -27,13 +27,27 @@ export async function prepareBrowserIsolation(
   if (!uid || !gid) throw new Error("batty-browser must be an unprivileged account");
   const installed = isolatedBrowserExecutablePath(executable);
   await fs.access(installed, fs.constants.X_OK);
-  const isolated = await fs.mkdtemp(path.join(ROOT, "sessions", "browser-"));
-  await fs.chown(isolated, 0, gid);
-  await fs.chmod(isolated, 0o710);
-  const isolation = { uid, gid, directory: isolated, executable: installed };
-  const artifacts = path.join(isolated, "artifacts");
-  await fs.mkdir(artifacts, { mode: 0o700 });
-  await fs.chown(artifacts, uid, gid);
+  const receiptFile = path.join(directory, "isolation.json");
+  const previous = await fs.readFile(receiptFile, "utf8").catch((error) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  });
+  const isolation: BrowserIsolation = previous
+    ? { ...JSON.parse(previous), executable: installed }
+    : {
+        uid,
+        gid,
+        directory: await fs.mkdtemp(path.join(ROOT, "sessions", "browser-")),
+        executable: installed,
+      };
+  const isolated = isolation.directory;
+  if (!previous) {
+    await fs.chown(isolated, 0, gid);
+    await fs.chmod(isolated, 0o710);
+    const artifacts = path.join(isolated, "artifacts");
+    await fs.mkdir(artifacts, { mode: 0o700 });
+    await fs.chown(artifacts, uid, gid);
+  }
   // Root-owned receipt: never derive cleanup paths from browser-controlled files.
   await fs.writeFile(path.join(directory, "isolation.json"), JSON.stringify(isolation), {
     mode: 0o600,
@@ -43,12 +57,19 @@ export async function prepareBrowserIsolation(
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
   });
+  // A receipt can precede profile setup if the service was interrupted. Finish
+  // that setup on retry; an established symlink reuses the profile untouched.
+  if (existing?.isSymbolicLink()) {
+    if (!previous || (await fs.readlink(profile)) !== path.join(isolated, "profile"))
+      throw new Error("Browser profile symlink does not match its isolation receipt");
+    return isolation;
+  }
   if (existing) {
     if (!existing.isDirectory() || existing.uid !== 0)
       throw new Error("New browser profile must be a root-owned directory");
     await fs.rename(profile, path.join(isolated, "profile"));
   } else {
-    await fs.mkdir(path.join(isolated, "profile"), { mode: 0o700 });
+    await fs.mkdir(path.join(isolated, "profile"), { recursive: true, mode: 0o700 });
   }
   await fs.symlink(path.join(isolated, "profile"), profile);
   return isolation;

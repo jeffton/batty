@@ -1719,8 +1719,14 @@ export class BrowserService {
           if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
           throw error;
         });
-      if (!this.startups.size && !entries.some((entry) => entry.isDirectory()))
-        await this.tailscaleProxy?.dispose();
+      const active = await Promise.all(
+        entries
+          .filter((entry) => entry.isDirectory())
+          .map((entry) =>
+            readBrowserJson(path.join(this.persistenceRoot, entry.name, "launch.json")),
+          ),
+      );
+      if (!this.startups.size && !active.some(Boolean)) await this.tailscaleProxy?.dispose();
     } catch (error) {
       errors.push(error);
     }

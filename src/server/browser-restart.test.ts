@@ -8,6 +8,7 @@ import { once } from "node:events";
 import { BrowserService } from "./browser-service";
 import { browserSessionDirectory } from "./browser-persistence";
 import { BROWSER_IDLE_RETENTION_MS } from "./browser-cleanup";
+import { removeBrowserIsolation } from "./browser-isolation";
 
 test.each(["main", "interrupted"])(
   "%s browser expires on inactivity across restart, but not during a browser call",
@@ -29,7 +30,11 @@ test.each(["main", "interrupted"])(
     };
     try {
       const first = await service.execute(owner, { action: "open", url });
-      await service.execute(owner, { action: "evaluate", script: "globalThis.retained = 42" });
+      await service.execute(owner, {
+        action: "evaluate",
+        script:
+          'globalThis.retained = 42; document.cookie = "login=retained; Max-Age=3600; Path=/"; localStorage.setItem("login", "retained")',
+      });
       const beforeRestart = await lastUsed();
       await service.dispose();
       service = new BrowserService(undefined, 4, root);
@@ -67,11 +72,30 @@ test.each(["main", "interrupted"])(
         usedAgain + BROWSER_IDLE_RETENTION_MS,
       );
       expect(await service.hasSession(owner)).toBe(false);
+      // Restart Batty while the browser is stopped: disk profile alone survives.
+      await service.dispose();
+      service = new BrowserService(undefined, 4, root);
       const reopened = await service.execute(owner, { action: "open", url });
       expect(reopened.details.url).toBe(url);
       expect(
         (await service.execute(owner, { action: "evaluate", script: "globalThis.retained" })).text,
       ).toContain("undefined");
+      const login = async () =>
+        (
+          await service.execute(owner, {
+            action: "evaluate",
+            script: '({cookie: document.cookie, storage: localStorage.getItem("login")})',
+          })
+        ).text;
+      expect(await login()).toContain("login=retained");
+      expect(await login()).toContain("storage: 'retained'");
+      await service.execute(owner, { action: "close" });
+      expect(await service.hasSession(owner)).toBe(false);
+      await service.dispose();
+      service = new BrowserService(undefined, 4, root);
+      await service.execute(owner, { action: "open", url });
+      expect(await login()).toContain("login=retained");
+      expect(await login()).toContain("storage: 'retained'");
     } finally {
       await service.closeSession(owner);
       await service.dispose();
@@ -79,6 +103,7 @@ test.each(["main", "interrupted"])(
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),
       );
+      await removeBrowserIsolation(browserSessionDirectory(root, owner));
       await fs.rm(root, { recursive: true, force: true });
     }
   },
@@ -171,7 +196,9 @@ test("browser service detach/reconnect preserves tabs, cookies, JavaScript state
     await service.execute("durable", { action: "close" });
     expect(Date.now() - closing).toBeLessThan(6000);
     expect(await stuck).toBe("closed");
-    expect(await fs.readdir(root)).toEqual([]);
+    expect(await service.hasSession("durable")).toBe(false);
+    await expect(fs.stat(path.join(directory, "profile"))).resolves.toBeDefined();
+    await expect(fs.stat(path.join(directory, "launch.json"))).rejects.toThrow("ENOENT");
   } finally {
     await service.closeSession("durable");
     await service.dispose();
@@ -179,6 +206,7 @@ test("browser service detach/reconnect preserves tabs, cookies, JavaScript state
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
     );
+    await removeBrowserIsolation(browserSessionDirectory(root, "durable"));
     await fs.rm(root, { recursive: true, force: true });
   }
 }, 30_000);

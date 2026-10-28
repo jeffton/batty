@@ -11,12 +11,17 @@ import {
 } from "./browser-persistence";
 import { createBrowserDisplay, stopBrowserDisplay } from "./browser-display";
 import { chromium } from "patchright";
+import { ownsBrowserProcess } from "./browser-isolation";
 
 // Failure fixtures launch fake executables, not the installed unprivileged Chromium.
-vi.mock("./browser-isolation", async (original) => ({
-  ...(await original<typeof import("./browser-isolation")>()),
-  prepareBrowserIsolation: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock("./browser-isolation", async (original) => {
+  const actual = await original<typeof import("./browser-isolation")>();
+  return {
+    ...actual,
+    prepareBrowserIsolation: vi.fn().mockResolvedValue(undefined),
+    ownsBrowserProcess: vi.fn(actual.ownsBrowserProcess),
+  };
+});
 vi.mock("patchright", () => ({
   chromium: { executablePath: vi.fn(), connectOverCDP: vi.fn() },
 }));
@@ -110,11 +115,58 @@ test("a stalled CDP disconnect is bounded and does not retain dead launch receip
     ).rejects.toThrow("Persistent browser cleanup failed");
     expect(timeout).toHaveBeenCalledExactlyOnceWith(2000);
     expect(stopBrowserDisplay).toHaveBeenCalledWith(display);
-    await expect(fs.stat(directory)).rejects.toThrow("ENOENT");
+    expect(await fs.readdir(directory)).not.toContain("display.json");
   } finally {
     timeout.mockRestore();
   }
 });
+
+test("closing bounds a stalled CDP-session creation and still clears runtime receipts", async () => {
+  await fs.writeFile(path.join(directory, "process.json"), JSON.stringify({ pid: 123456 }));
+  vi.mocked(ownsBrowserProcess).mockResolvedValueOnce(true);
+  const kill = vi.spyOn(process, "kill").mockImplementation(() => {
+    throw Object.assign(new Error("gone"), { code: "ESRCH" });
+  });
+  const controller = new AbortController();
+  const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => {
+    queueMicrotask(() => controller.abort(new DOMException("Timed out", "TimeoutError")));
+    return controller.signal;
+  });
+  const close = vi.fn(async () => {});
+  try {
+    await expect(
+      closePersistentBrowser(directory, {
+        newBrowserCDPSession: () => new Promise(() => {}),
+        close,
+      } as unknown as Browser),
+    ).rejects.toThrow("Persistent browser cleanup failed");
+    expect(close).toHaveBeenCalledOnce();
+    await expect(fs.stat(path.join(directory, "process.json"))).rejects.toThrow("ENOENT");
+  } finally {
+    kill.mockRestore();
+    timeout.mockRestore();
+  }
+});
+
+test.skipIf(process.platform !== "linux")(
+  "profile initialization retries after interrupted preferences setup",
+  async () => {
+    const preferences = path.join(directory, "profile", "Default", "Preferences");
+    await fs.mkdir(path.dirname(preferences), { recursive: true });
+    await fs.writeFile(preferences, "invalid-json");
+    await expect(connectPersistentBrowser(directory, { useTailscale: false })).rejects.toThrow();
+    await expect(fs.stat(path.join(directory, "profile-ready.json"))).rejects.toThrow("ENOENT");
+    await fs.writeFile(preferences, JSON.stringify({ translate: { enabled: true } }));
+    vi.mocked(chromium.executablePath).mockReturnValue("/nonexistent/batty-test-chromium");
+    await expect(connectPersistentBrowser(directory, { useTailscale: false })).rejects.toThrow(
+      "ENOENT",
+    );
+    expect(JSON.parse(await fs.readFile(preferences, "utf8")).translate.enabled).toBe(false);
+    expect(JSON.parse(await fs.readFile(path.join(directory, "profile-ready.json"), "utf8"))).toBe(
+      true,
+    );
+  },
+);
 
 async function expectLaunchCleaned() {
   expect(stopBrowserDisplay).toHaveBeenCalledTimes(1);

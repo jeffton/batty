@@ -45,6 +45,8 @@ test("Chromium reads native-prompt preferences before launch without disabling w
     await page.goto(
       "data:text/html,<form><input autocomplete='username'><input type='password' autocomplete='current-password'></form><button onclick=\"document.documentElement.lang='sv'\">Website language</button>",
     );
+    // Check the website's main world, not only Patchright's isolated context.
+    expect(await page.evaluate(() => navigator.webdriver, undefined, undefined, false)).toBe(false);
     await page.locator("input[type=password]").fill("synthetic-fixture");
     expect(await page.locator("input[type=password]").inputValue()).toBe("synthetic-fixture");
     await page.getByRole("button", { name: "Website language" }).click();

@@ -233,6 +233,9 @@ export async function connectPersistentBrowser(
     const args = [
       ...(display ? ["--kiosk", "--app=about:blank", "--window-position=0,0"] : ["--headless=new"]),
       "--disable-dev-shm-usage",
+      // Match Patchright's launch defaults for this manually spawned CDP browser.
+      // Chrome otherwise advertises automation when remote-debugging-port is zero.
+      "--disable-blink-features=AutomationControlled",
       "--disable-quic",
       "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
       "--window-size=1365,768",

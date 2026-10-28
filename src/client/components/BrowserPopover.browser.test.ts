@@ -774,11 +774,16 @@ test("DPR3 binary frames fill the actual popover, retain edge input alignment an
     await service.execute("integration", { action: "click", selector: "#edge" });
     await expect.poll(() => inspect("document.body.dataset.clicks")).toBe("2");
     await page.setViewportSize({ width: 844, height: 390 });
+    let rotated!: Awaited<ReturnType<typeof service.cloudState>>;
     await expect
-      .poll(async () => (await service.cloudState(attachedBrowserId)).width)
-      .toBeGreaterThan(750);
-    const rotated = await service.cloudState(attachedBrowserId);
-    await expect.poll(() => canvas.getAttribute("data-revision")).toBe(rotated.revision);
+      .poll(async () => {
+        const state = await service.cloudState(attachedBrowserId);
+        if (state.width <= 750 || (await canvas.getAttribute("data-revision")) !== state.revision)
+          return false;
+        rotated = state;
+        return true;
+      })
+      .toBe(true);
     await expect.poll(colors).toEqual(expected);
     await tapRemote(page, rotated.width * 0.875, rotated.height * 0.85);
     await expect.poll(() => inspect("document.body.dataset.clicks")).toBe("3");
@@ -794,6 +799,7 @@ test("DPR3 binary frames fill the actual popover, retain edge input alignment an
       { width: 1000, height: 2400 },
     ]) {
       await page.setViewportSize(viewport);
+      let fitted!: Awaited<ReturnType<typeof service.cloudState>>;
       await expect
         .poll(async () => {
           const bounds = await page.locator(".cloud-browser__viewport").boundingBox();
@@ -801,15 +807,17 @@ test("DPR3 binary frames fill the actual popover, retain edge input alignment an
           const height = Math.round(bounds!.height);
           const ratio = Math.min(1, 1365 / Math.max(width, height));
           const state = await service.cloudState(attachedBrowserId);
-          return (
+          const ready =
             Math.max(state.width, state.height) === 1365 &&
             state.width === Math.round(width * ratio) &&
-            state.height === Math.round(height * ratio)
-          );
+            state.height === Math.round(height * ratio) &&
+            (await canvas.getAttribute("data-revision")) === state.revision;
+          if (ready) fitted = state;
+          return ready;
         })
         .toBe(true);
-      const fitted = await service.cloudState(attachedBrowserId);
-      await expect.poll(() => canvas.getAttribute("data-revision")).toBe(fitted.revision);
+      // A later ResizeObserver fit can supersede a matching revision before it
+      // paints. Check the geometry and current painted frame together above.
       await expect.poll(colors).toEqual(expected);
       expect(await page.locator(".cloud-browser__error").count()).toBe(0);
       const clicks = Number(await inspect("document.body.dataset.clicks"));

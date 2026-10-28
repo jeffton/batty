@@ -33,10 +33,10 @@ test("FTS backfill checkpoints survive reopen, filter noise/tools, preserve orig
       leaf("Runtime cron: [cron 124 result] pension report", "note"),
     ]);
     expect(await search.cursor(1)).toBe(5);
-    expect((await search.search(1, { query: "pension" })).map((x) => x.id)).toEqual([4, 0]);
+    expect((await search.search(1, { query: "pension" })).map((x) => x.id)).toEqual([0, 4]);
     expect(
       (await search.search(1, { query: "pension", includeTools: true })).map((x) => x.id),
-    ).toEqual([4, 2, 0]);
+    ).toEqual([2, 0, 4]);
     expect(await search.search(1, { query: "NO_REPLY", includeTools: true })).toEqual([]);
     await search.append(2, 0, [leaf("pension other workspace")]);
     expect(await search.search(1, { query: "pension" })).toHaveLength(2);

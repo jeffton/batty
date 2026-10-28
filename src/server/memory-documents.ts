@@ -103,6 +103,18 @@ export const Generations = defineDocFamily<
   initial: (generation) => generation,
 });
 
+// Pinned per input so tool continuations reuse the exact same prompt prefix.
+export const MemoryRecall = defineDocFamily<{ text: string }, { text: string }>({
+  kind: "batty.memory-recall",
+  checkpointWhen: () => false,
+  version: 1,
+  family: true,
+  scope: "conversation",
+  history: "latest",
+  fork: "initial",
+  initial: (recall) => recall,
+});
+
 export const Packets = defineDocFamily<MemoryPacket, MemoryPacket>({
   kind: "batty.memory-packet",
   checkpointWhen: () => false,

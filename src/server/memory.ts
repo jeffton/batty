@@ -788,6 +788,13 @@ export function createMemory(config: MemoryConfig, models: Models) {
     }),
     zoom: zoomOutput,
     search,
+    recall: async (prompt, recent, before, visible, context) =>
+      exclusive(async () => {
+        if (!searchIndex) return "";
+        await syncTo(Number.MAX_SAFE_INTEGER, context);
+        await indexSearch(context);
+        return (await searchIndex.recall(main.id, prompt, recent, before, visible)).text;
+      }),
     report,
   });
   return {

@@ -45,6 +45,7 @@ import { ProviderUsageService } from "./provider-usage";
 import { createTools } from "./tools";
 import { createBrowserCleanup } from "./browser-cleanup";
 import { createOrchestration } from "./orchestration";
+import { networkAvailable, recoverNetwork } from "./network-recovery";
 import { RemoteWorkers, parseRemoteSession } from "./remote-workers";
 import { createMemory, type MemoryConfig } from "./memory";
 import { createResources } from "./resources";
@@ -179,7 +180,7 @@ export class Runtime {
     });
     const registry = createRegistry();
     const tools = await createTools(config);
-    const orchestration = createOrchestration(config);
+    const orchestration = createOrchestration(config, networkAvailable);
     const memory = createMemory(
       {
         getAssistantWorkspaceId: async () =>
@@ -262,7 +263,7 @@ export class Runtime {
       ...(memory.extension.tools ?? []),
     ]);
     await memory.bind(harness, main, storage, await createMemorySearch(database));
-    const streamSimple = models.streamSimple.bind(models);
+    const streamSimple = recoverNetwork(models.streamSimple.bind(models));
     models.streamSimple = (model, request, options) => {
       memory.validateRequest(request, options);
       return streamSimple(model, request, options);

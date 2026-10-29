@@ -1,4 +1,5 @@
 import { modelChange } from "./orchestration-worker-config.js";
+import { NETWORK_RETRY_MS } from "./network-recovery.js";
 import { archiveWorker, removeCompletedOneShot } from "./orchestration-lifecycle.js";
 import { randomUUID } from "node:crypto";
 
@@ -55,10 +56,12 @@ export function createCronScheduler(
   Delivery: ReturnType<typeof createDeliveryTask>,
   workers: ReturnType<typeof createWorkers>,
   onError: (error: unknown) => void,
+  networkAvailable: () => Promise<boolean>,
 ) {
   const { Anchor, createWorker } = workers;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let closed = false;
+  let networkRetryAt = 0;
   const snapshot = async () => (await services.harness.snapshot(OrchestrationDoc, context))!;
   const listJobs = async (workspaceId?: string) =>
     Object.values((await snapshot()).jobs).filter(
@@ -116,6 +119,22 @@ export function createCronScheduler(
     const now = Date.now();
     await listRunningCron();
     const jobs = await listJobs();
+    const due = jobs.some(
+      (job) =>
+        job.enabled &&
+        job.nextAt !== undefined &&
+        job.nextAt <= now &&
+        (job.retryAt === undefined || job.retryAt <= now),
+    );
+    if (due) {
+      if (networkRetryAt > now) return;
+      if (!(await networkAvailable())) {
+        networkRetryAt = Date.now() + NETWORK_RETRY_MS;
+        return;
+      }
+      networkRetryAt = 0;
+      if (closed) return;
+    }
     for (const job of jobs) {
       if (
         !job.enabled ||
@@ -210,7 +229,10 @@ export function createCronScheduler(
     const due = (await listJobs())
       .filter((j) => j.enabled && j.nextAt !== undefined)
       .map((j) => Math.max(j.nextAt!, j.retryAt ?? 0));
-    const delay = Math.max(1, Math.min(60000, Math.min(...due) - Date.now()));
+    const delay = Math.max(
+      1,
+      Math.min(60000, Math.max(Math.min(...due), networkRetryAt) - Date.now()),
+    );
     timer = setTimeout(() => {
       void tick()
         .catch(onError)

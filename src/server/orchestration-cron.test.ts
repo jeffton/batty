@@ -1,4 +1,4 @@
-import { expect, test } from "vite-plus/test";
+import { expect, test, vi } from "vite-plus/test";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
@@ -8,6 +8,62 @@ import { OrchestrationDoc, type CronRun } from "./orchestration.js";
 import { indexRun } from "./orchestration-history";
 
 import { fixture, until } from "./orchestration-test-fixture.js";
+
+test("offline cron preserves due deadlines across reopen and coalesces missed triggers on recovery", async () => {
+  let online = false;
+  const check = vi.fn(async () => online);
+  const state = await fixture(10000, console.error, undefined, check);
+  let { harness } = await state.open();
+  const now = Date.now();
+  const deadline = now - 3 * 60_000;
+  for (const id of ["one-shot", "recurring"]) {
+    await state.orchestration.importJob({
+      id,
+      title: id,
+      workspaceId: "test",
+      prompt: id,
+      delivery: "direct",
+      enabled: true,
+      schedule:
+        id === "one-shot"
+          ? { kind: "at", at: new Date(deadline).toISOString() }
+          : { kind: "every", every: "1m", everyMs: 60_000 },
+      nextAt: deadline,
+      createdAt: now - 5 * 60_000,
+      updatedAt: now - 5 * 60_000,
+    });
+  }
+  await state.orchestration.tick();
+  await state.orchestration.tick();
+  expect(check).toHaveBeenCalledTimes(1);
+  expect(await state.orchestration.listRunLogs()).toEqual([]);
+  expect((await state.orchestration.listJobs()).map((j) => j.nextAt)).toEqual([deadline, deadline]);
+  state.orchestration.close();
+  await harness.close(context);
+  ({ harness } = await state.open());
+  expect((await state.orchestration.listJobs()).map((j) => j.nextAt)).toEqual([deadline, deadline]);
+  online = true;
+  state.faux.setResponses(
+    Array.from({ length: 2 }, () => fauxAssistantMessage([fauxText("done")])),
+  );
+  const clock = vi.spyOn(Date, "now").mockReturnValue(now + 31_000);
+  try {
+    await Promise.all([state.orchestration.tick(), state.orchestration.tick()]);
+    await until(
+      async () =>
+        (await state.orchestration.listRunLogs()).filter((r) => r.status === "completed").length ===
+        2,
+    );
+    const runs = await state.orchestration.listRunLogs();
+    expect(runs).toHaveLength(2);
+    expect(runs.map((r) => r.scheduledAt)).toEqual([deadline, deadline]);
+    expect((await state.orchestration.getJob("recurring")).nextAt).toBeGreaterThan(now + 31_000);
+    await state.orchestration.tick();
+    expect(await state.orchestration.listRunLogs()).toHaveLength(2);
+  } finally {
+    clock.mockRestore();
+  }
+});
 
 test("reopen retires only completed unchanged one-shots and preserves archived metadata", async () => {
   const state = await fixture();

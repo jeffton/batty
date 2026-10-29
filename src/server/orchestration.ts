@@ -40,7 +40,10 @@ export type {
 } from "./orchestration-state.js";
 export { parseDuration } from "./cron-schedule.js";
 const context = BACKGROUND_CONTEXT;
-export function createOrchestration(input: OrchestrationConfig | AppConfig = {}) {
+export function createOrchestration(
+  input: OrchestrationConfig | AppConfig = {},
+  networkAvailable: () => Promise<boolean> = async () => true,
+) {
   const options: OrchestrationConfig =
     "workspacesRoots" in input
       ? {
@@ -103,7 +106,7 @@ export function createOrchestration(input: OrchestrationConfig | AppConfig = {})
   const { Anchor, AwaitChild, subagent } = workers;
   const nodeCommands = createRemoteCommands(workers.command, () => ({ harness, main }));
   const RemoteJoin = createRemoteJoin(services);
-  const scheduler = createCronScheduler(services, Delivery, workers, onError);
+  const scheduler = createCronScheduler(services, Delivery, workers, onError, networkAvailable);
   const {
     cron,
     listJobSummaries,

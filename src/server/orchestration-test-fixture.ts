@@ -27,6 +27,7 @@ export async function fixture(
   tokensPerSecond = 10000,
   onError: (error: unknown) => void = console.error,
   assistantWorkspaceId?: string,
+  networkAvailable?: () => Promise<boolean>,
 ) {
   const directory = await mkdtemp(join(tmpdir(), "batty-orchestration-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
@@ -40,28 +41,31 @@ export async function fixture(
   const models = createModels();
   models.setProvider(faux.provider);
   const registry = createRegistry();
-  const orchestration = createOrchestration({
-    fileStorage: { rootDir: join(directory, "sent-files") },
-    onError,
-    workspaces: [
-      {
-        id: "test",
-        path: directory,
-        label: "Test",
-        kind: "workspace",
-        isPinned: false,
-        isAssistant: assistantWorkspaceId === "test",
-      },
-      {
-        id: "other",
-        path: "/tmp",
-        label: "Other",
-        kind: "workspace",
-        isPinned: false,
-        isAssistant: assistantWorkspaceId === "other",
-      },
-    ],
-  });
+  const orchestration = createOrchestration(
+    {
+      fileStorage: { rootDir: join(directory, "sent-files") },
+      onError,
+      workspaces: [
+        {
+          id: "test",
+          path: directory,
+          label: "Test",
+          kind: "workspace",
+          isPinned: false,
+          isAssistant: assistantWorkspaceId === "test",
+        },
+        {
+          id: "other",
+          path: "/tmp",
+          label: "Other",
+          kind: "workspace",
+          isPinned: false,
+          isAssistant: assistantWorkspaceId === "other",
+        },
+      ],
+    },
+    networkAvailable,
+  );
   registry.install(orchestration.extension);
   let harness: Harness;
   const open = async () => {
@@ -80,5 +84,5 @@ export async function fixture(
     orchestration.close();
     await harness.close(context);
   });
-  return { faux, orchestration, open, registry, directory };
+  return { faux, models, orchestration, open, registry, directory };
 }

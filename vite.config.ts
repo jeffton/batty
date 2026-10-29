@@ -11,6 +11,7 @@ const mockedServerTests = [
   "src/server/web-push.test.ts",
   "src/server/browser-credentials.test.ts",
   "src/server/cloud-browser.test.ts",
+  "src/server/network-probe.test.ts",
   "src/server/routes/assistant-agents.test.ts",
 ];
 

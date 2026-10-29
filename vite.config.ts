@@ -128,6 +128,7 @@ export default defineConfig({
       "cron-cli": "src/server/cron-cli.ts",
       "stop-service": "src/server/stop-service.ts",
       "verify-browser-isolation": "scripts/verify-browser-isolation.ts",
+      "close-browsers": "scripts/close-browsers.ts",
     },
     outDir: "dist/server",
     format: ["esm"],

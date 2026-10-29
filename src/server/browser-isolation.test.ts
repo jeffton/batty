@@ -3,7 +3,6 @@ import { expect, test, vi } from "vite-plus/test";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { chromium } from "patchright";
 import { prepareBrowserIsolation, removeBrowserIsolation } from "./browser-isolation";
 import { browserExecutablePath } from "./browser-executable";
 import { verifyBrowserIsolation } from "./browser-isolation-smoke";
@@ -19,7 +18,7 @@ test
     await fs.writeFile(path.join(profile, "saved-login"), "retained");
     const failure = vi.spyOn(fs, operation).mockRejectedValueOnce(new Error("setup interrupted"));
     try {
-      const executable = browserExecutablePath(() => chromium.executablePath());
+      const executable = browserExecutablePath();
       await expect(prepareBrowserIsolation(directory, executable)).rejects.toThrow(
         "setup interrupted",
       );

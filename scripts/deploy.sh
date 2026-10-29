@@ -2,9 +2,6 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/deploy-lib.sh
-# Match the service’s browser choice, including security-patched external Chrome.
-if [[ -f /etc/batty2/browser.env ]]; then source /etc/batty2/browser.env; fi
-export BATTY_BROWSER_EXECUTABLE_PATH
 # Validate source and production offline behavior before pushing (see AGENTS.md).
 # Deployment builds the release and verifies its running health/build ID.
 git pull --ff-only
@@ -15,6 +12,7 @@ minimum_free_kb=${BATTY2_DEPLOY_MIN_FREE_KB:-4194304}
 preflight_disk /opt/batty2 "$minimum_free_kb"
 preflight_disk /tmp "$minimum_free_kb"
 preflight_browser_video
+bash scripts/setup-chrome.sh
 
 revision=$(git rev-parse --short HEAD)
 build=$(mktemp -d /tmp/batty2-build.XXXXXX)
@@ -23,7 +21,6 @@ git archive HEAD | tar -x -C "$build"
 (
   cd "$build"
   pnpm install --frozen-lockfile
-  if [[ ! ${BATTY_BROWSER_EXECUTABLE_PATH+x} ]]; then pnpm exec patchright install chromium; fi
   bash scripts/setup-browser-isolation.sh
   BATTY_BUILD_ID="$revision" pnpm build
 )

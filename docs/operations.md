@@ -2,7 +2,7 @@
 
 ## Local setup
 
-Requires Node.js **24.15.0+** and pnpm **12.15.0**. Install dependencies with `pnpm install`.
+Requires Node.js **24.15.0+**, pnpm **12.15.0** and installed Google Chrome Stable for browser tools. Install JavaScript dependencies with `pnpm install`; install Chrome with `scripts/setup-chrome.sh` (Linux/macOS) or `scripts/setup-chrome.ps1` (Windows). Linux root installations also require the [browser isolation setup](#chromium-isolation).
 
 The server takes a data-root argument and stores state in its `.batty` directory. The package scripts use `/var/lib/batty2`; to use another root, run `pnpm exec tsx watch src/server/main.ts /absolute/data/root`.
 
@@ -57,23 +57,28 @@ Cloud state, WebSocket admission, controls, touch input and capture setup share 
 
 Linux installations running Batty as root launch tool Chromium and its private Xvfb as the dedicated `batty-browser` account, with supplementary groups cleared and a minimal environment. Chromium's namespace and seccomp sandbox remain enabled; there is no `--no-sandbox` mode or root-browser fallback. Ordinary macOS/Windows and non-root Linux browsing use their current user with Chromium's sandbox enabled.
 
-Install Patchright's pinned Chromium (`pnpm exec patchright install chromium`), then run `sudo bash scripts/setup-browser-isolation.sh`. Linux deployment runs the setup script before activation. It creates a locked, no-login system account, root-owned browser binaries under `/opt/batty-browser`, private profiles/artifacts under `/var/lib/batty-browser`, and an executable-scoped AppArmor `userns` allowance on Ubuntu. It does not change global user-namespace restrictions or expose `/root`. Repeat setup after a Chromium dependency update. Missing setup fails explicitly.
+### Installed Chrome and updates
 
-### Explicit security browser
+Production browser tools and shared headless work use **installed Google Chrome Stable**, controlled by Patchright. Discovery uses `/opt/google/chrome/chrome` on Linux, system/user Applications on macOS, and Program Files/LocalAppData on Windows. Missing Chrome fails explicitly; bundled Chromium is reserved for test fixtures. `BATTY_BROWSER_EXECUTABLE_PATH` overrides discovery with an existing absolute executable; root-isolated Linux tools require the package-managed `/opt/google/chrome/chrome`.
 
-`BATTY_BROWSER_EXECUTABLE_PATH` selects one absolute full-Chrome executable for new persistent sessions and shared headless work. Without it, Patchright retains its bundled Chromium/headless-shell defaults. An invalid or unavailable explicit executable fails; it never falls back to the bundle. Existing detached browsers keep their current executable, tabs and login across deploys.
+Deployment installs missing Chrome with `bash scripts/setup-chrome.sh` (Linux/macOS) or `scripts/setup-chrome.ps1` (Windows). The Linux helper supports Debian/Ubuntu x86_64 and installs Google's official DEB/repository; other Linux distributions require installation with their package manager. Google does not provide Linux ARM Chrome. The macOS helper uses Homebrew for missing Chrome; an existing manually installed Chrome is accepted. Windows uses winget when installation is needed. Normal Chrome installations retain their Google Updater on macOS/Windows.
 
-On the maintained Linux installation, put the setting in root-owned `/etc/batty2/browser.env` and add `EnvironmentFile=/etc/batty2/browser.env` to a `batty2.service` drop-in. Deployment and isolation setup read this same file. Install the complete official Chrome for Testing archive under `/opt/batty-browser/chromium-VERSION/chrome-linux64/`, then set, for example:
+Linux updates arrive through APT, including security fixes, independently of npm/Patchright. The dependency review checks Chrome Stable release notes and installed/running versions as well as Patchright. Explicit updates: `sudo bash scripts/setup-chrome.sh --update`, `bash scripts/setup-chrome.sh --update` for Homebrew-managed macOS installations, or `./scripts/setup-chrome.ps1 -Update` on Windows. Manually installed macOS Chrome uses Google Updater. Chrome for Testing does not auto-update and is not the production default.
+
+Linux deployment runs `sudo bash scripts/setup-browser-isolation.sh`: it creates the locked browser account/private profile directories and loads the executable-scoped AppArmor allowance. It uses Ubuntu's existing Chrome profile where present, avoiding duplicate attachments. The Chrome installation stays package-managed; it is not copied into a frozen browser cache. To prepare pinned test Chromium separately, run `pnpm exec patchright install chromium` and `sudo bash scripts/setup-browser-isolation.sh --test`.
+
+Chrome updates require browser-process restart, not just a Batty service restart: detached browsers survive the latter. On the maintained Linux installation, run this detached maintenance after a Chrome package change:
 
 ```sh
-BATTY_BROWSER_EXECUTABLE_PATH=/opt/batty-browser/chromium-security-156.0.8078.73/chrome-linux64/chrome
+systemd-run --unit=batty-browser-refresh --collect --property=Type=exec \
+  /bin/bash /root/github/batty/scripts/restart-browsers.sh /var/lib/batty2
 ```
 
-Run `systemctl daemon-reload` after changing the drop-in. Setup requires a real executable path in the isolated tree (no symlinks), applies root ownership/read-only browser permissions and the existing scoped AppArmor allowance. Deployment skips the unused bundled Chromium download when an explicit executable is configured. Never relabel a Playwright cache revision to point at another browser.
+The script stops only `batty2.service`, closes all stored workspace browser processes with CDP `Browser.close` to flush cookies, then starts the service. The CLI refuses to run while the service owns its runtime lock. Profiles/login remain; live tabs/viewer handles end. Observe the unit result, service health and the sandbox smoke afterward. On macOS/Windows, stop that installation's Batty service, run `node dist/server/close-browsers.mjs BATTY_ROOT`, and start it again.
 
-Full Chrome is also used for headless work when explicitly selected, bypassing the separately bundled headless shell. This does not replace test fixtures that directly launch Patchright/Playwright. External Chrome is outside Patchright's pinned-browser compatibility guarantee; run the isolation smoke and shared-headless smoke against each selected build before activation. The isolation smoke covers CDP, evaluation, upload/download, sandboxing and H.264. Supply the same environment setting when running smoke commands manually.
+Desktop extensions can use the same installed Chrome **binary**, but Batty keeps its own profile. CDP does not attach to the user's normal Chrome profile. macOS/Windows cloud live-view capture remains unsupported.
 
-Control receipts stay in Batty's root-only state directory; only the browser profile, downloads and private X cookie are accessible to the browser UID. Uploads transfer file contents rather than giving Chromium access to agent filesystem paths. Explicit close/expiry removes isolated session files. Existing root-browser processes cannot reattach after this change: close and reopen them. This is a breaking browser lifecycle change.
+Installed Chrome releases independently of Patchright's pinned Chromium, so verify browser compatibility after upgrades. The isolation smoke covers CDP, evaluation, upload/download, namespace/seccomp sandboxing and H.264; verify shared headless navigation as well. Control receipts remain root-only; close/expiry preserves browser profiles and login.
 
 After building/deploying, verify with `sudo node dist/server/verify-browser-isolation.mjs` (installed release: `/opt/batty2/current/dist/server/verify-browser-isolation.mjs`). Set `BATTY_BROWSER_SSH_DESTINATION=user@host` to include an SSH SOCKS navigation check. The isolated smoke command checks UID, cleared groups/capabilities, `chrome://sandbox` namespace/seccomp status, unprivileged Xvfb, H.264 frames and private upload/download fixtures. It never opens installation data or uses credentials. The account boundary protects service/root files, not sessions from other sessions sharing that browser UID; CDP and authenticated agent access remain trusted.
 

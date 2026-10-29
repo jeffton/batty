@@ -9,10 +9,7 @@ async function launchBrowser(): Promise<Browser> {
   const { chromium } = await import("patchright");
   const browser = await chromium.launch({
     headless: true,
-    // An explicit full Chrome also replaces Playwright’s separate headless shell.
-    ...(process.env.BATTY_BROWSER_EXECUTABLE_PATH !== undefined
-      ? { executablePath: browserExecutablePath(() => chromium.executablePath()) }
-      : {}),
+    executablePath: browserExecutablePath(),
     args: [
       "--disable-dev-shm-usage",
       "--disable-quic",

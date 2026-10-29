@@ -1,3 +1,7 @@
+# Browser maintenance — 2026-10-29
+
+Production uses package-managed Google Chrome Stable **156.0.8078.73** on Linux, with Patchright **1.64.1** as driver. Google's [October 27 release notes](https://chromereleases.googleblog.com/2026/10/stable-channel-update-for-desktop_0562499947.html) document 52 security fixes, including CVE-2026-118320. The [Linux update policy](https://support.google.com/chrome/a/answer/9052345?hl=en) uses Google's APT repository; the existing nightly system-update workflow applies those updates without npm release-age holds. macOS/Windows use installed Chrome Stable and Google Updater. Test fixtures retain pinned Chromium/WebKit.
+
 # Dependency review — 2026-10-26
 
 Reviewed all direct/runtime and development dependencies, catalogs, overrides and pnpm against npm. Selection uses the 4320-minute release age, the existing exclusions and a cutoff of October 23, 09:00 UTC.

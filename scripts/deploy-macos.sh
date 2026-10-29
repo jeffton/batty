@@ -8,6 +8,7 @@ git pull --ff-only
 if [[ ${BATTY2_ALLOW_DIRTY:-0} != 1 ]]; then
   [[ -z $(git status --porcelain) ]] || { echo 'Commit changes before deploying (or set BATTY2_ALLOW_DIRTY=1).' >&2; exit 1; }
 fi
+bash scripts/setup-chrome.sh
 command -v flock >/dev/null || { echo 'Install the kernel lock helper: brew install flock' >&2; exit 1; }
 install_root=${BATTY2_INSTALL_ROOT:-"$HOME/Library/Application Support/Batty2/app"}
 data_root=${BATTY2_ROOT:-"$HOME/Library/Application Support/Batty2/root"}

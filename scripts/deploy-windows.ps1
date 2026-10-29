@@ -38,6 +38,7 @@ if (-not $ReleasePath) {
     try {
         Invoke-Native git @('pull', '--ff-only')
         if (-not $AllowDirty -and (git status --porcelain)) { throw 'Commit changes before deploying, or explicitly use -AllowDirty.' }
+        & (Join-Path $PSScriptRoot 'setup-chrome.ps1')
         $revision = (git rev-parse --short HEAD).Trim()
         $buildId = "$revision-windows-$(Get-Date -Format yyyyMMddHHmmss)"
         Invoke-Native pnpm @('install', '--frozen-lockfile')

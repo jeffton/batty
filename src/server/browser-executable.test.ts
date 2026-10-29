@@ -1,37 +1,64 @@
+import fs from "node:fs";
 import { afterEach, expect, test, vi } from "vite-plus/test";
-import { browserExecutablePath, isolatedBrowserExecutablePath } from "./browser-executable";
+import {
+  browserExecutablePath,
+  chromeCandidates,
+  isolatedBrowserExecutablePath,
+} from "./browser-executable";
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
 
-test("default browser retains the pinned bundle and isolation mapping", () => {
+test("discovery covers system and per-user Chrome installations without test bundles", () => {
+  expect(chromeCandidates("linux")).toEqual(["/opt/google/chrome/chrome"]);
+  expect(chromeCandidates("darwin", {}, "/Users/test")).toEqual([
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Users/test/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  ]);
+  expect(
+    chromeCandidates("win32", {
+      PROGRAMFILES: "C:\\Program Files",
+      LOCALAPPDATA: "C:\\Users\\test\\AppData\\Local",
+    }),
+  ).toEqual([
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "C:\\Users\\test\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe",
+  ]);
+});
+
+test("missing Chrome fails explicitly instead of selecting bundled Chromium", () => {
   vi.stubEnv("BATTY_BROWSER_EXECUTABLE_PATH", undefined);
-  const bundled = "/cache/chromium-1248/chrome-linux64/chrome";
-  expect(browserExecutablePath(() => bundled)).toBe(bundled);
-  expect(isolatedBrowserExecutablePath(bundled)).toBe(
+  vi.spyOn(fs, "existsSync").mockReturnValue(false);
+  expect(() => browserExecutablePath()).toThrow("Google Chrome Stable is not installed");
+});
+
+test("explicit selection must exist and never triggers discovery", () => {
+  vi.stubEnv("BATTY_BROWSER_EXECUTABLE_PATH", "/selected/chrome");
+  const access = vi.spyOn(fs, "accessSync").mockImplementation(() => {});
+  const exists = vi.spyOn(fs, "existsSync");
+  expect(browserExecutablePath()).toBe("/selected/chrome");
+  expect(exists).not.toHaveBeenCalled();
+  access.mockImplementation(() => {
+    throw new Error("ENOENT");
+  });
+  expect(() => browserExecutablePath()).toThrow("ENOENT");
+});
+
+test.each(["", "relative/chrome"])("invalid override %j fails", (selected) => {
+  vi.stubEnv("BATTY_BROWSER_EXECUTABLE_PATH", selected);
+  expect(() => browserExecutablePath()).toThrow("absolute executable path");
+});
+
+test("root isolation uses system Chrome directly and maps only test bundles", () => {
+  vi.stubEnv("BATTY_BROWSER_EXECUTABLE_PATH", undefined);
+  expect(isolatedBrowserExecutablePath("/opt/google/chrome/chrome")).toBe(
+    "/opt/google/chrome/chrome",
+  );
+  expect(isolatedBrowserExecutablePath("/cache/chromium-1248/chrome-linux64/chrome")).toBe(
     "/opt/batty-browser/chromium-1248/chrome-linux64/chrome",
   );
-});
-
-test("explicit security browser is never mapped to a bundled revision", () => {
-  const selected = "/opt/batty-browser/chromium-security-156.0.8078.73/chrome-linux64/chrome";
-  vi.stubEnv("BATTY_BROWSER_EXECUTABLE_PATH", selected);
-  const bundled = vi.fn(() => {
-    throw new Error("bundle unavailable");
-  });
-  expect(browserExecutablePath(bundled)).toBe(selected);
-  expect(isolatedBrowserExecutablePath(selected)).toBe(selected);
-  expect(bundled).not.toHaveBeenCalled();
-});
-
-test.each(["", "relative/chrome"])(
-  "invalid explicit path %j fails instead of selecting bundle",
-  (selected) => {
-    vi.stubEnv("BATTY_BROWSER_EXECUTABLE_PATH", selected);
-    expect(() => browserExecutablePath(() => "/bundle/chrome")).toThrow("absolute executable path");
-  },
-);
-
-test("root isolation rejects explicit binaries outside its installation tree", () => {
   vi.stubEnv("BATTY_BROWSER_EXECUTABLE_PATH", "/tmp/chrome");
-  expect(() => isolatedBrowserExecutablePath("/tmp/chrome")).toThrow("/opt/batty-browser");
+  expect(() => isolatedBrowserExecutablePath("/tmp/chrome")).toThrow("/opt/google/chrome/chrome");
 });

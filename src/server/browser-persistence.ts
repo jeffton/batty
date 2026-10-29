@@ -200,7 +200,7 @@ export async function connectPersistentBrowser(
   let display: BrowserDisplay | undefined;
   let child: ChildProcess | undefined;
   try {
-    const executable = browserExecutablePath(() => chromium.executablePath());
+    const executable = browserExecutablePath();
     isolation = await prepareBrowserIsolation(directory, executable);
     await fs.mkdir(profile, { recursive: true, mode: 0o700 });
     const initialized = await readBrowserJson<boolean>(path.join(directory, "profile-ready.json"));

@@ -12,6 +12,9 @@ import {
 import { createBrowserDisplay, stopBrowserDisplay } from "./browser-display";
 import { chromium } from "patchright";
 import { ownsBrowserProcess } from "./browser-isolation";
+import { browserExecutablePath } from "./browser-executable";
+
+vi.mock("./browser-executable", () => ({ browserExecutablePath: vi.fn() }));
 
 // Failure fixtures launch fake executables, not the installed unprivileged Chromium.
 vi.mock("./browser-isolation", async (original) => {
@@ -23,7 +26,7 @@ vi.mock("./browser-isolation", async (original) => {
   };
 });
 vi.mock("patchright", () => ({
-  chromium: { executablePath: vi.fn(), connectOverCDP: vi.fn() },
+  chromium: { connectOverCDP: vi.fn() },
 }));
 vi.mock("./browser-display", () => ({
   createBrowserDisplay: vi.fn(),
@@ -78,7 +81,7 @@ test.skipIf(process.platform !== "linux")(
   async () => {
     const executable = path.join(directory, "fake-chromium");
     await fs.writeFile(executable, "#!/bin/sh\nexec sleep 60\n", { mode: 0o700 });
-    vi.mocked(chromium.executablePath).mockReturnValue(executable);
+    vi.mocked(browserExecutablePath).mockReturnValue(executable);
     const controller = new AbortController();
     let launchedPid: number | undefined;
     vi.mocked(chromium.connectOverCDP).mockImplementation(async () => {
@@ -157,7 +160,7 @@ test.skipIf(process.platform !== "linux")(
     await expect(connectPersistentBrowser(directory, { useTailscale: false })).rejects.toThrow();
     await expect(fs.stat(path.join(directory, "profile-ready.json"))).rejects.toThrow("ENOENT");
     await fs.writeFile(preferences, JSON.stringify({ translate: { enabled: true } }));
-    vi.mocked(chromium.executablePath).mockReturnValue("/nonexistent/batty-test-chromium");
+    vi.mocked(browserExecutablePath).mockReturnValue("/nonexistent/batty-test-chromium");
     await expect(connectPersistentBrowser(directory, { useTailscale: false })).rejects.toThrow(
       "ENOENT",
     );
@@ -178,7 +181,7 @@ async function expectLaunchCleaned() {
 test.skipIf(process.platform !== "linux")(
   "Chromium spawn failure releases the display and launch receipts",
   async () => {
-    vi.mocked(chromium.executablePath).mockReturnValue("/nonexistent/batty-test-chromium");
+    vi.mocked(browserExecutablePath).mockReturnValue("/nonexistent/batty-test-chromium");
     await expect(connectPersistentBrowser(directory, { useTailscale: false })).rejects.toThrow(
       "ENOENT",
     );
@@ -202,7 +205,7 @@ test.skipIf(process.platform !== "linux")(
   async () => {
     const executable = path.join(directory, "fake-chromium");
     await fs.writeFile(executable, "#!/bin/sh\nexec sleep 60\n", { mode: 0o700 });
-    vi.mocked(chromium.executablePath).mockReturnValue(executable);
+    vi.mocked(browserExecutablePath).mockReturnValue(executable);
     let launchedPid: number | undefined;
     vi.mocked(chromium.connectOverCDP).mockImplementation(async () => {
       launchedPid = JSON.parse(await fs.readFile(path.join(directory, "process.json"), "utf8")).pid;

@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { expect, test, vi } from "vite-plus/test";
+import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from "vite-plus/test";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -112,13 +112,38 @@ test.each(["pages", "registry"] as const)(
   25_000,
 );
 
-test.each([false, true])(
-  "missing selector cancellation preserves every tab and prevents a late click (%s)",
-  async (interrupted) => {
-    const state = await fixture();
+describe("page-scoped cancellation", () => {
+  let state: Awaited<ReturnType<typeof fixture>>;
+
+  beforeAll(async () => {
+    state = await fixture();
+    await state.service.execute("worker", { action: "open", url: state.url });
+  });
+
+  beforeEach(async () => {
+    // These cases must preserve the process. Reuse it, but discard every target
+    // page and clear storage so each case starts with the same clean survivor.
     const { service, url } = state;
-    try {
-      await service.execute("worker", { action: "open", url });
+    const pages = await service.execute("worker", { action: "pages" });
+    for (const page of pages.details.pages!) {
+      if (page.id !== "page-1")
+        await service.execute("worker", { action: "close-page", pageId: page.id });
+    }
+    await service.execute("worker", { action: "open", pageId: "page-1", url });
+    await service.execute("worker", {
+      action: "evaluate",
+      script: "() => { localStorage.clear(); sessionStorage.clear(); }",
+    });
+  });
+
+  afterAll(async () => {
+    await state.close();
+  });
+
+  test.each([false, true])(
+    "missing selector cancellation preserves every tab and prevents a late click (%s)",
+    async (interrupted) => {
+      const { service, url } = state;
       await service.execute("worker", { action: "open", url, newPage: true });
       const controller = new AbortController();
       const pending = service.execute(
@@ -148,19 +173,13 @@ test.each([false, true])(
           })
         ).text,
       ).toContain("Evaluation result:\nundefined");
-    } finally {
-      await state.close();
-    }
-  },
-);
+    },
+  );
 
-test.each([false, true])(
-  "cancelled evaluate destroys only its target, stopping delayed JavaScript (%s)",
-  async (interrupted) => {
-    const state = await fixture();
-    const { service, url } = state;
-    try {
-      await service.execute("worker", { action: "open", url });
+  test.each([false, true])(
+    "cancelled evaluate destroys only its target, stopping delayed JavaScript (%s)",
+    async (interrupted) => {
+      const { service, url } = state;
       await service.execute("worker", { action: "open", url, newPage: true });
       const controller = new AbortController();
       const pending = service.execute(
@@ -191,11 +210,9 @@ test.each([false, true])(
           })
         ).text,
       ).toContain("Evaluation result:\nnull");
-    } finally {
-      await state.close();
-    }
-  },
-);
+    },
+  );
+});
 
 test("failed target recovery escalates to process cleanup without losing the profile", async () => {
   const state = await fixture();

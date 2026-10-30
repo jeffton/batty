@@ -135,7 +135,8 @@ test("model-visible inputs convert BMP and bound large images while retaining or
     const dimensions = await sharp(Buffer.from(image.data, "base64")).metadata();
     expect(dimensions.width).toBeLessThanOrEqual(2000);
     expect(dimensions.height).toBeLessThanOrEqual(2000);
-    expect(await readFile(files[0]!.file.storedPath)).toEqual(bytes);
+    // Compare binary content directly instead of deeply traversing millions of bytes.
+    expect((await readFile(files[0]!.file.storedPath)).equals(bytes)).toBe(true);
     if (name.endsWith("bmp")) expect(image.mimeType).toBe("image/png");
   }
   await expect(

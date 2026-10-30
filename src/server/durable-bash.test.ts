@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { persistentBashOperations } from "./durable-bash";
-import { bashJobKey } from "./durable-bash-cancel";
+import { bashJobKey, cancelPersistentBashJob } from "./durable-bash-cancel";
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof childProcess>();
@@ -33,6 +33,52 @@ test("failed stdin delivery rejects instead of polling for a missing receipt", a
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test.skipIf(process.platform === "win32").each([false, true])(
+  "supervisor close distinguishes external termination from persisted cancellation before its next poll (%s)",
+  async (cancelled) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-bash-cancel-close-"));
+    const identity = "cancel-before-monitor";
+    const { spawn } = await vi.importActual<typeof childProcess>("node:child_process");
+    const mock = vi.mocked(childProcess.spawn).mockImplementationOnce((_command, args, options) => {
+      // Suppress only the supervisor's polling callback to deterministically
+      // reproduce the child closing before that callback observes cancellation.
+      const monitor = "setInterval(()=>{if(fs.existsSync(job.cancelPath))cancel()},20)";
+      expect(args?.[1]).toContain(monitor);
+      return spawn(
+        process.execPath,
+        ["-e", args![1]!.replace(monitor, "setInterval(()=>{},20)")],
+        options,
+      );
+    });
+    const job = persistentBashOperations(root, identity).exec(
+      "echo ready > started; sleep 5",
+      root,
+      {
+        timeout: 5,
+        onData: () => {},
+      },
+    );
+    try {
+      await vi.waitFor(async () => {
+        expect(await fs.readFile(path.join(root, "started"), "utf8")).toBe("ready\n");
+      });
+      if (cancelled) await cancelPersistentBashJob(root, identity);
+      else {
+        const receipt = JSON.parse(
+          await fs.readFile(path.join(root, bashJobKey(identity), "receipt.json"), "utf8"),
+        );
+        process.kill(-receipt.pid, "SIGTERM");
+      }
+      expect((await job).exitCode).toBe(cancelled ? 130 : 143);
+    } finally {
+      await cancelPersistentBashJob(root, identity);
+      await job;
+      mock.mockImplementation(spawn);
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test.skipIf(process.platform !== "linux")(
   "bash receives a large environment over stdin without putting the job in supervisor argv",

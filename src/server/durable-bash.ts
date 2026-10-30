@@ -31,7 +31,7 @@ const monitor=setInterval(()=>{if(fs.existsSync(job.cancelPath))cancel()},20);
 if(fs.existsSync(job.cancelPath))cancel();
 if(job.timeout) timer=setTimeout(()=>kill('SIGKILL'),job.timeout*1000);
 child.on('error', error=>{fs.appendFileSync(path.join(job.directory,'output'),error.message+'\n');save({status:'done',exitCode:1,startedAt,endedAt:Date.now()})});
-child.on('close',(code,signal)=>{clearTimeout(timer);clearTimeout(killTimer);clearInterval(monitor); const signals={SIGTERM:15,SIGKILL:9,SIGINT:2};save({status:'done',exitCode:cancelled ? 130 : code ?? 128+(signals[signal] ?? 1),startedAt,endedAt:Date.now()})});
+child.on('close',(code,signal)=>{clearTimeout(timer);clearTimeout(killTimer);clearInterval(monitor); const signals={SIGTERM:15,SIGKILL:9,SIGINT:2};save({status:'done',exitCode:cancelled || fs.existsSync(job.cancelPath) ? 130 : code ?? 128+(signals[signal] ?? 1),startedAt,endedAt:Date.now()})});
 `;
 
 export function persistentBashOperations(jobsDir: string, taskId: string): BashOperations {

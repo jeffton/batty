@@ -1,4 +1,5 @@
 import type { Context, JsonValue } from "@earendil-works/chord";
+import { withAbortSignal } from "@earendil-works/chord/context";
 import {
   defineTool,
   AgentDoc,
@@ -48,7 +49,9 @@ export function createCodemodeAdapters(
       parameters: Type.Object({ name: Type.String(), args: Type.Any() }),
       structuredOutputSchema: Type.Any(),
       execute: async ({ name, args }, api, ctx) => {
+        ctx.abortSignal?.throwIfAborted();
         const tool = (await resolve(api, ctx)).find((tool) => tool.name === name);
+        ctx.abortSignal?.throwIfAborted();
         if (!tool || name === "codemode" || name.startsWith("batty_codemode_"))
           throw new Error(`Unknown nested tool: ${name}`);
         if ((tool.replay ?? "unsafe") !== replay)
@@ -63,7 +66,16 @@ export function createCodemodeAdapters(
           {
             ...api,
             executeTool: async (name, args, context, options) => {
+              // A nested tool cannot detach subsequent dispatches from its owning
+              // adapter by supplying a context without the task's abort signal.
+              const signals = [ctx.abortSignal, context.abortSignal].filter(
+                (signal): signal is AbortSignal => signal !== undefined,
+              );
+              const signal = AbortSignal.any(signals);
+              signal.throwIfAborted();
+              context = withAbortSignal(signal, context);
               const target = (await resolve(api, context)).find((tool) => tool.name === name);
+              signal.throwIfAborted();
               if (!target) throw new Error(`Unknown nested tool: ${name}`);
               const nested = await api.executeTool(
                 codemodeAdapterName(target.replay ?? "unsafe"),

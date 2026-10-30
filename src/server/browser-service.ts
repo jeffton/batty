@@ -279,6 +279,8 @@ export class BrowserService {
       );
       return { text: "Browser session closed.", details: { action: input.action } };
     }
+    let activePage: Page | undefined;
+    let evaluating = false;
     // Cancellation must reach the serialized operation, not just its caller.
     // Explicit close remains outside the queue so it can interrupt a stalled action.
     return await this.serialized(
@@ -339,9 +341,12 @@ export class BrowserService {
               });
             session.cloudInteraction++;
             const page = await this.pageForOpen(session, input, created);
+            activePage = page;
+            signal?.throwIfAborted();
             await this.configurePage(session, page, input);
             signal?.throwIfAborted();
-            await page.goto(url, { waitUntil: "domcontentloaded" });
+            await page.goto(url, { waitUntil: "domcontentloaded", signal });
+            signal?.throwIfAborted();
             const result = await this.snapshotResult(session, input, page);
             if (input.cloud) result.details.sites = [await this.cloudAttachment(session)];
             return result;
@@ -364,8 +369,11 @@ export class BrowserService {
           if (!["snapshot", "screenshot", "frames", "wait"].includes(input.action))
             session.cloudInteraction++;
           const page = this.resolvePage(session, input.pageId);
+          activePage = page;
           await this.configurePage(session, page, input);
+          signal?.throwIfAborted();
           if (input.viewport) await this.setViewport(session, page, input.viewport);
+          signal?.throwIfAborted();
 
           if (input.action === "switch") {
             session.activePageId = this.pageId(session, page);
@@ -379,7 +387,11 @@ export class BrowserService {
           if (input.action === "frames") return this.framesResult(session, input, page);
 
           const frame = this.resolveFrame(session, page, input.frameId);
-          const output = await this.performPageAction(session, page, frame, input);
+          evaluating =
+            input.action === "evaluate" || (input.action === "scroll" && !input.selector);
+          const output = await this.performPageAction(session, page, frame, input, signal);
+          signal?.throwIfAborted();
+          evaluating = false;
           if (output.text != null) {
             return await this.textResult(session, input, page, frame, output);
           }
@@ -388,6 +400,7 @@ export class BrowserService {
           const session = this.sessions.get(sessionId);
           if (!signal?.aborted && session?.browser.isConnected()) {
             await this.persistRegistry(session);
+            signal?.throwIfAborted();
             await this.touchSession(sessionId);
           }
         }
@@ -395,6 +408,8 @@ export class BrowserService {
       this.queues,
       true,
       signal,
+      () => activePage,
+      () => evaluating,
     );
   }
 
@@ -562,7 +577,7 @@ export class BrowserService {
           Object.assign(
             new Error(
               running
-                ? "Cloud browser operation timed out. The unresponsive browser session was closed."
+                ? "Cloud browser operation timed out."
                 : "Cloud browser queue timed out. Another operation is still using the browser.",
             ),
             { statusCode: 504 },
@@ -1381,35 +1396,42 @@ export class BrowserService {
     page: Page,
     frame: Frame,
     input: BrowserActionInput,
+    signal?: AbortSignal,
   ): Promise<ActionOutput> {
+    signal?.throwIfAborted();
     switch (input.action) {
       case "snapshot":
         return {};
       case "screenshot": {
-        const image = await page.screenshot({ fullPage: input.fullPage ?? false, type: "png" });
+        const image = await page.screenshot({
+          fullPage: input.fullPage ?? false,
+          type: "png",
+          signal,
+        });
+        signal?.throwIfAborted();
         const screenshotPath = await createScreenshotPath();
         await fs.writeFile(screenshotPath, image);
         return { image, screenshotPath };
       }
       case "click":
-        await frame.locator(required(input.selector, "selector", input.action)).click();
+        await frame.locator(required(input.selector, "selector", input.action)).click({ signal });
         return {};
       case "fill":
         await frame
           .locator(required(input.selector, "selector", input.action))
-          .fill(present(input.value, "value", input.action));
+          .fill(present(input.value, "value", input.action), { signal });
         return {};
       case "press":
         await frame
           .locator(required(input.selector, "selector", input.action))
-          .press(required(input.key, "key", input.action));
+          .press(required(input.key, "key", input.action), { signal });
         return {};
       case "select": {
         const values = input.values ?? (input.value == null ? [] : [input.value]);
         if (values.length === 0) throw new Error("value or values is required for browser select");
         await frame
           .locator(required(input.selector, "selector", input.action))
-          .selectOption(values);
+          .selectOption(values, { signal });
         return {};
       }
       case "upload": {
@@ -1423,14 +1445,16 @@ export class BrowserService {
               buffer: await fs.readFile(file),
             })),
           ),
+          { signal },
         );
         return {};
       }
       case "download": {
         const [download] = await Promise.all([
-          page.waitForEvent("download"),
-          frame.locator(required(input.selector, "selector", input.action)).click(),
+          page.waitForEvent("download", { signal }),
+          frame.locator(required(input.selector, "selector", input.action)).click({ signal }),
         ]);
+        signal?.throwIfAborted();
         const dir = await fs.mkdtemp(path.join(os.tmpdir(), "batty-browser-download-"));
         session.downloadDirs.add(dir);
         const downloadPath = path.join(dir, safeDownloadName(download.suggestedFilename()));
@@ -1451,11 +1475,12 @@ export class BrowserService {
         await frame.locator(required(input.selector, "selector", input.action)).waitFor({
           state: input.state ?? "visible",
           timeout: timeout(input),
+          signal,
         });
         return {};
       case "scroll":
         if (input.selector) {
-          await frame.locator(input.selector).scrollIntoViewIfNeeded();
+          await frame.locator(input.selector).scrollIntoViewIfNeeded({ signal });
         } else {
           await frame.evaluate(({ deltaX, deltaY }) => window.scrollBy(deltaX, deltaY), {
             deltaX: input.deltaX ?? 0,
@@ -1464,13 +1489,13 @@ export class BrowserService {
         }
         return {};
       case "hover":
-        await frame.locator(required(input.selector, "selector", input.action)).hover();
+        await frame.locator(required(input.selector, "selector", input.action)).hover({ signal });
         return {};
       case "back":
-        await page.goBack({ waitUntil: "domcontentloaded" });
+        await page.goBack({ waitUntil: "domcontentloaded", signal });
         return {};
       case "reload":
-        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.reload({ waitUntil: "domcontentloaded", signal });
         return {};
       case "evaluate": {
         const script = required(input.script, "script", input.action);
@@ -1714,12 +1739,31 @@ export class BrowserService {
     if (errors.length) throw new AggregateError(errors, "Browser session cleanup failed");
   }
 
+  private async settlesWithin(pending: Promise<unknown>, milliseconds: number): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        pending.then(
+          () => true,
+          () => true,
+        ),
+        new Promise<false>((resolve) => {
+          timer = setTimeout(() => resolve(false), milliseconds);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   private async serialized<T>(
     sessionId: string,
     operation: () => Promise<T>,
     queues = this.queues,
     agentAction = false,
     signal?: AbortSignal,
+    recoveryPage?: () => Page | undefined,
+    destroyTarget?: () => boolean,
   ): Promise<T> {
     const previous = queues.get(sessionId) ?? Promise.resolve();
     let release!: () => void;
@@ -1739,12 +1783,28 @@ export class BrowserService {
     }
     if (agentAction) this.activeAgentSessions.add(sessionId);
     let cancellationCleanup: Promise<void> | undefined;
+    let pending: Promise<T> | undefined;
     try {
       signal?.throwIfAborted();
-      return await browserAbortable(operation(), signal);
+      pending = operation();
+      return await browserAbortable(pending, signal);
     } catch (error) {
-      if (signal?.aborted) {
+      if (signal?.aborted && pending) {
         cancellationCleanup = (async () => {
+          // Locator/navigation AbortSignals settle cooperatively. Give the driver
+          // time to acknowledge cancellation before touching the shared browser.
+          if (!destroyTarget?.() && pending && (await this.settlesWithin(pending, 500))) return;
+          const page = recoveryPage?.();
+          if (page) {
+            try {
+              // evaluate has no AbortSignal: closing its target destroys its JS
+              // context, including timers/promises which could mutate it later.
+              await browserAbortable(page.close(), AbortSignal.timeout(2_000));
+              if (pending && (await this.settlesWithin(pending, 500))) return;
+            } catch {
+              // Recovery itself failed; the process is the remaining boundary.
+            }
+          }
           // Startup must finish its own cancellation cleanup before removal/retry.
           await this.startups.get(sessionId)?.catch(() => {});
           await this.closeSession(sessionId);

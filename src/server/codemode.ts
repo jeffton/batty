@@ -70,6 +70,7 @@ export function createCodemodeTool(
       const ordinaryImages = new Set<ImageContent>();
       let usedMainMemory = false;
       let ordinal = 0;
+      const activeCalls = new Set<Promise<unknown>>();
       const aborts: Promise<void>[] = [];
       const abortErrors: unknown[] = [];
       let control: import("@earendil-works/pi-durable").ToolControl | undefined;
@@ -104,144 +105,156 @@ export function createCodemodeTool(
             : tool.name === "web_search"
               ? (WebSearchOutputSchema as unknown as CodemodeJsonSchema)
               : { type: "string" },
-        execute: async (input, { signal }) => {
-          // Inputs fixed before memory was read cannot be derived from that read.
-          const independentOfMainMemory = !usedMainMemory;
-          const index = String(ordinal++);
-          const started = performance.now();
-          const call: CodemodeCall = {
-            id: `${api.callId}-${index}`,
-            name: tool.name,
-            args: input === undefined ? "undefined" : JSON.stringify(input),
-            status: "running",
-          };
-          calls.push(call);
-          try {
-            const args = tool.prepareArguments ? tool.prepareArguments(input) : input;
-            call.args = args === undefined ? "undefined" : JSON.stringify(args);
-            const validator = Compile(tool.parameters);
-            if (!validator.Check(args))
-              throw new Error(
-                `Invalid arguments for ${tool.name}: ${JSON.stringify([...validator.Errors(args)])}`,
-              );
-            // Existing callers must consume their legacy receipts, never repeat side effects.
-            const legacy = (await api.snapshot(CodemodeCalls, api.taskId, ctx))?.calls[index];
-            let value: CodemodeResult;
-            if (legacy) {
-              if (legacy.name !== tool.name || JSON.stringify(legacy.args) !== JSON.stringify(args))
-                throw new Error(`Codemode replay changed nested call ${index}`);
-              const taskId =
-                legacy.taskId as import("@earendil-works/pi-durable").TaskId<CodemodeResult>;
-              const abort = () => {
-                // Harness shutdown must preserve resumable tasks. Explicit harness
-                // aborts already cascade through ownership; only sandbox-local
-                // deadlines/unawaited calls need an additional task abort.
-                if (ctx.abortSignal?.aborted) return;
-                aborts.push(
-                  abortNested(taskId, ctx).catch((error) => {
-                    abortErrors.push(error);
-                  }),
-                );
-              };
-              signal.addEventListener("abort", abort, { once: true });
-              let settled;
-              try {
-                settled = await api.waitForTask(taskId, withAbortSignal(signal, ctx));
-              } finally {
-                signal.removeEventListener("abort", abort);
-              }
-              const outcome = settled.state.outcome;
-              if (outcome.status !== "completed") {
-                if (outcome.status === "aborted") call.status = "cancelled";
+        execute: (input, { signal }) => {
+          const pending = executeNested(input, signal);
+          activeCalls.add(pending);
+          return pending.finally(() => activeCalls.delete(pending));
+
+          async function executeNested(input: unknown, signal: AbortSignal) {
+            signal.throwIfAborted();
+            // Inputs fixed before memory was read cannot be derived from that read.
+            const independentOfMainMemory = !usedMainMemory;
+            const index = String(ordinal++);
+            const started = performance.now();
+            const call: CodemodeCall = {
+              id: `${api.callId}-${index}`,
+              name: tool.name,
+              args: input === undefined ? "undefined" : JSON.stringify(input),
+              status: "running",
+            };
+            calls.push(call);
+            try {
+              const args = tool.prepareArguments ? tool.prepareArguments(input) : input;
+              call.args = args === undefined ? "undefined" : JSON.stringify(args);
+              const validator = Compile(tool.parameters);
+              if (!validator.Check(args))
                 throw new Error(
-                  outcome.status === "faulted"
-                    ? outcome.error.message
-                    : outcome.status === "orphaned"
-                      ? outcome.reason
-                      : `Nested tool ${tool.name} ${outcome.status}`,
+                  `Invalid arguments for ${tool.name}: ${JSON.stringify([...validator.Errors(args)])}`,
                 );
-              }
-              if ("released" in outcome.result)
-                throw new Error(`Legacy codemode result ${taskId} has been released`);
-              value = outcome.result;
-            } else {
-              const key = `codemode-${index}`;
-              let nested;
-              try {
-                nested = await api.executeTool(
-                  codemodeAdapterName(tool.replay ?? "unsafe"),
-                  { name: tool.name, args: args as JsonValue },
-                  withAbortSignal(signal, ctx),
-                  { key, progress: false },
-                );
-              } finally {
-                // A local sandbox abort cancels the native wait, not its child task.
-                // Admission has settled before executeTool rejects, so its slot is discoverable.
-                if (signal.aborted && !ctx.abortSignal?.aborted) {
-                  const cancel = (async () => {
-                    const slot = await api.snapshot(NestedCallDoc, api.taskId, key, ctx);
-                    if (slot?.taskId) await abortNested(slot.taskId, ctx);
-                  })().catch((error) => {
-                    abortErrors.push(error);
-                  });
-                  aborts.push(cancel);
-                  await cancel;
+              // Existing callers must consume their legacy receipts, never repeat side effects.
+              const legacy = (await api.snapshot(CodemodeCalls, api.taskId, ctx))?.calls[index];
+              signal.throwIfAborted();
+              let value: CodemodeResult;
+              if (legacy) {
+                if (
+                  legacy.name !== tool.name ||
+                  JSON.stringify(legacy.args) !== JSON.stringify(args)
+                )
+                  throw new Error(`Codemode replay changed nested call ${index}`);
+                const taskId =
+                  legacy.taskId as import("@earendil-works/pi-durable").TaskId<CodemodeResult>;
+                const abort = () => {
+                  // Harness shutdown must preserve resumable tasks. Explicit harness
+                  // aborts already cascade through ownership; only sandbox-local
+                  // deadlines/unawaited calls need an additional task abort.
+                  if (ctx.abortSignal?.aborted) return;
+                  aborts.push(
+                    abortNested(taskId, ctx).catch((error) => {
+                      abortErrors.push(error);
+                    }),
+                  );
+                };
+                signal.addEventListener("abort", abort, { once: true });
+                let settled;
+                try {
+                  settled = await api.waitForTask(taskId, withAbortSignal(signal, ctx));
+                } finally {
+                  signal.removeEventListener("abort", abort);
                 }
+                const outcome = settled.state.outcome;
+                if (outcome.status !== "completed") {
+                  if (outcome.status === "aborted") call.status = "cancelled";
+                  throw new Error(
+                    outcome.status === "faulted"
+                      ? outcome.error.message
+                      : outcome.status === "orphaned"
+                        ? outcome.reason
+                        : `Nested tool ${tool.name} ${outcome.status}`,
+                  );
+                }
+                if ("released" in outcome.result)
+                  throw new Error(`Legacy codemode result ${taskId} has been released`);
+                value = outcome.result;
+              } else {
+                const key = `codemode-${index}`;
+                let nested;
+                try {
+                  nested = await api.executeTool(
+                    codemodeAdapterName(tool.replay ?? "unsafe"),
+                    { name: tool.name, args: args as JsonValue },
+                    withAbortSignal(signal, ctx),
+                    { key, progress: false },
+                  );
+                } finally {
+                  // A local sandbox abort cancels the native wait, not its child task.
+                  // Admission has settled before executeTool rejects, so its slot is discoverable.
+                  if (signal.aborted && !ctx.abortSignal?.aborted) {
+                    const cancel = (async () => {
+                      const slot = await api.snapshot(NestedCallDoc, api.taskId, key, ctx);
+                      if (slot?.taskId) await abortNested(slot.taskId, ctx);
+                    })().catch((error) => {
+                      abortErrors.push(error);
+                    });
+                    aborts.push(cancel);
+                    await cancel;
+                  }
+                }
+                if (nested.isError || nested.structuredOutput === undefined)
+                  throw new Error(
+                    nested.diagnostics
+                      .map((item) =>
+                        item.message.replaceAll(
+                          codemodeAdapterName(tool.replay ?? "unsafe"),
+                          tool.name,
+                        ),
+                      )
+                      .join("\n") || `Nested tool ${tool.name} failed`,
+                  );
+                value = nested.structuredOutput as unknown as CodemodeResult;
               }
-              if (nested.isError || nested.structuredOutput === undefined)
-                throw new Error(
-                  nested.diagnostics
-                    .map((item) =>
-                      item.message.replaceAll(
-                        codemodeAdapterName(tool.replay ?? "unsafe"),
-                        tool.name,
-                      ),
-                    )
-                    .join("\n") || `Nested tool ${tool.name} failed`,
-                );
-              value = nested.structuredOutput as unknown as CodemodeResult;
+              const { result, structured } = value;
+              call.details = result.details ?? null;
+              if (
+                result.details &&
+                typeof result.details === "object" &&
+                !Array.isArray(result.details)
+              ) {
+                Object.assign(call, result.details, {
+                  id: call.id,
+                  name: call.name,
+                  args: call.args,
+                  status: call.status,
+                });
+              }
+              if (result.control) control = result.control;
+              const text =
+                result.output
+                  ?.filter((block) => block.type === "text")
+                  .map((block) => block.text)
+                  .join("\n") ?? "";
+              if (MAIN_MEMORY_TOOLS.has(tool.name)) usedMainMemory = true;
+              else if (independentOfMainMemory) ordinaryOutputs.add(text);
+              const images = (result.output ?? []).filter((block) => block.type === "image");
+              if ((tool.name === "read" || tool.name === "memory_zoom") && !result.isError) {
+                forwardedImages.push(...images);
+                if (tool.name === "read" && independentOfMainMemory)
+                  for (const image of images) ordinaryImages.add(image);
+              }
+              if (result.isError && result.structuredOutput === undefined) throw new Error(text);
+              call.status = result.isError ? "error" : "ok";
+              // Image bytes stay out of the script bridge and its text/return serialization.
+              if (tool.name === "read" && images.length > 0) return text;
+              if (result.structuredOutput !== undefined) return result.structuredOutput;
+              if (structured !== null) return structured;
+              return text;
+            } catch (error) {
+              if (signal.aborted) call.status = "cancelled";
+              else if (call.status !== "cancelled") call.status = "error";
+              call.error = error instanceof Error ? error.message : String(error);
+              throw error;
+            } finally {
+              call.durationMs = performance.now() - started;
             }
-            const { result, structured } = value;
-            call.details = result.details ?? null;
-            if (
-              result.details &&
-              typeof result.details === "object" &&
-              !Array.isArray(result.details)
-            ) {
-              Object.assign(call, result.details, {
-                id: call.id,
-                name: call.name,
-                args: call.args,
-                status: call.status,
-              });
-            }
-            if (result.control) control = result.control;
-            const text =
-              result.output
-                ?.filter((block) => block.type === "text")
-                .map((block) => block.text)
-                .join("\n") ?? "";
-            if (MAIN_MEMORY_TOOLS.has(tool.name)) usedMainMemory = true;
-            else if (independentOfMainMemory) ordinaryOutputs.add(text);
-            const images = (result.output ?? []).filter((block) => block.type === "image");
-            if ((tool.name === "read" || tool.name === "memory_zoom") && !result.isError) {
-              forwardedImages.push(...images);
-              if (tool.name === "read" && independentOfMainMemory)
-                for (const image of images) ordinaryImages.add(image);
-            }
-            if (result.isError && result.structuredOutput === undefined) throw new Error(text);
-            call.status = result.isError ? "error" : "ok";
-            // Image bytes stay out of the script bridge and its text/return serialization.
-            if (tool.name === "read" && images.length > 0) return text;
-            if (result.structuredOutput !== undefined) return result.structuredOutput;
-            if (structured !== null) return structured;
-            return text;
-          } catch (error) {
-            if (call.status !== "cancelled") call.status = "error";
-            call.error = error instanceof Error ? error.message : String(error);
-            throw error;
-          } finally {
-            call.durationMs = performance.now() - started;
           }
         },
       }));
@@ -379,6 +392,9 @@ export function createCodemodeTool(
         // SDK close() requests shutdown; keep ownership until the worker actually exits.
         await workerExited;
         sandboxes.delete(sandbox);
+        // The SDK aborts host callbacks but only joins the VM worker. A callback may
+        // still be admitting a durable child and have not registered its cleanup yet.
+        await Promise.allSettled(activeCalls);
         await Promise.all(aborts);
         if (abortErrors.length)
           throw new AggregateError(abortErrors, "Failed to cancel nested codemode tools");

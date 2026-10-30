@@ -106,7 +106,7 @@ test.each([false, true])(
       const timedOut = expect(failure).resolves.toMatchObject({
         statusCode: 504,
         message: expect.stringContaining(
-          cleanupFailure ? "cleanup failed" : "unresponsive browser session was closed",
+          cleanupFailure ? "cleanup failed" : "Cloud browser operation timed out",
         ),
       });
       await dispatched;

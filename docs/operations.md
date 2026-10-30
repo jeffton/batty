@@ -47,7 +47,7 @@ See [remote instances](remote-instances.md) for node-token provisioning, remote 
 
 ## Browser action deadlines
 
-Every browser action applies `timeoutMs` (default 30 seconds, range 1–60 seconds) across queue admission, startup, CDP calls, evaluation and result/registry generation. A queued timeout or cancellation leaves its predecessor’s browser untouched. A running timeout or cancellation closes the browser and reaps owned startup processes before releasing the queue; disk profiles and login data survive, but live tabs and JavaScript state do not.
+Every browser action applies `timeoutMs` (default 30 seconds, range 1–60 seconds) across queue admission, startup, CDP calls, evaluation and result/registry generation. A queued timeout or cancellation leaves its predecessor’s browser untouched. Running locator and navigation actions receive an AbortSignal; cancellation preserves their tabs once the driver acknowledges it. Arbitrary `evaluate` cannot be cancelled cooperatively, so cancellation closes only its target tab to destroy the running JavaScript context. If target recovery fails or the operation remains stuck, cleanup closes the browser process. Disk profiles and login data survive; process-level cleanup loses live tabs and JavaScript state. Cancellation cannot undo clicks, requests or other effects already performed.
 
 Cancellation cleanup has a further 15-second grace period. If cleanup exceeds it, the caller receives an explicit error while the queue remains fenced until the actual cleanup finishes. `action="close"` bypasses the action queue so it can interrupt stalled operations; its caller’s wait is also bounded by `timeoutMs`.
 

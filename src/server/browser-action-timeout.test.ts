@@ -49,7 +49,7 @@ async function fixture() {
   };
 }
 
-test.each(["pages", "evaluate", "registry"] as const)(
+test.each(["pages", "registry"] as const)(
   "%s deadline and caller abort interrupt execution, release the queue and preserve the profile",
   async (stage) => {
     const action = stage === "registry" ? "pages" : stage;
@@ -68,19 +68,15 @@ test.each(["pages", "evaluate", "registry"] as const)(
       });
       for (const interrupted of [false, true]) {
         // Metadata and persistence have no locator timeout; evaluate awaits a real page promise.
-        const stalled =
-          stage === "evaluate"
-            ? vi.spyOn(internals, "performPageAction")
-            : vi
-                .spyOn(internals, stage === "registry" ? "persistRegistry" : "pagesResult")
-                .mockImplementation(() => new Promise(() => {}));
+        const stalled = vi
+          .spyOn(internals, stage === "registry" ? "persistRegistry" : "pagesResult")
+          .mockImplementation(() => new Promise(() => {}));
         const controller = new AbortController();
         const deadline = controlDeadline();
         const pending = service.execute(
           "worker",
           {
             action,
-            script: action === "evaluate" ? "() => new Promise(() => {})" : undefined,
             timeoutMs: 1000,
           },
           controller.signal,
@@ -115,6 +111,126 @@ test.each(["pages", "evaluate", "registry"] as const)(
   },
   25_000,
 );
+
+test.each([false, true])(
+  "missing selector cancellation preserves every tab and prevents a late click (%s)",
+  async (interrupted) => {
+    const state = await fixture();
+    const { service, url } = state;
+    try {
+      await service.execute("worker", { action: "open", url });
+      await service.execute("worker", { action: "open", url, newPage: true });
+      const controller = new AbortController();
+      const pending = service.execute(
+        "worker",
+        { action: "click", selector: "#late", timeoutMs: 1000 },
+        controller.signal,
+      );
+      const rejected = expect(pending).rejects.toThrow();
+      if (interrupted) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        controller.abort(new Error("Stopped"));
+      }
+      await rejected;
+      const pages = await service.execute("worker", { action: "pages" });
+      expect(pages.details.pages).toHaveLength(2);
+      await service.execute("worker", {
+        action: "evaluate",
+        script:
+          "() => { const b = document.createElement('button'); b.id='late'; b.onclick=() => document.body.dataset.clicked='yes'; document.body.append(b); }",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(
+        (
+          await service.execute("worker", {
+            action: "evaluate",
+            script: "() => document.body.dataset.clicked",
+          })
+        ).text,
+      ).toContain("Evaluation result:\nundefined");
+    } finally {
+      await state.close();
+    }
+  },
+);
+
+test.each([false, true])(
+  "cancelled evaluate destroys only its target, stopping delayed JavaScript (%s)",
+  async (interrupted) => {
+    const state = await fixture();
+    const { service, url } = state;
+    try {
+      await service.execute("worker", { action: "open", url });
+      await service.execute("worker", { action: "open", url, newPage: true });
+      const controller = new AbortController();
+      const pending = service.execute(
+        "worker",
+        {
+          action: "evaluate",
+          script:
+            "() => new Promise(() => { setTimeout(() => localStorage.setItem('late', 'bad'), 2000); })",
+          timeoutMs: 1000,
+        },
+        controller.signal,
+      );
+      const rejected = expect(pending).rejects.toThrow();
+      if (interrupted) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        controller.abort(new Error("Stopped"));
+      }
+      await rejected;
+      const pages = await service.execute("worker", { action: "pages" });
+      expect(pages.details.pages).toHaveLength(1);
+      expect(pages.text).toContain("page-1");
+      await new Promise((resolve) => setTimeout(resolve, 2100));
+      expect(
+        (
+          await service.execute("worker", {
+            action: "evaluate",
+            script: "() => localStorage.getItem('late')",
+          })
+        ).text,
+      ).toContain("Evaluation result:\nnull");
+    } finally {
+      await state.close();
+    }
+  },
+);
+
+test("failed target recovery escalates to process cleanup without losing the profile", async () => {
+  const state = await fixture();
+  const { service, url } = state;
+  const internals = service as unknown as {
+    sessions: Map<string, { pages: Map<string, { close(): Promise<void> }> }>;
+    performPageAction(): Promise<unknown>;
+  };
+  try {
+    await service.execute("worker", { action: "open", url });
+    await service.execute("worker", { action: "open", url, newPage: true });
+    const page = internals.sessions.get("worker")!.pages.get("page-2")!;
+    const close = vi.spyOn(page, "close").mockRejectedValue(new Error("Target recovery failed"));
+    const running = vi.spyOn(internals, "performPageAction");
+    const controller = new AbortController();
+    const pending = service.execute(
+      "worker",
+      {
+        action: "evaluate",
+        script: "() => new Promise(() => {})",
+      },
+      controller.signal,
+    );
+    const rejected = expect(pending).rejects.toThrow("Stopped");
+    await vi.waitFor(() => expect(running).toHaveBeenCalled());
+    controller.abort(new Error("Stopped"));
+    await rejected;
+    expect(close).toHaveBeenCalled();
+    expect(await service.hasSession("worker")).toBe(false);
+    expect(await fs.stat(path.join(state.directory, "profile"))).toBeDefined();
+  } finally {
+    vi.restoreAllMocks();
+    await state.close();
+  }
+});
 
 test("queued action timeout and abort preserve the running predecessor and queue order", async () => {
   const fixtureState = await fixture();
@@ -211,7 +327,7 @@ test.each(["startup", "close"] as const)(
       await rejected;
       cleanupDeadline.mockRestore();
       if (stage === "startup") expect(close).not.toHaveBeenCalled();
-      else expect(close).toHaveBeenCalledTimes(1);
+      else await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(1));
       let followingRan = false;
       const following = internals.serialized("worker", async () => {
         followingRan = true;

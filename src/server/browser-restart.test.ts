@@ -172,7 +172,10 @@ test("browser service detach/reconnect preserves tabs, cookies, JavaScript state
     setTimeout(() => controller.abort(new Error("cancelled")), 50);
     expect(await cancelled).toBe("aborted");
     expect(Date.now() - began).toBeLessThan(6000);
-    expect(await service.hasSession("durable")).toBe(false);
+    expect(await service.hasSession("durable")).toBe(true);
+    expect(
+      (await service.execute("durable", { action: "pages" })).details.pages?.map((page) => page.id),
+    ).toEqual([second.details.pageId!]);
     await expect(fs.stat(path.join(directory, "profile"))).resolves.toBeDefined();
     const disposing = Date.now();
     await service.dispose();

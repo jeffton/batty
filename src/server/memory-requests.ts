@@ -153,7 +153,7 @@ export function createMemoryRequests({
       defineTool({
         name: "memory_zoom",
         description:
-          "Open prepared main-memory line id+n into its two child summaries with UTC timestamp ranges; n=1 returns the original UTC timestamp, uncompressed non-thought text and original images from that message. No reasoning or full message metadata.",
+          "Open prepared main-memory line id+n into its two child summaries with UTC timestamp ranges; n=1 returns the original UTC timestamp, uncompressed non-thought text and original images from that message. No reasoning or full message metadata. From a search/recall ID, use memory_zoom(id - 1, 1) or memory_zoom(id + 1, 1) to read neighboring original messages, also across summary boundaries. Neighbors may be tool calls or runtime notes.",
         parameters: Type.Object({ id: Type.Integer(), n: Type.Integer() }),
         replay: "safe",
         outputLimits: { maxBytes: Number.MAX_SAFE_INTEGER, maxLines: Number.MAX_SAFE_INTEGER },

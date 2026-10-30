@@ -98,6 +98,10 @@ Use memory_search({query}) to find forgotten topics in original text, then memor
 
 Navigating: memory_zoom(id, n) opens line id+n into the two lines of n/2
 messages it was made from, each with its first-to-last original UTC timestamp range;
+From any original search/recall ID, memory_zoom(id - 1, 1) and
+memory_zoom(id + 1, 1) retrieve neighboring originals, even across summary
+boundaries. A neighbor may be a tool call or runtime note. Fetch neighbors
+when context is needed; automatic recall does not include them.
 memory_zoom(id, 1) gives the original UTC timestamp, uncompressed non-thought
 text projection and original images as image blocks. Overview images use
 placeholders; explicit leaf zoom retrieves their archived image data. Full

@@ -70,7 +70,7 @@ test("language-independent variants are bidirectional, exact-first, conjunctive 
   }
 });
 
-test("recall chooses at most five corpus-weighted terms, includes nearby correction, excludes visible/recent duplicates and handles empty retrieval", async () => {
+test("recall keeps source IDs without automatic neighbors, excludes visible/recent duplicates and handles empty retrieval", async () => {
   const db = await openNodeSqliteDatabase(":memory:");
   try {
     const search = await createMemorySearch(db);
@@ -82,8 +82,8 @@ test("recall chooses at most five corpus-weighted terms, includes nearby correct
     const found = await search.recall(1, "Fur", [], 82, new Set());
     expect(found.terms).toEqual(["fur"]);
     expect(found.text).toContain("0+1|");
-    expect(found.text).toContain("1+1|");
-    expect(found.text).toContain("Altså i og ikke på");
+    expect(found.text).not.toContain("1+1|");
+    expect(found.text).not.toContain("Altså i og ikke på");
     expect(await search.recall(1, "Fur", [], 82, new Set([0, 1]))).toMatchObject({ text: "" });
     expect(await search.recall(1, "Fur", [], 10, new Set())).toMatchObject({ text: "" });
     expect(await search.recall(1, "unknowntopic", [], 82, new Set())).toMatchObject({
@@ -91,9 +91,7 @@ test("recall chooses at most five corpus-weighted terms, includes nearby correct
       text: "",
     });
     expect(await search.recall(1, "😅", [], 82, new Set())).toMatchObject({ terms: [], text: "" });
-    expect((await search.recall(1, "fortæl", ["Fur"], 82, new Set())).text).toContain(
-      "Altså i og ikke på",
-    );
+    expect((await search.recall(1, "fortæl", ["Fur"], 82, new Set())).text).toContain("0+1|");
     const wall = await search.recall(
       1,
       "Fur almindelig historik fyldtekst ".repeat(2000),
@@ -101,7 +99,7 @@ test("recall chooses at most five corpus-weighted terms, includes nearby correct
       82,
       new Set(),
     );
-    expect(wall.terms.length).toBeLessThanOrEqual(5);
+    expect(wall.terms.length).toBeLessThanOrEqual(32);
   } finally {
     await db.close();
   }
@@ -145,6 +143,78 @@ test("automatic OR recall ranks topic variants alongside exact matches instead o
     const result = await search.recall(1, "topicwarm brønd", [], 1040, new Set());
     expect(result.terms).toHaveLength(2);
     expect(result.text).toContain("brønden water");
+  } finally {
+    await db.close();
+  }
+});
+
+test("recall retains common topic words and separates previous topics", async () => {
+  const db = await openNodeSqliteDatabase(":memory:");
+  try {
+    const search = await createMemorySearch(db);
+    await search.append(1, 0, [
+      leaf("Bought the sensor bracket in aluminium"),
+      leaf("Unrelated adjacent private information"),
+      ...Array.from({ length: 180 }, (_, i) => leaf(`bracket ordinary document ${i}`)),
+      ...Array.from({ length: 120 }, (_, i) => leaf(`astonishing detail ${i}`)),
+      ...Array.from({ length: 40 }, (_, i) => leaf(`previousrare contexttopic detail ${i}`)),
+      ...Array.from({ length: 1000 }, () => leaf("ordinary repeated history")),
+    ]);
+    const result = await search.recall(
+      1,
+      "An astonishing sensor bracket",
+      ["previousrare contexttopic"],
+      1342,
+      new Set(),
+    );
+    expect(result.terms).toContain("bracket");
+    expect(result.text).toContain("Bought the sensor bracket");
+    expect(result.text).not.toMatch(/\n1\+1\|/);
+    expect(result.text).toContain("previousrare contexttopic");
+    const onlyCurrent = await search.recall(1, "sensor bracket", [], 1342, new Set());
+    expect(onlyCurrent.text).toContain("Bought the sensor bracket");
+    expect(onlyCurrent.text).not.toContain("previousrare contexttopic");
+    expect((await search.recall(2, "sensor bracket", [], 1342, new Set())).text).toBe("");
+  } finally {
+    await db.close();
+  }
+});
+
+test("recall reaches older sources beyond twenty already-visible hits", async () => {
+  const db = await openNodeSqliteDatabase(":memory:");
+  try {
+    const search = await createMemorySearch(db);
+    await search.append(1, 0, [
+      leaf("telescope original purchase"),
+      ...Array.from({ length: 70 }, (_, i) => leaf(`telescope recent detail ${i}`)),
+      ...Array.from({ length: 80 }, () => leaf("ordinary repeated history")),
+    ]);
+    const result = await search.recall(
+      1,
+      "telescope",
+      [],
+      151,
+      new Set(Array.from({ length: 70 }, (_, i) => i + 1)),
+    );
+    expect(result.text).toContain("telescope original purchase");
+  } finally {
+    await db.close();
+  }
+});
+
+test("recall preserves a multi-term excerpt when individual queries find distant words", async () => {
+  const db = await openNodeSqliteDatabase(":memory:");
+  try {
+    const search = await createMemorySearch(db);
+    await search.append(1, 0, [
+      leaf(
+        "astonishing bracket bought for the bicycle " + "unrelated passage ".repeat(100) + "sensor",
+      ),
+      ...Array.from({ length: 80 }, () => leaf("ordinary repeated history")),
+    ]);
+    const result = await search.recall(1, "astonishing sensor bracket", [], 81, new Set());
+    expect(result.text).toContain("bought for the bicycle");
+    expect(result.text).toContain("zoom for full text");
   } finally {
     await db.close();
   }
@@ -231,7 +301,8 @@ test("main injects zoomable source recall immediately before input, preserving t
     const second = requests[1]!.filter((message) => message.role !== "system");
     expect(first.at(-1)).toMatchObject({ role: "user", content: "Fur" });
     expect(first.at(-2)?.content).toContain("<memory-recall>");
-    expect(first.at(-2)?.content).toContain("Altså i og ikke på");
+    expect(first.at(-2)?.content).toContain("0+1|");
+    expect(first.at(-2)?.content).not.toContain("Altså i og ikke på");
     // The estimator timestamp is intentionally refreshed; provider prompt content stays identical.
     const cacheContent = (messages: Message[]) =>
       messages.map((message) => ({ ...message, timestamp: 0 }));

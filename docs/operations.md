@@ -45,9 +45,11 @@ Flows and IDs follow the installed [Pi SDK documentation](https://github.com/ear
 
 See [remote instances](remote-instances.md) for node-token provisioning, remote workers and offline mirrors.
 
-## Browser open deadlines
+## Browser action deadlines
 
-`browser.open` applies `timeoutMs` (default 30 seconds, range 1–60 seconds) to queue admission, SSH/display/Chromium startup, CDP attachment, navigation and the returned snapshot. Expiry or worker cancellation interrupts the action, closes its browser session and reaps owned startup processes before releasing its action queue. Bounded process cleanup can add a few seconds; a timeout while waiting behind another action does not close that action’s browser. Other browser actions retain their Playwright action/navigation timeout semantics.
+Every browser action applies `timeoutMs` (default 30 seconds, range 1–60 seconds) across queue admission, startup, CDP calls, evaluation and result/registry generation. A queued timeout or cancellation leaves its predecessor’s browser untouched. A running timeout or cancellation closes the browser and reaps owned startup processes before releasing the queue; disk profiles and login data survive, but live tabs and JavaScript state do not.
+
+Cancellation cleanup has a further 15-second grace period. If cleanup exceeds it, the caller receives an explicit error while the queue remains fenced until the actual cleanup finishes. `action="close"` bypasses the action queue so it can interrupt stalled operations; its caller’s wait is also bounded by `timeoutMs`.
 
 ## Cloud-browser operation deadlines
 

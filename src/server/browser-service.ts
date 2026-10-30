@@ -41,6 +41,7 @@ export type { BrowserAction, BrowserActionInput } from "./browser-schemas";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const CLOUD_OPERATION_TIMEOUT_MS = 15_000;
+const CANCELLATION_CLEANUP_TIMEOUT_MS = 15_000;
 const MAX_BROWSER_SESSIONS = 8;
 const SCREENSHOTS_DIR = path.join(os.tmpdir(), "batty-browser-screenshots");
 
@@ -248,10 +249,12 @@ export class BrowserService {
     input: BrowserActionInput,
     signal?: AbortSignal,
   ): Promise<BrowserActionResult> {
-    if (input.action !== "open") return this.executeAction(sessionId, input, signal);
     const controller = new AbortController();
     const deadline = setTimeout(
-      () => controller.abort(new Error(`Browser open exceeded timeoutMs (${timeout(input)} ms)`)),
+      () =>
+        controller.abort(
+          new Error(`Browser ${input.action} exceeded timeoutMs (${timeout(input)} ms)`),
+        ),
       timeout(input),
     );
     const cancellation = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
@@ -270,128 +273,128 @@ export class BrowserService {
     signal?.throwIfAborted();
     if (this.disposed) throw new Error("Browser service is disposed");
     if (input.action === "close") {
-      await this.closeSession(sessionId);
+      await browserAbortable(
+        this.withSessionLifecycle(sessionId, () => this.closeSession(sessionId)),
+        signal,
+      );
       return { text: "Browser session closed.", details: { action: input.action } };
     }
-    // Abort only the waiter on harness shutdown. Explicit close separately
-    // terminates the browser outside the action queue, interrupting CDP calls.
-    return await this.abortable(
-      this.serialized(
-        sessionId,
-        async () => {
-          signal?.throwIfAborted();
-          // Registering the action queue protects queued/running browser calls;
-          // admission waits for any expiry already closing the old instance.
-          await this.withSessionLifecycle(sessionId, async () => {
-            if (await this.hasSession(sessionId)) await this.touchSession(sessionId);
-          });
-          signal?.throwIfAborted();
-          try {
-            let session = this.sessions.get(sessionId);
-            if (
-              !session &&
-              (await readBrowserJson(
-                path.join(browserSessionDirectory(this.persistenceRoot, sessionId), "launch.json"),
-              ))
-            )
-              session = await this.createSession(sessionId, undefined, undefined, signal);
-            if (
-              session &&
-              input.useTailscale != null &&
-              input.useTailscale !== session.useTailscale
-            ) {
-              throw new Error(
-                'Browser routing is fixed for the session. Use action="close", then open a new session.',
-              );
-            }
-
-            if (session?.useTailscale) await this.requireTailscaleProxy();
-            if (
-              session &&
-              (input.viewport ||
-                !["attach", "pages", "snapshot", "screenshot", "frames", "wait"].includes(
-                  input.action,
-                ))
-            )
-              for (const [id, touch] of this.cloudTouches)
-                if (touch.session === session) await this.cancelCloudTouch(id);
-
-            if (input.action === "open") {
-              const url = validateUrl(required(input.url, "url", input.action));
-              const created = !session;
-              session ??= await this.createSession(
-                sessionId,
-                input.viewport,
-                input.useTailscale ?? false,
-                signal,
-              );
-              signal?.throwIfAborted();
-              if (input.cloud) await this.enableCloud(sessionId, session);
-              if (created && input.cloud && !input.viewport)
-                await this.setViewport(session, this.resolvePage(session), {
-                  width: 390,
-                  height: 640,
-                });
-              session.cloudInteraction++;
-              const page = await this.pageForOpen(session, input, created);
-              await this.configurePage(session, page, input);
-              signal?.throwIfAborted();
-              await page.goto(url, { waitUntil: "domcontentloaded" });
-              const result = await this.snapshotResult(session, input, page);
-              if (input.cloud) result.details.sites = [await this.cloudAttachment(session)];
-              return result;
-            }
-
-            if (!session) {
-              throw new Error('No active browser page. Start with action="open".');
-            }
-
-            if (input.cloud) await this.enableCloud(sessionId, session);
-            if (input.action === "attach") {
-              const site = await this.cloudAttachment(session);
-              return {
-                text: "Live cloud browser attached. The user and agent share this browser session.",
-                details: { action: "attach", sites: [site] },
-              };
-            }
-            if (input.action === "pages") return await this.pagesResult(session, input.action);
-
-            if (!["snapshot", "screenshot", "frames", "wait"].includes(input.action))
-              session.cloudInteraction++;
-            const page = this.resolvePage(session, input.pageId);
-            await this.configurePage(session, page, input);
-            if (input.viewport) await this.setViewport(session, page, input.viewport);
-
-            if (input.action === "switch") {
-              session.activePageId = this.pageId(session, page);
-              return await this.snapshotResult(session, input, page);
-            }
-            if (input.action === "close-page") {
-              const closedPageId = this.pageId(session, page);
-              await page.close();
-              return await this.pagesResult(session, input.action, `Closed page ${closedPageId}.`);
-            }
-            if (input.action === "frames") return this.framesResult(session, input, page);
-
-            const frame = this.resolveFrame(session, page, input.frameId);
-            const output = await this.performPageAction(session, page, frame, input);
-            if (output.text != null) {
-              return await this.textResult(session, input, page, frame, output);
-            }
-            return await this.snapshotResult(session, input, page, frame, output);
-          } finally {
-            const session = this.sessions.get(sessionId);
-            if (!signal?.aborted && session?.browser.isConnected()) {
-              await this.persistRegistry(session);
-              await this.touchSession(sessionId);
-            }
+    // Cancellation must reach the serialized operation, not just its caller.
+    // Explicit close remains outside the queue so it can interrupt a stalled action.
+    return await this.serialized(
+      sessionId,
+      async () => {
+        signal?.throwIfAborted();
+        // Registering the action queue protects queued/running browser calls;
+        // admission waits for any expiry already closing the old instance.
+        await this.withSessionLifecycle(sessionId, async () => {
+          if (await this.hasSession(sessionId)) await this.touchSession(sessionId);
+        });
+        signal?.throwIfAborted();
+        try {
+          let session = this.sessions.get(sessionId);
+          if (
+            !session &&
+            (await readBrowserJson(
+              path.join(browserSessionDirectory(this.persistenceRoot, sessionId), "launch.json"),
+            ))
+          )
+            session = await this.createSession(sessionId, undefined, undefined, signal);
+          if (
+            session &&
+            input.useTailscale != null &&
+            input.useTailscale !== session.useTailscale
+          ) {
+            throw new Error(
+              'Browser routing is fixed for the session. Use action="close", then open a new session.',
+            );
           }
-        },
-        this.queues,
-        true,
-        input.action === "open" ? signal : undefined,
-      ),
-      input.action === "open" ? undefined : signal,
+
+          if (session?.useTailscale) await this.requireTailscaleProxy(signal);
+          if (
+            session &&
+            (input.viewport ||
+              !["attach", "pages", "snapshot", "screenshot", "frames", "wait"].includes(
+                input.action,
+              ))
+          )
+            for (const [id, touch] of this.cloudTouches)
+              if (touch.session === session) await this.cancelCloudTouch(id);
+
+          if (input.action === "open") {
+            const url = validateUrl(required(input.url, "url", input.action));
+            const created = !session;
+            session ??= await this.createSession(
+              sessionId,
+              input.viewport,
+              input.useTailscale ?? false,
+              signal,
+            );
+            signal?.throwIfAborted();
+            if (input.cloud) await this.enableCloud(sessionId, session);
+            if (created && input.cloud && !input.viewport)
+              await this.setViewport(session, this.resolvePage(session), {
+                width: 390,
+                height: 640,
+              });
+            session.cloudInteraction++;
+            const page = await this.pageForOpen(session, input, created);
+            await this.configurePage(session, page, input);
+            signal?.throwIfAborted();
+            await page.goto(url, { waitUntil: "domcontentloaded" });
+            const result = await this.snapshotResult(session, input, page);
+            if (input.cloud) result.details.sites = [await this.cloudAttachment(session)];
+            return result;
+          }
+
+          if (!session) {
+            throw new Error('No active browser page. Start with action="open".');
+          }
+
+          if (input.cloud) await this.enableCloud(sessionId, session);
+          if (input.action === "attach") {
+            const site = await this.cloudAttachment(session);
+            return {
+              text: "Live cloud browser attached. The user and agent share this browser session.",
+              details: { action: "attach", sites: [site] },
+            };
+          }
+          if (input.action === "pages") return await this.pagesResult(session, input.action);
+
+          if (!["snapshot", "screenshot", "frames", "wait"].includes(input.action))
+            session.cloudInteraction++;
+          const page = this.resolvePage(session, input.pageId);
+          await this.configurePage(session, page, input);
+          if (input.viewport) await this.setViewport(session, page, input.viewport);
+
+          if (input.action === "switch") {
+            session.activePageId = this.pageId(session, page);
+            return await this.snapshotResult(session, input, page);
+          }
+          if (input.action === "close-page") {
+            const closedPageId = this.pageId(session, page);
+            await page.close();
+            return await this.pagesResult(session, input.action, `Closed page ${closedPageId}.`);
+          }
+          if (input.action === "frames") return this.framesResult(session, input, page);
+
+          const frame = this.resolveFrame(session, page, input.frameId);
+          const output = await this.performPageAction(session, page, frame, input);
+          if (output.text != null) {
+            return await this.textResult(session, input, page, frame, output);
+          }
+          return await this.snapshotResult(session, input, page, frame, output);
+        } finally {
+          const session = this.sessions.get(sessionId);
+          if (!signal?.aborted && session?.browser.isConnected()) {
+            await this.persistRegistry(session);
+            await this.touchSession(sessionId);
+          }
+        }
+      },
+      this.queues,
+      true,
+      signal,
     );
   }
 
@@ -1008,28 +1011,6 @@ export class BrowserService {
       },
       true,
     );
-  }
-
-  private abortable<T>(pending: Promise<T>, signal?: AbortSignal): Promise<T> {
-    if (!signal) return pending;
-    return new Promise<T>((resolve, reject) => {
-      const abort = () => {
-        signal.removeEventListener("abort", abort);
-        reject(signal.reason ?? new Error("Browser action aborted"));
-      };
-      pending.then(
-        (value) => {
-          signal.removeEventListener("abort", abort);
-          resolve(value);
-        },
-        (error) => {
-          signal.removeEventListener("abort", abort);
-          reject(error);
-        },
-      );
-      if (signal.aborted) abort();
-      else signal.addEventListener("abort", abort, { once: true });
-    });
   }
 
   async closeSession(sessionId: string): Promise<void> {
@@ -1757,27 +1738,47 @@ export class BrowserService {
       throw error;
     }
     if (agentAction) this.activeAgentSessions.add(sessionId);
+    let cancellationCleanup: Promise<void> | undefined;
     try {
       signal?.throwIfAborted();
       return await browserAbortable(operation(), signal);
     } catch (error) {
       if (signal?.aborted) {
-        try {
+        cancellationCleanup = (async () => {
           // Startup must finish its own cancellation cleanup before removal/retry.
           await this.startups.get(sessionId)?.catch(() => {});
           await this.closeSession(sessionId);
+        })();
+        try {
+          await browserAbortable(
+            cancellationCleanup,
+            AbortSignal.timeout(CANCELLATION_CLEANUP_TIMEOUT_MS),
+          );
         } catch (cleanupError) {
           throw Object.assign(
-            new AggregateError([error, cleanupError], "Browser cancellation and cleanup failed"),
+            new AggregateError(
+              [error, cleanupError],
+              `Browser cancellation cleanup failed or exceeded ${CANCELLATION_CLEANUP_TIMEOUT_MS} ms`,
+            ),
             { statusCode: (error as { statusCode?: number })?.statusCode },
           );
         }
       }
       throw error;
     } finally {
-      if (agentAction) this.activeAgentSessions.delete(sessionId);
-      release();
-      if (queues.get(sessionId) === current) queues.delete(sessionId);
+      const finish = () => {
+        if (agentAction) this.activeAgentSessions.delete(sessionId);
+        release();
+        if (queues.get(sessionId) === current) queues.delete(sessionId);
+      };
+      // A cleanup timeout ends the caller's wait, not ownership of the browser.
+      // Keep later actions fenced until the actual cleanup has finished.
+      if (cancellationCleanup)
+        void cancellationCleanup.then(finish, (error) => {
+          console.error("Browser cancellation cleanup", error);
+          finish();
+        });
+      else finish();
     }
   }
 }

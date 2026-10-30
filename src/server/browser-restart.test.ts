@@ -131,7 +131,7 @@ test("browser service detach/reconnect preserves tabs, cookies, JavaScript state
       action: "evaluate",
       pageId,
       script:
-        'globalThis.liveState = {counter: 42}; document.cookie = "durableCookie=present; path=/"; "saved"',
+        'globalThis.liveState = {counter: 42}; document.cookie = "durableCookie=present; Max-Age=3600; path=/"; "saved"',
     });
     const second = await service.execute("durable", { action: "open", url, newPage: true });
     await service.execute("durable", { action: "switch", pageId });
@@ -171,22 +171,27 @@ test("browser service detach/reconnect preserves tabs, cookies, JavaScript state
     );
     setTimeout(() => controller.abort(new Error("cancelled")), 50);
     expect(await cancelled).toBe("aborted");
-    expect(Date.now() - began).toBeLessThan(500);
+    expect(Date.now() - began).toBeLessThan(6000);
+    expect(await service.hasSession("durable")).toBe(false);
+    await expect(fs.stat(path.join(directory, "profile"))).resolves.toBeDefined();
     const disposing = Date.now();
     await service.dispose();
     expect(Date.now() - disposing).toBeLessThan(1000);
     service = new BrowserService(undefined, 4, root);
-    expect(
-      (
-        await service.execute("durable", {
-          action: "evaluate",
-          pageId,
-          script: "globalThis.liveState.counter",
-        })
-      ).text,
-    ).toContain("42");
+    const reopened = await service.execute("durable", { action: "open", url });
+    const reopenedState = await service.execute("durable", {
+      action: "evaluate",
+      pageId: reopened.details.pageId,
+      script: "({state: globalThis.liveState, cookies: document.cookie})",
+    });
+    expect(reopenedState.text).toContain("state: undefined");
+    expect(reopenedState.text).toContain("durableCookie=present");
     const stuck = service
-      .execute("durable", { action: "evaluate", pageId, script: "new Promise(() => {})" })
+      .execute("durable", {
+        action: "evaluate",
+        pageId: reopened.details.pageId,
+        script: "new Promise(() => {})",
+      })
       .then(
         () => "completed",
         () => "closed",

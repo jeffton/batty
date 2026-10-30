@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { BACKGROUND_CONTEXT, awaitWithContext } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord";
 import { Type, type ImageContent, type Message, type TextContent } from "@earendil-works/pi-ai";
 import { getCurrentSystemMessage, normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
@@ -19,9 +19,17 @@ import {
   type SubmissionId,
   type EntryId,
   type Harness,
+  type EntryRecord,
 } from "@earendil-works/pi-durable";
 import type { MemorySearchOptions, MemorySearch } from "./memory-search";
-import { Packets, WorkerMemory, MemoryRecall, type MemorySnapshot } from "./memory-documents";
+import {
+  Packets,
+  WorkerMemory,
+  MemoryRecall,
+  SessionMemory,
+  type MemorySnapshot,
+} from "./memory-documents";
+import { SESSION_TAIL_BYTES, rolloverBoundary, sessionMessages } from "./session-tail";
 import { decodeRuntimeNotice } from "./runtime-notices";
 import { WorkerDoc } from "./orchestration";
 import { conversationPolicy } from "./conversation-policy";
@@ -34,12 +42,12 @@ type MemoryRequests = {
   rootSessionId: () => string;
   assistantWorkspaceId: () => Promise<string | undefined>;
   load: (context: Context) => Promise<void>;
-  conversationalView: (
+  archiveView: (maximum: number) => Promise<{ view: string; snapshot: MemorySnapshot }>;
+  readyArchive: (
     maximum: number,
-    fits: (view: string) => boolean,
     context: Context,
-  ) => Promise<{ view: string; snapshot: MemorySnapshot }>;
-  preparedView: () => { view: string; snapshot: MemorySnapshot };
+  ) => Promise<{ view: string; snapshot: MemorySnapshot } | undefined>;
+  sessionTailBytes?: number;
   zoom: (
     id: number,
     count: number,
@@ -76,8 +84,9 @@ export function createMemoryRequests({
   rootSessionId,
   assistantWorkspaceId,
   load,
-  conversationalView,
-  preparedView,
+  archiveView,
+  readyArchive,
+  sessionTailBytes = SESSION_TAIL_BYTES,
   zoom,
   search,
   recall,
@@ -99,22 +108,20 @@ export function createMemoryRequests({
       : undefined;
   }
   let packetQueue: Promise<unknown> = Promise.resolve();
-  function packetForRun(runId: SubmissionId, fits: (view: string) => boolean, context: Context) {
-    const result = packetQueue.then(() => createPacket(runId, fits, context));
+  function packetForRun(runId: SubmissionId, context: Context) {
+    const result = packetQueue.then(() => createPacket(runId, context));
     packetQueue = result.catch(() => undefined);
     return result;
   }
-  async function createPacket(
-    runId: SubmissionId,
-    fits: (view: string) => boolean,
-    context: Context,
-  ) {
+  async function createPacket(runId: SubmissionId, context: Context) {
     const packet = await harness().snapshot(Packets, main().id, String(runId), context);
-    if (packet && fits(packet.view)) return packet;
+    if (packet) return packet;
     const input = await (await harness().submission(runId, context))!.status(context);
     if (!input.entry) throw new Error("Main run input has no entry");
+    const session = await sessionAt(input.entry, input.entry, context);
     const candidate = {
-      ...(await conversationalView(input.entry - 1, fits, context)),
+      ...session,
+      tailBoundary: session.boundary,
       boundary: input.entry as number,
     };
     return main().commit(async (tx) => {
@@ -122,6 +129,59 @@ export function createMemoryRequests({
       if (!packet) await tx.appendEntry(main().id, { kind: "batty.run-head", head: input.entry });
       return candidate;
     }, context);
+  }
+  async function sessionAt(maximum: number, currentInput: number, context: Context) {
+    const saved = await harness().snapshot(SessionMemory, main().id, context);
+    if (saved) return saved;
+    // Adopt a complete existing tree without inference on the initial request,
+    // whether it belongs to main or an assistant-workspace worker.
+    const entries = await history(0, maximum, context);
+    const boundary = rolloverBoundary(entries, currentInput, sessionTailBytes);
+    const prepared = boundary === undefined ? undefined : await readyArchive(boundary - 1, context);
+    return main().commit(async (tx) => {
+      const draft = await tx.doc(SessionMemory, main().id);
+      if (prepared && boundary! > draft.boundary)
+        Object.assign(draft, prepared, { boundary: boundary! });
+      return { ...draft, snapshot: { ...draft.snapshot } };
+    }, context);
+  }
+  let archiving: Promise<void> | undefined;
+  let closed = false;
+  async function history(boundary: number, maximum: number, context: Context) {
+    const entries: EntryRecord[] = [];
+    let cursor;
+    do {
+      const page = await main().entries(
+        { minEntryId: boundary as EntryId, maxEntryId: maximum as EntryId },
+        500,
+        cursor,
+        context,
+      );
+      entries.push(...page.items);
+      cursor = page.next;
+    } while (cursor);
+    return entries.reverse();
+  }
+  function archiveLater(entries: EntryRecord[], input: number, boundary: number) {
+    if (closed || archiving) return;
+    const next = rolloverBoundary(entries, input, sessionTailBytes);
+    if (next === undefined || next <= boundary) return;
+    // No model inference on the request path. Keep the old tail/prefix until
+    // the complete replacement is durable, including across shutdown/retry.
+    archiving = (async () => {
+      const prepared = await archiveView(next - 1);
+      if (closed) return;
+      await main().commit(async (tx) => {
+        const session = await tx.doc(SessionMemory, main().id);
+        if (next > session.boundary) Object.assign(session, prepared, { boundary: next });
+      }, BACKGROUND_CONTEXT);
+    })()
+      .catch((error) => {
+        if (!closed) report(error);
+      })
+      .finally(() => {
+        archiving = undefined;
+      });
   }
   async function runTail(
     messages: readonly Message[],
@@ -227,10 +287,19 @@ export function createMemoryRequests({
               const packet = runId
                 ? await harness().snapshot(Packets, main().id, String(runId), context)
                 : undefined;
-              const prepared = preparedView();
+              const session = packet
+                ? undefined
+                : await sessionAt(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, context);
+              const prefix = packet ?? session!;
+              const boundary = packet
+                ? (packet.tailBoundary ?? packet.boundary)
+                : session!.boundary;
               const candidate = {
-                view: packet?.view ?? prepared.view,
-                snapshot: packet?.snapshot ?? prepared.snapshot,
+                view: prefix.view,
+                snapshot: prefix.snapshot,
+                tail: JSON.stringify(
+                  sessionMessages(await history(boundary, Number.MAX_SAFE_INTEGER, context)),
+                ),
               };
               const conversation = (await harness().conversation(api.conversationId, context))!;
               snapshot = await conversation.commit(async (tx) => {
@@ -238,10 +307,12 @@ export function createMemoryRequests({
                 if (pinned.view === null) {
                   pinned.view = candidate.view;
                   pinned.snapshot = candidate.snapshot;
+                  pinned.tail = candidate.tail;
                 }
                 return {
                   view: pinned.view,
                   snapshot: pinned.snapshot ? { ...pinned.snapshot } : undefined,
+                  tail: pinned.tail,
                 };
               }, context);
             }
@@ -254,6 +325,7 @@ export function createMemoryRequests({
                   content: snapshot!.view!,
                   timestamp: 0,
                 },
+                ...(JSON.parse(snapshot!.tail ?? "[]") as Message[]),
                 ...messages.filter(
                   (message) => message.role !== "system" && !isMainMemoryView(message),
                 ),
@@ -274,7 +346,23 @@ export function createMemoryRequests({
                 if (notice) notices.add(JSON.stringify([message.timestamp, notice.text]));
               }
             }
-            const tail = await runTail(messages, input.entry!, context);
+            let packet = await packetForRun(runId, context);
+            const entries = await history(
+              packet.tailBoundary ?? packet.boundary,
+              input.entry!,
+              context,
+            );
+            archiveLater(entries, input.entry!, packet.tailBoundary ?? packet.boundary);
+            const activeTail = await runTail(messages, input.entry!, context);
+            const activeSystem = activeTail[0]?.role === "system" ? activeTail.slice(0, 1) : [];
+            let historicalTail = sessionMessages(
+              entries.filter((entry) => entry.id < input.entry!),
+            );
+            let tail = [
+              ...activeSystem,
+              ...historicalTail,
+              ...activeTail.slice(activeSystem.length),
+            ];
             const task = (await harness().getTask(api.taskId, context))!;
             const checkpoint = task.state.checkpoint as unknown as GenerationCheckpoint;
             if (checkpoint.phase !== "request")
@@ -301,11 +389,30 @@ export function createMemoryRequests({
                 normalizeContext({ messages: makeMessages(view) }),
                 model.maxTokens,
               ) >= reserve;
-            if (!fits(""))
+            while (!fits(packet.view) && archiving) {
+              // Ordinary turns never join inference. At the actual model limit
+              // there is no admissible request to send: await the existing job,
+              // then atomically adopt its prefix without losing this submission.
+              await awaitWithContext(archiving, context);
+              const session = await harness().snapshot(SessionMemory, main().id, context);
+              if (session && session.boundary > (packet.tailBoundary ?? packet.boundary)) {
+                packet = { ...session, boundary: input.entry!, tailBoundary: session.boundary };
+                await main().commit(async (tx) => {
+                  Object.assign(await tx.doc(Packets, main().id, String(runId), packet), packet);
+                }, context);
+                const retained = await history(session.boundary, input.entry!, context);
+                historicalTail = sessionMessages(
+                  retained.filter((entry) => entry.id < input.entry!),
+                );
+                tail = [...system, ...historicalTail, ...activeTail.slice(activeSystem.length)];
+                recalledTail = tail.slice(system.length);
+                archiveLater(retained, input.entry!, session.boundary);
+              } else break;
+            }
+            if (!fits(packet.view))
               throw new Error(
                 "Active main turn exceeds the model's input budget; memory preparation cannot reduce it",
               );
-            let packet = await packetForRun(runId, fits, context);
             const visible = new Set(
               [...packet.view.matchAll(/(?:^|\n)(\d+)\+1\|/g)].map((match) => Number(match[1])),
             );
@@ -315,7 +422,9 @@ export function createMemoryRequests({
             recalledTail = [];
             const rawTail = tail.slice(system.length);
             for (const [position, message] of rawTail.entries()) {
-              if (message.role === "user") {
+              // Recall belongs to this run's inputs, not every historical user
+              // message retained in the session tail.
+              if (position >= historicalTail.length && message.role === "user") {
                 const text =
                   typeof message.content === "string"
                     ? message.content
@@ -378,7 +487,7 @@ export function createMemoryRequests({
             // per input across tools/restarts. Include it in admission budgeting.
             if (!fits(""))
               throw new Error("Active main turn and memory recall exceed the model's input budget");
-            packet = await packetForRun(runId, fits, context);
+            packet = await packetForRun(runId, context);
             const prepared = makeMessages(packet.view);
             validPackets.clear();
             validPackets.add(packet.view);
@@ -399,6 +508,16 @@ export function createMemoryRequests({
   });
   return {
     extension,
+    async close() {
+      closed = true;
+      await archiving;
+    },
+    async archiveCompleted(maximum: number) {
+      const session = await harness().snapshot(SessionMemory, main().id, BACKGROUND_CONTEXT);
+      if (!session) return;
+      const entries = await history(session.boundary, maximum, BACKGROUND_CONTEXT);
+      archiveLater(entries, maximum + 1, session.boundary);
+    },
     validateRequest(request: { messages: readonly Message[] }, options?: { sessionId?: string }) {
       if (options?.sessionId !== rootSessionId()) return;
       const admitted = request.messages.some(

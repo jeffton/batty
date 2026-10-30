@@ -228,7 +228,12 @@ test("main injects zoomable source recall immediately before input, preserving t
   const faux = fauxProvider();
   models.setProvider(faux.provider);
   const memory = createMemory(
-    { nodeBytes: 60, viewBytes: 200, compress: async () => "user: archived conversation" },
+    {
+      sessionTailBytes: 1,
+      nodeBytes: 60,
+      viewBytes: 200,
+      compress: async () => "user: archived conversation",
+    },
     models,
   );
   const registry = createRegistry();

@@ -20,9 +20,10 @@ import {
 import { Type } from "@earendil-works/pi-ai";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { createMemory, MemoryIndexDoc } from "./memory";
+import { SessionMemory } from "./memory-documents";
+import { snapshotView } from "./memory-snapshot";
 import { createTools } from "./tools";
 import { createOrchestration, OrchestrationDoc, WorkerDoc } from "./orchestration";
-import { isMainMemoryView } from "./main-memory-policy";
 import { listWorkspaces } from "./workspaces";
 import { setAssistantWorkspace } from "./options";
 import type { AppConfig } from "./config";
@@ -89,7 +90,16 @@ test("fresh assistant-workspace worker pins its overview across tools and later 
     const views: string[] = [];
     faux.setResponses(
       Array.from({ length: 4 }, (_, i) => (request) => {
-        views.push(request.messages.find(isMainMemoryView)!.content as string);
+        const task = request.messages.findIndex(
+          (message) =>
+            message.role === "user" &&
+            ["start", "continue", "new task"].includes(String(message.content)),
+        );
+        views.push(
+          JSON.stringify(
+            request.messages.slice(0, task).filter((message) => message.role !== "system"),
+          ),
+        );
         return fauxAssistantMessage(i === 0 ? [fauxToolCall("advance", {})] : [fauxText("done")], {
           stopReason: i === 0 ? "toolUse" : "stop",
         });
@@ -127,7 +137,7 @@ test.each([
   { kind: "fresh", target: "other" },
   { kind: "nested", target: "other" },
 ] as const)(
-  "$kind worker in $target receives permitted main memory without parent transcript",
+  "$kind worker in $target receives permitted main memory and its native tail",
   async (scenario) => {
     const { kind } = scenario;
     const directory = await mkdtemp(join(tmpdir(), "batty-overview-"));
@@ -150,6 +160,7 @@ test.each([
       {
         getAssistantWorkspaceId: async () =>
           (await listWorkspaces(config)).find((workspace) => workspace.isAssistant)?.id,
+        sessionTailBytes: 1,
         nodeBytes: 80,
         viewBytes: 100,
         compress: async () => {
@@ -197,6 +208,20 @@ test.each([
       let navigated = 0;
       let rejectedDelegation = false;
       const overview = await memory.prepare();
+      const preparedIndex = (await harness.snapshot(MemoryIndexDoc, main.id, context))!;
+      const snapshot = {
+        generation: preparedIndex.generation ?? 0,
+        count: preparedIndex.viewCount,
+        prepared: preparedIndex.viewCount,
+      };
+      const last = (await main.entries({}, 1, undefined, context)).items[0]!.id;
+      await main.commit(async (tx) => {
+        Object.assign(await tx.doc(SessionMemory, main.id), {
+          boundary: last + 1,
+          view: snapshotView(overview, snapshot),
+          snapshot,
+        });
+      }, context);
       const line = overview.match(/(\d+)\+(\d+)\|/)!;
       const code = `text(await searchTools("memory_overview"));
 text(ALL_TOOLS);
@@ -235,7 +260,9 @@ text(await tools.memory_zoom({id, n: 1}));`;
               const text = JSON.stringify(
                 request.messages.filter((message) => message.role !== "system"),
               );
-              expect(text).not.toContain("launch catalog");
+              if (target === assistantId && kind !== "cron")
+                expect(text).toContain("launch catalog");
+              else expect(text).not.toContain("launch catalog");
               expect(text).toContain("inspect catalog");
               const system = request.messages.findLast((message) => message.role === "system");
               const names = system?.toolsAdded?.map((tool) => tool.name) ?? [];
@@ -391,7 +418,9 @@ test("automatic worker overview uses the built catalog without waiting for pendi
         ).wait(context)
       ).status,
     ).toBe("done");
-    expect(overview).toContain(built.replaceAll("\n", "\\n"));
+    expect(built).toContain("built decision");
+    expect(overview).toContain("built decision");
+    expect(overview).toContain("pending pending");
     expect(overview).not.toContain("pending summary");
     expect(compressions).toBe(1);
     expect(await harness.snapshot(MemoryIndexDoc, main.id, context)).toEqual(before);

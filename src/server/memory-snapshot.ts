@@ -1,7 +1,6 @@
 import type { Context } from "@earendil-works/chord";
 import type { MemorySnapshot } from "./memory-documents";
 import type { MemoryLeaf } from "./memory-projection";
-import { isMemoryNoise } from "./memory-noise";
 import { key, renderView, type Part } from "./memory-view";
 
 export function snapshotView(view: string, snapshot: MemorySnapshot) {
@@ -50,12 +49,6 @@ export async function captureMemorySnapshot(
     nodes.set(key(part), await source.node(part, context, source.generation));
   }
   for (const part of source.parts) await include(part);
-  for (let id = prepared; id < count; id++) {
-    const leaf = await source.leaf(id, context);
-    const part = { start: id, count: 1 };
-    parts.push(part);
-    nodes.set(key(part), isMemoryNoise(leaf) ? "" : `${leaf.kind}: ${leaf.text}`);
-  }
   const view = renderView(parts, nodes);
   return {
     view,

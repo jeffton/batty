@@ -21,6 +21,7 @@ test("optional recall uses spare context space without changing the overview or 
   models.setProvider(faux.provider);
   const memory = createMemory(
     {
+      sessionTailBytes: 1,
       nodeBytes: 60,
       viewBytes: 200,
       compress: async () => "user: archived conversation",

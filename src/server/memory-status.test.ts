@@ -42,18 +42,23 @@ test("background failure leaves the successful main task intact and clears only 
     context,
   );
   expect((await first.wait(context)).status).toBe("done");
+  await state.memory.sync();
+  await expect(state.memory.settle()).rejects.toThrow("Invalid prompt");
   await vi.waitFor(() => expect(state.memory.status().error).toContain("Invalid prompt"));
   expect(state.memory.status().pending).toBeGreaterThan(0);
   expect(errors).toHaveLength(1);
   failing = false;
   const second = await state.main.submit({ type: "input", content: "continue" }, context);
   expect((await second.wait(context)).status).toBe("done");
+  await state.memory.sync();
+  const settling = state.memory.settle();
   await mergeStarted.promise;
   // Successful leaf writes must not hide an error while the failed prefix is unpublished.
   expect(state.memory.status().error).toContain("Invalid prompt");
   expect(state.memory.status().pending).toBeGreaterThan(0);
   holdMerge = false;
   merge.release();
+  await settling;
   await vi.waitFor(() => {
     expect(state.memory.status().pending).toBe(0);
     expect(state.memory.status().error).toBeUndefined();
@@ -84,6 +89,8 @@ test("cached nodes clear a publication error when the prefix is successfully set
       ).wait(context)
     ).status,
   ).toBe("done");
+  await state.memory.sync();
+  await expect(state.memory.settle()).rejects.toThrow("Publication interrupted");
   await vi.waitFor(() => expect(state.memory.status().error).toContain("Publication interrupted"));
   const compressions = f.compressions();
   failPublication = false;

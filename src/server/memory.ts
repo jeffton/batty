@@ -1,6 +1,6 @@
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { BACKGROUND_CONTEXT, withCancel, awaitWithContext } from "@earendil-works/chord/context";
+import { BACKGROUND_CONTEXT, withCancel } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord";
 import type { ImageContent, Models, TextContent } from "@earendil-works/pi-ai";
 import {
@@ -68,6 +68,7 @@ export type MemoryConfig = {
   memoryReasoning?: "minimal" | "low" | "medium" | "high";
   nodeBytes?: number;
   viewBytes?: number;
+  sessionTailBytes?: number;
   retryMs?: number;
   onError?: (error: unknown) => void;
   onProgress?: (progress: { completed: number; total: number; nodes: number }) => void;
@@ -113,11 +114,11 @@ export function createMemory(config: MemoryConfig, models: Models) {
   );
   let maintenance: { generation: number; settled: number };
   let treeWrites = 0;
+  let preparationTarget = 0;
   // Only the current overview is pinned; cold branches never enter Pi's tracker cache.
   let overviewNodes = new Map<string, string>();
   let overviewParts: Part[] = [];
   let overviewGeneration = 0;
-  let overviewChanged = Promise.withResolvers<void>();
   async function readTree<T extends MemoryLeaf | { text: string }>(
     kind: string,
     name: string,
@@ -213,9 +214,6 @@ export function createMemory(config: MemoryConfig, models: Models) {
     overviewNodes = current;
     overviewParts = parts;
     overviewGeneration = generation;
-    const changed = overviewChanged;
-    overviewChanged = Promise.withResolvers<void>();
-    changed.resolve();
   }
   let serial: Promise<unknown> = Promise.resolve();
   let writer: Promise<unknown> = Promise.resolve();
@@ -491,8 +489,8 @@ export function createMemory(config: MemoryConfig, models: Models) {
       pipeline.cancel();
     }
   }
-  async function settleNow(context: Context) {
-    const total = index.count;
+  async function settleNow(context: Context, total = index.count) {
+    preparationTarget = Math.max(preparationTarget, total);
     // Legacy cleanup writes into a new generation, never into a run's pinned tree.
     if (maintenance.settled < index.viewCount) await cleanLegacyNoise(context);
     while (maintenance.settled < total) {
@@ -515,14 +513,14 @@ export function createMemory(config: MemoryConfig, models: Models) {
       const viewCount = Math.max(index.viewCount, end);
       const batch: ViewBatch = { merging: index.merging };
       const fitted = await fitParts(parts, viewCount, context, generation, batch);
-      config.onProgress?.({ completed: viewCount, total: index.count, nodes: cache.size });
+      config.onProgress?.({ completed: viewCount, total, nodes: cache.size });
       await publishPrefix(
         expected,
         { settled: end, viewCount, parts: fitted, merging: batch.merging },
         context,
       );
     }
-    if (maintenance.settled === index.count) lastError = undefined;
+    if (maintenance.settled >= total) lastError = undefined;
   }
   const reportRebuild = (error: unknown) => {
     if (background.context.abortSignal?.aborted) return;
@@ -639,6 +637,9 @@ export function createMemory(config: MemoryConfig, models: Models) {
       await exclusive(() => load(context));
       await settleNow(context);
       return renderView(overviewParts, overviewNodes);
+    }).catch((error) => {
+      report(error);
+      throw error;
     });
   async function zoom(
     id: number,
@@ -741,30 +742,16 @@ export function createMemory(config: MemoryConfig, models: Models) {
       context,
     );
   }
-  async function conversationalView(
-    maximum: number,
-    fits: (view: string) => boolean,
-    context: Context,
-  ) {
-    let settling: Promise<unknown> | undefined;
-    for (;;) {
-      // Subscribe before capture so a publication between capture and wait is not lost.
-      const changed = overviewChanged.promise;
+  async function archiveView(maximum: number) {
+    return writeExclusive(async () => {
+      const context = background.context;
       const captured = await exclusive(() => captureView(maximum, context));
-      const view = snapshotView(captured.view, captured.snapshot);
-      if (fits(view)) return { view, snapshot: captured.snapshot };
-      if (captured.snapshot.prepared === captured.snapshot.count)
-        throw new Error("Main context exceeds the model's input budget after memory preparation");
-      // Memory's display target is not a request limit. Only real model pressure
-      // waits, and a usable published prefix releases the request immediately.
-      if (!settling) {
-        settling = settle(background.context);
-        void settling.catch((error) => {
-          if (!background.context.abortSignal?.aborted) report(error);
-        });
-      }
-      await awaitWithContext(Promise.race([changed, settling]), context);
-    }
+      await settleNow(context, captured.snapshot.count);
+      const prepared = await exclusive(() => captureView(maximum, context));
+      if (prepared.snapshot.count !== prepared.snapshot.prepared)
+        throw new Error("Session archive prefix is not fully prepared");
+      return { view: snapshotView(prepared.view, prepared.snapshot), snapshot: prepared.snapshot };
+    });
   }
   const compress = createMemoryCompressor(config, models, recordMemoryCall, report);
   const requests = createMemoryRequests({
@@ -773,19 +760,15 @@ export function createMemory(config: MemoryConfig, models: Models) {
     rootSessionId: () => rootSessionId,
     assistantWorkspaceId: async () => config.getAssistantWorkspaceId?.(),
     load,
-    conversationalView,
-    preparedView: () => ({
-      view: snapshotView(renderView(overviewParts, overviewNodes), {
-        generation: overviewGeneration,
-        count: index.viewCount,
-        prepared: index.viewCount,
+    archiveView,
+    readyArchive: async (maximum, context) =>
+      exclusive(async () => {
+        const captured = await captureView(maximum, context);
+        return captured.snapshot.count === captured.snapshot.prepared
+          ? { view: snapshotView(captured.view, captured.snapshot), snapshot: captured.snapshot }
+          : undefined;
       }),
-      snapshot: {
-        generation: overviewGeneration,
-        count: index.viewCount,
-        prepared: index.viewCount,
-      },
-    }),
+    sessionTailBytes: config.sessionTailBytes,
     zoom: zoomOutput,
     search,
     recall: async (prompt, recent, before, visible, context) =>
@@ -826,7 +809,6 @@ export function createMemory(config: MemoryConfig, models: Models) {
             await syncTo(maximum, background.context);
             await indexSearch(background.context);
           });
-          await settleNow(background.context);
         }).catch((error) => {
           if (!background.context.abortSignal?.aborted) report(error);
         });
@@ -859,7 +841,12 @@ export function createMemory(config: MemoryConfig, models: Models) {
           const maximum = Math.max(
             ...finished.map((change) => (change as { value: EntryRecord }).value.id),
           );
-          queueMicrotask(() => start(maximum));
+          queueMicrotask(() => {
+            start(maximum);
+            void requests.archiveCompleted(maximum).catch((error) => {
+              if (!background.context.abortSignal?.aborted) report(error);
+            });
+          });
         }
       });
       unsubscribeClose = harness.subscribeClose(() => background.cancel());
@@ -1009,7 +996,7 @@ export function createMemory(config: MemoryConfig, models: Models) {
       return {
         totalLeaves,
         builtLeaves,
-        pending: totalLeaves - builtLeaves,
+        pending: Math.max(0, preparationTarget - builtLeaves),
         settled: maintenance?.settled ?? 0,
         cacheBytes: cache.bytes,
         cacheEntries: cache.size,
@@ -1021,6 +1008,7 @@ export function createMemory(config: MemoryConfig, models: Models) {
       unsubscribe();
       unsubscribeClose();
       background.cancel();
+      await requests.close();
       await rebuilding;
       await writer;
       await serial;

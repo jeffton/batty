@@ -1,11 +1,10 @@
 import { expect, test } from "vite-plus/test";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { Type } from "@earendil-works/pi-ai";
-import { buildBaseOptions } from "@earendil-works/pi-ai/api/simple-options";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { GenerationTask, defineExtension, defineTool, hook } from "@earendil-works/pi-durable";
-import { Packets, MemoryIndexDoc } from "./memory-documents";
-import { snapshotFromView } from "./memory-snapshot";
+import { Packets, MemoryIndexDoc, SessionMemory } from "./memory-documents";
+import { snapshotFromView, snapshotView } from "./memory-snapshot";
 import { fixture, cleanup } from "./memory-test-fixture";
 
 function gate() {
@@ -22,7 +21,28 @@ function view(messages: readonly { role: string; content: unknown }[]) {
   )!.content as string;
 }
 
-test("new main runs finish with the raw tail while maintenance is still compressing", async () => {
+async function pinArchive(state: Awaited<ReturnType<Awaited<ReturnType<typeof fixture>>["open"]>>) {
+  const overview = await state.memory.prepare();
+  const entries = await state.main.entries({}, 1, undefined, context);
+  const boundary = Number(entries.items[0]!.id) + 1;
+  await state.main.commit(async (tx) => {
+    Object.assign(await tx.doc(SessionMemory, state.main.id), {
+      boundary,
+      view: snapshotView(overview, {
+        generation: 0,
+        count: state.memory.status().totalLeaves,
+        prepared: state.memory.status().builtLeaves,
+      }),
+      snapshot: {
+        generation: 0,
+        count: state.memory.status().totalLeaves,
+        prepared: state.memory.status().builtLeaves,
+      },
+    });
+  }, context);
+}
+
+test("new main runs finish with native originals while maintenance is still compressing", async () => {
   const f = await fixture();
   const started = gate(),
     blocked = gate();
@@ -67,11 +87,15 @@ test("new main runs finish with the raw tail while maintenance is still compress
   const requests: string[] = [];
   f.faux.setResponses(
     Array.from({ length: 2 }, () => (request) => {
-      const packet = view(request.messages);
-      expect(packet).toContain("established decision");
-      expect(packet).toContain(raw);
-      expect(packet).not.toContain("not summarized yet");
-      requests.push(packet);
+      const originals = request.messages.filter((message) => message.role !== "system");
+      expect(originals).toContainEqual(
+        expect.objectContaining({ role: "user", content: "established decision", timestamp: 1 }),
+      );
+      expect(originals).toContainEqual(
+        expect.objectContaining({ role: "user", content: raw, timestamp: 2 }),
+      );
+      expect(view(request.messages)).not.toContain("not summarized yet");
+      requests.push(JSON.stringify(originals));
       return fauxAssistantMessage([fauxText("answered before maintenance finished")]);
     }),
   );
@@ -118,7 +142,9 @@ test("new main input is answered before a slow repair publishes its replacement 
   f.faux.setResponses([
     (request) => {
       expect(snapshotFromView(view(request.messages))?.generation).toBe(0);
-      expect(view(request.messages)).toContain("original 0");
+      expect(request.messages).toContainEqual(
+        expect.objectContaining({ role: "user", content: "original 0", timestamp: 1 }),
+      );
       return fauxAssistantMessage([fauxText("answered before repair finished")]);
     },
   ]);
@@ -136,12 +162,13 @@ test("new main input is answered before a slow repair publishes its replacement 
   expect((await repair).generation).toBe(1);
 });
 
-test("oversized raw history waits for model capacity, not the memory view target", async () => {
-  const f = await fixture({ contextWindow: 10_000, maxTokens: 256 });
+test("over-threshold history remains available without waiting for background archival", async () => {
+  const f = await fixture();
   const started = gate(),
     blocked = gate();
   const state = await f.open({
     viewBytes: 100,
+    sessionTailBytes: 1_000,
     compress: async () => {
       started.release();
       await blocked.promise;
@@ -165,18 +192,23 @@ test("oversized raw history waits for model capacity, not the memory view target
   f.faux.setResponses([
     (request) => {
       called = true;
-      expect(buildBaseOptions(f.models.getModel("faux", "faux-1")!, request).maxTokens).toBe(256);
-      expect(view(request.messages)).toContain("retained decision");
-      expect(view(request.messages)).not.toContain("large original");
+      expect(request.messages).toContainEqual(
+        expect.objectContaining({
+          role: "user",
+          content: "large original ".repeat(2000),
+          timestamp: 1,
+        }),
+      );
+      expect(view(request.messages)).not.toContain("retained decision");
       return fauxAssistantMessage([fauxText("done")]);
     },
   ]);
   const submission = await state.main.submit({ type: "input", content: "continue" }, context);
   await started.promise;
-  expect(called).toBe(false);
-  expect((await submission.status(context)).status).toBe("placed");
-  blocked.release();
   expect((await submission.wait(context)).status).toBe("done");
+  expect(called).toBe(true);
+  expect((await state.harness.snapshot(SessionMemory, state.main.id, context))?.boundary).toBe(0);
+  blocked.release();
 });
 
 test("a published tree indexed past the run boundary cannot leak later entries into its packet", async () => {
@@ -228,8 +260,12 @@ test("a published tree indexed past the run boundary cannot leak later entries i
   f.faux.setResponses([
     (request) => {
       const packet = view(request.messages);
-      expect(packet).toContain("prior 0");
-      expect(packet).toContain("prior 1");
+      expect(request.messages).toContainEqual(
+        expect.objectContaining({ role: "user", content: "prior 0", timestamp: 1 }),
+      );
+      expect(request.messages).toContainEqual(
+        expect.objectContaining({ role: "user", content: "prior 1", timestamp: 2 }),
+      );
       expect(packet).not.toContain("current input");
       expect(packet).not.toContain("future secret");
       expect(JSON.stringify(request.messages)).not.toContain("future secret");
@@ -240,7 +276,7 @@ test("a published tree indexed past the run boundary cannot leak later entries i
   expect((await submission.wait(context)).status).toBe("done");
 });
 
-test("repair leaves the run's zoom tree unchanged and later runs select the repaired generation", async () => {
+test("repair leaves the run's zoom tree and later session packets pinned until rollover", async () => {
   const f = await fixture();
   const state = await f.open({
     viewBytes: 10_000,
@@ -260,7 +296,7 @@ test("repair leaves the run's zoom tree unchanged and later runs select the repa
         }),
       context,
     );
-  await state.memory.prepare();
+  await pinArchive(state);
   state.registry.install(
     defineExtension({
       name: "repair-during-run",
@@ -306,7 +342,10 @@ test("repair leaves the run's zoom tree unchanged and later runs select the repa
     (request) => {
       expect(
         JSON.stringify(request.messages.findLast((message) => message.role === "toolResult")),
-      ).toContain("repaired summary");
+      ).not.toContain("repaired summary");
+      expect(
+        JSON.stringify(request.messages.findLast((message) => message.role === "toolResult")),
+      ).toContain("original 0");
       return fauxAssistantMessage([fauxText("done")]);
     },
   ]);
@@ -327,7 +366,11 @@ test("repair leaves the run's zoom tree unchanged and later runs select the repa
       ).wait(context)
     ).status,
   ).toBe("done");
-  expect(snapshotFromView(packets[3]!)?.generation).toBe(1);
+  expect(snapshotFromView(packets[3]!)?.generation).toBe(0);
+  expect(packets[3]).toBe(packets[0]);
+  expect((await state.harness.snapshot(MemoryIndexDoc, state.main.id, context))?.generation).toBe(
+    1,
+  );
 });
 
 test("reopen resumes a run using its persisted packet despite a repair between model turns", async () => {
@@ -346,7 +389,7 @@ test("reopen resumes a run using its persisted packet despite a repair between m
         }),
       context,
     );
-  await state.memory.prepare();
+  await pinArchive(state);
   const started = gate();
   let firstView = "";
   state.registry.install(

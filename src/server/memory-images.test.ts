@@ -3,6 +3,8 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { fixture, cleanup } from "./memory-test-fixture";
+import { SessionMemory } from "./memory-documents";
+import { snapshotView } from "./memory-snapshot";
 
 const image: ImageContent = {
   type: "image",
@@ -46,6 +48,23 @@ test("leaf zoom retrieves only the selected archived message's images without po
   expect(overview).toContain("[image image/png]");
   expect(overview).not.toContain(image.data);
   expect(overview).not.toContain("private reasoning");
+  // Pin this archived prefix; live session images remain native until rollover.
+  const entries = await state.main.entries({}, 1, undefined, context);
+  await state.main.commit(async (tx) => {
+    Object.assign(await tx.doc(SessionMemory, state.main.id), {
+      boundary: Number(entries.items[0]!.id) + 1,
+      view: snapshotView(overview, {
+        generation: 0,
+        count: state.memory.status().totalLeaves,
+        prepared: state.memory.status().builtLeaves,
+      }),
+      snapshot: {
+        generation: 0,
+        count: state.memory.status().totalLeaves,
+        prepared: state.memory.status().builtLeaves,
+      },
+    });
+  }, context);
   // Retrieval must work from the persisted archive, not just this process's input.
   await state.memory.close();
   await state.harness.close(context);

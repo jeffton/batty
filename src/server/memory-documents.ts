@@ -3,9 +3,42 @@ import type { MemoryLeaf } from "./memory-projection";
 import type { Part } from "./memory-view";
 
 export type MemorySnapshot = { generation: number; count: number; prepared: number };
-export type MemoryPacket = { view: string; boundary: number; snapshot: MemorySnapshot };
+export type MemoryPacket = {
+  view: string;
+  boundary: number;
+  tailBoundary?: number;
+  snapshot: MemorySnapshot;
+};
 
-export const WorkerMemory = defineDoc<{ view: string | null; snapshot?: MemorySnapshot }>({
+export function emptySessionMemory() {
+  return {
+    boundary: 0,
+    view: '<chat>\n</chat>\n<!-- batty-optchat:{"generation":0,"count":0,"prepared":0} -->',
+    snapshot: { generation: 0, count: 0, prepared: 0 },
+  };
+}
+
+// Published only once the archived prefix is fully prepared. Until then the
+// canonical entries remain in the ordinary session tail.
+export const SessionMemory = defineDoc<{
+  boundary: number;
+  view: string;
+  snapshot: MemorySnapshot;
+}>({
+  kind: "batty.session-memory",
+  checkpointWhen: () => false,
+  version: 1,
+  scope: "conversation",
+  history: "latest",
+  fork: "initial",
+  initial: emptySessionMemory,
+});
+
+export const WorkerMemory = defineDoc<{
+  view: string | null;
+  snapshot?: MemorySnapshot;
+  tail?: string;
+}>({
   kind: "batty.worker-memory",
   checkpointWhen: () => false,
   version: 1,

@@ -19,7 +19,7 @@ import {
 import { createMemory } from "./memory";
 import { fixture, cleanup } from "./memory-test-fixture";
 
-test("fatal memory preparation aborts without dispatching raw canonical history", async () => {
+test("oversized original history fails admission without dispatch or silent truncation", async () => {
   const models = createModels();
   const faux = fauxProvider({ models: [{ id: "faux-1", contextWindow: 10_000, maxTokens: 256 }] });
   models.setProvider(faux.provider);
@@ -63,10 +63,15 @@ test("fatal memory preparation aborts without dispatching raw canonical history"
   ).wait(context);
   expect(settled.status).toBe("unanswered");
   expect(calls).toBe(0);
-  expect(memory.status().error).toContain("Memory model unavailable");
+  expect(memory.status().error).toContain("exceeds the model's input budget");
+  expect(
+    (await main.entries({}, 100, undefined, context)).items.flatMap((entry) => entry.model ?? []),
+  ).toContainEqual(
+    expect.objectContaining({ role: "user", content: "private original".repeat(2000) }),
+  );
 });
 
-test("each run starts from a persisted view and the full new input, never old raw turns", async () => {
+test("each run retains original turns as native messages alongside its persisted archive view", async () => {
   const fixtureState = await fixture();
   const state = await fixtureState.open();
   cleanup.push(() => state.harness.close(context));
@@ -88,7 +93,12 @@ test("each run starts from a persisted view and the full new input, never old ra
     await state.main.submit({ type: "input", content: "second", requestId: "second" }, context)
   ).wait(context);
   const second = requests[1] as { role: string; content: unknown }[];
-  expect(second.some((message) => message.role === "assistant")).toBe(false);
+  expect(second.filter((message) => message.role === "assistant")).toEqual([
+    expect.objectContaining({ content: [{ type: "text", text: "old exact reply" }] }),
+  ]);
+  expect(
+    second.filter((message) => message.role === "user" && message.content === "first"),
+  ).toHaveLength(1);
   expect(JSON.stringify(second)).toContain("old exact reply");
   expect(JSON.stringify(second)).toContain("batty-optchat:");
   expect(second[0]!.role).toBe("system");

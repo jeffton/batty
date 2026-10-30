@@ -2,9 +2,12 @@ import type { Message } from "@earendil-works/pi-ai";
 import type { EntryRecord } from "@earendil-works/pi-durable";
 import { decodeRuntimeNotice } from "./runtime-notices";
 
-// One size policy, with 20% hysteresis: advance in byte-sized batches, never
-// every turn. JSON includes tools, reasoning, reports and image payloads.
+// One context-size policy, with 20% hysteresis: advance in batches, never
+// every turn. Count meaningful content, not transport encoding or signatures.
 export const SESSION_TAIL_BYTES = 200_000;
+// A model-independent budget estimate (~2,000 text tokens), not an exact image
+// tokenizer. Compressed file size/base64 length does not describe image context.
+export const SESSION_IMAGE_BYTES = 8_000;
 export const SESSION_TAIL_RETAIN_RATIO = 0.8;
 
 function contributions(entries: readonly EntryRecord[]): Message[][] {
@@ -76,7 +79,30 @@ export function sessionMessages(entries: readonly EntryRecord[]): Message[] {
 }
 
 export function sessionBytes(messages: readonly Message[]): number {
-  return Buffer.byteLength(JSON.stringify(messages), "utf8");
+  const bytes = (text: string) => Buffer.byteLength(text, "utf8");
+  return messages.reduce((total, message) => {
+    // Small fixed allowance for role/framing; timestamps, provider usage and
+    // opaque replay signatures remain native but do not consume this budget.
+    let size = 32;
+    if (typeof message.content === "string") return total + size + bytes(message.content);
+    for (const block of message.content) {
+      switch (block.type) {
+        case "text":
+          size += bytes(block.text);
+          break;
+        case "thinking":
+          size += bytes(block.thinking);
+          break;
+        case "toolCall":
+          size += bytes(block.name) + bytes(JSON.stringify(block.arguments));
+          break;
+        case "image":
+          size += SESSION_IMAGE_BYTES;
+          break;
+      }
+    }
+    return total + size;
+  }, 0);
 }
 
 export function rolloverBoundary(
@@ -84,10 +110,8 @@ export function rolloverBoundary(
   currentInput: number,
   threshold: number,
 ): number | undefined {
-  const bytes = contributions(entries).map((messages) =>
-    messages.length ? sessionBytes(messages) - 1 : 0,
-  );
-  let remaining = bytes.reduce((sum, size) => sum + size, 1);
+  const bytes = contributions(entries).map((messages) => sessionBytes(messages));
+  let remaining = bytes.reduce((sum, size) => sum + size, 0);
   if (remaining <= threshold) return undefined;
   const boundaries = new Set([
     currentInput,

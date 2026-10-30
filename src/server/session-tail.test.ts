@@ -4,9 +4,70 @@ import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/
 import type { Message } from "@earendil-works/pi-ai";
 import { WorkerDoc } from "./orchestration";
 import { SessionMemory } from "./memory-documents";
-import { rolloverBoundary, sessionMessages } from "./session-tail";
+import {
+  rolloverBoundary,
+  sessionBytes,
+  sessionMessages,
+  SESSION_IMAGE_BYTES,
+} from "./session-tail";
 import type { EntryRecord } from "@earendil-works/pi-durable";
 import { fixture, cleanup } from "./memory-test-fixture";
+
+test("context budget ignores transport size while retaining image and reasoning originals", () => {
+  const photo: Message = {
+    role: "user",
+    content: [{ type: "image", data: "A".repeat(4_000_000), mimeType: "image/jpeg" }],
+    timestamp: 1,
+  };
+  const smallerPhoto: Message = {
+    ...photo,
+    content: [{ type: "image", data: "AAAA", mimeType: "image/jpeg" }],
+  };
+  expect(sessionBytes([photo])).toBe(32 + SESSION_IMAGE_BYTES);
+  expect(sessionBytes([photo])).toBe(sessionBytes([smallerPhoto]));
+  expect(
+    sessionBytes([
+      {
+        ...photo,
+        content: Array.from({ length: 2 }, () => ({
+          type: "image" as const,
+          data: "AAAA",
+          mimeType: "image/jpeg",
+        })),
+      },
+    ]),
+  ).toBe(32 + 2 * SESSION_IMAGE_BYTES);
+  const call = fauxAssistantMessage([
+    { type: "toolCall", id: "call", name: "check", arguments: { value: "å" } },
+  ]);
+  expect(sessionBytes([call])).toBe(32 + 5 + Buffer.byteLength('{"value":"å"}'));
+  expect(
+    sessionBytes([
+      {
+        role: "toolResult",
+        toolCallId: "call",
+        toolName: "check",
+        content: [{ type: "text", text: "result" }],
+        isError: false,
+        timestamp: 1,
+      },
+    ]),
+  ).toBe(32 + 6);
+  const thinking = fauxAssistantMessage([
+    { type: "thinking", thinking: "reasoning", thinkingSignature: "S".repeat(500_000) },
+    fauxText("answer"),
+  ]);
+  expect(sessionBytes([thinking])).toBe(32 + 9 + 6);
+  expect(sessionBytes([{ role: "user", content: "å", timestamp: 1 }])).toBe(34);
+  const entries = [
+    { id: 1, model: [photo, thinking] },
+    { id: 2, model: [{ role: "user", content: "next", timestamp: 2 }] },
+  ].map((entry) => ({ conversationId: 1, kind: "test", ...entry })) as unknown as EntryRecord[];
+  expect(rolloverBoundary(entries, 2, 200_000)).toBeUndefined();
+  expect(sessionMessages(entries)[0]).toBe(photo);
+  expect(sessionMessages(entries)[1]).toBe(thinking);
+  expect(rolloverBoundary(entries, 2, 5_000)).toBe(2);
+});
 
 function gate() {
   let release!: () => void;

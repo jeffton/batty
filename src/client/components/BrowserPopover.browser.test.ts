@@ -309,6 +309,38 @@ async function trackScrollEnd(selector?: string) {
     }
   };
 }
+async function fittedViewerFrame(page: Page) {
+  // Remote viewport changes precede encoder restart and the viewer's next paint.
+  // Wait for geometry, revision and decoded bitmap together, not just any frame.
+  let fitted!: Awaited<ReturnType<typeof service.cloudState>>;
+  await expect
+    .poll(
+      async () => {
+        const state = await service.cloudState(attachedBrowserId);
+        const ready = await page
+          .locator(".cloud-browser__image")
+          .evaluate((canvas: HTMLCanvasElement, state) => {
+            const viewport = canvas.parentElement!.getBoundingClientRect();
+            const width = Math.round(viewport.width);
+            const height = Math.round(viewport.height);
+            const ratio = Math.min(1, 1365 / Math.max(width, height));
+            return (
+              state.width === Math.round(width * ratio) &&
+              state.height === Math.round(height * ratio) &&
+              canvas.dataset.frame !== undefined &&
+              canvas.dataset.revision === state.revision &&
+              canvas.width === Math.ceil((state.width * state.deviceScaleFactor) / 2) * 2 &&
+              canvas.height === Math.ceil((state.height * state.deviceScaleFactor) / 2) * 2
+            );
+          }, state);
+        if (ready) fitted = state;
+        return ready;
+      },
+      { timeout: 10_000 },
+    )
+    .toBe(true);
+  return fitted;
+}
 async function tapRemote(page: Page, x: number, y: number) {
   const image = page.locator(".cloud-browser__image");
   const state = await service.cloudState(attachedBrowserId);
@@ -378,13 +410,8 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
     await page.getByRole("button", { name: "Open browser", exact: true }).click();
     const popover = page.locator("#site-preview--cloud");
     const image = popover.getByRole("img");
-    await expect.poll(() => image.count()).toBe(1);
-    await expect
-      .poll(() =>
-        image.evaluate((e: HTMLCanvasElement) => e.dataset.frame !== undefined && e.width > 0),
-      )
-      .toBe(true);
-    const remote = await service.cloudState(attachedBrowserId);
+    await expect.poll(() => image.count(), { timeout: 10_000 }).toBe(1);
+    const remote = await fittedViewerFrame(page);
     expect(remote.mobile).toBe(true);
     expect(remote.deviceScaleFactor).toBe(3);
     expect(await image.evaluate((e: HTMLCanvasElement) => [e.width, e.height])).toEqual([
@@ -518,13 +545,31 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
       .poll(async () => (await service.cloudState(attachedBrowserId)).width)
       .toBe(remote.width);
     const popup = (await service.cloudTarget(attachedBrowserId)).page;
+    await fittedViewerFrame(page);
     await popup.evaluate(() => history.pushState({}, "", "#section"));
-    await popover.getByRole("button", { name: "Go back" }).click();
+    // The server sees pushState before the socket publishes it. Wait until the
+    // viewer knows the history entry before asking it to go back.
+    await expect
+      .poll(() => addressInput.inputValue(), { timeout: 10_000 })
+      .toBe(`${backendUrl}/popup#section`);
+    const back = async () => {
+      const response = page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/control") &&
+          response.request().postDataJSON().action === "back",
+      );
+      await popover.getByRole("button", { name: "Go back" }).click();
+      expect((await response).ok()).toBe(true);
+    };
+    await back();
     await expect
       .poll(async () => (await service.cloudState(attachedBrowserId)).url)
       .toBe(`${backendUrl}/popup`);
     expect(popup.isClosed()).toBe(false);
-    await popover.getByRole("button", { name: "Go back" }).click();
+    await expect
+      .poll(() => addressInput.inputValue(), { timeout: 10_000 })
+      .toBe(`${backendUrl}/popup`);
+    await back();
     await expect
       .poll(async () => (await service.cloudState(attachedBrowserId)).title)
       .toBe("Shared target");
@@ -748,7 +793,7 @@ test("DPR3 binary frames fill the actual popover, retain edge input alignment an
       [false, false, true],
       [true, true, false],
     ];
-    await expect.poll(() => canvas.getAttribute("data-frame")).not.toBeNull();
+    await fittedViewerFrame(page);
     const original = await service.cloudTarget(attachedBrowserId);
     await expect.poll(() => canvas.getAttribute("data-revision")).toBe(original.state.revision);
     await page.screenshot({ path: "/tmp/cloud-coverage-portrait.png" });
@@ -774,16 +819,8 @@ test("DPR3 binary frames fill the actual popover, retain edge input alignment an
     await service.execute("integration", { action: "click", selector: "#edge" });
     await expect.poll(() => inspect("document.body.dataset.clicks")).toBe("2");
     await page.setViewportSize({ width: 844, height: 390 });
-    let rotated!: Awaited<ReturnType<typeof service.cloudState>>;
-    await expect
-      .poll(async () => {
-        const state = await service.cloudState(attachedBrowserId);
-        if (state.width <= 750 || (await canvas.getAttribute("data-revision")) !== state.revision)
-          return false;
-        rotated = state;
-        return true;
-      })
-      .toBe(true);
+    const rotated = await fittedViewerFrame(page);
+    expect(rotated.width).toBeGreaterThan(750);
     await expect.poll(colors).toEqual(expected);
     await tapRemote(page, rotated.width * 0.875, rotated.height * 0.85);
     await expect.poll(() => inspect("document.body.dataset.clicks")).toBe("3");
@@ -799,25 +836,8 @@ test("DPR3 binary frames fill the actual popover, retain edge input alignment an
       { width: 1000, height: 2400 },
     ]) {
       await page.setViewportSize(viewport);
-      let fitted!: Awaited<ReturnType<typeof service.cloudState>>;
-      await expect
-        .poll(async () => {
-          const bounds = await page.locator(".cloud-browser__viewport").boundingBox();
-          const width = Math.round(bounds!.width);
-          const height = Math.round(bounds!.height);
-          const ratio = Math.min(1, 1365 / Math.max(width, height));
-          const state = await service.cloudState(attachedBrowserId);
-          const ready =
-            Math.max(state.width, state.height) === 1365 &&
-            state.width === Math.round(width * ratio) &&
-            state.height === Math.round(height * ratio) &&
-            (await canvas.getAttribute("data-revision")) === state.revision;
-          if (ready) fitted = state;
-          return ready;
-        })
-        .toBe(true);
-      // A later ResizeObserver fit can supersede a matching revision before it
-      // paints. Check the geometry and current painted frame together above.
+      const fitted = await fittedViewerFrame(page);
+      expect(Math.max(fitted.width, fitted.height)).toBe(1365);
       await expect.poll(colors).toEqual(expected);
       expect(await page.locator(".cloud-browser__error").count()).toBe(0);
       const clicks = Number(await inspect("document.body.dataset.clicks"));

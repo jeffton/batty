@@ -64,6 +64,9 @@ export default defineConfig({
     sourcemap: true,
   },
   test: {
+    // Each integration worker can own several Chrome processes and a Vite server.
+    // Bound the shared worker pool rather than saturating the host CPU/RAM.
+    maxWorkers: 2,
     execArgv: ["--no-experimental-webstorage"],
     projects: [
       {
@@ -99,6 +102,10 @@ export default defineConfig({
       {
         test: {
           name: "browser",
+          // Native capture/touch fixtures need a compositor, not competing unit
+          // workers or other browser fixtures fighting for the same CPU budget.
+          sequence: { groupOrder: 1 },
+          maxWorkers: 1,
           // Browser startup, fixture compilation and systemd-backed calls are
           // integration work, not 5-second unit tests. Locator waits still fail fast.
           testTimeout: 30_000,

@@ -128,7 +128,7 @@ pnpm test:browser  # Browser fixtures, layout and native cache (Chromium/WebKit)
 pnpm test:all      # All groups; required before pushing
 ```
 
-Browser fixture servers use separate temporary Vite caches and a 30-second integration-test budget. Wait for observable state or events rather than fixed sleeps. Viewport cases cover layout; dark-mode cases cover styling rather than repeating every interaction.
+The shared test pool is capped at two workers. Browser tests run afterward, one file at a time, so native capture and touch fixtures do not compete with unit workers or other browser fixtures. CLI worker overrides remain available for larger hosts. Browser fixture servers use separate temporary Vite caches and a 30-second integration-test budget. Wait for observable state or events rather than fixed sleeps. Viewport cases cover layout; dark-mode cases cover styling rather than repeating every interaction.
 
 Before pushing changes, run the complete source validation below. Installations pull validated commits; deployment installs locked dependencies, builds the release and verifies the running service without repeating development checks or browser tests.
 

@@ -4,7 +4,7 @@ import { decodeRuntimeNotice } from "./runtime-notices";
 
 // One context-size policy, with 20% hysteresis: advance in batches, never
 // every turn. Count meaningful content, not transport encoding or signatures.
-export const SESSION_TAIL_BYTES = 200_000;
+export const SESSION_TAIL_BYTES = 600_000;
 // A model-independent budget estimate (~2,000 text tokens), not an exact image
 // tokenizer. Compressed file size/base64 length does not describe image context.
 export const SESSION_IMAGE_BYTES = 8_000;

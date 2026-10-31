@@ -24,7 +24,9 @@ async function handleKeydown(event: KeyboardEvent): Promise<void> {
   event.preventDefault();
   activeTab.value = props.tabs[nextIndex]!;
   await nextTick();
-  document.getElementById(`${props.idPrefix}-${activeTab.value}-tab`)?.focus();
+  const tab = document.getElementById(`${props.idPrefix}-${activeTab.value}-tab`);
+  tab?.focus();
+  tab?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 </script>
 
@@ -51,21 +53,21 @@ async function handleKeydown(event: KeyboardEvent): Promise<void> {
 <style scoped>
 .popover-tabs {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-  border-bottom: 1px solid var(--color-chrome-border);
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-inline: 0.5rem;
 }
 
 .popover-tabs__tab {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
   min-height: 44px;
-  padding: 0.55rem 0.8rem;
+  padding: 0.45rem 0.8rem;
   border: 0;
   border-bottom: 3px solid transparent;
-  margin-bottom: -1px;
   border-radius: 0.5rem 0.5rem 0 0;
   background: transparent;
   color: var(--color-text-subtle);

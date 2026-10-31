@@ -111,6 +111,54 @@ test("popover chrome remains keyboard-accessible and fits narrow screens in both
   }
 });
 
+test("popover tabs meet the body edge and stay on one navigable row on narrow screens", async () => {
+  for (const view of ["cron", "settings", "tools"]) {
+    for (const width of [320, 1280]) {
+      for (const colorScheme of ["light", "dark"] as const) {
+        const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
+        try {
+          await page.route("**/api/**", (route) =>
+            route.fulfill({ json: { names: [], servers: [] } }),
+          );
+          await page.goto(`${url}?view=${view}`);
+          const popover = page.locator(`#${view}`);
+          const tablist = popover.getByRole("tablist");
+          const tabs = tablist.getByRole("tab");
+          await tabs.first().focus();
+          await page.keyboard.press("End");
+          const last = tabs.last();
+          await expect.poll(() => last.getAttribute("aria-selected")).toBe("true");
+          expect(await last.evaluate((element) => element === document.activeElement)).toBe(true);
+          const layout = await popover.evaluate((element) => {
+            const header = element.querySelector(".full-popover__header")!;
+            const list = element.querySelector('[role="tablist"]')!;
+            const rect = list.getBoundingClientRect();
+            const buttons = [...list.querySelectorAll('[role="tab"]')];
+            const active = buttons.find(
+              (button) => button.getAttribute("aria-selected") === "true",
+            )!;
+            const selected = active.getBoundingClientRect();
+            return {
+              gap:
+                element.querySelector(".full-popover__body")!.getBoundingClientRect().top -
+                rect.bottom,
+              rows: buttons.map((button) => button.getBoundingClientRect().top),
+              fits: header.scrollWidth <= header.clientWidth,
+              selectedVisible: selected.left >= rect.left && selected.right <= rect.right + 1,
+            };
+          });
+          expect(layout.gap).toBeLessThanOrEqual(1);
+          expect(new Set(layout.rows).size).toBe(1);
+          expect(layout.fits).toBe(true);
+          expect(layout.selectedVisible).toBe(true);
+        } finally {
+          await page.close();
+        }
+      }
+    }
+  }
+});
+
 test("instance colors affect app header and footer, not controls or content", async () => {
   if (captureScreenshots) await fs.mkdir(".tmp/ui-feedback", { recursive: true });
   for (const colorScheme of ["light", "dark"] as const) {

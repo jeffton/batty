@@ -535,7 +535,9 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
     expect((await service.cloudState(attachedBrowserId)).height).toBe(remote.height);
     await popover.getByRole("button", { name: "Done", exact: true }).click();
     await page.setViewportSize({ width: 390, height: 844 });
-    await expect.poll(async () => (await image.boundingBox())!.height).toBe(remote.height);
+    await expect
+      .poll(async () => Math.abs((await image.boundingBox())!.height - remote.height))
+      .toBeLessThan(1);
     await image.evaluate((element) => {
       element.addEventListener(
         "pointermove",

@@ -122,10 +122,15 @@ onBeforeUnmount(removeFromStack);
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.5rem 1rem;
-  padding: 0.8rem 1rem;
+  padding: 0.65rem 1rem;
   border-bottom: 1px solid var(--color-chrome-border);
   background: var(--color-chrome-surface);
   box-shadow: var(--color-shadow-header);
+}
+
+.full-popover__header:has(.full-popover__header-content) {
+  row-gap: 0.25rem;
+  padding-bottom: 0;
 }
 
 .full-popover__heading {
@@ -159,6 +164,7 @@ onBeforeUnmount(removeFromStack);
 .full-popover__header-content {
   grid-column: 1 / -1;
   min-width: 0;
+  margin-inline: -1rem;
 }
 
 .full-popover__body {

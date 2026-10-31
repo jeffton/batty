@@ -11,6 +11,8 @@
       import { createApp, h } from "vue";
       import { createPinia } from "pinia";
       import SettingsPopover from "./SettingsPopover.vue";
+      import CronPopover from "./CronPopover.vue";
+      import ToolsPopover from "./ToolsPopover.vue";
       import ChatHeader from "./ChatHeader.vue";
       import MessageComposer from "./MessageComposer.vue";
       import { useAppStore } from "../stores/app";
@@ -48,6 +50,7 @@
       ];
       store.settings.defaultThinkingLevel = "medium";
       store.settings.memoryModel = "fixture/memory";
+      store.settings.memoryThinkingLevel = "high";
       store.settings.defaultModel = "model";
       store.settings.defaultProvider = "fixture";
       store.getBattyAgentsFile = async () => "Global instructions";
@@ -61,6 +64,9 @@
       };
       store.bootstrap = async () => {};
       store.refreshProviderAuthStatus = async () => {};
+      const view = new URLSearchParams(location.search).get("view") ?? "settings";
+      const popover =
+        view === "cron" ? CronPopover : view === "tools" ? ToolsPopover : SettingsPopover;
       createApp({
         render: () =>
           new URLSearchParams(location.search).has("shell")
@@ -69,11 +75,11 @@
                 h("main", { style: "flex:1" }, "Conversation"),
                 h(MessageComposer, { streaming: false, subagents: [] }),
               ])
-            : h(SettingsPopover, { popoverId: "settings", anchorName: "--settings" }),
+            : h(popover, { popoverId: view, anchorName: "--settings" }),
       })
         .use(pinia)
         .mount("#app");
-      document.getElementById("settings")?.showPopover();
+      document.getElementById(view)?.showPopover();
     </script>
   </body>
 </html>

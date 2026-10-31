@@ -70,9 +70,12 @@ test("popover chrome remains keyboard-accessible and fits narrow screens in both
               buttonColor: getComputedStyle(document.querySelector(".full-popover__close")!).color,
             };
           });
-          expect(chrome.background).toBe(
-            colorScheme === "light" ? "rgb(255, 255, 255)" : "rgb(23, 33, 40)",
-          );
+          const hex = colorScheme === "light" ? option.light : option.dark;
+          const rgb = hex
+            .slice(1)
+            .match(/../g)!
+            .map((part) => parseInt(part, 16));
+          expect(chrome.background).toBe(`rgb(${rgb.join(", ")})`);
           expect(chrome.shadow).not.toBe("none");
           expect(chrome.underline).toBe("solid");
           expect(chrome.underlineWidth).toBeGreaterThanOrEqual(2);

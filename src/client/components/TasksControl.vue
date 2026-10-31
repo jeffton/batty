@@ -198,7 +198,7 @@ function sessionToggle(taskId: string, event: Event): void {
   flex-shrink: 0;
   padding: 0.9rem 1rem 0.75rem;
   border-bottom: 1px solid var(--color-chrome-border);
-  background: var(--color-chrome-surface);
+  background: var(--color-bg-instance);
   color: var(--color-text-strong);
   font-size: 1rem;
   font-weight: 700;

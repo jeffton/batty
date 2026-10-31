@@ -124,7 +124,7 @@ onBeforeUnmount(removeFromStack);
   gap: 0.5rem 1rem;
   padding: 0.65rem 1rem;
   border-bottom: 1px solid var(--color-chrome-border);
-  background: var(--color-chrome-surface);
+  background: var(--color-bg-instance);
   box-shadow: var(--color-shadow-header);
 }
 

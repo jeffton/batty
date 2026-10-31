@@ -106,8 +106,7 @@
   --color-accent-soft: oklch(0.92 0.04 175);
   --color-accent-strong: oklch(0.45 0.12 175);
 
-  /* --- neutral popover chrome; instance colors are reserved for app header/footer --- */
-  --color-chrome-surface: #ffffff;
+  /* --- neutral chrome surface; app and popover headers use the instance color --- */
   --color-chrome-border: var(--color-border-soft);
   --color-chrome-hover: color-mix(in oklch, var(--color-accent) 12%, transparent);
   --color-chrome-active: color-mix(in oklch, var(--color-accent) 20%, transparent);
@@ -169,7 +168,6 @@
 
     /* --- per-install chrome --- */
     --color-bg-instance: var(--color-instance-dark);
-    --color-chrome-surface: #172128;
 
     /* --- surfaces --- */
     --color-bg-app: oklch(0.16 0.02 240);

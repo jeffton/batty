@@ -35,8 +35,8 @@ function thinkingLabel(value: string): string {
   flex-wrap: wrap;
   gap: 0.25rem;
   padding: 0.15rem;
-  background: var(--color-bg-elevated);
-  border-radius: 0.45rem;
+  background: var(--color-chrome-hover);
+  border-radius: var(--chrome-control-radius);
 }
 
 .thinking-picker.is-disabled {
@@ -48,7 +48,7 @@ function thinkingLabel(value: string): string {
   min-height: 44px;
   flex: 1;
   border: 0;
-  border-radius: 0.35rem;
+  border-radius: 0.7rem;
   background: transparent;
   color: var(--color-text-muted);
   padding: 0.3rem 0.4rem;
@@ -61,7 +61,7 @@ function thinkingLabel(value: string): string {
 @media (hover: hover) {
   .thinking-picker__btn:hover:not(:disabled):not(.is-active) {
     color: var(--color-text);
-    background: var(--color-bg-hover);
+    background: var(--color-chrome-hover);
   }
 }
 
@@ -69,6 +69,11 @@ function thinkingLabel(value: string): string {
   background: var(--color-user-bg);
   color: var(--color-user-text);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.thinking-picker__btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
 }
 
 .thinking-picker__btn:disabled {

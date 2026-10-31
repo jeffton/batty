@@ -49,7 +49,7 @@ function triggerClick(): void {
     <span class="spinner streaming-stop-control__spinner" aria-hidden="true" />
     <button
       v-if="!props.hideStop"
-      class="streaming-stop-control__button"
+      class="streaming-stop-control__button chrome-button chrome-button--icon chrome-button--danger"
       type="button"
       :aria-label="props.label ?? 'Stop'"
       :title="props.label ?? 'Stop'"
@@ -76,8 +76,8 @@ function triggerClick(): void {
   text-overflow: ellipsis;
   padding: 0.35rem 0.55rem;
   border-radius: 0.5rem;
-  background: var(--color-bg-elevated);
-  color: var(--color-text-muted);
+  background: var(--color-chrome-hover);
+  color: var(--color-link);
   font-size: 0.78rem;
   line-height: 1;
   white-space: nowrap;
@@ -88,32 +88,6 @@ function triggerClick(): void {
   height: 1rem;
   border-width: 2px;
   flex-shrink: 0;
-}
-
-.streaming-stop-control__button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 0;
-  border-radius: 0.5rem;
-  background: transparent;
-  color: var(--color-error);
-  cursor: pointer;
-  transition:
-    background 80ms ease,
-    color 80ms ease;
-}
-
-@media (hover: hover) {
-  .streaming-stop-control__button:hover:not(:disabled) {
-    background: var(--color-bg-elevated);
-  }
-}
-
-.streaming-stop-control__button:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 
 .streaming-stop-control__button :deep(svg) {

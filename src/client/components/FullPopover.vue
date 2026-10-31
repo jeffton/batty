@@ -69,7 +69,7 @@ onBeforeUnmount(removeFromStack);
         <slot name="header-actions" />
         <button
           type="button"
-          class="full-popover__close"
+          class="full-popover__close chrome-button chrome-button--icon"
           :aria-label="props.closeLabel"
           title="Close"
           @click="popoverElement?.hidePopover()"
@@ -98,8 +98,8 @@ onBeforeUnmount(removeFromStack);
   max-height: none;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.9rem;
+  border: 1px solid var(--color-chrome-border);
+  border-radius: 1.1rem;
   background: var(--color-bg-panel);
   color: var(--color-text);
   box-shadow: var(--color-shadow-popover);
@@ -122,10 +122,9 @@ onBeforeUnmount(removeFromStack);
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.5rem 1rem;
-  padding: 0.9rem 1rem 0.75rem;
-  border-bottom: 1px solid var(--color-border-soft);
-  background: var(--color-bg-panel-strong);
-  box-shadow: var(--color-shadow-header);
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid var(--color-chrome-border);
+  background: var(--color-chrome-surface);
 }
 
 .full-popover__heading {
@@ -133,8 +132,9 @@ onBeforeUnmount(removeFromStack);
 }
 
 .full-popover__title {
-  font-size: 1rem;
+  font-size: 1.08rem;
   font-weight: 700;
+  letter-spacing: -0.02em;
   color: var(--color-text-strong);
 }
 
@@ -160,26 +160,8 @@ onBeforeUnmount(removeFromStack);
   min-width: 0;
 }
 
-.full-popover__close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.5rem;
-  background: var(--color-bg-panel);
-  color: var(--color-text);
-  cursor: pointer;
-}
-
 .full-popover__body {
   min-height: 0;
   overflow: hidden;
-}
-
-@media (hover: hover) {
-  .full-popover__close:hover {
-    background: var(--color-bg-elevated-soft);
-  }
 }
 </style>

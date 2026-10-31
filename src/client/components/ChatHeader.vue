@@ -43,7 +43,7 @@ async function logout() {
     <div class="header__brand">
       <button
         type="button"
-        class="header__button"
+        class="header__button chrome-button chrome-button--icon"
         popovertarget="settings-popover"
         aria-label="Settings"
         title="Settings"
@@ -54,7 +54,7 @@ async function logout() {
     <button
       v-if="store.settings.cloudBrowserAvailable"
       type="button"
-      class="header__button"
+      class="header__button chrome-button chrome-button--icon"
       aria-label="Open browser"
       title="Open browser"
       :disabled="openingBrowser || !store.workspaces.length"
@@ -65,7 +65,7 @@ async function logout() {
     </button>
     <button
       type="button"
-      class="header__button"
+      class="header__button chrome-button chrome-button--icon"
       popovertarget="workers-popover"
       aria-label="Cron"
       title="Cron"
@@ -74,7 +74,7 @@ async function logout() {
     </button>
     <button
       type="button"
-      class="header__button"
+      class="header__button chrome-button chrome-button--icon"
       popovertarget="tools-popover"
       aria-label="Workspaces and tools"
       title="Workspaces and tools"
@@ -116,13 +116,15 @@ async function logout() {
   min-width: 0;
   padding: calc(var(--safe-area-top) + 0.5rem) calc(var(--safe-area-right) + 0.65rem) 0.5rem
     calc(var(--safe-area-left) + 0.65rem);
-  background: var(--color-bg-panel-strong);
-  border-bottom: 1px solid var(--color-border-soft);
-  box-shadow: var(--color-shadow-header);
+  background: var(--color-chrome-surface);
+  border-bottom: 1px solid var(--color-chrome-border);
 }
 .header__brand {
   display: flex;
   align-items: center;
+  margin-right: 0.15rem;
+  border-radius: var(--chrome-control-radius);
+  background: var(--color-chrome-hover);
 }
 .header__brand img {
   width: 1.6rem;
@@ -130,23 +132,7 @@ async function logout() {
   border-radius: 0.35rem;
 }
 .header__button {
-  display: grid;
-  place-items: center;
-  flex: 0 0 44px;
-  width: 44px;
-  height: 44px;
-  padding: 0;
-  border: 0;
-  border-radius: 0.5rem;
-  background: transparent;
-  color: var(--color-text-subtle);
-}
-.header__button:hover {
-  background: var(--color-bg-elevated);
-}
-.header__button:focus-visible {
-  outline: 2px solid var(--color-text-subtle);
-  outline-offset: -2px;
+  flex: 0 0 var(--button-size);
 }
 .header__spacer {
   flex: 1;

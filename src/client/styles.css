@@ -11,9 +11,9 @@
   width: fit-content;
   padding: 0.45rem 0.65rem;
   border: 0;
-  border-radius: 0.45rem;
-  background: var(--color-bg-elevated);
-  color: inherit;
+  border-radius: var(--chrome-control-radius);
+  background: var(--color-chrome-hover);
+  color: var(--color-link);
   font-family: inherit;
   font-size: 0.82rem;
   text-decoration: none;
@@ -22,7 +22,12 @@
 
 .settings-popover__action--primary {
   background: var(--color-bg-selection);
-  color: var(--color-accent-strong);
+  color: var(--color-link);
+}
+
+.settings-popover__action:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 .settings-popover__action:disabled {
@@ -31,8 +36,8 @@
 }
 
 @media (hover: hover) {
-  .settings-popover__action:hover {
-    background: var(--color-bg-hover);
+  .settings-popover__action:hover:not(:disabled) {
+    background: var(--color-chrome-active);
   }
 
   .settings-popover__action--primary:hover {
@@ -51,6 +56,7 @@
 :root {
   --button-size: 44px;
   --button-icon-size: 22px;
+  --chrome-control-radius: 0.85rem;
 
   --safe-area-top: env(safe-area-inset-top, 0px);
   --safe-area-right: env(safe-area-inset-right, 0px);
@@ -99,6 +105,12 @@
   --color-accent: oklch(0.55 0.15 175);
   --color-accent-soft: oklch(0.92 0.04 175);
   --color-accent-strong: oklch(0.45 0.12 175);
+
+  /* --- shared toolbar and popover chrome (inherits light/dark/instance colors) --- */
+  --color-chrome-surface: color-mix(in oklch, var(--color-accent) 4%, var(--color-bg-panel-strong));
+  --color-chrome-border: color-mix(in oklch, var(--color-accent) 22%, var(--color-border-soft));
+  --color-chrome-hover: color-mix(in oklch, var(--color-accent) 12%, transparent);
+  --color-chrome-active: color-mix(in oklch, var(--color-accent) 20%, transparent);
 
   /* --- user message / active selection --- */
   --color-user-bg: oklch(0.88 0.06 175);
@@ -288,6 +300,67 @@ button,
 .mcp-settings__icon-btn {
   width: var(--button-size);
   padding: 0;
+}
+
+/* Quiet actions, one treatment across toolbars and popover headers. */
+.chrome-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0 0.75rem;
+  border: 0;
+  border-radius: var(--chrome-control-radius);
+  background: transparent;
+  color: var(--chrome-button-ink, var(--color-link));
+  font-weight: 600;
+  text-decoration: none;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.chrome-button--icon {
+  width: var(--button-size);
+  padding: 0;
+}
+
+.chrome-button--primary {
+  background: var(--color-chrome-hover);
+}
+
+.chrome-button--danger {
+  --chrome-button-ink: var(--color-error);
+  --chrome-button-hover: var(--color-error-soft);
+  --chrome-button-active: var(--color-error-soft-strong);
+}
+
+@media (hover: hover) {
+  .chrome-button:hover:not(:disabled) {
+    background: var(--chrome-button-hover, var(--color-chrome-hover));
+  }
+}
+
+.chrome-button:active:not(:disabled),
+.chrome-button[aria-expanded="true"],
+.chrome-button[aria-pressed="true"] {
+  background: var(--chrome-button-active, var(--color-chrome-active));
+}
+
+.chrome-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.chrome-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chrome-button {
+    transition: none;
+  }
 }
 
 button svg.lucide,

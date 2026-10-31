@@ -2,7 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import BasePopover from "@/client/components/BasePopover.vue";
-import { SquareStack, Check } from "@lucide/vue";
+import { ArrowLeft, RotateCw, SquareStack, Check } from "@lucide/vue";
 import BrowserCredentials from "@/client/components/BrowserCredentials.vue";
 import { useBrowserTransport } from "@/client/browser/transport";
 import { fitCloudViewport } from "@/shared/browser-geometry";
@@ -152,22 +152,25 @@ onBeforeUnmount(() => {
       <form class="cloud-browser__address" @submit.prevent="navigate">
         <button
           type="button"
+          class="chrome-button chrome-button--icon"
           :disabled="!ready"
           aria-label="Go back"
           @click="control({ action: 'back' })"
         >
-          ←
+          <ArrowLeft :size="18" />
         </button>
         <button
           type="button"
+          class="chrome-button chrome-button--icon"
           :disabled="!ready"
           aria-label="Reload page"
           @click="control({ action: 'reload' })"
         >
-          ↻
+          <RotateCw :size="18" />
         </button>
         <button
           type="button"
+          class="chrome-button chrome-button--icon"
           :disabled="!ready"
           :popovertarget="`${popoverId}-tabs`"
           aria-label="Choose tab"
@@ -215,7 +218,10 @@ onBeforeUnmount(() => {
     </template>
     <div class="cloud-browser">
       <div v-if="error" class="cloud-browser__error" role="alert">
-        {{ error }} <button v-if="!ended" type="button" @click="startViewing">Reconnect</button>
+        {{ error }}
+        <button v-if="!ended" type="button" class="chrome-button" @click="startViewing">
+          Reconnect
+        </button>
       </div>
       <div ref="viewport" class="cloud-browser__viewport">
         <canvas
@@ -279,7 +285,9 @@ onBeforeUnmount(() => {
           @compositionend="scheduleInput"
           @keydown.enter="submitInput"
         />
-        <button type="button" @click="dismissInput">Done</button>
+        <button type="button" class="chrome-button chrome-button--primary" @click="dismissInput">
+          Done
+        </button>
       </div>
     </div>
   </FullPopover>
@@ -312,7 +320,8 @@ onBeforeUnmount(() => {
 }
 .cloud-browser-tabs button:hover,
 .cloud-browser-tabs button[aria-current] {
-  background: var(--color-bg-elevated);
+  background: var(--color-chrome-hover);
+  color: var(--color-link);
 }
 .cloud-browser-tabs__label {
   display: grid;
@@ -348,22 +357,19 @@ onBeforeUnmount(() => {
   gap: 0.35rem;
   min-width: 0;
 }
-.cloud-browser__address button,
 .cloud-browser__address input,
-.cloud-browser button,
 .cloud-browser input,
 .cloud-browser textarea {
   min-height: 2.4rem;
   padding: 0.35rem 0.5rem;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.45rem;
-  background: var(--color-bg-panel);
+  border: 1px solid var(--color-chrome-border);
+  border-radius: var(--chrome-control-radius);
+  background: var(--color-bg-panel-strong);
   color: var(--color-text);
   font: inherit;
   font-size: 1rem;
 }
-.cloud-browser__address input,
-.cloud-browser__address button {
+.cloud-browser__address input {
   height: var(--button-size);
   min-height: var(--button-size);
 }
@@ -374,13 +380,11 @@ onBeforeUnmount(() => {
   min-width: 0;
   width: 0;
 }
-.cloud-browser__address button,
-.cloud-browser button {
-  flex-shrink: 0;
-  cursor: pointer;
-}
-.cloud-browser__address button:disabled {
-  opacity: 0.5;
+.cloud-browser__address input:focus-visible,
+.cloud-browser input:focus-visible,
+.cloud-browser textarea:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
 }
 .cloud-browser__error,
 .cloud-browser__connection {

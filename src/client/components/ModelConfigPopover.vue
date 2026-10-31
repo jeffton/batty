@@ -136,8 +136,13 @@ watch(
   align-items: center;
   gap: 0.4rem;
   padding: 0.35rem 0.5rem;
-  background: var(--color-bg-elevated);
-  border-radius: 0.5rem;
+  background: var(--color-chrome-hover);
+  border-radius: var(--chrome-control-radius);
+}
+
+.mc-popover__search-row:focus-within {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
 }
 
 .mc-popover__search-icon {
@@ -185,7 +190,7 @@ watch(
 
 @media (hover: hover) {
   .mc-popover__model:hover:not(.is-active) {
-    background: var(--color-bg-hover);
+    background: var(--color-chrome-hover);
   }
 }
 

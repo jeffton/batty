@@ -141,7 +141,13 @@ async function fill(): Promise<void> {
         :disabled="busy || !target"
         enterkeyhint="done"
       />
-      <button type="submit" :disabled="busy || !target">Fill</button>
+      <button
+        type="submit"
+        class="chrome-button chrome-button--primary"
+        :disabled="busy || !target"
+      >
+        Fill
+      </button>
     </div>
   </form>
 </template>
@@ -165,17 +171,20 @@ p {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
   gap: 0.35rem;
 }
-input,
-button {
+input {
   min-width: 0;
   min-height: 2.4rem;
   padding: 0.35rem 0.5rem;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.45rem;
-  background: var(--color-bg-panel);
+  border: 1px solid var(--color-chrome-border);
+  border-radius: var(--chrome-control-radius);
+  background: var(--color-bg-panel-strong);
   color: var(--color-text);
   font: inherit;
   font-size: 1rem;
+}
+input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
 }
 @media (max-width: 420px) {
   .browser-credentials__fields {

@@ -25,6 +25,57 @@ afterAll(async () => {
   if (server) await closeBrowserFixtureServer(server);
 });
 
+test("popover chrome remains keyboard-accessible and fits narrow screens in both themes", async () => {
+  for (const colorScheme of ["light", "dark"] as const) {
+    for (const width of [320, 1280]) {
+      const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
+      try {
+        await page.route("**/api/**", (route) => route.fulfill({ json: { names: [] } }));
+        await page.goto(url);
+        const tabs = page.getByRole("tablist", { name: "Settings", exact: true });
+        const first = tabs.getByRole("tab", { name: "Assistant", exact: true });
+        await first.focus();
+        await page.keyboard.press("ArrowRight");
+        await expect
+          .poll(() =>
+            page
+              .getByRole("tab", { name: "Appearance", exact: true })
+              .getAttribute("aria-selected"),
+          )
+          .toBe("true");
+        expect(await page.evaluate(() => document.activeElement?.getAttribute("role"))).toBe("tab");
+        const header = page.locator("#settings .full-popover__header");
+        expect(await header.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+          true,
+        );
+        const close = page.getByRole("button", { name: "Close settings", exact: true });
+        const bounds = (await close.boundingBox())!;
+        expect(bounds.width).toBeGreaterThanOrEqual(44);
+        expect(bounds.height).toBeGreaterThanOrEqual(44);
+        await close.focus();
+        expect(
+          await close.evaluate((element) => {
+            const style = getComputedStyle(element);
+            return (
+              element.matches(":focus-visible") &&
+              style.outlineStyle !== "none" &&
+              parseFloat(style.outlineWidth) >= 2
+            );
+          }),
+        ).toBe(true);
+        await page.keyboard.press("Enter");
+        await expect
+          .poll(() =>
+            page.locator("#settings").evaluate((element) => element.matches(":popover-open")),
+          )
+          .toBe(false);
+      } finally {
+        await page.close();
+      }
+    }
+  }
+});
+
 test("Remote settings provisions connections and grants on mobile without retaining tokens", async () => {
   const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
   const requests: Record<string, string>[] = [];

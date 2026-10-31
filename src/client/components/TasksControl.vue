@@ -77,7 +77,7 @@ function sessionToggle(taskId: string, event: Event): void {
 <template>
   <button
     v-if="tasks.length || tasksOpen"
-    class="tasks-control"
+    class="tasks-control chrome-button"
     type="button"
     :popovertarget="popoverId"
     aria-label="Running tasks"
@@ -150,10 +150,6 @@ function sessionToggle(taskId: string, event: Event): void {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  border: 0;
-  border-radius: 0.5rem;
-  background: transparent;
-  color: var(--color-text-muted);
   font-family: inherit;
   font-size: 0.78rem;
   white-space: nowrap;
@@ -182,12 +178,6 @@ function sessionToggle(taskId: string, event: Event): void {
   border-width: 1.5px;
 }
 
-@media (hover: hover) {
-  .tasks-control:hover {
-    background: var(--color-bg-elevated);
-  }
-}
-
 :global(.tasks-popover) {
   display: none;
 }
@@ -207,9 +197,8 @@ function sessionToggle(taskId: string, event: Event): void {
   z-index: 1;
   flex-shrink: 0;
   padding: 0.9rem 1rem 0.75rem;
-  border-bottom: 1px solid var(--color-border-soft);
-  background: var(--color-bg-panel-strong);
-  box-shadow: var(--color-shadow-header);
+  border-bottom: 1px solid var(--color-chrome-border);
+  background: var(--color-chrome-surface);
   color: var(--color-text-strong);
   font-size: 1rem;
   font-weight: 700;

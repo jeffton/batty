@@ -81,7 +81,7 @@ async function save(): Promise<void> {
   >
     <template #header-actions>
       <button
-        class="settings-popover__action settings-popover__action--primary"
+        class="chrome-button chrome-button--primary"
         type="button"
         :disabled="loading || saving || !target || !(target in drafts)"
         @click="save"

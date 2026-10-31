@@ -6,11 +6,6 @@
   background: var(--color-bg-panel);
 }
 
-.settings-popover .full-popover__header {
-  border-bottom: 0;
-  background: var(--color-bg-panel-strong);
-}
-
 .settings-popover .settings-popover__body {
   display: flex;
   height: 100%;
@@ -246,8 +241,7 @@
 }
 
 .settings-popover .settings-popover__action {
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.55rem;
+  border: 1px solid var(--color-chrome-border);
   background: var(--color-bg-panel-strong);
   gap: 0.5rem;
   font-size: 0.9rem;
@@ -262,6 +256,7 @@
 .settings-popover .settings-popover__action--primary {
   border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border-soft));
   background: var(--color-bg-selection);
+  color: var(--color-link);
 }
 
 .settings-popover .settings-popover__instruction-buttons .settings-popover__action {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Minus, Plus } from "@lucide/vue";
 import { ref } from "vue";
 import FullPopover from "./FullPopover.vue";
 
@@ -101,17 +102,24 @@ function onToggle(event: Event): void {
     <template #header-actions>
       <button
         type="button"
+        class="chrome-button chrome-button--icon"
         aria-label="Zoom out"
         :disabled="scale === 1"
         @click="zoom(scale / 1.5)"
       >
-        −
+        <Minus :size="18" />
       </button>
-      <button type="button" aria-label="Reset zoom" @click="reset">
+      <button type="button" class="chrome-button" aria-label="Reset zoom" @click="reset">
         {{ Math.round(scale * 100) }}%
       </button>
-      <button type="button" aria-label="Zoom in" :disabled="scale === 8" @click="zoom(scale * 1.5)">
-        +
+      <button
+        type="button"
+        class="chrome-button chrome-button--icon"
+        aria-label="Zoom in"
+        :disabled="scale === 8"
+        @click="zoom(scale * 1.5)"
+      >
+        <Plus :size="18" />
       </button>
     </template>
     <div

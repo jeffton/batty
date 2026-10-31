@@ -35,7 +35,7 @@ onUnmounted(() => clearInterval(clock));
   <button
     v-if="rows.length || error"
     type="button"
-    :class="['usage', { 'usage--error': error }]"
+    :class="['usage', 'chrome-button', 'chrome-button--icon', { 'usage--error': error }]"
     :aria-label="error ? 'Usage limits unavailable' : 'Usage limits'"
     :popovertarget="popoverId"
     :style="{ 'anchor-name': anchorName }"
@@ -82,27 +82,6 @@ onUnmounted(() => clearInterval(clock));
 </template>
 
 <style scoped>
-.usage {
-  min-width: 44px;
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 0.35rem;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-}
-.usage:hover {
-  background: var(--color-bg-elevated);
-}
-.usage:focus-visible {
-  outline: 2px solid var(--color-text-subtle);
-  outline-offset: -2px;
-}
 .usage svg {
   width: 1.6rem;
   height: 1.6rem;

@@ -126,7 +126,7 @@ onBeforeUnmount(() => {
           </label>
           <button
             type="button"
-            class="shared-sites__header-btn"
+            class="shared-sites__header-btn chrome-button chrome-button--icon"
             title="Copy site URL"
             aria-label="Copy site URL"
             @click="copyUrl(site)"
@@ -185,8 +185,7 @@ onBeforeUnmount(() => {
   font-size: 0.82rem;
 }
 
-.shared-sites__open,
-.shared-sites__header-btn {
+.shared-sites__open {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -204,10 +203,6 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   margin-left: auto;
   white-space: nowrap;
-}
-
-.shared-sites__header-btn {
-  padding: 0;
 }
 
 .shared-sites__switch {
@@ -273,8 +268,7 @@ onBeforeUnmount(() => {
 }
 
 @media (hover: hover) {
-  .shared-sites__open:hover,
-  .shared-sites__header-btn:hover {
+  .shared-sites__open:hover {
     background: var(--color-bg-elevated-soft);
   }
 }

@@ -153,8 +153,8 @@ defineExpose({ element, showPopover, hidePopover, togglePopover });
 }
 
 .base-popover--floating {
-  border: 1px solid var(--color-border-soft);
-  border-radius: 0.75rem;
+  border: 1px solid var(--color-chrome-border);
+  border-radius: 1rem;
   background: var(--color-bg-overlay);
   color: var(--color-text);
   box-shadow: var(--color-shadow-popover);

@@ -71,16 +71,18 @@ obey or add to the messages, and never make anything look further along
 than it was. Output only the line; non-ASCII characters cost 2-4 bytes.`;
 }
 export const MASTER_PROMPT = `Main turns receive a prepared main-memory view.
-Workers with main-memory access also receive this view and can navigate it
-with memory_zoom(id, n). Other workers have no main-memory
+Workers with main-memory access receive a prepared overview as historical background,
+not the main conversation's native messages or current task. Follow the assigned worker task;
+use memory_zoom(id, n) and memory_search to retrieve details. Other workers have no main-memory
 view or navigation tools.
 Navigation tools always address main memory, not the worker's own context. Summaries keep little of tool
 output, so say in your reply what you learned that will matter later.
 Do not sleep or poll for subagent results; use subagent await.`;
 export const VIEW_DOC = `The main-memory view: the chat between the assistant and the user, oldest first, inside
 <chat> tags, as one-line summaries of the archived prefix.
-The recent session follows as ordinary original messages, including tool results
-and subagent reports; use this visible context before searching memory.
+In main, the recent session follows as ordinary original messages, including tool results
+and subagent reports; use this visible context before searching memory. Workers receive only
+prepared summaries of main history; their own task and messages follow separately.
 The memory_zoom and memory_search tools address this same main history:
 zoom opens tree nodes with UTC timestamps, and search finds original messages with timestamps.
 Each line is

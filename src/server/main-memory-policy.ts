@@ -19,6 +19,11 @@ export function isMainMemoryView(message: Message): boolean {
           .filter((part) => part.type === "text")
           .map((part) => part.text)
           .join("\n");
+  if (
+    content.startsWith("<main-memory-background>\n") &&
+    content.endsWith("\n</main-memory-background>")
+  )
+    return true;
   return /^<chat>\n(?:\d+\+\d+\|[^\n]*(?:\n\d+\+\d+\|[^\n]*)*)?\n<\/chat>(?:\n<!-- batty-optchat:[^\n]+ -->)?$/.test(
     content,
   );

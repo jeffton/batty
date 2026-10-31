@@ -401,7 +401,7 @@ test("native history applies edits and pairs real results before interleaved rep
 });
 
 test.each([true, false])(
-  "assistant-workspace workers pin main originals and reports, initialized=%s",
+  "assistant-workspace workers pin prepared main decisions and reports as background, initialized=%s",
   async (initialized) => {
     const f = await fixture();
     const state = await f.open({ getAssistantWorkspaceId: async () => "assistant" });
@@ -431,6 +431,7 @@ test.each([true, false])(
         }),
       context,
     );
+    await state.memory.prepare();
     const worker = await state.harness.createConversation(
       { ownership: { kind: "ownerless" } },
       context,
@@ -445,6 +446,16 @@ test.each([true, false])(
         expect(text).toContain("recent main input");
         if (initialized) expect(text).toContain("recent main reply");
         expect(text).toContain("recent subagent finding");
+        expect(text).toContain("main-memory-background");
+        expect(request.messages.at(-1)).toMatchObject({
+          role: "user",
+          content: "independent task",
+        });
+        expect(
+          request.messages.some(
+            (message) => message.role === "user" && message.content === "recent main input",
+          ),
+        ).toBe(false);
         return fauxAssistantMessage([fauxText("worker done")]);
       },
     ]);

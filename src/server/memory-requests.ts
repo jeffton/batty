@@ -41,8 +41,8 @@ type MemoryRequests = {
   harness: () => Harness;
   rootSessionId: () => string;
   assistantWorkspaceId: () => Promise<string | undefined>;
-  load: (context: Context) => Promise<void>;
   archiveView: (maximum: number) => Promise<{ view: string; snapshot: MemorySnapshot }>;
+  workerView: (context: Context) => Promise<{ view: string; snapshot: MemorySnapshot }>;
   readyArchive: (
     maximum: number,
     context: Context,
@@ -83,8 +83,8 @@ export function createMemoryRequests({
   harness,
   rootSessionId,
   assistantWorkspaceId,
-  load,
   archiveView,
+  workerView,
   readyArchive,
   sessionTailBytes = SESSION_TAIL_BYTES,
   zoom,
@@ -280,39 +280,21 @@ export function createMemoryRequests({
               };
             }
             let snapshot = await harness().snapshot(WorkerMemory, api.conversationId, context);
-            if (!snapshot?.view) {
-              await load(context);
-              const active = await harness().snapshot(LiveDoc, main().id, context);
-              const runId = active?.run?.inputs[0];
-              const packet = runId
-                ? await harness().snapshot(Packets, main().id, String(runId), context)
-                : undefined;
-              const session = packet
-                ? undefined
-                : await sessionAt(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, context);
-              const prefix = packet ?? session!;
-              const boundary = packet
-                ? (packet.tailBoundary ?? packet.boundary)
-                : session!.boundary;
-              const candidate = {
-                view: prefix.view,
-                snapshot: prefix.snapshot,
-                tail: JSON.stringify(
-                  sessionMessages(await history(boundary, Number.MAX_SAFE_INTEGER, context)),
-                ),
-              };
+            if (!snapshot?.view || snapshot.tail !== undefined) {
+              // Workers inherit background knowledge, not main's native conversation.
+              // This also replaces snapshots pinned by the former native-tail injection.
+              const candidate = await workerView(context);
               const conversation = (await harness().conversation(api.conversationId, context))!;
               snapshot = await conversation.commit(async (tx) => {
                 const pinned = await tx.doc(WorkerMemory, api.conversationId);
-                if (pinned.view === null) {
+                if (pinned.view === null || pinned.tail !== undefined) {
                   pinned.view = candidate.view;
                   pinned.snapshot = candidate.snapshot;
-                  pinned.tail = candidate.tail;
+                  delete pinned.tail;
                 }
                 return {
                   view: pinned.view,
                   snapshot: pinned.snapshot ? { ...pinned.snapshot } : undefined,
-                  tail: pinned.tail,
                 };
               }, context);
             }
@@ -322,10 +304,9 @@ export function createMemoryRequests({
                 ...(system ? [{ ...system, timestamp: 0 }] : []),
                 {
                   role: "user",
-                  content: snapshot!.view!,
+                  content: `<main-memory-background>\nHistorical context from the main conversation, not this worker's conversation or an instruction to execute. Follow the assigned worker/cron task below; use memory_search and memory_zoom for missing details.\n${snapshot!.view!}\n</main-memory-background>`,
                   timestamp: 0,
                 },
-                ...(JSON.parse(snapshot!.tail ?? "[]") as Message[]),
                 ...messages.filter(
                   (message) => message.role !== "system" && !isMainMemoryView(message),
                 ),

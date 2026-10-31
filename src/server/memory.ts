@@ -756,8 +756,34 @@ export function createMemory(config: MemoryConfig, models: Models) {
     harness: () => harness,
     rootSessionId: () => rootSessionId,
     assistantWorkspaceId: async () => config.getAssistantWorkspaceId?.(),
-    load,
     archiveView,
+    workerView: (context) =>
+      exclusive(async () => {
+        const captured = await captureView(Number.MAX_SAFE_INTEGER, context);
+        const { count, prepared } = captured.snapshot;
+        const pending: string[] = [];
+        let bytes = 0;
+        let first = count;
+        // Bounded, non-model excerpts bridge compression lag without importing a
+        // second native conversation. Originals and all omitted IDs remain navigable.
+        for (let id = count - 1; id >= prepared; id--) {
+          const leaf = await leafAt(id, context);
+          const excerpt = Array.from(leaf.text.replaceAll("\n", " ")).slice(0, 256).join("");
+          const line = `${id}+1|[${leaf.date}] ${leaf.kind}: ${excerpt}${excerpt.length < leaf.text.length ? " … (zoom for full text)" : ""}`;
+          if (bytes + utf8Bytes(line) > 16_000) break;
+          pending.unshift(line);
+          bytes += utf8Bytes(line);
+          first = id;
+        }
+        const recent =
+          count > prepared
+            ? `\n<unprepared-main-memory>\nMain messages ${prepared}–${count - 1} are not summarized yet. These are bounded original excerpts, not summaries; use memory_search or memory_zoom(id, 1) for complete originals.${first > prepared ? ` Earlier pending messages ${prepared}–${first - 1} are available through those tools.` : ""}\n${pending.join("\n")}\n</unprepared-main-memory>`
+            : "";
+        return {
+          view: snapshotView(captured.view + recent, captured.snapshot),
+          snapshot: captured.snapshot,
+        };
+      }),
     readyArchive: async (maximum, context) =>
       exclusive(async () => {
         const captured = await captureView(maximum, context);

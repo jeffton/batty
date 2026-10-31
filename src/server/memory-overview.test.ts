@@ -137,7 +137,7 @@ test.each([
   { kind: "fresh", target: "other" },
   { kind: "nested", target: "other" },
 ] as const)(
-  "$kind worker in $target receives permitted main memory and its native tail",
+  "$kind worker in $target receives permitted summarized background without inheriting main turns",
   async (scenario) => {
     const { kind } = scenario;
     const directory = await mkdtemp(join(tmpdir(), "batty-overview-"));
@@ -260,9 +260,13 @@ text(await tools.memory_zoom({id, n: 1}));`;
               const text = JSON.stringify(
                 request.messages.filter((message) => message.role !== "system"),
               );
-              if (target === assistantId && kind !== "cron")
-                expect(text).toContain("launch catalog");
-              else expect(text).not.toContain("launch catalog");
+              expect(
+                request.messages.some(
+                  (message) => message.role === "user" && message.content === "launch catalog",
+                ),
+              ).toBe(false);
+              if (target === assistantId) expect(text).toContain("main-memory-background");
+              else expect(text).not.toContain("main-memory-background");
               expect(text).toContain("inspect catalog");
               const system = request.messages.findLast((message) => message.role === "system");
               const names = system?.toolsAdded?.map((tool) => tool.name) ?? [];
@@ -421,6 +425,9 @@ test("automatic worker overview uses the built catalog without waiting for pendi
     expect(built).toContain("built decision");
     expect(overview).toContain("built decision");
     expect(overview).toContain("pending pending");
+    expect(overview).not.toContain("pending ".repeat(100));
+    expect(overview).toContain("zoom for full text");
+    expect(overview).toContain("Main messages 1–1 are not summarized yet");
     expect(overview).not.toContain("pending summary");
     expect(compressions).toBe(1);
     expect(await harness.snapshot(MemoryIndexDoc, main.id, context)).toEqual(before);

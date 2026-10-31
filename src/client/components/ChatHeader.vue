@@ -125,7 +125,6 @@ async function logout() {
   align-items: center;
   margin-right: 0.15rem;
   border-radius: var(--chrome-control-radius);
-  background: var(--color-chrome-hover);
 }
 .header__brand img {
   width: 1.6rem;

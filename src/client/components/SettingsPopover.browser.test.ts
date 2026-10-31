@@ -1,5 +1,7 @@
 // @vitest-environment node
 import path from "node:path";
+import fs from "node:fs/promises";
+import { APP_COLOR_OPTIONS } from "@/shared/appearance";
 import vue from "@vitejs/plugin-vue";
 import { chromium, type Browser } from "patchright";
 import type { ViteDevServer } from "vite";
@@ -9,6 +11,7 @@ import { afterAll, beforeAll, expect, test } from "vite-plus/test";
 let server: ViteDevServer;
 let browser: Browser;
 let url: string;
+const captureScreenshots = process.env.BATTY_UI_SCREENSHOTS === "1";
 beforeAll(async () => {
   server = await createBrowserFixtureServer("src/client/components/SettingsPopover.fixture.html", {
     plugins: [vue()],
@@ -48,6 +51,38 @@ test("popover chrome remains keyboard-accessible and fits narrow screens in both
         expect(await header.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
           true,
         );
+        if (captureScreenshots) await fs.mkdir(".tmp/ui-feedback", { recursive: true });
+        let buttonColor: string | undefined;
+        for (const option of APP_COLOR_OPTIONS) {
+          await page.evaluate(`(async () => {
+            const { applyAppAppearance } = await import("/src/client/lib/appearance.ts");
+            applyAppAppearance({ title: "Batty", color: ${JSON.stringify(option.id)} });
+          })()`);
+          const chrome = await header.evaluate((element) => {
+            const style = getComputedStyle(element);
+            const tab = document.querySelector('[role="tab"][aria-selected="true"]')!;
+            const tabStyle = getComputedStyle(tab);
+            return {
+              background: style.backgroundColor,
+              shadow: style.boxShadow,
+              underline: tabStyle.borderBottomStyle,
+              underlineWidth: parseFloat(tabStyle.borderBottomWidth),
+              buttonColor: getComputedStyle(document.querySelector(".full-popover__close")!).color,
+            };
+          });
+          expect(chrome.background).toBe(
+            colorScheme === "light" ? "rgb(255, 255, 255)" : "rgb(23, 33, 40)",
+          );
+          expect(chrome.shadow).not.toBe("none");
+          expect(chrome.underline).toBe("solid");
+          expect(chrome.underlineWidth).toBeGreaterThanOrEqual(2);
+          buttonColor ??= chrome.buttonColor;
+          expect(chrome.buttonColor).toBe(buttonColor);
+          if (captureScreenshots)
+            await page.screenshot({
+              path: `.tmp/ui-feedback/settings-${option.id}-${colorScheme}-${width}.png`,
+            });
+        }
         const close = page.getByRole("button", { name: "Close settings", exact: true });
         const bounds = (await close.boundingBox())!;
         expect(bounds.width).toBeGreaterThanOrEqual(44);
@@ -69,6 +104,59 @@ test("popover chrome remains keyboard-accessible and fits narrow screens in both
             page.locator("#settings").evaluate((element) => element.matches(":popover-open")),
           )
           .toBe(false);
+      } finally {
+        await page.close();
+      }
+    }
+  }
+});
+
+test("instance colors affect app header and footer, not controls or content", async () => {
+  if (captureScreenshots) await fs.mkdir(".tmp/ui-feedback", { recursive: true });
+  for (const colorScheme of ["light", "dark"] as const) {
+    for (const width of [320, 1280]) {
+      const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
+      try {
+        await page.route("**/api/**", (route) => route.fulfill({ json: { names: [] } }));
+        await page.goto(`${url}?shell=1`);
+        let controls: unknown;
+        for (const option of APP_COLOR_OPTIONS) {
+          await page.evaluate(`(async () => {
+            const { applyAppAppearance } = await import("/src/client/lib/appearance.ts");
+            applyAppAppearance({ title: "Batty", color: ${JSON.stringify(option.id)} });
+          })()`);
+          const actual = await page.evaluate(() => {
+            const style = (selector: string) => getComputedStyle(document.querySelector(selector)!);
+            const button = style('.header [aria-label="Cron"]');
+            const input = style(".composer__input");
+            return {
+              header: style(".header").backgroundColor,
+              footer: style(".composer").backgroundColor,
+              shadow: style(".header").boxShadow,
+              controls: [
+                button.color,
+                button.backgroundColor,
+                input.color,
+                input.backgroundColor,
+                style(".app-shell").backgroundColor,
+              ],
+            };
+          });
+          const hex = colorScheme === "light" ? option.light : option.dark;
+          const rgb = hex
+            .slice(1)
+            .match(/../g)!
+            .map((part) => parseInt(part, 16));
+          expect(actual.header).toBe(`rgb(${rgb.join(", ")})`);
+          expect(actual.footer).toBe(actual.header);
+          expect(actual.shadow).not.toBe("none");
+          controls ??= actual.controls;
+          expect(actual.controls).toEqual(controls);
+          if (captureScreenshots)
+            await page.screenshot({
+              path: `.tmp/ui-feedback/shell-${option.id}-${colorScheme}-${width}.png`,
+            });
+        }
       } finally {
         await page.close();
       }

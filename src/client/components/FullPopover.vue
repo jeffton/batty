@@ -125,6 +125,7 @@ onBeforeUnmount(removeFromStack);
   padding: 0.8rem 1rem;
   border-bottom: 1px solid var(--color-chrome-border);
   background: var(--color-chrome-surface);
+  box-shadow: var(--color-shadow-header);
 }
 
 .full-popover__heading {

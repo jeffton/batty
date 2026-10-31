@@ -517,7 +517,7 @@ defineExpose({ clear, restore });
   position: relative;
   z-index: 2;
   padding: 0 0 calc(var(--safe-area-bottom) + 0.5rem);
-  background: var(--color-bg-panel-strong);
+  background: var(--color-bg-instance);
   border-top: 1px solid var(--color-border-soft);
   box-shadow: 0 -0.35rem 0.75rem oklch(0.15 0.02 240 / 0.08);
 }
@@ -613,7 +613,7 @@ defineExpose({ clear, restore });
   border: 0;
   border-bottom: 1px solid var(--color-border-soft);
   border-radius: 0;
-  background: var(--color-bg-panel-strong);
+  background: transparent;
   color: inherit;
   padding: 0.85rem 0 0.5rem;
   font-size: 0.95rem;

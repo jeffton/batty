@@ -52,7 +52,8 @@ async function handleKeydown(event: KeyboardEvent): Promise<void> {
 .popover-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.2rem;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--color-chrome-border);
 }
 
 .popover-tabs__tab {
@@ -63,7 +64,9 @@ async function handleKeydown(event: KeyboardEvent): Promise<void> {
   min-height: 44px;
   padding: 0.55rem 0.8rem;
   border: 0;
-  border-radius: var(--chrome-control-radius);
+  border-bottom: 3px solid transparent;
+  margin-bottom: -1px;
+  border-radius: 0.5rem 0.5rem 0 0;
   background: transparent;
   color: var(--color-text-subtle);
   font-family: inherit;
@@ -73,7 +76,7 @@ async function handleKeydown(event: KeyboardEvent): Promise<void> {
 }
 
 .popover-tabs__tab[aria-selected="true"] {
-  background: var(--color-chrome-hover);
+  border-bottom-color: var(--color-accent);
   color: var(--color-link);
 }
 

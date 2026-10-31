@@ -107,6 +107,12 @@ function scheduleResize(): void {
 function addressPointerDown(event: PointerEvent): void {
   addressWasFocused = document.activeElement === event.currentTarget;
 }
+const addressFocused = ref(false);
+function focusAddress(event: Event): void {
+  addressFocused.value = true;
+  tabs.value?.hidePopover();
+  selectAddress(event);
+}
 function selectAddress(event: Event): void {
   (event.currentTarget as HTMLInputElement).select();
 }
@@ -149,7 +155,11 @@ onBeforeUnmount(() => {
     @toggle="onToggle"
   >
     <template #heading>
-      <form class="cloud-browser__address" @submit.prevent="navigate">
+      <form
+        class="cloud-browser__address"
+        :class="{ 'cloud-browser__address--focused': addressFocused }"
+        @submit.prevent="navigate"
+      >
         <button
           type="button"
           class="chrome-button chrome-button--icon"
@@ -203,7 +213,8 @@ onBeforeUnmount(() => {
           ref="addressInput"
           v-model="address"
           aria-label="Browser address"
-          @focus="selectAddress"
+          @focus="focusAddress"
+          @blur="addressFocused = false"
           @pointerdown="addressPointerDown"
           @click="!addressWasFocused && selectAddress($event)"
           type="text"
@@ -368,6 +379,9 @@ onBeforeUnmount(() => {
   color: var(--color-text);
   font: inherit;
   font-size: 1rem;
+}
+.cloud-browser__address--focused > button {
+  display: none;
 }
 .cloud-browser__address input {
   height: var(--button-size);

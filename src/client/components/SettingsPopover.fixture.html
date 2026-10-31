@@ -11,6 +11,8 @@
       import { createApp, h } from "vue";
       import { createPinia } from "pinia";
       import SettingsPopover from "./SettingsPopover.vue";
+      import ChatHeader from "./ChatHeader.vue";
+      import MessageComposer from "./MessageComposer.vue";
       import { useAppStore } from "../stores/app";
       import "../styles.css";
       const pinia = createPinia();
@@ -60,11 +62,18 @@
       store.bootstrap = async () => {};
       store.refreshProviderAuthStatus = async () => {};
       createApp({
-        render: () => h(SettingsPopover, { popoverId: "settings", anchorName: "--settings" }),
+        render: () =>
+          new URLSearchParams(location.search).has("shell")
+            ? h("div", { class: "app-shell", style: "display:flex;flex-direction:column" }, [
+                h(ChatHeader),
+                h("main", { style: "flex:1" }, "Conversation"),
+                h(MessageComposer, { streaming: false, subagents: [] }),
+              ])
+            : h(SettingsPopover, { popoverId: "settings", anchorName: "--settings" }),
       })
         .use(pinia)
         .mount("#app");
-      document.getElementById("settings").showPopover();
+      document.getElementById("settings")?.showPopover();
     </script>
   </body>
 </html>

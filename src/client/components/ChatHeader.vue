@@ -116,7 +116,8 @@ async function logout() {
   min-width: 0;
   padding: calc(var(--safe-area-top) + 0.5rem) calc(var(--safe-area-right) + 0.65rem) 0.5rem
     calc(var(--safe-area-left) + 0.65rem);
-  background: var(--color-chrome-surface);
+  background: var(--color-bg-instance);
+  box-shadow: var(--color-shadow-header);
   border-bottom: 1px solid var(--color-chrome-border);
 }
 .header__brand {

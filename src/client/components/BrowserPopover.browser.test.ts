@@ -487,7 +487,16 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
     expect(Math.abs(remote.width - bounds.width)).toBeLessThan(2);
     expect(Math.abs(remote.height - bounds.height)).toBeLessThan(2);
     const addressInput = popover.getByRole("textbox", { name: "Browser address" });
+    const addressWidth = (await addressInput.boundingBox())!.width;
+    const inputHeight = (await addressInput.boundingBox())!.height;
+    expect((await popover.getByRole("button", { name: "Go back" }).boundingBox())!.height).toBe(
+      inputHeight,
+    );
     await addressInput.tap();
+    for (const name of ["Go back", "Reload page", "Choose tab"]) {
+      await popover.getByRole("button", { name, exact: true }).waitFor({ state: "hidden" });
+    }
+    expect((await addressInput.boundingBox())!.width).toBeGreaterThan(addressWidth + 100);
     expect(
       await addressInput.evaluate((e: HTMLInputElement) => [
         e.selectionStart,
@@ -499,14 +508,10 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
       (await addressInput.inputValue()).length,
       (await addressInput.inputValue()).length,
     ]);
-    const inputHeight = (await addressInput.boundingBox())!.height;
-    expect((await popover.getByRole("button", { name: "Go back" }).boundingBox())!.height).toBe(
-      inputHeight,
-    );
-    expect((await popover.getByRole("button", { name: "Reload page" }).boundingBox())!.height).toBe(
-      inputHeight,
-    );
     await addressInput.blur();
+    for (const name of ["Go back", "Reload page", "Choose tab"]) {
+      await popover.getByRole("button", { name, exact: true }).waitFor({ state: "visible" });
+    }
     expect(await popover.getByRole("textbox", { name: "Focused browser field" }).count()).toBe(0);
     await tapRemote(page, 40, 25);
     await expect.poll(() => inspect("document.body.dataset.clicks")).toBe("1");

@@ -806,6 +806,9 @@ export function createMemory(config: MemoryConfig, models: Models) {
             await syncTo(maximum, background.context);
             await indexSearch(background.context);
           });
+          // Prepare durable nodes continuously; SessionMemory keeps the prompt's
+          // prefix and native tail pinned until the normal atomic rollover.
+          await settleNow(background.context);
         }).catch((error) => {
           if (!background.context.abortSignal?.aborted) report(error);
         });

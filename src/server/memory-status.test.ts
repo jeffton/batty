@@ -42,8 +42,6 @@ test("background failure leaves the successful main task intact and clears only 
     context,
   );
   expect((await first.wait(context)).status).toBe("done");
-  await state.memory.sync();
-  await expect(state.memory.settle()).rejects.toThrow("Invalid prompt");
   await vi.waitFor(() => expect(state.memory.status().error).toContain("Invalid prompt"));
   expect(state.memory.status().pending).toBeGreaterThan(0);
   expect(errors).toHaveLength(1);
@@ -89,8 +87,6 @@ test("cached nodes clear a publication error when the prefix is successfully set
       ).wait(context)
     ).status,
   ).toBe("done");
-  await state.memory.sync();
-  await expect(state.memory.settle()).rejects.toThrow("Publication interrupted");
   await vi.waitFor(() => expect(state.memory.status().error).toContain("Publication interrupted"));
   const compressions = f.compressions();
   failPublication = false;

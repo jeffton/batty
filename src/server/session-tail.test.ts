@@ -171,6 +171,78 @@ test("async byte rollover retains every original until a complete prefix is publ
   ).toBe("done");
 });
 
+test("preparation below the threshold keeps the prompt stable, stays nonblocking and is reused after restart", async () => {
+  const f = await fixture();
+  const blocked = gate();
+  const started = gate();
+  const sources: string[] = [];
+  let hold = true;
+  const options = {
+    sessionTailBytes: 1_200,
+    compress: async (source: string) => {
+      sources.push(source);
+      if (hold) {
+        started.release();
+        await blocked.promise;
+      }
+      return "prepared decision";
+    },
+  };
+  const state = await f.open(options);
+  cleanup.push(async () => {
+    blocked.release();
+    await state.memory.close();
+    await state.harness.close(context);
+  });
+  const requests: Message[][] = [];
+  const response = (request: { messages: Message[] }) => {
+    requests.push(request.messages);
+    return fauxAssistantMessage([fauxText("reply")]);
+  };
+  const submit = async (main: typeof state.main, content: string) =>
+    expect(
+      (await (await main.submit({ type: "input", content }, context)).wait(context)).status,
+    ).toBe("done");
+  f.faux.setResponses([response, response, response, response]);
+  const original = "first decision ".repeat(45);
+  await submit(state.main, original);
+  await started.promise;
+  // No rollover is due. Even stalled preparatory inference must not delay a turn.
+  await submit(state.main, "second input");
+  expect(view(requests[1]!)).toBe(view(requests[0]!));
+  expect(JSON.stringify(requests[1])).toContain(original);
+  expect((await state.harness.snapshot(SessionMemory, state.main.id, context))!.boundary).toBe(0);
+  hold = false;
+  blocked.release();
+  await vi.waitFor(() => {
+    const status = state.memory.status();
+    expect(status.builtLeaves).toBeGreaterThanOrEqual(4);
+    expect(status.builtLeaves).toBe(status.totalLeaves);
+  });
+  expect((await state.harness.snapshot(SessionMemory, state.main.id, context))!.boundary).toBe(0);
+  await state.memory.close();
+  await state.harness.close(context);
+  const reopened = await f.open(options);
+  cleanup.push(async () => {
+    await reopened.memory.close();
+    await reopened.harness.close(context);
+  });
+  // The next completed run crosses the byte threshold; cached summaries survive
+  // restart and are reused when the session prefix is finally switched.
+  await submit(reopened.main, "third decision ".repeat(45));
+  expect(view(requests[2]!)).toBe(view(requests[0]!));
+  expect(JSON.stringify(requests[2])).toContain(original);
+  await vi.waitFor(async () =>
+    expect(
+      (await reopened.harness.snapshot(SessionMemory, reopened.main.id, context))!.boundary,
+    ).toBeGreaterThan(0),
+  );
+  await submit(reopened.main, "fourth input");
+  expect(JSON.stringify(requests[3])).not.toContain(original);
+  expect(JSON.stringify(requests[3])).toContain("prepared decision");
+  expect(sources.filter((source) => source.includes(original.trim()))).toHaveLength(1);
+});
+
 test("archival failure preserves the complete session and retries without waiting for inference", async () => {
   const f = await fixture();
   let failing = true;

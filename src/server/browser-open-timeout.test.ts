@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { expect, test, vi } from "vite-plus/test";
 import fs from "node:fs/promises";
+import { removeTestBrowserRoot } from "./test-browser-cleanup";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
@@ -136,7 +137,7 @@ test("open deadline and worker cancellation interrupt a hung snapshot and releas
     await service.dispose();
     website.closeAllConnections();
     await new Promise<void>((resolve) => website.close(() => resolve()));
-    await fs.rm(root, { recursive: true, force: true });
+    await removeTestBrowserRoot(root);
   }
 }, 20_000);
 
@@ -163,7 +164,7 @@ test("startup preserves the original failure when cleanup also fails", async () 
     target.mockRestore();
     close.mockRestore();
     await service.closeSession("worker");
-    await fs.rm(root, { recursive: true, force: true });
+    await removeTestBrowserRoot(root);
   }
 });
 

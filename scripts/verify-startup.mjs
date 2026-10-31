@@ -45,6 +45,9 @@ for (const baseUrl of ["/", "/batty"]) {
       env: {
         PATH: process.env.PATH,
         HOME: root,
+        // Own every temporary child artifact, including site-isolation runtimes,
+        // even when shutdown needs SIGKILL and cannot run the server close hooks.
+        TMPDIR: root,
         XDG_CONFIG_HOME: path.join(root, "config"),
         BATTY_SELF_PATH: repo,
         BATTY_HOST: "127.0.0.1",
@@ -132,6 +135,10 @@ for (const baseUrl of ["/", "/batty"]) {
       assert.deepEqual(await response.json(), {
         value: { input: "packaged-backend", process: "undefined" },
       });
+      assert(
+        (await fs.readdir(root)).some((name) => name.startsWith("batty-site-runtime-")),
+        "Site backend runtime must remain inside the disposable smoke fixture",
+      );
     }
     // Native nested tool-call IDs exceed Fastify's default 100-character parameter limit.
     const toolCallId =

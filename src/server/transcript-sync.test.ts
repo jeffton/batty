@@ -2,9 +2,14 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
-import { expect, test } from "vite-plus/test";
+import { afterEach, expect, test } from "vite-plus/test";
 import { entryMessages } from "./runtime";
 import { TranscriptImages } from "./transcript-images";
+
+const roots: string[] = [];
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+});
 
 test("persisted assistant attempts expose the durable task identity without changing originals", () => {
   const entries = [
@@ -49,6 +54,7 @@ test.each(["/", "/batty"])(
   "inline images at %s leave history payloads, and previews retain originals",
   async (baseUrl) => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), "batty-image-preview-"));
+    roots.push(directory);
     const original = await sharp({
       create: { width: 4000, height: 3000, channels: 3, background: "red" },
     })
@@ -106,6 +112,5 @@ test.each(["/", "/batty"])(
     expect(await fs.readFile((await images.resolve(invalidId, false)).path, "utf8")).toBe(
       "not an image",
     );
-    // Keep generated fixtures in the OS temp directory; no user files are affected.
   },
 );

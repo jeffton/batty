@@ -120,6 +120,8 @@ This uses no periodic client presence traffic. Challenges are bound to live stre
 
 ## Checks
 
+Shared server fixtures register disposers with `test-cleanup.ts`; `test-setup.ts` installs the cleanup hook for each file, including when modules are cached. Spawned smoke servers keep `TMPDIR` inside their disposable fixture root. Browser tests remove their isolated profiles before deleting fixture receipts; ordinary browser close/expiry retains production profiles and logins.
+
 `pnpm test` runs the server/shared and client-component groups. Server tests reuse Node threads; files with module mocks belong in `mockedServerTests` in `vite.config.ts` and run with isolated module graphs. Component tests use isolated happy-dom environments. Durable replay, process cancellation, browser persistence and SQLite scaling regressions remain in the standard suite.
 
 ```sh

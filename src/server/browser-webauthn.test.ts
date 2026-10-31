@@ -4,6 +4,7 @@ import { chromium } from "patchright";
 import http from "node:http";
 import { once } from "node:events";
 import fs from "node:fs/promises";
+import { removeTestBrowserRoot } from "./test-browser-cleanup";
 import os from "node:os";
 import path from "node:path";
 import { BrowserService } from "./browser-service";
@@ -104,7 +105,7 @@ test("tool browsers reject WebAuthn before website scripts, in frames and after 
     await service.closeSession("policy");
     await service.dispose();
     await site.close();
-    await fs.rm(root, { recursive: true, force: true });
+    await removeTestBrowserRoot(root);
   }
 }, 30_000);
 

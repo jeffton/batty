@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { expect, test, vi } from "vite-plus/test";
 import fs from "node:fs/promises";
+import { removeTestBrowserRoot } from "./test-browser-cleanup";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
@@ -56,7 +57,7 @@ async function fixture() {
       await service.dispose();
       website.closeAllConnections();
       await new Promise<void>((resolve) => website.close(() => resolve()));
-      await fs.rm(root, { recursive: true, force: true });
+      await removeTestBrowserRoot(root);
     },
   };
 }

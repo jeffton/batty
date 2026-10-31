@@ -73,6 +73,7 @@ export default defineConfig({
         test: {
           name: "server",
           environment: "node",
+          setupFiles: ["src/server/test-setup.ts"],
           include: ["src/server/**/*.test.ts", "src/shared/**/*.test.ts"],
           exclude: mockedServerTests,
           pool: "threads",

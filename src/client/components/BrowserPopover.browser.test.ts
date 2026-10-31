@@ -1,6 +1,7 @@
 // @vitest-environment node
 import path from "node:path";
 import fs from "node:fs/promises";
+import { removeTestBrowserRoot } from "@/server/test-browser-cleanup";
 import os from "node:os";
 import net from "node:net";
 import { once } from "node:events";
@@ -110,7 +111,7 @@ afterAll(async () => {
   await service?.dispose();
   await backend.close();
   if (server) await closeBrowserFixtureServer(server);
-  if (root) await fs.rm(root, { recursive: true, force: true });
+  if (root) await removeTestBrowserRoot(root);
 });
 
 test("toolbar starts a cloud browser and reopens the same live tabs on mobile", async () => {

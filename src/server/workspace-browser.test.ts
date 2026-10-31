@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { expect, test } from "vite-plus/test";
 import fs from "node:fs/promises";
+import { removeTestBrowserRoot } from "./test-browser-cleanup";
 import os from "node:os";
 import path from "node:path";
 import http from "node:http";
@@ -140,6 +141,6 @@ test("main and workers share tabs, login and cloud attachments within their work
     await service.dispose();
     website.closeAllConnections();
     await new Promise<void>((resolve) => website.close(() => resolve()));
-    await fs.rm(root, { recursive: true, force: true });
+    await removeTestBrowserRoot(root);
   }
 }, 30_000);

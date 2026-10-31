@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { expect, test, vi } from "vite-plus/test";
 import fs from "node:fs/promises";
+import { removeTestBrowserRoot } from "./test-browser-cleanup";
 import os from "node:os";
 import path from "node:path";
 import type { Browser } from "patchright";
@@ -75,5 +76,6 @@ test("Chromium reads native-prompt preferences before launch without disabling w
   } finally {
     vi.restoreAllMocks();
     await closePersistentBrowser(directory, browser);
+    await removeTestBrowserRoot(directory);
   }
 }, 20_000);

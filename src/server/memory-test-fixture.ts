@@ -1,18 +1,14 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach } from "vite-plus/test";
+import { cleanup } from "./test-cleanup";
+export { cleanup } from "./test-cleanup";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { createRegistry, Harness } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createMemory, type MemoryConfig } from "./memory";
-
-export const cleanup: (() => Promise<void>)[] = [];
-afterEach(async () => {
-  for (const close of cleanup.splice(0).reverse()) await close();
-});
 
 export async function fixture(model?: { contextWindow: number; maxTokens: number }) {
   const directory = await mkdtemp(join(tmpdir(), "batty-memory-"));

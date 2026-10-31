@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { removeTestBrowserRoot } from "./test-browser-cleanup";
 import http from "node:http";
 import { once } from "node:events";
 import os from "node:os";
@@ -62,6 +63,6 @@ test("offline maintenance closes all workspace browsers and retains cookies for 
     await service.dispose();
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    await fs.rm(root, { recursive: true, force: true });
+    await removeTestBrowserRoot(root);
   }
 }, 30_000);

@@ -40,6 +40,8 @@ Settings → Memory controls the summarization model and free-text language. The
 
 ### Usage accounting
 
+The toolbar context ring shows provider-measured input tokens for the last completed model request divided by the selected model's context window. Pi's normalized uncached input, cache reads and cache writes are added once; output/reasoning tokens are not added to that input measurement. This includes the actual system/tools, OptChat prefix, native tail, recall and provider-accounted images, not the 600 KB retention estimate or cumulative conversation usage. New inputs, streaming output and pending rollovers are not predicted. A missing measurement, failed request or model/provider mismatch displays unknown rather than zero. History pagination does not change the measurement.
+
 OptChat requests lead with effective instructions and tool declarations. Authenticated `GET /api/memory/usage` separates incremental and rebuild totals: attempts, measured/unmeasured outcomes, uncached input, cache reads/writes, output, reasoning and API-equivalent catalog cost. Reasoning is included in output, not added to it. This measures returned API usage, not subscription spending. Coverage starts with instrumentation; historical compression costs and provider-internal retries without returned usage are not recorded.
 
 The durable `batty.memory-usage` document stores totals. `batty.memory-call` entries in `runtime.sqlite` hold per-attempt operation, generation/node range, source hash, model, timing, stop reason, response ID and returned usage. They contain no source text or provider error messages and do not enter the memory tree or conversational usage totals.

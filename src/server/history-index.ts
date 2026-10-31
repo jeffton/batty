@@ -36,6 +36,50 @@ export async function createHistoryIndex(db: SqliteDatabase) {
     );
   });
   return {
+    async contextUsage(
+      conversationId: number,
+      model?: { provider: string; id: string; contextWindow: number },
+    ) {
+      // Read the latest request's provider measurement, independently of the
+      // displayed history page. Never sum usage across turns or count cache hits
+      // as free context: Pi normalizes input/cacheRead/cacheWrite as disjoint.
+      const row = await db.get<{
+        provider: string;
+        model: string;
+        stopReason: string;
+        usage: string | null;
+      }>(
+        `SELECT json_extract(message.value, '$.provider') AS provider,
+          json_extract(message.value, '$.model') AS model,
+          json_extract(message.value, '$.stopReason') AS stopReason,
+          json_extract(message.value, '$.usage') AS usage
+         FROM (SELECT json_extract(e.record, '$.model') AS messages FROM entries e
+           WHERE e.conversation_id = ? AND EXISTS (
+             SELECT 1 FROM json_each(json_extract(e.record, '$.model')) candidate
+             WHERE json_extract(candidate.value, '$.role') = 'assistant')
+           ORDER BY e.id DESC LIMIT 1) latest, json_each(latest.messages) message
+         WHERE json_extract(message.value, '$.role') = 'assistant'
+         ORDER BY CAST(message.key AS INTEGER) DESC LIMIT 1`,
+        conversationId,
+      );
+      const unknown = { contextTokens: null, contextPercent: null };
+      if (
+        !model ||
+        !row?.usage ||
+        row.provider !== model.provider ||
+        row.model !== model.id ||
+        ["error", "aborted", "deferred"].includes(row.stopReason)
+      )
+        return unknown;
+      const usage = JSON.parse(row.usage) as {
+        input: number;
+        cacheRead: number;
+        cacheWrite: number;
+      };
+      const tokens = usage.input + usage.cacheRead + usage.cacheWrite;
+      if (!(tokens > 0) || !(model.contextWindow > 0)) return unknown;
+      return { contextTokens: tokens, contextPercent: (tokens / model.contextWindow) * 100 };
+    },
     async responseArtifacts(conversationId: number, answerId: number) {
       const submission = await db.get<{ input: number | null }>(
         "SELECT MIN(json_extract(record, '$.entry')) AS input FROM submissions WHERE conversation_id = ? AND json_extract(record, '$.answer') = ?",

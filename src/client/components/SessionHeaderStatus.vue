@@ -25,7 +25,9 @@ const contextUsageLabel = computed(() => {
   const windowLabel = props.contextWindow == null ? "?" : formatTokenCount(props.contextWindow);
   const percentLabel = props.contextPercent == null ? "?" : `${props.contextPercent.toFixed(1)}%`;
 
-  return `ctx ${tokensLabel}/${windowLabel} · ${percentLabel}`;
+  return props.contextTokens == null || props.contextPercent == null
+    ? `Context usage unavailable · window ${windowLabel}`
+    : `Last completed model request: ${tokensLabel}/${windowLabel} · ${percentLabel}`;
 });
 const contextPercentValue = computed(() => {
   if (typeof props.contextPercent !== "number" || !Number.isFinite(props.contextPercent)) {
@@ -58,12 +60,14 @@ const contextArcClass = computed(() => {
   <div class="session-header-status">
     <div
       class="session-header-status__context"
+      :class="{ 'session-header-status__context--unknown': props.contextPercent == null }"
       :aria-label="contextUsageLabel"
       :title="contextUsageLabel"
     >
       <svg class="session-header-status__context-chart" viewBox="0 0 36 36" aria-hidden="true">
         <circle class="session-header-status__context-track" cx="18" cy="18" r="15.9155" />
         <circle
+          v-if="props.contextPercent != null"
           :class="['session-header-status__context-arc', contextArcClass]"
           :style="contextArcStyle"
           cx="18"
@@ -125,6 +129,10 @@ const contextArcClass = computed(() => {
 
 .session-header-status__context-track {
   stroke: var(--color-border-soft);
+}
+
+.session-header-status__context--unknown .session-header-status__context-track {
+  stroke-dasharray: 3 3;
 }
 
 .session-header-status__context-arc {

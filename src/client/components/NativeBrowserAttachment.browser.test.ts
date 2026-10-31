@@ -1,5 +1,6 @@
 // @vitest-environment node
 import fs from "node:fs/promises";
+import { removeTestBrowserRoot } from "@/server/test-browser-cleanup";
 import os from "node:os";
 import path from "node:path";
 import net from "node:net";
@@ -195,6 +196,6 @@ test("main browser tools render a live attachment through SSE, reload and reopen
     await runtime.tools.browserService.closeSession(workspaceBrowserKey("work"));
     await runtime.close();
     vi.unstubAllEnvs();
-    await fs.rm(root, { recursive: true, force: true });
+    await removeTestBrowserRoot(root);
   }
 }, 60_000);

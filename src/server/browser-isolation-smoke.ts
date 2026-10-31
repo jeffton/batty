@@ -5,6 +5,7 @@ import path from "node:path";
 import http from "node:http";
 import { once } from "node:events";
 import { BrowserService } from "./browser-service";
+import { removeBrowserIsolation } from "./browser-isolation";
 import { browserSessionDirectory, readBrowserJson } from "./browser-persistence";
 import { SshSocksProxy } from "./ssh-socks-proxy";
 import { startNativeBrowserVideo } from "./native-browser-video";
@@ -149,6 +150,8 @@ export async function verifyBrowserIsolation(): Promise<void> {
     await proxy?.dispose();
     website.closeAllConnections();
     await new Promise<void>((resolve) => website.close(() => resolve()));
+    await removeBrowserIsolation(browserSessionDirectory(root, "smoke"));
+    await removeBrowserIsolation(browserSessionDirectory(root, "proxy"));
     await fs.rm(root, { recursive: true, force: true });
   }
 }

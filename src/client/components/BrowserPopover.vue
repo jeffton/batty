@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
+import BasePopover from "@/client/components/BasePopover.vue";
+import { PanelsTopLeft, Check } from "@lucide/vue";
 import BrowserCredentials from "@/client/components/BrowserCredentials.vue";
 import { useBrowserTransport } from "@/client/browser/transport";
 import { fitCloudViewport } from "@/shared/browser-geometry";
@@ -9,6 +11,11 @@ const props = defineProps<{ popoverId: string; browserId: string; title: string 
 const viewport = ref<HTMLElement>();
 const address = ref("");
 const credentialsVisible = ref(false);
+const tabs = ref<InstanceType<typeof BasePopover>>();
+function selectTab(pageId: string): void {
+  tabs.value?.hidePopover();
+  void control({ action: "switch", pageId });
+}
 const addressInput = ref<HTMLInputElement>();
 let addressWasFocused = false;
 const viewStyle = ref<Record<string, string>>({});
@@ -23,6 +30,7 @@ const browser = useBrowserTransport(() => props.browserId, {
   onStop: () => {
     clearTimeout(resizeTimer);
     credentialsVisible.value = false;
+    tabs.value?.hidePopover();
   },
   fitViewport,
 });
@@ -158,6 +166,30 @@ onBeforeUnmount(() => {
         >
           ↻
         </button>
+        <button
+          type="button"
+          :disabled="!ready"
+          :popovertarget="`${popoverId}-tabs`"
+          aria-label="Choose tab"
+          title="Choose tab"
+        >
+          <PanelsTopLeft :size="18" />
+        </button>
+        <BasePopover :id="`${popoverId}-tabs`" ref="tabs" anchor-down class="cloud-browser-tabs">
+          <button
+            v-for="page in state?.pages"
+            :key="page.id"
+            type="button"
+            :aria-current="page.active ? 'page' : undefined"
+            @click="selectTab(page.id)"
+          >
+            <Check v-if="page.active" :size="16" aria-hidden="true" />
+            <span class="cloud-browser-tabs__label">
+              <strong>{{ page.title || page.url || "New tab" }}</strong>
+              <small v-if="page.title">{{ page.url }}</small>
+            </span>
+          </button>
+        </BasePopover>
         <input
           ref="addressInput"
           v-model="address"
@@ -248,6 +280,47 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+:global(.cloud-browser-tabs) {
+  width: 20rem;
+  padding: 0.3rem;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 0.6rem;
+  background: var(--color-bg-panel);
+  color: var(--color-text);
+  box-shadow: var(--color-shadow-popover);
+  overflow: auto;
+}
+.cloud-browser-tabs button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.6rem;
+  text-align: left;
+  border: 0;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.cloud-browser-tabs button:hover,
+.cloud-browser-tabs button[aria-current] {
+  background: var(--color-bg-elevated);
+}
+.cloud-browser-tabs__label {
+  display: grid;
+  min-width: 0;
+}
+.cloud-browser-tabs__label strong,
+.cloud-browser-tabs__label small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cloud-browser-tabs__label small {
+  color: var(--color-text-muted);
+}
 .browser-popover :deep(.full-popover__header) {
   padding: 0.4rem;
   gap: 0.4rem;

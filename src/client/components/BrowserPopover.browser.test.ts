@@ -5,7 +5,8 @@ import os from "node:os";
 import net from "node:net";
 import { once } from "node:events";
 import fastify from "fastify";
-import { BrowserService } from "@/server/browser-service";
+import { BrowserService, workspaceBrowserKey } from "@/server/browser-service";
+import { registerCloudBrowserLauncher } from "@/server/cloud-browser-launcher";
 import { registerCloudBrowserRoutes } from "@/server/routes/cloud-browser";
 import vue from "@vitejs/plugin-vue";
 import { chromium, type Browser, type Page } from "patchright";
@@ -78,6 +79,7 @@ beforeAll(async () => {
   backendUrl = `http://127.0.0.1:${port}`;
   server = await createBrowserFixtureServer("src/client/components/BrowserPopover.fixture.html", {
     plugins: [vue()],
+    define: { __BATTY_BUILD_ID__: JSON.stringify("dev") },
     resolve: { alias: { "@": path.resolve("src") } },
     server: {
       host: "127.0.0.1",
@@ -94,6 +96,9 @@ beforeAll(async () => {
   await server.listen();
   url = `${server.resolvedUrls!.local[0]}src/client/components/BrowserPopover.fixture.html`;
   closeStreams = await registerCloudBrowserRoutes(backend, service, server.resolvedUrls!.local[0]!);
+  registerCloudBrowserLauncher(backend, service, server.resolvedUrls!.local[0]!, true, async () => [
+    "integration",
+  ]);
   await backend.listen({ host: "127.0.0.1", port });
   browser = await chromium.launch({ headless: true });
 }, 30_000);
@@ -101,11 +106,64 @@ afterAll(async () => {
   await browser?.close();
   await closeStreams?.();
   await service?.closeSession("integration");
+  await service?.closeSession(workspaceBrowserKey("integration"));
   await service?.dispose();
   await backend.close();
   if (server) await closeBrowserFixtureServer(server);
   if (root) await fs.rm(root, { recursive: true, force: true });
 });
+
+test("toolbar starts a cloud browser and reopens the same live tabs on mobile", async () => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  try {
+    await context.addCookies([
+      { name: "cloud-auth", value: "test", url: server.resolvedUrls!.local[0]! },
+    ]);
+    const page = await context.newPage();
+    await page.goto(`${url}?toolbar=1`);
+    const opened = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/cloud-browser/open") &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "Open browser", exact: true }).click();
+    const descriptor = await (await opened).json();
+    const popover = page.locator("#toolbar-browser");
+    await popover.waitFor({ state: "visible" });
+    await expect
+      .poll(
+        () => popover.locator("canvas").evaluate((element) => element.dataset.frame !== undefined),
+        { timeout: 10_000 },
+      )
+      .toBe(true);
+    await service.execute(workspaceBrowserKey("integration"), {
+      action: "open",
+      url: `${backendUrl}/target`,
+    });
+    const state = await service.cloudState(descriptor.browserId);
+    const target = (await service.cloudTarget(descriptor.browserId)).page;
+    await target.evaluate(() => {
+      (globalThis as any).toolbarRetained = 42;
+    });
+    await popover.getByRole("button", { name: "Close popover", exact: true }).click();
+    await page.getByRole("button", { name: "Open browser", exact: true }).click();
+    await popover.waitFor({ state: "visible" });
+    const reopened = await service.cloudState(descriptor.browserId);
+    expect(reopened.pageId).toBe(state.pageId);
+    expect(reopened.pages).toHaveLength(1);
+    expect(await target.evaluate(() => (globalThis as any).toolbarRetained)).toBe(42);
+    expect(
+      await page.locator("header.header").evaluate((element) => element.scrollWidth),
+    ).toBeLessThanOrEqual(390);
+  } finally {
+    await context.close();
+    await service.closeSession(workspaceBrowserKey("integration"));
+  }
+}, 30_000);
 
 test("WebKit decodes production H.264, forwards taps and resumes after viewer reconnect", async () => {
   const { webkit } = await import("playwright-core");
@@ -546,6 +604,26 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
       .toBe(remote.width);
     const popup = (await service.cloudTarget(attachedBrowserId)).page;
     await fittedViewerFrame(page);
+    // The nested native popover stays below its header button and switches the shared tab.
+    const chooseTab = page.getByRole("button", { name: "Choose tab", exact: true });
+    await chooseTab.click();
+    const tabs = page.locator(".cloud-browser-tabs:popover-open");
+    await tabs.waitFor({ state: "visible" });
+    await expect.poll(() => tabs.locator("button").count()).toBe(2);
+    expect(await tabs.locator('[aria-current="page"]').textContent()).toContain("Popup target");
+    const buttonBounds = await chooseTab.boundingBox();
+    const tabBounds = await tabs.boundingBox();
+    expect(tabBounds!.y).toBeGreaterThanOrEqual(buttonBounds!.y + buttonBounds!.height);
+    expect(tabBounds!.x + tabBounds!.width).toBeLessThanOrEqual(390);
+    await tabs.getByRole("button", { name: /Shared target/ }).click();
+    await expect.poll(() => addressInput.inputValue()).toBe(`${backendUrl}/target`);
+    await fittedViewerFrame(page);
+    expect(await popover.evaluate((element) => element.matches(":popover-open"))).toBe(true);
+    await chooseTab.click();
+    await tabs.getByRole("button", { name: /Popup target/ }).click();
+    await expect.poll(() => addressInput.inputValue()).toBe(`${backendUrl}/popup`);
+    await fittedViewerFrame(page);
+    expect(popup.isClosed()).toBe(false);
     await popup.evaluate(() => history.pushState({}, "", "#section"));
     // The server sees pushState before the socket publishes it. Wait until the
     // viewer knows the history entry before asking it to go back.

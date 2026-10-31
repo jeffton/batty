@@ -30,6 +30,7 @@ import { registerBrowserErrorRoutes } from "./browser-errors";
 import { registerCronRoutes } from "./routes/cron";
 import { registerSiteRoutes } from "./routes/sites";
 import { registerCloudBrowserRoutes } from "./routes/cloud-browser";
+import { cloudBrowserAvailable, registerCloudBrowserLauncher } from "./cloud-browser-launcher";
 import { registerMcpRoutes } from "./routes/mcp";
 import { registerMemoryTreeRoutes } from "./routes/memory-tree";
 import { Runtime, context } from "./runtime";
@@ -126,6 +127,14 @@ const closeCloudBrowsers = await registerCloudBrowserRoutes(
   runtime.tools.browserService,
   config.baseUrl,
 );
+const browserAvailable = await cloudBrowserAvailable();
+registerCloudBrowserLauncher(
+  app,
+  runtime.tools.browserService,
+  config.baseUrl,
+  browserAvailable,
+  async () => (await listWorkspaces(config)).map((workspace) => workspace.id),
+);
 registerMcpRoutes({ ...routeContext, mcp: runtime.tools.mcp });
 registerMemoryTreeRoutes(app, runtime.memory);
 app.get("/api/push/public-key", async () => ({ publicKey: webPush.getPublicKey() }));
@@ -160,6 +169,7 @@ const buildId =
 function settingsStatus() {
   return {
     braveSearchConfigured: Boolean(config.braveSearchKey),
+    cloudBrowserAvailable: browserAvailable,
     defaultProvider: config.defaultProvider,
     defaultModel: config.defaultModel,
     memoryModel: config.memoryModel,

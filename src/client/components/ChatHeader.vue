@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import { Wrench, Clock3 } from "@lucide/vue";
+import { Wrench, Clock3, Globe } from "@lucide/vue";
+import { nextTick, ref } from "vue";
+import { openCloudBrowser } from "@/client/lib/api";
+import BrowserPopover from "./BrowserPopover.vue";
+import type { BrowserDescriptor } from "@/shared/types";
 import { useAppStore } from "@/client/stores/app";
 import { withBaseUrl } from "@/client/lib/base-url";
 import SettingsPopover from "./SettingsPopover.vue";
@@ -8,6 +12,24 @@ import CronPopover from "./CronPopover.vue";
 import SessionHeaderStatus from "./SessionHeaderStatus.vue";
 import ProviderUsageIndicator from "./ProviderUsageIndicator.vue";
 const store = useAppStore();
+const cloudBrowser = ref<BrowserDescriptor>();
+const openingBrowser = ref(false);
+async function showBrowser(): Promise<void> {
+  const workspaceId =
+    store.activeSession?.workspaceId ??
+    store.workspaces.find((workspace) => workspace.isAssistant)?.id;
+  if (!workspaceId || openingBrowser.value) return;
+  openingBrowser.value = true;
+  try {
+    cloudBrowser.value = await openCloudBrowser(workspaceId);
+    await nextTick();
+    document.getElementById("toolbar-browser")?.showPopover();
+  } catch (error) {
+    store.lastError = error instanceof Error ? error.message : String(error);
+  } finally {
+    openingBrowser.value = false;
+  }
+}
 async function logout() {
   try {
     await store.logout();
@@ -47,6 +69,25 @@ async function logout() {
     >
       <Wrench :size="17" />
     </button>
+    <button
+      v-if="store.settings.cloudBrowserAvailable"
+      type="button"
+      class="header__button"
+      aria-label="Open browser"
+      title="Open browser"
+      :disabled="openingBrowser || !store.workspaces.length"
+      :aria-busy="openingBrowser"
+      @click="showBrowser"
+    >
+      <Globe :size="17" />
+    </button>
+    <BrowserPopover
+      v-if="cloudBrowser"
+      :key="cloudBrowser.browserId"
+      popover-id="toolbar-browser"
+      :browser-id="cloudBrowser.browserId"
+      title="Cloud browser"
+    />
     <div class="header__spacer" />
     <ProviderUsageIndicator :model="store.activeSession?.model" :update="store.providerUsage" />
     <SessionHeaderStatus

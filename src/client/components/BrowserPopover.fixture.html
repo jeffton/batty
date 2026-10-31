@@ -7,30 +7,45 @@
     <div id="app"></div>
     <script type="module">
       import { createApp, h } from "vue";
+      import { createPinia, setActivePinia } from "pinia";
+      import ChatHeader from "./ChatHeader.vue";
+      import { useAppStore } from "../stores/app";
       import SharedSitesList from "./SharedSitesList.vue";
       import "../styles.css";
+      const pinia = createPinia();
+      setActivePinia(pinia);
+      const store = useAppStore();
+      store.settings.cloudBrowserAvailable = true;
+      store.settings.pushTitle = "Batty";
+      store.settings.memoryLanguage = "English";
+      store.refreshProviderAuthStatus = async () => {};
+      store.workspaces = [{ id: "integration", label: "Integration", isAssistant: true }];
       createApp({
         render: () =>
-          h(SharedSitesList, {
-            sites: [
-              {
-                kind: "browser",
-                id: "cloud",
-                name: "Shared browser",
-                browserId: "opaque",
-                url: "/",
-                public: false,
-              },
-              {
-                kind: "site",
-                id: "ordinary",
-                name: "Ordinary site",
-                url: "https://example.org",
-                public: false,
-              },
-            ],
-          }),
-      }).mount("#app");
+          new URLSearchParams(location.search).has("toolbar")
+            ? h(ChatHeader)
+            : h(SharedSitesList, {
+                sites: [
+                  {
+                    kind: "browser",
+                    id: "cloud",
+                    name: "Shared browser",
+                    browserId: "opaque",
+                    url: "/",
+                    public: false,
+                  },
+                  {
+                    kind: "site",
+                    id: "ordinary",
+                    name: "Ordinary site",
+                    url: "https://example.org",
+                    public: false,
+                  },
+                ],
+              }),
+      })
+        .use(pinia)
+        .mount("#app");
     </script>
   </body>
 </html>

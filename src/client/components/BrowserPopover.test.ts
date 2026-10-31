@@ -128,6 +128,10 @@ function create() {
     props: { popoverId: "browser-test", browserId: "opaque/id", title: "Cloud browser" },
     global: {
       stubs: {
+        BasePopover: {
+          template: "<div><slot /></div>",
+          methods: { hidePopover() {} },
+        },
         FullPopover: {
           name: "FullPopover",
           template: '<div><slot name="heading" /><slot /></div>',

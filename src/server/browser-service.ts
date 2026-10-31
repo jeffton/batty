@@ -413,6 +413,38 @@ export class BrowserService {
     );
   }
 
+  /** Open the workspace viewer without navigating or replacing its existing tabs. */
+  async openCloudBrowser(sessionId: string): Promise<BrowserDescriptor> {
+    if (process.platform !== "linux") throw new Error("Cloud browser requires Linux.");
+    const signal = AbortSignal.timeout(30_000);
+    return this.serialized(
+      sessionId,
+      async () => {
+        if (this.disposed) throw new Error("Browser service is disposed");
+        await this.withSessionLifecycle(sessionId, async () => {
+          if (await this.hasSession(sessionId)) await this.touchSession(sessionId);
+        });
+        const session =
+          this.sessions.get(sessionId) ??
+          (await this.createSession(
+            sessionId,
+            undefined,
+            (await this.hasSession(sessionId)) ? undefined : false,
+            signal,
+          ));
+        signal.throwIfAborted();
+        if (session.useTailscale) await this.requireTailscaleProxy(signal);
+        await this.enableCloud(sessionId, session);
+        await this.persistRegistry(session);
+        await this.touchSession(sessionId);
+        return this.cloudAttachment(session);
+      },
+      this.queues,
+      true,
+      signal,
+    );
+  }
+
   private async cloudAttachment(session: BrowserSession): Promise<BrowserDescriptor> {
     const cloud = await readBrowserJson<{ id: string }>(path.join(session.directory, "cloud.json"));
     if (!cloud) throw new Error("Enable cloud=true before attaching this browser.");

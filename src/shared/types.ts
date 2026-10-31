@@ -426,6 +426,7 @@ export interface ProviderAuthAttemptStatus {
 }
 
 export interface AppSettingsStatus {
+  cloudBrowserAvailable?: boolean;
   memoryModel: string;
   memoryLanguage: string;
   pushTitle: string;

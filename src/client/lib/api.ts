@@ -10,6 +10,7 @@ import type { AppAppearance } from "@/shared/appearance";
 import type { RemoteSettings } from "@/shared/remotes";
 import type {
   AppSettingsStatus,
+  BrowserDescriptor,
   BootstrapPayload,
   CronJob,
   CronRunLog,
@@ -88,6 +89,14 @@ export function addRemoteConnection(input: {
 
 export function removeRemoteConnection(id: string): Promise<{ ok: true }> {
   return provisionRemote({ action: "connection-remove", id });
+}
+
+export function openCloudBrowser(workspaceId: string): Promise<BrowserDescriptor> {
+  return request("/api/cloud-browser/open", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workspaceId }),
+  });
 }
 
 export function getMemoryTree(): Promise<MemoryTreeOverview> {

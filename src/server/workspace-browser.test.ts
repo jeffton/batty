@@ -50,6 +50,16 @@ test("main and workers share tabs, login and cloud attachments within their work
     return { ...result, details: result.details as ToolExecutionDetails };
   };
   try {
+    if (process.platform === "linux") {
+      const [opened, concurrent] = await Promise.all([
+        service.openCloudBrowser(workspaceBrowserKey("roy")),
+        service.openCloudBrowser(workspaceBrowserKey("roy")),
+      ]);
+      expect(concurrent.browserId).toBe(opened.browserId);
+      expect((await service.cloudState(opened.browserId)).pages).toHaveLength(1);
+    } else {
+      await expect(service.openCloudBrowser(workspaceBrowserKey("roy"))).rejects.toThrow("Linux");
+    }
     const first = await call("roy", "main", { action: "open", url });
     const pageId = first.details!.pageId as string;
     await call("roy", "main", {
@@ -66,6 +76,17 @@ test("main and workers share tabs, login and cloud attachments within their work
     expect(login.content).toContainEqual(
       expect.objectContaining({ text: expect.stringContaining("login=fixture:42") }),
     );
+    if (process.platform === "linux") {
+      const opened = await service.openCloudBrowser(workspaceBrowserKey("roy"));
+      const unchanged = await service.cloudState(opened.browserId);
+      expect(unchanged.url).toBe(url);
+      expect(unchanged.pages).toHaveLength(1);
+      expect(unchanged.pageId).toBe(pageId);
+      expect(
+        (await call("roy", "main", { action: "evaluate", script: "globalThis.sharedState" }))
+          .content,
+      ).toContainEqual(expect.objectContaining({ text: expect.stringContaining("42") }));
+    }
     const second = await call("roy", "worker", { action: "open", url, newPage: true });
     expect(second.details!.pageId).not.toBe(pageId);
     const pages = await call("roy", "main", { action: "pages" });
@@ -91,6 +112,11 @@ test("main and workers share tabs, login and cloud attachments within their work
     const browserId = descriptor && "browserId" in descriptor ? descriptor.browserId : undefined;
     await service.dispose();
     service = new BrowserService(undefined, 4, root);
+    if (browserId) {
+      const opened = await service.openCloudBrowser(workspaceBrowserKey("roy"));
+      expect(opened.browserId).toBe(browserId);
+      expect((await service.cloudState(browserId)).pages).toHaveLength(2);
+    }
     const restored = await call("roy", "resumed-worker", {
       action: "evaluate",
       pageId,

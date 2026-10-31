@@ -130,7 +130,7 @@ export const useAppStore = defineStore("app", {
         this.models = payload.models;
         applyAppAppearance(this.settings.appearance);
         if (this.authenticated) {
-          this.workspaces = payload.workspaces ?? (await api.listWorkspaces());
+          this.workspaces = payload.workspaces;
           if (authEpoch !== localStorage.getItem(CACHE_EPOCH_KEY)) return;
           const incoming = await api.getMain(sessionHistoryCursor(this.activeSession));
           if (authEpoch !== localStorage.getItem(CACHE_EPOCH_KEY)) return;

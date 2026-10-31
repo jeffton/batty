@@ -18,7 +18,6 @@ import {
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { Compile } from "typebox/compile";
-import type { McpService } from "./mcp-service";
 import type { CodemodeCall } from "../shared/types";
 import { MAIN_MEMORY_TOOLS } from "./main-memory-policy";
 import { codemodeAdapterName, type CodemodeResult } from "./codemode-native";
@@ -47,7 +46,6 @@ export const CodemodeStore = defineDoc<{ values: Record<string, JsonValue> }>({
 
 export function createCodemodeTool(
   resolveTools: (api: ToolExecutionApi, ctx: Context) => Promise<ToolRegistration[]>,
-  mcp: McpService,
   sandboxes: Set<CodemodeSandbox>,
   abortNested: (id: import("@earendil-works/pi-durable").TaskId, ctx: Context) => Promise<void>,
 ) {

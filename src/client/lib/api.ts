@@ -21,7 +21,6 @@ import type {
   McpStatus,
   ProviderAuthStartResponse,
   ProviderAuthStatus,
-  ProviderUsage,
   SessionMessagesPage,
   SessionResourcesResponse,
   SessionState,
@@ -39,7 +38,6 @@ import type { FetchOperation } from "@/shared/browser-errors";
 // Only requests used by handlers that can set the main composer error banner.
 const bannerRequests: Record<string, FetchOperation> = {
   "/api/bootstrap": "bootstrap",
-  "/api/workspaces": "workspaces",
   "/api/main": "main",
   "/api/main/messages": "history",
   "/api/push/public-key": "push-key",
@@ -160,11 +158,6 @@ export function getBootstrap(): Promise<BootstrapPayload> {
 
 export function getModels(): Promise<ModelOption[]> {
   return request("/api/models");
-}
-
-export function getProviderUsage(provider: string, model: string): Promise<ProviderUsage> {
-  const query = new URLSearchParams({ provider, model });
-  return request(`/api/provider-usage?${query}`);
 }
 
 export function getProviderAuthStatus(): Promise<ProviderAuthStatus> {
@@ -310,12 +303,6 @@ export function logout(): Promise<{ ok: true }> {
   return request("/api/logout", {
     method: "POST",
   });
-}
-
-export function listWorkspaces(): Promise<WorkspaceInfo[]> {
-  return request<{ workspaces: WorkspaceInfo[] }>("/api/workspaces").then(
-    (response) => response.workspaces,
-  );
 }
 
 export function setAssistantWorkspace(workspaceId: string): Promise<WorkspaceInfo[]> {
@@ -534,7 +521,7 @@ export function getSessionResources(sessionId: string): Promise<SessionResources
 }
 
 export function getSessionMessages(
-  session: Pick<SessionState, "id" | "workspaceId" | "path">,
+  session: Pick<SessionState, "id">,
   options: { before?: string; limit?: number } = {},
 ): Promise<SessionMessagesPage> {
   const params = new URLSearchParams();

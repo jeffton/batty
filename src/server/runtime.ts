@@ -18,7 +18,6 @@ import {
   type ConversationId,
   type EntryRecord,
   type EntryId,
-  type Cursor,
   type Storage,
   type ConversationView,
   type LiveState,
@@ -97,45 +96,6 @@ export function entryMessages(entries: readonly EntryRecord[]): UiMessage[] {
       ];
     return [];
   });
-}
-
-export async function historyPage(
-  storage: Storage,
-  conversationId: ConversationId,
-  before: string | undefined,
-  limit: number,
-  after?: string,
-  maximum?: number,
-) {
-  const query = {
-    conversationId,
-    ...(after ? { minEntryId: (Number(after.split(":")[0]) + 1) as EntryId } : {}),
-    ...(maximum === undefined ? {} : { maxEntryId: maximum as EntryId }),
-    ...(before ? { maxEntryId: (Number(before.split(":")[0]) - 1) as EntryId } : {}),
-  };
-  const target = Math.min(limit, 500);
-  let cursor: Cursor | undefined;
-  let oldest: EntryId | undefined;
-  const messages: UiMessage[] = [];
-  do {
-    const page = await storage.scanEntries(
-      query,
-      after ? 200 : Math.max(1, target - messages.length),
-      cursor,
-      context,
-    );
-    oldest = page.items.at(-1)?.id ?? oldest;
-    messages.unshift(...entryMessages([...page.items].reverse()));
-    cursor = page.next;
-  } while ((after !== undefined || messages.length < target) && cursor);
-  await Promise.all(
-    messages.map((message) => hydrateRuntimeResultArtifacts(storage, conversationId, message)),
-  );
-  return {
-    messages,
-    hasMoreMessages: cursor !== undefined,
-    nextBefore: oldest === undefined ? undefined : String(oldest),
-  };
 }
 
 export class Runtime {

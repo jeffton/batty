@@ -56,7 +56,7 @@ export {
   type Part,
   type ViewBatch,
 } from "./memory-view";
-export { isMemoryNoise, stripNoiseClauses, planNoiseCleanup } from "./memory-noise";
+export { isMemoryNoise, stripNoiseClauses } from "./memory-noise";
 export { COMPACT_PROMPT, compactPrompt, MASTER_PROMPT, VIEW_DOC } from "./memory-prompts";
 export { NODE_BYTES } from "./memory-compression";
 export { MemoryIndexDoc, MemoryMaintenanceDoc, MemoryNodesDoc } from "./memory-documents";
@@ -585,9 +585,6 @@ export function createMemory(config: MemoryConfig, models: Models) {
     // nodes and the persisted repair closure are rebuilt bottom-up.
     for (let count = 1; count <= job.total; count *= 2) {
       await buildRange(0, job.total, count, context, job.generation, "rebuild", repairs);
-      await main.commit(async (tx) => {
-        (await tx.doc(Rebuild, main.id)).level = count * 2;
-      }, context);
     }
     // Validate every node, not just the overview, before atomic publication.
     for (let count = 1; count <= job.total; count *= 2) {

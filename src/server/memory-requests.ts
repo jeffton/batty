@@ -126,7 +126,7 @@ export function createMemoryRequests({
     };
     return main().commit(async (tx) => {
       Object.assign(await tx.doc(Packets, main().id, String(runId), candidate), candidate);
-      if (!packet) await tx.appendEntry(main().id, { kind: "batty.run-head", head: input.entry });
+      await tx.appendEntry(main().id, { kind: "batty.run-head", head: input.entry });
       return candidate;
     }, context);
   }

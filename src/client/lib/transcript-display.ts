@@ -24,7 +24,6 @@ export type TranscriptDisplayEntry =
 
 export interface TranscriptDisplayResult {
   entries: TranscriptDisplayEntry[];
-  latestExpandedSectionKey?: string;
 }
 
 interface TranscriptSection {
@@ -192,7 +191,6 @@ export function buildTranscriptDisplayEntries(
           showTimestamp: false,
         }));
       }),
-      latestExpandedSectionKey: undefined,
     };
   }
 
@@ -282,6 +280,5 @@ export function buildTranscriptDisplayEntries(
 
   return {
     entries: displayEntries.sort((a, b) => a.order - b.order).map(({ entry }) => entry),
-    latestExpandedSectionKey: latestSectionKey,
   };
 }

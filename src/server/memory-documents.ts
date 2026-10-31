@@ -60,7 +60,6 @@ export type MemoryRebuild = {
   generation: number;
   total: number;
   status: "pending" | "complete";
-  level?: number;
   repairs?: string[];
   baseGeneration?: number;
 };

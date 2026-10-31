@@ -8,11 +8,7 @@ export function sessionHistoryCursor(session: SessionState | undefined): string 
     ? messageId
     : session.historyCursor;
 }
-export function sessionEventsPath(
-  session: Pick<SessionState, "id">,
-  _detail: "summary" | "full" = "full",
-  after?: string,
-): string {
+export function sessionEventsPath(session: Pick<SessionState, "id">, after?: string): string {
   return withBaseUrl(
     `/api/sessions/${encodeURIComponent(session.id)}/events${after ? `?after=${encodeURIComponent(after)}` : ""}`,
   );

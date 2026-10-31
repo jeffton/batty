@@ -32,13 +32,3 @@ export function easyModeMessage(
 
   return next;
 }
-
-export function easyModeMessages(
-  messages: UiMessage[],
-  toolStatesByCallId: Map<string, ToolDisplayState> = new Map(),
-): UiMessage[] {
-  return messages.flatMap((message) => {
-    const next = easyModeMessage(message, toolStatesByCallId);
-    return next ? [next] : [];
-  });
-}

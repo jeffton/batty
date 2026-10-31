@@ -1,10 +1,5 @@
 const clientLocales = navigator.languages.length > 0 ? navigator.languages : [navigator.language];
 
-const timeFormatter = new Intl.DateTimeFormat(clientLocales, {
-  hour: "2-digit",
-  minute: "2-digit",
-});
-
 const dateTimeFormatter = new Intl.DateTimeFormat(clientLocales, {
   dateStyle: "short",
   timeStyle: "short",
@@ -12,10 +7,6 @@ const dateTimeFormatter = new Intl.DateTimeFormat(clientLocales, {
 
 function isValidTimestamp(timestamp: number): boolean {
   return !Number.isNaN(new Date(timestamp).getTime());
-}
-
-export function formatShortTime(timestamp: number): string {
-  return isValidTimestamp(timestamp) ? timeFormatter.format(new Date(timestamp)) : "--:--";
 }
 
 export function formatShortDateTime(timestamp: number): string {

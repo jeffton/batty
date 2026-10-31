@@ -69,7 +69,7 @@ function openStream(): void {
 
   closeStream();
   connection = createSessionConnection({
-    path: () => sessionEventsPath(session.value!, "full", sessionHistoryCursor(session.value)),
+    path: () => sessionEventsPath(session.value!, sessionHistoryCursor(session.value)),
     onConnecting: () => {
       connectionState.value = "connecting";
     },

@@ -44,7 +44,7 @@ The worktree and installed dependencies remain isolated from live runtime data. 
 
 ## Historical JPEG measurements
 
-The scripts `benchmark-cloud-browser.ts`, `benchmark-cloud-stages.ts` and `prototype-h264.ts` instrument the historical JPEG transport. Their current-checkout entry points reject a non-JPEG backend; run the original versions from the `470668d` worktree to reproduce historical data. Their image/codec assumptions are not a current production benchmark.
+Historical JPEG harnesses and their analysis scripts are preserved at revision `470668d`. Run them from an isolated worktree at that revision to reproduce the stage measurements and standalone prototype below. Use `scripts/benchmark-production-browser.ts` for the current production path.
 
 - [Stage measurements](cloud-browser-stage-measurements.md): fixed-DPR3 JPEG, 40 settled moves per profile. Local total 200/233 ms p50/p95; synthetic mobile 421/450 ms. Chromium→CDP JPEG accounted for about 95–111 ms, mobile image transport 207 ms and decode 25–27 ms. This is not the adaptive-JPEG control above.
 - [Standalone H.264 prototype](h264-prototype.md): same headed target for both codec paths, mirrored input and a fixture adapter rather than actual BrowserService/popover integration. Mobile 190 vs 234 ms median, 28.7 vs 14.2 changed frames/s and 1.93 vs 14.39 Mbit/s. These gains cannot be presented as production integration measurements.

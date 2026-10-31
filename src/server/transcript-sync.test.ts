@@ -3,10 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import { expect, test } from "vite-plus/test";
-import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
-import { createModels } from "@earendil-works/pi-ai/models";
-import { Harness, createRegistry, MemoryStorage } from "@earendil-works/pi-durable";
-import { entryMessages, historyPage } from "./runtime";
+import { entryMessages } from "./runtime";
 import { TranscriptImages } from "./transcript-images";
 
 test("persisted assistant attempts expose the durable task identity without changing originals", () => {
@@ -46,38 +43,6 @@ test("persisted assistant attempts expose the durable task identity without chan
     { id: "2", runTaskId: "7", stopReason: "stop" },
   ]);
   expect(JSON.stringify(entries)).toBe(original);
-});
-
-test("delta history starts after its anchor and crosses invisible records and page boundaries", async () => {
-  const storage = new MemoryStorage();
-  const harness = await Harness.open(
-    storage,
-    { models: createModels(), registry: createRegistry() },
-    context,
-  );
-  try {
-    const main = await harness.root(context);
-    let anchor = "";
-    await main.commit(async (tx) => {
-      for (let i = 0; i < 300; i++) {
-        const entry = await tx.appendEntry(main.id, {
-          kind: "pi.user",
-          model: [{ role: "user", content: `message ${i}`, timestamp: i }],
-        });
-        if (i === 20) anchor = String(entry.id);
-        await tx.appendEntry(main.id, { kind: "bookkeeping", data: { i } });
-      }
-    }, context);
-    const delta = await historyPage(storage, main.id, undefined, 120, anchor);
-    expect(delta.messages).toHaveLength(279);
-    expect(delta.messages[0]).toMatchObject({ blocks: [{ type: "text", text: "message 21" }] });
-    expect(delta.messages.some((message) => message.id === anchor)).toBe(false);
-    expect(delta.messages.at(-1)).toMatchObject({
-      blocks: [{ type: "text", text: "message 299" }],
-    });
-  } finally {
-    await harness.close(context);
-  }
 });
 
 test.each(["/", "/batty"])(

@@ -1,14 +1,6 @@
 import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
 import type { ActiveToolRun, ServerEvent, SessionState } from "@/shared/types";
 
-export function shouldUpdateSessionSummary(event: ServerEvent): boolean {
-  return event.type === "reset" || event.type === "state";
-}
-
-export function shouldWriteSessionCache(event: ServerEvent): boolean {
-  return event.type === "reset";
-}
-
 function applyAssistantDelta(
   assistant: SessionState["activeAssistant"],
   event: Extract<ServerEvent, { type: "assistant-delta" }>,

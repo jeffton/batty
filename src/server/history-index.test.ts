@@ -69,6 +69,55 @@ test("50,000-entry archive uses transactional counts and indexed receipt/catch-u
   await storage.close(context);
 });
 
+test("indexed pagination and bounded catch-up retain archived messages across invisible entries", async () => {
+  const db = await openNodeSqliteDatabase(":memory:");
+  const storage = await SqliteStorage.open(db);
+  const harness = await Harness.open(
+    storage,
+    { models: createModels(), registry: createRegistry() },
+    context,
+  );
+  try {
+    const main = await harness.root(context);
+    const index = await createHistoryIndex(db);
+    const ids: number[] = [];
+    await main.commit(async (tx) => {
+      for (let i = 0; i < 300; i++) {
+        const entry = await tx.appendEntry(main.id, {
+          kind: "pi.user",
+          model: [{ role: "user", content: `message ${i}`, timestamp: i }],
+        });
+        ids.push(entry.id);
+        await tx.appendEntry(main.id, { kind: "bookkeeping", data: { i } });
+      }
+      await tx.appendEntry(main.id, { kind: "archive-head", head: "self" });
+    }, context);
+    expect((await main.context(context)).messages).toHaveLength(0);
+    const recent = await index.entries(main.id, undefined, 1);
+    expect(recent.entries.map((entry) => entry.id)).toEqual([ids[299]]);
+    const older = await index.entries(main.id, recent.nextBefore, 1);
+    expect(older.entries.map((entry) => entry.id)).toEqual([ids[298]]);
+    expect(older.hasMoreMessages).toBe(true);
+    const oldest = await index.entries(main.id, String(ids[1]), 1);
+    expect(oldest.entries.map((entry) => entry.id)).toEqual([ids[0]]);
+    expect(oldest.hasMoreMessages).toBe(false);
+    expect((await index.entries(main.id, oldest.nextBefore, 1)).entries).toEqual([]);
+
+    let after = String(ids[20]);
+    const caughtUp: number[] = [];
+    for (;;) {
+      const boundary = await index.nextBoundary(main.id, after, 120);
+      const page = await index.entries(main.id, undefined, 120, after, boundary.end);
+      caughtUp.push(...page.entries.map((entry) => entry.id));
+      if (!boundary.more) break;
+      after = String(boundary.end);
+    }
+    expect(caughtUp).toEqual(ids.slice(21));
+  } finally {
+    await harness.close(context);
+  }
+});
+
 test("one-time backfill agrees with new commits and rolls back counts with failed archive writes", async () => {
   const db = await openNodeSqliteDatabase(":memory:");
   const storage = await SqliteStorage.open(db);

@@ -34,7 +34,6 @@ vi.mock("@/client/lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/client/lib/api")>()),
   getBootstrap: vi.fn(),
   getMain: vi.fn(),
-  listWorkspaces: vi.fn(),
   removeMainQueuedPrompt: vi.fn(),
   logout: vi.fn(),
   submitMainPrompt: vi.fn(),
@@ -74,6 +73,7 @@ const bootstrap = {
   providerAuth: { providers: [] },
   settings: { braveSearchConfigured: false, appearance: { title: "Batty", color: "neutral" } },
   models: [],
+  workspaces: [],
 } as unknown as BootstrapPayload;
 let pinia: ReturnType<typeof createPinia>;
 let wrapper: ReturnType<typeof mount> | undefined;
@@ -92,7 +92,6 @@ beforeEach(() => {
   );
   vi.mocked(api.getBootstrap).mockResolvedValue(bootstrap);
   vi.mocked(api.getMain).mockResolvedValue(state());
-  vi.mocked(api.listWorkspaces).mockResolvedValue([]);
   vi.mocked(api.listRunningSubagents).mockResolvedValue([]);
   vi.mocked(api.listRunningCronRuns).mockResolvedValue([]);
   vi.mocked(api.logout).mockResolvedValue({ ok: true });

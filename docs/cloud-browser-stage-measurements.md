@@ -6,9 +6,12 @@ No production behavior changed. The benchmark creates isolated viewer/target Chr
 
 ## Method
 
-Run from the repository root:
+Run the historical harness and summarizer from revision `470668d`:
 
 ```sh
+git worktree add --detach /tmp/batty-jpeg-stages 470668d
+ln -s "$PWD/node_modules" /tmp/batty-jpeg-stages/node_modules
+cd /tmp/batty-jpeg-stages
 BENCH_WORKLOAD=settled BENCH_RTT_MS=0 BENCH_DOWN_MBIT=1000 BENCH_LABEL=settled-local \
   pnpm exec tsx scripts/benchmark-cloud-stages.ts
 BENCH_WORKLOAD=settled BENCH_RTT_MS=60 BENCH_DOWN_MBIT=20 BENCH_LABEL=settled-mobile \

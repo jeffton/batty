@@ -71,7 +71,6 @@ it("joins real nested browser recovery before a sandbox timeout returns, prevent
   let codemodeTimedOut = false;
   const codemode = createCodemodeTool(
     async () => allTools,
-    mcp,
     new Set(),
     async (id) => {
       await harness.abortTask(id, BACKGROUND_CONTEXT);
@@ -170,7 +169,6 @@ it("joins host admission cleanup even when the sandbox worker has already exited
     async () => [
       { name: "slow", description: "slow", parameters: Type.Object({}), execute: async () => ({}) },
     ],
-    mcp,
     new Set(),
     async () => {
       cancelled = true;
@@ -221,7 +219,6 @@ it("does not dispatch a tool when cancellation happens during legacy receipt loo
         execute: async () => ({}),
       },
     ],
-    mcp,
     new Set(),
     async () => {},
   );
@@ -287,7 +284,6 @@ it.each(["deadline", "abort"])(
     let harness!: Harness;
     const codemode = createCodemodeTool(
       async () => allTools,
-      mcp,
       new Set(),
       async (id) => {
         await harness.abortTask(id, BACKGROUND_CONTEXT);

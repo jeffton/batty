@@ -4,7 +4,7 @@ This records the standalone experiment at `470668d`. Run its original scripts fr
 
 **GO for the video direction, not for deploying this prototype as the default browser.** Native software H.264 doubled useful scroll updates and used roughly one seventh of JPEG's movement bandwidth. Median input response improved by 44 ms on the synthetic mobile link; local response did not improve and mobile p95 was essentially unchanged.
 
-The prototype is `scripts/prototype-h264.ts` with a small standalone viewer. It is not imported by the application. No production routes, browser launch defaults, profiles or services change.
+Revision `470668d` contains `scripts/prototype-h264.ts`, its standalone viewer and analysis script. The experiment uses isolated browsers and does not alter production routes, profiles or services.
 
 ## What runs
 
@@ -63,6 +63,9 @@ A private demo contains a recording and a local WebCodecs capability check. Reco
 Requires the repository's installed Node dependencies plus existing Linux `Xvfb` and FFmpeg with libx264. The script fails rather than choosing another codec/capture path.
 
 ```sh
+git worktree add --detach /tmp/batty-h264-prototype 470668d
+ln -s "$PWD/node_modules" /tmp/batty-h264-prototype/node_modules
+cd /tmp/batty-h264-prototype
 PROTO_LABEL=h264-mobile pnpm exec tsx scripts/prototype-h264.ts
 PROTO_CODEC=jpeg PROTO_LABEL=jpeg-mobile pnpm exec tsx scripts/prototype-h264.ts
 

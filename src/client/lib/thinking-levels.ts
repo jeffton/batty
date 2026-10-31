@@ -1,10 +1,4 @@
-import type { ModelOption, SessionState } from "@/shared/types";
-
-export function resolveThinkingOptions(
-  session: Pick<SessionState, "availableThinkingLevels"> | undefined,
-): string[] {
-  return [...new Set(session?.availableThinkingLevels)];
-}
+import type { ModelOption } from "@/shared/types";
 
 export function resolveModelThinkingOptions(
   model: Pick<ModelOption, "thinkingLevels"> | undefined,

@@ -1,12 +1,5 @@
 import { expect, test } from "vite-plus/test";
-import {
-  isMemoryNoise,
-  fitView,
-  planNoiseCleanup,
-  renderView,
-  stripNoiseClauses,
-  type MemoryLeaf,
-} from "./memory";
+import { isMemoryNoise, fitView, renderView, stripNoiseClauses, type MemoryLeaf } from "./memory";
 
 const leaf = (kind: MemoryLeaf["kind"], text: string, source = 1): MemoryLeaf => ({
   kind,
@@ -35,41 +28,6 @@ test("only exact silent assistant and runtime-result notices are noise", () => {
     expect(isMemoryNoise(leaf("talk", text))).toBe(false);
     expect(isMemoryNoise(leaf("note", text))).toBe(false);
   }
-});
-
-test("cleanup reuses useful summaries and preserves all original leaves and IDs", () => {
-  const leaves = new Map([
-    [0, leaf("talk", "NO_REPLY")],
-    [1, leaf("note", "Runtime cron: [cron 10 result]\nNO_REPLY")],
-    [2, leaf("user", "Keep NO_REPLY discussions")],
-    [3, leaf("talk", "Useful result")],
-  ]);
-  const before = JSON.stringify([...leaves]);
-  const nodes = new Map([
-    ["0+1", "talk: NO_REPLY"],
-    ["1+1", "note: Runtime cron: [cron 10 result] NO_REPLY"],
-    ["2+1", "user: Keep NO_REPLY discussions"],
-    ["3+1", "talk: Useful result"],
-    ["0+2", "note: both silent"],
-    ["2+2", "user: Keep NO_REPLY discussions; talk: Useful result"],
-    ["0+4", "talk: NO_REPLY; user: Keep NO_REPLY discussions"],
-  ]);
-  const plan = planNoiseCleanup(leaves, nodes);
-  expect(plan.excluded).toEqual([0, 1]);
-  expect(plan.updates.get("0+2")).toBe("");
-  expect(plan.updates.get("0+4")).toBe(nodes.get("2+2"));
-  expect(JSON.stringify([...leaves])).toBe(before);
-  for (const [key, value] of plan.updates) nodes.set(key, value);
-  expect(planNoiseCleanup(leaves, nodes).updates.size).toBe(0);
-  expect(
-    renderView(
-      [
-        { start: 0, count: 2 },
-        { start: 2, count: 2 },
-      ],
-      nodes,
-    ),
-  ).toBe(`<chat>\n2+2|${nodes.get("2+2")}\n</chat>`);
 });
 
 test("an entirely silent history has a logarithmic cover rather than one part per leaf", () => {

@@ -228,7 +228,7 @@ export async function createTools(
   const nestedTask = createCodemodeTasks(resolveTools, mcp, jobsDir);
   local.push(
     ...createCodemodeAdapters(resolveTools, mcp),
-    createCodemodeTool(resolveTools, mcp, sandboxes, async (id, ctx) => {
+    createCodemodeTool(resolveTools, sandboxes, async (id, ctx) => {
       if (!harness)
         throw new Error("Tools must bindHarness() before cancelling nested codemode calls");
       await harness.abortTask(id, withoutAbortSignal(ctx));

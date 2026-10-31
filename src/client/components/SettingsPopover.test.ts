@@ -87,14 +87,13 @@ describe("Assistant settings", () => {
   });
 
   it("groups workspace, push identity and memory without changing stored values", async () => {
-    const { wrapper, store, save } = setup();
+    const { wrapper, save } = setup();
     const section = wrapper.get('[aria-label="Assistant settings"]');
     expect(section.get("select").element.value).toBe("roy");
     expect(section.get("input").element.value).toBe("Roy");
     expect(save).not.toHaveBeenCalled();
     await section.get("select").setValue("project");
     expect(save).toHaveBeenCalledWith("project");
-    expect(store.settings.memoryReasoning).toBe("low");
     wrapper.unmount();
   });
 

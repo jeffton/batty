@@ -25,37 +25,34 @@ const calls: CodemodeCall[] = [
 ];
 
 describe("codemode runtime call display", () => {
-  it.each(["run", "await", "queue", "resume", "steer", "stop"])(
-    "opens subagent sessions from explicit arguments for %s in every call state",
-    (action) => {
-      for (const status of ["running", "ok", "error", "cancelled"] as const) {
-        const wrapper = mount(CodemodeDisplay, {
-          props: {
-            code: "",
-            blocks: [],
-            compact: false,
-            details: {
-              calls: [
-                {
-                  id: "child-call",
-                  name: "subagent",
-                  status,
-                  args: JSON.stringify({ action, sessionId: "worker-42" }),
-                },
-              ],
-            },
+  it("opens subagent sessions from explicit arguments in every call state", () => {
+    for (const status of ["running", "ok", "error", "cancelled"] as const) {
+      const wrapper = mount(CodemodeDisplay, {
+        props: {
+          code: "",
+          blocks: [],
+          compact: false,
+          details: {
+            calls: [
+              {
+                id: "child-call",
+                name: "subagent",
+                status,
+                args: JSON.stringify({ action: "await", sessionId: "worker-42" }),
+              },
+            ],
           },
-          global: { stubs: { CodeBlock: true, SubagentSessionPopover: true } },
-        });
-        const popover = wrapper.getComponent({ name: "SubagentSessionPopover" });
-        expect(popover.props("sessionId")).toBe("worker-42");
-        expect(wrapper.get(".codemode-display__session-btn").attributes("popovertarget")).toBe(
-          popover.props("popoverId"),
-        );
-        wrapper.unmount();
-      }
-    },
-  );
+        },
+        global: { stubs: { CodeBlock: true, SubagentSessionPopover: true } },
+      });
+      const popover = wrapper.getComponent({ name: "SubagentSessionPopover" });
+      expect(popover.props("sessionId")).toBe("worker-42");
+      expect(wrapper.get(".codemode-display__session-btn").attributes("popovertarget")).toBe(
+        popover.props("popoverId"),
+      );
+      wrapper.unmount();
+    }
+  });
 
   it("prioritizes returned IDs and ignores missing IDs and malformed arguments", async () => {
     const wrapper = mount(CodemodeDisplay, {

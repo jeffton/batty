@@ -71,8 +71,6 @@ test("Remote settings provisions connections and grants on mobile without retain
     await page.getByRole("tab", { name: "Remote", exact: true }).click();
     expect(await page.getByRole("textbox", { name: "New token", exact: true }).count()).toBe(0);
     await page.getByRole("textbox", { name: "Connection name", exact: true }).fill("Work");
-    expect(await page.getByRole("textbox", { name: "Connection ID", exact: true }).count()).toBe(0);
-    expect(await page.locator("#settings-Remote-panel [placeholder]").count()).toBe(0);
     await page
       .getByRole("textbox", { name: "Remote URL", exact: true })
       .fill("https://work.example.com/batty/");

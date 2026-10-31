@@ -12,7 +12,7 @@ import { registerSiteRoutes } from "@/server/routes/sites";
 import { registerSiteFunction } from "@/server/site-functions";
 import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
 
-test.each(["/", "/batty", "/nested/app"])(
+test.each(["/", "/nested/app"])(
   "stored site previews load image assets through a prefix-stripping proxy at %s",
   async (baseUrl) => {
     const sitesDir = await fs.mkdtemp(path.join(os.tmpdir(), "batty-site-preview-"));

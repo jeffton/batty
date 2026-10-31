@@ -65,10 +65,17 @@ test.skipIf(process.platform === "win32").each([false, true])(
       });
       if (cancelled) await cancelPersistentBashJob(root, identity);
       else {
-        const receipt = JSON.parse(
-          await fs.readFile(path.join(root, bashJobKey(identity), "receipt.json"), "utf8"),
-        );
-        process.kill(-receipt.pid, "SIGTERM");
+        // The shell can write its marker before the supervisor publishes its PID.
+        let pid!: number;
+        await vi.waitFor(async () => {
+          const receipt = JSON.parse(
+            await fs.readFile(path.join(root, bashJobKey(identity), "receipt.json"), "utf8"),
+          );
+          expect(receipt.status).toBe("running");
+          expect(Number.isInteger(receipt.pid)).toBe(true);
+          pid = receipt.pid;
+        });
+        process.kill(-pid, "SIGTERM");
       }
       expect((await job).exitCode).toBe(cancelled ? 130 : 143);
     } finally {

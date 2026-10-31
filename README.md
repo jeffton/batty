@@ -20,7 +20,7 @@ Device frame: [Apple Frames](https://www.macstories.net/shortcuts/) by Federico 
 - **Mobile web app:** installable PWA, passkey login, push notifications, offline history reading and incremental reconnect.
 - **Model controls:** choose models and reasoning effort for the main assistant, subagents and scheduled work; inspect token usage.
 
-## OptChat
+## Hybrid Memory
 
 [OptChat](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449) gives the permanent conversation a navigable memory tree. Main combines summaries of older history with a recent native session tail, including tool calls, results and images. Background summarization moves older runs into the tree in batches, keeping the request prefix stable between rollovers. Original history is retained.
 

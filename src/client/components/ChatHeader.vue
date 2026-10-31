@@ -52,6 +52,18 @@ async function logout() {
       </button>
     </div>
     <button
+      v-if="store.settings.cloudBrowserAvailable"
+      type="button"
+      class="header__button"
+      aria-label="Open browser"
+      title="Open browser"
+      :disabled="openingBrowser || !store.workspaces.length"
+      :aria-busy="openingBrowser"
+      @click="showBrowser"
+    >
+      <Globe :size="17" />
+    </button>
+    <button
       type="button"
       class="header__button"
       popovertarget="workers-popover"
@@ -68,18 +80,6 @@ async function logout() {
       title="Workspaces and tools"
     >
       <Wrench :size="17" />
-    </button>
-    <button
-      v-if="store.settings.cloudBrowserAvailable"
-      type="button"
-      class="header__button"
-      aria-label="Open browser"
-      title="Open browser"
-      :disabled="openingBrowser || !store.workspaces.length"
-      :aria-busy="openingBrowser"
-      @click="showBrowser"
-    >
-      <Globe :size="17" />
     </button>
     <BrowserPopover
       v-if="cloudBrowser"

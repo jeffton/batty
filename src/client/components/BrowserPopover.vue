@@ -2,7 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import BasePopover from "@/client/components/BasePopover.vue";
-import { PanelsTopLeft, Check } from "@lucide/vue";
+import { SquareStack, Check } from "@lucide/vue";
 import BrowserCredentials from "@/client/components/BrowserCredentials.vue";
 import { useBrowserTransport } from "@/client/browser/transport";
 import { fitCloudViewport } from "@/shared/browser-geometry";
@@ -173,9 +173,15 @@ onBeforeUnmount(() => {
           aria-label="Choose tab"
           title="Choose tab"
         >
-          <PanelsTopLeft :size="18" />
+          <SquareStack :size="18" />
         </button>
-        <BasePopover :id="`${popoverId}-tabs`" ref="tabs" anchor-down class="cloud-browser-tabs">
+        <BasePopover
+          :id="`${popoverId}-tabs`"
+          ref="tabs"
+          anchor-down
+          :boundary-id="popoverId"
+          class="cloud-browser-tabs"
+        >
           <button
             v-for="page in state?.pages"
             :key="page.id"
@@ -285,7 +291,7 @@ onBeforeUnmount(() => {
   padding: 0.3rem;
   border: 1px solid var(--color-border-soft);
   border-radius: 0.6rem;
-  background: var(--color-bg-panel);
+  background: var(--color-bg-overlay);
   color: var(--color-text);
   box-shadow: var(--color-shadow-popover);
   overflow: auto;

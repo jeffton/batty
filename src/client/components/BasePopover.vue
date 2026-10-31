@@ -11,6 +11,7 @@ const props = withDefaults(
     anchorDown?: boolean;
     floating?: boolean;
     alignViewportRight?: boolean;
+    boundaryId?: string;
     dimBackdrop?: boolean;
   }>(),
   {
@@ -39,8 +40,21 @@ function positionAtAnchor(): void {
   const viewportLeft = viewport?.offsetLeft ?? 0;
   const viewportTop = viewport?.offsetTop ?? 0;
   const viewportWidth = viewport?.width ?? window.innerWidth;
+  const boundary = props.boundaryId
+    ? document.getElementById(props.boundaryId)!.getBoundingClientRect()
+    : undefined;
+  const left = Math.max(viewportLeft, boundary?.left ?? viewportLeft);
+  const right = Math.min(
+    viewportLeft + viewportWidth,
+    boundary?.right ?? viewportLeft + viewportWidth,
+  );
+  const top = Math.max(viewportTop, boundary?.top ?? viewportTop);
+  const bottom = Math.min(
+    viewportTop + (viewport?.height ?? window.innerHeight),
+    boundary?.bottom ?? window.innerHeight,
+  );
   const margin = 8;
-  const width = Math.min(popover.offsetWidth, viewportWidth - margin * 2);
+  const width = Math.min(popover.offsetWidth, right - left - margin * 2);
   anchorStyle.value = {
     position: "fixed",
     positionArea: "none",
@@ -48,9 +62,9 @@ function positionAtAnchor(): void {
     top: props.anchorDown ? `${rect.bottom + margin}px` : "auto",
     right: "auto",
     bottom: props.anchorDown ? "auto" : `${window.innerHeight - rect.top + margin}px`,
-    left: `${props.alignViewportRight ? viewportLeft + viewportWidth - width - margin : Math.max(viewportLeft + margin, Math.min(rect.right - width, viewportLeft + viewportWidth - width - margin))}px`,
-    maxWidth: `${viewportWidth - margin * 2}px`,
-    maxHeight: `min(var(--anchored-popover-max-height, 32rem), ${Math.max(0, props.anchorDown ? viewportTop + (viewport?.height ?? window.innerHeight) - rect.bottom - margin * 2 : rect.top - viewportTop - margin * 2)}px)`,
+    left: `${props.alignViewportRight ? right - width - margin : Math.max(left + margin, Math.min(rect.right - width, right - width - margin))}px`,
+    maxWidth: `${right - left - margin * 2}px`,
+    maxHeight: `min(var(--anchored-popover-max-height, 32rem), ${Math.max(0, props.anchorDown ? bottom - rect.bottom - margin * 2 : rect.top - top - margin * 2)}px)`,
     margin: "0",
   };
 }
@@ -79,6 +93,7 @@ function handleBeforeToggle(event: Event): void {
     observer.observe(anchor);
     const container = anchor.parentElement!.parentElement!;
     observer.observe(container);
+    if (props.boundaryId) observer.observe(document.getElementById(props.boundaryId)!);
     layoutObserver = new MutationObserver(positionAtAnchor);
     layoutObserver.observe(container, {
       subtree: true,

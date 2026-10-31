@@ -611,10 +611,37 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
     await tabs.waitFor({ state: "visible" });
     await expect.poll(() => tabs.locator("button").count()).toBe(2);
     expect(await tabs.locator('[aria-current="page"]').textContent()).toContain("Popup target");
-    const buttonBounds = await chooseTab.boundingBox();
-    const tabBounds = await tabs.boundingBox();
-    expect(tabBounds!.y).toBeGreaterThanOrEqual(buttonBounds!.y + buttonBounds!.height);
-    expect(tabBounds!.x + tabBounds!.width).toBeLessThanOrEqual(390);
+    for (const width of [390, 1440, 320]) {
+      await page.setViewportSize({ width, height: 844 });
+      await expect
+        .poll(() =>
+          tabs.evaluate((element) => {
+            const menu = element.getBoundingClientRect();
+            const browser = document.querySelector(".browser-popover")!.getBoundingClientRect();
+            const button = document
+              .querySelector('[aria-label="Choose tab"]')!
+              .getBoundingClientRect();
+            return (
+              menu.left >= browser.left + 7 &&
+              menu.right <= browser.right - 7 &&
+              menu.bottom <= browser.bottom - 7 &&
+              menu.top >= button.bottom
+            );
+          }),
+        )
+        .toBe(true);
+      await page.emulateMedia({ colorScheme: "light" });
+      expect(await tabs.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(
+        "oklch(1 0 0)",
+      );
+      await page.screenshot({ path: `/tmp/batty-tabs-${width}.png` });
+    }
+    await page.emulateMedia({ colorScheme: "dark" });
+    expect(await tabs.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(
+      "oklch(1 0 0)",
+    );
+    await page.setViewportSize({ width: 390, height: 844 });
+    await fittedViewerFrame(page);
     await tabs.getByRole("button", { name: /Shared target/ }).click();
     await expect.poll(() => addressInput.inputValue()).toBe(`${backendUrl}/target`);
     await fittedViewerFrame(page);

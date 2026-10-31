@@ -6,6 +6,7 @@ import * as api from "@/client/lib/api";
 import * as updates from "@/client/lib/app-updates";
 import * as cache from "@/client/lib/main-cache";
 import * as browserErrors from "@/client/lib/browser-errors";
+import * as pushNotifications from "@/client/lib/push-notifications";
 import App from "@/client/App.vue";
 import ChatHeader from "@/client/components/ChatHeader.vue";
 import ChatSessionPane from "@/client/components/ChatSessionPane.vue";
@@ -160,6 +161,90 @@ describe("caught cache diagnostics", () => {
     expect(report).toHaveBeenCalledWith(error, "cache-read");
     expect(api.getBootstrap).toHaveBeenCalledTimes(1);
     report.mockRestore();
+  });
+});
+
+describe("push synchronization recovery", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("defers hidden synchronization and recovers its aborted fetch on resume", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    const sync = vi
+      .spyOn(pushNotifications, "syncPushSubscription")
+      .mockRejectedValueOnce(new DOMException("Fetch is aborted", "AbortError"))
+      .mockResolvedValue(true);
+    const store = useAppStore();
+    store.authenticated = true;
+    store.bootstrapped = true;
+    store.activeSession = state();
+    await store.syncNotifications();
+    expect(sync).not.toHaveBeenCalled();
+    visibility.mockReturnValue("visible");
+    await store.syncNotifications();
+    expect(store.lastError).toBe("Push notifications: Fetch is aborted");
+    await store.recoverConnection();
+    await flushPromises();
+    expect(sync).toHaveBeenCalledTimes(2);
+    expect(store.lastError).toBeUndefined();
+    expect(store.activeSession?.sessionId).toBe("main");
+  });
+
+  it("retries when a pre-suspension request fails after recovery has already started", async () => {
+    let reject!: (error: Error) => void;
+    const sync = vi
+      .spyOn(pushNotifications, "syncPushSubscription")
+      .mockReturnValueOnce(
+        new Promise((_, fail) => {
+          reject = fail;
+        }),
+      )
+      .mockResolvedValue(true);
+    const store = useAppStore();
+    store.authenticated = true;
+    store.bootstrapped = true;
+    store.activeSession = state();
+    const pending = store.syncNotifications();
+    await store.recoverConnection();
+    await store.recoverConnection();
+    expect(sync).toHaveBeenCalledOnce();
+    reject(new DOMException("Fetch is aborted", "AbortError"));
+    await pending;
+    await flushPromises();
+    expect(sync).toHaveBeenCalledTimes(2);
+    expect(store.lastError).toBeUndefined();
+  });
+
+  it("retains real failures and does not clear unrelated errors after successful sync", async () => {
+    const sync = vi
+      .spyOn(pushNotifications, "syncPushSubscription")
+      .mockRejectedValueOnce(new Error("HTTP 500"))
+      .mockResolvedValue(true);
+    const store = useAppStore();
+    store.authenticated = true;
+    await store.syncNotifications();
+    expect(store.lastError).toBe("Push notifications: HTTP 500");
+    store.lastError = "Message submission failed";
+    await store.syncNotifications();
+    expect(store.lastError).toBe("Message submission failed");
+    expect(sync).toHaveBeenCalledTimes(2);
+  });
+
+  it("coalesces concurrent recovery and ignores results from a replaced auth epoch", async () => {
+    let reject!: (error: Error) => void;
+    const sync = vi.spyOn(pushNotifications, "syncPushSubscription").mockReturnValue(
+      new Promise((_, fail) => {
+        reject = fail;
+      }),
+    );
+    const store = useAppStore();
+    store.authenticated = true;
+    const first = store.syncNotifications();
+    const second = store.syncNotifications();
+    expect(sync).toHaveBeenCalledOnce();
+    localStorage.setItem(cache.CACHE_EPOCH_KEY, "new-account");
+    reject(new Error("Old request failed"));
+    await Promise.all([first, second]);
+    expect(store.lastError).toBeUndefined();
   });
 });
 

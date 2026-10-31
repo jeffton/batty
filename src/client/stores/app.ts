@@ -35,6 +35,8 @@ let expandedHistory = false;
 let readingHistory: AbortController | undefined;
 let readingHistoryError: string | undefined;
 let uploads = 0;
+let pushSync: Promise<void> | undefined;
+let pushError: string | undefined;
 let bootstrapping: Promise<void> | undefined;
 blockAppReload(() => uploads > 0);
 export const useAppStore = defineStore("app", {
@@ -141,9 +143,7 @@ export const useAppStore = defineStore("app", {
           if (!expandedHistory) this.activeSession = recentSessionWindow(this.activeSession);
           this.openStream();
           void this.populateReadingCache();
-          void syncPushSubscription(false).catch((error) => {
-            this.lastError = error instanceof Error ? error.message : String(error);
-          });
+          void this.syncNotifications();
         } else {
           this.closeStream();
           this.activeSession = undefined;
@@ -235,6 +235,7 @@ export const useAppStore = defineStore("app", {
         if (connection) connection.recover();
         else this.openStream();
         void this.populateReadingCache();
+        void this.syncNotifications(true);
       }
     },
     async checkForUpdates(buildId?: string) {
@@ -337,10 +338,36 @@ export const useAppStore = defineStore("app", {
     setAuthError(error: unknown) {
       this.authError = error instanceof Error ? error.message : String(error);
     },
+    async syncNotifications(afterPending = false): Promise<void> {
+      if (!this.authenticated || document.visibilityState === "hidden" || !navigator.onLine) return;
+      if (pushSync) {
+        await pushSync;
+        // A request started before suspension can fail only after resume.
+        // Recovery must synchronize again, not merely join that stale request.
+        if (afterPending) return this.syncNotifications();
+        return;
+      }
+      const epoch = localStorage.getItem(CACHE_EPOCH_KEY);
+      pushSync = (async () => {
+        try {
+          await syncPushSubscription(false);
+          if (epoch !== localStorage.getItem(CACHE_EPOCH_KEY)) return;
+          if (pushError && this.lastError === pushError) this.lastError = undefined;
+          pushError = undefined;
+        } catch (error) {
+          if (epoch !== localStorage.getItem(CACHE_EPOCH_KEY)) return;
+          pushError = `Push notifications: ${error instanceof Error ? error.message : String(error)}`;
+          this.lastError = pushError;
+        }
+      })().finally(() => {
+        pushSync = undefined;
+      });
+      return pushSync;
+    },
     primeNotifications() {
       void primeAgentNotifications()
         .then((granted) => {
-          if (granted) return syncPushSubscription(false);
+          if (granted) return this.syncNotifications();
         })
         .catch((error) => {
           this.lastError = error instanceof Error ? error.message : String(error);

@@ -762,26 +762,29 @@ export function createMemory(config: MemoryConfig, models: Models) {
         const captured = await captureView(Number.MAX_SAFE_INTEGER, context);
         const { count, prepared } = captured.snapshot;
         const pending: string[] = [];
-        let bytes = 0;
-        let first = count;
-        // Bounded, non-model excerpts bridge compression lag without importing a
-        // second native conversation. Originals and all omitted IDs remain navigable.
-        for (let id = count - 1; id >= prepared; id--) {
+        const attachments: (TextContent | ImageContent)[] = [];
+        // Bridge compression lag with complete projected originals, not a second
+        // native conversation. Reuse zoom's original-image lookup without inference.
+        for (let id = prepared; id < count; id++) {
           const leaf = await leafAt(id, context);
-          const excerpt = Array.from(leaf.text.replaceAll("\n", " ")).slice(0, 256).join("");
-          const line = `${id}+1|[${leaf.date}] ${leaf.kind}: ${excerpt}${excerpt.length < leaf.text.length ? " … (zoom for full text)" : ""}`;
-          if (bytes + utf8Bytes(line) > 16_000) break;
-          pending.unshift(line);
-          bytes += utf8Bytes(line);
-          first = id;
+          pending.push(`${id}+1|[${leaf.date}] ${leaf.kind}: ${leaf.text}`);
+          const images = (await zoomOutput(id, 1, context, captured.snapshot)).filter(
+            (part) => part.type === "image",
+          );
+          if (images.length)
+            attachments.push(
+              { type: "text", text: `Original images for main message ${id}:` },
+              ...images,
+            );
         }
         const recent =
           count > prepared
-            ? `\n<unprepared-main-memory>\nMain messages ${prepared}–${count - 1} are not summarized yet. These are bounded original excerpts, not summaries; use memory_search or memory_zoom(id, 1) for complete originals.${first > prepared ? ` Earlier pending messages ${prepared}–${first - 1} are available through those tools.` : ""}\n${pending.join("\n")}\n</unprepared-main-memory>`
+            ? `\n<unprepared-main-memory>\nMain messages ${prepared}–${count - 1} are not summarized yet. These are complete original text projections, not summaries; original images follow the text. Use memory_search or memory_zoom(id, 1) to navigate originals.\n${pending.join("\n")}\n</unprepared-main-memory>`
             : "";
         return {
           view: snapshotView(captured.view + recent, captured.snapshot),
           snapshot: captured.snapshot,
+          attachments,
         };
       }),
     readyArchive: async (maximum, context) =>

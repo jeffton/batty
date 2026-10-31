@@ -36,6 +36,10 @@ export const SessionMemory = defineDoc<{
 
 export const WorkerMemory = defineDoc<{
   view: string | null;
+  attachments?: (
+    | { type: "text"; text: string }
+    | { type: "image"; data: string; mimeType: string }
+  )[];
   snapshot?: MemorySnapshot;
   tail?: string;
 }>({

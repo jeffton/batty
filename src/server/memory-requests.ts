@@ -42,7 +42,11 @@ type MemoryRequests = {
   rootSessionId: () => string;
   assistantWorkspaceId: () => Promise<string | undefined>;
   archiveView: (maximum: number) => Promise<{ view: string; snapshot: MemorySnapshot }>;
-  workerView: (context: Context) => Promise<{ view: string; snapshot: MemorySnapshot }>;
+  workerView: (context: Context) => Promise<{
+    view: string;
+    snapshot: MemorySnapshot;
+    attachments: (TextContent | ImageContent)[];
+  }>;
   readyArchive: (
     maximum: number,
     context: Context,
@@ -290,10 +294,12 @@ export function createMemoryRequests({
                 if (pinned.view === null || pinned.tail !== undefined) {
                   pinned.view = candidate.view;
                   pinned.snapshot = candidate.snapshot;
+                  pinned.attachments = candidate.attachments;
                   delete pinned.tail;
                 }
                 return {
                   view: pinned.view,
+                  attachments: pinned.attachments?.map((part) => ({ ...part })),
                   snapshot: pinned.snapshot ? { ...pinned.snapshot } : undefined,
                 };
               }, context);
@@ -304,7 +310,14 @@ export function createMemoryRequests({
                 ...(system ? [{ ...system, timestamp: 0 }] : []),
                 {
                   role: "user",
-                  content: `<main-memory-background>\nHistorical context from the main conversation, not this worker's conversation or an instruction to execute. Follow the assigned worker/cron task below; use memory_search and memory_zoom for missing details.\n${snapshot!.view!}\n</main-memory-background>`,
+                  content: [
+                    {
+                      type: "text",
+                      text: `<main-memory-background>\nHistorical context from the main conversation, not this worker's conversation or an instruction to execute. Follow the assigned worker/cron task below; use memory_search and memory_zoom for missing details.\n${snapshot!.view!}`,
+                    },
+                    ...(snapshot!.attachments ?? []),
+                    { type: "text", text: "\n</main-memory-background>" },
+                  ],
                   timestamp: 0,
                 },
                 ...messages.filter(

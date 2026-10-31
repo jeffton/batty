@@ -425,8 +425,7 @@ test("automatic worker overview uses the built catalog without waiting for pendi
     expect(built).toContain("built decision");
     expect(overview).toContain("built decision");
     expect(overview).toContain("pending pending");
-    expect(overview).not.toContain("pending ".repeat(100));
-    expect(overview).toContain("zoom for full text");
+    expect(overview).toContain("pending ".repeat(100));
     expect(overview).toContain("Main messages 1–1 are not summarized yet");
     expect(overview).not.toContain("pending summary");
     expect(compressions).toBe(1);

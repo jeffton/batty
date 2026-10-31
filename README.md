@@ -22,12 +22,15 @@ Device frame: [Apple Frames](https://www.macstories.net/shortcuts/) by Federico 
 
 ## OptChat
 
-[OptChat](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449) gives the permanent conversation a navigable memory tree. Original history is retained; hierarchical summaries keep older context available without sending the entire archive on every turn.
+[OptChat](https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449) gives the permanent conversation a navigable memory tree. Main combines summaries of older history with a recent native session tail, including tool calls, results and images. Background summarization moves older runs into the tree in batches, keeping the request prefix stable between rollovers. Original history is retained.
 
+- **Automatic recall:** main user inputs retrieve relevant historical text excerpts through lexical search, with source IDs for opening the originals.
 - `memory_zoom` expands summaries with UTC timestamp ranges or retrieves an original timestamp, non-thought text and images at leaf zoom (`n=1`).
-- `memory_search` searches original text by literal words.
+- `memory_search` searches original text by keywords; tool calls and results are opt-in.
 
-Main runs receive a prepared memory overview. Workers in the assistant's workspace can use that same main history. The summarization model and language are configurable; original messages remain unchanged.
+Workers in the assistant workspace receive a snapshot of the prepared main-memory tree plus all unprepared text projections and original images, marked as historical background rather than their own conversation. Workers in other workspaces receive neither this background nor main-memory tools.
+
+The summarization model and language are configurable; original messages remain unchanged. See [memory architecture and recall](docs/runtime.md#memory) for retention, worker context and retrieval details.
 
 ## Documentation
 

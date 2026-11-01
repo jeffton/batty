@@ -21,6 +21,7 @@ import {
   browserSessionDirectory,
   closePersistentBrowser,
   connectPersistentBrowser,
+  interruptedBrowser,
   persistentBrowserDisplay,
   readBrowserJson,
   writeBrowserJson,
@@ -274,7 +275,13 @@ export class BrowserService {
     if (this.disposed) throw new Error("Browser service is disposed");
     if (input.action === "close") {
       await browserAbortable(
-        this.withSessionLifecycle(sessionId, () => this.closeSession(sessionId)),
+        this.withSessionLifecycle(sessionId, async () => {
+          await this.closeSession(sessionId);
+          await fs.rm(
+            path.join(browserSessionDirectory(this.persistenceRoot, sessionId), "relaunch.json"),
+            { force: true },
+          );
+        }),
         signal,
       );
       return { text: "Browser session closed.", details: { action: input.action } };
@@ -293,6 +300,14 @@ export class BrowserService {
           if (await this.hasSession(sessionId)) await this.touchSession(sessionId);
         });
         signal?.throwIfAborted();
+        if (
+          await readBrowserJson(
+            path.join(browserSessionDirectory(this.persistenceRoot, sessionId), "relaunch.json"),
+          )
+        )
+          throw new Error(
+            'Browser relaunch was interrupted. Open the browser viewer to retry, or use action="close" to end the session.',
+          );
         try {
           let session = this.sessions.get(sessionId);
           if (
@@ -424,19 +439,33 @@ export class BrowserService {
         await this.withSessionLifecycle(sessionId, async () => {
           if (await this.hasSession(sessionId)) await this.touchSession(sessionId);
         });
+        const directory = browserSessionDirectory(this.persistenceRoot, sessionId);
+        const relaunchFile = path.join(directory, "relaunch.json");
+        const interrupted = await interruptedBrowser(directory);
+        const relaunch =
+          interrupted ?? (await readBrowserJson<{ useTailscale: boolean }>(relaunchFile));
+        if (relaunch?.useTailscale) await this.requireTailscaleProxy(signal);
+        if (interrupted) {
+          // A viewer start is explicit permission to relaunch the same profile.
+          // Keep routing intent across failed launches, independently of process receipts.
+          await writeBrowserJson(relaunchFile, { useTailscale: interrupted.useTailscale });
+          await this.closeSession(sessionId);
+        }
         const session =
           this.sessions.get(sessionId) ??
           (await this.createSession(
             sessionId,
             undefined,
-            (await this.hasSession(sessionId)) ? undefined : false,
+            relaunch?.useTailscale ?? ((await this.hasSession(sessionId)) ? undefined : false),
             signal,
+            !!relaunch,
           ));
         signal.throwIfAborted();
         if (session.useTailscale) await this.requireTailscaleProxy(signal);
         await this.enableCloud(sessionId, session);
         await this.persistRegistry(session);
         await this.touchSession(sessionId);
+        await fs.rm(relaunchFile, { force: true });
         return this.cloudAttachment(session);
       },
       this.queues,
@@ -1126,8 +1155,9 @@ export class BrowserService {
     viewport: BrowserViewport | undefined,
     useTailscale: boolean | undefined,
     signal?: AbortSignal,
+    restoreTabs = false,
   ): Promise<BrowserSession> {
-    const pending = this.createSessionNow(sessionId, viewport, useTailscale, signal);
+    const pending = this.createSessionNow(sessionId, viewport, useTailscale, signal, restoreTabs);
     this.startups.set(sessionId, pending);
     try {
       return await pending;
@@ -1141,6 +1171,7 @@ export class BrowserService {
     viewport: BrowserViewport | undefined,
     useTailscale: boolean | undefined,
     signal?: AbortSignal,
+    restoreTabs = false,
   ): Promise<BrowserSession> {
     if (this.sessions.size >= MAX_BROWSER_SESSIONS) {
       throw new Error(`Browser session limit reached (${MAX_BROWSER_SESSIONS})`);
@@ -1152,7 +1183,7 @@ export class BrowserService {
     signal?.throwIfAborted();
     const { browser, receipt, created } = await connectPersistentBrowser(
       directory,
-      useTailscale === undefined ? undefined : { useTailscale, proxyServer },
+      useTailscale === undefined ? undefined : { useTailscale, proxyServer, restoreTabs },
       signal,
     );
     const identity = browserIdentity(browser.version());

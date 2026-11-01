@@ -72,6 +72,23 @@ export interface PersistentBrowserReceipt {
   endpoint: string;
   useTailscale: boolean;
 }
+/** Only a confirmed missing process may be relaunched by the explicit viewer launcher. */
+export async function interruptedBrowser(
+  directory: string,
+): Promise<PersistentBrowserReceipt | undefined> {
+  const receipt = await readBrowserJson<PersistentBrowserReceipt>(
+    path.join(directory, "browser.json"),
+  );
+  if (!receipt) return undefined;
+  try {
+    process.kill(receipt.pid, 0);
+    return undefined;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    return receipt;
+  }
+}
+
 export interface PersistentBrowserRegistry {
   cloudViewport?: CloudBrowserViewport;
   activePageId?: string;
@@ -116,7 +133,12 @@ export async function persistentBrowserDisplay(
 
 export async function connectPersistentBrowser(
   directory: string,
-  options?: { useTailscale: boolean; proxyServer?: string; userAgent?: string },
+  options?: {
+    useTailscale: boolean;
+    proxyServer?: string;
+    userAgent?: string;
+    restoreTabs?: boolean;
+  },
   signal?: AbortSignal,
 ): Promise<{ browser: Browser; receipt: PersistentBrowserReceipt; created: boolean }> {
   signal?.throwIfAborted();
@@ -245,6 +267,7 @@ export async function connectPersistentBrowser(
       `--user-data-dir=${isolation ? path.join(isolation.directory, "profile") : profile}`,
       "--no-first-run",
       "--no-default-browser-check",
+      ...(options.restoreTabs ? ["--restore-last-session"] : []),
       "--disable-background-networking",
       "--disable-component-update",
       "--disable-infobars",

@@ -41,6 +41,8 @@ function connectionFixture() {
   vi.useFakeTimers();
   const sources: FakeSource[] = [];
   class FakeSource {
+    static CONNECTING = 0;
+    readyState = 1;
     onopen?: () => void;
     onerror?: () => void;
     onmessage?: (event: { data: string }) => void;
@@ -87,6 +89,66 @@ test("foreground events preserve a live stream and replace a stale stream only o
   window.dispatchEvent(new Event("online"));
   expect(sources).toHaveLength(2);
   expect(sources[0]!.close).toHaveBeenCalledOnce();
+});
+
+test("focus and resume recover stale sockets without replacing healthy or newly connecting ones", () => {
+  const { connection, sources } = connectionFixture();
+  window.dispatchEvent(new Event("focus"));
+  document.dispatchEvent(new Event("resume"));
+  expect(sources).toHaveLength(1);
+  vi.setSystemTime(Date.now() + 60_000);
+  window.dispatchEvent(new Event("focus"));
+  document.dispatchEvent(new Event("resume"));
+  expect(sources).toHaveLength(2);
+  connection.close();
+  window.dispatchEvent(new Event("focus"));
+  document.dispatchEvent(new Event("resume"));
+  expect(sources).toHaveLength(2);
+});
+
+test("a suspended event loop replaces the old socket even after a buffered heartbeat", () => {
+  const { sources } = connectionFixture();
+  vi.setSystemTime(Date.now() + 60_000);
+  sources[0]!.listeners.get("heartbeat")!();
+  vi.advanceTimersByTime(5000);
+  expect(sources).toHaveLength(2);
+  sources[1]!.listeners.get("heartbeat")!();
+  vi.advanceTimersByTime(5000);
+  expect(sources).toHaveLength(2);
+});
+
+test("a backwards wall-clock adjustment cannot strand a stream in a fresh lease", () => {
+  const { sources } = connectionFixture();
+  vi.setSystemTime(Date.now() - 60_000);
+  window.dispatchEvent(new Event("focus"));
+  expect(sources).toHaveLength(2);
+  window.dispatchEvent(new Event("focus"));
+  expect(sources).toHaveLength(2);
+});
+
+test("a hidden wake tick preserves suspension until foreground recovery", () => {
+  const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+  const { sources } = connectionFixture();
+  vi.setSystemTime(Date.now() + 60_000);
+  sources[0]!.listeners.get("heartbeat")!();
+  vi.advanceTimersByTime(5000);
+  expect(sources).toHaveLength(1);
+  sources[0]!.listeners.get("heartbeat")!();
+  visibility.mockReturnValue("visible");
+  document.dispatchEvent(new Event("visibilitychange"));
+  window.dispatchEvent(new Event("focus"));
+  expect(sources).toHaveLength(2);
+});
+
+test("stalled handshakes retry within one heartbeat interval, with no late-event race", () => {
+  const { sources, onEvent } = connectionFixture();
+  sources[0]!.readyState = 0;
+  vi.advanceTimersByTime(4999);
+  expect(sources).toHaveLength(1);
+  vi.advanceTimersByTime(1);
+  expect(sources).toHaveLength(2);
+  sources[0]!.onmessage!({ data: '{"type":"error","message":"late"}' });
+  expect(onEvent).not.toHaveBeenCalled();
 });
 
 test("background timers preserve the stream; foreground replaces it once when stale", () => {

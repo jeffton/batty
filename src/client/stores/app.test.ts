@@ -468,6 +468,8 @@ describe("stream recovery", () => {
     vi.stubGlobal(
       "EventSource",
       class {
+        static CONNECTING = 0;
+        readyState = 1;
         close = vi.fn();
         listeners = new Map<string, () => void>();
         addEventListener(name: string, callback: () => void) {
@@ -578,6 +580,8 @@ describe("stream recovery", () => {
     vi.stubGlobal(
       "EventSource",
       class {
+        static CONNECTING = 0;
+        readyState = 1;
         close = vi.fn();
         addEventListener = vi.fn();
         removeEventListener = vi.fn();

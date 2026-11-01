@@ -18,6 +18,8 @@ export function createSessionConnection(options: ConnectionOptions) {
   let retry: ReturnType<typeof setTimeout> | undefined;
   let lastActivity = 0;
   let lastWatchdog = 0;
+  let lastTick = 0;
+  let suspended = false;
   let active = false;
   let stopPushForeground: (() => void) | undefined;
 
@@ -41,12 +43,19 @@ export function createSessionConnection(options: ConnectionOptions) {
     stopPushForeground = listenForPushForeground(current);
     lastActivity = Date.now();
     lastWatchdog = lastActivity;
+    lastTick = lastActivity;
+    suspended = false;
     const touch = () => {
       if (source === current) lastActivity = Date.now();
     };
     current.addEventListener("heartbeat", touch);
     watchdog = setInterval(() => {
+      const now = Date.now();
+      suspended ||= now < lastTick || now - lastTick > 10_000;
+      lastTick = now;
       if (document.visibilityState === "hidden") return;
+      // Buffered heartbeats can arrive before this timer after sleep. They do
+      // not prove the old socket still works; a paused event loop needs a fresh one.
       recover();
       if (Date.now() - lastWatchdog >= 15_000) {
         lastWatchdog = Date.now();
@@ -76,7 +85,10 @@ export function createSessionConnection(options: ConnectionOptions) {
 
   function recover() {
     if (!active || !navigator.onLine) return;
-    if (source && Date.now() - lastActivity < 15_000) return;
+    // A handshake that never opens must not inherit a live stream's lease.
+    const timeout = source?.readyState === EventSource.CONNECTING ? 5000 : 15_000;
+    const age = Date.now() - lastActivity;
+    if (source && !suspended && age >= 0 && age < timeout) return;
     connect();
   }
 
@@ -95,6 +107,8 @@ export function createSessionConnection(options: ConnectionOptions) {
       window.addEventListener("online", recover);
       window.addEventListener("offline", offline);
       window.addEventListener("pageshow", recover);
+      window.addEventListener("focus", recover);
+      document.addEventListener("resume", visible);
       document.addEventListener("visibilitychange", visible);
     }
     if (navigator.onLine) recover();
@@ -107,6 +121,8 @@ export function createSessionConnection(options: ConnectionOptions) {
     window.removeEventListener("online", recover);
     window.removeEventListener("offline", offline);
     window.removeEventListener("pageshow", recover);
+    window.removeEventListener("focus", recover);
+    document.removeEventListener("resume", visible);
     document.removeEventListener("visibilitychange", visible);
   }
 

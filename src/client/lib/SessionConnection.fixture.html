@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Session connection fixture</title>
+  </head>
+  <body>
+    <textarea aria-label="Draft">unsent draft</textarea>
+    <output>connecting</output>
+    <script type="module">
+      import { createSessionConnection } from "./session-connection";
+      let cursor = "1";
+      window.connection = createSessionConnection({
+        path: () => `/wake-events?after=${cursor}`,
+        onConnecting: () => (document.querySelector("output").textContent = "connecting"),
+        onError: () => (document.querySelector("output").textContent = "offline"),
+        onEvent: (event) => {
+          cursor = event.cursor;
+          document.querySelector("output").textContent = "online";
+        },
+      });
+      window.connection.open();
+    </script>
+  </body>
+</html>

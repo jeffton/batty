@@ -13,10 +13,11 @@ import { recentSessionWindow } from "@/client/lib/session-window";
 import { sessionHistoryCursor } from "@/client/lib/session-stream";
 import { createAppState } from "./app-state";
 import { providerSettingsActions } from "./app-provider-settings";
-import type { BootstrapPayload } from "@/shared/types";
+import type { BootstrapPayload, UiMessage } from "@/shared/types";
 import {
   clearMainCache,
   readMainCache,
+  readMainCachePage,
   saveMainCache,
   CACHE_DAY_MS,
   CACHE_EPOCH_KEY,
@@ -165,17 +166,22 @@ export const useAppStore = defineStore("app", {
         }
       }
     },
-    async persistMainCache() {
-      if (!cachedBootstrap || !this.authenticated || !this.activeSession) return;
+    async persistMainCache(
+      messages?: UiMessage[],
+      page?: { before?: string; hasMoreMessages?: boolean },
+    ) {
+      if (!cachedBootstrap || !this.authenticated || !this.activeSession) return true;
       try {
-        await saveMainCache(cachedBootstrap, this.activeSession);
+        await saveMainCache(cachedBootstrap, this.activeSession, messages, page);
         if (cacheError && this.lastError === cacheError) this.lastError = undefined;
         cacheError = undefined;
+        return true;
       } catch (error) {
         reportBrowserError(error, "cache-write");
-        if (error instanceof CacheSuspendedError) return;
+        if (error instanceof CacheSuspendedError) return false;
         cacheError = `Local cache: ${String(error)}`;
         this.lastError = cacheError;
+        return false;
       }
     },
     pauseReadingCache() {
@@ -200,24 +206,33 @@ export const useAppStore = defineStore("app", {
         localStorage.getItem(CACHE_EPOCH_KEY) === authEpoch &&
         this.activeSession?.sessionId === sessionId;
       try {
-        while (
-          current() &&
-          this.activeSession?.hasMoreMessages &&
-          (this.activeSession.messages[0]?.timestamp ?? 0) > Date.now() - CACHE_DAY_MS
-        ) {
-          const requested = this.activeSession;
-          const before = requested.messages[0]?.id;
-          const page = await api.getMainMessages({ before, limit: 500, signal: controller.signal });
+        if (!(await this.persistMainCache()) || !current()) return;
+        let boundary = this.activeSession?.messages[0];
+        let hasMore = this.activeSession?.hasMoreMessages;
+        while (current() && hasMore && boundary && boundary.timestamp > Date.now() - CACHE_DAY_MS) {
+          const before = boundary.id;
+          const cached = await readMainCachePage({ sessionId: sessionId!, before, limit: 50 });
+          if (!current()) return;
+          const page =
+            cached ?? (await api.getMainMessages({ before, limit: 50, signal: controller.signal }));
           if (!current()) return;
           if (readingHistoryError && this.lastError === readingHistoryError)
             this.lastError = undefined;
           readingHistoryError = undefined;
-          if (!page.messages.length) break;
-          this.activeSession = prependHistoryPage(this.activeSession!, requested, page);
-          if (this.activeSession.messages[0]?.id === before) break;
-          await this.persistMainCache();
+          if (!page.messages.length || page.messages[0]!.id === before) break;
+          // Link this page to its requested boundary without loading the whole
+          // day into the live transcript. Older messages are paged on demand.
+          if (
+            !cached &&
+            !(await this.persistMainCache(page.messages, {
+              before,
+              hasMoreMessages: page.hasMoreMessages,
+            }))
+          )
+            return;
+          boundary = page.messages[0];
+          hasMore = page.hasMoreMessages;
         }
-        if (current()) await this.persistMainCache();
       } catch (error) {
         // Only our lifecycle cancellation is expected. Timeouts, HTTP errors and
         // unowned browser aborts remain visible and retain fetch diagnostics.
@@ -402,7 +417,12 @@ export const useAppStore = defineStore("app", {
       if (!current?.hasMoreMessages || this.loadingOlderMessages) return;
       this.loadingOlderMessages = true;
       try {
-        const page = await api.getMainMessages({ before: current.messages[0]?.id, limit: 50 });
+        const before = current.messages[0]?.id;
+        const offline = this.connectionState === "offline" || !navigator.onLine;
+        const page = offline
+          ? await readMainCachePage({ sessionId: current.sessionId, before, limit: 50 })
+          : await api.getMainMessages({ before, limit: 50 });
+        if (!page) throw new Error("This history is not available offline");
         if (this.activeSession) {
           const previous = this.activeSession;
           this.activeSession = prependHistoryPage(previous, current, page);

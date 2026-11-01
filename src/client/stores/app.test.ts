@@ -19,6 +19,7 @@ vi.mock("@/client/lib/main-cache", () => ({
   registerMainCacheBootstrap: vi.fn(),
   authorizePreviewCache: vi.fn(),
   readMainCache: vi.fn(),
+  readMainCachePage: vi.fn(),
   saveMainCache: vi.fn(),
   clearMainCache: vi.fn(),
 }));
@@ -262,6 +263,69 @@ describe("reading history lifecycle", () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
+  it("caches successive server pages without expanding the live transcript", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
+    const fetch = vi
+      .spyOn(api, "getMainMessages")
+      .mockResolvedValueOnce({
+        messages: [message("middle")],
+        totalMessageCount: 3,
+        hasMoreMessages: true,
+      })
+      .mockResolvedValueOnce({
+        messages: [message("old")],
+        totalMessageCount: 3,
+        hasMoreMessages: false,
+      });
+    vi.mocked(api.getMain).mockResolvedValue({ ...history(), totalMessageCount: 3 });
+    const store = useAppStore();
+    await store.bootstrap();
+    await flushPromises();
+    expect(fetch.mock.calls.map(([options]) => options.before)).toEqual(["new", "middle"]);
+    expect(store.activeSession?.messages.map((entry) => entry.id)).toEqual(["new"]);
+    expect(cache.saveMainCache).toHaveBeenCalledWith(
+      bootstrap,
+      expect.objectContaining({ messages: [message("new")] }),
+      [message("middle")],
+      { before: "new", hasMoreMessages: true },
+    );
+    expect(cache.saveMainCache).toHaveBeenCalledWith(
+      bootstrap,
+      expect.anything(),
+      [message("old")],
+      { before: "middle", hasMoreMessages: false },
+    );
+  });
+
+  it("pages cached history offline without a network request", async () => {
+    const fetch = vi.spyOn(api, "getMainMessages");
+    const store = useAppStore();
+    store.activeSession = history();
+    store.connectionState = "offline";
+    vi.mocked(cache.readMainCachePage).mockResolvedValueOnce({
+      messages: [message("old")],
+      totalMessageCount: 2,
+      hasMoreMessages: false,
+    });
+    await store.loadOlderMessages();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(store.activeSession.messages.map((entry) => entry.id)).toEqual(["old", "new"]);
+    expect(store.activeSession.hasMoreMessages).toBe(false);
+  });
+
+  it("keeps a cache gap visible offline instead of skipping missing history", async () => {
+    const fetch = vi.spyOn(api, "getMainMessages");
+    const store = useAppStore();
+    store.activeSession = history();
+    store.connectionState = "offline";
+    vi.mocked(cache.readMainCachePage).mockResolvedValueOnce(undefined);
+    await store.loadOlderMessages();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(store.activeSession.messages.map((entry) => entry.id)).toEqual(["new"]);
+    expect(store.activeSession.hasMoreMessages).toBe(true);
+    expect(store.lastError).toBe("This history is not available offline");
+  });
+
   it("does not start background fetches while hidden and resumes from the current boundary", async () => {
     const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
     const fetch = vi.spyOn(api, "getMainMessages").mockResolvedValue({
@@ -280,7 +344,7 @@ describe("reading history lifecycle", () => {
     await flushPromises();
     expect(fetch).toHaveBeenCalledOnce();
     expect(fetch.mock.calls[0]![0].before).toBe("new");
-    expect(store.activeSession.messages.map((message) => message.id)).toEqual(["old", "new"]);
+    expect(store.activeSession.messages.map((message) => message.id)).toEqual(["new"]);
   });
 
   it("cancels on suspension, coalesces resume and ignores a late page from the cancelled request", async () => {
@@ -313,7 +377,7 @@ describe("reading history lifecycle", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
     resolve({ messages: [message("stale")], totalMessageCount: 99, hasMoreMessages: false });
     await flushPromises();
-    expect(store.activeSession?.messages.map((message) => message.id)).toEqual(["old", "new"]);
+    expect(store.activeSession?.messages.map((message) => message.id)).toEqual(["new"]);
     expect(store.lastError).toBeUndefined();
   });
 
@@ -354,10 +418,11 @@ describe("reading history lifecycle", () => {
       });
     reset();
     reset();
+    await flushPromises();
     expect(fetch).toHaveBeenCalledTimes(2);
     resolve({ messages: [message("old")], totalMessageCount: 2, hasMoreMessages: false });
     await flushPromises();
-    expect(store.activeSession?.messages.map((message) => message.id)).toEqual(["old", "new"]);
+    expect(store.activeSession?.messages.map((message) => message.id)).toEqual(["new"]);
     expect(store.lastError).toBeUndefined();
   });
 

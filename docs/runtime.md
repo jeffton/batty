@@ -68,7 +68,7 @@ FFmpeg captures the private X display and encodes H.264, delivered through Batty
 
 ## Offline reading
 
-The main thread opens from an authentication-scoped IndexedDB cache before network requests. It fills at least the latest 24 hours, retaining up to seven days within a 32 MiB soft budget, and reports an error rather than exceeding 128 MiB or dropping the latest day. Quota failures preserve the previous complete cache. Logout invalidates cached reading across tabs. Worker sessions are excluded, but their main-thread notices remain.
+The main thread opens from an authentication-scoped IndexedDB cache before network requests. Background synchronization stores the latest 24 hours incrementally without expanding the live transcript. Cached history is read in bounded, numerically ordered pages, including offline; missing ranges remain explicit rather than being skipped. Storage has no per-day byte ceiling. Quota failures preserve the previous committed cache and report the storage error. Logout invalidates cached reading across tabs. Worker sessions are excluded, but their main-thread notices remain. Internal file-mutation snapshots stay in durable storage; UI notices carry the displayable artifacts and diff patches.
 
 Reconnect uses the last durable message ID and an inclusive overlap record, updating existing IDs and live state without resending the entire conversation. Older history loads in pages. Sending requires a live connection; offline drafts are not queued for delivery.
 

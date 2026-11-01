@@ -3,6 +3,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { appBasePath } from "./app-shell";
+import { projectUiMessage, projectUiMetadata } from "./ui-artifact-projection";
 import type { SessionState, UiContentBlock, UiMessage } from "@/shared/types";
 
 const pending = new Map<string, Promise<void>>();
@@ -83,7 +84,8 @@ export class TranscriptImages {
   async messages(messages: UiMessage[]): Promise<UiMessage[]> {
     const result: UiMessage[] = [];
     // Serial processing bounds concurrent image decoders during history pagination.
-    for (const message of messages) {
+    for (const source of messages) {
+      const message = projectUiMessage(source);
       result.push(
         "blocks" in message
           ? {
@@ -103,6 +105,7 @@ export class TranscriptImages {
       activeTools: await Promise.all(
         state.activeTools.map(async (tool) => ({
           ...tool,
+          details: tool.details ? projectUiMetadata(tool.details) : undefined,
           blocks: await Promise.all(tool.blocks.map((block) => this.block(block))),
         })),
       ),

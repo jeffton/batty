@@ -3,6 +3,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { UiMessage } from "@/shared/types";
 import { runtimeResultArtifacts } from "./runtime-result-artifacts";
 import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE } from "./runtime-notices";
+import { projectUiMetadata } from "./ui-artifact-projection";
 
 /** Historical notices resolve their exact durable delivery, not answer text or latest worker state. */
 export async function hydrateRuntimeResultArtifacts(
@@ -10,12 +11,12 @@ export async function hydrateRuntimeResultArtifacts(
   parentId: ConversationId,
   message: UiMessage,
 ): Promise<void> {
-  if (
-    message.role !== "custom" ||
-    !message.customType.startsWith(BATTY_RUNTIME_NOTICE_CUSTOM_TYPE) ||
-    message.data?.runtimeResultArtifacts
-  )
+  if (message.role !== "custom" || !message.customType.startsWith(BATTY_RUNTIME_NOTICE_CUSTOM_TYPE))
     return;
+  if (message.data?.runtimeResultArtifacts) {
+    message.data = projectUiMetadata(message.data);
+    return;
+  }
   const source = (message.data?.cron ?? message.data?.subagent) as
     | { sessionId?: string }
     | undefined;
@@ -60,5 +61,5 @@ export async function hydrateRuntimeResultArtifacts(
     entries.unshift(...[...page.items].reverse());
     cursor = page.next;
   } while (cursor);
-  message.data!.runtimeResultArtifacts = runtimeResultArtifacts(entries);
+  message.data!.runtimeResultArtifacts = projectUiMetadata(runtimeResultArtifacts(entries));
 }

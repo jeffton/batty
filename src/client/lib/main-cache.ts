@@ -1,8 +1,13 @@
-import type { BootstrapPayload, SessionState, UiMessage } from "@/shared/types";
+import type {
+  BootstrapPayload,
+  SessionMessagesPage,
+  SessionState,
+  UiMessage,
+} from "@/shared/types";
 
 export const CACHE_DAY_MS = 86_400_000;
-export const CACHE_BYTE_BUDGET = 32 * 1024 * 1024;
-export const CACHE_HARD_LIMIT = 128 * 1024 * 1024;
+const PAGE_BYTE_BUDGET = 700 * 1024;
+const PAGE_SIZE = 50;
 const DB_NAME = "batty-main-reading-v1";
 export const CACHE_EPOCH_KEY = "batty:main-cache-epoch";
 export const REVOKED_CACHE_SCOPE_KEY = "batty:revoked-cache-scope";
@@ -18,12 +23,20 @@ interface MessageRecord {
   timestamp: number;
   json: string;
   bytes: number;
+  order: [string, number, number];
+}
+type MessageKey = [number, number];
+interface CachedRange {
+  first: MessageKey;
+  last: MessageKey;
+  complete: boolean;
 }
 interface CacheMetadata {
   epoch: string | null;
   bootstrap: BootstrapPayload;
   session: SessionState;
   savedAt: number;
+  ranges: CachedRange[];
 }
 let database: Promise<IDBDatabase> | undefined;
 const owners = new WeakMap<IDBDatabase, Promise<IDBDatabase>>();
@@ -57,7 +70,7 @@ function request<T>(request: IDBRequest<T>): Promise<T> {
   });
 }
 
-async function readRecords(db: IDBDatabase) {
+async function readMetadata(db: IDBDatabase) {
   requireForeground();
   const transaction = db.transaction(["metadata", "messages"], "readonly");
   const done = transactionDone(transaction, "read");
@@ -65,7 +78,6 @@ async function readRecords(db: IDBDatabase) {
     request(transaction.objectStore("metadata").get("current")) as Promise<
       CacheMetadata | undefined
     >,
-    request(transaction.objectStore("messages").getAll()) as Promise<MessageRecord[]>,
     done,
   ]);
   // Join the terminal abort before releasing the save lock or reusing the connection.
@@ -75,10 +87,7 @@ async function readRecords(db: IDBDatabase) {
     failures.find((result) => result.reason instanceof CacheSuspendedError) ??
     failures[0];
   if (failure) throw failure.reason;
-  return [
-    (results[0] as PromiseFulfilledResult<CacheMetadata | undefined>).value,
-    (results[1] as PromiseFulfilledResult<MessageRecord[]>).value,
-  ] as const;
+  return (results[0] as PromiseFulfilledResult<CacheMetadata | undefined>).value;
 }
 function transactionDone(
   transaction: IDBTransaction,
@@ -157,10 +166,52 @@ async function open(): Promise<IDBDatabase> {
 function openConnection(): Promise<IDBDatabase> {
   if (database) return database;
   const pending = new Promise<IDBDatabase>((resolve, reject) => {
-    const operation = indexedDB.open(DB_NAME, 1);
-    operation.onupgradeneeded = () => {
-      operation.result.createObjectStore("metadata");
-      operation.result.createObjectStore("messages", { keyPath: "id" });
+    const operation = indexedDB.open(DB_NAME, 2);
+    operation.onupgradeneeded = (event) => {
+      const db = operation.result;
+      const transaction = operation.transaction!;
+      if (event.oldVersion === 0) {
+        db.createObjectStore("metadata");
+        db.createObjectStore("messages", { keyPath: "id" });
+      }
+      const messages = transaction.objectStore("messages");
+      messages.createIndex("order", "order", { unique: true });
+      // Upgrade in-place, one row at a time, retaining every v1 record.
+      const metadataRequest = transaction.objectStore("metadata").get("current");
+      metadataRequest.onsuccess = () => {
+        const metadata = metadataRequest.result as CacheMetadata | undefined;
+        if (!metadata) return;
+        const owner = cacheOwner(metadata.bootstrap, metadata.session);
+        let first: MessageKey | undefined;
+        let last: MessageKey | undefined;
+        let count = 0;
+        const cursorRequest = messages.openCursor();
+        cursorRequest.onsuccess = () => {
+          const cursor = cursorRequest.result;
+          if (cursor) {
+            const row = cursor.value as MessageRecord;
+            const key = messageKey(row.id);
+            count += 1;
+            if (!first || compareKeys(key, first) < 0) first = key;
+            if (!last || compareKeys(key, last) > 0) last = key;
+            cursor.update({ ...row, order: [owner, ...key] });
+            cursor.continue();
+          } else {
+            metadata.ranges =
+              first && last
+                ? [{ first, last, complete: count >= metadata.session.totalMessageCount }]
+                : [];
+            metadata.bootstrap = { ...metadata.bootstrap, activeSession: undefined };
+            metadata.session = {
+              ...metadata.session,
+              messages: [],
+              activeTools: [],
+              activeAssistant: undefined,
+            };
+            transaction.objectStore("metadata").put(metadata, "current");
+          }
+        };
+      };
     };
     operation.onsuccess = () => {
       const db = operation.result;
@@ -183,29 +234,175 @@ function openConnection(): Promise<IDBDatabase> {
   return pending;
 }
 
-export function retainCacheRecords(records: MessageRecord[], now: number): MessageRecord[] {
-  const sorted = [...records].sort(
-    (a, b) =>
-      Number(a.id.split(":")[0]) - Number(b.id.split(":")[0]) ||
-      Number(a.id.split(":")[1] ?? 0) - Number(b.id.split(":")[1] ?? 0),
+function messageKey(id: string): MessageKey {
+  const [entry, subid = "0"] = id.split(":");
+  return [Number(entry), Number(subid)];
+}
+function compareKeys(a: MessageKey, b: MessageKey): number {
+  return a[0] - b[0] || a[1] - b[1];
+}
+function cacheOwner(bootstrap: BootstrapPayload, session: SessionState): string {
+  return JSON.stringify([bootstrap.cacheScope, session.id]);
+}
+function authorizedMetadata(metadata: CacheMetadata | undefined): metadata is CacheMetadata {
+  return Boolean(
+    metadata &&
+    metadata.epoch === localStorage.getItem(CACHE_EPOCH_KEY) &&
+    metadata.bootstrap.cacheScope !== localStorage.getItem(REVOKED_CACHE_SCOPE_KEY) &&
+    metadata.bootstrap.cacheExpiresAt &&
+    metadata.bootstrap.cacheExpiresAt > Date.now(),
   );
-  let bytes = sorted.reduce((total, row) => total + row.bytes, 0);
-  while (sorted.length > 1) {
-    const oldest = sorted[0]!;
-    const optional = oldest.timestamp < now - CACHE_DAY_MS;
-    if (
-      bytes <= CACHE_HARD_LIMIT &&
-      (!optional || (bytes <= CACHE_BYTE_BUDGET && oldest.timestamp >= now - 7 * CACHE_DAY_MS))
-    )
-      break;
-    const entryId = oldest.id.split(":")[0];
-    const entry = sorted.filter((row) => row.id.split(":")[0] === entryId);
-    if (entry.some((row) => row.timestamp >= now - CACHE_DAY_MS)) break;
-    for (let index = 0; index < entry.length; index += 1) bytes -= sorted.shift()!.bytes;
+}
+
+export interface MainCachePageOptions {
+  sessionId: string;
+  before?: string;
+  limit?: number;
+}
+export interface MainCacheSavePage {
+  /** Exclusive server-page cursor. Certifies continuity across the page boundary. */
+  before?: string;
+  hasMoreMessages?: boolean;
+}
+
+function mergeRanges(ranges: CachedRange[], incoming: CachedRange): CachedRange[] {
+  const sorted = [...ranges, incoming].sort((a, b) => compareKeys(a.first, b.first));
+  const merged: CachedRange[] = [];
+  for (const range of sorted) {
+    const previous = merged.at(-1);
+    if (!previous || compareKeys(previous.last, range.first) < 0) {
+      merged.push({ ...range });
+      continue;
+    }
+    if (compareKeys(previous.first, range.first) === 0) previous.complete ||= range.complete;
+    if (compareKeys(range.last, previous.last) > 0) previous.last = range.last;
   }
-  if (bytes > CACHE_HARD_LIMIT)
-    throw new Error("The latest day exceeds the 128 MiB reading-cache limit");
-  return sorted;
+  return merged;
+}
+
+async function readSnapshot(
+  options?: MainCachePageOptions,
+): Promise<{ metadata: CacheMetadata; page: SessionMessagesPage } | undefined> {
+  requireForeground();
+  const db = await open();
+  const transaction = db.transaction(["metadata", "messages"], "readonly");
+  const done = transactionDone(transaction, "read");
+  const snapshot = new Promise<{ metadata: CacheMetadata; page: SessionMessagesPage } | undefined>(
+    (resolve, reject) => {
+      transaction.addEventListener("abort", () =>
+        reject(
+          lifecycleAborts.has(transaction)
+            ? new CacheSuspendedError()
+            : (transaction.error ?? new DOMException("Cache read aborted", "AbortError")),
+        ),
+      );
+      const metadataRequest = transaction.objectStore("metadata").get("current");
+      metadataRequest.onerror = () => reject(metadataRequest.error);
+      metadataRequest.onsuccess = () => {
+        if (lifecycleAborts.has(transaction)) {
+          reject(new CacheSuspendedError());
+          return;
+        }
+        const metadata = metadataRequest.result as CacheMetadata | undefined;
+        if (
+          !authorizedMetadata(metadata) ||
+          (options && options.sessionId !== metadata.session.id)
+        ) {
+          resolve(undefined);
+          return;
+        }
+        const before = options?.before ? messageKey(options.before) : undefined;
+        const range = before
+          ? metadata.ranges.find(
+              (candidate) =>
+                compareKeys(candidate.first, before) <= 0 &&
+                compareKeys(before, candidate.last) <= 0,
+            )
+          : metadata.ranges.at(-1);
+        if (!range) {
+          resolve(
+            !before && metadata.ranges.length === 0
+              ? {
+                  metadata,
+                  page: {
+                    messages: [],
+                    totalMessageCount: metadata.session.totalMessageCount,
+                    hasMoreMessages: Boolean(
+                      metadata.session.hasMoreMessages || metadata.session.totalMessageCount > 0,
+                    ),
+                  },
+                }
+              : undefined,
+          );
+          return;
+        }
+        // The next row might lie across an unsynchronized hole. Let the server
+        // answer instead of silently jumping to a disconnected older range.
+        if (before && compareKeys(before, range.first) === 0 && !range.complete) {
+          resolve(undefined);
+          return;
+        }
+        const owner = cacheOwner(metadata.bootstrap, metadata.session);
+        const messages: UiMessage[] = [];
+        const limit = options?.limit ?? PAGE_SIZE;
+        let bytes = 0;
+        const finish = () =>
+          resolve({
+            metadata,
+            page: {
+              messages: messages.reverse(),
+              totalMessageCount: metadata.session.totalMessageCount,
+              hasMoreMessages:
+                !range.complete ||
+                (messages.length > 0 && compareKeys(messageKey(messages[0]!.id), range.first) > 0),
+            },
+          });
+        if (before && compareKeys(before, range.first) === 0) {
+          finish();
+          return;
+        }
+        const keys = IDBKeyRange.bound(
+          [owner, ...range.first],
+          [owner, ...(before ?? range.last)],
+          false,
+          Boolean(before),
+        );
+        const cursorRequest = transaction
+          .objectStore("messages")
+          .index("order")
+          .openCursor(keys, "prev");
+        cursorRequest.onerror = () => reject(cursorRequest.error);
+        cursorRequest.onsuccess = () => {
+          const cursor = cursorRequest.result;
+          if (!cursor) {
+            finish();
+            return;
+          }
+          const row = cursor.value as MessageRecord;
+          // Always allow one oversized message; never truncate message content.
+          if (
+            messages.length &&
+            (messages.length >= limit || bytes + row.bytes > PAGE_BYTE_BUDGET)
+          ) {
+            finish();
+            return;
+          }
+          messages.push(JSON.parse(row.json) as UiMessage);
+          bytes += row.bytes;
+          cursor.continue();
+        };
+      };
+    },
+  );
+  const results = await Promise.allSettled([snapshot, done]);
+  const failures = results.filter((result) => result.status === "rejected");
+  const failure =
+    failures.find((result) => result.reason?.name !== "AbortError") ??
+    failures.find((result) => result.reason instanceof CacheSuspendedError) ??
+    failures[0];
+  if (failure) throw failure.reason;
+  const result = (results[0] as PromiseFulfilledResult<Awaited<typeof snapshot>>).value;
+  return result && authorizedMetadata(result.metadata) ? result : undefined;
 }
 
 export function authorizePreviewCache(bootstrap: BootstrapPayload): void {
@@ -223,37 +420,31 @@ export function authorizePreviewCache(bootstrap: BootstrapPayload): void {
 }
 
 export async function readMainCache(): Promise<CacheMetadata | undefined> {
-  requireForeground();
-  const db = await open();
-  const [metadata, records] = await readRecords(db);
-  if (!metadata) return undefined;
-  if (metadata.bootstrap.cacheScope === localStorage.getItem(REVOKED_CACHE_SCOPE_KEY)) {
-    await clearMainCache();
-    return undefined;
-  }
-  if (
-    metadata.epoch !== localStorage.getItem(CACHE_EPOCH_KEY) ||
-    !metadata.bootstrap.cacheExpiresAt ||
-    metadata.bootstrap.cacheExpiresAt <= Date.now()
-  ) {
-    await clearMainCache();
-    return undefined;
-  }
-  authorizePreviewCache(metadata.bootstrap);
-  const messages = retainCacheRecords(records, Date.now()).map(
-    (record) => JSON.parse(record.json) as UiMessage,
-  );
+  const result = await readSnapshot();
+  if (!result) return undefined;
+  authorizePreviewCache(result.metadata.bootstrap);
   return {
-    ...metadata,
-    session: {
-      ...metadata.session,
-      messages,
-      hasMoreMessages: metadata.session.totalMessageCount > messages.length,
-    },
+    ...result.metadata,
+    session: { ...result.metadata.session, ...result.page },
   };
 }
 
-export function saveMainCache(bootstrap: BootstrapPayload, session: SessionState): Promise<void> {
+export async function readMainCachePage(
+  options: MainCachePageOptions,
+): Promise<SessionMessagesPage | undefined> {
+  return (await readSnapshot(options))?.page;
+}
+
+/**
+ * Each supplied array must be a contiguous server window/page, not disconnected
+ * history concatenated with a live tail. Omitted rows are never deleted.
+ */
+export function saveMainCache(
+  bootstrap: BootstrapPayload,
+  session: SessionState,
+  messages: UiMessage[] = session.messages,
+  page: MainCacheSavePage = {},
+): Promise<void> {
   if (
     !isCacheAuthorized() ||
     bootstrap.cacheScope === localStorage.getItem(REVOKED_CACHE_SCOPE_KEY) ||
@@ -269,67 +460,103 @@ export function saveMainCache(bootstrap: BootstrapPayload, session: SessionState
       if (admitted !== generation || !isCacheAuthorized()) return;
       requireForeground();
       const db = await open();
-      const [oldMetadata, oldRows] = await readRecords(db);
+      const oldMetadata = await readMetadata(db);
       if (admitted !== generation || !isCacheAuthorized()) return;
       const sameScope =
         oldMetadata?.bootstrap.cacheScope === bootstrap.cacheScope &&
         oldMetadata?.session.id === session.id;
       if (
         sameScope &&
-        oldMetadata?.session.streamId === session.streamId &&
+        oldMetadata.session.streamId === session.streamId &&
         (oldMetadata.session.revision ?? 0) > (session.revision ?? 0)
       )
         return;
-      const oldById = new Map((sameScope ? oldRows : []).map((record) => [record.id, record]));
-      const rows = session.messages.map((message) => {
+      const owner = cacheOwner(bootstrap, session);
+      const rows = messages.map((message) => {
         let row = serialized.get(message);
-        if (!row) {
+        if (!row || row.order[0] !== owner) {
           const json = JSON.stringify(message);
           row = {
-            id: message.id,
+            id: JSON.stringify([owner, message.id]),
             timestamp: message.timestamp,
             json,
             bytes: new TextEncoder().encode(json).byteLength,
+            order: [owner, ...messageKey(message.id)],
           };
           serialized.set(message, row);
         }
         return row;
       });
-      const kept = retainCacheRecords(rows, Date.now());
-      // Serialize/validate before opening the write transaction. Large snapshots
-      // must not keep a native transaction idle while JS prepares its payload.
+      let ranges = sameScope ? oldMetadata.ranges : [];
+      if (rows.length) {
+        const keys = rows
+          .map((row) => [row.order[1], row.order[2]] as MessageKey)
+          .sort(compareKeys);
+        const first = keys[0]!;
+        let last = keys.at(-1)!;
+        if (page.before) {
+          const boundary = messageKey(page.before);
+          const joined = ranges.find(
+            (range) =>
+              compareKeys(range.first, boundary) <= 0 && compareKeys(boundary, range.last) <= 0,
+          );
+          if (joined && compareKeys(last, boundary) < 0) last = boundary;
+        }
+        ranges = mergeRanges(ranges, {
+          first,
+          last,
+          complete:
+            page.hasMoreMessages === false ||
+            (messages === session.messages &&
+              (session.hasMoreMessages === false || session.totalMessageCount <= messages.length)),
+        });
+      }
+      // Strip transient assistant/tool payloads as well as messages: metadata
+      // stays bounded even when a live tool returns a very large report.
       const metadata: CacheMetadata = {
         epoch: admittedEpoch,
-        bootstrap,
-        session: { ...session, messages: [] },
+        bootstrap: { ...bootstrap, activeSession: undefined },
+        session: { ...session, messages: [], activeTools: [], activeAssistant: undefined },
+        ranges,
         savedAt: Date.now(),
       };
-      const metadataJson = JSON.stringify(metadata);
-      const totalBytes =
-        kept.reduce((total, row) => total + row.bytes, 0) +
-        new TextEncoder().encode(metadataJson).byteLength;
-      if (totalBytes > CACHE_HARD_LIMIT) throw new Error("Reading cache exceeds the 128 MiB limit");
-      const plainMetadata = JSON.parse(metadataJson);
-      // pagehide can close the read connection while its transaction completes.
+      const plainMetadata = JSON.parse(JSON.stringify(metadata));
       const writeDb = await open();
       if (admitted !== generation || !isCacheAuthorized()) return;
       requireForeground();
       const transaction = writeDb.transaction(["metadata", "messages"], "readwrite");
       const done = transactionDone(transaction, "write");
-      const messages = transaction.objectStore("messages");
+      const store = transaction.objectStore("messages");
+      let writeError: unknown;
+      let remaining = rows.length;
       try {
-        if (!sameScope) messages.clear();
-        const retainedIds = new Set(kept.map((row) => row.id));
-        for (const old of oldById.values()) if (!retainedIds.has(old.id)) messages.delete(old.id);
-        for (const row of kept) if (oldById.get(row.id)?.json !== row.json) messages.put(row);
+        for (const row of rows) {
+          // Preserve v1 primary keys while new records use scope-qualified IDs.
+          const existingKey = store.index("order").getKey(row.order);
+          existingKey.onsuccess = () => {
+            try {
+              store.put({ ...row, id: existingKey.result ?? row.id });
+              remaining -= 1;
+              if (remaining === 0) transaction.commit();
+            } catch (error) {
+              writeError = error;
+              transaction.abort();
+            }
+          };
+        }
         transaction.objectStore("metadata").put(plainMetadata, "current");
-        transaction.commit();
+        // Enqueue all upserts before committing, keeping rows/ranges/metadata atomic.
+        if (!rows.length) transaction.commit();
       } catch (error) {
         transaction.abort();
         await done.catch(() => {});
         throw error;
       }
-      await done;
+      try {
+        await done;
+      } catch (error) {
+        throw writeError ?? error;
+      }
     }),
   );
   queue = operation.catch(() => {});

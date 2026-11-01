@@ -15,6 +15,7 @@ import { sanitizeTerminalBlocks, stripTerminalFormatting } from "./terminal-outp
 import { agentTurnArtifactsByReplyEntryId } from "./agent-turn-file-changes";
 import { buildRuntimeNoticeMessage, decodeRuntimeNotice } from "./runtime-notices";
 import { decodeSiteAttachmentDescriptor } from "./site-attachments";
+import { projectUiMetadata } from "./ui-artifact-projection";
 
 export type UiImageResolver = (image: {
   mimeType: string;
@@ -74,7 +75,7 @@ interface CustomLikeMessage {
 
 function normalizeToolDetails(details: unknown): ToolExecutionDetails | undefined {
   if (!details || typeof details !== "object") return undefined;
-  const result = details as ToolExecutionDetails;
+  const result = projectUiMetadata(details as ToolExecutionDetails);
   return result.sites
     ? { ...result, sites: result.sites.map(decodeSiteAttachmentDescriptor) }
     : result;
@@ -82,7 +83,7 @@ function normalizeToolDetails(details: unknown): ToolExecutionDetails | undefine
 
 function normalizeCustomData(data: unknown): CustomMessageData | undefined {
   if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
-  const result = data as CustomMessageData;
+  const result = projectUiMetadata(data as CustomMessageData);
   const artifacts = result.runtimeResultArtifacts as ToolExecutionDetails | undefined;
   return artifacts
     ? { ...result, runtimeResultArtifacts: normalizeToolDetails(artifacts) }

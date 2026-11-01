@@ -22,7 +22,19 @@ test("historical hydration resolves exact delivery even with repeated answers an
         items: [
           { model: [{ role: "assistant", content: [{ type: "text", text: "Done" }] }] },
           { model: [{ role: "user", content: "Steering" }] },
-          { model: [{ role: "toolResult", details: { sentFiles: [file] } }] },
+          {
+            model: [
+              {
+                role: "toolResult",
+                details: {
+                  sentFiles: [file],
+                  battyFileChanges: [
+                    { path: "a.ts", before: "private before", after: "private after", order: 1 },
+                  ],
+                },
+              },
+            ],
+          },
           { model: [{ role: "user", content: "Original task" }] },
         ],
       };
@@ -38,5 +50,10 @@ test("historical hydration resolves exact delivery even with repeated answers an
   };
   await hydrateRuntimeResultArtifacts(storage, 1 as never, message);
   expect(queries).toEqual([{ conversationId: 42, minEntryId: 10, maxEntryId: 14 }]);
-  expect(message.data!.runtimeResultArtifacts).toEqual({ sentFiles: [file] });
+  expect(message.data!.runtimeResultArtifacts).toMatchObject({
+    sentFiles: [file],
+    fileChanges: [{ path: "a.ts", patch: expect.any(String) }],
+  });
+  expect(message.data!.runtimeResultArtifacts).not.toHaveProperty("battyFileChanges");
+  expect(message.data!.runtimeResultArtifacts).not.toHaveProperty("forwardedArtifacts");
 });

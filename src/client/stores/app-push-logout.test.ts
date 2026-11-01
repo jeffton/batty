@@ -10,6 +10,7 @@ vi.mock("@/client/lib/main-cache", () => ({
   registerMainCacheBootstrap: vi.fn(),
   authorizePreviewCache: vi.fn(),
   readMainCache: vi.fn(),
+  readMainCachePage: vi.fn(),
   saveMainCache: vi.fn(),
   clearMainCache: vi.fn(),
 }));

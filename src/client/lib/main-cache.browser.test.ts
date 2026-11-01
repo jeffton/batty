@@ -86,46 +86,6 @@ test("native cache upserts IDs, rejects stale state, isolates users/workers and 
   await page.close();
 });
 
-test("eviction protects 24h before optional history and has a hard bound", async () => {
-  const page = await fixture();
-  const result = await evaluate(page, () => {
-    const c = (window as any).cache;
-    const now = Date.now();
-    const row = (id: number, hours: number, bytes: number) => ({
-      id: String(id),
-      timestamp: now - hours * 3_600_000,
-      bytes,
-      json: "{}",
-    });
-    return {
-      optional: c
-        .retainCacheRecords(
-          [row(1, 200, 1), row(2, 48, c.CACHE_BYTE_BUDGET), row(3, 12, c.CACHE_BYTE_BUDGET)],
-          now,
-        )
-        .map((r: any) => r.id),
-      recent: c.retainCacheRecords(
-        [row(4, 12, c.CACHE_BYTE_BUDGET), row(5, 1, c.CACHE_BYTE_BUDGET)],
-        now,
-      ).length,
-      hard: (() => {
-        try {
-          c.retainCacheRecords(
-            Array.from({ length: 5 }, (_, i) => row(i + 10, 1, c.CACHE_BYTE_BUDGET)),
-            now,
-          );
-        } catch (error) {
-          return String(error);
-        }
-      })(),
-    };
-  });
-  expect(result.optional).toEqual(["3"]);
-  expect(result.recent).toBe(2);
-  expect(result.hard).toContain("128 MiB");
-  await page.close();
-});
-
 test("logout in another tab cannot be undone by stale cache persistence", async () => {
   const context = await browser.newContext();
   const first = await context.newPage();
@@ -211,71 +171,74 @@ test("cross-tab revision checks and commits are serialized", async () => {
   await context.close();
 });
 
-test("quota error aborts the native transaction and keeps the previous complete cache", async () => {
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  await page.goto(url);
-  await page.waitForFunction(() => Boolean((window as any).cache));
-  await evaluate(page, () =>
-    (window as any).cache.saveMainCache(
-      { cacheScope: "quota", cacheExpiresAt: Date.now() + 60_000 },
-      {
-        id: "1",
-        sessionId: "1",
-        revision: 1,
-        streamId: "a",
-        messages: [
-          {
-            id: "1",
-            role: "user",
-            timestamp: Date.now(),
-            blocks: [{ type: "text", text: "retained" }],
-          },
-        ],
-        activeTools: [],
-      },
-    ),
-  );
-
-  const result = await evaluate(page, async () => {
-    const c = (window as any).cache;
-    let error = "";
-    const put = IDBObjectStore.prototype.put;
-    IDBObjectStore.prototype.put = function (value, key) {
-      if (value.id === "2") throw new DOMException("Quota exceeded", "QuotaExceededError");
-      return put.call(this, value, key);
-    };
-    try {
-      const noise = Array.from({ length: 80_000 }, () => crypto.randomUUID()).join("");
-      await c.saveMainCache(
+test.each(["Chromium", "WebKit"])(
+  "%s quota error aborts atomically and keeps the previous cache",
+  async (engine) => {
+    const context = await (engine === "WebKit" ? safari : browser).newContext();
+    const page = await context.newPage();
+    await page.goto(url);
+    await page.waitForFunction(() => Boolean((window as any).cache));
+    await evaluate(page, () =>
+      (window as any).cache.saveMainCache(
         { cacheScope: "quota", cacheExpiresAt: Date.now() + 60_000 },
         {
           id: "1",
           sessionId: "1",
-          revision: 2,
+          revision: 1,
           streamId: "a",
           messages: [
             {
-              id: "2",
+              id: "1",
               role: "user",
               timestamp: Date.now(),
-              blocks: [{ type: "text", text: noise }],
+              blocks: [{ type: "text", text: "retained" }],
             },
           ],
           activeTools: [],
         },
-      );
-    } catch (failure) {
-      error = String(failure);
-    } finally {
-      IDBObjectStore.prototype.put = put;
-    }
-    return { error, restored: await c.readMainCache() };
-  });
-  expect(result.error).toContain("Quota");
-  expect(result.restored.session.messages[0].id).toBe("1");
-  await context.close();
-});
+      ),
+    );
+
+    const result = await evaluate(page, async () => {
+      const c = (window as any).cache;
+      let error = "";
+      const put = IDBObjectStore.prototype.put;
+      IDBObjectStore.prototype.put = function (value, key) {
+        if (value.order?.[1] === 2) throw new DOMException("Quota exceeded", "QuotaExceededError");
+        return put.call(this, value, key);
+      };
+      try {
+        const noise = Array.from({ length: 80_000 }, () => crypto.randomUUID()).join("");
+        await c.saveMainCache(
+          { cacheScope: "quota", cacheExpiresAt: Date.now() + 60_000 },
+          {
+            id: "1",
+            sessionId: "1",
+            revision: 2,
+            streamId: "a",
+            messages: [
+              {
+                id: "2",
+                role: "user",
+                timestamp: Date.now(),
+                blocks: [{ type: "text", text: noise }],
+              },
+            ],
+            activeTools: [],
+          },
+        );
+      } catch (failure) {
+        error = String(failure);
+      } finally {
+        IDBObjectStore.prototype.put = put;
+      }
+      return { error, restored: await c.readMainCache() };
+    });
+    expect(result.error).toContain("Quota");
+    expect(result.restored.session.messages[0].id).toBe("1");
+    await context.close();
+  },
+);
 
 test.each(["Chromium", "WebKit"])(
   "%s cache survives suspension, closed connections, and a native read abort without unhandled rejections",
@@ -322,9 +285,9 @@ test.each(["Chromium", "WebKit"])(
       connection!.close();
       connection!.dispatchEvent(new Event("close"));
       await c.saveMainCache(bootstrap, { ...session, revision: 3 });
-      const getAll = IDBObjectStore.prototype.getAll;
-      IDBObjectStore.prototype.getAll = function (...args) {
-        const operation = getAll.apply(this, args);
+      const get = IDBObjectStore.prototype.get;
+      IDBObjectStore.prototype.get = function (...args) {
+        const operation = get.apply(this, args);
         this.transaction.abort();
         return operation;
       };
@@ -334,13 +297,13 @@ test.each(["Chromium", "WebKit"])(
       } catch (error) {
         abort = String(error);
       } finally {
-        IDBObjectStore.prototype.getAll = getAll;
+        IDBObjectStore.prototype.get = get;
       }
       await new Promise((resolve) => setTimeout(resolve, 0));
       const retained = await c.readMainCache();
       // Suspend during the read half of a save, not just between finished saves.
-      IDBObjectStore.prototype.getAll = function (...args) {
-        const operation = getAll.apply(this, args);
+      IDBObjectStore.prototype.get = function (...args) {
+        const operation = get.apply(this, args);
         operation.addEventListener(
           "success",
           () => {
@@ -348,7 +311,7 @@ test.each(["Chromium", "WebKit"])(
           },
           { once: true },
         );
-        IDBObjectStore.prototype.getAll = getAll;
+        IDBObjectStore.prototype.get = get;
         return operation;
       };
       const cancellation = await c
@@ -413,10 +376,10 @@ test.each(["Chromium", "WebKit"])(
         });
         return transaction;
       };
-      const getAll = IDBObjectStore.prototype.getAll;
-      IDBObjectStore.prototype.getAll = function (...args) {
-        IDBObjectStore.prototype.getAll = getAll;
-        const operation = getAll.apply(this, args);
+      const get = IDBObjectStore.prototype.get;
+      IDBObjectStore.prototype.get = function (...args) {
+        IDBObjectStore.prototype.get = get;
+        const operation = get.apply(this, args);
         const transaction = this.transaction;
         // Model the native request failing before its transaction's abort task.
         queueMicrotask(() => {
@@ -516,10 +479,10 @@ test.each(["Chromium", "WebKit"])(
         .catch((error: Error) => error instanceof c.CacheSuspendedError);
       resume();
       const previous = await c.readMainCache();
-      const getAll = IDBObjectStore.prototype.getAll;
-      IDBObjectStore.prototype.getAll = function (...args) {
-        IDBObjectStore.prototype.getAll = getAll;
-        const operation = getAll.apply(this, args);
+      const get = IDBObjectStore.prototype.get;
+      IDBObjectStore.prototype.get = function (...args) {
+        IDBObjectStore.prototype.get = get;
+        const operation = get.apply(this, args);
         operation.addEventListener("success", hide, { once: true });
         return operation;
       };
@@ -609,10 +572,10 @@ test.each(["Chromium", "WebKit"])(
         if ((pending.get(this) ?? 0) > 0) prematureClose = true;
         close.call(this);
       };
-      const getAll = IDBObjectStore.prototype.getAll;
-      IDBObjectStore.prototype.getAll = function (...args) {
-        IDBObjectStore.prototype.getAll = getAll;
-        const operation = getAll.apply(this, args);
+      const get = IDBObjectStore.prototype.get;
+      IDBObjectStore.prototype.get = function (...args) {
+        IDBObjectStore.prototype.get = get;
+        const operation = get.apply(this, args);
         operation.addEventListener("success", hide, { once: true });
         return operation;
       };
@@ -717,4 +680,215 @@ test.each(["Chromium", "WebKit"])(
     });
     await page.close();
   },
+);
+
+test.each(["Chromium", "WebKit"])(
+  "%s pages numeric IDs, stops at holes, and joins only certified adjacent pages",
+  async (engine) => {
+    const page = await fixture(engine === "WebKit" ? safari : browser);
+    const result = await evaluate(page, async () => {
+      const c = (window as any).cache;
+      const bootstrap = { cacheScope: "ranges", cacheExpiresAt: Date.now() + 60_000 };
+      const message = (id: string) => ({ id, timestamp: Date.now(), role: "user", blocks: [] });
+      const tail = Array.from({ length: 12 }, (_, i) => message(i ? `100:${i}` : "100"));
+      const session = {
+        id: "1",
+        streamId: "a",
+        revision: 1,
+        messages: tail,
+        totalMessageCount: 14,
+        hasMoreMessages: true,
+        activeTools: [],
+      };
+      // Any accidental unbounded history read fails, even with a tiny fixture.
+      const getAll = IDBObjectStore.prototype.getAll;
+      IDBObjectStore.prototype.getAll = () => {
+        throw new Error("Unbounded read");
+      };
+      await c.saveMainCache(bootstrap, session);
+      const newest = await c.readMainCachePage({ sessionId: "1", limit: 3 });
+      const older = await c.readMainCachePage({ sessionId: "1", before: "100:9", limit: 20 });
+      await c.saveMainCache(bootstrap, session, [message("1")], { hasMoreMessages: false });
+      const gap = await c.readMainCachePage({ sessionId: "1", before: "100" });
+      const head = await c.readMainCache();
+      await c.saveMainCache(bootstrap, session, [message("50")], {
+        before: "100",
+        hasMoreMessages: true,
+      });
+      const bridged = await c.readMainCachePage({ sessionId: "1", before: "100" });
+      const remainingGap = await c.readMainCachePage({ sessionId: "1", before: "50" });
+      await c.saveMainCache(bootstrap, session, [message("1")], {
+        before: "50",
+        hasMoreMessages: false,
+      });
+      const complete = await c.readMainCachePage({ sessionId: "1", before: "100", limit: 50 });
+      const wrongSession = await c.readMainCachePage({ sessionId: "2", before: "100" });
+      IDBObjectStore.prototype.getAll = getAll;
+      return { newest, older, gap, head, bridged, remainingGap, complete, wrongSession };
+    });
+    expect(result.newest.messages.map((m: any) => m.id)).toEqual(["100:9", "100:10", "100:11"]);
+    expect(result.older.messages.map((m: any) => m.id)).toEqual([
+      "100",
+      ...Array.from({ length: 8 }, (_, i) => `100:${i + 1}`),
+    ]);
+    expect(result.gap).toBeUndefined();
+    expect(result.head.session.messages.at(-1).id).toBe("100:11");
+    expect(result.bridged.messages.map((m: any) => m.id)).toEqual(["50"]);
+    expect(result.bridged.hasMoreMessages).toBe(true);
+    expect(result.remainingGap).toBeUndefined();
+    expect(result.complete.messages.map((m: any) => m.id)).toEqual(["1", "50"]);
+    expect(result.complete.hasMoreMessages).toBe(false);
+    expect(result.wrongSession).toBeUndefined();
+    await page.close();
+  },
+);
+
+test.each(["Chromium", "WebKit"])(
+  "%s migrates v1 history in place without clearing rows and keeps numeric suffix order",
+  async (engine) => {
+    const page = await fixture(engine === "WebKit" ? safari : browser);
+    const result = await evaluate(page, async () => {
+      const now = Date.now();
+      const bootstrap = { cacheScope: "legacy", cacheExpiresAt: now + 60_000 };
+      const messages = Array.from({ length: 12 }, (_, i) => ({
+        id: i ? `100:${i}` : "100",
+        timestamp: now,
+        role: "user",
+        blocks: [],
+      }));
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const operation = indexedDB.open("batty-main-reading-v1", 1);
+        operation.onupgradeneeded = () => {
+          operation.result.createObjectStore("metadata");
+          operation.result.createObjectStore("messages", { keyPath: "id" });
+        };
+        operation.onsuccess = () => resolve(operation.result);
+        operation.onerror = () => reject(operation.error);
+      });
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(["messages", "metadata"], "readwrite");
+        tx.oncomplete = () => resolve();
+        tx.onabort = () => reject(tx.error);
+        tx.objectStore("metadata").put(
+          {
+            epoch: null,
+            bootstrap,
+            savedAt: now,
+            session: { id: "1", streamId: "a", revision: 1, messages: [], totalMessageCount: 12 },
+          },
+          "current",
+        );
+        for (const message of messages) {
+          const json = JSON.stringify(message);
+          tx.objectStore("messages").put({
+            id: message.id,
+            timestamp: now,
+            json,
+            bytes: new TextEncoder().encode(json).length,
+          });
+        }
+      });
+      db.close();
+      const c = (window as any).cache;
+      const restored = await c.readMainCache();
+      // An upsert of a migrated row must not duplicate its legacy primary key.
+      await c.saveMainCache(bootstrap, {
+        ...restored.session,
+        revision: 2,
+        messages: [{ ...messages[11], blocks: [{ type: "text", text: "updated" }] }],
+      });
+      const connection = await new Promise<IDBDatabase>((resolve) => {
+        const op = indexedDB.open("batty-main-reading-v1", 2);
+        op.onsuccess = () => resolve(op.result);
+      });
+      const count = await new Promise<number>((resolve) => {
+        const operation = connection.transaction("messages").objectStore("messages").count();
+        operation.onsuccess = () => resolve(operation.result);
+      });
+      connection.close();
+      const final = await c.readMainCache();
+      return { restored, final, count };
+    });
+    expect(result.restored.session.messages.map((m: any) => m.id)).toEqual([
+      "100",
+      ...Array.from({ length: 11 }, (_, i) => `100:${i + 1}`),
+    ]);
+    expect(result.restored.session.hasMoreMessages).toBe(false);
+    expect(result.count).toBe(12);
+    expect(result.final.session.messages.at(-1).blocks[0].text).toBe("updated");
+    await page.close();
+  },
+);
+
+test.each(["Chromium", "WebKit"])(
+  "%s incrementally stores and browses a real 144 MiB day without getAll or eviction",
+  async (engine) => {
+    const page = await fixture(engine === "WebKit" ? safari : browser);
+    const result = await evaluate(page, async () => {
+      const c = (window as any).cache;
+      const bootstrap = { cacheScope: "large", cacheExpiresAt: Date.now() + 180_000 };
+      const session = {
+        id: "1",
+        streamId: "a",
+        revision: 1,
+        messages: [],
+        totalMessageCount: 144,
+        hasMoreMessages: true,
+        activeTools: [],
+      };
+      const getAll = IDBObjectStore.prototype.getAll;
+      IDBObjectStore.prototype.getAll = () => {
+        throw new Error("Unbounded read");
+      };
+      for (let end = 144; end > 0; end -= 12) {
+        const messages = Array.from({ length: 12 }, (_, i) => ({
+          id: String(end - 11 + i),
+          role: "user",
+          timestamp: Date.now(),
+          blocks: [{ type: "text", text: String(end - 11 + i) + "x".repeat(1024 * 1024) }],
+        }));
+        await c.saveMainCache(bootstrap, session, messages, {
+          before: end === 144 ? undefined : String(end + 1),
+          hasMoreMessages: end > 12,
+        });
+      }
+      const head = await c.readMainCache();
+      const ids: string[] = [];
+      let cursor: string | undefined;
+      let bytes = 0;
+      for (;;) {
+        const page = await c.readMainCachePage({ sessionId: "1", before: cursor });
+        if (!page) throw new Error("Unexpected hole");
+        if (page.messages.length !== 1)
+          throw new Error("Oversized messages must page individually");
+        const message = page.messages[0];
+        ids.push(message.id);
+        bytes += message.blocks[0].text.length;
+        if (!page.hasMoreMessages) break;
+        cursor = message.id;
+      }
+      // Small live-window updates retain all previously synchronized history.
+      await c.saveMainCache(bootstrap, { ...session, revision: 2 }, [
+        { id: "144", role: "user", timestamp: Date.now(), blocks: [] },
+      ]);
+      const oldest = await c.readMainCachePage({ sessionId: "1", before: "2" });
+      IDBObjectStore.prototype.getAll = getAll;
+      return {
+        count: head.session.messages.length,
+        newest: head.session.messages[0].id,
+        hasMore: head.session.hasMoreMessages,
+        ids,
+        bytes,
+        oldest: oldest.messages[0].id,
+      };
+    });
+    expect(result.count).toBe(1);
+    expect(result.newest).toBe("144");
+    expect(result.hasMore).toBe(true);
+    expect(result.ids).toEqual(Array.from({ length: 144 }, (_, i) => String(144 - i)));
+    expect(result.bytes).toBeGreaterThan(128 * 1024 * 1024);
+    expect(result.oldest).toBe("1");
+    await page.close();
+  },
+  120_000,
 );

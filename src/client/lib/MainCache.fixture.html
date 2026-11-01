@@ -6,23 +6,19 @@
       import {
         CacheSuspendedError,
         readMainCache,
+        readMainCachePage,
         saveMainCache,
         clearMainCache,
-        retainCacheRecords,
         registerMainCacheBootstrap,
-        CACHE_BYTE_BUDGET,
-        CACHE_DAY_MS,
       } from "./main-cache.ts";
       window.cache = {
         CacheSuspendedError,
         reactive,
         readMainCache,
+        readMainCachePage,
         saveMainCache,
         clearMainCache,
-        retainCacheRecords,
         registerMainCacheBootstrap,
-        CACHE_BYTE_BUDGET,
-        CACHE_DAY_MS,
       };
     </script>
   </body>

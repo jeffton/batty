@@ -232,7 +232,7 @@ watch(
     >
       <template #actions>
         <CopyStoredValue
-          v-if="provider.connected && provider.authKind === 'apiKey'"
+          v-if="provider.connected && provider.authKind === 'apiKey' && !isExpanded(provider.id)"
           kind="provider"
           :name="provider.id"
           :label="itemTitle(provider.id)"
@@ -373,7 +373,7 @@ watch(
     >
       <template #actions>
         <CopyStoredValue
-          v-if="store.settings.braveSearchConfigured"
+          v-if="store.settings.braveSearchConfigured && !isExpanded(BRAVE_SEARCH_ITEM_ID)"
           kind="brave-search"
           name=""
           label="Brave Search API key"

@@ -420,6 +420,14 @@ test("copies saved keys and environment values through the real clipboard withou
       await page.goto(`${url}?savedKeys`);
       await page.getByRole("tab", { name: "Auth", exact: true }).click();
       expect(copies).toBe(0);
+      for (const label of ["Gemini API key", "Brave Search API key"]) {
+        await page.getByRole("button", { name: `Edit ${label}`, exact: true }).click();
+        expect(await page.getByRole("button", { name: `Copy ${label}`, exact: true }).count()).toBe(
+          0,
+        );
+        await page.getByRole("button", { name: `Close ${label}`, exact: true }).click();
+        await page.getByRole("button", { name: `Copy ${label}`, exact: true }).waitFor();
+      }
       for (const label of ["Gemini API key", "Brave Search API key", "NORMAL_VALUE"]) {
         const copy = page.getByRole("button", { name: `Copy ${label}`, exact: true });
         await copy.click();

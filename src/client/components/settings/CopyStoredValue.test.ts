@@ -98,6 +98,18 @@ it("offers copy for saved provider keys and every environment variable but not O
     "openrouter",
     "",
   ]);
+  for (const title of [
+    "ChatGPT subscription",
+    "Gemini API key",
+    "OpenRouter API key",
+    "Brave Search API key",
+  ]) {
+    await auth.get(`[aria-label="Edit ${title}"]`).trigger("click");
+    expect(auth.find(`[aria-label="Copy ${title}"]`).exists()).toBe(false);
+    expect(auth.findAllComponents(CopyStoredValue)).toHaveLength(3);
+    await auth.get(`[aria-label="Close ${title}"]`).trigger("click");
+    expect(auth.find(`[aria-label="Copy ${title}"]`).exists()).toBe(true);
+  }
   vi.mocked(listEnvironmentVariables).mockResolvedValue({
     names: ["API_KEY", "ORDINARY", "EMPTY"],
   });

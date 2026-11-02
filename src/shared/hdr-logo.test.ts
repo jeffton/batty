@@ -42,7 +42,7 @@ test("HDR logo preserves original coverage and colors with bounded genuine PQ he
       const rgb = [0, 1, 2].map((channel) => nits(pixels.readUInt16BE(offset + channel * 2)));
       peak = Math.max(peak, ...rgb);
       // Convert decoded BT.2020 back to sRGB and compare with the source pixels.
-      const [r, g, b] = rgb.map((value) => value / 235) as [number, number, number];
+      const [r, g, b] = rgb.map((value) => value / 380) as [number, number, number];
       const decoded = [
         1.660491 * r - 0.587641 * g - 0.07285 * b,
         -0.12455 * r + 1.1329 * g - 0.008349 * b,
@@ -53,6 +53,6 @@ test("HDR logo preserves original coverage and colors with bounded genuine PQ he
       }
     }
   }
-  expect(peak).toBeGreaterThan(203);
-  expect(peak).toBeLessThan(235.1);
+  expect(peak).toBeGreaterThan(350);
+  expect(peak).toBeLessThan(380.1);
 });

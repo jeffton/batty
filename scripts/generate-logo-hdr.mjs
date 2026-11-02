@@ -27,9 +27,9 @@ function linear(value) {
 }
 
 // ST 2084, absolute cd/m². SDR reference white is 203 nits; the logo's
-// brightest white reaches only 235 nits (1.16×). No hue or saturation boost.
+// brightest white reaches 380 nits (1.87×). No hue or saturation boost.
 function pq(value) {
-  const p = ((value * 235) / 10000) ** (2610 / 16384);
+  const p = ((value * 380) / 10000) ** (2610 / 16384);
   return ((3424 / 4096 + (2413 / 128) * p) / (1 + (2392 / 128) * p)) ** (2523 / 32);
 }
 

@@ -196,6 +196,40 @@ test.each([
   },
 );
 
+test("tab IDs are visible and copy confirms briefly without switching tabs or making requests", async () => {
+  vi.useFakeTimers();
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", { clipboard: { writeText } });
+  fetchMock.mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      ...state,
+      pages: [{ id: "page-1", title: "Example", url: state.url, active: true }],
+    }),
+  });
+  const wrapper = create();
+  try {
+    await open(wrapper);
+    expect(wrapper.get(".cloud-browser-tabs__label code").text()).toBe("page-1");
+    const requests = fetchMock.mock.calls.length;
+    const copy = wrapper.get('[aria-label="Copy tab ID: page-1"]');
+    await copy.trigger("click");
+    await flushPromises();
+    expect(writeText).toHaveBeenCalledExactlyOnceWith("page-1");
+    expect(copy.find("svg.lucide-check").exists()).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(requests);
+    await vi.advanceTimersByTimeAsync(1400);
+    expect(copy.find("svg.lucide-copy").exists()).toBe(true);
+    writeText.mockRejectedValueOnce(new Error("Clipboard denied"));
+    await copy.trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[role="alert"]').text()).toBe("Could not copy tab ID.");
+  } finally {
+    wrapper.unmount();
+    vi.useRealTimers();
+  }
+});
+
 test("streams gesture deltas without HTTP round-trip gating and preserves nested anchor/totals", async () => {
   const wrapper = create();
   try {
@@ -784,7 +818,8 @@ test.each([200, 409])(
       expect(FakeEvents.instances).toHaveLength(1);
       expect(socket.closed).toBe(false);
       expect(wrapper.find('[role="alert"]').exists()).toBe(false);
-      expect(wrapper.get('[aria-current="page"]').text()).toBe("about:blank");
+      expect(wrapper.get('[aria-current="page"] strong').text()).toBe("about:blank");
+      expect(wrapper.get('[aria-current="page"] code').text()).toBe("new");
     } finally {
       wrapper.unmount();
     }

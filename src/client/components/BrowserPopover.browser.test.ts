@@ -114,8 +114,9 @@ afterAll(async () => {
   if (root) await removeTestBrowserRoot(root);
 });
 
-test("tab menu creates and closes pages with keyboard controls and mobile-sized targets", async () => {
+test("tab menu copies shared IDs and creates/closes pages with keyboard and mobile-sized targets", async () => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   try {
     const page = await context.newPage();
     let selected = "first";
@@ -169,6 +170,14 @@ test("tab menu creates and closes pages with keyboard controls and mobile-sized 
     const choose = page.getByRole("button", { name: "Choose tab", exact: true });
     await choose.click();
     const menu = page.locator(".cloud-browser-tabs:popover-open");
+    await menu.waitFor({ state: "visible" });
+    expect(await menu.locator("code").allTextContents()).toEqual(["first", "second"]);
+    await menu.getByRole("button", { name: "Copy tab ID: first", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("first");
+    expect(
+      commands.filter((item) => ["switch", "close-page", "new-page"].includes(item.action)),
+    ).toEqual([]);
     await menu.waitFor({ state: "visible" });
     for (const width of [320, 390, 1440]) {
       await page.setViewportSize({ width, height: 844 });

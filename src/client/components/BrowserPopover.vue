@@ -2,7 +2,8 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import BasePopover from "@/client/components/BasePopover.vue";
-import { ArrowLeft, RotateCw, SquareStack, Check, Plus, X } from "@lucide/vue";
+import { ArrowLeft, RotateCw, SquareStack, Check, Copy, Plus, X } from "@lucide/vue";
+import { useCopyFeedback } from "@/client/lib/copy-feedback";
 import BrowserCredentials from "@/client/components/BrowserCredentials.vue";
 import { useBrowserTransport } from "@/client/browser/transport";
 import { fitCloudViewport } from "@/shared/browser-geometry";
@@ -12,6 +13,20 @@ const viewport = ref<HTMLElement>();
 const address = ref("");
 const credentialsVisible = ref(false);
 const tabs = ref<InstanceType<typeof BasePopover>>();
+const { copied, markCopied, resetCopied } = useCopyFeedback();
+const copiedPageId = ref("");
+const copyError = ref("");
+async function copyPageId(pageId: string): Promise<void> {
+  resetCopied();
+  copyError.value = "";
+  try {
+    await navigator.clipboard.writeText(pageId);
+    copiedPageId.value = pageId;
+    markCopied();
+  } catch {
+    copyError.value = "Could not copy tab ID.";
+  }
+}
 function selectTab(pageId: string): void {
   tabs.value?.hidePopover();
   void control({ action: "switch", pageId });
@@ -224,8 +239,23 @@ onBeforeUnmount(() => {
               </span>
               <span class="cloud-browser-tabs__label">
                 <strong>{{ page.title || page.url || "New tab" }}</strong>
-                <small v-if="page.title">{{ page.url }}</small>
+                <small
+                  ><code>{{ page.id }}</code> · {{ page.url }}</small
+                >
               </span>
+            </button>
+            <button
+              type="button"
+              class="cloud-browser-tabs__copy"
+              :aria-label="`Copy tab ID: ${page.id}`"
+              :title="copied && copiedPageId === page.id ? 'Copied' : 'Copy tab ID'"
+              @click="copyPageId(page.id)"
+            >
+              <component
+                :is="copied && copiedPageId === page.id ? Check : Copy"
+                :size="16"
+                aria-hidden="true"
+              />
             </button>
             <button
               type="button"
@@ -237,6 +267,7 @@ onBeforeUnmount(() => {
               <X :size="16" aria-hidden="true" />
             </button>
           </div>
+          <p v-if="copyError" class="cloud-browser-tabs__error" role="alert">{{ copyError }}</p>
         </BasePopover>
         <input
           ref="addressInput"
@@ -384,6 +415,7 @@ onBeforeUnmount(() => {
   flex: 1;
   min-width: 0;
 }
+.cloud-browser-tabs__copy,
 .cloud-browser-tabs__close {
   justify-content: center;
   flex: 0 0 2.75rem;
@@ -404,6 +436,12 @@ onBeforeUnmount(() => {
 }
 .cloud-browser-tabs__label small {
   color: var(--color-text-muted);
+}
+.cloud-browser-tabs__label code {
+  font-size: inherit;
+}
+.cloud-browser-tabs__error {
+  margin: 0.3rem 0.6rem;
 }
 .browser-popover :deep(.full-popover__header) {
   padding: 0.4rem;

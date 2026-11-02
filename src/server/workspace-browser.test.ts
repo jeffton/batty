@@ -12,10 +12,10 @@ import { BrowserService, workspaceBrowserKey } from "./browser-service";
 import { createBrowserTool } from "./custom-tools";
 import type { BrowserActionInput } from "./browser-schemas";
 
-test("delayed popups belong to the interacting client, not tab observers or capture", async () => {
+test("agents and viewer share an explicit tab while popups belong only to their interacting client", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-popup-owner-"));
   const website = http.createServer((request, response) =>
-    response.end(`<html><body>
+    response.end(`<html><body><input id="shared" value="initial">
       <button onclick="setTimeout(() => window.open('/child'), 1200)">Popup</button>
       ${request.url === "/auto" ? "<script>setTimeout(() => window.open('/child'), 1200)</script>" : ""}
       </body></html>`),
@@ -23,17 +23,76 @@ test("delayed popups belong to the interacting client, not tab observers or capt
   website.listen(0, "127.0.0.1");
   await once(website, "listening");
   const url = `http://127.0.0.1:${(website.address() as { port: number }).port}/`;
-  const service = new BrowserService(undefined, 4, root);
-  const call = (client: string, input: BrowserActionInput) =>
-    service.execute("shared", input, undefined, client);
+  let service = new BrowserService(undefined, 4, root);
+  const owner = workspaceBrowserKey("shared");
+  const call = async (client: string, input: BrowserActionInput) => {
+    const tool = createBrowserTool({
+      browserService: service,
+      workspace: {
+        id: "shared",
+        path: root,
+        label: "Shared",
+        kind: "workspace",
+        isPinned: false,
+        isAssistant: true,
+      },
+      config: {} as AppConfig,
+    });
+    const ctx = {
+      sessionManager: {
+        getSessionId: () => client,
+        getSessionFile: () => path.join(root, `${client}.jsonl`),
+      },
+    } as Parameters<typeof tool.execute>[4];
+    const result = await tool.execute(
+      `call-${client}`,
+      input,
+      new AbortController().signal,
+      undefined,
+      ctx,
+    );
+    return { ...result, details: result.details as ToolExecutionDetails };
+  };
   const selected = async (client: string) =>
-    (await call(client, { action: "pages" })).details.pages?.find((page) => page.active)?.id;
+    (
+      (await call(client, { action: "pages" })).details.pages as Array<{
+        id: string;
+        active: boolean;
+      }>
+    )?.find((page) => page.active)?.id;
   try {
     const first = await call("a", { action: "open", url });
-    const pageId = first.details.pageId!;
+    const pageId = first.details.pageId as string;
     await call("b", { action: "switch", pageId });
-    const viewer =
-      process.platform === "linux" ? await service.openCloudBrowser("shared") : undefined;
+    const viewer = process.platform === "linux" ? await service.openCloudBrowser(owner) : undefined;
+    await call("a", { action: "fill", selector: "#shared", value: "from agent" });
+    if (viewer) {
+      const state = await service.cloudState(viewer.browserId);
+      expect(state.pageId).toBe(pageId);
+      await service.cloudControl(viewer.browserId, {
+        action: "text",
+        pageId,
+        revision: state.revision,
+        text: " and viewer",
+      });
+    }
+    for (const client of ["a", "b"]) {
+      const shared = await call(client, {
+        action: "evaluate",
+        pageId,
+        script: "document.querySelector('#shared').value",
+      });
+      expect(JSON.stringify(shared.content)).toContain(
+        viewer ? "from agent and viewer" : "from agent",
+      );
+      expect(await selected(client)).toBe(pageId);
+    }
+    const temporary = await call("b", { action: "open", url, newPage: true });
+    await call("b", { action: "snapshot", pageId });
+    expect(await selected("b")).toBe(temporary.details.pageId);
+    expect(await selected("a")).toBe(pageId);
+    await call("b", { action: "close-page", pageId: temporary.details.pageId as string });
+    await call("b", { action: "switch", pageId });
     await call("a", { action: "click", selector: "button" });
     await call("b", { action: "snapshot" });
     if (viewer)
@@ -46,7 +105,7 @@ test("delayed popups belong to the interacting client, not tab observers or capt
     if (viewer) {
       expect((await service.cloudState(viewer.browserId)).pageId).toBe(pageId);
       await service.cloudControl(viewer.browserId, { action: "navigate", url: `${url}auto` });
-      await call("b", { action: "snapshot" });
+      expect((await call("b", { action: "snapshot" })).details.url).toBe(`${url}auto`);
       await service.cloudVideoGeometry(
         viewer.browserId,
         await service.cloudState(viewer.browserId),
@@ -55,9 +114,23 @@ test("delayed popups belong to the interacting client, not tab observers or capt
         .poll(async () => (await service.cloudState(viewer.browserId)).pageId, { timeout: 5000 })
         .not.toBe(pageId);
       expect(await selected("b")).toBe(pageId);
+      const sharedPopup = (await service.cloudState(viewer.browserId)).pageId;
+      await call("a", { action: "switch", pageId: sharedPopup });
+      await call("b", { action: "switch", pageId: sharedPopup });
+      await call("a", { action: "open", pageId: sharedPopup, url: `${url}?shared` });
+      expect((await service.cloudState(viewer.browserId)).url).toBe(`${url}?shared`);
+      expect((await call("b", { action: "snapshot" })).details.url).toBe(`${url}?shared`);
+      await service.dispose();
+      service = new BrowserService(undefined, 4, root);
+      for (const client of ["a", "b"])
+        expect((await call(client, { action: "snapshot" })).details.pageId).toBe(sharedPopup);
+      expect((await service.cloudState(viewer.browserId)).pageId).toBe(sharedPopup);
+      expect((await call("b", { action: "attach" })).details.sites![0]).toMatchObject({
+        browserId: viewer.browserId,
+      });
     }
   } finally {
-    await service.closeSession("shared");
+    await service.closeSession(owner);
     await service.dispose();
     website.closeAllConnections();
     await new Promise<void>((resolve) => website.close(() => resolve()));

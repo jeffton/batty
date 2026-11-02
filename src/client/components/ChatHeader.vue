@@ -131,6 +131,16 @@ async function logout() {
   height: 1.6rem;
   border-radius: 0.35rem;
 }
+/* Keep the original SDR logo unless both HDR display and modern image
+   rendering are available (Safari 26+, Chromium with HDR PNG support). */
+@supports (dynamic-range-limit: no-limit) {
+  @media (dynamic-range: high) {
+    .header__brand img {
+      content: url("../assets/logo-hdr.png");
+      dynamic-range-limit: no-limit;
+    }
+  }
+}
 .header__button {
   flex: 0 0 var(--button-size);
 }

@@ -2,7 +2,7 @@
 
 Only the Settings logo in the chat header uses HDR. Its shape, alpha, colors, size and button behavior match `public/favicon.png`. Other icons, themes and UI are unchanged.
 
-`src/client/assets/logo-hdr.png` is 16-bit straight-alpha Rec.2100 PQ, signaled with PNG `cICP` (9/16/0/1). Linear sRGB is converted to BT.2020 without a saturation change. White is encoded at 380 cd/m² versus 203 cd/m² SDR reference white: 1.87× headroom, not a screen-peak effect. Actual output depends on display brightness and OS tone mapping.
+`src/client/assets/logo-hdr.png` is 16-bit straight-alpha Rec.2100 PQ, signaled with PNG `cICP` (9/16/0/1). Linear sRGB is converted to BT.2020 without a saturation change. White is encoded at 420 cd/m² versus 203 cd/m² SDR reference white: 2.07× headroom, not a screen-peak effect. Actual output depends on display brightness and OS tone mapping.
 
 The HDR image replaces the original only inside `(dynamic-range: high)` and `@supports (dynamic-range-limit: no-limit)`. SDR displays and older browsers retain the exact original PNG. No CSS brightness filter, glow, animation or theme preference is involved. The asset itself bounds brightness; `no-limit` permits its encoded headroom rather than raising it.
 

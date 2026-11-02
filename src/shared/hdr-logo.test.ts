@@ -42,17 +42,18 @@ test("HDR logo preserves original coverage and colors with bounded genuine PQ he
       const rgb = [0, 1, 2].map((channel) => nits(pixels.readUInt16BE(offset + channel * 2)));
       peak = Math.max(peak, ...rgb);
       // Convert decoded BT.2020 back to sRGB and compare with the source pixels.
-      const [r, g, b] = rgb.map((value) => value / 380) as [number, number, number];
+      const [r, g, b] = rgb.map((value) => value / 420) as [number, number, number];
       const decoded = [
         1.660491 * r - 0.587641 * g - 0.07285 * b,
         -0.12455 * r + 1.1329 * g - 0.008349 * b,
         -0.018151 * r - 0.100579 * g + 1.11873 * b,
       ].map(srgb);
       for (let channel = 0; channel < 3; channel++) {
-        expect(Math.abs(decoded[channel]! - original.data[source + channel]!)).toBeLessThan(0.2);
+        // PQ quantization can move an 8-bit channel by less than one third of a step.
+        expect(Math.abs(decoded[channel]! - original.data[source + channel]!)).toBeLessThan(0.3);
       }
     }
   }
-  expect(peak).toBeGreaterThan(350);
-  expect(peak).toBeLessThan(380.1);
+  expect(peak).toBeGreaterThan(419.9);
+  expect(peak).toBeLessThan(420.1);
 });

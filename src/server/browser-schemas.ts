@@ -34,7 +34,7 @@ export const BrowserToolSchema = Type.Object(
     pageId: Type.Optional(
       Type.String({
         description:
-          "Tab ID from action=pages or the viewer's Copy tab ID button. Targets that shared tab; defaults to this agent's selection. Only switch/open change the agent's selection, never another client's.",
+          "Tab ID from action=pages. The (viewer) entry with viewerActive=true is the user's current tab. Targets that shared tab; defaults to this agent's selection. Only switch/open change the agent's selection, never another client's.",
       }),
     ),
     frameId: Type.Optional(

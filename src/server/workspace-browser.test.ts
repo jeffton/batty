@@ -227,6 +227,22 @@ test("main and workers share tabs, login and cloud attachments within their work
     expect(second.details!.pageId).not.toBe(pageId);
     const pages = await call("roy", "main", { action: "pages" });
     expect(JSON.stringify(pages.content)).toContain(second.details!.pageId);
+    if (process.platform === "linux") {
+      const workerPages = await call("roy", "worker", { action: "pages" });
+      const listed = workerPages.details.pages as Array<{
+        id: string;
+        active: boolean;
+        viewerActive: boolean;
+      }>;
+      const viewerPage = listed.find((page) => page.viewerActive)!;
+      expect(viewerPage).toMatchObject({ id: pageId, active: false, viewerActive: true });
+      expect(listed.find((page) => page.active)?.id).toBe(second.details.pageId);
+      expect(JSON.stringify(workerPages.content)).toContain(`${pageId} (viewer)`);
+      await call("roy", "worker", { action: "snapshot", pageId: viewerPage.id });
+      expect((await call("roy", "worker", { action: "snapshot" })).details.pageId).toBe(
+        second.details.pageId,
+      );
+    }
     await call("roy", "main", { action: "switch", pageId });
 
     // An unrelated workspace cannot see the shared browser or its cookie jar.
@@ -290,7 +306,9 @@ test("main and workers share tabs, login and cloud attachments within their work
       );
       const listed = await call("roy", "worker", { action: "pages" });
       expect(
-        (listed.details.pages as Array<{ active: boolean }>).every((page) => !page.active),
+        (listed.details.pages as Array<{ active: boolean; viewerActive: boolean }>).every(
+          (page) => !page.active && !page.viewerActive,
+        ),
       ).toBe(true);
       await call("roy", "worker", { action: "switch", pageId });
       // Closing the last viewer tab creates a blank one; cookies remain shared.

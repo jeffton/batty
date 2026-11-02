@@ -114,9 +114,8 @@ afterAll(async () => {
   if (root) await removeTestBrowserRoot(root);
 });
 
-test("tab menu copies shared IDs and creates/closes pages with keyboard and mobile-sized targets", async () => {
+test("tab menu has cohesive row hover and creates/closes pages without exposing IDs", async () => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   try {
     const page = await context.newPage();
     let selected = "first";
@@ -171,14 +170,9 @@ test("tab menu copies shared IDs and creates/closes pages with keyboard and mobi
     await choose.click();
     const menu = page.locator(".cloud-browser-tabs:popover-open");
     await menu.waitFor({ state: "visible" });
-    expect(await menu.locator("code").allTextContents()).toEqual(["first", "second"]);
-    await menu.getByRole("button", { name: "Copy tab ID: first", exact: true }).focus();
-    await page.keyboard.press("Enter");
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("first");
-    expect(
-      commands.filter((item) => ["switch", "close-page", "new-page"].includes(item.action)),
-    ).toEqual([]);
-    await menu.waitFor({ state: "visible" });
+    expect(await menu.locator("code").count()).toBe(0);
+    expect(await menu.getByRole("button", { name: /^Copy tab ID/ }).count()).toBe(0);
+    await fs.mkdir("/tmp/batty-tab-menu-proof", { recursive: true });
     for (const width of [320, 390, 1440]) {
       await page.setViewportSize({ width, height: 844 });
       await expect
@@ -193,6 +187,25 @@ test("tab menu copies shared IDs and creates/closes pages with keyboard and mobi
           }),
         )
         .toBe(true);
+      for (const [index, name] of [
+        [0, "selected"],
+        [1, "unselected"],
+      ] as const) {
+        const row = menu.locator(".cloud-browser-tabs__row").nth(index);
+        await row.locator(".cloud-browser-tabs__close").hover();
+        const colors = await row.evaluate((element) => ({
+          row: getComputedStyle(element).backgroundColor,
+          buttons: [...element.querySelectorAll("button")].map(
+            (button) => getComputedStyle(button).backgroundColor,
+          ),
+        }));
+        expect(colors.row).not.toBe("rgba(0, 0, 0, 0)");
+        expect(colors.buttons).toEqual(["rgba(0, 0, 0, 0)", "rgba(0, 0, 0, 0)"]);
+        if (width !== 390)
+          await menu.screenshot({
+            path: `/tmp/batty-tab-menu-proof/menu-${width}-${name}-close.png`,
+          });
+      }
       for (const button of await menu.locator("button").all()) {
         const bounds = (await button.boundingBox())!;
         expect(bounds.height).toBeGreaterThanOrEqual(44);

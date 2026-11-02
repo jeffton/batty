@@ -1692,14 +1692,17 @@ export class BrowserService {
     prefix?: string,
     selectedPageId?: string,
   ): Promise<BrowserActionResult> {
-    const pages = await this.pageDetails(session, selectedPageId ?? "");
+    const pages = (await this.pageDetails(session, selectedPageId ?? "")).map((page) => ({
+      ...page,
+      viewerActive: page.id === session.activePageId,
+    }));
     const listing =
       pages.length === 0
         ? "No open pages."
         : pages
             .map(
               (page) =>
-                `${page.id}${page.active ? " (active)" : ""}\nTitle: ${page.title || "(untitled)"}\nURL: ${page.url}`,
+                `${page.id}${page.active ? " (active)" : ""}${page.viewerActive ? " (viewer)" : ""}\nTitle: ${page.title || "(untitled)"}\nURL: ${page.url}`,
             )
             .join("\n\n");
     return {

@@ -196,10 +196,7 @@ test.each([
   },
 );
 
-test("tab IDs are visible and copy confirms briefly without switching tabs or making requests", async () => {
-  vi.useFakeTimers();
-  const writeText = vi.fn().mockResolvedValue(undefined);
-  vi.stubGlobal("navigator", { clipboard: { writeText } });
+test("tab menu presents titles and URLs without exposing internal IDs or copy controls", async () => {
   fetchMock.mockResolvedValue({
     ok: true,
     json: async () => ({
@@ -210,23 +207,13 @@ test("tab IDs are visible and copy confirms briefly without switching tabs or ma
   const wrapper = create();
   try {
     await open(wrapper);
-    expect(wrapper.get(".cloud-browser-tabs__label code").text()).toBe("page-1");
-    const requests = fetchMock.mock.calls.length;
-    const copy = wrapper.get('[aria-label="Copy tab ID: page-1"]');
-    await copy.trigger("click");
-    await flushPromises();
-    expect(writeText).toHaveBeenCalledExactlyOnceWith("page-1");
-    expect(copy.find("svg.lucide-check").exists()).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(requests);
-    await vi.advanceTimersByTimeAsync(1400);
-    expect(copy.find("svg.lucide-copy").exists()).toBe(true);
-    writeText.mockRejectedValueOnce(new Error("Clipboard denied"));
-    await copy.trigger("click");
-    await flushPromises();
-    expect(wrapper.get('[role="alert"]').text()).toBe("Could not copy tab ID.");
+    const selected = wrapper.get('[aria-current="page"]');
+    expect(selected.text()).toBe("Examplehttps://example.org");
+    expect(wrapper.find(".cloud-browser-tabs__label code").exists()).toBe(false);
+    expect(wrapper.find('[aria-label^="Copy tab ID"]').exists()).toBe(false);
+    expect(wrapper.find('[aria-label="Close tab: Example"]').exists()).toBe(true);
   } finally {
     wrapper.unmount();
-    vi.useRealTimers();
   }
 });
 
@@ -819,7 +806,6 @@ test.each([200, 409])(
       expect(socket.closed).toBe(false);
       expect(wrapper.find('[role="alert"]').exists()).toBe(false);
       expect(wrapper.get('[aria-current="page"] strong').text()).toBe("about:blank");
-      expect(wrapper.get('[aria-current="page"] code').text()).toBe("new");
     } finally {
       wrapper.unmount();
     }

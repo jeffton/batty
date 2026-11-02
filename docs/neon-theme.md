@@ -1,13 +1,16 @@
 # Neon
 
-Choose **Settings → Appearance → Neon**. The set follows the system light/dark preference. Ice-white and blue-black chrome carry cyan/violet/magenta washes and a two-pixel emissive seam; transcript, text and controls retain Neutral colors.
+Choose **Settings → Appearance → Neon**. Both system light/dark variants recolor the functional UI: mint user messages, electric-blue system messages, vivid hover/selection, green/red diffs, and violet/mint/cyan/amber syntax. Neutral surfaces and ordinary text stay calm. There are no decorative neon stripes or bloom.
 
-On displays reporting `(dynamic-range: high)`, the seam uses a lossless 16-bit Rec.2100 PQ PNG: BT.2020 primaries, ST 2084 transfer, full-range RGB (`cICP 9/16/0/1`). Its brightest cyan endpoint has approximately 440 cd/m² luminance, above 203 cd/m² HDR reference white. It is opaque, unfiltered and requests `dynamic-range-limit: no-limit`; the surrounding UI stays SDR. Regenerate it with `node scripts/generate-neon-hdr.mjs`.
+HDR-capable displays receive solid 16-bit Rec.2100 PQ swatches (`cICP 9/16/0/1`, BT.2020 primaries, ST 2084 transfer, full-range RGB). Light mode uses pastel HDR fills behind dark message/diff text and on hovered controls. Dark mode clips saturated HDR swatches to syntax glyphs, green/red diff prefixes, user-message text and system-notice headings, keeping large backgrounds dark. Broad fills encode 215 cd/m² luminance; colored glyphs encode 235 cd/m². This is approximately 1.06×/1.16× the 203 cd/m² reference white, not maximum display brightness. The swatches request the browser's constrained dynamic range (including the earlier `constrained-high` spelling). Regenerate with `node scripts/generate-neon-hdr.mjs`.
 
-Other displays use the CSS neon gradient. Wide-gamut CSS alone is not HDR. Actual brightness depends on browser image decoding/compositing, OS HDR mode and available display headroom; an SDR screenshot cannot verify emitted HDR light. Chrome and Safari support HDR images on compatible hardware, but reporting HDR capability alone does not prove every image/compositor path produces HDR.
+The enhancement is selected with `(dynamic-range: high)`. The complete SDR palette remains functional without HDR. Wide-gamut OKLCH/P3 is not HDR. Native CSS HDR color spaces remain an evolving specification; the implementation uses actual PQ image data, not unsupported color syntax or a brightness filter.
+
+Chrome/Safari image decoding and compositing, OS HDR mode and display headroom determine emitted brightness. Background-clipped HDR glyphs require preservation of HDR through that compositor path. Encoded HDR, successful decoding and CSS selection can be checked on the server; physical HDR output cannot be verified on its SDR display. Screenshots are SDR.
 
 References:
 
-- [CSS HDR terminology and dynamic-range-limit](https://drafts.csswg.org/css-color-hdr/)
+- [CSS HDR specification](https://drafts.csswg.org/css-color-hdr/)
 - [PNG cICP specification](https://www.w3.org/TR/png-3/#cICP-chunk)
-- [XHDR's Rec.2100 PQ example](https://xhdr.app/)
+- [cICP explanation and implementations](https://svgees.us/blog/cICP.html)
+- [Safari HDR image support](https://gregbenzphotography.com/photography-reviews/apple-safari-now-supports-hdr-photography/)

@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#172128" />
+    <style>
+      #app {
+        overflow: auto;
+      }
+      .preview {
+        max-width: 760px;
+        padding: 24px;
+        margin: auto;
+        display: grid;
+        gap: 22px;
+      }
+      .preview .message {
+        margin: 0;
+      }
+      .preview__code {
+        padding: 18px;
+        background: var(--color-bg-panel);
+        border-radius: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      import { createApp, h } from "vue";
+      import { createPinia } from "pinia";
+      import ChatMessage from "./ChatMessage.vue";
+      import CodeBlock from "./CodeBlock.vue";
+      import DiffBlock from "./DiffBlock.vue";
+      import "../styles.css";
+      import { applyAppAppearance } from "../lib/appearance.ts";
+      applyAppAppearance({ title: "Neon preview", color: "neon" });
+      createApp({
+        setup: () => () =>
+          h("main", { class: "preview" }, [
+            h("h2", "Neon"),
+            h(ChatMessage, {
+              message: {
+                id: "user",
+                role: "user",
+                timestamp: 0,
+                blocks: [{ type: "text", text: "Make the existing colors a little neon." }],
+              },
+            }),
+            h(ChatMessage, {
+              message: {
+                id: "notice",
+                role: "custom",
+                timestamp: 0,
+                customType: "batty-runtime-notice:subagent",
+                text: "Theme ready. Syntax, messages and diffs checked.",
+              },
+            }),
+            h("div", { class: "preview__code" }, [
+              h(CodeBlock, {
+                language: "javascript",
+                code: 'const theme = { name: "Neon", brightness: 1.16 };\nfunction greet() { return theme.name; }',
+              }),
+            ]),
+            h(DiffBlock, {
+              oldText: 'const color = "muted";\nexport default color;',
+              newText: 'const color = "vivid";\nexport default color;',
+              language: "javascript",
+            }),
+            h("button", { class: "chrome-button", style: "padding:12px", type: "button" }, "Hover"),
+            h("p", "Plain text and neutral surfaces stay readable."),
+          ]),
+      })
+        .use(createPinia())
+        .mount("#app");
+    </script>
+  </body>
+</html>

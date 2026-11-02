@@ -52,6 +52,7 @@ test("popover chrome remains keyboard-accessible and fits narrow screens in both
           true,
         );
         if (captureScreenshots) await fs.mkdir(".tmp/ui-feedback", { recursive: true });
+        await page.emulateMedia({ reducedMotion: "reduce" });
         let buttonColor: string | undefined;
         for (const option of APP_COLOR_OPTIONS) {
           await page.evaluate(`(async () => {
@@ -82,18 +83,12 @@ test("popover chrome remains keyboard-accessible and fits narrow screens in both
             edge: getComputedStyle(element, "::after").backgroundImage,
             edgeHeight: getComputedStyle(element, "::after").height,
           }));
-          if (option.id === "neon") {
-            expect(decoration.wash).toContain("radial-gradient");
-            expect(decoration.edge).not.toBe("none");
-            expect(decoration.edgeHeight).toBe("2px");
-          } else {
-            expect(decoration.wash).toBe("none");
-            expect(decoration.edge).toBe("none");
-          }
+          expect(decoration.wash).toBe("none");
+          expect(decoration.edge).toBe("none");
           expect(chrome.underline).toBe("solid");
           expect(chrome.underlineWidth).toBeGreaterThanOrEqual(2);
           buttonColor ??= chrome.buttonColor;
-          expect(chrome.buttonColor).toBe(buttonColor);
+          if (option.id !== "neon") expect(chrome.buttonColor).toBe(buttonColor);
           if (captureScreenshots)
             await page.screenshot({
               path: `.tmp/ui-feedback/settings-${option.id}-${colorScheme}-${width}.png`,
@@ -175,7 +170,7 @@ test("popover tabs meet the body edge and stay on one navigable row on narrow sc
   }
 });
 
-test("instance colors affect app header and footer, not controls or content", async () => {
+test("instance colors affect chrome while Neon alone recolors functional accents", async () => {
   if (captureScreenshots) await fs.mkdir(".tmp/ui-feedback", { recursive: true });
   for (const colorScheme of ["light", "dark"] as const) {
     for (const width of [320, 1280]) {
@@ -183,6 +178,7 @@ test("instance colors affect app header and footer, not controls or content", as
       try {
         await page.route("**/api/**", (route) => route.fulfill({ json: { names: [] } }));
         await page.goto(`${url}?shell=1`);
+        await page.emulateMedia({ reducedMotion: "reduce" });
         let controls: unknown;
         for (const option of APP_COLOR_OPTIONS) {
           await page.evaluate(`(async () => {
@@ -215,7 +211,9 @@ test("instance colors affect app header and footer, not controls or content", as
           expect(actual.footer).toBe(actual.header);
           expect(actual.shadow).not.toBe("none");
           controls ??= actual.controls;
-          expect(actual.controls).toEqual(controls);
+          if (option.id === "neon")
+            expect(actual.controls.slice(1)).toEqual((controls as string[]).slice(1));
+          else expect(actual.controls).toEqual(controls);
           if (captureScreenshots)
             await page.screenshot({
               path: `.tmp/ui-feedback/shell-${option.id}-${colorScheme}-${width}.png`,

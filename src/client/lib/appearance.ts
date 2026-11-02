@@ -4,6 +4,7 @@ export function applyAppAppearance(appearance: AppAppearance): void {
   const color = appColorOption(appearance.color);
   const root = document.documentElement;
 
+  root.dataset.appColor = appearance.color;
   root.style.setProperty("--color-instance-light", color.light);
   root.style.setProperty("--color-instance-dark", color.dark);
   document.title = appearance.title;

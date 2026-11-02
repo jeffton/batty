@@ -77,6 +77,19 @@ test("popover chrome remains keyboard-accessible and fits narrow screens in both
             .map((part) => parseInt(part, 16));
           expect(chrome.background).toBe(`rgb(${rgb.join(", ")})`);
           expect(chrome.shadow).not.toBe("none");
+          const decoration = await header.evaluate((element) => ({
+            wash: getComputedStyle(element).backgroundImage,
+            edge: getComputedStyle(element, "::after").backgroundImage,
+            edgeHeight: getComputedStyle(element, "::after").height,
+          }));
+          if (option.id === "neon") {
+            expect(decoration.wash).toContain("radial-gradient");
+            expect(decoration.edge).not.toBe("none");
+            expect(decoration.edgeHeight).toBe("2px");
+          } else {
+            expect(decoration.wash).toBe("none");
+            expect(decoration.edge).toBe("none");
+          }
           expect(chrome.underline).toBe("solid");
           expect(chrome.underlineWidth).toBeGreaterThanOrEqual(2);
           buttonColor ??= chrome.buttonColor;

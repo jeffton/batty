@@ -3,6 +3,7 @@ export const DEFAULT_APP_COLOR = "neutral";
 
 export const APP_COLOR_OPTIONS = [
   { id: "neutral", label: "Neutral", light: "#ffffff", dark: "#172128" },
+  { id: "neon", label: "Neon", light: "#f7fbff", dark: "#101923" },
   { id: "blue", label: "Blue", light: "#eaf2ff", dark: "#172640" },
   { id: "teal", label: "Teal", light: "#e5f5f1", dark: "#12332f" },
   { id: "green", label: "Green", light: "#edf6e7", dark: "#203321" },

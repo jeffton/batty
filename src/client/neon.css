@@ -1,0 +1,45 @@
+/* Neutral controls and transcript; only the chrome gets the neon treatment. */
+:root[data-app-color="neon"] {
+  --neon-wash:
+    radial-gradient(ellipse at 2% 0%, rgb(0 209 255 / 0.12), transparent 48%),
+    radial-gradient(ellipse at 98% 100%, rgb(255 0 184 / 0.09), transparent 50%);
+  --neon-edge: linear-gradient(90deg, #00cce9, #7375ff 48%, #fa44be);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-app-color="neon"] {
+    --neon-wash:
+      radial-gradient(ellipse at 2% 0%, rgb(0 226 255 / 0.16), transparent 48%),
+      radial-gradient(ellipse at 98% 100%, rgb(255 0 184 / 0.13), transparent 50%);
+  }
+}
+
+:root[data-app-color="neon"] :is(.header, .composer, .full-popover__header) {
+  background-image: var(--neon-wash);
+}
+
+/* A tiny emissive seam, never bright text or a luminous button surface. */
+:root[data-app-color="neon"] :is(.header, .composer, .full-popover__header)::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  inset-inline: 0;
+  bottom: 0;
+  height: 2px;
+  background-image: var(--neon-edge);
+  background-size: 100% 100%;
+}
+
+:root[data-app-color="neon"] .composer::after {
+  top: 0;
+  bottom: auto;
+}
+
+/* PQ pixels contain real >203-nit highlights, not wide-gamut SDR colors.
+   Keep this layer opaque and unfiltered so its HDR headroom survives compositing. */
+@media (dynamic-range: high) {
+  :root[data-app-color="neon"] :is(.header, .composer, .full-popover__header)::after {
+    background-image: url("./assets/neon-pq.png");
+    dynamic-range-limit: no-limit;
+  }
+}

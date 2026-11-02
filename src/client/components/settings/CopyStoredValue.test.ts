@@ -14,11 +14,13 @@ vi.mock("@/client/lib/api", async (original) => ({
 }));
 vi.mock("@/client/lib/provider-auth", () => ({ watchProviderAuthAttempt: vi.fn() }));
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 
-it("starts clipboard access before the network resolves and never renders the saved value", async () => {
+it("starts clipboard access before the network resolves and briefly confirms without rendering text or the value", async () => {
+  vi.useFakeTimers();
   const saved = Promise.withResolvers<{ value: string }>();
   vi.mocked(getSettingsCopyValue).mockReturnValue(saved.promise);
   let blob: Promise<Blob> | undefined;
@@ -45,9 +47,21 @@ it("starts clipboard access before the network resolves and never renders the sa
   saved.resolve({ value: "test-secret" });
   await flushPromises();
   expect((await blob)!.type).toBe("text/plain");
-  expect(wrapper.text()).toContain("Copied");
+  expect(wrapper.text()).toBe("");
+  expect(wrapper.get("button").attributes("aria-label")).toBe("Copied KEY");
+  expect(wrapper.find("svg.lucide-check").exists()).toBe(true);
   expect(wrapper.html()).not.toContain("test-secret");
+  await vi.advanceTimersByTimeAsync(1399);
+  expect(wrapper.get("button").attributes("aria-label")).toBe("Copied KEY");
+  await vi.advanceTimersByTimeAsync(1);
+  expect(wrapper.get("button").attributes("aria-label")).toBe("Copy KEY");
+  expect(wrapper.find("svg.lucide-copy").exists()).toBe(true);
+  await wrapper.get("button").trigger("click");
+  await flushPromises();
+  const clearTimeout = vi.spyOn(window, "clearTimeout");
   wrapper.unmount();
+  expect(clearTimeout).toHaveBeenCalledExactlyOnceWith(expect.anything());
+  clearTimeout.mockRestore();
 });
 
 it("reports clipboard denial without exposing its error or value", async () => {

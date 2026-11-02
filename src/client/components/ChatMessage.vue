@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Cog, FileDiff, PanelRightOpen } from "@lucide/vue";
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed } from "vue";
+import { useCopyFeedback } from "@/client/lib/copy-feedback";
 import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE } from "@/server/runtime-notices";
 import AgentTurnDiffPopover from "@/client/components/AgentTurnDiffPopover.vue";
 import AttachedFilesList from "@/client/components/AttachedFilesList.vue";
@@ -26,8 +27,7 @@ type AssistantSegment = {
   blocks: UiContentBlock[];
 };
 
-const copied = ref(false);
-let copiedTimeout: number | undefined;
+const { copied, markCopied } = useCopyFeedback();
 
 const props = withDefaults(
   defineProps<{
@@ -347,23 +347,8 @@ const assistantMarkdown = computed(() => {
 
 async function copyAssistantMarkdown(): Promise<void> {
   await navigator.clipboard.writeText(assistantMarkdown.value);
-  copied.value = true;
-
-  if (copiedTimeout !== undefined) {
-    window.clearTimeout(copiedTimeout);
-  }
-
-  copiedTimeout = window.setTimeout(() => {
-    copied.value = false;
-    copiedTimeout = undefined;
-  }, 1400);
+  markCopied();
 }
-
-onBeforeUnmount(() => {
-  if (copiedTimeout !== undefined) {
-    window.clearTimeout(copiedTimeout);
-  }
-});
 </script>
 
 <template>

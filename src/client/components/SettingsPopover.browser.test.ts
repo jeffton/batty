@@ -423,18 +423,21 @@ test("copies saved keys and environment values through the real clipboard withou
       for (const label of ["Gemini API key", "Brave Search API key", "NORMAL_VALUE"]) {
         const copy = page.getByRole("button", { name: `Copy ${label}`, exact: true });
         await copy.click();
-        await expect.poll(() => copy.innerText()).toBe("Copied");
+        const confirmed = page.getByRole("button", { name: `Copied ${label}`, exact: true });
+        await confirmed.waitFor();
+        expect(await confirmed.innerText()).toBe("");
         expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
           "fixture-copy-value",
         );
         expect(await page.locator("body").innerText()).not.toContain("fixture-copy-value");
         expect(
-          await copy.evaluate((element) => {
+          await confirmed.evaluate((element) => {
             const box = element.getBoundingClientRect();
             return box.left >= 0 && box.right <= innerWidth;
           }),
         ).toBe(true);
       }
+      await page.getByRole("button", { name: "Copy NORMAL_VALUE", exact: true }).waitFor();
       expect(copies).toBe(3);
       await page.close();
     }

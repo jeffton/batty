@@ -2,6 +2,7 @@
 import { Check, Copy } from "@lucide/vue";
 import { ref } from "vue";
 import { getSettingsCopyValue } from "@/client/lib/api";
+import { useCopyFeedback } from "@/client/lib/copy-feedback";
 
 const props = defineProps<{
   kind: "provider" | "environment" | "brave-search";
@@ -10,12 +11,12 @@ const props = defineProps<{
   disabled?: boolean;
 }>();
 const pending = ref(false);
-const copied = ref(false);
+const { copied, markCopied, resetCopied } = useCopyFeedback();
 const failed = ref(false);
 
 async function copy(): Promise<void> {
   pending.value = true;
-  copied.value = false;
+  resetCopied();
   failed.value = false;
   try {
     // Start clipboard access within the click gesture, including on Safari.
@@ -26,7 +27,7 @@ async function copy(): Promise<void> {
         ),
       }),
     ]);
-    copied.value = true;
+    markCopied();
   } catch {
     failed.value = true;
   } finally {
@@ -39,14 +40,12 @@ async function copy(): Promise<void> {
   <button
     class="settings-popover__action"
     type="button"
-    :aria-label="`Copy ${label}`"
+    :aria-label="copied ? `Copied ${label}` : `Copy ${label}`"
     :title="failed ? 'Copy failed. Try again.' : copied ? 'Copied' : `Copy ${label}`"
     :disabled="disabled || pending"
     @click="copy"
   >
     <component :is="copied ? Check : Copy" :size="16" aria-hidden="true" />
-    <span v-if="copied || failed" :role="failed ? 'alert' : 'status'">{{
-      failed ? "Copy failed" : "Copied"
-    }}</span>
+    <span v-if="failed" role="alert">Copy failed</span>
   </button>
 </template>

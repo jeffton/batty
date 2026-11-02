@@ -2,7 +2,7 @@
 
 ## Local setup
 
-Requires Node.js **24.15.0+**, pnpm **12.15.0** and installed Google Chrome Stable for browser tools. Install JavaScript dependencies with `pnpm install`; install Chrome with `scripts/setup-chrome.sh` (Linux/macOS) or `scripts/setup-chrome.ps1` (Windows). Linux root installations also require the [browser isolation setup](#chromium-isolation).
+Requires Node.js **24.15.0+**, pnpm **12.16.1** and installed Google Chrome Stable for browser tools. Install JavaScript dependencies with `pnpm install`; install Chrome with `scripts/setup-chrome.sh` (Linux/macOS) or `scripts/setup-chrome.ps1` (Windows). Linux root installations also require the [browser isolation setup](#chromium-isolation).
 
 The server takes a data-root argument and stores state in its `.batty` directory. The package scripts use `/var/lib/batty2`; to use another root, run `pnpm exec tsx watch src/server/main.ts /absolute/data/root`.
 
@@ -279,6 +279,8 @@ Jobs require a nonempty `title` on creation and import. `list` includes all work
 `--root` defaults to `/var/lib/batty2`. `--json FILE` accepts request fields (`-` reads stdin); flags override them. Repeat or combine `--at`, `--in`, `--every` and `--cron` for multiple triggers on one job. `--timezone` applies to every `--cron` flag; use JSON for per-trigger timezones.
 
 The API and AI tool accept `schedule: {kind: "multiple", triggers: [{kind: "at", at: "2026-11-20T10:00:00+01:00"}, {kind: "cron", expression: "0 10 * * 1", timezone: "Europe/Stockholm"}]}`. Nested multiple schedules and empty trigger lists are rejected. Due triggers coalesce into one run; future triggers keep their deadlines. Editing only a title or prompt preserves deadlines, while replacing `schedule` resets all of them. See [migration](migration.md) for schedule imports.
+
+Cron expressions follow the selected timezone (default UTC). At spring-forward, a fixed-time expression such as `30 2 * * *` runs at the first valid time after a missing 02:30. At fall-back it runs only at the first 02:30; interval expressions such as `*/30 * * * *` run through both occurrences of the repeated hour. These are Croner 11 scheduling semantics; `every` schedules retain their elapsed-time cadence.
 
 ## Push notifications
 

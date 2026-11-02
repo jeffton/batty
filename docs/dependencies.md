@@ -1,3 +1,55 @@
+# Dependency review — 2026-11-02
+
+Reviewed every direct dependency, devDependency, catalog, override and pnpm against npm at 09:00 UTC. Selection honors the 4320-minute age policy (October 30, 09:00 UTC cutoff) and existing exclusions.
+
+## Updates
+
+| Package                                 | Version                          |
+| --------------------------------------- | -------------------------------- |
+| Fastify cookie; static                  | 11.1.3 → 11.1.5; 10.1.7 → 10.1.8 |
+| Lucide Vue; Pierre diffs                | 1.61.0 → 1.65.0; 1.6.1 → 1.6.2   |
+| Croner; Marked                          | 10.0.1 → 11.0.0; 18.1.1 → 18.1.2 |
+| unpdf; Virtua                           | 1.9.1 → 2.1.0; 0.53.6 → 0.54.0   |
+| Node declarations                       | 26.6.5 → 26.6.6                  |
+| PostCSS; serialize-javascript overrides | 8.5.31 → 8.5.32; 7.1.3 → 7.1.4   |
+| pnpm                                    | 12.15.0 → 12.16.1                |
+
+**Breaking scheduling behavior:** Croner 11 runs fixed-time jobs in spring-forward gaps at the first valid local time, rather than shifting by the gap length. Interval expressions traverse both occurrences of a repeated fall hour; fixed-time expressions run once. Batty uses paused `nextRun(Date)` calculations, not Croner's timers, `startAt`, `dayOffset` or `previousRun`. Three regressions exercise actual schedule advancement across Stockholm DST transitions. Existing stored cron expressions inherit these semantics; no schedule-data conversion is required.
+
+unpdf 2 requires Node 24 and ESM. Batty already requires Node ≥24.15 and dynamically imports it inside the PDF worker. Its document/page/text/destruction APIs remain supported; removed configuration helpers and changed image/link/render/metadata APIs are unused. The HTTP-to-worker regression extracts a real local PDF, reports invalid document errors and extracts again after failure. Reviewed intermediate versions: 2.0.0, 2.0.1 and 2.1.0.
+
+Lucide 1.62–1.65 adds icons and metadata/build corrections; the renamed `archive-restore` icon is unused. Virtua fixes offset/reorder/removal behavior without changing Batty's vertical Vue Virtualizer API. Pierre's worker-memory and remount fixes preserve CodeView. Cookie serialization, Markdown parsing, Node types and override patches require no application API migration. pnpm 12.16.0/12.16.1 fix zstd/signing security issues and preserve catalogs and frozen installs.
+
+The updated overrides remain necessary: Vite Plus Core permits PostCSS `^8.5.30`, Vue compiler permits `^8.5.29`, and plugin-terser permits serialize-javascript `^7.0.3`, all allowing earlier affected versions. Other maintained-major overrides remain current; no unrelated override changes are needed.
+
+## Checked versions and holds
+
+Pi/Chord's seven packages remain aligned at **1.4.0**: no SDK, durable schema, harness/transcript/queue, compaction/retry or provider/model migration boundary is crossed. Vite Plus and its Vite alias remain **1.4.0**, Vue/compiler **3.5.44**, and all six Workbox packages **7.4.1**.
+
+Patchright's registry stable is **1.64.2**, with Playwright Core **1.64.1**. Patchright 1.64.2 is age-eligible, but its official release page returns 404 and the upstream release list ends at 1.64.1. Reassessment included published package diffs: its core changes MediaRouter launch-feature filtering, while browser manifests are unchanged. Retain **1.64.1** pending official release notes/upstream declaration, rather than crossing an undocumented driver release. Installed Patchright Core/Playwright Core manifests agree on Chromium **156.0.8078.4 / revision 1248** and WebKit **27.2 / revision 2370**.
+
+Chrome Stable installed and verified through the isolated runtime is **156.0.8078.79**, also the current APT candidate after refreshing metadata. Google's October 29 release documents 21 security fixes, including critical CVE-2026-76024. No Chrome package change or browser-refresh maintenance is required. Production retains system Chrome; Chromium/WebKit remain pinned test dependencies.
+
+Age holds: websocket **11.3.5/11.3.6** until November 3, 11:22/17:05 UTC; Lucide **1.66.0** until November 3, 06:17 UTC; Virtua **0.54.1** until November 5, 00:31 UTC; pnpm **12.17.0** until November 2, 14:23 UTC (registry latest remains 12.16.1).
+
+Other checked pins retained: multipart 10.1.6, Source Sans 3 5.3.1, Readability 0.6.0, CSS anchor positioning 0.10.2, WebAuthn browser/server 14.0.0/14.0.3, DOMPurify 3.4.17, Fastify 5.12.7, Highlight.js 11.12.0, jsdom 30.1.3, mime-types 3.0.2, Pinia 4.1.0, persisted-state 4.7.1, Sharp 0.35.5, Turndown/GFM 7.2.4/1.0.2, TypeBox 1.4.3, Vue Router 5.4.0, web-push 3.6.7; jsdom/Turndown/web-push/ws types 30.0.0/5.0.6/3.6.4/8.18.2, Vue plugin 6.0.10, Vue test-utils 2.5.1, Happy DOM 21.0.4, tsx 4.23.15, TypeScript 7.0.2, PWA plugin 2.0.0. Maintained-major overrides retain fast-uri 3.1.9/4.2.3, Nano ID 3.3.20, brace-expansion 2.1.7/5.0.12 and find-my-way 9.10.0.
+
+## Validation
+
+`pnpm check`, `pnpm test` (902 passed, 2 skipped), `pnpm test:all` (957 passed, 2 skipped), Linux deployment regression checks, production build, packaged startup and offline verification pass. Frozen installation and the isolated system-Chrome sandbox/H.264/upload/download smoke pass. Independent Sol review found no actionable findings. Ten existing lint warnings and the existing caught localhost version-check connection refusal remain; no assertions failed.
+
+## Official sources
+
+All crossed intermediate releases were reviewed:
+
+- Cookie [11.1.4](https://github.com/fastify/fastify-cookie/releases/tag/v11.1.4), [11.1.5](https://github.com/fastify/fastify-cookie/releases/tag/v11.1.5); [static 10.1.8](https://github.com/fastify/fastify-static/releases/tag/v10.1.8).
+- Lucide [1.62](https://github.com/lucide-icons/lucide/releases/tag/1.62.0), [1.63](https://github.com/lucide-icons/lucide/releases/tag/1.63.0), [1.64](https://github.com/lucide-icons/lucide/releases/tag/1.64.0), [1.65](https://github.com/lucide-icons/lucide/releases/tag/1.65.0); [Pierre 1.6.2](https://github.com/pierrecomputer/pierre/releases/tag/diffs-v1.6.2).
+- [Croner 11 and migration guide](https://github.com/Hexagon/croner/releases/tag/11.0.0); [Marked 18.1.2](https://github.com/markedjs/marked/releases/tag/v18.1.2).
+- unpdf [2.0.0 and migration guide](https://github.com/unjs/unpdf/releases/tag/v2.0.0), [2.0.1](https://github.com/unjs/unpdf/releases/tag/v2.0.1), [2.1.0](https://github.com/unjs/unpdf/releases/tag/v2.1.0); [Virtua 0.54.0](https://github.com/inokawa/virtua/releases/tag/0.54.0).
+- [Node declarations](https://github.com/DefinitelyTyped/DefinitelyTyped/commit/abfd87afc9bfead6b07c24babc07d31aa39655ee); [PostCSS 8.5.32 changelog](https://github.com/postcss/postcss/blob/8.5.32/CHANGELOG.md); [serialize-javascript 7.1.4](https://github.com/yahoo/serialize-javascript/releases/tag/v7.1.4).
+- pnpm [12.16.0](https://github.com/pnpm/pnpm/releases/tag/v12.16.0), [12.16.1](https://github.com/pnpm/pnpm/releases/tag/v12.16.1).
+- [Patchright releases](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/releases); [Playwright releases](https://github.com/microsoft/playwright/releases); [Chrome October 29 security notes](https://chromereleases.googleblog.com/2026/10/stable-channel-update-for-desktop_02107719452.html).
+
 # Browser maintenance — 2026-10-29
 
 Production uses package-managed Google Chrome Stable **156.0.8078.73** on Linux, with Patchright **1.64.1** as driver. Google's [October 27 release notes](https://chromereleases.googleblog.com/2026/10/stable-channel-update-for-desktop_0562499947.html) document 52 security fixes, including CVE-2026-118320. The [Linux update policy](https://support.google.com/chrome/a/answer/9052345?hl=en) uses Google's APT repository; the existing nightly system-update workflow applies those updates without npm release-age holds. macOS/Windows use installed Chrome Stable and Google Updater. Test fixtures retain pinned Chromium/WebKit.

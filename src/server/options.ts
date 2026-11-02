@@ -118,7 +118,8 @@ function normalizeAppTitle(value: unknown): string {
 }
 
 function normalizeAppColor(value: unknown): AppColor {
-  if (value == null) {
+  // Migrate the removed experimental theme without invalidating saved options.
+  if (value == null || value === "neon") {
     return DEFAULT_APP_COLOR;
   }
   if (APP_COLOR_OPTIONS.some((option) => option.id === value)) {

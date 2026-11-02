@@ -62,6 +62,10 @@
           { id: "openrouter", name: "OpenRouter", connected: false, authKind: "apiKey" },
         ],
       };
+      if (new URLSearchParams(location.search).has("savedKeys")) {
+        store.providerAuth.providers.find((provider) => provider.id === "google").connected = true;
+        store.settings.braveSearchConfigured = true;
+      }
       store.bootstrap = async () => {};
       store.refreshProviderAuthStatus = async () => {};
       const view = new URLSearchParams(location.search).get("view") ?? "settings";

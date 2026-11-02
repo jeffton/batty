@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Check, ExternalLink, LogIn, Save } from "@lucide/vue";
 import SettingsCredential from "./SettingsCredential.vue";
+import CopyStoredValue from "./CopyStoredValue.vue";
 import SettingsField from "./SettingsField.vue";
 import { computed, reactive, ref, watch } from "vue";
 import { useAppStore } from "@/client/stores/app";
@@ -229,6 +230,15 @@ watch(
       "
       @toggle="toggleExpanded(provider.id)"
     >
+      <template #actions>
+        <CopyStoredValue
+          v-if="provider.connected && provider.authKind === 'apiKey'"
+          kind="provider"
+          :name="provider.id"
+          :label="itemTitle(provider.id)"
+          :disabled="apiKeySaving[provider.id]"
+        />
+      </template>
       <template v-if="isSubscriptionProvider(provider.id)">
         <div class="settings-popover__help">
           Sign in with your subscription to use <code>{{ provider.id }}/*</code> models.
@@ -361,6 +371,15 @@ watch(
       :disabled="braveSearchSaving"
       @toggle="toggleExpanded(BRAVE_SEARCH_ITEM_ID)"
     >
+      <template #actions>
+        <CopyStoredValue
+          v-if="store.settings.braveSearchConfigured"
+          kind="brave-search"
+          name=""
+          label="Brave Search API key"
+          :disabled="braveSearchSaving"
+        />
+      </template>
       <form class="settings-popover__editor" @submit.prevent="saveBraveSearchKey">
         <SettingsField label="API key">
           <input

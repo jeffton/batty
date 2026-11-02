@@ -401,3 +401,44 @@ for (const width of [390]) {
     }
   });
 }
+
+test("copies saved keys and environment values through the real clipboard without rendering them", async () => {
+  const context = await browser.newContext({ permissions: ["clipboard-read", "clipboard-write"] });
+  try {
+    for (const width of [320, 1280]) {
+      const page = await context.newPage();
+      await page.setViewportSize({ width, height: 900 });
+      let copies = 0;
+      await page.route("**/api/**", async (route) => {
+        if (route.request().url().endsWith("/settings/copy-value")) {
+          copies++;
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          return route.fulfill({ json: { value: "fixture-copy-value" } });
+        }
+        return route.fulfill({ json: { names: ["NORMAL_VALUE"] } });
+      });
+      await page.goto(`${url}?savedKeys`);
+      await page.getByRole("tab", { name: "Auth", exact: true }).click();
+      expect(copies).toBe(0);
+      for (const label of ["Gemini API key", "Brave Search API key", "NORMAL_VALUE"]) {
+        const copy = page.getByRole("button", { name: `Copy ${label}`, exact: true });
+        await copy.click();
+        await expect.poll(() => copy.innerText()).toBe("Copied");
+        expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+          "fixture-copy-value",
+        );
+        expect(await page.locator("body").innerText()).not.toContain("fixture-copy-value");
+        expect(
+          await copy.evaluate((element) => {
+            const box = element.getBoundingClientRect();
+            return box.left >= 0 && box.right <= innerWidth;
+          }),
+        ).toBe(true);
+      }
+      expect(copies).toBe(3);
+      await page.close();
+    }
+  } finally {
+    await context.close();
+  }
+});

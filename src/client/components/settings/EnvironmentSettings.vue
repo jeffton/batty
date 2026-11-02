@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Save } from "@lucide/vue";
 import SettingsField from "./SettingsField.vue";
+import CopyStoredValue from "./CopyStoredValue.vue";
 import { ref, watch } from "vue";
 import DeleteButton from "@/client/components/DeleteButton.vue";
 import {
@@ -71,12 +72,20 @@ watch(
     <div class="settings-popover__group-title">Environment variables</div>
     <div v-for="name in environmentNames" :key="name" class="settings-popover__environment-row">
       <code>{{ name }}</code>
-      <DeleteButton
-        class="settings-popover__action"
-        :label="`Remove ${name}`"
-        :disabled="environmentPending"
-        @confirm="deleteEnvironmentVariable(name)"
-      />
+      <div class="settings-popover__item-top">
+        <CopyStoredValue
+          kind="environment"
+          :name="name"
+          :label="name"
+          :disabled="environmentPending"
+        />
+        <DeleteButton
+          class="settings-popover__action"
+          :label="`Remove ${name}`"
+          :disabled="environmentPending"
+          @confirm="deleteEnvironmentVariable(name)"
+        />
+      </div>
     </div>
     <form class="settings-popover__editor" @submit.prevent="saveEnvironmentVariable">
       <SettingsField>

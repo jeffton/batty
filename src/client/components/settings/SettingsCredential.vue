@@ -24,6 +24,7 @@ defineEmits<{ toggle: [] }>();
           {{ status }}
         </div>
       </div>
+      <slot name="actions" />
       <button
         class="settings-popover__action"
         type="button"

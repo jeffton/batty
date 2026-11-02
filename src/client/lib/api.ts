@@ -373,6 +373,18 @@ export function setBraveSearchApiKey(apiKey: string): Promise<AppSettingsStatus>
   });
 }
 
+export function getSettingsCopyValue(
+  kind: "provider" | "environment" | "brave-search",
+  name: string,
+): Promise<{ value: string }> {
+  return request("/api/settings/copy-value", {
+    method: "POST",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind, name }),
+  });
+}
+
 export function listEnvironmentVariables(): Promise<{ names: string[] }> {
   return request("/api/settings/environment");
 }

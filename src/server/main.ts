@@ -25,6 +25,7 @@ import { verifyAuthToken, authCacheScope } from "./auth";
 import { TranscriptImages, imagePreview } from "./transcript-images";
 import { createLoginRateLimiter } from "./login-rate-limit";
 import { registerAuthRoutes } from "./routes/auth";
+import { registerSettingsCopyRoute } from "./routes/settings-copy";
 import { appBasePath, renderAppShell } from "./app-shell";
 import { registerBrowserErrorRoutes } from "./browser-errors";
 import { registerCronRoutes } from "./routes/cron";
@@ -118,6 +119,12 @@ const routeContext = {
   routePath: (route: string) => route,
 };
 registerAuthRoutes(routeContext);
+registerSettingsCopyRoute(app, async (kind, name) => {
+  if (kind === "provider") return runtime.providerAuth.getApiKey(name);
+  if (kind === "brave-search") return config.braveSearchKey || undefined;
+  const environment = await readEnvironmentFile(config.battyDir);
+  return Object.hasOwn(environment, name) ? environment[name] : undefined;
+});
 const closeRemoteStreams = registerRemoteRoutes(app, runtime);
 registerBrowserErrorRoutes(app, path.join(stateDirPath(config.battyDir), "browser-errors.json"));
 registerCronRoutes(app, runtime.orchestration);

@@ -142,6 +142,12 @@ export class ProviderAuthService {
     };
   }
 
+  getApiKey(providerId: string): string | undefined {
+    if (!this.getStatus().providers.some((provider) => provider.id === providerId)) return;
+    const credential = this.readCredential(providerId);
+    return credential?.type === "api_key" ? credential.key : undefined;
+  }
+
   async setApiKey(
     providerId: keyof typeof API_KEY_PROVIDER_NAMES,
     apiKey: string,

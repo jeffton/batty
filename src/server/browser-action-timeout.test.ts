@@ -201,6 +201,10 @@ describe("page-scoped cancellation", () => {
       const pages = await service.execute("worker", { action: "pages" });
       expect(pages.details.pages).toHaveLength(1);
       expect(pages.text).toContain("page-1");
+      await expect(service.execute("worker", { action: "snapshot" })).rejects.toThrow(
+        "Unknown browser page",
+      );
+      await service.execute("worker", { action: "switch", pageId: "page-1" });
       await new Promise((resolve) => setTimeout(resolve, 2100));
       expect(
         (

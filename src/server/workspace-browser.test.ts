@@ -12,6 +12,59 @@ import { BrowserService, workspaceBrowserKey } from "./browser-service";
 import { createBrowserTool } from "./custom-tools";
 import type { BrowserActionInput } from "./browser-schemas";
 
+test("delayed popups belong to the interacting client, not tab observers or capture", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-popup-owner-"));
+  const website = http.createServer((request, response) =>
+    response.end(`<html><body>
+      <button onclick="setTimeout(() => window.open('/child'), 1200)">Popup</button>
+      ${request.url === "/auto" ? "<script>setTimeout(() => window.open('/child'), 1200)</script>" : ""}
+      </body></html>`),
+  );
+  website.listen(0, "127.0.0.1");
+  await once(website, "listening");
+  const url = `http://127.0.0.1:${(website.address() as { port: number }).port}/`;
+  const service = new BrowserService(undefined, 4, root);
+  const call = (client: string, input: BrowserActionInput) =>
+    service.execute("shared", input, undefined, client);
+  const selected = async (client: string) =>
+    (await call(client, { action: "pages" })).details.pages?.find((page) => page.active)?.id;
+  try {
+    const first = await call("a", { action: "open", url });
+    const pageId = first.details.pageId!;
+    await call("b", { action: "switch", pageId });
+    const viewer =
+      process.platform === "linux" ? await service.openCloudBrowser("shared") : undefined;
+    await call("a", { action: "click", selector: "button" });
+    await call("b", { action: "snapshot" });
+    if (viewer)
+      await service.cloudVideoGeometry(
+        viewer.browserId,
+        await service.cloudState(viewer.browserId),
+      );
+    await expect.poll(() => selected("a"), { timeout: 5000 }).not.toBe(pageId);
+    expect(await selected("b")).toBe(pageId);
+    if (viewer) {
+      expect((await service.cloudState(viewer.browserId)).pageId).toBe(pageId);
+      await service.cloudControl(viewer.browserId, { action: "navigate", url: `${url}auto` });
+      await call("b", { action: "snapshot" });
+      await service.cloudVideoGeometry(
+        viewer.browserId,
+        await service.cloudState(viewer.browserId),
+      );
+      await expect
+        .poll(async () => (await service.cloudState(viewer.browserId)).pageId, { timeout: 5000 })
+        .not.toBe(pageId);
+      expect(await selected("b")).toBe(pageId);
+    }
+  } finally {
+    await service.closeSession("shared");
+    await service.dispose();
+    website.closeAllConnections();
+    await new Promise<void>((resolve) => website.close(() => resolve()));
+    await removeTestBrowserRoot(root);
+  }
+}, 30_000);
+
 // Exercise the actual tool boundary: conversation IDs differ, workspace IDs do not.
 test("main and workers share tabs, login and cloud attachments within their workspace across restart", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-workspace-browser-"));
@@ -63,6 +116,15 @@ test("main and workers share tabs, login and cloud attachments within their work
     }
     const first = await call("roy", "main", { action: "open", url });
     const pageId = first.details!.pageId as string;
+    if (process.platform === "linux") {
+      const viewer = await service.openCloudBrowser(workspaceBrowserKey("roy"));
+      // Opening an agent tab must leave the viewer's blank tab alone.
+      expect((await service.cloudState(viewer.browserId)).url).toBe("about:blank");
+      await service.cloudControl(viewer.browserId, {
+        action: "close-page",
+        pageId: (await service.cloudState(viewer.browserId)).pageId,
+      });
+    }
     await call("roy", "main", {
       action: "evaluate",
       script: 'document.cookie = "login=fixture; path=/"; globalThis.sharedState = 42',
@@ -130,6 +192,55 @@ test("main and workers share tabs, login and cloud attachments within their work
       const attached = await call("roy", "main", { action: "attach" });
       expect(attached.details.sites![0]).toMatchObject({ browserId });
       expect((await service.cloudState(browserId)).pageId).toBe(pageId);
+      // Main and worker retain different selections across a service restart.
+      expect((await call("roy", "main", { action: "snapshot" })).details.pageId).toBe(pageId);
+      expect((await call("roy", "worker", { action: "snapshot" })).details.pageId).toBe(
+        second.details.pageId,
+      );
+      // Concurrent agent navigation stays on each client's own tab.
+      await Promise.all([
+        call("roy", "main", { action: "open", url: url + "?main" }),
+        call("roy", "worker", { action: "open", url: url + "?worker" }),
+      ]);
+      expect((await service.cloudState(browserId)).url).toBe(url + "?main");
+      const extra = await service.cloudControl(browserId, { action: "new-page" });
+      expect(extra.url).toBe("about:blank");
+      expect((await call("roy", "main", { action: "snapshot" })).details.pageId).toBe(pageId);
+      await service.cloudControl(browserId, { action: "close-page", pageId: extra.pageId });
+      await service.cloudControl(browserId, {
+        action: "switch",
+        pageId: second.details.pageId as string,
+      });
+      await call("roy", "main", { action: "close-page", pageId: second.details.pageId as string });
+      await expect(call("roy", "worker", { action: "snapshot" })).rejects.toThrow(
+        "Unknown browser page",
+      );
+      const listed = await call("roy", "worker", { action: "pages" });
+      expect(
+        (listed.details.pages as Array<{ active: boolean }>).every((page) => !page.active),
+      ).toBe(true);
+      await call("roy", "worker", { action: "switch", pageId });
+      // Closing the last viewer tab creates a blank one; cookies remain shared.
+      await expect(service.cloudState(browserId)).rejects.toMatchObject({
+        statusCode: 409,
+        pages: [expect.objectContaining({ id: pageId, active: false })],
+      });
+      await service.cloudControl(browserId, { action: "switch", pageId });
+      const blank = await service.cloudControl(browserId, { action: "close-page", pageId });
+      expect(blank.url).toBe("about:blank");
+      await expect(call("roy", "main", { action: "snapshot" })).rejects.toThrow(
+        "Unknown browser page",
+      );
+      await service.cloudControl(browserId, { action: "navigate", url });
+      expect(
+        (
+          await call("roy", "resumed-worker", {
+            action: "evaluate",
+            pageId: blank.pageId,
+            script: "document.cookie",
+          })
+        ).content,
+      ).toContainEqual(expect.objectContaining({ text: expect.stringContaining("login=fixture") }));
     }
     await call("roy", "worker", { action: "close" });
     await expect(call("roy", "main", { action: "pages" })).rejects.toThrow("No active browser");

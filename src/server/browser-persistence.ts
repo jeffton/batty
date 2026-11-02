@@ -92,6 +92,7 @@ export async function interruptedBrowser(
 export interface PersistentBrowserRegistry {
   cloudViewport?: CloudBrowserViewport;
   activePageId?: string;
+  agentPages?: Record<string, string>;
   nextPageNumber: number;
   nextFrameNumber: number;
   pages: Record<string, string>;

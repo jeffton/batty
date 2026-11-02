@@ -2,7 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
 import BasePopover from "@/client/components/BasePopover.vue";
-import { ArrowLeft, RotateCw, SquareStack, Check } from "@lucide/vue";
+import { ArrowLeft, RotateCw, SquareStack, Check, Plus, X } from "@lucide/vue";
 import BrowserCredentials from "@/client/components/BrowserCredentials.vue";
 import { useBrowserTransport } from "@/client/browser/transport";
 import { fitCloudViewport } from "@/shared/browser-geometry";
@@ -15,6 +15,18 @@ const tabs = ref<InstanceType<typeof BasePopover>>();
 function selectTab(pageId: string): void {
   tabs.value?.hidePopover();
   void control({ action: "switch", pageId });
+}
+function closeTab(pageId: string): void {
+  tabs.value?.hidePopover();
+  void control({ action: "close-page", pageId });
+}
+async function newTab(): Promise<void> {
+  tabs.value?.hidePopover();
+  const created = await control({ action: "new-page" });
+  if (created && state.value?.url === "about:blank") {
+    address.value = "";
+    addressInput.value?.focus();
+  }
 }
 const addressInput = ref<HTMLInputElement>();
 let addressWasFocused = false;
@@ -36,6 +48,7 @@ const browser = useBrowserTransport(() => props.browserId, {
 });
 const {
   state,
+  availablePages,
   ready,
   error,
   reconnecting,
@@ -181,7 +194,7 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="chrome-button chrome-button--icon"
-          :disabled="!ready"
+          :disabled="ended"
           :popovertarget="`${popoverId}-tabs`"
           aria-label="Choose tab"
           title="Choose tab"
@@ -195,19 +208,35 @@ onBeforeUnmount(() => {
           :boundary-id="popoverId"
           class="cloud-browser-tabs"
         >
-          <button
-            v-for="page in state?.pages"
-            :key="page.id"
-            type="button"
-            :aria-current="page.active ? 'page' : undefined"
-            @click="selectTab(page.id)"
-          >
-            <Check v-if="page.active" :size="16" aria-hidden="true" />
-            <span class="cloud-browser-tabs__label">
-              <strong>{{ page.title || page.url || "New tab" }}</strong>
-              <small v-if="page.title">{{ page.url }}</small>
-            </span>
+          <button type="button" class="cloud-browser-tabs__new" @click="newTab">
+            <Plus :size="18" aria-hidden="true" />
+            New tab
           </button>
+          <div v-for="page in availablePages" :key="page.id" class="cloud-browser-tabs__row">
+            <button
+              type="button"
+              class="cloud-browser-tabs__select"
+              :aria-current="page.active ? 'page' : undefined"
+              @click="selectTab(page.id)"
+            >
+              <span class="cloud-browser-tabs__current" aria-hidden="true">
+                <Check v-if="page.active" :size="16" />
+              </span>
+              <span class="cloud-browser-tabs__label">
+                <strong>{{ page.title || page.url || "New tab" }}</strong>
+                <small v-if="page.title">{{ page.url }}</small>
+              </span>
+            </button>
+            <button
+              type="button"
+              class="cloud-browser-tabs__close"
+              :aria-label="`Close tab: ${page.title || page.url || 'New tab'}`"
+              title="Close tab"
+              @click="closeTab(page.id)"
+            >
+              <X :size="16" aria-hidden="true" />
+            </button>
+          </div>
         </BasePopover>
         <input
           ref="addressInput"
@@ -319,7 +348,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  width: 100%;
+  min-height: 2.75rem;
   padding: 0.6rem;
   text-align: left;
   border: 0;
@@ -333,6 +362,35 @@ onBeforeUnmount(() => {
 .cloud-browser-tabs button[aria-current] {
   background: var(--color-chrome-hover);
   color: var(--color-link);
+}
+.cloud-browser-tabs button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+.cloud-browser-tabs__new {
+  width: 100%;
+}
+.cloud-browser-tabs__row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.cloud-browser-tabs__row:first-of-type {
+  margin-top: 0.3rem;
+  padding-top: 0.3rem;
+  border-top: 1px solid var(--color-border-soft);
+}
+.cloud-browser-tabs__select {
+  flex: 1;
+  min-width: 0;
+}
+.cloud-browser-tabs__close {
+  justify-content: center;
+  flex: 0 0 2.75rem;
+}
+.cloud-browser-tabs__current {
+  display: flex;
+  flex: 0 0 1rem;
 }
 .cloud-browser-tabs__label {
   display: grid;

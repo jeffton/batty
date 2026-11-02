@@ -533,6 +533,324 @@ test("contextual field replaces values, accepts clearing, and never sends a draf
   }
 });
 
+test("tab controls switch or close only the requested page and focus a new blank tab's address", async () => {
+  const wrapper = create();
+  try {
+    const events = await open(wrapper);
+    const pages = [
+      { id: "page-1", title: "Example", url: state.url, active: true },
+      { id: "page-2", title: "Other tab", url: "https://other.example", active: false },
+    ];
+    events.send("state", { ...state, pages });
+    await flushPromises();
+    expect(wrapper.get('[aria-current="page"]').text()).toContain("Example");
+    await wrapper.get('[aria-label="Close tab: Other tab"]').trigger("click");
+    await flushPromises();
+    expect(commands()).toEqual([{ action: "close-page", pageId: "page-2" }]);
+    events.send("state", { ...state, pages });
+    await flushPromises();
+    await wrapper
+      .get(".cloud-browser-tabs__row:nth-of-type(2) .cloud-browser-tabs__select")
+      .trigger("click");
+    await flushPromises();
+    expect(commands().at(-1)).toEqual({ action: "switch", pageId: "page-2" });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ...state, pageId: "page-new", url: "about:blank", title: "", pages }),
+    });
+    await wrapper.get(".cloud-browser-tabs__new").trigger("click");
+    await flushPromises();
+    expect(commands().at(-1)).toEqual({ action: "new-page" });
+    expect((wrapper.get('[aria-label="Browser address"]').element as HTMLInputElement).value).toBe(
+      "",
+    );
+  } finally {
+    wrapper.unmount();
+  }
+});
+
+test("closing the final tab surfaces server errors without implicitly switching or creating a tab", async () => {
+  const wrapper = create();
+  try {
+    const events = await open(wrapper);
+    events.send("state", {
+      ...state,
+      pages: [{ id: "page-1", title: "Example", url: state.url, active: true }],
+    });
+    await flushPromises();
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: "The selected tab was closed. Choose a tab or open a new one." }),
+    });
+    await wrapper.get('[aria-label="Close tab: Example"]').trigger("click");
+    await flushPromises();
+    expect(commands()).toEqual([{ action: "close-page", pageId: "page-1" }]);
+    expect(wrapper.get('[role="alert"]').text()).toContain("The selected tab was closed.");
+    expect(wrapper.find(".cloud-browser-tabs__new").exists()).toBe(true);
+  } finally {
+    wrapper.unmount();
+  }
+});
+
+test("a selected-tab error keeps the tab menu available for switching to a surviving tab", async () => {
+  const wrapper = create();
+  try {
+    const events = await open(wrapper);
+    const surviving = {
+      id: "page-2",
+      title: "Surviving tab",
+      url: "https://other.example",
+      active: false,
+    };
+    events.send("state", {
+      ...state,
+      pages: [{ id: "page-1", title: "Example", url: state.url, active: true }, surviving],
+    });
+    await flushPromises();
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        error: "The selected tab was closed. Choose a tab or open a new one.",
+        pages: [surviving],
+      }),
+    });
+    await wrapper.get('[aria-label="Reload page"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[role="alert"]').text()).toContain("The selected tab was closed.");
+    expect(wrapper.get('[aria-label="Choose tab"]').attributes("disabled")).toBeUndefined();
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ...state,
+        pageId: surviving.id,
+        url: surviving.url,
+        pages: [{ ...surviving, active: true }],
+      }),
+    });
+    expect(wrapper.findAll(".cloud-browser-tabs__select")).toHaveLength(1);
+    expect(wrapper.get('[aria-label="Reload page"]').attributes("disabled")).toBeDefined();
+    await wrapper.get(".cloud-browser-tabs__select").trigger("click");
+    await flushPromises();
+    expect(commands().at(-1)).toEqual({ action: "switch", pageId: "page-2" });
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+    expect((wrapper.get('[aria-label="Browser address"]').element as HTMLInputElement).value).toBe(
+      surviving.url,
+    );
+  } finally {
+    wrapper.unmount();
+  }
+});
+
+test("a fresh viewer whose selected tab was closed can create a new tab without an initial page state", async () => {
+  const wrapper = create();
+  try {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        error: "The selected tab was closed. Choose a tab or open a new one.",
+        pages: [],
+      }),
+    });
+    await open(wrapper);
+    expect(wrapper.get('[aria-label="Choose tab"]').attributes("disabled")).toBeUndefined();
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ...state,
+        pageId: "new-page",
+        url: "about:blank",
+        title: "",
+        pages: [{ id: "new-page", title: "", url: "about:blank", active: true }],
+      }),
+    });
+    await wrapper.get(".cloud-browser-tabs__new").trigger("click");
+    await flushPromises();
+    expect(commands()).toEqual([{ action: "new-page" }]);
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+    expect((wrapper.get('[aria-label="Browser address"]').element as HTMLInputElement).value).toBe(
+      "",
+    );
+  } finally {
+    wrapper.unmount();
+  }
+});
+
+test("a stream-selected-tab error removes stale pixels and reconnects only after an explicit switch", async () => {
+  const wrapper = create();
+  try {
+    const events = await open(wrapper);
+    await frame(wrapper, events);
+    vi.useFakeTimers();
+    const surviving = {
+      id: "page-2",
+      title: "Surviving tab",
+      url: "https://other.example",
+      active: false,
+    };
+    events.send("browser-error", {
+      error: "The selected tab was closed. Choose a tab or open a new one.",
+      retryable: false,
+      statusCode: 409,
+      pages: [surviving],
+    });
+    await flushPromises();
+    expect(events.closed).toBe(true);
+    expect(wrapper.get("canvas").attributes("style")).toContain("display: none");
+    expect(wrapper.get('[aria-label="Choose tab"]').attributes("disabled")).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(FakeEvents.instances).toHaveLength(1);
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ...state,
+        pageId: surviving.id,
+        url: surviving.url,
+        pages: [{ ...surviving, active: true }],
+      }),
+    });
+    await wrapper.get(".cloud-browser-tabs__select").trigger("click");
+    await flushPromises();
+    expect(commands()).toEqual([{ action: "switch", pageId: "page-2" }]);
+    expect(FakeEvents.instances).toHaveLength(2);
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+    const next = FakeEvents.instances.at(-1)!;
+    next.send("frame", { pageId: "page-2", revision: state.revision, width: 1280, height: 800 });
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(20);
+    await flushPromises();
+    expect(wrapper.get("canvas").attributes("style") ?? "").not.toContain("display: none");
+  } finally {
+    wrapper.unmount();
+    vi.useRealTimers();
+  }
+});
+
+test("a nonretryable stopped stream still allows an explicit new tab to reconnect", async () => {
+  const wrapper = create();
+  try {
+    const events = await open(wrapper);
+    events.send("browser-error", { error: "Capture stopped", retryable: false });
+    await flushPromises();
+    expect(events.closed).toBe(true);
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ...state, pageId: "new", url: "about:blank" }),
+    });
+    await wrapper.get(".cloud-browser-tabs__new").trigger("click");
+    await flushPromises();
+    expect(commands()).toEqual([{ action: "new-page" }]);
+    expect(FakeEvents.instances).toHaveLength(2);
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+  } finally {
+    wrapper.unmount();
+  }
+});
+
+test.each([200, 409])(
+  "explicit recovery supersedes an initial state request whose late response is %i",
+  async (status) => {
+    const wrapper = create();
+    let finish!: (value: unknown) => void;
+    try {
+      fetchMock.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      await open(wrapper);
+      const initialSignal = fetchMock.mock.calls[0]![1].signal as AbortSignal;
+      const fresh = {
+        ...state,
+        pageId: "new",
+        url: "about:blank",
+        pages: [{ id: "new", title: "", url: "about:blank", active: true }],
+      };
+      fetchMock.mockResolvedValueOnce({ ok: true, json: async () => fresh });
+      await wrapper.get(".cloud-browser-tabs__new").trigger("click");
+      await flushPromises();
+      expect(initialSignal.aborted).toBe(true);
+      expect(FakeEvents.instances).toHaveLength(1);
+      const socket = FakeEvents.instances[0]!;
+      finish({
+        ok: status === 200,
+        status,
+        json: async () => (status === 200 ? state : { error: "Old selection closed", pages: [] }),
+      });
+      await flushPromises();
+      expect(FakeEvents.instances).toHaveLength(1);
+      expect(socket.closed).toBe(false);
+      expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+      expect(wrapper.get('[aria-current="page"]').text()).toBe("about:blank");
+    } finally {
+      wrapper.unmount();
+    }
+  },
+);
+
+test.each([200, 409])(
+  "a stream selection loss cancels pending and queued controls before a late %i response",
+  async (status) => {
+    const wrapper = create();
+    let finish!: (value: unknown) => void;
+    try {
+      const socket = await open(wrapper);
+      fetchMock.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      await wrapper.get('[aria-label="Reload page"]').trigger("click");
+      await flushPromises();
+      const oldSignal = fetchMock.mock.calls.at(-1)![1].signal as AbortSignal;
+      await wrapper.get('[aria-label="Go back"]').trigger("click");
+      const surviving = {
+        id: "page-2",
+        title: "Surviving tab",
+        url: "https://other.example",
+        active: false,
+      };
+      socket.send("browser-error", {
+        error: "Selected tab closed",
+        retryable: false,
+        statusCode: 409,
+        pages: [surviving],
+      });
+      await flushPromises();
+      expect(oldSignal.aborted).toBe(true);
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ...state,
+          pageId: surviving.id,
+          url: surviving.url,
+          pages: [{ ...surviving, active: true }],
+        }),
+      });
+      await wrapper.get(".cloud-browser-tabs__select").trigger("click");
+      await flushPromises();
+      expect(FakeEvents.instances).toHaveLength(2);
+      const recovered = FakeEvents.instances[1]!;
+      finish({
+        ok: status === 200,
+        status,
+        json: async () => (status === 200 ? state : { error: "Old response", pages: [] }),
+      });
+      await flushPromises();
+      expect(commands().map((command) => command.action)).toEqual(["reload", "switch"]);
+      expect(wrapper.get('[aria-current="page"]').text()).toContain("Surviving tab");
+      expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+      expect(recovered.closed).toBe(false);
+    } finally {
+      wrapper.unmount();
+    }
+  },
+);
+
 test("bare domains receive https while explicit http is preserved", async () => {
   const wrapper = create();
   try {

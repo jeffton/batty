@@ -181,7 +181,10 @@ test("browser service detach/reconnect preserves tabs, cookies, JavaScript state
     await service.dispose();
     expect(Date.now() - disposing).toBeLessThan(1000);
     service = new BrowserService(undefined, 4, root);
-    const reopened = await service.execute("durable", { action: "open", url });
+    await expect(service.execute("durable", { action: "open", url })).rejects.toThrow(
+      `Unknown browser page: ${pageId}`,
+    );
+    const reopened = await service.execute("durable", { action: "open", url, newPage: true });
     const reopenedState = await service.execute("durable", {
       action: "evaluate",
       pageId: reopened.details.pageId,

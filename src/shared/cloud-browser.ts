@@ -73,7 +73,7 @@ export type CloudBrowserControl =
   | (ViewTarget & { action: "text"; text: string })
   | (ViewTarget & { action: "key"; key: string; focusId?: string })
   | { action: "navigate"; url: string }
-  | { action: "back" | "reload" }
+  | { action: "back" | "reload" | "new-page" }
   | { action: "switch" | "close-page"; pageId: string }
   | ({ action: "viewport" } & CloudBrowserViewport);
 

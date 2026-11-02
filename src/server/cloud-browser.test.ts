@@ -237,6 +237,7 @@ test("cloud attachment shares agent state and controls, survives detach, and can
     await service.cloudControl(id, { action: "switch", pageId: state.pageId });
     expect((await service.cloudState(id)).pages).toHaveLength(2);
     await service.cloudControl(id, { action: "close-page", pageId: second.details.pageId! });
+    await service.execute("shared", { action: "switch", pageId: state.pageId });
     const busy = service.execute("shared", {
       action: "evaluate",
       script: "new Promise(resolve => setTimeout(resolve, 200))",
@@ -510,6 +511,37 @@ test("cloud routes require auth, same-origin control and bounded allowlisted com
         })
       ).statusCode,
     ).toBe(400);
+    const survivor = await f.service.execute("shared", {
+      action: "open",
+      url: f.url,
+      newPage: true,
+    });
+    await f.service.execute("shared", { action: "close-page", pageId: state.pageId });
+    const unavailable = await app.inject({
+      url: `${endpoint}/state`,
+      headers: { authorization: "test" },
+    });
+    expect(unavailable.statusCode).toBe(409);
+    expect(unavailable.json()).toEqual({
+      error: `Unknown browser page: ${state.pageId}`,
+      pages: [expect.objectContaining({ id: survivor.details.pageId, active: false })],
+    });
+    const rejected = await control({ action: "reload" });
+    expect(rejected.statusCode).toBe(409);
+    expect(rejected.json()).toEqual(unavailable.json());
+    const recovered = await control({ action: "switch", pageId: survivor.details.pageId });
+    expect(recovered.statusCode).toBe(200);
+    expect(recovered.json().pageId).toBe(survivor.details.pageId);
+    await f.service.execute("shared", { action: "close-page", pageId: survivor.details.pageId });
+    const empty = await app.inject({
+      url: `${endpoint}/state`,
+      headers: { authorization: "test" },
+    });
+    expect(empty.statusCode).toBe(409);
+    expect(empty.json().pages).toEqual([
+      expect.objectContaining({ url: "about:blank", active: false }),
+    ]);
+    expect((await control({ action: "new-page" })).statusCode).toBe(200);
     await f.service.closeSession("shared");
     expect(
       (await app.inject({ url: `${endpoint}/state`, headers: { authorization: "test" } }))

@@ -61,6 +61,7 @@ export class CloudBrowserStreams {
         broadcast("browser-error", {
           error: message,
           statusCode,
+          pages: (error as { pages?: CloudBrowserState["pages"] }).pages,
           retryable:
             statusCode === undefined &&
             /Execution context was destroyed|Frame was detached|Cannot find context|Target closed|Session closed|has been closed/i.test(

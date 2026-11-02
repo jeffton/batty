@@ -114,6 +114,112 @@ afterAll(async () => {
   if (root) await removeTestBrowserRoot(root);
 });
 
+test("tab menu creates and closes pages with keyboard controls and mobile-sized targets", async () => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  try {
+    const page = await context.newPage();
+    let selected = "first";
+    let pages = [
+      { id: "first", title: "First tab", url: "https://first.example/" },
+      {
+        id: "second",
+        title: "Second tab with a very long title that must not squeeze its close button",
+        url: "https://second.example/",
+      },
+    ];
+    const commands: Array<{ action: string; pageId?: string }> = [];
+    await page.addInitScript(() => {
+      globalThis.WebSocket = class {
+        static OPEN = 1;
+        readyState = 1;
+        close() {
+          this.readyState = 3;
+        }
+        send() {}
+      } as unknown as typeof WebSocket;
+    });
+    await page.route("**/api/cloud-browser/*/{state,control}*", async (route) => {
+      const command = route.request().postDataJSON() as { action: string; pageId?: string } | null;
+      if (command) {
+        commands.push(command);
+        if (command.action === "new-page") {
+          selected = "new";
+          pages.push({ id: selected, title: "", url: "about:blank" });
+        } else if (command.action === "switch") selected = command.pageId!;
+        else if (command.action === "close-page")
+          pages = pages.filter((item) => item.id !== command.pageId);
+      }
+      const current = pages.find((item) => item.id === selected)!;
+      await route.fulfill({
+        json: {
+          pageId: selected,
+          revision: "test-revision",
+          url: current.url,
+          title: current.title,
+          width: 390,
+          height: 700,
+          mobile: false,
+          deviceScaleFactor: 1,
+          pages: pages.map((item) => ({ ...item, active: item.id === selected })),
+        },
+      });
+    });
+    await page.goto(url);
+    await page.getByRole("button", { name: "Open browser", exact: true }).click();
+    const choose = page.getByRole("button", { name: "Choose tab", exact: true });
+    await choose.click();
+    const menu = page.locator(".cloud-browser-tabs:popover-open");
+    await menu.waitFor({ state: "visible" });
+    for (const width of [320, 390, 1440]) {
+      await page.setViewportSize({ width, height: 844 });
+      await expect
+        .poll(() =>
+          menu.evaluate((element) => {
+            const rect = element.getBoundingClientRect();
+            return (
+              rect.left >= 0 &&
+              rect.right <= innerWidth &&
+              element.scrollWidth <= element.clientWidth
+            );
+          }),
+        )
+        .toBe(true);
+      for (const button of await menu.locator("button").all()) {
+        const bounds = (await button.boundingBox())!;
+        expect(bounds.height).toBeGreaterThanOrEqual(44);
+        if (await button.getAttribute("aria-label"))
+          expect(bounds.width).toBeGreaterThanOrEqual(44);
+      }
+    }
+    // Native buttons retain normal Tab/Enter keyboard access; closing must not also switch.
+    await menu.getByRole("button", { name: /^Close tab: Second tab/ }).focus();
+    await page.keyboard.press("Enter");
+    await expect.poll(() => pages.length).toBe(1);
+    expect(commands.filter((item) => item.action === "switch")).toEqual([]);
+    await menu.waitFor({ state: "hidden" });
+    await choose.focus();
+    await page.keyboard.press("Enter");
+    await menu.getByRole("button", { name: "New tab", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect.poll(() => commands.some((item) => item.action === "new-page")).toBe(true);
+    const address = page.getByRole("textbox", { name: "Browser address", exact: true });
+    await expect
+      .poll(() => address.evaluate((element) => element === document.activeElement))
+      .toBe(true);
+    expect(await address.inputValue()).toBe("");
+    await address.blur();
+    await choose.click();
+    await menu.locator(".cloud-browser-tabs__select").filter({ hasText: "First tab" }).focus();
+    await page.keyboard.press("Enter");
+    await expect.poll(() => address.inputValue()).toBe("https://first.example/");
+    expect(commands.filter((item) => item.action === "switch")).toEqual([
+      { action: "switch", pageId: "first" },
+    ]);
+  } finally {
+    await context.close();
+  }
+}, 30_000);
+
 test("toolbar starts a cloud browser and reopens the same live tabs on mobile", async () => {
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
@@ -155,7 +261,7 @@ test("toolbar starts a cloud browser and reopens the same live tabs on mobile", 
     await popover.waitFor({ state: "visible" });
     const reopened = await service.cloudState(descriptor.browserId);
     expect(reopened.pageId).toBe(state.pageId);
-    expect(reopened.pages).toHaveLength(1);
+    expect(reopened.pages.map((item) => item.id)).toEqual(state.pages.map((item) => item.id));
     expect(await target.evaluate(() => (globalThis as any).toolbarRetained)).toBe(42);
     expect(
       await page.locator("header.header").evaluate((element) => element.scrollWidth),
@@ -617,7 +723,7 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
     await chooseTab.click();
     const tabs = page.locator(".cloud-browser-tabs:popover-open");
     await tabs.waitFor({ state: "visible" });
-    await expect.poll(() => tabs.locator("button").count()).toBe(2);
+    await expect.poll(() => tabs.locator(".cloud-browser-tabs__select").count()).toBe(2);
     expect(await tabs.locator('[aria-current="page"]').textContent()).toContain("Popup target");
     for (const width of [390, 1440, 320]) {
       await page.setViewportSize({ width, height: 844 });
@@ -650,12 +756,12 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
     );
     await page.setViewportSize({ width: 390, height: 844 });
     await fittedViewerFrame(page);
-    await tabs.getByRole("button", { name: /Shared target/ }).click();
+    await tabs.locator(".cloud-browser-tabs__select").filter({ hasText: "Shared target" }).click();
     await expect.poll(() => addressInput.inputValue()).toBe(`${backendUrl}/target`);
     await fittedViewerFrame(page);
     expect(await popover.evaluate((element) => element.matches(":popover-open"))).toBe(true);
     await chooseTab.click();
-    await tabs.getByRole("button", { name: /Popup target/ }).click();
+    await tabs.locator(".cloud-browser-tabs__select").filter({ hasText: "Popup target" }).click();
     await expect.poll(() => addressInput.inputValue()).toBe(`${backendUrl}/popup`);
     await fittedViewerFrame(page);
     expect(popup.isClosed()).toBe(false);

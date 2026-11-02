@@ -218,6 +218,30 @@ test("navigation winning capture setup discards the stale view and starts the au
   }
 });
 
+test("closed viewer selection stops capture and reports explicit tab recovery", async () => {
+  const f = fixture();
+  try {
+    await f.subscribe();
+    const pages = [{ id: "other", url: "about:blank", title: "", active: false }];
+    f.target.mockRejectedValueOnce(
+      Object.assign(new Error("Unknown browser page: page"), { statusCode: 409, pages }),
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    expect(f.events.at(-1)).toEqual({
+      event: "browser-error",
+      data: { error: "Unknown browser page: page", retryable: false, statusCode: 409, pages },
+    });
+    expect(f.captures[0]!.stop).toHaveBeenCalledOnce();
+    f.paint(0);
+    expect(f.frames()).toEqual([]);
+    const calls = f.target.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(f.target).toHaveBeenCalledTimes(calls);
+  } finally {
+    await f.streams.close();
+  }
+});
+
 test("failed asynchronous capture creation rejects subscription and releases the stream slot", async () => {
   const f = fixture();
   vi.mocked(f.factory).mockRejectedValueOnce(new Error("cannot start encoder"));

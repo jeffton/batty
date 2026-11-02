@@ -166,6 +166,7 @@ export const CloudBrowserControlSchema = Type.Union([
   }),
   command("back"),
   command("reload"),
+  command("new-page"),
   command("switch", { pageId: target.pageId }),
   command("close-page", { pageId: target.pageId }),
   command("viewport", {

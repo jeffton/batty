@@ -79,12 +79,24 @@ export async function registerCloudBrowserRoutes(
       return reply.code(204).send();
     },
   );
-  app.get<{ Params: { browserId: string } }>(`${prefix}/state`, async (request) =>
-    browser.cloudState(request.params.browserId),
+  const selectionError = (
+    error: Error & { statusCode?: number; pages?: unknown },
+    _request: unknown,
+    reply: import("fastify").FastifyReply,
+  ) => {
+    if (error.statusCode === 409 && error.pages)
+      return reply.code(409).send({ error: error.message, pages: error.pages });
+    throw error;
+  };
+  app.get<{ Params: { browserId: string } }>(
+    `${prefix}/state`,
+    { errorHandler: selectionError },
+    async (request) => browser.cloudState(request.params.browserId),
   );
   app.post<{ Params: { browserId: string }; Body: CloudBrowserControl }>(
     `${prefix}/control`,
     {
+      errorHandler: selectionError,
       schema: { body: CloudBrowserControlSchema },
       bodyLimit: 64 * 1024,
       // AJV's removeAdditional mutates union branches before discriminating actions.
@@ -105,6 +117,7 @@ export async function registerCloudBrowserRoutes(
     `${prefix}/socket`,
     {
       websocket: true,
+      errorHandler: selectionError,
       preValidation: async (request, reply) => {
         const origin = new URL(baseUrl, `${request.protocol}://${request.host}`).origin;
         if (request.headers.origin !== origin)
@@ -155,8 +168,13 @@ export async function registerCloudBrowserRoutes(
         writer.send("browser-error", {
           error: message,
           statusCode,
+          pages: (error as { pages?: unknown }).pages,
           retryable:
-            statusCode !== 410 && statusCode !== 400 && statusCode !== 403 && statusCode !== 504,
+            !(error as { pages?: unknown }).pages &&
+            statusCode !== 410 &&
+            statusCode !== 400 &&
+            statusCode !== 403 &&
+            statusCode !== 504,
         });
       };
       const scroll = async () => {

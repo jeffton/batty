@@ -121,6 +121,8 @@ interface BrowserSession {
   frames: Map<string, Frame>;
   frameIds: WeakMap<Frame, string>;
   activePageId?: string;
+  agentPages: Map<string, string>;
+  pageActors: WeakMap<Page, string>;
   nextPageNumber: number;
   nextFrameNumber: number;
   downloadDirs: Set<string>;
@@ -249,6 +251,7 @@ export class BrowserService {
     sessionId: string,
     input: BrowserActionInput,
     signal?: AbortSignal,
+    clientId = "legacy",
   ): Promise<BrowserActionResult> {
     const controller = new AbortController();
     const deadline = setTimeout(
@@ -260,7 +263,7 @@ export class BrowserService {
     );
     const cancellation = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
     try {
-      return await this.executeAction(sessionId, input, cancellation);
+      return await this.executeAction(sessionId, input, cancellation, clientId);
     } finally {
       clearTimeout(deadline);
     }
@@ -269,7 +272,8 @@ export class BrowserService {
   private async executeAction(
     sessionId: string,
     input: BrowserActionInput,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    clientId: string,
   ): Promise<BrowserActionResult> {
     signal?.throwIfAborted();
     if (this.disposed) throw new Error("Browser service is disposed");
@@ -355,14 +359,25 @@ export class BrowserService {
                 height: 640,
               });
             session.cloudInteraction++;
-            const page = await this.pageForOpen(session, input, created);
+            const selected = session.agentPages.get(clientId);
+            const page = await this.pageForOpen(
+              session,
+              {
+                ...input,
+                pageId: input.pageId ?? selected,
+                newPage: input.newPage || (!created && !input.pageId && !selected),
+              },
+              created,
+            );
+            session.agentPages.set(clientId, this.pageId(session, page));
+            session.pageActors.set(page, clientId);
             activePage = page;
             signal?.throwIfAborted();
             await this.configurePage(session, page, input);
             signal?.throwIfAborted();
             await page.goto(url, { waitUntil: "domcontentloaded", signal });
             signal?.throwIfAborted();
-            const result = await this.snapshotResult(session, input, page);
+            const result = await this.snapshotResult(session, clientId, input, page);
             if (input.cloud) result.details.sites = [await this.cloudAttachment(session)];
             return result;
           }
@@ -379,11 +394,28 @@ export class BrowserService {
               details: { action: "attach", sites: [site] },
             };
           }
-          if (input.action === "pages") return await this.pagesResult(session, input.action);
+          if (input.action === "pages")
+            return await this.pagesResult(
+              session,
+              input.action,
+              undefined,
+              session.agentPages.get(clientId),
+            );
 
           if (!["snapshot", "screenshot", "frames", "wait"].includes(input.action))
             session.cloudInteraction++;
-          const page = this.resolvePage(session, input.pageId);
+          const selected = input.pageId ?? session.agentPages.get(clientId);
+          if (!selected)
+            throw new Error(
+              'No selected browser tab. Use action="pages", then action="switch" with pageId, or open a new page.',
+            );
+          const page = this.resolvePage(session, selected);
+          if (
+            !["snapshot", "screenshot", "frames", "wait", "switch", "close-page"].includes(
+              input.action,
+            )
+          )
+            session.pageActors.set(page, clientId);
           activePage = page;
           await this.configurePage(session, page, input);
           signal?.throwIfAborted();
@@ -391,13 +423,22 @@ export class BrowserService {
           signal?.throwIfAborted();
 
           if (input.action === "switch") {
-            session.activePageId = this.pageId(session, page);
-            return await this.snapshotResult(session, input, page);
+            session.agentPages.set(clientId, this.pageId(session, page));
+            return await this.snapshotResult(session, clientId, input, page);
           }
           if (input.action === "close-page") {
             const closedPageId = this.pageId(session, page);
+            // Chrome exits when its final tab closes. Keep an unselected blank
+            // tab without redirecting any client's closed selection to it.
+            if (session.pages.size === 1)
+              await this.pageForOpen(session, { action: "open", newPage: true }, false);
             await page.close();
-            return await this.pagesResult(session, input.action, `Closed page ${closedPageId}.`);
+            return await this.pagesResult(
+              session,
+              input.action,
+              `Closed page ${closedPageId}. Select another tab with action="switch".`,
+              session.agentPages.get(clientId),
+            );
           }
           if (input.action === "frames") return this.framesResult(session, input, page);
 
@@ -410,7 +451,7 @@ export class BrowserService {
           if (output.text != null) {
             return await this.textResult(session, input, page, frame, output);
           }
-          return await this.snapshotResult(session, input, page, frame, output);
+          return await this.snapshotResult(session, clientId, input, page, frame, output);
         } finally {
           const session = this.sessions.get(sessionId);
           if (!signal?.aborted && session?.browser.isConnected()) {
@@ -605,7 +646,6 @@ export class BrowserService {
   }
 
   private async cloudStateFor(session: BrowserSession): Promise<CloudBrowserState> {
-    if (!session.pages.size) throw this.cloudEnded();
     const page = this.resolvePage(session);
     await session.pageIdentityPromises.get(page);
     return {
@@ -674,6 +714,19 @@ export class BrowserService {
           if (!session.browser.isConnected()) throw this.cloudEnded();
           try {
             return await operation(session);
+          } catch (error) {
+            // A closed viewer selection is recoverable only by an explicit
+            // switch/new action. Keep the surviving tabs available to the UI.
+            if ((error as Error).message.startsWith("Unknown browser page:")) {
+              throw Object.assign(error as Error, {
+                statusCode: 409,
+                pages: (await this.pageDetails(session)).map((page) => ({
+                  ...page,
+                  active: false,
+                })),
+              });
+            }
+            throw error;
           } finally {
             // An abandoned CDP promise may settle after timeout/closure. Never
             // persist it or touch a newer session that reused the same owner.
@@ -818,7 +871,7 @@ export class BrowserService {
     await this.cloudOperation(
       id,
       async (session) => {
-        const page = this.cloudInputPage(session, command.target);
+        const page = this.cloudInputPage(session, command.target, true);
         // Never expose Patchright errors/call arguments containing credentials.
         let filled = false;
         try {
@@ -852,6 +905,7 @@ export class BrowserService {
       | Extract<CloudBrowserControl, { revision: string }>
       | CloudBrowserTouch
       | Pick<CloudBrowserState, "pageId" | "revision">,
+    interaction = false,
   ): Page {
     const page = this.resolvePage(session);
     const current = this.cloudView(session, page);
@@ -867,6 +921,7 @@ export class BrowserService {
           statusCode: 400,
         });
     }
+    if (interaction) session.pageActors.set(page, "viewer");
     return page;
   }
 
@@ -886,7 +941,7 @@ export class BrowserService {
       id,
       async (session) => {
         try {
-          const page = this.cloudInputPage(session, command);
+          const page = this.cloudInputPage(session, command, true);
           await session.pageIdentityPromises.get(page);
           let touch = this.cloudTouches.get(id);
           if (command.phase === "start") {
@@ -962,7 +1017,7 @@ export class BrowserService {
     session: BrowserSession,
     command: Extract<CloudBrowserControl, { action: "scroll" }>,
   ): Promise<void> {
-    const page = this.cloudInputPage(session, command);
+    const page = this.cloudInputPage(session, command, true);
     await session.pageIdentityPromises.get(page);
     const connection = session.pageEmulation.get(page)!;
     // Wheel events carry their own CSS-coordinate target; avoid an extra
@@ -982,7 +1037,7 @@ export class BrowserService {
       async (session) => {
         await this.cancelCloudTouch(id);
         if ("revision" in command) {
-          const page = this.cloudInputPage(session, command);
+          const page = this.cloudInputPage(session, command, true);
           // Viewer input keeps the capture running. Revisions fence agent actions,
           // navigation and viewport changes, not individual wheel/typing events.
           switch (command.action) {
@@ -1023,14 +1078,27 @@ export class BrowserService {
         } else {
           session.cloudInteraction++;
           switch (command.action) {
-            case "navigate":
-              await this.resolvePage(session).goto(validateUrl(command.url), {
+            case "new-page": {
+              const page = await this.pageForOpen(
+                session,
+                { action: "open", newPage: true },
+                false,
+              );
+              session.activePageId = this.pageId(session, page);
+              break;
+            }
+            case "navigate": {
+              const page = this.resolvePage(session);
+              session.pageActors.set(page, "viewer");
+              await page.goto(validateUrl(command.url), {
                 waitUntil: "domcontentloaded",
                 timeout: 30_000,
               });
               break;
+            }
             case "back": {
               const page = this.resolvePage(session);
+              session.pageActors.set(page, "viewer");
               const connection = await page.context().newCDPSession(page);
               let currentIndex: number;
               try {
@@ -1047,23 +1115,38 @@ export class BrowserService {
               }
               break;
             }
-            case "reload":
-              await this.resolvePage(session).reload({
+            case "reload": {
+              const page = this.resolvePage(session);
+              session.pageActors.set(page, "viewer");
+              await page.reload({
                 waitUntil: "domcontentloaded",
                 timeout: 30_000,
               });
               break;
+            }
             case "switch":
               this.resolvePage(session, command.pageId);
               session.activePageId = command.pageId;
               break;
-            case "close-page":
-              if (session.pages.size === 1)
-                throw Object.assign(new Error("Keep at least one browser tab open."), {
-                  statusCode: 400,
-                });
-              await this.resolvePage(session, command.pageId).close();
+            case "close-page": {
+              const page = this.resolvePage(session, command.pageId);
+              if (session.activePageId === command.pageId) {
+                // An explicit viewer close selects its next tab. Other clients
+                // retain their closed selection and must select a tab themselves.
+                let next = [...session.pages.keys()].find((id) => id !== command.pageId);
+                if (!next) {
+                  const blank = await this.pageForOpen(
+                    session,
+                    { action: "open", newPage: true },
+                    false,
+                  );
+                  next = this.pageId(session, blank);
+                }
+                session.activePageId = next;
+              }
+              await page.close();
               break;
+            }
             case "viewport": {
               const page = this.resolvePage(session);
               const modeChanged =
@@ -1204,6 +1287,8 @@ export class BrowserService {
       pageViewports: new WeakMap(),
       pageIdentityPromises: new WeakMap(),
       pages: new Map(),
+      agentPages: new Map(Object.entries(registry?.agentPages ?? {})),
+      pageActors: new WeakMap(),
       pageIds: new WeakMap(),
       rejectedPages: new WeakSet(),
       frames: new Map(),
@@ -1241,8 +1326,7 @@ export class BrowserService {
           }
         }
       }
-      if (registry?.activePageId && session.pages.has(registry.activePageId))
-        session.activePageId = registry.activePageId;
+      if (registry?.activePageId) session.activePageId = registry.activePageId;
       if (!session.pages.size)
         this.registerPage(session, await browserAbortable(context.newPage(), signal), true);
       if (created && viewport)
@@ -1297,7 +1381,12 @@ export class BrowserService {
         session.navigations.set(page, (session.navigations.get(page) ?? 0) + 1);
     });
     page.on("popup", (popup) => {
-      if (!session.rejectedPages.has(popup)) this.registerPage(session, popup, true);
+      if (session.rejectedPages.has(popup)) return;
+      const popupId = this.registerPage(session, popup, false);
+      const actor = session.pageActors.get(page);
+      if (actor && actor !== "viewer") {
+        if (session.agentPages.get(actor) === pageId) session.agentPages.set(actor, popupId);
+      } else if (session.activePageId === pageId) session.activePageId = popupId;
     });
     page.on("frameattached", (frame) => this.registerFrame(session, frame));
     page.on("framedetached", (frame) => this.unregisterFrame(session, frame));
@@ -1306,9 +1395,7 @@ export class BrowserService {
       for (const [frameId, frame] of session.frames) {
         if (frame.page() === page) session.frames.delete(frameId);
       }
-      if (session.activePageId === pageId) {
-        session.activePageId = session.pages.keys().next().value;
-      }
+      // Keep closed selections as tombstones: never redirect another client silently.
     });
     return pageId;
   }
@@ -1348,7 +1435,7 @@ export class BrowserService {
           `Browser tab limit reached (${this.maxTabs}). Close a page before opening another.`,
         );
       }
-      this.registerPage(session, page, true);
+      this.registerPage(session, page, false);
       if (input.viewport) await this.setViewport(session, page, input.viewport);
       return page;
     }
@@ -1585,13 +1672,16 @@ export class BrowserService {
     }
   }
 
-  private async pageDetails(session: BrowserSession): Promise<BrowserPageDetails[]> {
+  private async pageDetails(
+    session: BrowserSession,
+    selectedPageId = session.activePageId,
+  ): Promise<BrowserPageDetails[]> {
     return Promise.all(
       [...session.pages].map(async ([id, page]) => ({
         id,
         url: page.url(),
         title: await page.title(),
-        active: id === session.activePageId,
+        active: id === selectedPageId,
       })),
     );
   }
@@ -1600,8 +1690,9 @@ export class BrowserService {
     session: BrowserSession,
     action: BrowserAction,
     prefix?: string,
+    selectedPageId?: string,
   ): Promise<BrowserActionResult> {
-    const pages = await this.pageDetails(session);
+    const pages = await this.pageDetails(session, selectedPageId ?? "");
     const listing =
       pages.length === 0
         ? "No open pages."
@@ -1675,6 +1766,7 @@ export class BrowserService {
 
   private async snapshotResult(
     session: BrowserSession,
+    clientId: string,
     input: BrowserActionInput,
     page: Page,
     frame = page.mainFrame(),
@@ -1684,10 +1776,10 @@ export class BrowserService {
     const frameId = this.frameId(session, frame);
     const title = await page.title();
     const url = page.url();
-    const pages = await this.pageDetails(session);
+    const pages = await this.pageDetails(session, session.agentPages.get(clientId) ?? "");
     const header = [
       `Page: ${title || "(untitled)"}`,
-      `Page ID: ${pageId}${pageId === session.activePageId ? " (active)" : ""}`,
+      `Page ID: ${pageId}`,
       `Frame ID: ${frameId}${frame === page.mainFrame() ? " (main)" : ""}`,
       `URL: ${url}`,
       ...(pages.length > 1 ? [`Open pages: ${pages.map((entry) => entry.id).join(", ")}`] : []),
@@ -1745,6 +1837,7 @@ export class BrowserService {
     await writeBrowserJson(path.join(session.directory, "registry.json"), {
       cloudViewport: session.cloudViewport,
       activePageId: session.activePageId,
+      agentPages: Object.fromEntries(session.agentPages),
       nextPageNumber: session.nextPageNumber,
       nextFrameNumber: session.nextFrameNumber,
       pages,

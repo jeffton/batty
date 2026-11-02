@@ -92,7 +92,8 @@ test.skipIf(process.platform !== "linux").each([false, true])(
       expect(state.pages.map((page) => page.url)).toEqual(
         expect.arrayContaining([url, `${url}second`]),
       );
-      await service.execute(owner, { action: "open", url });
+      const restoredPage = state.pages.find((page) => page.url === url)!;
+      await service.execute(owner, { action: "open", url, pageId: restoredPage.id });
       expect(
         (
           await service.execute(owner, {

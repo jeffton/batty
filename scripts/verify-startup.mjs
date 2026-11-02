@@ -103,6 +103,39 @@ for (const baseUrl of ["/", "/batty"]) {
     ).toString("base64url");
     const signature = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
     const cookie = `batty2-auth=${payload}.${signature}`;
+    const saveProviderKey = (providerId, apiKey, headers = {}) =>
+      get("/api/provider-auth/api-key", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify({ providerId, apiKey }),
+      });
+    assert.equal((await saveProviderKey("openrouter", "fixture-key")).status, 401);
+    assert.equal(
+      (await saveProviderKey("unsupported-provider", "fixture-key", { cookie })).status,
+      400,
+    );
+    for (const providerId of ["google", "openrouter"]) {
+      const key = `fixture-${providerId}-key`;
+      const saved = await saveProviderKey(providerId, `  ${key}  `, { cookie });
+      assert.equal(saved.status, 200);
+      const status = await saved.json();
+      assert.equal(
+        status.providers.find((provider) => provider.id === providerId)?.connected,
+        true,
+      );
+      assert(!JSON.stringify(status).includes(key));
+      const credentials = JSON.parse(
+        await fs.readFile(path.join(root, ".batty/auth.json"), "utf8"),
+      );
+      assert.deepEqual(credentials[providerId], { type: "api_key", key });
+      const refreshed = await (
+        await get("/api/provider-auth/status", { headers: { cookie } })
+      ).json();
+      assert.equal(
+        refreshed.providers.find((provider) => provider.id === providerId)?.connected,
+        true,
+      );
+    }
     if (process.platform === "linux" && process.getuid?.() === 0) {
       const siteId = "10000000-0000-0000-0000-000000000001";
       const siteRoot = path.join(root, ".batty/sites", siteId);

@@ -1,8 +1,50 @@
 // @vitest-environment node
 import { expect, it, vi } from "vite-plus/test";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { InMemoryCredentialStore, type Credential } from "@earendil-works/pi-ai";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, readStoredCredential } from "@earendil-works/pi-coding-agent";
 import { ProviderAuthService } from "./provider-auth";
+
+it.each(["google", "openrouter"] as const)(
+  "persists %s keys and restores connected status in a fresh runtime",
+  async (providerId) => {
+    const dir = await mkdtemp(path.join(tmpdir(), "batty-provider-auth-"));
+    const authPath = path.join(dir, "auth.json");
+    const options = { authPath, modelsPath: null, refreshOnCreate: false };
+    const runtime = await ModelRuntime.create(options);
+    const service = new ProviderAuthService(
+      runtime,
+      (id) => readStoredCredential(id, authPath),
+      () => "test-device",
+    );
+    const key = `fixture-${providerId}-key`;
+    const status = await service.setApiKey(providerId, `  ${key}  `);
+    expect(status.providers.find((provider) => provider.id === providerId)).toMatchObject({
+      connected: true,
+      authKind: "apiKey",
+    });
+    expect(JSON.stringify(status)).not.toContain(key);
+    expect(readStoredCredential(providerId, authPath)).toEqual({ type: "api_key", key });
+    await service.dispose();
+
+    const restarted = await ModelRuntime.create(options);
+    const restored = new ProviderAuthService(
+      restarted,
+      (id) => readStoredCredential(id, authPath),
+      () => "test-device",
+    );
+    expect(
+      restored.getStatus().providers.find((provider) => provider.id === providerId),
+    ).toMatchObject({
+      connected: true,
+      authKind: "apiKey",
+    });
+    expect((await restarted.getAuth(providerId))?.auth.apiKey).toBe(key);
+    await restored.dispose();
+  },
+);
 
 it.each(["openai-codex", "anthropic"] as const)(
   "completes %s through its real SDK flow using isolated credentials",

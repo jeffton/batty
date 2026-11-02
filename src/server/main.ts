@@ -351,8 +351,10 @@ app.post<{ Body: { attemptId: string; callbackUrl: string } }>(
 app.post<{ Body: { providerId: string; apiKey: string } }>(
   "/api/provider-auth/api-key",
   async (request) => {
-    await runtime.models.setRuntimeApiKey(request.body.providerId, request.body.apiKey);
-    return runtime.providerAuth.getStatus();
+    if (request.body.providerId !== "google" && request.body.providerId !== "openrouter") {
+      throw Object.assign(new Error("Unsupported API-key provider"), { statusCode: 400 });
+    }
+    return runtime.providerAuth.setApiKey(request.body.providerId, request.body.apiKey);
   },
 );
 app.post<{ Body: { providerId: string } }>("/api/provider-auth/logout", async (request) => {

@@ -185,7 +185,7 @@ export class Runtime {
           stream: { timeoutMs: 300_000 },
         },
         env: ({ cwd }) => new NodeExecutionEnv({ cwd: cwd ?? config.selfPath }),
-        onReport: (error, info) => console.error("Durable runtime", info, error),
+        onReport: (report) => console.error("Durable runtime", report),
       },
       context,
     );
@@ -376,6 +376,22 @@ export class Runtime {
           Number.MAX_SAFE_INTEGER,
         )
       : undefined;
+    const failure = live?.runFailure;
+    const failureLabel =
+      failure && !live?.run
+        ? {
+            model_error: "Model request failed",
+            no_model: "Model unavailable",
+            interrupted: "Run interrupted while answering",
+            restart_limit: "Run stopped after repeated interruptions",
+            faulted: "Run failed",
+            orphaned: "Run could not resume",
+            turn_limit: "Run reached its tool-round limit",
+            aborted: undefined,
+            reset: undefined,
+            nothing_to_answer: undefined,
+          }[failure.reason]
+        : undefined;
     const state: SessionState = {
       id: String(conversation.id),
       sessionId: String(conversation.id),
@@ -387,6 +403,9 @@ export class Runtime {
       thinkingLevel: agent.thinkingLevel,
       availableThinkingLevels: model ? getSupportedThinkingLevels(model) : ["off"],
       isStreaming: Boolean(live?.run),
+      runFailure: failureLabel
+        ? `${failureLabel}${failure?.detail ? `: ${failure.detail}` : ""}`
+        : null,
       // Main declines native compaction tasks; only workers produce native summaries.
       isCompacting: policy.nativeCompaction && Boolean(live?.compactions?.length),
       memoryPreparation: conversation.id === this.main.id ? this.memory.status() : undefined,

@@ -1,4 +1,4 @@
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./schema-enum";
 import { Type, type Static } from "typebox";
 import { CLOUD_BROWSER_KEYS } from "@/shared/cloud-browser";
 

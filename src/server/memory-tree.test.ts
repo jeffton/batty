@@ -46,8 +46,11 @@ test("authenticated prepared tree traverses to exact leaves without writes or mo
   registerMemoryTreeRoutes(app, memory);
   const headers = { authorization: createAuthToken("test-secret") };
   let writes = 0;
-  const stop = harness.subscribeCommits(() => {
-    writes++;
+  const observation = harness.observeCommits({
+    advance: () => {
+      writes++;
+    },
+    end: () => {},
   });
   const before = compressions;
   try {
@@ -106,7 +109,7 @@ test("authenticated prepared tree traverses to exact leaves without writes or mo
     expect(writes).toBe(0);
     expect(compressions).toBe(before);
   } finally {
-    stop();
+    observation.detach();
     await app.close();
     await memory.close();
     await harness.close(context);

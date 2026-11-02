@@ -6,6 +6,7 @@ import {
   type TaskId,
   type StorageWrite,
 } from "@earendil-works/pi-durable";
+import { commitWrites } from "@earendil-works/pi-durable/testing";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createOrchestration, OrchestrationDoc } from "./orchestration";
@@ -41,7 +42,7 @@ test("5,000 completed deliveries leave zero hot workers/tasks and bounded run-hi
         },
       });
     }
-    await storage.commit(writes, context);
+    await commitWrites(storage, writes, context);
     let lastWorker = "";
     await main.commit(async (tx) => {
       const doc = await tx.doc(OrchestrationDoc);

@@ -1,5 +1,6 @@
 import type { ServerResponse } from "node:http";
-import type { ConversationId } from "@earendil-works/pi-durable";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import type { ConversationId, ConversationView } from "@earendil-works/pi-durable";
 import { Runtime } from "./runtime";
 import { OrchestrationDoc } from "./orchestration-state";
 import type { TranscriptImages } from "./transcript-images";
@@ -34,6 +35,7 @@ export function streamSession(
   },
 ) {
   let after = initialAfter;
+  let view: ConversationView | undefined;
   let closed = false;
   let flushing = false;
   let dirty = true;
@@ -60,7 +62,7 @@ export function streamSession(
         let state = await images.state(
           await (projection
             ? projection.state(includeHistory, after)
-            : runtime.state(String(conversationId), undefined, includeHistory, after)),
+            : runtime.state(String(conversationId), view, includeHistory, after)),
         );
         if (includeHistory) {
           for (;;) {
@@ -75,7 +77,7 @@ export function streamSession(
             state = await images.state(
               await (projection
                 ? projection.state(true, after)
-                : runtime.state(String(conversationId), undefined, true, after)),
+                : runtime.state(String(conversationId), view, true, after)),
             );
           }
         } else {
@@ -127,42 +129,42 @@ export function streamSession(
       void flush();
     }, 0);
   }
+  let detachConversation = () => {};
   const unsubscribe =
     projection?.subscribe(schedule) ??
-    runtime.harness.subscribeCommits((publication) => {
-      let changed = false;
-      let entries = false;
-      for (const change of publication.changes) {
-        // Delivery tasks are owned by the parent, and orchestration is session-scoped.
-        // Their commits can change worker stop availability without a worker entry.
-        if (
-          ((change.type === "document" || change.type === "document.copy") &&
-            change.record.kind === OrchestrationDoc.definition.kind) ||
-          (change.type === "task" &&
-            change.value.kind === "batty.delivery" &&
-            (change.value.input as { workerId: string }).workerId === String(conversationId))
-        )
-          changed = true;
-        if (
-          notifyOrchestration &&
-          (change.type === "document" || change.type === "document.copy") &&
-          change.record.kind === OrchestrationDoc.definition.kind
-        ) {
-          orchestrationDirty = true;
-          cronDirty = true;
-        }
-        const owner =
-          change.type === "document" || change.type === "document.copy"
-            ? change.conversationId
-            : change.type === "conversation"
-              ? change.value.id
-              : change.value.conversationId;
-        if (owner !== conversationId) continue;
-        changed = true;
-        entries ||= change.type === "entry";
-      }
-      if (changed) schedule(entries);
-    });
+    (() => {
+      const commits = runtime.harness.observeCommits({
+        advance(publication) {
+          let changed = false;
+          for (const change of publication.changes) {
+            // Delivery tasks are owned by the parent, and orchestration is session-scoped.
+            // Their commits can change worker stop availability without a worker entry.
+            if (
+              (change.type === "document" &&
+                change.record.kind === OrchestrationDoc.definition.kind) ||
+              (change.type === "task" &&
+                change.value.kind === "batty.delivery" &&
+                (change.value.input as { workerId: string }).workerId === String(conversationId))
+            )
+              changed = true;
+            if (
+              notifyOrchestration &&
+              change.type === "document" &&
+              change.record.kind === OrchestrationDoc.definition.kind
+            ) {
+              orchestrationDirty = true;
+              cronDirty = true;
+            }
+          }
+          if (changed) schedule(false);
+        },
+        end(end) {
+          if (!closed && (end.kind === "failed" || end.kind === "listener_error"))
+            onError(end.error);
+        },
+      });
+      return () => commits.detach();
+    })();
   let remoteTasks = notifyOrchestration
     ? JSON.stringify(runtime.remotes.tasks(Number(conversationId)))
     : "";
@@ -193,9 +195,43 @@ export function streamSession(
     clearInterval(memoryTimer);
     clearInterval(heartbeat);
     unsubscribe();
+    detachConversation();
     if (notifyOrchestration) runtime.remotes.changes.off("change", remoteChanged);
   }
   stream.once("close", close);
-  void flush();
+  if (projection) {
+    void flush();
+  } else {
+    // Observe memory, not just stored commits: deferred generation/tool progress must
+    // reach the socket immediately. Entries remain loaded through runtime's paginated
+    // history index, never from this observer's bounded transcript window.
+    void runtime.harness
+      .observeConversation(
+        Number(conversationId) as ConversationId,
+        {
+          advance(call) {
+            if (call.kind !== "value") return;
+            const previousLast = view?.entries.at(-1)?.id;
+            view = call.value;
+            schedule(previousLast !== view.entries.at(-1)?.id);
+          },
+          end(end) {
+            if (!closed && (end.kind === "failed" || end.kind === "listener_error"))
+              onError(end.error);
+          },
+        },
+        BACKGROUND_CONTEXT,
+      )
+      .then((observation) => {
+        detachConversation = () => observation.detach();
+        if (closed) {
+          detachConversation();
+          return;
+        }
+        view ??= observation.value;
+        void flush();
+      })
+      .catch(onError);
+  }
   return close;
 }

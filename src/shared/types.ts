@@ -326,6 +326,8 @@ export interface SessionState {
   availableThinkingLevels: string[];
   isStreaming: boolean;
   isCompacting?: boolean;
+  /** Null clears a previous failed run in incremental state events. */
+  runFailure?: string | null;
   memoryPreparation?: { pending: number; totalLeaves: number; builtLeaves: number; error?: string };
   pendingMessageCount: number;
   queuedPrompts?: QueuedPrompt[];

@@ -7,7 +7,7 @@ import {
   fauxText,
   fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import {
   createRegistry,
   Harness,

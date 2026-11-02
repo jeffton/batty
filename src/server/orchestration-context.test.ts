@@ -4,7 +4,8 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 
-import { Type, getCurrentTools } from "@earendil-works/pi-ai";
+import { getCurrentTools } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 
 import { orchestrationHistory } from "./orchestration-test-history";
 
@@ -43,7 +44,7 @@ test("fresh workers receive only their task, not the parent transcript", async (
   await until(async () => (await orchestration.listRunning()).length === 0);
   const worker = Object.values((await orchestrationHistory(harness))!.workers)[0]!;
   const child = (await harness.conversation(worker.id, context))!;
-  const view = await child.viewState(context);
+  const view = await child.watch(context);
   expect(view.value.conversation.parent).toBeUndefined();
   const copied = JSON.stringify(view.value.entries);
   expect(copied).not.toContain("archive-only");
@@ -54,7 +55,7 @@ test("fresh workers receive only their task, not the parent transcript", async (
     thinkingLevel: "medium",
     model: { provider: "faux", modelId: "faux-1" },
   });
-  view.dispose();
+  view.stop();
 }, 15000);
 
 test("worker agent preparation applies workspace-scoped tools before generation admission", async () => {

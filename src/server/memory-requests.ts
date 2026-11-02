@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { BACKGROUND_CONTEXT, awaitWithContext } from "@earendil-works/chord/context";
 import type { Context } from "@earendil-works/chord";
-import { Type, type ImageContent, type Message, type TextContent } from "@earendil-works/pi-ai";
+import { type ImageContent, type Message, type TextContent } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { getCurrentSystemMessage, normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { clampMaxTokensToContext } from "@earendil-works/pi-ai/api/simple-options";
 import {

@@ -1,6 +1,6 @@
 import { expect, test } from "vite-plus/test";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { GenerationTask, defineExtension, defineTool, hook } from "@earendil-works/pi-durable";
 import { Packets, MemoryIndexDoc, SessionMemory } from "./memory-documents";

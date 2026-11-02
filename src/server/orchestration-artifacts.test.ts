@@ -4,7 +4,7 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 
 import { OrchestrationDoc } from "./orchestration.js";
 import { orchestrationHistory } from "./orchestration-test-history";

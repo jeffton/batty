@@ -1,4 +1,4 @@
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./schema-enum";
 import { Type } from "typebox";
 export const SitesToolSchema = Type.Object(
   {

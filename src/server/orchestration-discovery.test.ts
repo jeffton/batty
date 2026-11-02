@@ -3,7 +3,7 @@ import { expect, test } from "vite-plus/test";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { artifactRefs, createAttachArtifactsTool } from "./artifact-forwarding";
 import { fixture, until } from "./orchestration-test-fixture";
 import { orchestrationHistory } from "./orchestration-test-history";

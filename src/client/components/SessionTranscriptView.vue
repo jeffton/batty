@@ -689,6 +689,7 @@ watch(
     transcriptTailSignature,
     activeAssistantSignature,
     activeToolsSignature,
+    () => props.session?.runFailure,
   ],
   ([sessionId], [previousSessionId]) => {
     const openedSession = sessionId !== previousSessionId;
@@ -721,6 +722,7 @@ watch(
     :tail-entries="tailEntries"
     :kept-history-indexes="keptHistoryIndexes"
     :is-streaming="Boolean(props.session?.isStreaming)"
+    :run-failure="props.session?.runFailure"
     :is-pinned-to-bottom="isTranscriptPinnedToBottom"
     @jump-to-latest="jumpToLatest"
     :allow-session-popovers="props.allowSessionPopovers"

@@ -7,7 +7,8 @@ import { OrchestrationDoc } from "./orchestration-state";
 import type { Runtime } from "./runtime";
 import type { TranscriptImages } from "./transcript-images";
 
-type Publication = Parameters<Parameters<Runtime["harness"]["subscribeCommits"]>[0]>[0];
+type Publication = Parameters<Parameters<Runtime["harness"]["observeCommits"]>[0]["advance"]>[0];
+const conversationView = { entries: [], docs: {}, conversation: { id: 2 } };
 
 test("worker SSE refreshes stop availability for parent-owned delivery completion and resume", async () => {
   const socket = Object.assign(new EventEmitter(), {
@@ -32,9 +33,10 @@ test("worker SSE refreshes stop availability for parent-owned delivery completio
     state,
     nextRevision: () => 2,
     harness: {
-      subscribeCommits: (listener: typeof publish) => {
-        publish = listener;
-        return () => {};
+      observeConversation: async () => ({ value: conversationView, detach() {} }),
+      observeCommits: (observer: { advance: typeof publish }) => {
+        publish = observer.advance;
+        return { detach() {} };
       },
     },
     memory: { status: () => ({ pending: 0 }) },
@@ -68,7 +70,7 @@ test("worker SSE refreshes stop availability for parent-owned delivery completio
       ],
     } as unknown as Publication);
     await vi.waitFor(() => expect(state).toHaveBeenCalledTimes(2));
-    expect(state.mock.calls[1]).toEqual(["2", undefined, false, undefined]);
+    expect(state.mock.calls[1]).toEqual(["2", conversationView, false, undefined]);
     expect(
       socket.write.mock.calls.some(([packet]) => packet.includes('"canStopSubagent":false')),
     ).toBe(true);

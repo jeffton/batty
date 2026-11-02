@@ -6,7 +6,7 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { defineExtension, defineTool, LiveDoc } from "@earendil-works/pi-durable";
 
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 
 import { orchestrationHistory } from "./orchestration-test-history";
 import { ArchivedWorker } from "./orchestration-history";
@@ -18,7 +18,7 @@ test("deleted worker references remain readable while local and node lifecycle c
   faux.setResponses(
     Array.from({ length: 20 }, () => fauxAssistantMessage([fauxText("retained report")])),
   );
-  const { harness, main } = await open();
+  let { harness, main } = await open();
   const started = await orchestration.nodeCommand("peer", "start", {
     action: "run",
     prompt: "complete a worker",
@@ -30,10 +30,13 @@ test("deleted worker references remain readable while local and node lifecycle c
   const reference = await harness.snapshot(ArchivedWorker, id, context);
   expect(reference).toBeDefined();
 
-  // Simulate deletion without deleting the archived reference in the parent.
+  // External deletion happens offline: Pi caches conversation records while it owns storage.
+  // Keep the archived reference in the parent and reopen to test persisted lifecycle state.
+  await harness.close(context);
   const database = new DatabaseSync(join(directory, "session.sqlite"));
   try {
     database.prepare("DELETE FROM conversations WHERE id=?").run(Number(id));
+    ({ harness, main } = await open());
     const failure = `Subagent session ${id} not found. Start a new subagent instead.`;
     await expect(
       orchestration.queryWorkers({ action: "inspect", sessionId: id }),

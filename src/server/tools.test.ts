@@ -90,14 +90,14 @@ async function fixture(persistent = false) {
       await main.submit({ type: "input", content: "run script" }, BACKGROUND_CONTEXT)
     ).wait(BACKGROUND_CONTEXT);
     expect(settled.status).toBe("done");
-    const view = await main.viewState(BACKGROUND_CONTEXT);
+    const view = await main.watch(BACKGROUND_CONTEXT);
     const result = view.value.entries.findLast(
       (entry) =>
         entry.kind === "pi.tool-result" &&
         entry.model?.[0]?.role === "toolResult" &&
         entry.model[0].toolName === "codemode",
     )!.model![0] as any;
-    view.dispose();
+    view.stop();
     return result;
   };
   const api = {
@@ -280,14 +280,14 @@ describe("durable tool bridge", () => {
         ).wait(BACKGROUND_CONTEXT)
       ).status,
     ).toBe("done");
-    const view = await resumed.viewState(BACKGROUND_CONTEXT);
+    const view = await resumed.watch(BACKGROUND_CONTEXT);
     expect(JSON.stringify(view.value.entries)).toContain("old worker resumed");
     expect(
       view.value.entries
         .filter((entry) => entry.kind === "pi.tool-result")
         .every((entry) => !(entry.model?.[0] as any)?.isError),
     ).toBe(true);
-    view.dispose();
+    view.stop();
   });
 
   it.skipIf(process.platform === "win32")(
@@ -375,9 +375,9 @@ describe("durable tool bridge", () => {
       ).status,
     ).toBe("done");
     expect(effects).toBe(1);
-    const view = await main.viewState(BACKGROUND_CONTEXT);
+    const view = await main.watch(BACKGROUND_CONTEXT);
     expect(JSON.stringify(view.value.entries)).toContain("legacy value");
-    view.dispose();
+    view.stop();
   });
 
   it("retires native nested payloads while retaining small task receipts and transcript results", async () => {
@@ -678,11 +678,11 @@ describe("durable tool bridge", () => {
     const recovered = await restarted.harness.submission(submitted.id, BACKGROUND_CONTEXT);
     expect((await recovered!.wait(BACKGROUND_CONTEXT)).status).toBe("done");
     expect(effects).toBe(1);
-    const view = await restarted.main.viewState(BACKGROUND_CONTEXT);
+    const view = await restarted.main.watch(BACKGROUND_CONTEXT);
     expect(JSON.stringify(view.value.entries)).toContain(
       "Tool delegate was interrupted and may have partially run",
     );
-    view.dispose();
+    view.stop();
   });
 
   it("isolates dynamically invoked main-memory output while retaining ordinary mixed-batch results", async () => {
@@ -1011,7 +1011,7 @@ describe("durable tool bridge", () => {
       ).status,
     ).toBe("done");
     expect((await names()).filter((name) => name.startsWith("mcp__"))).toEqual([]);
-    const view = await main.viewState(BACKGROUND_CONTEXT);
+    const view = await main.watch(BACKGROUND_CONTEXT);
     const called = view.value.entries
       .flatMap((entry) => entry.model ?? [])
       .find((message) => message.role === "toolResult" && message.toolName === "codemode") as any;
@@ -1019,7 +1019,7 @@ describe("durable tool bridge", () => {
     expect(called.content[0].text).toContain("direct");
     expect(called.content[0].text).toContain("deferred");
     expect(called.content[0].text).toContain("script");
-    view.dispose();
+    view.stop();
     const discovered = await run(
       'return { names: (await searchTools("mcp__modes__")).map(tool=>tool.name).sort(), declaration: await describeTool("mcp__modes__deferred"), hidden: ALL_TOOLS.some(tool=>tool.name === "mcp__modes__hidden") }',
     );
@@ -1198,7 +1198,7 @@ describe("durable tool bridge", () => {
     ).orchestrationHistory(harness);
     expect(Object.keys(state.workers)).toHaveLength(2);
     expect(Object.keys(state.calls)).toHaveLength(2);
-    const view = await main.viewState(BACKGROUND_CONTEXT);
+    const view = await main.watch(BACKGROUND_CONTEXT);
     const result = view.value.entries.find(
       (entry) =>
         entry.kind === "pi.tool-result" &&
@@ -1210,7 +1210,7 @@ describe("durable tool bridge", () => {
       "first worker",
       "second worker",
     ]);
-    view.dispose();
+    view.stop();
   });
 
   it.skipIf(process.platform === "win32")(
@@ -1244,7 +1244,7 @@ describe("durable tool bridge", () => {
       const recovered = await restarted.harness.submission(submission.id, BACKGROUND_CONTEXT);
       expect((await recovered!.wait(BACKGROUND_CONTEXT)).status).toBe("done");
       expect(await fs.readFile(path.join(directory, "count"), "utf8")).toBe("run\n");
-      const view = await restarted.main.viewState(BACKGROUND_CONTEXT);
+      const view = await restarted.main.watch(BACKGROUND_CONTEXT);
       const result = view.value.entries.findLast(
         (entry) =>
           entry.kind === "pi.tool-result" &&
@@ -1253,7 +1253,7 @@ describe("durable tool bridge", () => {
       )!.model![0] as any;
       expect(result.isError, JSON.stringify(result)).toBe(false);
       expect(result.content[0].text).toContain("original:finished");
-      view.dispose();
+      view.stop();
     },
     15_000,
   );

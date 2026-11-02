@@ -4,7 +4,7 @@ import { archiveWorker, removeCompletedOneShot } from "./orchestration-lifecycle
 import { randomUUID } from "node:crypto";
 
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-durable";
 
 import { buildCronRuntimeNotice } from "./runtime-notices.js";

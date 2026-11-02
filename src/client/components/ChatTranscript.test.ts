@@ -2,7 +2,8 @@ import { expect, test, vi } from "vite-plus/test";
 import { mount } from "@vue/test-utils";
 import ChatTranscript from "./ChatTranscript.vue";
 import { buildTranscriptDisplayEntries } from "@/client/lib/transcript-display";
-import type { UiMessage } from "@/shared/types";
+import type { SessionState, UiMessage } from "@/shared/types";
+import { applyServerEvent } from "@/client/lib/session-events";
 
 vi.mock("virtua/vue", () => ({
   Virtualizer: {
@@ -10,6 +11,47 @@ vi.mock("virtua/vue", () => ({
     template: '<div><slot v-for="item in data" :item="item" /></div>',
   },
 }));
+
+test("shared transcript shows a failed run and clears it on incremental state and reset", async () => {
+  let session = {
+    sessionId: "main",
+    messages: [],
+    activeTools: [],
+    availableThinkingLevels: [],
+    totalMessageCount: 0,
+    runFailure: "Run interrupted while answering: request cut off twice",
+  } as unknown as SessionState;
+  const wrapper = mount(ChatTranscript, {
+    props: {
+      historyEntries: [],
+      tailEntries: [],
+      keptHistoryIndexes: [],
+      isStreaming: false,
+      isPinnedToBottom: true,
+      runFailure: session.runFailure,
+    },
+  });
+  try {
+    expect(wrapper.get('[role="alert"]').text()).toBe(session.runFailure);
+    session = applyServerEvent(session, { type: "state", state: { runFailure: null } as never })!;
+    await wrapper.setProps({ runFailure: session.runFailure });
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+    session = applyServerEvent(session, {
+      type: "reset",
+      state: { ...session, runFailure: "Model unavailable: provider/model" },
+    })!;
+    await wrapper.setProps({ runFailure: session.runFailure });
+    expect(wrapper.get('[role="alert"]').text()).toBe("Model unavailable: provider/model");
+    session = applyServerEvent(session, {
+      type: "reset",
+      state: { ...session, runFailure: null },
+    })!;
+    await wrapper.setProps({ runFailure: session.runFailure });
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+  } finally {
+    wrapper.unmount();
+  }
+});
 
 const tools = new Map();
 const messages: UiMessage[] = [

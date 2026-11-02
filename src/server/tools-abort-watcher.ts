@@ -10,64 +10,67 @@ export function createBashAbortWatcher(jobsDir: string) {
   return {
     bind(harness: Harness) {
       unsubscribe?.();
-      unsubscribe = harness.subscribeCommits((publication) => {
-        const cancel = (identity: string) => {
-          const work = new Promise<void>((resolve, reject) => {
-            queueMicrotask(() => {
-              cancelPersistentBashJob(jobsDir, identity).then(resolve, reject);
+      unsubscribe = harness.observeCommits({
+        advance: (publication) => {
+          const cancel = (identity: string) => {
+            const work = new Promise<void>((resolve, reject) => {
+              queueMicrotask(() => {
+                cancelPersistentBashJob(jobsDir, identity).then(resolve, reject);
+              });
             });
-          });
-          pending.add(work);
-          work.then(
-            () => pending.delete(work),
-            (error) => {
-              errors.push(error);
-              pending.delete(work);
-            },
-          );
-        };
-        for (const change of publication.changes) {
-          if (change.type === "task") {
-            const task = change.value;
-            const input =
-              task.input as unknown as import("@earendil-works/pi-durable").ToolTaskInput;
+            pending.add(work);
+            work.then(
+              () => pending.delete(work),
+              (error) => {
+                errors.push(error);
+                pending.delete(work);
+              },
+            );
+          };
+          for (const change of publication.changes) {
+            if (change.type === "task") {
+              const task = change.value;
+              const input =
+                task.input as unknown as import("@earendil-works/pi-durable").ToolTaskInput;
+              if (
+                task.kind === "pi.tool" &&
+                task.state.status === "terminal" &&
+                task.state.outcome.status === "aborted" &&
+                input.kind === "nested" &&
+                input.call.name === codemodeAdapterName("safe") &&
+                input.call.arguments.name === "bash"
+              )
+                cancel(`${task.conversationId}-${task.id}-${input.call.id}`);
+              continue;
+            }
+            if (change.type !== "entry") continue;
+            const entry = change.value;
+            if (entry.kind !== "pi.tool-result" || entry.byTaskId === undefined) continue;
+            const message = entry.model?.find(
+              (message) => message.role === "toolResult" && message.toolName === "bash",
+            );
+            const diagnostics =
+              entry.data && typeof entry.data === "object" && !Array.isArray(entry.data)
+                ? entry.data.diagnostics
+                : undefined;
             if (
-              task.kind === "pi.tool" &&
-              task.state.status === "terminal" &&
-              task.state.outcome.status === "aborted" &&
-              input.kind === "nested" &&
-              input.call.name === codemodeAdapterName("safe") &&
-              input.call.arguments.name === "bash"
+              message?.role !== "toolResult" ||
+              !Array.isArray(diagnostics) ||
+              !diagnostics.some(
+                (diagnostic) =>
+                  diagnostic &&
+                  typeof diagnostic === "object" &&
+                  !Array.isArray(diagnostic) &&
+                  diagnostic.code === "aborted",
+              )
             )
-              cancel(`${task.conversationId}-${task.id}-${input.call.id}`);
-            continue;
+              continue;
+            const identity = `${entry.conversationId}-${entry.byTaskId}-${message.toolCallId}`;
+            cancel(identity);
           }
-          if (change.type !== "entry") continue;
-          const entry = change.value;
-          if (entry.kind !== "pi.tool-result" || entry.byTaskId === undefined) continue;
-          const message = entry.model?.find(
-            (message) => message.role === "toolResult" && message.toolName === "bash",
-          );
-          const diagnostics =
-            entry.data && typeof entry.data === "object" && !Array.isArray(entry.data)
-              ? entry.data.diagnostics
-              : undefined;
-          if (
-            message?.role !== "toolResult" ||
-            !Array.isArray(diagnostics) ||
-            !diagnostics.some(
-              (diagnostic) =>
-                diagnostic &&
-                typeof diagnostic === "object" &&
-                !Array.isArray(diagnostic) &&
-                diagnostic.code === "aborted",
-            )
-          )
-            continue;
-          const identity = `${entry.conversationId}-${entry.byTaskId}-${message.toolCallId}`;
-          cancel(identity);
-        }
-      });
+        },
+        end: () => {},
+      }).detach;
     },
     async close() {
       unsubscribe?.();

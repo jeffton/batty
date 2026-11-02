@@ -110,8 +110,8 @@ test("large disk tree has bounded startup, cold zoom cache and incremental resta
     expect(await state.memory.zoom(0, 1)).toContain("user: 0 ");
     const observed: number[] = [];
     const watch = (await state.harness.watchDoc(MemoryIndexDoc, state.main.id, context))!;
-    watch.start(async (value) => {
-      if (value) observed.push(value.count);
+    watch.start(async (call) => {
+      if (call.kind === "value") observed.push(call.value.count);
     });
     const before = reads;
     await state.main.commit(

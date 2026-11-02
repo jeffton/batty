@@ -842,42 +842,49 @@ export function createMemory(config: MemoryConfig, models: Models) {
           if (!background.context.abortSignal?.aborted) report(error);
         });
       };
-      unsubscribe = harness.subscribeCommits((publication) => {
-        for (const change of publication.changes) {
-          if (change.type !== "document" || change.conversationId !== main.id || !change.record.key)
-            continue;
-          if (
-            change.record.kind === Leaves.definition.kind ||
-            change.record.kind === Nodes.definition.kind
-          ) {
-            const name = `${change.record.kind}:${change.record.key}`;
-            if (change.value)
-              cache.set(name, structuredClone(change.value) as MemoryLeaf | { text: string });
-            else cache.delete(name);
+      unsubscribe = harness.observeCommits({
+        advance: (publication) => {
+          for (const change of publication.changes) {
+            if (
+              change.type !== "document" ||
+              change.conversationId !== main.id ||
+              !change.record.key
+            )
+              continue;
+            if (
+              change.record.kind === Leaves.definition.kind ||
+              change.record.kind === Nodes.definition.kind
+            ) {
+              const name = `${change.record.kind}:${change.record.key}`;
+              if (change.kind === "change")
+                cache.set(name, structuredClone(change.value) as MemoryLeaf | { text: string });
+              else cache.delete(name);
+            }
           }
-        }
-        const finished = publication.changes.filter(
-          (change) =>
-            change.type === "entry" &&
-            change.value.conversationId === main.id &&
-            change.value.model?.some(
-              (message) =>
-                message.role === "assistant" &&
-                (message.stopReason === "stop" || message.stopReason === "length"),
-            ),
-        );
-        if (finished.length) {
-          const maximum = Math.max(
-            ...finished.map((change) => (change as { value: EntryRecord }).value.id),
+          const finished = publication.changes.filter(
+            (change) =>
+              change.type === "entry" &&
+              change.value.conversationId === main.id &&
+              change.value.model?.some(
+                (message) =>
+                  message.role === "assistant" &&
+                  (message.stopReason === "stop" || message.stopReason === "length"),
+              ),
           );
-          queueMicrotask(() => {
-            start(maximum);
-            void requests.archiveCompleted(maximum).catch((error) => {
-              if (!background.context.abortSignal?.aborted) report(error);
+          if (finished.length) {
+            const maximum = Math.max(
+              ...finished.map((change) => (change as { value: EntryRecord }).value.id),
+            );
+            queueMicrotask(() => {
+              start(maximum);
+              void requests.archiveCompleted(maximum).catch((error) => {
+                if (!background.context.abortSignal?.aborted) report(error);
+              });
             });
-          });
-        }
-      });
+          }
+        },
+        end: () => {},
+      }).detach;
       unsubscribeClose = harness.subscribeClose(() => background.cancel());
       start(cutoff);
       if (config.rebuildRequested) {

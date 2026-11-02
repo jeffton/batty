@@ -1,3 +1,9 @@
+# Pi upgrade — 2026-11-02
+
+Pi AI, Agent Core, Coding Agent, Durable, Code Mode, MCP and Chord are aligned at **1.5.0**; `pi-schema` 1.5.0 supplies the shared JSON Schema validator. This explicit upgrade overrides the release-age hold for these packages only. Other dependencies are unchanged.
+
+Reviewed the [1.5 release](https://github.com/earendil-works/pi/releases/tag/v1.5.0) and each package's changelog. Batty retains directly imported TypeBox schemas, adopts tagged commit observers and watches, and streams memory-adopted progress independently of deferred SQLite writes. Transcript pagination and OptChat remain Batty-owned. Restart-limited tasks terminate rather than park; persisted document/task versions prevent executable-only downgrade. See [migration, regression fixtures and restore boundary](pi-1.5-migration.md).
+
 # Dependency review — 2026-11-02
 
 Reviewed every direct dependency, devDependency, catalog, override and pnpm against npm at 09:00 UTC. Selection honors the 4320-minute age policy (October 30, 09:00 UTC cutoff) and existing exclusions.

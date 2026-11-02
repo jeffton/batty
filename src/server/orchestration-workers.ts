@@ -8,7 +8,7 @@ import { workerTools } from "./orchestration-worker-config.js";
 import { modelChange } from "./orchestration-worker-config.js";
 import type { Context, JsonValue } from "@earendil-works/chord";
 
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import {
   AgentDoc,
   LiveDoc,

@@ -85,7 +85,7 @@ test("startup restores direct memory tools from a persisted pre-search allowlist
         ).wait(context)
       ).status,
     ).toBe("done");
-    const view = await runtime.main.viewState(context);
+    const view = await runtime.main.watch(context);
     try {
       const results = view.value.entries
         .flatMap((entry) => entry.model ?? [])
@@ -93,7 +93,7 @@ test("startup restores direct memory tools from a persisted pre-search allowlist
       expect(results.map((message) => message.toolName)).toEqual(["memory_search", "codemode"]);
       expect(results.every((message) => !message.isError)).toBe(true);
     } finally {
-      view.dispose();
+      view.stop();
     }
   } finally {
     await runtime?.close();
@@ -142,17 +142,20 @@ test("startup observers see a due inline cron reply even with explicit resume di
       resume: false,
       beforeStart: (opened) => {
         opened.models.registerNativeProvider(faux.provider);
-        stop = opened.harness.subscribeCommits((publication) => {
-          for (const change of publication.changes) {
-            if (change.type !== "entry") continue;
-            for (const message of change.value.model ?? []) {
-              if (message.role !== "assistant") continue;
-              observed.push(
-                ...message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])),
-              );
+        stop = opened.harness.observeCommits({
+          advance: (publication) => {
+            for (const change of publication.changes) {
+              if (change.type !== "entry") continue;
+              for (const message of change.value.model ?? []) {
+                if (message.role !== "assistant") continue;
+                observed.push(
+                  ...message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])),
+                );
+              }
             }
-          }
-        });
+          },
+          end: () => {},
+        }).detach;
       },
     });
     for (let i = 0; i < 1000; i++) {

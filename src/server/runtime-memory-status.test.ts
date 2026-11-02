@@ -16,7 +16,7 @@ test("session snapshots separate declined main tasks, OptChat preparation/errors
   let runtime: Runtime | undefined;
   try {
     runtime = await Runtime.open(await loadConfig(directory), { resume: false });
-    const originalView = (await runtime.main.viewState(context)).value;
+    const originalView = (await runtime.main.watch(context)).value;
     // Threshold checks briefly publish a native task before main's decline hook runs.
     const mainView = {
       ...originalView,
@@ -53,7 +53,7 @@ test("session snapshots separate declined main tasks, OptChat preparation/errors
       { ownership: { kind: "ownerless" } },
       context,
     );
-    const originalWorkerView = (await worker.viewState(context)).value;
+    const originalWorkerView = (await worker.watch(context)).value;
     const workerView = {
       ...originalWorkerView,
       docs: { ...originalWorkerView.docs, "pi.live": mainView.docs["pi.live"] },

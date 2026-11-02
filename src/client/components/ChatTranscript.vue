@@ -12,6 +12,7 @@ const props = withDefaults(
     tailEntries: TranscriptDisplayEntry[];
     keptHistoryIndexes: number[];
     isStreaming: boolean;
+    runFailure?: string | null;
     isPinnedToBottom: boolean;
     allowSessionPopovers?: boolean;
   }>(),
@@ -129,6 +130,9 @@ defineExpose({
             />
           </div>
         </div>
+        <p v-if="props.runFailure" class="transcript__run-failure" role="alert">
+          {{ props.runFailure }}
+        </p>
         <div ref="transcriptBottom" class="transcript__bottom" aria-hidden="true" />
       </div>
     </div>
@@ -161,6 +165,13 @@ defineExpose({
   overflow-anchor: none;
   padding: 0.6rem calc(var(--safe-area-right) + 0.8rem) 0.2rem calc(var(--safe-area-left) + 0.8rem);
   background: var(--color-bg-app);
+}
+
+.transcript__run-failure {
+  color: var(--color-error);
+  margin: 0 0 0.8rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .transcript__history,

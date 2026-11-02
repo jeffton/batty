@@ -237,17 +237,20 @@ export function registerRemoteRoutes(app: FastifyInstance, runtime: Runtime) {
         flushing = false;
       }
     };
-    const stop = runtime.harness.subscribeCommits((publication) => {
-      if (
-        publication.changes.some(
-          (change) =>
-            change.type === "document" &&
-            ["batty.worker", "batty.orchestration"].includes(change.record.kind),
-        )
-      ) {
-        dirty = true;
-        queueMicrotask(() => void flush());
-      }
+    const observation = runtime.harness.observeCommits({
+      advance: (publication) => {
+        if (
+          publication.changes.some(
+            (change) =>
+              change.type === "document" &&
+              ["batty.worker", "batty.orchestration"].includes(change.record.kind),
+          )
+        ) {
+          dirty = true;
+          queueMicrotask(() => void flush());
+        }
+      },
+      end: () => {},
     });
     const heartbeat = setInterval(() => {
       if (!reply.raw.writableNeedDrain) reply.raw.write("event: heartbeat\ndata: {}\n\n");
@@ -255,7 +258,7 @@ export function registerRemoteRoutes(app: FastifyInstance, runtime: Runtime) {
     reply.raw.once("close", () => {
       closed = true;
       clearInterval(heartbeat);
-      stop();
+      observation.detach();
       streams.delete(reply.raw);
     });
     void flush();

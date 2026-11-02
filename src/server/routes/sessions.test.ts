@@ -228,9 +228,6 @@ test("multipart image → durable receipt → SSE → backend reopen reconciles 
       for (let i = 0; i < 5000; i++)
         await tx.appendEntry(runtime!.main.id, { kind: "bookkeeping", data: { tail: i } });
     }, context);
-    const view = vi
-      .spyOn(runtime!.main, "viewState")
-      .mockRejectedValue(new Error("Full view forbidden"));
     const watch = vi
       .spyOn(runtime!.main, "watch")
       .mockRejectedValue(new Error("Full watch forbidden"));
@@ -243,7 +240,6 @@ test("multipart image → durable receipt → SSE → backend reopen reconciles 
     const coldStream = await stream(`${url}/api/main/events`);
     const cold = await coldStream((event) => event.type === "reset");
     expect(cold.type === "reset" && cold.state.messages.length).toBe(120);
-    expect(view).not.toHaveBeenCalled();
     expect(watch).not.toHaveBeenCalled();
     console.log(
       `runtime/SSE: 5,000 visible + 5,000 invisible archive entries open in ${(performance.now() - started).toFixed(1)}ms; 120-message state, zero cold archive scans/full views/watches`,

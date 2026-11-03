@@ -517,29 +517,40 @@ test("cloud routes require auth, same-origin control and bounded allowlisted com
       newPage: true,
     });
     await f.service.execute("shared", { action: "close-page", pageId: state.pageId });
-    const unavailable = await app.inject({
-      url: `${endpoint}/state`,
-      headers: { authorization: "test" },
-    });
-    expect(unavailable.statusCode).toBe(409);
-    expect(unavailable.json()).toEqual({
+    // Mutating requests never repair their stale target by acting on another tab.
+    const rejected = await control({ action: "reload" });
+    expect(rejected.statusCode).toBe(409);
+    expect(rejected.json()).toEqual({
       error: `Unknown browser page: ${state.pageId}`,
       pages: [expect.objectContaining({ id: survivor.details.pageId, active: false })],
     });
-    const rejected = await control({ action: "reload" });
-    expect(rejected.statusCode).toBe(409);
-    expect(rejected.json()).toEqual(unavailable.json());
-    const recovered = await control({ action: "switch", pageId: survivor.details.pageId });
+    const recovered = await app.inject({
+      url: `${endpoint}/state`,
+      headers: { authorization: "test" },
+    });
     expect(recovered.statusCode).toBe(200);
+    expect(recovered.headers["cache-control"]).toBe("no-store");
     expect(recovered.json().pageId).toBe(survivor.details.pageId);
+    // An old painted input remains fenced after the viewer reconciles.
+    expect(
+      (
+        await control({
+          action: "click",
+          pageId: state.pageId,
+          revision: state.revision,
+          x: 40,
+          y: 30,
+        })
+      ).statusCode,
+    ).toBe(409);
     await f.service.execute("shared", { action: "close-page", pageId: survivor.details.pageId });
     const empty = await app.inject({
       url: `${endpoint}/state`,
       headers: { authorization: "test" },
     });
-    expect(empty.statusCode).toBe(409);
+    expect(empty.statusCode).toBe(200);
     expect(empty.json().pages).toEqual([
-      expect.objectContaining({ url: "about:blank", active: false }),
+      expect.objectContaining({ url: "about:blank", active: true }),
     ]);
     expect((await control({ action: "new-page" })).statusCode).toBe(200);
     await f.service.closeSession("shared");

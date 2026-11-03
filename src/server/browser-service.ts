@@ -804,7 +804,21 @@ export class BrowserService {
   }
 
   async cloudState(id: string): Promise<CloudBrowserState> {
-    return this.cloudOperation(id, (session) => this.cloudStateFor(session));
+    return this.cloudOperation(
+      id,
+      async (session) => {
+        // Opening/reconnecting the viewer reconciles its selection with the live
+        // tabs. Agent selections and explicit pageId actions remain strict.
+        if (!session.pages.has(session.activePageId ?? "")) {
+          const next = [...session.pages].find(([, page]) => !page.isClosed());
+          if (!next) throw this.cloudEnded();
+          session.activePageId = next[0];
+        }
+        return this.cloudStateFor(session);
+      },
+      false,
+      true,
+    );
   }
 
   /** Capture polling reads only local page metadata, not titles, frames or focused fields. */

@@ -310,13 +310,21 @@ test("main and workers share tabs, login and cloud attachments within their work
           (page) => !page.active && !page.viewerActive,
         ),
       ).toBe(true);
+      // Reopening the viewer repairs only its selection, including after restart.
+      await service.dispose();
+      service = new BrowserService(undefined, 4, root);
+      expect((await service.cloudState(browserId)).pageId).toBe(pageId);
+      await expect(call("roy", "worker", { action: "snapshot" })).rejects.toThrow(
+        "Unknown browser page",
+      );
+      await expect(
+        call("roy", "main", {
+          action: "snapshot",
+          pageId: second.details.pageId as string,
+        }),
+      ).rejects.toThrow("Unknown browser page");
       await call("roy", "worker", { action: "switch", pageId });
       // Closing the last viewer tab creates a blank one; cookies remain shared.
-      await expect(service.cloudState(browserId)).rejects.toMatchObject({
-        statusCode: 409,
-        pages: [expect.objectContaining({ id: pageId, active: false })],
-      });
-      await service.cloudControl(browserId, { action: "switch", pageId });
       const blank = await service.cloudControl(browserId, { action: "close-page", pageId });
       expect(blank.url).toBe("about:blank");
       await expect(call("roy", "main", { action: "snapshot" })).rejects.toThrow(

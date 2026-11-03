@@ -91,7 +91,10 @@ export async function registerCloudBrowserRoutes(
   app.get<{ Params: { browserId: string } }>(
     `${prefix}/state`,
     { errorHandler: selectionError },
-    async (request) => browser.cloudState(request.params.browserId),
+    async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
+      return browser.cloudState(request.params.browserId);
+    },
   );
   app.post<{ Params: { browserId: string }; Body: CloudBrowserControl }>(
     `${prefix}/control`,

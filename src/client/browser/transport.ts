@@ -74,6 +74,7 @@ export function useBrowserTransport(
   ): Promise<BrowserState> {
     const response = await fetch(withBaseUrl(`${endpoint.value}/${path}`), {
       credentials: "include",
+      cache: "no-store",
       ...init,
       signal,
     });
@@ -94,18 +95,21 @@ export function useBrowserTransport(
     onState(value, previous);
   }
   function selectionClosed(pages: BrowserState["pages"]): void {
-    stopViewing();
     availablePages.value = pages;
     state.value = undefined;
     hasFrame.value = false;
     displayedFrame.value = undefined;
-    reconnecting.value = false;
+    // Do not replay an interrupted command on another tab. Reconcile state in
+    // a fresh generation, then reconnect the viewer to the surviving selection.
+    scheduleReconnect();
   }
   function showFailure(
     cause: Error & { statusCode?: number; pages?: BrowserState["pages"] },
   ): void {
-    if (cause.statusCode === 409 && cause.pages) selectionClosed(cause.pages);
-    else if (cause.statusCode === 404 || cause.statusCode === 410) {
+    if (cause.statusCode === 409 && cause.pages) {
+      selectionClosed(cause.pages);
+      return;
+    } else if (cause.statusCode === 404 || cause.statusCode === 410) {
       stopViewing();
       ended.value = true;
       reconnecting.value = false;
@@ -137,7 +141,7 @@ export function useBrowserTransport(
     if (open.value && !ended.value) scheduleReconnect();
   }
   function onOnline(): void {
-    if (reconnecting.value && open.value && !document.hidden) void startViewing();
+    if (open.value && !ended.value && !document.hidden) void startViewing();
   }
   async function startViewing(): Promise<void> {
     stopViewing();
@@ -198,7 +202,6 @@ export function useBrowserTransport(
         };
         if (failure.statusCode === 409 && failure.pages) {
           selectionClosed(failure.pages);
-          error.value = failure.error;
         } else if (failure.retryable) scheduleReconnect();
         else {
           stopViewing();
@@ -218,6 +221,9 @@ export function useBrowserTransport(
   function onVisibility(): void {
     if (document.hidden) stopViewing();
     else if (open.value && !ended.value) void startViewing();
+  }
+  function onPageShow(event: PageTransitionEvent): void {
+    if (event.persisted && open.value && !ended.value) void startViewing();
   }
   function control(command: Record<string, unknown>): Promise<boolean> {
     const recovery = command.action === "new-page" || command.action === "switch";
@@ -251,7 +257,11 @@ export function useBrowserTransport(
         if (recovery && !stream) connectStream(current);
         return true;
       } catch (cause) {
-        if (current === generation) showFailure(cause as Error);
+        if (current === generation) {
+          const status = (cause as { statusCode?: number }).statusCode;
+          if (!status || (status >= 500 && status !== 504) || status === 429) scheduleReconnect();
+          else showFailure(cause as Error);
+        }
         return false;
       }
     };
@@ -275,6 +285,7 @@ export function useBrowserTransport(
     stopViewing,
     onToggle,
     onVisibility,
+    onPageShow,
     onOnline,
     onOffline,
   };

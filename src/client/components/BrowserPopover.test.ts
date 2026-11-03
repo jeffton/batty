@@ -639,7 +639,8 @@ test("a selected-tab error keeps the tab menu available for switching to a survi
     });
     await wrapper.get('[aria-label="Reload page"]').trigger("click");
     await flushPromises();
-    expect(wrapper.get('[role="alert"]').text()).toContain("The selected tab was closed.");
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
+    expect(wrapper.get('[role="status"]').attributes("aria-label")).toBe("Reconnecting browser");
     expect(wrapper.get('[aria-label="Choose tab"]').attributes("disabled")).toBeUndefined();
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -699,7 +700,7 @@ test("a fresh viewer whose selected tab was closed can create a new tab without 
   }
 });
 
-test("a stream-selected-tab error removes stale pixels and reconnects only after an explicit switch", async () => {
+test("a stream-selected-tab error removes stale pixels and automatically reconciles without replaying controls", async () => {
   const wrapper = create();
   try {
     const events = await open(wrapper);
@@ -721,7 +722,6 @@ test("a stream-selected-tab error removes stale pixels and reconnects only after
     expect(events.closed).toBe(true);
     expect(wrapper.get("canvas").attributes("style")).toContain("display: none");
     expect(wrapper.get('[aria-label="Choose tab"]').attributes("disabled")).toBeUndefined();
-    await vi.advanceTimersByTimeAsync(10_000);
     expect(FakeEvents.instances).toHaveLength(1);
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -732,9 +732,9 @@ test("a stream-selected-tab error removes stale pixels and reconnects only after
         pages: [{ ...surviving, active: true }],
       }),
     });
-    await wrapper.get(".cloud-browser-tabs__select").trigger("click");
+    await vi.advanceTimersByTimeAsync(1000);
     await flushPromises();
-    expect(commands()).toEqual([{ action: "switch", pageId: "page-2" }]);
+    expect(commands()).toEqual([]);
     expect(FakeEvents.instances).toHaveLength(2);
     expect(wrapper.find('[role="alert"]').exists()).toBe(false);
     const next = FakeEvents.instances.at(-1)!;
@@ -914,6 +914,48 @@ test("disconnects while hidden/closed and reconnects without closing the remote 
     wrapper.unmount();
   }
 });
+
+test.each(["reopen", "online", "pageshow"])(
+  "%s fetches authoritative state and ignores an older reconnect response",
+  async (trigger) => {
+    const wrapper = create();
+    try {
+      const first = await open(wrapper);
+      let finish!: (value: unknown) => void;
+      fetchMock.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      window.dispatchEvent(new Event("online"));
+      await flushPromises();
+      const pendingSignal = fetchMock.mock.calls.at(-1)![1].signal as AbortSignal;
+      const next = { ...state, pageId: "page-2", url: "https://survivor.example" };
+      fetchMock.mockResolvedValueOnce({ ok: true, json: async () => next });
+      if (trigger === "reopen") {
+        const popover = wrapper.getComponent({ name: "FullPopover" });
+        popover.vm.$emit("toggle", { newState: "closed" });
+        popover.vm.$emit("toggle", { newState: "open" });
+      } else if (trigger === "online") window.dispatchEvent(new Event("online"));
+      else window.dispatchEvent(Object.assign(new Event("pageshow"), { persisted: true }));
+      await flushPromises();
+      expect(pendingSignal.aborted).toBe(true);
+      expect(first.closed).toBe(true);
+      finish({ ok: true, json: async () => state });
+      await flushPromises();
+      expect(
+        (wrapper.get('[aria-label="Browser address"]').element as HTMLInputElement).value,
+      ).toBe(next.url);
+      expect(FakeEvents.instances).toHaveLength(2);
+      expect(FakeEvents.instances[1]!.closed).toBe(false);
+      expect(fetchMock.mock.calls.every(([, init]) => init.cache === "no-store")).toBe(true);
+      expect(commands()).toEqual([]);
+    } finally {
+      wrapper.unmount();
+    }
+  },
+);
 
 test("blocks stale painted targets and accepts identical pixels with a fresh revision", async () => {
   const wrapper = create();

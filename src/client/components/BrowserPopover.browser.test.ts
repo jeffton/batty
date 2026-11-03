@@ -912,6 +912,99 @@ test("native touch retains nested and outer momentum, taps once, drags and cance
   }
 }, 60_000);
 
+test("viewer open and live reconnect reconcile agent-closed tabs without replaying actions or changing agent selections", async () => {
+  const owner = "viewer-sync";
+  const first = await service.execute(
+    owner,
+    {
+      action: "open",
+      url: `${backendUrl}/target?first`,
+      cloud: true,
+    },
+    undefined,
+    "agent-a",
+  );
+  attachedBrowserId = first.details.sites![0]!.browserId!;
+  const second = await service.execute(
+    owner,
+    {
+      action: "open",
+      url: `${backendUrl}/target?second`,
+    },
+    undefined,
+    "agent-b",
+  );
+  await service.execute(
+    owner,
+    { action: "close-page", pageId: first.details.pageId },
+    undefined,
+    "agent-b",
+  );
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  await context.addCookies([
+    { name: "cloud-auth", value: "test", url: server.resolvedUrls!.local[0]! },
+  ]);
+  try {
+    const page = await context.newPage();
+    const commands: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().endsWith("/control")) commands.push(request.postDataJSON().action);
+    });
+    await page.goto(url);
+    await page.getByRole("button", { name: "Open browser", exact: true }).click();
+    const popover = page.locator("#site-preview--cloud");
+    const address = popover.getByRole("textbox", { name: "Browser address" });
+    await expect.poll(() => address.inputValue()).toBe(`${backendUrl}/target?second`);
+    await expect.poll(() => popover.getByRole("status").count()).toBe(0);
+    await expect(
+      service.execute(owner, { action: "snapshot" }, undefined, "agent-a"),
+    ).rejects.toThrow("Unknown browser page");
+    const survivor = await service.execute(
+      owner,
+      {
+        action: "open",
+        url: `${backendUrl}/target?survivor`,
+      },
+      undefined,
+      "agent-c",
+    );
+    const live = (await service.cloudTarget(attachedBrowserId)).page;
+    const liveBrowser = live.context().browser();
+    await service.execute(
+      owner,
+      { action: "close-page", pageId: second.details.pageId },
+      undefined,
+      "agent-c",
+    );
+    // No test-side state polling: only the client's recovery may repair selection.
+    await expect
+      .poll(() => address.inputValue(), { timeout: 10000 })
+      .toBe(`${backendUrl}/target?survivor`);
+    await expect.poll(() => popover.getByRole("status").count()).toBe(0);
+    expect(await popover.getByRole("alert").count()).toBe(0);
+    expect((await service.cloudTarget(attachedBrowserId)).page.context().browser()).toBe(
+      liveBrowser,
+    );
+    expect(
+      (await service.execute(owner, { action: "snapshot" }, undefined, "agent-c")).details.pageId,
+    ).toBe(survivor.details.pageId);
+    await expect(
+      service.execute(owner, { action: "snapshot" }, undefined, "agent-b"),
+    ).rejects.toThrow("Unknown browser page");
+    const resumedState = page.waitForResponse((response) => response.url().endsWith("/state"));
+    await page.evaluate(() =>
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })),
+    );
+    expect((await resumedState).status()).toBe(200);
+    await expect.poll(() => popover.getByRole("status").count()).toBe(0);
+    expect(commands.filter((action) => action !== "viewport")).toEqual([]);
+    await page.getByRole("button", { name: "Close popover" }).click();
+  } finally {
+    await context.close();
+    await service.closeSession(owner);
+  }
+}, 30_000);
+
 test("desktop/mobile switching keeps login, CSS screen matches the viewer, and network loss reconnects without a new browser", async () => {
   await service.execute("integration", {
     action: "open",

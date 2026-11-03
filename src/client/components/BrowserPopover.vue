@@ -58,6 +58,7 @@ const {
   stopViewing,
   onToggle,
   onVisibility,
+  onPageShow,
   onOnline,
   onOffline,
 } = browser;
@@ -139,6 +140,7 @@ function navigate(): void {
 onMounted(() => {
   document.addEventListener("visibilitychange", onVisibility);
   window.addEventListener("resize", resizeView);
+  window.addEventListener("pageshow", onPageShow);
   window.addEventListener("online", onOnline);
   window.addEventListener("offline", onOffline);
   window.visualViewport?.addEventListener("resize", resizeView);
@@ -152,6 +154,7 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect();
   document.removeEventListener("visibilitychange", onVisibility);
   window.removeEventListener("resize", resizeView);
+  window.removeEventListener("pageshow", onPageShow);
   window.removeEventListener("online", onOnline);
   window.removeEventListener("offline", onOffline);
   window.visualViewport?.removeEventListener("resize", resizeView);

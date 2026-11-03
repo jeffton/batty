@@ -59,6 +59,10 @@ Cloud state, WebSocket admission, controls, touch input and capture setup share 
 
 Linux installations running Batty as root launch tool Chromium and its private Xvfb as the dedicated `batty-browser` account, with supplementary groups cleared and a minimal environment. Chromium's namespace and seccomp sandbox remain enabled; there is no `--no-sandbox` mode or root-browser fallback. Ordinary macOS/Windows and non-root Linux browsing use their current user with Chromium's sandbox enabled.
 
+The shared headless browser used for rendered web extraction has a separate ephemeral profile. Root Linux launches it through `setpriv` as `batty-browser`, with cleared supplementary groups, no new privileges and the same minimal environment as cloud Chrome. It connects through loopback CDP without disabling Chrome's sandbox; close/disconnect terminates the child and removes its temporary profile. It never attaches to a workspace browser or its login data. Other platforms explicitly enable `chromiumSandbox` when launching. Isolation setup failures fail the extraction rather than starting a root or unsandboxed browser.
+
+Run `pnpm exec vp test --run --project server src/server/browser-headless.test.ts` on root Linux to verify the actual headless process UID, groups/capabilities, environment exclusion, namespace/seccomp sandbox, navigation and cleanup. Non-root and Windows/macOS launch-option regressions run on every platform.
+
 ### Installed Chrome and updates
 
 Production browser tools and shared headless work use **installed Google Chrome Stable**, controlled by Patchright. Discovery uses `/opt/google/chrome/chrome` on Linux, system/user Applications on macOS, and Program Files/LocalAppData on Windows. Missing Chrome fails explicitly; bundled Chromium is reserved for test fixtures. `BATTY_BROWSER_EXECUTABLE_PATH` overrides discovery with an existing absolute executable; root-isolated Linux tools require the package-managed `/opt/google/chrome/chrome`.

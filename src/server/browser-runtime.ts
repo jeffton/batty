@@ -1,5 +1,6 @@
 import type { Browser } from "patchright";
 import { browserExecutablePath } from "./browser-executable";
+import { launchHeadlessBrowser } from "./browser-headless";
 
 let activeBrowser: Browser | null = null;
 let browserLaunchPromise: Promise<Browser> | null = null;
@@ -7,17 +8,13 @@ let browserClosePromise: Promise<void> | null = null;
 
 async function launchBrowser(): Promise<Browser> {
   const { chromium } = await import("patchright");
-  const browser = await chromium.launch({
-    headless: true,
-    executablePath: browserExecutablePath(),
-    args: [
-      "--disable-dev-shm-usage",
-      "--disable-quic",
-      "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
-      "--window-size=1365,768",
-      "--force-device-scale-factor=3",
-    ],
-  });
+  const browser = await launchHeadlessBrowser(chromium, browserExecutablePath(), [
+    "--disable-dev-shm-usage",
+    "--disable-quic",
+    "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+    "--window-size=1365,768",
+    "--force-device-scale-factor=3",
+  ]);
 
   activeBrowser = browser;
   browser.on("disconnected", () => {

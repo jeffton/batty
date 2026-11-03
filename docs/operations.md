@@ -33,7 +33,7 @@ Main chat submissions use the default model and thinking level selected in Setti
 
 Use separate data roots, listener ports and proxy routes with distinct `baseUrl` values, such as `/batty` and `/batty-safe`. Browser history caches, drafts, submission receipts, logout synchronization, update markers and service-worker caches are namespaced by the canonical base path, including `/`. Tabs within one installation share logout state; other installations remain independent. Update every installation to enable this isolation.
 
-On first authenticated online bootstrap, the client copies a legacy reading cache only when its saved authentication scope matches that server's current response. The copy preserves cached history and the matched session's draft/submission receipt, without changing the legacy database or keys. Unattributed legacy drafts remain untouched rather than being assigned to an arbitrary installation. Server settings, conversations, passkeys and path-scoped login cookies are unchanged; the first upgrade needs an online connection before the legacy reading cache becomes available under its scoped name.
+The client reads and writes only its installation-scoped storage. Origin-wide legacy caches and drafts are not imported or modified. Server settings, conversations, passkeys and path-scoped login cookies are independent of browser caching.
 
 Paths isolate application state, not browser security origins. Same-origin JavaScript can access another path's storage, and notification permission is shared by the hostname. Use separate origins for mutually untrusted installations.
 

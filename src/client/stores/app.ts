@@ -4,7 +4,6 @@ import { primeAgentNotifications } from "@/client/lib/agent-notifications";
 import { syncPushSubscription, unregisterPushSubscription } from "@/client/lib/push-notifications";
 import { withBaseUrl } from "@/client/lib/base-url";
 import { reportBrowserError } from "@/client/lib/browser-errors";
-import { migrateLegacyMainCache } from "@/client/lib/legacy-main-cache";
 import { applyAppAppearance } from "@/client/lib/appearance";
 import * as api from "@/client/lib/api";
 import { applyServerEvent, applySessionResponse } from "@/client/lib/session-events";
@@ -113,10 +112,6 @@ export const useAppStore = defineStore("app", {
         if (payload.cacheScope === localStorage.getItem(REVOKED_CACHE_SCOPE_KEY))
           payload.authenticated = false;
         if (authEpoch !== localStorage.getItem(CACHE_EPOCH_KEY)) return;
-        if (payload.authenticated) {
-          await migrateLegacyMainCache(payload);
-          if (authEpoch !== localStorage.getItem(CACHE_EPOCH_KEY)) return;
-        }
         if (cachedBootstrap?.cacheScope && cachedBootstrap.cacheScope !== payload.cacheScope) {
           this.activeSession = undefined;
           this.authenticated = false;

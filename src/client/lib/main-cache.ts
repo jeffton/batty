@@ -169,51 +169,12 @@ function openConnection(): Promise<IDBDatabase> {
   if (database) return database;
   const pending = new Promise<IDBDatabase>((resolve, reject) => {
     const operation = indexedDB.open(DB_NAME, 2);
-    operation.onupgradeneeded = (event) => {
+    operation.onupgradeneeded = () => {
       const db = operation.result;
-      const transaction = operation.transaction!;
-      if (event.oldVersion === 0) {
-        db.createObjectStore("metadata");
-        db.createObjectStore("messages", { keyPath: "id" });
-      }
-      const messages = transaction.objectStore("messages");
-      messages.createIndex("order", "order", { unique: true });
-      // Upgrade in-place, one row at a time, retaining every v1 record.
-      const metadataRequest = transaction.objectStore("metadata").get("current");
-      metadataRequest.onsuccess = () => {
-        const metadata = metadataRequest.result as CacheMetadata | undefined;
-        if (!metadata) return;
-        const owner = cacheOwner(metadata.bootstrap, metadata.session);
-        let first: MessageKey | undefined;
-        let last: MessageKey | undefined;
-        let count = 0;
-        const cursorRequest = messages.openCursor();
-        cursorRequest.onsuccess = () => {
-          const cursor = cursorRequest.result;
-          if (cursor) {
-            const row = cursor.value as MessageRecord;
-            const key = messageKey(row.id);
-            count += 1;
-            if (!first || compareKeys(key, first) < 0) first = key;
-            if (!last || compareKeys(key, last) > 0) last = key;
-            cursor.update({ ...row, order: [owner, ...key] });
-            cursor.continue();
-          } else {
-            metadata.ranges =
-              first && last
-                ? [{ first, last, complete: count >= metadata.session.totalMessageCount }]
-                : [];
-            metadata.bootstrap = { ...metadata.bootstrap, activeSession: undefined };
-            metadata.session = {
-              ...metadata.session,
-              messages: [],
-              activeTools: [],
-              activeAssistant: undefined,
-            };
-            transaction.objectStore("metadata").put(metadata, "current");
-          }
-        };
-      };
+      db.createObjectStore("metadata");
+      db.createObjectStore("messages", { keyPath: "id" }).createIndex("order", "order", {
+        unique: true,
+      });
     };
     operation.onsuccess = () => {
       const db = operation.result;

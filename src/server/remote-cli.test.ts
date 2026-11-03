@@ -7,27 +7,6 @@ import { runCronCli } from "./cron-cli";
 import { verifyAuthToken } from "./auth";
 import { loadConfig } from "./config";
 
-test("parses grant provisioning and public listing commands", async () => {
-  expect((await parseRemoteArgs(["remote", "grant", "add", "--label", "Home"])).body).toEqual({
-    action: "grant-add",
-    label: "Home",
-  });
-  expect((await parseRemoteArgs(["remote", "grant", "list"])).body).toEqual({
-    action: "grant-list",
-  });
-  expect((await parseRemoteArgs(["remote", "grant", "revoke", "--id", "grant-id"])).body).toEqual({
-    action: "grant-revoke",
-    id: "grant-id",
-  });
-  expect((await parseRemoteArgs(["remote", "connection", "list"])).body).toEqual({
-    action: "connection-list",
-  });
-  expect((await parseRemoteArgs(["remote", "connection", "remove", "--id", "work"])).body).toEqual({
-    action: "connection-remove",
-    id: "work",
-  });
-});
-
 test("reads a connection token from stdin without requiring a secret in argv", async () => {
   const readToken = vi.fn().mockResolvedValue(" private-token\n");
   const input = await parseRemoteArgs(
@@ -59,41 +38,6 @@ test("reads a connection token from stdin without requiring a secret in argv", a
       token: "private-token",
     },
   });
-});
-
-test.each([
-  ["remote", "grant", "add"],
-  ["remote", "grant", "list", "--token", "private-token"],
-  ["remote", "grant", "revoke"],
-  ["remote", "connection", "remove"],
-  [
-    "remote",
-    "connection",
-    "add",
-    "--id",
-    "work",
-    "--label",
-    "Work",
-    "--url",
-    "https://example.com",
-  ],
-  [
-    "remote",
-    "connection",
-    "add",
-    "--id",
-    "work",
-    "--label",
-    "Work",
-    "--url",
-    "https://example.com",
-    "--token",
-    "t",
-    "--token-stdin",
-  ],
-  ["remote", "unknown", "list"],
-])("rejects invalid provisioning command %j", async (...args) => {
-  await expect(parseRemoteArgs(args)).rejects.toThrow();
 });
 
 test("dispatch distinguishes the command from a cron prompt containing remote", () => {

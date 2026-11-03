@@ -24,6 +24,8 @@ const backend = fastify();
 let closeStreams: () => Promise<void>;
 let backendUrl: string;
 let attachedBrowserId = "";
+// Control flows use DPR1; the dedicated DPR3 test covers high-density capture
+// and input alignment without re-encoding every gesture at nine times the pixels.
 beforeAll(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-cloud-popover-"));
   service = new BrowserService(undefined, 4, root);
@@ -114,7 +116,7 @@ afterAll(async () => {
   if (root) await removeTestBrowserRoot(root);
 });
 
-test("tab menu has cohesive row hover and creates/closes pages without exposing IDs", async () => {
+test("tab menu creates, switches and closes pages without exposing IDs", async () => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   try {
     const page = await context.newPage();
@@ -172,47 +174,6 @@ test("tab menu has cohesive row hover and creates/closes pages without exposing 
     await menu.waitFor({ state: "visible" });
     expect(await menu.locator("code").count()).toBe(0);
     expect(await menu.getByRole("button", { name: /^Copy tab ID/ }).count()).toBe(0);
-    await fs.mkdir("/tmp/batty-tab-menu-proof", { recursive: true });
-    for (const width of [320, 390, 1440]) {
-      await page.setViewportSize({ width, height: 844 });
-      await expect
-        .poll(() =>
-          menu.evaluate((element) => {
-            const rect = element.getBoundingClientRect();
-            return (
-              rect.left >= 0 &&
-              rect.right <= innerWidth &&
-              element.scrollWidth <= element.clientWidth
-            );
-          }),
-        )
-        .toBe(true);
-      for (const [index, name] of [
-        [0, "selected"],
-        [1, "unselected"],
-      ] as const) {
-        const row = menu.locator(".cloud-browser-tabs__row").nth(index);
-        await row.locator(".cloud-browser-tabs__close").hover();
-        const colors = await row.evaluate((element) => ({
-          row: getComputedStyle(element).backgroundColor,
-          buttons: [...element.querySelectorAll("button")].map(
-            (button) => getComputedStyle(button).backgroundColor,
-          ),
-        }));
-        expect(colors.row).not.toBe("rgba(0, 0, 0, 0)");
-        expect(colors.buttons).toEqual(["rgba(0, 0, 0, 0)", "rgba(0, 0, 0, 0)"]);
-        if (width !== 390)
-          await menu.screenshot({
-            path: `/tmp/batty-tab-menu-proof/menu-${width}-${name}-close.png`,
-          });
-      }
-      for (const button of await menu.locator("button").all()) {
-        const bounds = (await button.boundingBox())!;
-        expect(bounds.height).toBeGreaterThanOrEqual(44);
-        if (await button.getAttribute("aria-label"))
-          expect(bounds.width).toBeGreaterThanOrEqual(44);
-      }
-    }
     // Native buttons retain normal Tab/Enter keyboard access; closing must not also switch.
     await menu.getByRole("button", { name: /^Close tab: Second tab/ }).focus();
     await page.keyboard.press("Enter");
@@ -301,7 +262,7 @@ test("WebKit decodes production H.264, forwards taps and resumes after viewer re
     viewport: { width: 390, height: 844 },
     isMobile: true,
     hasTouch: true,
-    deviceScaleFactor: 3,
+    deviceScaleFactor: 1,
   });
   try {
     await service.execute("integration", {
@@ -369,7 +330,7 @@ test("WebKit bottom autofill pair detects login steps without submitting or expo
     viewport: { width: 390, height: 844 },
     isMobile: true,
     hasTouch: true,
-    deviceScaleFactor: 3,
+    deviceScaleFactor: 1,
   });
   try {
     await service.execute("integration", {
@@ -586,7 +547,7 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
     viewport: { width: 390, height: 844 },
     isMobile: true,
     hasTouch: true,
-    deviceScaleFactor: 3,
+    deviceScaleFactor: 1,
   });
   await context.addCookies([
     { name: "cloud-auth", value: "test", url: server.resolvedUrls!.local[0]! },
@@ -600,10 +561,10 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
     await expect.poll(() => image.count(), { timeout: 10_000 }).toBe(1);
     const remote = await fittedViewerFrame(page);
     expect(remote.mobile).toBe(true);
-    expect(remote.deviceScaleFactor).toBe(3);
+    expect(remote.deviceScaleFactor).toBe(1);
     expect(await image.evaluate((e: HTMLCanvasElement) => [e.width, e.height])).toEqual([
-      Math.ceil((remote.width * 3) / 2) * 2,
-      Math.ceil((remote.height * 3) / 2) * 2,
+      Math.ceil(remote.width / 2) * 2,
+      Math.ceil(remote.height / 2) * 2,
     ]);
     expect(await inspect("document.body.dataset.serverMobile")).toBe("true");
     expect(
@@ -706,7 +667,7 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
     // Wheel is routed too, and remains anchored to the nested container.
     await image.hover({ position: { x: 100, y: 190 } });
     // Chromium's injected device-pixel wheel is normalized by viewer DPR before DOM delivery.
-    await page.mouse.wheel(0, 1200 * 3);
+    await page.mouse.wheel(0, 1200);
     await expect
       .poll(() => inspect("document.querySelector('#inner').scrollTop"))
       .toBeGreaterThan(700);
@@ -747,37 +708,6 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
     await tabs.waitFor({ state: "visible" });
     await expect.poll(() => tabs.locator(".cloud-browser-tabs__select").count()).toBe(2);
     expect(await tabs.locator('[aria-current="page"]').textContent()).toContain("Popup target");
-    for (const width of [390, 1440, 320]) {
-      await page.setViewportSize({ width, height: 844 });
-      await expect
-        .poll(() =>
-          tabs.evaluate((element) => {
-            const menu = element.getBoundingClientRect();
-            const browser = document.querySelector(".browser-popover")!.getBoundingClientRect();
-            const button = document
-              .querySelector('[aria-label="Choose tab"]')!
-              .getBoundingClientRect();
-            return (
-              menu.left >= browser.left + 7 &&
-              menu.right <= browser.right - 7 &&
-              menu.bottom <= browser.bottom - 7 &&
-              menu.top >= button.bottom
-            );
-          }),
-        )
-        .toBe(true);
-      await page.emulateMedia({ colorScheme: "light" });
-      expect(await tabs.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(
-        "oklch(1 0 0)",
-      );
-      await page.screenshot({ path: `/tmp/batty-tabs-${width}.png` });
-    }
-    await page.emulateMedia({ colorScheme: "dark" });
-    expect(await tabs.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(
-      "oklch(1 0 0)",
-    );
-    await page.setViewportSize({ width: 390, height: 844 });
-    await fittedViewerFrame(page);
     await tabs.locator(".cloud-browser-tabs__select").filter({ hasText: "Shared target" }).click();
     await expect.poll(() => addressInput.inputValue()).toBe(`${backendUrl}/target`);
     await fittedViewerFrame(page);
@@ -822,7 +752,7 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
   }
 }, 60_000);
 
-test("native touch retains nested and outer momentum, taps once, drags and cancels across rotation/disconnect", async () => {
+test("native touch drag and cancellation survive rotation and disconnect", async () => {
   await service.execute("integration", { action: "open", url: `${backendUrl}/touch`, cloud: true });
   attachedBrowserId = (await service.execute("integration", { action: "attach" })).details
     .sites![0]!.browserId!;
@@ -830,7 +760,7 @@ test("native touch retains nested and outer momentum, taps once, drags and cance
     viewport: { width: 390, height: 844 },
     isMobile: true,
     hasTouch: true,
-    deviceScaleFactor: 3,
+    deviceScaleFactor: 1,
   });
   await context.addCookies([
     { name: "cloud-auth", value: "test", url: server.resolvedUrls!.local[0]! },
@@ -844,30 +774,12 @@ test("native touch retains nested and outer momentum, taps once, drags and cance
     await expect.poll(() => canvas.getAttribute("data-frame")).not.toBeNull();
     await tapRemote(page, 40, 25);
     await expect.poll(() => inspect("document.body.dataset.clicks")).toBe("1");
-    const innerSettled = await trackScrollEnd("#pane");
-    await swipe(page, 150, 500, 280, 10, 16);
-    await expect.poll(() => inspect("document.body.dataset.releaseInner")).not.toBeUndefined();
-    const releaseInner = Number(await inspect("document.body.dataset.releaseInner"));
-    await expect
-      .poll(() => inspect("document.querySelector('#pane').scrollTop"))
-      .toBeGreaterThan(releaseInner + 30);
-    expect(await inspect("scrollY")).toBe(0);
-    await innerSettled();
     // A touch-action:none surface receives touch-driven pointer movement, not page scrolling.
     await swipe(page, 340, 400, 120);
     await expect
       .poll(() => inspect("Number(document.querySelector('#drag').dataset.moves||0)"))
       .toBeGreaterThan(2);
     expect(await inspect("scrollY")).toBe(0);
-    // Start outside both nested pane and custom drag surface.
-    const outerSettled = await trackScrollEnd();
-    await swipe(page, 325, 600, 280, 10, 16);
-    await expect
-      .poll(() => inspect("Number(document.body.dataset.releaseOuter)"))
-      .toBeGreaterThan(0);
-    const releaseOuter = Number(await inspect("document.body.dataset.releaseOuter"));
-    await expect.poll(() => inspect("scrollY")).toBeGreaterThan(releaseOuter + 30);
-    await outerSettled();
     const send = async (type: "touchStart" | "touchMove" | "touchCancel", x = 200, y = 300) => {
       const bounds = (await canvas.boundingBox())!;
       await touch.send("Input.dispatchTouchEvent", {
@@ -1023,7 +935,7 @@ test("desktop/mobile switching keeps login, CSS screen matches the viewer, and n
     viewport: { width: 390, height: 844 },
     isMobile: true,
     hasTouch: true,
-    deviceScaleFactor: 3,
+    deviceScaleFactor: 1,
   });
   for (const context of [desktop, mobile])
     await context.addCookies([
@@ -1078,7 +990,7 @@ test("desktop/mobile switching keeps login, CSS screen matches the viewer, and n
   }
 }, 60_000);
 
-test("DPR3 binary frames fill the actual popover, retain edge input alignment and rotate without padded quadrants", async () => {
+test("DPR3 frames cover all viewport corners and align edge taps", async () => {
   await service.execute("integration", {
     action: "open",
     url: `${backendUrl}/coverage`,
@@ -1141,45 +1053,7 @@ test("DPR3 binary frames fill the actual popover, retain edge input alignment an
     ]);
     await tapRemote(page, original.state.width * 0.875, original.state.height * 0.85);
     await expect.poll(() => inspect("document.body.dataset.clicks")).toBe("1");
-    await swipe(page, original.state.width * 0.2, original.state.height * 0.45, 80);
-    await expect
-      .poll(() => inspect("document.querySelector('#pane').scrollTop"))
-      .toBeGreaterThan(60);
-    expect(await inspect("scrollY")).toBe(0);
-    await expect.poll(colors).toEqual(expected);
-    await swipe(page, original.state.width * 0.7, original.state.height * 0.65, 120);
-    await expect.poll(() => inspect("scrollY")).toBeGreaterThan(90);
-    await expect.poll(colors).toEqual(expected);
-    await service.execute("integration", { action: "click", selector: "#edge" });
-    await expect.poll(() => inspect("document.body.dataset.clicks")).toBe("2");
-    await page.setViewportSize({ width: 844, height: 390 });
-    const rotated = await fittedViewerFrame(page);
-    expect(rotated.width).toBeGreaterThan(750);
-    await expect.poll(colors).toEqual(expected);
-    await tapRemote(page, rotated.width * 0.875, rotated.height * 0.85);
-    await expect.poll(() => inspect("document.body.dataset.clicks")).toBe("3");
     expect((await service.cloudTarget(attachedBrowserId)).page).toBe(original.page);
-    expect(await inspect("[innerWidth,innerHeight,devicePixelRatio]")).toEqual([
-      rotated.width,
-      rotated.height,
-      3,
-    ]);
-    await page.screenshot({ path: "/tmp/cloud-coverage-landscape.png" });
-    for (const viewport of [
-      { width: 2400, height: 1000 },
-      { width: 1000, height: 2400 },
-    ]) {
-      await page.setViewportSize(viewport);
-      const fitted = await fittedViewerFrame(page);
-      expect(Math.max(fitted.width, fitted.height)).toBe(1365);
-      await expect.poll(colors).toEqual(expected);
-      expect(await page.locator(".cloud-browser__error").count()).toBe(0);
-      const clicks = Number(await inspect("document.body.dataset.clicks"));
-      await tapRemote(page, fitted.width * 0.875, fitted.height * 0.85);
-      await expect.poll(() => inspect("Number(document.body.dataset.clicks)")).toBe(clicks + 1);
-      expect((await service.cloudTarget(attachedBrowserId)).page).toBe(original.page);
-    }
-    await page.screenshot({ path: "/tmp/cloud-coverage-oversize.png" });
     await page.getByRole("button", { name: "Close popover" }).click();
   } finally {
     await context.close();

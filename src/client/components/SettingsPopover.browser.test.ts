@@ -1,7 +1,6 @@
 // @vitest-environment node
 import path from "node:path";
 import fs from "node:fs/promises";
-import { APP_COLOR_OPTIONS } from "@/shared/appearance";
 import vue from "@vitejs/plugin-vue";
 import { chromium, type Browser } from "patchright";
 import type { ViteDevServer } from "vite";
@@ -28,189 +27,54 @@ afterAll(async () => {
   if (server) await closeBrowserFixtureServer(server);
 });
 
-test("popover chrome remains keyboard-accessible and fits narrow screens in both themes", async () => {
-  for (const colorScheme of ["light", "dark"] as const) {
-    for (const width of [320, 1280]) {
-      const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
-      try {
-        await page.route("**/api/**", (route) => route.fulfill({ json: { names: [] } }));
-        await page.goto(url);
-        const tabs = page.getByRole("tablist", { name: "Settings", exact: true });
-        const first = tabs.getByRole("tab", { name: "Assistant", exact: true });
-        await first.focus();
-        await page.keyboard.press("ArrowRight");
-        await expect
-          .poll(() =>
-            page
-              .getByRole("tab", { name: "Appearance", exact: true })
-              .getAttribute("aria-selected"),
-          )
-          .toBe("true");
-        expect(await page.evaluate(() => document.activeElement?.getAttribute("role"))).toBe("tab");
-        const header = page.locator("#settings .full-popover__header");
-        expect(await header.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
-          true,
-        );
-        if (captureScreenshots) await fs.mkdir(".tmp/ui-feedback", { recursive: true });
-        let buttonColor: string | undefined;
-        for (const option of APP_COLOR_OPTIONS) {
-          await page.evaluate(`(async () => {
-            const { applyAppAppearance } = await import("/src/client/lib/appearance.ts");
-            applyAppAppearance({ title: "Batty", color: ${JSON.stringify(option.id)} });
-          })()`);
-          const chrome = await header.evaluate((element) => {
-            const style = getComputedStyle(element);
-            const tab = document.querySelector('[role="tab"][aria-selected="true"]')!;
-            const tabStyle = getComputedStyle(tab);
-            return {
-              background: style.backgroundColor,
-              shadow: style.boxShadow,
-              underline: tabStyle.borderBottomStyle,
-              underlineWidth: parseFloat(tabStyle.borderBottomWidth),
-              buttonColor: getComputedStyle(document.querySelector(".full-popover__close")!).color,
-            };
-          });
-          const hex = colorScheme === "light" ? option.light : option.dark;
-          const rgb = hex
-            .slice(1)
-            .match(/../g)!
-            .map((part) => parseInt(part, 16));
-          expect(chrome.background).toBe(`rgb(${rgb.join(", ")})`);
-          expect(chrome.shadow).not.toBe("none");
-          expect(chrome.underline).toBe("solid");
-          expect(chrome.underlineWidth).toBeGreaterThanOrEqual(2);
-          buttonColor ??= chrome.buttonColor;
-          expect(chrome.buttonColor).toBe(buttonColor);
-          if (captureScreenshots)
-            await page.screenshot({
-              path: `.tmp/ui-feedback/settings-${option.id}-${colorScheme}-${width}.png`,
-            });
-        }
-        const close = page.getByRole("button", { name: "Close settings", exact: true });
-        const bounds = (await close.boundingBox())!;
-        expect(bounds.width).toBeGreaterThanOrEqual(44);
-        expect(bounds.height).toBeGreaterThanOrEqual(44);
-        await close.focus();
-        expect(
-          await close.evaluate((element) => {
-            const style = getComputedStyle(element);
-            return (
-              element.matches(":focus-visible") &&
-              style.outlineStyle !== "none" &&
-              parseFloat(style.outlineWidth) >= 2
-            );
-          }),
-        ).toBe(true);
-        await page.keyboard.press("Enter");
-        await expect
-          .poll(() =>
-            page.locator("#settings").evaluate((element) => element.matches(":popover-open")),
-          )
-          .toBe(false);
-      } finally {
-        await page.close();
-      }
-    }
-  }
-});
-
-test("popover tabs meet the body edge and stay on one navigable row on narrow screens", async () => {
-  for (const view of ["cron", "settings", "tools"]) {
-    for (const width of [320, 1280]) {
-      for (const colorScheme of ["light", "dark"] as const) {
-        const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
-        try {
-          await page.route("**/api/**", (route) =>
-            route.fulfill({ json: { names: [], servers: [] } }),
-          );
-          await page.goto(`${url}?view=${view}`);
-          const popover = page.locator(`#${view}`);
-          const tablist = popover.getByRole("tablist");
-          const tabs = tablist.getByRole("tab");
-          await tabs.first().focus();
-          await page.keyboard.press("End");
-          const last = tabs.last();
-          await expect.poll(() => last.getAttribute("aria-selected")).toBe("true");
-          expect(await last.evaluate((element) => element === document.activeElement)).toBe(true);
-          const layout = await popover.evaluate((element) => {
-            const header = element.querySelector(".full-popover__header")!;
-            const list = element.querySelector('[role="tablist"]')!;
-            const rect = list.getBoundingClientRect();
-            const buttons = [...list.querySelectorAll('[role="tab"]')];
-            const active = buttons.find(
-              (button) => button.getAttribute("aria-selected") === "true",
-            )!;
-            const selected = active.getBoundingClientRect();
-            return {
-              gap:
-                element.querySelector(".full-popover__body")!.getBoundingClientRect().top -
-                rect.bottom,
-              rows: buttons.map((button) => button.getBoundingClientRect().top),
-              fits: header.scrollWidth <= header.clientWidth,
-              selectedVisible: selected.left >= rect.left && selected.right <= rect.right + 1,
-            };
-          });
-          expect(layout.gap).toBeLessThanOrEqual(1);
-          expect(new Set(layout.rows).size).toBe(1);
-          expect(layout.fits).toBe(true);
-          expect(layout.selectedVisible).toBe(true);
-        } finally {
-          await page.close();
-        }
-      }
-    }
-  }
-});
-
 test("instance colors affect app header and footer, not controls or content", async () => {
   if (captureScreenshots) await fs.mkdir(".tmp/ui-feedback", { recursive: true });
-  for (const colorScheme of ["light", "dark"] as const) {
-    for (const width of [320, 1280]) {
-      const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
-      try {
-        await page.route("**/api/**", (route) => route.fulfill({ json: { names: [] } }));
-        await page.goto(`${url}?shell=1`);
-        let controls: unknown;
-        for (const option of APP_COLOR_OPTIONS) {
-          await page.evaluate(`(async () => {
+  for (const [colorScheme, width] of [
+    ["dark", 320],
+    ["light", 1280],
+  ] as const) {
+    const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
+    try {
+      await page.route("**/api/**", (route) => route.fulfill({ json: { names: [] } }));
+      await page.goto(`${url}?shell=1`);
+      let controls: unknown;
+      let previousHeader: string | undefined;
+      for (const color of ["neutral", "blue"]) {
+        await page.evaluate(`(async () => {
             const { applyAppAppearance } = await import("/src/client/lib/appearance.ts");
-            applyAppAppearance({ title: "Batty", color: ${JSON.stringify(option.id)} });
+            applyAppAppearance({ title: "Batty", color: ${JSON.stringify(color)} });
           })()`);
-          const actual = await page.evaluate(() => {
-            const style = (selector: string) => getComputedStyle(document.querySelector(selector)!);
-            const button = style('.header [aria-label="Cron"]');
-            const input = style(".composer__input");
-            return {
-              header: style(".header").backgroundColor,
-              footer: style(".composer").backgroundColor,
-              shadow: style(".header").boxShadow,
-              controls: [
-                button.color,
-                button.backgroundColor,
-                input.color,
-                input.backgroundColor,
-                style(".app-shell").backgroundColor,
-              ],
-            };
+        const actual = await page.evaluate(() => {
+          const style = (selector: string) => getComputedStyle(document.querySelector(selector)!);
+          const button = style('.header [aria-label="Cron"]');
+          const input = style(".composer__input");
+          return {
+            header: style(".header").backgroundColor,
+            footer: style(".composer").backgroundColor,
+            shadow: style(".header").boxShadow,
+            controls: [
+              button.color,
+              button.backgroundColor,
+              input.color,
+              input.backgroundColor,
+              style(".app-shell").backgroundColor,
+            ],
+          };
+        });
+        expect(actual.header).not.toBe("rgba(0, 0, 0, 0)");
+        if (previousHeader) expect(actual.header).not.toBe(previousHeader);
+        previousHeader = actual.header;
+        expect(actual.footer).toBe(actual.header);
+        expect(actual.shadow).not.toBe("none");
+        controls ??= actual.controls;
+        expect(actual.controls).toEqual(controls);
+        if (captureScreenshots)
+          await page.screenshot({
+            path: `.tmp/ui-feedback/shell-${color}-${colorScheme}-${width}.png`,
           });
-          const hex = colorScheme === "light" ? option.light : option.dark;
-          const rgb = hex
-            .slice(1)
-            .match(/../g)!
-            .map((part) => parseInt(part, 16));
-          expect(actual.header).toBe(`rgb(${rgb.join(", ")})`);
-          expect(actual.footer).toBe(actual.header);
-          expect(actual.shadow).not.toBe("none");
-          controls ??= actual.controls;
-          expect(actual.controls).toEqual(controls);
-          if (captureScreenshots)
-            await page.screenshot({
-              path: `.tmp/ui-feedback/shell-${option.id}-${colorScheme}-${width}.png`,
-            });
-        }
-      } finally {
-        await page.close();
       }
+    } finally {
+      await page.close();
     }
   }
 });

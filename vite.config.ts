@@ -64,9 +64,9 @@ export default defineConfig({
     sourcemap: true,
   },
   test: {
-    // Share a bounded thread pool across unit and browser integrations. More
-    // workers increase Chrome/Vite contention on the maintained four-core host.
-    maxWorkers: 3,
+    // Four workers balance browser I/O waits against Chrome/Vite contention on
+    // the maintained four-core host. Six oversubscribes its browser processes.
+    maxWorkers: 4,
     execArgv: ["--no-experimental-webstorage"],
     projects: [
       {

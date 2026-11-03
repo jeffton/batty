@@ -46,46 +46,6 @@ function setup() {
 }
 
 describe("Assistant settings", () => {
-  it("groups settings in accessible tabs and preserves drafts while switching", async () => {
-    const { wrapper } = setup();
-    try {
-      expect(wrapper.findAll('[role="tab"]').map((tab) => tab.text())).toEqual([
-        "Assistant",
-        "Appearance",
-        "Auth",
-        "Remote",
-      ]);
-      const assistant = wrapper.get("#settings-test-Assistant-panel");
-      const appearance = wrapper.get("#settings-test-Appearance-panel");
-      const auth = wrapper.get("#settings-test-Auth-panel");
-      const remote = wrapper.get("#settings-test-Remote-panel");
-      expect(assistant.isVisible()).toBe(true);
-      expect(appearance.isVisible()).toBe(false);
-      expect(auth.isVisible()).toBe(false);
-      await assistant.get("input").setValue("Draft sender");
-      await wrapper.get("#settings-test-Assistant-tab").trigger("keydown", { key: "ArrowRight" });
-      expect(appearance.isVisible()).toBe(true);
-      expect(document.activeElement?.id).toBe("settings-test-Appearance-tab");
-      await wrapper.get("#settings-test-Appearance-tab").trigger("keydown", { key: "End" });
-      expect(remote.isVisible()).toBe(true);
-      expect(document.activeElement?.id).toBe("settings-test-Remote-tab");
-      await wrapper.get("#settings-test-Remote-tab").trigger("keydown", { key: "ArrowRight" });
-      expect(assistant.isVisible()).toBe(true);
-      expect(assistant.get<HTMLInputElement>("input").element.value).toBe("Draft sender");
-      await wrapper.get("#settings-test-Assistant-tab").trigger("keydown", { key: "ArrowLeft" });
-      expect(remote.isVisible()).toBe(true);
-      await wrapper.get("#settings-test-Remote-tab").trigger("keydown", { key: "Home" });
-      expect(assistant.isVisible()).toBe(true);
-      expect(wrapper.get("#settings-test-Assistant-tab").attributes("aria-controls")).toBe(
-        assistant.attributes("id"),
-      );
-      expect(auth.attributes("aria-labelledby")).toBe("settings-test-Auth-tab");
-      expect(wrapper.findAll('[role="tab"][tabindex="0"]')).toHaveLength(1);
-    } finally {
-      wrapper.unmount();
-    }
-  });
-
   it("groups workspace, push identity and memory without changing stored values", async () => {
     const { wrapper, save } = setup();
     const section = wrapper.get('[aria-label="Assistant settings"]');

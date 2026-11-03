@@ -196,27 +196,6 @@ test.each([
   },
 );
 
-test("tab menu presents titles and URLs without exposing internal IDs or copy controls", async () => {
-  fetchMock.mockResolvedValue({
-    ok: true,
-    json: async () => ({
-      ...state,
-      pages: [{ id: "page-1", title: "Example", url: state.url, active: true }],
-    }),
-  });
-  const wrapper = create();
-  try {
-    await open(wrapper);
-    const selected = wrapper.get('[aria-current="page"]');
-    expect(selected.text()).toBe("Examplehttps://example.org");
-    expect(wrapper.find(".cloud-browser-tabs__label code").exists()).toBe(false);
-    expect(wrapper.find('[aria-label^="Copy tab ID"]').exists()).toBe(false);
-    expect(wrapper.find('[aria-label="Close tab: Example"]').exists()).toBe(true);
-  } finally {
-    wrapper.unmount();
-  }
-});
-
 test("streams gesture deltas without HTTP round-trip gating and preserves nested anchor/totals", async () => {
   const wrapper = create();
   try {

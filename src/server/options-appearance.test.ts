@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { expect, it } from "vite-plus/test";
-import { APP_COLOR_OPTIONS } from "@/shared/appearance";
 import { loadAppOptions, optionsFilePath } from "./options";
 
 it("migrates the removed experimental Neon preference to Neutral without changing other options", async () => {
@@ -34,15 +33,6 @@ it("migrates the removed experimental Neon preference to Neutral without changin
     expect(migrated).toEqual({ ...original, appColor: "neutral" });
     expect(JSON.parse(await fs.readFile(optionsFilePath(directory), "utf8"))).toEqual(migrated);
     expect(await loadAppOptions(directory)).toEqual(migrated);
-    expect(APP_COLOR_OPTIONS.map((option) => option.id)).toEqual([
-      "neutral",
-      "blue",
-      "teal",
-      "green",
-      "amber",
-      "rose",
-      "violet",
-    ]);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

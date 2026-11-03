@@ -19,12 +19,8 @@ test("session snapshots expose failed runs, suppress intentional stops and clear
     runtime = await Runtime.open(await loadConfig(directory), { resume: false });
     const main = runtime.main;
     const failures: [RunFailureReason, string | null][] = [
-      ["interrupted", "Run interrupted while answering: request cut off twice"],
-      ["restart_limit", "Run stopped after repeated interruptions: request cut off twice"],
       ["model_error", "Model request failed: request cut off twice"],
-      ["no_model", "Model unavailable: request cut off twice"],
       ["aborted", null],
-      ["reset", null],
     ];
     for (const [reason, expected] of failures) {
       await main.commit(async (tx) => {

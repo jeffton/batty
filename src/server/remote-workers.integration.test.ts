@@ -400,7 +400,8 @@ test("two runtimes execute remote native tools, deliver progress to the initiati
   }
 }, 45_000);
 
-test.each([404, 408, 429, 503])(
+// A permanent miss and a retryable failure exercise the two import/recovery paths.
+test.each([404, 503])(
   "HTTP %i file failures do not strand a coordinator's remote await or terminal mirror",
   async (status) => {
     vi.stubEnv("PI_OFFLINE", "1");

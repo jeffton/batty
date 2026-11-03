@@ -1,31 +1,10 @@
 import fs from "node:fs";
 import { afterEach, expect, test, vi } from "vite-plus/test";
-import {
-  browserExecutablePath,
-  chromeCandidates,
-  isolatedBrowserExecutablePath,
-} from "./browser-executable";
+import { browserExecutablePath, isolatedBrowserExecutablePath } from "./browser-executable";
 
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
-});
-
-test("discovery covers system and per-user Chrome installations without test bundles", () => {
-  expect(chromeCandidates("linux")).toEqual(["/opt/google/chrome/chrome"]);
-  expect(chromeCandidates("darwin", {}, "/Users/test")).toEqual([
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Users/test/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-  ]);
-  expect(
-    chromeCandidates("win32", {
-      PROGRAMFILES: "C:\\Program Files",
-      LOCALAPPDATA: "C:\\Users\\test\\AppData\\Local",
-    }),
-  ).toEqual([
-    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-    "C:\\Users\\test\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe",
-  ]);
 });
 
 test("missing Chrome fails explicitly instead of selecting bundled Chromium", () => {

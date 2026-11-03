@@ -10,105 +10,98 @@ import { browserSessionDirectory } from "./browser-persistence";
 import { BROWSER_IDLE_RETENTION_MS } from "./browser-cleanup";
 import { removeBrowserIsolation } from "./browser-isolation";
 
-test.each(["main", "interrupted"])(
-  "%s browser expires on inactivity across restart, but not during a browser call",
-  async (owner) => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-browser-retention-"));
-    const server = http.createServer((_, response) =>
-      response.end("<html><body>Retention</body></html>"),
+test("browser expires on inactivity across restart, but not during a browser call", async () => {
+  const owner = "main";
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-browser-retention-"));
+  const server = http.createServer((_, response) =>
+    response.end("<html><body>Retention</body></html>"),
+  );
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/`;
+  let service = new BrowserService(undefined, 4, root);
+  const lastUsed = async () => {
+    const directory = browserSessionDirectory(root, owner);
+    return Math.max(
+      (await fs.stat(path.join(directory, "launch.json"))).mtimeMs,
+      (await fs.stat(path.join(directory, "registry.json"))).mtimeMs,
     );
-    server.listen(0, "127.0.0.1");
-    await once(server, "listening");
-    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/`;
-    let service = new BrowserService(undefined, 4, root);
-    const lastUsed = async () => {
-      const directory = browserSessionDirectory(root, owner);
-      return Math.max(
-        (await fs.stat(path.join(directory, "launch.json"))).mtimeMs,
-        (await fs.stat(path.join(directory, "registry.json"))).mtimeMs,
-      );
-    };
-    try {
-      const first = await service.execute(owner, { action: "open", url });
-      await service.execute(owner, {
-        action: "evaluate",
-        script:
-          'globalThis.retained = 42; document.cookie = "login=retained; Max-Age=3600; Path=/"; localStorage.setItem("login", "retained")',
-      });
-      const beforeRestart = await lastUsed();
-      await service.dispose();
-      service = new BrowserService(undefined, 4, root);
-      await service.expireIdleSession(
-        owner,
-        BROWSER_IDLE_RETENTION_MS,
-        beforeRestart + 59 * 60_000,
-      );
-      expect(await service.hasSession(owner)).toBe(true);
-      const restored = await service.execute(owner, {
-        action: "evaluate",
-        script: "globalThis.retained",
-      });
-      expect(restored.text).toContain("42");
-      expect(restored.details.pageId).toBe(first.details.pageId);
+  };
+  try {
+    const first = await service.execute(owner, { action: "open", url });
+    await service.execute(owner, {
+      action: "evaluate",
+      script:
+        'globalThis.retained = 42; document.cookie = "login=retained; Max-Age=3600; Path=/"; localStorage.setItem("login", "retained")',
+    });
+    const beforeRestart = await lastUsed();
+    await service.dispose();
+    service = new BrowserService(undefined, 4, root);
+    await service.expireIdleSession(owner, BROWSER_IDLE_RETENTION_MS, beforeRestart + 59 * 60_000);
+    expect(await service.hasSession(owner)).toBe(true);
+    const restored = await service.execute(owner, {
+      action: "evaluate",
+      script: "globalThis.retained",
+    });
+    expect(restored.text).toContain("42");
+    expect(restored.details.pageId).toBe(first.details.pageId);
 
-      const active = service.execute(owner, {
-        action: "evaluate",
-        script: "new Promise(resolve => setTimeout(() => resolve(43), 300))",
-      });
-      await service.expireIdleSession(
-        owner,
-        BROWSER_IDLE_RETENTION_MS,
-        Date.now() + 2 * BROWSER_IDLE_RETENTION_MS,
-      );
-      expect((await active).text).toContain("43");
-      expect(await service.hasSession(owner)).toBe(true);
-      const usedAgain = await lastUsed();
-      // Unrelated main/worker activity cannot extend this persisted browser idle clock.
-      await service.dispose();
-      service = new BrowserService(undefined, 4, root);
-      await service.expireIdleSession(
-        owner,
-        BROWSER_IDLE_RETENTION_MS,
-        usedAgain + BROWSER_IDLE_RETENTION_MS,
-      );
-      expect(await service.hasSession(owner)).toBe(false);
-      // Restart Batty while the browser is stopped: disk profile alone survives.
-      await service.dispose();
-      service = new BrowserService(undefined, 4, root);
-      const reopened = await service.execute(owner, { action: "open", url });
-      expect(reopened.details.url).toBe(url);
-      expect(
-        (await service.execute(owner, { action: "evaluate", script: "globalThis.retained" })).text,
-      ).toContain("undefined");
-      const login = async () =>
-        (
-          await service.execute(owner, {
-            action: "evaluate",
-            script: '({cookie: document.cookie, storage: localStorage.getItem("login")})',
-          })
-        ).text;
-      expect(await login()).toContain("login=retained");
-      expect(await login()).toContain("storage: 'retained'");
-      await service.execute(owner, { action: "close" });
-      expect(await service.hasSession(owner)).toBe(false);
-      await service.dispose();
-      service = new BrowserService(undefined, 4, root);
-      await service.execute(owner, { action: "open", url });
-      expect(await login()).toContain("login=retained");
-      expect(await login()).toContain("storage: 'retained'");
-    } finally {
-      await service.closeSession(owner);
-      await service.dispose();
-      server.closeAllConnections();
-      await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve())),
-      );
-      await removeBrowserIsolation(browserSessionDirectory(root, owner));
-      await fs.rm(root, { recursive: true, force: true });
-    }
-  },
-  30_000,
-);
+    const active = service.execute(owner, {
+      action: "evaluate",
+      script: "new Promise(resolve => setTimeout(() => resolve(43), 300))",
+    });
+    await service.expireIdleSession(
+      owner,
+      BROWSER_IDLE_RETENTION_MS,
+      Date.now() + 2 * BROWSER_IDLE_RETENTION_MS,
+    );
+    expect((await active).text).toContain("43");
+    expect(await service.hasSession(owner)).toBe(true);
+    const usedAgain = await lastUsed();
+    // Unrelated main/worker activity cannot extend this persisted browser idle clock.
+    await service.dispose();
+    service = new BrowserService(undefined, 4, root);
+    await service.expireIdleSession(
+      owner,
+      BROWSER_IDLE_RETENTION_MS,
+      usedAgain + BROWSER_IDLE_RETENTION_MS,
+    );
+    expect(await service.hasSession(owner)).toBe(false);
+    // Restart Batty while the browser is stopped: disk profile alone survives.
+    await service.dispose();
+    service = new BrowserService(undefined, 4, root);
+    const reopened = await service.execute(owner, { action: "open", url });
+    expect(reopened.details.url).toBe(url);
+    expect(
+      (await service.execute(owner, { action: "evaluate", script: "globalThis.retained" })).text,
+    ).toContain("undefined");
+    const login = async () =>
+      (
+        await service.execute(owner, {
+          action: "evaluate",
+          script: '({cookie: document.cookie, storage: localStorage.getItem("login")})',
+        })
+      ).text;
+    expect(await login()).toContain("login=retained");
+    expect(await login()).toContain("storage: 'retained'");
+    await service.execute(owner, { action: "close" });
+    expect(await service.hasSession(owner)).toBe(false);
+    await service.dispose();
+    service = new BrowserService(undefined, 4, root);
+    await service.execute(owner, { action: "open", url });
+    expect(await login()).toContain("login=retained");
+    expect(await login()).toContain("storage: 'retained'");
+  } finally {
+    await service.closeSession(owner);
+    await service.dispose();
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await removeBrowserIsolation(browserSessionDirectory(root, owner));
+    await fs.rm(root, { recursive: true, force: true });
+  }
+}, 30_000);
 
 test("browser service detach/reconnect preserves tabs, cookies, JavaScript state and tab/frame IDs", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-browser-restart-"));

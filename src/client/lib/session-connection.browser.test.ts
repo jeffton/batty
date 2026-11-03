@@ -64,14 +64,16 @@ test.each(["Chromium", "WebKit"])(
     stall = true;
     const page = await (engine === "WebKit" ? safari : chrome).newPage();
     try {
-      const start = Date.now();
+      await page.clock.install();
+      await page.clock.pauseAt(Date.now());
       await page.goto(url);
+      await expect.poll(() => requests.length).toBe(1);
+      // Keep real HTTP/SSE and browser state; advance only the handshake timer.
+      await page.clock.fastForward(5000);
       await expect
         .poll(() => page.locator("output").textContent(), { timeout: 10_000 })
         .toBe("online");
-      const elapsed = Date.now() - start;
       expect(requests).toHaveLength(2);
-      expect(elapsed).toBeLessThan(10_000);
       expect(await page.locator("textarea").inputValue()).toBe("unsent draft");
       await page.evaluate(() => {
         window.dispatchEvent(new Event("focus"));
@@ -79,7 +81,6 @@ test.each(["Chromium", "WebKit"])(
         document.dispatchEvent(new Event("visibilitychange"));
       });
       expect(requests).toHaveLength(2);
-      console.log(`${engine} stalled handshake recovered in ${elapsed}ms`);
     } finally {
       await page.close();
     }

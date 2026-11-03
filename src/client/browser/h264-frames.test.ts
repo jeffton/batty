@@ -74,13 +74,14 @@ function packet(frame: RemoteFrame): ArrayBuffer {
 }
 function setup() {
   const socket = { readyState: 1, send: vi.fn() } as unknown as WebSocket;
+  let currentSocket = socket;
   let generation = 1;
   let revision = "view-1";
   const onLive = vi.fn();
   const onDecodeError = vi.fn();
   const frames = useBrowserFrames({
     getGeneration: () => generation,
-    getSocket: () => socket,
+    getSocket: () => currentSocket,
     getState: () => ({
       pageId: "page",
       revision,
@@ -109,8 +110,11 @@ function setup() {
     onLive,
     onDecodeError,
     receive: (overrides: Partial<RemoteFrame> = {}) =>
-      frames.receive(packet({ ...base, ...overrides }), socket, generation),
-    reconnect: () => generation++,
+      frames.receive(packet({ ...base, ...overrides }), currentSocket, generation),
+    reconnect: (nextSocket = socket) => {
+      currentSocket = nextSocket;
+      generation++;
+    },
     navigate: () => (revision = "view-2"),
     acks: () =>
       vi.mocked(socket.send).mock.calls.map(([data]) => JSON.parse(data as string).frameId),
@@ -240,7 +244,7 @@ test("missing WebCodecs fails explicitly without bitmap fallback", () => {
   expect(test.acks()).toEqual([1]);
 });
 
-test("a support check resolving after stop cannot create a decoder or double-ACK", async () => {
+test("a pending support check crossing reconnect ACKs only its old socket and cannot replace the new decoder", async () => {
   let resolve!: (support: { supported: boolean }) => void;
   FakeDecoder.isConfigSupported.mockReturnValue(
     new Promise((done) => {
@@ -250,8 +254,24 @@ test("a support check resolving after stop cannot create a decoder or double-ACK
   const test = setup();
   test.receive();
   test.frames.stop();
+  const socket = { readyState: 1, send: vi.fn() } as unknown as WebSocket;
+  test.reconnect(socket);
+  FakeDecoder.isConfigSupported.mockResolvedValue({ supported: true });
+  test.receive({ frameId: 2 });
+  const decoder = await configured();
+  const video = decoder.emit(2);
+  paint();
   resolve({ supported: true });
   await Promise.resolve();
   expect(test.acks()).toEqual([1]);
-  expect(FakeDecoder.instances).toHaveLength(0);
+  expect(socket.send).toHaveBeenCalledExactlyOnceWith(
+    JSON.stringify({ action: "ack", frameId: 2 }),
+  );
+  expect(FakeDecoder.instances).toHaveLength(1);
+  expect(test.drawImage).toHaveBeenCalledExactlyOnceWith(video, 0, 0);
+  expect(test.frames.displayedFrame.value?.frameId).toBe(2);
+  expect(test.onLive).toHaveBeenCalledOnce();
+  expect(video.close).toHaveBeenCalledOnce();
+  expect(test.onDecodeError).not.toHaveBeenCalled();
+  test.frames.stop();
 });

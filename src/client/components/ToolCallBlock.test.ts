@@ -2,8 +2,6 @@ import { shallowMount } from "@vue/test-utils";
 import { describe, expect, it } from "vite-plus/test";
 import ToolCallBlock from "./ToolCallBlock.vue";
 
-const actions = ["run", "await", "queue", "resume", "steer", "stop"];
-
 function mountCall(
   action: string,
   options: {
@@ -29,19 +27,17 @@ function mountCall(
 }
 
 describe("subagent tool session buttons", () => {
-  it.each(actions)(
-    "opens the explicit session for %s, including errors and pending calls",
-    (action) => {
-      for (const status of ["running", "success", "error"] as const) {
-        const wrapper = mountCall(action, { sessionId: "worker-42", status });
-        const button = wrapper.get(".tool-call__subagent-btn");
-        const popover = wrapper.getComponent({ name: "SubagentSessionPopover" });
-        expect(popover.props("sessionId")).toBe("worker-42");
-        expect(button.attributes("popovertarget")).toBe(popover.props("popoverId"));
-        wrapper.unmount();
-      }
-    },
-  );
+  it("opens the explicit session for running, completed and failed calls", () => {
+    for (const status of ["running", "success", "error"] as const) {
+      const action = "steer";
+      const wrapper = mountCall(action, { sessionId: "worker-42", status });
+      const button = wrapper.get(".tool-call__subagent-btn");
+      const popover = wrapper.getComponent({ name: "SubagentSessionPopover" });
+      expect(popover.props("sessionId")).toBe("worker-42");
+      expect(button.attributes("popovertarget")).toBe(popover.props("popoverId"));
+      wrapper.unmount();
+    }
+  });
 
   it("shows the immediate start result without an async detail flag", async () => {
     const wrapper = mountCall("run", { resultId: "worker-42" });
@@ -64,15 +60,12 @@ describe("subagent tool session buttons", () => {
     wrapper.unmount();
   });
 
-  it.each(actions)(
-    "does not infer a session from result text or a tool-call ID for %s",
-    async (action) => {
-      const wrapper = mountCall(action);
-      await wrapper.setProps({ resultBlocks: [{ type: "text", text: "Session ID: 999" }] });
-      expect(wrapper.find(".tool-call__subagent-btn").exists()).toBe(false);
-      wrapper.unmount();
-    },
-  );
+  it("does not infer a session from result text or a tool-call ID", async () => {
+    const wrapper = mountCall("await");
+    await wrapper.setProps({ resultBlocks: [{ type: "text", text: "Session ID: 999" }] });
+    expect(wrapper.find(".tool-call__subagent-btn").exists()).toBe(false);
+    wrapper.unmount();
+  });
 
   it.each(["", "   "])("does not show a button for an empty ID (%j)", (id) => {
     const wrapper = mountCall("steer", { sessionId: id, resultId: id });

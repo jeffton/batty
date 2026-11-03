@@ -7,7 +7,6 @@ import {
   mergeResponseArtifacts,
   responseArtifacts,
 } from "./artifact-forwarding";
-import { encodeRuntimeNotice } from "./runtime-notices";
 import { runtimeResultArtifacts } from "./runtime-result-artifacts";
 
 const diff = { path: "/repo/a.ts", patch: "--- a.ts\n+++ a.ts\n@@ -1 +1 @@\n-old\n+new\n" };
@@ -41,47 +40,26 @@ function apiFor(messages: unknown[]) {
   } as never;
 }
 
-test.each(["notice", "sync", "codemode"])(
-  "forwards only selected saved objects received via %s, including replay",
-  async (source) => {
-    const artifacts = { fileChanges: [diff], sites: [site, browser, other] };
-    const messages =
-      source === "notice"
-        ? [
-            {
-              role: "user",
-              content: encodeRuntimeNotice({
-                kind: "cron",
-                text: "report",
-                data: { runtimeResultArtifacts: artifacts },
-              }),
-            },
-          ]
-        : [
-            {
-              role: "toolResult",
-              details:
-                source === "sync" ? artifacts : { calls: [{ name: "subagent", ...artifacts }] },
-            },
-          ];
-    const refs = artifactRefs({ fileChanges: [diff], sites: [site, browser] }).map(
-      (item) => item.ref,
-    );
-    const tool = createAttachArtifactsTool();
-    const result = await tool.execute({ refs }, apiFor(messages), context);
-    expect(result.details).toEqual({
-      fileChanges: [diff],
-      sites: [site, browser],
-      forwardedArtifacts: { fileChanges: [diff], sites: [site, browser] },
-    });
-    expect(await tool.execute({ refs }, apiFor(messages), context)).toEqual(result);
-    expect(
-      runtimeResultArtifacts([
-        { model: [{ role: "toolResult", details: result.details }] } as never,
-      ]).fileChanges,
-    ).toEqual([diff]);
-  },
-);
+test("forwards only selected saved objects, including replay", async () => {
+  const artifacts = { fileChanges: [diff], sites: [site, browser, other] };
+  // Notice/codemode wrappers and multi-parent replay are covered by the chain tests.
+  const messages = [{ role: "toolResult", details: artifacts }];
+  const refs = artifactRefs({ fileChanges: [diff], sites: [site, browser] }).map(
+    (item) => item.ref,
+  );
+  const tool = createAttachArtifactsTool();
+  const result = await tool.execute({ refs }, apiFor(messages), context);
+  expect(result.details).toEqual({
+    fileChanges: [diff],
+    sites: [site, browser],
+    forwardedArtifacts: { fileChanges: [diff], sites: [site, browser] },
+  });
+  expect(await tool.execute({ refs }, apiFor(messages), context)).toEqual(result);
+  expect(
+    runtimeResultArtifacts([{ model: [{ role: "toolResult", details: result.details }] } as never])
+      .fileChanges,
+  ).toEqual([diff]);
+});
 
 test("forwarding adds to existing response metadata without removing sites or duplicating objects", () => {
   expect(mergeResponseArtifacts({ sites: [site] }, { fileChanges: [diff] })).toEqual({

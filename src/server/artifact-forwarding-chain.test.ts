@@ -28,7 +28,7 @@ const apiFor = (messages: unknown[]) =>
     commit: async (fn: any) => fn({ scanEntries: async () => ({ items: [{ model: messages }] }) }),
   }) as never;
 
-test.each(["async", "sync", "await", "codemode", "direct-cron"])(
+test.each(["async", "sync", "await", "codemode", "codemode-flat", "direct-cron"])(
   "%s artifact forwarding reuses original file and same-path diffs across two parents and replay",
   async (source) => {
     const messages =
@@ -46,7 +46,12 @@ test.each(["async", "sync", "await", "codemode", "direct-cron"])(
         : [
             {
               role: "toolResult",
-              details: source === "codemode" ? { calls: [{ details: inventory }] } : inventory,
+              details:
+                source === "codemode"
+                  ? { calls: [{ details: inventory }] }
+                  : source === "codemode-flat"
+                    ? { calls: [{ name: "subagent", ...inventory }] }
+                    : inventory,
             },
           ];
     const refs = artifactRefs(inventory).map((item) => item.ref);

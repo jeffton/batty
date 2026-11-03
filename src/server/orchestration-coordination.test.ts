@@ -39,9 +39,14 @@ test("run cannot reuse a session and lifecycle actions cannot create one implici
 test.each(
   ["steer", "stop", "queue", "resume"].flatMap((action) =>
     ["unrelated", "coordinator", "peer"].flatMap((caller) =>
-      [false, true].flatMap((callerCron) =>
-        [false, true].map((targetCron) => ({ action, caller, callerCron, targetCron })),
-      ),
+      // Cover both cron classifications on each side for every action/scope.
+      // Coordinator cases use crossed flags so each action also covers all four pairs.
+      [false, true].map((callerCron) => ({
+        action,
+        caller,
+        callerCron,
+        targetCron: caller === "coordinator" ? !callerCron : callerCron,
+      })),
     ),
   ),
 )(

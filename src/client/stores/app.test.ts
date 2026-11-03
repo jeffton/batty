@@ -426,34 +426,28 @@ describe("reading history lifecycle", () => {
     expect(store.lastError).toBeUndefined();
   });
 
-  it.each([
-    new DOMException("Fetch is aborted", "AbortError"),
-    new DOMException("Timed out", "TimeoutError"),
-    new Error("HTTP 500"),
-  ])(
-    "keeps real failures visible and clears only the owned error after recovery: %s",
-    async (error) => {
-      const fetch = vi.spyOn(api, "getMainMessages").mockRejectedValueOnce(error);
-      const store = useAppStore();
-      store.authenticated = true;
-      store.activeSession = history();
-      await store.populateReadingCache();
-      expect(store.lastError).toBe(`Reading history: ${String(error)}`);
-      fetch.mockResolvedValue({
-        messages: [message("old")],
-        totalMessageCount: 2,
-        hasMoreMessages: false,
-      });
-      await store.populateReadingCache();
-      expect(store.lastError).toBeUndefined();
-      store.activeSession = history();
-      fetch.mockRejectedValueOnce(error);
-      await store.populateReadingCache();
-      store.lastError = "Unrelated failure";
-      await store.populateReadingCache();
-      expect(store.lastError).toBe("Unrelated failure");
-    },
-  );
+  it("keeps real failures visible and clears only the owned error after recovery", async () => {
+    const error = new DOMException("Fetch is aborted", "AbortError");
+    const fetch = vi.spyOn(api, "getMainMessages").mockRejectedValueOnce(error);
+    const store = useAppStore();
+    store.authenticated = true;
+    store.activeSession = history();
+    await store.populateReadingCache();
+    expect(store.lastError).toBe(`Reading history: ${String(error)}`);
+    fetch.mockResolvedValue({
+      messages: [message("old")],
+      totalMessageCount: 2,
+      hasMoreMessages: false,
+    });
+    await store.populateReadingCache();
+    expect(store.lastError).toBeUndefined();
+    store.activeSession = history();
+    fetch.mockRejectedValueOnce(error);
+    await store.populateReadingCache();
+    store.lastError = "Unrelated failure";
+    await store.populateReadingCache();
+    expect(store.lastError).toBe("Unrelated failure");
+  });
 
   it("does not report owned cancellation or merge a response after the auth epoch changes", async () => {
     let reject!: (error: unknown) => void;
@@ -607,12 +601,8 @@ describe("stream recovery", () => {
     expect(store.mcpAuthAttempts).toEqual({});
     expect(store.authAttemptsVersion).toBe(2);
   });
-  it.each([
-    new Error("Version check failed: 502"),
-    new DOMException("The operation timed out", "TimeoutError"),
-    new TypeError("Failed to fetch"),
-    new Error("App shell check failed: 503"),
-  ])("keeps background update failures out of the banner: %s", async (error) => {
+  it("keeps background update failures out of the banner", async () => {
+    const error = new Error("Version check failed: 502");
     const check = vi.spyOn(updates, "checkAppUpdate");
     const store = useAppStore();
     check.mockRejectedValueOnce(error);

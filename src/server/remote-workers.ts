@@ -382,13 +382,12 @@ export class RemoteWorkers {
         (mirror) =>
           this.access.getConnection(mirror.node) &&
           mirror.summary.status === "running" &&
-          (parentId === this.runtime.main.id ||
-            this.index.assignments.some(
-              (item) =>
-                item.node === mirror.node &&
-                item.session === mirror.session &&
-                item.parentId === parentId,
-            )),
+          this.index.assignments.some(
+            (item) =>
+              item.node === mirror.node &&
+              item.session === mirror.session &&
+              item.parentId === parentId,
+          ),
       )
       .map((mirror) => ({
         sessionId: remoteSessionId(mirror.node, mirror.session),

@@ -59,6 +59,8 @@ The subagent tool's `workspaces` action discovers configured nodes, their worksp
 
 Remote session IDs have the form `remote:NODE_ID:SESSION_ID`, for example `remote:work:123`. Use that ID with the ordinary lifecycle actions (`inspect`, `await`, `steer`, `queue`, `resume`, `stop`). Workers are visible on both installations; the initiating installation can also discover and control existing workers on the receiver.
 
+The running Tasks menu shows remote workers assigned by the conversation being viewed, using locally saved node/session/parent assignments. Discovery alone does not add Tasks: a worker started independently on a connected peer is not a task of this installation. Main, project, nested and cron conversations each retain their own assignment scope, including after a restart.
+
 Commands carry durable request IDs, so reconnect/replay does not start duplicate work. Reports stay bound to their assignment's initiating conversation, including later queue/resume assignments. Resumable SSE streams mirror status and conversation output locally. Historical workers are discovered without downloading their transcripts; active or assigned sessions are mirrored, and streams retire only after their terminal history cursor has arrived. Reports and completion results return to the initiating conversation for the corresponding assignment. The mirror persists under `.batty/remote-mirrors`, so received history remains available while the remote is offline; execution and live commands still require connectivity. File attachments are copied into local attachment storage. Hosted sites and live cloud-browser sessions are not relayed.
 
 ### Files sent to workers

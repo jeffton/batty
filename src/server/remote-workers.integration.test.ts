@@ -161,6 +161,61 @@ function filesIn(value: unknown): SentFileDescriptor[] {
   return Object.values(object).flatMap(filesIn);
 }
 
+test("bidirectional peers discover independently started workers without claiming them in Tasks", async () => {
+  vi.stubEnv("PI_OFFLINE", "1");
+  const directory = await mkdtemp(join(tmpdir(), "batty-peer-task-ownership-"));
+  const instances: Awaited<ReturnType<typeof openInstance>>[] = [];
+  try {
+    const a = await openInstance(directory, "a");
+    instances.push(a);
+    const b = await openInstance(directory, "b");
+    instances.push(b);
+    await connect(a, b, "b");
+    await connect(b, a, "a");
+    for (const instance of instances) {
+      instance.faux.setResponses([
+        fauxAssistantMessage(
+          [
+            fauxToolCall("bash", {
+              command:
+                "printf ready > entered; for i in $(seq 1 400); do test -f release && exit 0; sleep 0.05; done; exit 1",
+            }),
+          ],
+          { stopReason: "toolUse" },
+        ),
+        fauxAssistantMessage([fauxText("Independent work finished")]),
+      ]);
+      // Start on this runtime, without a delegation/assignment from its connected peer.
+      const started = await instance.runtime.orchestration.nodeCommand("independent", "start", {
+        action: "run",
+        workspaceId: "work",
+        prompt: "independent worker",
+      });
+      expect(started.isError).not.toBe(true);
+    }
+    await eventually(
+      async () =>
+        a.runtime.remotes.list().some((worker) => worker.status === "running") &&
+        b.runtime.remotes.list().some((worker) => worker.status === "running"),
+      "both peer catalogs",
+    );
+    expect(a.runtime.remotes.tasks(a.runtime.main.id)).toEqual([]);
+    expect(b.runtime.remotes.tasks(b.runtime.main.id)).toEqual([]);
+  } finally {
+    for (const instance of instances) await writeFile(join(instance.work, "release"), "release");
+    for (const instance of instances) {
+      await eventually(
+        async () => (await instance.runtime.orchestration.listRunning()).length === 0,
+        "independent worker shutdown",
+      );
+      await instance.runtime.main.waitForIdle(context);
+      await instance.close();
+    }
+    await rm(directory, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+  }
+}, 45_000);
+
 test("two runtimes execute remote native tools, deliver progress to the initiating parent, and retain local history/files offline", async () => {
   vi.stubEnv("PI_OFFLINE", "1");
   const directory = await mkdtemp(join(tmpdir(), "batty-two-runtimes-"));
@@ -172,6 +227,7 @@ test("two runtimes execute remote native tools, deliver progress to the initiati
     const local = a;
     const remote = b;
     await connect(local, remote, "b");
+    await connect(remote, local, "a");
     let bModelCalls = 0;
     remote.faux.setResponses([
       (request) => {
@@ -272,6 +328,9 @@ test("two runtimes execute remote native tools, deliver progress to the initiati
         local.runtime.remotes.tasks(local.runtime.main.id).some((row) => row.sessionId === id),
       "remote Tasks row",
     );
+    // A connection in the reverse direction must not change task ownership.
+    expect(remote.runtime.remotes.tasks(remote.runtime.main.id)).toEqual([]);
+    expect(local.runtime.remotes.tasks(local.runtime.main.id + 1)).toEqual([]);
     const state = await local.runtime.state(id);
     expect(state.cwd).toBe(remote.work);
     expect(state.model).toBe("faux/model-b");

@@ -290,26 +290,9 @@ export function buildTranscriptMessages(
       continue;
     }
 
-    if (pendingAttachmentBlocks.length > 0 && messageWithoutAttachmentBlocks.role !== "assistant") {
-      const attachmentMessage: Extract<UiMessage, { role: "assistant" }> = {
-        id: `${pendingAttachmentId}:attachments`,
-        role: "assistant",
-        timestamp: pendingAttachmentTimestamp,
-        turnPhase: "final",
-        blocks: pendingAttachmentBlocks,
-      };
-      entries.push({
-        message: attachmentMessage,
-        toolStatesByCallId: toolStatesForMessage(
-          attachmentMessage,
-          toolStateLookup.toolStatesByCallId,
-        ),
-      });
-      pendingAttachmentBlocks = [];
-      pendingAttachmentId = "attachment-carrier";
-      pendingAttachmentTimestamp = 0;
-    }
-
+    // Notices, user steering and unrelated tool results can interleave with
+    // an ongoing run. Keep its outputs for the next owning assistant response,
+    // matching server metadata projection instead of rendering them twice.
     const shouldMergePendingAttachments =
       pendingAttachmentBlocks.length > 0 &&
       acceptsPendingAttachmentBlocks(messageWithoutAttachmentBlocks);

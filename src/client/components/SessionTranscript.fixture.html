@@ -20,8 +20,44 @@
       import { applyServerEvent } from "../lib/session-events.ts";
       import { commentaryAttachments } from "../test/commentary-attachments.ts";
 
-      const attachmentMessages = () =>
-        commentaryAttachments().map((message, index) => ({ ...message, id: String(200 + index) }));
+      const attachmentMessages = () => {
+        const messages = commentaryAttachments();
+        messages.splice(
+          3,
+          0,
+          {
+            id: "notice",
+            role: "custom",
+            timestamp: 3,
+            customType: "batty-runtime-notice:subagent",
+            text: "Interleaved worker report",
+          },
+          {
+            id: "steer",
+            role: "user",
+            timestamp: 3,
+            blocks: [{ type: "text", text: "Continue the other task too" }],
+          },
+          {
+            id: "orphan",
+            role: "toolResult",
+            timestamp: 3,
+            toolCallId: "unrelated",
+            toolName: "read",
+            isError: false,
+            blocks: [{ type: "text", text: "Other tool output" }],
+          },
+          {
+            id: "direct",
+            role: "assistant",
+            timestamp: 3,
+            turnPhase: "final",
+            directDelivery: { sessionId: "cron", runId: "cron-run" },
+            blocks: [{ type: "text", text: "Independent reminder" }],
+          },
+        );
+        return messages.map((message, index) => ({ ...message, id: String(200 + index) }));
+      };
       const user = {
         id: "u",
         role: "user",
@@ -76,8 +112,8 @@
             availableThinkingLevels: ["off"],
             streamId: "attachment-stream",
             revision: 1,
-            totalMessageCount: 4,
-            messages: attachmentMessages().slice(0, 4),
+            totalMessageCount: 8,
+            messages: attachmentMessages().slice(0, 8),
             isStreaming: true,
           };
         }
@@ -88,7 +124,7 @@
             revision: 2,
             state: {
               messages: attachmentMessages(),
-              totalMessageCount: 6,
+              totalMessageCount: 10,
               isStreaming: false,
             },
           });

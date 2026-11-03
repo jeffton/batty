@@ -175,6 +175,112 @@ test("site-only native codemode output is an attachment, not a synthetic tool bu
   wrapper.unmount();
 });
 
+const interleavings: Array<[string, UiMessage[]]> = [
+  [
+    "worker notice",
+    [
+      {
+        id: "notice",
+        role: "custom",
+        timestamp: 3,
+        customType: "batty-runtime-notice:subagent",
+        text: "Another worker completed",
+      },
+    ],
+  ],
+  [
+    "user steer",
+    [
+      {
+        id: "steer",
+        role: "user",
+        timestamp: 3,
+        blocks: [{ type: "text", text: "Continue the other task too" }],
+      },
+    ],
+  ],
+  [
+    "unreferenced tool result",
+    [
+      {
+        id: "orphan-result",
+        role: "toolResult",
+        timestamp: 3,
+        toolCallId: "orphan",
+        toolName: "read",
+        isError: false,
+        blocks: [{ type: "text", text: "Other tool output" }],
+      },
+    ],
+  ],
+  [
+    "referenced tool result",
+    [
+      {
+        id: "read-call",
+        role: "assistant",
+        timestamp: 3,
+        turnPhase: "intermediate",
+        blocks: [{ type: "toolCall", id: "read", name: "read", arguments: {} }],
+      },
+      {
+        id: "read-result",
+        role: "toolResult",
+        timestamp: 3,
+        toolCallId: "read",
+        toolName: "read",
+        isError: false,
+        blocks: [{ type: "text", text: "Read output" }],
+      },
+    ],
+  ],
+  [
+    "direct cron delivery",
+    [
+      {
+        id: "direct",
+        role: "assistant",
+        timestamp: 3,
+        turnPhase: "final",
+        directDelivery: { sessionId: "cron", runId: "cron-run" },
+        blocks: [{ type: "text", text: "Independent reminder" }],
+      },
+    ],
+  ],
+];
+
+for (const [label, interleaved] of interleavings) {
+  test(`${label} neither flushes nor consumes native output before its owning commentary`, () => {
+    const messages = commentaryAttachments();
+    messages.splice(3, 0, ...interleaved);
+    const entries = transcript(messages);
+    expect(entries.some((entry) => entry.message.id.endsWith(":attachments"))).toBe(false);
+    const wrappers = entries.map((entry) =>
+      mount(ChatMessage, {
+        props: entry,
+        global: {
+          stubs: { AgentTurnDiffPopover: true, SharedSitesList: true, ToolCallBlock: true },
+        },
+      }),
+    );
+    expect(wrappers.reduce((count, wrapper) => count + wrapper.findAll("video").length, 0)).toBe(1);
+    for (const wrapper of wrappers) wrapper.unmount();
+    const owner = render(messages);
+    expect(owner.findAll(".attached-files__card")).toHaveLength(2);
+    owner.unmount();
+  });
+}
+
+test("native output stays visible at the end while waiting for the next owning response", () => {
+  const messages = commentaryAttachments().slice(0, 3);
+  messages.push(...interleavings[0]![1], ...interleavings[1]![1]);
+  const entries = transcript(messages);
+  expect(entries.at(-1)!.message.id).toBe("tool-result:attachments");
+  const pending = render(messages, "tool-result:attachments");
+  expect(pending.findAll(".attached-files__card")).toHaveLength(2);
+  pending.unmount();
+});
+
 test("empty commentary does not consume a pending native attachment", () => {
   const messages = commentaryAttachments();
   messages.splice(3, 0, {

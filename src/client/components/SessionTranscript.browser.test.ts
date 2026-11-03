@@ -106,6 +106,11 @@ for (const width of [390]) {
         .filter({ hasText: "Here is the timelapse." });
       await commentary.getByText("Timelapse.mp4", { exact: true }).waitFor();
       expect(await commentary.locator("video").count()).toBe(1);
+      expect(await page.locator("video").count()).toBe(1);
+      const direct = page
+        .locator(".message--assistant")
+        .filter({ hasText: "Independent reminder" });
+      expect(await direct.locator(".message__artifacts").count()).toBe(0);
       expect(await commentary.locator(".message__segment--bubble").count()).toBe(1);
       await expect
         .poll(() =>

@@ -103,36 +103,55 @@ export function forwardedResponseArtifacts(entries: readonly EntryRecord[]): Age
   for (const entry of entries) {
     for (const message of entry.model ?? []) {
       if (message.role !== "toolResult") continue;
-      const forwarded = (message.details as { forwardedArtifacts?: AgentTurnArtifacts })
-        ?.forwardedArtifacts;
-      if (forwarded) sources.push(forwarded);
+      const details = message.details as
+        | (ArtifactDetails & { forwardedArtifacts?: AgentTurnArtifacts })
+        | undefined;
+      if (details?.forwardedArtifacts) sources.push(details.forwardedArtifacts);
+      if (message.toolName === "codemode") {
+        for (const call of details?.calls ?? []) {
+          const forwarded = (
+            (call.details ?? call) as {
+              forwardedArtifacts?: AgentTurnArtifacts;
+            }
+          ).forwardedArtifacts;
+          if (forwarded) sources.push(forwarded);
+        }
+      }
     }
   }
   return mergeResponseArtifacts(...sources);
 }
 
-/** Browser tools attach their own live session; received reports still require explicit forwarding. */
+/** Native output tools attach their own artifacts; received reports require explicit forwarding. */
 export function responseArtifacts(entries: readonly EntryRecord[]): AgentTurnArtifacts {
-  const browsers = entries.flatMap((entry) =>
+  const ownedArtifacts = entries.flatMap((entry) =>
     (entry.model ?? []).flatMap((message) => {
-      if (message.role !== "toolResult") return [];
+      if (message.role !== "toolResult" || (message.isError && message.toolName !== "codemode"))
+        return [];
       const details = message.details as ArtifactDetails | undefined;
       const owned =
-        message.toolName === "browser"
-          ? [details]
-          : message.toolName === "codemode"
-            ? (details?.calls ?? [])
-                .filter((call) => call.name === "browser")
-                .map((call) => call.details ?? call)
-            : [];
-      return owned.flatMap((artifacts) =>
-        (artifacts?.sites ?? [])
-          .map(decodeSiteAttachmentDescriptor)
-          .filter((site) => site.kind === "browser"),
-      );
+        message.toolName === "codemode"
+          ? (details?.calls ?? []).map((call) => ({
+              name: call.name,
+              artifacts: call.details ?? call,
+            }))
+          : [{ name: message.toolName, artifacts: details }];
+      return owned.flatMap(({ name, artifacts }): AgentTurnArtifacts[] => {
+        if (name === "attach_files" || name === "sites")
+          return [{ sentFiles: artifacts?.sentFiles, sites: artifacts?.sites }];
+        if (name === "browser")
+          return [
+            {
+              sites: (artifacts?.sites ?? [])
+                .map(decodeSiteAttachmentDescriptor)
+                .filter((site) => site.kind === "browser"),
+            },
+          ];
+        return [];
+      });
     }),
   );
-  return mergeResponseArtifacts(forwardedResponseArtifacts(entries), { sites: browsers });
+  return mergeResponseArtifacts(forwardedResponseArtifacts(entries), ...ownedArtifacts);
 }
 
 export function createAttachArtifactsTool() {

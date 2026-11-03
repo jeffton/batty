@@ -81,22 +81,39 @@ export async function createHistoryIndex(db: SqliteDatabase) {
       return { contextTokens: tokens, contextPercent: (tokens / model.contextWindow) * 100 };
     },
     async responseArtifacts(conversationId: number, answerId: number) {
-      const submission = await db.get<{ input: number | null }>(
-        "SELECT MIN(json_extract(record, '$.entry')) AS input FROM submissions WHERE conversation_id = ? AND json_extract(record, '$.answer') = ?",
-        conversationId,
-        answerId,
-      );
-      if (submission?.input == null) return [];
       const rows = await db.all<{ record: string }>(
-        `SELECT record FROM entries WHERE conversation_id = ? AND id >= ? AND id <= ?
+        // Artifacts belong to the next visible assistant response, not the final
+        // answer of a submission. Commentary can deliver one result while the
+        // same run continues awaiting other workers. This boundary also makes
+        // replay and paginated history consume each tool result exactly once.
+        // The whitespace set matches JavaScript trim() in Runtime.history().
+        `SELECT record FROM entries WHERE conversation_id = ? AND id < ?
+          AND id > COALESCE((SELECT previous.id FROM entries previous
+            WHERE previous.conversation_id = ? AND previous.id < ?
+              AND EXISTS (SELECT 1 FROM json_each(json_extract(previous.record, '$.model')) AS message,
+                json_each(json_extract(message.value, '$.content')) AS block
+                WHERE json_extract(message.value, '$.role') = 'assistant'
+                  AND json_extract(message.value, '$.display') IS NOT 0
+                  AND (json_extract(block.value, '$.type') = 'image'
+                    OR (json_extract(block.value, '$.type') = 'text'
+                      AND trim(json_extract(block.value, '$.text'),
+                        char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,
+                          8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)) != '')))
+            ORDER BY previous.id DESC LIMIT 1), 0)
           AND EXISTS (SELECT 1 FROM json_each(json_extract(record, '$.model')) AS message
             WHERE json_extract(message.value, '$.role') = 'toolResult' AND (
-              json_type(message.value, '$.details.forwardedArtifacts') = 'object'
+              json_extract(message.value, '$.toolName') IN ('attach_files', 'sites')
+              OR json_type(message.value, '$.details.forwardedArtifacts') = 'object'
+              OR EXISTS (SELECT 1 FROM json_each(json_extract(message.value, '$.details.calls')) AS call
+                WHERE json_extract(call.value, '$.name') IN ('attach_files', 'sites', 'browser')
+                  OR json_type(call.value, '$.details.forwardedArtifacts') = 'object'
+                  OR json_type(call.value, '$.forwardedArtifacts') = 'object')
               OR EXISTS (SELECT 1 FROM json_each(json_extract(message.value, '$.details.sites')) AS site
                 WHERE json_type(site.value, '$.browserId') = 'text')))
           ORDER BY id`,
         conversationId,
-        submission.input,
+        answerId,
+        conversationId,
         answerId,
       );
       return rows.map((row) => JSON.parse(row.record) as EntryRecord);

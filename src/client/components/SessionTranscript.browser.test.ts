@@ -1,5 +1,6 @@
 // @vitest-environment node
 import path from "node:path";
+import { readFile } from "node:fs/promises";
 import vue from "@vitejs/plugin-vue";
 import { chromium, type Browser, type Page } from "patchright";
 import type { ViteDevServer } from "vite";
@@ -25,6 +26,20 @@ beforeAll(async () => {
         {
           name: "reconnect-fixture",
           configureServer(server) {
+            server.middlewares.use("/fixture-video.mp4", async (_request, response) => {
+              response.setHeader("content-type", "video/mp4");
+              response.end(await readFile("src/client/test/assets/commentary.mp4"));
+            });
+            server.middlewares.use("/fixture-image.svg", (_request, response) => {
+              response.setHeader("content-type", "image/svg+xml");
+              response.end(
+                '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="teal"/></svg>',
+              );
+            });
+            server.middlewares.use("/fixture-site.html", (_request, response) => {
+              response.setHeader("content-type", "text/html");
+              response.end("<h1>Timelapse notes</h1>");
+            });
             server.middlewares.use("/fixture-resumed.json", (_request, response) => {
               response.setHeader("content-type", "application/json");
               response.end(
@@ -79,6 +94,69 @@ async function state(page: Page, value: string) {
 }
 
 for (const width of [390]) {
+  test(`commentary artifacts render immediately, survive a later final and cache reload at ${width}px`, async () => {
+    const page = await browser.newPage({ viewport: { width, height: 900 } });
+    page.setDefaultTimeout(5000);
+    page.on("pageerror", (error) => console.error(error.message));
+    try {
+      await page.goto(url);
+      await state(page, "attachments");
+      const commentary = page
+        .locator(".message--assistant")
+        .filter({ hasText: "Here is the timelapse." });
+      await commentary.getByText("Timelapse.mp4", { exact: true }).waitFor();
+      expect(await commentary.locator("video").count()).toBe(1);
+      expect(await commentary.locator(".message__segment--bubble").count()).toBe(1);
+      await expect
+        .poll(() =>
+          commentary.locator("video").evaluate((video) => (video as HTMLVideoElement).readyState),
+        )
+        .toBeGreaterThanOrEqual(1);
+      await commentary.locator("video").evaluate(async (video) => {
+        await (video as HTMLVideoElement).play();
+      });
+      await expect
+        .poll(() =>
+          commentary.locator("video").evaluate((video) => (video as HTMLVideoElement).currentTime),
+        )
+        .toBeGreaterThan(0);
+      await commentary.getByRole("img", { name: "Frame.svg", exact: true }).waitFor();
+      expect(await commentary.locator(".shared-sites__card").count()).toBe(2);
+      expect(await commentary.getByRole("button", { name: "View changes 1" }).count()).toBe(1);
+      const download = page.waitForEvent("download");
+      await commentary
+        .locator(".attached-files__card")
+        .filter({ hasText: "Timelapse.mp4" })
+        .getByRole("link", { name: "Download", exact: true })
+        .click();
+      expect((await download).suggestedFilename()).toBe("Timelapse.mp4");
+      expect(await page.getByText("Unselected child.mp4", { exact: true }).count()).toBe(0);
+      await state(page, "attachments-final");
+      await page.getByText("The unrelated task is complete.", { exact: true }).waitFor();
+      await expect
+        .poll(() => page.evaluate(() => window.__cacheRestored, undefined, undefined, false))
+        .toBe(true);
+      for (const replay of [false, true]) {
+        if (replay) await page.goto(`${url}?attachments=reload`);
+        await page.getByText("The unrelated task is complete.", { exact: true }).waitFor();
+        expect(await page.locator(".attached-files__card").count()).toBe(2);
+        expect(await page.locator("video").count()).toBe(1);
+        expect(await commentary.locator("video").count()).toBe(1);
+        const final = page
+          .locator(".message--assistant")
+          .filter({ hasText: "The unrelated task is complete." });
+        expect(await final.locator(".message__artifacts").count()).toBe(0);
+        expect(await page.getByText("Unselected child.mp4", { exact: true }).count()).toBe(0);
+      }
+      await page.setViewportSize({ width, height: 1600 });
+      await page.locator("#app").evaluate((element) => {
+        (element as HTMLElement).style.height = "1500px";
+      });
+      await page.screenshot({ path: "/tmp/batty-commentary-attachments.png", fullPage: true });
+    } finally {
+      await page.close();
+    }
+  });
   test(`empty cron response never creates a bubble or Copy action at ${width}px`, async () => {
     const page = await browser.newPage({ viewport: { width, height: 800 } });
     try {

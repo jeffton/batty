@@ -52,6 +52,10 @@ MCP uses one `.batty/mcp.json` configuration and a shared connection registry ac
 
 Settings use `/api/settings/mcp`; connection status and actions use `/api/mcp`. Workspace-specific MCP configuration, overrides and scoped API parameters are not supported.
 
+## Response attachments
+
+Files, sites, live browsers and explicitly forwarded artifacts attach to the next visible assistant response, including commentary while other work continues. They are consumed once, not repeated on a later final answer. Reload, paginated history and SSE replay derive the same attribution from immutable tool results; child report inventories require explicit `attach_artifacts` selection.
+
 ## Browser lifecycle
 
 Each workspace shares one Chromium instance, profile, logins and tabs between main and its workers. Other workspaces have separate browsers. Each agent session has its own persisted selected tab, independent of the human viewer. `pages` marks that agent’s selection; `switch` changes only its selection. Explicit `pageId` targets a tab without changing the selection, except `open` and `switch`, which select their target for that agent. A fresh agent’s first `open` creates its own tab unless a `pageId` is supplied; `attach` only shares the viewer handle. Browser actions are serialized per workspace.

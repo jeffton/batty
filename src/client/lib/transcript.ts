@@ -113,7 +113,7 @@ export function isAttachmentOutputToolCall(
   }
 
   const state = toolStatesByCallId.get(block.id);
-  if (state?.status !== "success" && state?.status !== "error") return false;
+  if (state?.status !== "success") return false;
   return (
     (block.name === "attach_files" && hasSentFiles(state)) ||
     (block.name === "sites" && hasSites(state))
@@ -185,27 +185,40 @@ function hasRenderableContent(message: Extract<UiMessage, { role: "assistant" }>
 
 function attachmentBlockFromToolResult(
   message: Extract<UiMessage, { role: "toolResult" }>,
+  toolStatesByCallId: Map<string, ToolDisplayState>,
 ): UiContentBlock | undefined {
   const state: ToolDisplayState = {
     status: message.isError ? "error" : "success",
     resultBlocks: message.blocks,
     resultDetails: message.details,
   };
-  if (state.status !== "success" && message.toolName !== "codemode") return undefined;
-  if (
-    hasSentFiles(state) &&
-    (message.toolName === "attach_files" ||
-      message.toolName === "subagent" ||
-      message.toolName === "codemode")
-  ) {
+  if (message.toolName === "codemode") {
+    // Aggregate codemode details also contain received worker artifacts. Only
+    // explicit native outputs are carriers; forwarded artifacts are projected
+    // by the server onto their owning assistant message.
+    const calls = message.details?.calls ?? [];
+    const nativeCalls = calls.filter(
+      (call) => call.name === "attach_files" || call.name === "sites",
+    ) as ToolExecutionDetails[];
+    state.resultDetails = {
+      sentFiles: nativeCalls.flatMap((call) => call.sentFiles ?? []),
+      sites: nativeCalls.flatMap((call) => call.sites ?? []),
+    };
+    if (!hasSentFiles(state) && !hasSites(state)) return undefined;
+    const id = `${message.toolCallId}:native-attachments`;
+    toolStatesByCallId.set(id, { ...state, status: "success" });
+    return {
+      type: "toolCall",
+      id,
+      name: hasSentFiles(state) ? "attach_files" : "sites",
+      arguments: {},
+    };
+  }
+  if (state.status !== "success") return undefined;
+  if (hasSentFiles(state) && message.toolName === "attach_files") {
     return { type: "toolCall", id: message.toolCallId, name: "attach_files", arguments: {} };
   }
-  if (
-    hasSites(state) &&
-    (message.toolName === "sites" ||
-      message.toolName === "subagent" ||
-      message.toolName === "codemode")
-  ) {
+  if (hasSites(state) && message.toolName === "sites") {
     return { type: "toolCall", id: message.toolCallId, name: "sites", arguments: {} };
   }
   return undefined;
@@ -221,9 +234,10 @@ export function mergeAttachmentCarrierIntoAssistant(
 function acceptsPendingAttachmentBlocks(message: UiMessage): boolean {
   return (
     message.role === "assistant" &&
-    message.turnPhase === "final" &&
     !message.directDelivery &&
-    (message.blocks.some((block) => block.type === "text" || block.type === "image") ||
+    (message.blocks.some(
+      (block) => block.type === "image" || (block.type === "text" && block.text.trim().length > 0),
+    ) ||
       (message.sentFiles?.length ?? 0) > 0 ||
       (message.sites?.length ?? 0) > 0)
   );
@@ -243,11 +257,12 @@ export function buildTranscriptMessages(
   for (const message of messages) {
     if (message.role === "toolResult") {
       const isReferenced = toolStateLookup.referencedToolCallIds.has(message.toolCallId);
-      const attachmentBlock = attachmentBlockFromToolResult(message);
-      const propagatesReferencedAttachment =
-        isReferenced && (message.toolName === "subagent" || message.toolName === "codemode");
+      const attachmentBlock = attachmentBlockFromToolResult(
+        message,
+        toolStateLookup.toolStatesByCallId,
+      );
 
-      if (attachmentBlock && (!isReferenced || propagatesReferencedAttachment)) {
+      if (attachmentBlock) {
         if (pendingAttachmentBlocks.length === 0) {
           pendingAttachmentId = message.id;
           pendingAttachmentTimestamp = message.timestamp;
@@ -262,14 +277,6 @@ export function buildTranscriptMessages(
     }
 
     const attachmentBlocks = attachmentCarrierBlocks(message, toolStateLookup.toolStatesByCallId);
-    if (attachmentBlocks.length > 0) {
-      if (pendingAttachmentBlocks.length === 0) {
-        pendingAttachmentId = message.id;
-        pendingAttachmentTimestamp = message.timestamp;
-      }
-      pendingAttachmentBlocks = [...pendingAttachmentBlocks, ...attachmentBlocks];
-    }
-
     const messageWithoutAttachmentBlocks =
       message.role === "assistant" && attachmentBlocks.length > 0
         ? removeAttachmentCarrierBlocks(message, toolStateLookup.toolStatesByCallId)

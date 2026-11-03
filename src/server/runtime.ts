@@ -470,7 +470,14 @@ export class Runtime {
     await Promise.all(
       messages.map(async (message) => {
         await hydrateRuntimeResultArtifacts(this.storage, conversationId, message);
-        if (message.role === "assistant" && message.turnPhase === "final") {
+        if (
+          message.role === "assistant" &&
+          !message.directDelivery &&
+          message.blocks.some(
+            (block) =>
+              block.type === "image" || (block.type === "text" && block.text.trim() !== ""),
+          )
+        ) {
           const entries = await this.historyIndex.responseArtifacts(
             conversationId,
             Number(message.id.split(":")[0]),

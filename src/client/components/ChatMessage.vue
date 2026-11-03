@@ -197,8 +197,8 @@ const replySegmentIndex = computed(() =>
   assistantSegments.value.findIndex((segment) => segment.kind === "reply"),
 );
 
-const lastReplySegmentIndex = computed(() =>
-  assistantSegments.value.findLastIndex((segment) => segment.kind === "reply"),
+const lastArtifactSegmentIndex = computed(() =>
+  assistantSegments.value.findLastIndex((segment) => segment.kind !== "plain"),
 );
 
 const hasAssistantReplySegment = computed(() => replySegmentIndex.value >= 0);
@@ -515,7 +515,7 @@ async function copyAssistantMarkdown(): Promise<void> {
           </template>
 
           <div
-            v-if="hasReplyArtifacts && segmentIndex === lastReplySegmentIndex"
+            v-if="hasReplyArtifacts && segmentIndex === lastArtifactSegmentIndex"
             class="message__artifacts"
           >
             <AttachedFilesList v-if="attachedFiles.length > 0" :files="attachedFiles" />
@@ -544,7 +544,7 @@ async function copyAssistantMarkdown(): Promise<void> {
       </template>
 
       <div
-        v-if="hasReplyArtifacts && !hasAssistantReplySegment"
+        v-if="hasReplyArtifacts && lastArtifactSegmentIndex < 0"
         class="message__segment message__segment--bubble message__artifacts"
       >
         <ReplyActions :copied="copied" @copy="copyAssistantMarkdown">

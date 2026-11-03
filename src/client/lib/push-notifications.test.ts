@@ -20,6 +20,12 @@ function installPushCapableBrowser(permission: NotificationPermission = "default
   subscribe: ReturnType<typeof vi.fn>;
   getSubscription: ReturnType<typeof vi.fn>;
   requestPermission: ReturnType<typeof vi.fn>;
+  getRegistration: ReturnType<typeof vi.fn>;
+  registration: {
+    scope: string;
+    active: { state: string };
+    pushManager: { getSubscription: ReturnType<typeof vi.fn>; subscribe: ReturnType<typeof vi.fn> };
+  };
 } {
   const subscribe = vi.fn().mockResolvedValue({
     endpoint: "https://push.example/subscription",
@@ -54,27 +60,29 @@ function installPushCapableBrowser(permission: NotificationPermission = "default
   globalThis.PushManager = MockPushManager as unknown as typeof PushManager;
   globalThis.ServiceWorkerRegistration =
     MockServiceWorkerRegistration as unknown as typeof ServiceWorkerRegistration;
+  const base = window.__BATTY_BASE_URL__ ?? "/";
+  const registration = {
+    scope: new URL(base === "/" ? "/" : `${base}/`, window.location.origin).href,
+    active: { state: "activated" },
+    pushManager: { getSubscription, subscribe },
+  };
+  const getRegistration = vi.fn().mockResolvedValue(registration);
   Object.defineProperty(navigator, "serviceWorker", {
     configurable: true,
-    value: {
-      getRegistration: vi.fn().mockResolvedValue({ pushManager: { getSubscription, subscribe } }),
-      ready: Promise.resolve({
-        pushManager: {
-          getSubscription,
-          subscribe,
-        },
-      }),
-    },
+    value: { getRegistration },
   });
 
   return {
     subscribe,
     getSubscription,
     requestPermission,
+    getRegistration,
+    registration,
   };
 }
 
 beforeEach(() => {
+  delete window.__BATTY_BASE_URL__;
   vi.clearAllMocks();
   mockedGetPushPublicKey.mockResolvedValue({
     publicKey:
@@ -104,6 +112,7 @@ afterEach(() => {
     configurable: true,
     value: originalServiceWorker,
   });
+  delete window.__BATTY_BASE_URL__;
   vi.restoreAllMocks();
 });
 
@@ -147,6 +156,44 @@ describe("unregisterPushSubscription", () => {
 });
 
 describe("syncPushSubscription", () => {
+  it("uses this installation's registration rather than an ancestor's ready worker", async () => {
+    window.__BATTY_BASE_URL__ = "/nested/app";
+    const browser = installPushCapableBrowser("granted");
+    await expect(syncPushSubscription(false)).resolves.toBe(true);
+    expect(browser.getRegistration).toHaveBeenCalledWith(
+      new URL("/nested/app/", window.location.origin).href,
+    );
+  });
+
+  it("never subscribes or unsubscribes the root registration for a nested installation", async () => {
+    window.__BATTY_BASE_URL__ = "/batty";
+    const browser = installPushCapableBrowser("granted");
+    browser.registration.scope = new URL("/", window.location.origin).href;
+    await expect(syncPushSubscription(false)).resolves.toBe(false);
+    await unregisterPushSubscription();
+    expect(browser.getSubscription).not.toHaveBeenCalled();
+    expect(browser.subscribe).not.toHaveBeenCalled();
+    expect(mockedDeletePushSubscription).not.toHaveBeenCalled();
+  });
+
+  it("waits for its own worker to activate rather than using a different ready registration", async () => {
+    window.__BATTY_BASE_URL__ = "/batty-safe";
+    const browser = installPushCapableBrowser("granted");
+    const worker = new EventTarget() as EventTarget & { state: string };
+    worker.state = "installing";
+    browser.getRegistration.mockResolvedValue({
+      ...browser.registration,
+      active: null,
+      installing: worker,
+    });
+    const sync = syncPushSubscription(false);
+    await vi.waitFor(() => expect(browser.getRegistration).toHaveBeenCalled());
+    expect(browser.subscribe).not.toHaveBeenCalled();
+    worker.state = "activated";
+    worker.dispatchEvent(new Event("statechange"));
+    await expect(sync).resolves.toBe(true);
+  });
+
   it("requests permission and saves a new subscription", async () => {
     const browser = installPushCapableBrowser();
 

@@ -78,7 +78,7 @@ it("rejects an old cached shell and guards against loops across document loads",
   expect(reload).not.toHaveBeenCalled();
   responses();
   await updates.checkAppUpdate();
-  expect(sessionStorage.getItem("batty:reload-build")).toBe("new");
+  expect(sessionStorage.getItem("batty:%2F:reload-build")).toBe("new");
   vi.resetModules();
   updates = await import("./app-updates");
   updates.initializeBuild("old");
@@ -122,7 +122,7 @@ it("surfaces a persistent 502 after bounded retries and allows a later check", a
   expect(reload).not.toHaveBeenCalled();
   responses();
   await updates.checkAppUpdate();
-  expect(sessionStorage.getItem("batty:reload-build")).toBe("new");
+  expect(sessionStorage.getItem("batty:%2F:reload-build")).toBe("new");
 });
 
 it("preserves reload blockers and the across-document guard after a 502", async () => {
@@ -164,6 +164,25 @@ it("waits for an available matching shell before reloading", async () => {
   await vi.advanceTimersByTimeAsync(1);
   await checking;
   expect(reload).toHaveBeenCalledOnce();
+});
+
+it.each([true, false])("updates only its exact worker registration (own=%s)", async (own) => {
+  const reload = responses();
+  Object.assign(window, {
+    __BATTY_BASE_URL__: "/batty-safe",
+    location: { origin: "https://same.test", reload },
+  });
+  const update = vi.fn().mockResolvedValue(undefined);
+  const getRegistration = vi.fn().mockResolvedValue({
+    scope: own ? "https://same.test/batty-safe/" : "https://same.test/",
+    update,
+  });
+  vi.stubGlobal("navigator", { serviceWorker: { getRegistration } });
+  const updates = await import("./app-updates");
+  updates.initializeBuild("old");
+  await updates.checkAppUpdate("new");
+  expect(getRegistration).toHaveBeenCalledWith("https://same.test/batty-safe/");
+  expect(update).toHaveBeenCalledTimes(own ? 1 : 0);
 });
 
 it("releases a failed check so resume can retry", async () => {

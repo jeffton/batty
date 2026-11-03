@@ -1,10 +1,10 @@
 /// <reference lib="webworker" />
 
 import { NOTIFICATION_NAVIGATION_MESSAGE_TYPE } from "@/client/lib/notification-navigation";
-import { clientsClaim } from "workbox-core";
-import { NavigationRoute, registerRoute } from "workbox-routing";
+import { cacheNames, clientsClaim, setCacheNameDetails } from "workbox-core";
+import { registerRoute } from "workbox-routing";
 import { NetworkFirst, StaleWhileRevalidate } from "workbox-strategies";
-import { cleanupOutdatedCaches, precacheAndRoute } from "workbox-precaching";
+import { precacheAndRoute } from "workbox-precaching";
 
 declare let self: ServiceWorkerGlobalScope;
 
@@ -68,13 +68,57 @@ async function routeClient(client: WindowClient, targetUrl: string): Promise<voi
   notifyClient(client, targetUrl);
 }
 
+const cacheNamespace = `batty:${encodeURIComponent(self.registration.scope)}:`;
+setCacheNameDetails({ prefix: cacheNamespace, suffix: "" });
 self.skipWaiting();
+// The browser only claims clients whose most-specific matching registration is this one.
 clientsClaim();
-cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST);
+// Workbox's cleanupOutdatedCaches uses a scope substring match, which lets a root
+// registration delete nested registrations' precaches. Match our exact namespace instead.
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches
+      .keys()
+      .then((names) =>
+        Promise.all(
+          names
+            .filter(
+              (name) =>
+                name.startsWith(`${cacheNamespace}-precache-`) && name !== cacheNames.precache,
+            )
+            .map((name) => caches.delete(name)),
+        ),
+      ),
+  );
+});
 const baseUrl = appBaseUrl();
 const appShellUrl = withBaseUrl("/index.html");
-const appShellCacheName = "app-shell";
+const appShellCacheName = `${cacheNamespace}app-shell`;
+
+function isAppUrl(url: URL): boolean {
+  return (
+    url.origin === self.location.origin &&
+    (baseUrl === "/" || url.pathname === baseUrl || url.pathname.startsWith(`${baseUrl}/`))
+  );
+}
+
+const appNavigationPaths = new Set(["/", "/login", "/memory-tree"].map(withBaseUrl));
+
+function isAppNavigationUrl(url: URL): boolean {
+  return isAppUrl(url) && appNavigationPaths.has(normalizeBaseUrl(url.pathname));
+}
+
+async function appClients(): Promise<WindowClient[]> {
+  const clients = await self.clients.matchAll({ type: "window" });
+  return clients.filter((client) => isAppNavigationUrl(new URL(client.url)));
+}
+
+async function isAppMessage(event: ExtendableMessageEvent): Promise<boolean> {
+  if (!event.source || !("id" in event.source)) return false;
+  const clientId = event.source.id;
+  return (await appClients()).some((client) => client.id === clientId);
+}
 
 async function cacheAppShell(): Promise<void> {
   const response = await fetch(appShellUrl, { cache: "no-store" });
@@ -89,37 +133,35 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("message", (event) => {
   if (event.data?.type === "refresh-app-shell") {
-    event.waitUntil(cacheAppShell());
+    event.waitUntil(isAppMessage(event).then((allowed) => (allowed ? cacheAppShell() : undefined)));
   }
 });
 
 registerRoute(
-  new NavigationRoute(
-    new NetworkFirst({
-      cacheName: appShellCacheName,
-      networkTimeoutSeconds: 2,
-      plugins: [{ cacheKeyWillBeUsed: async () => appShellUrl }],
-    }),
-    {
-      denylist: [new RegExp(`^${baseUrl === "/" ? "" : baseUrl}\\/api(?:\\/|$)`)],
-    },
-  ),
+  // Root and parent registrations can control a child's first visit before its
+  // worker exists. Only our actual router paths may populate our shared shell key.
+  ({ request, url }) => request.mode === "navigate" && isAppNavigationUrl(url),
+  new NetworkFirst({
+    cacheName: appShellCacheName,
+    networkTimeoutSeconds: 2,
+    plugins: [{ cacheKeyWillBeUsed: async () => appShellUrl }],
+  }),
 );
 registerRoute(
-  ({ url }) => url.pathname.startsWith(withBaseUrl("/assets/")),
+  ({ url }) => isAppUrl(url) && url.pathname.startsWith(withBaseUrl("/assets/")),
   new StaleWhileRevalidate({
-    cacheName: "static-assets",
+    cacheName: `${cacheNamespace}static-assets`,
   }),
 );
 
-const previewPrefix = "private-image-previews:";
+const previewPrefix = `${cacheNamespace}private-image-previews:`;
 const permissionCacheName = `${previewPrefix}permissions`;
 const permissionKey = (clientId: string) =>
   new Request(
     new URL(withBaseUrl(`/api/local-preview-permission/${clientId}`), self.location.origin),
   );
 const previewLock = <T>(action: () => Promise<T>) =>
-  navigator.locks.request("batty-private-previews", action);
+  navigator.locks.request(`${cacheNamespace}private-previews`, action);
 async function permissionEpoch(cache: Cache): Promise<string | null | undefined> {
   const marker = await cache.match(permissionKey("epoch"));
   return marker ? (await marker.json()).cacheEpoch : undefined;
@@ -128,51 +170,59 @@ self.addEventListener("message", (event) => {
   if (event.data?.type === "authorize-private-previews" && event.source && "id" in event.source) {
     const clientId = event.source.id;
     event.waitUntil(
-      previewLock(async () => {
-        const cache = await caches.open(permissionCacheName);
-        const epoch = await permissionEpoch(cache);
-        if (epoch !== undefined && epoch !== event.data.cacheEpoch) return;
-        if (epoch === undefined)
+      isAppMessage(event).then((allowed) => {
+        if (!allowed) return;
+        return previewLock(async () => {
+          const cache = await caches.open(permissionCacheName);
+          const epoch = await permissionEpoch(cache);
+          if (epoch !== undefined && epoch !== event.data.cacheEpoch) return;
+          if (epoch === undefined)
+            await cache.put(
+              permissionKey("epoch"),
+              new Response(JSON.stringify({ cacheEpoch: event.data.cacheEpoch })),
+            );
           await cache.put(
-            permissionKey("epoch"),
-            new Response(JSON.stringify({ cacheEpoch: event.data.cacheEpoch })),
+            permissionKey(clientId),
+            new Response(
+              JSON.stringify({
+                scope: event.data.scope,
+                expiresAt: event.data.expiresAt,
+                cacheEpoch: event.data.cacheEpoch,
+              }),
+            ),
           );
-        await cache.put(
-          permissionKey(clientId),
-          new Response(
-            JSON.stringify({
-              scope: event.data.scope,
-              expiresAt: event.data.expiresAt,
-              cacheEpoch: event.data.cacheEpoch,
-            }),
-          ),
-        );
-        const keys = (await cache.keys()).filter((key) => key.url !== permissionKey("epoch").url);
-        for (const key of keys.slice(0, Math.max(0, keys.length - 128))) await cache.delete(key);
+          const keys = (await cache.keys()).filter((key) => key.url !== permissionKey("epoch").url);
+          for (const key of keys.slice(0, Math.max(0, keys.length - 128))) await cache.delete(key);
+        });
       }),
     );
   }
   if (event.data?.type === "clear-private-previews") {
     event.waitUntil(
-      previewLock(async () => {
-        for (const name of await caches.keys())
-          if (name.startsWith(previewPrefix) && name !== permissionCacheName)
-            await caches.delete(name);
-        const cache = await caches.open(permissionCacheName);
-        for (const key of await cache.keys()) await cache.delete(key);
-        await cache.put(
-          permissionKey("epoch"),
-          new Response(JSON.stringify({ cacheEpoch: event.data.cacheEpoch })),
-        );
-      }).then(
-        () => {
-          event.ports[0]?.postMessage({ ok: true });
-        },
-        (error) => {
-          event.ports[0]?.postMessage({ error: String(error) });
-          throw error;
-        },
-      ),
+      isAppMessage(event)
+        .then(async (allowed) => {
+          if (!allowed) throw new Error("Private preview message is outside this installation");
+          await previewLock(async () => {
+            for (const name of await caches.keys())
+              if (name.startsWith(previewPrefix) && name !== permissionCacheName)
+                await caches.delete(name);
+            const cache = await caches.open(permissionCacheName);
+            for (const key of await cache.keys()) await cache.delete(key);
+            await cache.put(
+              permissionKey("epoch"),
+              new Response(JSON.stringify({ cacheEpoch: event.data.cacheEpoch })),
+            );
+          });
+        })
+        .then(
+          () => {
+            event.ports[0]?.postMessage({ ok: true });
+          },
+          (error) => {
+            event.ports[0]?.postMessage({ error: String(error) });
+            throw error;
+          },
+        ),
     );
   }
 });
@@ -245,27 +295,25 @@ self.addEventListener("notificationclick", (event) => {
       ? event.notification.data.url
       : withBaseUrl("/"),
     self.location.origin,
-  ).href;
+  );
+  if (!isAppNavigationUrl(targetUrl))
+    throw new Error("Notification URL is outside this installation");
 
   event.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(async (clients) => {
-      const sameOriginClients = clients.filter(
-        (client): client is WindowClient => new URL(client.url).origin === self.location.origin,
-      );
-
-      for (const client of sameOriginClients) {
-        notifyClient(client, targetUrl);
+    appClients().then(async (clients) => {
+      for (const client of clients) {
+        notifyClient(client, targetUrl.href);
       }
 
-      const existingClient = sameOriginClients[0];
+      const existingClient = clients[0];
       if (existingClient) {
-        await routeClient(existingClient, targetUrl);
+        await routeClient(existingClient, targetUrl.href);
         return;
       }
 
-      const opened = await self.clients.openWindow(targetUrl);
+      const opened = await self.clients.openWindow(targetUrl.href);
       if (opened) {
-        await routeClient(opened, targetUrl);
+        await routeClient(opened, targetUrl.href);
       }
     }),
   );

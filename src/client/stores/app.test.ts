@@ -5,12 +5,14 @@ import { defineComponent } from "vue";
 import * as api from "@/client/lib/api";
 import * as updates from "@/client/lib/app-updates";
 import * as cache from "@/client/lib/main-cache";
+import { migrateLegacyMainCache } from "@/client/lib/legacy-main-cache";
 import * as browserErrors from "@/client/lib/browser-errors";
 import * as pushNotifications from "@/client/lib/push-notifications";
 import App from "@/client/App.vue";
 import ChatHeader from "@/client/components/ChatHeader.vue";
 import ChatSessionPane from "@/client/components/ChatSessionPane.vue";
 import { useAppStore } from "./app";
+vi.mock("@/client/lib/legacy-main-cache", () => ({ migrateLegacyMainCache: vi.fn() }));
 vi.mock("@/client/lib/main-cache", () => ({
   CacheSuspendedError: class CacheSuspendedError extends Error {},
   CACHE_DAY_MS: 86_400_000,
@@ -117,6 +119,32 @@ function deferResponse(_kind: (typeof mutations)[number]) {
   vi.mocked(api.removeMainQueuedPrompt).mockReturnValueOnce(promise);
   return resolve;
 }
+describe("authenticated legacy cache migration", () => {
+  it("imports only after authenticated bootstrap, before loading live history", async () => {
+    vi.mocked(migrateLegacyMainCache).mockImplementationOnce(async (payload) => {
+      expect(payload).toBe(bootstrap);
+      expect(api.getBootstrap).toHaveBeenCalledTimes(1);
+      expect(api.getMain).not.toHaveBeenCalled();
+    });
+    await useAppStore().bootstrap();
+    expect(migrateLegacyMainCache).toHaveBeenCalledWith(bootstrap);
+    expect(api.getMain).toHaveBeenCalledTimes(1);
+    vi.mocked(migrateLegacyMainCache).mockClear();
+    vi.mocked(api.getBootstrap).mockResolvedValueOnce({ ...bootstrap, authenticated: false });
+    await useAppStore().bootstrap();
+    expect(migrateLegacyMainCache).not.toHaveBeenCalled();
+  });
+
+  it("does not admit an old bootstrap after another tab logs out during migration", async () => {
+    vi.mocked(migrateLegacyMainCache).mockImplementationOnce(async () => {
+      localStorage.setItem(cache.CACHE_EPOCH_KEY, "concurrent-logout");
+    });
+    await useAppStore().bootstrap();
+    expect(api.getMain).not.toHaveBeenCalled();
+    expect(useAppStore().authenticated).toBe(false);
+  });
+});
+
 describe("caught cache diagnostics", () => {
   it("reports write aborts while preserving the visible cache failure", async () => {
     const report = vi.spyOn(browserErrors, "reportBrowserError").mockImplementation(() => {});
@@ -1015,14 +1043,17 @@ describe("optimistic prompt reconciliation", () => {
     first.submit("Unsent", [new File(["image"], "photo.png")]);
     await flushPromises();
     expect(first.pending()).toHaveLength(1);
-    expect(localStorage.getItem("batty:optimistic-messages")).toBeNull();
+    expect(localStorage.getItem("batty:%2F:optimistic-messages")).toBeNull();
     wrapper!.unmount();
     // Discard stale entries written by the previous persisted implementation.
-    localStorage.setItem("batty:optimistic-messages", JSON.stringify({ main: first.pending() }));
+    localStorage.setItem(
+      "batty:%2F:optimistic-messages",
+      JSON.stringify({ main: first.pending() }),
+    );
     const second = mountPane();
     await flushPromises();
     expect(second.pending()).toHaveLength(0);
-    expect(localStorage.getItem("batty:optimistic-messages")).toBeNull();
+    expect(localStorage.getItem("batty:%2F:optimistic-messages")).toBeNull();
     reject(new Error("Interrupted upload"));
     await flushPromises();
     expect(second.pending()).toHaveLength(0);

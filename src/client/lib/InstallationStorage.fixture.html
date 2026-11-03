@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+  <head>
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#fff" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#172128" />
+  </head>
+  <body>
+    <script>
+      window.__BATTY_BASE_URL__ = new URL(location.href).searchParams.get("base");
+    </script>
+    <script type="module">
+      import * as cache from "./main-cache.ts";
+      import * as drafts from "./session-draft.ts";
+      import * as retries from "./prompt-retry.ts";
+      import { installationStorageKey } from "./installation-storage.ts";
+      import { createPinia, setActivePinia } from "pinia";
+      import { useAppStore } from "../stores/app.ts";
+      setActivePinia(createPinia());
+      const store = useAppStore();
+      // Exercise bootstrap/auth storage listeners without background network workflows.
+      store.openStream = () => {};
+      store.populateReadingCache = async () => {};
+      store.syncNotifications = async () => {};
+      window.fixture = { cache, drafts, retries, installationStorageKey, store };
+    </script>
+  </body>
+</html>

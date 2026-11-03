@@ -757,7 +757,7 @@ test.each(["Chromium", "WebKit"])(
         blocks: [],
       }));
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
-        const operation = indexedDB.open("batty-main-reading-v1", 1);
+        const operation = indexedDB.open("batty:%2F:main-reading-v1", 1);
         operation.onupgradeneeded = () => {
           operation.result.createObjectStore("metadata");
           operation.result.createObjectStore("messages", { keyPath: "id" });
@@ -798,7 +798,7 @@ test.each(["Chromium", "WebKit"])(
         messages: [{ ...messages[11], blocks: [{ type: "text", text: "updated" }] }],
       });
       const connection = await new Promise<IDBDatabase>((resolve) => {
-        const op = indexedDB.open("batty-main-reading-v1", 2);
+        const op = indexedDB.open("batty:%2F:main-reading-v1", 2);
         op.onsuccess = () => resolve(op.result);
       });
       const count = await new Promise<number>((resolve) => {

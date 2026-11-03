@@ -16,6 +16,7 @@ import {
 } from "@/client/lib/api";
 import type { SubscriptionProviderId } from "@/shared/provider-auth";
 import { applyAppAppearance } from "@/client/lib/appearance";
+import { getAppServiceWorkerController } from "@/client/lib/service-worker";
 import type { AppAppearance } from "@/shared/appearance";
 import type { AppActionContext } from "./app-state";
 
@@ -78,7 +79,7 @@ export const providerSettingsActions = {
   async setAppearance(this: AppActionContext, appearance: AppAppearance): Promise<void> {
     this.settings = await setAppearanceRequest(appearance);
     applyAppAppearance(this.settings.appearance);
-    navigator.serviceWorker?.controller?.postMessage({ type: "refresh-app-shell" });
+    getAppServiceWorkerController()?.postMessage({ type: "refresh-app-shell" });
   },
 
   async setBraveSearchApiKey(this: AppActionContext, apiKey: string): Promise<void> {

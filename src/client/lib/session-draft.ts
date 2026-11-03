@@ -1,4 +1,6 @@
-const SESSION_DRAFT_STORAGE_PREFIX = "batty:session-draft:";
+import { installationStorageKey } from "./installation-storage";
+
+const SESSION_DRAFT_STORAGE_PREFIX = `${installationStorageKey("session-draft")}:`;
 
 export function sessionDraftStorageKey(sessionId: string): string {
   return `${SESSION_DRAFT_STORAGE_PREFIX}${encodeURIComponent(sessionId)}`;

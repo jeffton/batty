@@ -7,6 +7,7 @@ import { getMain, listRunningSubagents, listRunningCronRuns } from "@/client/lib
 import { applySessionResponse } from "@/client/lib/session-events";
 import { promptSubmissionId, retainPromptRetry, clearPromptRetry } from "@/client/lib/prompt-retry";
 import { useAppStore } from "@/client/stores/app";
+import { installationStorageKey } from "@/client/lib/installation-storage";
 import {
   optimisticTranscriptMessages,
   reconcileOptimisticMessages,
@@ -28,7 +29,7 @@ let promptRequestId = 0;
 let optimisticMessageId = 0;
 // In-flight submissions belong to this page only: interrupted uploads cannot
 // be resumed from filenames. Accepted queue entries are rendered from SSE.
-localStorage.removeItem("batty:optimistic-messages");
+localStorage.removeItem(installationStorageKey("optimistic-messages"));
 const optimisticMessagesBySessionId = ref<Record<string, PendingOptimisticMessage[]>>({});
 const activeOptimisticMessages = computed(() => {
   const session = store.activeSession;

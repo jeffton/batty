@@ -178,7 +178,7 @@ try {
     );
     const populated = await page.evaluate(async () => {
       const db = await new Promise((resolve, reject) => {
-        const r = indexedDB.open("batty-main-reading-v1");
+        const r = indexedDB.open("batty:%2F:main-reading-v1");
         r.onsuccess = () => resolve(r.result);
         r.onerror = () => reject(r.error);
       });
@@ -315,12 +315,12 @@ try {
       401,
     );
     await debug.send("ServiceWorker.stopAllWorkers");
-    await page.waitForFunction(
-      async () =>
-        !(await caches.keys()).some(
-          (name) => name.startsWith("private-image-previews:") && !name.endsWith(":permissions"),
-        ),
-    );
+    await page.waitForFunction(async () => {
+      const prefix = `batty:${encodeURIComponent(new URL("/", location.href).href)}:private-image-previews:`;
+      return !(await caches.keys()).some(
+        (name) => name.startsWith(prefix) && !name.endsWith(":permissions"),
+      );
+    });
     await context.setOffline(true);
     assert(
       await page.evaluate(async (url) => {

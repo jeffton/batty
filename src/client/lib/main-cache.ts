@@ -1,3 +1,5 @@
+import { installationStorageKey } from "./installation-storage";
+import { getAppServiceWorkerController } from "./service-worker";
 import type {
   BootstrapPayload,
   SessionMessagesPage,
@@ -8,9 +10,9 @@ import type {
 export const CACHE_DAY_MS = 86_400_000;
 const PAGE_BYTE_BUDGET = 700 * 1024;
 const PAGE_SIZE = 50;
-const DB_NAME = "batty-main-reading-v1";
-export const CACHE_EPOCH_KEY = "batty:main-cache-epoch";
-export const REVOKED_CACHE_SCOPE_KEY = "batty:revoked-cache-scope";
+const DB_NAME = installationStorageKey("main-reading-v1");
+export const CACHE_EPOCH_KEY = installationStorageKey("main-cache-epoch");
+export const REVOKED_CACHE_SCOPE_KEY = installationStorageKey("revoked-cache-scope");
 let admittedEpoch = localStorage.getItem(CACHE_EPOCH_KEY);
 export function registerMainCacheBootstrap(): void {
   admittedEpoch = localStorage.getItem(CACHE_EPOCH_KEY);
@@ -411,7 +413,7 @@ export function authorizePreviewCache(bootstrap: BootstrapPayload): void {
     bootstrap.cacheScope === localStorage.getItem(REVOKED_CACHE_SCOPE_KEY)
   )
     return;
-  navigator.serviceWorker?.controller?.postMessage({
+  getAppServiceWorkerController()?.postMessage({
     type: "authorize-private-previews",
     scope: bootstrap.cacheScope,
     expiresAt: bootstrap.cacheExpiresAt,
@@ -456,7 +458,7 @@ export function saveMainCache(
   authorizePreviewCache(bootstrap);
   const admitted = generation;
   const operation = queue.then(() =>
-    navigator.locks.request("batty-main-reading-cache", async () => {
+    navigator.locks.request(installationStorageKey("main-reading-cache"), async () => {
       if (admitted !== generation || !isCacheAuthorized()) return;
       requireForeground();
       const db = await open();
@@ -567,7 +569,7 @@ export async function clearMainCache(cacheEpoch: string = crypto.randomUUID()): 
   localStorage.setItem(CACHE_EPOCH_KEY, cacheEpoch);
   generation += 1;
   await queue;
-  await navigator.locks.request("batty-main-reading-cache", async () => {
+  await navigator.locks.request(installationStorageKey("main-reading-cache"), async () => {
     const db = await open();
     const transaction = db.transaction(["metadata", "messages"], "readwrite");
     const done = transactionDone(transaction, "clear");
@@ -576,7 +578,7 @@ export async function clearMainCache(cacheEpoch: string = crypto.randomUUID()): 
     transaction.commit();
     await done;
   });
-  const worker = navigator.serviceWorker?.controller;
+  const worker = getAppServiceWorkerController();
   if (worker)
     await new Promise<void>((resolve, reject) => {
       const channel = new MessageChannel();

@@ -1,4 +1,6 @@
 import { withBaseUrl } from "./base-url";
+import { getAppServiceWorkerRegistration } from "./service-worker";
+import { installationStorageKey } from "./installation-storage";
 import { withFetchDiagnostics } from "./browser-errors";
 
 const blockers = new Set<() => boolean>();
@@ -60,19 +62,18 @@ export async function checkAppUpdate(availableBuild?: string): Promise<void> {
     initializeBuild(buildId);
     pendingBuild = buildId !== loadedBuild ? buildId : undefined;
     if (!pendingBuild || reloading || !canReloadApp()) return;
-    if (sessionStorage.getItem("batty:reload-build") === pendingBuild) return;
+    if (sessionStorage.getItem(installationStorageKey("reload-build")) === pendingBuild) return;
     // Verify online HTML before navigating; an offline cached shell must not loop.
     const shell = await fetchAvailable("/index.html", "App shell", (response) => response.text());
     const html = new DOMParser().parseFromString(shell, "text/html");
     if (html.querySelector('meta[name="batty-build"]')?.getAttribute("content") !== pendingBuild)
       return;
     // Worker updates run independently, without plugin-controlled page reloads.
-    void navigator.serviceWorker
-      ?.getRegistration()
+    void getAppServiceWorkerRegistration()
       .then((registration) => registration?.update())
       .catch(console.error);
     if (!canReloadApp()) return;
-    sessionStorage.setItem("batty:reload-build", pendingBuild);
+    sessionStorage.setItem(installationStorageKey("reload-build"), pendingBuild);
     reloading = true;
     window.location.reload();
   })().finally(() => {

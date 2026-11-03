@@ -1,9 +1,11 @@
+import { installationStorageKey } from "./installation-storage";
+
 type RetryPrompt = {
   clientMessageId: string;
   payload: string;
 };
 
-const prefix = "batty:prompt-retry:";
+const prefix = `${installationStorageKey("prompt-retry")}:`;
 function storageKey(sessionId: string): string {
   return `${prefix}${encodeURIComponent(sessionId)}`;
 }

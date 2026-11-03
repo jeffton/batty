@@ -29,6 +29,14 @@ Main chat submissions use the default model and thinking level selected in Setti
 
 `baseUrl` is a path prefix, not a hostname or public origin; `/` serves Batty at the root. The hostname and HTTPS origin come from hosting/proxy configuration and request headers.
 
+### Multiple installations on one hostname
+
+Use separate data roots, listener ports and proxy routes with distinct `baseUrl` values, such as `/batty` and `/batty-safe`. Browser history caches, drafts, submission receipts, logout synchronization, update markers and service-worker caches are namespaced by the canonical base path, including `/`. Tabs within one installation share logout state; other installations remain independent. Update every installation to enable this isolation.
+
+On first authenticated online bootstrap, the client copies a legacy reading cache only when its saved authentication scope matches that server's current response. The copy preserves cached history and the matched session's draft/submission receipt, without changing the legacy database or keys. Unattributed legacy drafts remain untouched rather than being assigned to an arbitrary installation. Server settings, conversations, passkeys and path-scoped login cookies are unchanged; the first upgrade needs an online connection before the legacy reading cache becomes available under its scoped name.
+
+Paths isolate application state, not browser security origins. Same-origin JavaScript can access another path's storage, and notification permission is shared by the hostname. Use separate origins for mutually untrusted installations.
+
 `BATTY_HOST` and `BATTY_PORT` control the listener; `BATTY_SELF_PATH` selects the application files. `BATTY_PROVIDER_AUTH_PATH` selects the SDK's locked provider credential store. Application secrets and passkeys remain in the data root. Environment settings are stored in `.batty/environment.json`.
 
 ## Provider subscriptions

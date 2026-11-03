@@ -1,4 +1,5 @@
 import { deletePushSubscription, getPushPublicKey, savePushSubscription } from "@/client/lib/api";
+import { getAppServiceWorkerRegistration } from "./service-worker";
 
 function decodeBase64Url(value: string): ArrayBuffer {
   const padding = "=".repeat((4 - (value.length % 4)) % 4);
@@ -32,7 +33,7 @@ export function syncPushSubscription(requestPermission: boolean): Promise<boolea
 export function unregisterPushSubscription(): Promise<void> {
   return serializeSubscription(async () => {
     if (!supportsWebPush()) return;
-    const registration = await navigator.serviceWorker.getRegistration();
+    const registration = await getAppServiceWorkerRegistration();
     const subscription = await registration?.pushManager.getSubscription();
     if (!subscription) return;
     await deletePushSubscription(subscription.endpoint);
@@ -45,7 +46,19 @@ async function syncSubscription(requestPermission: boolean): Promise<boolean> {
     return false;
   }
 
-  const registration = await navigator.serviceWorker.ready;
+  const registration = await getAppServiceWorkerRegistration();
+  if (!registration) return false;
+  const worker = registration.active ?? registration.installing ?? registration.waiting;
+  if (!worker) return false;
+  if (worker.state !== "activated") {
+    await new Promise<void>((resolve, reject) => {
+      worker.addEventListener("statechange", () => {
+        if (worker.state === "activated") resolve();
+        else if (worker.state === "redundant")
+          reject(new Error("Push service worker became redundant"));
+      });
+    });
+  }
   if (requestPermission && Notification.permission === "default") {
     await Notification.requestPermission();
   }

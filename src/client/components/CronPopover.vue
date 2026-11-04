@@ -130,7 +130,15 @@ onBeforeUnmount(() => {
               <div class="cron-popover__run-details">
                 <span>{{ workspaceLabel(job.workspaceId) }}</span>
                 <span>{{ job.model }} · {{ job.thinkingLevel }}</span>
-                <span>Delivery: {{ job.delivery === "direct" ? "Direct" : "Via assistant" }}</span>
+                <span
+                  :title="
+                    job.delivery === 'direct'
+                      ? 'Shows the result unchanged to you; the assistant receives it as context.'
+                      : 'Sends the result to the assistant to handle and deliver to you.'
+                  "
+                  >Delivery:
+                  {{ job.delivery === "direct" ? "Direct to you" : "Via assistant" }}</span
+                >
                 <span v-if="job.state.nextRunAtMs"
                   >Next: {{ formatTimestamp(job.state.nextRunAtMs) }}</span
                 >

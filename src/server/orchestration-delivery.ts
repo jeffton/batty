@@ -249,7 +249,17 @@ export function createDeliveryTask(services: OrchestrationServices) {
           const target = (await runtime.conversation(targetId, ctx))!;
           const content = encodeRuntimeNotice({
             kind: task.input.runId ? "cron" : "subagent",
-            text: `[${task.input.runId ? "cron" : "subagent"} ${task.input.workerId} result]\n${reportWithArtifacts(reportWithAttachments(text, artifacts?.sentFiles), artifacts)}`,
+            text: [
+              `[${task.input.runId ? "cron" : "subagent"} ${task.input.workerId} result]`,
+              ...(task.input.runId
+                ? [
+                    task.input.delivery === "direct"
+                      ? "delivery=direct — scheduled run failed; no direct result was delivered to the user. This is an internal failure report; the main assistant is responsible for handling it."
+                      : "delivery=assistant — internal result, not delivered to the user. The main assistant is responsible for delivering the requested output.",
+                  ]
+                : []),
+              reportWithArtifacts(reportWithAttachments(text, artifacts?.sentFiles), artifacts),
+            ].join("\n"),
             data: {
               ...(artifacts ? { runtimeResultArtifacts: artifacts } : {}),
               runtimeNotice: {
@@ -259,7 +269,13 @@ export function createDeliveryTask(services: OrchestrationServices) {
               [task.input.runId ? "cron" : "subagent"]: {
                 sessionId: task.input.workerId,
                 prompt: task.input.prompt,
-                ...(task.input.runId ? { runId: task.input.runId } : {}),
+                ...(task.input.runId
+                  ? {
+                      runId: task.input.runId,
+                      delivery: task.input.delivery ?? "assistant",
+                      deliveredToUser: false,
+                    }
+                  : {}),
               },
             },
           });
@@ -310,11 +326,21 @@ export function createDeliveryTask(services: OrchestrationServices) {
                     role: "user",
                     content: encodeRuntimeNotice({
                       kind: "cron",
-                      text: `[cron ${task.input.workerId} completed output]\n${reportWithArtifacts(text, artifacts)}`,
+                      text: [
+                        `[cron ${task.input.workerId} completed output]`,
+                        "delivery=direct — already delivered to the user; do not redeliver. The output and attachments are retained as context.",
+                        reportWithArtifacts(text, artifacts),
+                        "This output and its attachments are already visible to the user. Artifact references are context, not a request to resend them.",
+                      ].join("\n"),
                       data: {
                         directDelivery: { text },
                         ...(artifacts ? { runtimeResultArtifacts: artifacts } : {}),
-                        cron: { sessionId: task.input.workerId, runId: task.input.runId! },
+                        cron: {
+                          sessionId: task.input.workerId,
+                          runId: task.input.runId!,
+                          delivery: "direct",
+                          deliveredToUser: true,
+                        },
                       },
                     }),
                     timestamp: runtime.now(),

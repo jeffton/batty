@@ -166,9 +166,14 @@ test.each(["complete", "restart", "cron-run", "cron-resume", "cron-restart"])(
           : JSON.stringify(message),
       )
       .join("\n");
-    expect(history).toContain(
-      `[${mode.startsWith("cron-") ? "cron" : "subagent"} ${outer.id} result]\nimplementation final report after review`,
-    );
+    const report = (await main.context(context)).messages
+      .flatMap((message) => (message.role === "user" ? [decodeRuntimeNotice(message.content)] : []))
+      .find((notice) =>
+        notice?.text.startsWith(
+          `[${mode.startsWith("cron-") ? "cron" : "subagent"} ${outer.id} result]`,
+        ),
+      );
+    expect(report?.text).toContain("implementation final report after review");
     expect(history).not.toContain("review findings");
     expect(history).not.toContain("(no output)");
     const outerMessages = (await (await harness.conversation(outer.id, context))!.context(context))

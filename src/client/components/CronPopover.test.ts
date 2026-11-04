@@ -92,7 +92,7 @@ describe("cron popover", () => {
       expect(cronPanel.text()).not.toContain("Detailed prompt");
       const jobDetails = cronPanel.findAll(".cron-popover__run-details");
       expect(jobDetails[0]!.text()).toContain("Delivery: Via assistant");
-      expect(jobDetails[1]!.text()).toContain("Delivery: Direct");
+      expect(jobDetails[1]!.text()).toContain("Delivery: Direct to you");
       expect(cronPanel.find("select").exists()).toBe(false);
       expect(api.updateCronDelivery).not.toHaveBeenCalled();
       expect(api.listRunningSubagents).not.toHaveBeenCalled();

@@ -9,6 +9,7 @@ import { Type } from "typebox";
 import { OrchestrationDoc } from "./orchestration.js";
 
 import { decodeRuntimeNotice } from "./runtime-notices.js";
+import { projectEntry } from "./memory-projection.js";
 import { registerPushCompletions } from "./push-completions.js";
 import { entryMessages, type Runtime } from "./runtime.js";
 import type { WebPushService } from "./web-push.js";
@@ -269,7 +270,7 @@ test.each(
       ],
     }),
   );
-  const { main } = await open();
+  let { harness, main } = await open();
   let mainRequests = 0;
   faux.setResponses(
     Array.from({ length: 10 }, () => (request) => {
@@ -302,6 +303,7 @@ test.each(
   if (busy) await until(async () => entered);
   const job = await orchestration.addJob({
     title: "Scheduled test task",
+    workspaceId: "other",
     prompt: "scheduled work",
     delivery,
     schedule: { kind: "at", in: "1h" },
@@ -338,6 +340,35 @@ test.each(
       !decodeRuntimeNotice(message.content)?.data?.directDelivery,
   );
   expect(reports).toHaveLength(delivery === "direct" ? 0 : 1);
+  const resultNotice = messages
+    .filter((message) => message.role === "user")
+    .map((message) => decodeRuntimeNotice(message.content))
+    .find((notice) => notice?.kind === "cron")!;
+  expect(resultNotice.text).toContain(
+    delivery === "direct"
+      ? "delivery=direct — already delivered to the user; do not redeliver"
+      : "delivery=assistant — internal result, not delivered to the user",
+  );
+  expect(resultNotice.data?.cron).toMatchObject({
+    delivery,
+    deliveredToUser: delivery === "direct",
+  });
+  // The same delivery contract reaches the next model request after reconnect and
+  // the OptChat leaf projection; it is not just UI-only metadata.
+  const expectedText = resultNotice.text;
+  await harness.close(context);
+  ({ harness, main } = await open());
+  faux.setResponses([
+    (request) => {
+      expect(JSON.stringify(request.messages)).toContain(expectedText.replaceAll("\n", "\\n"));
+      return fauxAssistantMessage([fauxText("next turn")]);
+    },
+  ]);
+  await (await main.submit({ type: "input", content: "next user turn" }, context)).wait(context);
+  const leaves = (await main.context(context)).entries.flatMap(projectEntry);
+  expect(leaves.some((leaf) => leaf.kind === "note" && leaf.text.includes(expectedText))).toBe(
+    true,
+  );
   const replies = messages.filter((message) => message.role === "assistant");
   if (delivery === "direct") {
     expect(mainRequests).toBe(busy ? 2 : 0);
@@ -415,5 +446,13 @@ test.each(["NO_REPLY", "error"])("direct cron handles %s", async (output) => {
       content: [fauxText("failure handled")],
     });
     expect((await orchestration.listRunLogs(job.id))[0]!.status).toBe("failed");
+    const failure = messages
+      .flatMap((message) => (message.role === "user" ? [decodeRuntimeNotice(message.content)] : []))
+      .find((notice) => notice?.kind === "cron")!;
+    expect(failure.text).toContain(
+      "delivery=direct — scheduled run failed; no direct result was delivered",
+    );
+    expect(failure.data?.cron).toMatchObject({ delivery: "direct", deliveredToUser: false });
+    expect(failure.data?.directDelivery).toBeUndefined();
   }
 });

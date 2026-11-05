@@ -2,7 +2,9 @@
 
 ## Local setup
 
-Requires Node.js **24.15.0+**, pnpm **12.16.1** and installed Google Chrome Stable for browser tools. Install JavaScript dependencies with `pnpm install`; install Chrome with `scripts/setup-chrome.sh` (Linux/macOS) or `scripts/setup-chrome.ps1` (Windows). Linux root installations also require the [browser isolation setup](#chromium-isolation).
+Requires Node.js **26.13.0+**, pnpm **12.16.1** and installed Google Chrome Stable for browser tools. Install JavaScript dependencies with `pnpm install`; install Chrome with `scripts/setup-chrome.sh` (Linux/macOS) or `scripts/setup-chrome.ps1` (Windows). Linux root installations also require the [browser isolation setup](#chromium-isolation).
+
+Node 26 does not bundle Corepack. Install it separately with `npm install --global corepack@0.36.0`, run `corepack enable`, then `corepack install` in the checkout to select the project's pinned pnpm. On Windows, use an elevated shell for the global installation.
 
 The server takes a data-root argument and stores state in its `.batty` directory. The package scripts use `/var/lib/batty2`; to use another root, run `pnpm exec tsx watch src/server/main.ts /absolute/data/root`.
 

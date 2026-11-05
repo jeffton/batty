@@ -920,13 +920,13 @@ test("catalog skips historical worker streams and retires active streams until t
     expect(streamsFor(sessionId)).toHaveLength(1);
     expect(streamsFor(sessionId)[0]!.closed).toBe(false);
     await writeFile(join(remote.work, "release"), "release");
-    await eventually(
-      async () =>
-        JSON.stringify(local.runtime.remotes.messages(active.sessionId)).includes(
-          "Active stream first terminal result",
-        ),
-      "terminal history mirrored before retirement",
-    );
+    // Opening the remote HTTP stream precedes importing its first snapshot locally.
+    // Poll through the expected 404 until the terminal history has been mirrored.
+    await expect
+      .poll(() => JSON.stringify(local.runtime.remotes.messages(active.sessionId)), {
+        timeout: 15_000,
+      })
+      .toContain("Active stream first terminal result");
     await eventually(
       async () => streamsFor(sessionId)[0]!.closed,
       "terminal session stream retiring",

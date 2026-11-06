@@ -39,19 +39,43 @@ let uploads = 0;
 let pushSync: Promise<void> | undefined;
 let pushError: string | undefined;
 let bootstrapping: Promise<void> | undefined;
+let checkingAuthentication: Promise<void> | undefined;
+let authenticationError: string | undefined;
 blockAppReload(() => uploads > 0);
 export const useAppStore = defineStore("app", {
   state: createAppState,
   actions: {
     ...providerSettingsActions,
-    async bootstrap() {
+    async bootstrap(payload?: BootstrapPayload) {
       if (bootstrapping) return bootstrapping;
-      bootstrapping = this.loadBootstrap().finally(() => {
+      bootstrapping = this.loadBootstrap(payload).finally(() => {
         bootstrapping = undefined;
       });
       return bootstrapping;
     },
-    async loadBootstrap() {
+    async checkAuthentication() {
+      if (bootstrapping) return bootstrapping;
+      if (checkingAuthentication) return checkingAuthentication;
+      const epoch = localStorage.getItem(CACHE_EPOCH_KEY);
+      checkingAuthentication = (async () => {
+        try {
+          const payload = await api.getBootstrap();
+          if (epoch !== localStorage.getItem(CACHE_EPOCH_KEY) || !this.authenticated) return;
+          if (authenticationError && this.lastError === authenticationError)
+            this.lastError = undefined;
+          authenticationError = undefined;
+          if (!payload.authenticated) await this.bootstrap(payload);
+        } catch (error) {
+          if (epoch !== localStorage.getItem(CACHE_EPOCH_KEY) || !this.authenticated) return;
+          authenticationError = error instanceof Error ? error.message : String(error);
+          this.lastError = authenticationError;
+        }
+      })().finally(() => {
+        checkingAuthentication = undefined;
+      });
+      return checkingAuthentication;
+    },
+    async loadBootstrap(bootstrapPayload?: BootstrapPayload) {
       if (!cacheSubscribed) {
         cacheSubscribed = true;
         navigator.serviceWorker?.addEventListener("controllerchange", () => {
@@ -106,7 +130,7 @@ export const useAppStore = defineStore("app", {
       }
       authEpoch = localStorage.getItem(CACHE_EPOCH_KEY);
       try {
-        const payload = await api.getBootstrap();
+        const payload = bootstrapPayload ?? (await api.getBootstrap());
         if (payload.authenticated && cacheReadError)
           reportBrowserError(cacheReadError, "cache-read");
         if (payload.cacheScope === localStorage.getItem(REVOKED_CACHE_SCOPE_KEY))
@@ -282,6 +306,9 @@ export const useAppStore = defineStore("app", {
         },
         onError: () => {
           this.connectionState = "offline";
+          // EventSource hides HTTP status, including expired-session 401s.
+          // Probe auth without reopening a healthy login's failing stream endpoint.
+          if (navigator.onLine && this.authenticated) void this.checkAuthentication();
         },
         onEvent: (event) => {
           if (event.type === "build") {

@@ -31,6 +31,7 @@ const requests = [];
 const streams = new Set();
 let revision = 1;
 let delayBootstrap = 0;
+let authenticated = true;
 const metadata = {
   id: "1",
   sessionId: "1",
@@ -71,7 +72,7 @@ const server = http.createServer(async (request, response) => {
   if (url.pathname === "/api/bootstrap") {
     if (delayBootstrap) await new Promise((resolve) => setTimeout(resolve, delayBootstrap));
     return json(response, {
-      authenticated: true,
+      authenticated,
       cacheScope: "offline-test-user",
       cacheExpiresAt: now + 86_400_000,
       auth: { passkeyCount: 1 },
@@ -119,6 +120,10 @@ const server = http.createServer(async (request, response) => {
     });
   }
   if (url.pathname === "/api/main/events") {
+    if (!authenticated) {
+      response.statusCode = 401;
+      return json(response, { error: "Authentication required" });
+    }
     response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store" });
     response.write(
       `data: ${JSON.stringify({ type: "reset", state: state(url.searchParams.get("after")), streamId: metadata.streamId, revision })}\n\n`,
@@ -348,6 +353,20 @@ try {
       ],
     };
   }
+  // Native EventSource hides HTTP failures. Expiring a server-side session and
+  // ending its stream must return the built app to login, not an offline loop.
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.goto(url);
+  await page.getByText("Cached thread newest", { exact: true }).waitFor();
+  await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+  authenticated = false;
+  for (const stream of streams) stream.end();
+  await page.waitForURL("**/login", { timeout: 10_000 });
+  await page.getByRole("button", { name: "Sign in with passkey" }).waitFor();
+  assert.equal(await page.getByText("Cached thread newest", { exact: true }).count(), 0);
+  console.log("Expired session returns to login after native SSE disconnect");
+  await context.close();
 } finally {
   await browser.close();
   for (const stream of streams) stream.end();

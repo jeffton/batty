@@ -253,7 +253,10 @@ export function useBrowserTransport(
           controller.signal,
         );
         if (current !== generation) return false;
-        updateState(value);
+        // Once subscribed, state and frames must follow the same ordered channel.
+        // An HTTP reply can arrive after a newer streamed navigation or focus change.
+        // Bootstrap/recovery still needs its snapshot before opening the socket.
+        if (!stream) updateState(value);
         if (recovery && !stream) connectStream(current);
         return true;
       } catch (cause) {

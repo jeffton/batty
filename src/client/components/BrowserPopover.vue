@@ -20,13 +20,9 @@ function closeTab(pageId: string): void {
   tabs.value?.hidePopover();
   void control({ action: "close-page", pageId });
 }
-async function newTab(): Promise<void> {
+function newTab(): void {
   tabs.value?.hidePopover();
-  const created = await control({ action: "new-page" });
-  if (created && state.value?.url === "about:blank") {
-    address.value = "";
-    addressInput.value?.focus();
-  }
+  void control({ action: "new-page" });
 }
 const addressInput = ref<HTMLInputElement>();
 let addressWasFocused = false;
@@ -37,7 +33,13 @@ const browser = useBrowserTransport(() => props.browserId, {
   onState: (value, previous) => {
     credentialsVisible.value = true;
     if (previous?.url !== value.url) address.value = value.url;
-    if (previous?.pageId !== value.pageId) scheduleResize();
+    if (previous?.pageId !== value.pageId) {
+      scheduleResize();
+      if (value.url === "about:blank") {
+        address.value = "";
+        void nextTick(() => addressInput.value?.focus());
+      }
+    }
   },
   onStop: () => {
     clearTimeout(resizeTimer);

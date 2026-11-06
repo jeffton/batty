@@ -252,13 +252,13 @@ export class Runtime {
       new ProviderUsageService(models, (id) => readStoredCredential(id, authPath)),
       historyIndex,
     );
-    // bind() admits due cron jobs and can resume the harness itself. Install
-    // completion observers before that startup boundary, not only before resume.
+    // bind() admits due cron jobs and can resume all persisted tasks. Install
+    // their services and completion observers before that startup boundary.
+    runtime.remotes = await RemoteWorkers.open(runtime);
+    orchestration.setRemoteWorkers(runtime.remotes);
     await runtime.browserCleanup.bind();
     await beforeStart?.(runtime);
     await orchestration.bind(harness, main);
-    runtime.remotes = await RemoteWorkers.open(runtime);
-    orchestration.setRemoteWorkers(runtime.remotes);
     runtime.remotes.start();
     if (resume) harness.resume();
     return runtime;

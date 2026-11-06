@@ -1,4 +1,4 @@
-import { expect, test } from "vite-plus/test";
+import { expect, test, vi } from "vite-plus/test";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
@@ -12,6 +12,133 @@ import { orchestrationHistory } from "./orchestration-test-history";
 import { ArchivedWorker } from "./orchestration-history";
 
 import { fixture, until } from "./orchestration-test-fixture.js";
+import { WorkerDoc } from "./orchestration-state.js";
+import type { createDeliveryTask } from "./orchestration-delivery.js";
+
+test("steer refuses a closed assignment while its report is still being delivered", async () => {
+  const { faux, orchestration, open } = await fixture();
+  const delivery = orchestration.extension.tasks!.find(
+    (task) => task.definition.name === "batty.delivery",
+  ) as ReturnType<typeof createDeliveryTask>;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let reporting = false;
+  let escapedRuns = 0;
+  const report = delivery.definition.phases.report!;
+  const pausedReport = vi
+    .spyOn(delivery.definition.phases, "report")
+    .mockImplementation(async (...args) => {
+      reporting = true;
+      await gate;
+      return report(...args);
+    });
+  faux.setResponses(
+    Array.from({ length: 20 }, () => (request) => {
+      const last = request.messages.findLast((message) => message.role === "user");
+      if (JSON.stringify(last?.content).includes("late steering")) escapedRuns++;
+      return fauxAssistantMessage([fauxText("worker final answer")]);
+    }),
+  );
+  const { harness } = await open();
+  try {
+    const started = await orchestration.nodeCommand("peer", "start", {
+      action: "run",
+      prompt: "original assignment",
+    });
+    const id = /Session ID: (\d+)/.exec(JSON.stringify(started.output))![1]!;
+    await until(async () => reporting);
+    expect(
+      (await harness.snapshot(WorkerDoc, Number(id) as never, context))?.completion,
+    ).toBeUndefined();
+    expect((await orchestration.listRunning()).some((worker) => worker.sessionId === id)).toBe(
+      true,
+    );
+    const result = await orchestration.nodeCommand("peer", "late-steer", {
+      action: "steer",
+      sessionId: id,
+      prompt: "late steering",
+    });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.output)).toContain("Cannot steer a finished subagent; use resume");
+    release();
+    await until(async () => (await orchestration.listRunning()).length === 0);
+    expect(escapedRuns).toBe(0);
+  } finally {
+    release();
+    pausedReport.mockRestore();
+  }
+});
+
+test("steer keeps the open assignment steerable when a follow-up is queued", async () => {
+  const { faux, orchestration, open, registry } = await fixture();
+  let release!: () => void;
+  let blocked = false;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  registry.install(
+    defineExtension({
+      name: "queued-steer-probe",
+      tools: [
+        defineTool({
+          name: "block_assignment",
+          description: "Wait for the test to release the assignment",
+          parameters: Type.Object({}),
+          execute: async () => {
+            blocked = true;
+            await gate;
+            return { output: [{ type: "text", text: "released" }] };
+          },
+        }),
+      ],
+    }),
+  );
+  const seen: string[] = [];
+  faux.setResponses(
+    Array.from({ length: 30 }, () => (request) => {
+      const last = request.messages.findLast((message) => message.role !== "system")!;
+      const text = JSON.stringify(last.content);
+      if (last.role === "user" && text.includes("open assignment"))
+        return fauxAssistantMessage([fauxToolCall("block_assignment", {})], {
+          stopReason: "toolUse",
+        });
+      if (last.role === "user" && text.includes("steering before queued work")) seen.push("steer");
+      if (last.role === "user" && text.includes("queued assignment")) seen.push("queued");
+      return fauxAssistantMessage([fauxText("finished")]);
+    }),
+  );
+  const { main } = await open();
+  await main.configure(
+    { extensions: [registry.snapshot().extension("queued-steer-probe")!, orchestration.extension] },
+    context,
+  );
+  try {
+    const started = await orchestration.nodeCommand("peer", "start", {
+      action: "run",
+      prompt: "open assignment",
+    });
+    const id = /Session ID: (\d+)/.exec(JSON.stringify(started.output))![1]!;
+    await until(async () => blocked);
+    await orchestration.nodeCommand("peer", "queue", {
+      action: "queue",
+      sessionId: id,
+      prompt: "queued assignment",
+    });
+    const steered = await orchestration.nodeCommand("peer", "steer", {
+      action: "steer",
+      sessionId: id,
+      prompt: "steering before queued work",
+    });
+    expect(steered.isError).not.toBe(true);
+    release();
+    await until(async () => (await orchestration.listRunning()).length === 0);
+    expect(seen).toEqual(["steer", "queued"]);
+  } finally {
+    release();
+  }
+});
 
 test("deleted worker references remain readable while local and node lifecycle commands fail clearly", async () => {
   const { faux, orchestration, open, directory } = await fixture();

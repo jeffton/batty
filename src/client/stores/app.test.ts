@@ -726,6 +726,146 @@ describe("stream recovery", () => {
 });
 
 describe("authentication recovery", () => {
+  it("keeps the SSE retry cadence when authentication works but the stream endpoint fails", async () => {
+    vi.useFakeTimers();
+    const streams: { onerror: () => void }[] = [];
+    vi.stubGlobal(
+      "EventSource",
+      class {
+        addEventListener() {}
+        removeEventListener() {}
+        close() {}
+        constructor() {
+          streams.push(this as unknown as (typeof streams)[number]);
+        }
+      },
+    );
+    try {
+      const store = useAppStore();
+      await store.bootstrap();
+      for (let attempt = 0; attempt < 3; attempt++) {
+        streams[attempt]!.onerror();
+        await flushPromises();
+        expect(store.authenticated).toBe(true);
+        expect(streams).toHaveLength(attempt + 1);
+        expect(api.getMain).toHaveBeenCalledOnce();
+        await vi.advanceTimersByTimeAsync(1999);
+        expect(streams).toHaveLength(attempt + 1);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(streams).toHaveLength(attempt + 2);
+      }
+    } finally {
+      useAppStore().closeStream();
+      vi.useRealTimers();
+    }
+  });
+
+  it("coalesces slow reconnect auth checks and ignores an expired response from a replaced login", async () => {
+    vi.useFakeTimers();
+    const streams: { onerror: () => void }[] = [];
+    vi.stubGlobal(
+      "EventSource",
+      class {
+        addEventListener() {}
+        removeEventListener() {}
+        close() {}
+        constructor() {
+          streams.push(this as unknown as (typeof streams)[number]);
+        }
+      },
+    );
+    try {
+      const store = useAppStore();
+      await store.bootstrap();
+      const transcript = store.activeSession;
+      let resolve!: (payload: BootstrapPayload) => void;
+      vi.mocked(api.getBootstrap).mockReturnValueOnce(
+        new Promise((done) => {
+          resolve = done;
+        }),
+      );
+      streams[0]!.onerror();
+      await vi.advanceTimersByTimeAsync(2000);
+      streams[1]!.onerror();
+      expect(api.getBootstrap).toHaveBeenCalledTimes(2);
+      localStorage.setItem(cache.CACHE_EPOCH_KEY, "replacement-login");
+      resolve({ ...bootstrap, authenticated: false });
+      await flushPromises();
+      expect(store.authenticated).toBe(true);
+      expect(store.activeSession).toBe(transcript);
+    } finally {
+      useAppStore().closeStream();
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns an expired login to the login screen after an SSE disconnect", async () => {
+    vi.useFakeTimers();
+    const streams: { onerror: () => void; close: ReturnType<typeof vi.fn> }[] = [];
+    vi.stubGlobal(
+      "EventSource",
+      class {
+        addEventListener() {}
+        removeEventListener() {}
+        close = vi.fn();
+        constructor() {
+          streams.push(this as unknown as (typeof streams)[number]);
+        }
+      },
+    );
+    try {
+      wrapper = mount(App, { global: { plugins: [pinia], stubs: { RouterView: true } } });
+      await flushPromises();
+      const store = useAppStore();
+      expect(store.authenticated).toBe(true);
+      replace.mockClear();
+      vi.mocked(cache.clearMainCache).mockClear();
+      vi.mocked(api.getBootstrap).mockResolvedValueOnce({ ...bootstrap, authenticated: false });
+
+      // EventSource exposes the same error for an expired-cookie 401 and a dropped socket.
+      streams[0]!.onerror();
+      await flushPromises();
+      expect(store.authenticated).toBe(false);
+      expect(store.activeSession).toBeUndefined();
+      expect(cache.clearMainCache).toHaveBeenCalledOnce();
+      expect(replace).toHaveBeenLastCalledWith("/login");
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(streams).toHaveLength(1);
+      expect(api.getBootstrap).toHaveBeenCalledTimes(2);
+    } finally {
+      useAppStore().closeStream();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the logged-in transcript when an SSE reconnect auth check has a network error", async () => {
+    let stream!: { onerror: () => void };
+    vi.stubGlobal(
+      "EventSource",
+      class {
+        addEventListener() {}
+        removeEventListener() {}
+        close() {}
+        constructor() {
+          stream = this as unknown as typeof stream;
+        }
+      },
+    );
+    const store = useAppStore();
+    await store.bootstrap();
+    const transcript = store.activeSession;
+    vi.mocked(cache.clearMainCache).mockClear();
+    vi.mocked(api.getBootstrap).mockRejectedValueOnce(new TypeError("Disconnected"));
+    stream.onerror();
+    await flushPromises();
+    expect(api.getBootstrap).toHaveBeenCalledTimes(2);
+    expect(store.authenticated).toBe(true);
+    expect(store.activeSession).toBe(transcript);
+    expect(store.connectionState).toBe("offline");
+    expect(store.lastError).toBe("Disconnected");
+    expect(cache.clearMainCache).not.toHaveBeenCalled();
+  });
+
   it("does not accept an authenticated bootstrap response across logout invalidation", async () => {
     let resolve!: (payload: BootstrapPayload) => void;
     vi.mocked(api.getBootstrap).mockReturnValueOnce(

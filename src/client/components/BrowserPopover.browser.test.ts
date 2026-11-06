@@ -134,6 +134,13 @@ test("tab menu creates, switches and closes pages without exposing IDs", async (
       globalThis.WebSocket = class {
         static OPEN = 1;
         readyState = 1;
+        onmessage?: (event: { data: string }) => void;
+        constructor(url: string | URL) {
+          if (!String(url).includes("/api/cloud-browser/")) return;
+          document.addEventListener("fixture-browser-state", (event) => {
+            this.onmessage?.({ data: (event as CustomEvent<string>).detail });
+          });
+        }
         close() {
           this.readyState = 3;
         }
@@ -152,19 +159,26 @@ test("tab menu creates, switches and closes pages without exposing IDs", async (
           pages = pages.filter((item) => item.id !== command.pageId);
       }
       const current = pages.find((item) => item.id === selected)!;
-      await route.fulfill({
-        json: {
-          pageId: selected,
-          revision: "test-revision",
-          url: current.url,
-          title: current.title,
-          width: 390,
-          height: 700,
-          mobile: false,
-          deviceScaleFactor: 1,
-          pages: pages.map((item) => ({ ...item, active: item.id === selected })),
-        },
-      });
+      const snapshot = {
+        pageId: selected,
+        revision: "test-revision",
+        url: current.url,
+        title: current.title,
+        width: 390,
+        height: 700,
+        mobile: false,
+        deviceScaleFactor: 1,
+        pages: pages.map((item) => ({ ...item, active: item.id === selected })),
+      };
+      await route.fulfill({ json: snapshot });
+      if (command)
+        await page.evaluate((state) => {
+          document.dispatchEvent(
+            new CustomEvent("fixture-browser-state", {
+              detail: JSON.stringify({ event: "state", data: state }),
+            }),
+          );
+        }, snapshot);
     });
     await page.goto(url);
     await page.getByRole("button", { name: "Open browser", exact: true }).click();

@@ -12,6 +12,7 @@ import { getCurrentTools } from "@earendil-works/pi-ai/utils/transcript";
 import { loadConfig } from "./config";
 import { Runtime, context } from "./runtime";
 import { OrchestrationDoc } from "./orchestration";
+import { RemoteWorkers } from "./remote-workers";
 
 test("startup restores direct memory tools from a persisted pre-search allowlist", async () => {
   const directory = await mkdtemp(join(tmpdir(), "batty2-memory-tools-"));
@@ -102,7 +103,7 @@ test("startup restores direct memory tools from a persisted pre-search allowlist
   }
 }, 15000);
 
-test("startup observers see a due inline cron reply even with explicit resume disabled", async () => {
+test("startup installs observers and remote joins before due cron resumes persisted work", async () => {
   const directory = await mkdtemp(join(tmpdir(), "batty2-startup-"));
   vi.stubEnv("PI_OFFLINE", "1");
   await mkdir(join(directory, ".batty"));
@@ -126,8 +127,25 @@ test("startup observers see a due inline cron reply even with explicit resume di
   let runtime: Runtime | undefined;
   let stop: (() => void) | undefined;
   const observed: string[] = [];
+  // Stub the remote wait; the persisted join task and scheduler execute their
+  // real definitions across the restart, including service lookup and settlement.
+  const joinRemote = vi.spyOn(RemoteWorkers.prototype, "join").mockResolvedValue();
   try {
     runtime = await Runtime.open(config, { resume: false });
+    const joinId = await runtime.main.commit(
+      (tx) =>
+        tx.createTask(
+          runtime!.orchestration.remoteJoinTask,
+          {
+            node: "remote-test",
+            session: "1",
+            assignmentId: "startup-assignment",
+            parentId: runtime!.main.id,
+          },
+          { ownership: { kind: "conversation" }, background: true },
+        ),
+      context,
+    );
     const job = await runtime.orchestration.addJob({
       title: "Scheduled test task",
       prompt: "startup cron task",
@@ -164,9 +182,16 @@ test("startup observers see a due inline cron reply even with explicit resume di
     }
     expect((await runtime.orchestration.listRunLogs())[0]?.status).toBe("completed");
     expect(observed).toContain("startup cron reply");
+    const join = await runtime.harness.getTask(joinId, context);
+    expect(join?.state).toMatchObject({
+      status: "terminal",
+      outcome: { status: "completed" },
+    });
+    expect(joinRemote).toHaveBeenCalledOnce();
   } finally {
     stop?.();
     await runtime?.close();
+    joinRemote.mockRestore();
     await rm(directory, { recursive: true, force: true });
     vi.unstubAllEnvs();
   }

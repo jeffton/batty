@@ -705,22 +705,26 @@ export function createWorkers(
           buildSubagentSteeringRuntimeNotice(args.prompt),
           files,
         );
-        const submitted = await api.commit(
-          (tx) => tx.submissionByRequest(worker!.id, `batty-steer:${api.taskId}`),
-          ctx,
-        );
-        if (submitted) return reply(`Steered. Session ID: ${workerId}`);
-        if (!running || (await api.getTask(worker!.active!, ctx))?.state.status === "terminal")
-          throw new Error("Cannot steer a finished subagent; use resume");
-        await (await api.conversation(worker!.id, ctx))!.submit(
-          {
+        const child = (await api.conversation(worker!.id, ctx))!;
+        await api.commit(async (tx) => {
+          const requestId = `batty-steer:${api.taskId}`;
+          if (await tx.submissionByRequest(worker!.id, requestId)) return;
+          const completion = (await tx.doc(WorkerDoc, worker!.id)).completion;
+          // Delivery remains nonterminal while reporting a closed assignment.
+          // Check its open completion and admit steering on the same mutation line.
+          if (
+            !running ||
+            !completion ||
+            (await tx.task(completion.owner))?.state.status === "terminal"
+          )
+            throw new Error("Cannot steer a finished subagent; use resume");
+          await child.submit(tx, {
             type: "input",
             content,
             whenBusy: "steer",
-            requestId: `batty-steer:${api.taskId}`,
-          },
-          ctx,
-        );
+            requestId,
+          });
+        }, ctx);
         return reply(`Steered. Session ID: ${workerId}`);
       }
       const ws = await services.workspace(

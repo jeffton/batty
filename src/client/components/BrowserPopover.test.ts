@@ -457,6 +457,91 @@ test("a new view discards the old decoder and ACKs its frames without painting s
   }
 });
 
+test("a delayed control response cannot roll back streamed navigation or block its painted input", async () => {
+  const wrapper = create();
+  let finish!: (value: unknown) => void;
+  try {
+    const events = await open(wrapper);
+    await frame(wrapper, events);
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await wrapper.get('[aria-label="Reload page"]').trigger("click");
+    await flushPromises();
+    const redirected = { ...state, revision: "redirected", url: "https://example.org/redirected" };
+    events.send("state", redirected);
+    await frame(wrapper, events, redirected.revision);
+    finish({ ok: true, json: async () => state });
+    await flushPromises();
+    expect((wrapper.get('[aria-label="Browser address"]').element as HTMLInputElement).value).toBe(
+      redirected.url,
+    );
+    const image = wrapper.get("canvas");
+    await image.trigger("pointerdown", { pointerId: 1, button: 0, clientX: 100, clientY: 100 });
+    await image.trigger("pointerup", { pointerId: 1, clientX: 100, clientY: 100 });
+    await flushPromises();
+    expect(commands().at(-1)).toEqual({
+      action: "click",
+      pageId: state.pageId,
+      revision: redirected.revision,
+      x: 320,
+      y: 200,
+    });
+  } finally {
+    wrapper.unmount();
+  }
+});
+
+test("a delayed control response cannot restore a field replaced by streamed focus", async () => {
+  const wrapper = create();
+  let finish!: (value: unknown) => void;
+  try {
+    const events = await open(wrapper);
+    await frame(wrapper, events);
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await wrapper.get('[aria-label="Reload page"]').trigger("click");
+    await flushPromises();
+    const focused = { id: "field-new", value: "current", type: "text", multiline: false };
+    events.send("state", { ...state, focused });
+    await flushPromises();
+    finish({
+      ok: true,
+      json: async () => ({ ...state, focused: { ...focused, id: "field-old", value: "old" } }),
+    });
+    await flushPromises();
+    const input = wrapper.get('[aria-label="Focused browser field"]');
+    expect((input.element as HTMLInputElement).value).toBe("current");
+    await input.trigger("keydown", { key: "Enter" });
+    await flushPromises();
+    expect(commands().slice(1)).toEqual([
+      {
+        action: "fill-focused",
+        value: "current",
+        focusId: "field-new",
+        pageId: state.pageId,
+        revision: state.revision,
+      },
+      {
+        action: "key",
+        key: "Enter",
+        focusId: "field-new",
+        pageId: state.pageId,
+        revision: state.revision,
+      },
+    ]);
+  } finally {
+    wrapper.unmount();
+  }
+});
+
 test("a late decoder failure cannot disconnect a reopened browser view", async () => {
   const wrapper = create();
   try {
@@ -554,16 +639,19 @@ test("tab controls switch or close only the requested page and focus a new blank
       .trigger("click");
     await flushPromises();
     expect(commands().at(-1)).toEqual({ action: "switch", pageId: "page-2" });
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ ...state, pageId: "page-new", url: "about:blank", title: "", pages }),
-    });
+    const blank = { ...state, pageId: "page-new", url: "about:blank", title: "", pages };
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => blank });
+    const address = wrapper.get('[aria-label="Browser address"]').element as HTMLInputElement;
+    const focus = vi.spyOn(address, "focus");
     await wrapper.get(".cloud-browser-tabs__new").trigger("click");
     await flushPromises();
     expect(commands().at(-1)).toEqual({ action: "new-page" });
-    expect((wrapper.get('[aria-label="Browser address"]').element as HTMLInputElement).value).toBe(
-      "",
-    );
+    expect(address.value).toBe(state.url);
+    expect(focus).not.toHaveBeenCalled();
+    events.send("state", blank);
+    await flushPromises();
+    expect(address.value).toBe("");
+    expect(focus).toHaveBeenCalledOnce();
   } finally {
     wrapper.unmount();
   }

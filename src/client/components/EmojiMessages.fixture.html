@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      import { createApp, h, reactive } from "vue";
+      import { createPinia } from "pinia";
+      import ChatMessage from "./ChatMessage.vue";
+      import "../styles.css";
+      const state = reactive({
+        message: {
+          id: "emoji-fixture",
+          role: "assistant",
+          timestamp: 1,
+          turnPhase: "final",
+          blocks: [{ type: "text", text: "😂" }],
+        },
+      });
+      window.addEventListener("fixture:message", (event) => {
+        state.message = JSON.parse(event.detail);
+      });
+      createApp({ render: () => h(ChatMessage, { message: state.message }) })
+        .use(createPinia())
+        .mount("#app");
+    </script>
+  </body>
+</html>

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { Cog, FileDiff, PanelRightOpen } from "@lucide/vue";
 import { computed } from "vue";
+import { marked } from "marked";
 import { useCopyFeedback } from "@/client/lib/copy-feedback";
+import { isEmojiOnly } from "@/client/lib/emoji-only";
 import { BATTY_RUNTIME_NOTICE_CUSTOM_TYPE } from "@/server/runtime-notices";
 import AgentTurnDiffPopover from "@/client/components/AgentTurnDiffPopover.vue";
 import AttachedFilesList from "@/client/components/AttachedFilesList.vue";
@@ -42,6 +44,18 @@ const props = withDefaults(
     allowSessionPopovers: true,
   },
 );
+
+const emojiOnly = computed(() => {
+  if (props.message.role !== "user" && props.message.role !== "assistant") return false;
+  const texts = props.message.blocks
+    .filter((block) => block.type === "text")
+    .map((block) => block.text);
+  return (
+    isEmojiOnly(texts.join("\n")) &&
+    (props.message.role === "user" ||
+      texts.every((text) => !marked.lexer(text).some((token) => token.type === "code")))
+  );
+});
 
 function imageUrl(block: Extract<UiContentBlock, { type: "image" }>): string {
   return block.url ?? `data:${block.mimeType};base64,${block.data ?? ""}`;
@@ -489,7 +503,11 @@ async function copyAssistantMarkdown(): Promise<void> {
             v-for="(block, blockIndex) in segment.blocks"
             :key="`${segmentIndex}-${blockIndex}`"
           >
-            <MarkdownBlock v-if="block.type === 'text'" :text="block.text" />
+            <MarkdownBlock
+              v-if="block.type === 'text'"
+              :class="{ 'message__emoji-only': emojiOnly }"
+              :text="block.text"
+            />
             <TranscriptImage
               v-else-if="block.type === 'image'"
               :src="block.previewUrl ?? imageUrl(block)"
@@ -593,7 +611,12 @@ async function copyAssistantMarkdown(): Promise<void> {
         v-for="(block, index) in props.message.blocks"
         :key="`${props.message.id}-${index}`"
       >
-        <div v-if="block.type === 'text'" class="message__text">{{ block.text }}</div>
+        <div
+          v-if="block.type === 'text'"
+          :class="['message__text', { 'message__emoji-only': emojiOnly }]"
+        >
+          {{ block.text }}
+        </div>
         <TranscriptImage
           v-else-if="block.type === 'image'"
           :src="block.previewUrl ?? imageUrl(block)"
@@ -723,6 +746,11 @@ async function copyAssistantMarkdown(): Promise<void> {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.5;
+}
+
+.message__emoji-only {
+  font-size: 1.4em;
+  line-height: 1.35;
 }
 
 .message__system-bubble {

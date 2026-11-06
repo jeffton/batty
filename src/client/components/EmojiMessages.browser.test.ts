@@ -64,7 +64,7 @@ test("only emoji chat text grows, including persisted and streaming messages", a
           width: document.documentElement.scrollWidth,
         }));
         expect(sizes.text?.replace(/\s/g, "")).toBe(text.replace(/\s/g, ""));
-        expect(sizes.font / sizes.parentFont).toBeCloseTo(1.4, 1);
+        expect(sizes.font / sizes.parentFont).toBeCloseTo(1.6, 1);
         expect(sizes.width).toBeLessThanOrEqual(320);
       }
       for (const text of [
@@ -124,7 +124,7 @@ test("only emoji chat text grows, including persisted and streaming messages", a
       await page
         .locator(".message__emoji-only")
         .evaluate((node) => parseFloat(getComputedStyle(node).fontSize)),
-    ).toBeCloseTo(33.6, 1);
+    ).toBeCloseTo(38.4, 1);
     expect((await page.locator(".message__emoji-only").textContent())?.trim()).toBe("😂");
     expect(errors).toEqual([]);
   } finally {

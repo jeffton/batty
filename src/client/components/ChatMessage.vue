@@ -749,7 +749,7 @@ async function copyAssistantMarkdown(): Promise<void> {
 }
 
 .message__emoji-only {
-  font-size: 1.4em;
+  font-size: 1.6em;
   line-height: 1.35;
 }
 

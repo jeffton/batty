@@ -68,7 +68,8 @@ export function siteIsolationProperties(root: string): string[] {
     "MountAPIVFS=yes",
     "DynamicUser=yes",
     "PrivateNetwork=yes",
-    "InaccessiblePaths=/tmp /var/tmp",
+    // DynamicUser implies private tmp mounts; make them read-only explicitly.
+    "TemporaryFileSystem=/tmp:ro /var/tmp:ro",
     "PrivateDevices=yes",
     "PrivateIPC=yes",
     "ProtectSystem=strict",

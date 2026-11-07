@@ -25,7 +25,9 @@ test("simulated VM escape: arbitrary Node is nonroot, has no host data/secrets/n
       try { fs.statSync(file); result.hostFiles[file] = true; } catch { result.hostFiles[file] = false; }
     }
     try { fs.writeFileSync('/runtime/probe','bad'); result.runtimeWritable = true; } catch { result.runtimeWritable = false; }
-    try { fs.writeFileSync('/tmp/probe','bad'); result.hostTmpWritable = true; } catch { result.hostTmpWritable = false; }
+    for (const directory of ['/tmp', '/var/tmp']) {
+      try { fs.writeFileSync(directory + '/probe','bad'); result.hostFiles[directory] = true; } catch { result.hostFiles[directory] = false; }
+    }
     try { fs.writeFileSync('/work/oversized', Buffer.alloc(9 * 1024 * 1024)); result.tmpUnbounded = true; } catch (error) { result.tmpError = error.code; }
     result.network = await new Promise(resolve => {
       const socket = net.connect(3148,'127.0.0.1');
@@ -40,9 +42,8 @@ test("simulated VM escape: arbitrary Node is nonroot, has no host data/secrets/n
   >;
   expect(value.uid).not.toBe(0);
   expect(value.environment).toEqual({ PATH: "/usr/bin", LANG: "C.UTF-8", TMPDIR: "/work" });
-  expect(Object.values(value.hostFiles as object)).toEqual(Array(7).fill(false));
+  expect(Object.values(value.hostFiles as object)).toEqual(Array(9).fill(false));
   expect(value.runtimeWritable).toBe(false);
-  expect(value.hostTmpWritable).toBe(false);
   expect(value.tmpError).toBe("ENOSPC");
   expect(value.network).toBe(false);
 });

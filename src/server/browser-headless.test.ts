@@ -59,26 +59,41 @@ describe("shared headless browser protection", () => {
     },
     45_000,
   );
-  it.each(["linux", "win32", "darwin"])(
-    "explicitly enables the Chrome sandbox on %s",
-    async (platform) => {
-      const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
-      const uid = process.getuid && vi.spyOn(process, "getuid").mockReturnValue(1000);
-      Object.defineProperty(process, "platform", { value: platform, configurable: true });
+  it.each(["win32", "darwin"])("explicitly enables the Chrome sandbox on %s", async (platform) => {
+    const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+    const uid = process.getuid && vi.spyOn(process, "getuid").mockReturnValue(1000);
+    Object.defineProperty(process, "platform", { value: platform, configurable: true });
+    try {
+      const launch = vi.fn().mockResolvedValue({});
+      await launchHeadlessBrowser({ launch } as unknown as BrowserType, "/chrome", ["--test-arg"]);
+      expect(launch).toHaveBeenCalledWith({
+        headless: true,
+        executablePath: "/chrome",
+        chromiumSandbox: true,
+        args: ["--test-arg"],
+      });
+    } finally {
+      Object.defineProperty(process, "platform", descriptor);
+      uid?.mockRestore();
+    }
+  });
+
+  it.skipIf(process.platform !== "linux")(
+    "never launches Linux Chromium as the control-plane UID when isolation fails",
+    async () => {
+      const uid = vi.spyOn(process, "getuid").mockReturnValue(1000);
+      const launch = vi.fn();
       try {
-        const launch = vi.fn().mockResolvedValue({});
-        await launchHeadlessBrowser({ launch } as unknown as BrowserType, "/chrome", [
-          "--test-arg",
-        ]);
-        expect(launch).toHaveBeenCalledWith({
-          headless: true,
-          executablePath: "/chrome",
-          chromiumSandbox: true,
-          args: ["--test-arg"],
-        });
+        await expect(
+          launchHeadlessBrowser(
+            { launch } as unknown as BrowserType,
+            "/missing-chrome-fixture",
+            [],
+          ),
+        ).rejects.toThrow();
+        expect(launch).not.toHaveBeenCalled();
       } finally {
-        Object.defineProperty(process, "platform", descriptor);
-        uid?.mockRestore();
+        uid.mockRestore();
       }
     },
   );

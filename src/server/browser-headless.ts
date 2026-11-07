@@ -1,4 +1,11 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
+import {
+  browserAdmin,
+  browserDescendantPid,
+  browserSignal,
+  spawnBrowserProcess,
+} from "./browser-privilege";
+import { readBrowserProfileFile } from "./browser-profile";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +15,8 @@ import {
   isolatedBrowserEnvironment,
   prepareBrowserIsolation,
   removeBrowserIsolation,
+  ownsBrowserProcess,
+  assertBrowserIsolation,
 } from "./browser-isolation";
 import { stopBrowserChild } from "./browser-process";
 
@@ -17,7 +26,7 @@ export async function launchHeadlessBrowser(
   executable: string,
   args: string[],
 ): Promise<Browser> {
-  if (process.platform !== "linux" || process.getuid?.() !== 0) {
+  if (process.platform !== "linux") {
     return chromium.launch({
       headless: true,
       executablePath: executable,
@@ -28,6 +37,8 @@ export async function launchHeadlessBrowser(
 
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "batty-headless-"));
   let child: ChildProcess | undefined;
+  let browserPid: number | undefined;
+  let isolatedExecutable: string | undefined;
   let cleanupPromise: Promise<void> | undefined;
   const cleanup = () =>
     (cleanupPromise ??= (async () => {
@@ -35,7 +46,12 @@ export async function launchHeadlessBrowser(
         // Chrome can leave writers alive after its main process exits. This launch
         // owns a separate process group; end that group before deleting its profile.
         try {
-          process.kill(-child.pid, "SIGKILL");
+          if (isolatedExecutable)
+            browserPid ??= await browserDescendantPid(child.pid, isolatedExecutable);
+          if (browserPid && (await ownsBrowserProcess(directory, browserPid))) {
+            await assertBrowserIsolation(directory, browserPid);
+            await browserSignal(-browserPid, "SIGKILL");
+          }
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
         }
@@ -46,12 +62,13 @@ export async function launchHeadlessBrowser(
     })());
   try {
     const isolation = (await prepareBrowserIsolation(directory, executable))!;
+    isolatedExecutable = isolation.executable;
     const profile = path.join(isolation.directory, "profile");
-    await fs.chown(profile, isolation.uid, isolation.gid);
+    await browserAdmin("/usr/bin/chown", [`${isolation.uid}:${isolation.gid}`, profile]);
     const logPath = path.join(directory, "chromium.log");
     const log = await fs.open(logPath, "wx", 0o600);
     try {
-      child = spawn(
+      child = spawnBrowserProcess(
         "/usr/bin/setpriv",
         [
           `--reuid=${isolation.uid}`,
@@ -91,13 +108,10 @@ export async function launchHeadlessBrowser(
     while (Date.now() < deadline) {
       if (child.exitCode !== null || child.signalCode !== null)
         throw new Error(`Headless Chromium exited: ${await fs.readFile(logPath, "utf8")}`);
-      const port = await fs
-        .readFile(path.join(profile, "DevToolsActivePort"), "utf8")
-        .catch((error) => {
-          if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-          throw error;
-        });
-      if (port) {
+      browserPid ??= await browserDescendantPid(child.pid!, isolation.executable);
+      const port = await readBrowserProfileFile(directory, "DevToolsActivePort");
+      if (port && browserPid) {
+        await assertBrowserIsolation(directory, browserPid);
         const [number, browserPath] = port.trim().split("\n");
         endpoint = `ws://127.0.0.1:${number}${browserPath}`;
         break;

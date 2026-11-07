@@ -1,7 +1,6 @@
 // @vitest-environment node
 import { expect, test, vi } from "vite-plus/test";
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { prepareBrowserIsolation, removeBrowserIsolation } from "./browser-isolation";
 import { browserExecutablePath } from "./browser-executable";
@@ -12,7 +11,7 @@ test
   .each(["rename", "symlink"] as const)(
   "interrupted isolation %s resumes without losing the existing profile",
   async (operation) => {
-    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "batty-isolation-retry-"));
+    const directory = await fs.mkdtemp(path.join("/var/lib/batty-browser", "isolation-retry-"));
     const profile = path.join(directory, "profile");
     await fs.mkdir(profile);
     await fs.writeFile(path.join(profile, "saved-login"), "retained");

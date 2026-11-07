@@ -1,6 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { spawn, execFile, type ChildProcess } from "node:child_process";
+import { execFile, type ChildProcess } from "node:child_process";
+import {
+  browserAdmin,
+  browserDescendantPid,
+  browserSignal,
+  spawnBrowserProcess,
+} from "./browser-privilege";
 import { promisify } from "node:util";
 import { randomBytes } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
@@ -67,7 +73,7 @@ export async function createBrowserDisplay(
     });
   const allowBrowser = async () => {
     if (!isolation) return;
-    await fs.chown(authority, 0, isolation.gid);
+    await browserAdmin("/usr/bin/chown", [`${process.getuid!()}:${isolation.gid}`, authority]);
     await fs.chmod(authority, 0o640);
   };
   await auth(":0");
@@ -76,7 +82,7 @@ export async function createBrowserDisplay(
   let child: ChildProcess | undefined;
   try {
     signal?.throwIfAborted();
-    child = spawn(
+    child = spawnBrowserProcess(
       isolation ? "/usr/bin/setpriv" : "Xvfb",
       [
         ...(isolation
@@ -111,7 +117,12 @@ export async function createBrowserDisplay(
     await allowBrowser();
     child.stdout!.destroy();
     child.unref();
-    return { pid: child.pid!, display, authority };
+    const pid =
+      isolation && process.getuid?.() !== 0
+        ? await browserDescendantPid(child.pid!, "/usr/bin/Xvfb")
+        : child.pid!;
+    if (!pid) throw new Error("Private browser display process is missing");
+    return { pid, display, authority };
   } catch (error) {
     if (child) await stopBrowserChild(child);
     throw error;
@@ -136,19 +147,19 @@ export async function stopBrowserDisplay(display: BrowserDisplay): Promise<void>
       throw new Error(`Private browser display PID ${display.pid} belongs to another process`);
     return true;
   };
-  const signal = (value: NodeJS.Signals) => {
+  const signal = async (value: NodeJS.Signals) => {
     try {
-      process.kill(display.pid, value);
+      await browserSignal(display.pid, value);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
     }
   };
   if (!(await ownsProcess())) return;
-  signal("SIGTERM");
+  await signal("SIGTERM");
   const deadline = Date.now() + 1000;
   while (Date.now() < deadline) {
     if (!(await ownsProcess())) return;
     await delay(50);
   }
-  if (await ownsProcess()) signal("SIGKILL");
+  if (await ownsProcess()) await signal("SIGKILL");
 }

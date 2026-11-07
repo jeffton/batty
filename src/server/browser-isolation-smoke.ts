@@ -6,6 +6,7 @@ import http from "node:http";
 import { once } from "node:events";
 import { BrowserService } from "./browser-service";
 import { removeBrowserIsolation } from "./browser-isolation";
+import { browserAdmin } from "./browser-privilege";
 import { browserSessionDirectory, readBrowserJson } from "./browser-persistence";
 import { SshSocksProxy } from "./ssh-socks-proxy";
 import { startNativeBrowserVideo } from "./native-browser-video";
@@ -13,7 +14,7 @@ import { startNativeBrowserVideo } from "./native-browser-video";
 export async function verifyBrowserIsolation(): Promise<void> {
   // Isolated synthetic data only; no service state, credentials or account interaction.
   assert.equal(process.platform, "linux");
-  assert.equal(process.getuid?.(), 0);
+  const controlUid = process.getuid!();
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-isolation-smoke-"));
   const website = http.createServer((req, res) => {
     if (req.url === "/download") {
@@ -41,6 +42,7 @@ export async function verifyBrowserIsolation(): Promise<void> {
     const isolation = (await readBrowserJson<{ uid: number; gid: number; directory: string }>(
       path.join(directory, "isolation.json"),
     ))!;
+    assert.notEqual(isolation.uid, controlUid);
     const status = await fs.readFile(`/proc/${receipt.pid}/status`, "utf8");
     assert.match(status, new RegExp(`Uid:\\s+${isolation.uid}\\s+${isolation.uid}`));
     assert.match(status, /Groups:\s*\n/);
@@ -50,7 +52,7 @@ export async function verifyBrowserIsolation(): Promise<void> {
     assert(!command.includes("--no-sandbox"));
     if (process.env.BATTY_BROWSER_EXECUTABLE_PATH)
       assert.equal(
-        await fs.readlink(`/proc/${receipt.pid}/exe`),
+        await browserAdmin("/usr/bin/readlink", [`/proc/${receipt.pid}/exe`]),
         process.env.BATTY_BROWSER_EXECUTABLE_PATH,
       );
     const { page } = await service.cloudTarget(id);
@@ -126,7 +128,8 @@ export async function verifyBrowserIsolation(): Promise<void> {
       JSON.stringify(
         {
           browserVersion: page.context().browser()!.version(),
-          executable: await fs.readlink(`/proc/${receipt.pid}/exe`),
+          executable: await browserAdmin("/usr/bin/readlink", [`/proc/${receipt.pid}/exe`]),
+          controlUid,
           uid: isolation.uid,
           gid: isolation.gid,
           supplementaryGroups: [],

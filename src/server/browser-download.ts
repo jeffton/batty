@@ -1,5 +1,5 @@
 import fs from "node:fs/promises";
-import { spawn } from "node:child_process";
+import { spawnBrowserProcess } from "./browser-privilege";
 import { stopBrowserChild } from "./browser-process";
 import type { BrowserIsolation } from "./browser-isolation";
 
@@ -12,7 +12,7 @@ export async function copyIsolatedBrowserDownload(
   // The output stays in a root-only directory. The child receives a write-only
   // descriptor, not traversal permission or ownership of the returned file.
   const output = await fs.open(destination, "wx", 0o600);
-  const child = spawn(
+  const child = spawnBrowserProcess(
     "/usr/bin/setpriv",
     [
       `--reuid=${isolation.uid}`,

@@ -1,4 +1,4 @@
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { execFile, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
@@ -10,6 +10,13 @@ import { createBrowserDisplay, stopBrowserDisplay, type BrowserDisplay } from ".
 import { stopBrowserChild } from "./browser-process";
 import { browserAbortable } from "./browser-abort";
 import { browserExecutablePath } from "./browser-executable";
+import {
+  browserAdmin,
+  browserDescendantPid,
+  browserSignal,
+  spawnBrowserProcess,
+} from "./browser-privilege";
+import { readBrowserProfileFile } from "./browser-profile";
 import {
   prepareBrowserIsolation,
   assertBrowserIsolation,
@@ -38,18 +45,13 @@ async function profileBrowserPid(directory: string): Promise<number | undefined>
     if (pids.length > 1) throw new Error(`Multiple Chromium owners for ${directory}`);
     return pids[0];
   }
-  const lock = await fs
-    .readlink(path.join(directory, "profile", "SingletonLock"))
-    .catch((error) => {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-      throw error;
-    });
+  const lock = await readBrowserProfileFile(directory, "SingletonLock", true);
   return lock ? Number(lock.slice(lock.lastIndexOf("-") + 1)) : undefined;
 }
 
 async function terminateBrowser(pid: number, signal: NodeJS.Signals): Promise<void> {
   try {
-    process.kill(pid, 0);
+    await browserSignal(pid, 0);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ESRCH") return;
     throw error;
@@ -60,7 +62,7 @@ async function terminateBrowser(pid: number, signal: NodeJS.Signals): Promise<vo
     });
   } else {
     try {
-      process.kill(-pid, signal);
+      await browserSignal(-pid, signal);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
     }
@@ -81,7 +83,7 @@ export async function interruptedBrowser(
   );
   if (!receipt) return undefined;
   try {
-    process.kill(receipt.pid, 0);
+    await browserSignal(receipt.pid, 0);
     return undefined;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
@@ -128,7 +130,7 @@ export async function persistentBrowserDisplay(
       ),
       { statusCode: 426 },
     );
-  process.kill(display.pid, 0);
+  await browserSignal(display.pid, 0);
   return { display: display.display, authority: display.authority };
 }
 
@@ -167,7 +169,7 @@ export async function connectPersistentBrowser(
   if (receipt) {
     // A dead browser is an explicit interruption, never silently replaced with
     // an empty profile/page. action=close lets the user clear the dead session.
-    process.kill(receipt.pid, 0);
+    await browserSignal(receipt.pid, 0);
     await assertBrowserIsolation(directory, receipt.pid);
     const browser = await connect(receipt.endpoint);
     return { browser, receipt, created: false };
@@ -184,13 +186,8 @@ export async function connectPersistentBrowser(
       signal?.throwIfAborted();
       let pid = starting?.pid;
       if (!pid) pid = await profileBrowserPid(directory);
-      if (pid) process.kill(pid, 0);
-      const port = await fs
-        .readFile(path.join(directory, "profile", "DevToolsActivePort"), "utf8")
-        .catch((error) => {
-          if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-          throw error;
-        });
+      if (pid) await browserSignal(pid, 0);
+      const port = await readBrowserProfileFile(directory, "DevToolsActivePort");
       if (pid && port) {
         await assertBrowserIsolation(directory, pid);
         const [number, browserPath] = port.trim().split("\n");
@@ -225,12 +222,20 @@ export async function connectPersistentBrowser(
   try {
     const executable = browserExecutablePath();
     isolation = await prepareBrowserIsolation(directory, executable);
-    await fs.mkdir(profile, { recursive: true, mode: 0o700 });
+    if (!isolation) await fs.mkdir(profile, { recursive: true, mode: 0o700 });
     const initialized = await readBrowserJson<boolean>(path.join(directory, "profile-ready.json"));
     // Existing isolated profiles are already initialized once their root directory
     // belongs to Chromium. Ownership is transferred last, so interrupted setup retries
     // without following files that an unprivileged browser could have modified.
-    const browserOwned = isolation && (await fs.stat(profile)).uid === isolation.uid;
+    const browserOwned =
+      isolation &&
+      Number(
+        await browserAdmin("/usr/bin/stat", [
+          "-c",
+          "%u",
+          path.join(isolation.directory, "profile"),
+        ]),
+      ) === isolation.uid;
     // Chromium profile preferences, not command-line feature names: both native
     // bubbles obscure our streamed webpage. Write only before a new process owns
     // the profile; never race Chrome's preference writer in an active session.
@@ -286,7 +291,7 @@ export async function connectPersistentBrowser(
     try {
       signal?.throwIfAborted();
       const env = isolation ? isolatedBrowserEnvironment(isolation) : process.env;
-      child = spawn(
+      child = spawnBrowserProcess(
         isolation ? "/usr/bin/setpriv" : executable,
         [
           ...(isolation
@@ -317,11 +322,7 @@ export async function connectPersistentBrowser(
       await log.close();
     }
     child.unref();
-    const pid = child.pid!;
-    await writeBrowserJson(path.join(directory, "process.json"), {
-      pid,
-      useTailscale: options.useTailscale,
-    });
+    let pid = process.getuid?.() === 0 || !isolation ? child.pid! : undefined;
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
       signal?.throwIfAborted();
@@ -329,13 +330,14 @@ export async function connectPersistentBrowser(
         throw new Error(
           `Persistent Chromium exited: ${await fs.readFile(path.join(directory, "chromium.log"), "utf8")}`,
         );
-      const portFile = await fs
-        .readFile(path.join(profile, "DevToolsActivePort"), "utf8")
-        .catch((error) => {
-          if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-          throw error;
+      pid ??= await browserDescendantPid(child.pid!, isolation!.executable);
+      const portFile = await readBrowserProfileFile(directory, "DevToolsActivePort");
+      if (portFile && pid) {
+        if (isolation) await assertBrowserIsolation(directory, pid);
+        await writeBrowserJson(path.join(directory, "process.json"), {
+          pid,
+          useTailscale: options.useTailscale,
         });
-      if (portFile) {
         const [port, browserPath] = portFile.trim().split("\n");
         receipt = {
           pid,
@@ -352,7 +354,13 @@ export async function connectPersistentBrowser(
     const cleanupErrors: unknown[] = [];
     try {
       if (child?.pid) {
-        await terminateBrowser(child.pid, "SIGKILL");
+        const pid = isolation
+          ? await browserDescendantPid(child.pid, isolation.executable)
+          : child.pid;
+        if (pid && (!isolation || (await ownsBrowserProcess(directory, pid)))) {
+          if (isolation) await assertBrowserIsolation(directory, pid);
+          await terminateBrowser(pid, "SIGKILL");
+        }
         await stopBrowserChild(child);
       }
     } catch (cleanupError) {
@@ -407,7 +415,7 @@ export async function closePersistentBrowser(directory: string, browser?: Browse
     const deadline = Date.now() + 5000;
     while (Date.now() < deadline) {
       try {
-        process.kill(receipt.pid, 0);
+        await browserSignal(receipt.pid, 0);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ESRCH") break;
         throw error;
@@ -445,5 +453,15 @@ async function clearBrowserSessionReceipts(directory: string): Promise<void> {
     "cloud.json",
     "profile/DevToolsActivePort",
   ])
-    await fs.rm(path.join(directory, name), { force: true });
+    if (name.startsWith("profile/") && process.platform === "linux" && process.getuid?.() !== 0) {
+      const isolation = await readBrowserJson<BrowserIsolation>(
+        path.join(directory, "isolation.json"),
+      );
+      if (isolation)
+        await browserAdmin("/usr/bin/rm", [
+          "-f",
+          "--",
+          path.join(isolation.directory, "profile", "DevToolsActivePort"),
+        ]);
+    } else await fs.rm(path.join(directory, name), { force: true });
 }

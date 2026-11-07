@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { isolatedBrowserExecutablePath } from "./browser-executable";
+import { browserAdmin } from "./browser-privilege";
 
 const ROOT = "/var/lib/batty-browser";
 const USER = "batty-browser";
@@ -20,7 +21,7 @@ export async function prepareBrowserIsolation(
   directory: string,
   executable: string,
 ): Promise<BrowserIsolation | undefined> {
-  if (process.platform !== "linux" || process.getuid?.() !== 0) return undefined;
+  if (process.platform !== "linux") return undefined;
   const id = async (flag: string) =>
     Number((await promisify(execFile)("id", [flag, USER], { timeout: 5000 })).stdout.trim());
   const [uid, gid] = await Promise.all([id("-u"), id("-g")]);
@@ -37,16 +38,29 @@ export async function prepareBrowserIsolation(
     : {
         uid,
         gid,
-        directory: await fs.mkdtemp(path.join(ROOT, "sessions", "browser-")),
+        directory: await browserAdmin("/usr/bin/mktemp", [
+          "-d",
+          path.join(ROOT, "sessions", "browser-XXXXXXXXXX"),
+        ]),
         executable: installed,
       };
   const isolated = isolation.directory;
+  await browserAdmin("/usr/bin/chown", [`${process.getuid!()}:${gid}`, isolated]);
+  await fs.chmod(isolated, 0o710);
   if (!previous) {
-    await fs.chown(isolated, 0, gid);
-    await fs.chmod(isolated, 0o710);
     const artifacts = path.join(isolated, "artifacts");
     await fs.mkdir(artifacts, { mode: 0o700 });
-    await fs.chown(artifacts, uid, gid);
+    await browserAdmin("/usr/bin/chown", [`${uid}:${gid}`, artifacts]);
+  }
+  // Named ACLs grant only the trusted control plane access, never the browser access
+  // to the control plane's home, provider credentials or sudo rights.
+  if (process.getuid!() !== 0) {
+    await browserAdmin("/usr/bin/setfacl", [
+      "-R",
+      "-m",
+      `u:${process.getuid!()}:rwX,d:u:${process.getuid!()}:rwx`,
+      isolated,
+    ]);
   }
   // Root-owned receipt: never derive cleanup paths from browser-controlled files.
   await fs.writeFile(path.join(directory, "isolation.json"), JSON.stringify(isolation), {
@@ -65,12 +79,19 @@ export async function prepareBrowserIsolation(
     return isolation;
   }
   if (existing) {
-    if (!existing.isDirectory() || existing.uid !== 0)
-      throw new Error("New browser profile must be a root-owned directory");
+    if (!existing.isDirectory() || existing.uid !== process.getuid!())
+      throw new Error("New browser profile must belong to the control-plane user");
     await fs.rename(profile, path.join(isolated, "profile"));
   } else {
     await fs.mkdir(path.join(isolated, "profile"), { recursive: true, mode: 0o700 });
   }
+  if (process.getuid!() !== 0)
+    await browserAdmin("/usr/bin/setfacl", [
+      "-R",
+      "-m",
+      `u:${process.getuid!()}:rwX,d:u:${process.getuid!()}:rwx`,
+      path.join(isolated, "profile"),
+    ]);
   await fs.symlink(path.join(isolated, "profile"), profile);
   return isolation;
 }
@@ -99,7 +120,7 @@ export async function ownsBrowserProcess(directory: string, pid: number): Promis
 }
 
 export async function assertBrowserIsolation(directory: string, pid: number): Promise<void> {
-  if (process.platform !== "linux" || process.getuid?.() !== 0) return;
+  if (process.platform !== "linux") return;
   const receipt = await fs
     .readFile(path.join(directory, "isolation.json"), "utf8")
     .catch((error) => {
@@ -117,7 +138,10 @@ export async function enableBrowserProfile(isolation: BrowserIsolation): Promise
   // Preferences were initialized by root, before Chromium could write symlinks.
   const profile = path.join(isolation.directory, "profile");
   for (const entry of ["Default/Preferences", "Default", ""]) {
-    await fs.chown(path.join(profile, entry), isolation.uid, isolation.gid);
+    await browserAdmin("/usr/bin/chown", [
+      `${isolation.uid}:${isolation.gid}`,
+      path.join(profile, entry),
+    ]);
   }
 }
 
@@ -129,7 +153,7 @@ export async function removeBrowserIsolation(directory: string): Promise<void> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
     throw error;
   }
-  await fs.rm(isolation.directory, { recursive: true, force: true });
+  await browserAdmin("/usr/bin/rm", ["-rf", "--", isolation.directory]);
   const profile = path.join(directory, "profile");
   const link = await fs.lstat(profile).catch((error) => {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;

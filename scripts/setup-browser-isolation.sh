@@ -4,6 +4,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 [[ $(id -u) == 0 ]] || { echo 'Run as root.' >&2; exit 1; }
 [[ ${1:-} == '' || ${1:-} == --test ]] || { echo 'Usage: setup-browser-isolation.sh [--test]' >&2; exit 1; }
+for command in sudo setpriv setsid setfacl; do
+  command -v "$command" >/dev/null || { echo "Browser isolation requires $command (install sudo, util-linux and acl)." >&2; exit 1; }
+done
 if ! id batty-browser >/dev/null 2>&1; then
   useradd --system --user-group --home-dir /var/lib/batty-browser/home --shell /usr/sbin/nologin batty-browser
 fi

@@ -6,6 +6,20 @@ mode=${1:-install}
 case $(uname -s) in
   Linux)
     [[ $(id -u) == 0 && $(uname -m) == x86_64 ]] || { echo 'Google Chrome Linux requires root installation on x86_64.' >&2; exit 1; }
+    . /etc/os-release
+    if [[ "$ID" == arch ]]; then
+      # Accept the reviewed, pacman-managed Google package; never fetch AUR code.
+      if [[ "$mode" == --update ]]; then
+        echo 'Arch Chrome updates require a reviewed google-chrome package rebuild with verified Google payload, followed by pacman -U. This helper does not build AUR packages.' >&2
+        exit 1
+      fi
+      executable=/opt/google/chrome/chrome
+      pacman -Q google-chrome >/dev/null
+      [[ -x "$executable" && $(realpath "$executable") == "$executable" ]] || { echo 'Install the reviewed google-chrome package at /opt/google/chrome/chrome.' >&2; exit 1; }
+      [[ $(pacman -Qqo "$executable") == google-chrome && $(stat -c %u "$executable") == 0 ]] || { echo 'Chrome must be root-owned and owned by the google-chrome pacman package.' >&2; exit 1; }
+      "$executable" --version
+      exit 0
+    fi
     command -v apt-get >/dev/null || { echo 'Install google-chrome-stable with your distribution package manager.' >&2; exit 1; }
     status=$(dpkg-query -W -f='${Status}' google-chrome-stable 2>/dev/null || true)
     if [[ "$status" != 'install ok installed' ]]; then

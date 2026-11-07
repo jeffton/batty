@@ -26,7 +26,7 @@ const tasks = computed(() => {
           {
             id: "memory",
             title: props.memoryError
-              ? "Memory preparation failed"
+              ? "Memory preparation error"
               : props.memoryPending
                 ? "Preparing memory"
                 : "Compacting memory",
@@ -54,6 +54,11 @@ const tasks = computed(() => {
       })),
   ];
 });
+const hasRunningTasks = computed(
+  () =>
+    Boolean(props.memoryPending || props.compacting) ||
+    tasks.value.some((task) => task.id !== "memory"),
+);
 const sessionTasks = computed(() => {
   const current = tasks.value.filter((task) => task.sessionId);
   if (selectedTask.value && !current.some((task) => task.id === selectedTask.value!.id)) {
@@ -86,8 +91,15 @@ function sessionToggle(taskId: string, event: Event): void {
     <Activity :size="17" aria-hidden="true" />
     <span class="tasks-control__info">
       <strong>{{ tasks.length }} {{ tasks.length === 1 ? "task" : "tasks" }}</strong>
-      <CircleAlert v-if="props.memoryError" :size="13" aria-label="Memory error" />
-      <span v-else-if="tasks.length" class="spinner tasks-control__spinner" aria-hidden="true" />
+      <span class="tasks-control__status">
+        <span v-if="hasRunningTasks" class="spinner tasks-control__spinner" aria-hidden="true" />
+        <CircleAlert
+          v-if="props.memoryError"
+          class="tasks-control__warning"
+          :class="{ 'tasks-control__warning--running': hasRunningTasks }"
+          aria-label="Memory error"
+        />
+      </span>
     </span>
   </button>
   <BasePopover
@@ -157,6 +169,7 @@ function sessionToggle(taskId: string, event: Event): void {
 }
 
 .tasks-control__info {
+  --button-icon-size: 0.7rem;
   min-width: 0;
   display: grid;
   gap: 0.2rem;
@@ -172,7 +185,23 @@ function sessionToggle(taskId: string, event: Event): void {
   color: var(--color-text-strong);
 }
 
+.tasks-control__status {
+  position: relative;
+  height: 0.7rem;
+}
+
+.tasks-control__warning {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.tasks-control__warning--running {
+  left: 0.9rem;
+}
+
 .tasks-control__spinner {
+  display: block;
   width: 0.7rem;
   height: 0.7rem;
   border-width: 1.5px;

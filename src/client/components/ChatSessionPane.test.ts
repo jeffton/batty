@@ -48,7 +48,7 @@ test("initial main snapshot shows preparation and SSE memory errors without poll
     expect(wrapper.getComponent(MessageComposer).props("error")).toBeUndefined();
     expect(wrapper.getComponent(MessageComposer).props("memoryError")).toBe("Memory failed");
     expect(wrapper.get(".tasks-popover__task").text()).toContain("Memory failed");
-    expect(wrapper.get(".tasks-popover__task").text()).toContain("Memory preparation failed");
+    expect(wrapper.get(".tasks-popover__task").text()).toContain("Memory preparation error");
     expect(wrapper.text()).not.toContain("Compacting");
     store.lastError = "Main request failed";
     store.activeSession.memoryPreparation.error = undefined;

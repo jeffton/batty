@@ -15,6 +15,14 @@
       createApp({
         setup: () => {
           const streaming = ref(params.has("streaming"));
+          const memoryError = ref();
+          const memoryPending = ref(params.has("memory") ? 1 : 0);
+          window.addEventListener("fixture:finish-memory", () => {
+            memoryPending.value = 0;
+          });
+          window.addEventListener("fixture:memory-error", () => {
+            memoryError.value = "Error: WebSocket closed 1000";
+          });
           const subagents = ref(
             params.has("tasks")
               ? [{ sessionId: "fixture-agent", prompt: "Fixture task", workspaceId: "fixture" }]
@@ -29,6 +37,8 @@
           return () =>
             h(MessageComposer, {
               streaming: streaming.value,
+              memoryPending: memoryPending.value,
+              memoryError: memoryError.value,
               subagents: subagents.value,
               onSubmit: (text) => {
                 submissions.push(text);

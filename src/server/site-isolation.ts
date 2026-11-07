@@ -44,7 +44,10 @@ export async function createSiteIsolationRuntime(source = SITE_WORKER_SOURCE): P
       dereference: true,
     });
     await fs.writeFile(path.join(root, "runtime/worker.mjs"), source);
-    await fs.mkdir(path.join(root, "tmp"));
+    // Own mountpoint ancestors before systemd enters the root directory so the
+    // application can remove the runtime without privileged cleanup afterward.
+    for (const directory of ["tmp", "var/tmp", "work"])
+      await fs.mkdir(path.join(root, directory), { recursive: true });
     const makeReadable = async (directory: string): Promise<void> => {
       await fs.chmod(directory, 0o755);
       for (const entry of await fs.readdir(directory, { withFileTypes: true })) {

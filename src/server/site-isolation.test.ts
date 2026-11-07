@@ -18,6 +18,22 @@ async function runtime(source: string) {
 }
 const noRequest = async () => null;
 
+test("the application owns mountpoints and can remove its runtime after a unit exits", async () => {
+  const root = await runtime(
+    "process.stdout.write(JSON.stringify({type:'done',value:true})+'\\n');",
+  );
+  const mountpoints = [root, `${root}/tmp`, `${root}/var`, `${root}/var/tmp`, `${root}/work`];
+  const expectApplicationOwnership = async () => {
+    for (const directory of mountpoints)
+      expect((await fs.stat(directory)).uid).toBe(process.getuid!());
+  };
+  await expectApplicationOwnership();
+  await expect(runSiteUnit(root, null, noRequest, AbortSignal.timeout(15000))).resolves.toBe(true);
+  await expectApplicationOwnership();
+  await fs.rm(root, { recursive: true });
+  await expect(fs.stat(root)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
 test("simulated VM escape: arbitrary Node is nonroot, has no host data/secrets/network and a read-only runtime plus bounded tmpfs", async () => {
   vi.stubEnv("BATTY_SITE_SECRET_ESCAPE_TEST", "must-not-inherit");
   const root = await runtime(`

@@ -1,4 +1,5 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { Context } from "@earendil-works/pi-ai";
 
 export const BATTY_RUNTIME_NOTICE_CUSTOM_TYPE = "batty-runtime-notice";
 const NOTICE_OPEN = "<batty-runtime-notice>";
@@ -11,7 +12,8 @@ export interface RuntimeNotice {
 }
 
 // Durable inputs use provider-compatible user messages. The envelope preserves
-// their application type through queued admission, storage.
+// their application type and full attachment metadata through admission and storage.
+// Project it to notice.text only at the model boundary, including native summaries.
 export function encodeRuntimeNotice(notice: RuntimeNotice): string {
   return `${NOTICE_OPEN}${JSON.stringify(notice)}${NOTICE_CLOSE}`;
 }
@@ -31,6 +33,52 @@ export function decodeRuntimeNotice(content: unknown): RuntimeNotice | undefined
   } catch {
     return undefined;
   }
+}
+
+/** Project persisted envelopes, including those embedded in native compaction transcripts.
+ * Attachment bodies remain in Durable history for UI display and explicit forwarding.
+ */
+function modelNoticeText(text: string): string {
+  let result = "";
+  let offset = 0;
+  let start = text.indexOf(NOTICE_OPEN);
+  while (start !== -1) {
+    let end = text.indexOf(NOTICE_CLOSE, start + NOTICE_OPEN.length);
+    let notice: RuntimeNotice | undefined;
+    // A report or diff may itself contain the closing marker inside its JSON string.
+    while (end !== -1) {
+      notice = decodeRuntimeNotice(text.slice(start, end + NOTICE_CLOSE.length));
+      if (notice) break;
+      end = text.indexOf(NOTICE_CLOSE, end + NOTICE_CLOSE.length);
+    }
+    if (!notice) {
+      start = text.indexOf(NOTICE_OPEN, start + NOTICE_OPEN.length);
+      continue;
+    }
+    result += text.slice(offset, start) + notice.text;
+    offset = end + NOTICE_CLOSE.length;
+    start = text.indexOf(NOTICE_OPEN, offset);
+  }
+  return result + text.slice(offset);
+}
+
+/** Both generation and completeSimple (native compaction) dispatch through this boundary. */
+export function projectRuntimeNoticeRequest(request: Context): Context {
+  return {
+    ...request,
+    messages: request.messages.map((message) => {
+      if (message.role !== "user") return message;
+      return {
+        ...message,
+        content:
+          typeof message.content === "string"
+            ? modelNoticeText(message.content)
+            : message.content.map((block) =>
+                block.type === "text" ? { ...block, text: modelNoticeText(block.text) } : block,
+              ),
+      };
+    }),
+  };
 }
 
 export function buildSubagentRuntimeNotice(_depth: number, prompt: string): RuntimeNotice {

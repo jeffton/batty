@@ -36,6 +36,7 @@ import { normalizeMessage, normalizeBlocks } from "./pi-state";
 import { hydrateRuntimeResultArtifacts } from "./runtime-result-artifacts-history";
 import { responseArtifacts, mergeResponseArtifacts } from "./artifact-forwarding";
 import { queuedPromptDisplay } from "./queued-prompt-display";
+import { projectRuntimeNoticeRequest } from "./runtime-notices";
 import { createHistoryIndex } from "./history-index";
 import { createMemorySearch } from "./memory-search";
 import { conversationPolicy } from "./conversation-policy";
@@ -226,8 +227,9 @@ export class Runtime {
     await memory.bind(harness, main, storage, await createMemorySearch(database));
     const streamSimple = recoverNetwork(models.streamSimple.bind(models));
     models.streamSimple = (model, request, options) => {
-      memory.validateRequest(request, options);
-      return streamSimple(model, request, options);
+      const projected = projectRuntimeNoticeRequest(request);
+      memory.validateRequest(projected, options);
+      return streamSimple(model, projected, options);
     };
     const settings = SettingsManager.create(cwd, dir);
     const providerAuth = new ProviderAuthService(

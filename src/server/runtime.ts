@@ -200,6 +200,7 @@ export class Runtime {
         cwd,
       },
     });
+    resources.bindMain(main.id);
     // Main uses the installed extensions' tools. Older MCP discovery persisted a
     // fixed allowlist, which otherwise hides tools added by later releases.
     await main.configure({ tools: null }, context);

@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { loadSkills, formatSkillsForPrompt } from "@earendil-works/pi-coding-agent";
-import { defineExtension, section } from "@earendil-works/pi-durable";
+import { defineExtension, section, type ConversationId } from "@earendil-works/pi-durable";
 import type { AppConfig } from "./config";
 import { stateDirPath } from "./options";
 import { listWorkspaces } from "./workspaces";
@@ -9,6 +9,7 @@ import { ATTACHMENT_DELIVERY_INSTRUCTION } from "./attachment-contract";
 
 export function createResources(config: AppConfig) {
   const agentDir = stateDirPath(config.battyDir);
+  let mainConversationId: ConversationId;
   function skills(cwd: string, assistantPath?: string) {
     const skillPaths = [path.join(agentDir, "skills"), path.join(cwd, ".batty", "skills")];
     if (assistantPath) {
@@ -40,6 +41,9 @@ export function createResources(config: AppConfig) {
   }
   return {
     skills,
+    bindMain(conversationId: ConversationId) {
+      mainConversationId = conversationId;
+    },
     async sessionSkills(cwd: string) {
       const workspaces = await listWorkspaces(config);
       const assistantPath = workspaces.find((workspace) => workspace.isAssistant)?.path;
@@ -49,10 +53,14 @@ export function createResources(config: AppConfig) {
       name: "batty-resources",
       sections: [
         section("attachments", () => ATTACHMENT_DELIVERY_INSTRUCTION),
-        section(
-          "assistant",
-          () =>
-            "You are running in Batty, a runtime with one permanent main thread. In main, you own the user's continuing conversation and integrate worker reports. Runtime notices identify subagent assignments, scheduled turns, steering and results; they are harness context, not messages written by the user. Follow the role and execution scope specified in the current assignment notice.",
+        section("assistant", (input) =>
+          [
+            "You are running in Batty, a runtime with one permanent main thread. In main, you own the user's continuing conversation and integrate worker reports.",
+            ...(input.conversationId === mainConversationId
+              ? ["You can run brief tool calls here, but delegate all tasks to subagents."]
+              : []),
+            "Runtime notices identify subagent assignments, scheduled turns, steering and results; they are harness context, not messages written by the user. Follow the role and execution scope specified in the current assignment notice.",
+          ].join(" "),
         ),
         section("cwd", (input) => input.agent.cwd),
         section("skills", (input) =>

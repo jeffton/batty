@@ -43,7 +43,7 @@ async function startServer(): Promise<ChildProcess> {
     env: {
       ...process.env,
       BATTY_PORT: String(port),
-      BATTY_PROVIDER_AUTH_PATH: "/root/github/.batty/auth.json",
+      BATTY_PROVIDER_AUTH_PATH: path.resolve(root, "../.batty/auth.json"),
       BATTY_SELF_PATH: root,
     },
     stdio: ["ignore", logFile.fd, logFile.fd],

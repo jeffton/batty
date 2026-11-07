@@ -2,6 +2,28 @@
 
 # Deployment lifecycle helpers shared by Linux and macOS.
 
+# The service invokes deployments with umask 0077. Installed code must remain
+# readable by the non-root runtime after ownership is transferred to root.
+install_release_files() {
+  local staged=$1 release=$2
+  mkdir -p "$release"
+  cp -a "$staged/." "$release/"
+  chown -R root:root "$release"
+  normalize_release_permissions "$release"
+}
+
+prepare_release_files() {
+  local staged=$1 release=$2 releases_dir=$3 active_release=$4
+  install_release_files "$staged" "$release"
+  copy_retained_client_assets "$releases_dir" "$release" "$active_release"
+  # Retained chunks are also created with the service's umask.
+  normalize_release_permissions "$release"
+}
+
+normalize_release_permissions() {
+  chmod -R a+rX,go-w "$1"
+}
+
 canonical_release_path() {
   (cd "$1" && pwd -P)
 }

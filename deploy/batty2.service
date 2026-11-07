@@ -5,12 +5,15 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=/root/github/batty
+User=roy
+Group=roy
+WorkingDirectory=/home/roy/github/batty
+Environment=HOME=/home/roy
+Environment=XDG_CONFIG_HOME=/home/roy/.config
 Environment=BATTY_HOST=127.0.0.1
 Environment=BATTY_PORT=3148
 Environment=BATTY_SELF_PATH=/opt/batty2/current
-Environment=BATTY_PROVIDER_AUTH_PATH=/root/github/.batty/auth.json
+Environment=BATTY_PROVIDER_AUTH_PATH=/home/roy/github/.batty/auth.json
 ExecStart=/usr/bin/node /opt/batty2/current/dist/server/main.mjs /var/lib/batty2
 Restart=on-failure
 RestartSec=2

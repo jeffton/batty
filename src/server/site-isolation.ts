@@ -14,8 +14,8 @@ let runtime: Promise<string> | undefined;
 const units = new Map<string, () => Promise<void>>();
 
 export async function createSiteIsolationRuntime(source = SITE_WORKER_SOURCE): Promise<string> {
-  if (process.platform !== "linux" || process.getuid?.() !== 0)
-    throw new Error("Site backend functions require Linux systemd isolation managed by root");
+  if (process.platform !== "linux")
+    throw new Error("Site backend functions require Linux systemd isolation");
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-site-runtime-"));
   try {
     const copy = async (source: string, destination: string) => {
@@ -95,12 +95,24 @@ export function siteIsolationProperties(root: string): string[] {
   ];
 }
 
+// Only system-manager operations are privileged. The application stages files as its
+// own user; systemd launches site code under DynamicUser with the sandbox below.
+function systemManagerCommand(name: "systemd-run" | "systemctl", args: string[]) {
+  const executable = `/usr/bin/${name}`;
+  return process.getuid?.() === 0
+    ? { executable, args }
+    : { executable: "/usr/bin/sudo", args: ["-n", "--", executable, ...args] };
+}
+
+async function systemctl(args: string[]) {
+  const command = systemManagerCommand("systemctl", args);
+  return exec(command.executable, command.args, { timeout: 5000 });
+}
+
 async function stopUnit(unit: string): Promise<void> {
   // Stop the cgroup, not only the local systemd-run helper. No user-controlled unit names.
-  await exec("systemctl", ["stop", unit], { timeout: 5000 }).catch(async (error) => {
-    const { stdout } = await exec("systemctl", ["show", unit, "--property=LoadState", "--value"], {
-      timeout: 5000,
-    });
+  await systemctl(["stop", unit]).catch(async (error) => {
+    const { stdout } = await systemctl(["show", unit, "--property=LoadState", "--value"]);
     if (stdout.trim() !== "not-found") throw error;
   });
 }
@@ -124,31 +136,28 @@ export async function runSiteUnit(
 ): Promise<unknown> {
   signal.throwIfAborted();
   const unit = `batty-site-${randomUUID()}.service`;
-  const child = spawn(
-    "systemd-run",
-    [
-      "--no-ask-password",
-      "--pipe",
-      "--wait",
-      "--collect",
-      "--service-type=exec",
-      `--unit=${unit}`,
-      ...siteIsolationProperties(root).flatMap((value) => ["--property", value]),
-      "/usr/bin/env",
-      "-i",
-      "PATH=/usr/bin",
-      "LANG=C.UTF-8",
-      "TMPDIR=/work",
-      "/usr/bin/node",
-      "/runtime/worker.mjs",
-    ],
-    {
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" },
-      timeout: 75_000,
-      killSignal: "SIGKILL",
-    },
-  );
+  const launch = systemManagerCommand("systemd-run", [
+    "--no-ask-password",
+    "--pipe",
+    "--wait",
+    "--collect",
+    "--service-type=exec",
+    `--unit=${unit}`,
+    ...siteIsolationProperties(root).flatMap((value) => ["--property", value]),
+    "/usr/bin/env",
+    "-i",
+    "PATH=/usr/bin",
+    "LANG=C.UTF-8",
+    "TMPDIR=/work",
+    "/usr/bin/node",
+    "/runtime/worker.mjs",
+  ]);
+  const child = spawn(launch.executable, launch.args, {
+    stdio: ["pipe", "pipe", "pipe"],
+    env: { PATH: "/usr/bin:/bin", LANG: "C.UTF-8" },
+    timeout: 75_000,
+    killSignal: "SIGKILL",
+  });
   let markRegistered!: () => void;
   let rejectRegistration!: (error: Error) => void;
   const registered = new Promise<void>((resolve, reject) => {

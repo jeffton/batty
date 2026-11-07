@@ -1,8 +1,11 @@
 // @vitest-environment node
 import fs from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { afterEach, expect, test, vi } from "vite-plus/test";
 import { createSiteIsolationRuntime, runSiteUnit } from "./site-isolation";
 
+const exec = promisify(execFile);
 const roots: string[] = [];
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -47,6 +50,55 @@ test("simulated VM escape: arbitrary Node is nonroot, has no host data/secrets/n
   expect(value.tmpError).toBe("ENOSPC");
   expect(value.network).toBe(false);
 });
+
+test.skipIf(process.getuid?.() === 0 && !process.env.BATTY_SITE_TEST_USER)(
+  "an unprivileged application uses sudo without granting site code its UID or privileges",
+  async () => {
+    const callerIsRoot = process.getuid?.() === 0;
+    const user = callerIsRoot ? process.env.BATTY_SITE_TEST_USER! : String(process.getuid!());
+    const { stdout: uid } = await exec("id", ["-u", user]);
+    const { stdout: gid } = await exec("id", ["-g", user]);
+    const root = await runtime(`
+    import fs from 'node:fs';
+    const status = fs.readFileSync('/proc/self/status', 'utf8');
+    process.stdout.write(JSON.stringify({type:'done',value:{uid:process.getuid(),status}})+'\\n');
+  `);
+    const hangingRoot = await runtime("process.on('SIGTERM',()=>{});setInterval(()=>{},1000);");
+    // Import the source while root can traverse this checkout, then exercise the
+    // actual system-manager bridge with every UID/GID dropped to the service user.
+    const { stdout } = await exec(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        "--input-type=module",
+        "-e",
+        `
+        const {runSiteUnit} = await import(${JSON.stringify(import.meta.url.replace(/\.test\.ts$/, ".ts"))});
+        if (${callerIsRoot}) {
+          process.setgroups([]);
+          process.setgid(${Number(gid)});
+          process.setuid(${Number(uid)});
+        }
+        const value = await runSiteUnit(${JSON.stringify(root)}, null, async () => null, AbortSignal.timeout(15000));
+        let cancellation;
+        try {
+          await runSiteUnit(${JSON.stringify(hangingRoot)}, null, async () => null, AbortSignal.timeout(300));
+        } catch (error) { cancellation = error.message; }
+        console.log(JSON.stringify({caller:process.getuid(), value, cancellation}));
+      `,
+      ],
+      { timeout: 25000 },
+    );
+    const result = JSON.parse(stdout);
+    expect(result.caller).toBe(Number(uid));
+    expect(result.value.uid).not.toBe(0);
+    expect(result.value.uid).not.toBe(Number(uid));
+    expect(result.value.status).toMatch(/NoNewPrivs:\s+1/);
+    expect(result.value.status).toMatch(/CapEff:\s+0+/);
+    expect(result.cancellation).toMatch(/cancelled/);
+  },
+);
 
 test("unit exit kills descendants before returning, even after arbitrary Node execution", async () => {
   const root = await runtime(`

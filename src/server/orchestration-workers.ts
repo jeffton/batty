@@ -249,25 +249,27 @@ export function createWorkers(
               : ""
           }`.trimEnd();
         const parent = (await runtime.conversation(task.input.parentId, ctx))!;
-        const submission = await parent.submit(
-          {
-            type: "input",
-            content: encodeRuntimeNotice({
-              kind: "subagent",
-              text,
-              data: {
-                subagent: { sessionId: task.input.workerId },
-                ...(artifacts ? { runtimeResultArtifacts: artifacts } : {}),
-              },
-            }),
-            whenBusy: "steer",
-            requestId: `batty-join:${task.id}`,
-          },
-          ctx,
-        );
         await runtime.commit(async (tx) => {
-          const completion = (await tx.doc(WorkerDoc, task.input.parentId)).completion!;
-          if (!completion.inputs.includes(submission.id)) completion.inputs.push(submission.id);
+          // A repeated await may already have returned the completed result.
+          // Arbitrate that receipt and notification admission on the same line.
+          const receipt = await tx.doc(DeliveryRecord, String(task.input.target), {});
+          if (!receipt.joinConsumed) {
+            const submission = await parent.submit(tx, {
+              type: "input",
+              content: encodeRuntimeNotice({
+                kind: "subagent",
+                text,
+                data: {
+                  subagent: { sessionId: task.input.workerId },
+                  ...(artifacts ? { runtimeResultArtifacts: artifacts } : {}),
+                },
+              }),
+              whenBusy: "steer",
+              requestId: `batty-join:${task.id}`,
+            });
+            const completion = (await tx.doc(WorkerDoc, task.input.parentId)).completion!;
+            if (!completion.inputs.includes(submission)) completion.inputs.push(submission);
+          }
           return { status: "terminal", outcome: { status: "completed", result: null } };
         }, ctx);
       },
@@ -627,7 +629,23 @@ export function createWorkers(
             );
             completion.waits[String(target)] = waiter;
           }
-          (await tx.doc(DeliveryRecord, String(target), {})).join = waiter ?? api.taskId;
+          const receipt = await tx.doc(DeliveryRecord, String(target), {});
+          receipt.join = waiter ?? api.taskId;
+          if (!waiting) {
+            receipt.joinConsumed = true;
+            // The first await's continuation may be queued behind another
+            // helper. Returning it here consumes that pending notification too.
+            const joined =
+              waiter === undefined
+                ? undefined
+                : await tx.submissionByRequest(api.conversationId, `batty-join:${waiter}`);
+            if (joined?.status === "queued") {
+              tx.settleSubmission(joined.id, { status: "unanswered", reason: "aborted" });
+              const inbox = await tx.doc(InboxDoc, api.conversationId);
+              inbox.items = inbox.items.filter((item) => item.id !== joined.id);
+              completion.inputs = completion.inputs.filter((id) => id !== joined.id);
+            }
+          }
           const live = await tx.doc(LiveDoc, api.conversationId);
           doc.joinParents ??= {};
           // Inputs survive generation handovers; taskId changes every tool round.

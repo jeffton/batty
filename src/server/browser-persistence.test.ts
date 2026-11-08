@@ -16,7 +16,8 @@ import { browserExecutablePath } from "./browser-executable";
 
 vi.mock("./browser-executable", () => ({ browserExecutablePath: vi.fn() }));
 
-// Failure fixtures launch fake executables, not the installed unprivileged Chromium.
+// These fixtures model the direct-launch control plane with isolation disabled.
+// Rootless Linux's sudo/browser-UID boundary is exercised by the isolation tests.
 vi.mock("./browser-isolation", async (original) => {
   const actual = await original<typeof import("./browser-isolation")>();
   return {
@@ -35,6 +36,7 @@ vi.mock("./browser-display", () => ({
 let directory: string;
 beforeEach(async () => {
   vi.clearAllMocks();
+  if (process.getuid) vi.spyOn(process, "getuid").mockReturnValue(0);
   directory = await fs.mkdtemp(path.join(os.tmpdir(), "batty-launch-failure-"));
   vi.mocked(createBrowserDisplay).mockResolvedValue({
     pid: 123456,
@@ -43,6 +45,7 @@ beforeEach(async () => {
   });
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   await fs.rm(directory, { recursive: true, force: true });
 });
 

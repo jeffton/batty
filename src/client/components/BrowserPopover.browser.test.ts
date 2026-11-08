@@ -806,7 +806,13 @@ test("native touch drag and cancellation survive rotation and disconnect", async
     await expect.poll(() => inspect("Number(document.body.dataset.cancels||0)")).toBeGreaterThan(0);
     // Rotation cancels a held remote finger before changing the coordinate system.
     const cancels = Number(await inspect("document.body.dataset.cancels"));
+    const startsBeforeRotation = Number(await inspect("document.body.dataset.starts"));
     await send("touchStart");
+    // Local CDP dispatch does not acknowledge delivery through the viewer socket.
+    // Hold an actual remote finger before testing that rotation cancels it.
+    await expect
+      .poll(() => inspect("Number(document.body.dataset.starts)"))
+      .toBeGreaterThan(startsBeforeRotation);
     await page.setViewportSize({ width: 844, height: 390 });
     await expect
       .poll(async () => (await service.cloudState(attachedBrowserId)).width)
@@ -818,9 +824,10 @@ test("native touch drag and cancellation survive rotation and disconnect", async
     // Closing the viewer cancels a touch without closing the browser or its page.
     const beforeClose = Number(await inspect("document.body.dataset.cancels"));
     const starts = Number(await inspect("document.body.dataset.starts"));
-    await expect
-      .poll(() => canvas.getAttribute("data-revision"))
-      .toBe((await service.cloudState(attachedBrowserId)).revision);
+    // Rotation can publish intermediate revisions while layout and encoding settle.
+    // Compare the current remote state and decoded frame together, not a revision
+    // sampled once before the poll starts.
+    await fittedViewerFrame(page);
     await send("touchStart", 200, 100);
     await expect
       .poll(() => inspect("Number(document.body.dataset.starts)"))

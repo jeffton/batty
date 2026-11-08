@@ -5,6 +5,7 @@ import { removeTestBrowserRoot } from "./test-browser-cleanup";
 import os from "node:os";
 import path from "node:path";
 import type { Browser } from "patchright";
+import { browserAdmin } from "./browser-privilege";
 import {
   closePersistentBrowser,
   connectPersistentBrowser,
@@ -39,8 +40,13 @@ test("Chromium reads native-prompt preferences before launch without disabling w
     expect((await getPreference("translate.enabled")).value).toBe(false);
     expect((await getPreference("credentials_enable_service")).value).toBe(false);
     expect((await getPreference("intl.accept_languages")).value).toBe("en-US,en");
+    const preferencesFile = path.join(directory, "profile", "Default", "Preferences");
+    // Chrome can atomically replace Preferences with an isolated-UID-owned file.
+    // Inspect this fixture through the admin helper, without changing its permissions.
     const preferences = JSON.parse(
-      await fs.readFile(path.join(directory, "profile", "Default", "Preferences"), "utf8"),
+      process.platform === "linux"
+        ? await browserAdmin("/usr/bin/cat", ["--", preferencesFile])
+        : await fs.readFile(preferencesFile, "utf8"),
     );
     expect(preferences.translate.unused_fixture_key).toBe("preserved");
     await page.goto(

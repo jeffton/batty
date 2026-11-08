@@ -15,6 +15,8 @@ import {
   readBrowserJson,
 } from "./browser-persistence";
 import { removeTestBrowserRoot } from "./test-browser-cleanup";
+import { ownsBrowserProcess } from "./browser-isolation";
+import { browserSignal } from "./browser-privilege";
 
 // Use a local fixture and isolated profile, never the shared workspace browser.
 test.skipIf(process.platform !== "linux").each([false, true])(
@@ -67,7 +69,8 @@ test.skipIf(process.platform !== "linux").each([false, true])(
         const running = await readBrowserJson<{ pid: number }>(
           path.join(directory, "browser.json"),
         );
-        process.kill(running!.pid, "SIGKILL");
+        expect(await ownsBrowserProcess(directory, running!.pid)).toBe(true);
+        await browserSignal(running!.pid, "SIGKILL");
         await expect.poll(() => interruptedBrowser(directory)).toBeDefined();
         await service.dispose();
         service = new BrowserService(undefined, 4, root);

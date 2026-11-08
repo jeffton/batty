@@ -4,12 +4,13 @@ import http from "node:http";
 import { once } from "node:events";
 import type { BrowserType } from "patchright";
 import { chromium } from "patchright";
+import { browserAdmin } from "./browser-privilege";
 import { browserExecutablePath } from "./browser-executable";
 import { launchHeadlessBrowser } from "./browser-headless";
 import { closeSharedBrowser, getSharedBrowser } from "./browser-runtime";
 
 describe("shared headless browser protection", () => {
-  it.skipIf(process.platform !== "linux" || process.getuid?.() !== 0)(
+  it.skipIf(process.platform !== "linux")(
     "retains shared launch, close and relaunch semantics",
     async () => {
       try {
@@ -27,7 +28,7 @@ describe("shared headless browser protection", () => {
     45_000,
   );
 
-  it.skipIf(process.platform !== "linux" || process.getuid?.() !== 0)(
+  it.skipIf(process.platform !== "linux")(
     "terminates its child and removes its profile when CDP attachment fails",
     async () => {
       let pid: number | undefined;
@@ -98,8 +99,8 @@ describe("shared headless browser protection", () => {
     },
   );
 
-  it.skipIf(process.platform !== "linux" || process.getuid?.() !== 0)(
-    "drops root credentials/environment, enables kernel sandboxing and cleans up on close",
+  it.skipIf(process.platform !== "linux")(
+    "drops control-plane credentials/environment, enables kernel sandboxing and cleans up on close",
     async () => {
       const server = http.createServer((_req, res) => res.end("<h1>Extraction fixture</h1>"));
       server.listen(0, "127.0.0.1");
@@ -118,10 +119,11 @@ describe("shared headless browser protection", () => {
         pid = processes.processInfo.find((entry) => entry.type === "browser")!.id;
         const status = await fs.readFile(`/proc/${pid}/status`, "utf8");
         expect(status).not.toMatch(/Uid:\s+0\s/);
+        expect(status).not.toMatch(new RegExp(`Uid:\\s+${process.getuid!()}\\s`));
         expect(status).toMatch(/Groups:\s*\n/);
         expect(status).toMatch(/CapEff:\s+0+\n/);
         expect(status).toMatch(/NoNewPrivs:\s+1\n/);
-        const env = await fs.readFile(`/proc/${pid}/environ`, "utf8");
+        const env = await browserAdmin("/bin/cat", [`/proc/${pid}/environ`]);
         expect(env).not.toContain("BATTY_HEADLESS_TEST_SENTINEL");
         expect(env).toContain("HOME=/var/lib/batty-browser/home");
         const args = (await fs.readFile(`/proc/${pid}/cmdline`, "utf8")).split("\0");

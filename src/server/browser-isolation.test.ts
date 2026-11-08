@@ -6,12 +6,10 @@ import { prepareBrowserIsolation, removeBrowserIsolation } from "./browser-isola
 import { browserExecutablePath } from "./browser-executable";
 import { verifyBrowserIsolation } from "./browser-isolation-smoke";
 
-test
-  .skipIf(process.platform !== "linux" || process.getuid?.() !== 0)
-  .each(["rename", "symlink"] as const)(
+test.skipIf(process.platform !== "linux").each(["rename", "symlink"] as const)(
   "interrupted isolation %s resumes without losing the existing profile",
   async (operation) => {
-    const directory = await fs.mkdtemp(path.join("/var/lib/batty-browser", "isolation-retry-"));
+    const directory = await fs.mkdtemp(path.join("/var/tmp", "batty-isolation-retry-"));
     const profile = path.join(directory, "profile");
     await fs.mkdir(profile);
     await fs.writeFile(path.join(profile, "saved-login"), "retained");
@@ -36,7 +34,7 @@ test
   },
 );
 
-test.skipIf(process.platform !== "linux" || process.getuid?.() !== 0)(
+test.skipIf(process.platform !== "linux")(
   "unprivileged Chromium uses namespace/seccomp sandbox with working upload, download and H.264",
   async () => {
     await expect(verifyBrowserIsolation()).resolves.toBeUndefined();

@@ -14,6 +14,7 @@ import { chromium, type Browser, type Page } from "patchright";
 import type { ViteDevServer } from "vite";
 import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
+import { launchWebKit } from "../test/webkit";
 
 let server: ViteDevServer;
 let browser: Browser;
@@ -270,8 +271,7 @@ test("toolbar starts a cloud browser and reopens the same live tabs on mobile", 
 }, 30_000);
 
 test("WebKit decodes production H.264, forwards taps and resumes after viewer reconnect", async () => {
-  const { webkit } = await import("playwright-core");
-  const viewer = await webkit.launch({ headless: true });
+  const viewer = await launchWebKit();
   const context = await viewer.newContext({
     viewport: { width: 390, height: 844 },
     isMobile: true,
@@ -338,8 +338,7 @@ test("WebKit decodes production H.264, forwards taps and resumes after viewer re
 }, 30_000);
 
 test("WebKit bottom autofill pair detects login steps without submitting or exposing values to controls", async () => {
-  const { webkit } = await import("playwright-core");
-  const viewer = await webkit.launch({ headless: true });
+  const viewer = await launchWebKit();
   const context = await viewer.newContext({
     viewport: { width: 390, height: 844 },
     isMobile: true,

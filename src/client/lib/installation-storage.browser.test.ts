@@ -1,6 +1,7 @@
 // @vitest-environment node
 import path from "node:path";
-import { chromium, webkit, type Browser, type BrowserContext, type Page } from "playwright-core";
+import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
+import { launchWebKit } from "../test/webkit";
 import type { ViteDevServer } from "vite";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
 import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
@@ -18,7 +19,7 @@ beforeAll(async () => {
   url = `${server.resolvedUrls!.local[0]}src/client/lib/InstallationStorage.fixture.html`;
   browsers = {
     Chromium: await chromium.launch({ headless: true }),
-    WebKit: await webkit.launch({ headless: true }),
+    WebKit: await launchWebKit(),
   };
 }, 30_000);
 afterAll(async () => {

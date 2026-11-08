@@ -2,14 +2,15 @@
 import path from "node:path";
 import vue from "@vitejs/plugin-vue";
 import { chromium, type Browser } from "patchright";
-import { webkit, type Page } from "playwright-core";
+import { type Page } from "playwright-core";
+import { launchWebKit } from "../test/webkit";
 import type { ViteDevServer } from "vite";
 import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
 
 let server: ViteDevServer;
 let browser: Browser;
-let webkitBrowser: Awaited<ReturnType<typeof webkit.launch>>;
+let webkitBrowser: Awaited<ReturnType<typeof launchWebKit>>;
 let url: string;
 
 beforeAll(async () => {
@@ -22,7 +23,7 @@ beforeAll(async () => {
   await server.listen();
   url = `${server.resolvedUrls!.local[0]}src/client/components/MessageComposer.fixture.html`;
   browser = await chromium.launch({ headless: true });
-  webkitBrowser = await webkit.launch({ headless: true });
+  webkitBrowser = await launchWebKit();
 }, 30_000);
 
 afterAll(async () => {

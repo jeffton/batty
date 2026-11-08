@@ -14,7 +14,7 @@ node scripts/verify-startup.mjs
 node scripts/verify-offline.mjs
 ```
 
-Run Linux deployment regression checks on Linux. Get an independent review and address findings before pushing. During development, `pnpm test` runs the non-browser groups; it does not replace the full pre-push gate.
+Run Linux deployment regression checks on Linux. Get an independent review and address findings before pushing. During development, `pnpm test` runs the non-browser groups; it does not replace the full pre-push gate. On Arch, use `pnpm test:all:isolated` for that gate: it runs every group with WebKit in the pinned Ubuntu container. `pnpm test:webkit` runs the browser groups only; see the isolated WebKit setup in `docs/operations.md`.
 
 Installations deploy validated commits. Deployment installs locked dependencies, builds and verifies service health and the expected build ID; do not rerun source checks, test suites or fixture-based offline tests there. The offline browser gate belongs before push.
 

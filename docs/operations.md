@@ -144,6 +144,43 @@ pnpm test:browser  # Browser fixtures, layout and native cache (Chromium/WebKit)
 pnpm test:all      # All groups; required before pushing
 ```
 
+### Isolated WebKit on Linux
+
+On Arch and other unsupported Playwright Linux hosts, install rootless Podman
+(`sudo pacman -S podman` on Arch) and configure the user's
+[subordinate UID/GID ranges](https://wiki.archlinux.org/title/Podman#Rootless_Podman).
+Run as the development user, not with sudo:
+
+```sh
+pnpm test:webkit                    # All browser fixtures, including WebKit
+pnpm test:webkit src/client/lib/main-cache.browser.test.ts  # The 19 cache tests
+pnpm test:all:isolated              # All groups, with the same Ubuntu WebKit
+```
+
+The runner builds a cached, test-only server from Microsoft's Ubuntu 24.04
+[Playwright image](https://playwright.dev/docs/docker#remote-connection), pinned
+by version and digest in `scripts/webkit/Containerfile`. Its locked driver must
+match the project's Playwright Core version. Update the image, server package
+and server lockfile together when changing Playwright; mismatches fail before
+tests start.
+
+Only WebKit runs in the container, as `pwuser` under rootless Podman with no
+capabilities or host mounts. The server listens on an ephemeral host-loopback
+port with a random WebSocket path and is removed after the run. No checkout,
+credentials, production data or host environment is passed into it. Playwright's
+`exposeNetwork: "<loopback>"` relay lets WebKit reach the local fixture servers.
+Chromium, native Chrome/H.264 integration, test code and disposable SQLite fixtures
+remain on the host; the container needs no systemd, sudo or host networking.
+Browser profiles live in its disposable filesystem, not the host browser cache.
+
+The ordinary `pnpm test`, `pnpm test:browser` and `pnpm test:all` commands retain
+native execution. The isolated commands select the Ubuntu browser explicitly;
+they neither retry with another engine nor skip failed tests. Native integration
+tests still require the host's documented browser setup and permissions. The
+runner defaults test `TMPDIR` to `/var/tmp` so profile-move fixtures stay on the
+`/var/lib` filesystem rather than a separate `/tmp` mount. An explicit `TMPDIR`
+overrides this setting.
+
 All groups share a three-worker thread pool, including browser fixtures with isolated module graphs. CLI worker overrides remain available for larger hosts. Browser fixture servers retain a separate dependency cache per fixture under `node_modules/.vite/batty-fixtures`; Vite invalidates dependency/configuration changes. Browser tests have a 30-second integration-test budget. Wait for observable state or events rather than fixed sleeps. Viewport cases cover layout; dark-mode cases cover styling rather than repeating every interaction.
 
 Before pushing changes, run the complete source validation below. Installations pull validated commits; deployment installs locked dependencies, builds the release and verifies the running service without repeating development checks or browser tests.

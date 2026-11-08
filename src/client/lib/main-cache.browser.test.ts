@@ -1,6 +1,7 @@
 // @vitest-environment node
 import path from "node:path";
-import { chromium, webkit, type Browser, type Page } from "playwright-core";
+import { chromium, type Browser, type Page } from "playwright-core";
+import { launchWebKit } from "../test/webkit";
 import type { ViteDevServer } from "vite";
 import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
@@ -24,7 +25,7 @@ beforeAll(async () => {
   await server.listen();
   url = `${server.resolvedUrls!.local[0]}src/client/lib/MainCache.fixture.html`;
   browser = await chromium.launch({ headless: true });
-  safari = await webkit.launch({ headless: true });
+  safari = await launchWebKit();
 }, 30_000);
 afterAll(async () => {
   await browser?.close();

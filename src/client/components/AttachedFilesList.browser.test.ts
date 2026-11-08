@@ -1,5 +1,5 @@
 // @vitest-environment node
-import fs from "node:fs/promises";
+import { buffer } from "node:stream/consumers";
 import path from "node:path";
 import fastify from "fastify";
 import vue from "@vitejs/plugin-vue";
@@ -8,6 +8,7 @@ import { webkit, type Browser } from "playwright-core";
 import sharp from "sharp";
 import { expect, test } from "vite-plus/test";
 import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
+import { launchWebKit } from "../test/webkit";
 
 for (const engine of [chromium, webkit]) {
   test(`${engine.name()}: attachment popover zooms without navigation and downloads authenticated bytes`, async () => {
@@ -42,7 +43,9 @@ for (const engine of [chromium, webkit]) {
     );
     await server.listen();
     const origin = server.resolvedUrls!.local[0]!;
-    const browser = (await engine.launch({ headless: true })) as unknown as Browser;
+    const browser = (await (engine === webkit
+      ? launchWebKit()
+      : engine.launch({ headless: true }))) as unknown as Browser;
     const context = await browser.newContext({
       viewport: { width: 390, height: 844 },
       hasTouch: true,
@@ -147,7 +150,7 @@ for (const engine of [chromium, webkit]) {
       const download = await downloadPromise;
       expect(download.url()).toMatch(/^blob:/);
       expect(download.suggestedFilename()).toBe("Cabin.jpg");
-      expect(await fs.readFile((await download.path())!)).toEqual(original);
+      expect(await buffer(await download.createReadStream())).toEqual(original);
       expect(requests.some((request) => request.search === "?download=1")).toBe(true);
       expect(requests.every((request) => request.authenticated)).toBe(true);
       expect(page.url()).toBe(url);

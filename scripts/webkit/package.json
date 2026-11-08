@@ -1,0 +1,7 @@
+{
+  "name": "batty-webkit-test-server",
+  "private": true,
+  "dependencies": {
+    "playwright-core": "1.64.1"
+  }
+}

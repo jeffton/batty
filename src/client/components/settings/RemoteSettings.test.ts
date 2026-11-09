@@ -34,7 +34,11 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(getRemoteSettings).mockResolvedValue(structuredClone(settings));
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  delete window.__BATTY_BASE_URL__;
+});
 
 function setup(open = true) {
   return mount(RemoteSettings, {
@@ -111,6 +115,11 @@ it("generates without a label, copies the token and clears secrets on close", as
   vi.stubGlobal("navigator", { clipboard: { writeText } });
   try {
     await flushPromises();
+    expect(wrapper.find('[aria-label="Copy token"]').exists()).toBe(false);
+    await wrapper.get('[aria-label="Copy URL"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[aria-label="Copy URL"]').text()).toBe("Copied");
+    expect(issueRemoteGrant).not.toHaveBeenCalled();
     vi.mocked(issueRemoteGrant).mockResolvedValueOnce({ id: "new", token: "issued-secret" });
     await generate(wrapper);
     await flushPromises();
@@ -122,7 +131,9 @@ it("generates without a label, copies the token and clears secrets on close", as
       .find((button) => button.text() === "Copy token")!
       .trigger("click");
     await flushPromises();
-    expect(writeText).toHaveBeenCalledWith("issued-secret");
+    expect(writeText.mock.calls).toEqual([[`${window.location.origin}/`], ["issued-secret"]]);
+    expect(wrapper.get('[aria-label="Copy token"]').text()).toBe("Copied");
+    expect(wrapper.get('[aria-label="Copy URL"]').text()).toBe("Copied");
     await wrapper.get('input[name="pairing-token"]').setValue("draft-secret");
     await wrapper.setProps({ open: false });
     expect(wrapper.find("textarea").exists()).toBe(false);
@@ -130,6 +141,52 @@ it("generates without a label, copies the token and clears secrets on close", as
     await wrapper.setProps({ open: true });
     await flushPromises();
     expect(wrapper.find("textarea").exists()).toBe(false);
+  } finally {
+    wrapper.unmount();
+  }
+});
+
+it.each([
+  ["https://batty.example", "/", "https://batty.example/"],
+  ["https://batty.example:8443", "/batty/", "https://batty.example:8443/batty"],
+  ["https://batty.example", "/nested/my%20app/", "https://batty.example/nested/my%20app"],
+  ["http://localhost:3148", "/", "http://localhost:3148/"],
+])(
+  "copies its own origin %s and app base %s, not the current route",
+  async (origin, base, expected) => {
+    vi.spyOn(window.location, "origin", "get").mockReturnValue(origin);
+    vi.spyOn(window.location, "pathname", "get").mockReturnValue("/settings/remote");
+    vi.spyOn(window.location, "search", "get").mockReturnValue("?secret=not-copied");
+    vi.spyOn(window.location, "hash", "get").mockReturnValue("#not-copied");
+    window.__BATTY_BASE_URL__ = base;
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const wrapper = setup();
+    try {
+      await flushPromises();
+      expect(wrapper.get("code").text()).toBe(expected);
+      await wrapper.get('[aria-label="Copy URL"]').trigger("click");
+      await flushPromises();
+      expect(writeText).toHaveBeenCalledExactlyOnceWith(expected);
+      expect(issueRemoteGrant).not.toHaveBeenCalled();
+      expect(wrapper.findAll("input")).toHaveLength(2);
+    } finally {
+      wrapper.unmount();
+    }
+  },
+);
+
+it("shows clipboard errors without claiming a successful copy", async () => {
+  vi.stubGlobal("navigator", {
+    clipboard: { writeText: vi.fn().mockRejectedValue(new Error("Clipboard denied")) },
+  });
+  const wrapper = setup();
+  try {
+    await flushPromises();
+    await wrapper.get('[aria-label="Copy URL"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[role="alert"]').text()).toBe("Clipboard denied");
+    expect(wrapper.get('[aria-label="Copy URL"]').text()).toBe("Copy URL");
   } finally {
     wrapper.unmount();
   }

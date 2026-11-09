@@ -10,6 +10,7 @@ import {
   removeRemoteConnection,
   revokeRemoteGrant,
 } from "@/client/lib/api";
+import { withBaseUrl } from "@/client/lib/base-url";
 import type { RemoteConnection, RemoteGrant } from "@/shared/remotes";
 
 const props = defineProps<{ open: boolean }>();
@@ -18,7 +19,9 @@ const grants = ref<RemoteGrant[]>([]);
 const connectionUrl = ref("");
 const connectionToken = ref("");
 const issued = ref<{ id: string; token: string }>();
-const copied = ref(false);
+const currentServerUrl = `${window.location.origin}${withBaseUrl("/")}`;
+const copiedUrl = ref(false);
+const copiedToken = ref(false);
 const pending = ref(false);
 const error = ref("");
 let opening = 0;
@@ -60,7 +63,7 @@ async function issueGrant(): Promise<void> {
   if (pending.value) return;
   const startedIn = opening;
   issued.value = undefined;
-  copied.value = false;
+  copiedToken.value = false;
   await perform(async () => {
     const result = await issueRemoteGrant();
     // Closing settings must also discard a secret still in flight.
@@ -84,12 +87,15 @@ async function removeConnection(id: string): Promise<void> {
   });
 }
 
-async function copyToken(): Promise<void> {
+async function copyValue(value: string, target: "url" | "token"): Promise<void> {
   const startedIn = opening;
   error.value = "";
   try {
-    await navigator.clipboard.writeText(issued.value!.token);
-    if (props.open && startedIn === opening) copied.value = true;
+    await navigator.clipboard.writeText(value);
+    if (props.open && startedIn === opening) {
+      if (target === "url") copiedUrl.value = true;
+      else copiedToken.value = true;
+    }
   } catch (cause) {
     if (props.open && startedIn === opening) {
       error.value = cause instanceof Error ? cause.message : String(cause);
@@ -100,7 +106,8 @@ async function copyToken(): Promise<void> {
 function clearSecrets(): void {
   connectionToken.value = "";
   issued.value = undefined;
-  copied.value = false;
+  copiedUrl.value = false;
+  copiedToken.value = false;
 }
 
 watch(
@@ -138,6 +145,20 @@ function connectionStatus(connection: RemoteConnection): string {
     <div v-if="error" class="settings-popover__error" role="alert">{{ error }}</div>
     <div v-if="pending" class="settings-popover__help" role="status">Working…</div>
     <div class="settings-popover__editor">
+      <div class="settings-popover__item-top">
+        <div class="settings-popover__item-meta">
+          <div class="settings-popover__group-title">This Batty</div>
+          <code class="settings-popover__help">{{ currentServerUrl }}</code>
+        </div>
+        <button
+          class="settings-popover__action"
+          type="button"
+          aria-label="Copy URL"
+          @click="copyValue(currentServerUrl, 'url')"
+        >
+          <Copy :size="14" /> {{ copiedUrl ? "Copied" : "Copy URL" }}
+        </button>
+      </div>
       <button
         class="settings-popover__action settings-popover__action--primary"
         type="button"
@@ -161,8 +182,13 @@ function connectionStatus(connection: RemoteConnection): string {
           />
         </SettingsField>
         <div class="settings-popover__help">Shown until you leave this tab.</div>
-        <button class="settings-popover__action" type="button" @click="copyToken">
-          <Copy :size="14" /> {{ copied ? "Copied" : "Copy token" }}
+        <button
+          class="settings-popover__action"
+          type="button"
+          aria-label="Copy token"
+          @click="copyValue(issued.token, 'token')"
+        >
+          <Copy :size="14" /> {{ copiedToken ? "Copied" : "Copy token" }}
         </button>
       </div>
       <div v-for="grant in grants" :key="grant.id" class="settings-popover__item-top">

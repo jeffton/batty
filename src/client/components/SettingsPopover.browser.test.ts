@@ -6,6 +6,7 @@ import { chromium, type Browser } from "patchright";
 import type { ViteDevServer } from "vite";
 import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
+import { launchWebKit } from "../test/webkit";
 
 let server: ViteDevServer;
 let browser: Browser;
@@ -185,6 +186,83 @@ test("Remote settings generates single-use tokens and adds peers with URL and to
     await page.close();
   }
 });
+
+for (const engine of ["chromium", "webkit"] as const) {
+  test(`Remote settings copies its own URL separately from the token in ${engine}`, async () => {
+    const instance = (engine === "webkit" ? await launchWebKit() : browser) as unknown as Browser;
+    try {
+      for (const width of [390, 1280]) {
+        const context = await instance.newContext(
+          engine === "chromium" ? { permissions: ["clipboard-read", "clipboard-write"] } : {},
+        );
+        const page = await context.newPage();
+        await page.setViewportSize({ width, height: 900 });
+        const base = "/nested/long%20workspace-name/batty/";
+        try {
+          await page.addInitScript((base) => {
+            window.__BATTY_BASE_URL__ = base;
+          }, base);
+          await page.route("**/api/**", async (route) => {
+            const input = route.request().method() === "POST" ? route.request().postDataJSON() : {};
+            await route.fulfill({
+              json:
+                input.action === "token-generate"
+                  ? { id: "fixture", token: "fixture-only-invitation" }
+                  : { grants: [], connections: [], names: [] },
+            });
+          });
+          await page.goto(`${url}?route=not-part-of-address#fragment`);
+          await page.getByRole("tab", { name: "Remote", exact: true }).click();
+          const panel = page.getByRole("region", { name: "Remote Batty", exact: true });
+          const expected = new URL(url).origin + base.slice(0, -1);
+          expect(await panel.locator("code").innerText()).toBe(expected);
+          expect(await panel.getByRole("button", { name: "Copy token", exact: true }).count()).toBe(
+            0,
+          );
+          await panel.getByRole("button", { name: "Copy URL", exact: true }).click();
+          await expect
+            .poll(() => panel.getByRole("button", { name: "Copy URL", exact: true }).innerText())
+            .toBe("Copied");
+          if (engine === "chromium")
+            expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(expected);
+          await panel.getByRole("button", { name: "Generate token", exact: true }).click();
+          await panel.getByRole("button", { name: "Copy token", exact: true }).click();
+          await expect
+            .poll(() => panel.getByRole("button", { name: "Copy token", exact: true }).innerText())
+            .toBe("Copied");
+          if (engine === "chromium")
+            expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+              "fixture-only-invitation",
+            );
+          expect(
+            await panel.getByRole("button", { name: "Copy URL", exact: true }).innerText(),
+          ).toBe("Copied");
+          expect(await panel.locator("input").count()).toBe(2);
+          expect(await panel.getByRole("alert").count()).toBe(0);
+          expect(
+            await panel.evaluate((element) => element.scrollWidth <= element.clientWidth),
+          ).toBe(true);
+          expect(
+            await panel.locator("code").evaluate((element) => {
+              const box = element.getBoundingClientRect();
+              return box.left >= 0 && box.right <= innerWidth;
+            }),
+          ).toBe(true);
+          if (captureScreenshots) {
+            await fs.mkdir(".tmp/ui-feedback", { recursive: true });
+            await page.screenshot({
+              path: `.tmp/ui-feedback/remote-own-url-${engine}-${width}.png`,
+            });
+          }
+        } finally {
+          await context.close();
+        }
+      }
+    } finally {
+      if (engine === "webkit") await instance.close();
+    }
+  });
+}
 
 test("Remote settings shows automatic peer names, offline status and pairing errors", async () => {
   for (const width of [390, 1280]) {

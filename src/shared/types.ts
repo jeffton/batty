@@ -142,6 +142,7 @@ export interface ActiveToolRun {
 }
 
 export interface WorkspaceInfo {
+  gitBranch?: string | null;
   id: string;
   label: string;
   path: string;

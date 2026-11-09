@@ -2,10 +2,10 @@
 import type { FileTree } from "@pierre/trees";
 import type { CodeView } from "@pierre/diffs";
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
-import { FolderTree, Search } from "@lucide/vue";
+import { FolderTree, Search, GitBranch } from "@lucide/vue";
 import WorkspaceFileSearch from "./WorkspaceFileSearch.vue";
 import FullPopover from "./FullPopover.vue";
-import { getWorkspaceFiles } from "@/client/lib/api";
+import { getWorkspaceFiles, getWorkspaceGit } from "@/client/lib/api";
 import type { WorkspaceInfo } from "@/shared/types";
 
 const props = defineProps<{ popoverId: string; workspace?: WorkspaceInfo }>();
@@ -15,6 +15,8 @@ let opened = false;
 const treeRoot = ref<HTMLElement>();
 const codeRoot = ref<HTMLElement>();
 const selectedPath = ref("");
+const branch = ref<string | null>(null);
+const branchError = ref("");
 const loadingFile = ref(false);
 const loadingDirectories = ref(0);
 const fileMessage = ref("");
@@ -111,9 +113,23 @@ async function selectFile(path: string): Promise<void> {
   }
 }
 
+async function loadBranch(currentGeneration: number): Promise<void> {
+  if (!props.workspace) return;
+  try {
+    const result = await getWorkspaceGit(props.workspace.id);
+    if (currentGeneration === generation) branch.value = result.branch;
+  } catch (cause) {
+    if (currentGeneration === generation)
+      branchError.value = cause instanceof Error ? cause.message : String(cause);
+  }
+}
+
 async function open(): Promise<void> {
   cleanUp();
   const currentGeneration = generation;
+  branch.value = null;
+  branchError.value = "";
+  void loadBranch(currentGeneration);
   selectedPath.value = "";
   loadingFile.value = false;
   loadingDirectories.value = 0;
@@ -215,6 +231,16 @@ onBeforeUnmount(() => {
     close-label="Close code browser"
     @toggle="handleToggle"
   >
+    <template v-if="branch || branchError" #header-content>
+      <div class="workspace-code__git">
+        <span v-if="branch" class="workspace-code__branch"
+          ><GitBranch :size="14" aria-hidden="true" />{{ branch }}</span
+        >
+        <span v-if="branchError" class="workspace-code__branch-error" role="alert">{{
+          branchError
+        }}</span>
+      </div>
+    </template>
     <template #header-actions>
       <button
         type="button"
@@ -279,6 +305,26 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.workspace-code__git {
+  min-width: 0;
+  padding: 0 1rem 0.65rem;
+  overflow-wrap: anywhere;
+}
+.workspace-code__branch {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  color: var(--color-text-subtle);
+  font-size: 0.78rem;
+}
+.workspace-code__branch svg {
+  flex-shrink: 0;
+}
+.workspace-code__branch-error {
+  color: var(--color-error);
+  font-size: 0.78rem;
+}
 .workspace-code {
   display: grid;
   grid-template-columns: minmax(12rem, 24%) minmax(0, 1fr);

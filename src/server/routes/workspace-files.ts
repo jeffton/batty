@@ -6,12 +6,23 @@ import type { WorkspaceFilesResponse, WorkspaceFileSearchEvent } from "@/shared/
 import { searchWorkspaceFileNames, withinWorkspace as within } from "../workspace-file-search";
 import type { AppConfig } from "../config";
 import { listWorkspaces } from "../workspaces";
+import { workspaceGitBranch } from "../workspace-git";
 
 function httpError(statusCode: number, message: string): Error {
   return Object.assign(new Error(message), { statusCode });
 }
 
 export function registerWorkspaceFileRoutes(app: FastifyInstance, config: AppConfig): void {
+  app.get<{ Params: { workspaceId: string } }>(
+    "/api/workspaces/:workspaceId/git",
+    async (request) => {
+      const workspace = (await listWorkspaces(config)).find(
+        (candidate) => candidate.id === request.params.workspaceId,
+      );
+      if (!workspace) throw httpError(404, "Workspace not found");
+      return { branch: await workspaceGitBranch(workspace.path) };
+    },
+  );
   app.get<{ Params: { workspaceId: string }; Querystring: { name: string } }>(
     "/api/workspaces/:workspaceId/file-search",
     async (request, reply) => {

@@ -213,7 +213,7 @@ app.get("/api/bootstrap", async (request) => ({
   workspaceSnapshots: [],
   models: request.auth ? await runtime.listModels() : [],
 }));
-app.get("/api/workspaces", async () => ({ workspaces: await listWorkspaces(config) }));
+app.get("/api/workspaces", async () => ({ workspaces: await listWorkspaces(config, true) }));
 registerWorkspaceFileRoutes(app, config);
 app.post<{ Body: { workspaceId: string } }>("/api/settings/assistant-workspace", async (request) =>
   changeAssistantWorkspace(config, request.body.workspaceId, {

@@ -2,71 +2,43 @@
 
 A remote Batty runs ordinary workers with its own workspaces, tools, instructions, models and credentials. The initiating installation sends commands and keeps a local read mirror; it does not provide the remote's model credentials or replace its agent runtime.
 
-## Provisioning
+## Pairing
 
-### Settings
+1. On the Batty you can reach, open **Settings → Remote** and select **Generate token**.
+2. On the other Batty, enter its **URL** and the token, then select **Add**.
 
-Open **Settings → Remote** on each installation.
+This single pairing permits subagent operations in both directions. The token is a single-use invitation, displayed only until the Remote tab closes; copy it with **Copy token**. An unused invitation can be cancelled. Tokens are never owner-login credentials.
 
-1. On the receiving Batty, enter a name under **Incoming access** and select **Create token**.
-2. Copy the token. It is displayed only until you leave the Remote tab or close Settings.
-3. On the initiating Batty, fill in **Connections** with a name, the receiving Batty's URL and the token. Select **Add connection**. Settings generates the internal connection ID; the CLI accepts an explicit ID.
+The instance selecting Add keeps an outbound HTTPS eventstream open. If only Mac can reach Windows over the work VPN, generate the token on Windows and select Add on Mac. Windows sends requests back over the same connection; Windows does not need to dial Mac. Installation IDs, names and scoped credentials are exchanged and stored automatically. Connection names use the hostname and a short stable installation ID.
 
-Direct connections are saved only after authentication with the receiver succeeds. Connections using an incoming reverse channel are saved with the remote installation ID and verified when that channel connects. Saved connection lists never display tokens. Incoming access lists show grant names and IDs, not tokens; create a new grant if a token is lost. Removal and revocation ask for confirmation. **Remove connection** disconnects and removes the locally saved credential; **Revoke access** invalidates the incoming token on the receiver. These are separate operations.
+The peer list shows online/offline status. **Refresh** updates it without background status polling. **Remove** immediately revokes local access and closes streams; an online peer is notified to remove its reciprocal pairing. Offline removal prevents further local access. A disconnected peer cannot use its retained credential for agent operations without a live authenticated control channel; reconnecting to a removed pairing is denied and removes the stale local pairing. Pairing again requires a fresh invitation.
 
-Settings and the CLI use the same owner-authenticated provisioning API and credential store.
+The invitation can retry only its exact persisted claim after a lost response. A different claimant cannot reuse it or replace a known installation. Neither command submissions nor agent execution are replayed during reconnection. Each node retains its own workspaces, models, credentials and worker state.
 
-### Reverse connection
+### Connection requirements
 
-Use a reverse channel when Mac can reach Windows but Windows cannot reach Mac. Mac maintains an authenticated control SSE stream to Windows over HTTPS and opens streamed GET/POST channels for individual requests. Windows sends its node requests back through those channels. Mac → Windows requests retain ordinary HTTPS transport. Each direction requires its own token.
+URLs require HTTPS with trusted certificates. HTTP is accepted only on loopback for development. Existing URL base paths are supported. No WebSocket support, public relay, SSH tunnel or reachable inbound URL on the initiating machine is required.
 
-1. On Windows, create an **Incoming access** token for Mac.
-2. On Mac, add a **Direct HTTPS** connection to Windows using that token and enable **Keep reverse connection open**. For an existing direct connection, enable the checkbox on its saved connection row; its ID and history remain unchanged.
-3. On Mac, create an **Incoming access** token for Windows. Copy Mac's **This installation ID**.
-4. On Windows, add a connection with transport **Via incoming connection**. Enter Mac's installation ID, URL and Mac-issued token. Under **Incoming access token**, select the Windows token given to Mac in step 1.
-
-The selected Windows grant binds the incoming channel to the configured Mac installation; it cannot be assigned to another reverse connection. The Mac URL remains the origin for file references, but Windows does not dial it. No reachable Mac URL is required for provisioning. Status shows whether the channel is connected, connecting, disconnected or failing; use **Refresh** to fetch its current state. A missing channel produces an error; requests do not switch to direct HTTP.
-
-Both installations enforce their own incoming grants. Revoking a grant closes affected channels and streams; it does not grant access in the opposite direction. Removing a connection stops its channel without revoking the other installation's token. The peer must remain awake and connected. Reconnection restores transport, not machine state: workers, credentials, history and cron remain on their executing installation.
-
-Windows's HTTPS reverse proxy must forward streamed responses and request bodies beneath Batty's configured base path. For IIS, verify that response buffering does not delay SSE and request buffering does not hold uploads until completion; check connection timeouts too. WebSocket support is not required. Transport heartbeats and an inactivity watchdog detect broken control streams; they do not poll worker or job status. Proxy policy can still disconnect the stream. Certificates must be trusted by Mac; TLS verification is not disabled. Local integration tests do not verify a particular IIS installation or work VPN.
+IIS or another HTTPS proxy must stream responses and request bodies beneath Batty's base path without buffering SSE or complete uploads. Proxy timeouts must permit the long-lived connection. Heartbeats and reconnect backoff detect network loss and standby; they do not poll agent status. The actual work VPN and IIS configuration require machine testing; local integration tests do not verify them.
 
 ### CLI
 
-Run commands on the installation being configured. Use `--root PATH` before `remote` when its installation root differs from `/var/lib/batty2`. The local service must be running: the CLI uses its authenticated loopback API, so grants and connections take effect without a restart.
-
-On the receiving installation:
+The running local service exposes the same owner-authenticated flow:
 
 ```sh
-batty2 remote grant add --label "Home installation"
-batty2 remote grant list
-```
-
-`grant add` prints JSON containing the grant ID and a random 256-bit bearer token. This is the token's only display; keep the output private. Transfer the token privately to the initiating installation. The receiver stores only its SHA-256 hash.
-
-On the initiating installation:
-
-```sh
-batty2 remote connection add --id work --label "Work" \
-  --url https://work.example.com/batty/ --token-stdin < /private/path/node-token
+batty2 remote token generate
+batty2 remote token list
+batty2 remote token revoke --id TOKEN_ID
+batty2 remote connection add --url https://work.example.com/batty/ --token-stdin < /private/path/pairing-token
 batty2 remote connection list
+batty2 remote connection remove --id PEER_ID
 ```
 
-The input file contains only the token. `--token TOKEN` is also supported, but exposes the credential in process arguments and potentially shell history. Connection creation authenticates against the receiver's identity endpoint and records its instance UUID and grant ID. An ID with saved history cannot be reused for a different installation. Self-connections and a second connection to an already connected installation are rejected. A failed handshake does not save a connection.
+Use `--root PATH` before `remote` to select another installation root. `--token TOKEN` is available but exposes the invitation in shell history and process arguments. The CLI uses the local owner credential only against its local loopback service.
 
-Withdraw access on the receiving installation:
+### Breaking remote setup change
 
-```sh
-batty2 remote grant revoke --id GRANT_ID
-```
-
-Remove saved credentials and disconnect on the initiating installation:
-
-```sh
-batty2 remote connection remove --id work
-```
-
-Removing a connection does not revoke the receiving grant. Use a separate grant per connection. Node tokens authorize remote operations, not owner login; never transfer an installation's `authSecret`. The CLI uses the local owner credential only to contact its own service.
+Manually configured directional remote grants and connections require fresh pairing. Their saved data is preserved, but unpaired grants cannot authorize node operations and unpaired connections do not start channels. Remove those entries and pair using URL and one generated token. Worker history, mirrors, sessions and other integrations are preserved. Legacy CLI grant commands and user-supplied connection IDs/names are not supported.
 
 ## Workers
 
@@ -90,10 +62,10 @@ Limits are 32 files and 100 MiB total per message. Failed transfers do not submi
 
 Attachment import failures do not prevent result delivery or terminal status. Unavailable files are omitted and reported by name and error. Permanent HTTP 4xx errors (except 408 and 429) are cached for the process lifetime; transient errors can be retried on later projections. Sent-file URLs use the same URL-safe segments as attachment storage, avoiding encoded slashes through proxies.
 
-Connections are directional. Bidirectional connections are supported: each installation exports only its own native workers, not its imported mirrors, and workspace discovery does not recursively follow its outgoing connections.
+Each paired installation exports only its own native workers, not its imported mirrors. Workspace discovery does not recursively follow other peer connections.
 
 ## Credentials and URLs
 
-`<battyDir>/.batty/remote-access.json` stores the installation UUID, incoming grant IDs/labels/hashes and outgoing connections. Outgoing tokens are stored in plaintext for transport use. The file is private (`0600`), replaced atomically, and mutations are serialized. Protect it like other installation credentials; do not include it in public artifacts or logs. Public grant and connection listings omit tokens and hashes.
+`<battyDir>/.batty/remote-access.json` stores the installation UUID, invitation hashes, paired node grants, outgoing scoped credentials and pending pairing claims. Outgoing tokens and pending claim credentials are stored in plaintext for transport use. The file is private (`0600`), replaced atomically, and mutations are serialized. Protect it like other installation credentials; do not include it in public artifacts or logs. Public grant and connection listings omit tokens and hashes.
 
 Connection URLs require HTTPS. HTTP is accepted only for `localhost`, `127.0.0.1` and `::1` development endpoints. Base paths are supported and normalized with a trailing slash; URL credentials, queries and fragments are rejected. Connection IDs contain letters, digits, underscores or hyphens and begin with a letter or digit.

@@ -1,22 +1,44 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
 import { stateDirPath } from "./options";
 
 import type { RemoteConnection, RemoteGrant } from "../shared/remotes";
 
 export interface RemoteConnectionCredentials extends RemoteConnection {
   token: string;
+  /** Local incoming credential belonging exclusively to this peer. */
+  localGrantId?: string;
+  invitationHash?: string;
+  claimHash?: string;
 }
 
 interface StoredGrant extends RemoteGrant {
   tokenHash: string;
+  invitation?: boolean;
+  instanceId?: string;
 }
 
 interface RemoteAccessState {
   instanceId: string;
   grants: StoredGrant[];
   connections: RemoteConnectionCredentials[];
+  pendingPairings?: PendingPairing[];
+}
+
+export interface PairingClaim {
+  instanceId: string;
+  name: string;
+  url: string;
+  localGrantId: string;
+  localToken: string;
+  remoteToken: string;
+}
+interface PendingPairing {
+  url: string;
+  invitationHash: string;
+  claim: PairingClaim;
 }
 
 function hashToken(token: string): string {
@@ -37,7 +59,13 @@ export function normalizeRemoteUrl(value: string): string {
 }
 
 function publicConnection(connection: RemoteConnectionCredentials): RemoteConnection {
-  const { token: _token, ...result } = connection;
+  const {
+    token: _token,
+    localGrantId: _local,
+    invitationHash: _invite,
+    claimHash: _claim,
+    ...result
+  } = connection;
   return result;
 }
 
@@ -71,18 +99,170 @@ export class RemoteAccess {
     return new RemoteAccess(filePath, state);
   }
 
-  identity(): { instanceId: string } {
-    return { instanceId: this.state.instanceId };
+  identity(): { instanceId: string; name: string } {
+    return {
+      instanceId: this.state.instanceId,
+      name: `${os.hostname()} · ${this.state.instanceId.slice(0, 8)}`,
+    };
   }
 
-  issue(label: string): Promise<{ id: string; token: string }> {
-    if (!label.trim()) return Promise.reject(new Error("Remote grant label is required"));
+  /** Invitations authorize only one exact pairing claim, never agent operations. */
+  issueInvitation(): Promise<{ id: string; token: string }> {
     return this.mutate((state) => {
       const id = crypto.randomUUID();
       const token = crypto.randomBytes(32).toString("base64url");
-      state.grants.push({ id, label: label.trim(), tokenHash: hashToken(token) });
+      state.grants.push({
+        id,
+        label: "Unused token",
+        tokenHash: hashToken(token),
+        invitation: true,
+      });
       return { id, token };
     });
+  }
+
+  listInvitations(): RemoteGrant[] {
+    return this.state.grants
+      .filter((grant) => grant.invitation)
+      .map(({ id, label }) => ({ id, label }));
+  }
+
+  canClaim(token: string): boolean {
+    const digest = hashToken(token);
+    return (
+      this.state.grants.some((grant) => grant.invitation && grant.tokenHash === digest) ||
+      this.state.connections.some((connection) => connection.invitationHash === digest)
+    );
+  }
+
+  completedPairing(url: string, invitation: string): boolean {
+    return this.state.connections.some(
+      (connection) => connection.url === url && connection.claimHash === hashToken(invitation),
+    );
+  }
+
+  beginPairing(url: string, invitation: string, localUrl: string): Promise<PairingClaim> {
+    return this.mutate((state) => {
+      const invitationHash = hashToken(invitation);
+      const existing = state.pendingPairings?.find(
+        (pairing) => pairing.url === url && pairing.invitationHash === invitationHash,
+      );
+      if (existing) return structuredClone(existing.claim);
+      const claim: PairingClaim = {
+        ...this.identity(),
+        url: normalizeRemoteUrl(localUrl),
+        localGrantId: crypto.randomUUID(),
+        localToken: crypto.randomBytes(32).toString("base64url"),
+        remoteToken: crypto.randomBytes(32).toString("base64url"),
+      };
+      (state.pendingPairings ??= []).push({ url, invitationHash, claim });
+      return structuredClone(claim);
+    });
+  }
+
+  claimInvitation(
+    invitation: string,
+    claim: PairingClaim,
+  ): Promise<{ instanceId: string; name: string; grantId: string }> {
+    return this.mutate((state) => {
+      if (
+        !claim.instanceId?.trim() ||
+        !claim.name?.trim() ||
+        !claim.localGrantId?.trim() ||
+        !/^[A-Za-z0-9_-]{43}$/.test(claim.localToken) ||
+        !/^[A-Za-z0-9_-]{43}$/.test(claim.remoteToken)
+      )
+        throw new Error("Invalid pairing claim");
+      const url = normalizeRemoteUrl(claim.url);
+      if (claim.instanceId === state.instanceId)
+        throw new Error("Cannot connect a Batty instance to itself");
+      const invitationHash = hashToken(invitation);
+      const claimHash = hashToken(JSON.stringify(claim));
+      const prior = state.connections.find(
+        (connection) => connection.invitationHash === invitationHash,
+      );
+      if (prior) {
+        if (prior.claimHash !== claimHash) throw new Error("Pairing token has already been used");
+        return { ...this.identity(), grantId: prior.localGrantId! };
+      }
+      if (state.connections.some((connection) => connection.instanceId === claim.instanceId))
+        throw new Error("This remote instance is already connected");
+      const invitationGrant = state.grants.find(
+        (grant) => grant.invitation && grant.tokenHash === invitationHash,
+      );
+      if (!invitationGrant) throw new Error("Pairing token is invalid or has been used");
+      const connection: RemoteConnectionCredentials = {
+        id: claim.instanceId,
+        label: claim.name,
+        instanceId: claim.instanceId,
+        url,
+        token: claim.localToken,
+        grantId: claim.localGrantId,
+        transport: "reverse",
+        reverseGrantId: invitationGrant.id,
+        localGrantId: invitationGrant.id,
+        invitationHash,
+        claimHash,
+      };
+      this.validateConnection(state, connection);
+      state.grants = state.grants.filter((grant) => grant.id !== invitationGrant.id);
+      state.grants.push({
+        id: invitationGrant.id,
+        label: claim.name,
+        tokenHash: hashToken(claim.remoteToken),
+        instanceId: claim.instanceId,
+      });
+      state.connections.push(connection);
+      return { ...this.identity(), grantId: invitationGrant.id };
+    });
+  }
+
+  completePairing(
+    url: string,
+    invitation: string,
+    identity: { instanceId: string; name: string; grantId: string },
+  ): Promise<string> {
+    return this.mutate((state) => {
+      const invitationHash = hashToken(invitation);
+      const completed = state.connections.find(
+        (connection) => connection.url === url && connection.claimHash === invitationHash,
+      );
+      if (completed) return completed.id;
+      const pending = state.pendingPairings?.find(
+        (pairing) => pairing.url === url && pairing.invitationHash === invitationHash,
+      );
+      if (!pending) throw new Error("No pending pairing claim");
+      if (!identity.instanceId?.trim() || !identity.name?.trim() || !identity.grantId?.trim())
+        throw new Error("Invalid remote identity");
+      if (state.connections.some((connection) => connection.instanceId === identity.instanceId))
+        throw new Error("This remote instance is already connected");
+      const connection: RemoteConnectionCredentials = {
+        id: identity.instanceId,
+        instanceId: identity.instanceId,
+        label: identity.name,
+        url,
+        token: pending.claim.remoteToken,
+        grantId: identity.grantId,
+        localGrantId: pending.claim.localGrantId,
+        reverseDial: true,
+        claimHash: invitationHash,
+      };
+      this.validateConnection(state, connection);
+      state.grants.push({
+        id: pending.claim.localGrantId,
+        label: identity.name,
+        tokenHash: hashToken(pending.claim.localToken),
+        instanceId: identity.instanceId,
+      });
+      state.connections.push(connection);
+      state.pendingPairings = state.pendingPairings!.filter((pairing) => pairing !== pending);
+      return connection.id;
+    });
+  }
+
+  pairedConnection(grantId: string): RemoteConnectionCredentials | undefined {
+    const connection = this.state.connections.find((item) => item.localGrantId === grantId);
+    return connection && { ...connection };
   }
 
   revoke(id: string): Promise<void> {
@@ -94,8 +274,15 @@ export class RemoteAccess {
   /** Receives the bearer token itself, without the HTTP Authorization scheme. */
   authenticate(bearer: string): RemoteGrant | undefined {
     const digest = Buffer.from(hashToken(bearer), "hex");
-    const grant = this.state.grants.find((entry) =>
-      crypto.timingSafeEqual(Buffer.from(entry.tokenHash, "hex"), digest),
+    const grant = this.state.grants.find(
+      (entry) =>
+        !entry.invitation &&
+        !!entry.instanceId &&
+        this.state.connections.some(
+          (connection) =>
+            connection.localGrantId === entry.id && connection.instanceId === entry.instanceId,
+        ) &&
+        crypto.timingSafeEqual(Buffer.from(entry.tokenHash, "hex"), digest),
     );
     return grant ? { id: grant.id, label: grant.label } : undefined;
   }
@@ -142,18 +329,6 @@ export class RemoteAccess {
       }
       this.validateConnection(state, normalized);
       state.connections.push(normalized);
-    });
-  }
-
-  setReverseDial(id: string, enabled: boolean): Promise<void> {
-    return this.mutate((state) => {
-      const connection = state.connections.find((entry) => entry.id === id);
-      if (!connection) throw new Error(`Unknown remote instance: ${id}`);
-      if (connection.transport === "reverse")
-        throw new Error("Only direct connections can keep a reverse channel open");
-      if (typeof enabled !== "boolean")
-        throw new Error("Reverse connection setting must be a boolean");
-      connection.reverseDial = enabled;
     });
   }
 
@@ -211,6 +386,9 @@ export class RemoteAccess {
 
   removeConnection(id: string): Promise<void> {
     return this.mutate((state) => {
+      const connection = state.connections.find((item) => item.id === id);
+      if (connection?.localGrantId)
+        state.grants = state.grants.filter((grant) => grant.id !== connection.localGrantId);
       state.connections = state.connections.filter((connection) => connection.id !== id);
     });
   }

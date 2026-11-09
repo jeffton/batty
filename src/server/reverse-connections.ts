@@ -37,6 +37,28 @@ export class ReverseConnections {
     return this.statuses.get(id) ?? { state: "disconnected" };
   }
 
+  async notifyRemoval(connection: RemoteConnectionCredentials): Promise<void> {
+    if (connection.transport === "reverse") {
+      await this.incoming.get(connection.id)?.channel.notifyRemoval();
+    } else {
+      await nodeRequest(connection, "unpair", {
+        method: "POST",
+        body: "{}",
+        signal: AbortSignal.timeout(5000),
+      });
+    }
+  }
+
+  hasControl(id: string): boolean {
+    if (!this.remotes.access.getConnection(id)?.localGrantId) return false;
+    const incoming = this.incoming.get(id);
+    return incoming
+      ? Date.now() - incoming.acknowledged < 45_000
+      : !!this.outgoing.get(id) &&
+          !this.outgoing.get(id)!.controller.signal.aborted &&
+          this.status(id).state === "connected";
+  }
+
   start(localUrl: string) {
     const url = new URL(localUrl);
     if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) || url.protocol !== "http:")
@@ -64,12 +86,14 @@ export class ReverseConnections {
         entry.controller.abort();
         this.outgoing.delete(id);
         this.statuses.set(id, { state: "disconnected" });
+        this.remotes.changes.emit("catalog", id);
       }
     }
     if (!this.localUrl || this.stopped) return;
     for (const item of this.remotes.access.listConnections()) {
       const connection = this.remotes.connection(item.id);
-      if (!connection.reverseDial || this.outgoing.has(connection.id)) continue;
+      if (!connection.localGrantId || !connection.reverseDial || this.outgoing.has(connection.id))
+        continue;
       const controller = new AbortController();
       const entry = { controller, configuration: JSON.stringify(connection) };
       this.outgoing.set(connection.id, entry);
@@ -173,7 +197,10 @@ export class ReverseConnections {
   private async dial(connection: RemoteConnectionCredentials, dial: Dial) {
     const signal = dial.controller.signal;
     const setStatus = (status: ReverseStatus) => {
-      if (this.outgoing.get(connection.id) === dial) this.statuses.set(connection.id, status);
+      if (this.outgoing.get(connection.id) !== dial) return;
+      const previous = this.status(connection.id).state;
+      this.statuses.set(connection.id, status);
+      if (previous !== status.state) this.remotes.changes.emit("catalog", connection.id);
     };
     let attempts = 0;
     while (!signal.aborted && !this.stopped) {
@@ -191,7 +218,19 @@ export class ReverseConnections {
           redirect: "error",
           signal: AbortSignal.any([signal, attempt.signal]),
         }).finally(() => clearTimeout(handshake));
-        if (!response.ok) throw new Error(`Reverse control HTTP ${response.status}`);
+        if (!response.ok) {
+          await response.body?.cancel();
+          if ([401, 403].includes(response.status) && connection.localGrantId) {
+            // A removed peer must never automatically pair again after waking up.
+            await this.remotes.access.removeConnection(connection.id);
+            this.remotes.disconnect(connection.id);
+            throw new NodeHttpError(
+              response.status,
+              "Peer access was removed; pair again to reconnect",
+            );
+          }
+          throw new Error(`Reverse control HTTP ${response.status}`);
+        }
         if (response.headers.get("x-batty-instance-id") !== connection.instanceId) {
           await response.body?.cancel();
           throw new Error("Reverse receiver identity mismatch");
@@ -200,6 +239,12 @@ export class ReverseConnections {
         setStatus({ state: "connected" });
         await readNodeEvents(response, async (value) => {
           const event = value as ReverseEvent;
+          if (event.type === "unpair") {
+            await this.remotes.access.removeConnection(connection.id);
+            this.remotes.disconnect(connection.id);
+            dial.controller.abort();
+            return;
+          }
           if (event.type === "ping") {
             const acknowledged = await fetch(new URL("api/node/reverse/alive", connection.url), {
               method: "POST",
@@ -240,7 +285,7 @@ export class ReverseConnections {
         signal.removeEventListener("abort", stopTasks);
         stopTasks();
       }
-      if (signal.aborted) break;
+      if (signal.aborted || !this.remotes.access.getConnection(connection.id)) break;
       // Reconnect transport only: never replay a command or an interrupted response.
       await new Promise<void>((resolve) => {
         const done = () => {

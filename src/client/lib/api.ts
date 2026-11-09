@@ -131,29 +131,16 @@ function provisionRemote<T>(body: Record<string, string | boolean>): Promise<T> 
   });
 }
 
-export function issueRemoteGrant(label: string): Promise<{ id: string; token: string }> {
-  return provisionRemote({ action: "grant-add", label });
+export function issueRemoteGrant(): Promise<{ id: string; token: string }> {
+  return provisionRemote({ action: "token-generate" });
 }
 
 export function revokeRemoteGrant(id: string): Promise<{ ok: true }> {
-  return provisionRemote({ action: "grant-revoke", id });
+  return provisionRemote({ action: "token-revoke", id });
 }
 
-export function addRemoteConnection(input: {
-  id: string;
-  label: string;
-  url: string;
-  token: string;
-  transport?: "reverse";
-  reverseDial?: boolean;
-  reverseGrantId?: string;
-  instanceId?: string;
-}): Promise<{ ok: true }> {
+export function addRemoteConnection(input: { url: string; token: string }): Promise<{ ok: true }> {
   return provisionRemote({ ...input, action: "connection-add" });
-}
-
-export function setRemoteReverseDial(id: string, reverseDial: boolean): Promise<{ ok: true }> {
-  return provisionRemote({ action: "connection-reverse-dial", id, reverseDial });
 }
 
 export function removeRemoteConnection(id: string): Promise<{ ok: true }> {

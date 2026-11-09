@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, it } from "vite-plus/test";
@@ -23,22 +24,36 @@ async function fixture() {
   };
 }
 
-it("persists installation identity and hashed incoming grants, and revokes them across restarts", async () => {
+it("persists identity and hashed unused invitations without authorizing agent operations", async () => {
   const { directory, access, file } = await fixture();
   expect(access.identity().instanceId).toMatch(/^[a-f0-9-]{36}$/);
-  const issued = await access.issue("Home Batty");
+  const issued = await access.issueInvitation();
   expect(Buffer.from(issued.token, "base64url")).toHaveLength(32);
-  expect(access.authenticate(issued.token)).toEqual({ id: issued.id, label: "Home Batty" });
-  expect(access.authenticate("wrong")).toBeUndefined();
-  expect(access.listGrants()).toEqual([{ id: issued.id, label: "Home Batty" }]);
+  expect(access.authenticate(issued.token)).toBeUndefined();
+  expect(access.canClaim(issued.token)).toBe(true);
   const persisted = await fs.readFile(file, "utf8");
   expect(persisted).not.toContain(issued.token);
   expect(JSON.parse(persisted).grants[0].tokenHash).toMatch(/^[a-f0-9]{64}$/);
   const reopened = await RemoteAccess.open(directory);
   expect(reopened.identity()).toEqual(access.identity());
-  expect(reopened.authenticate(issued.token)).toEqual({ id: issued.id, label: "Home Batty" });
+  expect(reopened.canClaim(issued.token)).toBe(true);
   await reopened.revoke(issued.id);
-  expect((await RemoteAccess.open(directory)).authenticate(issued.token)).toBeUndefined();
+  expect((await RemoteAccess.open(directory)).canClaim(issued.token)).toBe(false);
+});
+
+it("preserves but disables legacy unpaired credentials", async () => {
+  const { directory, file } = await fixture();
+  const state = JSON.parse(await fs.readFile(file, "utf8"));
+  state.grants.push({
+    id: "old",
+    label: "Legacy",
+    tokenHash: crypto.createHash("sha256").update("legacy-secret").digest("hex"),
+  });
+  await fs.writeFile(file, JSON.stringify(state));
+  const access = await RemoteAccess.open(directory);
+  expect(access.authenticate("legacy-secret")).toBeUndefined();
+  expect(access.canClaim("legacy-secret")).toBe(false);
+  expect(JSON.parse(await fs.readFile(file, "utf8")).grants).toEqual(state.grants);
 });
 
 it("stores outgoing tokens privately while public listings and returned objects expose no mutable state", async () => {
@@ -107,9 +122,7 @@ it.each(["", "../remote", "two words", "a/b", ".", "-start"])(
 
 it("serializes concurrent mutations without losing grants or connections", async () => {
   const { access, directory } = await fixture();
-  const issued = await Promise.all(
-    Array.from({ length: 15 }, (_, i) => access.issue(`Grant ${i}`)),
-  );
+  const issued = await Promise.all(Array.from({ length: 15 }, () => access.issueInvitation()));
   await Promise.all([
     ...issued.slice(0, 5).map(({ id }) => access.revoke(id)),
     ...Array.from({ length: 5 }, (_, i) =>
@@ -124,16 +137,16 @@ it("serializes concurrent mutations without losing grants or connections", async
   const reopened = await RemoteAccess.open(directory);
   expect(reopened.listGrants()).toHaveLength(10);
   expect(reopened.listConnections()).toHaveLength(5);
-  expect(issued.slice(5).every(({ token }) => reopened.authenticate(token))).toBe(true);
+  expect(issued.slice(5).every(({ token }) => reopened.canClaim(token))).toBe(true);
 });
 
 it("surfaces malformed state and persistence errors without publishing an unpersisted mutation", async () => {
   const { access, directory, file } = await fixture();
   await fs.rename(stateDirPath(directory), `${stateDirPath(directory)}-saved`);
-  await expect(access.issue("Unpersisted")).rejects.toThrow();
+  await expect(access.issueInvitation()).rejects.toThrow();
   expect(access.listGrants()).toEqual([]);
   await fs.rename(`${stateDirPath(directory)}-saved`, stateDirPath(directory));
-  await access.issue("Persisted");
+  await access.issueInvitation();
   expect(access.listGrants()).toHaveLength(1);
   expect(await fs.readdir(stateDirPath(directory))).toEqual(["remote-access.json"]);
   await fs.writeFile(file, "{ broken");

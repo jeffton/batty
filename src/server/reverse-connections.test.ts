@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { setImmediate } from "node:timers/promises";
 import { expect, test, vi } from "vite-plus/test";
 import { ReverseConnections } from "./reverse-connections";
@@ -13,6 +14,7 @@ test("superseded dial cleanup cannot overwrite its replacement connection status
     instanceId: "windows-instance",
     transport: "reverse",
     reverseDial: true,
+    localGrantId: "local-grant",
   };
   const oldHandshake = Promise.withResolvers<Response>();
   let streamController!: ReadableStreamDefaultController<Uint8Array>;
@@ -31,6 +33,7 @@ test("superseded dial cleanup cannot overwrite its replacement connection status
       });
     });
   const remotes = {
+    changes: new EventEmitter(),
     access: {
       listGrants: () => [],
       listConnections: () => [connection],

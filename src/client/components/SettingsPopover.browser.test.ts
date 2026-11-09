@@ -79,11 +79,11 @@ test("instance colors affect app header and footer, not controls or content", as
   }
 });
 
-test("Remote settings provisions connections and grants on mobile without retaining tokens", async () => {
+test("Remote settings generates single-use tokens and adds peers with URL and token", async () => {
   const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
   const requests: Record<string, string>[] = [];
   let grants: { id: string; label: string }[] = [];
-  let connections: { id: string; label: string; url: string }[] = [];
+  let connections: Record<string, unknown>[] = [];
   try {
     await page.route("**/api/remotes", async (route) => {
       if (route.request().method() === "GET") {
@@ -94,15 +94,22 @@ test("Remote settings provisions connections and grants on mobile without retain
       requests.push(input);
       let body: unknown = { ok: true };
       switch (input.action) {
-        case "grant-add":
-          grants = [{ id: "grant", label: input.label }];
-          body = { id: "grant", token: "issued-private-token" };
+        case "token-generate":
+          grants = [{ id: "invitation", label: "Unused token" }];
+          body = { id: "invitation", token: "issued-private-token" };
           break;
-        case "grant-revoke":
+        case "token-revoke":
           grants = [];
           break;
         case "connection-add":
-          connections = [{ id: input.id, label: input.label, url: input.url }];
+          connections = [
+            {
+              id: "automatic-work-id",
+              label: "Work",
+              url: input.url,
+              status: { state: "connected" },
+            },
+          ];
           break;
         case "connection-remove":
           connections = [];
@@ -116,21 +123,38 @@ test("Remote settings provisions connections and grants on mobile without retain
     await page.goto(url);
     await page.getByRole("tab", { name: "Remote", exact: true }).click();
     await page.getByText("No connections.", { exact: true }).waitFor();
-    await page.getByRole("textbox", { name: "Grant name", exact: true }).fill("Office");
-    await page.getByRole("button", { name: "Create token", exact: true }).click();
+    const panel = page.locator("#settings-Remote-panel");
+    expect(await panel.locator("input").count()).toBe(2);
+    expect(await panel.locator('input[type="password"]').count()).toBe(0);
+    expect(await page.getByLabel("Remote URL", { exact: true }).getAttribute("name")).toBe(
+      "pairing-url",
+    );
+    expect(await page.getByLabel("Remote token", { exact: true }).getAttribute("name")).toBe(
+      "pairing-token",
+    );
+    expect(
+      await page.getByLabel("Remote token", { exact: true }).getAttribute("autocomplete"),
+    ).toBe("one-time-code");
+    expect(await panel.getByRole("combobox").count()).toBe(0);
+    expect(await panel.getByRole("checkbox").count()).toBe(0);
+    await page.getByRole("button", { name: "Generate token", exact: true }).click();
     await expect
-      .poll(() => page.getByRole("textbox", { name: "New token", exact: true }).inputValue())
+      .poll(() => page.getByRole("textbox", { name: "Generated token", exact: true }).inputValue())
       .toBe("issued-private-token");
+    await page.getByLabel("Remote token", { exact: true }).fill("draft-private-token");
     await page.getByRole("tab", { name: "Auth", exact: true }).click();
     await page.getByRole("tab", { name: "Remote", exact: true }).click();
-    expect(await page.getByRole("textbox", { name: "New token", exact: true }).count()).toBe(0);
-    await page.getByRole("textbox", { name: "Connection name", exact: true }).fill("Work");
+    expect(await page.getByRole("textbox", { name: "Generated token", exact: true }).count()).toBe(
+      0,
+    );
+    expect(await page.getByLabel("Remote token", { exact: true }).inputValue()).toBe("");
     await page
       .getByRole("textbox", { name: "Remote URL", exact: true })
       .fill("https://work.example.com/batty/");
     await page.getByLabel("Remote token", { exact: true }).fill("outgoing-private-token");
-    await page.getByRole("button", { name: "Add connection", exact: true }).click();
+    await page.getByRole("button", { name: "Add", exact: true }).click();
     await page.getByRole("button", { name: "Remove connection Work", exact: true }).waitFor();
+    await page.getByText("Online", { exact: true }).waitFor();
     expect(await page.getByLabel("Remote token", { exact: true }).inputValue()).toBe("");
     await page.getByRole("button", { name: "Remove connection Work", exact: true }).click();
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -140,62 +164,67 @@ test("Remote settings provisions connections and grants on mobile without retain
       .getByRole("button", { name: "Confirm: Remove connection Work", exact: true })
       .click();
     await page.getByText("No connections.", { exact: true }).waitFor();
-    await page.getByRole("button", { name: "Revoke access Office", exact: true }).click();
-    await page.getByRole("button", { name: "Confirm: Revoke access Office", exact: true }).click();
-    await page.getByText("No incoming access.", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Cancel unused token", exact: true }).click();
+    await page.getByRole("button", { name: "Confirm: Cancel unused token", exact: true }).click();
+    await expect.poll(() => page.getByText("Unused token", { exact: true }).count()).toBe(0);
     expect(requests).toEqual([
-      { action: "grant-add", label: "Office" },
+      { action: "token-generate" },
       {
         action: "connection-add",
-        id: expect.stringMatching(/^[0-9a-f-]{36}$/),
-        label: "Work",
         url: "https://work.example.com/batty/",
         token: "outgoing-private-token",
       },
-      { action: "connection-remove", id: requests[1]!.id },
-      { action: "grant-revoke", id: "grant" },
+      { action: "connection-remove", id: "automatic-work-id" },
+      { action: "token-revoke", id: "invitation" },
     ]);
-    expect(
-      await page
-        .locator("#settings-Remote-panel")
-        .evaluate((element) => element.scrollWidth <= element.clientWidth),
-    ).toBe(true);
+    expect(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+      true,
+    );
     expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain("private-token");
   } finally {
     await page.close();
   }
 });
 
-test("reverse connections pin the peer and local grant without exposing credentials", async () => {
+test("Remote settings shows automatic peer names, offline status and pairing errors", async () => {
   for (const width of [390, 1280]) {
     const page = await browser.newPage({ viewport: { width, height: 900 } });
     const requests: Record<string, unknown>[] = [];
-    const connections: Record<string, unknown>[] = [];
+    let connected = false;
     try {
       await page.route("**/api/remotes", async (route) => {
         if (route.request().method() === "GET") {
           await route.fulfill({
             json: {
-              instanceId: "windows-installation",
-              grants: [{ id: "mac-grant", label: "Mac" }],
-              connections,
+              instanceId: "hidden-installation-id",
+              grants: [],
+              connections: connected
+                ? [
+                    {
+                      id: "automatic-peer-id",
+                      label: "Work PC",
+                      url: "https://work.example.com/batty/",
+                      status: { state: "connected" },
+                    },
+                    {
+                      id: "automatic-offline-id",
+                      label: "Home Mac",
+                      url: "",
+                      status: { state: "disconnected" },
+                    },
+                  ]
+                : [],
             },
           });
           return;
         }
         const input = route.request().postDataJSON();
         requests.push(input);
-        if (input.action === "connection-add") {
-          connections.push({
-            id: input.id,
-            label: input.label,
-            url: input.url,
-            instanceId: input.instanceId,
-            transport: input.transport,
-            reverseGrantId: input.reverseGrantId,
-            status: { state: "connected" },
-          });
+        if (requests.length === 1) {
+          await route.fulfill({ status: 400, json: { error: "Token already used" } });
+          return;
         }
+        connected = true;
         await route.fulfill({ json: { ok: true } });
       });
       await page.route("**/api/settings/environment", (route) =>
@@ -203,43 +232,58 @@ test("reverse connections pin the peer and local grant without exposing credenti
       );
       await page.goto(url);
       await page.getByRole("tab", { name: "Remote", exact: true }).click();
-      await page.getByRole("textbox", { name: "This installation ID", exact: true }).waitFor();
-      await page.getByRole("textbox", { name: "Connection name", exact: true }).fill("Home Mac");
-      await page.getByRole("combobox", { name: "Transport", exact: true }).selectOption("reverse");
-      await page
-        .getByRole("textbox", { name: "Remote installation ID", exact: true })
-        .fill("mac-installation");
-      await page
-        .getByRole("combobox", { name: "Incoming access token", exact: true })
-        .selectOption("mac-grant");
+      await page.getByText("No connections.", { exact: true }).waitFor();
+      const panel = page.locator("#settings-Remote-panel");
+      expect(await panel.locator("input").count()).toBe(2);
+      expect(await panel.getByRole("combobox").count()).toBe(0);
+      expect(await panel.getByRole("checkbox").count()).toBe(0);
       await page
         .getByRole("textbox", { name: "Remote URL", exact: true })
-        .fill("https://mac.example.com/batty/");
-      await page.getByLabel("Remote token", { exact: true }).fill("private-mac-token");
-      await page.getByRole("button", { name: "Add connection", exact: true }).click();
-      await page.getByText("Via incoming connection · connected", { exact: false }).waitFor();
-      expect(requests[0]).toMatchObject({
-        action: "connection-add",
-        label: "Home Mac",
-        transport: "reverse",
-        instanceId: "mac-installation",
-        reverseGrantId: "mac-grant",
-        token: "private-mac-token",
-      });
+        .fill("https://work.example.com/batty/");
+      await page.getByLabel("Remote token", { exact: true }).fill("private-work-token");
+      await page.getByRole("button", { name: "Add", exact: true }).click();
+      await page.getByRole("alert").getByText("Token already used", { exact: true }).waitFor();
+      await page.getByRole("button", { name: "Add", exact: true }).click();
+      await page.getByText("Online", { exact: true }).waitFor();
+      await page.getByText("Offline", { exact: true }).waitFor();
+      expect(
+        await page.getByRole("button", { name: "Remove connection Work PC", exact: true }).count(),
+      ).toBe(1);
+      expect(
+        await page.getByRole("button", { name: "Remove connection Home Mac", exact: true }).count(),
+      ).toBe(1);
+      expect(requests).toEqual([
+        {
+          action: "connection-add",
+          url: "https://work.example.com/batty/",
+          token: "private-work-token",
+        },
+        {
+          action: "connection-add",
+          url: "https://work.example.com/batty/",
+          token: "private-work-token",
+        },
+      ]);
       expect(await page.getByLabel("Remote token", { exact: true }).inputValue()).toBe("");
-      const panel = page.locator("#settings-Remote-panel");
+      await page.reload();
+      await page.getByRole("tab", { name: "Remote", exact: true }).click();
+      await page.getByText("Online", { exact: true }).waitFor();
+      expect(await page.getByLabel("Remote URL", { exact: true }).inputValue()).toBe("");
+      expect(await page.getByLabel("Remote token", { exact: true }).inputValue()).toBe("");
+      expect(await panel.innerText()).not.toContain("hidden-installation-id");
+      expect(await panel.innerText()).not.toContain("automatic-peer-id");
       expect(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
         true,
       );
       expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain(
-        "private-mac-token",
+        "private-work-token",
       );
       if (captureScreenshots) {
         await fs.mkdir(".tmp/ui-feedback", { recursive: true });
         await page
-          .getByRole("textbox", { name: "This installation ID", exact: true })
+          .getByRole("button", { name: "Generate token", exact: true })
           .scrollIntoViewIfNeeded();
-        await page.screenshot({ path: `.tmp/ui-feedback/reverse-settings-${width}.png` });
+        await page.screenshot({ path: `.tmp/ui-feedback/remote-pairing-${width}.png` });
       }
     } finally {
       await page.close();

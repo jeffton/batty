@@ -237,7 +237,11 @@ export class RemoteWorkers {
   }
   start() {
     for (const connection of this.access.listConnections())
-      if (connection.transport !== "reverse") this.connect(connection.id);
+      if (
+        this.access.getConnection(connection.id)?.localGrantId &&
+        connection.transport !== "reverse"
+      )
+        this.connect(connection.id);
   }
   connect(node: string) {
     if (this.running.has(node) || this.stopped) return;

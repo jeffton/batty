@@ -3,15 +3,15 @@ import { loadConfig } from "./config";
 import { createAuthToken } from "./auth";
 
 export const remoteHelp = `Usage: batty2 [--root /var/lib/batty2] remote RESOURCE ACTION [options]
-  remote grant add --label TEXT
-  remote grant list
-  remote grant revoke --id ID
-  remote connection add --id ID --label TEXT --url URL --token-stdin
+  remote token generate
+  remote token list
+  remote token revoke --id ID
+  remote connection add --url URL --token-stdin
   remote connection list
   remote connection remove --id ID
 Options:
   --token TOKEN  Alternative to --token-stdin; may expose the token in shell history.
-Outputs JSON. Grant add returns the new bearer token once. Keep that output private.
+Outputs JSON. Token generate returns a single-use pairing invitation. Keep that output private.
 Uses the running local Batty service; changes take effect without restart.
 `;
 
@@ -30,7 +30,6 @@ export async function parseRemoteArgs(args: string[], readToken = stdinToken) {
       root: { type: "string", default: "/var/lib/batty2" },
       help: { type: "boolean" },
       id: { type: "string" },
-      label: { type: "string" },
       url: { type: "string" },
       token: { type: "string" },
       "token-stdin": { type: "boolean" },
@@ -39,9 +38,9 @@ export async function parseRemoteArgs(args: string[], readToken = stdinToken) {
   if (values.help) return { root: values.root, help: true, body: {} };
   const [command, resource, action, extra] = positionals;
   const actions = [
-    "grant-add",
-    "grant-list",
-    "grant-revoke",
+    "token-generate",
+    "token-list",
+    "token-revoke",
     "connection-add",
     "connection-list",
     "connection-remove",
@@ -49,14 +48,14 @@ export async function parseRemoteArgs(args: string[], readToken = stdinToken) {
   const operation = `${resource}-${action}`;
   if (command !== "remote" || extra || !actions.includes(operation)) throw new Error(remoteHelp);
   const allowed: Record<string, string[]> = {
-    "grant-add": ["label"],
-    "grant-list": [],
-    "grant-revoke": ["id"],
-    "connection-add": ["id", "label", "url", "token", "token-stdin"],
+    "token-generate": [],
+    "token-list": [],
+    "token-revoke": ["id"],
+    "connection-add": ["url", "token", "token-stdin"],
     "connection-list": [],
     "connection-remove": ["id"],
   };
-  for (const flag of ["id", "label", "url", "token", "token-stdin"] as const) {
+  for (const flag of ["id", "url", "token", "token-stdin"] as const) {
     if (values[flag] !== undefined && !allowed[operation]!.includes(flag)) {
       throw new Error(`--${flag} is not valid for ${resource} ${action}`);
     }
@@ -65,7 +64,7 @@ export async function parseRemoteArgs(args: string[], readToken = stdinToken) {
   for (const field of allowed[operation]!.filter(
     (name) => name !== "token" && name !== "token-stdin",
   )) {
-    const value = values[field as "id" | "label" | "url"];
+    const value = values[field as "id" | "url"];
     if (!value?.trim()) throw new Error(`--${field} is required`);
     body[field] = value;
   }

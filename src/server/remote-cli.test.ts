@@ -16,10 +16,6 @@ test("reads a connection token from stdin without requiring a secret in argv", a
       "remote",
       "connection",
       "add",
-      "--id",
-      "work",
-      "--label",
-      "Work",
       "--url",
       "https://example.com/batty/",
       "--token-stdin",
@@ -32,8 +28,6 @@ test("reads a connection token from stdin without requiring a secret in argv", a
     help: false,
     body: {
       action: "connection-add",
-      id: "work",
-      label: "Work",
       url: "https://example.com/batty/",
       token: "private-token",
     },
@@ -41,7 +35,7 @@ test("reads a connection token from stdin without requiring a secret in argv", a
 });
 
 test("dispatch distinguishes the command from a cron prompt containing remote", () => {
-  expect(isRemoteCommand(["--root", "/tmp/test", "remote", "grant", "list"])).toBe(true);
+  expect(isRemoteCommand(["--root", "/tmp/test", "remote", "token", "list"])).toBe(true);
   expect(isRemoteCommand(["--root=/tmp/test", "remote", "--help"])).toBe(true);
   expect(isRemoteCommand(["cron", "add", "--prompt", "remote"])).toBe(false);
 });
@@ -65,11 +59,11 @@ test("existing batty2 entrypoint provisions through the live authenticated local
       path.join(root, ".batty", "environment.json"),
       JSON.stringify({ BATTY_HOST: "::", BATTY_PORT: "4555" }),
     );
-    await runCronCli(["--root", root, "remote", "grant", "add", "--label", "Home"]);
+    await runCronCli(["--root", root, "remote", "token", "generate"]);
     expect(fetchMock).toHaveBeenCalledOnce();
     const [url, request] = fetchMock.mock.calls[0]!;
     expect(url).toBe("http://[::1]:4555/api/remotes");
-    expect(request.body).toBe('{"action":"grant-add","label":"Home"}');
+    expect(request.body).toBe('{"action":"token-generate"}');
     const config = await loadConfig(root);
     expect(
       verifyAuthToken(
@@ -85,7 +79,7 @@ test("existing batty2 entrypoint provisions through the live authenticated local
     expect(await fs.readdir(path.join(root, ".batty"))).not.toContain("remote-access.json");
     fetchMock.mockResolvedValue(new Response("No such grant", { status: 404 }));
     await expect(
-      runCronCli(["--root", root, "remote", "grant", "revoke", "--id", "missing"]),
+      runCronCli(["--root", root, "remote", "token", "revoke", "--id", "missing"]),
     ).rejects.toThrow("Batty2 404: No such grant");
   } finally {
     output.mockRestore();

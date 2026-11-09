@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 /** Only the existing agent API is bridgeable, never arbitrary HTTP or owner routes. */
 export function isNodeRoute(route: string, method: string): boolean {
-  if (method === "POST") return route === "commands";
+  if (method === "POST") return route === "commands" || route === "unpair";
   if (method !== "GET") return false;
   if (["identity", "workspaces", "catalog/events"].includes(route)) return true;
   if (/^assignments\/\d+$/.test(route)) return true;
@@ -22,6 +22,7 @@ export function isNodeRoute(route: string, method: string): boolean {
 }
 
 export type ReverseEvent =
+  | { type: "unpair" }
   | { type: "ping" }
   | {
       type: "request";
@@ -49,6 +50,10 @@ export class ReverseChannel {
   private closed = false;
 
   constructor(private readonly send: (event: ReverseEvent) => Promise<void>) {}
+
+  notifyRemoval(): Promise<void> {
+    return this.send({ type: "unpair" });
+  }
 
   request(route: string, request: Request): Promise<Response> {
     if (this.closed) return Promise.reject(new Error("Reverse connection is offline"));

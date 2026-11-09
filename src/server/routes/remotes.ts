@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import type { RemoteAccess, RemoteConnectionCredentials } from "../remote-access";
+import type { RemoteAccess, PairingClaim } from "../remote-access";
 import type { Runtime } from "../runtime";
 import { context } from "../runtime";
 import { listWorkspaces } from "../workspaces";
@@ -33,6 +33,10 @@ export function authenticateNode(
   access: RemoteAccess,
 ) {
   const bearer = request.headers.authorization?.match(/^Bearer (.+)$/)?.[1];
+  if (request.method === "POST" && request.url === "/api/node/pair") {
+    if (bearer && access.canClaim(bearer)) return;
+    return reply.code(401).send({ error: "Pairing token is invalid or has been used" });
+  }
   request.nodeGrant = bearer ? access.authenticate(bearer) : undefined;
   if (!request.nodeGrant) return reply.code(401).send({ error: "Node authentication required" });
 }
@@ -40,15 +44,41 @@ export function authenticateNode(
 export function registerRemoteRoutes(app: FastifyInstance, runtime: Runtime) {
   const remotes = runtime.remotes;
   const access = remotes.access;
-  const streams = new Set<import("node:http").ServerResponse>();
+  const streams = new Map<import("node:http").ServerResponse, string | undefined>();
+  const closeOfflineStreams = (id: string) => {
+    if (remotes.reverse.hasControl(id)) return;
+    for (const [stream, peerId] of streams) if (peerId === id) stream.end();
+  };
+  remotes.changes.on("catalog", closeOfflineStreams);
+  const requireLivePeer = (request: FastifyRequest): string => {
+    const bearer = request.headers.authorization?.match(/^Bearer (.+)$/)?.[1];
+    const grant = bearer && access.authenticate(bearer);
+    const connection = grant && access.pairedConnection(grant.id);
+    if (!connection) throw Object.assign(new Error("Node access was removed"), { statusCode: 401 });
+    if (!remotes.reverse.hasControl(connection.id))
+      throw Object.assign(new Error("Paired peer is offline"), { statusCode: 503 });
+    return connection.id;
+  };
   let closing = false;
   app.addHook("onRequest", async (request, reply) => {
     if (closing && request.url.startsWith("/api/node/"))
       return reply.code(503).send({ error: "Instance is shutting down" });
   });
+  app.addHook("onRequest", async (request, reply) => {
+    if (
+      !request.nodeGrant ||
+      request.url.startsWith("/api/node/reverse/") ||
+      request.url === "/api/node/unpair"
+    )
+      return;
+    const connection = access.pairedConnection(request.nodeGrant.id);
+    if (connection && !remotes.reverse.hasControl(connection.id)) {
+      return reply.code(503).send({ error: "Paired peer is offline" });
+    }
+  });
   app.get("/api/remotes", async () => ({
     ...access.identity(),
-    grants: access.listGrants(),
+    grants: access.listInvitations(),
     connections: access.listConnections().map((connection) => ({
       ...connection,
       status: remotes.reverse.status(connection.id),
@@ -58,90 +88,96 @@ export function registerRemoteRoutes(app: FastifyInstance, runtime: Runtime) {
     Body: {
       action: string;
       id?: string;
-      label?: string;
       url?: string;
       token?: string;
-      transport?: "reverse";
-      reverseDial?: boolean;
-      reverseGrantId?: string;
-      instanceId?: string;
     };
   }>("/api/remotes", async (request) => {
     const input = request.body;
     switch (input.action) {
-      case "grant-add":
-        return access.issue(input.label!);
-      case "grant-list":
-        return access.listGrants();
-      case "grant-revoke": {
+      case "token-list":
+        return access.listInvitations();
+      case "connection-list":
+        return access.listConnections();
+      case "token-generate":
+        return access.issueInvitation();
+      case "token-revoke": {
         await access.revoke(input.id!);
         remotes.reverse.reconfigure();
         // Valid peers reconnect; a revoked grant cannot open another stream.
-        for (const stream of streams) stream.end();
+        for (const stream of streams.keys()) stream.end();
         return { ok: true };
       }
-      case "connection-list":
-        return access.listConnections();
+
       case "connection-add": {
-        const connection: RemoteConnectionCredentials = {
-          id: input.id!,
-          label: input.label!,
-          token: input.token!,
-          url: normalizeRemoteUrl(input.url!),
-          ...(input.transport === undefined ? {} : { transport: input.transport }),
-          ...(input.reverseDial === undefined ? {} : { reverseDial: input.reverseDial }),
-          ...(input.reverseGrantId === undefined ? {} : { reverseGrantId: input.reverseGrantId }),
-        };
-        if (input.transport !== undefined && input.transport !== "reverse")
-          throw new Error("Unknown remote transport");
-        if (input.transport === "reverse") {
-          if (!input.instanceId?.trim())
-            throw new Error("Reverse connections require a remote installation ID");
-          if (input.reverseDial) throw new Error("An incoming reverse connection cannot also dial");
-          if (!access.listGrants().some((grant) => grant.id === input.reverseGrantId))
-            throw new Error("Select an existing incoming access grant");
-          if (
-            access
-              .listConnections()
-              .some(
-                (item) =>
-                  item.transport === "reverse" && item.reverseGrantId === input.reverseGrantId,
-              )
-          )
-            throw new Error("This incoming access grant is already bound to a reverse connection");
-        }
-        const identity =
-          input.transport === "reverse"
-            ? { instanceId: input.instanceId!.trim() }
-            : await nodeRequest<{ instanceId: string; grantId: string }>(connection, "identity");
-        if (identity.instanceId === access.identity().instanceId)
-          throw new Error("Cannot connect a Batty instance to itself");
-        if (access.listConnections().some((item) => item.instanceId === identity.instanceId))
-          throw new Error("This remote instance is already connected");
-        await remotes.bindOrigin(connection.id, identity.instanceId);
-        await access.addConnection({
-          ...connection,
-          instanceId: identity.instanceId,
-          ...("grantId" in identity ? { grantId: identity.grantId } : {}),
+        const url = normalizeRemoteUrl(input.url!);
+        if (!input.token?.trim()) throw new Error("Pairing token is required");
+        if (access.completedPairing(url, input.token)) return { ok: true };
+        const claim = await access.beginPairing(url, input.token!, runtime.config.baseUrl);
+        const response = await fetch(new URL("api/node/pair", url), {
+          method: "POST",
+          headers: { authorization: `Bearer ${input.token!}`, "content-type": "application/json" },
+          body: JSON.stringify(claim),
+          redirect: "error",
+          signal: AbortSignal.timeout(30_000),
         });
-        if (connection.transport !== "reverse") remotes.connect(connection.id);
-        remotes.reverse.reconfigure();
-        return { ok: true };
-      }
-      case "connection-reverse-dial": {
-        await access.setReverseDial(input.id!, input.reverseDial!);
+        if (!response.ok) {
+          const detail = (await response.json()) as { message?: string; error?: string };
+          throw new Error(
+            `Pairing failed: ${detail.message ?? detail.error ?? `HTTP ${response.status}`}`,
+          );
+        }
+        const identity = (await response.json()) as {
+          instanceId: string;
+          name: string;
+          grantId: string;
+        };
+        await remotes.bindOrigin(identity.instanceId, identity.instanceId);
+        const id = await access.completePairing(url, input.token!, identity);
+        remotes.connect(id);
         remotes.reverse.reconfigure();
         return { ok: true };
       }
       case "connection-remove": {
+        const connection = access.getConnection(input.id!);
+        const notification =
+          connection?.localGrantId && remotes.reverse.hasControl(connection.id)
+            ? remotes.reverse.notifyRemoval(connection).catch((error: unknown) => {
+                app.log.warn(
+                  { err: error },
+                  "Peer removal notification interrupted; local access revoked",
+                );
+              })
+            : undefined;
+        // Revocation and stream cleanup never wait for a sleeping or unreachable peer.
         await access.removeConnection(input.id!);
         remotes.disconnect(input.id!);
         remotes.reverse.reconfigure();
+        for (const stream of streams.keys()) stream.end();
+        await notification;
         return { ok: true };
       }
       default:
         throw new Error("Unknown remote provisioning action");
     }
+  });
+  app.post<{ Body: PairingClaim }>("/api/node/pair", async (request) => {
+    const invitation = request.headers.authorization!.slice(7);
+    const identity = await access.claimInvitation(invitation, request.body);
+    await remotes.bindOrigin(request.body.instanceId, request.body.instanceId);
+    remotes.reverse.reconfigure();
+    return identity;
+  });
+  app.post("/api/node/unpair", async (request) => {
+    const connection = access.pairedConnection(request.nodeGrant!.id);
+    if (!connection) throw new Error("Unknown paired peer");
+    await access.removeConnection(connection.id);
+    remotes.disconnect(connection.id);
+    // Let the response drain before closing its own reverse transfer.
+    setImmediate(() => {
+      remotes.reverse.reconfigure();
+      for (const stream of streams.keys()) stream.end();
+    });
+    return { ok: true };
   });
   app.get("/api/node/identity", async (request) => ({
     ...access.identity(),
@@ -206,6 +242,7 @@ export function registerRemoteRoutes(app: FastifyInstance, runtime: Runtime) {
         );
       } else if (body.files !== undefined)
         throw new Error("Worker files require multipart transfer");
+      requireLivePeer(request);
       return runtime.orchestration.nodeCommand(
         request.nodeGrant!.id,
         body.requestId,
@@ -250,8 +287,9 @@ export function registerRemoteRoutes(app: FastifyInstance, runtime: Runtime) {
     return workers;
   }
   app.get("/api/node/catalog/events", async (request, reply) => {
+    const peerId = requireLivePeer(request);
     reply.hijack();
-    streams.add(reply.raw);
+    streams.set(reply.raw, peerId);
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
@@ -314,8 +352,9 @@ export function registerRemoteRoutes(app: FastifyInstance, runtime: Runtime) {
       const metadata = await runtime.orchestration.metadata(conversation.id);
       if (!metadata?.isSubagent && !metadata?.isCron)
         return reply.code(404).send({ error: "Unknown worker" });
+      const peerId = requireLivePeer(request);
       reply.hijack();
-      streams.add(reply.raw);
+      streams.set(reply.raw, peerId);
       reply.raw.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache, no-transform",
@@ -343,12 +382,16 @@ export function registerRemoteRoutes(app: FastifyInstance, runtime: Runtime) {
         toolCallId: request.params.tool,
         fileId: request.params.id,
       });
+      const peerId = requireLivePeer(request);
+      streams.set(reply.raw, peerId);
+      reply.raw.once("close", () => streams.delete(reply.raw));
       reply.type(file.descriptor.mimeType);
       return reply.send(fs.createReadStream(file.storedPath));
     },
   );
   return () => {
     closing = true;
-    for (const stream of streams) stream.destroy();
+    remotes.changes.off("catalog", closeOfflineStreams);
+    for (const stream of streams.keys()) stream.destroy();
   };
 }

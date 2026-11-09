@@ -57,10 +57,8 @@ it("sends owner-authenticated provisioning requests as JSON", async () => {
     return new Response(JSON.stringify({ ok: true }));
   });
   await getRemoteSettings();
-  await issueRemoteGrant("Office");
+  await issueRemoteGrant();
   await addRemoteConnection({
-    id: "work",
-    label: "Work",
     url: "https://work.test/",
     token: "private",
   });
@@ -68,20 +66,18 @@ it("sends owner-authenticated provisioning requests as JSON", async () => {
   await revokeRemoteGrant("grant");
   expect(requests).toEqual([
     { method: "GET", body: undefined, credentials: "include" },
-    { method: "POST", body: { action: "grant-add", label: "Office" }, credentials: "include" },
+    { method: "POST", body: { action: "token-generate" }, credentials: "include" },
     {
       method: "POST",
       body: {
         action: "connection-add",
-        id: "work",
-        label: "Work",
         url: "https://work.test/",
         token: "private",
       },
       credentials: "include",
     },
     { method: "POST", body: { action: "connection-remove", id: "work" }, credentials: "include" },
-    { method: "POST", body: { action: "grant-revoke", id: "grant" }, credentials: "include" },
+    { method: "POST", body: { action: "token-revoke", id: "grant" }, credentials: "include" },
   ]);
 });
 

@@ -18,9 +18,16 @@ vi.mock("@/client/lib/api", () => ({
 }));
 
 const settings = {
-  instanceId: "local",
-  connections: [{ id: "work", label: "Work", url: "https://work.test/batty/" }],
-  grants: [{ id: "grant", label: "Home" }],
+  instanceId: "local-private-id",
+  connections: [
+    {
+      id: "work-private-id",
+      label: "Work",
+      url: "https://work.test/batty/",
+      status: { state: "connected" as const },
+    },
+  ],
+  grants: [{ id: "grant", label: "Unused token" }],
 };
 
 beforeEach(() => {
@@ -45,109 +52,112 @@ function setup(open = true) {
   });
 }
 
-it("loads only when open and uses existing provisioning actions for connections", async () => {
+function generate(wrapper: ReturnType<typeof setup>) {
+  return wrapper
+    .findAll("button")
+    .find((button) => button.text() === "Generate token")!
+    .trigger("click");
+}
+
+it("offers only URL and token inputs and sends only those fields when adding", async () => {
   const wrapper = setup(false);
   try {
     expect(getRemoteSettings).not.toHaveBeenCalled();
     await wrapper.setProps({ open: true });
     await flushPromises();
-    expect(wrapper.text()).toContain("work · https://work.test/batty/");
-    expect(wrapper.find("[placeholder]").exists()).toBe(false);
-    expect(wrapper.text()).not.toContain("Connection ID");
+    expect(wrapper.text()).toContain("Work");
+    expect(wrapper.text()).toContain("Online");
+    expect(wrapper.text()).toContain("https://work.test/batty/");
+    expect(wrapper.text()).not.toContain("private-id");
+    expect(wrapper.findAll("input")).toHaveLength(2);
+    expect(wrapper.get("form").attributes("autocomplete")).toBe("off");
+    expect(wrapper.get('input[name="pairing-url"]').attributes("type")).toBe("url");
+    const tokenInput = wrapper.get('input[name="pairing-token"]');
+    expect(tokenInput.attributes("type")).toBe("text");
+    expect(tokenInput.attributes("autocomplete")).toBe("one-time-code");
+    expect(wrapper.find('input[type="password"]').exists()).toBe(false);
+    expect(wrapper.find("select").exists()).toBe(false);
+    expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false);
+    expect(wrapper.findAll("form")).toHaveLength(1);
     await wrapper.get('input[type="url"]').setValue("https://home.test/batty/");
-    await wrapper.get('input[type="password"]').setValue(" private-token ");
-    await wrapper.get("form").get("input").setValue("Home installation");
-    vi.mocked(addRemoteConnection).mockRejectedValueOnce(
-      new Error("Remote authentication required"),
-    );
+    await wrapper.get('input[name="pairing-token"]').setValue(" private-token ");
+    vi.mocked(addRemoteConnection).mockRejectedValueOnce(new Error("Token already used"));
     await wrapper.get("form").trigger("submit");
     await flushPromises();
-    expect(wrapper.get('[role="alert"]').text()).toBe("Remote authentication required");
-    expect(wrapper.get<HTMLInputElement>('input[type="password"]').element.value).toBe(
+    expect(wrapper.get('[role="alert"]').text()).toBe("Token already used");
+    expect(wrapper.get<HTMLInputElement>('input[name="pairing-token"]').element.value).toBe(
       " private-token ",
     );
     vi.mocked(addRemoteConnection).mockResolvedValueOnce({ ok: true });
     await wrapper.get("form").trigger("submit");
     await flushPromises();
     expect(addRemoteConnection).toHaveBeenLastCalledWith({
-      id: expect.stringMatching(/^[0-9a-f-]{36}$/),
-      label: "Home installation",
       url: "https://home.test/batty/",
       token: "private-token",
     });
-    expect(wrapper.get<HTMLInputElement>('input[type="password"]').element.value).toBe("");
+    expect(wrapper.get<HTMLInputElement>('input[name="pairing-token"]').element.value).toBe("");
     vi.mocked(removeRemoteConnection).mockResolvedValueOnce({ ok: true });
     await wrapper.get('[aria-label="Remove connection Work"]').trigger("click");
     await flushPromises();
-    expect(removeRemoteConnection).toHaveBeenCalledWith("work");
+    expect(removeRemoteConnection).toHaveBeenCalledWith("work-private-id");
   } finally {
     wrapper.unmount();
   }
 });
 
-it("shows an issued token once, copies it, and clears all secrets when leaving the tab", async () => {
+it("generates without a label, copies the token and clears secrets on close", async () => {
   const wrapper = setup();
   const writeText = vi.fn().mockResolvedValue(undefined);
   vi.stubGlobal("navigator", { clipboard: { writeText } });
   try {
     await flushPromises();
-    await wrapper.findAll("form")[1]!.get("input").setValue("  Office  ");
     vi.mocked(issueRemoteGrant).mockResolvedValueOnce({ id: "new", token: "issued-secret" });
-    await wrapper.findAll("form")[1]!.trigger("submit");
+    await generate(wrapper);
     await flushPromises();
-    expect(issueRemoteGrant).toHaveBeenCalledWith("Office");
+    expect(issueRemoteGrant).toHaveBeenCalledWith();
     expect(wrapper.get<HTMLTextAreaElement>("textarea").element.value).toBe("issued-secret");
+    expect(wrapper.get("textarea").attributes("readonly")).toBeDefined();
     await wrapper
       .findAll("button")
       .find((button) => button.text() === "Copy token")!
       .trigger("click");
     await flushPromises();
     expect(writeText).toHaveBeenCalledWith("issued-secret");
-    await wrapper.get('input[type="password"]').setValue("draft-secret");
+    await wrapper.get('input[name="pairing-token"]').setValue("draft-secret");
     await wrapper.setProps({ open: false });
     expect(wrapper.find("textarea").exists()).toBe(false);
-    expect(wrapper.get<HTMLInputElement>('input[type="password"]').element.value).toBe("");
+    expect(wrapper.get<HTMLInputElement>('input[name="pairing-token"]').element.value).toBe("");
     await wrapper.setProps({ open: true });
     await flushPromises();
     expect(wrapper.find("textarea").exists()).toBe(false);
-    vi.mocked(revokeRemoteGrant).mockRejectedValueOnce(new Error("Revoke failed"));
-    await wrapper.get('[aria-label="Revoke access Home"]').trigger("click");
+  } finally {
+    wrapper.unmount();
+  }
+});
+
+it("cancels unused tokens and clears a cancelled generated secret", async () => {
+  const wrapper = setup();
+  try {
     await flushPromises();
-    expect(wrapper.get('[role="alert"]').text()).toBe("Revoke failed");
+    vi.mocked(issueRemoteGrant).mockResolvedValueOnce({ id: "grant", token: "issued-secret" });
+    await generate(wrapper);
+    await flushPromises();
+    vi.mocked(revokeRemoteGrant).mockRejectedValueOnce(new Error("Cancel failed"));
+    await wrapper.get('[aria-label="Cancel unused token"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('[role="alert"]').text()).toBe("Cancel failed");
+    expect(wrapper.find("textarea").exists()).toBe(true);
     vi.mocked(revokeRemoteGrant).mockResolvedValueOnce({ ok: true });
-    await wrapper.get('[aria-label="Revoke access Home"]').trigger("click");
+    await wrapper.get('[aria-label="Cancel unused token"]').trigger("click");
     await flushPromises();
     expect(revokeRemoteGrant).toHaveBeenLastCalledWith("grant");
-  } finally {
-    wrapper.unmount();
-  }
-});
-
-it("does not reveal a token that arrives after the settings close", async () => {
-  const wrapper = setup();
-  try {
-    await flushPromises();
-    let finish!: (value: { id: string; token: string }) => void;
-    vi.mocked(issueRemoteGrant).mockReturnValueOnce(
-      new Promise((resolve) => {
-        finish = resolve;
-      }),
-    );
-    await wrapper.findAll("form")[1]!.get("input").setValue("Late grant");
-    await wrapper.findAll("form")[1]!.trigger("submit");
-    await wrapper.setProps({ open: false });
-    finish({ id: "late", token: "late-secret" });
-    await flushPromises();
-    await wrapper.setProps({ open: true });
-    await flushPromises();
     expect(wrapper.find("textarea").exists()).toBe(false);
-    expect(wrapper.text()).not.toContain("late-secret");
   } finally {
     wrapper.unmount();
   }
 });
 
-it("keeps an in-flight mutation locked across reopen and never reveals its old token", async () => {
+it("keeps an in-flight generation locked across reopen without revealing its secret", async () => {
   const wrapper = setup();
   try {
     await flushPromises();
@@ -157,17 +167,14 @@ it("keeps an in-flight mutation locked across reopen and never reveals its old t
         finish = resolve;
       }),
     );
-    await wrapper.findAll("form")[1]!.get("input").setValue("Slow grant");
-    await wrapper.findAll("form")[1]!.trigger("submit");
+    await generate(wrapper);
     expect(issueRemoteGrant).toHaveBeenCalledOnce();
     await wrapper.setProps({ open: false });
     await wrapper.setProps({ open: true });
     await flushPromises();
-    // Reopening must not start a faster GET that releases the mutation's lock.
     expect(getRemoteSettings).toHaveBeenCalledOnce();
     expect(wrapper.get("form").get("input").attributes("disabled")).toBeDefined();
-    expect(wrapper.get('[aria-label="Revoke access Home"]').attributes("disabled")).toBeDefined();
-    await wrapper.findAll("form")[1]!.trigger("submit");
+    await generate(wrapper);
     expect(issueRemoteGrant).toHaveBeenCalledOnce();
     finish({ id: "slow", token: "old-opening-secret" });
     await flushPromises();
@@ -180,12 +187,69 @@ it("keeps an in-flight mutation locked across reopen and never reveals its old t
   }
 });
 
-it("surfaces loading errors", async () => {
+it("discards a generated token arriving while settings are closed", async () => {
+  const wrapper = setup();
+  try {
+    await flushPromises();
+    let finish!: (value: { id: string; token: string }) => void;
+    vi.mocked(issueRemoteGrant).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    await generate(wrapper);
+    await wrapper.setProps({ open: false });
+    finish({ id: "late", token: "late-secret" });
+    await flushPromises();
+    await wrapper.setProps({ open: true });
+    await flushPromises();
+    expect(wrapper.find("textarea").exists()).toBe(false);
+  } finally {
+    wrapper.unmount();
+  }
+});
+
+it("shows connection states and refreshes explicitly", async () => {
+  vi.mocked(getRemoteSettings).mockResolvedValue({
+    ...settings,
+    connections: [
+      { id: "offline", label: "Offline peer", url: "" },
+      { id: "connecting", label: "Waking peer", url: "", status: { state: "connecting" } },
+      {
+        id: "error",
+        label: "Unreachable peer",
+        url: "",
+        status: { state: "error", error: "Connection lost" },
+      },
+    ],
+  });
+  const wrapper = setup();
+  try {
+    await flushPromises();
+    expect(wrapper.text()).toContain("Offline");
+    expect(wrapper.text()).toContain("Connecting");
+    expect(wrapper.get('[role="alert"]').text()).toBe("Connection lost");
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === "Refresh")!
+      .trigger("click");
+    await flushPromises();
+    expect(getRemoteSettings).toHaveBeenCalledTimes(2);
+  } finally {
+    wrapper.unmount();
+  }
+});
+
+it("surfaces loading and generation errors", async () => {
   vi.mocked(getRemoteSettings).mockRejectedValueOnce(new Error("Settings unavailable"));
   const wrapper = setup();
   try {
     await flushPromises();
     expect(wrapper.get('[role="alert"]').text()).toBe("Settings unavailable");
+    vi.mocked(issueRemoteGrant).mockRejectedValueOnce(new Error("Could not generate token"));
+    await generate(wrapper);
+    await flushPromises();
+    expect(wrapper.get('[role="alert"]').text()).toBe("Could not generate token");
   } finally {
     wrapper.unmount();
   }

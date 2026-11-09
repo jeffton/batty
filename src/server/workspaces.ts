@@ -4,6 +4,7 @@ import path from "node:path";
 import type { WorkspaceInfo } from "@/shared/types";
 import type { AppConfig } from "./config";
 import { loadAppOptions } from "./options";
+import { workspaceGitBranch } from "./workspace-git";
 
 function createHttpError(statusCode: number, message: string): Error & { statusCode: number } {
   return Object.assign(new Error(message), { statusCode });
@@ -93,7 +94,10 @@ function resolveWorkspacePath(workspacesRoot: string, name: string): string {
   return workspacePath;
 }
 
-export async function listWorkspaces(config: AppConfig): Promise<WorkspaceInfo[]> {
+export async function listWorkspaces(
+  config: AppConfig,
+  includeGit = false,
+): Promise<WorkspaceInfo[]> {
   const options = await loadAppOptions(config.battyDir);
   const pinnedWorkspaceIds = new Set(options.pinnedWorkspaceIds);
   const roots = config.workspacesRoots;
@@ -115,7 +119,15 @@ export async function listWorkspaces(config: AppConfig): Promise<WorkspaceInfo[]
     }),
   );
 
-  return workspaceGroups.flat().sort((left, right) => {
+  const workspaces = workspaceGroups.flat();
+  if (includeGit) {
+    await Promise.all(
+      workspaces.map(async (workspace) => {
+        workspace.gitBranch = await workspaceGitBranch(workspace.path);
+      }),
+    );
+  }
+  return workspaces.sort((left, right) => {
     if (left.isPinned !== right.isPinned) {
       return left.isPinned ? -1 : 1;
     }

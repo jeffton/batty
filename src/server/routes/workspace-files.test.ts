@@ -36,6 +36,23 @@ function get(file = "", workspaceId = "project") {
   return app.inject(`/api/workspaces/${workspaceId}/files?${new URLSearchParams({ path: file })}`);
 }
 
+test("reads fresh workspace git state and rejects unknown IDs", async () => {
+  expect((await app.inject("/api/workspaces/project/git")).json()).toEqual({ branch: null });
+  expect((await app.inject("/api/workspaces/unknown/git")).statusCode).toBe(404);
+  await promisify(execFile)("git", ["-C", workspace, "init", "--initial-branch=feature/actual"]);
+  expect((await app.inject("/api/workspaces/project/git")).json()).toEqual({
+    branch: "feature/actual",
+  });
+  await promisify(execFile)("git", [
+    "-C",
+    workspace,
+    "symbolic-ref",
+    "HEAD",
+    "refs/heads/switched",
+  ]);
+  expect((await app.inject("/api/workspaces/project/git")).json()).toEqual({ branch: "switched" });
+});
+
 test("lists one directory at a time, including hidden files, and reads UTF-8 and empty source", async () => {
   const listing = (await get()).json();
   expect(listing.kind).toBe("directory");

@@ -1,5 +1,8 @@
 // @vitest-environment node
 import fs from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { listWorkspaces } from "@/server/workspaces";
 import os from "node:os";
 import path from "node:path";
 import type { ServerResponse } from "node:http";
@@ -50,7 +53,22 @@ beforeAll(async () => {
   await fs.writeFile(path.join(project, ".hidden"), "Hidden content");
   await fs.writeFile(path.join(project, "empty"), "");
   await fs.writeFile(path.join(project, "binary"), Buffer.from([0, 1, 2]));
+  await promisify(execFile)("git", [
+    "-C",
+    project,
+    "init",
+    "--initial-branch=feature/current-branch",
+  ]);
   app = fastify();
+  app.get("/api/workspaces", async () => ({
+    workspaces: await listWorkspaces(
+      {
+        battyDir: root,
+        workspacesRoots: [path.join(root, "workspaces")],
+      } as AppConfig,
+      true,
+    ),
+  }));
   registerWorkspaceFileRoutes(app, {
     battyDir: root,
     workspacesRoots: [path.join(root, "workspaces")],
@@ -111,8 +129,16 @@ test("workspace row opens native code browser, lazily browses files and closes b
     page.on("pageerror", (error) => errors.push(error.message));
     try {
       await page.goto(url);
+      await page
+        .locator(".tools-popover__branch")
+        .getByText("feature/current-branch", { exact: true })
+        .waitFor();
       await page.getByRole("button", { name: "Browse code in Project" }).click();
       const popover = page.locator("#tools-code");
+      await popover
+        .locator(".workspace-code__branch")
+        .getByText("feature/current-branch", { exact: true })
+        .waitFor();
       await popover.getByRole("treeitem", { name: "src", exact: true }).waitFor();
       expect(calls).toHaveLength(1);
       const bounds = await popover.boundingBox();
@@ -162,6 +188,53 @@ test("workspace row opens native code browser, lazily browses files and closes b
     } finally {
       await page.close();
     }
+  }
+});
+
+test("refreshes actual branches on reopening, with long names contained on mobile", async () => {
+  const branch = `feature/${"long-branch-name-".repeat(7)}`;
+  const project = path.join(root, "workspaces/project");
+  const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
+  const setBranch = (name: string) =>
+    promisify(execFile)("git", ["-C", project, "symbolic-ref", "HEAD", `refs/heads/${name}`]);
+  try {
+    await page.goto(url);
+    await page
+      .locator(".tools-popover__branch")
+      .getByText("feature/current-branch", { exact: true })
+      .waitFor();
+    await page.getByRole("button", { name: "Browse code in Project" }).click();
+    const popover = page.locator("#tools-code");
+    await popover
+      .locator(".workspace-code__branch")
+      .getByText("feature/current-branch", { exact: true })
+      .waitFor();
+    await popover.getByRole("button", { name: "Close code browser" }).click();
+    await setBranch(branch);
+    await page.getByRole("button", { name: "Browse code in Project" }).click();
+    await popover.locator(".workspace-code__branch").getByText(branch, { exact: true }).waitFor();
+    expect(await popover.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+      true,
+    );
+    if (process.env.BATTY_UI_SCREENSHOTS === "1")
+      await page.screenshot({ path: ".tmp/ui-feedback/branch-header-long-390.png" });
+    await popover.getByRole("button", { name: "Close code browser" }).click();
+    await page.locator("#tools").evaluate((element) => (element as HTMLElement).hidePopover());
+    await page.locator("#tools").evaluate((element) => (element as HTMLElement).showPopover());
+    const row = page.getByRole("button", { name: "Browse code in Project" });
+    await row.locator(".tools-popover__branch").getByText(branch, { exact: true }).waitFor();
+    expect(await row.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    expect(
+      await page
+        .getByRole("button", { name: "Browse code in Other" })
+        .locator(".tools-popover__branch")
+        .count(),
+    ).toBe(0);
+    if (process.env.BATTY_UI_SCREENSHOTS === "1")
+      await page.screenshot({ path: ".tmp/ui-feedback/branch-list-long-390.png" });
+  } finally {
+    await setBranch("feature/current-branch");
+    await page.close();
   }
 });
 

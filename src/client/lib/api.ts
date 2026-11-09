@@ -59,6 +59,14 @@ export class HttpError extends Error {
   }
 }
 
+export function getWorkspaces(): Promise<{ workspaces: WorkspaceInfo[] }> {
+  return request("/api/workspaces");
+}
+
+export function getWorkspaceGit(workspaceId: string): Promise<{ branch: string | null }> {
+  return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/git`);
+}
+
 export function getWorkspaceFiles(workspaceId: string, path = ""): Promise<WorkspaceFilesResponse> {
   return request(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/files?${new URLSearchParams({ path })}`,

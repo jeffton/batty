@@ -3,13 +3,16 @@ import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import ToolsPopover from "./ToolsPopover.vue";
 import { useAppStore } from "@/client/stores/app";
-import { getSessionResources } from "@/client/lib/api";
+import { getSessionResources, getWorkspaces } from "@/client/lib/api";
 
-vi.mock("@/client/lib/api", () => ({ getSessionResources: vi.fn() }));
+vi.mock("@/client/lib/api", () => ({ getSessionResources: vi.fn(), getWorkspaces: vi.fn() }));
 
 beforeEach(() => {
   setActivePinia(createPinia());
   vi.clearAllMocks();
+  vi.mocked(getWorkspaces).mockResolvedValue({
+    workspaces: [{ id: "project", gitBranch: "feature/current" } as never],
+  });
 });
 
 function setup() {
@@ -64,6 +67,8 @@ describe("Workspaces and tools", () => {
       expect(workspacePanel.isVisible()).toBe(true);
       expect(workspacePanel.text()).toContain("Project");
       expect(workspacePanel.text()).toContain("/work/project");
+      expect(workspacePanel.text()).toContain("feature/current");
+      expect(getWorkspaces).toHaveBeenCalledTimes(1);
       await workspacePanel.get("button").trigger("click");
       expect(wrapper.getComponent({ name: "WorkspaceCodePopover" }).props("workspace")).toEqual(
         store.workspaces[0],
@@ -91,6 +96,12 @@ describe("Workspaces and tools", () => {
       wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState: "closed" });
       await flushPromises();
       expect(wrapper.getComponent({ name: "McpSettingsPanel" }).props("active")).toBe(false);
+      vi.mocked(getWorkspaces).mockResolvedValue({
+        workspaces: [{ ...store.workspaces[0], id: "project", gitBranch: "next/branch" } as never],
+      });
+      wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState: "open" });
+      await flushPromises();
+      expect(getWorkspaces).toHaveBeenCalledTimes(2);
     } finally {
       wrapper.unmount();
     }

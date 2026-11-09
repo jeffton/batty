@@ -5,7 +5,8 @@ import WorkspaceCodePopover from "./WorkspaceCodePopover.vue";
 import type { WorkspaceInfo } from "@/shared/types";
 import PopoverTabs from "./PopoverTabs.vue";
 import McpSettingsPanel from "@/client/components/McpSettingsPanel.vue";
-import { getSessionResources } from "@/client/lib/api";
+import { getSessionResources, getWorkspaces } from "@/client/lib/api";
+import { GitBranch } from "@lucide/vue";
 import { useAppStore } from "@/client/stores/app";
 import type { SessionResourcesResponse } from "@/shared/types";
 
@@ -26,6 +27,26 @@ const error = ref("");
 const resources = ref<SessionResourcesResponse>({ skills: [], tools: [] });
 const sessionId = computed(() => store.activeSession?.id);
 let loadGeneration = 0;
+let workspaceGeneration = 0;
+const branches = ref<Record<string, string | null>>({});
+const branchError = ref("");
+
+async function loadBranches(): Promise<void> {
+  const generation = ++workspaceGeneration;
+  branches.value = {};
+  branchError.value = "";
+  if (!open.value) return;
+  try {
+    const result = await getWorkspaces();
+    if (generation === workspaceGeneration)
+      branches.value = Object.fromEntries(
+        result.workspaces.map((workspace) => [workspace.id, workspace.gitBranch ?? null]),
+      );
+  } catch (cause) {
+    if (generation === workspaceGeneration)
+      branchError.value = cause instanceof Error ? cause.message : String(cause);
+  }
+}
 
 function tabId(tab: Tab): string {
   return `${props.popoverId}-${tab}-tab`;
@@ -58,7 +79,11 @@ function handleToggle(event: Event): void {
 }
 
 watch([open, sessionId], () => void loadResources());
-onBeforeUnmount(() => loadGeneration++);
+watch(open, () => void loadBranches());
+onBeforeUnmount(() => {
+  loadGeneration++;
+  workspaceGeneration++;
+});
 </script>
 
 <template>
@@ -85,6 +110,9 @@ onBeforeUnmount(() => loadGeneration++);
       :aria-labelledby="tabId('Workspaces')"
       class="tools-popover__pane"
     >
+      <div v-if="branchError" class="tools-popover__item tools-popover__error" role="alert">
+        {{ branchError }}
+      </div>
       <button
         v-for="workspace in store.workspaces"
         :key="workspace.id"
@@ -95,6 +123,9 @@ onBeforeUnmount(() => loadGeneration++);
         @click="browsingWorkspace = workspace"
       >
         <strong>{{ workspace.label }}</strong>
+        <span v-if="branches[workspace.id]" class="tools-popover__branch"
+          ><GitBranch :size="14" aria-hidden="true" />{{ branches[workspace.id] }}</span
+        >
         <code>{{ workspace.path }}</code>
       </button>
       <div v-if="!store.workspaces.length" class="tools-popover__empty">
@@ -178,6 +209,19 @@ onBeforeUnmount(() => loadGeneration++);
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
+}
+
+.tools-popover__branch {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  color: var(--color-text-subtle);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+.tools-popover__branch svg {
+  flex-shrink: 0;
 }
 
 .tools-popover__workspace:hover {

@@ -1,7 +1,17 @@
 import Fastify from "fastify";
+import { socketFetch } from "./socket-fetch";
+
+vi.mock("@/client/lib/socket-fetch", () => ({
+  socketFetch: vi.fn((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init)),
+  closeSocketTransport: vi.fn(),
+}));
 import { afterEach, expect, it, vi } from "vite-plus/test";
 import {
   addRemoteConnection,
+  beginPasskeyLogin,
+  finishPasskeyLogin,
+  getBootstrap,
+  logout,
   getRemoteSettings,
   getMainMessages,
   issueRemoteGrant,
@@ -11,6 +21,20 @@ import {
   setMemoryLanguage,
   setPushTitle,
 } from "./api";
+
+it("cookie-establishing login, bootstrap and logout use HTTP, app requests use the socket", async () => {
+  vi.mocked(socketFetch).mockClear();
+  const http = vi.fn(async () => new Response(JSON.stringify({ authenticated: true })));
+  vi.stubGlobal("fetch", http);
+  await getBootstrap();
+  await beginPasskeyLogin();
+  await finishPasskeyLogin("request", {} as Parameters<typeof finishPasskeyLogin>[1]);
+  await logout();
+  expect(socketFetch).not.toHaveBeenCalled();
+  expect(http.mock.calls).toHaveLength(4);
+  await getRemoteSettings();
+  expect(socketFetch).toHaveBeenCalledOnce();
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();

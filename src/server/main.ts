@@ -128,7 +128,7 @@ registerSettingsCopyRoute(app, async (kind, name) => {
   return Object.hasOwn(environment, name) ? environment[name] : undefined;
 });
 const closeRemoteStreams = registerRemoteRoutes(app, runtime);
-registerReverseRemoteRoutes(app, runtime);
+await registerReverseRemoteRoutes(app, runtime);
 registerBrowserErrorRoutes(app, path.join(stateDirPath(config.battyDir), "browser-errors.json"));
 registerCronRoutes(app, runtime.orchestration);
 registerSiteRoutes(routeContext);

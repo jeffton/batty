@@ -1,3 +1,4 @@
+import { fixtureRoute, waitForFixtureResponse } from "../test/socket-fixture";
 // @vitest-environment node
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -118,7 +119,11 @@ afterAll(async () => {
 });
 
 test("tab menu creates, switches and closes pages without exposing IDs", async () => {
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const context = await browser.newContext({
+    permissions: ["local-network-access"],
+    viewport: { width: 390, height: 844 },
+  });
+  context.setDefaultTimeout(5_000);
   try {
     const page = await context.newPage();
     let selected = "first";
@@ -131,24 +136,7 @@ test("tab menu creates, switches and closes pages without exposing IDs", async (
       },
     ];
     const commands: Array<{ action: string; pageId?: string }> = [];
-    await page.addInitScript(() => {
-      globalThis.WebSocket = class {
-        static OPEN = 1;
-        readyState = 1;
-        onmessage?: (event: { data: string }) => void;
-        constructor(url: string | URL) {
-          if (!String(url).includes("/api/cloud-browser/")) return;
-          document.addEventListener("fixture-browser-state", (event) => {
-            this.onmessage?.({ data: (event as CustomEvent<string>).detail });
-          });
-        }
-        close() {
-          this.readyState = 3;
-        }
-        send() {}
-      } as unknown as typeof WebSocket;
-    });
-    await page.route("**/api/cloud-browser/*/{state,control}*", async (route) => {
+    await fixtureRoute(server, page, "**/api/cloud-browser/*/{state,control}*", async (route) => {
       const command = route.request().postDataJSON() as { action: string; pageId?: string } | null;
       if (command) {
         commands.push(command);
@@ -181,8 +169,10 @@ test("tab menu creates, switches and closes pages without exposing IDs", async (
           );
         }, snapshot);
     });
-    await page.goto(url);
+    await page.goto(`${url}?mockTabs=1`);
+    const initial = waitForFixtureResponse(server, (path) => path.endsWith("/state"));
     await page.getByRole("button", { name: "Open browser", exact: true }).click();
+    expect((await (await initial).json()).pages).toHaveLength(2);
     const choose = page.getByRole("button", { name: "Choose tab", exact: true });
     await choose.click();
     const menu = page.locator(".cloud-browser-tabs:popover-open");
@@ -190,6 +180,7 @@ test("tab menu creates, switches and closes pages without exposing IDs", async (
     expect(await menu.locator("code").count()).toBe(0);
     expect(await menu.getByRole("button", { name: /^Copy tab ID/ }).count()).toBe(0);
     // Native buttons retain normal Tab/Enter keyboard access; closing must not also switch.
+    await expect.poll(() => menu.innerText(), { timeout: 5_000 }).toContain("Second tab");
     await menu.getByRole("button", { name: /^Close tab: Second tab/ }).focus();
     await page.keyboard.press("Enter");
     await expect.poll(() => pages.length).toBe(1);
@@ -220,6 +211,7 @@ test("tab menu creates, switches and closes pages without exposing IDs", async (
 
 test("toolbar starts a cloud browser and reopens the same live tabs on mobile", async () => {
   const context = await browser.newContext({
+    permissions: ["local-network-access"],
     viewport: { width: 390, height: 844 },
     isMobile: true,
     hasTouch: true,
@@ -230,10 +222,9 @@ test("toolbar starts a cloud browser and reopens the same live tabs on mobile", 
     ]);
     const page = await context.newPage();
     await page.goto(`${url}?toolbar=1`);
-    const opened = page.waitForResponse(
-      (response) =>
-        response.url().endsWith("/api/cloud-browser/open") &&
-        response.request().method() === "POST",
+    const opened = waitForFixtureResponse(
+      server,
+      (path, body) => path.endsWith("/api/cloud-browser/open") && body !== undefined,
     );
     await page.getByRole("button", { name: "Open browser", exact: true }).click();
     const descriptor = await (await opened).json();
@@ -358,8 +349,9 @@ test("WebKit bottom autofill pair detects login steps without submitting or expo
     ]);
     const page = await context.newPage();
     const controls: string[] = [];
-    page.on("request", (request) => {
-      if (request.url().endsWith("/control")) controls.push(request.postData() ?? "");
+    await fixtureRoute(server, page, "**/control", async (route) => {
+      controls.push(JSON.stringify(route.request().postDataJSON()));
+      await route.continue();
     });
     await page.goto(url);
     await page.getByRole("button", { name: "Open browser", exact: true }).click();
@@ -557,6 +549,7 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
   attachedBrowserId = (await service.execute("integration", { action: "attach" })).details
     .sites![0]!.browserId!;
   const context = await browser.newContext({
+    permissions: ["local-network-access"],
     viewport: { width: 390, height: 844 },
     isMobile: true,
     hasTouch: true,
@@ -737,13 +730,12 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
       .poll(() => addressInput.inputValue(), { timeout: 10_000 })
       .toBe(`${backendUrl}/popup#section`);
     const back = async () => {
-      const response = page.waitForResponse(
-        (response) =>
-          response.url().endsWith("/control") &&
-          response.request().postDataJSON().action === "back",
+      const response = waitForFixtureResponse(
+        server,
+        (path, body) => path.endsWith("/control") && !!body && JSON.parse(body).action === "back",
       );
       await popover.getByRole("button", { name: "Go back" }).click();
-      expect((await response).ok()).toBe(true);
+      expect((await response).ok).toBe(true);
     };
     await back();
     await expect
@@ -770,6 +762,7 @@ test("native touch drag and cancellation survive rotation and disconnect", async
   attachedBrowserId = (await service.execute("integration", { action: "attach" })).details
     .sites![0]!.browserId!;
   const context = await browser.newContext({
+    permissions: ["local-network-access"],
     viewport: { width: 390, height: 844 },
     isMobile: true,
     hasTouch: true,
@@ -872,15 +865,19 @@ test("viewer open and live reconnect reconcile agent-closed tabs without replayi
     undefined,
     "agent-b",
   );
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const context = await browser.newContext({
+    permissions: ["local-network-access"],
+    viewport: { width: 1280, height: 900 },
+  });
   await context.addCookies([
     { name: "cloud-auth", value: "test", url: server.resolvedUrls!.local[0]! },
   ]);
   try {
     const page = await context.newPage();
     const commands: string[] = [];
-    page.on("request", (request) => {
-      if (request.url().endsWith("/control")) commands.push(request.postDataJSON().action);
+    await fixtureRoute(server, page, "**/control", async (route) => {
+      commands.push(route.request().postDataJSON().action);
+      await route.continue();
     });
     await page.goto(url);
     await page.getByRole("button", { name: "Open browser", exact: true }).click();
@@ -923,11 +920,11 @@ test("viewer open and live reconnect reconcile agent-closed tabs without replayi
     await expect(
       service.execute(owner, { action: "snapshot" }, undefined, "agent-b"),
     ).rejects.toThrow("Unknown browser page");
-    const resumedState = page.waitForResponse((response) => response.url().endsWith("/state"));
+    const resumedState = waitForFixtureResponse(server, (path) => path.endsWith("/state"));
     await page.evaluate(() =>
       window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })),
     );
-    expect((await resumedState).status()).toBe(200);
+    expect((await resumedState).status).toBe(200);
     await expect.poll(() => popover.getByRole("status").count()).toBe(0);
     expect(commands.filter((action) => action !== "viewport")).toEqual([]);
     await page.getByRole("button", { name: "Close popover" }).click();
@@ -950,8 +947,12 @@ test("desktop/mobile switching keeps login, CSS screen matches the viewer, and n
     document.cookie = "login=retained;path=/";
     localStorage.setItem("login", "retained");
   });
-  const desktop = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const desktop = await browser.newContext({
+    permissions: ["local-network-access"],
+    viewport: { width: 1440, height: 1000 },
+  });
   const mobile = await browser.newContext({
+    permissions: ["local-network-access"],
     viewport: { width: 390, height: 844 },
     isMobile: true,
     hasTouch: true,
@@ -1019,6 +1020,7 @@ test("DPR3 frames cover all viewport corners and align edge taps", async () => {
   attachedBrowserId = (await service.execute("integration", { action: "attach" })).details
     .sites![0]!.browserId!;
   const context = await browser.newContext({
+    permissions: ["local-network-access"],
     viewport: { width: 390, height: 844 },
     deviceScaleFactor: 3,
     isMobile: true,

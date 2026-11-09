@@ -1,3 +1,4 @@
+import { fixtureRoute } from "../test/socket-fixture";
 // @vitest-environment node
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -36,7 +37,9 @@ test("instance colors affect app header and footer, not controls or content", as
   ] as const) {
     const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
     try {
-      await page.route("**/api/**", (route) => route.fulfill({ json: { names: [] } }));
+      await fixtureRoute(server, page, "**/api/**", (route) =>
+        route.fulfill({ json: { names: [] } }),
+      );
       await page.goto(`${url}?shell=1`);
       let controls: unknown;
       let previousHeader: string | undefined;
@@ -88,7 +91,7 @@ for (const engine of ["chromium", "webkit"] as const) {
     let grants: { id: string; label: string }[] = [];
     let connections: Record<string, unknown>[] = [];
     try {
-      await page.route("**/api/remotes", async (route) => {
+      await fixtureRoute(server, page, "**/api/remotes", async (route) => {
         if (route.request().method() === "GET") {
           await route.fulfill({ json: { instanceId: "local", grants, connections } });
           return;
@@ -120,7 +123,7 @@ for (const engine of ["chromium", "webkit"] as const) {
         }
         await route.fulfill({ json: body });
       });
-      await page.route("**/api/settings/environment", (route) =>
+      await fixtureRoute(server, page, "**/api/settings/environment", (route) =>
         route.fulfill({ json: { names: [] } }),
       );
       await page.goto(url);
@@ -142,8 +145,9 @@ for (const engine of ["chromium", "webkit"] as const) {
       expect(await panel.getByRole("checkbox").count()).toBe(0);
       await page.getByRole("button", { name: "Generate token", exact: true }).click();
       await expect
-        .poll(() =>
-          page.getByRole("textbox", { name: "Generated token", exact: true }).inputValue(),
+        .poll(
+          () => page.getByRole("textbox", { name: "Generated token", exact: true }).inputValue(),
+          { timeout: 5_000 },
         )
         .toBe("issued-private-token");
       await page.getByLabel("Remote token", { exact: true }).fill("draft-private-token");
@@ -207,9 +211,12 @@ for (const engine of ["chromium", "webkit"] as const) {
       ] as const) {
         const context = await instance.newContext({
           colorScheme,
-          ...(engine === "chromium" ? { permissions: ["clipboard-read", "clipboard-write"] } : {}),
+          ...(engine === "chromium"
+            ? { permissions: ["clipboard-read", "clipboard-write", "local-network-access"] }
+            : {}),
         });
         const page = await context.newPage();
+        page.setDefaultTimeout(5_000);
         await page.setViewportSize({ width, height: 900 });
         const base = "/nested/very-long%20workspace-name/department/project/batty/";
         const token = "fixture-only-invitation-".repeat(8);
@@ -217,7 +224,7 @@ for (const engine of ["chromium", "webkit"] as const) {
           await page.addInitScript((base) => {
             window.__BATTY_BASE_URL__ = base;
           }, base);
-          await page.route("**/api/**", async (route) => {
+          await fixtureRoute(server, page, "**/api/**", async (route) => {
             const input = route.request().method() === "POST" ? route.request().postDataJSON() : {};
             await route.fulfill({
               json:
@@ -300,7 +307,7 @@ test("Remote settings shows automatic peer names, offline status and pairing err
     const requests: Record<string, unknown>[] = [];
     let connected = false;
     try {
-      await page.route("**/api/remotes", async (route) => {
+      await fixtureRoute(server, page, "**/api/remotes", async (route) => {
         if (route.request().method() === "GET") {
           await route.fulfill({
             json: {
@@ -335,7 +342,7 @@ test("Remote settings shows automatic peer names, offline status and pairing err
         connected = true;
         await route.fulfill({ json: { ok: true } });
       });
-      await page.route("**/api/settings/environment", (route) =>
+      await fixtureRoute(server, page, "**/api/settings/environment", (route) =>
         route.fulfill({ json: { names: [] } }),
       );
       await page.goto(url);
@@ -406,7 +413,7 @@ for (const width of [390]) {
     const environmentRequests: unknown[] = [];
     let environmentNames = ["PROJECT_ROOT"];
     try {
-      await page.route("**/api/**", async (route) => {
+      await fixtureRoute(server, page, "**/api/**", async (route) => {
         const pathname = new URL(route.request().url()).pathname;
         let body: unknown = {};
         if (pathname.endsWith("/environment")) body = { names: environmentNames };
@@ -500,13 +507,15 @@ for (const width of [390]) {
 }
 
 test("copies saved keys and environment values through the real clipboard without rendering them", async () => {
-  const context = await browser.newContext({ permissions: ["clipboard-read", "clipboard-write"] });
+  const context = await browser.newContext({
+    permissions: ["clipboard-read", "clipboard-write", "local-network-access"],
+  });
   try {
     for (const width of [320, 1280]) {
       const page = await context.newPage();
       await page.setViewportSize({ width, height: 900 });
       let copies = 0;
-      await page.route("**/api/**", async (route) => {
+      await fixtureRoute(server, page, "**/api/**", async (route) => {
         if (route.request().url().endsWith("/settings/copy-value")) {
           copies++;
           await new Promise((resolve) => setTimeout(resolve, 30));

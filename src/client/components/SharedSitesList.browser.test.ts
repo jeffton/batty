@@ -17,6 +17,10 @@ test.each(["/", "/nested/app"])(
   async (baseUrl) => {
     const sitesDir = await fs.mkdtemp(path.join(os.tmpdir(), "batty-site-preview-"));
     const backend = fastify();
+    let delayRequests = 0;
+    backend.addHook("onRequest", async (request) => {
+      if (request.url.endsWith("/functions/delay")) delayRequests++;
+    });
     const site = await createSite(sitesDir, baseUrl, "Gallery");
     const prefix = baseUrl === "/" ? "" : baseUrl;
     await registerSiteFunction(sitesDir, site.descriptor.id, "echo", {
@@ -124,11 +128,8 @@ test.each(["/", "/nested/app"])(
         };
         // Both documents start at request id 1. A WindowProxy survives this reload.
         await reload("first-document");
-        const requested = page.waitForRequest((request) =>
-          request.url().endsWith("/functions/delay"),
-        );
         await invoke("old-document", 400);
-        await requested;
+        await expect.poll(() => delayRequests).toBe(1);
         await reload("second-document");
         await invoke("new-document", 900);
         await expect

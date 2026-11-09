@@ -12,6 +12,10 @@ test("browser rejection and caught upload failure reach authenticated server wit
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "batty-browser-errors-"));
   const file = path.join(dir, "browser-errors.json");
   const backend = fastify();
+  const telemetryStatuses: number[] = [];
+  backend.addHook("onResponse", async (request, reply) => {
+    if (request.url.endsWith("/api/browser-errors")) telemetryStatuses.push(reply.statusCode);
+  });
   backend.decorateRequest("auth", false);
   backend.addHook("onRequest", async (req) => {
     req.auth = req.headers.cookie === "fixture=authenticated";
@@ -40,10 +44,6 @@ test("browser rejection and caught upload failure reach authenticated server wit
   const context = await browser.newContext();
   await context.addCookies([{ name: "fixture", value: "authenticated", url }]);
   const page = await context.newPage();
-  const telemetryStatuses: number[] = [];
-  page.on("response", (response) => {
-    if (response.url().endsWith("/api/browser-errors")) telemetryStatuses.push(response.status());
-  });
   try {
     await page.goto(`${url}src/client/lib/BrowserErrors.fixture.html`);
     await page.waitForFunction(() => Boolean((window as any).diagnosticsFixture));

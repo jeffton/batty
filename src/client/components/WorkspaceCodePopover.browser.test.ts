@@ -1,3 +1,4 @@
+import { fixtureRoute } from "../test/socket-fixture";
 // @vitest-environment node
 import fs from "node:fs/promises";
 import { execFile } from "node:child_process";
@@ -123,8 +124,9 @@ test("workspace row opens native code browser, lazily browses files and closes b
     page.setDefaultTimeout(5000);
     const calls: string[] = [];
     const errors: string[] = [];
-    page.on("request", (request) => {
-      if (request.url().includes("/files?")) calls.push(request.url());
+    await fixtureRoute(server, page, "**/files?*", async (route) => {
+      calls.push(route.request().url());
+      await route.continue();
     });
     page.on("pageerror", (error) => errors.push(error.message));
     try {
@@ -427,7 +429,7 @@ test("search errors and newer queries do not turn partial or stale results into 
   const page = await browser.newPage();
   page.setDefaultTimeout(10_000);
   try {
-    await page.route("**/api/workspaces/project/file-search?name=broken", (route) =>
+    await fixtureRoute(server, page, "**/api/workspaces/project/file-search?name=broken", (route) =>
       route.fulfill({
         contentType: "application/x-ndjson",
         body:
@@ -460,18 +462,23 @@ test("search errors and newer queries do not turn partial or stale results into 
     const requested = new Promise<void>((resolve) => {
       started = resolve;
     });
-    await page.route("**/api/workspaces/project/file-search?name=slow", async (route) => {
-      started();
-      await delayed;
-      await route.fulfill({
-        contentType: "application/x-ndjson",
-        body:
-          JSON.stringify({ kind: "match", path: "stale.ts" }) +
-          "\n" +
-          JSON.stringify({ kind: "done" }) +
-          "\n",
-      });
-    });
+    await fixtureRoute(
+      server,
+      page,
+      "**/api/workspaces/project/file-search?name=slow",
+      async (route) => {
+        started();
+        await delayed;
+        await route.fulfill({
+          contentType: "application/x-ndjson",
+          body:
+            JSON.stringify({ kind: "match", path: "stale.ts" }) +
+            "\n" +
+            JSON.stringify({ kind: "done" }) +
+            "\n",
+        });
+      },
+    );
     await input.fill("slow");
     await requested;
     await input.fill("HiddenNeedle");
@@ -597,7 +604,7 @@ test("directory failures are visible and retryable, file failures do not leave s
   page.setDefaultTimeout(5000);
   let fail = true;
   try {
-    await page.route("**/api/workspaces/project/files?path=src", (route) =>
+    await fixtureRoute(server, page, "**/api/workspaces/project/files?path=src", (route) =>
       fail
         ? route.fulfill({ status: 500, json: { error: "Directory unavailable" } })
         : route.continue(),
@@ -611,7 +618,7 @@ test("directory failures are visible and retryable, file failures do not leave s
     await popover.getByRole("button", { name: "Retry", exact: true }).click();
     await popover.getByRole("treeitem", { name: "main.ts", exact: true }).click();
     await popover.locator("[data-line]").filter({ hasText: "export const greeting" }).waitFor();
-    await page.route("**/api/workspaces/project/files?path=.hidden", (route) =>
+    await fixtureRoute(server, page, "**/api/workspaces/project/files?path=.hidden", (route) =>
       route.fulfill({ status: 403, json: { error: "Path leaves the workspace" } }),
     );
     await popover.getByRole("treeitem", { name: ".hidden", exact: true }).click();

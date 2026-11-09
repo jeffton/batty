@@ -75,7 +75,10 @@ test("main browser tools render a live attachment through SSE, reload and reopen
     server: {
       host: "127.0.0.1",
       port: 0,
-      proxy: { "/api": { target: backendUrl, ws: true } },
+      proxy: {
+        "/api/cloud-browser": { target: backendUrl, ws: true },
+        "/api": { target: backendUrl },
+      },
     },
   });
   await server.listen();

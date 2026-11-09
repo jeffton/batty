@@ -18,6 +18,7 @@ import {
 import { resolveSentFile } from "../send-files";
 import type { TranscriptImages } from "../transcript-images";
 import type { TaskId } from "@earendil-works/pi-durable";
+import { unpairPeer } from "../socket-dispatch";
 import { DeliveryRecord } from "../orchestration-history";
 
 declare module "fastify" {
@@ -67,7 +68,7 @@ export function registerRemoteRoutes(app: FastifyInstance, runtime: Runtime) {
   app.addHook("onRequest", async (request, reply) => {
     if (
       !request.nodeGrant ||
-      request.url.startsWith("/api/node/reverse/") ||
+      request.url === "/api/node/socket" ||
       request.url === "/api/node/unpair"
     )
       return;
@@ -168,13 +169,8 @@ export function registerRemoteRoutes(app: FastifyInstance, runtime: Runtime) {
     return identity;
   });
   app.post("/api/node/unpair", async (request) => {
-    const connection = access.pairedConnection(request.nodeGrant!.id);
-    if (!connection) throw new Error("Unknown paired peer");
-    await access.removeConnection(connection.id);
-    remotes.disconnect(connection.id);
-    // Let the response drain before closing its own reverse transfer.
+    await unpairPeer(remotes, request.nodeGrant!.id);
     setImmediate(() => {
-      remotes.reverse.reconfigure();
       for (const stream of streams.keys()) stream.end();
     });
     return { ok: true };

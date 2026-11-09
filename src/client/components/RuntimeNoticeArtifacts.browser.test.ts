@@ -1,3 +1,4 @@
+import { fixtureRoute } from "../test/socket-fixture";
 // @vitest-environment node
 import path from "node:path";
 import vue from "@vitejs/plugin-vue";
@@ -93,7 +94,7 @@ for (const { width, colorScheme } of themedLayouts) {
   test(`runtime notice popovers preserve nested navigation at ${width}px (${colorScheme})`, async () => {
     const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
     page.setDefaultTimeout(5000);
-    await page.route("**/api/sessions/42", (route) =>
+    await fixtureRoute(server, page, "**/api/sessions/42", (route) =>
       route.fulfill({
         json: {
           id: "42",
@@ -120,7 +121,7 @@ for (const { width, colorScheme } of themedLayouts) {
         },
       }),
     );
-    await page.route("**/api/sessions/43", (route) =>
+    await fixtureRoute(server, page, "**/api/sessions/43", (route) =>
       route.fulfill({
         json: { id: "43", sessionId: "43", messages: [], activeTools: [], isStreaming: false },
       }),

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { withBaseUrl } from "@/client/lib/base-url";
+import { socketFetch } from "@/client/lib/socket-fetch";
 import type { CloudBrowserCredentialTarget, CloudBrowserState } from "@/shared/cloud-browser";
 
 const props = defineProps<{ browserId: string; state: CloudBrowserState }>();
@@ -41,7 +42,7 @@ watch(
   { flush: "sync" },
 );
 async function prepare(): Promise<void> {
-  const response = await fetch(withBaseUrl(`${endpoint}/prepare`), {
+  const response = await socketFetch(withBaseUrl(`${endpoint}/prepare`), {
     method: "POST",
     signal: controller.signal,
     cache: "no-store",
@@ -76,7 +77,7 @@ async function fill(): Promise<void> {
   busy.value = true;
   error.value = "";
   try {
-    const response = await fetch(withBaseUrl(`${endpoint}/fill`), {
+    const response = await socketFetch(withBaseUrl(`${endpoint}/fill`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

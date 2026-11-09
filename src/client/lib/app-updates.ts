@@ -39,6 +39,7 @@ function fetchAvailable<T>(
 
 async function fetchAvailableResponse(path: string, label: string): Promise<Response> {
   for (let attempt = 0; ; attempt += 1) {
+    // Public bootstrap probes must work even when an older app cannot open its socket.
     const response = await fetch(withBaseUrl(path), {
       cache: "no-store",
       signal: AbortSignal.timeout(10_000),

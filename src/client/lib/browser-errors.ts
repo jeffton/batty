@@ -1,5 +1,6 @@
 import type { App } from "vue";
 import { withBaseUrl } from "./base-url";
+import { socketFetch } from "./socket-fetch";
 import {
   browserFamily,
   platformFamily,
@@ -99,7 +100,7 @@ export function reportBrowserError(
       lifecycle,
     };
     // Separate transport: never feed telemetry failures back into telemetry or UI.
-    void fetch(withBaseUrl("/api/browser-errors"), {
+    void socketFetch(withBaseUrl("/api/browser-errors"), {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },

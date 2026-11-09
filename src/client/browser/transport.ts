@@ -1,4 +1,5 @@
 import { computed, ref } from "vue";
+import { socketFetch } from "@/client/lib/socket-fetch";
 import { withBaseUrl } from "@/client/lib/base-url";
 import type { CloudBrowserState as BrowserState } from "@/shared/cloud-browser";
 import { useBrowserFrames } from "./frames";
@@ -72,7 +73,7 @@ export function useBrowserTransport(
     init: RequestInit,
     signal: AbortSignal,
   ): Promise<BrowserState> {
-    const response = await fetch(withBaseUrl(`${endpoint.value}/${path}`), {
+    const response = await socketFetch(withBaseUrl(`${endpoint.value}/${path}`), {
       credentials: "include",
       cache: "no-store",
       ...init,

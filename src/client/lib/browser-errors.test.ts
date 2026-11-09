@@ -1,4 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+
+vi.mock("@/client/lib/socket-fetch", () => ({
+  socketFetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
+  closeSocketTransport: vi.fn(),
+}));
 import {
   authorizeErrorReporting,
   reportBrowserError,

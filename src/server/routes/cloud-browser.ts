@@ -20,7 +20,8 @@ export async function registerCloudBrowserRoutes(
   browser: BrowserService,
   baseUrl: string,
 ): Promise<() => Promise<void>> {
-  await app.register(websocket, { options: { maxPayload: 2048, perMessageDeflate: false } });
+  if (!app.hasDecorator("websocketServer"))
+    await app.register(websocket, { options: { maxPayload: 2048, perMessageDeflate: false } });
   const streams = new CloudBrowserStreams(browser);
   const prefix = "/api/cloud-browser/:browserId";
   const credentialSchema = Type.Object(

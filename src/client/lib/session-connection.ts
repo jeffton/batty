@@ -1,4 +1,6 @@
 import type { ServerEvent } from "@/shared/types";
+import { SocketEventSource } from "./socket-event-source";
+import { closeSocketTransport } from "./socket-fetch";
 import { recordErrorLifecycle } from "./browser-errors";
 import { listenForPushForeground } from "./push-foreground";
 
@@ -13,7 +15,7 @@ type ConnectionOptions = {
 
 /** Shared SSE lifecycle. Every reconnect resolves its cursor from current state. */
 export function createSessionConnection(options: ConnectionOptions) {
-  let source: EventSource | undefined;
+  let source: SocketEventSource | undefined;
   let watchdog: ReturnType<typeof setInterval> | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
   let lastActivity = 0;
@@ -38,7 +40,7 @@ export function createSessionConnection(options: ConnectionOptions) {
     stopSource();
     recordErrorLifecycle("reconnect");
     options.onConnecting();
-    const current = new EventSource(options.path());
+    const current = new SocketEventSource(options.path());
     source = current;
     stopPushForeground = listenForPushForeground(current);
     lastActivity = Date.now();
@@ -76,7 +78,7 @@ export function createSessionConnection(options: ConnectionOptions) {
     };
     current.onerror = () => {
       if (source !== current) return;
-      // Own retries instead of racing EventSource's automatic reconnect.
+      // The lifecycle owns retries and resolves the latest cursor for each stream.
       stopSource();
       options.onError();
       retry = setTimeout(recover, 2000);
@@ -86,13 +88,16 @@ export function createSessionConnection(options: ConnectionOptions) {
   function recover() {
     if (!active || !navigator.onLine) return;
     // A handshake that never opens must not inherit a live stream's lease.
-    const timeout = source?.readyState === EventSource.CONNECTING ? 5000 : 15_000;
+    const timeout = source?.readyState === SocketEventSource.CONNECTING ? 5000 : 15_000;
     const age = Date.now() - lastActivity;
     if (source && !suspended && age >= 0 && age < timeout) return;
+    // A new logical stream alone cannot recover a half-open shared socket after sleep.
+    if (source) closeSocketTransport();
     connect();
   }
 
   function offline() {
+    closeSocketTransport();
     stopSource();
     options.onError();
   }

@@ -1,4 +1,9 @@
 import { flushPromises, mount } from "@vue/test-utils";
+
+vi.mock("@/client/lib/socket-fetch", () => ({
+  socketFetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
+  closeSocketTransport: vi.fn(),
+}));
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import BrowserPopover from "./BrowserPopover.vue";
 

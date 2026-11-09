@@ -1,12 +1,13 @@
 import { SITE_CALL_CHANNEL, SITE_RESULT_CHANNEL } from "@/shared/site-functions";
 import { withBaseUrl } from "./base-url";
+import { socketFetch } from "./socket-fetch";
 
 export async function callSiteFunction(
   siteId: string,
   name: string,
   input: unknown,
 ): Promise<unknown> {
-  const response = await fetch(
+  const response = await socketFetch(
     withBaseUrl(`/api/sites/${encodeURIComponent(siteId)}/functions/${encodeURIComponent(name)}`),
     {
       method: "POST",

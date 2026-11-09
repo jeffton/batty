@@ -6,6 +6,7 @@ import type {
 } from "@simplewebauthn/browser";
 import type { SubscriptionProviderId } from "@/shared/provider-auth";
 import { withBaseUrl } from "@/client/lib/base-url";
+import { closeSocketTransport, socketFetch } from "./socket-fetch";
 import type { AppAppearance } from "@/shared/appearance";
 import type { RemoteSettings } from "@/shared/remotes";
 import type {
@@ -79,7 +80,7 @@ export async function searchWorkspaceFiles(
   signal: AbortSignal,
   onMatches: (paths: string[]) => void,
 ): Promise<void> {
-  const response = await fetch(
+  const response = await socketFetch(
     withBaseUrl(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/file-search?${new URLSearchParams({ name })}`,
     ),
@@ -170,7 +171,9 @@ function request<T>(input: string, init?: RequestInit): Promise<T> {
 }
 
 async function performRequest<T>(input: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(withBaseUrl(input), {
+  const http =
+    input === "/api/bootstrap" || input === "/api/logout" || input.startsWith("/api/auth/");
+  const response = await (http ? fetch : socketFetch)(withBaseUrl(input), {
     credentials: "include",
     signal: !init?.method || init.method === "GET" ? AbortSignal.timeout(20_000) : undefined,
     ...init,
@@ -364,6 +367,7 @@ export function finishPasskeyRegistration(
 }
 
 export function logout(): Promise<{ ok: true }> {
+  closeSocketTransport();
   authorizeErrorReporting(false);
   return request("/api/logout", {
     method: "POST",

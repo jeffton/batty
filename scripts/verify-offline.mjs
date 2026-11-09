@@ -6,6 +6,10 @@ import assert from "node:assert/strict";
 import { chromium } from "patchright";
 import mime from "mime-types";
 import sharp from "sharp";
+import { WebSocketServer } from "ws";
+import { tsImport } from "tsx/esm/api";
+
+const { SocketChannel } = await tsImport("../src/shared/socket-channel.ts", import.meta.url);
 const preview = await sharp({
   create: { width: 768, height: 576, channels: 3, background: "teal" },
 })
@@ -129,7 +133,7 @@ const server = http.createServer(async (request, response) => {
       `data: ${JSON.stringify({ type: "reset", state: state(url.searchParams.get("after")), streamId: metadata.streamId, revision })}\n\n`,
     );
     streams.add(response);
-    request.on("close", () => streams.delete(response));
+    response.on("close", () => streams.delete(response));
     return;
   }
   if (url.pathname === "/api/provider-usage")
@@ -148,6 +152,24 @@ const server = http.createServer(async (request, response) => {
 });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const url = `http://127.0.0.1:${server.address().port}`;
+// Exercise the same shared binary, pull-driven app transport as the built client.
+// HTTP remains the fixture router for bootstrap, resources and streamed API bodies.
+const channels = new Set();
+const sockets = new WebSocketServer({ server, path: "/api/socket" });
+sockets.on("connection", (socket) => {
+  const channel = new SocketChannel(socket, {
+    handle: (route, request) =>
+      fetch(new URL(route, url), {
+        method: request.method,
+        headers: request.headers,
+        signal: request.signal,
+        body: request.body,
+        ...(request.body ? { duplex: "half" } : {}),
+      }),
+  });
+  channels.add(channel);
+  void channel.closed.then(() => channels.delete(channel));
+});
 const browser = await chromium.launch({ headless: true });
 try {
   for (const width of [390, 1100]) {
@@ -353,22 +375,25 @@ try {
       ],
     };
   }
-  // Native EventSource hides HTTP failures. Expiring a server-side session and
-  // ending its stream must return the built app to login, not an offline loop.
+  // Expiring a server-side session and disconnecting its app socket must return
+  // the built app to login, not an offline reconnect loop.
   const context = await browser.newContext();
   const page = await context.newPage();
   await page.goto(url);
   await page.getByText("Cached thread newest", { exact: true }).waitFor();
   await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
   authenticated = false;
+  for (const channel of channels) channel.close();
   for (const stream of streams) stream.end();
   await page.waitForURL("**/login", { timeout: 10_000 });
   await page.getByRole("button", { name: "Sign in with passkey" }).waitFor();
   assert.equal(await page.getByText("Cached thread newest", { exact: true }).count(), 0);
-  console.log("Expired session returns to login after native SSE disconnect");
+  console.log("Expired session returns to login after app WebSocket disconnect");
   await context.close();
 } finally {
   await browser.close();
+  for (const channel of channels) channel.close();
+  await new Promise((resolve) => sockets.close(resolve));
   for (const stream of streams) stream.end();
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));

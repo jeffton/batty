@@ -177,7 +177,6 @@ export class RemoteWorkers {
     route: string,
     init: RequestInit = {},
   ): Promise<Response> => {
-    if (connection.transport !== "reverse") return fetchNodeResponse(connection, route, init);
     const headers = new Headers(init.headers);
     if (!(init.body instanceof FormData) && !headers.has("content-type"))
       headers.set("content-type", "application/json");
@@ -189,7 +188,7 @@ export class RemoteWorkers {
         signal,
         ...(init.body instanceof ReadableStream ? { duplex: "half" } : {}),
       });
-      return this.reverse.channel(connection).request(route, request);
+      return this.reverse.channel(connection).request(`/api/node/${route}`, request);
     });
   };
   private nodeRequest<T>(

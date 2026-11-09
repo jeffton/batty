@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { createServer, request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { Duplex } from "node:stream";
+import WebSocket from "ws";
 import { workerCommandBody } from "./worker-files";
 import { artifactRefs } from "./artifact-forwarding";
 import { tmpdir } from "node:os";
@@ -114,7 +116,12 @@ async function openInstance(directory: string, name: string, fileStatus = 200, b
       return reply.code(401).send({ error: "Owner authentication required" });
   });
   const closeRoutes = registerRemoteRoutes(app, runtime);
-  registerReverseRemoteRoutes(app, runtime);
+  await registerReverseRemoteRoutes(app, runtime);
+  const upgradedSockets = new Set<Duplex>();
+  app.server.on("upgrade", (_request, socket) => {
+    upgradedSockets.add(socket);
+    socket.once("close", () => upgradedSockets.delete(socket));
+  });
   const upstreamUrl = `${await app.listen({ host: "127.0.0.1", port: 0 })}/`;
   const prefix = config.baseUrl === "/" ? "" : config.baseUrl;
   const proxyRequests: string[] = [];
@@ -142,6 +149,39 @@ async function openInstance(directory: string, name: string, fileStatus = 200, b
         incoming.pipe(upstream);
       })
     : undefined;
+  proxy?.on("upgrade", (incoming, downstream, head) => {
+    const path = incoming.url!;
+    proxyRequests.push(path);
+    if (!path.startsWith(`${prefix}/`)) {
+      downstream.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+      return;
+    }
+    const upstream = httpRequest(new URL(path.slice(prefix.length), upstreamUrl), {
+      method: incoming.method,
+      headers: incoming.headers,
+    });
+    upstream.on("upgrade", (response, socket, upstreamHead) => {
+      downstream.write(
+        `HTTP/1.1 101 Switching Protocols\r\n${Object.entries(response.headers)
+          .map(([name, value]) => `${name}: ${value}`)
+          .join("\r\n")}\r\n\r\n`,
+      );
+      if (head.length) socket.write(head);
+      if (upstreamHead.length) downstream.write(upstreamHead);
+      socket.pipe(downstream).pipe(socket);
+      socket.on("error", () => downstream.destroy());
+      downstream.on("error", () => socket.destroy());
+      socket.on("close", () => downstream.destroy());
+      downstream.on("close", () => socket.destroy());
+    });
+    upstream.on("response", (response) => {
+      downstream.end(`HTTP/1.1 ${response.statusCode} Rejected\r\nConnection: close\r\n\r\n`);
+      response.resume();
+    });
+    upstream.on("error", () => downstream.destroy());
+    downstream.on("close", () => upstream.destroy());
+    upstream.end();
+  });
   if (proxy) await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
   const url = proxy
     ? `http://127.0.0.1:${(proxy.address() as AddressInfo).port}${prefix}/`
@@ -161,7 +201,10 @@ async function openInstance(directory: string, name: string, fileStatus = 200, b
     proxyRequests,
     setNodeOnline(online: boolean) {
       nodeOnline = online;
-      if (!online) app.server.closeAllConnections();
+      if (!online) {
+        app.server.closeAllConnections();
+        for (const socket of upgradedSockets) socket.destroy();
+      }
     },
     setFileStatus(status: number) {
       fileStatus = status;
@@ -176,6 +219,9 @@ async function openInstance(directory: string, name: string, fileStatus = 200, b
       closed = true;
       closeRoutes();
       await runtime.close();
+      // HTTP closeAllConnections excludes upgrades, including a peer partway
+      // through its closing handshake. Tear down fixture sockets explicitly.
+      for (const socket of upgradedSockets) socket.destroy();
       await app.close();
       if (proxy) {
         proxy.closeAllConnections();
@@ -185,6 +231,27 @@ async function openInstance(directory: string, name: string, fileStatus = 200, b
       }
     },
   };
+}
+
+async function rejectedSocket(url: string, token: string, instanceId: string) {
+  const endpoint = new URL("api/node/socket", url);
+  endpoint.protocol = endpoint.protocol === "https:" ? "wss:" : "ws:";
+  return new Promise<number>((resolve, reject) => {
+    const socket = new WebSocket(endpoint, {
+      headers: { authorization: `Bearer ${token}`, "x-batty-instance-id": instanceId },
+      handshakeTimeout: 5000,
+    });
+    socket.on("error", reject);
+    socket.once("open", () => {
+      socket.terminate();
+      reject(new Error("Unauthorized socket unexpectedly opened"));
+    });
+    socket.once("unexpected-response", (_request, response) => {
+      response.resume();
+      resolve(response.statusCode!);
+      socket.terminate();
+    });
+  });
 }
 
 async function connect(
@@ -208,8 +275,16 @@ async function connect(
     async () =>
       from.runtime.remotes.reverse.status(to.id).state === "connected" &&
       to.runtime.remotes.reverse.status(from.id).state === "connected",
-    "automatically paired control connection",
-  );
+    "automatically paired socket connection",
+  ).catch((error) => {
+    throw new Error(
+      `${error.message}: ${JSON.stringify({
+        from: from.runtime.remotes.reverse.status(to.id),
+        to: to.runtime.remotes.reverse.status(from.id),
+      })}`,
+      { cause: error },
+    );
+  });
   expect(from.runtime.remotes.access.listConnections()).toEqual(
     expect.arrayContaining([
       expect.objectContaining({
@@ -336,14 +411,7 @@ test.each(["/", "/batty/"])(
       }
       await connect(other, windows);
       const otherToken = other.runtime.remotes.connection(windows.id).token;
-      expect(
-        (
-          await windows.app.inject({
-            url: "/api/node/reverse/control",
-            headers: { authorization: `Bearer ${otherToken}`, "x-batty-instance-id": mac.id },
-          })
-        ).statusCode,
-      ).toBe(403);
+      expect(await rejectedSocket(windows.url, otherToken, mac.id)).toBe(403);
       const unused = await windows.app.inject({
         method: "POST",
         url: "/api/remotes",
@@ -455,7 +523,7 @@ test.each(["/", "/batty/"])(
           expect(instance.proxyRequests.every((url) => url.startsWith("/batty/api/"))).toBe(true);
         }
         expect(windows.proxyRequests).toContain("/batty/api/node/pair");
-        expect(windows.proxyRequests).toContain("/batty/api/node/reverse/control");
+        expect(windows.proxyRequests).toContain("/batty/api/node/socket");
         // A missing prefix is genuinely unroutable at this proxy, not swallowed by
         // an in-memory mock that would hide incorrect peer request destinations.
         const unprefixed = await fetch(new URL("/api/remotes", windows.url), {
@@ -463,9 +531,8 @@ test.each(["/", "/batty/"])(
         });
         expect(unprefixed.status).toBe(404);
         await unprefixed.body?.cancel();
-        expect(
-          windows.proxyRequests.some((url) => url.startsWith("/batty/api/node/reverse/transfers/")),
-        ).toBe(true);
+        // Worker events and binary file bodies travel over the same upgraded channel.
+        expect(windows.proxyRequests.some((url) => url.includes("/reverse/"))).toBe(false);
       }
     } finally {
       await other.close();
@@ -546,14 +613,7 @@ test.each(["creator", "adder"] as const)(
           })
         ).statusCode,
       ).toBe(401);
-      expect(
-        (
-          await removing.app.inject({
-            url: "/api/node/reverse/control",
-            headers: { authorization: `Bearer ${staleToken}`, "x-batty-instance-id": peer.id },
-          })
-        ).statusCode,
-      ).toBe(401);
+      expect(await rejectedSocket(removing.url, staleToken, peer.id)).toBe(401);
       expect(removing.runtime.remotes.access.listConnections()).toEqual([]);
       expect(await mac.runtime.orchestration.listRunning()).toHaveLength(1);
       await writeFile(join(mac.work, "release"), "release");
@@ -820,8 +880,8 @@ test("bidirectional peers discover independently started workers without claimin
   }
 }, 45_000);
 
-test.each(["http", "reverse"] as const)(
-  "%s peers execute remote native tools, deliver progress to the initiating parent, and retain local history/files offline",
+test.each(["forward", "reverse"] as const)(
+  "%s socket peers execute remote native tools, deliver progress to the initiating parent, and retain local history/files offline",
   async (transport) => {
     vi.stubEnv("PI_OFFLINE", "1");
     const directory = await mkdtemp(join(tmpdir(), "batty-two-runtimes-"));
@@ -953,15 +1013,15 @@ test.each(["http", "reverse"] as const)(
 
       // A status request can fail after the last terminal catalog commit; reconnect must resync it.
       remote.failNextAssignmentRequest();
-      // Interrupt real HTTP control/data sockets; the Mac worker must continue independently.
-      if (transport === "reverse") local.app.server.closeAllConnections();
-      else local.runtime.remotes.disconnect(remote.id);
+      // Interrupt the real socket; the worker must continue independently.
+      const listener = transport === "reverse" ? local : remote;
+      listener.setNodeOnline(false);
+      listener.setNodeOnline(true);
       await writeFile(join(remote.work, "release"), "release");
       await eventually(
         async () => (await remote.runtime.orchestration.listRunning()).length === 0,
         "B finishing during stream disconnect",
       );
-      if (transport === "http") local.runtime.remotes.connect(remote.id);
       await eventually(
         async () => remote.failedAssignmentRequests() === 1,
         "injected assignment-status failure consumed independently of session replay",
@@ -1189,17 +1249,13 @@ test("reverse pairing rejects impersonation and live grant revocation severs str
     await connectReverse(local, remote);
     const identity = remote.runtime.remotes.access.identity().instanceId;
     const dialToken = remote.runtime.remotes.connection(local.id).token;
-    const control = (token: string, instance: string) =>
-      local.app.inject({
-        url: "/api/node/reverse/control",
-        headers: { authorization: `Bearer ${token}`, "x-batty-instance-id": instance },
-      });
-    expect((await control("wrong-token", identity)).statusCode).toBe(401);
-    expect((await control(dialToken, "untrusted-installation")).statusCode).toBe(403);
+    const control = (token: string, instance: string) => rejectedSocket(local.url, token, instance);
+    expect(await control("wrong-token", identity)).toBe(401);
+    expect(await control(dialToken, "untrusted-installation")).toBe(403);
 
     const otherGrant = await local.runtime.remotes.access.issueInvitation();
-    expect((await control(dialToken, "other-installation")).statusCode).toBe(403);
-    expect((await control(otherGrant.token, identity)).statusCode).toBe(401);
+    expect(await control(dialToken, "other-installation")).toBe(403);
+    expect(await control(otherGrant.token, identity)).toBe(401);
     await eventually(
       async () => local.runtime.remotes.reverse.status(remote.id).state === "connected",
       "legitimate pairing remains connected",
@@ -1284,21 +1340,26 @@ test("reverse pairing rejects impersonation and live grant revocation severs str
     const pendingRead = reader.read();
     const interrupted = expect(pendingRead).rejects.toThrow();
     const channel = local.runtime.remotes.reverse.channel(connection);
-    expect(channel.transfers.size).toBeGreaterThan(0);
+    let channelClosed = false;
+    void channel.closed.then(() => {
+      channelClosed = true;
+    });
+    expect(channelClosed).toBe(false);
     // Internal credential loss must fail closed, independently of owner removal.
-    await local.runtime.remotes.access.revoke(connection.reverseGrantId!);
+    await local.runtime.remotes.access.revoke(connection.localGrantId!);
     local.runtime.remotes.reverse.reconfigure();
     await interrupted;
     try {
       await revokedJoin;
-      expect(await transcript(local.runtime)).toContain("revoked");
+      expect(await transcript(local.runtime)).toMatch(/access removed|revoked/i);
       expect(local.runtime.remotes.access.getConnection(remote.id)).toBeDefined();
     } finally {
       revokedAwaitAbort.abort();
       await revokedJoin.catch(() => {});
     }
-    expect(channel.transfers.size).toBe(0);
-    expect((await control(dialToken, identity)).statusCode).toBe(401);
+    await channel.closed;
+    expect(channelClosed).toBe(true);
+    expect(await control(dialToken, identity)).toBe(401);
     await eventually(
       async () => local.runtime.remotes.state(id).remote?.connectionState === "offline",
       "retained mirror explicitly offline",
@@ -1321,7 +1382,7 @@ test("reverse pairing rejects impersonation and live grant revocation severs str
       connectionState: "offline",
     });
     const forbiddenStop = local.runtime.remotes.stop(id);
-    await expect(forbiddenStop).rejects.toThrow(/revoked/);
+    await expect(forbiddenStop).rejects.toThrow(/access removed|revoked/i);
     await expect(forbiddenStop).rejects.toMatchObject({ status: 403 });
     await expect(
       local.runtime.remotes.command(
@@ -1333,7 +1394,7 @@ test("reverse pairing rejects impersonation and live grant revocation severs str
         api,
         context,
       ),
-    ).rejects.toThrow(/revoked/);
+    ).rejects.toThrow(/access removed|revoked/i);
     expect(await remote.runtime.orchestration.listRunning()).toHaveLength(1);
     expect(
       JSON.stringify(await (await remote.runtime.conversation(session)).context(context)),
@@ -1731,7 +1792,10 @@ test("node grants cannot access owner routes, revoke immediately, and reciprocal
       (await a.app.inject({ url: "/api/remotes", headers: a.owner })).json().connections,
     ).toEqual([]);
     expect(a.runtime.remotes.access.getConnection(remote.id)).toBeUndefined();
-    expect(b.runtime.remotes.access.getConnection(local.id)).toBeUndefined();
+    await eventually(
+      async () => b!.runtime.remotes.access.getConnection(local.id) === undefined,
+      "online peer removal notification applied",
+    );
     expect((await b.app.inject({ url: "/api/node/identity", headers: auth })).statusCode).toBe(401);
     expect(
       (
@@ -2309,8 +2373,8 @@ test("multipart node commands authenticate, reject corrupt/incomplete transfers 
   }
 }, 30_000);
 
-test.each(["http", "reverse"] as const)(
-  "%s run/queue/steer/resume carry selected paths and received refs, images, immutable queued bytes and locally mirrored input attachments",
+test.each(["forward", "reverse"] as const)(
+  "%s socket run/queue/steer/resume carry selected paths and received refs, images, immutable queued bytes and locally mirrored input attachments",
   async (transport) => {
     vi.stubEnv("PI_OFFLINE", "1");
     const directory = await mkdtemp(join(tmpdir(), "batty-input-files-"));

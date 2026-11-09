@@ -1,4 +1,14 @@
 import { afterEach, expect, test, vi } from "vite-plus/test";
+
+// Lifecycle tests inject a source; wire their existing fake through the new transport boundary.
+vi.mock("@/client/lib/socket-event-source", () => ({
+  SocketEventSource: class {
+    static CONNECTING = 0;
+    constructor(url: string) {
+      return new EventSource(url);
+    }
+  },
+}));
 import { flushPromises, mount } from "@vue/test-utils";
 import SubagentSessionPopover from "./SubagentSessionPopover.vue";
 import type { SessionState } from "@/shared/types";

@@ -1,15 +1,20 @@
+import { attachFixtureSocket } from "./socket-fixture";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { createServer, type InlineConfig, type ViteDevServer } from "vite";
 
-export async function createBrowserFixtureServer(fixture: string, config: InlineConfig) {
+export async function createBrowserFixtureServer(
+  fixture: string,
+  config: InlineConfig,
+  options: { socket?: boolean } = {},
+) {
   // Keep Vite's dependency cache between runs, with one namespace per fixture.
   // Vite invalidates it when dependencies or optimizer configuration change.
   const cacheDir = path.resolve(
     "node_modules/.vite/batty-fixtures",
     createHash("sha256").update(fixture).digest("hex").slice(0, 16),
   );
-  return await createServer({
+  const server = await createServer({
     ...config,
     configFile: false,
     cacheDir,
@@ -21,6 +26,8 @@ export async function createBrowserFixtureServer(fixture: string, config: Inline
       include: ["@pierre/diffs", "@pierre/trees"],
     },
   });
+  if (options.socket !== false) attachFixtureSocket(server);
+  return server;
 }
 
 export async function closeBrowserFixtureServer(server: ViteDevServer) {

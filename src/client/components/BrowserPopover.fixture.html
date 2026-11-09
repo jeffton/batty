@@ -12,6 +12,23 @@
       import { useAppStore } from "../stores/app";
       import SharedSitesList from "./SharedSitesList.vue";
       import "../styles.css";
+      if (new URLSearchParams(location.search).has("mockTabs")) {
+        const AppWebSocket = globalThis.WebSocket;
+        globalThis.WebSocket = class {
+          static OPEN = 1;
+          readyState = 1;
+          constructor(url) {
+            if (!String(url).includes("/api/cloud-browser/")) return new AppWebSocket(url);
+            document.addEventListener("fixture-browser-state", (event) => {
+              this.onmessage?.({ data: event.detail });
+            });
+          }
+          close() {
+            this.readyState = 3;
+          }
+          send() {}
+        };
+      }
       const pinia = createPinia();
       setActivePinia(pinia);
       const store = useAppStore();

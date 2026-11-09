@@ -1,5 +1,17 @@
 import { afterEach, expect, test, vi } from "vite-plus/test";
+
+// Lifecycle tests inject a source; wire their existing fake through the new transport boundary.
+vi.mock("@/client/lib/socket-event-source", () => ({
+  SocketEventSource: class {
+    static CONNECTING = 0;
+    constructor(url: string) {
+      return new EventSource(url);
+    }
+  },
+}));
 import { createSessionConnection } from "./session-connection";
+import { closeSocketTransport } from "./socket-fetch";
+vi.mock("./socket-fetch", () => ({ socketFetch: vi.fn(), closeSocketTransport: vi.fn() }));
 import { prependHistoryPage } from "./session-pagination";
 import { recentSessionWindow } from "./session-window";
 import { applyServerEvent } from "./session-events";
@@ -72,6 +84,22 @@ function connectionFixture() {
   connection.open();
   return { connection, sources, onEvent, onError };
 }
+
+test("only stale recovery/offline invalidates the shared socket, not normal disposal", () => {
+  vi.mocked(closeSocketTransport).mockClear();
+  const { connection } = connectionFixture();
+  window.dispatchEvent(new Event("focus"));
+  expect(closeSocketTransport).not.toHaveBeenCalled();
+  vi.setSystemTime(Date.now() + 60_000);
+  window.dispatchEvent(new Event("focus"));
+  expect(closeSocketTransport).toHaveBeenCalledOnce();
+  window.dispatchEvent(new Event("focus"));
+  expect(closeSocketTransport).toHaveBeenCalledOnce();
+  window.dispatchEvent(new Event("offline"));
+  expect(closeSocketTransport).toHaveBeenCalledTimes(2);
+  connection.close();
+  expect(closeSocketTransport).toHaveBeenCalledTimes(2);
+});
 
 test("foreground events preserve a live stream and replace a stale stream only once", () => {
   const { sources } = connectionFixture();

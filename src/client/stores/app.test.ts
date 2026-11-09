@@ -1,4 +1,14 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vite-plus/test";
+
+// Lifecycle tests inject a source; wire their existing fake through the new transport boundary.
+vi.mock("@/client/lib/socket-event-source", () => ({
+  SocketEventSource: class {
+    static CONNECTING = 0;
+    constructor(url: string) {
+      return new EventSource(url);
+    }
+  },
+}));
 import { createPinia, setActivePinia } from "pinia";
 import { flushPromises, mount } from "@vue/test-utils";
 import { defineComponent } from "vue";

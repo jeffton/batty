@@ -1,4 +1,9 @@
 import { afterEach, expect, test, vi } from "vite-plus/test";
+
+vi.mock("@/client/lib/socket-fetch", () => ({
+  socketFetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
+  closeSocketTransport: vi.fn(),
+}));
 import { searchWorkspaceFiles } from "./api";
 
 afterEach(() => vi.unstubAllGlobals());

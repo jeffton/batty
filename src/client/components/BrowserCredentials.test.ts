@@ -1,4 +1,9 @@
 import { flushPromises, mount } from "@vue/test-utils";
+
+vi.mock("@/client/lib/socket-fetch", () => ({
+  socketFetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
+  closeSocketTransport: vi.fn(),
+}));
 import { afterEach, expect, test, vi } from "vite-plus/test";
 import BrowserCredentials from "./BrowserCredentials.vue";
 

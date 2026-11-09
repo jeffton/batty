@@ -1,146 +1,121 @@
+import WebSocket from "ws";
+import { SocketChannel, SOCKET_MAX_FRAME_BYTES } from "../shared/socket-channel";
 import type { RemoteConnectionCredentials } from "./remote-access";
 import type { RemoteWorkers } from "./remote-workers";
-import { NodeHttpError, nodeRequest, readNodeEvents } from "./remote-workers";
-import {
-  ReverseChannel,
-  isNodeRoute,
-  responseMetadata,
-  type ReverseEvent,
-} from "./reverse-transport";
+import { NodeHttpError, nodeRequest } from "./remote-workers";
+import { nodeSocketHandler } from "./socket-dispatch";
 
 export type ReverseStatus = {
   state: "connected" | "connecting" | "disconnected" | "error";
   error?: string;
 };
-type Incoming = {
-  channel: ReverseChannel;
-  close: () => void;
-  configuration: string;
-  acknowledged: number;
-};
+type Link = { channel: SocketChannel; configuration: string };
 type Dial = { controller: AbortController; configuration: string };
 
-/** Installation-local volatile channels; task lifetime remains entirely in RemoteWorkers. */
+/** Both directions use the same duplex channel as browsers. Only the dialer
+ * needs a reachable URL. Reconnect never replays a command or owns job lifetime.
+ */
 export class ReverseConnections {
   private localUrl?: string;
   private stopped = false;
-  private grants = "";
-  private readonly incoming = new Map<string, Incoming>();
+  private readonly links = new Map<string, Link>();
   private readonly outgoing = new Map<string, Dial>();
   private readonly statuses = new Map<string, ReverseStatus>();
-  private readonly denied = new Map<string, NodeHttpError>();
   private readonly loops = new Set<Promise<void>>();
 
   constructor(private readonly remotes: RemoteWorkers) {}
-
   status(id: string): ReverseStatus {
     return this.statuses.get(id) ?? { state: "disconnected" };
   }
-
-  async notifyRemoval(connection: RemoteConnectionCredentials): Promise<void> {
-    if (connection.transport === "reverse") {
-      await this.incoming.get(connection.id)?.channel.notifyRemoval();
-    } else {
-      await nodeRequest(connection, "unpair", {
-        method: "POST",
-        body: "{}",
-        signal: AbortSignal.timeout(5000),
-      });
-    }
+  hasControl(id: string): boolean {
+    return !!this.remotes.access.getConnection(id)?.localGrantId && this.links.has(id);
   }
 
-  hasControl(id: string): boolean {
-    if (!this.remotes.access.getConnection(id)?.localGrantId) return false;
-    const incoming = this.incoming.get(id);
-    return incoming
-      ? Date.now() - incoming.acknowledged < 45_000
-      : !!this.outgoing.get(id) &&
-          !this.outgoing.get(id)!.controller.signal.aborted &&
-          this.status(id).state === "connected";
+  async notifyRemoval(connection: RemoteConnectionCredentials): Promise<void> {
+    await nodeRequest(
+      connection,
+      "unpair",
+      { method: "POST", signal: AbortSignal.timeout(5000) },
+      this.remotes.requestNode,
+    );
   }
 
   start(localUrl: string) {
     const url = new URL(localUrl);
     if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) || url.protocol !== "http:")
-      throw new Error("Reverse bridge requires a local HTTP listener");
+      throw new Error("Node dispatcher requires a local HTTP listener");
     this.localUrl = url.href;
     this.reconfigure();
   }
 
   reconfigure() {
-    const grants = JSON.stringify(this.remotes.access.listGrants());
-    const grantsChanged = this.grants !== grants;
-    this.grants = grants;
-    for (const [id, entry] of this.incoming) {
+    for (const [id, entry] of this.links) {
       const connection = this.remotes.access.getConnection(id);
-      if (grantsChanged || !connection || JSON.stringify(connection) !== entry.configuration)
-        entry.close();
+      if (
+        !connection ||
+        !this.validGrant(connection) ||
+        JSON.stringify(connection) !== entry.configuration
+      )
+        entry.channel.close();
     }
     for (const [id, entry] of this.outgoing) {
       const connection = this.remotes.access.getConnection(id);
       if (
-        grantsChanged ||
         !connection?.reverseDial ||
+        !this.validGrant(connection) ||
         JSON.stringify(connection) !== entry.configuration
       ) {
         entry.controller.abort();
         this.outgoing.delete(id);
-        this.statuses.set(id, { state: "disconnected" });
-        this.remotes.changes.emit("catalog", id);
       }
     }
     if (!this.localUrl || this.stopped) return;
     for (const item of this.remotes.access.listConnections()) {
       const connection = this.remotes.connection(item.id);
-      if (!connection.localGrantId || !connection.reverseDial || this.outgoing.has(connection.id))
+      if (
+        !connection.reverseDial ||
+        !this.validGrant(connection) ||
+        this.outgoing.has(connection.id)
+      )
         continue;
-      const controller = new AbortController();
-      const entry = { controller, configuration: JSON.stringify(connection) };
-      this.outgoing.set(connection.id, entry);
-      const loop = this.dial(connection, entry).finally(() => {
-        if (this.outgoing.get(connection.id) === entry) this.outgoing.delete(connection.id);
+      const dial = { controller: new AbortController(), configuration: JSON.stringify(connection) };
+      this.outgoing.set(connection.id, dial);
+      const loop = this.dial(connection, dial).finally(() => {
+        if (this.outgoing.get(connection.id) === dial) this.outgoing.delete(connection.id);
       });
       this.loops.add(loop);
       void loop.finally(() => this.loops.delete(loop));
     }
   }
 
-  /** Resolve grant→connection before accepting the claimed peer ID. Never let the peer choose a target. */
-  connectionFor(grantId: string, instanceId: string): RemoteConnectionCredentials {
-    const connection = this.remotes.access
-      .listConnections()
-      .find((item) => item.transport === "reverse" && item.reverseGrantId === grantId);
-    if (!connection || connection.instanceId !== instanceId)
-      throw Object.assign(new Error("Reverse peer is not configured for this grant"), {
-        statusCode: 403,
-      });
-    return this.remotes.connection(connection.id);
+  private validGrant(connection: RemoteConnectionCredentials) {
+    return (
+      !!connection.localGrantId &&
+      this.remotes.access.listGrants().some((grant) => grant.id === connection.localGrantId)
+    );
   }
 
-  accept(
-    connection: RemoteConnectionCredentials,
-    send: (event: ReverseEvent) => Promise<void>,
-    end: () => void,
-  ) {
-    this.incoming.get(connection.id)?.close();
-    const channel = new ReverseChannel(send);
-    const entry: Incoming = {
-      channel,
-      acknowledged: Date.now(),
-      configuration: JSON.stringify(connection),
-      close: () => {
-        channel.close();
-        end();
-        if (this.incoming.get(connection.id) === entry) {
-          this.incoming.delete(connection.id);
-          this.statuses.set(connection.id, { state: "disconnected" });
-          this.remotes.changes.emit("catalog", connection.id);
-        }
-      },
-    };
-    this.incoming.set(connection.id, entry);
-    this.denied.delete(connection.id);
-    this.statuses.set(connection.id, { state: "connecting" });
+  connectionFor(grantId: string, instanceId: string): RemoteConnectionCredentials {
+    const connection = this.remotes.access.pairedConnection(grantId);
+    if (!connection || connection.transport !== "reverse" || connection.instanceId !== instanceId)
+      throw Object.assign(new Error("Socket peer identity mismatch"), { statusCode: 403 });
+    return connection;
+  }
+
+  accept(connection: RemoteConnectionCredentials, socket: WebSocket): SocketChannel {
+    if (!this.localUrl) throw new Error("Node listener is not ready");
+    this.links.get(connection.id)?.channel.close();
+    const channel = new SocketChannel(socket, {
+      handle: nodeSocketHandler(() => this.localUrl!, connection, this.remotes),
+    });
+    const link = { channel, configuration: JSON.stringify(connection) };
+    this.links.set(connection.id, link);
+    this.setStatus(connection.id, { state: "connecting" });
+    void channel.closed.then(() => {
+      if (this.links.get(connection.id) !== link) return;
+      this.links.delete(connection.id);
+      this.setStatus(connection.id, { state: "disconnected" });
+    });
     void nodeRequest<{ instanceId: string; grantId: string }>(
       connection,
       "identity",
@@ -149,144 +124,98 @@ export class ReverseConnections {
     )
       .then(async (identity) => {
         if (identity.instanceId !== connection.instanceId)
-          throw new Error("Reverse peer identity mismatch");
-        if (this.incoming.get(connection.id) !== entry) return;
+          throw new Error("Socket peer identity mismatch");
+        if (this.links.get(connection.id) !== link) return;
         await this.remotes.access.updateIdentity(connection.id, identity);
-        if (this.incoming.get(connection.id) !== entry) return;
-        entry.configuration = JSON.stringify(this.remotes.connection(connection.id));
-        this.statuses.set(connection.id, { state: "connected" });
+        if (this.links.get(connection.id) !== link) return;
+        link.configuration = JSON.stringify(this.remotes.connection(connection.id));
+        this.setStatus(connection.id, { state: "connected" });
         this.remotes.connect(connection.id);
       })
       .catch((error: unknown) => {
-        if (this.incoming.get(connection.id) !== entry) return;
-        if (error instanceof NodeHttpError && [401, 403].includes(error.status))
-          this.denied.set(connection.id, error);
-        entry.close();
-        this.statuses.set(connection.id, { state: "error", error: String(error) });
+        if (this.links.get(connection.id) !== link) return;
+        channel.close();
+        this.setStatus(connection.id, { state: "error", error: String(error) });
       });
-    return entry.close;
-  }
-
-  acknowledge(connection: RemoteConnectionCredentials) {
-    const entry = this.incoming.get(connection.id);
-    if (!entry) throw Object.assign(new Error("Reverse control is offline"), { statusCode: 409 });
-    entry.acknowledged = Date.now();
-  }
-
-  isAlive(connection: RemoteConnectionCredentials): boolean {
-    const entry = this.incoming.get(connection.id);
-    return !!entry && Date.now() - entry.acknowledged < 45_000;
-  }
-
-  channel(connection: RemoteConnectionCredentials): ReverseChannel {
-    const denied = this.denied.get(connection.id);
-    if (denied) throw denied;
-    if (!this.remotes.access.listGrants().some((grant) => grant.id === connection.reverseGrantId))
-      throw new NodeHttpError(403, `Remote ${connection.id}: reverse access grant was revoked`);
-    const channel = this.incoming.get(connection.id)?.channel;
-    if (!channel) throw new Error(`Remote ${connection.id}: reverse connection is offline`);
     return channel;
   }
 
-  transfer(connection: RemoteConnectionCredentials, id: string) {
-    const transfer = this.channel(connection).transfers.get(id);
-    if (!transfer) throw Object.assign(new Error("Unknown reverse transfer"), { statusCode: 404 });
-    return transfer;
+  channel(connection: RemoteConnectionCredentials): SocketChannel {
+    if (!this.validGrant(connection)) throw new NodeHttpError(403, "Peer access removed");
+    const link = this.links.get(connection.id);
+    if (!link) throw new Error(`Remote ${connection.id}: socket is offline`);
+    return link.channel;
+  }
+
+  private setStatus(id: string, status: ReverseStatus) {
+    const previous = this.status(id).state;
+    this.statuses.set(id, status);
+    if (previous !== status.state) this.remotes.changes.emit("catalog", id);
   }
 
   private async dial(connection: RemoteConnectionCredentials, dial: Dial) {
     const signal = dial.controller.signal;
-    const setStatus = (status: ReverseStatus) => {
-      if (this.outgoing.get(connection.id) !== dial) return;
-      const previous = this.status(connection.id).state;
-      this.statuses.set(connection.id, status);
-      if (previous !== status.state) this.remotes.changes.emit("catalog", connection.id);
-    };
     let attempts = 0;
     while (!signal.aborted && !this.stopped) {
-      const tasks = new Map<string, AbortController>();
-      const stopTasks = () => {
-        for (const task of tasks.values()) task.abort();
-      };
-      signal.addEventListener("abort", stopTasks, { once: true });
+      let socket: WebSocket | undefined;
+      let abort: (() => void) | undefined;
       try {
-        setStatus({ state: "connecting" });
-        const attempt = new AbortController();
-        const handshake = setTimeout(() => attempt.abort(), 30_000);
-        const response = await fetch(new URL("api/node/reverse/control", connection.url), {
-          headers: this.headers(connection),
-          redirect: "error",
-          signal: AbortSignal.any([signal, attempt.signal]),
-        }).finally(() => clearTimeout(handshake));
-        if (!response.ok) {
-          await response.body?.cancel();
-          if ([401, 403].includes(response.status) && connection.localGrantId) {
-            // A removed peer must never automatically pair again after waking up.
-            await this.remotes.access.removeConnection(connection.id);
-            this.remotes.disconnect(connection.id);
-            throw new NodeHttpError(
-              response.status,
-              "Peer access was removed; pair again to reconnect",
-            );
-          }
-          throw new Error(`Reverse control HTTP ${response.status}`);
-        }
-        if (response.headers.get("x-batty-instance-id") !== connection.instanceId) {
-          await response.body?.cancel();
-          throw new Error("Reverse receiver identity mismatch");
-        }
-        attempts = 0;
-        setStatus({ state: "connected" });
-        await readNodeEvents(response, async (value) => {
-          const event = value as ReverseEvent;
-          if (event.type === "unpair") {
-            await this.remotes.access.removeConnection(connection.id);
-            this.remotes.disconnect(connection.id);
-            dial.controller.abort();
-            return;
-          }
-          if (event.type === "ping") {
-            const acknowledged = await fetch(new URL("api/node/reverse/alive", connection.url), {
-              method: "POST",
-              headers: this.headers(connection),
-              signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
-              redirect: "error",
-            });
-            if (!acknowledged.ok) throw new Error(`Reverse heartbeat HTTP ${acknowledged.status}`);
-            await acknowledged.body?.cancel();
-            return;
-          }
-          if (event.type === "cancel") {
-            tasks.get(event.id)?.abort();
-            return;
-          }
-          if (
-            event.type !== "request" ||
-            typeof event.id !== "string" ||
-            tasks.has(event.id) ||
-            typeof event.route !== "string" ||
-            !isNodeRoute(event.route, event.method) ||
-            !Array.isArray(event.headers) ||
-            typeof event.body !== "boolean"
-          )
-            throw new Error("Invalid reverse control request");
-          const task = new AbortController();
-          tasks.set(event.id, task);
-          void this.bridge(connection, event, task.signal)
-            .catch((error: unknown) => {
-              if (!task.signal.aborted) setStatus({ state: "error", error: String(error) });
-            })
-            .finally(() => tasks.delete(event.id));
+        this.setStatus(connection.id, { state: "connecting" });
+        const url = new URL("api/node/socket", connection.url);
+        url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+        socket = new WebSocket(url, {
+          headers: {
+            authorization: `Bearer ${connection.token}`,
+            "x-batty-instance-id": this.remotes.access.identity().instanceId,
+          },
+          handshakeTimeout: 30_000,
+          maxPayload: SOCKET_MAX_FRAME_BYTES,
+          perMessageDeflate: false,
+          followRedirects: false,
         });
-        if (!signal.aborted) throw new Error("Reverse control disconnected");
+        // A pending handshake also needs an error listener before it can abort.
+        socket.on("error", () => {});
+        abort = () => socket!.terminate();
+        signal.addEventListener("abort", abort, { once: true });
+        const channel = await new Promise<SocketChannel>((resolve, reject) => {
+          socket!.once("open", () => {
+            // ws can emit messages immediately after open in the same read.
+            // Install channel listeners before returning to its frame decoder.
+            try {
+              resolve(this.accept(connection, socket!));
+            } catch (error) {
+              reject(error);
+            }
+          });
+          socket!.once("error", reject);
+          socket!.once("close", () => reject(new Error("Socket handshake closed")));
+          socket!.once("unexpected-response", (_request, response) => {
+            response.resume();
+            socket!.terminate();
+            reject(
+              new NodeHttpError(response.statusCode!, `Peer socket HTTP ${response.statusCode}`),
+            );
+          });
+        });
+        attempts = 0;
+        await channel.closed;
       } catch (error) {
-        if (!signal.aborted) setStatus({ state: "error", error: String(error) });
+        if (
+          !signal.aborted &&
+          this.outgoing.get(connection.id) === dial &&
+          error instanceof NodeHttpError &&
+          [401, 403].includes(error.status)
+        ) {
+          await this.remotes.access.removeConnection(connection.id);
+          this.remotes.disconnect(connection.id);
+        }
+        if (!signal.aborted)
+          this.setStatus(connection.id, { state: "error", error: String(error) });
       } finally {
-        signal.removeEventListener("abort", stopTasks);
-        stopTasks();
+        if (abort) signal.removeEventListener("abort", abort);
+        socket?.terminate();
       }
       if (signal.aborted || !this.remotes.access.getConnection(connection.id)) break;
-      // Reconnect transport only: never replay a command or an interrupted response.
       await new Promise<void>((resolve) => {
         const done = () => {
           clearTimeout(timer);
@@ -300,76 +229,13 @@ export class ReverseConnections {
         signal.addEventListener("abort", done, { once: true });
       });
     }
-    setStatus({ state: "disconnected" });
-  }
-
-  private headers(connection: RemoteConnectionCredentials) {
-    return {
-      authorization: `Bearer ${connection.token}`,
-      "x-batty-instance-id": this.remotes.access.identity().instanceId,
-    };
-  }
-
-  private async bridge(
-    connection: RemoteConnectionCredentials,
-    event: Extract<ReverseEvent, { type: "request" }>,
-    signal: AbortSignal,
-  ) {
-    const endpoint = new URL(
-      `api/node/reverse/transfers/${encodeURIComponent(event.id)}`,
-      connection.url,
-    );
-    let response: Response;
-    try {
-      let body: ReadableStream<Uint8Array> | null = null;
-      if (event.body) {
-        const upload = await fetch(endpoint, {
-          headers: this.headers(connection),
-          signal,
-          redirect: "error",
-        });
-        if (!upload.ok) throw new Error(`Reverse request body HTTP ${upload.status}`);
-        body = upload.body;
-      }
-      // Fixed loopback destination and independently checked node route; no peer-supplied URL.
-      const supplied = new Headers(event.headers);
-      const headers = new Headers();
-      for (const name of ["authorization", "content-type"]) {
-        const value = supplied.get(name);
-        if (value !== null) headers.set(name, value);
-      }
-      response = await fetch(new URL(`api/node/${event.route}`, this.localUrl!), {
-        method: event.method,
-        headers,
-        body,
-        signal,
-        redirect: "error",
-        ...(body ? { duplex: "half" } : {}),
-      });
-    } catch (error) {
-      if (signal.aborted) throw error;
-      response = new Response(`Reverse node request failed: ${String(error)}`, { status: 502 });
-    }
-    const uploaded = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        ...this.headers(connection),
-        "content-type": "application/x-batty-reverse",
-        "x-batty-response": responseMetadata(response),
-      },
-      body: response.body,
-      signal,
-      redirect: "error",
-      ...(response.body ? { duplex: "half" } : {}),
-    });
-    if (!uploaded.ok) throw new Error(`Reverse response HTTP ${uploaded.status}`);
-    await uploaded.body?.cancel();
+    if (!this.links.has(connection.id)) this.setStatus(connection.id, { state: "disconnected" });
   }
 
   async close() {
     this.stopped = true;
-    for (const incoming of this.incoming.values()) incoming.close();
-    for (const outgoing of this.outgoing.values()) outgoing.controller.abort();
+    for (const link of this.links.values()) link.channel.close();
+    for (const dial of this.outgoing.values()) dial.controller.abort();
     await Promise.allSettled(this.loops);
   }
 }

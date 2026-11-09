@@ -1,7 +1,8 @@
 import { withBaseUrl } from "./base-url";
+import { socketFetch } from "./socket-fetch";
 
 /** Acknowledge only a live stream's current challenge while the app is visible and focused. */
-export function listenForPushForeground(source: EventSource): () => void {
+export function listenForPushForeground(source: EventTarget): () => void {
   let clientId: string | undefined;
   let closed = false;
   const identify = (event: Event) => {
@@ -19,7 +20,7 @@ export function listenForPushForeground(source: EventSource): () => void {
       !document.hasFocus()
     )
       return;
-    void fetch(withBaseUrl("/api/push/foreground/ack"), {
+    void socketFetch(withBaseUrl("/api/push/foreground/ack"), {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },

@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 
+vi.mock("@/client/lib/socket-fetch", () => ({
+  socketFetch: vi.fn(() => {
+    throw new Error("Update probes must not require an authenticated socket");
+  }),
+  closeSocketTransport: vi.fn(),
+}));
+
 beforeEach(() => {
   vi.resetModules();
   sessionStorage.clear();
@@ -61,6 +68,48 @@ it("uses SSE build IDs without version requests and still verifies the online sh
   expect(reload).toHaveBeenCalledOnce();
   unblock();
 });
+
+it("checks the public version over HTTP without opening a socket", async () => {
+  const reload = responses();
+  const { socketFetch } = await import("./socket-fetch");
+  vi.mocked(socketFetch).mockClear();
+  const { initializeBuild, checkAppUpdate } = await import("./app-updates");
+  initializeBuild("new");
+  await checkAppUpdate();
+  expect(fetch).toHaveBeenCalledOnce();
+  expect(vi.mocked(fetch).mock.calls[0]).toEqual([
+    "/api/version",
+    { cache: "no-store", signal: expect.any(AbortSignal) },
+  ]);
+  expect(socketFetch).not.toHaveBeenCalled();
+  expect(reload).not.toHaveBeenCalled();
+});
+
+it.each([502, 503, 504])(
+  "retries public HTTP version probes after %s without socket access",
+  async (status) => {
+    vi.useFakeTimers();
+    responses();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: false, status } as Response)
+      .mockResolvedValueOnce({ ok: false, status } as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ buildId: "current" }) } as Response);
+    const { initializeBuild, checkAppUpdate } = await import("./app-updates");
+    initializeBuild("current");
+    const checking = checkAppUpdate();
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    await checking;
+    expect(vi.mocked(fetch).mock.calls.map(([path]) => path)).toEqual([
+      "/api/version",
+      "/api/version",
+      "/api/version",
+    ]);
+  },
+);
 
 it("does not reload an unchanged build", async () => {
   const reload = responses();

@@ -1,6 +1,7 @@
 // @vitest-environment node
 import path from "node:path";
-import type { ServerResponse } from "node:http";
+import { WebSocketServer } from "ws";
+import { SocketChannel } from "@/shared/socket-channel";
 import { chromium, type Browser } from "playwright-core";
 import { launchWebKit } from "../test/webkit";
 import type { ViteDevServer } from "vite";
@@ -10,41 +11,70 @@ import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/b
 let chrome: Browser;
 let safari: Browser;
 let server: ViteDevServer;
+let sockets: WebSocketServer;
 let url: string;
 let stall = false;
 const requests: string[] = [];
-const responses = new Set<ServerResponse>();
+const channels = new Set<SocketChannel>();
 
 beforeAll(async () => {
-  server = await createBrowserFixtureServer("src/client/lib/SessionConnection.fixture.html", {
-    resolve: { alias: { "@": path.resolve("src") } },
-    server: { host: "127.0.0.1", port: 0 },
-    plugins: [
-      {
-        name: "wake-events",
-        configureServer(server) {
-          server.middlewares.use((request, response, next) => {
-            if (!request.url?.startsWith("/wake-events")) return next();
-            requests.push(request.url);
-            responses.add(response);
-            response.on("close", () => responses.delete(response));
-            // Leave the first TCP/HTTP request waiting for headers, as during network recovery.
-            if (stall) {
-              stall = false;
-              return;
-            }
-            response.writeHead(200, {
-              "Content-Type": "text/event-stream",
-              "Cache-Control": "no-cache",
+  server = await createBrowserFixtureServer(
+    "src/client/lib/SessionConnection.fixture.html",
+    {
+      resolve: { alias: { "@": path.resolve("src") } },
+      server: { host: "127.0.0.1", port: 0 },
+      plugins: [
+        {
+          name: "wake-events",
+          configureServer(server) {
+            sockets = new WebSocketServer({ noServer: true });
+            server.httpServer!.on("upgrade", (request, socket, head) => {
+              if (request.url !== "/api/socket") return;
+              sockets.handleUpgrade(request, socket, head, (websocket) => {
+                const channel = new SocketChannel(websocket, {
+                  handle: async (path, request) => {
+                    requests.push(path);
+                    // Leave the first logical stream waiting for headers during recovery.
+                    if (stall) {
+                      stall = false;
+                      return new Promise<Response>((_, reject) => {
+                        request.signal.addEventListener(
+                          "abort",
+                          () => reject(request.signal.reason),
+                          { once: true },
+                        );
+                      });
+                    }
+                    const encoder = new TextEncoder();
+                    let timer: ReturnType<typeof setInterval>;
+                    return new Response(
+                      new ReadableStream<Uint8Array>({
+                        start(controller) {
+                          controller.enqueue(encoder.encode('data: {"cursor":"2"}\n\n'));
+                          timer = setInterval(
+                            () =>
+                              controller.enqueue(encoder.encode("event: heartbeat\ndata: {}\n\n")),
+                            1000,
+                          );
+                        },
+                        cancel() {
+                          clearInterval(timer);
+                        },
+                      }),
+                      { headers: { "Content-Type": "text/event-stream" } },
+                    );
+                  },
+                });
+                channels.add(channel);
+                void channel.closed.then(() => channels.delete(channel));
+              });
             });
-            response.write('data: {"cursor":"2"}\n\n');
-            const timer = setInterval(() => response.write("event: heartbeat\ndata: {}\n\n"), 1000);
-            response.on("close", () => clearInterval(timer));
-          });
+          },
         },
-      },
-    ],
-  });
+      ],
+    },
+    { socket: false },
+  );
   await server.listen();
   url = `${server.resolvedUrls!.local[0]}src/client/lib/SessionConnection.fixture.html`;
   chrome = await chromium.launch({ headless: true });
@@ -54,12 +84,13 @@ beforeAll(async () => {
 afterAll(async () => {
   await chrome?.close();
   await safari?.close();
-  for (const response of responses) response.destroy();
+  for (const channel of channels) channel.close();
+  sockets?.close();
   if (server) await closeBrowserFixtureServer(server);
 });
 
 test.each(["Chromium", "WebKit"])(
-  "%s retries stalled HTTP handshakes without losing a draft",
+  "%s retries stalled socket stream handshakes without losing a draft",
   async (engine) => {
     requests.length = 0;
     stall = true;
@@ -69,7 +100,7 @@ test.each(["Chromium", "WebKit"])(
       await page.clock.pauseAt(Date.now());
       await page.goto(url);
       await expect.poll(() => requests.length).toBe(1);
-      // Keep real HTTP/SSE and browser state; advance only the handshake timer.
+      // Keep real WebSocket streaming and browser state; advance only the handshake timer.
       await page.clock.fastForward(5000);
       await expect
         .poll(() => page.locator("output").textContent(), { timeout: 10_000 })
@@ -98,7 +129,7 @@ test("Chromium resumes a paused renderer with buffered heartbeats at the latest 
     await cdp.send("Debugger.enable");
     await cdp.send("Debugger.pause");
     // Pause the actual renderer's JavaScript while the server keeps writing.
-    // This exercises suspended tasks and buffered SSE, not physical Mac sleep.
+    // This exercises suspended tasks and buffered streams, not physical Mac sleep.
     await new Promise((resolve) => setTimeout(resolve, 11_000));
     const start = Date.now();
     await cdp.send("Debugger.resume");

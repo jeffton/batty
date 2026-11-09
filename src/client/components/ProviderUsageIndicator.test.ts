@@ -1,4 +1,9 @@
 import { mount } from "@vue/test-utils";
+
+vi.mock("@/client/lib/socket-fetch", () => ({
+  socketFetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
+  closeSocketTransport: vi.fn(),
+}));
 import { expect, test, vi } from "vite-plus/test";
 import ProviderUsageIndicator from "./ProviderUsageIndicator.vue";
 import type { ProviderUsageUpdate } from "@/shared/types";

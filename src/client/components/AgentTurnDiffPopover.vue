@@ -49,7 +49,9 @@ function buildItems(): CodeViewItem<undefined>[] {
   return props.files.map((file, index) => ({
     id: `${props.popoverId}:${index}`,
     type: "diff",
-    fileDiff: pierre!.parsePatchFiles(file.patch, `${props.popoverId}:${index}`)[0]!.files[0]!,
+    fileDiff: pierre!.parsePatchFiles(file.patch, {
+      cacheKeyPrefix: `${props.popoverId}:${index}`,
+    })[0]!.files[0]!,
   }));
 }
 

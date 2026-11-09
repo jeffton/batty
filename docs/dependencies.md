@@ -1,3 +1,63 @@
+# Dependency review — 2026-11-09
+
+Checked every direct dependency, devDependency, catalog, override and pnpm against npm at 09:00 UTC. Selection honors the 4320-minute age policy (November 6, 09:00 UTC cutoff) and existing exclusions.
+
+## Updates and integration
+
+| Package                               | Version                                                             |
+| ------------------------------------- | ------------------------------------------------------------------- |
+| Fastify; multipart; static; websocket | 5.12.7 → 5.12.8; 10.1.6 → 10.1.7; 10.1.8 → 10.1.10; 11.3.4 → 11.3.7 |
+| Lucide Vue; Pierre diffs              | 1.65.0 → 1.70.0; 1.6.2 → 1.6.4                                      |
+| jsdom; Marked; Turndown               | 30.1.3 → 31.0.0; 18.1.2 → 18.1.3; 7.2.4 → 7.2.5                     |
+| TypeBox; Virtua                       | 1.4.3 → 1.4.4; 0.54.0 → 0.54.2                                      |
+| Vue/compiler                          | 3.5.44 → 3.5.45                                                     |
+| Vite Plus and aliased Vite catalog    | 1.4.0 → 1.5.0                                                       |
+| Patchright                            | 1.64.2 → 1.64.3                                                     |
+| pnpm                                  | 12.16.1 → 12.18.0                                                   |
+
+Pierre 1.6.3 changes `parsePatchFiles`' second argument from a string to an options object; the diff popover passes `cacheKeyPrefix`. Its regression uses the real parser to verify distinct cache keys and contents for immutable same-path edits. Version 1.6.4 repairs publication.
+
+**Breaking upstream jsdom changes:** version 31 replaces optional Canvas with `@napi-rs/canvas`, replaces CSS/style internals, and changes constructor completion when blocking scripts await resources. Batty only parses HTML with `{ url }`, without script/resource loading or Canvas. No Canvas dependency or asynchronous lifecycle conversion is needed. The HTTP extraction regression exercises real jsdom/Readability/Turndown, relative links, code, tables, navigation removal and disabled script/resource loading.
+
+Multipart fixes malformed-body errors reaching delayed file consumers (GHSA-5849-5m6q-9632). Fastify fixes streaming timeout crashes (GHSA-3qgw-9275-xf8w); Batty retains its default disabled handler timeout. Static's forbidden-path errors retain `statusCode`, already used by Batty; directory/compression and websocket HEAD/listener fixes require no integration migration. Marked fixes parsing/backtracking, Turndown improves concatenation, TypeBox expands IRI coverage, Virtua fixes scrolling/rendering and Vue fixes lifecycle/compiler behavior. Lucide's renamed alert icons retain nondeprecated aliases.
+
+Vite Plus 1.5 retains Vite 8.3.5 and bundles Vitest 5.1.0, Rolldown 1.2.16, tsdown 0.23.4, oxlint 1.91.0, tsgolint 7.0.2005, oxfmt 0.76.0 and oxc-node 1.0.1. Its HTML formatter changes upstream formatting behavior; Batty passes formatting/type checks without unrelated rewrites. Existing test projects, mocks, pack settings and catalog alias remain supported. pnpm 12.17/12.18 preserve catalogs, overrides and frozen installation.
+
+## Browser selection
+
+Patchright 1.64.3 still uses Playwright **1.64.1**. Playwright Core **1.65.0** is age-eligible but held for manifest alignment: it selects Chromium revision 1254 and WebKit 2388, unlike Patchright. Installed Patchright Core 1.64.3 and Playwright Core 1.64.1 manifests are byte-identical: Chromium **156.0.8078.4 / revision 1248**, WebKit **27.2 / revision 2370**, Firefox **157.0 / revision 1555**.
+
+Patchright's missing GitHub release page is not a hold. Official release-workflow provenance at `f14e043660ff14cc252d7610c4356835f2d04cf8`, upstream PRs and integrity-verified published tarballs establish the changes: selector/closed-shadow-root efficiency, execution-context and handle-disposal corrections, deadline-aware selector counting, and authenticated-proxy request restart fixes. Only the Core bundle and version metadata change; public types, browser manifests and Node requirements remain unchanged. No Batty API migration is required.
+
+Chrome Stable installed and running is **157.0.8103.38** (Arch package **157.0.8103.38-1**), matching Google's current Linux Stable package metadata. Official November 5 notes document 213 security fixes. No Chrome package update or detached-browser restart is required. Production retains system Chrome; bundled Chromium/WebKit remain test-only.
+
+## Checked versions and holds
+
+All **eight Pi/Chord packages remain 1.5.0**, including pi-schema. No SDK, SQLite/document/task, harness/transcript/queue, session/tool event, compaction/retry or provider/model migration boundary is crossed. All six Workbox packages remain **7.4.1**.
+
+Age holds: multipart **10.1.8** until November 9, 09:22 UTC; WebAuthn server **14.1.0** until November 9, 20:23 UTC; TypeBox **1.4.5/1.4.6** until November 9, 10:28 / November 11, 10:59 UTC; web-push **4.0.0** until November 9, 11:44 UTC. The WebAuthn exclusion applies only to 14.0.2.
+
+Other retained pins checked: cookie 11.1.5, Source Sans 3 5.3.1, Readability 0.6.0, CSS anchor positioning 0.10.2, WebAuthn browser/server 14.0.0/14.0.3, Croner 11.0.0, DOMPurify 3.4.17, Highlight.js 11.12.0, mime-types 3.0.2, Pinia 4.1.0, persisted-state 4.7.1, Sharp 0.35.5, Turndown GFM 1.0.2, unpdf 2.1.0, Vue Router 5.4.0, web-push 3.6.7; jsdom/Node/Turndown/web-push/ws types 30.0.0/26.6.6/5.0.6/3.6.4/8.18.2, Vue plugin 6.0.10, Vue test-utils 2.5.1, Happy DOM 21.0.4, tsx 4.23.15, TypeScript 7.0.2 and PWA plugin 2.0.0.
+
+Maintained-major overrides remain current: fast-uri 3.1.9/4.2.3, Nano ID 3.3.20, PostCSS 8.5.32, serialize-javascript 7.1.4, brace-expansion 2.1.7/5.0.12 and find-my-way 9.10.0. Vite Plus Core still permits PostCSS `^8.5.30`; Vue compiler's raised floor does not eliminate that override's purpose. Vue compiler and Vite overrides retain the aligned runtime/catalog configuration.
+
+## Validation
+
+`pnpm check`, `TMPDIR=/var/tmp pnpm test` (929 passed, 2 skipped), `pnpm test:all:isolated` (998 passed, 2 skipped), Linux deployment lifecycle/privilege regressions, `pnpm build`, packaged startup/offline checks and frozen installation pass. The system-Chrome smoke verifies Chrome 157.0.8103.38, namespace/seccomp sandbox, isolated UID/groups, H.264 and upload/download. Full-suite shared-headless navigation passes. Test-only Chromium isolation is prepared; WebKit runs in the pinned Ubuntu container on Arch. Independent Sol review found no actionable findings and reran both changed test files successfully.
+
+The initial plain `pnpm test` failed one profile-move fixture with `EXDEV` because `/tmp` is on another filesystem. Using the documented `/var/tmp` test environment resolves it without source changes. Ten existing lint warnings and the caught localhost version-check refusal remain. The native WebKit installer reports missing Ubuntu libraries on Arch; the required isolated Ubuntu suite passes instead.
+
+## Official sources
+
+Reviewed every crossed intermediate release:
+
+- Multipart [10.1.7](https://github.com/fastify/fastify-multipart/releases/tag/v10.1.7); static [10.1.9](https://github.com/fastify/fastify-static/releases/tag/v10.1.9), [10.1.10](https://github.com/fastify/fastify-static/releases/tag/v10.1.10); websocket [11.3.5](https://github.com/fastify/fastify-websocket/releases/tag/v11.3.5), [11.3.6](https://github.com/fastify/fastify-websocket/releases/tag/v11.3.6), [11.3.7](https://github.com/fastify/fastify-websocket/releases/tag/v11.3.7); [Fastify 5.12.8](https://github.com/fastify/fastify/releases/tag/v5.12.8).
+- Lucide [1.66](https://github.com/lucide-icons/lucide/releases/tag/1.66.0), [1.67](https://github.com/lucide-icons/lucide/releases/tag/1.67.0), [1.68](https://github.com/lucide-icons/lucide/releases/tag/1.68.0), [1.69](https://github.com/lucide-icons/lucide/releases/tag/1.69.0), [1.70](https://github.com/lucide-icons/lucide/releases/tag/1.70.0) and [alias policy](https://github.com/lucide-icons/lucide/pull/5143); Pierre [1.6.3](https://github.com/pierrecomputer/pierre/releases/tag/diffs-v1.6.3), [1.6.4](https://github.com/pierrecomputer/pierre/releases/tag/diffs-v1.6.4).
+- [jsdom 31 and migration](https://github.com/jsdom/jsdom/releases/tag/v31.0.0); [Marked 18.1.3](https://github.com/markedjs/marked/releases/tag/v18.1.3); [Turndown 7.2.5](https://github.com/mixmark-io/turndown/releases/tag/v7.2.5); [TypeBox changelog](https://github.com/sinclairzx81/typebox/blob/main/changelog/1.4.0.md); Virtua [0.54.1](https://github.com/inokawa/virtua/releases/tag/0.54.1), [0.54.2](https://github.com/inokawa/virtua/releases/tag/0.54.2); [Vue/compiler 3.5.45](https://github.com/vuejs/core/blob/v3.5.45/CHANGELOG.md).
+- [Vite Plus 1.5](https://github.com/voidzero-dev/vite-plus/releases/tag/v1.5.0), [Vitest 5.1](https://github.com/vitest-dev/vitest/releases/tag/v5.1.0), [Rolldown 1.2.16](https://github.com/rolldown/rolldown/releases/tag/v1.2.16), tsdown [0.23.2](https://github.com/rolldown/tsdown/releases/tag/v0.23.2), [0.23.3](https://github.com/rolldown/tsdown/releases/tag/v0.23.3), [0.23.4](https://github.com/rolldown/tsdown/releases/tag/v0.23.4); oxlint [1.90](https://github.com/oxc-project/oxc/releases/tag/oxlint_v1.90.0), [1.91](https://github.com/oxc-project/oxc/releases/tag/oxlint_v1.91.0), oxfmt [0.75](https://github.com/oxc-project/oxc/releases/tag/oxfmt_v0.75.0), [0.76](https://github.com/oxc-project/oxc/releases/tag/oxfmt_v0.76.0), [tsgolint 7.0.2005](https://github.com/oxc-project/tsgolint/releases/tag/v7.0.2005), [oxc-node 1.0.1](https://github.com/oxc-project/oxc-node/releases/tag/v1.0.1).
+- pnpm [12.17](https://github.com/pnpm/pnpm/releases/tag/v12.17.0), [12.18](https://github.com/pnpm/pnpm/releases/tag/v12.18.0).
+- Patchright [PR 258](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/pull/258), [PR 260](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/pull/260), [source comparison](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/compare/e2876b7bc0bef67b38164794b3108eadbc2eb647...f14e043660ff14cc252d7610c4356835f2d04cf8), [release workflow](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/actions/runs/41527391957); [Playwright 1.65](https://github.com/microsoft/playwright/releases/tag/v1.65.0); [Chrome Stable/security notes](https://chromereleases.googleblog.com/2026/11/stable-channel-update-for-desktop.html).
+
 # Pi upgrade — 2026-11-02
 
 Pi AI, Agent Core, Coding Agent, Durable, Code Mode, MCP and Chord are aligned at **1.5.0**; `pi-schema` 1.5.0 supplies the shared JSON Schema validator. This explicit upgrade overrides the release-age hold for these packages only. Other dependencies are unchanged.

@@ -30,6 +30,14 @@
           isAssistant: false,
           isPinned: false,
         },
+        {
+          id: "long",
+          label: "Workspace-with-an-unbroken-name-that-needs-to-wrap-on-a-small-screen",
+          path: "/fixture/projects/with-a-long-unbroken-directory-name-and-more-nested-folders/source",
+          kind: "workspace",
+          isAssistant: false,
+          isPinned: false,
+        },
       ];
       createApp({ render: () => h(ToolsPopover, { popoverId: "tools", anchorName: "--tools" }) })
         .use(pinia)

@@ -17,6 +17,11 @@ let app: ReturnType<typeof fastify>;
 let server: ViteDevServer;
 let browser: Browser;
 let url: string;
+const wrappedSource = [
+  `export const sentence = "${"Text with spaces and indentation. ".repeat(15)}";`,
+  `  const unbroken = "${"a".repeat(420)}";`,
+  "  console.log(sentence, unbroken);",
+].join("\n");
 beforeAll(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-code-ui-"));
   const project = path.join(root, "workspaces/project");
@@ -24,6 +29,7 @@ beforeAll(async () => {
   await fs.mkdir(path.join(root, "workspaces/other"));
   await fs.writeFile(path.join(root, "workspaces/other/other.txt"), "Other workspace");
   await fs.writeFile(path.join(project, "src/main.ts"), 'export const greeting = "Hej 🦾";\n');
+  await fs.writeFile(path.join(project, "src/long.ts"), wrappedSource);
   await fs.writeFile(path.join(project, ".hidden"), "Hidden content");
   await fs.writeFile(path.join(project, "empty"), "");
   await fs.writeFile(path.join(project, "binary"), Buffer.from([0, 1, 2]));
@@ -133,6 +139,104 @@ test("workspace row opens native code browser, lazily browses files and closes b
     }
   }
 });
+
+test("workspace rows contain wrapped names and paths on desktop and mobile", async () => {
+  for (const width of [1280, 390]) {
+    const page = await browser.newPage({ viewport: { width, height: 900 } });
+    try {
+      await page.goto(url);
+      const list = page.locator("#tools-Workspaces-panel");
+      await list.getByRole("button", { name: "Browse code in Project" }).waitFor();
+      const rows = await list.locator(".tools-popover__workspace").evaluateAll((elements) =>
+        elements.map((element) => {
+          const row = element.getBoundingClientRect();
+          return {
+            height: row.height,
+            scrollWidth: element.scrollWidth,
+            clientWidth: element.clientWidth,
+            childrenContained: [...element.children].every((child) => {
+              const box = child.getBoundingClientRect();
+              return (
+                box.top >= row.top &&
+                box.bottom <= row.bottom &&
+                box.right <= row.right &&
+                box.left >= row.left
+              );
+            }),
+            detailWeight: getComputedStyle(element.querySelector("code")!).fontWeight,
+          };
+        }),
+      );
+      expect(rows.every((row) => row.childrenContained && row.scrollWidth <= row.clientWidth)).toBe(
+        true,
+      );
+      expect(rows.every((row) => row.detailWeight === "400")).toBe(true);
+      expect(rows[0]!.height).toBeGreaterThan(44);
+      if (width === 390) expect(rows[2]!.height).toBeGreaterThan(rows[0]!.height);
+      if (process.env.BATTY_UI_SCREENSHOTS === "1") {
+        await fs.mkdir(".tmp/ui-feedback", { recursive: true });
+        await page.screenshot({ path: `.tmp/ui-feedback/workspace-list-${width}.png` });
+      }
+      await list.getByRole("button", { name: "Browse code in Project" }).click();
+      await page
+        .getByRole("dialog", { name: "Code in Project" })
+        .getByRole("treeitem", { name: "src", exact: true })
+        .waitFor();
+    } finally {
+      await page.close();
+    }
+  }
+});
+
+for (const engine of ["chromium", "webkit"] as const) {
+  test(`${engine}: code wraps spaced lines and long tokens without changing text`, async () => {
+    const instance = (engine === "webkit" ? await launchWebKit() : browser) as unknown as Browser;
+    try {
+      for (const width of engine === "webkit" ? [390] : [1280, 390]) {
+        const page = await instance.newPage({ viewport: { width, height: 900 } });
+        page.setDefaultTimeout(10_000);
+        try {
+          await page.goto(url);
+          await page.getByRole("button", { name: "Browse code in Project" }).click();
+          const popover = page.getByRole("dialog", { name: "Code in Project" });
+          await popover.getByRole("treeitem", { name: "src", exact: true }).click();
+          await popover.getByRole("treeitem", { name: "long.ts", exact: true }).click();
+          await popover
+            .locator("[data-line]")
+            .filter({ hasText: "export const sentence" })
+            .waitFor();
+          await expect
+            .poll(() => popover.locator("[data-line] span").count(), { timeout: 10_000 })
+            .toBeGreaterThan(3);
+          const lines = await popover.locator("[data-line]").evaluateAll((elements) =>
+            elements.map((element) => ({
+              text: element.textContent?.replace(/\\n$/, ""),
+              height: element.getBoundingClientRect().height,
+              lineHeight: parseFloat(getComputedStyle(element).lineHeight),
+              scrollWidth: element.scrollWidth,
+              clientWidth: element.clientWidth,
+            })),
+          );
+          expect(lines.map((line) => line.text)).toEqual(wrappedSource.split("\n"));
+          expect(lines.slice(0, 2).every((line) => line.height > line.lineHeight * 2)).toBe(true);
+          expect(lines.every((line) => line.scrollWidth <= line.clientWidth + 1)).toBe(true);
+          const viewer = await popover
+            .locator(".workspace-code__viewer")
+            .evaluate((element) => ({ scroll: element.scrollWidth, width: element.clientWidth }));
+          expect(viewer.scroll).toBeLessThanOrEqual(viewer.width);
+          if (process.env.BATTY_UI_SCREENSHOTS === "1") {
+            await fs.mkdir(".tmp/ui-feedback", { recursive: true });
+            await page.screenshot({ path: `.tmp/ui-feedback/wrapped-code-${engine}-${width}.png` });
+          }
+        } finally {
+          await page.close();
+        }
+      }
+    } finally {
+      if (engine === "webkit") await instance.close();
+    }
+  });
+}
 
 test("directory failures are visible and retryable, file failures do not leave stale source", async () => {
   const page = await browser.newPage();

@@ -135,7 +135,7 @@ async function open(): Promise<void> {
     code = new diffs.CodeView({
       theme: { dark: "pierre-dark", light: "pierre-light" },
       themeType: "system",
-      overflow: "scroll",
+      overflow: "wrap",
       disableFileHeader: true,
       layout: { paddingTop: 12, paddingBottom: 12, gap: 0 },
       unsafeCSS: `

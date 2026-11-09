@@ -166,6 +166,8 @@ onBeforeUnmount(() => loadGeneration++);
 
 .tools-popover__workspace {
   width: 100%;
+  height: auto;
+  font-weight: 400;
   border: 0;
   border-bottom: 1px solid var(--color-border-soft);
   background: transparent;

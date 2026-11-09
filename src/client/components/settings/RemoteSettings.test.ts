@@ -118,7 +118,7 @@ it("generates without a label, copies the token and clears secrets on close", as
     expect(wrapper.find('[aria-label="Copy token"]').exists()).toBe(false);
     await wrapper.get('[aria-label="Copy URL"]').trigger("click");
     await flushPromises();
-    expect(wrapper.get('[aria-label="Copy URL"]').text()).toBe("Copied");
+    expect(wrapper.get('[aria-label="Copy URL"]').attributes("title")).toBe("Copied");
     expect(issueRemoteGrant).not.toHaveBeenCalled();
     vi.mocked(issueRemoteGrant).mockResolvedValueOnce({ id: "new", token: "issued-secret" });
     await generate(wrapper);
@@ -126,14 +126,12 @@ it("generates without a label, copies the token and clears secrets on close", as
     expect(issueRemoteGrant).toHaveBeenCalledWith();
     expect(wrapper.get<HTMLTextAreaElement>("textarea").element.value).toBe("issued-secret");
     expect(wrapper.get("textarea").attributes("readonly")).toBeDefined();
-    await wrapper
-      .findAll("button")
-      .find((button) => button.text() === "Copy token")!
-      .trigger("click");
+    await wrapper.get('[aria-label="Copy token"]').trigger("click");
     await flushPromises();
     expect(writeText.mock.calls).toEqual([[`${window.location.origin}/`], ["issued-secret"]]);
-    expect(wrapper.get('[aria-label="Copy token"]').text()).toBe("Copied");
-    expect(wrapper.get('[aria-label="Copy URL"]').text()).toBe("Copied");
+    expect(wrapper.get('[aria-label="Copy token"]').attributes("title")).toBe("Copied");
+    expect(wrapper.get('[aria-label="Copy URL"]').attributes("title")).toBe("Copied");
+    expect(wrapper.get(".remote-settings__announcement").text()).toBe("URL copied. Token copied.");
     await wrapper.get('input[name="pairing-token"]').setValue("draft-secret");
     await wrapper.setProps({ open: false });
     expect(wrapper.find("textarea").exists()).toBe(false);
@@ -186,7 +184,7 @@ it("shows clipboard errors without claiming a successful copy", async () => {
     await wrapper.get('[aria-label="Copy URL"]').trigger("click");
     await flushPromises();
     expect(wrapper.get('[role="alert"]').text()).toBe("Clipboard denied");
-    expect(wrapper.get('[aria-label="Copy URL"]').text()).toBe("Copy URL");
+    expect(wrapper.get('[aria-label="Copy URL"]').attributes("title")).toBe("Copy URL");
   } finally {
     wrapper.unmount();
   }
@@ -286,10 +284,7 @@ it("shows connection states and refreshes explicitly", async () => {
     expect(wrapper.text()).toContain("Offline");
     expect(wrapper.text()).toContain("Connecting");
     expect(wrapper.get('[role="alert"]').text()).toBe("Connection lost");
-    await wrapper
-      .findAll("button")
-      .find((button) => button.text() === "Refresh")!
-      .trigger("click");
+    await wrapper.get('[aria-label="Refresh connections"]').trigger("click");
     await flushPromises();
     expect(getRemoteSettings).toHaveBeenCalledTimes(2);
   } finally {

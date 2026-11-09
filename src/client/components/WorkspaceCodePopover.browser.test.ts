@@ -2,6 +2,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import type { ServerResponse } from "node:http";
 import fastify from "fastify";
 import vue from "@vitejs/plugin-vue";
 import { chromium, type Browser } from "patchright";
@@ -17,6 +18,7 @@ let app: ReturnType<typeof fastify>;
 let server: ViteDevServer;
 let browser: Browser;
 let url: string;
+let incrementalSearch: ServerResponse | undefined;
 const wrappedSource = [
   `export const sentence = "${"Text with spaces and indentation. ".repeat(15)}";`,
   `  const unbroken = "${"a".repeat(420)}";`,
@@ -63,6 +65,14 @@ beforeAll(async () => {
           name: "workspace-file-fixture",
           configureServer(vite) {
             vite.middlewares.use("/api", async (request, response) => {
+              if (request.url === "/workspaces/project/file-search?name=needle-stream") {
+                response.writeHead(200, { "content-type": "application/x-ndjson" });
+                response.write(
+                  JSON.stringify({ kind: "match", path: "one/needle-stream.ts" }) + "\n",
+                );
+                incrementalSearch = response;
+                return;
+              }
               const result = await app.inject({ method: "GET", url: `/api${request.url}` });
               response.writeHead(result.statusCode, { "content-type": "application/json" });
               response.end(result.body);
@@ -156,7 +166,7 @@ test("workspace row opens native code browser, lazily browses files and closes b
 });
 
 for (const engine of ["chromium", "webkit"] as const) {
-  test(`${engine}: quick-open searches filenames throughout unopened folders and preserves tree state`, async () => {
+  test(`${engine}: filename filtering renders a native hierarchy and preserves the original tree`, async () => {
     const instance = (engine === "webkit" ? await launchWebKit() : browser) as unknown as Browser;
     try {
       for (const width of engine === "webkit" ? [390] : [1280, 390]) {
@@ -166,50 +176,111 @@ for (const engine of ["chromium", "webkit"] as const) {
           await page.goto(url);
           await page.getByRole("button", { name: "Browse code in Project" }).click();
           const popover = page.getByRole("dialog", { name: "Code in Project" });
-          await popover.getByRole("treeitem", { name: "src", exact: true }).waitFor();
-          expect(
-            await popover.getByRole("treeitem", { name: "QuickNeedle.ts", exact: true }).count(),
-          ).toBe(0);
+          await popover.getByRole("treeitem", { name: "src", exact: true }).click();
+          await popover.getByRole("treeitem", { name: "main.ts", exact: true }).click();
+          await popover
+            .locator("[data-line]")
+            .filter({ hasText: "export const greeting" })
+            .waitFor();
           await page.keyboard.press(engine === "webkit" ? "Meta+p" : "Control+p");
-          const input = popover.getByRole("combobox", { name: "Find file by name" });
+          const input = popover.getByRole("searchbox", { name: "Find file by name" });
           expect(await input.evaluate((element) => element === document.activeElement)).toBe(true);
           await input.fill("qUiCkNeEdLe");
-          await expect.poll(() => popover.getByRole("option").count()).toBe(2);
-          expect(await popover.getByRole("option").allTextContents()).toEqual(
-            expect.arrayContaining([
-              expect.stringContaining("unopened/deeper"),
-              expect.stringContaining("another"),
-            ]),
-          );
+          const filtered = popover.locator(".file-search__results");
+          await expect.poll(() => filtered.getByRole("treeitem").count()).toBe(5);
+          expect(await filtered.getByRole("tree").count()).toBe(1);
+          expect(
+            await filtered
+              .getByRole("treeitem")
+              .evaluateAll((items) =>
+                items.map((item) => [
+                  item.getAttribute("aria-label"),
+                  item.getAttribute("aria-level"),
+                ]),
+              ),
+          ).toEqual([
+            ["another", "1"],
+            ["QuickNeedle.ts", "2"],
+            ["unopened", "1"],
+            ["deeper", "2"],
+            ["QuickNeedle.ts", "3"],
+          ]);
+          expect(await popover.getByRole("listbox").count()).toBe(0);
+          if (process.env.BATTY_UI_SCREENSHOTS === "1") {
+            await fs.mkdir(".tmp/ui-feedback", { recursive: true });
+            await page.screenshot({
+              path: `.tmp/ui-feedback/filtered-hierarchy-${engine}-${width}.png`,
+            });
+          }
+          const folder = filtered.getByRole("treeitem", { name: "another", exact: true });
+          expect(await folder.getAttribute("aria-expanded")).toBe("true");
+          await folder.click();
+          await expect
+            .poll(() =>
+              filtered.getByRole("treeitem", { name: "QuickNeedle.ts", exact: true }).count(),
+            )
+            .toBe(1);
+          await folder.focus();
+          await page.keyboard.press("ArrowRight");
+          await expect
+            .poll(() =>
+              filtered.getByRole("treeitem", { name: "QuickNeedle.ts", exact: true }).count(),
+            )
+            .toBe(2);
+          await input.focus();
           await input.press("ArrowDown");
-          const activeId = await input.getAttribute("aria-activedescendant");
-          const option = popover.locator(`[id="${activeId}"]`);
-          const parent = await option.locator("span").textContent();
-          await input.press("Enter");
+          expect(
+            await folder.evaluate(
+              (item) => (item.getRootNode() as ShadowRoot).activeElement === item,
+            ),
+          ).toBe(true);
+          await page.keyboard.press("ArrowDown");
+          await page.keyboard.press("Enter");
           await popover.locator("[data-line]").filter({ hasText: "export const found" }).waitFor();
           expect(await popover.locator(".full-popover__subtitle").textContent()).toBe(
-            `${parent}/QuickNeedle.ts`,
+            "another/QuickNeedle.ts",
           );
           if (width < 600)
             await popover.getByRole("button", { name: "Files", exact: true }).click();
-          expect(await input.inputValue()).toBe("");
+          expect(await input.inputValue()).toBe("qUiCkNeEdLe");
+          expect(
+            await filtered
+              .locator('[data-item-path="another/QuickNeedle.ts"]')
+              .getAttribute("aria-selected"),
+          ).toBe("true");
+          await input.press("Escape");
           expect(
             await popover
               .getByRole("treeitem", { name: "src", exact: true })
               .getAttribute("aria-expanded"),
-          ).toBe("false");
+          ).toBe("true");
+          expect(
+            await popover
+              .getByRole("treeitem", { name: "main.ts", exact: true })
+              .getAttribute("aria-selected"),
+          ).toBe("true");
+          expect(await popover.locator(".full-popover__subtitle").textContent()).toBe(
+            "another/QuickNeedle.ts",
+          );
           await popover.getByRole("button", { name: "Find file", exact: true }).click();
           await input.fill("unopened");
           await popover.getByText("No files found.", { exact: true }).waitFor();
           await input.fill("HiddenNeedle");
-          const hidden = popover.getByRole("option").filter({ hasText: "HiddenNeedle.ts" });
+          const hidden = filtered.getByRole("treeitem", { name: "HiddenNeedle.ts", exact: true });
           await hidden.waitFor();
-          expect(await hidden.textContent()).toContain(".git/objects");
+          expect(
+            await filtered
+              .getByRole("treeitem")
+              .evaluateAll((items) => items.map((item) => item.getAttribute("aria-label"))),
+          ).toEqual([".git", "objects", "HiddenNeedle.ts"]);
           if (process.env.BATTY_UI_SCREENSHOTS === "1") {
             await fs.mkdir(".tmp/ui-feedback", { recursive: true });
-            await page.screenshot({ path: `.tmp/ui-feedback/file-search-${engine}-${width}.png` });
+            await page.screenshot({
+              path: `.tmp/ui-feedback/file-search-tree-${engine}-${width}.png`,
+            });
           }
-          await input.press("Escape");
+          await hidden.focus();
+          await page.keyboard.press("Escape");
           expect(await input.inputValue()).toBe("");
           expect(await popover.isVisible()).toBe(true);
           await input.press("Escape");
@@ -235,6 +306,50 @@ for (const engine of ["chromium", "webkit"] as const) {
   });
 }
 
+test("incremental matches preserve collapsed folders, open new parents, and flush the last batch", async () => {
+  const page = await browser.newPage();
+  page.setDefaultTimeout(10_000);
+  try {
+    await page.goto(url);
+    await page.getByRole("button", { name: "Browse code in Project" }).click();
+    const popover = page.getByRole("dialog", { name: "Code in Project" });
+    await popover.getByRole("treeitem", { name: "src", exact: true }).waitFor();
+    await popover.getByRole("searchbox", { name: "Find file by name" }).fill("needle-stream");
+    const filtered = popover.locator(".file-search__results");
+    const one = filtered.getByRole("treeitem", { name: "one", exact: true });
+    await filtered.getByRole("treeitem", { name: "needle-stream.ts", exact: true }).waitFor();
+    await one.click();
+    expect(await one.getAttribute("aria-expanded")).toBe("false");
+    incrementalSearch!.write(
+      JSON.stringify({ kind: "match", path: "one/needle-stream-two.ts" }) +
+        "\n" +
+        JSON.stringify({ kind: "match", path: "two/needle-stream.ts" }) +
+        "\n",
+    );
+    incrementalSearch!.end(JSON.stringify({ kind: "done" }) + "\n");
+    await filtered.getByRole("treeitem", { name: "two", exact: true }).waitFor();
+    await expect.poll(() => popover.getByText("Searching…", { exact: true }).count()).toBe(0);
+    expect(await one.getAttribute("aria-expanded")).toBe("false");
+    expect(
+      await filtered
+        .getByRole("treeitem", { name: "two", exact: true })
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
+    expect(
+      await filtered.getByRole("treeitem", { name: "needle-stream.ts", exact: true }).count(),
+    ).toBe(1);
+    await one.click();
+    await filtered.getByRole("treeitem", { name: "needle-stream-two.ts", exact: true }).waitFor();
+    expect(
+      await filtered.getByRole("treeitem", { name: "needle-stream.ts", exact: true }).count(),
+    ).toBe(2);
+  } finally {
+    incrementalSearch?.end();
+    incrementalSearch = undefined;
+    await page.close();
+  }
+});
+
 test("search errors and newer queries do not turn partial or stale results into successful matches", async () => {
   const page = await browser.newPage();
   page.setDefaultTimeout(10_000);
@@ -242,20 +357,28 @@ test("search errors and newer queries do not turn partial or stale results into 
     await page.route("**/api/workspaces/project/file-search?name=broken", (route) =>
       route.fulfill({
         contentType: "application/x-ndjson",
-        body: JSON.stringify({ kind: "error", message: "Permission denied" }) + "\n",
+        body:
+          JSON.stringify({ kind: "match", path: "partial/match.ts" }) +
+          "\n" +
+          JSON.stringify({ kind: "error", message: "Permission denied" }) +
+          "\n",
       }),
     );
     await page.goto(url);
     await page.getByRole("button", { name: "Browse code in Project" }).click();
     const popover = page.getByRole("dialog", { name: "Code in Project" });
     await popover.getByRole("treeitem", { name: "src", exact: true }).waitFor();
-    const input = popover.getByRole("combobox", { name: "Find file by name" });
+    const input = popover.getByRole("searchbox", { name: "Find file by name" });
     await input.fill("broken");
     await popover
       .getByRole("alert")
       .filter({ hasText: "Search incomplete: Permission denied" })
       .waitFor();
     expect(await popover.getByText("No files found.", { exact: true }).count()).toBe(0);
+    await popover
+      .locator(".file-search__results")
+      .getByRole("treeitem", { name: "match.ts", exact: true })
+      .waitFor();
     let finish!: () => void;
     const delayed = new Promise<void>((resolve) => {
       finish = resolve;
@@ -279,11 +402,19 @@ test("search errors and newer queries do not turn partial or stale results into 
     await input.fill("slow");
     await requested;
     await input.fill("HiddenNeedle");
-    await popover.getByRole("option").filter({ hasText: "HiddenNeedle.ts" }).waitFor();
+    await popover
+      .locator(".file-search__results")
+      .getByRole("treeitem", { name: "HiddenNeedle.ts", exact: true })
+      .waitFor();
     finish();
     await expect
-      .poll(() => popover.getByRole("option").allTextContents())
-      .toEqual([expect.stringContaining("HiddenNeedle.ts")]);
+      .poll(() =>
+        popover
+          .locator(".file-search__results")
+          .getByRole("treeitem")
+          .evaluateAll((items) => items.map((item) => item.getAttribute("aria-label"))),
+      )
+      .toEqual([".git", "objects", "HiddenNeedle.ts"]);
     expect(await popover.getByRole("alert").count()).toBe(0);
   } finally {
     await page.close();

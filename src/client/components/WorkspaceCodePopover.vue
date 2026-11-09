@@ -167,7 +167,8 @@ async function selectSearchFile(path: string): Promise<void> {
   const currentGeneration = generation;
   await selectFile(path);
   await nextTick();
-  if (currentGeneration === generation) codeRoot.value?.focus({ preventScroll: true });
+  if (currentGeneration === generation && window.matchMedia("(max-width: 600px)").matches)
+    codeRoot.value?.focus({ preventScroll: true });
 }
 
 function shortcut(event: KeyboardEvent): void {

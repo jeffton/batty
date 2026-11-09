@@ -19,7 +19,7 @@ The authenticated root route contains one main chat. Workspace listings never se
 - `GET /api/workspaces/:id/files?path=`: read-only directory entries or text/binary file status, confined to the canonical workspace root.
 - `GET /api/workspaces/:id/file-search?name=`: authenticated NDJSON stream of `WorkspaceFileSearchEvent` (`match`, `done`, `error`). Case-insensitive substring matching uses file basenames, not parent paths or contents. The walk includes hidden folders, visits each canonical directory once, excludes external symlink targets and cancels on disconnect. Scan errors mark results incomplete.
 
-The code browser’s Find file input and Ctrl/Cmd+P search unopened folders. Arrow keys and Enter open a result; Escape clears the query before closing the browser. Clearing search restores the existing tree.
+The code browser’s Find file input and Ctrl/Cmd+P filter a native Pierre tree, including unopened folders. Matching files retain their parent hierarchy; folders expand and collapse normally. Arrow keys and Enter navigate and open files. Escape clears the filter before closing the browser, restoring the original tree’s expansion and selection.
 
 ## Installation status
 

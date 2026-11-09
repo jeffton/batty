@@ -19,7 +19,8 @@ export interface RemoteConnectionStatus {
 export interface RemoteConnection {
   id: string;
   label: string;
-  url: string;
+  /** Only outgoing peers have an address; reverse peers use their authenticated channel. */
+  url?: string;
   instanceId?: string;
   grantId?: string;
   transport?: "reverse";

@@ -112,7 +112,7 @@ export function registerRemoteRoutes(app: FastifyInstance, runtime: Runtime) {
         const url = normalizeRemoteUrl(input.url!);
         if (!input.token?.trim()) throw new Error("Pairing token is required");
         if (access.completedPairing(url, input.token)) return { ok: true };
-        const claim = await access.beginPairing(url, input.token!, runtime.config.baseUrl);
+        const claim = await access.beginPairing(url, input.token!);
         const response = await fetch(new URL("api/node/pair", url), {
           method: "POST",
           headers: { authorization: `Bearer ${input.token!}`, "content-type": "application/json" },

@@ -7,6 +7,7 @@ import {
   ensureOptionsFile,
   stateDirPath,
   type DefaultThinkingLevel,
+  type AppBasePath,
 } from "./options";
 
 export interface AppConfig {
@@ -30,7 +31,7 @@ export interface AppConfig {
   memoryModel: string;
   memoryLanguage: string;
   defaultThinkingLevel?: DefaultThinkingLevel;
-  baseUrl: string;
+  baseUrl: AppBasePath;
   appTitle: string;
   appColor: AppColor;
   cookieName: string;

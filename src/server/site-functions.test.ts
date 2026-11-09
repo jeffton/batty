@@ -13,7 +13,8 @@ import {
 } from "./site-functions";
 import { closeSiteFunctionRuntime } from "./site-isolation";
 import { registerSiteRoutes } from "./routes/sites";
-import type { AppConfig } from "./config";
+import { loadConfig } from "./config";
+import { writeStoredOptions } from "./options";
 import { createSitesTool } from "./custom-tools";
 import type { SiteFunction } from "@/shared/site-functions";
 
@@ -31,6 +32,14 @@ async function fixture() {
   const site = await createSite(root, "", "Test");
   await writeFile(join(site.directory, "index.html"), "<h1>Test</h1>");
   return { root, id: site.descriptor.id, site };
+}
+
+async function siteConfig(root: string) {
+  await writeStoredOptions(root, {
+    workspacesRoots: [root],
+    webPushSubject: "mailto:test@example.com",
+  });
+  return { ...(await loadConfig(root)), sitesDir: root };
 }
 
 test("site-scoped isolated QuickJS transforms input without Node and definitions cannot be served", async () => {
@@ -96,7 +105,7 @@ test("paid routes require login and same origin even for public/capability-previ
   });
   registerSiteRoutes({
     app,
-    config: { sitesDir: root, baseUrl: "" } as AppConfig,
+    config: await siteConfig(root),
     routePath: (route) => route,
   });
   try {
@@ -122,7 +131,7 @@ test("paid routes require login and same origin even for public/capability-previ
 test("sites tool registers, replaces and deletes code without echoing definitions", async () => {
   const { root, id } = await fixture();
   const tool = createSitesTool({
-    config: { sitesDir: root, baseUrl: "" } as AppConfig,
+    config: await siteConfig(root),
   } as Parameters<typeof createSitesTool>[0]);
   const result = await tool.execute(
     "register",

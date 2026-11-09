@@ -42,6 +42,9 @@ export interface StoredAppOptions {
   appColor?: AppColor;
 }
 
+/** Application mount path, never a network origin or URL. */
+export type AppBasePath = `/${string}`;
+
 export interface AppOptions {
   memoryModel: string;
   memoryLanguage: string;
@@ -57,7 +60,7 @@ export interface AppOptions {
   defaultProvider?: string;
   defaultModel?: string;
   defaultThinkingLevel?: DefaultThinkingLevel;
-  baseUrl: string;
+  baseUrl: AppBasePath;
   appTitle: string;
   appColor: AppColor;
 }
@@ -74,7 +77,7 @@ function createAuthSecret(): string {
   return crypto.randomBytes(32).toString("base64url");
 }
 
-export function normalizeBaseUrl(value: unknown): string {
+export function normalizeBaseUrl(value: unknown): AppBasePath {
   if (value == null) {
     return "/";
   }
@@ -86,7 +89,12 @@ export function normalizeBaseUrl(value: unknown): string {
   if (trimmed.length === 0 || trimmed === "/") {
     return "/";
   }
-  if (trimmed.includes("?") || trimmed.includes("#")) {
+  if (
+    trimmed.includes("?") ||
+    trimmed.includes("#") ||
+    /^[a-z][a-z\d+.-]*:/i.test(trimmed) ||
+    trimmed.startsWith("//")
+  ) {
     throw new Error(`Invalid baseUrl in options.json: ${trimmed}. Expected a URL path.`);
   }
 

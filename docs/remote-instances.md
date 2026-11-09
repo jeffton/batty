@@ -9,7 +9,7 @@ A remote Batty runs ordinary workers with its own workspaces, tools, instruction
 
 This single pairing permits subagent operations in both directions. The token is a single-use invitation, displayed only until the Remote tab closes; copy it with **Copy token**. An unused invitation can be cancelled. Tokens are never owner-login credentials.
 
-The instance selecting Add keeps an outbound HTTPS eventstream open. If only Mac can reach Windows over the work VPN, generate the token on Windows and select Add on Mac. Windows sends requests back over the same connection; Windows does not need to dial Mac. Installation IDs, names and scoped credentials are exchanged and stored automatically. Connection names use the hostname and a short stable installation ID.
+The instance selecting Add keeps an outbound HTTPS eventstream open. If only Mac can reach Windows over the work VPN, generate the token on Windows and select Add on Mac. Windows sends requests back over the same connection; Windows does not need to dial Mac. The initiating machine does not advertise or need a reachable URL. Installation IDs, names and scoped credentials are exchanged and stored automatically. Connection names use the hostname and a short stable installation ID.
 
 The peer list shows online/offline status. **Refresh** updates it without background status polling. **Remove** immediately revokes local access and closes streams; an online peer is notified to remove its reciprocal pairing. Offline removal prevents further local access. A disconnected peer cannot use its retained credential for agent operations without a live authenticated control channel; reconnecting to a removed pairing is denied and removes the stale local pairing. Pairing again requires a fresh invitation.
 

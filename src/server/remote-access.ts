@@ -30,7 +30,6 @@ interface RemoteAccessState {
 export interface PairingClaim {
   instanceId: string;
   name: string;
-  url: string;
   localGrantId: string;
   localToken: string;
   remoteToken: string;
@@ -141,7 +140,7 @@ export class RemoteAccess {
     );
   }
 
-  beginPairing(url: string, invitation: string, localUrl: string): Promise<PairingClaim> {
+  beginPairing(url: string, invitation: string): Promise<PairingClaim> {
     return this.mutate((state) => {
       const invitationHash = hashToken(invitation);
       const existing = state.pendingPairings?.find(
@@ -150,7 +149,6 @@ export class RemoteAccess {
       if (existing) return structuredClone(existing.claim);
       const claim: PairingClaim = {
         ...this.identity(),
-        url: normalizeRemoteUrl(localUrl),
         localGrantId: crypto.randomUUID(),
         localToken: crypto.randomBytes(32).toString("base64url"),
         remoteToken: crypto.randomBytes(32).toString("base64url"),
@@ -173,7 +171,6 @@ export class RemoteAccess {
         !/^[A-Za-z0-9_-]{43}$/.test(claim.remoteToken)
       )
         throw new Error("Invalid pairing claim");
-      const url = normalizeRemoteUrl(claim.url);
       if (claim.instanceId === state.instanceId)
         throw new Error("Cannot connect a Batty instance to itself");
       const invitationHash = hashToken(invitation);
@@ -195,7 +192,6 @@ export class RemoteAccess {
         id: claim.instanceId,
         label: claim.name,
         instanceId: claim.instanceId,
-        url,
         token: claim.localToken,
         grantId: claim.localGrantId,
         transport: "reverse",
@@ -313,7 +309,7 @@ export class RemoteAccess {
     const normalized: RemoteConnectionCredentials = {
       id: connection.id,
       label: connection.label.trim(),
-      url: normalizeRemoteUrl(connection.url),
+      ...(connection.transport === "reverse" ? {} : { url: normalizeRemoteUrl(connection.url!) }),
       token: connection.token,
       ...(connection.instanceId === undefined ? {} : { instanceId: connection.instanceId }),
       ...(connection.grantId === undefined ? {} : { grantId: connection.grantId }),

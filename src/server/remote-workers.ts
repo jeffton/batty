@@ -183,7 +183,7 @@ export class RemoteWorkers {
       headers.set("content-type", "application/json");
     headers.set("authorization", `Bearer ${connection.token}`);
     return withNodeDeadline(route, init, (signal) => {
-      const request = new Request(new URL(`api/node/${route}`, connection.url), {
+      const request = new Request(new URL(`api/node/${route}`, "http://batty.invalid/"), {
         ...init,
         headers,
         signal,
@@ -930,10 +930,14 @@ export class RemoteWorkers {
   }
   private async importFile(node: string, object: Record<string, unknown>) {
     const connection = this.connection(node);
-    if (!URL.canParse(String(object.downloadUrl), connection.url))
+    // Reverse peers have no network address. Their manifests contain app-relative paths;
+    // the URL only parses the manifest, while bytes travel over the authenticated node route.
+    const base = new URL(
+      connection.transport === "reverse" ? "http://batty.invalid/" : connection.url!,
+    );
+    if (!URL.canParse(String(object.downloadUrl), base))
       throw new PermanentFileImportError("Remote file URL is invalid");
-    const source = new URL(String(object.downloadUrl), connection.url);
-    const base = new URL(connection.url);
+    const source = new URL(String(object.downloadUrl), base);
     if (source.origin !== base.origin)
       throw new PermanentFileImportError("Remote file URL has a foreign origin");
     const match = /\/api\/sent-files\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/.exec(source.pathname);

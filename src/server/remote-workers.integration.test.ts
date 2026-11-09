@@ -1,6 +1,8 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { createServer, request as httpRequest } from "node:http";
+import type { AddressInfo } from "node:net";
 import { workerCommandBody } from "./worker-files";
 import { artifactRefs } from "./artifact-forwarding";
 import { tmpdir } from "node:os";
@@ -33,7 +35,7 @@ async function eventually(check: () => Promise<boolean>, label: string) {
   throw new Error(`Timed out waiting for ${label}`);
 }
 
-async function openInstance(directory: string, name: string, fileStatus = 200) {
+async function openInstance(directory: string, name: string, fileStatus = 200, baseUrl = "/") {
   const root = join(directory, name);
   const work = join(root, "work");
   await mkdir(join(root, ".batty", "skills"), { recursive: true });
@@ -44,6 +46,7 @@ async function openInstance(directory: string, name: string, fileStatus = 200) {
       workspacesRoots: [root],
       assistantWorkspaceId: "work",
       webPushSubject: "mailto:integration@example.com",
+      baseUrl,
     }),
   );
   await writeFile(join(work, "origin.txt"), `tools executed on ${name}`);
@@ -112,8 +115,37 @@ async function openInstance(directory: string, name: string, fileStatus = 200) {
   });
   const closeRoutes = registerRemoteRoutes(app, runtime);
   registerReverseRemoteRoutes(app, runtime);
-  const url = `${await app.listen({ host: "127.0.0.1", port: 0 })}/`;
-  config.baseUrl = url;
+  const upstreamUrl = `${await app.listen({ host: "127.0.0.1", port: 0 })}/`;
+  const prefix = config.baseUrl === "/" ? "" : config.baseUrl;
+  const proxyRequests: string[] = [];
+  // Production routes are unprefixed: a path-mounted reverse proxy strips the
+  // configured app prefix before forwarding HTTP bodies and live SSE streams.
+  const proxy = prefix
+    ? createServer((incoming, outgoing) => {
+        const path = incoming.url!;
+        proxyRequests.push(path);
+        if (!path.startsWith(`${prefix}/`)) {
+          outgoing.writeHead(404).end();
+          return;
+        }
+        const upstream = httpRequest(
+          new URL(path.slice(prefix.length), upstreamUrl),
+          { method: incoming.method, headers: incoming.headers },
+          (response) => {
+            outgoing.writeHead(response.statusCode!, response.headers);
+            response.pipe(outgoing);
+            outgoing.on("close", () => response.destroy());
+          },
+        );
+        upstream.on("error", () => outgoing.destroy());
+        outgoing.on("close", () => upstream.destroy());
+        incoming.pipe(upstream);
+      })
+    : undefined;
+  if (proxy) await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+  const url = proxy
+    ? `http://127.0.0.1:${(proxy.address() as AddressInfo).port}${prefix}/`
+    : upstreamUrl;
   let closed = false;
   return {
     app,
@@ -126,6 +158,7 @@ async function openInstance(directory: string, name: string, fileStatus = 200) {
     sessionStreams,
     fileRequests,
     pairingClaims,
+    proxyRequests,
     setNodeOnline(online: boolean) {
       nodeOnline = online;
       if (!online) app.server.closeAllConnections();
@@ -144,6 +177,12 @@ async function openInstance(directory: string, name: string, fileStatus = 200) {
       closeRoutes();
       await runtime.close();
       await app.close();
+      if (proxy) {
+        proxy.closeAllConnections();
+        await new Promise<void>((resolve, reject) =>
+          proxy.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
     },
   };
 }
@@ -152,21 +191,19 @@ async function connect(
   from: Awaited<ReturnType<typeof openInstance>>,
   to: Awaited<ReturnType<typeof openInstance>>,
 ) {
-  const issued = await to.app.inject({
+  const issued = await fetch(new URL("api/remotes", to.url), {
     method: "POST",
-    url: "/api/remotes",
-    headers: to.owner,
-    payload: { action: "token-generate" },
+    headers: { ...to.owner, "content-type": "application/json" },
+    body: JSON.stringify({ action: "token-generate" }),
   });
-  expect(issued.statusCode, issued.body).toBe(200);
-  const invitation = issued.json<{ id: string; token: string }>();
-  const connected = await from.app.inject({
+  expect(issued.status).toBe(200);
+  const invitation = (await issued.json()) as { id: string; token: string };
+  const connected = await fetch(new URL("api/remotes", from.url), {
     method: "POST",
-    url: "/api/remotes",
-    headers: from.owner,
-    payload: { action: "connection-add", url: to.url, token: invitation.token },
+    headers: { ...from.owner, "content-type": "application/json" },
+    body: JSON.stringify({ action: "connection-add", url: to.url, token: invitation.token }),
   });
-  expect(connected.statusCode, connected.body).toBe(200);
+  expect(connected.status, await connected.text()).toBe(200);
   await eventually(
     async () =>
       from.runtime.remotes.reverse.status(to.id).state === "connected" &&
@@ -194,13 +231,11 @@ async function connect(
   return invitation;
 }
 
-/** Only Mac dials Windows; Windows does not need to reach the advertised Mac URL. */
+/** Only Mac dials Windows; its own URL never enters the pairing protocol. */
 async function connectReverse(
   windows: Awaited<ReturnType<typeof openInstance>>,
   mac: Awaited<ReturnType<typeof openInstance>>,
-  advertisedUrl = mac.url,
 ) {
-  mac.config.baseUrl = advertisedUrl;
   return connect(mac, windows);
 }
 
@@ -226,152 +261,222 @@ function filesIn(value: unknown): SentFileDescriptor[] {
   return Object.values(object).flatMap(filesIn);
 }
 
-test("one invitation pairs both directions, never becomes a node bearer, and rejects replay or cross-binding", async () => {
-  vi.stubEnv("PI_OFFLINE", "1");
-  const directory = await mkdtemp(join(tmpdir(), "batty-single-invitation-"));
-  const windows = await openInstance(directory, "windows");
-  const mac = await openInstance(directory, "mac");
-  const other = await openInstance(directory, "other");
-  try {
-    expect(
-      (
-        await windows.app.inject({
-          method: "POST",
-          url: "/api/remotes",
-          payload: { action: "token-generate" },
-        })
-      ).statusCode,
-    ).toBe(401);
-    const bad = await mac.app.inject({
-      method: "POST",
-      url: "/api/remotes",
-      headers: mac.owner,
-      payload: { action: "connection-add", url: windows.url, token: "wrong-token" },
-    });
-    expect(bad.statusCode).toBe(500);
-    expect(mac.runtime.remotes.access.listConnections()).toEqual([]);
-    expect(windows.runtime.remotes.access.listConnections()).toEqual([]);
+test.each(["/", "/batty/"])(
+  "%s owner pairing works bidirectionally, never becomes a node bearer, and rejects replay or cross-binding",
+  async (baseUrl) => {
+    vi.stubEnv("PI_OFFLINE", "1");
+    const directory = await mkdtemp(join(tmpdir(), "batty-single-invitation-"));
+    const windows = await openInstance(directory, "windows", 200, baseUrl);
+    const mac = await openInstance(directory, "mac", 200, baseUrl);
+    const other = await openInstance(directory, "other");
+    try {
+      expect(
+        (
+          await windows.app.inject({
+            method: "POST",
+            url: "/api/remotes",
+            payload: { action: "token-generate" },
+          })
+        ).statusCode,
+      ).toBe(401);
+      const bad = await mac.app.inject({
+        method: "POST",
+        url: "/api/remotes",
+        headers: mac.owner,
+        payload: { action: "connection-add", url: windows.url, token: "wrong-token" },
+      });
+      expect(bad.statusCode).toBe(500);
+      expect(mac.runtime.remotes.access.listConnections()).toEqual([]);
+      expect(windows.runtime.remotes.access.listConnections()).toEqual([]);
 
-    const invitation = await connectReverse(windows, mac, "http://127.0.0.1:1/");
-    expect(mac.id).toMatch(/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/);
-    expect(windows.runtime.remotes.connection(mac.id).url).toBe("http://127.0.0.1:1/");
-    expect(windows.runtime.remotes.access.identity().name).toMatch(
-      new RegExp(` · ${windows.id.slice(0, 8)}$`),
-    );
-    const inviteAuth = { authorization: `Bearer ${invitation.token}` };
-    expect(
-      (await windows.app.inject({ url: "/api/node/identity", headers: inviteAuth })).statusCode,
-    ).toBe(401);
-    expect(
-      (
-        await windows.app.inject({
-          method: "POST",
-          url: "/api/node/commands",
-          headers: inviteAuth,
-          payload: { requestId: "invitation-is-not-bearer", command: { action: "list" } },
-        })
-      ).statusCode,
-    ).toBe(401);
-    // A lost HTTP response may retry exactly the durable original claim.
-    const original = windows.pairingClaims[0]!;
-    const retry = await windows.app.inject({
-      method: "POST",
-      url: "/api/node/pair",
-      headers: inviteAuth,
-      payload: original,
-    });
-    expect(retry.statusCode, retry.body).toBe(200);
-    for (const claim of [
-      { ...original, instanceId: other.id },
-      { ...original, remoteToken: original.localToken },
-      { ...original, localGrantId: "different-grant" },
-    ]) {
-      const replay = await windows.app.inject({
+      const invitation = await connectReverse(windows, mac);
+      expect(mac.id).toMatch(/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/);
+      expect(windows.runtime.remotes.connection(mac.id)).not.toHaveProperty("url");
+      expect(mac.runtime.remotes.connection(windows.id).url).toBe(windows.url);
+      expect(windows.pairingClaims[0]).not.toHaveProperty("url");
+      expect(windows.config.baseUrl).toBe(baseUrl === "/" ? "/" : "/batty");
+      expect(windows.runtime.remotes.access.identity().name).toMatch(
+        new RegExp(` · ${windows.id.slice(0, 8)}$`),
+      );
+      const inviteAuth = { authorization: `Bearer ${invitation.token}` };
+      expect(
+        (await windows.app.inject({ url: "/api/node/identity", headers: inviteAuth })).statusCode,
+      ).toBe(401);
+      expect(
+        (
+          await windows.app.inject({
+            method: "POST",
+            url: "/api/node/commands",
+            headers: inviteAuth,
+            payload: { requestId: "invitation-is-not-bearer", command: { action: "list" } },
+          })
+        ).statusCode,
+      ).toBe(401);
+      // A lost HTTP response may retry exactly the durable original claim.
+      const original = windows.pairingClaims[0]!;
+      const retry = await windows.app.inject({
         method: "POST",
         url: "/api/node/pair",
         headers: inviteAuth,
-        payload: claim,
+        payload: original,
       });
-      expect(replay.statusCode).toBeGreaterThanOrEqual(400);
-    }
-    await connect(other, windows);
-    const otherToken = other.runtime.remotes.connection(windows.id).token;
-    expect(
-      (
-        await windows.app.inject({
-          url: "/api/node/reverse/control",
-          headers: { authorization: `Bearer ${otherToken}`, "x-batty-instance-id": mac.id },
-        })
-      ).statusCode,
-    ).toBe(403);
-    const unused = await windows.app.inject({
-      method: "POST",
-      url: "/api/remotes",
-      headers: windows.owner,
-      payload: { action: "token-generate" },
-    });
-    const revoked = await windows.app.inject({
-      method: "POST",
-      url: "/api/remotes",
-      headers: windows.owner,
-      payload: { action: "token-revoke", id: unused.json().id },
-    });
-    expect(revoked.statusCode).toBe(200);
-    const claimedRevoked = await windows.app.inject({
-      method: "POST",
-      url: "/api/node/pair",
-      headers: { authorization: `Bearer ${unused.json().token}` },
-      payload: { ...original, instanceId: "new-peer" },
-    });
-    expect(claimedRevoked.statusCode).toBe(401);
-    await eventually(
-      async () => windows.runtime.remotes.reverse.status(mac.id).state === "connected",
-      "unused invitation revocation preserves paired peers",
-    );
-    for (const [from, to] of [
-      [windows, mac],
-      [mac, windows],
-    ] as const) {
-      to.faux.setResponses([fauxAssistantMessage([fauxText(`executed on ${to.id}`)])]);
-      const started = await nodeRequest<{ output: Array<{ text: string }> }>(
-        from.runtime.remotes.connection(to.id),
-        "commands",
-        {
+      expect(retry.statusCode, retry.body).toBe(200);
+      for (const claim of [
+        { ...original, instanceId: other.id },
+        { ...original, remoteToken: original.localToken },
+        { ...original, localGrantId: "different-grant" },
+      ]) {
+        const replay = await windows.app.inject({
           method: "POST",
-          body: JSON.stringify({
-            requestId: `paired-${from.id}`,
-            command: {
-              action: "run",
-              workspaceId: "work",
-              prompt: "prove both directions",
-            },
-          }),
-        },
-        from.runtime.remotes.requestNode,
-      );
-      expect(started.output[0]!.text).toContain("Started");
+          url: "/api/node/pair",
+          headers: inviteAuth,
+          payload: claim,
+        });
+        expect(replay.statusCode).toBeGreaterThanOrEqual(400);
+      }
+      await connect(other, windows);
+      const otherToken = other.runtime.remotes.connection(windows.id).token;
+      expect(
+        (
+          await windows.app.inject({
+            url: "/api/node/reverse/control",
+            headers: { authorization: `Bearer ${otherToken}`, "x-batty-instance-id": mac.id },
+          })
+        ).statusCode,
+      ).toBe(403);
+      const unused = await windows.app.inject({
+        method: "POST",
+        url: "/api/remotes",
+        headers: windows.owner,
+        payload: { action: "token-generate" },
+      });
+      const revoked = await windows.app.inject({
+        method: "POST",
+        url: "/api/remotes",
+        headers: windows.owner,
+        payload: { action: "token-revoke", id: unused.json().id },
+      });
+      expect(revoked.statusCode).toBe(200);
+      const claimedRevoked = await windows.app.inject({
+        method: "POST",
+        url: "/api/node/pair",
+        headers: { authorization: `Bearer ${unused.json().token}` },
+        payload: { ...original, instanceId: "new-peer" },
+      });
+      expect(claimedRevoked.statusCode).toBe(401);
       await eventually(
-        async () => (await to.runtime.orchestration.listRunning()).length === 0,
-        "paired native worker completion",
+        async () => windows.runtime.remotes.reverse.status(mac.id).state === "connected",
+        "unused invitation revocation preserves paired peers",
       );
+      for (const [from, to] of [
+        [windows, mac],
+        [mac, windows],
+      ] as const) {
+        to.faux.setResponses([
+          fauxAssistantMessage([fauxToolCall("attach_files", { paths: ["origin.txt"] })], {
+            stopReason: "toolUse",
+          }),
+          fauxAssistantMessage([fauxText(`executed on ${to.id}`)]),
+        ]);
+        const started = await nodeRequest<{ output: Array<{ text: string }> }>(
+          from.runtime.remotes.connection(to.id),
+          "commands",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              requestId: `paired-${from.id}`,
+              command: {
+                action: "run",
+                workspaceId: "work",
+                prompt: "prove both directions",
+              },
+            }),
+          },
+          from.runtime.remotes.requestNode,
+        );
+        expect(started.output[0]!.text).toContain("Started");
+        const session = /Session ID: (\d+)/.exec(started.output[0]!.text)![1]!;
+        const waiting = await nodeRequest<{ details: { assignmentId: string } }>(
+          from.runtime.remotes.connection(to.id),
+          "commands",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              requestId: `paired-await-${from.id}`,
+              command: { action: "await", sessionId: session },
+            }),
+          },
+          from.runtime.remotes.requestNode,
+        );
+        const controller = new AbortController();
+        try {
+          await from.runtime.remotes.join(
+            {
+              node: to.id,
+              session,
+              assignmentId: waiting.details.assignmentId,
+              parentId: from.runtime.main.id,
+            },
+            controller.signal,
+          );
+        } finally {
+          controller.abort();
+        }
+        await eventually(
+          async () => (await to.runtime.orchestration.listRunning()).length === 0,
+          "paired native worker completion",
+        );
+        const source = filesIn((await to.runtime.state(session)).messages).find(
+          (file) => file.name === "origin.txt",
+        );
+        expect(source).toBeDefined();
+        const segments = new URL(source!.downloadUrl, to.url).pathname.split("/").slice(-4);
+        const received = await from.runtime.remotes.requestNode(
+          from.runtime.remotes.connection(to.id),
+          `files/${segments.join("/")}`,
+        );
+        expect(received.status).toBe(200);
+        expect(await received.text()).toBe(
+          `tools executed on ${to === windows ? "windows" : "mac"}`,
+        );
+      }
+      expect(await windows.runtime.orchestration.queryWorkers({ action: "list" })).toHaveProperty(
+        "output",
+      );
+      const publicState = await windows.app.inject({ url: "/api/remotes", headers: windows.owner });
+      expect(publicState.body).not.toContain(invitation.token);
+      expect(publicState.body).not.toContain(original.localToken);
+      expect(publicState.body).not.toContain(original.remoteToken);
+      expect(publicState.body).not.toContain("localGrantId");
+      expect(publicState.body).not.toContain("claimHash");
+      if (baseUrl !== "/") {
+        for (const instance of [windows, mac]) {
+          expect(instance.proxyRequests).toContain("/batty/api/remotes");
+          expect(instance.proxyRequests.every((url) => url.startsWith("/batty/api/"))).toBe(true);
+        }
+        expect(windows.proxyRequests).toContain("/batty/api/node/pair");
+        expect(windows.proxyRequests).toContain("/batty/api/node/reverse/control");
+        // A missing prefix is genuinely unroutable at this proxy, not swallowed by
+        // an in-memory mock that would hide incorrect peer request destinations.
+        const unprefixed = await fetch(new URL("/api/remotes", windows.url), {
+          headers: windows.owner,
+        });
+        expect(unprefixed.status).toBe(404);
+        await unprefixed.body?.cancel();
+        expect(
+          windows.proxyRequests.some((url) => url.startsWith("/batty/api/node/reverse/transfers/")),
+        ).toBe(true);
+      }
+    } finally {
+      await other.close();
+      await mac.close();
+      await windows.close();
+      await rm(directory, { recursive: true, force: true });
+      vi.unstubAllEnvs();
     }
-    expect(await windows.runtime.orchestration.queryWorkers({ action: "list" })).toHaveProperty(
-      "output",
-    );
-    const publicState = await windows.app.inject({ url: "/api/remotes", headers: windows.owner });
-    expect(publicState.body).not.toContain(invitation.token);
-    expect(publicState.body).not.toContain(original.localToken);
-    expect(publicState.body).not.toContain(original.remoteToken);
-    expect(publicState.body).not.toContain("localGrantId");
-    expect(publicState.body).not.toContain("claimHash");
-  } finally {
-    await other.close();
-    await mac.close();
-    await windows.close();
-    await rm(directory, { recursive: true, force: true });
-    vi.unstubAllEnvs();
-  }
-}, 30_000);
+  },
+  30_000,
+);
 
 test.each(["creator", "adder"] as const)(
   "offline removal by %s revokes access without restarting a worker or repairing itself",
@@ -381,7 +486,7 @@ test.each(["creator", "adder"] as const)(
     const windows = await openInstance(directory, "windows");
     const mac = await openInstance(directory, "mac");
     try {
-      await connectReverse(windows, mac, "http://127.0.0.1:1/");
+      await connectReverse(windows, mac);
       mac.faux.setResponses([
         fauxAssistantMessage(
           [
@@ -934,133 +1039,142 @@ test.each(["http", "reverse"] as const)(
   45_000,
 );
 
-test("reverse-only unreachable Mac address supports discovery, native workers, inspect, await and stop", async () => {
-  vi.stubEnv("PI_OFFLINE", "1");
-  const directory = await mkdtemp(join(tmpdir(), "batty-reverse-only-"));
-  let windows: Awaited<ReturnType<typeof openInstance>> | undefined;
-  let mac: Awaited<ReturnType<typeof openInstance>> | undefined;
-  try {
-    windows = await openInstance(directory, "a");
-    mac = await openInstance(directory, "b");
-    const local = windows;
-    const remote = mac;
-    // There is no listener here: any accidental HTTP fallback makes this test fail.
-    await connectReverse(local, remote, "http://127.0.0.1:1/");
-    const discovered = await local.runtime.remotes.workspaces(remote.id);
-    expect(discovered[0]).toMatchObject({
-      nodeId: remote.id,
-      defaultModel: "faux/model-b",
-      workspaces: [expect.objectContaining({ id: "work" })],
-    });
-    remote.faux.setResponses([
-      fauxAssistantMessage(
-        [
-          fauxToolCall("bash", {
-            command:
-              "printf ready > entered; for i in $(seq 1 400); do test -f release && exit 0; sleep 0.05; done; exit 1",
-          }),
-        ],
-        { stopReason: "toolUse" },
-      ),
-      fauxAssistantMessage([fauxText("worker released")]),
-    ]);
-    const request = <T>(route: string, init: RequestInit = {}) =>
-      nodeRequest<T>(
-        local.runtime.remotes.connection(remote.id),
-        route,
-        init,
-        local.runtime.remotes.requestNode,
-      );
-    const command = <T>(requestId: string, action: Record<string, unknown>) =>
-      request<T>("commands", {
-        method: "POST",
-        body: JSON.stringify({ requestId, command: action }),
-      });
-    const run = { action: "run", workspaceId: "work", prompt: "native reverse-only worker" };
-    const started = await command<{ output: Array<{ text: string }> }>("reverse-once", run);
-    const session = /Session ID: (\d+)/.exec(started.output[0]!.text)![1]!;
-    const duplicate = await command("reverse-once", run);
-    expect(duplicate).toEqual(started);
-    await eventually(async () => {
-      try {
-        return (await readFile(join(remote.work, "entered"), "utf8")) === "ready";
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-        throw error;
-      }
-    }, "reverse-only native bash worker");
-    const inspected = await command<{ output: Array<{ text: string }> }>("reverse-inspect", {
-      action: "inspect",
-      sessionId: session,
-    });
-    expect(JSON.parse(inspected.output[0]!.text)).toMatchObject({
-      sessionId: session,
-      status: "running",
-    });
-    const waiting = await command<{ details: { assignmentId: string } }>("reverse-await", {
-      action: "await",
-      sessionId: session,
-    });
-    const controller = new AbortController();
-    const joined = local.runtime.remotes.join(
-      {
-        node: remote.id,
-        session,
-        assignmentId: waiting.details.assignmentId,
-        parentId: local.runtime.main.id,
-      },
-      controller.signal,
-    );
+test.each(["/", "/batty/"])(
+  "%s reverse-only Mac without a self URL supports workers, inspect, await, stop and restart",
+  async (baseUrl) => {
+    vi.stubEnv("PI_OFFLINE", "1");
+    const directory = await mkdtemp(join(tmpdir(), "batty-reverse-only-"));
+    let windows: Awaited<ReturnType<typeof openInstance>> | undefined;
+    let mac: Awaited<ReturnType<typeof openInstance>> | undefined;
     try {
-      await local.runtime.remotes.stop(`remote:${remote.id}:${session}`);
-      await joined;
-      await eventually(
-        async () => (await remote.runtime.orchestration.listRunning()).length === 0,
-        "stopped remote worker",
-      );
-      const after = await command<{ output: Array<{ text: string }> }>("reverse-inspect-stopped", {
+      windows = await openInstance(directory, "a", 200, baseUrl);
+      mac = await openInstance(directory, "b", 200, baseUrl);
+      const local = windows;
+      const remote = mac;
+      await connectReverse(local, remote);
+      // The adder supplies no address. A creator attempting a direct dial cannot
+      // discover the fixture listener and must fail rather than hiding a fallback.
+      expect(local.runtime.remotes.connection(remote.id)).not.toHaveProperty("url");
+      const discovered = await local.runtime.remotes.workspaces(remote.id);
+      expect(discovered[0]).toMatchObject({
+        nodeId: remote.id,
+        defaultModel: "faux/model-b",
+        workspaces: [expect.objectContaining({ id: "work" })],
+      });
+      remote.faux.setResponses([
+        fauxAssistantMessage(
+          [
+            fauxToolCall("bash", {
+              command:
+                "printf ready > entered; for i in $(seq 1 400); do test -f release && exit 0; sleep 0.05; done; exit 1",
+            }),
+          ],
+          { stopReason: "toolUse" },
+        ),
+        fauxAssistantMessage([fauxText("worker released")]),
+      ]);
+      const request = <T>(route: string, init: RequestInit = {}) =>
+        nodeRequest<T>(
+          local.runtime.remotes.connection(remote.id),
+          route,
+          init,
+          local.runtime.remotes.requestNode,
+        );
+      const command = <T>(requestId: string, action: Record<string, unknown>) =>
+        request<T>("commands", {
+          method: "POST",
+          body: JSON.stringify({ requestId, command: action }),
+        });
+      const run = { action: "run", workspaceId: "work", prompt: "native reverse-only worker" };
+      const started = await command<{ output: Array<{ text: string }> }>("reverse-once", run);
+      const session = /Session ID: (\d+)/.exec(started.output[0]!.text)![1]!;
+      const duplicate = await command("reverse-once", run);
+      expect(duplicate).toEqual(started);
+      await eventually(async () => {
+        try {
+          return (await readFile(join(remote.work, "entered"), "utf8")) === "ready";
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+          throw error;
+        }
+      }, "reverse-only native bash worker");
+      const inspected = await command<{ output: Array<{ text: string }> }>("reverse-inspect", {
         action: "inspect",
         sessionId: session,
       });
-      expect(JSON.parse(after.output[0]!.text).status).not.toBe("running");
-      expect(await transcript(local.runtime)).toContain(`remote:${remote.id}:${session}`);
-      const installation = remote.runtime.remotes.access.identity().instanceId;
-      await remote.close();
-      await eventually(
-        async () => local.runtime.remotes.reverse.status(remote.id).state !== "connected",
-        "closed Mac transport becoming unavailable",
-      );
-      mac = await openInstance(directory, "b");
-      expect(mac.runtime.remotes.access.identity().instanceId).toBe(installation);
-      const reopened = mac;
-      await eventually(
-        async () =>
-          local.runtime.remotes.reverse.status(remote.id).state === "connected" &&
-          reopened.runtime.remotes.reverse.status(local.id).state === "connected",
-        "persisted Mac pairing reconnecting after Runtime/server restart",
-      );
-      const restored = await command<{ output: Array<{ text: string }> }>("reverse-restored", {
-        action: "inspect",
+      expect(JSON.parse(inspected.output[0]!.text)).toMatchObject({
+        sessionId: session,
+        status: "running",
+      });
+      const waiting = await command<{ details: { assignmentId: string } }>("reverse-await", {
+        action: "await",
         sessionId: session,
       });
-      expect(JSON.parse(restored.output[0]!.text)).toMatchObject({ sessionId: session });
-      expect((await local.runtime.remotes.workspaces(remote.id))[0]!.defaultModel).toBe(
-        "faux/model-b",
+      const controller = new AbortController();
+      const joined = local.runtime.remotes.join(
+        {
+          node: remote.id,
+          session,
+          assignmentId: waiting.details.assignmentId,
+          parentId: local.runtime.main.id,
+        },
+        controller.signal,
       );
-      const catalog = await reopened.runtime.orchestration.queryWorkers({ action: "list" });
-      expect(JSON.parse(catalog.output[0]!.text).workers).toHaveLength(1);
+      try {
+        await local.runtime.remotes.stop(`remote:${remote.id}:${session}`);
+        await joined;
+        await eventually(
+          async () => (await remote.runtime.orchestration.listRunning()).length === 0,
+          "stopped remote worker",
+        );
+        const after = await command<{ output: Array<{ text: string }> }>(
+          "reverse-inspect-stopped",
+          {
+            action: "inspect",
+            sessionId: session,
+          },
+        );
+        expect(JSON.parse(after.output[0]!.text).status).not.toBe("running");
+        expect(await transcript(local.runtime)).toContain(`remote:${remote.id}:${session}`);
+        const installation = remote.runtime.remotes.access.identity().instanceId;
+        await remote.close();
+        await eventually(
+          async () => local.runtime.remotes.reverse.status(remote.id).state !== "connected",
+          "closed Mac transport becoming unavailable",
+        );
+        mac = await openInstance(directory, "b", 200, baseUrl);
+        expect(mac.runtime.remotes.access.identity().instanceId).toBe(installation);
+        const reopened = mac;
+        await eventually(
+          async () =>
+            local.runtime.remotes.reverse.status(remote.id).state === "connected" &&
+            reopened.runtime.remotes.reverse.status(local.id).state === "connected",
+          "persisted Mac pairing reconnecting after Runtime/server restart",
+        );
+        const restored = await command<{ output: Array<{ text: string }> }>("reverse-restored", {
+          action: "inspect",
+          sessionId: session,
+        });
+        expect(JSON.parse(restored.output[0]!.text)).toMatchObject({ sessionId: session });
+        expect((await local.runtime.remotes.workspaces(remote.id))[0]!.defaultModel).toBe(
+          "faux/model-b",
+        );
+        const catalog = await reopened.runtime.orchestration.queryWorkers({ action: "list" });
+        expect(JSON.parse(catalog.output[0]!.text).workers).toHaveLength(1);
+      } finally {
+        controller.abort();
+        await joined.catch(() => {});
+      }
     } finally {
-      controller.abort();
-      await joined.catch(() => {});
+      if (mac) await writeFile(join(mac.work, "release"), "release");
+      await windows?.close();
+      await mac?.close();
+      await rm(directory, { recursive: true, force: true });
+      vi.unstubAllEnvs();
     }
-  } finally {
-    if (mac) await writeFile(join(mac.work, "release"), "release");
-    await windows?.close();
-    await mac?.close();
-    await rm(directory, { recursive: true, force: true });
-    vi.unstubAllEnvs();
-  }
-}, 30_000);
+  },
+  30_000,
+);
 
 test("reverse pairing rejects impersonation and live grant revocation severs streams without queuing offline commands", async () => {
   vi.stubEnv("PI_OFFLINE", "1");
@@ -1519,7 +1633,6 @@ test("node grants cannot access owner routes, revoke immediately, and reciprocal
         {
           id: local.id,
           label: a.runtime.remotes.access.identity().name,
-          url: a.url,
           instanceId: local.id,
           transport: "reverse",
           status: { state: "connected" },

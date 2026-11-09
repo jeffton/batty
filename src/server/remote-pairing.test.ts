@@ -22,16 +22,9 @@ it("consumes one invitation atomically, binds both identities, and retries only 
   const third = await fixture();
   const invitation = await creator.access.issueInvitation();
   expect(creator.access.authenticate(invitation.token)).toBeUndefined();
-  const claim = await adder.access.beginPairing(
-    "https://creator.test/",
-    invitation.token,
-    "https://unreachable.test/",
-  );
-  const competing = await third.access.beginPairing(
-    "https://creator.test/",
-    invitation.token,
-    "https://third.test/",
-  );
+  const claim = await adder.access.beginPairing("https://creator.test/", invitation.token);
+  expect(claim).not.toHaveProperty("url");
+  const competing = await third.access.beginPairing("https://creator.test/", invitation.token);
   const outcomes = await Promise.allSettled([
     creator.access.claimInvitation(invitation.token, claim),
     creator.access.claimInvitation(invitation.token, competing),
@@ -39,6 +32,7 @@ it("consumes one invitation atomically, binds both identities, and retries only 
   expect(outcomes.map((result) => result.status)).toEqual(["fulfilled", "rejected"]);
   const identity = await creator.access.claimInvitation(invitation.token, claim);
   expect(creator.access.listInvitations()).toEqual([]);
+  expect(creator.access.getConnection(claim.instanceId)).not.toHaveProperty("url");
   expect(creator.access.authenticate(invitation.token)).toBeUndefined();
   expect(creator.access.authenticate(claim.remoteToken)?.id).toBe(identity.grantId);
   expect(creator.access.authenticate(claim.localToken)).toBeUndefined();
@@ -51,13 +45,9 @@ it("consumes one invitation atomically, binds both identities, and retries only 
 
   // A lost HTTPS response or process restart must reuse the same two scoped credentials.
   const reopenedAdder = await RemoteAccess.open(adder.directory);
-  expect(
-    await reopenedAdder.beginPairing(
-      "https://creator.test/",
-      invitation.token,
-      "https://unreachable.test/",
-    ),
-  ).toEqual(claim);
+  expect(await reopenedAdder.beginPairing("https://creator.test/", invitation.token)).toEqual(
+    claim,
+  );
   const reopenedCreator = await RemoteAccess.open(creator.directory);
   expect(await reopenedCreator.claimInvitation(invitation.token, claim)).toEqual(identity);
   const id = await reopenedAdder.completePairing(
@@ -85,11 +75,7 @@ it("does not let a new invitation overwrite an existing paired identity", async 
   const creator = await fixture();
   const adder = await fixture();
   const first = await creator.access.issueInvitation();
-  const claim = await adder.access.beginPairing(
-    "https://creator.test/",
-    first.token,
-    "https://adder.test/",
-  );
+  const claim = await adder.access.beginPairing("https://creator.test/", first.token);
   await creator.access.claimInvitation(first.token, claim);
   const second = await creator.access.issueInvitation();
   await expect(creator.access.claimInvitation(second.token, claim)).rejects.toThrow(

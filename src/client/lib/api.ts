@@ -28,7 +28,7 @@ import type {
   WorkspaceInfo,
 } from "@/shared/types";
 
-import type { WorkspaceFilesResponse } from "@/shared/workspace-files";
+import type { WorkspaceFilesResponse, WorkspaceFileSearchEvent } from "@/shared/workspace-files";
 import type { MemoryTreeOverview, MemoryTreeExpansion } from "@/shared/memory-tree";
 import {
   authorizeErrorReporting,
@@ -63,6 +63,52 @@ export function getWorkspaceFiles(workspaceId: string, path = ""): Promise<Works
   return request(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/files?${new URLSearchParams({ path })}`,
   );
+}
+
+export async function searchWorkspaceFiles(
+  workspaceId: string,
+  name: string,
+  signal: AbortSignal,
+  onMatches: (paths: string[]) => void,
+): Promise<void> {
+  const response = await fetch(
+    withBaseUrl(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/file-search?${new URLSearchParams({ name })}`,
+    ),
+    { credentials: "include", signal },
+  );
+  if (!response.ok) {
+    const body = (await response.json()) as { error: string };
+    throw new HttpError(body.error, response.status);
+  }
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let complete = false;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      buffer += decoder.decode(chunk.value, { stream: !chunk.done });
+      const lines = buffer.split("\n");
+      buffer = lines.pop()!;
+      const matches: string[] = [];
+      for (const line of lines) {
+        const event = JSON.parse(line) as WorkspaceFileSearchEvent;
+        if (event.kind === "match") matches.push(event.path);
+        else if (event.kind === "done") complete = true;
+        else {
+          if (matches.length) onMatches(matches);
+          throw new Error(`Search incomplete: ${event.message}`);
+        }
+      }
+      if (matches.length) onMatches(matches);
+      if (chunk.done) break;
+    }
+    if (!complete) throw new Error("File search ended before completion");
+  } finally {
+    await reader.cancel();
+    reader.releaseLock();
+  }
 }
 
 export function getRemoteSettings(): Promise<RemoteSettings> {

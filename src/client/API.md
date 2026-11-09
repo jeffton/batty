@@ -14,6 +14,13 @@ The authenticated root route contains one main chat. Workspace listings never se
 - `POST /api/main/stop`: `{ ok: true }`.
 - `POST /api/main/queue/remove`: `{ kind, index }`, kind `steer` or `followUp`, index copied from the queued prompt's durable submission identifier; return `SessionState`.
 
+## Workspace code browsing
+
+- `GET /api/workspaces/:id/files?path=`: read-only directory entries or text/binary file status, confined to the canonical workspace root.
+- `GET /api/workspaces/:id/file-search?name=`: authenticated NDJSON stream of `WorkspaceFileSearchEvent` (`match`, `done`, `error`). Case-insensitive substring matching uses file basenames, not parent paths or contents. The walk includes hidden folders, visits each canonical directory once, excludes external symlink targets and cancels on disconnect. Scan errors mark results incomplete.
+
+The code browser’s Find file input and Ctrl/Cmd+P search unopened folders. Arrow keys and Enter open a result; Escape clears the query before closing the browser. Clearing search restores the existing tree.
+
 ## Installation status
 
 Main SSE replays `build`, `auth-attempts` and the latest `provider-usage` snapshot on connection. OAuth transitions arrive as `provider-auth-attempt` / `mcp-auth-attempt`; missing attempts are reconciled once after start/reconnect, not polled. Reconnect snapshots recover completion, failure and cancellation.

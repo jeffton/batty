@@ -2,12 +2,16 @@
 import type { FileTree } from "@pierre/trees";
 import type { CodeView } from "@pierre/diffs";
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
-import { FolderTree } from "@lucide/vue";
+import { FolderTree, Search } from "@lucide/vue";
+import WorkspaceFileSearch from "./WorkspaceFileSearch.vue";
 import FullPopover from "./FullPopover.vue";
 import { getWorkspaceFiles } from "@/client/lib/api";
 import type { WorkspaceInfo } from "@/shared/types";
 
 const props = defineProps<{ popoverId: string; workspace?: WorkspaceInfo }>();
+const fileSearch = ref<InstanceType<typeof WorkspaceFileSearch>>();
+const searchActive = ref(false);
+let opened = false;
 const treeRoot = ref<HTMLElement>();
 const codeRoot = ref<HTMLElement>();
 const selectedPath = ref("");
@@ -27,6 +31,7 @@ let fileGeneration = 0;
 const directories = new Map<string, "unloaded" | "loading" | "loaded" | "error">();
 
 function cleanUp(): void {
+  searchActive.value = false;
   generation++;
   fileGeneration++;
   unsubscribe?.();
@@ -144,6 +149,7 @@ async function open(): Promise<void> {
       `,
     });
     code.setup(codeRoot.value);
+    searchActive.value = true;
     await loadDirectory("", currentGeneration);
   } catch (cause) {
     if (currentGeneration === generation)
@@ -151,12 +157,50 @@ async function open(): Promise<void> {
   }
 }
 
-function handleToggle(event: Event): void {
-  if ((event as ToggleEvent).newState === "open") void open();
-  else cleanUp();
+async function focusSearch(): Promise<void> {
+  reading.value = false;
+  await nextTick();
+  fileSearch.value?.focus();
 }
 
-onBeforeUnmount(cleanUp);
+async function selectSearchFile(path: string): Promise<void> {
+  const currentGeneration = generation;
+  await selectFile(path);
+  await nextTick();
+  if (currentGeneration === generation) codeRoot.value?.focus({ preventScroll: true });
+}
+
+function shortcut(event: KeyboardEvent): void {
+  if (
+    !opened ||
+    event.defaultPrevented ||
+    event.key.toLowerCase() !== "p" ||
+    !(event.ctrlKey || event.metaKey) ||
+    event.altKey ||
+    event.shiftKey
+  )
+    return;
+  const element = document.getElementById(props.popoverId)!;
+  if (!element.matches(":popover-open")) return;
+  event.preventDefault();
+  void focusSearch();
+}
+
+function handleToggle(event: Event): void {
+  opened = (event as ToggleEvent).newState === "open";
+  if (opened) {
+    document.addEventListener("keydown", shortcut);
+    void open();
+  } else {
+    document.removeEventListener("keydown", shortcut);
+    cleanUp();
+  }
+}
+
+onBeforeUnmount(() => {
+  document.removeEventListener("keydown", shortcut);
+  cleanUp();
+});
 </script>
 
 <template>
@@ -172,6 +216,15 @@ onBeforeUnmount(cleanUp);
   >
     <template #header-actions>
       <button
+        type="button"
+        class="chrome-button chrome-button--icon"
+        aria-label="Find file"
+        title="Find file (⌘/Ctrl+P)"
+        @click="focusSearch"
+      >
+        <Search :size="16" />
+      </button>
+      <button
         class="workspace-code__files chrome-button"
         type="button"
         :aria-expanded="!reading"
@@ -182,28 +235,36 @@ onBeforeUnmount(cleanUp);
     </template>
     <div class="workspace-code" :class="{ 'workspace-code--reading': reading }">
       <aside class="workspace-code__sidebar" aria-label="Workspace files">
-        <div v-if="loadingDirectories" class="workspace-code__status" role="status">
-          Loading files…
-        </div>
-        <div
-          v-for="(message, path) in directoryErrors"
-          :key="path"
-          class="workspace-code__error"
-          role="alert"
+        <WorkspaceFileSearch
+          ref="fileSearch"
+          :workspace-id="props.workspace?.id"
+          :active="searchActive"
+          :id-prefix="props.popoverId"
+          @select="selectSearchFile"
         >
-          <div>{{ path || "Workspace" }}: {{ message }}</div>
-          <button
-            type="button"
-            class="chrome-button"
-            @click="tree ? loadDirectory(String(path)) : open()"
+          <div v-if="loadingDirectories" class="workspace-code__status" role="status">
+            Loading files…
+          </div>
+          <div
+            v-for="(message, path) in directoryErrors"
+            :key="path"
+            class="workspace-code__error"
+            role="alert"
           >
-            Retry
-          </button>
-        </div>
-        <div ref="treeRoot" class="workspace-code__tree" />
-        <div v-if="!loadingDirectories && rootEmpty" class="workspace-code__status">
-          Empty directory.
-        </div>
+            <div>{{ path || "Workspace" }}: {{ message }}</div>
+            <button
+              type="button"
+              class="chrome-button"
+              @click="tree ? loadDirectory(String(path)) : open()"
+            >
+              Retry
+            </button>
+          </div>
+          <div ref="treeRoot" class="workspace-code__tree" />
+          <div v-if="!loadingDirectories && rootEmpty" class="workspace-code__status">
+            Empty directory.
+          </div>
+        </WorkspaceFileSearch>
       </aside>
       <section class="workspace-code__content" aria-label="File preview">
         <div v-if="loadingFile" class="workspace-code__status" role="status">Loading file…</div>

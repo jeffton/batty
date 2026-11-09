@@ -92,6 +92,7 @@ for (const baseUrl of ["/", "/batty"]) {
     assert.equal((await get(route)).status, 401);
     assert.equal((await get("/api/cron/running")).status, 401);
     assert.equal((await get("/api/workspaces/assistant/files")).status, 401);
+    assert.equal((await get("/api/workspaces/assistant/file-search?name=source")).status, 401);
     const foregroundAck = (headers = {}) =>
       get("/api/push/foreground/ack", {
         method: "POST",
@@ -109,6 +110,14 @@ for (const baseUrl of ["/", "/batty"]) {
       headers: { cookie },
     });
     assert.equal(sourceFile.status, 200);
+    const searchedFiles = await get("/api/workspaces/assistant/file-search?name=source", {
+      headers: { cookie },
+    });
+    assert.equal(searchedFiles.status, 200);
+    assert.deepEqual((await searchedFiles.text()).trim().split("\n").map(JSON.parse), [
+      { kind: "match", path: "source.ts" },
+      { kind: "done" },
+    ]);
     assert.deepEqual(await sourceFile.json(), {
       kind: "text",
       path: "source.ts",

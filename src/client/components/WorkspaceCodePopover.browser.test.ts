@@ -30,6 +30,21 @@ beforeAll(async () => {
   await fs.writeFile(path.join(root, "workspaces/other/other.txt"), "Other workspace");
   await fs.writeFile(path.join(project, "src/main.ts"), 'export const greeting = "Hej 🦾";\n');
   await fs.writeFile(path.join(project, "src/long.ts"), wrappedSource);
+  for (const folder of ["unopened/deeper", "another", "QuickNeedle-directory", ".git/objects"])
+    await fs.mkdir(path.join(project, folder), { recursive: true });
+  await fs.writeFile(
+    path.join(project, "unopened/deeper/QuickNeedle.ts"),
+    'export const found = "unopened";',
+  );
+  await fs.writeFile(
+    path.join(project, "another/QuickNeedle.ts"),
+    'export const found = "another";',
+  );
+  await fs.writeFile(path.join(project, "QuickNeedle-directory/nohit.txt"), "not a filename match");
+  await fs.writeFile(
+    path.join(project, ".git/objects/HiddenNeedle.ts"),
+    'export const found = "hidden";',
+  );
   await fs.writeFile(path.join(project, ".hidden"), "Hidden content");
   await fs.writeFile(path.join(project, "empty"), "");
   await fs.writeFile(path.join(project, "binary"), Buffer.from([0, 1, 2]));
@@ -137,6 +152,141 @@ test("workspace row opens native code browser, lazily browses files and closes b
     } finally {
       await page.close();
     }
+  }
+});
+
+for (const engine of ["chromium", "webkit"] as const) {
+  test(`${engine}: quick-open searches filenames throughout unopened folders and preserves tree state`, async () => {
+    const instance = (engine === "webkit" ? await launchWebKit() : browser) as unknown as Browser;
+    try {
+      for (const width of engine === "webkit" ? [390] : [1280, 390]) {
+        const page = await instance.newPage({ viewport: { width, height: 900 } });
+        page.setDefaultTimeout(10_000);
+        try {
+          await page.goto(url);
+          await page.getByRole("button", { name: "Browse code in Project" }).click();
+          const popover = page.getByRole("dialog", { name: "Code in Project" });
+          await popover.getByRole("treeitem", { name: "src", exact: true }).waitFor();
+          expect(
+            await popover.getByRole("treeitem", { name: "QuickNeedle.ts", exact: true }).count(),
+          ).toBe(0);
+          await page.keyboard.press(engine === "webkit" ? "Meta+p" : "Control+p");
+          const input = popover.getByRole("combobox", { name: "Find file by name" });
+          expect(await input.evaluate((element) => element === document.activeElement)).toBe(true);
+          await input.fill("qUiCkNeEdLe");
+          await expect.poll(() => popover.getByRole("option").count()).toBe(2);
+          expect(await popover.getByRole("option").allTextContents()).toEqual(
+            expect.arrayContaining([
+              expect.stringContaining("unopened/deeper"),
+              expect.stringContaining("another"),
+            ]),
+          );
+          await input.press("ArrowDown");
+          const activeId = await input.getAttribute("aria-activedescendant");
+          const option = popover.locator(`[id="${activeId}"]`);
+          const parent = await option.locator("span").textContent();
+          await input.press("Enter");
+          await popover.locator("[data-line]").filter({ hasText: "export const found" }).waitFor();
+          expect(await popover.locator(".full-popover__subtitle").textContent()).toBe(
+            `${parent}/QuickNeedle.ts`,
+          );
+          if (width < 600)
+            await popover.getByRole("button", { name: "Files", exact: true }).click();
+          expect(await input.inputValue()).toBe("");
+          expect(
+            await popover
+              .getByRole("treeitem", { name: "src", exact: true })
+              .getAttribute("aria-expanded"),
+          ).toBe("false");
+          await popover.getByRole("button", { name: "Find file", exact: true }).click();
+          await input.fill("unopened");
+          await popover.getByText("No files found.", { exact: true }).waitFor();
+          await input.fill("HiddenNeedle");
+          const hidden = popover.getByRole("option").filter({ hasText: "HiddenNeedle.ts" });
+          await hidden.waitFor();
+          expect(await hidden.textContent()).toContain(".git/objects");
+          if (process.env.BATTY_UI_SCREENSHOTS === "1") {
+            await fs.mkdir(".tmp/ui-feedback", { recursive: true });
+            await page.screenshot({ path: `.tmp/ui-feedback/file-search-${engine}-${width}.png` });
+          }
+          await input.press("Escape");
+          expect(await input.inputValue()).toBe("");
+          expect(await popover.isVisible()).toBe(true);
+          await input.press("Escape");
+          expect(await popover.isVisible()).toBe(false);
+          const shortcut = await page.evaluate(() => {
+            const event = new KeyboardEvent("keydown", {
+              key: "p",
+              ctrlKey: true,
+              bubbles: true,
+              cancelable: true,
+            });
+            document.body.dispatchEvent(event);
+            return event.defaultPrevented;
+          });
+          expect(shortcut).toBe(false);
+        } finally {
+          await page.close();
+        }
+      }
+    } finally {
+      if (engine === "webkit") await instance.close();
+    }
+  });
+}
+
+test("search errors and newer queries do not turn partial or stale results into successful matches", async () => {
+  const page = await browser.newPage();
+  page.setDefaultTimeout(10_000);
+  try {
+    await page.route("**/api/workspaces/project/file-search?name=broken", (route) =>
+      route.fulfill({
+        contentType: "application/x-ndjson",
+        body: JSON.stringify({ kind: "error", message: "Permission denied" }) + "\n",
+      }),
+    );
+    await page.goto(url);
+    await page.getByRole("button", { name: "Browse code in Project" }).click();
+    const popover = page.getByRole("dialog", { name: "Code in Project" });
+    await popover.getByRole("treeitem", { name: "src", exact: true }).waitFor();
+    const input = popover.getByRole("combobox", { name: "Find file by name" });
+    await input.fill("broken");
+    await popover
+      .getByRole("alert")
+      .filter({ hasText: "Search incomplete: Permission denied" })
+      .waitFor();
+    expect(await popover.getByText("No files found.", { exact: true }).count()).toBe(0);
+    let finish!: () => void;
+    const delayed = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    let started!: () => void;
+    const requested = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    await page.route("**/api/workspaces/project/file-search?name=slow", async (route) => {
+      started();
+      await delayed;
+      await route.fulfill({
+        contentType: "application/x-ndjson",
+        body:
+          JSON.stringify({ kind: "match", path: "stale.ts" }) +
+          "\n" +
+          JSON.stringify({ kind: "done" }) +
+          "\n",
+      });
+    });
+    await input.fill("slow");
+    await requested;
+    await input.fill("HiddenNeedle");
+    await popover.getByRole("option").filter({ hasText: "HiddenNeedle.ts" }).waitFor();
+    finish();
+    await expect
+      .poll(() => popover.getByRole("option").allTextContents())
+      .toEqual([expect.stringContaining("HiddenNeedle.ts")]);
+    expect(await popover.getByRole("alert").count()).toBe(0);
+  } finally {
+    await page.close();
   }
 });
 

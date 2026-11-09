@@ -12,7 +12,7 @@ Device frame: [Apple Frames](https://www.macstories.net/shortcuts/) by Federico 
 
 - **Async subagents:** delegate parallel work, `await` results, `steer` running agents and `resume` previous agents for follow-ups.
 - **Cron:** scheduled and one-off tasks, with results delivered directly or through the main assistant.
-- **Workspaces:** project directories with their own instructions and skills; execution scopes, not separate user chats. Open a workspace in the Workspaces list to browse its folders and syntax-highlighted source in a read-only popover.
+- **Workspaces:** project directories with their own instructions and skills; execution scopes, not separate user chats. Open a workspace in the Workspaces list to browse its folders and syntax-highlighted source in a read-only popover. Ctrl/Cmd+P finds files by name across unopened folders.
 - **Coding tools:** read, write and edit files, search repositories and run shell commands.
 - **Browser and web search:** interact with JavaScript-driven pages, capture screenshots and extract readable web content.
 - **Codemode, MCP and skills:** compose tool calls in JavaScript, discover external MCP tools and load reusable workflows.

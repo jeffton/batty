@@ -46,6 +46,7 @@ import { createTools } from "./tools";
 import { createBrowserCleanup } from "./browser-cleanup";
 import { createOrchestration } from "./orchestration";
 import { networkAvailable, recoverNetwork } from "./network-recovery";
+import { MODEL_STREAM_IDLE_TIMEOUT_MS, withModelStreamTimeout } from "./model-stream-timeout";
 import { RemoteWorkers, parseRemoteSession } from "./remote-workers";
 import { createMemory, type MemoryConfig } from "./memory";
 import { createResources } from "./resources";
@@ -183,7 +184,7 @@ export class Runtime {
           // steer (post-tools) versus follow-up (final-answer) boundaries.
           steeringMode: "all",
           followUpMode: "all",
-          stream: { timeoutMs: 300_000 },
+          stream: { timeoutMs: MODEL_STREAM_IDLE_TIMEOUT_MS },
         },
         env: ({ cwd }) => new NodeExecutionEnv({ cwd: cwd ?? config.selfPath }),
         onReport: (report) => console.error("Durable runtime", report),
@@ -225,7 +226,7 @@ export class Runtime {
       ...(memory.extension.tools ?? []),
     ]);
     await memory.bind(harness, main, storage, await createMemorySearch(database));
-    const streamSimple = recoverNetwork(models.streamSimple.bind(models));
+    const streamSimple = recoverNetwork(withModelStreamTimeout(models.streamSimple.bind(models)));
     models.streamSimple = (model, request, options) => {
       const projected = projectRuntimeNoticeRequest(request);
       memory.validateRequest(projected, options);

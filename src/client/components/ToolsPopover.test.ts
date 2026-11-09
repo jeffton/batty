@@ -34,6 +34,7 @@ function setup() {
           template: '<div><slot name="header-content" /><slot /></div>',
         },
         McpSettingsPanel: true,
+        WorkspaceCodePopover: true,
       },
     },
   });
@@ -63,6 +64,11 @@ describe("Workspaces and tools", () => {
       expect(workspacePanel.isVisible()).toBe(true);
       expect(workspacePanel.text()).toContain("Project");
       expect(workspacePanel.text()).toContain("/work/project");
+      await workspacePanel.get("button").trigger("click");
+      expect(wrapper.getComponent({ name: "WorkspaceCodePopover" }).props("workspace")).toEqual(
+        store.workspaces[0],
+      );
+      expect(workspacePanel.get("button").attributes("popovertarget")).toBe("tools-test-code");
       await wrapper.get("#tools-test-Workspaces-tab").trigger("keydown", { key: "ArrowRight" });
       expect(wrapper.get("#tools-test-Skills-panel").isVisible()).toBe(true);
       expect(document.activeElement?.id).toBe("tools-test-Skills-tab");

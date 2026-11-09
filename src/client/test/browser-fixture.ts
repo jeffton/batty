@@ -18,7 +18,7 @@ export async function createBrowserFixtureServer(fixture: string, config: Inline
     optimizeDeps: {
       entries: [fixture, "src/client/main.ts"],
       // The SFC scanner does not discover this on-demand import.
-      include: ["@pierre/diffs"],
+      include: ["@pierre/diffs", "@pierre/trees"],
     },
   });
 }

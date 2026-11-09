@@ -28,6 +28,7 @@ import type {
   WorkspaceInfo,
 } from "@/shared/types";
 
+import type { WorkspaceFilesResponse } from "@/shared/workspace-files";
 import type { MemoryTreeOverview, MemoryTreeExpansion } from "@/shared/memory-tree";
 import {
   authorizeErrorReporting,
@@ -56,6 +57,12 @@ export class HttpError extends Error {
   ) {
     super(message);
   }
+}
+
+export function getWorkspaceFiles(workspaceId: string, path = ""): Promise<WorkspaceFilesResponse> {
+  return request(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/files?${new URLSearchParams({ path })}`,
+  );
 }
 
 export function getRemoteSettings(): Promise<RemoteSettings> {

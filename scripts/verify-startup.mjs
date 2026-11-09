@@ -91,6 +91,7 @@ for (const baseUrl of ["/", "/batty"]) {
     const route = `/api/cloud-browser/${id}/state`;
     assert.equal((await get(route)).status, 401);
     assert.equal((await get("/api/cron/running")).status, 401);
+    assert.equal((await get("/api/workspaces/assistant/files")).status, 401);
     const foregroundAck = (headers = {}) =>
       get("/api/push/foreground/ack", {
         method: "POST",
@@ -103,6 +104,16 @@ for (const baseUrl of ["/", "/batty"]) {
     ).toString("base64url");
     const signature = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
     const cookie = `batty2-auth=${payload}.${signature}`;
+    await fs.writeFile(path.join(workspaceRoot, "assistant/source.ts"), "export const value = 42;");
+    const sourceFile = await get("/api/workspaces/assistant/files?path=source.ts", {
+      headers: { cookie },
+    });
+    assert.equal(sourceFile.status, 200);
+    assert.deepEqual(await sourceFile.json(), {
+      kind: "text",
+      path: "source.ts",
+      contents: "export const value = 42;",
+    });
     const saveProviderKey = (providerId, apiKey, headers = {}) =>
       get("/api/provider-auth/api-key", {
         method: "POST",

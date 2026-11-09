@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import FullPopover from "@/client/components/FullPopover.vue";
+import WorkspaceCodePopover from "./WorkspaceCodePopover.vue";
+import type { WorkspaceInfo } from "@/shared/types";
 import PopoverTabs from "./PopoverTabs.vue";
 import McpSettingsPanel from "@/client/components/McpSettingsPanel.vue";
 import { getSessionResources } from "@/client/lib/api";
@@ -18,6 +20,7 @@ const tabs = ["Workspaces", "Skills", "MCPs", "Tools"] as const;
 type Tab = (typeof tabs)[number];
 const activeTab = ref<string>("Workspaces");
 const open = ref(false);
+const browsingWorkspace = ref<WorkspaceInfo>();
 const loading = ref(false);
 const error = ref("");
 const resources = ref<SessionResourcesResponse>({ skills: [], tools: [] });
@@ -82,14 +85,18 @@ onBeforeUnmount(() => loadGeneration++);
       :aria-labelledby="tabId('Workspaces')"
       class="tools-popover__pane"
     >
-      <article
+      <button
         v-for="workspace in store.workspaces"
         :key="workspace.id"
+        type="button"
         class="tools-popover__item tools-popover__workspace"
+        :popovertarget="`${props.popoverId}-code`"
+        :aria-label="`Browse code in ${workspace.label}`"
+        @click="browsingWorkspace = workspace"
       >
         <strong>{{ workspace.label }}</strong>
         <code>{{ workspace.path }}</code>
-      </article>
+      </button>
       <div v-if="!store.workspaces.length" class="tools-popover__empty">
         No workspaces configured.
       </div>
@@ -135,6 +142,7 @@ onBeforeUnmount(() => loadGeneration++);
         <div v-if="!resources.tools.length" class="tools-popover__empty">No tools available.</div>
       </template>
     </div>
+    <WorkspaceCodePopover :popover-id="`${props.popoverId}-code`" :workspace="browsingWorkspace" />
   </FullPopover>
 </template>
 
@@ -157,9 +165,26 @@ onBeforeUnmount(() => loadGeneration++);
 }
 
 .tools-popover__workspace {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--color-border-soft);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
+}
+
+.tools-popover__workspace:hover {
+  background: var(--color-chrome-hover);
+}
+
+.tools-popover__workspace:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
 }
 
 .tools-popover__item p {

@@ -36,6 +36,7 @@
     "@mozilla/readability": "0.6.0",
     "@oddbird/css-anchor-positioning": "0.10.2",
     "@pierre/diffs": "1.6.4",
+    "@pierre/trees": "1.0.0-beta.6",
     "@simplewebauthn/browser": "14.0.0",
     "@simplewebauthn/server": "14.0.3",
     "croner": "11.0.0",

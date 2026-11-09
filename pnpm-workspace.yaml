@@ -24,6 +24,8 @@ catalog:
   vite: npm:@voidzero-dev/vite-plus-core@1.5.0
   vite-plus: 1.5.0
 overrides:
+  # Trees uses the shared color API; 1.0.2 accepts the Pierre theme 2 peer used by diffs.
+  "@pierre/trees>@pierre/theming": 1.0.2
   "@vue/compiler-sfc": 3.5.45
   "fast-uri@3": 3.1.9
   "fast-uri@4": 4.2.3
@@ -34,6 +36,14 @@ overrides:
   "brace-expansion@5": 5.0.12
   "find-my-way@9": 9.10.0
   vite@*: "catalog:"
+# The vanilla Trees entry has no React dependency; only its /react wrapper does.
+packageExtensions:
+  "@pierre/trees@1.0.0-beta.6":
+    peerDependenciesMeta:
+      react:
+        optional: true
+      react-dom:
+        optional: true
 peerDependencyRules:
   allowAny:
     - vite

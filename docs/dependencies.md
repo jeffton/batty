@@ -1,3 +1,9 @@
+# Workspace code browsing — 2026-11-09
+
+Added `@pierre/trees@1.0.0-beta.6`, the registry’s current `latest`; Trees has no stable release. Its [vanilla API](https://trees.software/docs#get-started-with-vanilla) mounts directly into Vue-owned hosts. React wrappers are unused, so the package extension marks React peers optional. Trees uses Preact internally. Existing `@pierre/diffs@1.6.4` renders selected files through CodeView.
+
+The scoped Trees → `@pierre/theming@1.0.2` override reuses the existing patch with the same color API and widens its optional Pierre theme peer to support version 2. [Published metadata](https://unpkg.com/@pierre/theming@1.0.2/package.json) and [color module](https://unpkg.com/@pierre/theming@1.0.2/dist/color.js) were checked; no separate patch release notes are published. Batty supplies its own theme variables. `pnpm peers check` passes.
+
 # Dependency review — 2026-11-09
 
 Checked every direct dependency, devDependency, catalog, override and pnpm against npm at 09:00 UTC. Selection honors the 4320-minute age policy (November 6, 09:00 UTC cutoff) and existing exclusions.

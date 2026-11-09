@@ -12,9 +12,24 @@ Open **Settings → Remote** on each installation.
 2. Copy the token. It is displayed only until you leave the Remote tab or close Settings.
 3. On the initiating Batty, fill in **Connections** with a name, the receiving Batty's URL and the token. Select **Add connection**. Settings generates the internal connection ID; the CLI accepts an explicit ID.
 
-The connection is saved only after authentication with the receiver succeeds. Saved connection lists never display tokens. Incoming access lists show grant names and IDs, not tokens; create a new grant if a token is lost. Removal and revocation ask for confirmation. **Remove connection** disconnects and removes the locally saved credential; **Revoke access** invalidates the incoming token on the receiver. These are separate operations.
+Direct connections are saved only after authentication with the receiver succeeds. Connections using an incoming reverse channel are saved with the remote installation ID and verified when that channel connects. Saved connection lists never display tokens. Incoming access lists show grant names and IDs, not tokens; create a new grant if a token is lost. Removal and revocation ask for confirmation. **Remove connection** disconnects and removes the locally saved credential; **Revoke access** invalidates the incoming token on the receiver. These are separate operations.
 
 Settings and the CLI use the same owner-authenticated provisioning API and credential store.
+
+### Reverse connection
+
+Use a reverse channel when Mac can reach Windows but Windows cannot reach Mac. Mac maintains an authenticated control SSE stream to Windows over HTTPS and opens streamed GET/POST channels for individual requests. Windows sends its node requests back through those channels. Mac → Windows requests retain ordinary HTTPS transport. Each direction requires its own token.
+
+1. On Windows, create an **Incoming access** token for Mac.
+2. On Mac, add a **Direct HTTPS** connection to Windows using that token and enable **Keep reverse connection open**. For an existing direct connection, enable the checkbox on its saved connection row; its ID and history remain unchanged.
+3. On Mac, create an **Incoming access** token for Windows. Copy Mac's **This installation ID**.
+4. On Windows, add a connection with transport **Via incoming connection**. Enter Mac's installation ID, URL and Mac-issued token. Under **Incoming access token**, select the Windows token given to Mac in step 1.
+
+The selected Windows grant binds the incoming channel to the configured Mac installation; it cannot be assigned to another reverse connection. The Mac URL remains the origin for file references, but Windows does not dial it. No reachable Mac URL is required for provisioning. Status shows whether the channel is connected, connecting, disconnected or failing; use **Refresh** to fetch its current state. A missing channel produces an error; requests do not switch to direct HTTP.
+
+Both installations enforce their own incoming grants. Revoking a grant closes affected channels and streams; it does not grant access in the opposite direction. Removing a connection stops its channel without revoking the other installation's token. The peer must remain awake and connected. Reconnection restores transport, not machine state: workers, credentials, history and cron remain on their executing installation.
+
+Windows's HTTPS reverse proxy must forward streamed responses and request bodies beneath Batty's configured base path. For IIS, verify that response buffering does not delay SSE and request buffering does not hold uploads until completion; check connection timeouts too. WebSocket support is not required. Transport heartbeats and an inactivity watchdog detect broken control streams; they do not poll worker or job status. Proxy policy can still disconnect the stream. Certificates must be trusted by Mac; TLS verification is not disabled. Local integration tests do not verify a particular IIS installation or work VPN.
 
 ### CLI
 
@@ -61,7 +76,7 @@ Remote session IDs have the form `remote:NODE_ID:SESSION_ID`, for example `remot
 
 The running Tasks menu shows remote workers assigned by the conversation being viewed, using locally saved node/session/parent assignments. Discovery alone does not add Tasks: a worker started independently on a connected peer is not a task of this installation. Main, project, nested and cron conversations each retain their own assignment scope, including after a restart.
 
-Commands carry durable request IDs, so reconnect/replay does not start duplicate work. Reports stay bound to their assignment's initiating conversation, including later queue/resume assignments. Resumable SSE streams mirror status and conversation output locally. Historical workers are discovered without downloading their transcripts; active or assigned sessions are mirrored, and streams retire only after their terminal history cursor has arrived. Reports and completion results return to the initiating conversation for the corresponding assignment. The mirror persists under `.batty/remote-mirrors`, so received history remains available while the remote is offline; execution and live commands still require connectivity. File attachments are copied into local attachment storage. Hosted sites and live cloud-browser sessions are not relayed.
+Commands carry durable request IDs. Transport reconnection never replays commands; an interrupted submission reports an error rather than silently starting replacement work. Reports stay bound to their assignment's initiating conversation, including later queue/resume assignments. Resumable SSE streams mirror status and conversation output locally. Historical workers are discovered without downloading their transcripts; active or assigned sessions are mirrored, and streams retire only after their terminal history cursor has arrived. Reports and completion results return to the initiating conversation for the corresponding assignment. The mirror persists under `.batty/remote-mirrors`, so received history remains available while the remote is offline; execution and live commands still require connectivity. Offline availability is separate from the last-known worker status: completed results remain completed, and unavailable active workers show their last-known lifecycle without a live spinner. Await uses catalog events and reconnect snapshots rather than periodic status polling; it survives temporary disconnection and ends with an error if the configured connection is removed or access is revoked. File attachments are copied into local attachment storage. Hosted sites and live cloud-browser sessions are not relayed.
 
 ### Files sent to workers
 

@@ -12,6 +12,7 @@ import type {
   SessionMessagesPage,
 } from "../shared/types";
 import { RemoteAccess, type RemoteConnectionCredentials } from "./remote-access";
+import { ReverseConnections } from "./reverse-connections";
 import type { RemoteDiscovery } from "../shared/remotes";
 import type { Runtime } from "./runtime";
 import type { WorkerCommand, WorkerCommandContext } from "./orchestration-workers";
@@ -57,7 +58,7 @@ type LocalIndex = { assignments: Assignment[]; origins: Record<string, string> }
 
 class PermanentFileImportError extends Error {}
 
-class NodeHttpError extends Error {
+export class NodeHttpError extends Error {
   constructor(
     readonly status: number,
     message: string,
@@ -66,21 +67,52 @@ class NodeHttpError extends Error {
   }
 }
 
+async function withNodeDeadline(
+  route: string,
+  init: RequestInit,
+  request: (signal: AbortSignal) => Promise<Response>,
+): Promise<Response> {
+  const streaming = route === "catalog/events" || /^sessions\/\d+\/events(?:\?|$)/.test(route);
+  const handshake = new AbortController();
+  // Multipart worker uploads retain their existing five-minute transfer budget.
+  const timeoutMs = route === "commands" && init.body instanceof FormData ? 300_000 : 30_000;
+  const deadline = streaming ? handshake.signal : AbortSignal.timeout(timeoutMs);
+  const timer = streaming
+    ? setTimeout(() => handshake.abort(new Error("Remote headers timed out")), 30_000)
+    : undefined;
+  try {
+    return await request(init.signal ? AbortSignal.any([init.signal, deadline]) : deadline);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function fetchNodeResponse(
+  connection: RemoteConnectionCredentials,
+  route: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  return withNodeDeadline(route, init, (signal) =>
+    fetch(new URL(`api/node/${route}`, connection.url), {
+      ...init,
+      redirect: "error",
+      signal,
+      headers: {
+        ...(init.body instanceof FormData ? {} : { "content-type": "application/json" }),
+        authorization: `Bearer ${connection.token}`,
+        ...init.headers,
+      },
+    }),
+  );
+}
+
 export async function nodeRequest<T>(
   connection: RemoteConnectionCredentials,
   route: string,
   init: RequestInit = {},
+  requester = fetchNodeResponse,
 ): Promise<T> {
-  const response = await fetch(new URL(`api/node/${route}`, connection.url), {
-    ...init,
-    redirect: "error",
-    signal: init.signal ?? AbortSignal.timeout(30_000),
-    headers: {
-      ...(init.body instanceof FormData ? {} : { "content-type": "application/json" }),
-      authorization: `Bearer ${connection.token}`,
-      ...init.headers,
-    },
-  });
+  const response = await requester(connection, route, init);
   if (!response.ok)
     throw new NodeHttpError(
       response.status,
@@ -94,14 +126,29 @@ export async function readNodeEvents(
   response: Response,
   receive: (value: Record<string, unknown>) => Promise<void>,
 ) {
-  if (!response.ok) throw new Error(`Remote event stream HTTP ${response.status}`);
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new NodeHttpError(response.status, `Remote event stream HTTP ${response.status}`);
+  }
   if (!response.body) throw new Error("Remote event stream has no body");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   try {
     for (;;) {
-      const chunk = await reader.read();
+      // Existing SSE endpoints heartbeat every five seconds. A silent half-open transport
+      // must reconnect after sleep/network loss rather than wait forever on a TCP read.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const chunk = await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Remote event stream heartbeat expired")),
+            45_000,
+          );
+          timer.unref();
+        }),
+      ]).finally(() => clearTimeout(timer));
       if (chunk.done) break;
       buffer = (buffer + decoder.decode(chunk.value, { stream: true })).replace(/\r\n/g, "\n");
       let boundary: number;
@@ -124,6 +171,34 @@ export async function readNodeEvents(
 export class RemoteWorkers {
   readonly changes = new EventEmitter();
   readonly access: RemoteAccess;
+  readonly reverse: ReverseConnections;
+  readonly requestNode = async (
+    connection: RemoteConnectionCredentials,
+    route: string,
+    init: RequestInit = {},
+  ): Promise<Response> => {
+    if (connection.transport !== "reverse") return fetchNodeResponse(connection, route, init);
+    const headers = new Headers(init.headers);
+    if (!(init.body instanceof FormData) && !headers.has("content-type"))
+      headers.set("content-type", "application/json");
+    headers.set("authorization", `Bearer ${connection.token}`);
+    return withNodeDeadline(route, init, (signal) => {
+      const request = new Request(new URL(`api/node/${route}`, connection.url), {
+        ...init,
+        headers,
+        signal,
+        ...(init.body instanceof ReadableStream ? { duplex: "half" } : {}),
+      });
+      return this.reverse.channel(connection).request(route, request);
+    });
+  };
+  private nodeRequest<T>(
+    connection: RemoteConnectionCredentials,
+    route: string,
+    init: RequestInit = {},
+  ) {
+    return nodeRequest<T>(connection, route, init, this.requestNode);
+  }
   private readonly mirrors = new Map<string, Mirror>();
   private index: LocalIndex = { assignments: [], origins: {} };
   private writes: Promise<void> = Promise.resolve();
@@ -137,6 +212,7 @@ export class RemoteWorkers {
     private readonly directory: string,
   ) {
     this.access = access;
+    this.reverse = new ReverseConnections(this);
   }
 
   static async open(runtime: Runtime) {
@@ -160,7 +236,8 @@ export class RemoteWorkers {
     return remotes;
   }
   start() {
-    for (const connection of this.access.listConnections()) this.connect(connection.id);
+    for (const connection of this.access.listConnections())
+      if (connection.transport !== "reverse") this.connect(connection.id);
   }
   connect(node: string) {
     if (this.running.has(node) || this.stopped) return;
@@ -170,6 +247,7 @@ export class RemoteWorkers {
       this.reconnect(node, "catalog/events", controller.signal, async (event) => {
         const workers = event.workers as RemoteWorkerSummary[];
         if (!workers) return;
+        this.changes.emit("catalog", node);
         for (const worker of workers) {
           const id = remoteSessionId(node, worker.sessionId);
           const mirror = this.mirrors.get(id) ?? {
@@ -195,10 +273,14 @@ export class RemoteWorkers {
             this.follow(mirror);
         }
         this.changes.emit("change");
+      }).finally(() => {
+        if (this.running.get(node) === controller) this.running.delete(node);
       }),
     );
   }
   disconnect(node: string) {
+    // Wake pending joins after the owner removes a configured peer.
+    queueMicrotask(() => this.changes.emit("catalog", node));
     for (const [key, controller] of this.running)
       if (key === node || key.startsWith(`${node}:`)) {
         controller.abort();
@@ -291,18 +373,24 @@ export class RemoteWorkers {
     receive: (value: Record<string, unknown>) => Promise<void>,
     mirror?: Mirror,
   ) {
+    let attempts = 0;
     while (!signal.aborted && !this.stopped) {
+      const attempt = new AbortController();
+      const refresh = (changedNode: string) => {
+        if (changedNode === node) attempt.abort(new Error("Catalog resync requested"));
+      };
+      if (route === "catalog/events") this.changes.on("catalog-refresh", refresh);
       try {
         const connection = this.connection(node);
-        const response = await fetch(
-          new URL(`api/node/${typeof route === "function" ? route() : route}`, connection.url),
-          {
-            redirect: "error",
-            signal,
-            headers: { authorization: `Bearer ${connection.token}` },
-          },
+        const response = await this.requestNode(
+          connection,
+          typeof route === "function" ? route() : route,
+          { signal: AbortSignal.any([signal, attempt.signal]) },
         );
-        await readNodeEvents(response, receive);
+        await readNodeEvents(response, async (event) => {
+          attempts = 0;
+          await receive(event);
+        });
         if (!signal.aborted) throw new Error(`Remote ${node} event stream disconnected`);
       } catch (error) {
         if (signal.aborted) break;
@@ -312,6 +400,12 @@ export class RemoteWorkers {
         }
         console.error(`Remote ${node} stream`, error);
         this.changes.emit("change");
+        if (error instanceof NodeHttpError && [401, 403].includes(error.status)) {
+          this.changes.emit("catalog", node);
+          break;
+        }
+      } finally {
+        if (route === "catalog/events") this.changes.off("catalog-refresh", refresh);
       }
       await new Promise<void>((resolve) => {
         const done = () => {
@@ -319,7 +413,10 @@ export class RemoteWorkers {
           signal.removeEventListener("abort", done);
           resolve();
         };
-        const timer = setTimeout(done, 1000);
+        const timer = setTimeout(
+          done,
+          Math.min(30_000, 500 * 2 ** Math.min(attempts++, 6)) * (0.8 + Math.random() * 0.4),
+        );
         signal.addEventListener("abort", done, { once: true });
       });
     }
@@ -335,13 +432,13 @@ export class RemoteWorkers {
   }
   connection(node: string) {
     const connection = this.access.getConnection(node);
-    if (!connection) throw new Error(`Unknown remote instance: ${node}`);
+    if (!connection) throw new NodeHttpError(404, `Unknown remote instance: ${node}`);
     return connection;
   }
   async stop(id: string) {
     const parsed = parseRemoteSession(id);
     if (!parsed) throw new Error("Invalid remote session ID");
-    const result = await nodeRequest<{ isError?: boolean; output?: unknown }>(
+    const result = await this.nodeRequest<{ isError?: boolean; output?: unknown }>(
       this.connection(parsed.node),
       "commands",
       {
@@ -362,7 +459,7 @@ export class RemoteWorkers {
       ).map(async (connection) => ({
         nodeId: connection.id,
         label: connection.label,
-        ...(await nodeRequest<RemoteDiscovery>(connection, "workspaces")),
+        ...(await this.nodeRequest<RemoteDiscovery>(connection, "workspaces")),
       })),
     );
   }
@@ -373,7 +470,9 @@ export class RemoteWorkers {
         ...mirror.summary,
         sessionId: remoteSessionId(mirror.node, mirror.session),
         nodeId: mirror.node,
-        ...(mirror.error ? { error: mirror.error } : {}),
+        connectionState:
+          mirror.error && !mirror.syncedTerminal ? ("offline" as const) : ("online" as const),
+        ...(mirror.error && !mirror.syncedTerminal ? { error: mirror.error } : {}),
       }));
   }
   tasks(parentId: number): RunningSubagent[] {
@@ -402,6 +501,13 @@ export class RemoteWorkers {
         model: mirror.state?.model ?? mirror.node,
         thinkingLevel: mirror.state?.thinkingLevel ?? "off",
         startedAtMs: mirror.summary.startedAtMs ?? null,
+        remote: {
+          nodeId: mirror.node,
+          connectionState:
+            mirror.error && !mirror.syncedTerminal ? ("offline" as const) : ("online" as const),
+          status: mirror.summary.status,
+          ...(mirror.error && !mirror.syncedTerminal ? { error: mirror.error } : {}),
+        },
       }));
   }
   state(id: string, includeHistory = true, after?: string): SessionState {
@@ -430,7 +536,12 @@ export class RemoteWorkers {
       path: id,
       workspaceId: `${mirror.node}/${mirror.summary.workspaceId}`,
       title: `Subagent · ${mirror.node}`,
-      remote: { nodeId: mirror.node, ...(mirror.error ? { error: mirror.error } : {}) },
+      remote: {
+        nodeId: mirror.node,
+        connectionState: mirror.error && !mirror.syncedTerminal ? "offline" : "online",
+        status: mirror.summary.status,
+        ...(mirror.error && !mirror.syncedTerminal ? { error: mirror.error } : {}),
+      },
       messages,
       totalMessageCount: mirror.messages.length,
       hasMoreMessages: mirror.messages.length > messages.length,
@@ -473,6 +584,26 @@ export class RemoteWorkers {
     const node = args.nodeId ?? parsed?.node;
     if (!node || (parsed && args.nodeId && parsed.node !== args.nodeId))
       throw new Error("Remote command requires a matching nodeId/sessionId");
+    if (args.action === "inspect" && args.sessionId) {
+      const mirror = this.mirrors.get(remoteSessionId(node, parsed?.session ?? args.sessionId));
+      if (mirror?.error && !mirror.syncedTerminal) {
+        this.connection(node);
+        return {
+          output: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                ...mirror.summary,
+                sessionId: remoteSessionId(node, mirror.session),
+                nodeId: node,
+                connectionState: "offline",
+                error: mirror.error,
+              }),
+            },
+          ],
+        };
+      }
+    }
     const requestId = `tool:${api.conversationId}:${api.taskId}`;
     const files = args.files
       ? await snapshotWorkerFiles(
@@ -499,7 +630,7 @@ export class RemoteWorkers {
         await this.write("assignments.json", this.index);
       });
     }
-    const result = await nodeRequest<{
+    const result = await this.nodeRequest<{
       output?: JsonValue;
       details?: JsonValue;
       isError?: boolean;
@@ -615,7 +746,7 @@ export class RemoteWorkers {
     };
   }
   private async assignment(node: string, assignmentId: string, signal?: AbortSignal) {
-    const result = await nodeRequest<{
+    const result = await this.nodeRequest<{
       status: string;
       text?: string;
       artifacts?: AgentTurnArtifacts;
@@ -626,55 +757,73 @@ export class RemoteWorkers {
     input: { node: string; session: string; assignmentId: string; parentId: ConversationId },
     signal: AbortSignal,
   ) {
-    for (;;) {
-      signal.throwIfAborted();
-      let result: { status: string; text?: string; artifacts?: AgentTurnArtifacts };
-      try {
-        result = await this.assignment(input.node, input.assignmentId, signal);
-      } catch (error) {
+    // Subscribe before checking status so a completion during the fetch cannot be missed.
+    // Catalog snapshots also arrive after reconnect, including unchanged worker summaries.
+    let dirty = true;
+    let wake: (() => void) | undefined;
+    const changed = (node: string) => {
+      if (node !== input.node) return;
+      dirty = true;
+      wake?.();
+    };
+    const aborted = () => wake?.();
+    this.changes.on("catalog", changed);
+    signal.addEventListener("abort", aborted);
+    try {
+      for (;;) {
         signal.throwIfAborted();
-        if (
-          error instanceof NodeHttpError &&
-          error.status < 500 &&
-          ![408, 429].includes(error.status)
-        )
-          result = { status: "failed", text: String(error) };
-        else {
-          console.error(`Remote ${input.node} await reconnect`, error);
-          result = { status: "running" };
+        dirty = false;
+        let result: { status: string; text?: string; artifacts?: AgentTurnArtifacts };
+        try {
+          result = await this.assignment(input.node, input.assignmentId, signal);
+        } catch (error) {
+          signal.throwIfAborted();
+          if (
+            error instanceof NodeHttpError &&
+            error.status < 500 &&
+            ![408, 429].includes(error.status)
+          )
+            result = { status: "failed", text: String(error) };
+          else {
+            console.error(`Remote ${input.node} await reconnect`, error);
+            // The triggering snapshot may be the last commit. Reconnect the catalog
+            // for a fresh snapshot rather than waiting forever or polling status.
+            this.changes.emit("catalog-refresh", input.node);
+            result = { status: "running" };
+          }
+        }
+        signal.throwIfAborted();
+        if (result.status !== "running") {
+          const parent = await this.runtime.harness.conversation(input.parentId, context);
+          await parent!.submit(
+            {
+              type: "input",
+              whenBusy: "steer",
+              requestId: `remote-result:${input.node}:${input.assignmentId}:${input.parentId}`,
+              content: encodeRuntimeNotice({
+                kind: "subagent",
+                text: `[subagent ${remoteSessionId(input.node, input.session)} result]\n${reportWithArtifacts(result.text ?? result.status, result.artifacts)}`,
+                data: {
+                  subagent: { sessionId: remoteSessionId(input.node, input.session) },
+                  ...(result.artifacts ? { runtimeResultArtifacts: result.artifacts } : {}),
+                },
+              }),
+            },
+            context,
+          );
+          return;
+        }
+        signal.throwIfAborted();
+        if (!dirty) {
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+          });
+          wake = undefined;
         }
       }
-      if (result.status !== "running") {
-        const parent = await this.runtime.harness.conversation(input.parentId, context);
-        await parent!.submit(
-          {
-            type: "input",
-            whenBusy: "steer",
-            requestId: `remote-result:${input.node}:${input.assignmentId}:${input.parentId}`,
-            content: encodeRuntimeNotice({
-              kind: "subagent",
-              text: `[subagent ${remoteSessionId(input.node, input.session)} result]\n${reportWithArtifacts(result.text ?? result.status, result.artifacts)}`,
-              data: {
-                subagent: { sessionId: remoteSessionId(input.node, input.session) },
-                ...(result.artifacts ? { runtimeResultArtifacts: result.artifacts } : {}),
-              },
-            }),
-          },
-          context,
-        );
-        return;
-      }
-      await new Promise<void>((resolve, reject) => {
-        const done = () => {
-          clearTimeout(timer);
-          reject(signal.reason);
-        };
-        const timer = setTimeout(() => {
-          signal.removeEventListener("abort", done);
-          resolve();
-        }, 1000);
-        signal.addEventListener("abort", done, { once: true });
-      });
+    } finally {
+      this.changes.off("catalog", changed);
+      signal.removeEventListener("abort", aborted);
     }
   }
   private async deliver(mirror: Mirror, message: UiMessage) {
@@ -786,14 +935,9 @@ export class RemoteWorkers {
     const match = /\/api\/sent-files\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/.exec(source.pathname);
     if (!match) throw new PermanentFileImportError("Remote file does not use a sent-file manifest");
     const toolCallId = `remote-${node}-${match.slice(1).join("-")}`;
-    const response = await fetch(
-      new URL(`api/node/files/${match.slice(1).join("/")}`, connection.url),
-      {
-        redirect: "error",
-        signal: AbortSignal.timeout(30_000),
-        headers: { authorization: `Bearer ${connection.token}` },
-      },
-    );
+    const response = await this.requestNode(connection, `files/${match.slice(1).join("/")}`, {
+      signal: AbortSignal.timeout(30_000),
+    });
     if (!response.ok) {
       const message = `Remote file HTTP ${response.status}`;
       if (response.status >= 400 && response.status < 500 && ![408, 429].includes(response.status))
@@ -832,6 +976,7 @@ export class RemoteWorkers {
   }
   async close() {
     this.stopped = true;
+    await this.reverse.close();
     for (const controller of this.running.values()) controller.abort();
     this.running.clear();
     await Promise.allSettled(this.loops);

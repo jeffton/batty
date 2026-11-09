@@ -41,6 +41,7 @@ import { resolveUploadedFile } from "./uploads";
 import { registerSessionRoutes } from "./routes/sessions";
 import { streamAppStatus } from "./app-status-stream";
 import { registerRemoteRoutes, authenticateNode } from "./routes/remotes";
+import { registerReverseRemoteRoutes } from "./routes/reverse-remotes";
 import { resolveSentFile } from "./send-files";
 import type { AppColor } from "@/shared/appearance";
 import { WebPushService } from "./web-push";
@@ -127,6 +128,7 @@ registerSettingsCopyRoute(app, async (kind, name) => {
   return Object.hasOwn(environment, name) ? environment[name] : undefined;
 });
 const closeRemoteStreams = registerRemoteRoutes(app, runtime);
+registerReverseRemoteRoutes(app, runtime);
 registerBrowserErrorRoutes(app, path.join(stateDirPath(config.battyDir), "browser-errors.json"));
 registerCronRoutes(app, runtime.orchestration);
 registerSiteRoutes(routeContext);

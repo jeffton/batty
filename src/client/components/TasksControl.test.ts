@@ -20,6 +20,42 @@ const run = {
 } as CronRunLog;
 
 describe("compose tasks", () => {
+  it("keeps an offline remote task visible without claiming live execution and recovers in place", async () => {
+    const wrapper = mount(TasksControl, {
+      props: {
+        subagents: [
+          {
+            ...agent,
+            remote: {
+              nodeId: "mac",
+              connectionState: "offline",
+              status: "running",
+              error: "Disconnected",
+            },
+          },
+        ],
+        cronRuns: [],
+      },
+      global: {
+        stubs: { BasePopover: { template: "<div><slot /></div>" }, SubagentSessionPopover: true },
+      },
+    });
+    try {
+      expect(wrapper.get(".tasks-popover__task").text()).toContain("Offline · last known running");
+      expect(wrapper.find(".tasks-control__spinner").exists()).toBe(false);
+      expect(wrapper.get(".tasks-control").text()).toContain("1 task");
+      await wrapper.setProps({
+        subagents: [
+          { ...agent, remote: { nodeId: "mac", connectionState: "online", status: "running" } },
+        ],
+      });
+      expect(wrapper.get(".tasks-popover__task").text()).not.toContain("Offline");
+      expect(wrapper.find(".tasks-control__spinner").exists()).toBe(true);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it("keeps memory errors on their task until recovery, including without a backlog", async () => {
     const wrapper = mount(TasksControl, {
       props: { subagents: [agent], cronRuns: [], memoryPending: 2, memoryError: "Invalid prompt" },

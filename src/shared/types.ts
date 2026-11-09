@@ -210,7 +210,15 @@ export type CronJobScheduleInput =
   | CronJobSingleScheduleInput
   | { kind: "multiple"; triggers: CronJobSingleScheduleInput[] };
 
+export interface RemoteSessionConnection {
+  nodeId: string;
+  connectionState?: "online" | "offline";
+  status?: string;
+  error?: string;
+}
+
 export interface RunningSubagent {
+  remote?: RemoteSessionConnection;
   sessionId: string;
   sessionPath: string;
   workspaceId: string;
@@ -312,7 +320,7 @@ export type PromptDisposition =
 export type PromptSubmissionResult = PromptDisposition & { clientMessageId: string };
 
 export interface SessionState {
-  remote?: { nodeId: string; error?: string };
+  remote?: RemoteSessionConnection;
   id: string;
   revision?: number;
   streamId?: string;

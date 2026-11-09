@@ -130,13 +130,83 @@ export class RemoteAccess {
       token: connection.token,
       ...(connection.instanceId === undefined ? {} : { instanceId: connection.instanceId }),
       ...(connection.grantId === undefined ? {} : { grantId: connection.grantId }),
+      ...(connection.transport === undefined ? {} : { transport: connection.transport }),
+      ...(connection.reverseDial === undefined ? {} : { reverseDial: connection.reverseDial }),
+      ...(connection.reverseGrantId === undefined
+        ? {}
+        : { reverseGrantId: connection.reverseGrantId }),
     };
     return this.mutate((state) => {
       if (state.connections.some((entry) => entry.id === normalized.id)) {
         throw new Error(`Remote connection already exists: ${normalized.id}`);
       }
+      this.validateConnection(state, normalized);
       state.connections.push(normalized);
     });
+  }
+
+  setReverseDial(id: string, enabled: boolean): Promise<void> {
+    return this.mutate((state) => {
+      const connection = state.connections.find((entry) => entry.id === id);
+      if (!connection) throw new Error(`Unknown remote instance: ${id}`);
+      if (connection.transport === "reverse")
+        throw new Error("Only direct connections can keep a reverse channel open");
+      if (typeof enabled !== "boolean")
+        throw new Error("Reverse connection setting must be a boolean");
+      connection.reverseDial = enabled;
+    });
+  }
+
+  updateIdentity(id: string, identity: { instanceId: string; grantId: string }): Promise<void> {
+    return this.mutate((state) => {
+      const connection = state.connections.find((entry) => entry.id === id);
+      if (!connection) throw new Error(`Unknown remote instance: ${id}`);
+      if (!identity.instanceId.trim() || !identity.grantId.trim())
+        throw new Error("Remote identity and grant ID are required");
+      if (connection.instanceId && connection.instanceId !== identity.instanceId)
+        throw new Error("Remote installation identity changed");
+      const updated = { ...connection, ...identity };
+      this.validateConnection(state, updated);
+      Object.assign(connection, identity);
+    });
+  }
+
+  private validateConnection(
+    state: RemoteAccessState,
+    connection: RemoteConnectionCredentials,
+  ): void {
+    if (connection.transport !== undefined && connection.transport !== "reverse")
+      throw new Error("Unknown remote transport");
+    if (connection.reverseDial !== undefined && typeof connection.reverseDial !== "boolean")
+      throw new Error("Reverse connection setting must be a boolean");
+    if (connection.instanceId === state.instanceId)
+      throw new Error("Cannot connect a Batty instance to itself");
+    if (
+      connection.instanceId &&
+      state.connections.some(
+        (entry) => entry.id !== connection.id && entry.instanceId === connection.instanceId,
+      )
+    )
+      throw new Error("This remote instance is already connected");
+    if (connection.transport === "reverse") {
+      if (!connection.instanceId?.trim())
+        throw new Error("Reverse connections require a remote installation ID");
+      if (connection.reverseDial)
+        throw new Error("An incoming reverse connection cannot also dial");
+      if (!state.grants.some((grant) => grant.id === connection.reverseGrantId))
+        throw new Error("Select an existing incoming access grant for this reverse connection");
+      if (
+        state.connections.some(
+          (entry) =>
+            entry.id !== connection.id &&
+            entry.transport === "reverse" &&
+            entry.reverseGrantId === connection.reverseGrantId,
+        )
+      )
+        throw new Error("This incoming access grant is already bound to a reverse connection");
+    } else if (connection.reverseGrantId !== undefined) {
+      throw new Error("Incoming access bindings require reverse transport");
+    }
   }
 
   removeConnection(id: string): Promise<void> {

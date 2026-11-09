@@ -56,7 +56,7 @@ it("loads only when open and uses existing provisioning actions for connections"
     expect(wrapper.text()).not.toContain("Connection ID");
     await wrapper.get('input[type="url"]').setValue("https://home.test/batty/");
     await wrapper.get('input[type="password"]').setValue(" private-token ");
-    await wrapper.get("input").setValue("Home installation");
+    await wrapper.get("form").get("input").setValue("Home installation");
     vi.mocked(addRemoteConnection).mockRejectedValueOnce(
       new Error("Remote authentication required"),
     );
@@ -165,14 +165,14 @@ it("keeps an in-flight mutation locked across reopen and never reveals its old t
     await flushPromises();
     // Reopening must not start a faster GET that releases the mutation's lock.
     expect(getRemoteSettings).toHaveBeenCalledOnce();
-    expect(wrapper.get("input").attributes("disabled")).toBeDefined();
+    expect(wrapper.get("form").get("input").attributes("disabled")).toBeDefined();
     expect(wrapper.get('[aria-label="Revoke access Home"]').attributes("disabled")).toBeDefined();
     await wrapper.findAll("form")[1]!.trigger("submit");
     expect(issueRemoteGrant).toHaveBeenCalledOnce();
     finish({ id: "slow", token: "old-opening-secret" });
     await flushPromises();
     expect(getRemoteSettings).toHaveBeenCalledTimes(2);
-    expect(wrapper.get("input").attributes("disabled")).toBeUndefined();
+    expect(wrapper.get("form").get("input").attributes("disabled")).toBeUndefined();
     expect(wrapper.find("textarea").exists()).toBe(false);
     expect(wrapper.text()).not.toContain("old-opening-secret");
   } finally {

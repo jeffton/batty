@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import type { RemoteAccess } from "../remote-access";
+import type { RemoteAccess, RemoteConnectionCredentials } from "../remote-access";
 import type { Runtime } from "../runtime";
 import { context } from "../runtime";
 import { listWorkspaces } from "../workspaces";
@@ -49,59 +49,100 @@ export function registerRemoteRoutes(app: FastifyInstance, runtime: Runtime) {
   app.get("/api/remotes", async () => ({
     ...access.identity(),
     grants: access.listGrants(),
-    connections: access.listConnections(),
+    connections: access.listConnections().map((connection) => ({
+      ...connection,
+      status: remotes.reverse.status(connection.id),
+    })),
   }));
-  app.post<{ Body: { action: string; id?: string; label?: string; url?: string; token?: string } }>(
-    "/api/remotes",
-    async (request) => {
-      const input = request.body;
-      switch (input.action) {
-        case "grant-add":
-          return access.issue(input.label!);
-        case "grant-list":
-          return access.listGrants();
-        case "grant-revoke": {
-          await access.revoke(input.id!);
-          // Valid peers reconnect; a revoked grant cannot open another stream.
-          for (const stream of streams) stream.end();
-          return { ok: true };
-        }
-        case "connection-list":
-          return access.listConnections();
-        case "connection-add": {
-          const connection = {
-            id: input.id!,
-            label: input.label!,
-            token: input.token!,
-            url: normalizeRemoteUrl(input.url!),
-          };
-          const identity = await nodeRequest<{ instanceId: string; grantId: string }>(
-            connection,
-            "identity",
-          );
-          if (identity.instanceId === access.identity().instanceId)
-            throw new Error("Cannot connect a Batty instance to itself");
-          if (access.listConnections().some((item) => item.instanceId === identity.instanceId))
-            throw new Error("This remote instance is already connected");
-          await remotes.bindOrigin(connection.id, identity.instanceId);
-          await access.addConnection({
-            ...connection,
-            instanceId: identity.instanceId,
-            grantId: identity.grantId,
-          });
-          remotes.connect(connection.id);
-          return { ok: true };
-        }
-        case "connection-remove": {
-          remotes.disconnect(input.id!);
-          await access.removeConnection(input.id!);
-          return { ok: true };
-        }
-        default:
-          throw new Error("Unknown remote provisioning action");
+  app.post<{
+    Body: {
+      action: string;
+      id?: string;
+      label?: string;
+      url?: string;
+      token?: string;
+      transport?: "reverse";
+      reverseDial?: boolean;
+      reverseGrantId?: string;
+      instanceId?: string;
+    };
+  }>("/api/remotes", async (request) => {
+    const input = request.body;
+    switch (input.action) {
+      case "grant-add":
+        return access.issue(input.label!);
+      case "grant-list":
+        return access.listGrants();
+      case "grant-revoke": {
+        await access.revoke(input.id!);
+        remotes.reverse.reconfigure();
+        // Valid peers reconnect; a revoked grant cannot open another stream.
+        for (const stream of streams) stream.end();
+        return { ok: true };
       }
-    },
-  );
+      case "connection-list":
+        return access.listConnections();
+      case "connection-add": {
+        const connection: RemoteConnectionCredentials = {
+          id: input.id!,
+          label: input.label!,
+          token: input.token!,
+          url: normalizeRemoteUrl(input.url!),
+          ...(input.transport === undefined ? {} : { transport: input.transport }),
+          ...(input.reverseDial === undefined ? {} : { reverseDial: input.reverseDial }),
+          ...(input.reverseGrantId === undefined ? {} : { reverseGrantId: input.reverseGrantId }),
+        };
+        if (input.transport !== undefined && input.transport !== "reverse")
+          throw new Error("Unknown remote transport");
+        if (input.transport === "reverse") {
+          if (!input.instanceId?.trim())
+            throw new Error("Reverse connections require a remote installation ID");
+          if (input.reverseDial) throw new Error("An incoming reverse connection cannot also dial");
+          if (!access.listGrants().some((grant) => grant.id === input.reverseGrantId))
+            throw new Error("Select an existing incoming access grant");
+          if (
+            access
+              .listConnections()
+              .some(
+                (item) =>
+                  item.transport === "reverse" && item.reverseGrantId === input.reverseGrantId,
+              )
+          )
+            throw new Error("This incoming access grant is already bound to a reverse connection");
+        }
+        const identity =
+          input.transport === "reverse"
+            ? { instanceId: input.instanceId!.trim() }
+            : await nodeRequest<{ instanceId: string; grantId: string }>(connection, "identity");
+        if (identity.instanceId === access.identity().instanceId)
+          throw new Error("Cannot connect a Batty instance to itself");
+        if (access.listConnections().some((item) => item.instanceId === identity.instanceId))
+          throw new Error("This remote instance is already connected");
+        await remotes.bindOrigin(connection.id, identity.instanceId);
+        await access.addConnection({
+          ...connection,
+          instanceId: identity.instanceId,
+          ...("grantId" in identity ? { grantId: identity.grantId } : {}),
+        });
+        if (connection.transport !== "reverse") remotes.connect(connection.id);
+        remotes.reverse.reconfigure();
+        return { ok: true };
+      }
+      case "connection-reverse-dial": {
+        await access.setReverseDial(input.id!, input.reverseDial!);
+        remotes.reverse.reconfigure();
+        return { ok: true };
+      }
+      case "connection-remove": {
+        await access.removeConnection(input.id!);
+        remotes.disconnect(input.id!);
+        remotes.reverse.reconfigure();
+        return { ok: true };
+      }
+      default:
+        throw new Error("Unknown remote provisioning action");
+    }
+  });
   app.get("/api/node/identity", async (request) => ({
     ...access.identity(),
     grantId: request.nodeGrant!.id,
@@ -242,8 +283,11 @@ export function registerRemoteRoutes(app: FastifyInstance, runtime: Runtime) {
         if (
           publication.changes.some(
             (change) =>
-              change.type === "document" &&
-              ["batty.worker", "batty.orchestration"].includes(change.record.kind),
+              (change.type === "document" &&
+                ["batty.worker", "batty.orchestration"].includes(change.record.kind)) ||
+              (change.type === "task" &&
+                change.value.kind === "batty.delivery" &&
+                change.value.state.status === "terminal"),
           )
         ) {
           dirty = true;

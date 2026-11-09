@@ -110,6 +110,71 @@ test("worker connection waits for a snapshot and recovers from offline without a
   expect(sources).toHaveLength(2);
 });
 
+test("a healthy local stream preserves remote offline status and disables actions until reconnection", async () => {
+  const sources: { onmessage?: (event: { data: string }) => void }[] = [];
+  vi.stubGlobal(
+    "EventSource",
+    class {
+      onmessage?: (event: { data: string }) => void;
+      close = vi.fn();
+      addEventListener = vi.fn();
+      removeEventListener = vi.fn();
+      constructor() {
+        sources.push(this);
+      }
+    },
+  );
+  const wrapper = mount(SubagentSessionPopover, {
+    props: { popoverId: "remote-popover", sessionId: "remote:mac:123" },
+    global: {
+      stubs: {
+        FullPopover: {
+          name: "FullPopover",
+          template: '<div><slot name="header-actions" /><slot /></div>',
+        },
+        SessionHeaderStatus: true,
+        SessionTranscriptView: true,
+      },
+    },
+  });
+  try {
+    wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState: "open" });
+    await flushPromises();
+    const send = async (offline: boolean, revision: number) => {
+      sources[0]!.onmessage!({
+        data: JSON.stringify({
+          type: "reset",
+          state: {
+            ...session,
+            revision,
+            canStopSubagent: true,
+            remote: {
+              nodeId: "mac",
+              connectionState: offline ? "offline" : "online",
+              status: "running",
+            },
+          },
+        }),
+      });
+      await wrapper.vm.$nextTick();
+    };
+    await send(true, 2);
+    expect(wrapper.getComponent({ name: "SessionHeaderStatus" }).props("connectionState")).toBe(
+      "offline",
+    );
+    expect(wrapper.get('[role="status"]').text()).toContain("Last known: running");
+    expect(wrapper.get('[aria-label="Stop subagent"]').attributes("disabled")).toBeDefined();
+    await send(false, 3);
+    expect(wrapper.getComponent({ name: "SessionHeaderStatus" }).props("connectionState")).toBe(
+      "online",
+    );
+    expect(wrapper.find('[role="status"]').exists()).toBe(false);
+    expect(wrapper.get('[aria-label="Stop subagent"]').attributes("disabled")).toBeUndefined();
+  } finally {
+    wrapper.unmount();
+  }
+});
+
 test("header stop follows active state, prevents duplicate requests and exposes failures", async () => {
   const sources: FakeSource[] = [];
   class FakeSource {

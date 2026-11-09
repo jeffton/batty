@@ -48,7 +48,7 @@ const tasks = computed(() => {
       .map((agent) => ({
         id: `agent-${agent.sessionId}`,
         title: agent.prompt,
-        detail: `Subagent · ${agent.workspaceId} · ${agent.model} · ${agent.thinkingLevel}`,
+        detail: `${agent.remote?.connectionState === "offline" ? `Offline · last known ${agent.remote.status ?? "unknown"} · ` : ""}Subagent · ${agent.workspaceId} · ${agent.model} · ${agent.thinkingLevel}`,
         sessionId: agent.sessionId,
         error: undefined,
       })),
@@ -57,7 +57,14 @@ const tasks = computed(() => {
 const hasRunningTasks = computed(
   () =>
     Boolean(props.memoryPending || props.compacting) ||
-    tasks.value.some((task) => task.id !== "memory"),
+    tasks.value.some(
+      (task) =>
+        task.id !== "memory" &&
+        !props.subagents.some(
+          (agent) =>
+            task.id === `agent-${agent.sessionId}` && agent.remote?.connectionState === "offline",
+        ),
+    ),
 );
 const sessionTasks = computed(() => {
   const current = tasks.value.filter((task) => task.sessionId);

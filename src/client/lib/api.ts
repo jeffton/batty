@@ -115,7 +115,7 @@ export function getRemoteSettings(): Promise<RemoteSettings> {
   return request("/api/remotes");
 }
 
-function provisionRemote<T>(body: Record<string, string>): Promise<T> {
+function provisionRemote<T>(body: Record<string, string | boolean>): Promise<T> {
   return request("/api/remotes", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -136,8 +136,16 @@ export function addRemoteConnection(input: {
   label: string;
   url: string;
   token: string;
+  transport?: "reverse";
+  reverseDial?: boolean;
+  reverseGrantId?: string;
+  instanceId?: string;
 }): Promise<{ ok: true }> {
   return provisionRemote({ ...input, action: "connection-add" });
+}
+
+export function setRemoteReverseDial(id: string, reverseDial: boolean): Promise<{ ok: true }> {
+  return provisionRemote({ action: "connection-reverse-dial", id, reverseDial });
 }
 
 export function removeRemoteConnection(id: string): Promise<{ ok: true }> {

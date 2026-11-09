@@ -45,6 +45,11 @@ const canStop = computed(
 const errorMessage = ref<string | undefined>(undefined);
 const displayError = computed(() => errorMessage.value ?? session.value?.remote?.error);
 const connectionState = ref<"online" | "connecting" | "offline">("connecting");
+const displayedConnectionState = computed(() =>
+  session.value?.remote?.connectionState === "offline" || session.value?.remote?.error
+    ? "offline"
+    : connectionState.value,
+);
 let connection: ReturnType<typeof createSessionConnection> | undefined;
 let loadGeneration = 0;
 
@@ -157,7 +162,7 @@ async function loadOlderMessages(): Promise<void> {
 }
 
 async function stop(): Promise<void> {
-  if (!canStop.value || stopping.value || connectionState.value !== "online") return;
+  if (!canStop.value || stopping.value || displayedConnectionState.value !== "online") return;
   const generation = loadGeneration;
   stopping.value = true;
   errorMessage.value = undefined;
@@ -218,7 +223,7 @@ onBeforeUnmount(() => {
       <StreamingStopControl
         v-if="canStop"
         :label="props.cronRun ? 'Stop cron run' : 'Stop subagent'"
-        :disabled="stopping || connectionState !== 'online'"
+        :disabled="stopping || displayedConnectionState !== 'online'"
         @stop="stop"
       />
       <span
@@ -230,12 +235,15 @@ onBeforeUnmount(() => {
       >
         <CircleAlert :size="17" />
       </span>
+      <span v-if="session?.remote?.connectionState === 'offline'" role="status">
+        Last known: {{ session.remote.status ?? "unknown" }}
+      </span>
       <SessionHeaderStatus
         v-if="!missing"
         :context-tokens="session?.contextTokens"
         :context-window="session?.contextWindow"
         :context-percent="session?.contextPercent"
-        :connection-state="session?.remote?.error ? 'offline' : connectionState"
+        :connection-state="displayedConnectionState"
       />
     </template>
 

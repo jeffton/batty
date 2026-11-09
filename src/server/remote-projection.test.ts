@@ -8,6 +8,8 @@ import { expect, test } from "vite-plus/test";
 import { RemoteWorkers } from "./remote-workers";
 import { streamSession } from "./session-sse";
 import type { Runtime } from "./runtime";
+import type { WorkerCommandContext } from "./orchestration-workers";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { TranscriptImages } from "./transcript-images";
 import type { ServerEvent, SessionState } from "../shared/types";
 import { applyServerEvent } from "../client/lib/session-events";
@@ -133,6 +135,78 @@ test("local mirror SSE keeps one revision clock across divergent remote counters
   }
 });
 
+test("offline mirrors preserve lifecycle status across reload and inspect uses only saved knowledge", async () => {
+  const root = await mkdtemp(join(tmpdir(), "batty-mirror-offline-"));
+  const directory = join(root, ".batty", "remote-mirrors");
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    join(directory, "work-123.json"),
+    JSON.stringify({
+      node: "work",
+      session: "123",
+      summary: { sessionId: "123", workspaceId: "work", status: "running" },
+      state: sourceState(1, "last known partial"),
+      messages: [],
+      error: "Remote disconnected",
+    }),
+  );
+  await writeFile(
+    join(directory, "assignments.json"),
+    JSON.stringify({
+      origins: {},
+      assignments: [
+        {
+          node: "work",
+          session: "123",
+          parentId: 1,
+          requestId: "request",
+          prompt: "Build project",
+        },
+      ],
+    }),
+  );
+  const runtime = {
+    config: { battyDir: root },
+    main: { id: 1 },
+    streamId: "local",
+    nextRevision: () => 1,
+  } as unknown as Runtime;
+  let remotes = await RemoteWorkers.open(runtime);
+  try {
+    await remotes.access.addConnection({
+      id: "work",
+      label: "Work",
+      url: "https://unreachable.invalid/",
+      token: "test",
+    });
+    await remotes.close();
+    remotes = await RemoteWorkers.open(runtime);
+    expect(remotes.list()[0]).toMatchObject({ status: "running", connectionState: "offline" });
+    expect(remotes.tasks(1)[0]).toMatchObject({
+      prompt: "Build project",
+      remote: { status: "running", connectionState: "offline" },
+    });
+    expect(remotes.state("remote:work:123")).toMatchObject({
+      canStopSubagent: false,
+      remote: { status: "running", connectionState: "offline" },
+    });
+    const result = await remotes.command(
+      { action: "inspect", sessionId: "remote:work:123" },
+      {} as WorkerCommandContext,
+      BACKGROUND_CONTEXT,
+    );
+    expect(JSON.parse(result.output[0]!.text)).toMatchObject({
+      sessionId: "remote:work:123",
+      status: "running",
+      connectionState: "offline",
+    });
+    expect(JSON.parse(result.output[0]!.text)).not.toHaveProperty("latest");
+  } finally {
+    await remotes.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("a synchronized terminal cursor overrides stale remote live fields in sessions and Tasks", async () => {
   const root = await mkdtemp(join(tmpdir(), "batty-mirror-terminal-"));
   const directory = join(root, ".batty", "remote-mirrors");
@@ -155,6 +229,7 @@ test("a synchronized terminal cursor overrides stale remote live fields in sessi
       ],
       state: sourceState(9000, "stale partial"),
       syncedTerminal: true,
+      error: "Peer disconnected after completion",
     }),
   );
   const runtime = {
@@ -174,6 +249,10 @@ test("a synchronized terminal cursor overrides stale remote live fields in sessi
     const state = remotes.state("remote:work:123");
     expect(state).toMatchObject({ isStreaming: false, canStopSubagent: false, activeTools: [] });
     expect(state.activeAssistant).toBeUndefined();
+    expect(state.remote).toMatchObject({ connectionState: "online", status: "completed" });
+    expect(state.remote?.error).toBeUndefined();
+    expect(remotes.list()[0]).toMatchObject({ status: "completed", connectionState: "online" });
+    expect(remotes.list()[0]).not.toHaveProperty("error");
     expect(remotes.tasks(1)).toEqual([]);
     // A metadata-only refresh can race a newer archive cursor from another stream.
     expect(remotes.state("remote:work:123", false, "0")).toMatchObject({

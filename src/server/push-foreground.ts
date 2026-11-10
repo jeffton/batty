@@ -1,14 +1,20 @@
 import { randomUUID } from "node:crypto";
 
+type ForegroundSend = (
+  ...args:
+    | [event: "push-client", data: { clientId: string }]
+    | [event: "push-foreground", data: { clientId: string; challengeId: string }]
+) => void;
+
 /** One-shot foreground checks, scoped to a live stream and one push delivery. */
 export class PushForeground {
-  private readonly clients = new Map<string, { send: (event: string, data: object) => void }>();
+  private readonly clients = new Map<string, { send: ForegroundSend }>();
   private readonly pending = new Map<
     string,
     { clients: Set<string>; expiresAt: number; finish: (visible: boolean) => void }
   >();
 
-  connect(send: (event: string, data: object) => void): () => void {
+  connect(send: ForegroundSend): () => void {
     const clientId = randomUUID();
     this.clients.set(clientId, { send });
     send("push-client", { clientId });

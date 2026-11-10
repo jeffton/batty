@@ -3,6 +3,7 @@ import type { RemoteAccess, PairingClaim } from "../remote-access";
 import { normalizeRemoteUrl } from "../remote-access";
 import type { Runtime } from "../runtime";
 import type { RemoteGrant } from "../../shared/remotes";
+import type { OwnerOutputs, RemoteOwnerOperation } from "../../shared/owner-api";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -13,9 +14,9 @@ declare module "fastify" {
 /** Shared owner provisioning domain entry point, independent of HTTP or sockets. */
 export async function executeRemoteOwnerOperation(
   runtime: Runtime,
-  operation: string,
+  operation: RemoteOwnerOperation,
   input: { id?: string; url?: string; token?: string } = {},
-) {
+): Promise<OwnerOutputs[RemoteOwnerOperation]> {
   const remotes = runtime.remotes;
   const access = remotes.access;
   switch (operation) {
@@ -27,10 +28,6 @@ export async function executeRemoteOwnerOperation(
           .listConnections()
           .map((connection) => ({ ...connection, status: remotes.reverse.status(connection.id) })),
       };
-    case "remotes.token.list":
-      return access.listInvitations();
-    case "remotes.connection.list":
-      return access.listConnections();
     case "remotes.token.generate":
       return access.issueInvitation();
     case "remotes.token.revoke":
@@ -119,14 +116,15 @@ export function registerRemoteRoutes(app: FastifyInstance, runtime: Runtime) {
     };
   }>("/api/remotes", async (request) => {
     const input = request.body;
-    const operation = {
-      "token-list": "remotes.token.list",
-      "connection-list": "remotes.connection.list",
+    if (input.action === "token-list") return access.listInvitations();
+    if (input.action === "connection-list") return access.listConnections();
+    const operations: Record<string, RemoteOwnerOperation> = {
       "token-generate": "remotes.token.generate",
       "token-revoke": "remotes.token.revoke",
       "connection-add": "remotes.connection.add",
       "connection-remove": "remotes.connection.remove",
-    }[input.action];
+    };
+    const operation = operations[input.action];
     if (!operation) throw new Error("Unknown remote provisioning action");
     return executeRemoteOwnerOperation(runtime, operation, input);
   });

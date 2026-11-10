@@ -1,4 +1,5 @@
-import { RpcClient, RpcError } from "@/shared/rpc";
+import { RpcClient, RpcError, type RpcCaller } from "@/shared/rpc";
+import type { OwnerInputs, OwnerOutputs, OwnerEvents } from "@/shared/owner-api";
 import { withBaseUrl } from "./base-url";
 
 export type { RpcCallOptions } from "@/shared/rpc";
@@ -15,5 +16,9 @@ const client = new RpcClient(
   },
 );
 
-export const rpcCall = client.call.bind(client);
+export const rpcCall = client.call.bind(client) as RpcCaller<
+  OwnerInputs,
+  OwnerOutputs,
+  OwnerEvents
+>;
 export const closeRpcTransport = client.close.bind(client);

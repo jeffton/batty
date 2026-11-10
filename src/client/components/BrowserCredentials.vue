@@ -40,7 +40,7 @@ watch(
   { flush: "sync" },
 );
 async function prepare(): Promise<void> {
-  const { value } = await rpcCall<CloudBrowserCredentialTarget>(
+  const { value } = await rpcCall(
     "browser.credentials.prepare",
     {
       browserId: initialBrowserId,

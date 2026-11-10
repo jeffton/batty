@@ -3,7 +3,7 @@ import type { ConversationId, ConversationView } from "@earendil-works/pi-durabl
 import { Runtime } from "./runtime";
 import { OrchestrationDoc } from "./orchestration-state";
 import type { TranscriptImages } from "./transcript-images";
-import type { SessionState } from "../shared/types";
+import type { SessionState, ServerEvent } from "../shared/types";
 
 /** Transport-neutral session projection. emit resolves when the consumer can accept more. */
 export function observeSession(
@@ -11,7 +11,7 @@ export function observeSession(
   conversationId: ConversationId | string,
   images: TranscriptImages,
   initialAfter: string | undefined,
-  emit: (event: object) => Promise<void>,
+  emit: (event: ServerEvent) => Promise<void>,
   signal: AbortSignal,
   onError: (error: unknown) => void,
   projection?: {

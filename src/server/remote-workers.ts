@@ -18,7 +18,13 @@ import type {
 } from "../shared/types";
 import { RemoteAccess, type RemoteConnectionCredentials } from "./remote-access";
 import { ReverseConnections } from "./reverse-connections";
-import type { RemoteDiscovery } from "../shared/remotes";
+import type {
+  NodeInputs,
+  NodeOutputs,
+  NodeEvent,
+  NodeOperation,
+  NodeWorkerSummary,
+} from "../shared/node-api";
 import type { Runtime } from "./runtime";
 import type { WorkerCommand, WorkerCommandContext } from "./orchestration-workers";
 import { stateDirPath } from "./options";
@@ -34,13 +40,7 @@ export function parseRemoteSession(id: string) {
   const match = /^remote:([a-zA-Z0-9_-]+):(\d+)$/.exec(id);
   return match ? { node: match[1]!, session: match[2]! } : undefined;
 }
-export type RemoteWorkerSummary = {
-  sessionId: string;
-  workspaceId: string;
-  status: string;
-  startedAtMs?: number;
-  terminalCursor?: string;
-};
+export type RemoteWorkerSummary = NodeWorkerSummary;
 type Mirror = {
   node: string;
   session: string;
@@ -66,10 +66,10 @@ class PermanentFileImportError extends Error {}
 export type NodeCallOptions = { signal?: AbortSignal; body?: ReadableStream<Uint8Array> };
 
 /** A bounded call handshake; returned streams retain caller cancellation, not a timer. */
-export async function withNodeDeadline<T>(
+export async function withNodeDeadline<T, Event>(
   options: NodeCallOptions,
-  call: (signal: AbortSignal) => Promise<RpcReply<T>>,
-): Promise<RpcReply<T>> {
+  call: (signal: AbortSignal) => Promise<RpcReply<T, Event>>,
+): Promise<RpcReply<T, Event>> {
   const timeout = new AbortController();
   const timer = setTimeout(
     () => timeout.abort(new RpcError("OFFLINE", "Remote call timed out")),
@@ -90,14 +90,16 @@ export class RemoteWorkers {
   readonly reverse: ReverseConnections;
 
   /** Native calls retain domain errors, JSON items and byte streams without HTTP envelopes. */
-  readonly requestNode = async <T = unknown>(
+  readonly requestNode = async <K extends NodeOperation>(
     connection: RemoteConnectionCredentials,
-    operation: string,
-    input: unknown = {},
+    operation: K,
+    input: NodeInputs[K],
     options: NodeCallOptions = {},
-  ): Promise<RpcReply<T>> => {
+  ): Promise<RpcReply<NodeOutputs[K], NodeEvent<K>>> => {
     return withNodeDeadline(options, (signal) =>
-      this.reverse.channel(connection).call<T>(operation, input, { ...options, signal }),
+      this.reverse
+        .channel(connection)
+        .call<NodeOutputs[K], NodeEvent<K>>(operation, input, { ...options, signal }),
     );
   };
 
@@ -110,13 +112,13 @@ export class RemoteWorkers {
     return createNodeRpcHandler(this, connection)(operation, input, call);
   }
 
-  private async nodeRequest<T>(
+  private async nodeRequest<K extends NodeOperation>(
     connection: RemoteConnectionCredentials,
-    operation: string,
-    input: unknown = {},
+    operation: K,
+    input: NodeInputs[K],
     options: NodeCallOptions = {},
   ) {
-    return (await this.requestNode<T>(connection, operation, input, options)).value;
+    return (await this.requestNode(connection, operation, input, options)).value;
   }
   private readonly mirrors = new Map<string, Mirror>();
   private index: LocalIndex = { assignments: [], origins: {} };
@@ -163,36 +165,45 @@ export class RemoteWorkers {
     const controller = new AbortController();
     this.running.set(node, controller);
     this.launch(
-      this.reconnect(node, "node.catalog.watch", controller.signal, async (event) => {
-        const workers = event.workers as RemoteWorkerSummary[];
-        if (!workers) return;
-        this.changes.emit("catalog", node);
-        for (const worker of workers) {
-          const id = remoteSessionId(node, worker.sessionId);
-          const mirror = this.mirrors.get(id) ?? {
-            node,
-            session: worker.sessionId,
-            summary: worker,
-            messages: [],
-          };
-          const changed =
-            !this.mirrors.has(id) || JSON.stringify(mirror.summary) !== JSON.stringify(worker);
-          mirror.summary = worker;
-          if (worker.status === "running") mirror.syncedTerminal = false;
-          this.mirrors.set(id, mirror);
-          if (this.terminalMirrored(mirror)) {
-            mirror.syncedTerminal = true;
-            this.running.get(`${node}:${worker.sessionId}`)?.abort();
+      this.reconnect(
+        node,
+        "node.catalog.watch",
+        () => ({}),
+        controller.signal,
+        async (event) => {
+          const workers = event.workers;
+          if (!workers) return;
+          this.changes.emit("catalog", node);
+          for (const worker of workers) {
+            const id = remoteSessionId(node, worker.sessionId);
+            const mirror = this.mirrors.get(id) ?? {
+              node,
+              session: worker.sessionId,
+              summary: worker,
+              messages: [],
+            };
+            const changed =
+              !this.mirrors.has(id) || JSON.stringify(mirror.summary) !== JSON.stringify(worker);
+            mirror.summary = worker;
+            if (worker.status === "running") mirror.syncedTerminal = false;
+            this.mirrors.set(id, mirror);
+            if (this.terminalMirrored(mirror)) {
+              mirror.syncedTerminal = true;
+              this.running.get(`${node}:${worker.sessionId}`)?.abort();
+            }
+            if (changed) await this.persistMirror(mirror);
+            const assigned = this.index.assignments.some(
+              (item) => item.node === node && item.session === worker.sessionId,
+            );
+            if (
+              worker.status === "running" ||
+              ((assigned || mirror.state) && !mirror.syncedTerminal)
+            )
+              this.follow(mirror);
           }
-          if (changed) await this.persistMirror(mirror);
-          const assigned = this.index.assignments.some(
-            (item) => item.node === node && item.session === worker.sessionId,
-          );
-          if (worker.status === "running" || ((assigned || mirror.state) && !mirror.syncedTerminal))
-            this.follow(mirror);
-        }
-        this.changes.emit("change");
-      }).finally(() => {
+          this.changes.emit("change");
+        },
+      ).finally(() => {
         if (this.running.get(node) === controller) this.running.delete(node);
       }),
     );
@@ -222,10 +233,8 @@ export class RemoteWorkers {
     this.launch(
       this.reconnect(
         mirror.node,
-        () => ({
-          operation: "node.session.watch",
-          input: { sessionId: mirror.session, after: mirror.after ?? "0" },
-        }),
+        "node.session.watch",
+        () => ({ sessionId: mirror.session, after: mirror.after ?? "0" }),
         controller.signal,
         async (event) => {
           if (event.type === "error") throw new Error(String(event.message));
@@ -287,11 +296,12 @@ export class RemoteWorkers {
       .catch((error) => console.error("Remote stream stopped", error))
       .finally(() => this.loops.delete(loop));
   }
-  private async reconnect(
+  private async reconnect<K extends "node.catalog.watch" | "node.session.watch">(
     node: string,
-    route: string | (() => { operation: string; input: unknown }),
+    operation: K,
+    input: () => NodeInputs[K],
     signal: AbortSignal,
-    receive: (value: Record<string, unknown>) => Promise<void>,
+    receive: (value: NodeEvent<K>) => Promise<void>,
     mirror?: Mirror,
   ) {
     let attempts = 0;
@@ -300,11 +310,10 @@ export class RemoteWorkers {
       const refresh = (changedNode: string) => {
         if (changedNode === node) attempt.abort(new Error("Catalog resync requested"));
       };
-      if (route === "node.catalog.watch") this.changes.on("catalog-refresh", refresh);
+      if (operation === "node.catalog.watch") this.changes.on("catalog-refresh", refresh);
       try {
         const connection = this.connection(node);
-        const watch = typeof route === "function" ? route() : { operation: route, input: {} };
-        const response = await this.requestNode(connection, watch.operation, watch.input, {
+        const response = await this.requestNode(connection, operation, input(), {
           signal: AbortSignal.any([signal, attempt.signal]),
         });
         if (!response.events)
@@ -315,7 +324,7 @@ export class RemoteWorkers {
             const item = await reader.read();
             if (item.done) break;
             attempts = 0;
-            await receive(item.value as Record<string, unknown>);
+            await receive(item.value);
           }
         } finally {
           await reader.cancel();
@@ -334,7 +343,7 @@ export class RemoteWorkers {
           break;
         }
       } finally {
-        if (route === "node.catalog.watch") this.changes.off("catalog-refresh", refresh);
+        if (operation === "node.catalog.watch") this.changes.off("catalog-refresh", refresh);
       }
       await new Promise<void>((resolve) => {
         const done = () => {
@@ -367,11 +376,10 @@ export class RemoteWorkers {
   async stop(id: string) {
     const parsed = parseRemoteSession(id);
     if (!parsed) throw new Error("Invalid remote session ID");
-    const result = await this.nodeRequest<{ isError?: boolean; output?: unknown }>(
-      this.connection(parsed.node),
-      "node.command",
-      { requestId: `stop:${randomUUID()}`, command: { action: "stop", sessionId: parsed.session } },
-    );
+    const result = await this.nodeRequest(this.connection(parsed.node), "node.command", {
+      requestId: `stop:${randomUUID()}`,
+      command: { action: "stop", sessionId: parsed.session },
+    });
     if (result.isError) throw new Error(JSON.stringify(result.output));
   }
   async workspaces(node?: string) {
@@ -382,7 +390,7 @@ export class RemoteWorkers {
       ).map(async (connection) => ({
         nodeId: connection.id,
         label: connection.label,
-        ...(await this.nodeRequest<RemoteDiscovery>(connection, "node.discovery")),
+        ...(await this.nodeRequest(connection, "node.discovery", {})),
       })),
     );
   }
@@ -538,7 +546,10 @@ export class RemoteWorkers {
       : [];
     const { nodeId: _nodeId, files: _files, ...command } = args;
     if (parsed) command.sessionId = parsed.session;
-    if (["run", "queue", "resume"].includes(command.action)) {
+    const { action, ...workerInput } = command;
+    if (action === "report" || action === "workspaces")
+      throw new RpcError("BAD_INPUT", "Invalid node worker action or requestId");
+    if (["run", "queue", "resume"].includes(action)) {
       await this.persist(async () => {
         if (
           !this.index.assignments.some((item) => item.node === node && item.requestId === requestId)
@@ -553,16 +564,12 @@ export class RemoteWorkers {
         await this.write("assignments.json", this.index);
       });
     }
-    const result = await this.nodeRequest<{
-      output?: JsonValue;
-      details?: JsonValue;
-      isError?: boolean;
-    }>(
+    const result = await this.nodeRequest(
       this.connection(node),
       "node.command",
       {
         requestId,
-        command,
+        command: { ...workerInput, action },
         ...(files.length ? { files: workerFileMetadata(files) } : {}),
       },
       files.length ? { body: workerBody(files), signal: AbortSignal.timeout(300_000) } : {},
@@ -672,11 +679,12 @@ export class RemoteWorkers {
     };
   }
   private async assignment(node: string, assignmentId: string, signal?: AbortSignal) {
-    const result = await this.nodeRequest<{
-      status: string;
-      text?: string;
-      artifacts?: AgentTurnArtifacts;
-    }>(this.connection(node), "node.assignment", { assignmentId }, { signal });
+    const result = await this.nodeRequest(
+      this.connection(node),
+      "node.assignment",
+      { assignmentId },
+      { signal },
+    );
     return (await this.importValue(node, result)) as typeof result;
   }
   async join(
@@ -864,7 +872,7 @@ export class RemoteWorkers {
     const match = /\/api\/sent-files\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/.exec(source.pathname);
     if (!match) throw new PermanentFileImportError("Remote file does not use a sent-file manifest");
     const toolCallId = `remote-${node}-${match.slice(1).join("-")}`;
-    let response: RpcReply;
+    let response: RpcReply<NodeOutputs["node.file"], never>;
     try {
       response = await this.requestNode(
         connection,

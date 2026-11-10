@@ -225,7 +225,7 @@ export interface RunningSubagent {
   workspaceId: string;
   parentSessionId: string;
   prompt: string;
-  model: string;
+  model?: string;
   thinkingLevel: string;
   startedAtMs: number | null;
 }
@@ -236,7 +236,7 @@ export interface RunningCronJob {
   workspaceId: string;
   prompt: string;
   model: string;
-  thinkingLevel: string;
+  thinkingLevel?: string;
   scheduleLabel: string;
   startedAtMs: number;
   sessionId?: string;
@@ -276,7 +276,7 @@ export interface CronJob {
   enabled: boolean;
   prompt: string;
   model: string;
-  thinkingLevel: string;
+  thinkingLevel?: string;
   createdAt: number;
   updatedAt: number;
   schedule: CronJobSchedule;
@@ -362,7 +362,14 @@ export interface SessionState {
 
 export type SessionStateMetadata = Omit<
   SessionState,
-  "messages" | "messagesDetailLevel" | "activeAssistant" | "activeTools"
+  | "messages"
+  | "messagesDetailLevel"
+  | "activeAssistant"
+  | "activeTools"
+  | "hasMoreMessages"
+  | "historyAfter"
+  | "historyCursor"
+  | "hasMoreRecentMessages"
 >;
 
 export interface SessionResourcesResponse {

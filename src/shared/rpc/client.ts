@@ -6,6 +6,17 @@ import {
   type RpcReply,
 } from "./channel";
 
+import type { RpcResult } from "./registry";
+
+/** Bind a transport to its application's shared operation contract at the wire boundary. */
+export type RpcCaller<Inputs, Outputs extends Record<keyof Inputs, unknown>, Events = {}> = <
+  K extends keyof Inputs & string,
+>(
+  operation: K,
+  input: Inputs[K],
+  options?: RpcCallOptions,
+) => Promise<RpcResult<Outputs, Events, K>>;
+
 export interface ClientSocket extends ChannelSocket {
   readonly readyState: number;
   addEventListener(type: "open" | "close" | "error", listener: () => void): void;
@@ -31,15 +42,15 @@ export class RpcClient {
     private readonly options: { invalidate?: (error: unknown) => boolean } = {},
   ) {}
 
-  async call<T = unknown>(
+  async call<T = unknown, Event = unknown>(
     operation: string,
     input: unknown,
     options?: RpcCallOptions,
-  ): Promise<RpcReply<T>> {
+  ): Promise<RpcReply<T, Event>> {
     const channel = await this.ready(options?.signal);
     options?.signal?.throwIfAborted();
     try {
-      return await channel.call<T>(operation, input, options);
+      return await channel.call<T, Event>(operation, input, options);
     } catch (error) {
       if (this.connection?.channel === channel && this.options.invalidate?.(error)) this.close();
       throw error;

@@ -1,7 +1,12 @@
 import type { UserMessage } from "@earendil-works/pi-ai";
 import type { SubmissionId } from "@earendil-works/pi-durable";
 import { RpcError, rpcRegistry, type RpcContext } from "../shared/rpc";
-import type { OwnerInputs } from "../shared/owner-api";
+import type {
+  OwnerInputs,
+  OwnerOutputs,
+  OwnerEvents,
+  OwnerSessionEvent,
+} from "../shared/owner-api";
 import type { OwnerRpcServices } from "./owner-rpc";
 import { Runtime, context } from "./runtime";
 import { retainInput } from "./input-receipts";
@@ -9,7 +14,7 @@ import { preparePromptFiles, type UploadedFile } from "./uploads";
 import { parseRemoteSession } from "./remote-workers";
 import { observeSession } from "./session-sse";
 import { observeAppStatus } from "./app-status-stream";
-import { rpcEvents } from "./rpc-events";
+import { rpcEvents, splitByteStream } from "../shared/rpc";
 
 function badInput(message: string): never {
   throw new RpcError("BAD_INPUT", message);
@@ -33,34 +38,23 @@ async function promptFiles(
   }
   if (!metadata.length && !rpc.body) return [];
   if (!rpc.body) badInput("Missing uploaded bytes");
-  const reader = rpc.body.getReader();
-  let rest: Uint8Array<ArrayBufferLike> = new Uint8Array();
   const result: UploadedFile[] = [];
-  try {
-    for (const file of metadata) {
-      const data = Buffer.alloc(file.size);
-      let offset = 0;
-      while (offset < file.size) {
-        rpc.signal.throwIfAborted();
-        if (!rest.length) {
-          const chunk = await reader.read();
-          if (chunk.done) badInput("Uploaded file is incomplete");
-          rest = chunk.value;
-          continue;
-        }
-        const count = Math.min(rest.length, file.size - offset);
-        data.set(rest.subarray(0, count), offset);
-        offset += count;
-        rest = rest.subarray(count);
-      }
-      result.push({ filename: file.name, mimetype: file.type, data });
+  let index = 0;
+  for await (const bytes of splitByteStream(
+    rpc.body,
+    metadata.map((file) => file.size),
+    rpc.signal,
+  )) {
+    const file = metadata[index++]!;
+    const data = Buffer.alloc(file.size);
+    let offset = 0;
+    for await (const chunk of bytes) {
+      data.set(chunk, offset);
+      offset += chunk.byteLength;
     }
-    if (rest.length || !(await reader.read()).done) badInput("Unexpected uploaded bytes");
-    return result;
-  } finally {
-    await reader.cancel();
-    reader.releaseLock();
+    result.push({ filename: file.name, mimetype: file.type, data });
   }
+  return result;
 }
 
 /** Session operations composed into the owner's native RPC allowlist. */
@@ -70,7 +64,7 @@ export function createSessionOperations(
 ) {
   const { config } = runtime;
   const { transcriptImages: images, webPush } = services;
-  const { operations, add, streaming } = rpcRegistry<OwnerInputs>();
+  const { operations, add, streaming } = rpcRegistry<OwnerInputs, OwnerOutputs, OwnerEvents>();
   add("session.get", async (input) =>
     images.state(await runtime.state(input.sessionId, undefined, true, input.after)),
   );
@@ -110,7 +104,7 @@ export function createSessionOperations(
   add("session.stop", async ({ sessionId }) => {
     if (parseRemoteSession(sessionId)) await runtime.remotes.stop(sessionId);
     else await runtime.orchestration.stopWorker(sessionId);
-    return { ok: true };
+    return { ok: true as const };
   });
   streaming("session.watch", async ({ sessionId, after }, rpc) => {
     const remote = parseRemoteSession(sessionId);
@@ -119,7 +113,7 @@ export function createSessionOperations(
     const main = conversation?.id === runtime.main.id;
     return {
       value: {},
-      events: rpcEvents(rpc.signal, (emit, signal) => {
+      events: rpcEvents<OwnerSessionEvent>(rpc.signal, (emit, signal) => {
         const stopSession = observeSession(
           runtime,
           conversation?.id ?? sessionId,
@@ -152,8 +146,9 @@ export function createSessionOperations(
             : undefined;
         const stopForeground =
           main && webPush
-            ? webPush.foreground.connect((type, data) => {
-                void emit({ type, ...data });
+            ? webPush.foreground.connect((...[type, data]) => {
+                if (type === "push-client") void emit({ type, ...data });
+                else void emit({ type, ...data });
               })
             : undefined;
         return () => {
@@ -200,7 +195,7 @@ export function createSessionOperations(
     );
     await retainInput(runtime.main, submission.id, content, input.clientMessageId);
     return {
-      disposition: wasBusy ? "queued" : "started",
+      disposition: wasBusy ? ("queued" as const) : ("started" as const),
       submissionId: String(submission.id),
       sessionId: String(runtime.main.id),
     };
@@ -208,7 +203,7 @@ export function createSessionOperations(
   add("main.stop", async () => {
     await runtime.tools.abortConversation(runtime.main.id);
     await runtime.main.abort(context);
-    return { ok: true };
+    return { ok: true as const };
   });
   add("main.queue.remove", async ({ index }) => {
     await runtime.harness.abortSubmission(Number(index) as SubmissionId, context, runtime.main.id);

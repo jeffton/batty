@@ -22,6 +22,7 @@ import { Runtime, context } from "./runtime";
 import type { RemoteWorkers } from "./remote-workers";
 import type { RemoteConnectionCredentials } from "./remote-access";
 import { RpcError } from "../shared/rpc/channel";
+import type { NodeInputs, NodeOperation } from "../shared/node-api";
 
 async function nodeRequest<T>(
   connection: RemoteConnectionCredentials,
@@ -29,7 +30,10 @@ async function nodeRequest<T>(
   input: unknown,
   requester: RemoteWorkers["requestNode"],
 ): Promise<T> {
-  return (await requester<T>(connection, operation, input)).value;
+  // Tests deliberately exercise malformed wire payloads as well as valid calls.
+  return (
+    await requester(connection, operation as NodeOperation, input as NodeInputs[NodeOperation])
+  ).value as T;
 }
 import type { PairingClaim } from "./remote-access";
 import { authenticateNode, registerRemoteRoutes } from "./routes/remotes";
@@ -521,6 +525,7 @@ test.each(["/", "/batty/"])(
             toolCallId: decodeURIComponent(segments[2]!),
             fileId: decodeURIComponent(segments[3]!),
             // File storage is server-owned; extra input cannot override its root.
+            // @ts-expect-error Deliberately send an unknown wire field.
             rootDir: join(directory, "attacker-selected-root"),
           },
         );
@@ -730,7 +735,7 @@ test.each(["reverse-unpair", "control-loss"] as const)(
         "native session subscription retired",
       );
       await expect(
-        windows.runtime.remotes.requestNode(connection, "node.identity"),
+        windows.runtime.remotes.requestNode(connection, "node.identity", {}),
       ).rejects.toBeInstanceOf(RpcError);
       expect(await mac.runtime.orchestration.listRunning()).toHaveLength(1);
     } finally {
@@ -1335,7 +1340,7 @@ test("reverse pairing rejects impersonation and live grant revocation severs str
       },
       revokedAwaitAbort.signal,
     );
-    const live = await local.runtime.remotes.requestNode(connection, "node.catalog.watch");
+    const live = await local.runtime.remotes.requestNode(connection, "node.catalog.watch", {});
     const reader = live.events!.getReader();
     await reader.read();
     const pendingRead = reader.read();
@@ -1717,7 +1722,12 @@ test("node grants cannot access owner routes, revoke immediately, and reciprocal
       expect((await b.app.inject({ url, headers: auth })).statusCode).toBe(404);
     }
     await expect(
-      a.runtime.remotes.requestNode(a.runtime.remotes.connection(b.id), "remotes.token.generate"),
+      a.runtime.remotes.requestNode(
+        a.runtime.remotes.connection(b.id),
+        // @ts-expect-error An owner operation must also be rejected at the peer wire boundary.
+        "remotes.token.generate",
+        {},
+      ),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     await b.runtime.main.configure({ model: { provider: "faux", modelId: "selected-b" } }, context);
     const nodes = await a.runtime.remotes.workspaces(remote.id);
@@ -2303,7 +2313,11 @@ test("native binary commands verify admission, never use HTTP, deduplicate retri
         sha256: createHash("sha256").update(bytes).digest("hex"),
       },
     ];
-    const command = { action: "run", prompt: "process transferred input", workspaceId: "work" };
+    const command = {
+      action: "run" as const,
+      prompt: "process transferred input",
+      workspaceId: "work",
+    };
     const body = (value = bytes) =>
       new ReadableStream<Uint8Array>({
         start(controller) {

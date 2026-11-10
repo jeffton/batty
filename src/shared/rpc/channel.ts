@@ -19,10 +19,10 @@ export interface ChannelSocket {
 
 export type RpcCallOptions = { signal?: AbortSignal; body?: ReadableStream<Uint8Array> };
 export type RpcContext = { signal: AbortSignal; body?: ReadableStream<Uint8Array> };
-export type RpcReply<T = unknown> = {
+export type RpcReply<T = unknown, Event = unknown> = {
   value: T;
   body?: ReadableStream<Uint8Array>;
-  events?: ReadableStream<unknown>;
+  events?: ReadableStream<Event>;
 };
 export type RpcHandler = (
   operation: string,
@@ -30,7 +30,10 @@ export type RpcHandler = (
   context: RpcContext,
 ) => Promise<RpcReply>;
 
-export class RpcError extends Error {
+/** The same error value travels over calls and stream failures on either endpoint. */
+export type RpcFailure = { code: string; message: string; details?: unknown };
+
+export class RpcError extends Error implements RpcFailure {
   readonly code: string;
   readonly details?: unknown;
 
@@ -49,7 +52,7 @@ type Frame =
   | { type: "event"; id: string; value: unknown }
   | { type: "credit"; id: string; lane: Lane; count: number }
   | { type: "end"; id: string; lane: Lane }
-  | { type: "error" | "cancel"; id: string; code: string; message: string; details?: unknown }
+  | ({ type: "error" | "cancel"; id: string } & RpcFailure)
   | { type: "ping" | "pong" };
 
 type Outbound = {
@@ -133,17 +136,17 @@ export class RpcChannel {
     );
   }
 
-  call<T = unknown>(
+  call<T = unknown, Event = unknown>(
     operation: string,
     input: unknown,
     options: RpcCallOptions = {},
-  ): Promise<RpcReply<T>> {
+  ): Promise<RpcReply<T, Event>> {
     if (this.ended) return Promise.reject(new RpcError("OFFLINE", "RPC socket is offline"));
     if (options.signal?.aborted) return Promise.reject(options.signal.reason);
     const id = crypto.randomUUID();
-    return new Promise<RpcReply<T>>((resolve, reject) => {
+    return new Promise<RpcReply<T, Event>>((resolve, reject) => {
       const entry = this.createCall();
-      entry.resolve = (reply) => resolve(reply as RpcReply<T>);
+      entry.resolve = (reply) => resolve(reply as RpcReply<T, Event>);
       entry.reject = reject;
       this.calls.set(id, entry);
       if (options.signal) {

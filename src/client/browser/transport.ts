@@ -81,7 +81,7 @@ export function useBrowserTransport(
     signal: AbortSignal,
   ): Promise<BrowserState> {
     return (
-      await rpcCall<BrowserState>(
+      await rpcCall(
         operation,
         { browserId: browserId(), ...(control ? { control } : {}) },
         { signal },

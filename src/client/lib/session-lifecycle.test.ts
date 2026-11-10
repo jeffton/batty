@@ -53,11 +53,11 @@ async function fixture(stall = false) {
   }[] = [];
   vi.mocked(rpcCall).mockImplementation(async (_operation, input, options) => {
     let active = true;
-    let controller!: ReadableStreamDefaultController<unknown>;
+    let controller!: ReadableStreamDefaultController<OwnerSessionEvent>;
     const cancel = vi.fn(() => {
       active = false;
     });
-    const events = new ReadableStream<unknown>({
+    const events = new ReadableStream<OwnerSessionEvent>({
       start(value) {
         controller = value;
       },
@@ -76,7 +76,7 @@ async function fixture(stall = false) {
     };
     sources.push(current);
     if (stall && sources.length === 1) return await new Promise<never>(() => {});
-    return { value: undefined, events };
+    return { value: {}, events };
   });
   let cursor = "10";
   const onEvent = vi.fn();

@@ -8,7 +8,7 @@ Browser app traffic and paired-node runtime traffic share `RpcChannel`: named op
 
 HTTP remains for bootstrap, authentication, pairing, static assets, sites, navigation and natural resource downloads. Cloud-browser video retains its specialized WebSocket. HTTP also serves CLI cron/remotes, health/version and service stop. Superseded owner REST, node HTTP/SSE, browser-control, MCP and memory controllers are removed. Tests exercise native operations or shared domain services rather than preserving obsolete routes.
 
-The reusable `src/shared/rpc/` library separates channel framing from lazy client connection lifecycle. Owner/session registries share a small typed registration helper; validation and authorization remain explicit domain policy. The shared transport handles correlated calls, cancellation, heartbeat and binary flow control: 64 KiB frames with 16 credits, not a file-size limit. Object events preserve session cursors without SSE framing. Disconnect fails volatile calls without replay. Durable jobs, mirrors, request IDs and recovery cursors remain above the transport.
+The reusable `src/shared/rpc/` library separates channel framing from lazy client connection lifecycle. Owner and node operation maps specify inputs, results and event types. Registrations and callers share those contracts; callers cannot select an unrelated result type. A small typed registration helper checks handler results. Validation and authorization remain explicit domain policy. Both boundaries share error normalization, subscription cleanup and sequential file-byte splitting. The shared transport handles correlated calls, cancellation, heartbeat and binary flow control: 64 KiB frames with 16 credits, not a file-size limit. Object events preserve session cursors without SSE framing. Disconnect fails volatile calls without replay. Durable jobs, mirrors, request IDs and recovery cursors remain above the transport.
 
 ## Authorization
 
@@ -16,15 +16,16 @@ Shared framing does not mean shared permissions. Browser upgrades require same-o
 
 ## Complexity
 
-Counts include new source files, exclude docs/scripts/dependency metadata, and classify tests/fixtures separately:
+Counts include all changed/new TS, Vue, JS, MJS, CSS and HTML files, exclude docs/scripts, and classify paths containing `test` or `fixture` as tests/fixtures:
 
-| Comparison       | Production                           | Tests/fixtures                         |
-| ---------------- | ------------------------------------ | -------------------------------------- |
-| Main `06eb679`   | +2,896 / −2,612 = **+284**, 47 files | +3,663 / −2,438 = **+1,225**, 53 files |
-| Tunnel `540d7fa` | +2,738 / −2,869 = **−131**, 48 files | +3,252 / −3,324 = **−72**, 55 files    |
-| Native `728eeaf` | +651 / −1,747 = **−1,096**, 29 files | +1,256 / −1,808 = **−552**, 38 files   |
+| Comparison        | Production                           | Tests/fixtures                         |
+| ----------------- | ------------------------------------ | -------------------------------------- |
+| Main `06eb679`    | +3,270 / −2,772 = **+498**, 48 files | +4,021 / −2,450 = **+1,571**, 61 files |
+| Tunnel `540d7fa`  | +3,129 / −3,029 = **+100**, 50 files | +3,593 / −3,336 = **+257**, 62 files   |
+| Native `728eeaf`  | +1,022 / −1,885 = **−863**, 37 files | +1,009 / −1,239 = **−230**, 41 files   |
+| Cleanup `3a8b922` | +864 / −626 = **+238**, 23 files     | +338 / −16 = **+322**, 8 files         |
 
-The native operation model is cleaner than HTTP/SSE tunneled over WebSocket: business operations and typed inputs replace URL/status/header plumbing. Production code is slightly larger than main and slightly smaller than the tunnel attempt. Extracting shared mechanics and removing duplicate controllers cuts 1,096 net production lines from the first native rewrite. Renaming files contributes to the gross additions/removals; net counts include every source file. We also own multiplexing, flow control and stream lifetime that HTTP supplied previously.
+The native operation model is cleaner than HTTP/SSE tunneled over WebSocket: business operations and typed inputs replace URL/status/header plumbing. Production code is slightly larger than main and the tunnel attempt. Shared mechanics, explicit contracts and removal of duplicate controllers cut 863 net production lines from the first native rewrite. The typed-contract follow-up adds 238 net production lines over the cleanup baseline; operation maps replace duplicated caller annotations and catch mismatched inputs, outputs and events at compile time. Renaming files contributes to the gross additions/removals; net counts include every source file. We also own multiplexing, flow control and stream lifetime that HTTP supplied previously.
 
 ## Dependency
 
@@ -32,11 +33,11 @@ Server `ws` is pinned at 8.22.1; `@fastify/websocket` and `@types/ws` already ex
 
 ## Validation
 
-- Final isolated Arch full suite: 216 files, 1,111 passed, two existing skips. The successful runner printed `ECONNREFUSED localhost:3000`; this diagnostic remains unresolved.
-- `pnpm check` passed with ten existing unused-variable warnings.
+- Final isolated Arch full suite: 220 files, 1,127 passed, two existing skips. The successful runner printed `ECONNREFUSED localhost:3000`; this diagnostic remains unresolved.
+- `pnpm check` passed with ten existing lint warnings.
 - Build, strict offline checks at 390/1100 pixels, packaged startup at `/` and `/batty`, and both deployment regression scripts passed.
 - Real WebSocket tests cover peer identity admission, malicious early controls, bidirectional files/jobs, corrupt/interrupted transfers, cancellation, reconnect, restart and revocation. Client tests cover idle sessions, stale authentication generations and upload cancellation.
-- Independent Sol reviews approved transport, owner and peer authorization, client lifecycle and native architecture.
+- Independent Sol reviews approved transport, owner and peer authorization, client lifecycle, native architecture, typed contracts and shared stream/error helpers. Compile-time regressions reject invalid owner/node inputs, results and events.
 
 ## Boundaries
 

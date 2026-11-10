@@ -27,14 +27,14 @@ it("uses completion received before the start response without requesting status
 
 it("reconciles a missing reconnect snapshot once and lets SSE beat a late GET", async () => {
   const scope = effectScope();
-  const pending = Promise.withResolvers<{ completed: boolean }>();
+  const pending = Promise.withResolvers<{ attemptId: string; completed: boolean }>();
   vi.mocked(getProviderAuthAttemptStatus).mockReturnValueOnce(pending.promise);
   const completed = vi.fn(async () => {});
   const error = vi.fn();
   scope.run(() => watchProviderAuthAttempt(ref("reconnect"), completed, error));
   state.providerAuthAttempts.reconnect = { attemptId: "reconnect", completed: true };
   await nextTick();
-  pending.resolve({ completed: false });
+  pending.resolve({ attemptId: "reconnect", completed: false });
   await nextTick();
   expect(completed).toHaveBeenCalledTimes(1);
   expect(error).not.toHaveBeenCalled();

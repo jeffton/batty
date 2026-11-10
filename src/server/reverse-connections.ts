@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import { RpcChannel, RpcError } from "../shared/rpc";
+import type { NodeOutputs } from "../shared/node-api";
 import type { RemoteConnectionCredentials } from "./remote-access";
 import type { RemoteWorkers } from "./remote-workers";
 
@@ -122,7 +123,7 @@ export class ReverseConnections {
       this.setStatus(connection.id, { state: "disconnected" });
     });
     void channel
-      .call<{ instanceId: string; grantId: string }>(
+      .call<NodeOutputs["node.identity"], never>(
         "node.identity",
         {},
         { signal: AbortSignal.timeout(30_000) },

@@ -54,6 +54,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   delete window.__BATTY_BASE_URL__;
 });
+const prompt = { kind: "prompt" as const, text: "command", clientMessageId: "test", files: [] };
 function setup() {
   vi.stubGlobal("WebSocket", FakeSocket);
   call.mockResolvedValue({ value: {} });
@@ -88,7 +89,7 @@ test("one opening call can abort without cancelling another", async () => {
 test("aborting the last opening call closes its socket and permits a later connection", async () => {
   setup();
   const controller = new AbortController();
-  const cancelled = rpcCall("session.get", {}, { signal: controller.signal });
+  const cancelled = rpcCall("session.get", { sessionId: "main" }, { signal: controller.signal });
   controller.abort();
   await expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
   expect(FakeSocket.instances[0]!.readyState).toBe(FakeSocket.CLOSED);
@@ -100,7 +101,7 @@ test("aborting the last opening call closes its socket and permits a later conne
 test("disconnect fails a command without replay, while a new call reconnects", async () => {
   setup();
   call.mockRejectedValueOnce(new Error("Disconnected"));
-  const failed = rpcCall("main.submit", { text: "command" });
+  const failed = rpcCall("main.submit", prompt);
   FakeSocket.instances[0]!.open();
   await expect(failed).rejects.toThrow("Disconnected");
   FakeSocket.instances[0]!.close();
@@ -116,7 +117,7 @@ test("explicit close terminates the resolved channel synchronously even when nat
       throw new Error("Closed");
     }),
   );
-  const pending = rpcCall("main.submit", { text: "command" });
+  const pending = rpcCall("main.submit", prompt);
   const socket = FakeSocket.instances[0]!;
   socket.open();
   await vi.waitFor(() => expect(call).toHaveBeenCalledOnce());
@@ -132,7 +133,7 @@ test("an unauthorized call discards its captured identity without replay; the ne
   setup();
   const unauthorized = new RpcError("UNAUTHORIZED", "Expired cookie");
   call.mockRejectedValueOnce(unauthorized);
-  const failed = rpcCall("main.submit", { text: "once" });
+  const failed = rpcCall("main.submit", { ...prompt, text: "once" });
   FakeSocket.instances[0]!.open();
   await expect(failed).rejects.toBe(unauthorized);
   expect(channels[0]!.close).toHaveBeenCalledOnce();
@@ -192,13 +193,13 @@ test("successful HTTP relogin refreshes the socket upgrade cookie without a page
 test("passes raw bodies and AbortSignal through; pre-aborted calls never open a socket", async () => {
   setup();
   const signal = AbortSignal.abort();
-  await expect(rpcCall("main.submit", {}, { signal })).rejects.toMatchObject({
+  await expect(rpcCall("main.submit", prompt, { signal })).rejects.toMatchObject({
     name: "AbortError",
   });
   expect(FakeSocket.instances).toHaveLength(0);
   const controller = new AbortController();
   const body = new ReadableStream<Uint8Array>();
-  const result = rpcCall("main.submit", { files: [] }, { body, signal: controller.signal });
+  const result = rpcCall("main.submit", prompt, { body, signal: controller.signal });
   FakeSocket.instances[0]!.open();
   await result;
   expect(call.mock.calls[0]![2]).toEqual({ body, signal: controller.signal });

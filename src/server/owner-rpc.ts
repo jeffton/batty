@@ -1,9 +1,14 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Check } from "typebox/value";
-import type { OwnerInputs } from "../shared/owner-api";
+import type {
+  OwnerInputs,
+  OwnerOutputs,
+  OwnerEvents,
+  RemoteOwnerOperation,
+} from "../shared/owner-api";
 import { RpcError, rpcRegistry, type RpcHandler } from "../shared/rpc";
-import type { AppSettingsStatus } from "../shared/types";
+import type { AppSettingsStatus, CronRunLog } from "../shared/types";
 import { isSubscriptionProvider } from "../shared/provider-auth";
 import { Runtime, context } from "./runtime";
 import type { TranscriptImages } from "./transcript-images";
@@ -34,6 +39,7 @@ import type { Schedule } from "./orchestration-state";
 import { workspaceGit, workspaceFiles, workspaceSearch } from "./routes/workspace-files";
 import { assistantAgentsRead, assistantAgentsWrite } from "./routes/assistant-agents";
 import { createSessionOperations } from "./session-api";
+import { rpcError } from "./rpc-errors";
 
 export interface OwnerRpcServices {
   transcriptImages: TranscriptImages;
@@ -44,7 +50,10 @@ export interface OwnerRpcServices {
   browserAvailable: boolean;
   logSubmission?: (correlationId: string) => void;
   reportBrowserError?: (report: BrowserErrorReport) => Promise<void>;
-  remoteOperation?: (operation: string, input: unknown) => Promise<unknown>;
+  remoteOperation?: (
+    operation: RemoteOwnerOperation,
+    input: OwnerInputs[RemoteOwnerOperation],
+  ) => Promise<OwnerOutputs[RemoteOwnerOperation]>;
 }
 
 function badInput(message: string): never {
@@ -62,7 +71,7 @@ export function scheduleLabel(schedule: Schedule): string {
       ? `Every ${schedule.every}`
       : `${schedule.expression} (${schedule.timezone})`;
 }
-function cronRunLog(runtime: Runtime, run: CronRun, jobs: CronJob[]) {
+function cronRunLog(runtime: Runtime, run: CronRun, jobs: CronJob[]): CronRunLog {
   const config = runtime.config;
   const job = jobs.find((item) => item.id === run.jobId) ?? run.job;
   return {
@@ -87,7 +96,7 @@ function cronRunLog(runtime: Runtime, run: CronRun, jobs: CronJob[]) {
 export function createOwnerRpcHandler(runtime: Runtime, services: OwnerRpcServices): RpcHandler {
   const { config } = runtime;
   const { webPush, passkeys, settingsStatus } = services;
-  const { operations, add, streaming } = rpcRegistry<OwnerInputs>(
+  const { operations, add, streaming } = rpcRegistry<OwnerInputs, OwnerOutputs, OwnerEvents>(
     createSessionOperations(runtime, services),
   );
   add("workspace.list", async () => ({ workspaces: await listWorkspaces(config, true) }));
@@ -321,11 +330,11 @@ export function createOwnerRpcHandler(runtime: Runtime, services: OwnerRpcServic
   add("push.key", () => ({ publicKey: webPush.getPublicKey() }));
   add("push.save", async ({ subscription }) => {
     await webPush.upsertSubscription(subscription);
-    return { ok: true };
+    return { ok: true as const };
   });
   add("push.delete", async ({ endpoint }) => {
     await webPush.removeSubscription(endpoint);
-    return { ok: true };
+    return { ok: true as const };
   });
   add("push.ack", ({ clientId, challengeId }) => ({
     ok: webPush.foreground.acknowledge(clientId, challengeId),
@@ -375,29 +384,7 @@ export function createOwnerRpcHandler(runtime: Runtime, services: OwnerRpcServic
     try {
       return await handler(input, rpc);
     } catch (error) {
-      if (error instanceof RpcError) throw error;
-      const failure = error as Error & { statusCode?: number; pages?: unknown };
-      const code = failure.pages
-        ? "SELECTION_CHANGED"
-        : ((
-            {
-              400: "BAD_INPUT",
-              401: "UNAUTHORIZED",
-              403: "FORBIDDEN",
-              404: "NOT_FOUND",
-              409: "CONFLICT",
-              410: "GONE",
-              429: "RATE_LIMITED",
-              501: "UNAVAILABLE",
-              503: "OFFLINE",
-              504: "TIMEOUT",
-            } as Record<number, string>
-          )[failure.statusCode ?? 500] ?? (error instanceof RangeError ? "BAD_INPUT" : "INTERNAL"));
-      throw new RpcError(
-        code,
-        failure.message,
-        failure.pages ? { pages: failure.pages } : undefined,
-      );
+      throw rpcError(error);
     }
   };
 }

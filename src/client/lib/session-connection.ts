@@ -15,7 +15,7 @@ type ConnectionOptions = {
 };
 type Subscription = {
   controller: AbortController;
-  reader?: ReadableStreamDefaultReader<unknown>;
+  reader?: ReadableStreamDefaultReader<OwnerSessionEvent>;
   connecting: boolean;
   foreground: ReturnType<typeof createPushForegroundHandler>;
 };
@@ -44,7 +44,7 @@ export function createSessionConnection(options: ConnectionOptions) {
   }
 
   async function subscribe(current: Subscription): Promise<void> {
-    let reader: ReadableStreamDefaultReader<unknown> | undefined;
+    let reader: ReadableStreamDefaultReader<OwnerSessionEvent> | undefined;
     try {
       const reply = await rpcCall(options.operation, options.input(), {
         signal: current.controller.signal,
@@ -61,7 +61,7 @@ export function createSessionConnection(options: ConnectionOptions) {
         const item = await reader.read();
         if (source !== current) return;
         if (item.done) throw new Error("Session subscription disconnected");
-        const event = item.value as OwnerSessionEvent;
+        const event = item.value;
         current.foreground.onEvent(event);
         if (
           event.type !== "heartbeat" &&

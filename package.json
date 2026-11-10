@@ -13,8 +13,8 @@
     "test:unit": "node scripts/test.mjs --project server --project server-mocked --project client",
     "test:browser": "node scripts/test.mjs --project browser",
     "test:all": "node scripts/test.mjs",
-    "typecheck": "tsc --noEmit",
-    "check": "vp check && tsc --noEmit",
+    "typecheck": "vue-tsc --noEmit",
+    "check": "vp check && pnpm typecheck",
     "check:fix": "vp check --fix"
   },
   "dependencies": {
@@ -75,10 +75,11 @@
     "happy-dom": "21.0.4",
     "playwright-core": "1.64.1",
     "tsx": "4.23.15",
-    "typescript": "7.0.2",
+    "typescript": "6.0.3",
     "vite": "catalog:",
     "vite-plugin-pwa": "2.0.0",
     "vite-plus": "catalog:",
+    "vue-tsc": "3.3.14",
     "workbox-build": "7.4.1"
   },
   "engines": {

@@ -78,7 +78,7 @@ function loadExpandedDirectories(): void {
   for (const [path, state] of directories) {
     if (state !== "unloaded") continue;
     const item = tree?.getItem(path);
-    if (item?.isDirectory() && item.isExpanded()) void loadDirectory(path);
+    if (item && "isExpanded" in item && item.isExpanded()) void loadDirectory(path);
   }
 }
 

@@ -114,7 +114,16 @@ messages.push({
       popover-id="fixture-footer-model"
       anchor-name="--fixture-footer-model"
       placement="up"
-      :models="[{ id: 'fixture/model', label: 'Fixture', provider: 'fixture' }]"
+      :models="[
+        {
+          id: 'fixture/model',
+          label: 'Fixture',
+          provider: 'fixture',
+          reasoning: true,
+          thinkingLevels: ['low', 'medium', 'high'],
+          supportsImages: false,
+        },
+      ]"
       current-thinking-level="medium"
       :thinking-options="['low', 'medium', 'high']"
     />

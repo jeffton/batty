@@ -1,3 +1,13 @@
+# Vue type checking — 2026-11-10
+
+`pnpm typecheck` runs `vue-tsc@3.3.14` with stock `typescript@6.0.3`; `pnpm check` runs formatting/lint and that checker once. It covers all 59 Vue SFCs, their templates and component props, plus the existing server/client TypeScript inputs. The generic `*.vue` shim is removed. Negative probes confirmed errors in SFC scripts, template expressions, imported component props and server TypeScript.
+
+TypeScript 7.0.2's CLI does not implement Vue's classic compiler hooks. The supported [native bridge](https://github.com/johnsoncodehk/typescript-native-bridge) replaces the TypeScript package with a patched fork and platform-specific native libraries. On the same source, `vue-tsc` took 25.1 seconds with TS6 versus 4.9 seconds with bridge `6.0.3-bridge.19.tsgo.7.0.2`; both reported the same two existing Vue errors. The previous plain TS7 check took 2.7 seconds but skipped SFC checking. Stock TS6 is selected for the simpler, stable toolchain; the bridge is not installed. Tests do not run an additional type checker.
+
+Reviewed [Vue Language Tools 3.3.14 release notes](https://github.com/vuejs/language-tools/releases/tag/v3.3.14), [Vue's bridge integration](https://github.com/vuejs/language-tools/pull/6129) and [TypeScript 6 release notes](https://devblogs.microsoft.com/typescript/announcing-typescript-6-0/). No compiler-option migration is required. The existing Trees expansion check uses its structural directory-only member for narrowing, and the model UI fixture supplies its required model capabilities.
+
+Validation on the reviewed tree based on `e8cc28b`: `pnpm check` passed in 26.1 seconds. The full parallel suite took 90.5 seconds: 1,096 passed, two existing skips, and one fixture-navigation timeout during cold Vite dependency optimization after the lockfile change. Its focused browser file then passed all nine cases without source changes (19.7 seconds); the complete suite was not repeated. Build, startup, offline and both deployment regression gates passed. Independent Sol review approved.
+
 # Workspace code browsing — 2026-11-09
 
 Added `@pierre/trees@1.0.0-beta.6`, the registry’s current `latest`; Trees has no stable release. Its [vanilla API](https://trees.software/docs#get-started-with-vanilla) mounts directly into Vue-owned hosts. React wrappers are unused, so the package extension marks React peers optional. Trees uses Preact internally. Existing `@pierre/diffs@1.6.4` renders selected files through CodeView.

@@ -1,9 +1,41 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import sharp from "sharp";
 import { expect, test } from "vite-plus/test";
 import type { SessionState, UiContentBlock } from "@/shared/types";
-import { TranscriptImages } from "./transcript-images";
+import { imagePreview, TranscriptImages } from "./transcript-images";
+
+test("previews imported attachments with paths longer than Windows MAX_PATH", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "batty-long-image-"));
+  try {
+    const nested = path.join(
+      directory,
+      "remote-".repeat(10),
+      "session-".repeat(10),
+      "call-".repeat(20),
+    );
+    await fs.mkdir(nested, { recursive: true });
+    const filePath = path.join(nested, "recording-notification.png");
+    expect(filePath.length).toBeGreaterThan(260);
+    const original = await sharp({
+      create: { width: 320, height: 240, channels: 3, background: "#008080" },
+    })
+      .png()
+      .toBuffer();
+    await fs.writeFile(filePath, original);
+
+    const preview = await imagePreview(filePath);
+    expect(await sharp(preview).metadata()).toMatchObject({
+      format: "webp",
+      width: 320,
+      height: 240,
+    });
+    expect(await fs.readFile(`${filePath}.preview.webp`)).toEqual(preview);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
 
 const image: UiContentBlock = {
   type: "image",

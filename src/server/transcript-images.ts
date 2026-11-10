@@ -15,7 +15,8 @@ export async function imagePreview(filePath: string): Promise<Buffer> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
-  const data = await sharp(filePath, { limitInputPixels: 64_000_000 })
+  // Node supports long Windows paths that libvips cannot open directly.
+  const data = await sharp(await fs.readFile(filePath), { limitInputPixels: 64_000_000 })
     .rotate()
     .resize({ width: 768, height: 768, fit: "inside", withoutEnlargement: true })
     .webp({ quality: 75 })

@@ -12,7 +12,8 @@ import { flushPromises, mount } from "@vue/test-utils";
 import SubagentSessionPopover from "./SubagentSessionPopover.vue";
 import type { SessionState } from "@/shared/types";
 import { RpcError } from "@/shared/rpc";
-import { getSession, getSessionMessages, stopCronRun, stopSubagent } from "@/client/lib/api";
+import { getSessionMessages, stopCronRun, stopSubagent } from "@/client/lib/api";
+import { rpcCall } from "@/client/lib/rpc";
 
 const session = {
   id: "worker",
@@ -36,7 +37,6 @@ const session = {
 } satisfies SessionState;
 
 vi.mock("@/client/lib/api", () => ({
-  getSession: vi.fn(async () => session),
   getSessionMessages: vi.fn(),
   stopSubagent: vi.fn(async () => ({ ok: true })),
   stopCronRun: vi.fn(async () => ({ ok: true })),
@@ -317,7 +317,7 @@ test("cron header stops only the current run and follows completion while viewin
 
 test("missing local or remote sessions show an empty state, not a connection failure", async () => {
   for (const sessionId of ["deleted-worker", "remote:peer:deleted-worker"]) {
-    vi.mocked(getSession).mockRejectedValueOnce(new RpcError("NOT_FOUND", "Session not found"));
+    vi.mocked(rpcCall).mockRejectedValueOnce(new RpcError("NOT_FOUND", "Session not found"));
     const wrapper = mount(SubagentSessionPopover, {
       props: { popoverId: "missing-popover", sessionId },
       global: {
@@ -358,7 +358,14 @@ test("closing during history loading does not lock history after reopening", asy
       { id: "100:0", role: "user", timestamp: 1, blocks: [{ type: "text", text: "recent" }] },
     ] as SessionState["messages"],
   };
-  vi.mocked(getSession).mockResolvedValueOnce(historySession).mockResolvedValueOnce(historySession);
+  vi.mocked(rpcCall).mockResolvedValueOnce({
+    value: {},
+    events: new ReadableStream({
+      start(controller) {
+        controller.enqueue({ type: "reset", state: historySession });
+      },
+    }),
+  } as Awaited<ReturnType<typeof rpcCall>>);
   const wrapper = mount(SubagentSessionPopover, {
     props: { popoverId: "history-popover", sessionId: "worker" },
     global: {
@@ -413,6 +420,15 @@ test("closing during history loading does not lock history after reopening", asy
 
 test("a deleted session clears a cached transcript when reopened", async () => {
   const close = vi.fn();
+  vi.mocked(rpcCall).mockResolvedValueOnce({
+    value: {},
+    events: new ReadableStream({
+      start(controller) {
+        controller.enqueue({ type: "reset", state: session });
+      },
+      cancel: close,
+    }),
+  } as Awaited<ReturnType<typeof rpcCall>>);
   vi.stubGlobal(
     "SessionSubscription",
     class {
@@ -440,7 +456,7 @@ test("a deleted session clears a cached transcript when reopened", async () => {
   await flushPromises();
   expect(wrapper.findComponent({ name: "SessionTranscriptView" }).exists()).toBe(true);
   toggle("closed");
-  vi.mocked(getSession).mockRejectedValueOnce(new RpcError("NOT_FOUND", "Session not found"));
+  vi.mocked(rpcCall).mockRejectedValueOnce(new RpcError("NOT_FOUND", "Session not found"));
   toggle("open");
   await flushPromises();
   expect(wrapper.findComponent({ name: "SessionTranscriptView" }).exists()).toBe(false);
@@ -454,7 +470,7 @@ test("server and network errors remain errors, not missing-session empty states"
     new RpcError("INTERNAL", "Server failed"),
     new TypeError("Network failed"),
   ]) {
-    vi.mocked(getSession).mockRejectedValueOnce(error);
+    vi.mocked(rpcCall).mockRejectedValueOnce(error);
     const wrapper = mount(SubagentSessionPopover, {
       props: { popoverId: "failed-popover", sessionId: "worker" },
       global: {
@@ -472,6 +488,58 @@ test("server and network errors remain errors, not missing-session empty states"
     await flushPromises();
     expect(wrapper.get(".subagent-session-popover__empty--error").text()).toBe(error.message);
     expect(wrapper.find('[role="status"]').exists()).toBe(false);
+    wrapper.unmount();
+  }
+});
+
+test("an initial read failure recovers without closing and reopening the popover", async () => {
+  vi.useFakeTimers();
+  vi.mocked(rpcCall).mockRejectedValueOnce(new DOMException("signal timed out", "TimeoutError"));
+  const sources: { onmessage?: (event: { data: string }) => void }[] = [];
+  vi.stubGlobal(
+    "SessionSubscription",
+    class {
+      onmessage?: (event: { data: string }) => void;
+      close = vi.fn();
+      constructor() {
+        sources.push(this);
+      }
+    },
+  );
+  const wrapper = mount(SubagentSessionPopover, {
+    props: { popoverId: "recovery-popover", sessionId: "worker" },
+    global: {
+      stubs: {
+        FullPopover: {
+          name: "FullPopover",
+          template: '<div><slot name="header-actions" /><slot /></div>',
+        },
+        SessionHeaderStatus: true,
+        SessionTranscriptView: true,
+      },
+    },
+  });
+  try {
+    wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState: "open" });
+    await flushPromises();
+    expect(wrapper.text()).toContain("signal timed out");
+    await vi.advanceTimersByTimeAsync(2000);
+    await flushPromises();
+    expect(sources).toHaveLength(1);
+    sources[0]!.onmessage!({ data: JSON.stringify({ type: "reset", state: session }) });
+    await flushPromises();
+    expect(wrapper.findComponent({ name: "SessionTranscriptView" }).exists()).toBe(true);
+    expect(wrapper.text()).not.toContain("signal timed out");
+    expect(wrapper.getComponent({ name: "SessionHeaderStatus" }).props("connectionState")).toBe(
+      "online",
+    );
+    expect(
+      vi
+        .mocked(rpcCall)
+        .mock.calls.slice(-2)
+        .map(([operation]) => operation),
+    ).toEqual(["session.watch", "session.watch"]);
+  } finally {
     wrapper.unmount();
   }
 });

@@ -5,9 +5,8 @@ import FullPopover from "@/client/components/FullPopover.vue";
 import SessionHeaderStatus from "@/client/components/SessionHeaderStatus.vue";
 import StreamingStopControl from "@/client/components/StreamingStopControl.vue";
 import SessionTranscriptView from "@/client/components/SessionTranscriptView.vue";
-import { getSessionMessages, getSession, stopSubagent, stopCronRun } from "@/client/lib/api";
+import { getSessionMessages, stopSubagent, stopCronRun } from "@/client/lib/api";
 import { applyServerEvent } from "@/client/lib/session-events";
-import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
 import { sessionHistoryCursor } from "@/client/lib/session-stream";
 import { RpcError } from "@/shared/rpc";
 import { prependHistoryPage } from "@/client/lib/session-pagination";
@@ -63,23 +62,32 @@ function applyEvent(event: ServerEvent): void {
 }
 
 function openStream(): void {
-  if (!session.value) {
-    return;
-  }
-
   closeStream();
   connection = createSessionConnection({
     operation: "session.watch",
-    input: () => ({ sessionId: session.value!.id, after: sessionHistoryCursor(session.value) }),
+    input: () => ({
+      sessionId: props.sessionId,
+      after: session.value ? sessionHistoryCursor(session.value) : undefined,
+    }),
     onConnecting: () => {
       connectionState.value = "connecting";
     },
-    onError: () => {
+    onError: (error) => {
+      loading.value = false;
       connectionState.value = "offline";
+      if (error !== undefined) handleSessionError(error);
+      return missing.value ? false : undefined;
     },
     onEvent: (event) => {
       applyEvent(event);
-      if (event.type === "reset") connectionState.value = "online";
+      if (event.type === "reset") {
+        loading.value = false;
+        errorMessage.value = undefined;
+        connectionState.value = "online";
+      } else if (event.type === "error") {
+        loading.value = false;
+        errorMessage.value = event.message;
+      }
     },
   });
   connection.open();
@@ -96,36 +104,15 @@ function handleSessionError(error: unknown): void {
   }
 }
 
-async function ensureSessionLoaded(): Promise<void> {
-  if (loading.value) {
-    return;
-  }
-
-  const generation = ++loadGeneration;
+function ensureSessionLoaded(): void {
+  loadGeneration += 1;
   loading.value = true;
   connectionState.value = "connecting";
   errorMessage.value = undefined;
   missing.value = false;
-  try {
-    const opened = normalizeSessionState(await getSession(props.sessionId));
-    if (!opened) {
-      throw new Error("Failed to open session");
-    }
-    if (generation !== loadGeneration) {
-      return;
-    }
-    session.value = mergeSessionState(opened, session.value);
-    openStream();
-  } catch (error) {
-    if (generation === loadGeneration) {
-      connectionState.value = "offline";
-      handleSessionError(error);
-    }
-  } finally {
-    if (generation === loadGeneration) {
-      loading.value = false;
-    }
-  }
+  // session.watch supplies the initial snapshot and owns reconnect from the first
+  // request. A failed one-shot read must not strand the popover before recovery starts.
+  openStream();
 }
 
 async function loadOlderMessages(): Promise<void> {

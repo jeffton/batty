@@ -10,7 +10,8 @@ type ConnectionOptions = {
   onConnecting: () => void;
   onOpen?: () => void;
   onEvent: (event: ServerEvent) => void;
-  onError: () => void;
+  /** Return false for a terminal subscription error (for example a deleted session). */
+  onError: (error?: unknown) => void | false;
   onWatchdog?: () => void;
 };
 type Subscription = {
@@ -70,11 +71,10 @@ export function createSessionConnection(options: ConnectionOptions) {
         )
           options.onEvent(event);
       }
-    } catch {
+    } catch (error) {
       if (source !== current) return;
       stopSource();
-      options.onError();
-      retry = setTimeout(recover, 2000);
+      if (options.onError(error) !== false) retry = setTimeout(recover, 2000);
     } finally {
       await reader?.cancel().catch(() => {});
       reader?.releaseLock();

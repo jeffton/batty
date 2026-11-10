@@ -22,3 +22,4 @@ export const rpcCall = client.call.bind(client) as RpcCaller<
   OwnerEvents
 >;
 export const closeRpcTransport = client.close.bind(client);
+export const isRpcTransportConnecting = () => client.connecting;

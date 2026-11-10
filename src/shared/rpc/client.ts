@@ -57,6 +57,10 @@ export class RpcClient {
     }
   }
 
+  get connecting(): boolean {
+    return this.connection?.socket.readyState === 0;
+  }
+
   close(): void {
     const current = this.connection;
     this.connection = undefined;

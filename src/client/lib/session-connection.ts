@@ -1,6 +1,6 @@
 import type { ServerEvent } from "@/shared/types";
 import type { OwnerInputs, OwnerSessionEvent } from "@/shared/owner-api";
-import { rpcCall, closeRpcTransport } from "./rpc";
+import { rpcCall, closeRpcTransport, isRpcTransportConnecting } from "./rpc";
 import { recordErrorLifecycle } from "./browser-errors";
 import { createPushForegroundHandler } from "./push-foreground";
 
@@ -111,6 +111,9 @@ export function createSessionConnection(options: ConnectionOptions) {
 
   function recover() {
     if (!active || !navigator.onLine) return;
+    // A pending WebSocket upgrade is not a stalled session.watch reply. Let the
+    // browser finish (or fail) it instead of cancelling it every watchdog tick.
+    if (source && !suspended && isRpcTransportConnecting()) return;
     const age = Date.now() - startedAt;
     // Session events can be idle indefinitely; RpcChannel owns socket liveness.
     if (source && !suspended && (!source.connecting || (age >= 0 && age < 5000))) return;

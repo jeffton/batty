@@ -1,10 +1,11 @@
-import { SocketChannel } from "@/shared/socket-channel";
-import { stripBaseUrl, withBaseUrl } from "./base-url";
+import { RpcChannel, RpcError, type RpcReply } from "@/shared/rpc-channel";
+import { withBaseUrl } from "./base-url";
 
+export type RpcCallOptions = { signal?: AbortSignal; body?: ReadableStream<Uint8Array> };
 type Connection = {
   socket: WebSocket;
-  channel?: SocketChannel;
-  ready: Promise<SocketChannel>;
+  channel?: RpcChannel;
+  ready: Promise<RpcChannel>;
   waiters: number;
 };
 let connection: Connection | undefined;
@@ -17,7 +18,7 @@ function openConnection(): Connection {
   const current: Connection = {
     socket,
     waiters: 0,
-    ready: new Promise<SocketChannel>((resolve, reject) => {
+    ready: new Promise<RpcChannel>((resolve, reject) => {
       const cleanup = () => {
         socket.removeEventListener("open", opened);
         socket.removeEventListener("error", failed);
@@ -27,17 +28,15 @@ function openConnection(): Connection {
         cleanup();
         if (connection === current) connection = undefined;
         socket.close();
-        reject(new Error("Batty socket disconnected"));
+        reject(new RpcError("OFFLINE", "Batty socket disconnected"));
       };
       const opened = () => {
         cleanup();
-        const channel = new SocketChannel(socket);
+        const channel = new RpcChannel(socket);
         current.channel = channel;
-        void channel.closed
-          .finally(() => {
-            if (connection === current) connection = undefined;
-          })
-          .catch(() => {});
+        void channel.closed.then(() => {
+          if (connection === current) connection = undefined;
+        });
         resolve(channel);
       };
       socket.addEventListener("open", opened);
@@ -48,13 +47,14 @@ function openConnection(): Connection {
   return current;
 }
 
-async function readyChannel(signal: AbortSignal): Promise<SocketChannel> {
-  signal.throwIfAborted();
+async function readyChannel(signal?: AbortSignal): Promise<RpcChannel> {
+  signal?.throwIfAborted();
   if (connection && connection.socket.readyState > WebSocket.OPEN) connection = undefined;
   const current = (connection ??= openConnection());
   current.waiters++;
   let aborted: (() => void) | undefined;
   try {
+    if (!signal) return await current.ready;
     return await Promise.race([
       current.ready,
       new Promise<never>((_, reject) => {
@@ -64,7 +64,7 @@ async function readyChannel(signal: AbortSignal): Promise<SocketChannel> {
       }),
     ]);
   } finally {
-    if (aborted) signal.removeEventListener("abort", aborted);
+    if (aborted) signal?.removeEventListener("abort", aborted);
     current.waiters--;
     if (!current.waiters && current.socket.readyState === WebSocket.CONNECTING) {
       if (connection === current) connection = undefined;
@@ -73,19 +73,29 @@ async function readyChannel(signal: AbortSignal): Promise<SocketChannel> {
   }
 }
 
-/** One authenticated app socket. A lost request fails; only a new request reconnects. */
-export async function socketFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
-  if (url.origin !== window.location.origin) throw new Error("Batty socket requires same origin");
-  const path = stripBaseUrl(url.pathname);
-  if (!path) throw new Error("Request is outside the Batty app");
-  const request = new Request(input instanceof Request ? input : url, init);
-  const channel = await readyChannel(request.signal);
-  request.signal.throwIfAborted();
-  return channel.request(`${path}${url.search}`, request);
+/** Calls are never replayed. A new call reconnects after a lost connection. */
+export async function rpcCall<T = unknown>(
+  operation: string,
+  input: unknown,
+  options?: RpcCallOptions,
+): Promise<RpcReply<T>> {
+  const channel = await readyChannel(options?.signal);
+  options?.signal?.throwIfAborted();
+  try {
+    return await channel.call<T>(operation, input, options);
+  } catch (error) {
+    // Upgrade cookies are fixed for a socket generation. Do not retain a rejected identity.
+    if (
+      error instanceof RpcError &&
+      error.code === "UNAUTHORIZED" &&
+      connection?.channel === channel
+    )
+      closeRpcTransport();
+    throw error;
+  }
 }
 
-export function closeSocketTransport(): void {
+export function closeRpcTransport(): void {
   const current = connection;
   connection = undefined;
   if (current?.channel) current.channel.close();

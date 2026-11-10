@@ -1,6 +1,6 @@
 // @vitest-environment node
 import path from "node:path";
-import { fixtureRoute } from "../test/socket-fixture";
+import { fixtureOperation } from "../test/socket-fixture";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import { launchWebKit } from "../test/webkit";
 import type { ViteDevServer } from "vite";
@@ -131,19 +131,17 @@ test.each(["Chromium", "WebKit"])(
       const safe = await open(context, "/batty-safe");
       const same = await open(context, "/batty/");
       for (const page of [main, safe, same]) {
-        await fixtureRoute(server, page, "**/api/main", (route) =>
-          route.fulfill({
-            json: {
-              id: "1",
-              streamId: "test",
-              revision: 1,
-              messages: [],
-              totalMessageCount: 0,
-              activeTools: [],
-              queuedPrompts: [],
-            },
-          }),
-        );
+        await fixtureOperation(server, page, "session.get", async () => ({
+          value: {
+            id: "1",
+            streamId: "test",
+            revision: 1,
+            messages: [],
+            totalMessageCount: 0,
+            activeTools: [],
+            queuedPrompts: [],
+          },
+        }));
         await page.evaluate(() => (window as any).fixture.store.bootstrap());
         expect(await page.evaluate(() => (window as any).fixture.store.lastError)).toBeUndefined();
         expect(await page.evaluate(() => (window as any).fixture.store.authenticated)).toBe(true);

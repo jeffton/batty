@@ -1,22 +1,20 @@
 import WebSocket from "ws";
-import { SocketChannel, SOCKET_MAX_FRAME_BYTES } from "../shared/socket-channel";
+import { RpcChannel, RpcError } from "../shared/rpc-channel";
 import type { RemoteConnectionCredentials } from "./remote-access";
 import type { RemoteWorkers } from "./remote-workers";
-import { NodeHttpError, nodeRequest } from "./remote-workers";
-import { nodeSocketHandler } from "./socket-dispatch";
 
 export type ReverseStatus = {
   state: "connected" | "connecting" | "disconnected" | "error";
   error?: string;
 };
-type Link = { channel: SocketChannel; configuration: string };
+type Link = { channel: RpcChannel; configuration: string; ready: boolean };
 type Dial = { controller: AbortController; configuration: string };
 
 /** Both directions use the same duplex channel as browsers. Only the dialer
  * needs a reachable URL. Reconnect never replays a command or owns job lifetime.
  */
 export class ReverseConnections {
-  private localUrl?: string;
+  private started = false;
   private stopped = false;
   private readonly links = new Map<string, Link>();
   private readonly outgoing = new Map<string, Dial>();
@@ -28,23 +26,22 @@ export class ReverseConnections {
     return this.statuses.get(id) ?? { state: "disconnected" };
   }
   hasControl(id: string): boolean {
-    return !!this.remotes.access.getConnection(id)?.localGrantId && this.links.has(id);
-  }
-
-  async notifyRemoval(connection: RemoteConnectionCredentials): Promise<void> {
-    await nodeRequest(
-      connection,
-      "unpair",
-      { method: "POST", signal: AbortSignal.timeout(5000) },
-      this.remotes.requestNode,
+    return (
+      !!this.remotes.access.getConnection(id)?.localGrantId && this.links.get(id)?.ready === true
     );
   }
 
-  start(localUrl: string) {
-    const url = new URL(localUrl);
-    if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) || url.protocol !== "http:")
-      throw new Error("Node dispatcher requires a local HTTP listener");
-    this.localUrl = url.href;
+  async notifyRemoval(connection: RemoteConnectionCredentials): Promise<void> {
+    await this.remotes.requestNode(
+      connection,
+      "node.unpair",
+      {},
+      { signal: AbortSignal.timeout(5000) },
+    );
+  }
+
+  start() {
+    this.started = true;
     this.reconfigure();
   }
 
@@ -69,7 +66,7 @@ export class ReverseConnections {
         this.outgoing.delete(id);
       }
     }
-    if (!this.localUrl || this.stopped) return;
+    if (!this.started || this.stopped) return;
     for (const item of this.remotes.access.listConnections()) {
       const connection = this.remotes.connection(item.id);
       if (
@@ -102,37 +99,48 @@ export class ReverseConnections {
     return connection;
   }
 
-  accept(connection: RemoteConnectionCredentials, socket: WebSocket): SocketChannel {
-    if (!this.localUrl) throw new Error("Node listener is not ready");
+  accept(connection: RemoteConnectionCredentials, socket: WebSocket): RpcChannel {
+    if (!this.started) throw new Error("Node listener is not ready");
     this.links.get(connection.id)?.channel.close();
-    const channel = new SocketChannel(socket, {
-      handle: nodeSocketHandler(() => this.localUrl!, connection, this.remotes),
+    const verified = Promise.withResolvers<void>();
+    // A disconnect/mismatch may happen without a pending inbound operation.
+    void verified.promise.catch(() => {});
+    const channel = new RpcChannel(socket, {
+      handle: async (operation, input, call) => {
+        if (operation !== "node.identity") await verified.promise;
+        call.signal.throwIfAborted();
+        return this.remotes.handleNode(connection, operation, input, call);
+      },
     });
-    const link = { channel, configuration: JSON.stringify(connection) };
+    const link = { channel, configuration: JSON.stringify(connection), ready: false };
     this.links.set(connection.id, link);
     this.setStatus(connection.id, { state: "connecting" });
     void channel.closed.then(() => {
+      verified.reject(new RpcError("OFFLINE", "Peer identity handshake disconnected"));
       if (this.links.get(connection.id) !== link) return;
       this.links.delete(connection.id);
       this.setStatus(connection.id, { state: "disconnected" });
     });
-    void nodeRequest<{ instanceId: string; grantId: string }>(
-      connection,
-      "identity",
-      {},
-      this.remotes.requestNode,
-    )
-      .then(async (identity) => {
+    void channel
+      .call<{ instanceId: string; grantId: string }>(
+        "node.identity",
+        {},
+        { signal: AbortSignal.timeout(30_000) },
+      )
+      .then(async ({ value: identity }) => {
         if (identity.instanceId !== connection.instanceId)
           throw new Error("Socket peer identity mismatch");
         if (this.links.get(connection.id) !== link) return;
         await this.remotes.access.updateIdentity(connection.id, identity);
         if (this.links.get(connection.id) !== link) return;
         link.configuration = JSON.stringify(this.remotes.connection(connection.id));
+        link.ready = true;
+        verified.resolve();
         this.setStatus(connection.id, { state: "connected" });
         this.remotes.connect(connection.id);
       })
       .catch((error: unknown) => {
+        verified.reject(error);
         if (this.links.get(connection.id) !== link) return;
         channel.close();
         this.setStatus(connection.id, { state: "error", error: String(error) });
@@ -140,10 +148,10 @@ export class ReverseConnections {
     return channel;
   }
 
-  channel(connection: RemoteConnectionCredentials): SocketChannel {
-    if (!this.validGrant(connection)) throw new NodeHttpError(403, "Peer access removed");
+  channel(connection: RemoteConnectionCredentials): RpcChannel {
+    if (!this.validGrant(connection)) throw new RpcError("FORBIDDEN", "Peer access removed");
     const link = this.links.get(connection.id);
-    if (!link) throw new Error(`Remote ${connection.id}: socket is offline`);
+    if (!link?.ready) throw new RpcError("OFFLINE", `Remote ${connection.id}: socket is offline`);
     return link.channel;
   }
 
@@ -169,7 +177,7 @@ export class ReverseConnections {
             "x-batty-instance-id": this.remotes.access.identity().instanceId,
           },
           handshakeTimeout: 30_000,
-          maxPayload: SOCKET_MAX_FRAME_BYTES,
+          maxPayload: 0,
           perMessageDeflate: false,
           followRedirects: false,
         });
@@ -177,7 +185,7 @@ export class ReverseConnections {
         socket.on("error", () => {});
         abort = () => socket!.terminate();
         signal.addEventListener("abort", abort, { once: true });
-        const channel = await new Promise<SocketChannel>((resolve, reject) => {
+        const channel = await new Promise<RpcChannel>((resolve, reject) => {
           socket!.once("open", () => {
             // ws can emit messages immediately after open in the same read.
             // Install channel listeners before returning to its frame decoder.
@@ -193,7 +201,14 @@ export class ReverseConnections {
             response.resume();
             socket!.terminate();
             reject(
-              new NodeHttpError(response.statusCode!, `Peer socket HTTP ${response.statusCode}`),
+              new RpcError(
+                response.statusCode === 401
+                  ? "UNAUTHORIZED"
+                  : response.statusCode === 403
+                    ? "FORBIDDEN"
+                    : "OFFLINE",
+                `Peer socket HTTP ${response.statusCode}`,
+              ),
             );
           });
         });
@@ -203,8 +218,8 @@ export class ReverseConnections {
         if (
           !signal.aborted &&
           this.outgoing.get(connection.id) === dial &&
-          error instanceof NodeHttpError &&
-          [401, 403].includes(error.status)
+          error instanceof RpcError &&
+          ["UNAUTHORIZED", "FORBIDDEN"].includes(error.code)
         ) {
           await this.remotes.access.removeConnection(connection.id);
           this.remotes.disconnect(connection.id);

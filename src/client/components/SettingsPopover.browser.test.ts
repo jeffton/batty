@@ -1,4 +1,5 @@
-import { fixtureRoute } from "../test/socket-fixture";
+import { fixtureOperation } from "../test/socket-fixture";
+import { RpcError } from "../../shared/rpc-channel";
 // @vitest-environment node
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -37,9 +38,9 @@ test("instance colors affect app header and footer, not controls or content", as
   ] as const) {
     const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
     try {
-      await fixtureRoute(server, page, "**/api/**", (route) =>
-        route.fulfill({ json: { names: [] } }),
-      );
+      await fixtureOperation(server, page, "environment.list", async () => ({
+        value: { names: [] },
+      }));
       await page.goto(`${url}?shell=1`);
       let controls: unknown;
       let previousHeader: string | undefined;
@@ -91,41 +92,50 @@ for (const engine of ["chromium", "webkit"] as const) {
     let grants: { id: string; label: string }[] = [];
     let connections: Record<string, unknown>[] = [];
     try {
-      await fixtureRoute(server, page, "**/api/remotes", async (route) => {
-        if (route.request().method() === "GET") {
-          await route.fulfill({ json: { instanceId: "local", grants, connections } });
-          return;
-        }
-        const input = route.request().postDataJSON();
-        requests.push(input);
-        let body: unknown = { ok: true };
-        switch (input.action) {
-          case "token-generate":
-            grants = [{ id: "invitation", label: "Unused token" }];
-            body = { id: "invitation", token: "issued-private-token" };
-            break;
-          case "token-revoke":
-            grants = [];
-            break;
-          case "connection-add":
-            connections = [
-              {
-                id: "automatic-work-id",
-                label: "Work",
-                url: input.url,
-                status: { state: "connected" },
-              },
-            ];
-            break;
-          case "connection-remove":
-            connections = [];
-            break;
-        }
-        await route.fulfill({ json: body });
-      });
-      await fixtureRoute(server, page, "**/api/settings/environment", (route) =>
-        route.fulfill({ json: { names: [] } }),
+      await fixtureOperation(server, page, "remotes.get", async () => ({
+        value: { instanceId: "local", grants, connections },
+      }));
+      await fixtureOperation(
+        server,
+        page,
+        [
+          "remotes.token.generate",
+          "remotes.token.revoke",
+          "remotes.connection.add",
+          "remotes.connection.remove",
+        ],
+        async (payload, _context, _next, operation) => {
+          const input = payload as Record<string, string>;
+          requests.push({ operation, ...input });
+          let body: unknown = { ok: true };
+          switch (operation) {
+            case "remotes.token.generate":
+              grants = [{ id: "invitation", label: "Unused token" }];
+              body = { id: "invitation", token: "issued-private-token" };
+              break;
+            case "remotes.token.revoke":
+              grants = [];
+              break;
+            case "remotes.connection.add":
+              connections = [
+                {
+                  id: "automatic-work-id",
+                  label: "Work",
+                  url: input.url,
+                  status: { state: "connected" },
+                },
+              ];
+              break;
+            case "remotes.connection.remove":
+              connections = [];
+              break;
+          }
+          return { value: body };
+        },
       );
+      await fixtureOperation(server, page, "environment.list", async () => ({
+        value: { names: [] },
+      }));
       await page.goto(url);
       await page.getByRole("tab", { name: "Remote", exact: true }).click();
       await page.getByText("No connections.", { exact: true }).waitFor();
@@ -167,7 +177,9 @@ for (const engine of ["chromium", "webkit"] as const) {
       expect(await page.getByLabel("Remote token", { exact: true }).inputValue()).toBe("");
       await page.getByRole("button", { name: "Remove connection Work", exact: true }).click();
       await page.getByRole("button", { name: "Cancel", exact: true }).click();
-      expect(requests.some((request) => request.action === "connection-remove")).toBe(false);
+      expect(requests.some((request) => request.operation === "remotes.connection.remove")).toBe(
+        false,
+      );
       await page.getByRole("button", { name: "Remove connection Work", exact: true }).click();
       await page
         .getByRole("button", { name: "Confirm: Remove connection Work", exact: true })
@@ -177,14 +189,14 @@ for (const engine of ["chromium", "webkit"] as const) {
       await page.getByRole("button", { name: "Confirm: Cancel unused token", exact: true }).click();
       await expect.poll(() => page.getByText("Unused token", { exact: true }).count()).toBe(0);
       expect(requests).toEqual([
-        { action: "token-generate" },
+        { operation: "remotes.token.generate" },
         {
-          action: "connection-add",
+          operation: "remotes.connection.add",
           url: "https://work.example.com/batty/",
           token: "outgoing-private-token",
         },
-        { action: "connection-remove", id: "automatic-work-id" },
-        { action: "token-revoke", id: "invitation" },
+        { operation: "remotes.connection.remove", id: "automatic-work-id" },
+        { operation: "remotes.token.revoke", id: "invitation" },
       ]);
       expect(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
         true,
@@ -224,15 +236,15 @@ for (const engine of ["chromium", "webkit"] as const) {
           await page.addInitScript((base) => {
             window.__BATTY_BASE_URL__ = base;
           }, base);
-          await fixtureRoute(server, page, "**/api/**", async (route) => {
-            const input = route.request().method() === "POST" ? route.request().postDataJSON() : {};
-            await route.fulfill({
-              json:
-                input.action === "token-generate"
-                  ? { id: "fixture", token }
-                  : { grants: [], connections: [], names: [] },
-            });
-          });
+          await fixtureOperation(server, page, "environment.list", async () => ({
+            value: { names: [] },
+          }));
+          await fixtureOperation(server, page, "remotes.get", async () => ({
+            value: { grants: [], connections: [] },
+          }));
+          await fixtureOperation(server, page, "remotes.token.generate", async () => ({
+            value: { id: "fixture", token },
+          }));
           await page.goto(`${url}?route=not-part-of-address#fragment`);
           await page.getByRole("tab", { name: "Remote", exact: true }).click();
           const panel = page.getByRole("region", { name: "Remote Batty", exact: true });
@@ -307,44 +319,38 @@ test("Remote settings shows automatic peer names, offline status and pairing err
     const requests: Record<string, unknown>[] = [];
     let connected = false;
     try {
-      await fixtureRoute(server, page, "**/api/remotes", async (route) => {
-        if (route.request().method() === "GET") {
-          await route.fulfill({
-            json: {
-              instanceId: "hidden-installation-id",
-              grants: [],
-              connections: connected
-                ? [
-                    {
-                      id: "automatic-peer-id",
-                      label: "Work PC",
-                      url: "https://work.example.com/batty/",
-                      status: { state: "connected" },
-                    },
-                    {
-                      id: "automatic-offline-id",
-                      label: "Home Mac",
-                      url: "",
-                      status: { state: "disconnected" },
-                    },
-                  ]
-                : [],
-            },
-          });
-          return;
-        }
-        const input = route.request().postDataJSON();
+      await fixtureOperation(server, page, "remotes.get", async () => ({
+        value: {
+          instanceId: "hidden-installation-id",
+          grants: [],
+          connections: connected
+            ? [
+                {
+                  id: "automatic-peer-id",
+                  label: "Work PC",
+                  url: "https://work.example.com/batty/",
+                  status: { state: "connected" },
+                },
+                {
+                  id: "automatic-offline-id",
+                  label: "Home Mac",
+                  url: "",
+                  status: { state: "disconnected" },
+                },
+              ]
+            : [],
+        },
+      }));
+      await fixtureOperation(server, page, "remotes.connection.add", async (payload) => {
+        const input = payload as Record<string, unknown>;
         requests.push(input);
-        if (requests.length === 1) {
-          await route.fulfill({ status: 400, json: { error: "Token already used" } });
-          return;
-        }
+        if (requests.length === 1) throw new RpcError("BAD_INPUT", "Token already used");
         connected = true;
-        await route.fulfill({ json: { ok: true } });
+        return { value: { ok: true } };
       });
-      await fixtureRoute(server, page, "**/api/settings/environment", (route) =>
-        route.fulfill({ json: { names: [] } }),
-      );
+      await fixtureOperation(server, page, "environment.list", async () => ({
+        value: { names: [] },
+      }));
       await page.goto(url);
       await page.getByRole("tab", { name: "Remote", exact: true }).click();
       await page.getByText("No connections.", { exact: true }).waitFor();
@@ -369,12 +375,10 @@ test("Remote settings shows automatic peer names, offline status and pairing err
       ).toBe(1);
       expect(requests).toEqual([
         {
-          action: "connection-add",
           url: "https://work.example.com/batty/",
           token: "private-work-token",
         },
         {
-          action: "connection-add",
           url: "https://work.example.com/batty/",
           token: "private-work-token",
         },
@@ -413,24 +417,24 @@ for (const width of [390]) {
     const environmentRequests: unknown[] = [];
     let environmentNames = ["PROJECT_ROOT"];
     try {
-      await fixtureRoute(server, page, "**/api/**", async (route) => {
-        const pathname = new URL(route.request().url()).pathname;
-        let body: unknown = {};
-        if (pathname.endsWith("/environment")) body = { names: environmentNames };
-        if (pathname.endsWith("/environment/NEW_KEY")) {
-          environmentRequests.push(route.request().postDataJSON());
-          environmentNames = ["PROJECT_ROOT", "NEW_KEY"];
-          body = { names: environmentNames };
-        }
-        if (pathname.endsWith("/appearance")) {
-          const appearance = route.request().postDataJSON();
-          appearanceRequests.push(appearance);
-          body = { appearance };
-        }
-        if (pathname.includes("assistant-agents")) body = { content: "Workspace instructions" };
-        if (pathname.endsWith("/memory/tree")) body = { nodes: [], prepared: 0, total: 0 };
-        await route.fulfill({ json: body });
+      await fixtureOperation(server, page, "environment.list", async () => ({
+        value: { names: environmentNames },
+      }));
+      await fixtureOperation(server, page, "environment.set", async (input) => {
+        environmentRequests.push(input);
+        environmentNames = ["PROJECT_ROOT", "NEW_KEY"];
+        return { value: { names: environmentNames } };
       });
+      await fixtureOperation(server, page, "settings.appearance", async (appearance) => {
+        appearanceRequests.push(appearance);
+        return { value: { appearance } };
+      });
+      await fixtureOperation(server, page, "assistant-agents.get", async () => ({
+        value: { content: "Workspace instructions" },
+      }));
+      await fixtureOperation(server, page, "memory.tree", async () => ({
+        value: { nodes: [], prepared: 0, total: 0 },
+      }));
       await page.goto(url);
       await page.getByRole("combobox", { name: "Assistant workspace", exact: true }).waitFor();
       await page.getByRole("button", { name: "Batty AGENTS.md", exact: true }).click();
@@ -490,7 +494,7 @@ for (const width of [390]) {
       ).toBe("NEW_KEY");
       await page.getByRole("button", { name: "Set variable", exact: true }).click();
       await page.getByText("NEW_KEY", { exact: true }).waitFor();
-      expect(environmentRequests).toEqual([{ value: "value with spaces" }]);
+      expect(environmentRequests).toEqual([{ name: "NEW_KEY", value: "value with spaces" }]);
       expect(
         await page.getByRole("textbox", { name: "Variable name", exact: true }).inputValue(),
       ).toBe("");
@@ -515,14 +519,14 @@ test("copies saved keys and environment values through the real clipboard withou
       const page = await context.newPage();
       await page.setViewportSize({ width, height: 900 });
       let copies = 0;
-      await fixtureRoute(server, page, "**/api/**", async (route) => {
-        if (route.request().url().endsWith("/settings/copy-value")) {
-          copies++;
-          await new Promise((resolve) => setTimeout(resolve, 30));
-          return route.fulfill({ json: { value: "fixture-copy-value" } });
-        }
-        return route.fulfill({ json: { names: ["NORMAL_VALUE"] } });
+      await fixtureOperation(server, page, "settings.copy-value", async () => {
+        copies++;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return { value: { value: "fixture-copy-value" } };
       });
+      await fixtureOperation(server, page, "environment.list", async () => ({
+        value: { names: ["NORMAL_VALUE"] },
+      }));
       await page.goto(`${url}?savedKeys`);
       await page.getByRole("tab", { name: "Auth", exact: true }).click();
       expect(copies).toBe(0);

@@ -1,23 +1,14 @@
 import { afterEach, expect, test, vi } from "vite-plus/test";
-
-// Lifecycle tests inject a source; wire their existing fake through the new transport boundary.
-vi.mock("@/client/lib/socket-event-source", () => ({
-  SocketEventSource: class {
-    static CONNECTING = 0;
-    constructor(url: string) {
-      return new EventSource(url);
-    }
-  },
-}));
 import { createSessionConnection } from "./session-connection";
-import { closeSocketTransport } from "./socket-fetch";
-vi.mock("./socket-fetch", () => ({ socketFetch: vi.fn(), closeSocketTransport: vi.fn() }));
+import { rpcCall, closeRpcTransport } from "./rpc";
 import { prependHistoryPage } from "./session-pagination";
 import { recentSessionWindow } from "./session-window";
 import { applyServerEvent } from "./session-events";
 import { sessionHistoryCursor } from "./session-stream";
 import type { SessionState } from "@/shared/types";
-
+import { RpcError } from "@/shared/rpc-channel";
+import type { OwnerSessionEvent } from "@/shared/owner-api";
+vi.mock("./rpc", () => ({ rpcCall: vi.fn(), closeRpcTransport: vi.fn() }));
 const state = (ids: string[]): SessionState => ({
   id: "1",
   sessionId: "1",
@@ -41,90 +32,100 @@ const state = (ids: string[]): SessionState => ({
   })),
   activeTools: [],
 });
+
 const connections: ReturnType<typeof createSessionConnection>[] = [];
 afterEach(() => {
   for (const connection of connections.splice(0)) connection.close();
   vi.useRealTimers();
   vi.restoreAllMocks();
-  vi.unstubAllGlobals();
+  vi.resetAllMocks();
 });
-
-function connectionFixture() {
+const tick = async () => {
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+};
+async function fixture(stall = false) {
   vi.useFakeTimers();
-  const sources: FakeSource[] = [];
-  class FakeSource {
-    static CONNECTING = 0;
-    readyState = 1;
-    onopen?: () => void;
-    onerror?: () => void;
-    onmessage?: (event: { data: string }) => void;
-    close = vi.fn();
-    listeners = new Map<string, () => void>();
-    addEventListener(name: string, listener: () => void) {
-      this.listeners.set(name, listener);
-    }
-    removeEventListener(name: string) {
-      this.listeners.delete(name);
-    }
-    constructor(public url: string) {
-      sources.push(this);
-    }
-  }
-  vi.stubGlobal("EventSource", FakeSource);
+  const sources: {
+    input: unknown;
+    send(event: OwnerSessionEvent): void;
+    fail(): void;
+    cancel: ReturnType<typeof vi.fn>;
+  }[] = [];
+  vi.mocked(rpcCall).mockImplementation(async (_operation, input, options) => {
+    let active = true;
+    let controller!: ReadableStreamDefaultController<unknown>;
+    const cancel = vi.fn(() => {
+      active = false;
+    });
+    const events = new ReadableStream<unknown>({
+      start(value) {
+        controller = value;
+      },
+      cancel,
+    });
+    options!.signal!.addEventListener("abort", cancel, { once: true });
+    const current = {
+      input,
+      send(event: OwnerSessionEvent) {
+        if (active) controller.enqueue(event);
+      },
+      fail() {
+        if (active) controller.error(new Error("Disconnected"));
+      },
+      cancel,
+    };
+    sources.push(current);
+    if (stall && sources.length === 1) return await new Promise<never>(() => {});
+    return { value: undefined, events };
+  });
+  let cursor = "10";
   const onEvent = vi.fn();
   const onError = vi.fn();
   const connection = createSessionConnection({
-    path: () => "/events",
+    operation: "session.watch",
+    input: () => ({ sessionId: "main", after: cursor }),
     onConnecting: vi.fn(),
-    onOpen: vi.fn(),
     onError,
     onEvent,
   });
   connections.push(connection);
   connection.open();
-  return { connection, sources, onEvent, onError };
+  await tick();
+  return {
+    connection,
+    sources,
+    onEvent,
+    onError,
+    cursor: (value: string) => {
+      cursor = value;
+    },
+  };
 }
-
-test("only stale recovery/offline invalidates the shared socket, not normal disposal", () => {
-  vi.mocked(closeSocketTransport).mockClear();
-  const { connection } = connectionFixture();
-  window.dispatchEvent(new Event("focus"));
-  expect(closeSocketTransport).not.toHaveBeenCalled();
-  vi.setSystemTime(Date.now() + 60_000);
-  window.dispatchEvent(new Event("focus"));
-  expect(closeSocketTransport).toHaveBeenCalledOnce();
-  window.dispatchEvent(new Event("focus"));
-  expect(closeSocketTransport).toHaveBeenCalledOnce();
-  window.dispatchEvent(new Event("offline"));
-  expect(closeSocketTransport).toHaveBeenCalledTimes(2);
-  connection.close();
-  expect(closeSocketTransport).toHaveBeenCalledTimes(2);
+test("subscription auth failures leave transport-generation invalidation to rpcCall", async () => {
+  vi.mocked(rpcCall).mockRejectedValueOnce(new RpcError("UNAUTHORIZED", "Old session expired"));
+  const { onError } = await fixture();
+  expect(onError).toHaveBeenCalledOnce();
+  expect(closeRpcTransport).not.toHaveBeenCalled();
 });
 
-test("foreground events preserve a live stream and replace a stale stream only once", () => {
-  const { sources } = connectionFixture();
-  for (let i = 0; i < 6; i += 1) {
-    vi.advanceTimersByTime(5000);
-    sources[0]!.listeners.get("heartbeat")!();
-  }
+test("an idle session leaves the shared socket and unrelated calls intact without domain heartbeats", async () => {
+  const { sources } = await fixture();
+  await vi.advanceTimersByTimeAsync(120_000);
   window.dispatchEvent(new Event("pageshow"));
   document.dispatchEvent(new Event("visibilitychange"));
+  window.dispatchEvent(new Event("focus"));
   expect(sources).toHaveLength(1);
-  // Timers are suspended in the background; resume checks the wall clock immediately.
-  vi.setSystemTime(Date.now() + 15_000);
-  window.dispatchEvent(new Event("pageshow"));
-  document.dispatchEvent(new Event("visibilitychange"));
-  window.dispatchEvent(new Event("online"));
-  expect(sources).toHaveLength(2);
-  expect(sources[0]!.close).toHaveBeenCalledOnce();
+  expect(sources[0]!.cancel).not.toHaveBeenCalled();
+  expect(closeRpcTransport).not.toHaveBeenCalled();
 });
-
-test("focus and resume recover stale sockets without replacing healthy or newly connecting ones", () => {
-  const { connection, sources } = connectionFixture();
+test("focus/resume recover a stale subscription and disposal removes listeners", async () => {
+  const { connection, sources } = await fixture();
   window.dispatchEvent(new Event("focus"));
   document.dispatchEvent(new Event("resume"));
   expect(sources).toHaveLength(1);
   vi.setSystemTime(Date.now() + 60_000);
+  vi.advanceTimersByTime(5000);
+  await tick();
   window.dispatchEvent(new Event("focus"));
   document.dispatchEvent(new Event("resume"));
   expect(sources).toHaveLength(2);
@@ -133,153 +134,85 @@ test("focus and resume recover stale sockets without replacing healthy or newly 
   document.dispatchEvent(new Event("resume"));
   expect(sources).toHaveLength(2);
 });
-
-test("a suspended event loop replaces the old socket even after a buffered heartbeat", () => {
-  const { sources } = connectionFixture();
+test("buffered heartbeats cannot hide a suspended event loop", async () => {
+  const { sources } = await fixture();
   vi.setSystemTime(Date.now() + 60_000);
-  sources[0]!.listeners.get("heartbeat")!();
+  sources[0]!.send({ type: "heartbeat" });
+  await tick();
   vi.advanceTimersByTime(5000);
-  expect(sources).toHaveLength(2);
-  sources[1]!.listeners.get("heartbeat")!();
-  vi.advanceTimersByTime(5000);
+  await tick();
   expect(sources).toHaveLength(2);
 });
-
-test("a backwards wall-clock adjustment cannot strand a stream in a fresh lease", () => {
-  const { sources } = connectionFixture();
+test("a backwards clock change cannot grant a stale connection a fresh lease", async () => {
+  const { sources } = await fixture();
   vi.setSystemTime(Date.now() - 60_000);
-  window.dispatchEvent(new Event("focus"));
-  expect(sources).toHaveLength(2);
+  vi.advanceTimersByTime(5000);
+  await tick();
   window.dispatchEvent(new Event("focus"));
   expect(sources).toHaveLength(2);
 });
-
-test("a hidden wake tick preserves suspension until foreground recovery", () => {
+test("hidden wake ticks preserve suspension until foreground recovery", async () => {
   const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
-  const { sources } = connectionFixture();
+  const { sources } = await fixture();
   vi.setSystemTime(Date.now() + 60_000);
-  sources[0]!.listeners.get("heartbeat")!();
+  sources[0]!.send({ type: "heartbeat" });
+  await tick();
   vi.advanceTimersByTime(5000);
   expect(sources).toHaveLength(1);
-  sources[0]!.listeners.get("heartbeat")!();
   visibility.mockReturnValue("visible");
   document.dispatchEvent(new Event("visibilitychange"));
+  await tick();
   window.dispatchEvent(new Event("focus"));
   expect(sources).toHaveLength(2);
 });
-
-test("stalled handshakes retry within one heartbeat interval, with no late-event race", () => {
-  const { sources, onEvent } = connectionFixture();
-  sources[0]!.readyState = 0;
+test("a stalled opening is cancelled within one heartbeat interval", async () => {
+  const { sources } = await fixture(true);
   vi.advanceTimersByTime(4999);
   expect(sources).toHaveLength(1);
   vi.advanceTimersByTime(1);
+  await tick();
   expect(sources).toHaveLength(2);
-  sources[0]!.onmessage!({ data: '{"type":"error","message":"late"}' });
-  expect(onEvent).not.toHaveBeenCalled();
+  expect(sources[0]!.cancel).toHaveBeenCalledOnce();
 });
-
-test("background timers preserve the stream; foreground replaces it once when stale", () => {
-  const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
-  const { sources } = connectionFixture();
-  vi.advanceTimersByTime(60_000);
-  expect(sources).toHaveLength(1);
-  visibility.mockReturnValue("visible");
-  document.dispatchEvent(new Event("visibilitychange"));
-  window.dispatchEvent(new Event("pageshow"));
+test("reconnect uses the latest cursor and rejects late events from old subscriptions", async () => {
+  const { connection, sources, onEvent, cursor } = await fixture();
+  sources[0]!.send({ type: "error", message: "first" });
+  await tick();
+  expect(onEvent).toHaveBeenCalledOnce();
+  cursor("11");
+  sources[0]!.fail();
+  await tick();
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(sources[1]!.input).toEqual({ sessionId: "main", after: "11" });
+  sources[0]!.send({ type: "error", message: "late" });
+  await tick();
+  expect(onEvent).toHaveBeenCalledOnce();
+  connection.close();
+  sources[1]!.fail();
+  await vi.advanceTimersByTimeAsync(120_000);
   expect(sources).toHaveLength(2);
+  expect(vi.getTimerCount()).toBe(0);
 });
-
-test("silent streams are replaced after 15 seconds and opening alone grants no indefinite lease", () => {
-  const { sources } = connectionFixture();
-  sources[0]!.onopen!();
-  vi.advanceTimersByTime(15_000);
-  expect(sources).toHaveLength(2);
-});
-
-test("foreground recovery cancels retry and stale callbacks cannot restart the new stream", () => {
-  const { sources, onEvent } = connectionFixture();
-  sources[0]!.onerror!();
-  expect(sources[0]!.close).toHaveBeenCalledOnce();
-  window.dispatchEvent(new Event("pageshow"));
-  expect(sources).toHaveLength(2);
-  sources[1]!.onopen!();
-  sources[0]!.onopen!();
-  sources[0]!.onerror!();
-  sources[0]!.onmessage!({ data: '{"type":"error","message":"late"}' });
-  vi.advanceTimersByTime(2000);
-  expect(sources).toHaveLength(2);
-  expect(onEvent).not.toHaveBeenCalled();
-});
-
-test("offline stops retries; online resumes once; disposed streams stay closed", () => {
+test("offline stops retries; online opens once; ordinary disposal preserves the socket", async () => {
   const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
-  const { connection, sources } = connectionFixture();
-  sources[0]!.onerror!();
+  const { connection, sources } = await fixture();
+  sources[0]!.fail();
+  await tick();
   online.mockReturnValue(false);
   window.dispatchEvent(new Event("offline"));
-  vi.advanceTimersByTime(30_000);
-  window.dispatchEvent(new Event("pageshow"));
+  await vi.advanceTimersByTimeAsync(30_000);
   expect(sources).toHaveLength(1);
   expect(vi.getTimerCount()).toBe(0);
+  expect(closeRpcTransport).toHaveBeenCalledOnce();
   online.mockReturnValue(true);
   window.dispatchEvent(new Event("online"));
+  await tick();
   window.dispatchEvent(new Event("pageshow"));
   expect(sources).toHaveLength(2);
   connection.close();
+  expect(closeRpcTransport).toHaveBeenCalledOnce();
   window.dispatchEvent(new Event("online"));
-  document.dispatchEvent(new Event("visibilitychange"));
-  vi.advanceTimersByTime(30_000);
   expect(sources).toHaveLength(2);
-  expect(vi.getTimerCount()).toBe(0);
-});
-
-test("main and worker streams reconnect at their latest cursor; closing rejects late events and cancels timers", async () => {
-  vi.useFakeTimers();
-  const sources: {
-    url: string;
-    onmessage?: (event: { data: string }) => void;
-    onerror?: () => void;
-    onopen?: () => void;
-    close: ReturnType<typeof vi.fn>;
-  }[] = [];
-  vi.stubGlobal(
-    "EventSource",
-    class {
-      onmessage?: (event: { data: string }) => void;
-      onerror?: () => void;
-      onopen?: () => void;
-      close = vi.fn();
-      addEventListener = vi.fn();
-      removeEventListener = vi.fn();
-      constructor(public url: string) {
-        sources.push(this);
-      }
-    },
-  );
-  let cursor = "10";
-  const events = vi.fn();
-  const connection = createSessionConnection({
-    path: () => `/events?after=${cursor}`,
-    onConnecting: vi.fn(),
-    onError: vi.fn(),
-    onEvent: events,
-  });
-  connection.open();
-  sources[0]!.onmessage!({ data: '{"type":"error","message":"visible error"}' });
-  expect(events).toHaveBeenCalledTimes(1);
-  cursor = "11";
-  sources[0]!.onerror!();
-  await vi.advanceTimersByTimeAsync(2000);
-  expect(sources[1]!.url).toBe("/events?after=11");
-  expect(sources[0]!.close).toHaveBeenCalledOnce();
-  sources[0]!.onmessage!({ data: '{"type":"error","message":"stale"}' });
-  expect(events).toHaveBeenCalledTimes(1);
-  connection.close();
-  sources[1]!.onerror!();
-  await vi.advanceTimersByTimeAsync(120000);
-  expect(sources).toHaveLength(2);
-  expect(vi.getTimerCount()).toBe(0);
 });
 
 test("invisible-entry cursor survives empty deltas, metadata updates and cache serialization", () => {

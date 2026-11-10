@@ -5,7 +5,7 @@ import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import { FolderTree, Search, GitBranch } from "@lucide/vue";
 import WorkspaceFileSearch from "./WorkspaceFileSearch.vue";
 import FullPopover from "./FullPopover.vue";
-import { getWorkspaceFiles, getWorkspaceGit } from "@/client/lib/api";
+import { getWorkspaceFile, getWorkspaceFiles, getWorkspaceGit } from "@/client/lib/api";
 import type { WorkspaceInfo } from "@/shared/types";
 
 const props = defineProps<{ popoverId: string; workspace?: WorkspaceInfo }>();
@@ -93,7 +93,7 @@ async function selectFile(path: string): Promise<void> {
   fileError.value = "";
   code?.setItems([]);
   try {
-    const result = await getWorkspaceFiles(props.workspace.id, path);
+    const result = await getWorkspaceFile(props.workspace.id, path);
     if (currentGeneration !== generation || request !== fileGeneration) return;
     if (result.kind === "text") {
       if (!result.contents) fileMessage.value = "Empty file.";

@@ -1,24 +1,12 @@
 import { SITE_CALL_CHANNEL, SITE_RESULT_CHANNEL } from "@/shared/site-functions";
-import { withBaseUrl } from "./base-url";
-import { socketFetch } from "./socket-fetch";
+import { rpcCall } from "./rpc";
 
 export async function callSiteFunction(
   siteId: string,
   name: string,
   input: unknown,
 ): Promise<unknown> {
-  const response = await socketFetch(
-    withBaseUrl(`/api/sites/${encodeURIComponent(siteId)}/functions/${encodeURIComponent(name)}`),
-    {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ input }),
-    },
-  );
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error ?? "Site function failed");
-  return result.value;
+  return (await rpcCall("site.call", { siteId, name, input })).value;
 }
 
 /** Never trust a siteId/origin supplied by an opaque-origin site. Bind its actual frame. */

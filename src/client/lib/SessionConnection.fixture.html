@@ -11,7 +11,8 @@
       import { createSessionConnection } from "./session-connection";
       let cursor = "1";
       window.connection = createSessionConnection({
-        path: () => `/wake-events?after=${cursor}`,
+        operation: "session.watch",
+        input: () => ({ sessionId: "wake-events", after: cursor }),
         onConnecting: () => (document.querySelector("output").textContent = "connecting"),
         onError: () => (document.querySelector("output").textContent = "offline"),
         onEvent: (event) => {

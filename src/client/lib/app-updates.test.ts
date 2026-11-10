@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 
-vi.mock("@/client/lib/socket-fetch", () => ({
-  socketFetch: vi.fn(() => {
+vi.mock("@/client/lib/rpc", () => ({
+  rpcCall: vi.fn(() => {
     throw new Error("Update probes must not require an authenticated socket");
   }),
-  closeSocketTransport: vi.fn(),
+  closeRpcTransport: vi.fn(),
 }));
 
 beforeEach(() => {
@@ -71,8 +71,8 @@ it("uses SSE build IDs without version requests and still verifies the online sh
 
 it("checks the public version over HTTP without opening a socket", async () => {
   const reload = responses();
-  const { socketFetch } = await import("./socket-fetch");
-  vi.mocked(socketFetch).mockClear();
+  const { rpcCall } = await import("./rpc");
+  vi.mocked(rpcCall).mockClear();
   const { initializeBuild, checkAppUpdate } = await import("./app-updates");
   initializeBuild("new");
   await checkAppUpdate();
@@ -81,7 +81,7 @@ it("checks the public version over HTTP without opening a socket", async () => {
     "/api/version",
     { cache: "no-store", signal: expect.any(AbortSignal) },
   ]);
-  expect(socketFetch).not.toHaveBeenCalled();
+  expect(rpcCall).not.toHaveBeenCalled();
   expect(reload).not.toHaveBeenCalled();
 });
 

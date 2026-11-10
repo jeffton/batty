@@ -1,28 +1,26 @@
-import { fixtureRoute } from "../test/socket-fixture";
+import { fixtureOperation, setFixtureRpcHandler } from "../test/socket-fixture";
+import { createOwnerRpcHandler, type OwnerRpcServices } from "@/server/owner-rpc";
+import type { Runtime } from "@/server/runtime";
+import { RpcError } from "@/shared/rpc-channel";
 // @vitest-environment node
 import fs from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { listWorkspaces } from "@/server/workspaces";
 import os from "node:os";
 import path from "node:path";
-import type { ServerResponse } from "node:http";
-import fastify from "fastify";
 import vue from "@vitejs/plugin-vue";
 import { chromium, type Browser } from "patchright";
 import type { ViteDevServer } from "vite";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
 import { createBrowserFixtureServer, closeBrowserFixtureServer } from "../test/browser-fixture";
-import { registerWorkspaceFileRoutes } from "@/server/routes/workspace-files";
 import { launchWebKit } from "../test/webkit";
 import type { AppConfig } from "@/server/config";
 
 let root: string;
-let app: ReturnType<typeof fastify>;
 let server: ViteDevServer;
 let browser: Browser;
 let url: string;
-let incrementalSearch: ServerResponse | undefined;
+let incrementalSearch: ReadableStreamDefaultController<unknown> | undefined;
 const wrappedSource = [
   `export const sentence = "${"Text with spaces and indentation. ".repeat(15)}";`,
   `  const unbroken = "${"a".repeat(420)}";`,
@@ -60,50 +58,37 @@ beforeAll(async () => {
     "init",
     "--initial-branch=feature/current-branch",
   ]);
-  app = fastify();
-  app.get("/api/workspaces", async () => ({
-    workspaces: await listWorkspaces(
-      {
-        battyDir: root,
-        workspacesRoots: [path.join(root, "workspaces")],
-      } as AppConfig,
-      true,
-    ),
-  }));
-  registerWorkspaceFileRoutes(app, {
-    battyDir: root,
-    workspacesRoots: [path.join(root, "workspaces")],
-  } as AppConfig);
-  await app.ready();
+  const config = { battyDir: root, workspacesRoots: [path.join(root, "workspaces")] } as AppConfig;
+  const handle = createOwnerRpcHandler(
+    { config, tools: {} } as unknown as Runtime,
+    {} as OwnerRpcServices,
+  );
   server = await createBrowserFixtureServer(
     "src/client/components/WorkspaceCodePopover.fixture.html",
     {
-      plugins: [
-        vue(),
-        {
-          name: "workspace-file-fixture",
-          configureServer(vite) {
-            vite.middlewares.use("/api", async (request, response) => {
-              if (request.url === "/workspaces/project/file-search?name=needle-stream") {
-                response.writeHead(200, { "content-type": "application/x-ndjson" });
-                response.write(
-                  JSON.stringify({ kind: "match", path: "one/needle-stream.ts" }) + "\n",
-                );
-                incrementalSearch = response;
-                return;
-              }
-              const result = await app.inject({ method: "GET", url: `/api${request.url}` });
-              response.writeHead(result.statusCode, { "content-type": "application/json" });
-              response.end(result.body);
-            });
-          },
-        },
-      ],
+      plugins: [vue()],
       define: { __BATTY_BUILD_ID__: JSON.stringify("dev") },
       resolve: { alias: { "@": path.resolve("src") } },
       server: { host: "127.0.0.1", port: 0 },
     },
   );
+  setFixtureRpcHandler(server, async (operation, input, context) => {
+    if (operation === "workspace.search" && (input as { name: string }).name === "needle-stream") {
+      return {
+        value: null,
+        events: new ReadableStream<unknown>({
+          start(controller) {
+            incrementalSearch = controller;
+            controller.enqueue({ kind: "match", path: "one/needle-stream.ts" });
+          },
+          cancel() {
+            incrementalSearch = undefined;
+          },
+        }),
+      };
+    }
+    return handle(operation, input, context);
+  });
   await server.listen();
   url = `${server.resolvedUrls!.local[0]}src/client/components/WorkspaceCodePopover.fixture.html`;
   browser = await chromium.launch({ headless: true });
@@ -111,7 +96,6 @@ beforeAll(async () => {
 afterAll(async () => {
   await browser?.close();
   if (server) await closeBrowserFixtureServer(server);
-  await app?.close();
   if (root) await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -124,9 +108,9 @@ test("workspace row opens native code browser, lazily browses files and closes b
     page.setDefaultTimeout(5000);
     const calls: string[] = [];
     const errors: string[] = [];
-    await fixtureRoute(server, page, "**/files?*", async (route) => {
-      calls.push(route.request().url());
-      await route.continue();
+    await fixtureOperation(server, page, "workspace.files", async (input, _context, next) => {
+      calls.push(input.path ?? "");
+      return next();
     });
     page.on("pageerror", (error) => errors.push(error.message));
     try {
@@ -395,13 +379,11 @@ test("incremental matches preserve collapsed folders, open new parents, and flus
     await filtered.getByRole("treeitem", { name: "needle-stream.ts", exact: true }).waitFor();
     await one.click();
     expect(await one.getAttribute("aria-expanded")).toBe("false");
-    incrementalSearch!.write(
-      JSON.stringify({ kind: "match", path: "one/needle-stream-two.ts" }) +
-        "\n" +
-        JSON.stringify({ kind: "match", path: "two/needle-stream.ts" }) +
-        "\n",
-    );
-    incrementalSearch!.end(JSON.stringify({ kind: "done" }) + "\n");
+    incrementalSearch!.enqueue({ kind: "match", path: "one/needle-stream-two.ts" });
+    incrementalSearch!.enqueue({ kind: "match", path: "two/needle-stream.ts" });
+    incrementalSearch!.enqueue({ kind: "done" });
+    incrementalSearch!.close();
+    incrementalSearch = undefined;
     await filtered.getByRole("treeitem", { name: "two", exact: true }).waitFor();
     await expect.poll(() => popover.getByText("Searching…", { exact: true }).count()).toBe(0);
     expect(await one.getAttribute("aria-expanded")).toBe("false");
@@ -419,7 +401,7 @@ test("incremental matches preserve collapsed folders, open new parents, and flus
       await filtered.getByRole("treeitem", { name: "needle-stream.ts", exact: true }).count(),
     ).toBe(2);
   } finally {
-    incrementalSearch?.end();
+    incrementalSearch?.close();
     incrementalSearch = undefined;
     await page.close();
   }
@@ -429,16 +411,19 @@ test("search errors and newer queries do not turn partial or stale results into 
   const page = await browser.newPage();
   page.setDefaultTimeout(10_000);
   try {
-    await fixtureRoute(server, page, "**/api/workspaces/project/file-search?name=broken", (route) =>
-      route.fulfill({
-        contentType: "application/x-ndjson",
-        body:
-          JSON.stringify({ kind: "match", path: "partial/match.ts" }) +
-          "\n" +
-          JSON.stringify({ kind: "error", message: "Permission denied" }) +
-          "\n",
-      }),
-    );
+    await fixtureOperation(server, page, "workspace.search", async (input, _context, next) => {
+      if (input.name !== "broken") return next();
+      return {
+        value: null,
+        events: new ReadableStream({
+          start(controller) {
+            controller.enqueue({ kind: "match", path: "partial/match.ts" });
+            controller.enqueue({ kind: "error", message: "Permission denied" });
+            controller.close();
+          },
+        }),
+      };
+    });
     await page.goto(url);
     await page.getByRole("button", { name: "Browse code in Project" }).click();
     const popover = page.getByRole("dialog", { name: "Code in Project" });
@@ -462,23 +447,21 @@ test("search errors and newer queries do not turn partial or stale results into 
     const requested = new Promise<void>((resolve) => {
       started = resolve;
     });
-    await fixtureRoute(
-      server,
-      page,
-      "**/api/workspaces/project/file-search?name=slow",
-      async (route) => {
-        started();
-        await delayed;
-        await route.fulfill({
-          contentType: "application/x-ndjson",
-          body:
-            JSON.stringify({ kind: "match", path: "stale.ts" }) +
-            "\n" +
-            JSON.stringify({ kind: "done" }) +
-            "\n",
-        });
-      },
-    );
+    await fixtureOperation(server, page, "workspace.search", async (input, _context, next) => {
+      if (input.name !== "slow") return next();
+      started();
+      await delayed;
+      return {
+        value: null,
+        events: new ReadableStream({
+          start(controller) {
+            controller.enqueue({ kind: "match", path: "stale.ts" });
+            controller.enqueue({ kind: "done" });
+            controller.close();
+          },
+        }),
+      };
+    });
     await input.fill("slow");
     await requested;
     await input.fill("HiddenNeedle");
@@ -604,11 +587,10 @@ test("directory failures are visible and retryable, file failures do not leave s
   page.setDefaultTimeout(5000);
   let fail = true;
   try {
-    await fixtureRoute(server, page, "**/api/workspaces/project/files?path=src", (route) =>
-      fail
-        ? route.fulfill({ status: 500, json: { error: "Directory unavailable" } })
-        : route.continue(),
-    );
+    await fixtureOperation(server, page, "workspace.files", async (input, _context, next) => {
+      if (input.path === "src" && fail) throw new RpcError("INTERNAL", "Directory unavailable");
+      return next();
+    });
     await page.goto(url);
     await page.getByRole("button", { name: "Browse code in Project" }).click();
     const popover = page.locator("#tools-code");
@@ -618,8 +600,14 @@ test("directory failures are visible and retryable, file failures do not leave s
     await popover.getByRole("button", { name: "Retry", exact: true }).click();
     await popover.getByRole("treeitem", { name: "main.ts", exact: true }).click();
     await popover.locator("[data-line]").filter({ hasText: "export const greeting" }).waitFor();
-    await fixtureRoute(server, page, "**/api/workspaces/project/files?path=.hidden", (route) =>
-      route.fulfill({ status: 403, json: { error: "Path leaves the workspace" } }),
+    await fixtureOperation(
+      server,
+      page,
+      ["workspace.files", "workspace.file"],
+      async (input, _context, next) => {
+        if (input.path === ".hidden") throw new RpcError("FORBIDDEN", "Path leaves the workspace");
+        return next();
+      },
     );
     await popover.getByRole("treeitem", { name: ".hidden", exact: true }).click();
     await popover.getByRole("alert").filter({ hasText: "Path leaves the workspace" }).waitFor();

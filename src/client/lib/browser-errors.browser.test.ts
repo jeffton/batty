@@ -7,27 +7,25 @@ import { chromium } from "patchright";
 import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
 import { expect, test } from "vite-plus/test";
 import { registerBrowserErrorRoutes } from "@/server/browser-errors";
+import { createOwnerRpcHandler, type OwnerRpcServices } from "@/server/owner-rpc";
+import type { Runtime } from "@/server/runtime";
+import { RpcError } from "@/shared/rpc-channel";
+import { fixtureOperation, setFixtureRpcHandler } from "../test/socket-fixture";
 
 test("browser rejection and caught upload failure reach authenticated server without content", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "batty-browser-errors-"));
   const file = path.join(dir, "browser-errors.json");
   const backend = fastify();
-  const telemetryStatuses: number[] = [];
-  backend.addHook("onResponse", async (request, reply) => {
-    if (request.url.endsWith("/api/browser-errors")) telemetryStatuses.push(reply.statusCode);
-  });
+  let telemetryWrites = 0;
   backend.decorateRequest("auth", false);
   backend.addHook("onRequest", async (req) => {
     req.auth = req.headers.cookie === "fixture=authenticated";
   });
-  registerBrowserErrorRoutes(backend, file);
+  const reportBrowserError = registerBrowserErrorRoutes(backend, file);
   backend.addContentTypeParser(/^multipart\/form-data/, (_req, _body, done) =>
     done(null, undefined),
   );
   backend.get("/api/bootstrap", async () => ({ authenticated: true }));
-  backend.post("/api/main/prompt", async (_req, reply) =>
-    reply.code(413).send({ error: "PRIVATE prompt token=secret" }),
-  );
   await backend.listen({ host: "127.0.0.1", port: 0 });
   const address = backend.server.address() as { port: number };
   const server = await createBrowserFixtureServer("src/client/lib/BrowserErrors.fixture.html", {
@@ -38,12 +36,37 @@ test("browser rejection and caught upload failure reach authenticated server wit
       proxy: { "/api": { target: `http://127.0.0.1:${address.port}`, changeOrigin: false } },
     },
   });
+  setFixtureRpcHandler(
+    server,
+    createOwnerRpcHandler(
+      { config: {}, tools: {} } as unknown as Runtime,
+      {
+        reportBrowserError: async (report) => {
+          await reportBrowserError(report);
+          telemetryWrites++;
+        },
+      } as OwnerRpcServices,
+    ),
+  );
   await server.listen();
   const url = server.resolvedUrls!.local[0]!;
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext();
   await context.addCookies([{ name: "fixture", value: "authenticated", url }]);
   const page = await context.newPage();
+  let uploaded = "";
+  await fixtureOperation(server, page, "main.submit", async (input, rpc) => {
+    expect(input.files).toEqual([{ name: "PRIVATE.jpg", type: "", size: 13 }]);
+    const reader = rpc.body!.getReader();
+    const chunks: Uint8Array[] = [];
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      chunks.push(chunk.value);
+    }
+    uploaded = Buffer.concat(chunks).toString();
+    throw new RpcError("LIMIT", "PRIVATE prompt token=secret");
+  });
   try {
     await page.goto(`${url}src/client/lib/BrowserErrors.fixture.html`);
     await page.waitForFunction(() => Boolean((window as any).diagnosticsFixture));
@@ -101,9 +124,8 @@ test("browser rejection and caught upload failure reach authenticated server wit
     );
     // Wait for writes to finish before reading: Windows cannot replace a file
     // while a polling reader holds it open.
-    await expect
-      .poll(() => telemetryStatuses, { timeout: 5000 })
-      .toEqual([204, 204, 204, 204, 204]);
+    await expect.poll(() => telemetryWrites, { timeout: 5000 }).toBe(5);
+    expect(uploaded).toBe("PRIVATE bytes");
     const reports = JSON.parse(await fs.readFile(file, "utf8"));
     expect(reports.map((r: any) => r.stage).sort()).toEqual([
       "cache-write",
@@ -113,7 +135,6 @@ test("browser rejection and caught upload failure reach authenticated server wit
       "window",
     ]);
     expect(reports.find((r: any) => r.stage === "submit")).toMatchObject({
-      status: 413,
       hasFiles: true,
       buildId: "dev",
     });

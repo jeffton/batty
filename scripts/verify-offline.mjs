@@ -9,7 +9,7 @@ import sharp from "sharp";
 import { WebSocketServer } from "ws";
 import { tsImport } from "tsx/esm/api";
 
-const { SocketChannel } = await tsImport("../src/shared/socket-channel.ts", import.meta.url);
+const { RpcChannel, RpcError } = await tsImport("../src/shared/rpc-channel.ts", import.meta.url);
 const preview = await sharp({
   create: { width: 768, height: 576, channels: 3, background: "teal" },
 })
@@ -32,7 +32,9 @@ messages[149].blocks.push({
   previewUrl,
 });
 const requests = [];
+const unexpectedHttp = [];
 const streams = new Set();
+const calls = [];
 let revision = 1;
 let delayBootstrap = 0;
 let authenticated = true;
@@ -112,34 +114,12 @@ const server = http.createServer(async (request, response) => {
     response.setHeader("Content-Type", "image/webp");
     return response.end(preview);
   }
-  if (url.pathname === "/api/main") return json(response, state(url.searchParams.get("after")));
-  if (url.pathname === "/api/main/messages") {
-    const older = messages.filter(
-      (message) => Number(message.id) < Number(url.searchParams.get("before")),
-    );
-    return json(response, {
-      messages: older.slice(-500),
-      totalMessageCount: messages.length,
-      hasMoreMessages: false,
-    });
-  }
-  if (url.pathname === "/api/main/events") {
-    if (!authenticated) {
-      response.statusCode = 401;
-      return json(response, { error: "Authentication required" });
-    }
-    response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store" });
-    response.write(
-      `data: ${JSON.stringify({ type: "reset", state: state(url.searchParams.get("after")), streamId: metadata.streamId, revision })}\n\n`,
-    );
-    streams.add(response);
-    response.on("close", () => streams.delete(response));
-    return;
-  }
-  if (url.pathname === "/api/provider-usage")
-    return json(response, { windows: [], provider: "fixture" });
   if (url.pathname === "/api/version") return json(response, { buildId: "dev" });
-  if (url.pathname.startsWith("/api/")) return json(response, []);
+  if (url.pathname.startsWith("/api/")) {
+    unexpectedHttp.push(url.pathname);
+    response.statusCode = 404;
+    return json(response, { error: "Unexpected HTTP API request in native fixture" });
+  }
   try {
     const file = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
     const content = await fs.readFile(path.join(root, file));
@@ -152,20 +132,60 @@ const server = http.createServer(async (request, response) => {
 });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const url = `http://127.0.0.1:${server.address().port}`;
-// Exercise the same shared binary, pull-driven app transport as the built client.
-// HTTP remains the fixture router for bootstrap, resources and streamed API bodies.
+// Exercise native operation names and structured event items, not HTTP/SSE envelopes.
 const channels = new Set();
 const sockets = new WebSocketServer({ server, path: "/api/socket" });
 sockets.on("connection", (socket) => {
-  const channel = new SocketChannel(socket, {
-    handle: (route, request) =>
-      fetch(new URL(route, url), {
-        method: request.method,
-        headers: request.headers,
-        signal: request.signal,
-        body: request.body,
-        ...(request.body ? { duplex: "half" } : {}),
-      }),
+  const channel = new RpcChannel(socket, {
+    handle: async (operation, input) => {
+      calls.push({ operation, input });
+      if (!authenticated) throw new RpcError("UNAUTHORIZED", "Authentication required");
+      switch (operation) {
+        case "session.get":
+          return { value: state(input.after) };
+        case "session.messages":
+          return {
+            value: {
+              messages: messages
+                .filter((message) => Number(message.id) < Number(input.before))
+                .slice(-500),
+              totalMessageCount: messages.length,
+              hasMoreMessages: false,
+            },
+          };
+        case "session.watch": {
+          let controller;
+          return {
+            value: null,
+            events: new ReadableStream({
+              start(value) {
+                controller = value;
+                streams.add(controller);
+                controller.enqueue({
+                  type: "reset",
+                  state: state(input.after),
+                  streamId: metadata.streamId,
+                  revision,
+                });
+              },
+              cancel() {
+                streams.delete(controller);
+              },
+            }),
+          };
+        }
+        case "provider.usage":
+          return { value: { windows: [], provider: "fixture" } };
+        case "provider.status":
+          return { value: { providers: [] } };
+        case "session.subagents":
+          return { value: [] };
+        case "session.resources":
+          return { value: { files: [], sites: [] } };
+        default:
+          throw new RpcError("NOT_FOUND", `Unexpected offline fixture operation: ${operation}`);
+      }
+    },
   });
   channels.add(channel);
   void channel.closed.then(() => channels.delete(channel));
@@ -249,6 +269,7 @@ try {
     });
     delayBootstrap = 3000;
     requests.length = 0;
+    calls.length = 0;
     await context.setOffline(false);
     await page
       .getByText("New after reconnect", { exact: true })
@@ -261,7 +282,9 @@ try {
         );
         throw error;
       });
-    assert(requests.some((request) => request.includes("/api/main?after=150")));
+    assert(
+      calls.some(({ operation, input }) => operation === "session.get" && input.after === "150"),
+    );
     assert.equal(await page.getByText("Updated anchor", { exact: true }).count(), 1);
     await page.screenshot({ path: `/tmp/batty2-offline-${width}.png` });
     console.log(
@@ -269,7 +292,7 @@ try {
         width,
         restoreMs,
         cache: populated,
-        deltaRequests: requests.filter((request) => request.startsWith("/api/main")),
+        deltaCalls: calls.filter(({ operation }) => operation.startsWith("session.")),
       }),
     );
     await page.evaluate(
@@ -384,17 +407,19 @@ try {
   await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
   authenticated = false;
   for (const channel of channels) channel.close();
-  for (const stream of streams) stream.end();
+  for (const stream of streams) stream.close();
   await page.waitForURL("**/login", { timeout: 10_000 });
   await page.getByRole("button", { name: "Sign in with passkey" }).waitFor();
   assert.equal(await page.getByText("Cached thread newest", { exact: true }).count(), 0);
+  assert.deepEqual(unexpectedHttp, [], "Migrated app operations must not use HTTP endpoints");
+  assert(calls.some(({ operation }) => operation === "session.subagents"));
   console.log("Expired session returns to login after app WebSocket disconnect");
   await context.close();
 } finally {
   await browser.close();
   for (const channel of channels) channel.close();
   await new Promise((resolve) => sockets.close(resolve));
-  for (const stream of streams) stream.end();
+  for (const stream of streams) stream.close();
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
 }

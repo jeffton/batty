@@ -34,6 +34,43 @@ export function streamSession(
     subscribe(changed: (history: boolean) => void): () => void;
   },
 ) {
+  const controller = new AbortController();
+  stream.once("close", () => controller.abort());
+  const close = observeSession(
+    runtime,
+    conversationId,
+    images,
+    initialAfter,
+    (event) => writeStreamEvent(stream, `data: ${JSON.stringify(event)}\n\n`),
+    controller.signal,
+    onError,
+    projection,
+  );
+  const heartbeat = setInterval(() => {
+    if (!stream.destroyed && !stream.writableNeedDrain)
+      stream.write("event: heartbeat\ndata: {}\n\n");
+  }, 5000);
+  controller.signal.addEventListener("abort", () => clearInterval(heartbeat), { once: true });
+  return () => {
+    controller.abort();
+    close();
+  };
+}
+
+/** Transport-neutral session projection. emit resolves when the consumer can accept more. */
+export function observeSession(
+  runtime: Runtime,
+  conversationId: ConversationId | string,
+  images: TranscriptImages,
+  initialAfter: string | undefined,
+  emit: (event: object) => Promise<void>,
+  signal: AbortSignal,
+  onError: (error: unknown) => void,
+  projection?: {
+    state(includeHistory: boolean, after?: string): Promise<SessionState>;
+    subscribe(changed: (history: boolean) => void): () => void;
+  },
+) {
   let after = initialAfter;
   let view: ConversationView | undefined;
   let closed = false;
@@ -44,7 +81,7 @@ export function streamSession(
   let orchestrationDirty = notifyOrchestration;
   let cronDirty = notifyOrchestration;
   let scheduled: ReturnType<typeof setTimeout> | undefined;
-  const write = (event: object) => writeStreamEvent(stream, `data: ${JSON.stringify(event)}\n\n`);
+  const write = emit;
   async function flush() {
     if (flushing || closed) return;
     flushing = true;
@@ -113,6 +150,7 @@ export function streamSession(
         }
       }
     } catch (error) {
+      if (closed) return;
       onError(error);
       await write({ type: "error", message: String(error) });
     } finally {
@@ -185,20 +223,21 @@ export function streamSession(
         memory = next;
         schedule(false);
       }, 2000);
-  const heartbeat = setInterval(() => {
-    if (!closed && !stream.writableNeedDrain) stream.write("event: heartbeat\ndata: {}\n\n");
-  }, 5000);
   function close() {
     if (closed) return;
     closed = true;
     clearTimeout(scheduled);
     clearInterval(memoryTimer);
-    clearInterval(heartbeat);
+    signal.removeEventListener("abort", close);
     unsubscribe();
     detachConversation();
     if (notifyOrchestration) runtime.remotes.changes.off("change", remoteChanged);
   }
-  stream.once("close", close);
+  signal.addEventListener("abort", close, { once: true });
+  if (signal.aborted) {
+    close();
+    return close;
+  }
   if (projection) {
     void flush();
   } else {
@@ -231,7 +270,9 @@ export function streamSession(
         view ??= observation.value;
         void flush();
       })
-      .catch(onError);
+      .catch((error) => {
+        if (!closed) onError(error);
+      });
   }
   return close;
 }

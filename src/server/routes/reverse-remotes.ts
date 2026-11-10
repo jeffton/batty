@@ -1,16 +1,22 @@
 import websocket from "@fastify/websocket";
 import type { FastifyInstance } from "fastify";
 import type { Runtime } from "../runtime";
-import { SOCKET_MAX_FRAME_BYTES } from "../../shared/socket-channel";
-import { registerOwnerSocket } from "../socket-dispatch";
+import type { RpcHandler } from "../../shared/rpc-channel";
+import { registerOwnerSocket } from "../owner-socket";
 
-/** A browser and a paired node share framing, not authorization. */
-export async function registerReverseRemoteRoutes(app: FastifyInstance, runtime: Runtime) {
+/** A browser and a paired node share framing, not authorization or operations. */
+export async function registerReverseRemoteRoutes(
+  app: FastifyInstance,
+  runtime: Runtime,
+  ownerHandler?: RpcHandler,
+) {
   await app.register(websocket, {
-    options: { maxPayload: SOCKET_MAX_FRAME_BYTES, perMessageDeflate: false },
+    // Event values can include archive pages; only binary chunks have a frame-size bound.
+    options: { maxPayload: 0, perMessageDeflate: false },
   });
-  let localUrl: string;
-  const closeOwners = registerOwnerSocket(app, () => localUrl);
+  const closeOwners = ownerHandler
+    ? registerOwnerSocket(app, runtime.config, ownerHandler)
+    : undefined;
   app.get(
     "/api/node/socket",
     {
@@ -36,14 +42,10 @@ export async function registerReverseRemoteRoutes(app: FastifyInstance, runtime:
     },
   );
   app.addHook("onListen", async () => {
-    const address = app.server.address();
-    if (!address || typeof address === "string")
-      throw new Error("Socket dispatcher requires a TCP listener");
-    localUrl = `http://127.0.0.1:${address.port}/`;
-    runtime.remotes.reverse.start(localUrl);
+    runtime.remotes.reverse.start();
   });
   app.addHook("preClose", async () => {
-    closeOwners();
+    closeOwners?.();
     await runtime.remotes.reverse.close();
   });
 }

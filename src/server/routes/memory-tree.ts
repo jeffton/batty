@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { createMemory } from "../memory";
+import { repairMemory } from "../memory-api";
 
 export function registerMemoryTreeRoutes(
   app: FastifyInstance,
@@ -44,11 +45,7 @@ export function registerMemoryTreeRoutes(
     },
     async (request, reply) => {
       try {
-        return await memory.repair(
-          request.body.roots,
-          request.body.generation,
-          request.body.dryRun,
-        );
+        return await repairMemory(memory, request.body);
       } catch (error) {
         if (error instanceof RangeError) return reply.code(400).send({ error: error.message });
         throw error;

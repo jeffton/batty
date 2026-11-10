@@ -1,4 +1,4 @@
-import { fixtureRoute } from "../test/socket-fixture";
+import { fixtureOperation } from "../test/socket-fixture";
 // @vitest-environment node
 import path from "node:path";
 import vue from "@vitejs/plugin-vue";
@@ -94,9 +94,16 @@ for (const { width, colorScheme } of themedLayouts) {
   test(`runtime notice popovers preserve nested navigation at ${width}px (${colorScheme})`, async () => {
     const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
     page.setDefaultTimeout(5000);
-    await fixtureRoute(server, page, "**/api/sessions/42", (route) =>
-      route.fulfill({
-        json: {
+    await fixtureOperation(server, page, "session.get", async (payload, _context, next) => {
+      const { sessionId } = payload as { sessionId: string };
+      if (sessionId === "43") {
+        return {
+          value: { id: "43", sessionId: "43", messages: [], activeTools: [], isStreaming: false },
+        };
+      }
+      if (sessionId !== "42") return next();
+      return {
+        value: {
           id: "42",
           sessionId: "42",
           messages: [
@@ -119,13 +126,8 @@ for (const { width, colorScheme } of themedLayouts) {
           activeTools: [],
           isStreaming: false,
         },
-      }),
-    );
-    await fixtureRoute(server, page, "**/api/sessions/43", (route) =>
-      route.fulfill({
-        json: { id: "43", sessionId: "43", messages: [], activeTools: [], isStreaming: false },
-      }),
-    );
+      };
+    });
     try {
       await page.goto(url, { waitUntil: "domcontentloaded" });
       await page.getByRole("button", { name: "Open subagent session", exact: true }).click();

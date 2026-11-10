@@ -5,16 +5,11 @@ import FullPopover from "@/client/components/FullPopover.vue";
 import SessionHeaderStatus from "@/client/components/SessionHeaderStatus.vue";
 import StreamingStopControl from "@/client/components/StreamingStopControl.vue";
 import SessionTranscriptView from "@/client/components/SessionTranscriptView.vue";
-import {
-  HttpError,
-  getSessionMessages,
-  getSession,
-  stopSubagent,
-  stopCronRun,
-} from "@/client/lib/api";
+import { getSessionMessages, getSession, stopSubagent, stopCronRun } from "@/client/lib/api";
 import { applyServerEvent } from "@/client/lib/session-events";
 import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
-import { sessionEventsPath, sessionHistoryCursor } from "@/client/lib/session-stream";
+import { sessionHistoryCursor } from "@/client/lib/session-stream";
+import { RpcError } from "@/shared/rpc-channel";
 import { prependHistoryPage } from "@/client/lib/session-pagination";
 import { createSessionConnection } from "@/client/lib/session-connection";
 import { RECENT_SESSION_MESSAGE_WINDOW } from "@/shared/session-history";
@@ -74,7 +69,8 @@ function openStream(): void {
 
   closeStream();
   connection = createSessionConnection({
-    path: () => sessionEventsPath(session.value!, sessionHistoryCursor(session.value)),
+    operation: "session.watch",
+    input: () => ({ sessionId: session.value!.id, after: sessionHistoryCursor(session.value) }),
     onConnecting: () => {
       connectionState.value = "connecting";
     },
@@ -90,7 +86,7 @@ function openStream(): void {
 }
 
 function handleSessionError(error: unknown): void {
-  if (error instanceof HttpError && error.status === 404) {
+  if (error instanceof RpcError && error.code === "NOT_FOUND") {
     closeStream();
     session.value = undefined;
     missing.value = true;

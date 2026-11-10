@@ -1,14 +1,13 @@
 import type { FastifyInstance } from "fastify";
-import type { UserMessage } from "@earendil-works/pi-ai";
-import { type Runtime, context } from "../runtime";
+import { Runtime } from "../runtime";
 import type { TranscriptImages } from "../transcript-images";
-import { retainInput } from "../input-receipts";
-import { preparePromptFiles, type UploadedFile } from "../uploads";
+import type { UploadedFile } from "../uploads";
 import { streamSession } from "../session-sse";
 import type { PushForeground } from "../push-foreground";
 import { parseRemoteSession } from "../remote-workers";
+import { createSessionOperations } from "../session-api";
 
-/** Shared HTTP boundary for archive pages, live projections and accepted inputs. */
+/** HTTP compatibility controllers use the same direct session operations as native RPC. */
 export function registerSessionRoutes(
   app: FastifyInstance,
   runtime: Runtime,
@@ -16,66 +15,46 @@ export function registerSessionRoutes(
   foreground?: PushForeground,
   connectAppStatus?: (stream: import("node:http").ServerResponse) => void,
 ) {
-  const config = runtime.config;
-  app.get<{ Querystring: { after?: string } }>("/api/main", async (request) =>
-    transcriptImages.state(await runtime.state("main", undefined, true, request.query.after)),
+  const operations = createSessionOperations(runtime, { transcriptImages });
+  const call = async (operation: string, input: unknown, body?: ReadableStream<Uint8Array>) => {
+    try {
+      return (
+        await operations.get(operation)!(input, { signal: new AbortController().signal, body })
+      ).value;
+    } catch (error) {
+      const failure = error as Error & { code?: string };
+      if (failure.code === "BAD_INPUT") Object.assign(failure, { statusCode: 400 });
+      throw error;
+    }
+  };
+  app.get<{ Querystring: { after?: string } }>("/api/main", (request) =>
+    call("session.get", { sessionId: "main", after: request.query.after }),
   );
-  app.get<{ Querystring: { before?: string; limit?: string } }>(
-    "/api/main/messages",
-    async (request) => {
-      const page = await runtime.messages(
-        "main",
-        request.query.before,
-        request.query.limit ? Number(request.query.limit) : undefined,
-      );
-      return { ...page, messages: await transcriptImages.messages(page.messages) };
-    },
+  app.get<{ Querystring: { before?: string; limit?: string } }>("/api/main/messages", (request) =>
+    call("session.messages", {
+      sessionId: "main",
+      before: request.query.before,
+      limit: request.query.limit ? Number(request.query.limit) : undefined,
+    }),
   );
-  app.get<{ Params: { sessionId: string } }>("/api/sessions/:sessionId", async (request) =>
-    transcriptImages.state(await runtime.state(request.params.sessionId)),
+  app.get<{ Params: { sessionId: string } }>("/api/sessions/:sessionId", (request) =>
+    call("session.get", request.params),
   );
   app.get<{ Params: { sessionId: string }; Querystring: { before?: string; limit?: string } }>(
     "/api/sessions/:sessionId/messages",
-    async (request) => {
-      const page = await runtime.messages(
-        request.params.sessionId,
-        request.query.before,
-        request.query.limit ? Number(request.query.limit) : undefined,
-      );
-      return { ...page, messages: await transcriptImages.messages(page.messages) };
-    },
+    (request) =>
+      call("session.messages", {
+        ...request.params,
+        before: request.query.before,
+        limit: request.query.limit ? Number(request.query.limit) : undefined,
+      }),
   );
-
-  app.get<{ Params: { sessionId: string } }>(
-    "/api/sessions/:sessionId/subagents",
-    async (request) => {
-      const conversation = await runtime.conversation(request.params.sessionId);
-      const workers = await runtime.orchestration.listRunning(conversation.id);
-      return [
-        ...(await Promise.all(
-          workers.map(async (worker) => {
-            const agent = await (await runtime.conversation(worker.sessionId)).agent(context);
-            return {
-              ...worker,
-              sessionPath: `durable:${worker.sessionId}`,
-              parentSessionId: String(worker.parentId),
-              model: agent.model ? `${agent.model.provider}/${agent.model.modelId}` : undefined,
-              thinkingLevel: agent.thinkingLevel,
-              startedAtMs: worker.startedAtMs,
-            };
-          }),
-        )),
-        ...runtime.remotes.tasks(conversation.id),
-      ];
-    },
+  app.get<{ Params: { sessionId: string } }>("/api/sessions/:sessionId/subagents", (request) =>
+    call("session.subagents", request.params),
   );
-
-  app.post<{ Params: { sessionId: string } }>("/api/sessions/:sessionId/stop", async (request) => {
-    if (parseRemoteSession(request.params.sessionId))
-      await runtime.remotes.stop(request.params.sessionId);
-    else await runtime.orchestration.stopWorker(request.params.sessionId);
-    return { ok: true };
-  });
+  app.post<{ Params: { sessionId: string } }>("/api/sessions/:sessionId/stop", (request) =>
+    call("session.stop", request.params),
+  );
 
   const eventStreams = new Set<import("node:http").ServerResponse>();
   for (const url of ["/api/main/events", "/api/sessions/:sessionId/events"]) {
@@ -144,7 +123,10 @@ export function registerSessionRoutes(
       },
     );
   }
-  for (const url of ["/api/main/prompt", "/api/main/steer"]) {
+  for (const [url, kind] of [
+    ["/api/main/prompt", "prompt"],
+    ["/api/main/steer", "steer"],
+  ] as const) {
     app.post(url, async (request) => {
       let text = "",
         clientMessageId: string | undefined;
@@ -165,38 +147,32 @@ export function registerSessionRoutes(
         text = body.text;
         clientMessageId = body.clientMessageId;
       }
-      if (!text.trim() && !files.length)
-        throw Object.assign(new Error("Missing message"), { statusCode: 400 });
-      const attachments = await preparePromptFiles(
-        config.uploadsDir,
-        String(runtime.main.id),
-        files,
-        config.baseUrl,
-      );
-      const wasBusy = (await runtime.state("main", undefined, false)).isStreaming;
-      const content: UserMessage["content"] = [
-        { type: "text", text: [text, attachments.text].filter(Boolean).join("\n\n") },
-        ...attachments.images,
-      ];
-      await runtime.useDefaultModel();
-      const submission = await runtime.main.submit(
+      let index = 0;
+      const body = files.length
+        ? new ReadableStream<Uint8Array>({
+            pull(controller) {
+              const file = files[index++];
+              if (file) controller.enqueue(file.data);
+              else controller.close();
+            },
+          })
+        : undefined;
+      return call(
+        "main.submit",
         {
-          type: "input",
-          content,
-          requestId: clientMessageId,
-          whenBusy: url.endsWith("steer") ? "steer" : "followUp",
+          kind,
+          text,
+          clientMessageId,
+          files: files.map((file) => ({
+            name: file.filename,
+            type: file.mimetype ?? "",
+            size: file.data.length,
+          })),
         },
-        context,
+        body,
       );
-      await retainInput(runtime.main, submission.id, content, clientMessageId);
-      return {
-        disposition: wasBusy ? "queued" : "started",
-        submissionId: String(submission.id),
-        sessionId: String(runtime.main.id),
-      };
     });
   }
-
   return () => {
     for (const stream of eventStreams) stream.end();
   };

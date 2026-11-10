@@ -1,11 +1,18 @@
 import { computed, ref } from "vue";
-import { socketFetch } from "@/client/lib/socket-fetch";
+import { rpcCall } from "@/client/lib/rpc";
 import { withBaseUrl } from "@/client/lib/base-url";
-import type { CloudBrowserState as BrowserState } from "@/shared/cloud-browser";
+import type {
+  CloudBrowserState as BrowserState,
+  CloudBrowserControl,
+} from "@/shared/cloud-browser";
 import { useBrowserFrames } from "./frames";
 import { useBrowserInput } from "./input";
 
-// Owns one viewing generation: HTTP controls, socket, reconnects and their cancellation.
+// Owns one viewing generation: native controls, media socket and cancellation.
+type BrowserFailure = Error & { code?: string; details?: { pages?: BrowserState["pages"] } };
+function retryable(cause: BrowserFailure): boolean {
+  return !cause.code || ["OFFLINE", "INTERNAL", "UNAVAILABLE", "RATE_LIMITED"].includes(cause.code);
+}
 export function useBrowserTransport(
   browserId: () => string,
   {
@@ -69,24 +76,17 @@ export function useBrowserTransport(
     scheduleReconnect,
   });
   async function request(
-    path: string,
-    init: RequestInit,
+    operation: "browser.state" | "browser.control",
+    control: CloudBrowserControl | undefined,
     signal: AbortSignal,
   ): Promise<BrowserState> {
-    const response = await socketFetch(withBaseUrl(`${endpoint.value}/${path}`), {
-      credentials: "include",
-      cache: "no-store",
-      ...init,
-      signal,
-    });
-    if (!response.ok) {
-      const body = (await response.json()) as { error: string; pages?: BrowserState["pages"] };
-      throw Object.assign(new Error(body.error), {
-        statusCode: response.status,
-        pages: body.pages,
-      });
-    }
-    return (await response.json()) as BrowserState;
+    return (
+      await rpcCall<BrowserState>(
+        operation,
+        { browserId: browserId(), ...(control ? { control } : {}) },
+        { signal },
+      )
+    ).value;
   }
   function updateState(value: BrowserState): void {
     const previous = state.value;
@@ -104,13 +104,11 @@ export function useBrowserTransport(
     // a fresh generation, then reconnect the viewer to the surviving selection.
     scheduleReconnect();
   }
-  function showFailure(
-    cause: Error & { statusCode?: number; pages?: BrowserState["pages"] },
-  ): void {
-    if (cause.statusCode === 409 && cause.pages) {
-      selectionClosed(cause.pages);
+  function showFailure(cause: BrowserFailure): void {
+    if (cause.code === "SELECTION_CHANGED" && cause.details?.pages) {
+      selectionClosed(cause.details.pages);
       return;
-    } else if (cause.statusCode === 404 || cause.statusCode === 410) {
+    } else if (cause.code === "NOT_FOUND" || cause.code === "GONE") {
       stopViewing();
       ended.value = true;
       reconnecting.value = false;
@@ -159,7 +157,7 @@ export function useBrowserTransport(
       state.value = undefined;
     }
     try {
-      const initial = await request("state", {}, abort.signal);
+      const initial = await request("browser.state", undefined, abort.signal);
       if (current !== generation) return;
       updateState(initial);
       await fitViewport();
@@ -167,8 +165,7 @@ export function useBrowserTransport(
       connectStream(current);
     } catch (cause) {
       if (current !== generation || abort.signal.aborted) return;
-      const status = (cause as { statusCode?: number }).statusCode;
-      if (!status || (status >= 500 && status !== 504) || status === 429) scheduleReconnect();
+      if (retryable(cause as BrowserFailure)) scheduleReconnect();
       else {
         reconnecting.value = false;
         showFailure(cause as Error);
@@ -245,25 +242,20 @@ export function useBrowserTransport(
         await input.drainScroll();
         if (current !== generation || !controller) return false;
         const value = await request(
-          "control",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(command),
-          },
+          "browser.control",
+          command as CloudBrowserControl,
           controller.signal,
         );
         if (current !== generation) return false;
         // Once subscribed, state and frames must follow the same ordered channel.
-        // An HTTP reply can arrive after a newer streamed navigation or focus change.
+        // A control reply can arrive after a newer streamed navigation or focus change.
         // Bootstrap/recovery still needs its snapshot before opening the socket.
         if (!stream) updateState(value);
         if (recovery && !stream) connectStream(current);
         return true;
       } catch (cause) {
         if (current === generation) {
-          const status = (cause as { statusCode?: number }).statusCode;
-          if (!status || (status >= 500 && status !== 504) || status === 429) scheduleReconnect();
+          if (retryable(cause as BrowserFailure)) scheduleReconnect();
           else showFailure(cause as Error);
         }
         return false;

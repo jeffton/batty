@@ -21,9 +21,12 @@ import { Runtime, context } from "@/server/runtime";
 import { registerSessionRoutes } from "@/server/routes/sessions";
 import { registerCloudBrowserRoutes } from "@/server/routes/cloud-browser";
 import { TranscriptImages } from "@/server/transcript-images";
+import { createOwnerRpcHandler, type OwnerRpcServices } from "@/server/owner-rpc";
+import { WebPushService } from "@/server/web-push";
+import { setFixtureRpcHandler } from "../test/socket-fixture";
 import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
 
-test("main browser tools render a live attachment through SSE, reload and reopened durable history", async () => {
+test("main browser tools render a live attachment through native events, reload and reopened durable history", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-native-browser-"));
   vi.stubEnv("PI_OFFLINE", "1");
   await fs.mkdir(path.join(root, ".batty"));
@@ -81,6 +84,15 @@ test("main browser tools render a live attachment through SSE, reload and reopen
       },
     },
   });
+  setFixtureRpcHandler(
+    server,
+    createOwnerRpcHandler(runtime, {
+      transcriptImages: new TranscriptImages(path.join(root, "images")),
+      webPush: new WebPushService(config),
+      buildId: "dev",
+      browserAvailable: true,
+    } as OwnerRpcServices),
+  );
   await server.listen();
   const origin = server.resolvedUrls!.local[0]!;
   const closeStreams = await registerCloudBrowserRoutes(

@@ -1,9 +1,7 @@
 import { flushPromises, mount } from "@vue/test-utils";
 
-vi.mock("@/client/lib/socket-fetch", () => ({
-  socketFetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
-  closeSocketTransport: vi.fn(),
-}));
+vi.mock("@/client/lib/rpc", () => ({ rpcCall: vi.fn() }));
+import { rpcCall } from "@/client/lib/rpc";
 import { afterEach, expect, test, vi } from "vite-plus/test";
 import BrowserCredentials from "./BrowserCredentials.vue";
 
@@ -39,9 +37,9 @@ test.each([
     const fetch = vi
       .fn()
       .mockImplementation(async (url: string) =>
-        url.endsWith("/prepare") ? { ok: true, json: async () => target } : { ok: true },
+        url === "browser.credentials.prepare" ? { value: target } : { value: {} },
       );
-    vi.stubGlobal("fetch", fetch);
+    vi.mocked(rpcCall).mockImplementation(fetch);
     const panel = mount(BrowserCredentials, {
       props: {
         browserId: "session",
@@ -62,8 +60,8 @@ test.each([
     expect(fetch).toHaveBeenCalledTimes(1);
     await panel.get("form").trigger("submit");
     await flushPromises();
-    expect(fetch.mock.calls[1]![0]).toBe("/api/cloud-browser/session/credentials/fill");
-    expect(JSON.parse(fetch.mock.calls[1]![1].body)).toEqual({
+    expect(fetch.mock.calls[1]![0]).toBe("browser.credentials.fill");
+    expect(fetch.mock.calls[1]![1].credentials).toEqual({
       target,
       username: "synthetic-user",
       password: "synthetic-password",
@@ -79,8 +77,8 @@ test.each([
   { ...state, url: "https://login.example/elsewhere" },
   { ...state, login: { ...state.login, id: "replacement-form" } },
 ])("navigation or form replacement clears and invalidates local credentials", async (nextState) => {
-  const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => target });
-  vi.stubGlobal("fetch", fetch);
+  const fetch = vi.fn().mockResolvedValue({ value: target });
+  vi.mocked(rpcCall).mockImplementation(fetch);
   const panel = mount(BrowserCredentials, { props: { browserId: "session", state } });
   await flushPromises();
   await panel.get('[name="password"]').setValue("synthetic-secret");
@@ -92,19 +90,16 @@ test.each([
 });
 
 test("late preparation for an obsolete document cannot enable filling", async () => {
-  let resolve!: (value: unknown) => void;
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(
-      () =>
-        new Promise((done) => {
-          resolve = done;
-        }),
-    ),
+  let resolve!: (value: { value: typeof target }) => void;
+  vi.mocked(rpcCall).mockImplementation(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
   );
   const panel = mount(BrowserCredentials, { props: { browserId: "session", state } });
   await panel.setProps({ state: { ...state, revision: "navigation" } });
-  resolve({ ok: true, json: async () => target });
+  resolve({ value: target });
   await flushPromises();
   expect(panel.get('button[type="submit"]').attributes("disabled")).toBeDefined();
   panel.unmount();
@@ -113,10 +108,10 @@ test("late preparation for an obsolete document cannot enable filling", async ()
 test("failed handoff clears secrets, hides transport error details and allows explicit retry", async () => {
   const fetch = vi
     .fn()
-    .mockResolvedValueOnce({ ok: true, json: async () => target })
+    .mockResolvedValueOnce({ value: target })
     .mockRejectedValueOnce(new Error("synthetic-password"))
-    .mockResolvedValueOnce({ ok: true, json: async () => target });
-  vi.stubGlobal("fetch", fetch);
+    .mockResolvedValueOnce({ value: target });
+  vi.mocked(rpcCall).mockImplementation(fetch);
   const panel = mount(BrowserCredentials, { props: { browserId: "session", state } });
   await flushPromises();
   await panel.get('[name="password"]').setValue("synthetic-password");

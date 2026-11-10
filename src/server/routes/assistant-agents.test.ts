@@ -3,7 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import Fastify from "fastify";
 import { expect, it, vi } from "vite-plus/test";
-import { registerAssistantAgentsRoutes } from "./assistant-agents";
+import {
+  assistantAgentsRead,
+  assistantAgentsWrite,
+  registerAssistantAgentsRoutes,
+} from "./assistant-agents";
 import { listWorkspaces } from "../workspaces";
 import type { AppConfig } from "../config";
 
@@ -32,6 +36,7 @@ it("edits only the selected assistant instructions and can create an absent file
   ]);
   registerAssistantAgentsRoutes(app, {} as AppConfig);
   try {
+    expect(await assistantAgentsRead({} as AppConfig, "assistant")).toEqual({ content: "" });
     expect((await app.inject("/api/settings/assistant-agents/assistant")).json()).toEqual({
       content: "",
     });
@@ -42,8 +47,14 @@ it("edits only the selected assistant instructions and can create an absent file
     });
     expect(response.statusCode).toBe(200);
     expect(await fs.readFile(path.join(directory, "AGENTS.md"), "utf8")).toBe("Local instructions");
+    expect(await assistantAgentsWrite({} as AppConfig, "assistant", "Native instructions")).toEqual(
+      { content: "Native instructions" },
+    );
+    expect(await assistantAgentsRead({} as AppConfig, "assistant")).toEqual({
+      content: "Native instructions",
+    });
     expect((await app.inject("/api/settings/assistant-agents/assistant")).json()).toEqual({
-      content: "Local instructions",
+      content: "Native instructions",
     });
     expect(
       (
@@ -55,7 +66,9 @@ it("edits only the selected assistant instructions and can create an absent file
       ).statusCode,
     ).toBe(404);
     expect((await app.inject("/api/settings/assistant-agents/unknown")).statusCode).toBe(404);
-    expect(await fs.readFile(path.join(directory, "AGENTS.md"), "utf8")).toBe("Local instructions");
+    expect(await fs.readFile(path.join(directory, "AGENTS.md"), "utf8")).toBe(
+      "Native instructions",
+    );
   } finally {
     await app.close();
     await fs.rm(directory, { recursive: true, force: true });

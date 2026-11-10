@@ -1,5 +1,5 @@
 import fs from "node:fs/promises";
-import { isSubscriptionProvider } from "@/shared/provider-auth";
+import { createOwnerRpcHandler } from "./owner-rpc";
 import path from "node:path";
 import { createReadStream } from "node:fs";
 import fastify from "fastify";
@@ -7,20 +7,11 @@ import cookie from "@fastify/cookie";
 import multipart from "@fastify/multipart";
 import staticFiles from "@fastify/static";
 import type { SubmissionId } from "@earendil-works/pi-durable";
-import { loadConfig, resolveBattyDir, readEnvironmentFile, updateEnvironmentFile } from "./config";
-import {
-  stateDirPath,
-  setAppearance,
-  setPushTitle,
-  setBraveSearchKey,
-  setDefaultModel,
-  setMemoryModel,
-  setMemoryLanguage,
-} from "./options";
+import { loadConfig, resolveBattyDir, readEnvironmentFile } from "./config";
+import { stateDirPath } from "./options";
 import { listWorkspaces } from "./workspaces";
 import { registerWorkspaceFileRoutes } from "./routes/workspace-files";
 import { registerAssistantAgentsRoutes } from "./routes/assistant-agents";
-import { changeAssistantWorkspace } from "./assistant-settings";
 import { PasskeyAuthService, formatSetupCode } from "./passkeys";
 import { verifyAuthToken, authCacheScope } from "./auth";
 import { TranscriptImages, imagePreview } from "./transcript-images";
@@ -40,7 +31,11 @@ import { acquireLock } from "./lock";
 import { resolveUploadedFile } from "./uploads";
 import { registerSessionRoutes } from "./routes/sessions";
 import { streamAppStatus } from "./app-status-stream";
-import { registerRemoteRoutes, authenticateNode } from "./routes/remotes";
+import {
+  registerRemoteRoutes,
+  authenticateNode,
+  executeRemoteOwnerOperation,
+} from "./routes/remotes";
 import { registerReverseRemoteRoutes } from "./routes/reverse-remotes";
 import { resolveSentFile } from "./send-files";
 import type { AppColor } from "@/shared/appearance";
@@ -128,8 +123,13 @@ registerSettingsCopyRoute(app, async (kind, name) => {
   return Object.hasOwn(environment, name) ? environment[name] : undefined;
 });
 const closeRemoteStreams = registerRemoteRoutes(app, runtime);
-await registerReverseRemoteRoutes(app, runtime);
-registerBrowserErrorRoutes(app, path.join(stateDirPath(config.battyDir), "browser-errors.json"));
+await registerReverseRemoteRoutes(app, runtime, (operation, input, rpc) =>
+  ownerHandler(operation, input, rpc),
+);
+const reportBrowserError = registerBrowserErrorRoutes(
+  app,
+  path.join(stateDirPath(config.battyDir), "browser-errors.json"),
+);
 registerCronRoutes(app, runtime.orchestration);
 registerSiteRoutes(routeContext);
 const closeCloudBrowsers = await registerCloudBrowserRoutes(
@@ -215,91 +215,65 @@ app.get("/api/bootstrap", async (request) => ({
   workspaceSnapshots: [],
   models: request.auth ? await runtime.listModels() : [],
 }));
-app.get("/api/workspaces", async () => ({ workspaces: await listWorkspaces(config, true) }));
-registerWorkspaceFileRoutes(app, config);
-app.post<{ Body: { workspaceId: string } }>("/api/settings/assistant-workspace", async (request) =>
-  changeAssistantWorkspace(config, request.body.workspaceId, {
-    state: () => runtime.state("main", undefined, false),
-    configure: (cwd) => runtime.main.configure({ cwd }, context),
-  }),
-);
-app.get("/api/models", async () => runtime.listModels());
-app.get<{ Params: { sessionId: string } }>(
-  "/api/sessions/:sessionId/resources",
-  async (request) => {
-    const conversation = await runtime.conversation(request.params.sessionId);
-    const agent = await conversation.agent(context);
-    return {
-      skills: (await runtime.resources.sessionSkills(agent.cwd ?? config.selfPath)).map(
-        (skill) => ({
-          name: skill.name,
-          description: skill.description,
-          filePath: skill.filePath,
-        }),
-      ),
-      tools: agent.tools.map((tool) => ({ name: tool.name, description: tool.description })),
-    };
-  },
-);
-function scheduleLabel(schedule: import("./orchestration-state").Schedule): string {
-  if (schedule.kind === "multiple") return schedule.triggers.map(scheduleLabel).join(" · ");
-  return schedule.kind === "at"
-    ? `At ${schedule.at}`
-    : schedule.kind === "every"
-      ? `Every ${schedule.every}`
-      : `${schedule.expression} (${schedule.timezone})`;
-}
-app.get<{ Params: { workspaceId: string } }>(
-  "/api/workspaces/:workspaceId/cron-jobs",
-  async (request) =>
-    (await runtime.orchestration.listJobs(request.params.workspaceId)).map((job) => ({
-      ...job,
-      model: job.model ?? `${config.defaultProvider}/${config.defaultModel}`,
-      thinkingLevel: job.thinkingLevel ?? config.defaultThinkingLevel,
-      scheduleLabel: scheduleLabel(job.schedule),
-      state: { nextRunAtMs: job.nextAt },
-    })),
-);
-function cronRunLog(
-  run: import("./orchestration").CronRun,
-  jobs: import("./orchestration").CronJob[],
-) {
-  const job = jobs.find((item) => item.id === run.jobId) ?? run.job;
-  return {
-    runId: run.id,
-    jobId: run.jobId,
-    workspaceId: run.workspaceId,
-    prompt: job?.prompt ?? "",
-    model: job?.model ?? `${config.defaultProvider}/${config.defaultModel}`,
-    thinkingLevel: job?.thinkingLevel ?? config.defaultThinkingLevel,
-    scheduleLabel: job ? scheduleLabel(job.schedule) : "",
-    startedAtMs: run.startedAt,
-    sessionId: run.sessionId,
-    sessionPath: `durable:${run.sessionId}`,
-    status: run.status === "running" ? "running" : run.status === "completed" ? "success" : "error",
-    completedAtMs: run.finishedAt,
-    durationMs: run.finishedAt ? run.finishedAt - run.startedAt : undefined,
-    error: run.status === "failed" ? run.output : undefined,
-  };
-}
-app.get("/api/cron/running", async () => {
-  const [runs, jobs] = await Promise.all([
-    runtime.orchestration.listRunningCron(),
-    runtime.orchestration.listJobs(),
-  ]);
-  return runs.map((run) => cronRunLog(run, jobs));
+const ownerHandler = createOwnerRpcHandler(runtime, {
+  transcriptImages,
+  webPush,
+  passkeys,
+  settingsStatus,
+  buildId,
+  browserAvailable,
+  reportBrowserError,
+  logSubmission: (correlationId) => app.log.info({ correlationId }, "Browser submission"),
+  remoteOperation: (operation, input) =>
+    executeRemoteOwnerOperation(
+      runtime,
+      operation,
+      input as Parameters<typeof executeRemoteOwnerOperation>[2],
+    ),
 });
+const ownerValue = async (operation: string, input: unknown = {}) => {
+  try {
+    return (await ownerHandler(operation, input, { signal: new AbortController().signal })).value;
+  } catch (error) {
+    const failure = error as Error & { code?: string };
+    const statusCode =
+      (
+        {
+          BAD_INPUT: 400,
+          UNAUTHORIZED: 401,
+          FORBIDDEN: 403,
+          NOT_FOUND: 404,
+          CONFLICT: 409,
+          GONE: 410,
+          RATE_LIMITED: 429,
+          UNAVAILABLE: 501,
+          OFFLINE: 503,
+          TIMEOUT: 504,
+        } as Record<string, number>
+      )[failure.code ?? ""] ?? 500;
+    throw Object.assign(failure, { statusCode });
+  }
+};
+
+app.get("/api/workspaces", () => ownerValue("workspace.list"));
+registerWorkspaceFileRoutes(app, config);
+app.post<{ Body: { workspaceId: string } }>("/api/settings/assistant-workspace", (request) =>
+  ownerValue("settings.assistant-workspace", request.body),
+);
+app.get("/api/models", () => ownerValue("models.list"));
+app.get<{ Params: { sessionId: string } }>("/api/sessions/:sessionId/resources", (request) =>
+  ownerValue("session.resources", request.params),
+);
+app.get<{ Params: { workspaceId: string } }>("/api/workspaces/:workspaceId/cron-jobs", (request) =>
+  ownerValue("workspace.cron.jobs", request.params),
+);
 app.get<{ Params: { workspaceId: string } }>(
   "/api/workspaces/:workspaceId/cron-run-logs",
-  async (request) => {
-    const jobs = await runtime.orchestration.listJobs();
-    return (
-      await runtime.orchestration.listRunLogs(undefined, 100, request.params.workspaceId)
-    ).map((run) => cronRunLog(run, jobs));
-  },
+  (request) => ownerValue("workspace.cron.logs", request.params),
 );
-app.get("/api/memory/status", async () => runtime.memory.status());
-app.get("/api/memory/usage", async () => runtime.memory.usage());
+app.get("/api/cron/running", () => ownerValue("cron.running"));
+app.get("/api/memory/status", () => ownerValue("memory.status"));
+app.get("/api/memory/usage", () => ownerValue("memory.usage"));
 const closeEventStreams = registerSessionRoutes(
   app,
   runtime,
@@ -307,11 +281,7 @@ const closeEventStreams = registerSessionRoutes(
   webPush.foreground,
   (stream) => streamAppStatus(stream, runtime, buildId, (error) => app.log.error(error)),
 );
-app.post("/api/main/stop", async () => {
-  await runtime.tools.abortConversation(runtime.main.id);
-  await runtime.main.abort(context);
-  return { ok: true };
-});
+app.post("/api/main/stop", () => ownerValue("main.stop"));
 app.delete<{ Params: { submissionId: string } }>(
   "/api/main/queue/:submissionId",
   async (request) => ({
@@ -322,126 +292,64 @@ app.delete<{ Params: { submissionId: string } }>(
     ),
   }),
 );
-app.post<{ Body: { kind: string; index: number } }>("/api/main/queue/remove", async (request) => {
-  await runtime.harness.abortSubmission(
-    Number(request.body.index) as SubmissionId,
-    context,
-    runtime.main.id,
-  );
-  return runtime.state();
-});
-app.get("/api/provider-auth/status", async () => runtime.providerAuth.getStatus());
-app.get<{ Querystring: { provider: string; model: string } }>(
-  "/api/provider-usage",
-  async (request) => runtime.providerUsage.getUsage(request.query.provider, request.query.model),
+app.post<{ Body: { kind: string; index: number } }>("/api/main/queue/remove", (request) =>
+  ownerValue("main.queue.remove", request.body),
 );
-app.post<{ Body: { providerId: string } }>("/api/provider-auth/start", async (request) => {
-  if (!isSubscriptionProvider(request.body.providerId)) {
-    throw Object.assign(new Error("Unsupported subscription provider"), { statusCode: 400 });
-  }
-  return runtime.providerAuth.start(request.body.providerId);
-});
-app.get<{ Params: { attemptId: string } }>(
-  "/api/provider-auth/attempt/:attemptId",
-  async (request) => runtime.providerAuth.getAttemptStatus(request.params.attemptId),
+app.get("/api/provider-auth/status", () => ownerValue("provider.status"));
+app.get<{ Querystring: { provider: string; model: string } }>("/api/provider-usage", (request) =>
+  ownerValue("provider.usage", request.query),
+);
+app.post<{ Body: { providerId: string } }>("/api/provider-auth/start", (request) =>
+  ownerValue("provider.start", request.body),
+);
+app.get<{ Params: { attemptId: string } }>("/api/provider-auth/attempt/:attemptId", (request) =>
+  ownerValue("provider.attempt", request.params),
 );
 app.post<{ Body: { attemptId: string; callbackUrl: string } }>(
   "/api/provider-auth/complete",
-  async (request) => {
-    await runtime.providerAuth.complete(request.body.attemptId, request.body.callbackUrl);
-    return runtime.providerAuth.getStatus();
-  },
+  (request) => ownerValue("provider.complete", request.body),
 );
 app.post<{ Body: { providerId: string; apiKey: string } }>(
   "/api/provider-auth/api-key",
-  async (request) => {
-    if (request.body.providerId !== "google" && request.body.providerId !== "openrouter") {
-      throw Object.assign(new Error("Unsupported API-key provider"), { statusCode: 400 });
-    }
-    return runtime.providerAuth.setApiKey(request.body.providerId, request.body.apiKey);
-  },
+  (request) => ownerValue("provider.key", request.body),
 );
-app.post<{ Body: { providerId: string } }>("/api/provider-auth/logout", async (request) => {
-  await runtime.models.logout(request.body.providerId);
-  return runtime.providerAuth.getStatus();
-});
-app.post<{ Body: { apiKey: string } }>("/api/settings/brave-search", async (request) => {
-  config.braveSearchKey = (
-    await setBraveSearchKey(config.battyDir, request.body.apiKey)
-  ).braveSearchKey;
-  return settingsStatus();
-});
-app.post<{ Body: { title: string; color: AppColor } }>(
-  "/api/settings/appearance",
-  async (request) => {
-    const settings = await setAppearance(config.battyDir, request.body.title, request.body.color);
-    config.appTitle = settings.appTitle;
-    config.appColor = settings.appColor;
-    return settingsStatus();
-  },
+app.post<{ Body: { providerId: string } }>("/api/provider-auth/logout", (request) =>
+  ownerValue("provider.logout", request.body),
+);
+app.post<{ Body: { apiKey: string } }>("/api/settings/brave-search", (request) =>
+  ownerValue("settings.brave-search", request.body),
+);
+app.post<{ Body: { title: string; color: AppColor } }>("/api/settings/appearance", (request) =>
+  ownerValue("settings.appearance", request.body),
 );
 app.post<{ Body: { modelId: string; thinkingLevel: string } }>(
   "/api/settings/default-model",
-  async (request) => {
-    const slash = request.body.modelId.indexOf("/");
-    const settings = await setDefaultModel(
-      config.battyDir,
-      request.body.modelId.slice(0, slash),
-      request.body.modelId.slice(slash + 1),
-      request.body.thinkingLevel,
-    );
-    Object.assign(config, {
-      defaultProvider: settings.defaultProvider,
-      defaultModel: settings.defaultModel,
-      defaultThinkingLevel: settings.defaultThinkingLevel,
-    });
-    return settingsStatus();
-  },
+  (request) => ownerValue("settings.default-model", request.body),
 );
-app.post<{ Body: { language: string } }>(
-  "/api/settings/memory-language",
-  async (request, reply) => {
-    const language = request.body.language.trim();
-    if (!language) return reply.code(400).send({ error: "Enter a memory language" });
-    const settings = await setMemoryLanguage(config.battyDir, language);
-    config.memoryLanguage = settings.memoryLanguage;
-    return settingsStatus();
-  },
+app.post<{ Body: { language: string } }>("/api/settings/memory-language", (request) =>
+  ownerValue("settings.memory-language", request.body),
 );
-app.post<{ Body: { modelId: string } }>("/api/settings/memory-model", async (request) => {
-  const settings = await setMemoryModel(config.battyDir, request.body.modelId);
-  config.memoryModel = settings.memoryModel;
-  return settingsStatus();
-});
-app.post<{ Body: { title: string } }>("/api/settings/push-title", async (request, reply) => {
-  const title = request.body.title.trim();
-  if (!title) return reply.code(400).send({ error: "Enter a push title" });
-  const settings = await setPushTitle(config.battyDir, title);
-  config.pushTitle = settings.pushTitle;
-  return settingsStatus();
-});
-app.get("/api/settings/environment", async () => ({
-  names: Object.keys(await readEnvironmentFile(config.battyDir)).sort(),
-}));
+app.post<{ Body: { modelId: string } }>("/api/settings/memory-model", (request) =>
+  ownerValue("settings.memory-model", request.body),
+);
+app.post<{ Body: { title: string } }>("/api/settings/push-title", (request) =>
+  ownerValue("settings.push-title", request.body),
+);
+app.get("/api/settings/environment", () => ownerValue("environment.list"));
 app.put<{ Params: { name: string }; Body: { value: string } }>(
   "/api/settings/environment/:name",
-  async (request) => ({
-    names: await updateEnvironmentFile(config.battyDir, request.params.name, request.body.value),
-  }),
+  (request) => ownerValue("environment.set", { ...request.params, ...request.body }),
 );
-app.delete<{ Params: { name: string } }>("/api/settings/environment/:name", async (request) => ({
-  names: await updateEnvironmentFile(config.battyDir, request.params.name),
-}));
+app.delete<{ Params: { name: string } }>("/api/settings/environment/:name", (request) =>
+  ownerValue("environment.remove", request.params),
+);
 registerAssistantAgentsRoutes(app, config);
-app.get("/api/settings/agents", async () => ({
-  content: await fs.readFile(path.join(stateDirPath(config.battyDir), "AGENTS.md"), "utf8"),
-}));
-app.post<{ Body: { content: string } }>("/api/settings/agents", async (request) => {
-  await fs.writeFile(path.join(stateDirPath(config.battyDir), "AGENTS.md"), request.body.content);
-  return { content: request.body.content };
-});
-app.get("/api/auth/status", async () => passkeys.getStatus());
-app.post("/api/auth/setup-code", async () => passkeys.issueSetupCode("settings"));
+app.get("/api/settings/agents", () => ownerValue("agents.get"));
+app.post<{ Body: { content: string } }>("/api/settings/agents", (request) =>
+  ownerValue("agents.set", request.body),
+);
+app.get("/api/auth/status", () => ownerValue("auth.status"));
+app.post("/api/auth/setup-code", () => ownerValue("auth.setup-code"));
 app.get<{ Params: { imageId: string }; Querystring: { preview?: string } }>(
   "/api/transcript-images/:imageId",
   async (request, reply) => {

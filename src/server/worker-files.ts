@@ -214,6 +214,26 @@ export async function receiveWorkerFiles(
   metadata: WorkerFileMetadata[],
   parts: AsyncIterable<Multipart>,
 ): Promise<WorkerInputFile[]> {
+  async function* streams() {
+    for await (const part of parts) {
+      if (part.type !== "file") throw invalid("Unexpected worker file part");
+      yield { fieldname: part.fieldname, stream: part.file, truncated: () => part.file.truncated };
+    }
+  }
+  return receiveWorkerFileStreams(storage, key, metadata, streams());
+}
+
+/** Transport-neutral admission: verified bytes are saved before the command can run. */
+export async function receiveWorkerFileStreams(
+  storage: WorkerFileStorage,
+  key: string,
+  metadata: WorkerFileMetadata[],
+  parts: AsyncIterable<{
+    fieldname: string;
+    stream: AsyncIterable<Uint8Array>;
+    truncated?: () => boolean;
+  }>,
+): Promise<WorkerInputFile[]> {
   validateWorkerFileMetadata(metadata);
   await fs.mkdir(storage.rootDir, { recursive: true });
   const staging = await fs.mkdtemp(path.join(storage.rootDir, ".worker-input-"));
@@ -222,7 +242,7 @@ export async function receiveWorkerFiles(
   try {
     for await (const part of parts) {
       const expected = metadata[paths.length];
-      if (part.type !== "file" || !expected || part.fieldname !== `file-${paths.length}`)
+      if (!expected || part.fieldname !== `file-${paths.length}`)
         throw invalid("Unexpected worker file part");
       const directory = path.join(staging, String(paths.length));
       await fs.mkdir(directory);
@@ -230,7 +250,7 @@ export async function receiveWorkerFiles(
       let size = 0;
       const hash = createHash("sha256");
       await pipeline(
-        part.file,
+        part.stream,
         new Transform({
           transform(chunk, _encoding, callback) {
             size += chunk.length;
@@ -245,7 +265,7 @@ export async function receiveWorkerFiles(
         }),
         createWriteStream(target, { mode: 0o600 }),
       );
-      if (part.file.truncated || size !== expected.size || hash.digest("hex") !== expected.sha256)
+      if (part.truncated?.() || size !== expected.size || hash.digest("hex") !== expected.sha256)
         throw invalid(`Worker file integrity check failed: ${expected.name}`);
       paths.push(target);
     }

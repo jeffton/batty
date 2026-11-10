@@ -1,10 +1,9 @@
 import { flushPromises, mount } from "@vue/test-utils";
 
-vi.mock("@/client/lib/socket-fetch", () => ({
-  socketFetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
-  closeSocketTransport: vi.fn(),
-}));
+const rpcCallMock = vi.hoisted(() => vi.fn());
+vi.mock("@/client/lib/rpc", () => ({ rpcCall: rpcCallMock }));
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
+import { RpcError } from "@/shared/rpc-channel";
 import BrowserPopover from "./BrowserPopover.vue";
 
 const state = {
@@ -90,7 +89,7 @@ class FakeDecoder {
     this.state = "closed";
   }
 }
-const fetchMock = vi.fn();
+const rpcCall = rpcCallMock;
 beforeEach(() => {
   FakeEvents.instances = [];
   vi.stubGlobal("WebSocket", FakeEvents);
@@ -113,7 +112,6 @@ beforeEach(() => {
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
     drawImage: vi.fn(),
   } as unknown as CanvasRenderingContext2D);
-  vi.stubGlobal("fetch", fetchMock);
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -121,12 +119,12 @@ beforeEach(() => {
       disconnect() {}
     },
   );
-  fetchMock.mockResolvedValue({ ok: true, json: async () => state });
+  rpcCall.mockResolvedValue({ value: state });
 });
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
-  fetchMock.mockReset();
+  rpcCall.mockReset();
 });
 function create() {
   return mount(BrowserPopover, {
@@ -167,9 +165,9 @@ async function frame(
   Object.defineProperty(image, "setPointerCapture", { configurable: true, value: vi.fn() });
 }
 function commands() {
-  return fetchMock.mock.calls
-    .filter(([, init]) => init.method === "POST")
-    .map(([, init]) => JSON.parse(init.body));
+  return rpcCall.mock.calls
+    .filter(([operation]) => operation === "browser.control")
+    .map(([, input]) => (input as { control: Record<string, unknown> }).control);
 }
 
 test.each([
@@ -420,7 +418,7 @@ test("a timed-out scroll fence disconnects before a second control can bypass pe
     const image = wrapper.get("canvas");
     await image.trigger("pointerdown", { pointerId: 1, button: 0, clientX: 100, clientY: 200 });
     await image.trigger("pointerup", { pointerId: 1, clientX: 100, clientY: 100 });
-    // HTTP back must fence even when the local animation-frame send is pending.
+    // RPC must fence even when the local animation-frame send is pending.
     await wrapper.get('[aria-label="Go back"]').trigger("click");
     await flushPromises();
     expect(events.sent.some((command) => command.action === "flush")).toBe(true);
@@ -464,11 +462,11 @@ test("a new view discards the old decoder and ACKs its frames without painting s
 
 test("a delayed control response cannot roll back streamed navigation or block its painted input", async () => {
   const wrapper = create();
-  let finish!: (value: unknown) => void;
+  let finish!: (value?: unknown, error?: Error) => void;
   try {
     const events = await open(wrapper);
     await frame(wrapper, events);
-    fetchMock.mockImplementationOnce(
+    rpcCall.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
           finish = resolve;
@@ -479,7 +477,7 @@ test("a delayed control response cannot roll back streamed navigation or block i
     const redirected = { ...state, revision: "redirected", url: "https://example.org/redirected" };
     events.send("state", redirected);
     await frame(wrapper, events, redirected.revision);
-    finish({ ok: true, json: async () => state });
+    finish({ value: state });
     await flushPromises();
     expect((wrapper.get('[aria-label="Browser address"]').element as HTMLInputElement).value).toBe(
       redirected.url,
@@ -502,11 +500,11 @@ test("a delayed control response cannot roll back streamed navigation or block i
 
 test("a delayed control response cannot restore a field replaced by streamed focus", async () => {
   const wrapper = create();
-  let finish!: (value: unknown) => void;
+  let finish!: (value?: unknown, error?: Error) => void;
   try {
     const events = await open(wrapper);
     await frame(wrapper, events);
-    fetchMock.mockImplementationOnce(
+    rpcCall.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
           finish = resolve;
@@ -518,8 +516,7 @@ test("a delayed control response cannot restore a field replaced by streamed foc
     events.send("state", { ...state, focused });
     await flushPromises();
     finish({
-      ok: true,
-      json: async () => ({ ...state, focused: { ...focused, id: "field-old", value: "old" } }),
+      value: { ...state, focused: { ...focused, id: "field-old", value: "old" } },
     });
     await flushPromises();
     const input = wrapper.get('[aria-label="Focused browser field"]');
@@ -573,7 +570,7 @@ test("contextual field replaces values, accepts clearing, and never sends a draf
     await frame(wrapper, events);
     const focused = { id: "field-a", value: "old", type: "text", multiline: false };
     const focusedState = { ...state, focused };
-    fetchMock.mockResolvedValue({ ok: true, json: async () => focusedState });
+    rpcCall.mockResolvedValue({ value: focusedState });
     events.send("state", focusedState);
     await flushPromises();
     const input = wrapper.get('[aria-label="Focused browser field"]');
@@ -597,11 +594,7 @@ test("contextual field replaces values, accepts clearing, and never sends a draf
       pageId: "page-1",
       revision: state.revision,
     });
-    fetchMock.mockResolvedValueOnce({
-      ok: false,
-      status: 409,
-      json: async () => ({ error: "The focused field changed." }),
-    });
+    rpcCall.mockRejectedValueOnce(new RpcError("CONFLICT", "The focused field changed."));
     const before = commands().length;
     await input.trigger("keydown", { key: "Enter" });
     await flushPromises();
@@ -645,7 +638,7 @@ test("tab controls switch or close only the requested page and focus a new blank
     await flushPromises();
     expect(commands().at(-1)).toEqual({ action: "switch", pageId: "page-2" });
     const blank = { ...state, pageId: "page-new", url: "about:blank", title: "", pages };
-    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => blank });
+    rpcCall.mockResolvedValueOnce({ value: blank });
     const address = wrapper.get('[aria-label="Browser address"]').element as HTMLInputElement;
     const focus = vi.spyOn(address, "focus");
     await wrapper.get(".cloud-browser-tabs__new").trigger("click");
@@ -671,11 +664,9 @@ test("closing the final tab surfaces server errors without implicitly switching 
       pages: [{ id: "page-1", title: "Example", url: state.url, active: true }],
     });
     await flushPromises();
-    fetchMock.mockResolvedValueOnce({
-      ok: false,
-      status: 409,
-      json: async () => ({ error: "The selected tab was closed. Choose a tab or open a new one." }),
-    });
+    rpcCall.mockRejectedValueOnce(
+      new RpcError("CONFLICT", "The selected tab was closed. Choose a tab or open a new one."),
+    );
     await wrapper.get('[aria-label="Close tab: Example"]').trigger("click");
     await flushPromises();
     expect(commands()).toEqual([{ action: "close-page", pageId: "page-1" }]);
@@ -701,27 +692,25 @@ test("a selected-tab error keeps the tab menu available for switching to a survi
       pages: [{ id: "page-1", title: "Example", url: state.url, active: true }, surviving],
     });
     await flushPromises();
-    fetchMock.mockResolvedValueOnce({
-      ok: false,
-      status: 409,
-      json: async () => ({
-        error: "The selected tab was closed. Choose a tab or open a new one.",
-        pages: [surviving],
-      }),
-    });
+    rpcCall.mockRejectedValueOnce(
+      new RpcError(
+        "SELECTION_CHANGED",
+        "The selected tab was closed. Choose a tab or open a new one.",
+        { pages: [surviving] },
+      ),
+    );
     await wrapper.get('[aria-label="Reload page"]').trigger("click");
     await flushPromises();
     expect(wrapper.find('[role="alert"]').exists()).toBe(false);
     expect(wrapper.get('[role="status"]').attributes("aria-label")).toBe("Reconnecting browser");
     expect(wrapper.get('[aria-label="Choose tab"]').attributes("disabled")).toBeUndefined();
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
+    rpcCall.mockResolvedValueOnce({
+      value: {
         ...state,
         pageId: surviving.id,
         url: surviving.url,
         pages: [{ ...surviving, active: true }],
-      }),
+      },
     });
     expect(wrapper.findAll(".cloud-browser-tabs__select")).toHaveLength(1);
     expect(wrapper.get('[aria-label="Reload page"]').attributes("disabled")).toBeDefined();
@@ -740,25 +729,23 @@ test("a selected-tab error keeps the tab menu available for switching to a survi
 test("a fresh viewer whose selected tab was closed can create a new tab without an initial page state", async () => {
   const wrapper = create();
   try {
-    fetchMock.mockResolvedValueOnce({
-      ok: false,
-      status: 409,
-      json: async () => ({
-        error: "The selected tab was closed. Choose a tab or open a new one.",
-        pages: [],
-      }),
-    });
+    rpcCall.mockRejectedValueOnce(
+      new RpcError(
+        "SELECTION_CHANGED",
+        "The selected tab was closed. Choose a tab or open a new one.",
+        { pages: [] },
+      ),
+    );
     await open(wrapper);
     expect(wrapper.get('[aria-label="Choose tab"]').attributes("disabled")).toBeUndefined();
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
+    rpcCall.mockResolvedValueOnce({
+      value: {
         ...state,
         pageId: "new-page",
         url: "about:blank",
         title: "",
         pages: [{ id: "new-page", title: "", url: "about:blank", active: true }],
-      }),
+      },
     });
     await wrapper.get(".cloud-browser-tabs__new").trigger("click");
     await flushPromises();
@@ -795,14 +782,13 @@ test("a stream-selected-tab error removes stale pixels and automatically reconci
     expect(wrapper.get("canvas").attributes("style")).toContain("display: none");
     expect(wrapper.get('[aria-label="Choose tab"]').attributes("disabled")).toBeUndefined();
     expect(FakeEvents.instances).toHaveLength(1);
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
+    rpcCall.mockResolvedValueOnce({
+      value: {
         ...state,
         pageId: surviving.id,
         url: surviving.url,
         pages: [{ ...surviving, active: true }],
-      }),
+      },
     });
     await vi.advanceTimersByTimeAsync(1000);
     await flushPromises();
@@ -828,9 +814,8 @@ test("a nonretryable stopped stream still allows an explicit new tab to reconnec
     events.send("browser-error", { error: "Capture stopped", retryable: false });
     await flushPromises();
     expect(events.closed).toBe(true);
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ ...state, pageId: "new", url: "about:blank" }),
+    rpcCall.mockResolvedValueOnce({
+      value: { ...state, pageId: "new", url: "about:blank" },
     });
     await wrapper.get(".cloud-browser-tabs__new").trigger("click");
     await flushPromises();
@@ -846,33 +831,31 @@ test.each([200, 409])(
   "explicit recovery supersedes an initial state request whose late response is %i",
   async (status) => {
     const wrapper = create();
-    let finish!: (value: unknown) => void;
+    let finish!: (value?: unknown, error?: Error) => void;
     try {
-      fetchMock.mockImplementationOnce(
+      rpcCall.mockImplementationOnce(
         () =>
-          new Promise((resolve) => {
-            finish = resolve;
+          new Promise((resolve, reject) => {
+            finish = (value, error) => (error ? reject(error) : resolve(value));
           }),
       );
       await open(wrapper);
-      const initialSignal = fetchMock.mock.calls[0]![1].signal as AbortSignal;
+      const initialSignal = rpcCall.mock.calls[0]![2].signal as AbortSignal;
       const fresh = {
         ...state,
         pageId: "new",
         url: "about:blank",
         pages: [{ id: "new", title: "", url: "about:blank", active: true }],
       };
-      fetchMock.mockResolvedValueOnce({ ok: true, json: async () => fresh });
+      rpcCall.mockResolvedValueOnce({ value: fresh });
       await wrapper.get(".cloud-browser-tabs__new").trigger("click");
       await flushPromises();
       expect(initialSignal.aborted).toBe(true);
       expect(FakeEvents.instances).toHaveLength(1);
       const socket = FakeEvents.instances[0]!;
-      finish({
-        ok: status === 200,
-        status,
-        json: async () => (status === 200 ? state : { error: "Old selection closed", pages: [] }),
-      });
+      if (status === 200) finish({ value: state });
+      else
+        finish(undefined, new RpcError("SELECTION_CHANGED", "Old selection closed", { pages: [] }));
       await flushPromises();
       expect(FakeEvents.instances).toHaveLength(1);
       expect(socket.closed).toBe(false);
@@ -888,18 +871,18 @@ test.each([200, 409])(
   "a stream selection loss cancels pending and queued controls before a late %i response",
   async (status) => {
     const wrapper = create();
-    let finish!: (value: unknown) => void;
+    let finish!: (value?: unknown, error?: Error) => void;
     try {
       const socket = await open(wrapper);
-      fetchMock.mockImplementationOnce(
+      rpcCall.mockImplementationOnce(
         () =>
-          new Promise((resolve) => {
-            finish = resolve;
+          new Promise((resolve, reject) => {
+            finish = (value, error) => (error ? reject(error) : resolve(value));
           }),
       );
       await wrapper.get('[aria-label="Reload page"]').trigger("click");
       await flushPromises();
-      const oldSignal = fetchMock.mock.calls.at(-1)![1].signal as AbortSignal;
+      const oldSignal = rpcCall.mock.calls.at(-1)![2].signal as AbortSignal;
       await wrapper.get('[aria-label="Go back"]').trigger("click");
       const surviving = {
         id: "page-2",
@@ -915,24 +898,20 @@ test.each([200, 409])(
       });
       await flushPromises();
       expect(oldSignal.aborted).toBe(true);
-      fetchMock.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
+      rpcCall.mockResolvedValueOnce({
+        value: {
           ...state,
           pageId: surviving.id,
           url: surviving.url,
           pages: [{ ...surviving, active: true }],
-        }),
+        },
       });
       await wrapper.get(".cloud-browser-tabs__select").trigger("click");
       await flushPromises();
       expect(FakeEvents.instances).toHaveLength(2);
       const recovered = FakeEvents.instances[1]!;
-      finish({
-        ok: status === 200,
-        status,
-        json: async () => (status === 200 ? state : { error: "Old response", pages: [] }),
-      });
+      if (status === 200) finish({ value: state });
+      else finish(undefined, new RpcError("SELECTION_CHANGED", "Old response", { pages: [] }));
       await flushPromises();
       expect(commands().map((command) => command.action)).toEqual(["reload", "switch"]);
       expect(wrapper.get('[aria-current="page"]').text()).toContain("Surviving tab");
@@ -968,7 +947,7 @@ test("disconnects while hidden/closed and reconnects without closing the remote 
   let hidden = false;
   vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden);
   try {
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(rpcCall).not.toHaveBeenCalled();
     const first = await open(wrapper);
     expect(first.url).toContain("/api/cloud-browser/opaque%2Fid/socket");
     hidden = true;
@@ -988,23 +967,23 @@ test("disconnects while hidden/closed and reconnects without closing the remote 
 });
 
 test.each(["reopen", "online", "pageshow"])(
-  "%s fetches authoritative state and ignores an older reconnect response",
+  "%s requests authoritative state and ignores an older reconnect response",
   async (trigger) => {
     const wrapper = create();
     try {
       const first = await open(wrapper);
-      let finish!: (value: unknown) => void;
-      fetchMock.mockImplementationOnce(
+      let finish!: (value?: unknown, error?: Error) => void;
+      rpcCall.mockImplementationOnce(
         () =>
-          new Promise((resolve) => {
-            finish = resolve;
+          new Promise((resolve, reject) => {
+            finish = (value, error) => (error ? reject(error) : resolve(value));
           }),
       );
       window.dispatchEvent(new Event("online"));
       await flushPromises();
-      const pendingSignal = fetchMock.mock.calls.at(-1)![1].signal as AbortSignal;
+      const pendingSignal = rpcCall.mock.calls.at(-1)![2].signal as AbortSignal;
       const next = { ...state, pageId: "page-2", url: "https://survivor.example" };
-      fetchMock.mockResolvedValueOnce({ ok: true, json: async () => next });
+      rpcCall.mockResolvedValueOnce({ value: next });
       if (trigger === "reopen") {
         const popover = wrapper.getComponent({ name: "FullPopover" });
         popover.vm.$emit("toggle", { newState: "closed" });
@@ -1014,14 +993,13 @@ test.each(["reopen", "online", "pageshow"])(
       await flushPromises();
       expect(pendingSignal.aborted).toBe(true);
       expect(first.closed).toBe(true);
-      finish({ ok: true, json: async () => state });
+      finish({ value: state });
       await flushPromises();
       expect(
         (wrapper.get('[aria-label="Browser address"]').element as HTMLInputElement).value,
       ).toBe(next.url);
       expect(FakeEvents.instances).toHaveLength(2);
       expect(FakeEvents.instances[1]!.closed).toBe(false);
-      expect(fetchMock.mock.calls.every(([, init]) => init.cache === "no-store")).toBe(true);
       expect(commands()).toEqual([]);
     } finally {
       wrapper.unmount();
@@ -1071,18 +1049,14 @@ test("a server-side cloud deadline is shown without an automatic reconnect loop"
   vi.useFakeTimers();
   const wrapper = create();
   try {
-    fetchMock.mockResolvedValueOnce({
-      ok: false,
-      status: 504,
-      json: async () => ({ error: "Cloud browser queue timed out." }),
-    });
+    rpcCall.mockRejectedValueOnce(new RpcError("TIMEOUT", "Cloud browser queue timed out."));
     wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState: "open" });
     await flushPromises();
     expect(wrapper.get('[role="alert"]').text()).toContain("Cloud browser queue timed out.");
     expect(wrapper.find('[role="status"]').exists()).toBe(false);
     expect(FakeEvents.instances).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(rpcCall).toHaveBeenCalledTimes(1);
     await wrapper.get('[role="alert"] button').trigger("click");
     await flushPromises();
     expect(FakeEvents.instances).toHaveLength(1);
@@ -1102,7 +1076,7 @@ test("reconnects transient stream/network failures with backoff, but stops for e
     expect(wrapper.get('[role="status"]').attributes("aria-label")).toBe("Reconnecting browser");
     expect(wrapper.find(".cloud-browser__viewport .cloud-browser__spinner").exists()).toBe(true);
     expect(first.closed).toBe(true);
-    fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    rpcCall.mockRejectedValueOnce(new RpcError("OFFLINE", "Batty socket disconnected"));
     await vi.advanceTimersByTimeAsync(1000);
     await flushPromises();
     expect(FakeEvents.instances).toHaveLength(1);
@@ -1125,11 +1099,7 @@ test("reconnects transient stream/network failures with backoff, but stops for e
     await flushPromises();
     const third = FakeEvents.instances.at(-1)!;
     third.onclose?.();
-    fetchMock.mockResolvedValueOnce({
-      ok: false,
-      status: 410,
-      json: async () => ({ error: "Browser session ended" }),
-    });
+    rpcCall.mockRejectedValueOnce(new RpcError("GONE", "Browser session ended"));
     await vi.advanceTimersByTimeAsync(1000);
     await flushPromises();
     expect(wrapper.get('[role="alert"]').text()).toContain("Browser session ended");

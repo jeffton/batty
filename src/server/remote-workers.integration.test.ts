@@ -1,11 +1,10 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { createServer, request as httpRequest } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
 import WebSocket from "ws";
-import { workerCommandBody } from "./worker-files";
 import { artifactRefs } from "./artifact-forwarding";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,11 +20,22 @@ import {
 import { getCurrentTools } from "@earendil-works/pi-ai/utils/transcript";
 import { loadConfig } from "./config";
 import { Runtime, context } from "./runtime";
-import { nodeRequest } from "./remote-workers";
+import type { RemoteWorkers } from "./remote-workers";
+import type { RemoteConnectionCredentials } from "./remote-access";
+import { RpcError } from "../shared/rpc-channel";
+
+async function nodeRequest<T>(
+  connection: RemoteConnectionCredentials,
+  operation: string,
+  input: unknown,
+  requester: RemoteWorkers["requestNode"],
+): Promise<T> {
+  return (await requester<T>(connection, operation, input)).value;
+}
 import type { PairingClaim } from "./remote-access";
 import { authenticateNode, registerRemoteRoutes } from "./routes/remotes";
 import { registerReverseRemoteRoutes } from "./routes/reverse-remotes";
-import { resolveSentFile, storeSentFiles } from "./send-files";
+import { resolveSentFile } from "./send-files";
 import type { SentFileDescriptor } from "../shared/types";
 
 async function eventually(check: () => Promise<boolean>, label: string) {
@@ -85,6 +95,49 @@ async function openInstance(directory: string, name: string, fileStatus = 200, b
   let assignmentFailures = 0;
   let failedAssignmentRequests = 0;
   const sessionStreams: Array<{ url: string; closed: boolean }> = [];
+  const nativeCalls: string[] = [];
+  const handleNode = runtime.remotes.handleNode.bind(runtime.remotes);
+  vi.spyOn(runtime.remotes, "handleNode").mockImplementation(
+    async (connection, operation, input, call) => {
+      nativeCalls.push(operation);
+      if (!nodeOnline) throw new RpcError("OFFLINE", "Simulated sleeping peer");
+      if (operation === "node.assignment" && assignmentFailures > 0) {
+        assignmentFailures--;
+        failedAssignmentRequests++;
+        throw new RpcError("INTERNAL", "Simulated transient assignment-status failure");
+      }
+      if (operation === "node.file") {
+        const file = input as {
+          workspaceId: string;
+          sessionId: string;
+          toolCallId: string;
+          fileId: string;
+        };
+        fileRequests.push(
+          [file.workspaceId, file.sessionId, file.toolCallId, file.fileId]
+            .map(encodeURIComponent)
+            .join("/"),
+        );
+        if (fileStatus !== 200)
+          throw new RpcError(fileStatus === 404 ? "NOT_FOUND" : "INTERNAL", "File unavailable");
+      }
+      if (operation === "node.session.watch") {
+        const stream = {
+          url: `node.session.watch:${(input as { sessionId: string }).sessionId}`,
+          closed: false,
+        };
+        sessionStreams.push(stream);
+        call.signal.addEventListener(
+          "abort",
+          () => {
+            stream.closed = true;
+          },
+          { once: true },
+        );
+      }
+      return handleNode(connection, operation, input, call);
+    },
+  );
   app.addHook("onRequest", async (request, reply) => {
     if (request.url.startsWith("/api/node/assignments/") && assignmentFailures > 0) {
       assignmentFailures--;
@@ -196,6 +249,7 @@ async function openInstance(directory: string, name: string, fileStatus = 200, b
     url,
     id: runtime.remotes.access.identity().instanceId,
     sessionStreams,
+    nativeCalls,
     fileRequests,
     pairingClaims,
     proxyRequests,
@@ -448,17 +502,14 @@ test.each(["/", "/batty/"])(
         ]);
         const started = await nodeRequest<{ output: Array<{ text: string }> }>(
           from.runtime.remotes.connection(to.id),
-          "commands",
+          "node.command",
           {
-            method: "POST",
-            body: JSON.stringify({
-              requestId: `paired-${from.id}`,
-              command: {
-                action: "run",
-                workspaceId: "work",
-                prompt: "prove both directions",
-              },
-            }),
+            requestId: `paired-${from.id}`,
+            command: {
+              action: "run",
+              workspaceId: "work",
+              prompt: "prove both directions",
+            },
           },
           from.runtime.remotes.requestNode,
         );
@@ -466,13 +517,10 @@ test.each(["/", "/batty/"])(
         const session = /Session ID: (\d+)/.exec(started.output[0]!.text)![1]!;
         const waiting = await nodeRequest<{ details: { assignmentId: string } }>(
           from.runtime.remotes.connection(to.id),
-          "commands",
+          "node.command",
           {
-            method: "POST",
-            body: JSON.stringify({
-              requestId: `paired-await-${from.id}`,
-              command: { action: "await", sessionId: session },
-            }),
+            requestId: `paired-await-${from.id}`,
+            command: { action: "await", sessionId: session },
           },
           from.runtime.remotes.requestNode,
         );
@@ -501,13 +549,30 @@ test.each(["/", "/batty/"])(
         const segments = new URL(source!.downloadUrl, to.url).pathname.split("/").slice(-4);
         const received = await from.runtime.remotes.requestNode(
           from.runtime.remotes.connection(to.id),
-          `files/${segments.join("/")}`,
+          "node.file",
+          {
+            workspaceId: decodeURIComponent(segments[0]!),
+            sessionId: decodeURIComponent(segments[1]!),
+            toolCallId: decodeURIComponent(segments[2]!),
+            fileId: decodeURIComponent(segments[3]!),
+            // File storage is server-owned; extra input cannot override its root.
+            rootDir: join(directory, "attacker-selected-root"),
+          },
         );
-        expect(received.status).toBe(200);
-        expect(await received.text()).toBe(
+        expect(received.body).toBeDefined();
+        expect(await new Response(received.body).text()).toBe(
           `tools executed on ${to === windows ? "windows" : "mac"}`,
         );
       }
+      for (const instance of [windows, mac])
+        expect(instance.nativeCalls).toEqual(
+          expect.arrayContaining([
+            "node.identity",
+            "node.command",
+            "node.catalog.watch",
+            "node.file",
+          ]),
+        );
       expect(await windows.runtime.orchestration.queryWorkers({ action: "list" })).toHaveProperty(
         "output",
       );
@@ -569,13 +634,10 @@ test.each(["creator", "adder"] as const)(
       const connection = windows.runtime.remotes.connection(mac.id);
       const started = await nodeRequest<{ output: Array<{ text: string }> }>(
         connection,
-        "commands",
+        "node.command",
         {
-          method: "POST",
-          body: JSON.stringify({
-            requestId: "offline-unpair-worker",
-            command: { action: "run", workspaceId: "work", prompt: "continue while disconnected" },
-          }),
+          requestId: "offline-unpair-worker",
+          command: { action: "run", workspaceId: "work", prompt: "continue while disconnected" },
         },
         windows.runtime.remotes.requestNode,
       );
@@ -663,13 +725,10 @@ test.each(["reverse-unpair", "control-loss"] as const)(
       const connection = windows.runtime.remotes.connection(mac.id);
       const started = await nodeRequest<{ output: Array<{ text: string }> }>(
         connection,
-        "commands",
+        "node.command",
         {
-          method: "POST",
-          body: JSON.stringify({
-            requestId: "paired-stream-worker",
-            command: { action: "run", workspaceId: "work", prompt: "hold while streams close" },
-          }),
+          requestId: "paired-stream-worker",
+          command: { action: "run", workspaceId: "work", prompt: "hold while streams close" },
         },
         windows.runtime.remotes.requestNode,
       );
@@ -750,13 +809,10 @@ test("session SSE rechecks paired access after asynchronous metadata lookup", as
     const connection = windows.runtime.remotes.connection(mac.id);
     const started = await nodeRequest<{ output: Array<{ text: string }> }>(
       connection,
-      "commands",
+      "node.command",
       {
-        method: "POST",
-        body: JSON.stringify({
-          requestId: "sse-admission-worker",
-          command: { action: "run", workspaceId: "work", prompt: "complete before SSE request" },
-        }),
+        requestId: "sse-admission-worker",
+        command: { action: "run", workspaceId: "work", prompt: "complete before SSE request" },
       },
       windows.runtime.remotes.requestNode,
     );
@@ -1133,18 +1189,13 @@ test.each(["/", "/batty/"])(
         ),
         fauxAssistantMessage([fauxText("worker released")]),
       ]);
-      const request = <T>(route: string, init: RequestInit = {}) =>
+      const command = <T>(requestId: string, action: Record<string, unknown>) =>
         nodeRequest<T>(
           local.runtime.remotes.connection(remote.id),
-          route,
-          init,
+          "node.command",
+          { requestId, command: action },
           local.runtime.remotes.requestNode,
         );
-      const command = <T>(requestId: string, action: Record<string, unknown>) =>
-        request<T>("commands", {
-          method: "POST",
-          body: JSON.stringify({ requestId, command: action }),
-        });
       const run = { action: "run", workspaceId: "work", prompt: "native reverse-only worker" };
       const started = await command<{ output: Array<{ text: string }> }>("reverse-once", run);
       const session = /Session ID: (\d+)/.exec(started.output[0]!.text)![1]!;
@@ -1285,13 +1336,10 @@ test("reverse pairing rejects impersonation and live grant revocation severs str
     const connection = local.runtime.remotes.connection(remote.id);
     const started = await nodeRequest<{ output: Array<{ text: string }> }>(
       connection,
-      "commands",
+      "node.command",
       {
-        method: "POST",
-        body: JSON.stringify({
-          requestId: "auth-regression-run",
-          command: { action: "run", workspaceId: "work", prompt: "report progress and hold" },
-        }),
+        requestId: "auth-regression-run",
+        command: { action: "run", workspaceId: "work", prompt: "report progress and hold" },
       },
       local.runtime.remotes.requestNode,
     );
@@ -1314,13 +1362,10 @@ test("reverse pairing rejects impersonation and live grant revocation severs str
     }, "progress mirrored before revocation");
     const waiting = await nodeRequest<{ details: { assignmentId: string } }>(
       connection,
-      "commands",
+      "node.command",
       {
-        method: "POST",
-        body: JSON.stringify({
-          requestId: "auth-regression-await",
-          command: { action: "await", sessionId: session },
-        }),
+        requestId: "auth-regression-await",
+        command: { action: "await", sessionId: session },
       },
       local.runtime.remotes.requestNode,
     );
@@ -1334,8 +1379,8 @@ test("reverse pairing rejects impersonation and live grant revocation severs str
       },
       revokedAwaitAbort.signal,
     );
-    const live = await local.runtime.remotes.requestNode(connection, "catalog/events");
-    const reader = live.body!.getReader();
+    const live = await local.runtime.remotes.requestNode(connection, "node.catalog.watch");
+    const reader = live.events!.getReader();
     await reader.read();
     const pendingRead = reader.read();
     const interrupted = expect(pendingRead).rejects.toThrow();
@@ -1383,7 +1428,7 @@ test("reverse pairing rejects impersonation and live grant revocation severs str
     });
     const forbiddenStop = local.runtime.remotes.stop(id);
     await expect(forbiddenStop).rejects.toThrow(/access removed|revoked/i);
-    await expect(forbiddenStop).rejects.toMatchObject({ status: 403 });
+    await expect(forbiddenStop).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(
       local.runtime.remotes.command(
         {
@@ -1436,11 +1481,8 @@ test("pending remote await settles after connection removal persistence without 
     const command = <T>(requestId: string, body: Record<string, unknown>) =>
       nodeRequest<T>(
         connection,
-        "commands",
-        {
-          method: "POST",
-          body: JSON.stringify({ requestId, command: body }),
-        },
+        "node.command",
+        { requestId, command: body },
         local.runtime.remotes.requestNode,
       );
     const started = await command<{ output: Array<{ text: string }> }>("removal-run", {
@@ -1521,7 +1563,7 @@ test("pending remote await settles after connection removal persistence without 
 
 // A permanent miss and a retryable failure exercise the two import/recovery paths.
 test.each([404, 503])(
-  "HTTP %i file failures do not strand a coordinator's remote await or terminal mirror",
+  "native file failure %i does not strand a coordinator's remote await or terminal mirror",
   async (status) => {
     vi.stubEnv("PI_OFFLINE", "1");
     const directory = await mkdtemp(join(tmpdir(), "batty-remote-import-failure-"));
@@ -1598,7 +1640,9 @@ test.each([404, 503])(
             JSON.stringify(last).includes("Remote final despite missing attachment")
           ) {
             expect(JSON.stringify(last)).toContain("Remote attachment import failed");
-            expect(JSON.stringify(last)).toContain(`Remote file HTTP ${status}`);
+            expect(JSON.stringify(last)).toContain(
+              `Remote file ${status === 404 ? "NOT_FOUND" : "INTERNAL"}`,
+            );
             receivedImportFailure = true;
           }
           return fauxAssistantMessage([fauxText("Coordinator finished")]);
@@ -1638,7 +1682,7 @@ test.each([404, 503])(
         "terminal history replay",
       );
       const history = JSON.stringify(local.runtime.remotes.messages(id));
-      expect(history).toContain(`Remote file HTTP ${status}`);
+      expect(history).toContain(`Remote file ${status === 404 ? "NOT_FOUND" : "INTERNAL"}`);
       expect(filesIn(local.runtime.remotes.messages(id))).toEqual([]);
       // Re-reading terminal assignment receipts retries transient errors, not 404s.
       const requestsBefore = remote.fileRequests.length;
@@ -2000,9 +2044,7 @@ test("catalog skips historical worker streams and retires active streams until t
     );
     expect(remote.sessionStreams).toHaveLength(0);
     const streamsFor = (id: string) =>
-      remote.sessionStreams.filter(
-        (stream) => new URL(stream.url, remote.url).pathname === `/api/node/sessions/${id}/events`,
-      );
+      remote.sessionStreams.filter((stream) => stream.url === `node.session.watch:${id}`);
     remote.faux.setResponses([
       fauxAssistantMessage(
         [
@@ -2277,14 +2319,26 @@ test("terminal metadata cannot retire a stream before its committed result curso
   }
 }, 30_000);
 
-test("multipart node commands authenticate, reject corrupt/incomplete transfers before admission, and replay without duplicate work", async () => {
+test("native binary commands verify admission, never use HTTP, deduplicate retries and recheck live grants", async () => {
   vi.stubEnv("PI_OFFLINE", "1");
-  const directory = await mkdtemp(join(tmpdir(), "batty-node-input-replay-"));
+  const directory = await mkdtemp(join(tmpdir(), "batty-native-input-replay-"));
   const remote = await openInstance(directory, "receiver");
   const sender = await openInstance(directory, "sender");
+  let restoreHttp = () => {};
   try {
     await connect(sender, remote);
     const grant = sender.runtime.remotes.connection(remote.id);
+    const channel = sender.runtime.remotes.reverse.channel(grant);
+    const originalFetch = globalThis.fetch;
+    const http = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = new URL(
+        typeof input === "string" ? input : input instanceof URL ? input : input.url,
+      );
+      if (url.pathname.startsWith("/api/node/"))
+        throw new Error("Native peer traffic attempted HTTP");
+      return originalFetch(input, init);
+    });
+    restoreHttp = () => http.mockRestore();
     let calls = 0;
     remote.faux.setResponses(
       Array.from({ length: 10 }, () => () => {
@@ -2292,86 +2346,175 @@ test("multipart node commands authenticate, reject corrupt/incomplete transfers 
         return fauxAssistantMessage([fauxText("input processed")]);
       }),
     );
-    const source = join(directory, "evidence.txt");
     const bytes = Buffer.from("durable input bytes");
-    await writeFile(source, bytes);
-    const [file] = await storeSentFiles({
-      rootDir: join(directory, "sender-files"),
-      workspaceId: "sender",
-      sessionId: "1",
-      toolCallId: "input",
-      cwd: directory,
-      paths: [source],
-    });
-    const files = [
+    const metadata = [
       {
-        name: file!.name,
-        size: file!.size,
-        mimeType: file!.mimeType,
+        name: "evidence.txt",
+        size: bytes.length,
+        mimeType: "text/plain",
         sha256: createHash("sha256").update(bytes).digest("hex"),
-        file: file!,
       },
     ];
     const command = { action: "run", prompt: "process transferred input", workspaceId: "work" };
-    const send = async (body: FormData, token = grant.token) =>
-      fetch(new URL("api/node/commands", remote.url), {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}` },
-        body,
+    const body = (value = bytes) =>
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(value);
+          controller.close();
+        },
       });
-    const denied = await send(await workerCommandBody(command, "denied", files), "invalid");
-    expect(denied.status).toBe(401);
-    await denied.body?.cancel();
-    const corrupt = await send(
-      await workerCommandBody(command, "attempt", [{ ...files[0]!, sha256: "0".repeat(64) }]),
-    );
-    expect(corrupt.status).toBe(400);
-    expect(await corrupt.text()).toContain("integrity check failed");
-    const missingBody = await workerCommandBody(command, "missing", files);
-    missingBody.delete("file-0");
-    const missing = await send(missingBody);
-    expect(missing.status).toBe(400);
-    expect(await missing.text()).toContain("Missing worker file parts");
+    const send = (requestId: string, files = metadata, value = bytes) =>
+      sender.runtime.remotes.requestNode(
+        grant,
+        "node.command",
+        { requestId, command, files },
+        { body: body(value) },
+      );
+    await expect(
+      send("attempt", [{ ...metadata[0]!, sha256: "0".repeat(64) }]),
+    ).rejects.toMatchObject({ code: "BAD_INPUT" });
+    await expect(send("missing", metadata, bytes.subarray(1))).rejects.toMatchObject({
+      code: "BAD_INPUT",
+    });
+    await expect(
+      send("extra", metadata, Buffer.concat([bytes, Buffer.from("extra")])),
+    ).rejects.toMatchObject({ code: "BAD_INPUT" });
     expect(await remote.runtime.orchestration.listRunning()).toHaveLength(0);
     expect(calls).toBe(0);
-    const first = await send(await workerCommandBody(command, "attempt", files));
-    expect(first.status).toBe(200);
-    const receipt = await first.json();
+    const receipt = (await send("attempt")).value;
     await eventually(
       async () => (await remote.runtime.orchestration.listRunning()).length === 0,
-      "single imported assignment",
+      "single native imported assignment",
     );
-    const duplicate = await send(await workerCommandBody(command, "attempt", files));
-    expect(duplicate.status).toBe(200);
-    expect(await duplicate.json()).toEqual(receipt);
+    expect((await send("attempt")).value).toEqual(receipt);
     expect(calls).toBe(1);
-    const changed = await send(
-      await workerCommandBody({ ...command, prompt: "different assignment" }, "attempt", files),
-    );
-    expect(changed.ok).toBe(false);
-    expect(await changed.text()).toContain("reused with different arguments");
-    const jsonPath = await remote.app.inject({
-      method: "POST",
-      url: "/api/node/commands",
-      headers: { authorization: `Bearer ${grant.token}` },
-      payload: {
+    await expect(
+      sender.runtime.remotes.requestNode(
+        grant,
+        "node.command",
+        {
+          requestId: "attempt",
+          command: { ...command, prompt: "different assignment" },
+          files: metadata,
+        },
+        { body: body() },
+      ),
+    ).rejects.toThrow("reused with different arguments");
+    await expect(
+      channel.call("node.command", {
         requestId: "path-injection",
         command: { ...command, files: [{ path: join(remote.work, "origin.txt") }] },
-      },
-    });
-    expect(jsonPath.statusCode).not.toBe(200);
-    expect(calls).toBe(1);
+      }),
+    ).rejects.toMatchObject({ code: "BAD_INPUT" });
+    await expect(channel.call("owner.settings", {})).rejects.toMatchObject({ code: "FORBIDDEN" });
     await remote.runtime.remotes.access.revoke(grant.grantId!);
-    const revoked = await send(await workerCommandBody(command, "revoked", files));
-    expect(revoked.status).toBe(401);
-    await revoked.body?.cancel();
+    // Keep the authenticated socket alive: revocation is checked on every call,
+    // not merely during its opening handshake.
+    await expect(
+      channel.call("node.command", { requestId: "revoked", command }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    expect(calls).toBe(1);
   } finally {
+    restoreHttp();
     await sender.close();
     await remote.close();
     await rm(directory, { recursive: true, force: true });
     vi.unstubAllEnvs();
   }
 }, 30_000);
+
+test.each(["cancel", "revoke"] as const)(
+  "native upload %s during transfer never admits a worker and cleans staging",
+  async (interruption) => {
+    vi.stubEnv("PI_OFFLINE", "1");
+    const directory = await mkdtemp(join(tmpdir(), "batty-native-upload-interrupt-"));
+    const remote = await openInstance(directory, "receiver");
+    const sender = await openInstance(directory, "sender");
+    try {
+      await connect(sender, remote);
+      const grant = sender.runtime.remotes.connection(remote.id);
+      const admission = vi.spyOn(remote.runtime.orchestration, "nodeCommand");
+      await mkdir(remote.config.sentFilesDir, { recursive: true });
+      const bytes = Buffer.from("finish only after grant check");
+      const files = [
+        {
+          name: "evidence.txt",
+          size: bytes.length,
+          mimeType: "text/plain",
+          sha256: createHash("sha256").update(bytes).digest("hex"),
+        },
+      ];
+      let writer!: ReadableStreamDefaultController<Uint8Array>;
+      let cancelled = false;
+      const body = new ReadableStream<Uint8Array>(
+        {
+          start(controller) {
+            writer = controller;
+            controller.enqueue(bytes.subarray(0, 1));
+          },
+          cancel() {
+            cancelled = true;
+          },
+        },
+        { highWaterMark: 0 },
+      );
+      const controller = new AbortController();
+      const pending = sender.runtime.remotes.requestNode(
+        grant,
+        "node.command",
+        {
+          requestId: `interrupt-${interruption}`,
+          command: { action: "run", workspaceId: "work", prompt: "must not be admitted" },
+          files,
+        },
+        { body, signal: controller.signal },
+      );
+      const outcome = pending.then(
+        () => ({ error: undefined }),
+        (error: unknown) => ({ error }),
+      );
+      await eventually(async () => {
+        const entries = await readdir(remote.config.sentFilesDir);
+        for (const stage of entries.filter((name) => name.startsWith(".worker-input-"))) {
+          try {
+            if (
+              (await readFile(join(remote.config.sentFilesDir, stage, "0", "evidence.txt")))
+                .length === 1
+            )
+              return true;
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          }
+        }
+        return false;
+      }, "first native upload chunk stored before interruption");
+      if (interruption === "cancel") controller.abort(new Error("Cancelled native upload"));
+      else {
+        // Do not close the socket: domain admission must recheck after byte receipt.
+        await remote.runtime.remotes.access.revoke(grant.grantId!);
+        writer.enqueue(bytes.subarray(1));
+        writer.close();
+      }
+      const { error } = await outcome;
+      if (interruption === "cancel")
+        expect(error).toMatchObject({ message: "Cancelled native upload" });
+      else expect(error).toMatchObject({ code: "UNAUTHORIZED" });
+      await eventually(async () => {
+        const entries = await readdir(remote.config.sentFilesDir);
+        return !entries.some((name) => name.startsWith(".worker-input-"));
+      }, "interrupted native upload staging removed");
+      expect(admission).not.toHaveBeenCalled();
+      expect(await remote.runtime.orchestration.listRunning()).toHaveLength(0);
+      if (interruption === "cancel") expect(cancelled).toBe(true);
+    } finally {
+      await sender.close();
+      await remote.close();
+      await rm(directory, { recursive: true, force: true });
+      vi.unstubAllEnvs();
+    }
+  },
+  30_000,
+);
 
 test.each(["forward", "reverse"] as const)(
   "%s socket run/queue/steer/resume carry selected paths and received refs, images, immutable queued bytes and locally mirrored input attachments",

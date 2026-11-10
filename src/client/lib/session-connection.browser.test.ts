@@ -1,7 +1,7 @@
 // @vitest-environment node
 import path from "node:path";
 import { WebSocketServer } from "ws";
-import { SocketChannel } from "@/shared/socket-channel";
+import { RpcChannel } from "@/shared/rpc-channel";
 import { chromium, type Browser } from "playwright-core";
 import { launchWebKit } from "../test/webkit";
 import type { ViteDevServer } from "vite";
@@ -14,8 +14,8 @@ let server: ViteDevServer;
 let sockets: WebSocketServer;
 let url: string;
 let stall = false;
-const requests: string[] = [];
-const channels = new Set<SocketChannel>();
+const requests: { operation: string; input: unknown }[] = [];
+const channels = new Set<RpcChannel>();
 
 beforeAll(async () => {
   server = await createBrowserFixtureServer(
@@ -31,29 +31,28 @@ beforeAll(async () => {
             server.httpServer!.on("upgrade", (request, socket, head) => {
               if (request.url !== "/api/socket") return;
               sockets.handleUpgrade(request, socket, head, (websocket) => {
-                const channel = new SocketChannel(websocket, {
-                  handle: async (path, request) => {
-                    requests.push(path);
+                const channel = new RpcChannel(websocket, {
+                  handle: async (operation, input, context) => {
+                    requests.push({ operation, input });
                     // Leave the first logical stream waiting for headers during recovery.
                     if (stall) {
                       stall = false;
-                      return new Promise<Response>((_, reject) => {
-                        request.signal.addEventListener(
+                      return new Promise<never>((_, reject) => {
+                        context.signal.addEventListener(
                           "abort",
-                          () => reject(request.signal.reason),
+                          () => reject(context.signal.reason),
                           { once: true },
                         );
                       });
                     }
-                    const encoder = new TextEncoder();
                     let timer: ReturnType<typeof setInterval>;
-                    return new Response(
-                      new ReadableStream<Uint8Array>({
+                    return {
+                      value: null,
+                      events: new ReadableStream<unknown>({
                         start(controller) {
-                          controller.enqueue(encoder.encode('data: {"cursor":"2"}\n\n'));
+                          controller.enqueue({ cursor: "2" });
                           timer = setInterval(
-                            () =>
-                              controller.enqueue(encoder.encode("event: heartbeat\ndata: {}\n\n")),
+                            () => controller.enqueue({ type: "heartbeat" }),
                             1000,
                           );
                         },
@@ -61,8 +60,7 @@ beforeAll(async () => {
                           clearInterval(timer);
                         },
                       }),
-                      { headers: { "Content-Type": "text/event-stream" } },
-                    );
+                    };
                   },
                 });
                 channels.add(channel);
@@ -135,7 +133,10 @@ test("Chromium resumes a paused renderer with buffered heartbeats at the latest 
     await cdp.send("Debugger.resume");
     await expect.poll(() => requests.length, { timeout: 7000 }).toBe(2);
     expect(Date.now() - start).toBeLessThan(7000);
-    expect(requests[1]).toBe("/wake-events?after=2");
+    expect(requests[1]).toEqual({
+      operation: "session.watch",
+      input: { sessionId: "wake-events", after: "2" },
+    });
     expect(await page.locator("textarea").inputValue()).toBe("unsent draft");
     console.log(`Chromium paused renderer reconnected in ${Date.now() - start}ms`);
     await cdp.detach();

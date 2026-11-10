@@ -1,73 +1,53 @@
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-
-vi.mock("@/client/lib/socket-fetch", () => ({
-  socketFetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
-  closeSocketTransport: vi.fn(),
-}));
-import { listenForPushForeground } from "./push-foreground";
-
-function stream() {
-  const source = new EventTarget();
-  const close = listenForPushForeground(source as EventSource);
-  const send = (name: string, data: object) =>
-    source.dispatchEvent(new MessageEvent(name, { data: JSON.stringify(data) }));
-  send("push-client", { clientId: "live-stream" });
-  return { send, close };
-}
-
+import { afterEach, expect, it, vi } from "vite-plus/test";
+import { createPushForegroundHandler } from "./push-foreground";
+import { rpcCall } from "./rpc";
+vi.mock("./rpc", () => ({ rpcCall: vi.fn() }));
 afterEach(() => {
+  vi.resetAllMocks();
   vi.restoreAllMocks();
-  vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
-
-describe("push foreground client", () => {
-  it("acks only while visible and focused, with the current stream and concrete challenge", () => {
-    const fetch = vi.fn().mockResolvedValue({ ok: true });
-    vi.stubGlobal("fetch", fetch);
-    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
-    const focus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
-    const current = stream();
-    const challenge = { clientId: "live-stream", challengeId: "delivery-1" };
-    current.send("push-foreground", challenge);
-    expect(fetch).not.toHaveBeenCalled();
-    focus.mockReturnValue(true);
-    current.send("push-foreground", challenge);
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/push/foreground/ack",
-      expect.objectContaining({
-        method: "POST",
-        credentials: "include",
-        body: JSON.stringify(challenge),
-      }),
-    );
-    visibility.mockReturnValue("hidden");
-    current.send("push-foreground", { ...challenge, challengeId: "delivery-2" });
-    expect(fetch).toHaveBeenCalledTimes(1);
-    visibility.mockReturnValue("visible");
-    current.send("push-foreground", { clientId: "old-stream", challengeId: "delivery-3" });
-    current.close();
-    current.send("push-foreground", { ...challenge, challengeId: "delivery-4" });
-    expect(fetch).toHaveBeenCalledTimes(1);
-  });
-
-  it("makes no periodic requests and treats ack timeout as normal push delivery", async () => {
-    vi.useFakeTimers();
-    try {
-      const fetch = vi.fn().mockRejectedValue(new DOMException("Timeout", "TimeoutError"));
-      vi.stubGlobal("fetch", fetch);
-      vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
-      vi.spyOn(document, "hasFocus").mockReturnValue(true);
-      const error = vi.spyOn(console, "error");
-      const current = stream();
-      await vi.advanceTimersByTimeAsync(10_000);
-      expect(fetch).not.toHaveBeenCalled();
-      current.send("push-foreground", { clientId: "live-stream", challengeId: "delivery" });
-      await vi.advanceTimersByTimeAsync(1000);
-      expect(fetch).toHaveBeenCalledTimes(1);
-      expect(error).not.toHaveBeenCalled();
-      current.close();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+it("acks only its visible focused stream's concrete challenge and stops after close", () => {
+  vi.mocked(rpcCall).mockResolvedValue({ value: {} });
+  const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  const focus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+  const current = createPushForegroundHandler();
+  current.onEvent({ type: "push-client", clientId: "live" });
+  const challenge = {
+    type: "push-foreground",
+    clientId: "live",
+    challengeId: "delivery-1",
+  } as const;
+  current.onEvent(challenge);
+  expect(rpcCall).not.toHaveBeenCalled();
+  focus.mockReturnValue(true);
+  current.onEvent(challenge);
+  expect(rpcCall).toHaveBeenCalledWith(
+    "push.ack",
+    { clientId: "live", challengeId: "delivery-1" },
+    expect.objectContaining({ signal: expect.any(AbortSignal) }),
+  );
+  visibility.mockReturnValue("hidden");
+  current.onEvent(challenge);
+  visibility.mockReturnValue("visible");
+  current.onEvent({ ...challenge, clientId: "old" });
+  current.close();
+  current.onEvent(challenge);
+  expect(rpcCall).toHaveBeenCalledOnce();
+});
+it("does not poll and treats acknowledgement timeout as ordinary push delivery", async () => {
+  vi.useFakeTimers();
+  vi.mocked(rpcCall).mockRejectedValue(new DOMException("Timeout", "TimeoutError"));
+  vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  const error = vi.spyOn(console, "error");
+  const current = createPushForegroundHandler();
+  current.onEvent({ type: "push-client", clientId: "live" });
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(rpcCall).not.toHaveBeenCalled();
+  current.onEvent({ type: "push-foreground", clientId: "live", challengeId: "delivery" });
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(rpcCall).toHaveBeenCalledOnce();
+  expect(error).not.toHaveBeenCalled();
+  current.close();
 });

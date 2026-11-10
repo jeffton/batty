@@ -1,4 +1,3 @@
-import { withBaseUrl } from "@/client/lib/base-url";
 import type { SessionState } from "@/shared/types";
 
 export function sessionHistoryCursor(session: SessionState | undefined): string | undefined {
@@ -7,9 +6,4 @@ export function sessionHistoryCursor(session: SessionState | undefined): string 
   return Number(messageId?.split(":")[0] ?? 0) > Number(session.historyCursor)
     ? messageId
     : session.historyCursor;
-}
-export function sessionEventsPath(session: Pick<SessionState, "id">, after?: string): string {
-  return withBaseUrl(
-    `/api/sessions/${encodeURIComponent(session.id)}/events${after ? `?after=${encodeURIComponent(after)}` : ""}`,
-  );
 }

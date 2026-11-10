@@ -2,7 +2,6 @@ import { defineStore } from "pinia";
 import { blockAppReload, checkAppUpdate } from "@/client/lib/app-updates";
 import { primeAgentNotifications } from "@/client/lib/agent-notifications";
 import { syncPushSubscription, unregisterPushSubscription } from "@/client/lib/push-notifications";
-import { withBaseUrl } from "@/client/lib/base-url";
 import { reportBrowserError } from "@/client/lib/browser-errors";
 import { applyAppAppearance } from "@/client/lib/appearance";
 import * as api from "@/client/lib/api";
@@ -291,12 +290,8 @@ export const useAppStore = defineStore("app", {
     openStream() {
       this.closeStream();
       connection = createSessionConnection({
-        path: () => {
-          const after = sessionHistoryCursor(this.activeSession);
-          return withBaseUrl(
-            `/api/main/events${after ? `?after=${encodeURIComponent(after)}` : ""}`,
-          );
-        },
+        operation: "session.watch",
+        input: () => ({ sessionId: "main", after: sessionHistoryCursor(this.activeSession) }),
         onConnecting: () => {
           this.connectionState = "connecting";
         },
@@ -306,8 +301,7 @@ export const useAppStore = defineStore("app", {
         },
         onError: () => {
           this.connectionState = "offline";
-          // EventSource hides HTTP status, including expired-session 401s.
-          // Probe auth without reopening a healthy login's failing stream endpoint.
+          // Probe the cookie session after transport/authentication failures.
           if (navigator.onLine && this.authenticated) void this.checkAuthentication();
         },
         onEvent: (event) => {

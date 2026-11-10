@@ -4,7 +4,7 @@ import type { RemoteAccess, PairingClaim } from "../remote-access";
 import type { Runtime } from "../runtime";
 import { context } from "../runtime";
 import { listWorkspaces } from "../workspaces";
-import { nodeRequest, type RemoteWorkerSummary } from "../remote-workers";
+import type { RemoteWorkerSummary } from "../remote-workers";
 import { normalizeRemoteUrl } from "../remote-access";
 import type { RemoteDiscovery, RemoteGrant } from "../../shared/remotes";
 import type { WorkerCommand } from "../orchestration-workers";
@@ -18,12 +18,86 @@ import {
 import { resolveSentFile } from "../send-files";
 import type { TranscriptImages } from "../transcript-images";
 import type { TaskId } from "@earendil-works/pi-durable";
-import { unpairPeer } from "../socket-dispatch";
+import { unpairPeer } from "../node-rpc";
 import { DeliveryRecord } from "../orchestration-history";
 
 declare module "fastify" {
   interface FastifyRequest {
     nodeGrant?: RemoteGrant;
+  }
+}
+
+/** Shared owner provisioning domain entry point, independent of HTTP or sockets. */
+export async function executeRemoteOwnerOperation(
+  runtime: Runtime,
+  operation: string,
+  input: { id?: string; url?: string; token?: string } = {},
+) {
+  const remotes = runtime.remotes;
+  const access = remotes.access;
+  switch (operation) {
+    case "remotes.get":
+      return {
+        ...access.identity(),
+        grants: access.listInvitations(),
+        connections: access
+          .listConnections()
+          .map((connection) => ({ ...connection, status: remotes.reverse.status(connection.id) })),
+      };
+    case "remotes.token.list":
+      return access.listInvitations();
+    case "remotes.connection.list":
+      return access.listConnections();
+    case "remotes.token.generate":
+      return access.issueInvitation();
+    case "remotes.token.revoke":
+      await access.revoke(input.id!);
+      remotes.reverse.reconfigure();
+      return { ok: true };
+    case "remotes.connection.add": {
+      const url = normalizeRemoteUrl(input.url!);
+      if (!input.token?.trim()) throw new Error("Pairing token is required");
+      if (access.completedPairing(url, input.token)) return { ok: true };
+      const claim = await access.beginPairing(url, input.token);
+      const response = await fetch(new URL("api/node/pair", url), {
+        method: "POST",
+        headers: { authorization: `Bearer ${input.token}`, "content-type": "application/json" },
+        body: JSON.stringify(claim),
+        redirect: "error",
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!response.ok) {
+        const detail = (await response.json()) as { message?: string; error?: string };
+        throw new Error(
+          `Pairing failed: ${detail.message ?? detail.error ?? `HTTP ${response.status}`}`,
+        );
+      }
+      const identity = (await response.json()) as {
+        instanceId: string;
+        name: string;
+        grantId: string;
+      };
+      await remotes.bindOrigin(identity.instanceId, identity.instanceId);
+      await access.completePairing(url, input.token, identity);
+      remotes.reverse.reconfigure();
+      return { ok: true };
+    }
+    case "remotes.connection.remove": {
+      const connection = access.getConnection(input.id!);
+      const notification =
+        connection?.localGrantId && remotes.reverse.hasControl(connection.id)
+          ? remotes.reverse.notifyRemoval(connection).catch((error: unknown) => {
+              console.error("Peer removal notification interrupted; local access revoked", error);
+            })
+          : undefined;
+      await access.removeConnection(input.id!);
+      remotes.disconnect(input.id!);
+      remotes.reverse.reconfigure();
+      await notification;
+      return { ok: true };
+    }
+    default:
+      throw new Error("Unknown remote provisioning operation");
   }
 }
 
@@ -94,72 +168,19 @@ export function registerRemoteRoutes(app: FastifyInstance, runtime: Runtime) {
     };
   }>("/api/remotes", async (request) => {
     const input = request.body;
-    switch (input.action) {
-      case "token-list":
-        return access.listInvitations();
-      case "connection-list":
-        return access.listConnections();
-      case "token-generate":
-        return access.issueInvitation();
-      case "token-revoke": {
-        await access.revoke(input.id!);
-        remotes.reverse.reconfigure();
-        // Valid peers reconnect; a revoked grant cannot open another stream.
-        for (const stream of streams.keys()) stream.end();
-        return { ok: true };
-      }
-
-      case "connection-add": {
-        const url = normalizeRemoteUrl(input.url!);
-        if (!input.token?.trim()) throw new Error("Pairing token is required");
-        if (access.completedPairing(url, input.token)) return { ok: true };
-        const claim = await access.beginPairing(url, input.token!);
-        const response = await fetch(new URL("api/node/pair", url), {
-          method: "POST",
-          headers: { authorization: `Bearer ${input.token!}`, "content-type": "application/json" },
-          body: JSON.stringify(claim),
-          redirect: "error",
-          signal: AbortSignal.timeout(30_000),
-        });
-        if (!response.ok) {
-          const detail = (await response.json()) as { message?: string; error?: string };
-          throw new Error(
-            `Pairing failed: ${detail.message ?? detail.error ?? `HTTP ${response.status}`}`,
-          );
-        }
-        const identity = (await response.json()) as {
-          instanceId: string;
-          name: string;
-          grantId: string;
-        };
-        await remotes.bindOrigin(identity.instanceId, identity.instanceId);
-        const id = await access.completePairing(url, input.token!, identity);
-        remotes.connect(id);
-        remotes.reverse.reconfigure();
-        return { ok: true };
-      }
-      case "connection-remove": {
-        const connection = access.getConnection(input.id!);
-        const notification =
-          connection?.localGrantId && remotes.reverse.hasControl(connection.id)
-            ? remotes.reverse.notifyRemoval(connection).catch((error: unknown) => {
-                app.log.warn(
-                  { err: error },
-                  "Peer removal notification interrupted; local access revoked",
-                );
-              })
-            : undefined;
-        // Revocation and stream cleanup never wait for a sleeping or unreachable peer.
-        await access.removeConnection(input.id!);
-        remotes.disconnect(input.id!);
-        remotes.reverse.reconfigure();
-        for (const stream of streams.keys()) stream.end();
-        await notification;
-        return { ok: true };
-      }
-      default:
-        throw new Error("Unknown remote provisioning action");
-    }
+    const operation = {
+      "token-list": "remotes.token.list",
+      "connection-list": "remotes.connection.list",
+      "token-generate": "remotes.token.generate",
+      "token-revoke": "remotes.token.revoke",
+      "connection-add": "remotes.connection.add",
+      "connection-remove": "remotes.connection.remove",
+    }[input.action];
+    if (!operation) throw new Error("Unknown remote provisioning action");
+    const result = await executeRemoteOwnerOperation(runtime, operation, input);
+    if (["remotes.token.revoke", "remotes.connection.remove"].includes(operation))
+      for (const stream of streams.keys()) stream.end();
+    return result;
   });
   app.post<{ Body: PairingClaim }>("/api/node/pair", async (request) => {
     const invitation = request.headers.authorization!.slice(7);

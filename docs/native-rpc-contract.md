@@ -1,0 +1,42 @@
+# Native RPC implementation contract
+
+Experimental branch only. Replace the HTTP/SSE tunnel, not the domain model.
+
+Shared channel lives in `src/shared/rpc-channel.ts`:
+
+```ts
+export type RpcContext = { signal: AbortSignal; body?: ReadableStream<Uint8Array> };
+export type RpcReply<T = unknown> = {
+  value: T;
+  body?: ReadableStream<Uint8Array>;
+  events?: ReadableStream<unknown>;
+};
+export type RpcHandler = (
+  operation: string,
+  input: unknown,
+  context: RpcContext,
+) => Promise<RpcReply>;
+export class RpcError extends Error {
+  code: string;
+}
+export class RpcChannel {
+  constructor(socket: ChannelSocket, options?: { handle?: RpcHandler });
+  call<T = unknown>(
+    operation: string,
+    input: unknown,
+    options?: { signal?: AbortSignal; body?: ReadableStream<Uint8Array> },
+  ): Promise<RpcReply<T>>;
+  readonly closed: Promise<void>;
+  close(error?: Error): void;
+}
+```
+
+`ChannelSocket` abstracts the browser and Node WebSocket interfaces. JSON calls/results and event items are protocol frames; bytes use binary frames with bounded sliding credits. No Request, Response, URL, HTTP method/status/headers or SSE/NDJSON framing. Input/output stream channels are call-scoped and cancel/disconnect with the call. Core owns heartbeat and flow control; durable jobs/cursors remain outside it. Error codes: UNAUTHORIZED, FORBIDDEN, NOT_FOUND, BAD_INPUT, OFFLINE, INTERNAL; domain-specific codes permitted.
+
+Browser singleton in `client/lib/rpc.ts`: `rpcCall<T>(operation,input,options?) -> Promise<RpcReply<T>>`, `closeRpcTransport()`. Browser operation names use `session.get`, `session.messages`, `session.resources`, `session.subagents`, `main.submit`, `main.stop`, `main.queue.remove`, `workspace.list`, `workspace.git`, `workspace.files`, `workspace.file`, `workspace.search`; other names selected by browser operation owner and communicated to client owner. No route mapper on the native path.
+
+Owner handler factory in `server/owner-rpc.ts` registers explicit named operations with direct domain functions, not Fastify injection or generic callback emulation. Existing HTTP endpoints may remain where required for tests/resources; native operations must not delegate through HTTP. Register factory from main with runtime/services it needs. Session producers expose objects through an event sink, not ServerResponse/SSE.
+
+Peer handler factory in `server/node-rpc.ts`: `createNodeRpcHandler(remotes,connection,services)` (exact services negotiated by peer owner). Operations: `node.identity`, `node.discovery`, `node.command`, `node.assignment`, `node.file`, `node.unpair`, subscriptions `node.catalog.watch`, `node.session.watch`. Bound peer credentials verified per operation outside payload. Peer owner updates reverse-connections and remote-workers; browser owner updates owner socket/main registration.
+
+Files: metadata in operation input/value, byte streams in body. No multipart on native path. Browser natural HTTP resource serving/bootstrap/auth remains HTTP. No deploy or production changes.

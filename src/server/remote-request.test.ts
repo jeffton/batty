@@ -1,96 +1,72 @@
 import { expect, test, vi } from "vite-plus/test";
-import { fetchNodeResponse, readNodeEvents } from "./remote-workers";
+import { withNodeDeadline } from "./remote-workers";
+import type { RpcReply } from "../shared/rpc-channel";
 
-const connection = { id: "peer", label: "Peer", url: "https://peer.test/", token: "test-token" };
-
-test("status request keeps its deadline when the caller also supplies cancellation", async () => {
-  vi.useFakeTimers();
-  const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
-    const controller = new AbortController();
-    setTimeout(() => controller.abort(new Error("deadline")), milliseconds);
-    return controller.signal;
+function untilAborted(signal: AbortSignal): Promise<RpcReply> {
+  return new Promise((_resolve, reject) => {
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
   });
-  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
-    async (_input, init) =>
-      new Promise<Response>((_resolve, reject) => {
-        init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason), { once: true });
-      }),
-  );
+}
+
+test("native status handshake keeps its deadline with caller cancellation", async () => {
+  vi.useFakeTimers();
   try {
     const caller = new AbortController();
-    const pending = fetchNodeResponse(connection, "assignments/1", { signal: caller.signal });
-    const rejected = expect(pending).rejects.toThrow("deadline");
+    const rejected = expect(
+      withNodeDeadline({ signal: caller.signal }, untilAborted),
+    ).rejects.toMatchObject({ code: "OFFLINE" });
     await vi.advanceTimersByTimeAsync(30_000);
     await rejected;
     expect(caller.signal.aborted).toBe(false);
   } finally {
-    fetchMock.mockRestore();
-    timeout.mockRestore();
     vi.useRealTimers();
   }
 });
 
-test("multipart uploads retain their longer budget and propagate caller cancellation", async () => {
-  const deadline = vi.spyOn(AbortSignal, "timeout");
-  let requestSignal!: AbortSignal;
-  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
-    requestSignal = init!.signal!;
-    return new Promise<Response>((_resolve, reject) => {
-      requestSignal.addEventListener("abort", () => reject(requestSignal.reason), { once: true });
-    });
-  });
+test("native binary uploads retain their longer budget and caller cancellation", async () => {
+  vi.useFakeTimers();
   try {
     const caller = new AbortController();
-    const pending = fetchNodeResponse(connection, "commands", {
-      method: "POST",
-      body: new FormData(),
-      signal: caller.signal,
-    });
+    let signal!: AbortSignal;
+    const pending = withNodeDeadline(
+      { body: new ReadableStream(), signal: caller.signal },
+      (value) => {
+        signal = value;
+        return untilAborted(value);
+      },
+    );
     const rejected = expect(pending).rejects.toThrow("Canceled upload");
-    expect(deadline).toHaveBeenCalledWith(300_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(signal.aborted).toBe(false);
     caller.abort(new Error("Canceled upload"));
     await rejected;
-    expect(requestSignal.aborted).toBe(true);
+    expect(signal.aborted).toBe(true);
+    const deadline = expect(
+      withNodeDeadline({ body: new ReadableStream() }, untilAborted),
+    ).rejects.toMatchObject({ code: "OFFLINE" });
+    await vi.advanceTimersByTimeAsync(300_000);
+    await deadline;
   } finally {
-    fetchMock.mockRestore();
-    deadline.mockRestore();
+    vi.useRealTimers();
   }
 });
 
-test("event headers have a handshake deadline without limiting an active stream lifetime", async () => {
+test("a returned native subscription has no handshake lifetime limit", async () => {
   vi.useFakeTimers();
-  let liveSignal!: AbortSignal;
-  const fetchMock = vi
-    .spyOn(globalThis, "fetch")
-    .mockImplementationOnce(
-      async (_input, init) =>
-        new Promise<Response>((_resolve, reject) => {
-          init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason), {
-            once: true,
-          });
-        }),
-    )
-    .mockImplementationOnce(async (_input, init) => {
-      liveSignal = init!.signal!;
-      return new Response("data: {}\n\n");
-    });
   try {
     const caller = new AbortController();
-    const failed = expect(
-      fetchNodeResponse(connection, "catalog/events", { signal: caller.signal }),
-    ).rejects.toThrow("headers timed out");
-    await vi.advanceTimersByTimeAsync(30_000);
-    await failed;
-    const response = await fetchNodeResponse(connection, "catalog/events", {
-      signal: caller.signal,
+    let liveSignal!: AbortSignal;
+    const events = new ReadableStream<unknown>();
+    const reply = await withNodeDeadline({ signal: caller.signal }, async (signal) => {
+      liveSignal = signal;
+      return { value: null, events };
     });
     await vi.advanceTimersByTimeAsync(120_000);
     expect(liveSignal.aborted).toBe(false);
-    await readNodeEvents(response, async () => {});
+    expect(reply.events).toBe(events);
     caller.abort();
     expect(liveSignal.aborted).toBe(true);
   } finally {
-    fetchMock.mockRestore();
     vi.useRealTimers();
   }
 });

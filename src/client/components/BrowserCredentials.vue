@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { withBaseUrl } from "@/client/lib/base-url";
-import { socketFetch } from "@/client/lib/socket-fetch";
+import { rpcCall } from "@/client/lib/rpc";
 import type { CloudBrowserCredentialTarget, CloudBrowserState } from "@/shared/cloud-browser";
 
 const props = defineProps<{ browserId: string; state: CloudBrowserState }>();
@@ -14,7 +13,6 @@ const busy = ref(true);
 const controller = new AbortController();
 const initialBrowserId = props.browserId;
 const initialKey = identity();
-const endpoint = `/api/cloud-browser/${encodeURIComponent(initialBrowserId)}/credentials`;
 function identity(): string {
   return JSON.stringify([
     props.browserId,
@@ -42,13 +40,13 @@ watch(
   { flush: "sync" },
 );
 async function prepare(): Promise<void> {
-  const response = await socketFetch(withBaseUrl(`${endpoint}/prepare`), {
-    method: "POST",
-    signal: controller.signal,
-    cache: "no-store",
-  });
-  if (!response.ok) throw new Error();
-  const value = (await response.json()) as CloudBrowserCredentialTarget;
+  const { value } = await rpcCall<CloudBrowserCredentialTarget>(
+    "browser.credentials.prepare",
+    {
+      browserId: initialBrowserId,
+    },
+    { signal: controller.signal },
+  );
   if (
     controller.signal.aborted ||
     identity() !== initialKey ||
@@ -77,20 +75,16 @@ async function fill(): Promise<void> {
   busy.value = true;
   error.value = "";
   try {
-    const response = await socketFetch(withBaseUrl(`${endpoint}/fill`), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        target: target.value,
-        username: username.value,
-        password: password.value,
-      }),
-      signal: controller.signal,
-      cache: "no-store",
-    });
+    await rpcCall(
+      "browser.credentials.fill",
+      {
+        browserId: initialBrowserId,
+        credentials: { target: target.value, username: username.value, password: password.value },
+      },
+      { signal: controller.signal },
+    );
     clear();
     target.value = undefined;
-    if (!response.ok) throw new Error();
     // Each handoff is one-shot. Keep the pair available for correction without
     // retaining credentials across steps, navigation or reconnects.
     await prepare();

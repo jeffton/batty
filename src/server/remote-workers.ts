@@ -1,5 +1,10 @@
 import fs from "node:fs/promises";
-import { snapshotWorkerFiles, workerCommandBody } from "./worker-files";
+import { createWriteStream } from "node:fs";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import { snapshotWorkerFiles, workerFileMetadata } from "./worker-files";
+import { RpcError, type RpcContext, type RpcReply } from "../shared/rpc-channel";
+import { createNodeRpcHandler, workerBody } from "./node-rpc";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
@@ -58,113 +63,24 @@ type LocalIndex = { assignments: Assignment[]; origins: Record<string, string> }
 
 class PermanentFileImportError extends Error {}
 
-export class NodeHttpError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+export type NodeCallOptions = { signal?: AbortSignal; body?: ReadableStream<Uint8Array> };
 
-async function withNodeDeadline(
-  route: string,
-  init: RequestInit,
-  request: (signal: AbortSignal) => Promise<Response>,
-): Promise<Response> {
-  const streaming = route === "catalog/events" || /^sessions\/\d+\/events(?:\?|$)/.test(route);
-  const handshake = new AbortController();
-  // Multipart worker uploads retain their existing five-minute transfer budget.
-  const timeoutMs = route === "commands" && init.body instanceof FormData ? 300_000 : 30_000;
-  const deadline = streaming ? handshake.signal : AbortSignal.timeout(timeoutMs);
-  const timer = streaming
-    ? setTimeout(() => handshake.abort(new Error("Remote headers timed out")), 30_000)
-    : undefined;
+/** A bounded call handshake; returned streams retain caller cancellation, not a timer. */
+export async function withNodeDeadline<T>(
+  options: NodeCallOptions,
+  call: (signal: AbortSignal) => Promise<RpcReply<T>>,
+): Promise<RpcReply<T>> {
+  const timeout = new AbortController();
+  const timer = setTimeout(
+    () => timeout.abort(new RpcError("OFFLINE", "Remote call timed out")),
+    options.body ? 300_000 : 30_000,
+  );
   try {
-    return await request(init.signal ? AbortSignal.any([init.signal, deadline]) : deadline);
+    return await call(
+      options.signal ? AbortSignal.any([options.signal, timeout.signal]) : timeout.signal,
+    );
   } finally {
     clearTimeout(timer);
-  }
-}
-
-export async function fetchNodeResponse(
-  connection: RemoteConnectionCredentials,
-  route: string,
-  init: RequestInit = {},
-): Promise<Response> {
-  return withNodeDeadline(route, init, (signal) =>
-    fetch(new URL(`api/node/${route}`, connection.url), {
-      ...init,
-      redirect: "error",
-      signal,
-      headers: {
-        ...(init.body instanceof FormData ? {} : { "content-type": "application/json" }),
-        authorization: `Bearer ${connection.token}`,
-        ...init.headers,
-      },
-    }),
-  );
-}
-
-export async function nodeRequest<T>(
-  connection: RemoteConnectionCredentials,
-  route: string,
-  init: RequestInit = {},
-  requester = fetchNodeResponse,
-): Promise<T> {
-  const response = await requester(connection, route, init);
-  if (!response.ok)
-    throw new NodeHttpError(
-      response.status,
-      `Remote ${connection.id}: HTTP ${response.status}: ${await response.text()}`,
-    );
-  return (await response.json()) as T;
-}
-
-/** SSE framing shared by catalog and ordinary session projections, including chunk boundaries. */
-export async function readNodeEvents(
-  response: Response,
-  receive: (value: Record<string, unknown>) => Promise<void>,
-) {
-  if (!response.ok) {
-    await response.body?.cancel();
-    throw new NodeHttpError(response.status, `Remote event stream HTTP ${response.status}`);
-  }
-  if (!response.body) throw new Error("Remote event stream has no body");
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  try {
-    for (;;) {
-      // Existing SSE endpoints heartbeat every five seconds. A silent half-open transport
-      // must reconnect after sleep/network loss rather than wait forever on a TCP read.
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const chunk = await Promise.race([
-        reader.read(),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error("Remote event stream heartbeat expired")),
-            45_000,
-          );
-          timer.unref();
-        }),
-      ]).finally(() => clearTimeout(timer));
-      if (chunk.done) break;
-      buffer = (buffer + decoder.decode(chunk.value, { stream: true })).replace(/\r\n/g, "\n");
-      let boundary: number;
-      while ((boundary = buffer.indexOf("\n\n")) !== -1) {
-        const frame = buffer.slice(0, boundary);
-        buffer = buffer.slice(boundary + 2);
-        const data = frame
-          .split("\n")
-          .filter((line) => line.startsWith("data:"))
-          .map((line) => line.slice(5).trimStart())
-          .join("\n");
-        if (data && data !== "{}") await receive(JSON.parse(data) as Record<string, unknown>);
-      }
-    }
-  } finally {
-    await reader.cancel();
   }
 }
 
@@ -172,31 +88,35 @@ export class RemoteWorkers {
   readonly changes = new EventEmitter();
   readonly access: RemoteAccess;
   readonly reverse: ReverseConnections;
-  readonly requestNode = async (
+
+  /** Native calls retain domain errors, JSON items and byte streams without HTTP envelopes. */
+  readonly requestNode = async <T = unknown>(
     connection: RemoteConnectionCredentials,
-    route: string,
-    init: RequestInit = {},
-  ): Promise<Response> => {
-    const headers = new Headers(init.headers);
-    if (!(init.body instanceof FormData) && !headers.has("content-type"))
-      headers.set("content-type", "application/json");
-    headers.set("authorization", `Bearer ${connection.token}`);
-    return withNodeDeadline(route, init, (signal) => {
-      const request = new Request(new URL(`api/node/${route}`, "http://batty.invalid/"), {
-        ...init,
-        headers,
-        signal,
-        ...(init.body instanceof ReadableStream ? { duplex: "half" } : {}),
-      });
-      return this.reverse.channel(connection).request(`/api/node/${route}`, request);
-    });
+    operation: string,
+    input: unknown = {},
+    options: NodeCallOptions = {},
+  ): Promise<RpcReply<T>> => {
+    return withNodeDeadline(options, (signal) =>
+      this.reverse.channel(connection).call<T>(operation, input, { ...options, signal }),
+    );
   };
-  private nodeRequest<T>(
+
+  handleNode(
     connection: RemoteConnectionCredentials,
-    route: string,
-    init: RequestInit = {},
+    operation: string,
+    input: unknown,
+    call: RpcContext,
   ) {
-    return nodeRequest<T>(connection, route, init, this.requestNode);
+    return createNodeRpcHandler(this, connection)(operation, input, call);
+  }
+
+  private async nodeRequest<T>(
+    connection: RemoteConnectionCredentials,
+    operation: string,
+    input: unknown = {},
+    options: NodeCallOptions = {},
+  ) {
+    return (await this.requestNode<T>(connection, operation, input, options)).value;
   }
   private readonly mirrors = new Map<string, Mirror>();
   private index: LocalIndex = { assignments: [], origins: {} };
@@ -206,7 +126,7 @@ export class RemoteWorkers {
   private readonly loops = new Set<Promise<void>>();
   private stopped = false;
   private constructor(
-    private readonly runtime: Runtime,
+    readonly runtime: Runtime,
     access: RemoteAccess,
     private readonly directory: string,
   ) {
@@ -235,19 +155,15 @@ export class RemoteWorkers {
     return remotes;
   }
   start() {
-    for (const connection of this.access.listConnections())
-      if (
-        this.access.getConnection(connection.id)?.localGrantId &&
-        connection.transport !== "reverse"
-      )
-        this.connect(connection.id);
+    // Catalog subscriptions start only after the socket verifies peer identity.
+    this.reverse.reconfigure();
   }
   connect(node: string) {
     if (this.running.has(node) || this.stopped) return;
     const controller = new AbortController();
     this.running.set(node, controller);
     this.launch(
-      this.reconnect(node, "catalog/events", controller.signal, async (event) => {
+      this.reconnect(node, "node.catalog.watch", controller.signal, async (event) => {
         const workers = event.workers as RemoteWorkerSummary[];
         if (!workers) return;
         this.changes.emit("catalog", node);
@@ -306,8 +222,10 @@ export class RemoteWorkers {
     this.launch(
       this.reconnect(
         mirror.node,
-        () =>
-          `sessions/${mirror.session}/events${mirror.after ? `?after=${encodeURIComponent(mirror.after)}` : "?after=0"}`,
+        () => ({
+          operation: "node.session.watch",
+          input: { sessionId: mirror.session, after: mirror.after ?? "0" },
+        }),
         controller.signal,
         async (event) => {
           if (event.type === "error") throw new Error(String(event.message));
@@ -371,7 +289,7 @@ export class RemoteWorkers {
   }
   private async reconnect(
     node: string,
-    route: string | (() => string),
+    route: string | (() => { operation: string; input: unknown }),
     signal: AbortSignal,
     receive: (value: Record<string, unknown>) => Promise<void>,
     mirror?: Mirror,
@@ -382,18 +300,26 @@ export class RemoteWorkers {
       const refresh = (changedNode: string) => {
         if (changedNode === node) attempt.abort(new Error("Catalog resync requested"));
       };
-      if (route === "catalog/events") this.changes.on("catalog-refresh", refresh);
+      if (route === "node.catalog.watch") this.changes.on("catalog-refresh", refresh);
       try {
         const connection = this.connection(node);
-        const response = await this.requestNode(
-          connection,
-          typeof route === "function" ? route() : route,
-          { signal: AbortSignal.any([signal, attempt.signal]) },
-        );
-        await readNodeEvents(response, async (event) => {
-          attempts = 0;
-          await receive(event);
+        const watch = typeof route === "function" ? route() : { operation: route, input: {} };
+        const response = await this.requestNode(connection, watch.operation, watch.input, {
+          signal: AbortSignal.any([signal, attempt.signal]),
         });
+        if (!response.events)
+          throw new RpcError("INTERNAL", "Remote subscription has no event stream");
+        const reader = response.events.getReader();
+        try {
+          for (;;) {
+            const item = await reader.read();
+            if (item.done) break;
+            attempts = 0;
+            await receive(item.value as Record<string, unknown>);
+          }
+        } finally {
+          await reader.cancel();
+        }
         if (!signal.aborted) throw new Error(`Remote ${node} event stream disconnected`);
       } catch (error) {
         if (signal.aborted) break;
@@ -403,12 +329,12 @@ export class RemoteWorkers {
         }
         console.error(`Remote ${node} stream`, error);
         this.changes.emit("change");
-        if (error instanceof NodeHttpError && [401, 403].includes(error.status)) {
+        if (error instanceof RpcError && ["UNAUTHORIZED", "FORBIDDEN"].includes(error.code)) {
           this.changes.emit("catalog", node);
           break;
         }
       } finally {
-        if (route === "catalog/events") this.changes.off("catalog-refresh", refresh);
+        if (route === "node.catalog.watch") this.changes.off("catalog-refresh", refresh);
       }
       await new Promise<void>((resolve) => {
         const done = () => {
@@ -435,7 +361,7 @@ export class RemoteWorkers {
   }
   connection(node: string) {
     const connection = this.access.getConnection(node);
-    if (!connection) throw new NodeHttpError(404, `Unknown remote instance: ${node}`);
+    if (!connection) throw new RpcError("NOT_FOUND", `Unknown remote instance: ${node}`);
     return connection;
   }
   async stop(id: string) {
@@ -443,14 +369,8 @@ export class RemoteWorkers {
     if (!parsed) throw new Error("Invalid remote session ID");
     const result = await this.nodeRequest<{ isError?: boolean; output?: unknown }>(
       this.connection(parsed.node),
-      "commands",
-      {
-        method: "POST",
-        body: JSON.stringify({
-          requestId: `stop:${randomUUID()}`,
-          command: { action: "stop", sessionId: parsed.session },
-        }),
-      },
+      "node.command",
+      { requestId: `stop:${randomUUID()}`, command: { action: "stop", sessionId: parsed.session } },
     );
     if (result.isError) throw new Error(JSON.stringify(result.output));
   }
@@ -462,7 +382,7 @@ export class RemoteWorkers {
       ).map(async (connection) => ({
         nodeId: connection.id,
         label: connection.label,
-        ...(await this.nodeRequest<RemoteDiscovery>(connection, "workspaces")),
+        ...(await this.nodeRequest<RemoteDiscovery>(connection, "node.discovery")),
       })),
     );
   }
@@ -637,13 +557,16 @@ export class RemoteWorkers {
       output?: JsonValue;
       details?: JsonValue;
       isError?: boolean;
-    }>(this.connection(node), "commands", {
-      method: "POST",
-      ...(files.length ? { signal: AbortSignal.timeout(300_000) } : {}),
-      body: files.length
-        ? await workerCommandBody(command, requestId, files)
-        : JSON.stringify({ requestId, command }),
-    });
+    }>(
+      this.connection(node),
+      "node.command",
+      {
+        requestId,
+        command,
+        ...(files.length ? { files: workerFileMetadata(files) } : {}),
+      },
+      files.length ? { body: workerBody(files), signal: AbortSignal.timeout(300_000) } : {},
+    );
     const text = Array.isArray(result.output)
       ? result.output
           .map((part) => (typeof part === "object" && part && "text" in part ? part.text : ""))
@@ -753,7 +676,7 @@ export class RemoteWorkers {
       status: string;
       text?: string;
       artifacts?: AgentTurnArtifacts;
-    }>(this.connection(node), `assignments/${assignmentId}`, { signal });
+    }>(this.connection(node), "node.assignment", { assignmentId }, { signal });
     return (await this.importValue(node, result)) as typeof result;
   }
   async join(
@@ -782,9 +705,8 @@ export class RemoteWorkers {
         } catch (error) {
           signal.throwIfAborted();
           if (
-            error instanceof NodeHttpError &&
-            error.status < 500 &&
-            ![408, 429].includes(error.status)
+            error instanceof RpcError &&
+            ["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND", "BAD_INPUT"].includes(error.code)
           )
             result = { status: "failed", text: String(error) };
           else {
@@ -942,19 +864,33 @@ export class RemoteWorkers {
     const match = /\/api\/sent-files\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/.exec(source.pathname);
     if (!match) throw new PermanentFileImportError("Remote file does not use a sent-file manifest");
     const toolCallId = `remote-${node}-${match.slice(1).join("-")}`;
-    const response = await this.requestNode(connection, `files/${match.slice(1).join("/")}`, {
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!response.ok) {
-      const message = `Remote file HTTP ${response.status}`;
-      if (response.status >= 400 && response.status < 500 && ![408, 429].includes(response.status))
+    let response: RpcReply;
+    try {
+      response = await this.requestNode(
+        connection,
+        "node.file",
+        {
+          workspaceId: decodeURIComponent(match[1]!),
+          sessionId: decodeURIComponent(match[2]!),
+          toolCallId: decodeURIComponent(match[3]!),
+          fileId: decodeURIComponent(match[4]!),
+        },
+        { signal: AbortSignal.timeout(30_000) },
+      );
+    } catch (error) {
+      const message = `Remote file ${error instanceof RpcError ? error.code : String(error)}`;
+      if (
+        error instanceof RpcError &&
+        ["NOT_FOUND", "UNAUTHORIZED", "FORBIDDEN", "BAD_INPUT"].includes(error.code)
+      )
         throw new PermanentFileImportError(message);
       throw new Error(message);
     }
+    if (!response.body) throw new Error("Remote file has no byte stream");
     const directory = path.join(this.directory, "downloads", toolCallId);
     await fs.mkdir(directory, { recursive: true });
     const temporary = path.join(directory, path.basename(String(object.name)));
-    await fs.writeFile(temporary, Buffer.from(await response.arrayBuffer()), { mode: 0o600 });
+    await pipeline(Readable.fromWeb(response.body), createWriteStream(temporary, { mode: 0o600 }));
     const [file] = await storeSentFiles({
       rootDir: this.runtime.config.sentFilesDir,
       baseUrl: this.runtime.config.baseUrl,

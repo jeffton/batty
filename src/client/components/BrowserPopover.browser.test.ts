@@ -1,4 +1,10 @@
-import { fixtureRoute, waitForFixtureResponse } from "../test/socket-fixture";
+import {
+  fixtureOperation,
+  setFixtureRpcHandler,
+  waitForFixtureOperation,
+} from "../test/socket-fixture";
+import { createOwnerRpcHandler, type OwnerRpcServices } from "@/server/owner-rpc";
+import type { Runtime } from "@/server/runtime";
 // @vitest-environment node
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -31,6 +37,7 @@ let attachedBrowserId = "";
 beforeAll(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-cloud-popover-"));
   service = new BrowserService(undefined, 4, root);
+  await fs.mkdir(path.join(root, "workspaces", "integration"), { recursive: true });
   backend.addHook("onRequest", async (request, reply) => {
     if (request.url.startsWith("/api/") && !request.headers.cookie?.includes("cloud-auth=test"))
       return reply.code(401).send({ error: "Authentication required" });
@@ -98,6 +105,22 @@ beforeAll(async () => {
       },
     },
   });
+  const nativeHandler = createOwnerRpcHandler(
+    {
+      config: { battyDir: root, workspacesRoots: [path.join(root, "workspaces")] },
+      tools: { browserService: service, mcp: {} },
+    } as unknown as Runtime,
+    { browserAvailable: true } as OwnerRpcServices,
+  );
+  setFixtureRpcHandler(server, (operation, input, context) => {
+    // The fixture uses the same opaque attachment alias as the video proxy.
+    const payload = input as { browserId?: string };
+    return nativeHandler(
+      operation,
+      payload.browserId === "opaque" ? { ...payload, browserId: attachedBrowserId } : input,
+      context,
+    );
+  });
   await server.listen();
   url = `${server.resolvedUrls!.local[0]}src/client/components/BrowserPopover.fixture.html`;
   closeStreams = await registerCloudBrowserRoutes(backend, service, server.resolvedUrls!.local[0]!);
@@ -136,43 +159,52 @@ test("tab menu creates, switches and closes pages without exposing IDs", async (
       },
     ];
     const commands: Array<{ action: string; pageId?: string }> = [];
-    await fixtureRoute(server, page, "**/api/cloud-browser/*/{state,control}*", async (route) => {
-      const command = route.request().postDataJSON() as { action: string; pageId?: string } | null;
-      if (command) {
-        commands.push(command);
-        if (command.action === "new-page") {
-          selected = "new";
-          pages.push({ id: selected, title: "", url: "about:blank" });
-        } else if (command.action === "switch") selected = command.pageId!;
-        else if (command.action === "close-page")
-          pages = pages.filter((item) => item.id !== command.pageId);
-      }
-      const current = pages.find((item) => item.id === selected)!;
-      const snapshot = {
-        pageId: selected,
-        revision: "test-revision",
-        url: current.url,
-        title: current.title,
-        width: 390,
-        height: 700,
-        mobile: false,
-        deviceScaleFactor: 1,
-        pages: pages.map((item) => ({ ...item, active: item.id === selected })),
-      };
-      await route.fulfill({ json: snapshot });
-      if (command)
-        await page.evaluate((state) => {
-          document.dispatchEvent(
-            new CustomEvent("fixture-browser-state", {
-              detail: JSON.stringify({ event: "state", data: state }),
-            }),
-          );
-        }, snapshot);
-    });
+    await fixtureOperation(
+      server,
+      page,
+      ["browser.state", "browser.control"],
+      async (input, _context, _next, operation) => {
+        expect(input.browserId).toBe("opaque");
+        const command =
+          operation === "browser.control"
+            ? (input.control as { action: string; pageId?: string })
+            : undefined;
+        if (command) {
+          commands.push(command);
+          if (command.action === "new-page") {
+            selected = "new";
+            pages.push({ id: selected, title: "", url: "about:blank" });
+          } else if (command.action === "switch") selected = command.pageId!;
+          else if (command.action === "close-page")
+            pages = pages.filter((item) => item.id !== command.pageId);
+        }
+        const current = pages.find((item) => item.id === selected)!;
+        const snapshot = {
+          pageId: selected,
+          revision: "test-revision",
+          url: current.url,
+          title: current.title,
+          width: 390,
+          height: 700,
+          mobile: false,
+          deviceScaleFactor: 1,
+          pages: pages.map((item) => ({ ...item, active: item.id === selected })),
+        };
+        if (command)
+          await page.evaluate((state) => {
+            document.dispatchEvent(
+              new CustomEvent("fixture-browser-state", {
+                detail: JSON.stringify({ event: "state", data: state }),
+              }),
+            );
+          }, snapshot);
+        return { value: snapshot };
+      },
+    );
     await page.goto(`${url}?mockTabs=1`);
-    const initial = waitForFixtureResponse(server, (path) => path.endsWith("/state"));
+    const initial = waitForFixtureOperation(server, (operation) => operation === "browser.state");
     await page.getByRole("button", { name: "Open browser", exact: true }).click();
-    expect((await (await initial).json()).pages).toHaveLength(2);
+    expect(((await initial).value as { pages: unknown[] }).pages).toHaveLength(2);
     const choose = page.getByRole("button", { name: "Choose tab", exact: true });
     await choose.click();
     const menu = page.locator(".cloud-browser-tabs:popover-open");
@@ -222,12 +254,12 @@ test("toolbar starts a cloud browser and reopens the same live tabs on mobile", 
     ]);
     const page = await context.newPage();
     await page.goto(`${url}?toolbar=1`);
-    const opened = waitForFixtureResponse(
+    const opened = waitForFixtureOperation(
       server,
-      (path, body) => path.endsWith("/api/cloud-browser/open") && body !== undefined,
+      (operation, input) => operation === "browser.open" && input.workspaceId === "integration",
     );
     await page.getByRole("button", { name: "Open browser", exact: true }).click();
-    const descriptor = await (await opened).json();
+    const descriptor = (await opened).value as { browserId: string };
     const popover = page.locator("#toolbar-browser");
     await popover.waitFor({ state: "visible" });
     await expect
@@ -349,9 +381,10 @@ test("WebKit bottom autofill pair detects login steps without submitting or expo
     ]);
     const page = await context.newPage();
     const controls: string[] = [];
-    await fixtureRoute(server, page, "**/control", async (route) => {
-      controls.push(JSON.stringify(route.request().postDataJSON()));
-      await route.continue();
+    await fixtureOperation(server, page, "browser.control", async (input, _context, next) => {
+      expect(input.browserId).toBe("opaque");
+      controls.push(JSON.stringify(input.control));
+      return next();
     });
     await page.goto(url);
     await page.getByRole("button", { name: "Open browser", exact: true }).click();
@@ -730,12 +763,12 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
       .poll(() => addressInput.inputValue(), { timeout: 10_000 })
       .toBe(`${backendUrl}/popup#section`);
     const back = async () => {
-      const response = waitForFixtureResponse(
+      const response = waitForFixtureOperation(
         server,
-        (path, body) => path.endsWith("/control") && !!body && JSON.parse(body).action === "back",
+        (operation, input) => operation === "browser.control" && input.control.action === "back",
       );
       await popover.getByRole("button", { name: "Go back" }).click();
-      expect((await response).ok).toBe(true);
+      expect((await response).value).toHaveProperty("pageId");
     };
     await back();
     await expect
@@ -875,9 +908,10 @@ test("viewer open and live reconnect reconcile agent-closed tabs without replayi
   try {
     const page = await context.newPage();
     const commands: string[] = [];
-    await fixtureRoute(server, page, "**/control", async (route) => {
-      commands.push(route.request().postDataJSON().action);
-      await route.continue();
+    await fixtureOperation(server, page, "browser.control", async (input, _context, next) => {
+      expect(input.browserId).toBe("opaque");
+      commands.push(input.control.action);
+      return next();
     });
     await page.goto(url);
     await page.getByRole("button", { name: "Open browser", exact: true }).click();
@@ -920,11 +954,14 @@ test("viewer open and live reconnect reconcile agent-closed tabs without replayi
     await expect(
       service.execute(owner, { action: "snapshot" }, undefined, "agent-b"),
     ).rejects.toThrow("Unknown browser page");
-    const resumedState = waitForFixtureResponse(server, (path) => path.endsWith("/state"));
+    const resumedState = waitForFixtureOperation(
+      server,
+      (operation) => operation === "browser.state",
+    );
     await page.evaluate(() =>
       window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })),
     );
-    expect((await resumedState).status).toBe(200);
+    expect((await resumedState).value).toHaveProperty("pageId");
     await expect.poll(() => popover.getByRole("status").count()).toBe(0);
     expect(commands.filter((action) => action !== "viewport")).toEqual([]);
     await page.getByRole("button", { name: "Close popover" }).click();

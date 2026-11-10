@@ -6,7 +6,12 @@ import { promisify } from "node:util";
 import fastify from "fastify";
 import { afterEach, beforeEach, expect, test } from "vite-plus/test";
 import type { AppConfig } from "../config";
-import { registerWorkspaceFileRoutes } from "./workspace-files";
+import {
+  registerWorkspaceFileRoutes,
+  workspaceFiles,
+  workspaceGit,
+  workspaceSearch,
+} from "./workspace-files";
 
 let root: string;
 let workspace: string;
@@ -35,6 +40,29 @@ afterEach(async () => {
 function get(file = "", workspaceId = "project") {
   return app.inject(`/api/workspaces/${workspaceId}/files?${new URLSearchParams({ path: file })}`);
 }
+
+test("exports direct workspace operations for native RPC", async () => {
+  const config = {
+    battyDir: root,
+    workspacesRoots: [path.join(root, "workspaces")],
+  } as AppConfig;
+  expect(await workspaceGit(config, "project")).toEqual({ branch: null });
+  expect(await workspaceFiles(config, "project", "src/main.ts")).toEqual({
+    kind: "text",
+    path: "src/main.ts",
+    contents: 'export const greeting = "Hej 🦾";\n',
+  });
+  const matches: string[] = [];
+  for await (const match of workspaceSearch(
+    config,
+    "project",
+    "main",
+    new AbortController().signal,
+  ))
+    matches.push(match);
+  expect(matches).toEqual(["src/main.ts"]);
+  await expect(workspaceGit(config, "missing")).rejects.toMatchObject({ statusCode: 404 });
+});
 
 test("reads fresh workspace git state and rejects unknown IDs", async () => {
   expect((await app.inject("/api/workspaces/project/git")).json()).toEqual({ branch: null });
@@ -79,6 +107,8 @@ test("lists one directory at a time, including hidden files, and reads UTF-8 and
 
 test("rejects unknown workspaces, missing files, traversal, absolute and NUL paths", async () => {
   expect((await get("", "missing")).statusCode).toBe(404);
+  expect((await app.inject("/api/workspaces/missing/file-search?name=x")).statusCode).toBe(404);
+  expect((await app.inject("/api/workspaces/project/file-search")).statusCode).toBe(400);
   expect((await get("missing")).statusCode).toBe(404);
   for (const file of [
     "../outside",

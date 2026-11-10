@@ -10,12 +10,34 @@ export function streamAppStatus(
   buildId: string,
   onError: (error: unknown) => void,
 ): () => void {
+  const controller = new AbortController();
+  stream.once("close", () => controller.abort());
+  const close = observeAppStatus(
+    runtime,
+    buildId,
+    (event) => writeStreamEvent(stream, `data: ${JSON.stringify(event)}\n\n`),
+    controller.signal,
+    onError,
+  );
+  return () => {
+    controller.abort();
+    close();
+  };
+}
+
+export function observeAppStatus(
+  runtime: Pick<Runtime, "providerAuth" | "providerUsage" | "tools">,
+  buildId: string,
+  emit: (event: ServerEvent) => Promise<void>,
+  signal: AbortSignal,
+  onError: (error: unknown) => void,
+): () => void {
   let closed = false;
   let pending = Promise.resolve();
   const send = (event: ServerEvent) => {
     pending = pending
       .then(async () => {
-        if (!closed) await writeStreamEvent(stream, `data: ${JSON.stringify(event)}\n\n`);
+        if (!closed) await emit(event);
       })
       .catch(onError);
   };
@@ -40,7 +62,9 @@ export function streamAppStatus(
     unsubscribeProvider();
     unsubscribeMcp();
     unsubscribeUsage();
+    signal.removeEventListener("abort", close);
   };
-  stream.once("close", close);
+  signal.addEventListener("abort", close, { once: true });
+  if (signal.aborted) close();
   return close;
 }

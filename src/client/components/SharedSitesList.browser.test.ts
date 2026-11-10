@@ -7,6 +7,9 @@ import vue from "@vitejs/plugin-vue";
 import { chromium } from "patchright";
 import { expect, test } from "vite-plus/test";
 import type { AppConfig } from "@/server/config";
+import type { Runtime } from "@/server/runtime";
+import { createOwnerRpcHandler, type OwnerRpcServices } from "@/server/owner-rpc";
+import { fixtureOperation, setFixtureRpcHandler } from "../test/socket-fixture";
 import { createSite } from "@/server/sites";
 import { registerSiteRoutes } from "@/server/routes/sites";
 import { registerSiteFunction } from "@/server/site-functions";
@@ -18,9 +21,6 @@ test.each(["/", "/nested/app"])(
     const sitesDir = await fs.mkdtemp(path.join(os.tmpdir(), "batty-site-preview-"));
     const backend = fastify();
     let delayRequests = 0;
-    backend.addHook("onRequest", async (request) => {
-      if (request.url.endsWith("/functions/delay")) delayRequests++;
-    });
     const site = await createSite(sitesDir, baseUrl, "Gallery");
     const prefix = baseUrl === "/" ? "" : baseUrl;
     await registerSiteFunction(sitesDir, site.descriptor.id, "echo", {
@@ -68,6 +68,16 @@ test.each(["/", "/nested/app"])(
         },
       },
     });
+    setFixtureRpcHandler(
+      server,
+      createOwnerRpcHandler(
+        {
+          config: { sitesDir, baseUrl },
+          tools: {},
+        } as unknown as Runtime,
+        {} as OwnerRpcServices,
+      ),
+    );
     const browser = await chromium.launch({ headless: true });
     try {
       await server.listen();
@@ -75,6 +85,10 @@ test.each(["/", "/nested/app"])(
       const context = await browser.newContext();
       await context.addCookies([{ name: "fixture-auth", value: "yes", url: origin }]);
       const page = await context.newPage();
+      await fixtureOperation(server, page, "site.call", async (input, _context, next) => {
+        if (input.name === "delay") delayRequests++;
+        return next();
+      });
       await page.goto(
         `${origin}${fixture}?${new URLSearchParams({ base: baseUrl, id: site.descriptor.id })}`,
       );

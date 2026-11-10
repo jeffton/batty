@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-
-vi.mock("@/client/lib/socket-fetch", () => ({
-  socketFetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
-  closeSocketTransport: vi.fn(),
-}));
+import { rpcCall } from "./rpc";
+vi.mock("./rpc", () => ({ rpcCall: vi.fn(), closeRpcTransport: vi.fn() }));
 import {
   authorizeErrorReporting,
   reportBrowserError,
@@ -11,87 +8,75 @@ import {
 } from "./browser-errors";
 import { getMain, getMainMessages } from "./api";
 import { checkAppUpdate, initializeBuild } from "./app-updates";
-
+const reportAt = (index: number) =>
+  (vi.mocked(rpcCall).mock.calls[index]![1] as { report: object }).report;
 afterEach(() => {
   authorizeErrorReporting(false);
   vi.restoreAllMocks();
+  vi.resetAllMocks();
 });
 describe("browser error reporting isolation", () => {
-  it("attributes a caught request abort across suspension/reconnect without changing the rejection", async () => {
+  it("attributes interrupted domain calls across suspension without changing the rejection", async () => {
     authorizeErrorReporting(true);
     vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
     const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
     let reject!: (error: Error) => void;
-    const fetch = vi
-      .spyOn(globalThis, "fetch")
+    vi.mocked(rpcCall)
       .mockImplementationOnce(
         () =>
-          new Promise<Response>((_, fail) => {
+          new Promise((_, fail) => {
             reject = fail;
           }),
       )
-      .mockResolvedValue(new Response());
-    const request = getMain("private-history-cursor");
+      .mockResolvedValue({ value: {} });
+    const pending = getMain("private-history-cursor");
     visibility.mockReturnValue("hidden");
     recordErrorLifecycle("hidden");
     visibility.mockReturnValue("visible");
     recordErrorLifecycle("visible");
     recordErrorLifecycle("reconnect");
-    const error = new Error("Fetch is aborted");
-    error.name = "AbortError";
+    const error = new DOMException("Fetch is aborted", "AbortError");
     reject(error);
-    await expect(request).rejects.toBe(error);
-    const report = JSON.parse(fetch.mock.calls[1]![1]!.body as string);
-    expect(report).toMatchObject({
+    await expect(pending).rejects.toBe(error);
+    expect(reportAt(1)).toMatchObject({
       stage: "fetch",
       operation: "main",
       errorName: "AbortError",
-      message: "Fetch is aborted",
       startedVisibility: "visible",
       visibility: "visible",
       suspended: true,
       lifecycle: "reconnect",
     });
-    expect(JSON.stringify(report)).not.toContain("private-history-cursor");
-    // A different operation with the same failure must not be deduplicated away.
-    fetch.mockRejectedValueOnce(error);
+    expect(JSON.stringify(reportAt(1))).not.toContain("private-history-cursor");
+    vi.mocked(rpcCall).mockRejectedValueOnce(error);
     await expect(getMainMessages({ before: "another-private-cursor" })).rejects.toBe(error);
-    const history = JSON.parse(fetch.mock.calls[3]![1]!.body as string);
-    expect(history).toMatchObject({ operation: "history", suspended: false });
-    expect(JSON.stringify(history)).not.toContain("another-private-cursor");
+    expect(reportAt(3)).toMatchObject({ operation: "history", suspended: false });
+    expect(JSON.stringify(reportAt(3))).not.toContain("another-private-cursor");
   });
-  it("reports version and shell body aborts and releases the update check for recovery", async () => {
+  it("reports public version/shell failures through native diagnostics and permits HTTP recovery", async () => {
     authorizeErrorReporting(true);
     vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
     vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    vi.mocked(rpcCall).mockResolvedValue({ value: {} });
     initializeBuild("old");
-    const error = new Error("Fetch is aborted");
-    error.name = "AbortError";
+    const error = new DOMException("Fetch is aborted", "AbortError");
     const version = new Response();
     vi.spyOn(version, "json").mockRejectedValue(error);
     const shell = new Response();
     vi.spyOn(shell, "text").mockRejectedValue(error);
-    const fetch = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(version)
-      .mockResolvedValueOnce(new Response());
+    const http = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(version);
     await expect(checkAppUpdate()).rejects.toBe(error);
-    expect(JSON.parse(fetch.mock.calls[1]![1]!.body as string)).toMatchObject({
-      operation: "version",
-    });
-    fetch
+    expect(reportAt(0)).toMatchObject({ operation: "version" });
+    http
       .mockResolvedValueOnce({ ok: true, json: async () => ({ buildId: "new" }) } as Response)
-      .mockResolvedValueOnce(shell)
-      .mockResolvedValueOnce(new Response());
+      .mockResolvedValueOnce(shell);
     await expect(checkAppUpdate()).rejects.toBe(error);
-    expect(JSON.parse(fetch.mock.calls[4]![1]!.body as string)).toMatchObject({
-      operation: "app-shell",
-    });
-    fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ buildId: "old" }) } as Response);
+    expect(reportAt(1)).toMatchObject({ operation: "app-shell" });
+    http.mockResolvedValueOnce({ ok: true, json: async () => ({ buildId: "old" }) } as Response);
     await expect(checkAppUpdate()).resolves.toBeUndefined();
   });
-  it("reports native cache diagnostics and asset stack without arbitrary error text", () => {
-    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response());
+  it("sends sanitized diagnostic objects without arbitrary error text", () => {
+    vi.mocked(rpcCall).mockResolvedValue({ value: {} });
     authorizeErrorReporting(true);
     vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
     const error = new Error(
@@ -101,28 +86,28 @@ describe("browser error reporting isolation", () => {
     error.stack =
       "UnknownError: private text\nrequest@https://example.test/assets/index-test.js:20:30";
     reportBrowserError(error, "cache-write");
-    const report = JSON.parse(fetch.mock.calls[0]![1]!.body as string);
-    expect(report).toMatchObject({
+    expect(vi.mocked(rpcCall).mock.calls[0]![0]).toBe("diagnostics.report");
+    expect(reportAt(0)).toMatchObject({
       stage: "cache-write",
       errorName: "UnknownError",
       message: error.message,
       stack: "/assets/index-test.js:20:30",
     });
-    expect(JSON.stringify(report)).not.toContain("private text");
+    expect(JSON.stringify(reportAt(0))).not.toContain("private text");
   });
-  it("drops offline/unauthenticated reports, deduplicates, and contains transport errors", () => {
-    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(() => {
+  it("drops offline/unauthenticated reports, deduplicates, and contains diagnostics failures", () => {
+    vi.mocked(rpcCall).mockImplementation(() => {
       throw new Error("Telemetry unavailable");
     });
     reportBrowserError(new Error("Load failed"), "window");
-    expect(fetch).not.toHaveBeenCalled();
+    expect(rpcCall).not.toHaveBeenCalled();
     authorizeErrorReporting(true);
-    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
     reportBrowserError(new Error("Load failed"), "window");
-    expect(fetch).not.toHaveBeenCalled();
-    vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
+    expect(rpcCall).not.toHaveBeenCalled();
+    online.mockReturnValue(true);
     expect(() => reportBrowserError(new Error("Load failed"), "window")).not.toThrow();
     reportBrowserError(new Error("Load failed"), "window");
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(rpcCall).toHaveBeenCalledOnce();
   });
 });

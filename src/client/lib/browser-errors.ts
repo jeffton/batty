@@ -1,6 +1,5 @@
 import type { App } from "vue";
-import { withBaseUrl } from "./base-url";
-import { socketFetch } from "./socket-fetch";
+import { rpcCall } from "./rpc";
 import {
   browserFamily,
   platformFamily,
@@ -100,13 +99,9 @@ export function reportBrowserError(
       lifecycle,
     };
     // Separate transport: never feed telemetry failures back into telemetry or UI.
-    void socketFetch(withBaseUrl("/api/browser-errors"), {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(report),
-      signal: AbortSignal.timeout(5_000),
-    }).catch(() => {});
+    void rpcCall("diagnostics.report", { report }, { signal: AbortSignal.timeout(5_000) }).catch(
+      () => {},
+    );
   } catch {
     // Reporting must never replace the original failure or recurse.
   }

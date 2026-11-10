@@ -1,14 +1,9 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-// Lifecycle tests inject a source; wire their existing fake through the new transport boundary.
-vi.mock("@/client/lib/socket-event-source", () => ({
-  SocketEventSource: class {
-    static CONNECTING = 0;
-    constructor(url: string) {
-      return new EventSource(url);
-    }
-  },
-}));
+vi.mock("@/client/lib/rpc", async () => {
+  const { fixtureSessionCall } = await import("@/client/test/session-rpc");
+  return { rpcCall: vi.fn(fixtureSessionCall), closeRpcTransport: vi.fn() };
+});
 import { createPinia, setActivePinia } from "pinia";
 import { flushPromises, mount } from "@vue/test-utils";
 import { defineComponent } from "vue";
@@ -94,7 +89,7 @@ beforeEach(() => {
   pinia = createPinia();
   setActivePinia(pinia);
   vi.stubGlobal(
-    "EventSource",
+    "SessionSubscription",
     class {
       addEventListener() {}
       removeEventListener() {}
@@ -394,7 +389,7 @@ describe("reading history lifecycle", () => {
   it("recovers through SSE reset and does not duplicate an in-flight history request", async () => {
     let stream: { onmessage: (event: { data: string }) => void };
     vi.stubGlobal(
-      "EventSource",
+      "SessionSubscription",
       class {
         addEventListener() {}
         removeEventListener() {}
@@ -530,12 +525,12 @@ describe("main mutation snapshots", () => {
 });
 
 describe("stream recovery", () => {
-  it("uses SSE build IDs for background reload checks and retains usage across disconnects", async () => {
+  it("uses native build events for background reload checks and retains usage across disconnects", async () => {
     vi.useFakeTimers();
     const check = vi.spyOn(updates, "checkAppUpdate").mockResolvedValue();
     const streams: any[] = [];
     vi.stubGlobal(
-      "EventSource",
+      "SessionSubscription",
       class {
         static CONNECTING = 0;
         readyState = 1;
@@ -567,23 +562,23 @@ describe("stream recovery", () => {
     };
     emit({ type: "provider-usage", update: usage });
     for (let i = 0; i < 15; i++) {
-      streams[0].listeners.get("heartbeat")();
       await vi.advanceTimersByTimeAsync(5000);
     }
     expect(check).toHaveBeenCalled();
     expect(check.mock.calls.every(([build]) => build === "server-build")).toBe(true);
     expect(streams).toHaveLength(1);
     streams[0].onerror();
+    await flushPromises();
     expect(store.providerUsage).toEqual(usage);
     expect(store.connectionState).toBe("offline");
     store.closeStream();
     check.mockRestore();
     vi.useRealTimers();
   });
-  it("replaces auth snapshots on reconnect and applies live updates without transcript changes", () => {
+  it("replaces auth snapshots on reconnect and applies live updates without transcript changes", async () => {
     const streams: any[] = [];
     vi.stubGlobal(
-      "EventSource",
+      "SessionSubscription",
       class {
         addEventListener() {}
         removeEventListener() {}
@@ -603,10 +598,12 @@ describe("stream recovery", () => {
       type: "mcp-auth-attempt",
       attempt: { attemptId: "m", serverName: "example", status: "completed" },
     });
+    await flushPromises();
     expect(store.providerAuthAttempts.p?.completed).toBe(true);
     expect(store.mcpAuthAttempts.m?.status).toBe("completed");
     expect(store.activeSession).toEqual(state());
     emit({ type: "auth-attempts", provider: [], mcp: [] });
+    await flushPromises();
     expect(store.providerAuthAttempts).toEqual({});
     expect(store.mcpAuthAttempts).toEqual({});
     expect(store.authAttemptsVersion).toBe(2);
@@ -639,11 +636,11 @@ describe("stream recovery", () => {
     expect(store.connectionState).toBe("connecting");
     check.mockRestore();
   });
-  it("replaces a silent connection, ignores its late messages and accepts a restart reset", () => {
+  it("recovers a suspended connection, ignores its late messages and accepts a restart reset", async () => {
     vi.useFakeTimers();
     const streams: any[] = [];
     vi.stubGlobal(
-      "EventSource",
+      "SessionSubscription",
       class {
         static CONNECTING = 0;
         readyState = 1;
@@ -658,7 +655,9 @@ describe("stream recovery", () => {
     const store = useAppStore();
     store.activeSession = { ...state(99), isStreaming: true };
     store.openStream();
-    vi.advanceTimersByTime(15_000);
+    await flushPromises();
+    vi.setSystemTime(Date.now() + 60_000);
+    await vi.advanceTimersByTimeAsync(5000);
     expect(streams).toHaveLength(2);
     expect(streams[0].close).toHaveBeenCalledOnce();
     streams[1].onmessage({
@@ -677,6 +676,7 @@ describe("stream recovery", () => {
         revision: 100,
       }),
     });
+    await flushPromises();
     expect(store.activeSession?.streamId).toBe("restart");
     expect(store.activeSession?.isStreaming).toBe(false);
     store.closeStream();
@@ -687,7 +687,7 @@ describe("stream recovery", () => {
     vi.useFakeTimers();
     const streams: any[] = [];
     vi.stubGlobal(
-      "EventSource",
+      "SessionSubscription",
       class {
         close = vi.fn();
         addEventListener = vi.fn();
@@ -709,14 +709,17 @@ describe("stream recovery", () => {
     streams[0].onmessage({
       data: JSON.stringify({ type: "reset", state: state(3), revision: 3 }),
     });
+    await flushPromises();
     expect(store.connectionState).toBe("online");
     streams[0].onerror();
+    await flushPromises();
     expect(store.connectionState).toBe("offline");
     await vi.advanceTimersByTimeAsync(2000);
     expect(store.connectionState).toBe("connecting");
     streams[0].onmessage({ data: JSON.stringify({ type: "reset", state: state(4) }) });
     expect(store.connectionState).toBe("connecting");
     streams[1].onmessage({ data: JSON.stringify({ type: "reset", state: state(4) }) });
+    await flushPromises();
     expect(store.connectionState).toBe("online");
     store.closeStream();
     check.mockRestore();
@@ -740,7 +743,7 @@ describe("authentication recovery", () => {
     vi.useFakeTimers();
     const streams: { onerror: () => void }[] = [];
     vi.stubGlobal(
-      "EventSource",
+      "SessionSubscription",
       class {
         addEventListener() {}
         removeEventListener() {}
@@ -774,7 +777,7 @@ describe("authentication recovery", () => {
     vi.useFakeTimers();
     const streams: { onerror: () => void }[] = [];
     vi.stubGlobal(
-      "EventSource",
+      "SessionSubscription",
       class {
         addEventListener() {}
         removeEventListener() {}
@@ -813,7 +816,7 @@ describe("authentication recovery", () => {
     vi.useFakeTimers();
     const streams: { onerror: () => void; close: ReturnType<typeof vi.fn> }[] = [];
     vi.stubGlobal(
-      "EventSource",
+      "SessionSubscription",
       class {
         addEventListener() {}
         removeEventListener() {}
@@ -851,7 +854,7 @@ describe("authentication recovery", () => {
   it("keeps the logged-in transcript when an SSE reconnect auth check has a network error", async () => {
     let stream!: { onerror: () => void };
     vi.stubGlobal(
-      "EventSource",
+      "SessionSubscription",
       class {
         addEventListener() {}
         removeEventListener() {}

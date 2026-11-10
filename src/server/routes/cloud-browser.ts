@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Check } from "typebox/value";
-import { Type } from "typebox";
+import { CloudBrowserCredentialsSchema } from "../cloud-browser-credentials-schema";
 import type { FastifyInstance } from "fastify";
 import websocket from "@fastify/websocket";
 import type {
@@ -24,24 +24,7 @@ export async function registerCloudBrowserRoutes(
     await app.register(websocket, { options: { maxPayload: 2048, perMessageDeflate: false } });
   const streams = new CloudBrowserStreams(browser);
   const prefix = "/api/cloud-browser/:browserId";
-  const credentialSchema = Type.Object(
-    {
-      target: Type.Object(
-        {
-          loginId: Type.String({ maxLength: 100 }),
-          pageId: Type.String({ maxLength: 200 }),
-          revision: Type.String({ maxLength: 100 }),
-          url: Type.String({ maxLength: 16384 }),
-          origin: Type.String({ maxLength: 2048 }),
-          token: Type.String({ maxLength: 100 }),
-        },
-        { additionalProperties: false },
-      ),
-      username: Type.String({ maxLength: 4096 }),
-      password: Type.String({ maxLength: 16384 }),
-    },
-    { additionalProperties: false },
-  );
+  const credentialSchema = CloudBrowserCredentialsSchema;
   const sameOrigin = (request: { protocol: string; host: string; headers: { origin?: string } }) =>
     request.headers.origin === new URL(baseUrl, `${request.protocol}://${request.host}`).origin;
   app.post<{ Params: { browserId: string } }>(

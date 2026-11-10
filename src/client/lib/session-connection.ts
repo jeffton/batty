@@ -1,111 +1,131 @@
 import type { ServerEvent } from "@/shared/types";
-import { SocketEventSource } from "./socket-event-source";
-import { closeSocketTransport } from "./socket-fetch";
+import type { OwnerInputs, OwnerSessionEvent } from "@/shared/owner-api";
+import { rpcCall, closeRpcTransport } from "./rpc";
 import { recordErrorLifecycle } from "./browser-errors";
-import { listenForPushForeground } from "./push-foreground";
+import { createPushForegroundHandler } from "./push-foreground";
 
 type ConnectionOptions = {
-  path: () => string;
+  operation: "session.watch";
+  input: () => OwnerInputs["session.watch"];
   onConnecting: () => void;
   onOpen?: () => void;
   onEvent: (event: ServerEvent) => void;
   onError: () => void;
   onWatchdog?: () => void;
 };
+type Subscription = {
+  controller: AbortController;
+  reader?: ReadableStreamDefaultReader<unknown>;
+  connecting: boolean;
+  foreground: ReturnType<typeof createPushForegroundHandler>;
+};
 
-/** Shared SSE lifecycle. Every reconnect resolves its cursor from current state. */
+/** Reconnect resolves its input/cursor from current state; commands are never replayed. */
 export function createSessionConnection(options: ConnectionOptions) {
-  let source: SocketEventSource | undefined;
+  let source: Subscription | undefined;
   let watchdog: ReturnType<typeof setInterval> | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
-  let lastActivity = 0;
+  let startedAt = 0;
   let lastWatchdog = 0;
   let lastTick = 0;
   let suspended = false;
   let active = false;
-  let stopPushForeground: (() => void) | undefined;
 
   function stopSource() {
     clearTimeout(retry);
     clearInterval(watchdog);
     retry = undefined;
     watchdog = undefined;
-    stopPushForeground?.();
-    stopPushForeground = undefined;
-    source?.close();
+    const previous = source;
     source = undefined;
+    previous?.foreground.close();
+    previous?.controller.abort();
+    void previous?.reader?.cancel().catch(() => {});
+  }
+
+  async function subscribe(current: Subscription): Promise<void> {
+    let reader: ReadableStreamDefaultReader<unknown> | undefined;
+    try {
+      const reply = await rpcCall(options.operation, options.input(), {
+        signal: current.controller.signal,
+      });
+      if (source !== current) {
+        await reply.events?.cancel();
+        return;
+      }
+      reader = reply.events!.getReader();
+      current.reader = reader;
+      current.connecting = false;
+      options.onOpen?.();
+      while (source === current) {
+        const item = await reader.read();
+        if (source !== current) return;
+        if (item.done) throw new Error("Session subscription disconnected");
+        const event = item.value as OwnerSessionEvent;
+        current.foreground.onEvent(event);
+        if (
+          event.type !== "heartbeat" &&
+          event.type !== "push-client" &&
+          event.type !== "push-foreground"
+        )
+          options.onEvent(event);
+      }
+    } catch {
+      if (source !== current) return;
+      stopSource();
+      options.onError();
+      retry = setTimeout(recover, 2000);
+    } finally {
+      await reader?.cancel().catch(() => {});
+      reader?.releaseLock();
+    }
   }
 
   function connect() {
     stopSource();
     recordErrorLifecycle("reconnect");
     options.onConnecting();
-    const current = new SocketEventSource(options.path());
-    source = current;
-    stopPushForeground = listenForPushForeground(current);
-    lastActivity = Date.now();
-    lastWatchdog = lastActivity;
-    lastTick = lastActivity;
-    suspended = false;
-    const touch = () => {
-      if (source === current) lastActivity = Date.now();
+    const current: Subscription = {
+      controller: new AbortController(),
+      connecting: true,
+      foreground: createPushForegroundHandler(),
     };
-    current.addEventListener("heartbeat", touch);
+    source = current;
+    startedAt = Date.now();
+    lastWatchdog = startedAt;
+    lastTick = startedAt;
+    suspended = false;
     watchdog = setInterval(() => {
       const now = Date.now();
       suspended ||= now < lastTick || now - lastTick > 10_000;
       lastTick = now;
       if (document.visibilityState === "hidden") return;
-      // Buffered heartbeats can arrive before this timer after sleep. They do
-      // not prove the old socket still works; a paused event loop needs a fresh one.
       recover();
       if (Date.now() - lastWatchdog >= 15_000) {
         lastWatchdog = Date.now();
         options.onWatchdog?.();
       }
     }, 5000);
-    current.onopen = () => {
-      if (source !== current) return;
-      clearTimeout(retry);
-      retry = undefined;
-      touch();
-      options.onOpen?.();
-    };
-    current.onmessage = (message) => {
-      if (source !== current) return;
-      touch();
-      options.onEvent(JSON.parse(message.data) as ServerEvent);
-    };
-    current.onerror = () => {
-      if (source !== current) return;
-      // The lifecycle owns retries and resolves the latest cursor for each stream.
-      stopSource();
-      options.onError();
-      retry = setTimeout(recover, 2000);
-    };
+    void subscribe(current);
   }
 
   function recover() {
     if (!active || !navigator.onLine) return;
-    // A handshake that never opens must not inherit a live stream's lease.
-    const timeout = source?.readyState === SocketEventSource.CONNECTING ? 5000 : 15_000;
-    const age = Date.now() - lastActivity;
-    if (source && !suspended && age >= 0 && age < timeout) return;
-    // A new logical stream alone cannot recover a half-open shared socket after sleep.
-    if (source) closeSocketTransport();
+    const age = Date.now() - startedAt;
+    // Session events can be idle indefinitely; RpcChannel owns socket liveness.
+    if (source && !suspended && (!source.connecting || (age >= 0 && age < 5000))) return;
+    // A new subscription alone cannot recover a half-open socket after standby.
+    if (source) closeRpcTransport();
     connect();
   }
-
   function offline() {
-    closeSocketTransport();
+    closeRpcTransport();
     stopSource();
     options.onError();
   }
-
   function visible() {
     if (document.visibilityState !== "hidden") recover();
   }
-
   function open() {
     if (!active) {
       active = true;
@@ -119,7 +139,6 @@ export function createSessionConnection(options: ConnectionOptions) {
     if (navigator.onLine) recover();
     else offline();
   }
-
   function close() {
     active = false;
     stopSource();
@@ -130,6 +149,5 @@ export function createSessionConnection(options: ConnectionOptions) {
     document.removeEventListener("resume", visible);
     document.removeEventListener("visibilitychange", visible);
   }
-
   return { open, recover, close };
 }

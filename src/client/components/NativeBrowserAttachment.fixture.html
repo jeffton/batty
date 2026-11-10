@@ -16,17 +16,23 @@
       import { createPinia } from "pinia";
       import SessionTranscriptView from "./SessionTranscriptView.vue";
       import { mergeSessionState } from "../lib/session-state.ts";
+      import { createSessionConnection } from "../lib/session-connection.ts";
       import "../styles.css";
 
       const session = ref();
-      const stream = new EventSource("/api/main/events");
-      stream.onmessage = ({ data }) => {
-        const event = JSON.parse(data);
-        if (event.type === "reset")
-          session.value = session.value
-            ? mergeSessionState(event.state, session.value)
-            : event.state;
-      };
+      const stream = createSessionConnection({
+        operation: "session.watch",
+        input: () => ({ sessionId: "main" }),
+        onConnecting() {},
+        onError() {},
+        onEvent(event) {
+          if (event.type === "reset")
+            session.value = session.value
+              ? mergeSessionState(event.state, session.value)
+              : event.state;
+        },
+      });
+      stream.open();
       window.addEventListener("pagehide", () => stream.close());
       createApp({
         setup: () => () =>

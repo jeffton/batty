@@ -1,24 +1,14 @@
 import { afterEach, expect, test, vi } from "vite-plus/test";
 
-// Lifecycle tests inject a source; wire their existing fake through the new transport boundary.
-vi.mock("@/client/lib/socket-event-source", () => ({
-  SocketEventSource: class {
-    static CONNECTING = 0;
-    constructor(url: string) {
-      return new EventSource(url);
-    }
-  },
-}));
+vi.mock("@/client/lib/rpc", async () => {
+  const { fixtureSessionCall } = await import("@/client/test/session-rpc");
+  return { rpcCall: vi.fn(fixtureSessionCall), closeRpcTransport: vi.fn() };
+});
 import { flushPromises, mount } from "@vue/test-utils";
 import SubagentSessionPopover from "./SubagentSessionPopover.vue";
 import type { SessionState } from "@/shared/types";
-import {
-  HttpError,
-  getSession,
-  getSessionMessages,
-  stopCronRun,
-  stopSubagent,
-} from "@/client/lib/api";
+import { RpcError } from "@/shared/rpc-channel";
+import { getSession, getSessionMessages, stopCronRun, stopSubagent } from "@/client/lib/api";
 
 const session = {
   id: "worker",
@@ -41,8 +31,7 @@ const session = {
   revision: 1,
 } satisfies SessionState;
 
-vi.mock("@/client/lib/api", async (importOriginal) => ({
-  HttpError: (await importOriginal<typeof import("@/client/lib/api")>()).HttpError,
+vi.mock("@/client/lib/api", () => ({
   getSession: vi.fn(async () => session),
   getSessionMessages: vi.fn(),
   stopSubagent: vi.fn(async () => ({ ok: true })),
@@ -69,7 +58,7 @@ test("worker connection waits for a snapshot and recovers from offline without a
       sources.push(this);
     }
   }
-  vi.stubGlobal("EventSource", FakeSource);
+  vi.stubGlobal("SessionSubscription", FakeSource);
   const wrapper = mount(SubagentSessionPopover, {
     props: { popoverId: "worker-popover", sessionId: "worker" },
     global: {
@@ -93,23 +82,23 @@ test("worker connection waits for a snapshot and recovers from offline without a
     await flushPromises();
     expect(status()).toBe("connecting");
     sources[0]!.onopen!();
-    await wrapper.vm.$nextTick();
+    await flushPromises();
     expect(status()).toBe("connecting");
     snapshot(sources[0]!);
-    await wrapper.vm.$nextTick();
+    await flushPromises();
     expect(status()).toBe("online");
     sources[0]!.onerror!();
-    await wrapper.vm.$nextTick();
+    await flushPromises();
     expect(status()).toBe("offline");
     window.dispatchEvent(new Event("pageshow"));
-    await wrapper.vm.$nextTick();
+    await flushPromises();
     expect(sources).toHaveLength(2);
     expect(status()).toBe("connecting");
     snapshot(sources[0]!);
-    await wrapper.vm.$nextTick();
+    await flushPromises();
     expect(status()).toBe("connecting");
     snapshot(sources[1]!);
-    await wrapper.vm.$nextTick();
+    await flushPromises();
     expect(status()).toBe("online");
   } finally {
     wrapper.unmount();
@@ -123,7 +112,7 @@ test("worker connection waits for a snapshot and recovers from offline without a
 test("a healthy local stream preserves remote offline status and disables actions until reconnection", async () => {
   const sources: { onmessage?: (event: { data: string }) => void }[] = [];
   vi.stubGlobal(
-    "EventSource",
+    "SessionSubscription",
     class {
       onmessage?: (event: { data: string }) => void;
       close = vi.fn();
@@ -166,7 +155,7 @@ test("a healthy local stream preserves remote offline status and disables action
           },
         }),
       });
-      await wrapper.vm.$nextTick();
+      await flushPromises();
     };
     await send(true, 2);
     expect(wrapper.getComponent({ name: "SessionHeaderStatus" }).props("connectionState")).toBe(
@@ -198,7 +187,7 @@ test("header stop follows active state, prevents duplicate requests and exposes 
       sources.push(this);
     }
   }
-  vi.stubGlobal("EventSource", FakeSource);
+  vi.stubGlobal("SessionSubscription", FakeSource);
   const wrapper = mount(SubagentSessionPopover, {
     props: { popoverId: "worker-popover", sessionId: "worker" },
     global: {
@@ -219,7 +208,7 @@ test("header stop follows active state, prevents duplicate requests and exposes 
         state: { ...session, canStopSubagent, revision },
       }),
     });
-    await wrapper.vm.$nextTick();
+    await flushPromises();
   };
   try {
     wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState: "open" });
@@ -245,7 +234,7 @@ test("header stop follows active state, prevents duplicate requests and exposes 
     expect(wrapper.find('[aria-label="Stop subagent"]').exists()).toBe(false);
     await snapshot(true, 4);
     sources[0]!.onerror!();
-    await wrapper.vm.$nextTick();
+    await flushPromises();
     expect(wrapper.get('[aria-label="Stop subagent"]').attributes("disabled")).toBeDefined();
   } finally {
     wrapper.unmount();
@@ -258,7 +247,7 @@ test("cron header stops only the current run and follows completion while viewin
     onerror?: () => void;
   }[] = [];
   vi.stubGlobal(
-    "EventSource",
+    "SessionSubscription",
     class {
       onmessage?: (event: { data: string }) => void;
       onerror?: () => void;
@@ -295,7 +284,7 @@ test("cron header stops only the current run and follows completion while viewin
     sources[0]!.onmessage!({
       data: JSON.stringify({ type: "reset", state: { ...session, isCronSession: true } }),
     });
-    await wrapper.vm.$nextTick();
+    await flushPromises();
     let reject!: (error: Error) => void;
     vi.mocked(stopCronRun).mockReturnValueOnce(
       new Promise((_, fail) => {
@@ -313,7 +302,7 @@ test("cron header stops only the current run and follows completion while viewin
     expect(wrapper.get('[role="alert"]').attributes("aria-label")).toBe("Cron stop failed");
     expect(stop.attributes("disabled")).toBeUndefined();
     sources[0]!.onerror!();
-    await wrapper.vm.$nextTick();
+    await flushPromises();
     expect(stop.attributes("disabled")).toBeDefined();
     await wrapper.setProps({ cronRun: { runId: "current-run", status: "error" } });
     expect(wrapper.find('[aria-label="Stop cron run"]').exists()).toBe(false);
@@ -324,7 +313,7 @@ test("cron header stops only the current run and follows completion while viewin
 
 test("missing local or remote sessions show an empty state, not a connection failure", async () => {
   for (const sessionId of ["deleted-worker", "remote:peer:deleted-worker"]) {
-    vi.mocked(getSession).mockRejectedValueOnce(new HttpError("Session not found", 404));
+    vi.mocked(getSession).mockRejectedValueOnce(new RpcError("NOT_FOUND", "Session not found"));
     const wrapper = mount(SubagentSessionPopover, {
       props: { popoverId: "missing-popover", sessionId },
       global: {
@@ -350,7 +339,7 @@ test("missing local or remote sessions show an empty state, not a connection fai
 
 test("closing during history loading does not lock history after reopening", async () => {
   vi.stubGlobal(
-    "EventSource",
+    "SessionSubscription",
     class {
       close = vi.fn();
       addEventListener = vi.fn();
@@ -391,7 +380,7 @@ test("closing during history loading does not lock history after reopening", asy
   await flushPromises();
   const transcript = wrapper.getComponent({ name: "SessionTranscriptView" });
   const pending = transcript.props("loadOlderMessages")();
-  await wrapper.vm.$nextTick();
+  await flushPromises();
   expect(transcript.props("loadingOlderMessages")).toBe(true);
   toggle("closed");
   toggle("open");
@@ -421,7 +410,7 @@ test("closing during history loading does not lock history after reopening", asy
 test("a deleted session clears a cached transcript when reopened", async () => {
   const close = vi.fn();
   vi.stubGlobal(
-    "EventSource",
+    "SessionSubscription",
     class {
       close = close;
       addEventListener = vi.fn();
@@ -447,7 +436,7 @@ test("a deleted session clears a cached transcript when reopened", async () => {
   await flushPromises();
   expect(wrapper.findComponent({ name: "SessionTranscriptView" }).exists()).toBe(true);
   toggle("closed");
-  vi.mocked(getSession).mockRejectedValueOnce(new HttpError("Session not found", 404));
+  vi.mocked(getSession).mockRejectedValueOnce(new RpcError("NOT_FOUND", "Session not found"));
   toggle("open");
   await flushPromises();
   expect(wrapper.findComponent({ name: "SessionTranscriptView" }).exists()).toBe(false);
@@ -457,7 +446,10 @@ test("a deleted session clears a cached transcript when reopened", async () => {
 });
 
 test("server and network errors remain errors, not missing-session empty states", async () => {
-  for (const error of [new HttpError("Server failed", 500), new TypeError("Network failed")]) {
+  for (const error of [
+    new RpcError("INTERNAL", "Server failed"),
+    new TypeError("Network failed"),
+  ]) {
     vi.mocked(getSession).mockRejectedValueOnce(error);
     const wrapper = mount(SubagentSessionPopover, {
       props: { popoverId: "failed-popover", sessionId: "worker" },

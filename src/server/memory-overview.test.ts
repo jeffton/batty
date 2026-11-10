@@ -206,7 +206,6 @@ test.each([
       await memory.prepare();
       const inspected: number[] = [];
       let navigated = 0;
-      let rejectedDelegation = false;
       let resumedId: string;
       const overview = await memory.prepare();
       const preparedIndex = (await harness.snapshot(MemoryIndexDoc, main.id, context))!;
@@ -304,12 +303,8 @@ text(await tools.memory_zoom({id, n: 1}));`;
           if (last.role === "toolResult" && last.toolName === "subagent" && !last.isError) {
             resumedId = JSON.stringify(last.content).match(/Session ID: (\d+)/)![1]!;
           }
-          if (last.role === "toolResult" && last.toolName === "subagent" && last.isError) {
-            expect(JSON.stringify(last.content)).toContain(
-              "Project workers delegate within their own workspace",
-            );
-            rejectedDelegation = true;
-          }
+          if (last.role === "toolResult" && last.toolName === "subagent")
+            expect(last.isError).toBeFalsy();
           if (last.role === "toolResult" && last.toolName === "codemode") {
             const output = JSON.stringify(last.content);
             expect(last.isError).toBeFalsy();
@@ -354,9 +349,7 @@ text(await tools.memory_zoom({id, n: 1}));`;
         ).wait(context);
         await until(async () => (await orchestration.listRunning()).length === 0);
       }
-      const blocked = kind === "nested" && parent !== assistantId && parent !== target;
-      expect(rejectedDelegation).toBe(blocked);
-      const count = blocked ? 0 : kind === "resumed" ? 2 : 1;
+      const count = kind === "resumed" ? 2 : 1;
       expect(inspected).toHaveLength(count);
       expect(navigated).toBe(count);
     } finally {

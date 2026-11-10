@@ -13,6 +13,8 @@ import {
 } from "./cloud-browser-events";
 import fastify from "fastify";
 import { BrowserService } from "./browser-service";
+import { createOwnerRpcHandler, type OwnerRpcServices } from "./owner-rpc";
+import type { Runtime } from "./runtime";
 vi.mock("./cloud-browser-stream", () => ({
   CloudBrowserStreams: class {
     async subscribe() {
@@ -127,7 +129,7 @@ test("oversized cloud viewports fit the display across attach, tool resize, API 
     await service.dispose();
     await f.close();
   }
-});
+}, 30_000);
 
 test("cloud attachment shares agent state and controls, survives detach, and cannot resurrect expired handles", async () => {
   const f = await fixture();
@@ -265,6 +267,67 @@ test("cloud attachment shares agent state and controls, survives detach, and can
   } finally {
     await service.closeSession("shared");
     await service.dispose();
+    await f.close();
+  }
+}, 30_000);
+
+test("native owner browser control validates commands and preserves browser selection errors", async () => {
+  const f = await fixture();
+  const handler = createOwnerRpcHandler(
+    { config: {}, tools: { browserService: f.service } } as unknown as Runtime,
+    {} as OwnerRpcServices,
+  );
+  const rpc = { signal: new AbortController().signal };
+  try {
+    const opened = await f.service.execute("shared", { action: "open", url: f.url, cloud: true });
+    const browserId = opened.details.sites![0]!.browserId!;
+    await expect(
+      handler(
+        "browser.control",
+        {
+          browserId,
+          control: { action: "viewport", width: 20_000, height: 640, mobile: false },
+        },
+        rpc,
+      ),
+    ).rejects.toMatchObject({ code: "BAD_INPUT" });
+    const state = await f.service.cloudState(browserId);
+    await expect(
+      handler(
+        "browser.control",
+        {
+          browserId,
+          control: {
+            action: "click",
+            pageId: state.pageId,
+            revision: state.revision,
+            x: 40,
+            y: 30,
+          },
+        },
+        rpc,
+      ),
+    ).resolves.toMatchObject({ value: expect.objectContaining({ pageId: state.pageId }) });
+    const other = await f.service.execute("shared", { action: "open", url: f.url, newPage: true });
+    await f.service.execute("shared", { action: "close-page", pageId: state.pageId });
+    await expect(
+      handler(
+        "browser.control",
+        {
+          browserId,
+          control: {
+            action: "click",
+            pageId: state.pageId,
+            revision: state.revision,
+            x: 40,
+            y: 30,
+          },
+        },
+        rpc,
+      ),
+    ).rejects.toMatchObject({ code: "SELECTION_CHANGED" });
+    expect(other.details.pageId).not.toBe(state.pageId);
+  } finally {
     await f.close();
   }
 }, 30_000);
@@ -433,164 +496,6 @@ test("mobile emulation survives service reconnect without replacing the page or 
     await f.close();
   }
 }, 30_000);
-
-test("cloud routes require auth, same-origin control and bounded allowlisted commands", async () => {
-  const f = await fixture();
-  const app = fastify();
-  app.addHook("onRequest", async (request, reply) => {
-    if (request.headers.authorization !== "test")
-      return reply.code(401).send({ error: "Authentication required" });
-  });
-  const closeStreams = await registerCloudBrowserRoutes(app, f.service, "https://batty.example");
-  try {
-    await f.service.execute("shared", { action: "open", url: f.url, cloud: true });
-    const id = (await f.service.execute("shared", { action: "attach" })).details.sites![0]!
-      .browserId!;
-    const endpoint = `/api/cloud-browser/${id}`;
-    expect((await app.inject(`${endpoint}/state`)).statusCode).toBe(401);
-    expect((await app.inject(`${endpoint}/socket`)).statusCode).toBe(401);
-    const control = (payload: Record<string, unknown>, origin = "https://batty.example") =>
-      app.inject({
-        method: "POST",
-        url: `${endpoint}/control`,
-        payload,
-        headers: { authorization: "test", origin },
-      });
-    expect((await control({ action: "reload" }, "https://attacker.example")).statusCode).toBe(403);
-    expect((await control({ action: "evaluate", script: "steal()" })).statusCode).toBe(400);
-    expect((await control({ action: "reload", script: "steal()" })).statusCode).toBe(400);
-    expect(
-      (await control({ action: "viewport", width: 20_000, height: 640, mobile: false })).statusCode,
-    ).toBe(400);
-    const state = (
-      await app.inject({ url: `${endpoint}/state`, headers: { authorization: "test" } })
-    ).json();
-    expect(
-      (
-        await control({
-          action: "click",
-          pageId: state.pageId,
-          revision: state.revision,
-          x: 40,
-          y: 30,
-        })
-      ).statusCode,
-    ).toBe(200);
-    let next = await f.service.cloudState(id);
-    expect(
-      (
-        await control({
-          action: "scroll",
-          pageId: next.pageId,
-          revision: next.revision,
-          x: 100,
-          y: 200,
-          deltaX: 0,
-          deltaY: 300,
-        })
-      ).statusCode,
-    ).toBe(200);
-    next = await f.service.cloudState(id);
-    expect(
-      (
-        await control({
-          action: "text",
-          pageId: next.pageId,
-          revision: next.revision,
-          text: "valid",
-        })
-      ).statusCode,
-    ).toBe(200);
-    expect(
-      (
-        await control({
-          action: "key",
-          pageId: next.pageId,
-          revision: next.revision,
-          key: "Control+L",
-        })
-      ).statusCode,
-    ).toBe(400);
-    const survivor = await f.service.execute("shared", {
-      action: "open",
-      url: f.url,
-      newPage: true,
-    });
-    await f.service.execute("shared", { action: "close-page", pageId: state.pageId });
-    // Mutating requests never repair their stale target by acting on another tab.
-    const rejected = await control({ action: "reload" });
-    expect(rejected.statusCode).toBe(409);
-    expect(rejected.json()).toEqual({
-      error: `Unknown browser page: ${state.pageId}`,
-      pages: [expect.objectContaining({ id: survivor.details.pageId, active: false })],
-    });
-    const recovered = await app.inject({
-      url: `${endpoint}/state`,
-      headers: { authorization: "test" },
-    });
-    expect(recovered.statusCode).toBe(200);
-    expect(recovered.headers["cache-control"]).toBe("no-store");
-    expect(recovered.json().pageId).toBe(survivor.details.pageId);
-    // An old painted input remains fenced after the viewer reconciles.
-    expect(
-      (
-        await control({
-          action: "click",
-          pageId: state.pageId,
-          revision: state.revision,
-          x: 40,
-          y: 30,
-        })
-      ).statusCode,
-    ).toBe(409);
-    await f.service.execute("shared", { action: "close-page", pageId: survivor.details.pageId });
-    const empty = await app.inject({
-      url: `${endpoint}/state`,
-      headers: { authorization: "test" },
-    });
-    expect(empty.statusCode).toBe(200);
-    expect(empty.json().pages).toEqual([
-      expect.objectContaining({ url: "about:blank", active: true }),
-    ]);
-    expect((await control({ action: "new-page" })).statusCode).toBe(200);
-    await f.service.closeSession("shared");
-    expect(
-      (await app.inject({ url: `${endpoint}/state`, headers: { authorization: "test" } }))
-        .statusCode,
-    ).toBe(410);
-  } finally {
-    await closeStreams();
-    await app.close();
-    await f.close();
-  }
-}, 30_000);
-
-test("relative app base paths derive the control origin from the trusted HTTPS request", async () => {
-  const app = fastify({ trustProxy: ["127.0.0.1"] });
-  const closeStreams = await registerCloudBrowserRoutes(
-    app,
-    {
-      cloudControl: async () => ({ ok: true }),
-    } as unknown as BrowserService,
-    "/",
-  );
-  try {
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/cloud-browser/test/control",
-      payload: { action: "reload" },
-      headers: {
-        host: "batty.example",
-        "x-forwarded-proto": "https",
-        origin: "https://batty.example",
-      },
-    });
-    expect(response.statusCode).toBe(200);
-  } finally {
-    await closeStreams();
-    await app.close();
-  }
-});
 
 test("binary packet retains exact H.264 bytes and decoder metadata", () => {
   const frame = {
@@ -1013,6 +918,10 @@ async function scrollSocketFixture(
     socket,
     messages,
     send: (value: unknown) => socket.send(JSON.stringify(value)),
+    async control() {
+      onControl();
+      return state;
+    },
     async close() {
       socket.terminate();
       await closeStreams();
@@ -1068,13 +977,7 @@ test("distinct scroll anchors stay FIFO and a fence drains all earlier input bef
     await expect
       .poll(() => f.messages.filter((event) => event.event === "scroll-drained"))
       .toEqual([{ event: "scroll-drained", data: { requestId: 1 } }]);
-    const response = await f.app.inject({
-      method: "POST",
-      url: "/api/cloud-browser/id/control",
-      headers: { origin: "https://batty.example" },
-      payload: { action: "click", pageId: "p", revision: "r", x: 50, y: 50 },
-    });
-    expect(response.statusCode).toBe(200);
+    await f.control();
     expect(order).toEqual(["scroll:10", "scroll:20", "scroll:30", "click"]);
     f.send({ action: "flush", requestId: 2 });
     await expect

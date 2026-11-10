@@ -1,12 +1,12 @@
 import { afterEach, expect, test, vi } from "vite-plus/test";
 import { closeRpcTransport, rpcCall } from "./rpc";
-import { RpcError } from "@/shared/rpc-channel";
+import { RpcError } from "@/shared/rpc";
 const { channels, call } = vi.hoisted(() => ({
   channels: [] as { closed: Promise<void>; close: ReturnType<typeof vi.fn> }[],
   call: vi.fn(),
 }));
-vi.mock("@/shared/rpc-channel", async (original) => ({
-  ...(await original<typeof import("@/shared/rpc-channel")>()),
+vi.mock("@/shared/rpc/channel", async (original) => ({
+  ...(await original<typeof import("@/shared/rpc/channel")>()),
   RpcChannel: class {
     closed: Promise<void>;
     call = call;
@@ -140,6 +140,29 @@ test("an unauthorized call discards its captured identity without replay; the ne
   FakeSocket.instances[1]!.open();
   await recovered;
   expect(call.mock.calls.map(([operation]) => operation)).toEqual(["main.submit", "models.list"]);
+});
+
+test("a late rejection from a closed generation does not discard its replacement", async () => {
+  setup();
+  let rejectOld!: (error: unknown) => void;
+  call.mockImplementationOnce(
+    () =>
+      new Promise((_, reject) => {
+        rejectOld = reject;
+      }),
+  );
+  const old = rpcCall("models.list", {});
+  FakeSocket.instances[0]!.open();
+  await vi.waitFor(() => expect(call).toHaveBeenCalledOnce());
+  closeRpcTransport();
+  const fresh = rpcCall("models.list", {});
+  FakeSocket.instances[1]!.open();
+  await fresh;
+  rejectOld(new RpcError("UNAUTHORIZED", "Old cookie"));
+  await expect(old).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  expect(channels[1]!.close).not.toHaveBeenCalled();
+  await rpcCall("models.list", {});
+  expect(FakeSocket.instances).toHaveLength(2);
 });
 
 test("successful HTTP relogin refreshes the socket upgrade cookie without a page reload", async () => {

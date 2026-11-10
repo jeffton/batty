@@ -9,7 +9,7 @@ import sharp from "sharp";
 import { WebSocketServer } from "ws";
 import { tsImport } from "tsx/esm/api";
 
-const { RpcChannel, RpcError } = await tsImport("../src/shared/rpc-channel.ts", import.meta.url);
+const { RpcChannel, RpcError } = await tsImport("../src/shared/rpc/channel.ts", import.meta.url);
 const preview = await sharp({
   create: { width: 768, height: 576, channels: 3, background: "teal" },
 })

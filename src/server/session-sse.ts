@@ -1,61 +1,9 @@
-import type { ServerResponse } from "node:http";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationId, ConversationView } from "@earendil-works/pi-durable";
 import { Runtime } from "./runtime";
 import { OrchestrationDoc } from "./orchestration-state";
 import type { TranscriptImages } from "./transcript-images";
 import type { SessionState } from "../shared/types";
-
-/** A paused socket owns at most one event; do not materialize the next archive page before drain. */
-export async function writeStreamEvent(stream: ServerResponse, payload: string): Promise<void> {
-  if (stream.destroyed || stream.writableEnded) return;
-  if (stream.write(payload)) return;
-  await new Promise<void>((resolve) => {
-    const done = () => {
-      stream.off("drain", done);
-      stream.off("close", done);
-      resolve();
-    };
-    stream.once("drain", done);
-    stream.once("close", done);
-  });
-}
-
-/** Live-doc snapshots and coalesced commits never acquire a full ConversationView. */
-export function streamSession(
-  stream: ServerResponse,
-  runtime: Runtime,
-  conversationId: ConversationId | string,
-  images: TranscriptImages,
-  initialAfter: string | undefined,
-  onError: (error: unknown) => void,
-  projection?: {
-    state(includeHistory: boolean, after?: string): Promise<SessionState>;
-    subscribe(changed: (history: boolean) => void): () => void;
-  },
-) {
-  const controller = new AbortController();
-  stream.once("close", () => controller.abort());
-  const close = observeSession(
-    runtime,
-    conversationId,
-    images,
-    initialAfter,
-    (event) => writeStreamEvent(stream, `data: ${JSON.stringify(event)}\n\n`),
-    controller.signal,
-    onError,
-    projection,
-  );
-  const heartbeat = setInterval(() => {
-    if (!stream.destroyed && !stream.writableNeedDrain)
-      stream.write("event: heartbeat\ndata: {}\n\n");
-  }, 5000);
-  controller.signal.addEventListener("abort", () => clearInterval(heartbeat), { once: true });
-  return () => {
-    controller.abort();
-    close();
-  };
-}
 
 /** Transport-neutral session projection. emit resolves when the consumer can accept more. */
 export function observeSession(

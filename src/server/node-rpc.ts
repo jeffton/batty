@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import { Readable } from "node:stream";
 import type { TaskId } from "@earendil-works/pi-durable";
-import { RpcError, type RpcHandler, type RpcReply } from "../shared/rpc-channel";
+import { RpcError, type RpcHandler, type RpcReply } from "../shared/rpc";
 import type { RemoteConnectionCredentials } from "./remote-access";
 import type { RemoteWorkers, RemoteWorkerSummary } from "./remote-workers";
 import { context } from "./runtime";

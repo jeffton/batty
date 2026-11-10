@@ -6,10 +6,10 @@ import fastify from "fastify";
 import { chromium } from "patchright";
 import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
 import { expect, test } from "vite-plus/test";
-import { registerBrowserErrorRoutes } from "@/server/browser-errors";
+import { createBrowserErrorReporter } from "@/server/browser-errors";
 import { createOwnerRpcHandler, type OwnerRpcServices } from "@/server/owner-rpc";
 import type { Runtime } from "@/server/runtime";
-import { RpcError } from "@/shared/rpc-channel";
+import { RpcError } from "@/shared/rpc";
 import { fixtureOperation, setFixtureRpcHandler } from "../test/socket-fixture";
 
 test("browser rejection and caught upload failure reach authenticated server without content", async () => {
@@ -21,11 +21,8 @@ test("browser rejection and caught upload failure reach authenticated server wit
   backend.addHook("onRequest", async (req) => {
     req.auth = req.headers.cookie === "fixture=authenticated";
   });
-  const reportBrowserError = registerBrowserErrorRoutes(backend, file);
-  backend.addContentTypeParser(/^multipart\/form-data/, (_req, _body, done) =>
-    done(null, undefined),
-  );
-  backend.get("/api/bootstrap", async () => ({ authenticated: true }));
+  const reportBrowserError = createBrowserErrorReporter(backend, file);
+  backend.get("/api/bootstrap", async (request) => ({ authenticated: request.auth }));
   await backend.listen({ host: "127.0.0.1", port: 0 });
   const address = backend.server.address() as { port: number };
   const server = await createBrowserFixtureServer("src/client/lib/BrowserErrors.fixture.html", {

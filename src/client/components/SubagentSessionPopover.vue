@@ -9,7 +9,7 @@ import { getSessionMessages, getSession, stopSubagent, stopCronRun } from "@/cli
 import { applyServerEvent } from "@/client/lib/session-events";
 import { mergeSessionState, normalizeSessionState } from "@/client/lib/session-state";
 import { sessionHistoryCursor } from "@/client/lib/session-stream";
-import { RpcError } from "@/shared/rpc-channel";
+import { RpcError } from "@/shared/rpc";
 import { prependHistoryPage } from "@/client/lib/session-pagination";
 import { createSessionConnection } from "@/client/lib/session-connection";
 import { RECENT_SESSION_MESSAGE_WINDOW } from "@/shared/session-history";

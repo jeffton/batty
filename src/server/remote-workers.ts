@@ -3,7 +3,7 @@ import { createWriteStream } from "node:fs";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { snapshotWorkerFiles, workerFileMetadata } from "./worker-files";
-import { RpcError, type RpcContext, type RpcReply } from "../shared/rpc-channel";
+import { RpcError, type RpcContext, type RpcReply } from "../shared/rpc";
 import { createNodeRpcHandler, workerBody } from "./node-rpc";
 import path from "node:path";
 import { randomUUID } from "node:crypto";

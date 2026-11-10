@@ -1,10 +1,9 @@
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream, openAsBlob } from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import type { Multipart } from "@fastify/multipart";
 import type { SentFileDescriptor } from "../shared/types";
 import { storeSentFiles } from "./send-files";
 import { artifactRefs, artifactsFromModelMessages } from "./artifact-forwarding";
@@ -207,22 +206,6 @@ export async function snapshotWorkerFiles(
   });
 }
 
-/** Metadata comes first; binary parts are streamed, bounded and verified before admission. */
-export async function receiveWorkerFiles(
-  storage: WorkerFileStorage,
-  key: string,
-  metadata: WorkerFileMetadata[],
-  parts: AsyncIterable<Multipart>,
-): Promise<WorkerInputFile[]> {
-  async function* streams() {
-    for await (const part of parts) {
-      if (part.type !== "file") throw invalid("Unexpected worker file part");
-      yield { fieldname: part.fieldname, stream: part.file, truncated: () => part.file.truncated };
-    }
-  }
-  return receiveWorkerFileStreams(storage, key, metadata, streams());
-}
-
 /** Transport-neutral admission: verified bytes are saved before the command can run. */
 export async function receiveWorkerFileStreams(
   storage: WorkerFileStorage,
@@ -315,16 +298,4 @@ export async function encodeWorkerNotice(
         data: (await fs.readFile(input.modelImage.storedPath)).toString("base64"),
       });
   return content;
-}
-
-export async function workerCommandBody(
-  command: unknown,
-  requestId: string,
-  files: WorkerInputFile[],
-) {
-  const body = new FormData();
-  body.set("command", JSON.stringify({ requestId, command, files: workerFileMetadata(files) }));
-  for (const [index, input] of files.entries())
-    body.append(`file-${index}`, await openAsBlob(input.file.storedPath), input.name);
-  return body;
 }

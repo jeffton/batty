@@ -3,19 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import fastify from "fastify";
 import { afterEach, beforeEach, expect, test } from "vite-plus/test";
 import type { AppConfig } from "../config";
-import {
-  registerWorkspaceFileRoutes,
-  workspaceFiles,
-  workspaceGit,
-  workspaceSearch,
-} from "./workspace-files";
+import { workspaceFiles, workspaceGit, workspaceSearch } from "./workspace-files";
 
 let root: string;
 let workspace: string;
-let app: ReturnType<typeof fastify>;
+let config: AppConfig;
 beforeEach(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-workspace-files-"));
   workspace = path.join(root, "workspaces/project");
@@ -27,18 +21,16 @@ beforeEach(async () => {
   await fs.writeFile(path.join(workspace, "empty"), "");
   await fs.writeFile(path.join(workspace, "binary"), Buffer.from([0, 10, 20]));
   await fs.writeFile(path.join(workspace, "invalid-utf8"), Buffer.from([0xff, 0xfe]));
-  app = fastify();
-  registerWorkspaceFileRoutes(app, {
+  config = {
     battyDir: root,
     workspacesRoots: [path.join(root, "workspaces")],
-  } as AppConfig);
+  } as AppConfig;
 });
 afterEach(async () => {
-  await app.close();
   await fs.rm(root, { recursive: true, force: true });
 });
 function get(file = "", workspaceId = "project") {
-  return app.inject(`/api/workspaces/${workspaceId}/files?${new URLSearchParams({ path: file })}`);
+  return workspaceFiles(config, workspaceId, file);
 }
 
 test("exports direct workspace operations for native RPC", async () => {
@@ -65,10 +57,10 @@ test("exports direct workspace operations for native RPC", async () => {
 });
 
 test("reads fresh workspace git state and rejects unknown IDs", async () => {
-  expect((await app.inject("/api/workspaces/project/git")).json()).toEqual({ branch: null });
-  expect((await app.inject("/api/workspaces/unknown/git")).statusCode).toBe(404);
+  expect(await workspaceGit(config, "project")).toEqual({ branch: null });
+  await expect(workspaceGit(config, "unknown")).rejects.toMatchObject({ statusCode: 404 });
   await promisify(execFile)("git", ["-C", workspace, "init", "--initial-branch=feature/actual"]);
-  expect((await app.inject("/api/workspaces/project/git")).json()).toEqual({
+  expect(await workspaceGit(config, "project")).toEqual({
     branch: "feature/actual",
   });
   await promisify(execFile)("git", [
@@ -78,38 +70,43 @@ test("reads fresh workspace git state and rejects unknown IDs", async () => {
     "HEAD",
     "refs/heads/switched",
   ]);
-  expect((await app.inject("/api/workspaces/project/git")).json()).toEqual({ branch: "switched" });
+  expect(await workspaceGit(config, "project")).toEqual({ branch: "switched" });
 });
 
 test("lists one directory at a time, including hidden files, and reads UTF-8 and empty source", async () => {
-  const listing = (await get()).json();
+  const listing = await get();
+  if (listing.kind !== "directory") throw new Error("Expected directory");
   expect(listing.kind).toBe("directory");
   expect(listing.entries[0]).toEqual({ path: "src", kind: "directory" });
   expect(listing.entries).toContainEqual({ path: ".hidden", kind: "file" });
   expect(listing.entries.some((entry: { path: string }) => entry.path === "src/main.ts")).toBe(
     false,
   );
-  expect((await get("src")).json()).toEqual({
+  expect(await get("src")).toEqual({
     kind: "directory",
     path: "src",
     entries: [{ path: "src/main.ts", kind: "file" }],
   });
-  expect((await get("src/main.ts")).json()).toEqual({
+  expect(await get("src/main.ts")).toEqual({
     kind: "text",
     path: "src/main.ts",
     contents: 'export const greeting = "Hej 🦾";\n',
   });
-  expect((await get("empty")).json()).toEqual({ kind: "text", path: "empty", contents: "" });
+  expect(await get("empty")).toEqual({ kind: "text", path: "empty", contents: "" });
   for (const file of ["binary", "invalid-utf8"]) {
-    expect((await get(file)).json()).toEqual({ kind: "binary", path: file });
+    expect(await get(file)).toEqual({ kind: "binary", path: file });
   }
 });
 
 test("rejects unknown workspaces, missing files, traversal, absolute and NUL paths", async () => {
-  expect((await get("", "missing")).statusCode).toBe(404);
-  expect((await app.inject("/api/workspaces/missing/file-search?name=x")).statusCode).toBe(404);
-  expect((await app.inject("/api/workspaces/project/file-search")).statusCode).toBe(400);
-  expect((await get("missing")).statusCode).toBe(404);
+  await expect(get("", "missing")).rejects.toMatchObject({ statusCode: 404 });
+  await expect(
+    workspaceSearch(config, "missing", "x", new AbortController().signal).next(),
+  ).rejects.toMatchObject({ statusCode: 404 });
+  await expect(
+    workspaceSearch(config, "project", "", new AbortController().signal).next(),
+  ).rejects.toMatchObject({ statusCode: 400 });
+  await expect(get("missing")).rejects.toMatchObject({ statusCode: 404 });
   for (const file of [
     "../outside",
     "src/../../outside",
@@ -119,11 +116,8 @@ test("rejects unknown workspaces, missing files, traversal, absolute and NUL pat
     "src\\..\\private",
     "\0",
   ]) {
-    expect((await get(file)).statusCode, file).toBe(400);
+    await expect(get(file)).rejects.toMatchObject({ statusCode: 400 });
   }
-  expect((await app.inject("/api/workspaces/project/files?path=%2e%2e%2foutside")).statusCode).toBe(
-    400,
-  );
 });
 
 test("allows internal symlinks and blocks external links, including prefix-lookalike roots", async () => {
@@ -133,14 +127,16 @@ test("allows internal symlinks and blocks external links, including prefix-looka
   await fs.writeFile(path.join(`${workspace}-outside`, "secret"), "not workspace content");
   await fs.symlink(`${workspace}-outside`, path.join(workspace, "prefix"), "dir");
   await fs.symlink(path.join(root, "outside/private.txt"), path.join(workspace, "secret"));
-  expect((await get()).json().entries).toContainEqual({ path: "linked", kind: "directory" });
-  expect((await get("linked/main.ts")).json().contents).toContain("Hej 🦾");
+  expect(
+    ((await get()) as Extract<Awaited<ReturnType<typeof get>>, { kind: "directory" }>).entries,
+  ).toContainEqual({ path: "linked", kind: "directory" });
+  expect(((await get("linked/main.ts")) as { contents: string }).contents).toContain("Hej 🦾");
   for (const file of ["outside", "outside/private.txt", "prefix/secret", "secret"]) {
-    expect((await get(file)).statusCode, file).toBe(403);
+    await expect(get(file)).rejects.toMatchObject({ statusCode: 403 });
   }
 });
 
 test.runIf(process.platform !== "win32")("does not read FIFOs", async () => {
   await promisify(execFile)("mkfifo", [path.join(workspace, "pipe")]);
-  expect((await get("pipe")).json()).toEqual({ kind: "unsupported", path: "pipe" });
+  expect(await get("pipe")).toEqual({ kind: "unsupported", path: "pipe" });
 });

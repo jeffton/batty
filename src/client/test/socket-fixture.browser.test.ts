@@ -2,7 +2,7 @@
 import { expect, test } from "vite-plus/test";
 import { WebSocket } from "ws";
 import { once } from "node:events";
-import { RpcChannel } from "../../shared/rpc-channel";
+import { RpcChannel } from "../../shared/rpc";
 import { createBrowserFixtureServer, closeBrowserFixtureServer } from "./browser-fixture";
 import { attachFixtureSocket, setFixtureRpcHandler } from "./socket-fixture";
 

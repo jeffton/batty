@@ -1,14 +1,13 @@
-import fastify from "fastify";
 import { expect, test } from "vite-plus/test";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
 import { createMemory } from "./memory";
-import { registerMemoryTreeRoutes } from "./routes/memory-tree";
-import { createAuthToken, verifyAuthToken } from "./auth";
+import { createOwnerRpcHandler, type OwnerRpcServices } from "./owner-rpc";
+import type { Runtime } from "./runtime";
 
-test("authenticated prepared tree traverses to exact leaves without writes or model calls", async () => {
+test("native prepared tree traverses to exact leaves without writes or model calls", async () => {
   const models = createModels();
   models.setProvider(fauxProvider().provider);
   let compressions = 0;
@@ -38,13 +37,12 @@ test("authenticated prepared tree traverses to exact leaves without writes or mo
   }, context);
   await memory.bind(harness, main, storage);
   await memory.prepare();
-  const app = fastify();
-  app.decorateRequest("auth", false);
-  app.addHook("onRequest", async (request) => {
-    request.auth = verifyAuthToken("test-secret", request.headers.authorization);
-  });
-  registerMemoryTreeRoutes(app, memory);
-  const headers = { authorization: createAuthToken("test-secret") };
+  const handler = createOwnerRpcHandler(
+    { config: {}, tools: {}, memory } as unknown as Runtime,
+    {} as OwnerRpcServices,
+  );
+  const call = async (name: string, input: object = {}) =>
+    (await handler(name, input, { signal: new AbortController().signal })).value;
   let writes = 0;
   const observation = harness.observeCommits({
     advance: () => {
@@ -54,63 +52,50 @@ test("authenticated prepared tree traverses to exact leaves without writes or mo
   });
   const before = compressions;
   try {
-    for (const url of ["/api/memory/tree", "/api/memory/tree/0/1"]) {
-      expect((await app.inject({ url })).statusCode).toBe(401);
-      expect((await app.inject({ url, headers: { authorization: "invalid" } })).statusCode).toBe(
-        401,
-      );
-    }
-    const repairRequest = {
-      method: "POST" as const,
-      url: "/api/memory/tree/repair",
-      payload: { generation: 0, roots: [{ start: 0, count: 2 }], dryRun: true },
-    };
-    expect((await app.inject(repairRequest)).statusCode).toBe(401);
-    const plan = await app.inject({ ...repairRequest, headers });
-    expect(plan.statusCode).toBe(200);
-    expect(plan.json().nodes).toEqual([
+    const repairRequest = { generation: 0, roots: [{ start: 0, count: 2 }], dryRun: true };
+    const plan = (await call("memory.repair", repairRequest)) as Awaited<
+      ReturnType<typeof memory.repair>
+    >;
+    expect(plan.nodes).toEqual([
       { start: 0, count: 2 },
       { start: 0, count: 4 },
       { start: 0, count: 8 },
     ]);
     for (const payload of [
       {},
-      { ...repairRequest.payload, generation: 2 },
-      { ...repairRequest.payload, roots: [{ start: 1, count: 2 }] },
-      { ...repairRequest.payload, roots: [] },
+      { ...repairRequest, generation: 2 },
+      { ...repairRequest, roots: [{ start: 1, count: 2 }] },
+      { ...repairRequest, roots: [] },
     ])
-      expect((await app.inject({ ...repairRequest, headers, payload })).statusCode).toBe(400);
-    const response = await app.inject({ url: "/api/memory/tree", headers });
-    expect(response.headers["cache-control"]).toBe("no-store");
-    const overview = response.json();
+      await expect(call("memory.repair", payload)).rejects.toMatchObject({ code: "BAD_INPUT" });
+    const overview = (await call("memory.tree")) as Awaited<
+      ReturnType<typeof memory.browserOverview>
+    >;
     expect(overview.prepared).toBe(8);
-    expect(overview.nodes[0].count).toBeGreaterThan(1);
-    let node = overview.nodes[0];
+    expect(overview.nodes[0]!.count).toBeGreaterThan(1);
+    let node = overview.nodes[0]!;
     while (node.count > 1) {
-      const result = (
-        await app.inject({ url: `/api/memory/tree/${node.id}/${node.count}`, headers })
-      ).json();
+      const result = (await call("memory.expand", { id: node.id, count: node.count })) as Awaited<
+        ReturnType<typeof memory.browserNode>
+      >;
       expect(result.children).toHaveLength(2);
-      expect(result.children[0].count).toBe(node.count / 2);
-      expect(result.children[1].id).toBe(node.id + node.count / 2);
-      node = result.children[0];
+      expect(result.children![0]!.count).toBe(node.count / 2);
+      expect(result.children![1]!.id).toBe(node.id + node.count / 2);
+      node = result.children![0]!;
     }
-    const leaf = (await app.inject({ url: `/api/memory/tree/${node.id}/1`, headers })).json();
+    const leaf = (await call("memory.expand", { id: node.id, count: 1 })) as { text: string };
     expect(leaf.text).toBe(await memory.zoom(node.id, 1));
     expect(leaf.text).toContain("original 0");
     for (const range of ["-1/1", "1/2", "0/3", "0/0", "8/1", "0/16", "x/2", "0/9007199254740992"]) {
-      expect((await app.inject({ url: `/api/memory/tree/${range}`, headers })).statusCode).toBe(
-        400,
-      );
+      const [id, count] = range.split("/").map(Number);
+      await expect(call("memory.expand", { id, count })).rejects.toMatchObject({
+        code: "BAD_INPUT",
+      });
     }
-    expect(
-      (await app.inject({ method: "POST", url: "/api/memory/tree", headers })).statusCode,
-    ).toBe(404);
     expect(writes).toBe(0);
     expect(compressions).toBe(before);
   } finally {
     observation.detach();
-    await app.close();
     await memory.close();
     await harness.close(context);
   }

@@ -17,6 +17,7 @@ export interface ChannelSocket {
   addEventListener(type: "close" | "error", listener: () => void): void;
 }
 
+export type RpcCallOptions = { signal?: AbortSignal; body?: ReadableStream<Uint8Array> };
 export type RpcContext = { signal: AbortSignal; body?: ReadableStream<Uint8Array> };
 export type RpcReply<T = unknown> = {
   value: T;
@@ -30,13 +31,14 @@ export type RpcHandler = (
 ) => Promise<RpcReply>;
 
 export class RpcError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-    public readonly details?: unknown,
-  ) {
+  readonly code: string;
+  readonly details?: unknown;
+
+  constructor(code: string, message: string, details?: unknown) {
     super(message);
     this.name = "RpcError";
+    this.code = code;
+    this.details = details;
   }
 }
 
@@ -94,10 +96,10 @@ export class RpcChannel {
     this.finishClosed = resolve;
   });
 
-  constructor(
-    private readonly socket: ChannelSocket,
-    options: { handle?: RpcHandler } = {},
-  ) {
+  private readonly socket: ChannelSocket;
+
+  constructor(socket: ChannelSocket, options: { handle?: RpcHandler } = {}) {
+    this.socket = socket;
     socket.binaryType = "arraybuffer";
     this.heartbeat = setInterval(() => {
       if (Date.now() - this.lastActivity >= 45_000)
@@ -134,7 +136,7 @@ export class RpcChannel {
   call<T = unknown>(
     operation: string,
     input: unknown,
-    options: { signal?: AbortSignal; body?: ReadableStream<Uint8Array> } = {},
+    options: RpcCallOptions = {},
   ): Promise<RpcReply<T>> {
     if (this.ended) return Promise.reject(new RpcError("OFFLINE", "RPC socket is offline"));
     if (options.signal?.aborted) return Promise.reject(options.signal.reason);

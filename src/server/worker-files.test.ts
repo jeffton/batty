@@ -3,7 +3,6 @@ import sharp from "sharp";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import type { Multipart } from "@fastify/multipart";
 import { expect, test } from "vite-plus/test";
 import { Type } from "typebox";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
@@ -15,7 +14,7 @@ import { artifactRefs } from "./artifact-forwarding";
 import { decodeRuntimeNotice } from "./runtime-notices";
 import { storeSentFiles } from "./send-files";
 import {
-  receiveWorkerFiles,
+  receiveWorkerFileStreams,
   encodeWorkerNotice,
   workerFileMetadata,
   type WorkerFileMetadata,
@@ -26,9 +25,9 @@ const png = Buffer.from(
   "base64",
 );
 
-function binaryParts(bytes: Buffer, name = "file-0"): AsyncIterable<Multipart> {
+function binaryParts(bytes: Buffer, name = "file-0") {
   return (async function* () {
-    yield { type: "file", fieldname: name, file: Readable.from([bytes]) } as unknown as Multipart;
+    yield { fieldname: name, stream: Readable.from([bytes]) };
   })();
 }
 function manifest(bytes: Buffer): WorkerFileMetadata[] {
@@ -49,14 +48,14 @@ test("file receipt verifies all bytes, rejects omissions/oversize/path traversal
   const bytes = Buffer.from("immutable evidence");
   const metadata = manifest(bytes);
   const [a, b] = await Promise.all([
-    receiveWorkerFiles(storage, "node:a:request", metadata, binaryParts(bytes)),
-    receiveWorkerFiles(storage, "node:a:request", metadata, binaryParts(bytes)),
+    receiveWorkerFileStreams(storage, "node:a:request", metadata, binaryParts(bytes)),
+    receiveWorkerFileStreams(storage, "node:a:request", metadata, binaryParts(bytes)),
   ]);
   expect(a).toEqual(b);
   expect(await readFile(a[0]!.file.storedPath)).toEqual(bytes);
   expect(workerFileMetadata(a)).toEqual(metadata);
   await expect(
-    receiveWorkerFiles(
+    receiveWorkerFileStreams(
       storage,
       "node:a:request",
       manifest(Buffer.from("changed")),
@@ -64,7 +63,7 @@ test("file receipt verifies all bytes, rejects omissions/oversize/path traversal
     ),
   ).rejects.toThrow("reused with different files");
   await expect(
-    receiveWorkerFiles(
+    receiveWorkerFileStreams(
       storage,
       "bad-hash",
       metadata,
@@ -72,13 +71,13 @@ test("file receipt verifies all bytes, rejects omissions/oversize/path traversal
     ),
   ).rejects.toThrow("integrity check failed");
   await expect(
-    receiveWorkerFiles(storage, "missing", [...metadata, ...metadata], binaryParts(bytes)),
+    receiveWorkerFileStreams(storage, "missing", [...metadata, ...metadata], binaryParts(bytes)),
   ).rejects.toThrow("Missing worker file");
   await expect(
-    receiveWorkerFiles(storage, "too-large", metadata, binaryParts(Buffer.alloc(100))),
+    receiveWorkerFileStreams(storage, "too-large", metadata, binaryParts(Buffer.alloc(100))),
   ).rejects.toThrow("size exceeds");
   await expect(
-    receiveWorkerFiles(
+    receiveWorkerFileStreams(
       storage,
       "traversal",
       [{ ...metadata[0]!, name: "../outside" }],
@@ -89,7 +88,12 @@ test("file receipt verifies all bytes, rejects omissions/oversize/path traversal
     (await readdir(storage.rootDir)).filter((name) => name.startsWith(".worker-input-")),
   ).toEqual([]);
   // A failed transfer has not claimed the durable request ID.
-  const repaired = await receiveWorkerFiles(storage, "bad-hash", metadata, binaryParts(bytes));
+  const repaired = await receiveWorkerFileStreams(
+    storage,
+    "bad-hash",
+    metadata,
+    binaryParts(bytes),
+  );
   expect(await readFile(repaired[0]!.file.storedPath)).toEqual(bytes);
 });
 
@@ -123,7 +127,7 @@ test("model-visible inputs convert BMP and bound large images while retaining or
     ["wide.png", "image/png", wide],
   ] as const) {
     const metadata = [{ ...manifest(bytes)[0]!, name, mimeType }];
-    const files = await receiveWorkerFiles(storage, name, metadata, binaryParts(bytes));
+    const files = await receiveWorkerFileStreams(storage, name, metadata, binaryParts(bytes));
     const content = await encodeWorkerNotice(
       { kind: "subagent", text: "Inspect the image" },
       files,
@@ -140,14 +144,14 @@ test("model-visible inputs convert BMP and bound large images while retaining or
     if (name.endsWith("bmp")) expect(image.mimeType).toBe("image/png");
   }
   await expect(
-    receiveWorkerFiles(
+    receiveWorkerFileStreams(
       storage,
       "invalid-image",
       [{ ...manifest(Buffer.from("not an image"))[0]!, name: "bad.png", mimeType: "image/png" }],
       binaryParts(Buffer.from("not an image")),
     ),
   ).rejects.toThrow("Cannot prepare image");
-  const corrected = await receiveWorkerFiles(
+  const corrected = await receiveWorkerFileStreams(
     storage,
     "invalid-image",
     [{ ...manifest(png)[0]!, name: "bad.png", mimeType: "image/png" }],

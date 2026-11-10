@@ -18,12 +18,11 @@ import {
 import { loadConfig } from "@/server/config";
 import { workspaceBrowserKey } from "@/server/browser-service";
 import { Runtime, context } from "@/server/runtime";
-import { registerSessionRoutes } from "@/server/routes/sessions";
 import { registerCloudBrowserRoutes } from "@/server/routes/cloud-browser";
 import { TranscriptImages } from "@/server/transcript-images";
 import { createOwnerRpcHandler, type OwnerRpcServices } from "@/server/owner-rpc";
 import { WebPushService } from "@/server/web-push";
-import { setFixtureRpcHandler } from "../test/socket-fixture";
+import { setFixtureRpcHandler, waitForFixtureOperation } from "../test/socket-fixture";
 import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
 
 test("main browser tools render a live attachment through native events, reload and reopened durable history", async () => {
@@ -64,7 +63,6 @@ test("main browser tools render a live attachment through native events, reload 
         "<title>Main tool session</title><button onclick=\"document.body.dataset.clicked='yes'\">Shared page</button>",
       ),
   );
-  registerSessionRoutes(backend, runtime, new TranscriptImages(path.join(root, "images")));
   const reservation = net.createServer();
   reservation.listen(0, "127.0.0.1");
   await once(reservation, "listening");
@@ -167,10 +165,13 @@ test("main browser tools render a live attachment through native events, reload 
     const service = runtime.tools.browserService;
     const before = await service.cloudTarget(attached!.browserId!);
     expect(await before.page.evaluate(() => document.cookie)).toContain("existing-login=retained");
-    expect(
-      (await backend.inject(`/api/cloud-browser/${attached!.browserId}/state`)).statusCode,
-    ).toBe(401);
+    const stateReply = waitForFixtureOperation(
+      server,
+      (operation, input) =>
+        operation === "browser.state" && input.browserId === attached!.browserId,
+    );
     await buttons.click();
+    expect((await stateReply).value).toMatchObject({ pageId: before.state.pageId });
     await expect.poll(() => page.locator(".cloud-browser__image[data-frame]").count()).toBe(1);
     expect((await service.cloudTarget(attached!.browserId!)).page).toBe(before.page);
     await page.getByRole("button", { name: "Close popover" }).click();

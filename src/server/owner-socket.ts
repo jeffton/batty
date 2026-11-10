@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { RpcChannel, RpcError, type RpcHandler } from "../shared/rpc-channel";
+import { RpcChannel, RpcError, type RpcHandler } from "../shared/rpc";
 import { verifyAuthToken } from "./auth";
 
 type OwnerCredentials = { authSecret: string; cookieName: string };

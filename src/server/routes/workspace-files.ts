@@ -1,8 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { Readable } from "node:stream";
-import type { FastifyInstance } from "fastify";
-import type { WorkspaceFilesResponse, WorkspaceFileSearchEvent } from "@/shared/workspace-files";
+import type { WorkspaceFilesResponse } from "@/shared/workspace-files";
 import { searchWorkspaceFileNames, withinWorkspace as within } from "../workspace-file-search";
 import type { AppConfig } from "../config";
 import { listWorkspaces } from "../workspaces";
@@ -101,49 +99,4 @@ export async function workspaceFiles(
     if (code === "ENOENT" || code === "ENOTDIR") throw httpError(404, "File not found");
     throw cause;
   }
-}
-
-export function registerWorkspaceFileRoutes(app: FastifyInstance, config: AppConfig): void {
-  app.get<{ Params: { workspaceId: string } }>("/api/workspaces/:workspaceId/git", (request) =>
-    workspaceGit(config, request.params.workspaceId),
-  );
-  app.get<{ Params: { workspaceId: string }; Querystring: { name: string } }>(
-    "/api/workspaces/:workspaceId/file-search",
-    async (request, reply) => {
-      const workspace = await workspaceFor(config, request.params.workspaceId);
-      if (!request.query.name) throw httpError(400, "File name is required");
-      await fs.realpath(workspace.path);
-      const controller = new AbortController();
-      reply.raw.once("close", () => controller.abort());
-      async function* events(): AsyncGenerator<string> {
-        const encode = (event: WorkspaceFileSearchEvent) => `${JSON.stringify(event)}\n`;
-        try {
-          for await (const filePath of workspaceSearch(
-            config,
-            request.params.workspaceId,
-            request.query.name,
-            controller.signal,
-          )) {
-            yield encode({ kind: "match", path: filePath });
-          }
-          yield encode({ kind: "done" });
-        } catch (cause) {
-          if (!controller.signal.aborted)
-            yield encode({
-              kind: "error",
-              message: cause instanceof Error ? cause.message : String(cause),
-            });
-        }
-      }
-      return reply
-        .type("application/x-ndjson")
-        .header("X-Accel-Buffering", "no")
-        .send(Readable.from(events()));
-    },
-  );
-  app.get<{ Params: { workspaceId: string }; Querystring: { path?: string } }>(
-    "/api/workspaces/:workspaceId/files",
-    (request): Promise<WorkspaceFilesResponse> =>
-      workspaceFiles(config, request.params.workspaceId, request.query.path ?? ""),
-  );
 }

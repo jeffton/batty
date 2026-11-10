@@ -1,18 +1,13 @@
 // @vitest-environment node
-import { EventEmitter } from "node:events";
-import type { ServerResponse } from "node:http";
 import { expect, test, vi } from "vite-plus/test";
-import { streamAppStatus } from "./app-status-stream";
+import { observeAppStatus } from "./app-status-stream";
 import type { Runtime } from "./runtime";
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 test("main status streams replay build/auth state, share usage subscription and clean up", async () => {
-  const socket = Object.assign(new EventEmitter(), {
-    write: vi.fn((_data: string) => true),
-    destroyed: false,
-    writableEnded: false,
-  });
+  const send = vi.fn(async (_event: import("@/shared/types").ServerEvent) => {});
+  const controller = new AbortController();
   let providerChanged!: (attempt: object) => void;
   let mcpChanged!: (attempt: object) => void;
   let usageChanged!: (usage: object) => void;
@@ -44,9 +39,9 @@ test("main status streams replay build/auth state, share usage subscription and 
       },
     },
   } as unknown as Runtime;
-  const close = streamAppStatus(socket as unknown as ServerResponse, runtime, "new-build", vi.fn());
+  const close = observeAppStatus(runtime, "new-build", send, controller.signal, vi.fn());
   await settle();
-  const events = () => socket.write.mock.calls.map(([data]) => JSON.parse(String(data).slice(6)));
+  const events = () => send.mock.calls.map(([event]) => event);
   expect(events()).toEqual([
     { type: "build", buildId: "new-build" },
     {
@@ -65,34 +60,31 @@ test("main status streams replay build/auth state, share usage subscription and 
       .slice(3)
       .map((event) => event.type),
   ).toEqual(["provider-auth-attempt", "mcp-auth-attempt", "provider-usage"]);
-  socket.emit("close");
+  controller.abort();
   close();
   expect(stopProvider).toHaveBeenCalledOnce();
   expect(stopMcp).toHaveBeenCalledOnce();
   expect(stopUsage).toHaveBeenCalledOnce();
-  const count = socket.write.mock.calls.length;
+  const count = send.mock.calls.length;
   usageChanged({ provider: "openai-codex", usage: { windows: [] } });
   await settle();
-  expect(socket.write).toHaveBeenCalledTimes(count);
+  expect(send).toHaveBeenCalledTimes(count);
 });
 
-test("status replay respects backpressure and drops queued events after disconnect", async () => {
-  const socket = Object.assign(new EventEmitter(), {
-    write: vi.fn((_data: string) => false),
-    destroyed: false,
-    writableEnded: false,
-  });
+test("native status replay waits for consumption and drops queued events on cancellation", async () => {
+  const pending = Promise.withResolvers<void>();
+  const send = vi.fn(() => pending.promise);
+  const controller = new AbortController();
   const runtime = {
     providerAuth: { subscribeAttempts: () => vi.fn(), listAuthAttempts: () => [] },
     tools: { mcp: { subscribeAttempts: () => vi.fn(), listAuthAttempts: () => [] } },
     providerUsage: { subscribe: () => vi.fn() },
   } as unknown as Runtime;
-  streamAppStatus(socket as unknown as ServerResponse, runtime, "build", vi.fn());
+  observeAppStatus(runtime, "build", send, controller.signal, vi.fn());
   await settle();
-  expect(socket.write).toHaveBeenCalledTimes(1);
-  socket.destroyed = true;
-  socket.emit("close");
+  expect(send).toHaveBeenCalledTimes(1);
+  controller.abort();
+  pending.resolve();
   await settle();
-  expect(socket.write).toHaveBeenCalledTimes(1);
-  expect(socket.listenerCount("drain")).toBe(0);
+  expect(send).toHaveBeenCalledTimes(1);
 });

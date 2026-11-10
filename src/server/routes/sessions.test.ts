@@ -2,21 +2,18 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import fastify from "fastify";
-import multipart from "@fastify/multipart";
 import { expect, test, vi } from "vite-plus/test";
 import { fauxProvider, fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/faux";
 import { loadConfig } from "../config";
 import { Runtime, context } from "../runtime";
 import { TranscriptImages } from "../transcript-images";
-import { registerSessionRoutes } from "./sessions";
-import { streamAppStatus } from "../app-status-stream";
+import { createSessionOperations } from "../session-api";
 import { applyServerEvent } from "@/client/lib/session-events";
 import { sessionHistoryCursor } from "@/client/lib/session-stream";
 import type { ServerEvent, SessionState } from "@/shared/types";
 
-test("multipart image → durable receipt → SSE → backend reopen reconciles without duplicate inputs", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "batty-session-http-"));
+test("native image → durable receipt → events → backend reopen reconciles without duplicate inputs", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "batty-session-native-"));
   vi.stubEnv("PI_OFFLINE", "1");
   await mkdir(join(directory, ".batty"));
   await mkdir(join(directory, "work"));
@@ -32,17 +29,16 @@ test("multipart image → durable receipt → SSE → backend reopen reconciles 
     ...(await loadConfig(directory)),
     selfPath: join(directory, "work"),
     defaultProvider: "faux",
-    defaultModel: "http-test",
+    defaultModel: "native-test",
     defaultThinkingLevel: "off" as const,
-    memoryModel: "faux/http-test",
+    memoryModel: "faux/native-test",
   };
-  const faux = fauxProvider({ models: [{ id: "http-test" }] });
+  const faux = fauxProvider({ models: [{ id: "native-test" }] });
   faux.setResponses(
     Array.from({ length: 40 }, () => fauxAssistantMessage([fauxText("image received")])),
   );
   let runtime: Runtime | undefined;
-  let app: ReturnType<typeof fastify> | undefined;
-  let closeStreams: (() => void) | undefined;
+  let operations: ReturnType<typeof createSessionOperations>;
   let abort: AbortController | undefined;
   const open = async () => {
     runtime = await Runtime.open(config, {
@@ -50,54 +46,37 @@ test("multipart image → durable receipt → SSE → backend reopen reconciles 
         opened.models.registerNativeProvider(faux.provider);
       },
     });
-    app = fastify();
-    await app.register(multipart);
-    closeStreams = registerSessionRoutes(
-      app,
-      runtime,
-      new TranscriptImages(join(directory, "previews"), config.baseUrl),
-      undefined,
-      (stream) =>
-        streamAppStatus(stream, runtime!, "fixture-build", (error) => {
-          throw error;
-        }),
-    );
-    return app.listen({ host: "127.0.0.1", port: 0 });
+    operations = createSessionOperations(runtime, {
+      transcriptImages: new TranscriptImages(join(directory, "previews"), config.baseUrl),
+      buildId: "fixture-build",
+    });
   };
   const close = async () => {
     abort?.abort();
-    closeStreams?.();
-    await app?.close();
     await runtime?.close();
-    app = undefined;
     runtime = undefined;
   };
-  async function stream(url: string) {
+  const call = async (operation: string, input: unknown, body?: ReadableStream<Uint8Array>) =>
+    (await operations.get(operation)!(input, { signal: new AbortController().signal, body })).value;
+  async function stream(after?: string) {
     abort = new AbortController();
-    const response = await fetch(url, { signal: abort.signal });
-    expect(response.headers.get("content-type")).toBe("text/event-stream");
-    const reader = response.body!.getReader();
-    let buffer = "";
+    const response = await operations.get("session.watch")!(
+      { sessionId: "main", after },
+      { signal: abort.signal },
+    );
+    const reader = response.events!.getReader();
     return async (matches: (event: ServerEvent) => boolean): Promise<ServerEvent> => {
       for (;;) {
-        let end;
-        while ((end = buffer.indexOf("\n\n")) >= 0) {
-          const packet = buffer.slice(0, end);
-          buffer = buffer.slice(end + 2);
-          const data = packet.split("\n").find((line) => line.startsWith("data: "));
-          if (!data || !packet.startsWith("data:")) continue;
-          const event = JSON.parse(data.slice(6)) as ServerEvent;
-          if (matches(event)) return event;
-        }
         const chunk = await reader.read();
-        if (chunk.done) throw new Error("SSE closed before expected receipt");
-        buffer += new TextDecoder().decode(chunk.value);
+        if (chunk.done) throw new Error("Event stream closed before expected receipt");
+        const event = chunk.value as ServerEvent;
+        if (matches(event)) return event;
       }
     };
   }
   try {
-    let url = await open();
-    const nextEvent = await stream(`${url}/api/main/events`);
+    await open();
+    const nextEvent = await stream();
     expect(await nextEvent((event) => event.type === "build")).toEqual({
       type: "build",
       buildId: "fixture-build",
@@ -108,25 +87,25 @@ test("multipart image → durable receipt → SSE → backend reopen reconciles 
       mcp: [],
     });
     let client = applyServerEvent(undefined, await nextEvent((event) => event.type === "reset"));
-    const form = new FormData();
-    form.set("text", "HTTP image test");
-    form.set("clientMessageId", "http-image-id");
-    form.set(
-      "files",
-      new Blob(
-        [
-          Buffer.from(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlXcAAAAASUVORK5CYII=",
-            "base64",
-          ),
-        ],
-        { type: "image/png" },
-      ),
-      "pixel.png",
+    const image = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlXcAAAAASUVORK5CYII=",
+      "base64",
     );
-    const receiptResponse = await fetch(`${url}/api/main/prompt`, { method: "POST", body: form });
-    expect(receiptResponse.status).toBe(200);
-    const receipt = (await receiptResponse.json()) as { submissionId: string };
+    const receipt = (await call(
+      "main.submit",
+      {
+        kind: "prompt",
+        text: "Native image test",
+        clientMessageId: "native-image-id",
+        files: [{ name: "pixel.png", type: "image/png", size: image.length }],
+      },
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(image);
+          controller.close();
+        },
+      }),
+    )) as { submissionId: string };
     await nextEvent((event) => {
       client = applyServerEvent(client, event);
       return (
@@ -137,11 +116,11 @@ test("multipart image → durable receipt → SSE → backend reopen reconciles 
       );
     });
     const user = client!.messages.find(
-      (message) => message.role === "user" && message.clientMessageId === "http-image-id",
+      (message) => message.role === "user" && message.clientMessageId === "native-image-id",
     )!;
     expect(user).toMatchObject({
       blocks: [
-        { type: "text", text: "HTTP image test" },
+        { type: "text", text: "Native image test" },
         {
           type: "image",
           url: expect.stringMatching(/^\/batty\/api\/transcript-images\//),
@@ -154,7 +133,7 @@ test("multipart image → durable receipt → SSE → backend reopen reconciles 
     const cursor = client!.messages.at(-1)!.id;
     const beforeRestart = client!;
     await close();
-    url = await open();
+    await open();
     await runtime!.main.commit(async (tx) => {
       for (let index = 0; index < 1000; index++)
         await tx.appendEntry(runtime!.main.id, { kind: "bookkeeping", data: { index } });
@@ -165,7 +144,7 @@ test("multipart image → durable receipt → SSE → backend reopen reconciles 
       for (let index = 0; index < 1000; index++)
         await tx.appendEntry(runtime!.main.id, { kind: "bookkeeping", data: { trailing: index } });
     }, context);
-    const reconnected = await stream(`${url}/api/main/events?after=${encodeURIComponent(cursor)}`);
+    const reconnected = await stream(cursor);
     client = beforeRestart;
     let catchupPages = 0;
     await reconnected((event) => {
@@ -187,32 +166,29 @@ test("multipart image → durable receipt → SSE → backend reopen reconciles 
     const rawCursor = sessionHistoryCursor(client)!;
     expect(Number(rawCursor)).toBeGreaterThan(Number(client!.messages.at(-1)!.id));
     abort!.abort();
-    const secondReconnect = await stream(
-      `${url}/api/main/events?after=${encodeURIComponent(rawCursor)}`,
-    );
+    const secondReconnect = await stream(rawCursor);
     const caughtUp = await secondReconnect((event) => event.type === "reset");
     if (caughtUp.type !== "reset") throw new Error("Expected reset");
     expect(caughtUp.state.messages).toEqual([]);
     expect(caughtUp.state.hasMoreRecentMessages).toBe(false);
     expect(caughtUp.state.historyCursor).toBe(rawCursor);
     client = applyServerEvent(client, caughtUp);
-    const retry = await fetch(`${url}/api/main/prompt`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: "HTTP image test", clientMessageId: "http-image-id" }),
-    });
-    expect(((await retry.json()) as { submissionId: string }).submissionId).toBe(
-      receipt.submissionId,
-    );
-    const snapshot = (await (await fetch(`${url}/api/main`)).json()) as SessionState;
+    const retry = (await call("main.submit", {
+      kind: "prompt",
+      text: "Native image test",
+      clientMessageId: "native-image-id",
+      files: [],
+    })) as { submissionId: string };
+    expect(retry.submissionId).toBe(receipt.submissionId);
+    const snapshot = (await call("session.get", { sessionId: "main" })) as SessionState;
     expect(
       snapshot.messages.filter(
-        (message) => message.role === "user" && message.clientMessageId === "http-image-id",
+        (message) => message.role === "user" && message.clientMessageId === "native-image-id",
       ),
     ).toHaveLength(1);
     expect(
       client!.messages.filter(
-        (message) => message.role === "user" && message.clientMessageId === "http-image-id",
+        (message) => message.role === "user" && message.clientMessageId === "native-image-id",
       ),
     ).toHaveLength(1);
     expect(snapshot.totalMessageCount).toBe(beforeRestart.totalMessageCount + 1);
@@ -233,16 +209,16 @@ test("multipart image → durable receipt → SSE → backend reopen reconciles 
       .mockRejectedValue(new Error("Full watch forbidden"));
     const scans = vi.spyOn(runtime!.storage, "scanEntries");
     const started = performance.now();
-    const bounded = (await (await fetch(`${url}/api/main`)).json()) as SessionState;
+    const bounded = (await call("session.get", { sessionId: "main" })) as SessionState;
     expect(bounded.messages).toHaveLength(120);
     expect(bounded.totalMessageCount).toBe(beforeRestart.totalMessageCount + 5001);
     expect(scans.mock.calls.filter(([query]) => query.minEntryId === undefined)).toHaveLength(0);
-    const coldStream = await stream(`${url}/api/main/events`);
+    const coldStream = await stream();
     const cold = await coldStream((event) => event.type === "reset");
     expect(cold.type === "reset" && cold.state.messages.length).toBe(120);
     expect(watch).not.toHaveBeenCalled();
     console.log(
-      `runtime/SSE: 5,000 visible + 5,000 invisible archive entries open in ${(performance.now() - started).toFixed(1)}ms; 120-message state, zero cold archive scans/full views/watches`,
+      `runtime/native events: 5,000 visible + 5,000 invisible archive entries open in ${(performance.now() - started).toFixed(1)}ms; 120-message state, zero cold archive scans/full views/watches`,
     );
   } finally {
     await close();

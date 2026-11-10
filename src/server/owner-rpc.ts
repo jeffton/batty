@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { Check } from "typebox/value";
 import type { OwnerInputs } from "../shared/owner-api";
-import { RpcError, type RpcContext, type RpcHandler, type RpcReply } from "../shared/rpc-channel";
+import { RpcError, rpcRegistry, type RpcHandler } from "../shared/rpc";
 import type { AppSettingsStatus } from "../shared/types";
 import { isSubscriptionProvider } from "../shared/provider-auth";
 import { Runtime, context } from "./runtime";
@@ -87,23 +87,9 @@ function cronRunLog(runtime: Runtime, run: CronRun, jobs: CronJob[]) {
 export function createOwnerRpcHandler(runtime: Runtime, services: OwnerRpcServices): RpcHandler {
   const { config } = runtime;
   const { webPush, passkeys, settingsStatus } = services;
-  const operations = new Map<string, (input: unknown, rpc: RpcContext) => Promise<RpcReply>>();
-  function add<K extends keyof OwnerInputs>(
-    name: K,
-    run: (input: OwnerInputs[K], rpc: RpcContext) => unknown | Promise<unknown>,
-  ) {
-    operations.set(name, async (input, rpc) => ({
-      value: await run(input as OwnerInputs[K], rpc),
-    }));
-  }
-  function streaming<K extends keyof OwnerInputs>(
-    name: K,
-    run: (input: OwnerInputs[K], rpc: RpcContext) => RpcReply | Promise<RpcReply>,
-  ) {
-    operations.set(name, (input, rpc) => Promise.resolve(run(input as OwnerInputs[K], rpc)));
-  }
-  for (const [name, operation] of createSessionOperations(runtime, services))
-    operations.set(name, operation);
+  const { operations, add, streaming } = rpcRegistry<OwnerInputs>(
+    createSessionOperations(runtime, services),
+  );
   add("workspace.list", async () => ({ workspaces: await listWorkspaces(config, true) }));
   add("workspace.git", ({ workspaceId }) => workspaceGit(config, workspaceId));
   add("workspace.files", ({ workspaceId, path }) => workspaceFiles(config, workspaceId, path));

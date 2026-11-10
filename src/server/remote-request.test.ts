@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vite-plus/test";
 import { withNodeDeadline } from "./remote-workers";
-import type { RpcReply } from "../shared/rpc-channel";
+import type { RpcReply } from "../shared/rpc";
 
 function untilAborted(signal: AbortSignal): Promise<RpcReply> {
   return new Promise((_resolve, reject) => {

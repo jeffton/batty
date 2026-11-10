@@ -3,8 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { expect, test, vi } from "vite-plus/test";
-import fastify from "fastify";
-import { registerSessionRoutes } from "./routes/sessions";
+import { createSessionOperations } from "./session-api";
 import { TranscriptImages } from "./transcript-images";
 import type { ServerEvent } from "@/shared/types";
 import {
@@ -146,42 +145,29 @@ test("Runtime response and reopened history reuse files and distinct same-path i
       }
       const tail = await runtime!.state(mainId, undefined, true, String(Number(response!.id) - 1));
       expect(tail.messages.find((message) => message.id === response!.id)).toMatchObject(selected);
-      const app = fastify();
-      const closeStreams = registerSessionRoutes(
-        app,
-        runtime!,
-        new TranscriptImages(join(directory, "previews"), ""),
+      const operations = createSessionOperations(runtime!, {
+        transcriptImages: new TranscriptImages(join(directory, "previews"), ""),
+      });
+      const controller = new AbortController();
+      const stream = await operations.get("session.watch")!(
+        { sessionId: "main", after: String(Number(response!.id) - 1) },
+        { signal: controller.signal },
       );
-      const abort = new AbortController();
+      const reader = stream.events!.getReader();
       try {
-        const url = await app.listen({ host: "127.0.0.1", port: 0 });
-        const stream = await fetch(`${url}/api/main/events?after=${Number(response!.id) - 1}`, {
-          signal: abort.signal,
-        });
-        const reader = stream.body!.getReader();
-        let buffer = "";
-        let reset: Extract<ServerEvent, { type: "reset" }> | undefined;
-        while (!reset) {
-          const chunk = await reader.read();
-          if (chunk.done) throw new Error("SSE closed before replay");
-          buffer += new TextDecoder().decode(chunk.value);
-          let end: number;
-          while ((end = buffer.indexOf("\n\n")) >= 0) {
-            const packet = buffer.slice(0, end);
-            buffer = buffer.slice(end + 2);
-            const line = packet.split("\n").find((item) => item.startsWith("data: "));
-            if (!line) continue;
-            const event = JSON.parse(line.slice(6)) as ServerEvent;
-            if (event.type === "reset") reset = event;
-          }
-        }
+        let event: ServerEvent;
+        do {
+          const result = await reader.read();
+          if (result.done) throw new Error("Event stream ended before replay");
+          event = result.value as ServerEvent;
+        } while (event.type !== "reset");
+        const reset = event;
         expect(reset.state.messages.find((message) => message.id === response!.id)).toMatchObject(
           selected,
         );
       } finally {
-        abort.abort();
-        closeStreams();
-        await app.close();
+        controller.abort();
+        await reader.cancel();
       }
     };
     // The commentary is already complete and projected while the run is still

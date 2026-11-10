@@ -388,35 +388,6 @@ export function getMainMessages(options: {
   );
 }
 
-function fileBytes(files: File[]): ReadableStream<Uint8Array> {
-  let cancelled = false;
-  let index = 0;
-  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
-  return new ReadableStream<Uint8Array>(
-    {
-      async pull(controller) {
-        while (!cancelled && (index < files.length || reader)) {
-          reader ??= files[index++]!.stream().getReader();
-          const chunk = await reader.read();
-          if (cancelled) return;
-          if (!chunk.done) {
-            controller.enqueue(chunk.value);
-            return;
-          }
-          reader.releaseLock();
-          reader = undefined;
-        }
-        if (!cancelled) controller.close();
-      },
-      async cancel(reason) {
-        cancelled = true;
-        await reader?.cancel(reason);
-        reader?.releaseLock();
-      },
-    },
-    { highWaterMark: 0 },
-  );
-}
 export async function submitMainPrompt(
   kind: "prompt" | "steer",
   text: string,
@@ -434,7 +405,7 @@ export async function submitMainPrompt(
         correlationId,
         files: files.map((file) => ({ name: file.name, type: file.type, size: file.size })),
       },
-      files.length ? { body: fileBytes(files) } : undefined,
+      files.length ? { body: new Blob(files).stream() } : undefined,
     );
   } catch (error) {
     reportBrowserError(error, "submit", { correlationId, hasFiles: files.length > 0 });

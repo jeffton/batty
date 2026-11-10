@@ -1,7 +1,7 @@
 // @vitest-environment node
 import path from "node:path";
 import { WebSocketServer } from "ws";
-import { RpcChannel } from "@/shared/rpc-channel";
+import { RpcChannel } from "@/shared/rpc";
 import { chromium, type Browser } from "playwright-core";
 import { launchWebKit } from "../test/webkit";
 import type { ViteDevServer } from "vite";

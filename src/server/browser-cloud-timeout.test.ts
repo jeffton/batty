@@ -113,7 +113,10 @@ test.each([false, true])(
       await dispatched;
       // Both routes used to queue forever behind the same unacknowledged CDP send.
       const admission = vi.spyOn(internals, "serialized");
-      const pendingState = app.inject({ url: `/api/cloud-browser/${id}/state` });
+      const pendingState = expect(service.cloudState(id)).rejects.toMatchObject({
+        statusCode: expect.any(Number),
+        message: expect.stringMatching(/timed out|session ended/),
+      });
       const pendingSocket = app.injectWS(`/api/cloud-browser/${id}/socket`, {
         headers: { origin: "https://batty.example" },
       });
@@ -123,13 +126,8 @@ test.each([false, true])(
       deadline.expireNext();
       deadline.restore();
       await timedOut;
-      const stateResponse = await pendingState;
+      await pendingState;
       await rejectedSocket;
-      // Queue admission can hit its own deadline while process cleanup finishes.
-      expect([410, 504]).toContain(stateResponse.statusCode);
-      expect(stateResponse.json().message ?? stateResponse.json().error).toMatch(
-        /timed out|session ended/,
-      );
       expect(() => process.kill(pid, 0)).toThrow("ESRCH");
       expect(internals.queues.has("worker")).toBe(false);
       expect(internals.cloudTouches.size).toBe(0);
@@ -141,9 +139,7 @@ test.each([false, true])(
       if (cleanupFailure) {
         const error = await failure;
         const stateFailure = vi.spyOn(service, "cloudState").mockRejectedValueOnce(error);
-        expect((await app.inject({ url: `/api/cloud-browser/${nextId}/state` })).statusCode).toBe(
-          504,
-        );
+        await expect(service.cloudState(nextId)).rejects.toMatchObject({ statusCode: 504 });
         stateFailure.mockRestore();
         const subscribe = vi
           .spyOn(CloudBrowserStreams.prototype, "subscribe")

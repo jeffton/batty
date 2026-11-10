@@ -1,5 +1,5 @@
 import { fixtureOperation } from "../test/socket-fixture";
-import { RpcError } from "../../shared/rpc-channel";
+import { RpcError } from "../../shared/rpc";
 // @vitest-environment node
 import path from "node:path";
 import fs from "node:fs/promises";

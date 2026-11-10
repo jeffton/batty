@@ -1,15 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Check } from "typebox/value";
-import { CloudBrowserCredentialsSchema } from "../cloud-browser-credentials-schema";
 import type { FastifyInstance } from "fastify";
 import websocket from "@fastify/websocket";
-import type {
-  CloudBrowserControl,
-  CloudBrowserTouch,
-  CloudBrowserCredentials,
-} from "@/shared/cloud-browser";
+import type { CloudBrowserControl, CloudBrowserTouch } from "@/shared/cloud-browser";
 import type { BrowserService } from "../browser-service";
-import { CloudBrowserControlSchema, CloudBrowserSocketCommandSchema } from "../browser-schemas";
+import { CloudBrowserSocketCommandSchema } from "../browser-schemas";
 import { CloudBrowserStreams } from "../cloud-browser-stream";
 import { createCloudBrowserSocketWriter } from "../cloud-browser-events";
 
@@ -24,45 +19,6 @@ export async function registerCloudBrowserRoutes(
     await app.register(websocket, { options: { maxPayload: 2048, perMessageDeflate: false } });
   const streams = new CloudBrowserStreams(browser);
   const prefix = "/api/cloud-browser/:browserId";
-  const credentialSchema = CloudBrowserCredentialsSchema;
-  const sameOrigin = (request: { protocol: string; host: string; headers: { origin?: string } }) =>
-    request.headers.origin === new URL(baseUrl, `${request.protocol}://${request.host}`).origin;
-  app.post<{ Params: { browserId: string } }>(
-    `${prefix}/credentials/prepare`,
-    async (request, reply) => {
-      reply.header("Cache-Control", "no-store");
-      if (!sameOrigin(request))
-        return reply.code(403).send({ error: "Same-origin browser control required." });
-      return browser.prepareCloudCredentials(request.params.browserId);
-    },
-  );
-  app.post<{ Params: { browserId: string }; Body: CloudBrowserCredentials }>(
-    `${prefix}/credentials/fill`,
-    {
-      bodyLimit: 64 * 1024,
-      // Parser/validation errors may contain submitted JSON. Do not pass them to
-      // the global error logger or echo their messages back to the client.
-      errorHandler: (_error, _request, reply) => {
-        const status = (_error as { statusCode?: number }).statusCode ?? 500;
-        return reply
-          .code(status)
-          .header("Cache-Control", "no-store")
-          .send({ error: "Credential fill failed. Reopen the login panel and try again." });
-      },
-      schema: { body: credentialSchema },
-      validatorCompiler: () => (data) =>
-        Check(credentialSchema, data)
-          ? { value: data }
-          : { error: new Error("Invalid credential request.") },
-    },
-    async (request, reply) => {
-      reply.header("Cache-Control", "no-store");
-      if (!sameOrigin(request))
-        return reply.code(403).send({ error: "Same-origin browser control required." });
-      await browser.fillCloudCredentials(request.params.browserId, request.body);
-      return reply.code(204).send();
-    },
-  );
   const selectionError = (
     error: Error & { statusCode?: number; pages?: unknown },
     _request: unknown,
@@ -72,34 +28,6 @@ export async function registerCloudBrowserRoutes(
       return reply.code(409).send({ error: error.message, pages: error.pages });
     throw error;
   };
-  app.get<{ Params: { browserId: string } }>(
-    `${prefix}/state`,
-    { errorHandler: selectionError },
-    async (request, reply) => {
-      reply.header("Cache-Control", "no-store");
-      return browser.cloudState(request.params.browserId);
-    },
-  );
-  app.post<{ Params: { browserId: string }; Body: CloudBrowserControl }>(
-    `${prefix}/control`,
-    {
-      errorHandler: selectionError,
-      schema: { body: CloudBrowserControlSchema },
-      bodyLimit: 64 * 1024,
-      // AJV's removeAdditional mutates union branches before discriminating actions.
-      validatorCompiler: () => (data) =>
-        Check(CloudBrowserControlSchema, data)
-          ? { value: data }
-          : { error: new Error("Invalid browser control command.") },
-    },
-    async (request, reply) => {
-      // Credentials alone must not let another site drive a logged-in browser.
-      const origin = new URL(baseUrl, `${request.protocol}://${request.host}`).origin;
-      if (request.headers.origin !== origin)
-        return reply.code(403).send({ error: "Same-origin browser control required." });
-      return browser.cloudControl(request.params.browserId, request.body);
-    },
-  );
   app.get<{ Params: { browserId: string } }>(
     `${prefix}/socket`,
     {

@@ -1,12 +1,10 @@
 // @vitest-environment node
-import { EventEmitter } from "node:events";
-import type { ServerResponse } from "node:http";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vite-plus/test";
 import { RemoteWorkers } from "./remote-workers";
-import { streamSession } from "./session-sse";
+import { observeSession } from "./session-sse";
 import type { Runtime } from "./runtime";
 import type { WorkerCommandContext } from "./orchestration-workers";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -45,7 +43,7 @@ function sourceState(revision: number, text: string): SessionState {
   };
 }
 
-test("local mirror SSE keeps one revision clock across divergent remote counters and remote restart", async () => {
+test("local mirror events keep one revision clock across divergent remote counters and remote restart", async () => {
   const root = await mkdtemp(join(tmpdir(), "batty-mirror-clock-"));
   const directory = join(root, ".batty", "remote-mirrors");
   await mkdir(directory, { recursive: true });
@@ -68,29 +66,20 @@ test("local mirror SSE keeps one revision clock across divergent remote counters
   await writeFile(file, JSON.stringify(mirror));
   let current = await RemoteWorkers.open(runtime);
   let changed!: (history: boolean) => void;
-  const socket = Object.assign(new EventEmitter(), {
-    destroyed: false,
-    writableEnded: false,
-    writableNeedDrain: false,
-  });
   let client: SessionState | undefined;
   const events: ServerEvent[] = [];
-  const stream = Object.assign(socket, {
-    write: (payload: string) => {
-      if (payload.startsWith("data:")) {
-        const event = JSON.parse(payload.slice(5)) as ServerEvent;
-        events.push(event);
-        client = applyServerEvent(client, event);
-      }
-      return true;
-    },
-  });
-  const close = streamSession(
-    stream as unknown as ServerResponse,
+  const controller = new AbortController();
+  const close = observeSession(
     runtime,
     "remote:work:123",
     { state: async (state) => state } as TranscriptImages,
     undefined,
+    async (value) => {
+      const event = value as ServerEvent;
+      events.push(event);
+      client = applyServerEvent(client, event);
+    },
+    controller.signal,
     (error) => {
       throw error;
     },

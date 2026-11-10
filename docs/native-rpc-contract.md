@@ -2,7 +2,7 @@
 
 Experimental branch only. Replace the HTTP/SSE tunnel, not the domain model.
 
-Shared channel lives in `src/shared/rpc-channel.ts`:
+Reusable mechanics live in `src/shared/rpc/`: `channel.ts` owns framing/streams and `client.ts` owns lazy, generation-safe connection lifecycle. The public entry point is `index.ts`:
 
 ```ts
 export type RpcContext = { signal: AbortSignal; body?: ReadableStream<Uint8Array> };
@@ -35,7 +35,7 @@ export class RpcChannel {
 
 Browser singleton in `client/lib/rpc.ts`: `rpcCall<T>(operation,input,options?) -> Promise<RpcReply<T>>`, `closeRpcTransport()`. Browser operation names use `session.get`, `session.messages`, `session.resources`, `session.subagents`, `main.submit`, `main.stop`, `main.queue.remove`, `workspace.list`, `workspace.git`, `workspace.files`, `workspace.file`, `workspace.search`; other names selected by browser operation owner and communicated to client owner. No route mapper on the native path.
 
-Owner handler factory in `server/owner-rpc.ts` registers explicit named operations with direct domain functions, not Fastify injection or generic callback emulation. Existing HTTP endpoints may remain where required for tests/resources; native operations must not delegate through HTTP. Register factory from main with runtime/services it needs. Session producers expose objects through an event sink, not ServerResponse/SSE.
+Owner handler factory in `server/owner-rpc.ts` registers explicit named operations with direct domain functions, not Fastify injection or generic callback emulation. HTTP endpoints remain only for actual consumers: bootstrap/auth, resources, CLI cron/remotes, pairing, sites/functions, health/version and service stop. Superseded owner REST, node HTTP/SSE and browser-control routes are removed; tests exercise native operations or domain services. Native operations must not delegate through HTTP. Register factory from main with runtime/services it needs. Session producers expose objects through an event sink, not ServerResponse/SSE.
 
 Peer handler factory in `server/node-rpc.ts`: `createNodeRpcHandler(remotes,connection,services)` (exact services negotiated by peer owner). Operations: `node.identity`, `node.discovery`, `node.command`, `node.assignment`, `node.file`, `node.unpair`, subscriptions `node.catalog.watch`, `node.session.watch`. Bound peer credentials verified per operation outside payload. Peer owner updates reverse-connections and remote-workers; browser owner updates owner socket/main registration.
 

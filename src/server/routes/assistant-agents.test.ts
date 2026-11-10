@@ -1,13 +1,8 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import Fastify from "fastify";
 import { expect, it, vi } from "vite-plus/test";
-import {
-  assistantAgentsRead,
-  assistantAgentsWrite,
-  registerAssistantAgentsRoutes,
-} from "./assistant-agents";
+import { assistantAgentsRead, assistantAgentsWrite } from "./assistant-agents";
 import { listWorkspaces } from "../workspaces";
 import type { AppConfig } from "../config";
 
@@ -15,7 +10,6 @@ vi.mock("../workspaces", () => ({ listWorkspaces: vi.fn() }));
 
 it("edits only the selected assistant instructions and can create an absent file", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "batty-instructions-"));
-  const app = Fastify();
   vi.mocked(listWorkspaces).mockResolvedValue([
     {
       id: "assistant",
@@ -34,18 +28,9 @@ it("edits only the selected assistant instructions and can create an absent file
       isAssistant: false,
     },
   ]);
-  registerAssistantAgentsRoutes(app, {} as AppConfig);
   try {
     expect(await assistantAgentsRead({} as AppConfig, "assistant")).toEqual({ content: "" });
-    expect((await app.inject("/api/settings/assistant-agents/assistant")).json()).toEqual({
-      content: "",
-    });
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/settings/assistant-agents/assistant",
-      payload: { content: "Local instructions" },
-    });
-    expect(response.statusCode).toBe(200);
+    await assistantAgentsWrite({} as AppConfig, "assistant", "Local instructions");
     expect(await fs.readFile(path.join(directory, "AGENTS.md"), "utf8")).toBe("Local instructions");
     expect(await assistantAgentsWrite({} as AppConfig, "assistant", "Native instructions")).toEqual(
       { content: "Native instructions" },
@@ -53,24 +38,16 @@ it("edits only the selected assistant instructions and can create an absent file
     expect(await assistantAgentsRead({} as AppConfig, "assistant")).toEqual({
       content: "Native instructions",
     });
-    expect((await app.inject("/api/settings/assistant-agents/assistant")).json()).toEqual({
-      content: "Native instructions",
+    await expect(
+      assistantAgentsWrite({} as AppConfig, "project", "Wrong workspace"),
+    ).rejects.toMatchObject({ statusCode: 404 });
+    await expect(assistantAgentsRead({} as AppConfig, "unknown")).rejects.toMatchObject({
+      statusCode: 404,
     });
-    expect(
-      (
-        await app.inject({
-          method: "POST",
-          url: "/api/settings/assistant-agents/project",
-          payload: { content: "Wrong workspace" },
-        })
-      ).statusCode,
-    ).toBe(404);
-    expect((await app.inject("/api/settings/assistant-agents/unknown")).statusCode).toBe(404);
     expect(await fs.readFile(path.join(directory, "AGENTS.md"), "utf8")).toBe(
       "Native instructions",
     );
   } finally {
-    await app.close();
     await fs.rm(directory, { recursive: true, force: true });
   }
 });

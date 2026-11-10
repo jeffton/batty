@@ -2,13 +2,12 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import fastify from "fastify";
 import { expect, test, vi } from "vite-plus/test";
 import { fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { loadConfig } from "../config";
 import { Runtime, context } from "../runtime";
 import { TranscriptImages } from "../transcript-images";
-import { registerSessionRoutes } from "./sessions";
+import { createSessionOperations } from "../session-api";
 
 test("running subagents expose each worker's current model and effort, not server defaults", async () => {
   const directory = await mkdtemp(join(tmpdir(), "batty-subagent-models-"));
@@ -34,9 +33,7 @@ test("running subagents expose each worker's current model and effort, not serve
       { id: "changed", reasoning: true },
     ],
   });
-  const app = fastify();
   let runtime: Runtime | undefined;
-  let closeStreams: (() => void) | undefined;
   let release!: () => void;
   const preparation = new Promise<{}>((resolve) => {
     release = () => resolve({});
@@ -46,11 +43,11 @@ test("running subagents expose each worker's current model and effort, not serve
       beforeStart: (opened) => opened.models.registerNativeProvider(faux.provider),
     });
     runtime.orchestration.setPrepareAgent(async () => preparation);
-    closeStreams = registerSessionRoutes(
-      app,
-      runtime,
-      new TranscriptImages(join(directory, "previews")),
-    );
+    const operations = createSessionOperations(runtime, {
+      transcriptImages: new TranscriptImages(join(directory, "previews")),
+    });
+    const call = async (name: string, input: unknown) =>
+      (await operations.get(name)!(input, { signal: new AbortController().signal })).value;
     const started = await runtime.orchestration.nodeCommand("peer", "start", {
       action: "run",
       workspaceId: "work",
@@ -61,10 +58,8 @@ test("running subagents expose each worker's current model and effort, not serve
     expect(started.isError, JSON.stringify(started.output)).not.toBe(true);
     const [worker] = await runtime.orchestration.listRunning(runtime.main.id);
     expect(worker).toBeDefined();
-    const url = "/api/sessions/main/subagents";
-    const response = await app.inject(url);
-    expect(response.statusCode, response.body).toBe(200);
-    expect(response.json()).toEqual([
+    const tasksForMain = () => call("session.subagents", { sessionId: "main" });
+    expect(await tasksForMain()).toEqual([
       expect.objectContaining({
         sessionId: worker!.sessionId,
         model: "faux/worker",
@@ -79,7 +74,7 @@ test("running subagents expose each worker's current model and effort, not serve
       { model: { provider: "faux", modelId: "changed" }, thinkingLevel: "high" },
       context,
     );
-    expect((await app.inject(url)).json()).toEqual([
+    expect(await tasksForMain()).toEqual([
       expect.objectContaining({ model: "faux/changed", thinkingLevel: "high" }),
     ]);
     const second = await runtime.orchestration.nodeCommand("peer", "start-second", {
@@ -102,7 +97,7 @@ test("running subagents expose each worker's current model and effort, not serve
       startedAtMs: 123,
     };
     const remoteTasks = vi.spyOn(runtime.remotes, "tasks").mockReturnValue([remote]);
-    const tasks = (await app.inject(url)).json();
+    const tasks = await tasksForMain();
     expect(tasks).toHaveLength(3);
     expect(tasks).toEqual(
       expect.arrayContaining([
@@ -113,10 +108,10 @@ test("running subagents expose each worker's current model and effort, not serve
     );
     expect(remoteTasks).toHaveBeenCalledWith(runtime.main.id);
     remoteTasks.mockRestore();
-    expect((await app.inject("/api/sessions/99999999/subagents")).statusCode).toBe(404);
+    await expect(call("session.subagents", { sessionId: "99999999" })).rejects.toMatchObject({
+      statusCode: 404,
+    });
   } finally {
-    closeStreams?.();
-    await app.close();
     release();
     await runtime?.close();
     await rm(directory, { recursive: true, force: true });

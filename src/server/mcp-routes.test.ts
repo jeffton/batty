@@ -1,73 +1,37 @@
 // @vitest-environment node
-import { expect, it } from "vite-plus/test";
-import Fastify from "fastify";
-import { registerMcpRoutes } from "./routes/mcp";
+import { expect, it, vi } from "vite-plus/test";
+import { createOwnerRpcHandler, type OwnerRpcServices } from "./owner-rpc";
+import type { Runtime } from "./runtime";
 
-it("serves global MCP routes and rejects scoped requests without mutating settings", async () => {
-  const app = Fastify();
-  const writes: unknown[] = [];
+it("native MCP operations reject scoped mutations and preserve global settings", async () => {
   const mcp = {
-    readSettings: () => ({ servers: [], errors: [] }),
-    getStatus: () => ({ servers: [], errors: [] }),
-    setServer: (...args: unknown[]) => {
-      writes.push(args);
-      return {};
-    },
-    removeServer: (...args: unknown[]) => {
-      writes.push(args);
-      return {};
-    },
-    reconnect: (name: string) => ({ name }),
-    logout: (name: string) => ({ name }),
-    startAuth: (name: string) => ({ serverName: name }),
+    readSettings: vi.fn(() => ({ servers: [], errors: [] })),
+    getStatus: vi.fn(() => ({ servers: [], errors: [] })),
+    setServer: vi.fn(() => ({})),
+    removeServer: vi.fn(() => ({})),
+    reconnect: vi.fn((name: string) => ({ name })),
   };
-  registerMcpRoutes({ app, mcp, routePath: (path: string) => path } as any);
-  try {
-    expect((await app.inject("/api/mcp")).statusCode).toBe(200);
-    for (const workspace of ["one", "two"]) {
-      expect((await app.inject(`/api/workspaces/${workspace}/mcp`)).statusCode).toBe(404);
-      expect(
-        (
-          await app.inject({
-            method: "POST",
-            url: `/api/workspaces/${workspace}/mcp/test/reconnect`,
-          })
-        ).statusCode,
-      ).toBe(404);
-      expect((await app.inject(`/api/settings/mcp?workspaceId=${workspace}`)).statusCode).toBe(400);
-      expect(
-        (
-          await app.inject({
-            method: "PUT",
-            url: "/api/settings/mcp/test",
-            payload: { workspaceId: workspace, config: { command: "test" } },
-          })
-        ).statusCode,
-      ).toBe(400);
-      expect(
-        (
-          await app.inject({
-            method: "DELETE",
-            url: `/api/settings/mcp/test?workspaceId=${workspace}`,
-          })
-        ).statusCode,
-      ).toBe(400);
-    }
-    expect(writes).toEqual([]);
-    expect(
-      (
-        await app.inject({
-          method: "PUT",
-          url: "/api/settings/mcp/test",
-          payload: { config: { command: "test" } },
-        })
-      ).statusCode,
-    ).toBe(200);
-    expect(writes).toEqual([["test", { command: "test" }]]);
-    expect((await app.inject({ method: "POST", url: "/api/mcp/test/reconnect" })).json()).toEqual({
-      name: "test",
+  const handler = createOwnerRpcHandler(
+    { config: {}, tools: { mcp } } as unknown as Runtime,
+    {} as OwnerRpcServices,
+  );
+  const call = async (name: string, input: object = {}) =>
+    (await handler(name, input, { signal: new AbortController().signal })).value;
+  expect(await call("mcp.status")).toEqual({ servers: [], errors: [] });
+  for (const workspaceId of ["one", "two"]) {
+    await expect(call("mcp.settings", { workspaceId })).rejects.toMatchObject({
+      code: "BAD_INPUT",
     });
-  } finally {
-    await app.close();
+    await expect(
+      call("mcp.set", { name: "test", config: { command: "test" }, workspaceId }),
+    ).rejects.toMatchObject({ code: "BAD_INPUT" });
+    await expect(call("mcp.remove", { name: "test", workspaceId })).rejects.toMatchObject({
+      code: "BAD_INPUT",
+    });
   }
+  expect(mcp.setServer).not.toHaveBeenCalled();
+  expect(mcp.removeServer).not.toHaveBeenCalled();
+  await call("mcp.set", { name: "test", config: { command: "test" } });
+  expect(mcp.setServer).toHaveBeenCalledWith("test", { command: "test" });
+  expect(await call("mcp.reconnect", { name: "test" })).toEqual({ name: "test" });
 });

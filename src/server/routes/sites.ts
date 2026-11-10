@@ -5,7 +5,7 @@ import { appBasePath } from "../app-shell";
 import { SITE_CLIENT_SCRIPT } from "@/shared/site-functions";
 import { executeSiteFunction } from "../site-functions";
 import { closeSiteFunctionRuntime } from "../site-isolation";
-import { resolveSiteFile, setSitePublic } from "../sites";
+import { resolveSiteFile } from "../sites";
 import type { RouteContext } from "./context";
 
 export function registerSiteRoutes({
@@ -37,21 +37,6 @@ export function registerSiteRoutes({
       };
     },
   );
-
-  app.patch<{
-    Params: { siteId: string };
-    Body: { public?: unknown };
-  }>(routePath("/api/sites/:siteId"), async (request, reply) => {
-    if (typeof request.body?.public !== "boolean") {
-      return reply.code(400).send({ error: "public must be a boolean" });
-    }
-    return setSitePublic(
-      config.sitesDir,
-      config.baseUrl,
-      request.params.siteId,
-      request.body.public,
-    );
-  });
 
   function publicPath(requestPath: string): string {
     return `${appBasePath(config.baseUrl)}${requestPath.slice(1)}`;

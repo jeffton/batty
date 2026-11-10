@@ -8,7 +8,7 @@ import {
   type RpcHandler,
   type RpcContext,
   type RpcReply,
-} from "../../shared/rpc-channel";
+} from "../../shared/rpc";
 
 type Override = {
   operation: string | readonly string[];

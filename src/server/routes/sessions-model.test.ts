@@ -2,16 +2,14 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import fastify from "fastify";
-import multipart from "@fastify/multipart";
 import { expect, test, vi } from "vite-plus/test";
 import { fauxProvider, fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai/providers/faux";
 import { loadConfig } from "../config";
 import { Runtime, context } from "../runtime";
 import { TranscriptImages } from "../transcript-images";
-import { registerSessionRoutes } from "./sessions";
+import { createSessionOperations } from "../session-api";
 
-test("main HTTP input replaces a persisted model and follows changed settings without restart", async () => {
+test("main native input replaces a persisted model and follows changed settings without restart", async () => {
   const directory = await mkdtemp(join(tmpdir(), "batty-default-model-"));
   vi.stubEnv("PI_OFFLINE", "1");
   await mkdir(join(directory, ".batty"));
@@ -31,9 +29,6 @@ test("main HTTP input replaces a persisted model and follows changed settings wi
   const faux = fauxProvider({ models: [{ id: "default" }, { id: "old" }, { id: "new" }] });
   faux.setResponses(Array.from({ length: 10 }, () => fauxAssistantMessage([fauxText("done")])));
   let runtime: Runtime | undefined;
-  const app = fastify();
-  await app.register(multipart);
-  let closeStreams: (() => void) | undefined;
   const open = () =>
     Runtime.open(config, {
       beforeStart: (opened) => opened.models.registerNativeProvider(faux.provider),
@@ -47,20 +42,21 @@ test("main HTTP input replaces a persisted model and follows changed settings wi
     await runtime.close();
     runtime = await open();
     expect((await runtime.main.agent(context)).model?.modelId).toBe("old");
-    closeStreams = registerSessionRoutes(
-      app,
-      runtime,
-      new TranscriptImages(join(directory, "previews")),
-    );
-    for (const [url, model] of [
-      ["/api/main/prompt", "default"],
-      ["/api/main/steer", "new"],
+    const operations = createSessionOperations(runtime, {
+      transcriptImages: new TranscriptImages(join(directory, "previews")),
+    });
+    const call = async (name: string, input: unknown) =>
+      (await operations.get(name)!(input, { signal: new AbortController().signal })).value;
+    for (const [kind, model] of [
+      ["prompt", "default"],
+      ["steer", "new"],
     ] as const) {
       config.defaultModel = model;
-      const response = await app.inject({ method: "POST", url, payload: { text: "which model?" } });
-      expect(response.statusCode, response.body).toBe(200);
+      const response = (await call("main.submit", { kind, text: "which model?", files: [] })) as {
+        submissionId: string;
+      };
       const submission = await runtime.harness.submission(
-        Number(response.json().submissionId) as never,
+        Number(response.submissionId) as never,
         context,
       );
       expect((await submission!.wait(context)).status).toBe("done");
@@ -72,22 +68,17 @@ test("main HTTP input replaces a persisted model and follows changed settings wi
       );
     }
 
-    for (const url of ["/api/sessions/99999999", "/api/sessions/99999999/messages"]) {
-      const response = await app.inject(url);
-      expect(response.statusCode).toBe(404);
-      expect(response.json().message).toBe("Session not found");
-    }
+    for (const operation of ["session.get", "session.messages"])
+      await expect(call(operation, { sessionId: "99999999" })).rejects.toMatchObject({
+        statusCode: 404,
+      });
 
-    for (const sessionId of ["main", "99999999"]) {
-      const response = await app.inject({ method: "POST", url: `/api/sessions/${sessionId}/stop` });
-      expect(response.statusCode).toBe(404);
-      expect(response.json().message).toBe(
-        `Subagent session ${sessionId} not found. Start a new subagent instead.`,
-      );
-    }
+    for (const sessionId of ["main", "99999999"])
+      await expect(call("session.stop", { sessionId })).rejects.toMatchObject({
+        statusCode: 404,
+        message: `Subagent session ${sessionId} not found. Start a new subagent instead.`,
+      });
   } finally {
-    closeStreams?.();
-    await app.close();
     await runtime?.close();
     await rm(directory, { recursive: true, force: true });
     vi.unstubAllEnvs();

@@ -6,7 +6,7 @@ import { recentSessionWindow } from "./session-window";
 import { applyServerEvent } from "./session-events";
 import { sessionHistoryCursor } from "./session-stream";
 import type { SessionState } from "@/shared/types";
-import { RpcError } from "@/shared/rpc-channel";
+import { RpcError } from "@/shared/rpc";
 import type { OwnerSessionEvent } from "@/shared/owner-api";
 vi.mock("./rpc", () => ({ rpcCall: vi.fn(), closeRpcTransport: vi.fn() }));
 const state = (ids: string[]): SessionState => ({

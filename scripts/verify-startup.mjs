@@ -9,6 +9,8 @@ import path from "node:path";
 import { once } from "node:events";
 import http from "node:http";
 import sharp from "sharp";
+import WebSocket from "ws";
+import { RpcChannel } from "../src/shared/rpc/channel.ts";
 import { setTimeout as delay } from "node:timers/promises";
 
 const repo = process.cwd();
@@ -20,6 +22,7 @@ for (const baseUrl of ["/", "/batty"]) {
   let child;
   let exited;
   let logs = "";
+  let channel;
   try {
     const workspaceRoot = path.join(root, "workspaces");
     await fs.mkdir(path.join(workspaceRoot, "assistant"), { recursive: true });
@@ -88,57 +91,50 @@ for (const baseUrl of ["/", "/batty"]) {
     const version = await (await get("/api/version")).json();
     assert.equal(version.buildId, "startup-smoke");
     const id = "00000000-0000-0000-0000-000000000000";
-    const route = `/api/cloud-browser/${id}/state`;
-    assert.equal((await get(route)).status, 401);
-    assert.equal((await get("/api/cron/running")).status, 401);
-    assert.equal((await get("/api/workspaces/assistant/files")).status, 401);
-    assert.equal((await get("/api/workspaces/assistant/file-search?name=source")).status, 401);
-    const foregroundAck = (headers = {}) =>
-      get("/api/push/foreground/ack", {
-        method: "POST",
-        headers: { "content-type": "application/json", ...headers },
-        body: JSON.stringify({ clientId: id, challengeId: id }),
-      });
-    assert.equal((await foregroundAck()).status, 401);
+    // Owner app operations are native RPC; obsolete HTTP paths must not survive.
+    const removedRoutes = [
+      `/api/cloud-browser/${id}/state`,
+      "/api/cron/running",
+      "/api/workspaces/assistant/files",
+      "/api/workspaces/assistant/file-search?name=source",
+      "/api/main/events",
+    ];
+    assert.equal((await get("/api/bootstrap")).status, 200);
     const payload = Buffer.from(
       JSON.stringify({ issuedAt: Date.now(), expiresAt: Date.now() + 60_000 }),
     ).toString("base64url");
     const signature = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
     const cookie = `batty2-auth=${payload}.${signature}`;
     await fs.writeFile(path.join(workspaceRoot, "assistant/source.ts"), "export const value = 42;");
-    const sourceFile = await get("/api/workspaces/assistant/files?path=source.ts", {
-      headers: { cookie },
+    for (const route of removedRoutes)
+      assert.equal((await get(route, { headers: { cookie } })).status, 404, route);
+    const socket = new WebSocket(`${origin.replace("http:", "ws:")}/api/socket`, {
+      headers: { cookie, origin },
     });
-    assert.equal(sourceFile.status, 200);
-    const searchedFiles = await get("/api/workspaces/assistant/file-search?name=source", {
-      headers: { cookie },
+    await once(socket, "open");
+    channel = new RpcChannel(socket);
+    const call = async (operation, input = {}) => (await channel.call(operation, input)).value;
+    const sourceFile = await call("workspace.files", {
+      workspaceId: "assistant",
+      path: "source.ts",
     });
-    assert.equal(searchedFiles.status, 200);
-    assert.deepEqual((await searchedFiles.text()).trim().split("\n").map(JSON.parse), [
-      { kind: "match", path: "source.ts" },
-      { kind: "done" },
-    ]);
-    assert.deepEqual(await sourceFile.json(), {
+    const searchedFiles = await channel.call("workspace.search", {
+      workspaceId: "assistant",
+      name: "source",
+    });
+    const matches = [];
+    for await (const event of searchedFiles.events) matches.push(event);
+    assert.deepEqual(matches, [{ kind: "match", path: "source.ts" }, { kind: "done" }]);
+    assert.deepEqual(sourceFile, {
       kind: "text",
       path: "source.ts",
       contents: "export const value = 42;",
     });
-    const saveProviderKey = (providerId, apiKey, headers = {}) =>
-      get("/api/provider-auth/api-key", {
-        method: "POST",
-        headers: { "content-type": "application/json", ...headers },
-        body: JSON.stringify({ providerId, apiKey }),
-      });
-    assert.equal((await saveProviderKey("openrouter", "fixture-key")).status, 401);
-    assert.equal(
-      (await saveProviderKey("unsupported-provider", "fixture-key", { cookie })).status,
-      400,
-    );
+    const saveProviderKey = (providerId, apiKey) => call("provider.key", { providerId, apiKey });
+    await assert.rejects(saveProviderKey("unsupported-provider", "fixture-key"));
     for (const providerId of ["google", "openrouter"]) {
       const key = `fixture-${providerId}-key`;
-      const saved = await saveProviderKey(providerId, `  ${key}  `, { cookie });
-      assert.equal(saved.status, 200);
-      const status = await saved.json();
+      const status = await saveProviderKey(providerId, `  ${key}  `);
       assert.equal(
         status.providers.find((provider) => provider.id === providerId)?.connected,
         true,
@@ -148,9 +144,7 @@ for (const baseUrl of ["/", "/batty"]) {
         await fs.readFile(path.join(root, ".batty/auth.json"), "utf8"),
       );
       assert.deepEqual(credentials[providerId], { type: "api_key", key });
-      const refreshed = await (
-        await get("/api/provider-auth/status", { headers: { cookie } })
-      ).json();
+      const refreshed = await call("provider.status");
       assert.equal(
         refreshed.providers.find((provider) => provider.id === providerId)?.connected,
         true,
@@ -246,48 +240,19 @@ for (const baseUrl of ["/", "/batty"]) {
       `attachment; filename*=UTF-8''${attachmentName}`,
     );
     assert.deepEqual(Buffer.from(await download.arrayBuffer()), original);
-    assert.equal((await get(route, { headers: { cookie } })).status, 410);
-    const runningCron = await get("/api/cron/running", { headers: { cookie } });
-    assert.equal(runningCron.status, 200);
-    assert.deepEqual(await runningCron.json(), []);
-    const ack = await foregroundAck({ cookie });
-    assert.equal(ack.status, 200);
-    assert.deepEqual(await ack.json(), { ok: false });
-    const streamAbort = new AbortController();
-    try {
-      const response = await get("/api/main/events", {
-        headers: { cookie },
-        signal: AbortSignal.any([streamAbort.signal, AbortSignal.timeout(5000)]),
-      });
-      assert.equal(response.status, 200);
-      const reader = response.body.getReader();
-      let packet = "";
-      while (!packet.includes("\n\n")) {
-        const { value, done } = await reader.read();
-        assert(!done, "Session SSE ended before push stream identity");
-        packet += new TextDecoder().decode(value);
-      }
-      assert(packet.startsWith("event: push-client\ndata: "));
-      const identity = JSON.parse(packet.split("\n")[1].slice(6));
-      assert.match(identity.clientId, /^[a-f0-9-]{36}$/);
-      await reader.cancel();
-    } finally {
-      streamAbort.abort();
+    await assert.rejects(call("browser.state", { browserId: id }));
+    assert.deepEqual(await call("cron.running"), []);
+    assert.deepEqual(await call("push.ack", { clientId: id, challengeId: id }), { ok: false });
+    const watch = await channel.call("session.watch", { sessionId: "main" });
+    const reader = watch.events.getReader();
+    let identity;
+    while (!identity) {
+      const event = await reader.read();
+      assert(!event.done, "Session watch ended before push stream identity");
+      if (event.value.type === "push-client") identity = event.value;
     }
-    const control = (requestOrigin) =>
-      get(`/api/cloud-browser/${id}/control`, {
-        method: "POST",
-        headers: {
-          cookie,
-          "x-forwarded-host": "smoke.example",
-          "x-forwarded-proto": "https",
-          origin: requestOrigin,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ action: "reload" }),
-      });
-    assert.equal((await control("https://attacker.example")).status, 403);
-    assert.equal((await control("https://smoke.example")).status, 410);
+    assert.match(identity.clientId, /^[a-f0-9-]{36}$/);
+    await reader.cancel();
     const upgrade = (headers = {}) =>
       new Promise((resolve, reject) => {
         const request = http.get(`${origin}/api/cloud-browser/${id}/socket`, {
@@ -324,6 +289,7 @@ for (const baseUrl of ["/", "/batty"]) {
       `Packaged server startup passed: baseUrl=${baseUrl}, authenticated cloud routes, HTTPS origin, stable health`,
     );
   } finally {
+    channel?.close();
     if (child && child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
     if (exited) {
       const terminated = await Promise.race([

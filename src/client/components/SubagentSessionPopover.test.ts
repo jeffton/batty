@@ -7,7 +7,7 @@ vi.mock("@/client/lib/rpc", async () => {
 import { flushPromises, mount } from "@vue/test-utils";
 import SubagentSessionPopover from "./SubagentSessionPopover.vue";
 import type { SessionState } from "@/shared/types";
-import { RpcError } from "@/shared/rpc-channel";
+import { RpcError } from "@/shared/rpc";
 import { getSession, getSessionMessages, stopCronRun, stopSubagent } from "@/client/lib/api";
 
 const session = {

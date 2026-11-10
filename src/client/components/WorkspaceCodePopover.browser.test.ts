@@ -1,7 +1,7 @@
 import { fixtureOperation, setFixtureRpcHandler } from "../test/socket-fixture";
 import { createOwnerRpcHandler, type OwnerRpcServices } from "@/server/owner-rpc";
 import type { Runtime } from "@/server/runtime";
-import { RpcError } from "@/shared/rpc-channel";
+import { RpcError } from "@/shared/rpc";
 // @vitest-environment node
 import fs from "node:fs/promises";
 import { execFile } from "node:child_process";

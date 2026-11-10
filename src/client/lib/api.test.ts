@@ -118,34 +118,6 @@ it("uploads file metadata and ordered raw bytes rather than multipart/base64", a
   ]);
   expect(bytes).toEqual(new Uint8Array([0, 255, 1, ...new TextEncoder().encode("Hej 🦾")]));
 });
-it("cancelling an upload during a pending file read never opens the next file", async () => {
-  const first = new File(["one"], "one.txt");
-  const second = new File(["two"], "two.txt");
-  const cancel = vi.fn();
-  vi.spyOn(first, "stream").mockReturnValue(
-    new ReadableStream<Uint8Array<ArrayBuffer>>({
-      start(controller) {
-        controller.enqueue(new Uint8Array([1]));
-      },
-      cancel,
-    }),
-  );
-  const unopened = vi.spyOn(second, "stream");
-  vi.mocked(rpcCall).mockImplementation(async (_operation, _input, options) => {
-    const reader = options!.body!.getReader();
-    await reader.read();
-    const pending = reader.read();
-    await Promise.resolve();
-    await reader.cancel();
-    await pending;
-    reader.releaseLock();
-    return { value: { disposition: "started", submissionId: "receipt", sessionId: "main" } };
-  });
-  await submitMainPrompt("prompt", "cancelled", [first, second], "receipt");
-  expect(cancel).toHaveBeenCalledOnce();
-  expect(unopened).not.toHaveBeenCalled();
-});
-
 it("reads a selected code file with its own operation", async () => {
   await getWorkspaceFile("project", "src/a.ts");
   expect(rpcCall).toHaveBeenCalledWith(

@@ -9,7 +9,6 @@ import { artifactRefs } from "./artifact-forwarding";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Fastify from "fastify";
-import multipart from "@fastify/multipart";
 import { expect, test, vi } from "vite-plus/test";
 import {
   fauxAssistantMessage,
@@ -22,7 +21,7 @@ import { loadConfig } from "./config";
 import { Runtime, context } from "./runtime";
 import type { RemoteWorkers } from "./remote-workers";
 import type { RemoteConnectionCredentials } from "./remote-access";
-import { RpcError } from "../shared/rpc-channel";
+import { RpcError } from "../shared/rpc/channel";
 
 async function nodeRequest<T>(
   connection: RemoteConnectionCredentials,
@@ -80,7 +79,6 @@ async function openInstance(directory: string, name: string, fileStatus = 200, b
   });
   // Match production shutdown, including unused HTTP-pool preconnections.
   const app = Fastify({ forceCloseConnections: true });
-  await app.register(multipart, { limits: { fileSize: 100 * 1024 * 1024 } });
   const fileRequests: string[] = [];
   const pairingClaims: PairingClaim[] = [];
   let nodeOnline = true;
@@ -138,28 +136,6 @@ async function openInstance(directory: string, name: string, fileStatus = 200, b
       return handleNode(connection, operation, input, call);
     },
   );
-  app.addHook("onRequest", async (request, reply) => {
-    if (request.url.startsWith("/api/node/assignments/") && assignmentFailures > 0) {
-      assignmentFailures--;
-      failedAssignmentRequests++;
-      return reply.code(503).send("Simulated transient assignment-status failure");
-    }
-    if (request.url.startsWith("/api/node/files/")) {
-      fileRequests.push(request.url);
-      // Model a proxy that decodes escaped separators before upstream routing.
-      if (/%2f/i.test(request.url)) return reply.code(404).send("Proxy route not found");
-      if (fileStatus !== 200) return reply.code(fileStatus).send("File unavailable");
-    }
-  });
-  app.addHook("onRequest", async (request, reply) => {
-    if (/^\/api\/node\/sessions\/\d+\/events(?:\?|$)/.test(request.url)) {
-      const stream = { url: request.url, closed: false };
-      sessionStreams.push(stream);
-      reply.raw.once("close", () => {
-        stream.closed = true;
-      });
-    }
-  });
   // Match main.ts's independent node bearer boundary, using a fixture-only owner header.
   app.addHook("onRequest", async (request, reply) => {
     if (request.url.startsWith("/api/node/")) {
@@ -168,7 +144,7 @@ async function openInstance(directory: string, name: string, fileStatus = 200, b
     if (request.headers["x-test-owner"] !== name)
       return reply.code(401).send({ error: "Owner authentication required" });
   });
-  const closeRoutes = registerRemoteRoutes(app, runtime);
+  registerRemoteRoutes(app, runtime);
   await registerReverseRemoteRoutes(app, runtime);
   const upgradedSockets = new Set<Duplex>();
   app.server.on("upgrade", (_request, socket) => {
@@ -179,7 +155,7 @@ async function openInstance(directory: string, name: string, fileStatus = 200, b
   const prefix = config.baseUrl === "/" ? "" : config.baseUrl;
   const proxyRequests: string[] = [];
   // Production routes are unprefixed: a path-mounted reverse proxy strips the
-  // configured app prefix before forwarding HTTP bodies and live SSE streams.
+  // configured app prefix before forwarding pairing bodies and socket upgrades.
   const proxy = prefix
     ? createServer((incoming, outgoing) => {
         const path = incoming.url!;
@@ -212,6 +188,8 @@ async function openInstance(directory: string, name: string, fileStatus = 200, b
     const upstream = httpRequest(new URL(path.slice(prefix.length), upstreamUrl), {
       method: incoming.method,
       headers: incoming.headers,
+      // Upgrade attempts must not return rejected-handshake sockets to the HTTP pool.
+      agent: false,
     });
     upstream.on("upgrade", (response, socket, upstreamHead) => {
       downstream.write(
@@ -271,7 +249,6 @@ async function openInstance(directory: string, name: string, fileStatus = 200, b
     async close() {
       if (closed) return;
       closed = true;
-      closeRoutes();
       await runtime.close();
       // HTTP closeAllConnections excludes upgrades, including a peer partway
       // through its closing handshake. Tear down fixture sockets explicitly.
@@ -428,19 +405,7 @@ test.each(["/", "/batty/"])(
         new RegExp(` · ${windows.id.slice(0, 8)}$`),
       );
       const inviteAuth = { authorization: `Bearer ${invitation.token}` };
-      expect(
-        (await windows.app.inject({ url: "/api/node/identity", headers: inviteAuth })).statusCode,
-      ).toBe(401);
-      expect(
-        (
-          await windows.app.inject({
-            method: "POST",
-            url: "/api/node/commands",
-            headers: inviteAuth,
-            payload: { requestId: "invitation-is-not-bearer", command: { action: "list" } },
-          })
-        ).statusCode,
-      ).toBe(401);
+      expect(await rejectedSocket(windows.url, invitation.token, mac.id)).toBe(401);
       // A lost HTTP response may retry exactly the durable original claim.
       const original = windows.pairingClaims[0]!;
       const retry = await windows.app.inject({
@@ -667,14 +632,6 @@ test.each(["creator", "adder"] as const)(
       expect(removed.statusCode, removed.body).toBe(200);
       expect(removing.runtime.remotes.access.getConnection(peer.id)).toBeUndefined();
       windows.setNodeOnline(true);
-      expect(
-        (
-          await removing.app.inject({
-            url: "/api/node/identity",
-            headers: { authorization: `Bearer ${staleToken}` },
-          })
-        ).statusCode,
-      ).toBe(401);
       expect(await rejectedSocket(removing.url, staleToken, peer.id)).toBe(401);
       expect(removing.runtime.remotes.access.listConnections()).toEqual([]);
       expect(await mac.runtime.orchestration.listRunning()).toHaveLength(1);
@@ -700,13 +657,13 @@ test.each(["creator", "adder"] as const)(
 );
 
 test.each(["reverse-unpair", "control-loss"] as const)(
-  "direct paired catalog and session streams close on %s",
+  "native paired catalog and session streams close on %s",
   async (interruption) => {
     vi.stubEnv("PI_OFFLINE", "1");
     const directory = await mkdtemp(join(tmpdir(), "batty-paired-direct-streams-"));
     const windows = await openInstance(directory, "windows");
     const mac = await openInstance(directory, "mac");
-    const readers: ReadableStreamDefaultReader<Uint8Array>[] = [];
+    const readers: ReadableStreamDefaultReader<unknown>[] = [];
     const controllers: AbortController[] = [];
     try {
       await connectReverse(windows, mac);
@@ -733,17 +690,16 @@ test.each(["reverse-unpair", "control-loss"] as const)(
         windows.runtime.remotes.requestNode,
       );
       const session = /Session ID: (\d+)/.exec(started.output[0]!.text)![1]!;
-      for (const route of ["catalog/events", `sessions/${session}/events`]) {
+      for (const [operation, input] of [
+        ["node.catalog.watch", {}],
+        ["node.session.watch", { sessionId: session }],
+      ] as const) {
         const controller = new AbortController();
         controllers.push(controller);
-        // These are independent inbound direct HTTP streams, not reverse transfers
-        // and not outgoing RemoteWorkers subscribers whose abort could hide a leak.
-        const response = await fetch(new URL(`api/node/${route}`, mac.url), {
-          headers: { authorization: `Bearer ${connection.token}` },
+        const response = await windows.runtime.remotes.requestNode(connection, operation, input, {
           signal: controller.signal,
         });
-        expect(response.status).toBe(200);
-        const reader = response.body!.getReader();
+        const reader = response.events!.getReader();
         readers.push(reader);
         expect((await reader.read()).done).toBe(false);
       }
@@ -751,7 +707,8 @@ test.each(["reverse-unpair", "control-loss"] as const)(
         try {
           while (!(await reader.read()).done) {}
         } catch (error) {
-          if (!(error instanceof TypeError)) throw error;
+          expect(error).toBeInstanceOf(RpcError);
+          expect((error as RpcError).code).toBe("OFFLINE");
         }
       });
       if (interruption === "reverse-unpair") {
@@ -763,24 +720,18 @@ test.each(["reverse-unpair", "control-loss"] as const)(
         });
         expect(removed.statusCode, removed.body).toBe(200);
       } else {
-        // Interrupt only the other listener: these independent inbound sockets on
-        // Mac remain open unless its paired-control lifecycle explicitly closes them.
+        // Losing the socket retires every in-flight native subscription.
         windows.setNodeOnline(false);
         await windows.runtime.remotes.reverse.close();
       }
       await Promise.all(closed);
       await eventually(
         async () => mac.sessionStreams.every((stream) => stream.closed),
-        "independent inbound session SSE retired",
+        "native session subscription retired",
       );
-      expect(
-        (
-          await mac.app.inject({
-            url: "/api/node/identity",
-            headers: { authorization: `Bearer ${connection.token}` },
-          })
-        ).statusCode,
-      ).toBe(interruption === "reverse-unpair" ? 401 : 503);
+      await expect(
+        windows.runtime.remotes.requestNode(connection, "node.identity"),
+      ).rejects.toBeInstanceOf(RpcError);
       expect(await mac.runtime.orchestration.listRunning()).toHaveLength(1);
     } finally {
       for (const controller of controllers) controller.abort();
@@ -795,7 +746,7 @@ test.each(["reverse-unpair", "control-loss"] as const)(
   30_000,
 );
 
-test("session SSE rechecks paired access after asynchronous metadata lookup", async () => {
+test("native session admission rechecks paired access after asynchronous metadata lookup", async () => {
   vi.stubEnv("PI_OFFLINE", "1");
   const directory = await mkdtemp(join(tmpdir(), "batty-paired-sse-admission-"));
   const windows = await openInstance(directory, "windows");
@@ -805,14 +756,18 @@ test("session SSE rechecks paired access after asynchronous metadata lookup", as
   let restore: (() => void) | undefined;
   try {
     await connectReverse(windows, mac);
-    mac.faux.setResponses([fauxAssistantMessage([fauxText("SSE admission evidence")])]);
+    mac.faux.setResponses([fauxAssistantMessage([fauxText("Native admission evidence")])]);
     const connection = windows.runtime.remotes.connection(mac.id);
     const started = await nodeRequest<{ output: Array<{ text: string }> }>(
       connection,
       "node.command",
       {
         requestId: "sse-admission-worker",
-        command: { action: "run", workspaceId: "work", prompt: "complete before SSE request" },
+        command: {
+          action: "run",
+          workspaceId: "work",
+          prompt: "complete before native subscription",
+        },
       },
       windows.runtime.remotes.requestNode,
     );
@@ -845,11 +800,13 @@ test("session SSE rechecks paired access after asynchronous metadata lookup", as
         return result;
       });
     restore = () => spy.mockRestore();
-    const admissionPath = `/api/node/sessions/${session}/events?after=0&admission-test=1`;
-    const pending = fetch(new URL(admissionPath, mac.url), {
-      headers: { authorization: `Bearer ${connection.token}` },
-      signal: AbortSignal.timeout(10_000),
-    });
+    const pending = windows.runtime.remotes.requestNode(
+      connection,
+      "node.session.watch",
+      { sessionId: session, after: "0" },
+      { signal: AbortSignal.timeout(10_000) },
+    );
+    const rejected = expect(pending).rejects.toMatchObject({ code: "OFFLINE" });
     await entered.promise;
     const removed = await windows.app.inject({
       method: "POST",
@@ -865,12 +822,11 @@ test("session SSE rechecks paired access after asynchronous metadata lookup", as
       "receiving peer persisted unpair before session admission resumes",
     );
     release.resolve();
-    const response = await pending;
-    expect(response.status).toBe(401);
-    await response.body?.cancel();
-    const admissions = mac.sessionStreams.filter((stream) => stream.url === admissionPath);
-    expect(admissions).toHaveLength(1);
-    await eventually(async () => admissions[0]!.closed, "rejected admission request closed");
+    await rejected;
+    await eventually(
+      async () => mac.sessionStreams.every((stream) => stream.closed),
+      "revoked native session admission cancelled",
+    );
   } finally {
     release.resolve();
     restore?.();
@@ -1747,17 +1703,22 @@ test("node grants cannot access owner routes, revoke immediately, and reciprocal
     expect(listing.body).not.toContain("token");
     expect(listing.body).not.toContain("Hash");
     const auth = { authorization: `Bearer ${grant.token}` };
-    expect((await b.app.inject({ url: "/api/node/identity" })).statusCode).toBe(401);
-    expect(
-      (
-        await b.app.inject({
-          url: "/api/node/identity",
-          headers: { authorization: "Bearer wrong" },
-        })
-      ).statusCode,
-    ).toBe(401);
-    expect((await b.app.inject({ url: "/api/node/identity", headers: auth })).statusCode).toBe(200);
-    expect((await b.app.inject({ url: "/api/node/workspaces" })).statusCode).toBe(401);
+    expect(await rejectedSocket(b.url, "wrong", a.id)).toBe(401);
+    expect(await rejectedSocket(b.url, "", a.id)).toBe(401);
+    const identity = await nodeRequest<{ instanceId: string }>(
+      a.runtime.remotes.connection(b.id),
+      "node.identity",
+      {},
+      a.runtime.remotes.requestNode,
+    );
+    expect(identity.instanceId).toBe(b.id);
+    // No duplicate HTTP node API survives alongside native operations.
+    for (const url of ["/api/node/identity", "/api/node/workspaces", "/api/node/catalog/events"]) {
+      expect((await b.app.inject({ url, headers: auth })).statusCode).toBe(404);
+    }
+    await expect(
+      a.runtime.remotes.requestNode(a.runtime.remotes.connection(b.id), "remotes.token.generate"),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
     await b.runtime.main.configure({ model: { provider: "faux", modelId: "selected-b" } }, context);
     const nodes = await a.runtime.remotes.workspaces(remote.id);
     expect(nodes).toHaveLength(1);
@@ -1772,29 +1733,26 @@ test("node grants cannot access owner routes, revoke immediately, and reciprocal
     );
     await b.runtime.main.configure({ model: { provider: "faux", modelId: "model-b" } }, context);
     expect((await b.app.inject({ url: "/api/remotes", headers: auth })).statusCode).toBe(401);
-    expect((await b.app.inject({ url: "/api/node/identity", headers: b.owner })).statusCode).toBe(
-      401,
-    );
+    expect(await rejectedSocket(b.url, "", a.id)).toBe(401);
     b.faux.setResponses([fauxAssistantMessage([fauxText("Remote discovery evidence")])]);
-    const started = await b.app.inject({
-      method: "POST",
-      url: "/api/node/commands",
-      headers: auth,
-      payload: {
+    const started = await nodeRequest<{ output: Array<{ text: string }> }>(
+      a.runtime.remotes.connection(b.id),
+      "node.command",
+      {
         requestId: "discover-start",
         command: { action: "run", workspaceId: "work", prompt: "discovery" },
       },
-    });
-    expect(started.statusCode).toBe(200);
+      a.runtime.remotes.requestNode,
+    );
+    expect(started.output[0]!.text).toContain("Started");
     await eventually(async () => a!.runtime.remotes.list().length === 1, "A importing B worker");
-    const discovery = await a.app.inject({
-      method: "POST",
-      url: "/api/node/commands",
-      headers: { authorization: `Bearer ${b.runtime.remotes.connection(local.id).token}` },
-      payload: { requestId: "list-from-b", command: { action: "list" } },
-    });
-    expect(discovery.statusCode).toBe(200);
-    const listed = JSON.parse(discovery.json().output[0].text);
+    const discovery = await nodeRequest<{ output: Array<{ text: string }> }>(
+      b.runtime.remotes.connection(a.id),
+      "node.command",
+      { requestId: "list-from-b", command: { action: "list" } },
+      b.runtime.remotes.requestNode,
+    );
+    const listed = JSON.parse(discovery.output[0]!.text);
     expect(listed.workers).toEqual([]);
     expect(b.runtime.remotes.list()).toEqual([]);
     const selfInvitation = await b.app.inject({
@@ -1840,17 +1798,7 @@ test("node grants cannot access owner routes, revoke immediately, and reciprocal
       async () => b!.runtime.remotes.access.getConnection(local.id) === undefined,
       "online peer removal notification applied",
     );
-    expect((await b.app.inject({ url: "/api/node/identity", headers: auth })).statusCode).toBe(401);
-    expect(
-      (
-        await b.app.inject({
-          method: "POST",
-          url: "/api/node/commands",
-          headers: auth,
-          payload: { requestId: "after-revoke", command: { action: "list" } },
-        })
-      ).statusCode,
-    ).toBe(401);
+    expect(await rejectedSocket(b.url, grant.token, a.id)).toBe(401);
   } finally {
     await Promise.all([a?.close(), b?.close()]);
     await rm(directory, { recursive: true, force: true });

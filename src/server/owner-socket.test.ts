@@ -4,7 +4,7 @@ import cookie from "@fastify/cookie";
 import websocket from "@fastify/websocket";
 import WebSocket from "ws";
 import { afterEach, expect, it, vi } from "vite-plus/test";
-import { RpcChannel, RpcError, type RpcHandler } from "../shared/rpc-channel";
+import { RpcChannel, RpcError, type RpcHandler } from "../shared/rpc";
 import { createAuthToken } from "./auth";
 import { registerOwnerSocket } from "./owner-socket";
 

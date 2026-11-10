@@ -1,6 +1,6 @@
 import type { UserMessage } from "@earendil-works/pi-ai";
 import type { SubmissionId } from "@earendil-works/pi-durable";
-import { RpcError, type RpcContext, type RpcReply } from "../shared/rpc-channel";
+import { RpcError, rpcRegistry, type RpcContext } from "../shared/rpc";
 import type { OwnerInputs } from "../shared/owner-api";
 import type { OwnerRpcServices } from "./owner-rpc";
 import { Runtime, context } from "./runtime";
@@ -63,28 +63,14 @@ async function promptFiles(
   }
 }
 
-/** Shared domain operations for native RPC and thin HTTP compatibility controllers. */
+/** Session operations composed into the owner's native RPC allowlist. */
 export function createSessionOperations(
   runtime: Runtime,
   services: Pick<OwnerRpcServices, "transcriptImages"> & Partial<OwnerRpcServices>,
 ) {
   const { config } = runtime;
   const { transcriptImages: images, webPush } = services;
-  const operations = new Map<string, (input: unknown, rpc: RpcContext) => Promise<RpcReply>>();
-  function add<K extends keyof OwnerInputs>(
-    name: K,
-    run: (input: OwnerInputs[K], rpc: RpcContext) => unknown | Promise<unknown>,
-  ) {
-    operations.set(name, async (input, rpc) => ({
-      value: await run(input as OwnerInputs[K], rpc),
-    }));
-  }
-  function streaming<K extends keyof OwnerInputs>(
-    name: K,
-    run: (input: OwnerInputs[K], rpc: RpcContext) => RpcReply | Promise<RpcReply>,
-  ) {
-    operations.set(name, (input, rpc) => Promise.resolve(run(input as OwnerInputs[K], rpc)));
-  }
+  const { operations, add, streaming } = rpcRegistry<OwnerInputs>();
   add("session.get", async (input) =>
     images.state(await runtime.state(input.sessionId, undefined, true, input.after)),
   );

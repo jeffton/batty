@@ -13,7 +13,7 @@ import {
 
 const MAX_REPORTS = 200;
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-export function registerBrowserErrorRoutes(
+export function createBrowserErrorReporter(
   app: FastifyInstance,
   file: string,
 ): (input: BrowserErrorReport) => Promise<void> {
@@ -143,59 +143,5 @@ export function registerBrowserErrorRoutes(
     await write;
     return;
   };
-  app.post<{ Body: BrowserErrorReport }>(
-    "/api/browser-errors",
-    {
-      bodyLimit: 8 * 1024,
-      schema: {
-        body: {
-          type: "object",
-          additionalProperties: false,
-          required: [
-            "timestamp",
-            "correlationId",
-            "buildId",
-            "stage",
-            "browser",
-            "platform",
-            "errorName",
-            "message",
-            "stack",
-          ],
-          properties: {
-            timestamp: { type: "string", format: "date-time" },
-            correlationId: { type: "string", pattern: "^[a-zA-Z0-9-]{1,64}$" },
-            buildId: { type: "string", pattern: "^[a-zA-Z0-9.-]{1,64}$" },
-            stage: { type: "string", enum: errorStages },
-            browser: { type: "string", enum: ["Edge", "Firefox", "Chrome", "WebKit", "Other"] },
-            platform: {
-              type: "string",
-              enum: ["iOS", "Android", "macOS", "Windows", "Linux", "Other"],
-            },
-            errorName: { type: "string", enum: errorNames },
-            message: { type: "string", maxLength: 256 },
-            stack: { type: "string", maxLength: 2048 },
-            status: { type: "integer", minimum: 100, maximum: 599 },
-            hasFiles: { type: "boolean" },
-            operation: { type: "string", enum: fetchOperations },
-            visibility: { type: "string", enum: ["hidden", "visible"] },
-            startedVisibility: { type: "string", enum: ["hidden", "visible"] },
-            suspended: { type: "boolean" },
-            lifecycle: { type: "string", enum: lifecycleEvents },
-          },
-        },
-      },
-    },
-    async (request, reply) => {
-      if (!request.auth) return reply.code(401).send({ error: "Authentication required" });
-      if (
-        !request.headers.origin ||
-        request.headers.origin !== `${request.protocol}://${request.host}`
-      )
-        return reply.code(403).send({ error: "Same-origin required" });
-      await reportBrowserError(request.body);
-      return reply.code(204).send();
-    },
-  );
   return reportBrowserError;
 }

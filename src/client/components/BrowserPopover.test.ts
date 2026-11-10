@@ -3,7 +3,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 const rpcCallMock = vi.hoisted(() => vi.fn());
 vi.mock("@/client/lib/rpc", () => ({ rpcCall: rpcCallMock }));
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
-import { RpcError } from "@/shared/rpc-channel";
+import { RpcError } from "@/shared/rpc";
 import BrowserPopover from "./BrowserPopover.vue";
 
 const state = {

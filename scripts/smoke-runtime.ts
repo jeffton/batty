@@ -6,6 +6,9 @@ import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { loadConfig } from "../src/server/config";
 import { createAuthToken } from "../src/server/auth";
+import WebSocket from "ws";
+import { once } from "node:events";
+import { RpcChannel } from "../src/shared/rpc";
 
 const root = process.cwd();
 const port = 6148;
@@ -17,6 +20,19 @@ const logsDir = await fs.mkdtemp(path.join(os.tmpdir(), "batty2-runtime-logs-"))
 const logPath = path.join(logsDir, "server.log");
 let server: ChildProcess | undefined;
 let cookieHeader = "";
+let channel: RpcChannel | undefined;
+
+async function connectRpc(): Promise<void> {
+  const socket = new WebSocket(`${baseUrl.replace("http:", "ws:")}/api/socket`, {
+    headers: { cookie: cookieHeader, origin: baseUrl },
+  });
+  await once(socket, "open");
+  channel = new RpcChannel(socket);
+}
+
+async function call<T>(operation: string, input: unknown = {}): Promise<T> {
+  return (await channel!.call<T>(operation, input)).value;
+}
 
 function log(message: string): void {
   console.log(message);
@@ -96,6 +112,7 @@ async function waitFor<T>(
 }
 
 const cleanup = async () => {
+  channel?.close();
   if (server) await stopServer(server).catch(() => server?.kill("SIGKILL"));
   await fs.rm(stateDir, { recursive: true, force: true });
   await fs.rm(logsDir, { recursive: true, force: true });
@@ -149,49 +166,47 @@ try {
     bootstrap.workspaces.some((workspace) => workspace.id === "roy"),
     "roy workspace is listed",
   );
-  const initial = await request<SessionState>("/api/main");
+  await connectRpc();
+  const initial = await call<SessionState>("session.get", { sessionId: "main" });
   assert.equal(initial.workspaceId, "roy");
 
-  const models = await request<ModelInfo[]>("/api/models");
+  const models = await call<ModelInfo[]>("models.list");
   const selected = models.find((model) => model.id === "openai-codex/gpt-6-luna");
   assert(
     selected,
     `configured openai-codex/gpt-6-luna model is available; models returned: ${models.map((model) => `${model.provider}/${model.id}`).join(", ")}`,
   );
   if (initial.model !== selected.id && initial.model !== `${selected.provider}/${selected.id}`) {
-    const configured = await request<SessionState>("/api/main/model", {
-      method: "PATCH",
-      body: JSON.stringify({ model: selected.id }),
-    });
-    assert(configured.model?.includes(selected.id), "main model can be set before prompt");
+    await call("settings.default-model", { modelId: selected.id, thinkingLevel: "low" });
   }
 
   const clientMessageId = cryptoRandomSecret();
-  await request("/api/main/prompt", {
-    method: "POST",
-    body: JSON.stringify({
-      clientMessageId,
-      text: "Use bash to run sleep 8; printf durable-main-ok then respond exactly durable-main-ok.",
-    }),
+  await call("main.submit", {
+    kind: "prompt",
+    clientMessageId,
+    text: "Use bash to run sleep 8; printf durable-main-ok then respond exactly durable-main-ok.",
+    files: [],
   });
   await waitFor(
     "running bash tool",
     async () => {
-      const state = await request<SessionState>("/api/main");
+      const state = await call<SessionState>("session.get", { sessionId: "main" });
       const bash = state.activeTools.find((tool) => tool.toolName === "bash");
       return state.isStreaming && bash ? bash : undefined;
     },
     45_000,
   );
   log("Observed the real main-session bash process running; restarting the server.");
+  channel?.close();
   await stopServer(server);
   server = undefined;
 
   server = await startServer();
+  await connectRpc();
   const finalState = await waitFor(
     "completed durable main turn",
     async () => {
-      const state = await request<SessionState>("/api/main");
+      const state = await call<SessionState>("session.get", { sessionId: "main" });
       const assistantText = state.messages
         .filter((message) => message.role === "assistant")
         .flatMap((message) => message.blocks)
@@ -202,7 +217,10 @@ try {
     },
     75_000,
   );
-  const history = await request<{ messages: UiMessage[] }>("/api/main/messages?limit=100");
+  const history = await call<{ messages: UiMessage[] }>("session.messages", {
+    sessionId: "main",
+    limit: 100,
+  });
   const messages = history.messages;
   const canonicalUserMessages = messages.filter(
     (message) =>

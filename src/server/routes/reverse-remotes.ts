@@ -1,7 +1,7 @@
 import websocket from "@fastify/websocket";
 import type { FastifyInstance } from "fastify";
 import type { Runtime } from "../runtime";
-import type { RpcHandler } from "../../shared/rpc-channel";
+import type { RpcHandler } from "../../shared/rpc";
 import { registerOwnerSocket } from "../owner-socket";
 
 /** A browser and a paired node share framing, not authorization or operations. */

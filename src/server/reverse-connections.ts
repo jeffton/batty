@@ -1,5 +1,5 @@
 import WebSocket from "ws";
-import { RpcChannel, RpcError } from "../shared/rpc-channel";
+import { RpcChannel, RpcError } from "../shared/rpc";
 import type { RemoteConnectionCredentials } from "./remote-access";
 import type { RemoteWorkers } from "./remote-workers";
 

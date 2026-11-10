@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { FastifyInstance } from "fastify";
 import type { AppConfig } from "../config";
 import { listWorkspaces } from "../workspaces";
 
@@ -32,19 +31,4 @@ export async function assistantAgentsWrite(
 ): Promise<{ content: string }> {
   await fs.writeFile(await fileFor(config, workspaceId), content);
   return { content };
-}
-
-export function registerAssistantAgentsRoutes(app: FastifyInstance, config: AppConfig): void {
-  app.get<{ Params: { workspaceId: string } }>(
-    "/api/settings/assistant-agents/:workspaceId",
-    async (request) => {
-      return assistantAgentsRead(config, request.params.workspaceId);
-    },
-  );
-  app.post<{ Params: { workspaceId: string }; Body: { content: string } }>(
-    "/api/settings/assistant-agents/:workspaceId",
-    async (request) => {
-      return assistantAgentsWrite(config, request.params.workspaceId, request.body.content);
-    },
-  );
 }

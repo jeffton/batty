@@ -3,9 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import fastify from "fastify";
 import { describe, expect, it } from "vite-plus/test";
-import { registerBrowserErrorRoutes } from "./browser-errors";
+import { createBrowserErrorReporter } from "./browser-errors";
 
-const report = {
+const report: import("@/shared/browser-errors").BrowserErrorReport = {
   timestamp: new Date().toISOString(),
   correlationId: "test-id",
   buildId: "dev",
@@ -19,33 +19,27 @@ const report = {
   hasFiles: true,
 };
 
-describe("browser error endpoint", () => {
+describe("native browser error reporting", () => {
   it("stores bounded request/lifecycle context and distinguishes operations in deduplication", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "batty-errors-fetch-"));
     const file = path.join(dir, "browser-errors.json");
     const app = fastify();
-    app.decorateRequest("auth", true);
-    registerBrowserErrorRoutes(app, file);
+    const record = createBrowserErrorReporter(app, file);
     const send = (operation: string) =>
-      app.inject({
-        method: "POST",
-        url: "/api/browser-errors",
-        headers: { origin: "http://localhost:80" },
-        payload: {
-          ...report,
-          stage: "fetch",
-          operation,
-          startedVisibility: "visible",
-          visibility: "visible",
-          suspended: true,
-          lifecycle: "reconnect",
-        },
+      record({
+        ...report,
+        stage: "fetch",
+        operation: operation as import("@/shared/browser-errors").BrowserErrorReport["operation"],
+        startedVisibility: "visible",
+        visibility: "visible",
+        suspended: true,
+        lifecycle: "reconnect",
       });
     try {
-      expect((await send("/api/main?token=secret")).statusCode).toBe(400);
-      expect((await send("main")).statusCode).toBe(204);
-      expect((await send("main")).statusCode).toBe(204);
-      expect((await send("history")).statusCode).toBe(204);
+      await expect(send("/api/main?token=secret")).rejects.toMatchObject({ statusCode: 400 });
+      await send("main");
+      await send("main");
+      await send("history");
       const stored = JSON.parse(await fs.readFile(file, "utf8"));
       expect(stored).toHaveLength(2);
       expect(stored[0]).toMatchObject({
@@ -77,19 +71,9 @@ describe("browser error endpoint", () => {
       ]),
     );
     const app = fastify();
-    app.decorateRequest("auth", true);
-    registerBrowserErrorRoutes(app, file);
+    const record = createBrowserErrorReporter(app, file);
     try {
-      expect(
-        (
-          await app.inject({
-            method: "POST",
-            url: "/api/browser-errors",
-            headers: { origin: "http://localhost:80" },
-            payload: report,
-          })
-        ).statusCode,
-      ).toBe(204);
+      await record(report);
       const stored = JSON.parse(await fs.readFile(file, "utf8"));
       expect(stored).toHaveLength(200);
       expect(stored.every((r: any) => Date.parse(r.receivedAt) > Date.now() - 86400000)).toBe(true);
@@ -99,29 +83,17 @@ describe("browser error endpoint", () => {
       await app.close();
     }
   });
-  it("requires authentication/origin and bounds, sanitizes and deduplicates stored reports", async () => {
+  it("bounds, sanitizes and deduplicates stored reports", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "batty-errors-"));
     const app = fastify();
-    app.decorateRequest("auth", false);
-    app.addHook("onRequest", async (req) => {
-      req.auth = req.headers.authorization === "fixture";
-    });
     const file = path.join(dir, "browser-errors.json");
-    registerBrowserErrorRoutes(app, file);
-    const send = (
-      body: object,
-      headers = { authorization: "fixture", origin: "http://localhost:80" },
-    ) => app.inject({ method: "POST", url: "/api/browser-errors", headers, payload: body });
+    const send = createBrowserErrorReporter(app, file);
     try {
-      expect(
-        (await send(report, { authorization: "", origin: "http://localhost:80" })).statusCode,
-      ).toBe(401);
-      expect(
-        (await send(report, { authorization: "fixture", origin: "https://evil.test" })).statusCode,
-      ).toBe(403);
-      expect((await send({ ...report, stack: "x".repeat(9000) })).statusCode).toBe(413);
-      expect((await send(report)).statusCode).toBe(204);
-      expect((await send(report)).statusCode).toBe(204);
+      await expect(send({ ...report, stack: "x".repeat(9000) })).rejects.toMatchObject({
+        statusCode: 400,
+      });
+      await send(report);
+      await send(report);
       const stored = JSON.parse(await fs.readFile(file, "utf8"));
       expect(stored).toHaveLength(1);
       expect(stored[0].message).toBe("Error details redacted");
@@ -129,7 +101,7 @@ describe("browser error endpoint", () => {
       expect(JSON.stringify(stored)).not.toContain("secret");
       expect(stored[0].status).toBe(413);
       for (let n = 0; n < 19; n++) await send({ ...report, status: 500 + n });
-      expect((await send({ ...report, status: 599 })).statusCode).toBe(429);
+      await expect(send({ ...report, status: 599 })).rejects.toMatchObject({ statusCode: 429 });
     } finally {
       await app.close();
     }

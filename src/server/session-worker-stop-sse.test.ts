@@ -1,8 +1,6 @@
 // @vitest-environment node
-import { EventEmitter } from "node:events";
-import type { ServerResponse } from "node:http";
 import { expect, test, vi } from "vite-plus/test";
-import { streamSession } from "./session-sse";
+import { observeSession } from "./session-sse";
 import { OrchestrationDoc } from "./orchestration-state";
 import type { Runtime } from "./runtime";
 import type { TranscriptImages } from "./transcript-images";
@@ -10,12 +8,9 @@ import type { TranscriptImages } from "./transcript-images";
 type Publication = Parameters<Parameters<Runtime["harness"]["observeCommits"]>[0]["advance"]>[0];
 const conversationView = { entries: [], docs: {}, conversation: { id: 2 } };
 
-test("worker SSE refreshes stop availability for parent-owned delivery completion and resume", async () => {
-  const socket = Object.assign(new EventEmitter(), {
-    write: vi.fn((_packet: string) => true),
-    destroyed: false,
-    writableEnded: false,
-    writableNeedDrain: false,
+test("worker events refresh stop availability for parent-owned delivery completion and resume", async () => {
+  const emit = vi.fn(async (event: object) => {
+    return void event;
   });
   let canStopSubagent = true;
   let publish!: (publication: Publication) => void;
@@ -41,17 +36,18 @@ test("worker SSE refreshes stop availability for parent-owned delivery completio
     },
     memory: { status: () => ({ pending: 0 }) },
   } as unknown as Runtime;
-  const close = streamSession(
-    socket as unknown as ServerResponse,
+  const close = observeSession(
     runtime,
     2 as never,
     { state: async (value: unknown) => value } as TranscriptImages,
     undefined,
+    emit,
+    new AbortController().signal,
     vi.fn(),
   );
   try {
-    await vi.waitFor(() => expect(socket.write).toHaveBeenCalledOnce());
-    expect(JSON.parse(socket.write.mock.calls[0]![0]!.split("data: ")[1]!)).toMatchObject({
+    await vi.waitFor(() => expect(emit).toHaveBeenCalledOnce());
+    expect(emit.mock.calls[0]![0]!).toMatchObject({
       type: "reset",
       state: { isStreaming: false, canStopSubagent: true },
     });
@@ -72,7 +68,9 @@ test("worker SSE refreshes stop availability for parent-owned delivery completio
     await vi.waitFor(() => expect(state).toHaveBeenCalledTimes(2));
     expect(state.mock.calls[1]).toEqual(["2", conversationView, false, undefined]);
     expect(
-      socket.write.mock.calls.some(([packet]) => packet.includes('"canStopSubagent":false')),
+      emit.mock.calls.some(([packet]) =>
+        JSON.stringify(packet).includes('"canStopSubagent":false'),
+      ),
     ).toBe(true);
     canStopSubagent = true;
     publish({
@@ -85,9 +83,10 @@ test("worker SSE refreshes stop availability for parent-owned delivery completio
     } as unknown as Publication);
     await vi.waitFor(() => expect(state).toHaveBeenCalledTimes(3));
     expect(
-      socket.write.mock.calls.some(
+      emit.mock.calls.some(
         ([packet]) =>
-          packet.includes('"type":"state"') && packet.includes('"canStopSubagent":true'),
+          JSON.stringify(packet).includes('"type":"state"') &&
+          JSON.stringify(packet).includes('"canStopSubagent":true'),
       ),
     ).toBe(true);
   } finally {

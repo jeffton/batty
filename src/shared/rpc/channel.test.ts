@@ -11,7 +11,7 @@ import {
   type RpcContext,
   type RpcHandler,
   type RpcReply,
-} from "./rpc-channel";
+} from "./channel";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {

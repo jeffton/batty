@@ -9,7 +9,7 @@ import { Runtime } from "./runtime";
 import { loadConfig } from "./config";
 import { TranscriptImages } from "./transcript-images";
 import { PushForeground } from "./push-foreground";
-import { RpcError } from "../shared/rpc-channel";
+import { RpcError } from "../shared/rpc";
 
 test("native owner operations read workspace files, stream search and reject workspace escapes without HTTP", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "batty-owner-native-"));

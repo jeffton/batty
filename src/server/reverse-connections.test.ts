@@ -2,7 +2,7 @@ import { EventEmitter, once } from "node:events";
 import { setImmediate } from "node:timers/promises";
 import { WebSocketServer } from "ws";
 import { expect, test, vi } from "vite-plus/test";
-import { RpcChannel } from "../shared/rpc-channel";
+import { RpcChannel } from "../shared/rpc";
 import { ReverseConnections } from "./reverse-connections";
 import type { RemoteConnectionCredentials } from "./remote-access";
 import type { RemoteWorkers } from "./remote-workers";

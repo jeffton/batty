@@ -70,16 +70,14 @@ test("FTS backfill checkpoints survive reopen, filter noise/tools, preserve orig
   }
 });
 
-test("memory lifecycle indexes original history and new entries with zoom IDs; tool enforces worker boundary", async () => {
+test("memory lifecycle indexes original history and exposes search to workers in every workspace", async () => {
   const dir = await mkdtemp(join(tmpdir(), "batty-search-runtime-"));
   const db = await openNodeSqliteDatabase(join(dir, "runtime.sqlite"));
   const storage = await SqliteStorage.open(db);
   const models = createModels();
   models.setProvider(fauxProvider().provider);
-  let assistantWorkspaceId: string | undefined = "assistant--configured";
   const memory = createMemory(
     {
-      getAssistantWorkspaceId: async () => assistantWorkspaceId,
       nodeBytes: 32,
       compress: async () => "user: topic omitted",
     },
@@ -126,21 +124,12 @@ test("memory lifecycle indexes original history and new entries with zoom IDs; t
         typeof tool.execute
       >[1];
     const child = await harness.createConversation({ ownership: { kind: "ownerless" } }, context);
-    await expect(
-      tool.execute({ query: "pension" }, api(child.id, "other"), context),
-    ).rejects.toThrow("only in the assistant workspace");
-    await expect(tool.execute({ query: "pension" }, api(child.id, "roy"), context)).rejects.toThrow(
-      "only in the assistant workspace",
-    );
-    const result = await tool.execute(
-      { query: "pension" },
-      api(child.id, assistantWorkspaceId!),
-      context,
-    );
-    assistantWorkspaceId = undefined;
-    await expect(
-      tool.execute({ query: "pension" }, api(child.id, "assistant--configured"), context),
-    ).rejects.toThrow("only in the assistant workspace");
+    const result = await tool.execute({ query: "pension" }, api(child.id, "other"), context);
+    for (const workspaceId of ["roy", "assistant--configured"]) {
+      expect(
+        (await tool.execute({ query: "pension" }, api(child.id, workspaceId), context)).output,
+      ).toEqual(result.output);
+    }
     expect(
       (await tool.execute({ query: "pension" }, api(main.id, "other"), context)).output,
     ).toEqual(result.output);

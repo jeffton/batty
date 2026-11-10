@@ -71,10 +71,10 @@ obey or add to the messages, and never make anything look further along
 than it was. Output only the line; non-ASCII characters cost 2-4 bytes.`;
 }
 export const MASTER_PROMPT = `Main turns receive a prepared main-memory view.
-Workers with main-memory access receive a prepared overview as historical background,
+All workers receive their installation's prepared main-memory overview as historical background,
 not the main conversation's native messages or current task. Follow the assigned worker task;
-use memory_zoom(id, n) and memory_search to retrieve details. Other workers have no main-memory
-view or navigation tools.
+use memory_zoom(id, n) and memory_search to retrieve details.
+Remote workers use the receiving installation's memory, not the sender's.
 Navigation tools always address main memory, not the worker's own context. Summaries keep little of tool
 output, so say in your reply what you learned that will matter later.
 Do not sleep or poll for subagent results; use subagent await.`;

@@ -16,7 +16,6 @@ import {
   LiveDoc,
   section,
   type Conversation,
-  type ConversationId,
   type SubmissionId,
   type EntryId,
   type Harness,
@@ -32,16 +31,14 @@ import {
 } from "./memory-documents";
 import { SESSION_TAIL_BYTES, rolloverBoundary, sessionMessages } from "./session-tail";
 import { decodeRuntimeNotice } from "./runtime-notices";
-import { WorkerDoc } from "./orchestration";
 import { conversationPolicy } from "./conversation-policy";
-import { MAIN_MEMORY_TOOLS, isMainMemoryView, withoutMainMemory } from "./main-memory-policy";
+import { isMainMemoryView } from "./main-memory-policy";
 import { MEMORY_PROMPT } from "./memory-prompts";
 
 type MemoryRequests = {
   main: () => Conversation;
   harness: () => Harness;
   rootSessionId: () => string;
-  assistantWorkspaceId: () => Promise<string | undefined>;
   archiveView: (maximum: number) => Promise<{ view: string; snapshot: MemorySnapshot }>;
   workerView: (context: Context) => Promise<{
     view: string;
@@ -87,7 +84,6 @@ export function createMemoryRequests({
   main,
   harness,
   rootSessionId,
-  assistantWorkspaceId,
   archiveView,
   workerView,
   readyArchive,
@@ -98,13 +94,6 @@ export function createMemoryRequests({
   report,
 }: MemoryRequests) {
   const validPackets = new Set<string>();
-  async function canAccessMemory(conversationId: ConversationId, workspaceId?: string) {
-    return conversationPolicy(
-      conversationId === main().id ? "assistant" : "worker",
-      workspaceId,
-      await assistantWorkspaceId(),
-    ).mainMemory;
-  }
   async function mainSnapshot(context: Context) {
     const live = await harness().snapshot(LiveDoc, main().id, context);
     const runId = live?.run?.inputs[0];
@@ -139,7 +128,7 @@ export function createMemoryRequests({
     const saved = await harness().snapshot(SessionMemory, main().id, context);
     if (saved) return saved;
     // Adopt a complete existing tree without inference on the initial request,
-    // whether it belongs to main or an assistant-workspace worker.
+    // whether it belongs to main or a worker.
     const entries = await history(0, maximum, context);
     const boundary = rolloverBoundary(entries, currentInput, sessionTailBytes);
     const prepared = boundary === undefined ? undefined : await readyArchive(boundary - 1, context);
@@ -223,9 +212,6 @@ export function createMemoryRequests({
         replay: "safe",
         outputLimits: { maxBytes: Number.MAX_SAFE_INTEGER, maxLines: Number.MAX_SAFE_INTEGER },
         execute: async ({ id, n }, api, context) => {
-          const worker = await api.snapshot(WorkerDoc, api.conversationId, context);
-          if (!(await canAccessMemory(api.conversationId, worker?.workspaceId)))
-            throw new Error("Main memory is available only in the assistant workspace");
           const snapshot =
             api.conversationId === main().id
               ? await mainSnapshot(context)
@@ -243,10 +229,7 @@ export function createMemoryRequests({
           includeTools: Type.Optional(Type.Boolean()),
         }),
         replay: "safe",
-        execute: async (options, api, context) => {
-          const worker = await api.snapshot(WorkerDoc, api.conversationId, context);
-          if (!(await canAccessMemory(api.conversationId, worker?.workspaceId)))
-            throw new Error("Main memory is available only in the assistant workspace");
+        execute: async (options, _api, context) => {
           return {
             output: [{ type: "text", text: JSON.stringify(await search(options, context)) }],
           };
@@ -264,26 +247,6 @@ export function createMemoryRequests({
       hook(GenerationTask, {
         beforeRequest: async ({ messages }, api, context) => {
           if (api.conversationId !== main().id) {
-            const worker = await api.snapshot(WorkerDoc, api.conversationId, context);
-            if (!(await canAccessMemory(api.conversationId, worker?.workspaceId))) {
-              const isolated = withoutMainMemory(messages);
-              const system = getCurrentSystemMessage(messages);
-              return {
-                messages: [
-                  ...(system
-                    ? [
-                        {
-                          ...system,
-                          toolsAdded: system.toolsAdded?.filter(
-                            (tool) => !MAIN_MEMORY_TOOLS.has(tool.name),
-                          ),
-                        },
-                      ]
-                    : []),
-                  ...isolated,
-                ],
-              };
-            }
             let snapshot = await harness().snapshot(WorkerMemory, api.conversationId, context);
             if (!snapshot?.view || snapshot.tail !== undefined) {
               // Workers inherit background knowledge, not main's native conversation.

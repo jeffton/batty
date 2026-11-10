@@ -42,9 +42,6 @@ import { createCodemodeAdapters } from "./codemode-native";
 import { createCodemodeTasks } from "./codemode-tasks";
 import { cancelPersistentBashJobs } from "./durable-bash-cancel";
 import { createBashAbortWatcher } from "./tools-abort-watcher";
-import { WorkerDoc } from "./orchestration";
-import { MAIN_MEMORY_TOOLS } from "./main-memory-policy";
-import { conversationPolicy } from "./conversation-policy";
 import { createAttachArtifactsTool } from "./artifact-forwarding";
 
 export async function toolCwd(api: ToolExecutionApi, ctx: Context): Promise<string> {
@@ -208,21 +205,8 @@ export async function createTools(
         ...(await mcp.tools()),
       ].map((tool) => [tool.name, tool]),
     );
-    const worker = await api.snapshot(WorkerDoc, api.conversationId, ctx);
-    const isMain = harness && api.conversationId === (await harness.root(ctx)).id;
-    const assistantWorkspaceId = (await listWorkspaces(config)).find(
-      (workspace) => workspace.isAssistant,
-    )?.id;
     return [...all.values()].filter(
-      (tool) =>
-        tool.name !== "memory_overview" &&
-        !tool.name.startsWith("batty_codemode_") &&
-        (conversationPolicy(
-          isMain ? "assistant" : "worker",
-          worker?.workspaceId,
-          assistantWorkspaceId,
-        ).mainMemory ||
-          !MAIN_MEMORY_TOOLS.has(tool.name)),
+      (tool) => tool.name !== "memory_overview" && !tool.name.startsWith("batty_codemode_"),
     );
   };
   const nestedTask = createCodemodeTasks(resolveTools, mcp, jobsDir);

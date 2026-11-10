@@ -28,7 +28,7 @@ Device frame: [Apple Frames](https://www.macstories.net/shortcuts/) by Federico 
 - `memory_zoom` expands summaries with UTC timestamp ranges or retrieves an original timestamp, non-thought text and images at leaf zoom (`n=1`).
 - `memory_search` searches original text by keywords; tool calls and results are opt-in.
 
-Workers in the assistant workspace receive a snapshot of the prepared main-memory tree plus all unprepared text projections and original images, marked as historical background rather than their own conversation. Workers in other workspaces receive neither this background nor main-memory tools.
+Workers in every workspace receive a snapshot of their installation's prepared main-memory tree plus all unprepared text projections and original images, marked as historical background rather than their own conversation. They can use `memory_search` and `memory_zoom`; remote workers access the receiving installation's memory, not the sender's. This includes personal main-conversation history. Workspace and remote coordination permissions are separate and unchanged.
 
 The summarization model and language are configurable; original messages remain unchanged. See [memory architecture and recall](docs/runtime.md#memory) for retention, worker context and retrieval details.
 

@@ -12,6 +12,7 @@ import {
 } from "@earendil-works/pi-ai/providers/faux";
 import {
   createRegistry,
+  AgentDoc,
   Harness,
   MemoryStorage,
   defineExtension,
@@ -24,18 +25,16 @@ import { SessionMemory } from "./memory-documents";
 import { snapshotView } from "./memory-snapshot";
 import { createTools } from "./tools";
 import { createOrchestration, OrchestrationDoc, WorkerDoc } from "./orchestration";
+import { enableWorkerMemory } from "./orchestration-worker-config";
 import { listWorkspaces } from "./workspaces";
 import { setAssistantWorkspace } from "./options";
 import type { AppConfig } from "./config";
 
-test("fresh assistant-workspace worker pins its overview across tools and later inputs while new workers see current memory", async () => {
+test("fresh project worker pins its overview across tools and later inputs while new workers see current memory", async () => {
   const models = createModels();
   const faux = fauxProvider();
   models.setProvider(faux.provider);
-  const memory = createMemory(
-    { nodeBytes: 1000, getAssistantWorkspaceId: async () => "assistant" },
-    models,
-  );
+  const memory = createMemory({ nodeBytes: 1000 }, models);
   const registry = createRegistry();
   registry.install(memory.extension);
   let main: Awaited<ReturnType<Harness["root"]>>;
@@ -81,7 +80,7 @@ test("fresh assistant-workspace worker pins its overview across tools and later 
     const worker = async () => {
       const child = await harness.createConversation({ ownership: { kind: "ownerless" } }, context);
       await child.commit(async (tx) => {
-        (await tx.doc(WorkerDoc, child.id)).workspaceId = "assistant";
+        (await tx.doc(WorkerDoc, child.id)).workspaceId = "project";
       }, context);
       await child.configure({ model: { provider: "faux", modelId: "faux-1" } }, context);
       return child;
@@ -133,8 +132,11 @@ test.each([
   { kind: "nested", target: "assistant" },
   { kind: "nested", target: "assistant", parent: "other" },
   { kind: "cron", target: "assistant" },
+  { kind: "cron", target: "other" },
+  { kind: "nested", target: "other", parent: "other" },
   { kind: "fresh", target: "roy" },
   { kind: "fresh", target: "other" },
+  { kind: "resumed", target: "other" },
   { kind: "nested", target: "other" },
 ] as const)(
   "$kind worker in $target receives permitted summarized background without inheriting main turns",
@@ -158,8 +160,6 @@ test.each([
     models.setProvider(faux.provider);
     const memory = createMemory(
       {
-        getAssistantWorkspaceId: async () =>
-          (await listWorkspaces(config)).find((workspace) => workspace.isAssistant)?.id,
         sessionTailBytes: 1,
         nodeBytes: 80,
         viewBytes: 100,
@@ -207,6 +207,7 @@ test.each([
       const inspected: number[] = [];
       let navigated = 0;
       let rejectedDelegation = false;
+      let resumedId: string;
       const overview = await memory.prepare();
       const preparedIndex = (await harness.snapshot(MemoryIndexDoc, main.id, context))!;
       const snapshot = {
@@ -233,6 +234,17 @@ text(await tools.memory_zoom({id, n: 1}));`;
           const last = request.messages.findLast((m) => m.role !== "system")!;
           if (last.role === "user") {
             const input = JSON.stringify(last.content);
+            if (input.includes("resume catalog"))
+              return fauxAssistantMessage(
+                [
+                  fauxToolCall("subagent", {
+                    action: "resume",
+                    sessionId: resumedId,
+                    prompt: "inspect catalog",
+                  }),
+                ],
+                { stopReason: "toolUse" },
+              );
             if (input.includes("launch catalog"))
               return fauxAssistantMessage(
                 [
@@ -256,7 +268,9 @@ text(await tools.memory_zoom({id, n: 1}));`;
                 { stopReason: "toolUse" },
               );
             if (input.includes("inspect catalog")) {
-              expect(JSON.stringify(request.messages)).not.toContain(secret);
+              expect(
+                JSON.stringify(request.messages.filter((message) => message.role === "user")),
+              ).not.toContain(secret);
               const text = JSON.stringify(
                 request.messages.filter((message) => message.role !== "system"),
               );
@@ -265,23 +279,20 @@ text(await tools.memory_zoom({id, n: 1}));`;
                   (message) => message.role === "user" && message.content === "launch catalog",
                 ),
               ).toBe(false);
-              if (target === assistantId) expect(text).toContain("main-memory-background");
-              else expect(text).not.toContain("main-memory-background");
+              expect(text).toContain("main-memory-background");
               expect(text).toContain("inspect catalog");
+              expect(text).not.toContain("<memory-recall>");
               const system = request.messages.findLast((message) => message.role === "system");
               const names = system?.toolsAdded?.map((tool) => tool.name) ?? [];
               expect(names).not.toContain("memory_overview");
-              expect(names.includes("memory_zoom")).toBe(target === assistantId);
+              expect(names).toContain("memory_zoom");
               expect(names.includes("memory_date")).toBe(false);
-              expect(names.includes("memory_search")).toBe(target === assistantId);
+              expect(names).toContain("memory_search");
               inspected.push(request.messages.length);
               return fauxAssistantMessage(
                 [
                   fauxToolCall("codemode", {
-                    code:
-                      target === assistantId
-                        ? code
-                        : "text(ALL_TOOLS); text(await searchTools('main memory')); try { text(await describeTool('memory_zoom')); } catch (error) { text(String(error)); }",
+                    code,
                   }),
                 ],
                 {
@@ -289,6 +300,9 @@ text(await tools.memory_zoom({id, n: 1}));`;
                 },
               );
             }
+          }
+          if (last.role === "toolResult" && last.toolName === "subagent" && !last.isError) {
+            resumedId = JSON.stringify(last.content).match(/Session ID: (\d+)/)![1]!;
           }
           if (last.role === "toolResult" && last.toolName === "subagent" && last.isError) {
             expect(JSON.stringify(last.content)).toContain(
@@ -299,14 +313,8 @@ text(await tools.memory_zoom({id, n: 1}));`;
           if (last.role === "toolResult" && last.toolName === "codemode") {
             const output = JSON.stringify(last.content);
             expect(last.isError).toBeFalsy();
-            if (target === assistantId) {
-              expect(output).toContain(`0:${secret}`);
-              expect(output).toContain("1970-01-01T00:00:00.001Z");
-            } else {
-              expect(output).not.toContain('"name":"memory_zoom"');
-              expect(output).not.toContain('"name":"memory_date"');
-              expect(output).not.toContain(secret);
-            }
+            expect(output).toContain(`0:${secret}`);
+            expect(output).toContain("1970-01-01T00:00:00.001Z");
             navigated++;
           }
           return fauxAssistantMessage([fauxText("NO_REPLY")]);
@@ -331,10 +339,26 @@ text(await tools.memory_zoom({id, n: 1}));`;
         ).wait(context);
         await until(async () => (await orchestration.listRunning()).length === 0);
       }
+      if (kind === "resumed") {
+        // A project worker persisted before this policy had neither memory tool enabled.
+        await main.commit(async (tx) => {
+          const agent = await tx.doc(AgentDoc, Number(resumedId) as typeof main.id);
+          if (!Array.isArray(agent.tools)) throw new Error("Expected a worker tool allowlist");
+          agent.tools = agent.tools.filter(
+            (name) => !["memory_zoom", "memory_search"].includes(name),
+          );
+        }, context);
+        await enableWorkerMemory(harness, context);
+        await (
+          await main.submit({ type: "input", content: "resume catalog" }, context)
+        ).wait(context);
+        await until(async () => (await orchestration.listRunning()).length === 0);
+      }
       const blocked = kind === "nested" && parent !== assistantId && parent !== target;
       expect(rejectedDelegation).toBe(blocked);
-      expect(inspected).toHaveLength(blocked ? 0 : 1);
-      expect(navigated).toBe(blocked ? 0 : 1);
+      const count = blocked ? 0 : kind === "resumed" ? 2 : 1;
+      expect(inspected).toHaveLength(count);
+      expect(navigated).toBe(count);
     } finally {
       orchestration.close();
       await harness.close(context);
@@ -361,7 +385,6 @@ test("automatic worker overview uses the built catalog without waiting for pendi
   let compressions = 0;
   const memory = createMemory(
     {
-      getAssistantWorkspaceId: async () => "assistant",
       nodeBytes: 80,
       compress: async () => {
         compressions++;

@@ -11,7 +11,7 @@ test.each([false, true])(
   "worker keeps its task and small context despite a large main tail (legacy snapshot: %s)",
   async (legacy) => {
     const f = await fixture({ contextWindow: 16_000, maxTokens: 256 });
-    const state = await f.open({ getAssistantWorkspaceId: async () => "assistant" });
+    const state = await f.open();
     cleanup.push(async () => {
       await state.harness.close(context);
       await state.memory.close();
@@ -80,7 +80,6 @@ test.each([false, true])(
 test("workers retain the complete pending background and original images across restart", async () => {
   const f = await fixture({ contextWindow: 16_000, maxTokens: 256 });
   const options = {
-    getAssistantWorkspaceId: async () => "assistant",
     compress: async () => {
       throw new Error("Luna unavailable");
     },

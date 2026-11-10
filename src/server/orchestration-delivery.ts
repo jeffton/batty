@@ -125,11 +125,7 @@ export function createDeliveryTask(services: OrchestrationServices) {
               (await tx.doc(OrchestrationDoc)).workers[task.input.workerId]!.workspaceId =
                 task.input.workspaceId;
               (await tx.doc(WorkerDoc, task.input.childId)).workspaceId = task.input.workspaceId;
-              (await tx.doc(AgentDoc, task.input.childId)).tools = workerTools(
-                childAgent,
-                task.input.workspaceId,
-                await services.assistantWorkspaceId(),
-              );
+              (await tx.doc(AgentDoc, task.input.childId)).tools = workerTools(childAgent);
             }
           }
         }, ctx);

@@ -1,7 +1,30 @@
-import type { Agent, AgentChange } from "@earendil-works/pi-durable";
+import {
+  AgentDoc,
+  type Agent,
+  type AgentChange,
+  type Cursor,
+  type Harness,
+} from "@earendil-works/pi-durable";
+import type { Context } from "@earendil-works/chord";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
-import { conversationPolicy } from "./conversation-policy.js";
-import { MAIN_MEMORY_TOOLS } from "./main-memory-policy.js";
+
+// Refresh persisted allowlists before durable generations resume after startup.
+export async function enableWorkerMemory(harness: Harness, context: Context) {
+  let cursor: Cursor | undefined;
+  do {
+    cursor = await harness.commit(async (tx) => {
+      const page = await tx.scanConversations({}, 100, cursor);
+      for (const conversation of page.items) {
+        const agent = await tx.doc(AgentDoc, conversation.id);
+        if (!Array.isArray(agent.tools)) continue;
+        for (const name of ["memory_search", "memory_zoom"]) {
+          if (!agent.tools.includes(name)) agent.tools.push(name);
+        }
+      }
+      return page.next;
+    }, context);
+  } while (cursor !== undefined);
+}
 
 export function modelChange(model?: string, effort?: string): AgentChange {
   const change: AgentChange = {};
@@ -20,17 +43,10 @@ export function modelChange(model?: string, effort?: string): AgentChange {
   }
   return change;
 }
-export function workerTools(
-  agent: Agent,
-  workspaceId: string,
-  assistantWorkspaceId: string | undefined,
-): string[] {
-  const mainMemory = conversationPolicy("worker", workspaceId, assistantWorkspaceId).mainMemory;
-  const memoryTools = mainMemory
-    ? agent.extensions.flatMap((extension) =>
-        extension.name === "batty-optchat" ? (extension.tools ?? []) : [],
-      )
-    : [];
+export function workerTools(agent: Agent): string[] {
+  const memoryTools = agent.extensions.flatMap((extension) =>
+    extension.name === "batty-optchat" ? (extension.tools ?? []) : [],
+  );
   return [
     ...new Set(
       // Model tools exclude caller-only adapters; workers still need them for nested execution.
@@ -43,10 +59,7 @@ export function workerTools(
         ),
         ...memoryTools,
       ]
-        .filter(
-          (tool) =>
-            tool.name !== "memory_overview" && (mainMemory || !MAIN_MEMORY_TOOLS.has(tool.name)),
-        )
+        .filter((tool) => tool.name !== "memory_overview")
         .map((tool) => tool.name),
     ),
   ];

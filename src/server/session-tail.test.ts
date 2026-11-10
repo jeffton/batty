@@ -404,7 +404,7 @@ test.each([true, false])(
   "assistant-workspace workers pin prepared main decisions and reports as background, initialized=%s",
   async (initialized) => {
     const f = await fixture();
-    const state = await f.open({ getAssistantWorkspaceId: async () => "assistant" });
+    const state = await f.open();
     cleanup.push(async () => {
       await state.harness.close(context);
       await state.memory.close();

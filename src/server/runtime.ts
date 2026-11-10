@@ -40,6 +40,7 @@ import { projectRuntimeNoticeRequest } from "./runtime-notices";
 import { createHistoryIndex } from "./history-index";
 import { createMemorySearch } from "./memory-search";
 import { conversationPolicy } from "./conversation-policy";
+import { enableWorkerMemory } from "./orchestration-worker-config";
 import { ProviderAuthService } from "./provider-auth";
 import { ProviderUsageService } from "./provider-usage";
 import { createTools } from "./tools";
@@ -145,8 +146,6 @@ export class Runtime {
     const orchestration = createOrchestration(config, networkAvailable);
     const memory = createMemory(
       {
-        getAssistantWorkspaceId: async () =>
-          (await listWorkspaces(config)).find((workspace) => workspace.isAssistant)?.id,
         noiseBackupDir: path.join(dir, "memory-backups"),
         rebuildRequested: existsSync(path.join(dir, "memory-rebuild.request")),
         get memoryLanguage() {
@@ -207,6 +206,7 @@ export class Runtime {
     // fixed allowlist, which otherwise hides tools added by later releases.
     await main.configure({ tools: null }, context);
     await enableCodemodeAdapters(harness, context);
+    await enableWorkerMemory(harness, context);
     if (!(await main.agent(context)).model) {
       await main.configure(
         {
@@ -373,7 +373,7 @@ export class Runtime {
     const worker = await this.orchestration.metadata(conversation.id);
     const role =
       conversation.id === this.main.id ? "assistant" : worker?.isCron ? "cron" : "worker";
-    const policy = conversationPolicy(role, workspace?.id);
+    const policy = conversationPolicy(role);
     const activeAssistant = live?.generation?.message
       ? normalizeMessage(
           live.generation.message as unknown as AgentMessage,

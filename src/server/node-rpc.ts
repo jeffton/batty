@@ -9,6 +9,7 @@ import type { RemoteWorkers, RemoteWorkerSummary } from "./remote-workers";
 import { context } from "./runtime";
 import { listWorkspaces } from "./workspaces";
 import { DeliveryRecord } from "./orchestration-history";
+import { OrchestrationDoc } from "./orchestration-state";
 import { observeSession } from "./session-observer";
 import { rpcEvents, splitByteStream } from "../shared/rpc";
 import type { TranscriptImages } from "./transcript-images";
@@ -188,6 +189,8 @@ export function createNodeRpcHandler(
       value: null,
       events: rpcEvents(call.signal, (emit, signal, fail) => {
         let dirty = true;
+        let forced = true;
+        let workerRegistry: string | undefined;
         let flushing = false;
         const flush = async () => {
           if (flushing || signal.aborted) return;
@@ -195,9 +198,25 @@ export function createNodeRpcHandler(
           try {
             while (dirty && !signal.aborted) {
               dirty = false;
+              const force = forced;
+              forced = false;
+              const state = (await runtime.harness.snapshot(OrchestrationDoc, context))!;
+              const registry = JSON.stringify([
+                state.mainId,
+                Object.values(state.workers).map(({ id, workspaceId, active, startedAtMs }) => [
+                  id,
+                  workspaceId,
+                  active,
+                  startedAtMs,
+                ]),
+              ]);
+              // Cron definitions, join bookkeeping and delivery receipts share the
+              // orchestration document, but do not change the worker catalog.
+              if (!force && registry === workerRegistry) continue;
               const workers = await catalog(remotes);
               authorizeNode(remotes, connection);
               await emit({ workers });
+              workerRegistry = registry;
             }
           } catch (error) {
             if (!signal.aborted) fail(error);
@@ -207,19 +226,24 @@ export function createNodeRpcHandler(
         };
         const observation = runtime.harness.observeCommits({
           advance(publication) {
-            if (
-              publication.changes.some(
-                (change) =>
-                  (change.type === "document" &&
-                    ["batty.worker", "batty.orchestration"].includes(change.record.kind)) ||
-                  (change.type === "task" &&
-                    change.value.kind === "batty.delivery" &&
-                    change.value.state.status === "terminal"),
+            for (const change of publication.changes) {
+              // Reports and terminal deliveries must still wake remote joins,
+              // even when their visible worker summaries are unchanged.
+              if (
+                (change.type === "document" && change.record.kind === "batty.worker") ||
+                (change.type === "task" &&
+                  change.value.kind === "batty.delivery" &&
+                  change.value.state.status === "terminal")
+              ) {
+                forced = true;
+                dirty = true;
+              } else if (
+                change.type === "document" &&
+                change.record.kind === OrchestrationDoc.definition.kind
               )
-            ) {
-              dirty = true;
-              queueMicrotask(() => void flush());
+                dirty = true;
             }
+            if (dirty) queueMicrotask(() => void flush());
           },
           end() {},
         });

@@ -461,7 +461,9 @@ export function createWorkers(
       };
       if (args.action === "workspaces") {
         if (!(await remoteCoordinator()))
-          throw new Error("Remote discovery requires the assistant coordinator");
+          throw new Error(
+            "Remote workspace discovery is available only to the main session and workers in the configured assistant workspace",
+          );
         if (!services.remoteWorkers) return reply("[]");
         return reply(JSON.stringify(await services.remoteWorkers.workspaces(args.nodeId)));
       }

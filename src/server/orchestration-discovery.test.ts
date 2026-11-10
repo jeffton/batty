@@ -129,7 +129,7 @@ test("discovery paginates, inspects running reports and archived results, and fo
     expect(JSON.stringify(running.content)).toContain("explicit progress");
     expect(running.details).toEqual(artifacts);
     expect(JSON.stringify(running.content)).not.toContain("private tool transcript");
-    // Cron sessions follow the same workspace policy as ordinary workers.
+    // Cron sessions remain discoverable and inspectable like ordinary workers.
     await main.commit(async (tx) => {
       (await tx.doc(WorkerDoc, worker.id)).isCron = true;
     }, context);
@@ -224,13 +224,13 @@ test("discovery paginates, inspects running reports and archived results, and fo
 }, 15_000);
 
 test.each([
-  { workspaceId: "test", assistantWorkspaceId: undefined, visible: true },
-  { workspaceId: "other", assistantWorkspaceId: undefined, visible: false },
-  { workspaceId: "other", assistantWorkspaceId: "other", visible: true },
-  { workspaceId: "other", assistantWorkspaceId: "test", visible: false },
+  { workspaceId: "test", assistantWorkspaceId: undefined },
+  { workspaceId: "other", assistantWorkspaceId: undefined },
+  { workspaceId: "other", assistantWorkspaceId: "other" },
+  { workspaceId: "other", assistantWorkspaceId: "test" },
 ])(
-  "worker discovery uses the reader workspace: %j",
-  async ({ workspaceId, assistantWorkspaceId, visible }) => {
+  "workers discover across workspaces regardless of assistant-workspace configuration: %j",
+  async ({ workspaceId, assistantWorkspaceId }) => {
     const { faux, open, orchestration } = await fixture(
       10_000,
       console.error,
@@ -276,12 +276,12 @@ test.each([
     const list = JSON.parse((results[0]!.content[0] as { text: string }).text);
     expect(
       list.workers.some((worker: { sessionId: string }) => worker.sessionId === String(first.id)),
-    ).toBe(visible);
-    expect(results[1]!.role === "toolResult" && !!results[1]!.isError).toBe(!visible);
+    ).toBe(true);
+    expect(results[1]!.role === "toolResult" && !!results[1]!.isError).toBe(false);
   },
 );
 
-test("nested readers gain and lose cross-workspace discovery on resume", async () => {
+test("nested readers retain cross-workspace discovery when moved by resume", async () => {
   const { faux, orchestration, open } = await fixture(10_000, console.error, "other");
   const { harness, main } = await open();
   let targetId: string;
@@ -313,8 +313,8 @@ test("nested readers gain and lose cross-workspace discovery on resume", async (
   const reader = Object.values((await orchestrationHistory(harness)).workers).find(
     (worker) => worker.prompt === "reader assignment",
   )!;
-  // Being spawned by an assistant-workspace parent does not grant its child access.
-  const check = async (visible: boolean) => {
+  // Nested readers can discover and inspect workers across workspace boundaries.
+  const check = async () => {
     const messages = (await (await harness.conversation(reader.id, context))!.context(context))
       .messages;
     const results = messages
@@ -323,25 +323,25 @@ test("nested readers gain and lose cross-workspace discovery on resume", async (
     expect(results).toHaveLength(2);
     const listed = JSON.parse((results[0]!.content[0] as { text: string }).text).workers;
     expect(listed.some((worker: { sessionId: string }) => worker.sessionId === targetId)).toBe(
-      visible,
+      true,
     );
-    expect(results[1]!.role === "toolResult" && !!results[1]!.isError).toBe(!visible);
+    expect(results[1]!.role === "toolResult" && !!results[1]!.isError).toBe(false);
   };
-  await check(false);
+  await check();
   await probe({
     action: "resume",
     sessionId: String(reader.id),
     prompt: "reader assignment",
     workspaceId: "other",
   });
-  await check(true);
+  await check();
   await probe({
     action: "resume",
     sessionId: String(reader.id),
     prompt: "reader assignment",
     workspaceId: "test",
   });
-  await check(false);
+  await check();
 });
 
 test("main discovers and inspects cron descendants in the assistant workspace", async () => {
@@ -401,7 +401,7 @@ test("main discovers and inspects cron descendants in the assistant workspace", 
   }
 });
 
-test("cron and ordinary workers coordinate by current workspace across jobs and runs", async () => {
+test("cron and ordinary workers coordinate across workspaces and runs", async () => {
   const { faux, orchestration, open } = await fixture(10_000, console.error, "test");
   const { harness, main } = await open();
   faux.setResponses(
@@ -487,9 +487,7 @@ test("cron and ordinary workers coordinate by current workspace across jobs and 
   const all = [...first, ...second, ...third, ordinary];
   for (const group of [first, second, third, [ordinary]]) {
     for (const reader of group) {
-      const visible = all.filter(
-        (target) => reader.workspaceId === "test" || reader.workspaceId === target.workspaceId,
-      );
+      const visible = all;
       const result = await probe(reader, { action: "list", limit: 100 });
       const listed = JSON.parse((result.content[0] as { text: string }).text).workers;
       expect(listed.map((worker: { sessionId: string }) => worker.sessionId).sort()).toEqual(
@@ -514,21 +512,20 @@ test("cron and ordinary workers coordinate by current workspace across jobs and 
   expect(resumed.role === "toolResult" && !!resumed.isError).toBe(false);
   await until(async () => (await orchestration.listRunning()).length === 0);
   expect((await harness.snapshot(WorkerDoc, grandchild.id, context))!.workspaceId).toBe("other");
-  // A project cron descendant cannot manage workers outside its current workspace.
+  // Cross-workspace lifecycle actions are available to assigned cron workers too.
   for (const target of [second[0]!, ordinary]) {
-    const rejected = await probe(grandchild, { action: "stop", sessionId: String(target.id) });
-    expect(rejected.role === "toolResult" && rejected.isError).toBe(true);
-    expect(JSON.stringify(rejected.content)).toContain("coordination scope");
+    const managed = await probe(grandchild, { action: "stop", sessionId: String(target.id) });
+    expect(managed.role === "toolResult" && !!managed.isError).toBe(false);
   }
   const moved = await probe(grandchild, { action: "list", limit: 100 });
   expect(
     JSON.parse((moved.content[0] as { text: string }).text)
       .workers.map((worker: { sessionId: string }) => worker.sessionId)
       .sort(),
-  ).toEqual([...third, grandchild].map((worker) => String(worker.id)).sort());
+  ).toEqual(all.map((worker) => String(worker.id)).sort());
 });
 
-test("inspect authorizes against the same snapshot as output during a workspace-changing resume", async () => {
+test("inspect can read a worker across a concurrent workspace move", async () => {
   const { faux, registry, orchestration, open } = await fixture();
   const subagent = orchestration.extension.tools!.find((tool) => tool.name === "subagent")!;
   const executeSubagent = subagent.execute as (
@@ -657,7 +654,6 @@ test("inspect authorizes against the same snapshot as output during a workspace-
   const result = messages.find(
     (message) => message.role === "toolResult" && message.toolName === "racing-inspect",
   );
-  expect(result?.role === "toolResult" && result.isError).toBe(true);
-  expect(JSON.stringify(result)).toContain("Unknown or inaccessible subagent");
-  expect(JSON.stringify(messages)).not.toContain("workspace B private report");
+  expect(result?.role === "toolResult" && result.isError).toBe(false);
+  expect(JSON.stringify(result)).toContain("workspace B private report");
 });

@@ -36,220 +36,153 @@ test("run cannot reuse a session and lifecycle actions cannot create one implici
   expect(await orchestrationHistory(harness)).toEqual(before);
 });
 
-test.each(
-  ["steer", "stop", "queue", "resume"].flatMap((action) =>
-    ["unrelated", "coordinator", "peer"].flatMap((caller) =>
-      // Cover both cron classifications on each side for every action/scope.
-      // Coordinator cases use crossed flags so each action also covers all four pairs.
-      [false, true].map((callerCron) => ({
-        action,
-        caller,
-        callerCron,
-        targetCron: caller === "coordinator" ? !callerCron : callerCron,
-      })),
-    ),
-  ),
-)(
-  "$action follows workspace scope for $caller (callerCron=$callerCron, targetCron=$targetCron)",
-  async ({ action, caller, callerCron, targetCron }) => {
-    const { faux, open, orchestration } = await fixture(
-      10_000,
-      console.error,
-      caller === "peer" ? undefined : "test",
-    );
+test.each(["steer", "stop", "queue", "resume"])(
+  "%s can manage a worker in another workspace",
+  async (action) => {
+    const { faux, open, orchestration } = await fixture(10_000, console.error, "other");
     const { harness, main } = await open();
     faux.setResponses([
-      call({
-        action: "run",
-        prompt: "target",
-        workspaceId: caller === "coordinator" ? "other" : "test",
-      }),
+      call({ action: "run", prompt: "target", workspaceId: "other" }),
       done(),
       done(),
     ]);
-    await (await main.submit({ type: "input", content: "start" }, context)).wait(context);
+    await (await main.submit({ type: "input", content: "start target" }, context)).wait(context);
     await until(async () => (await orchestration.listRunning()).length === 0);
     await main.waitForIdle(context);
     const target = Object.values((await orchestrationHistory(harness)).workers)[0]!;
     faux.setResponses([
-      call({
-        action: "run",
-        prompt: "reader",
-        workspaceId: caller === "unrelated" ? "other" : "test",
-      }),
+      call({ action: "run", prompt: "reader", workspaceId: "test" }),
       done(),
       done(),
     ]);
-    await (await main.submit({ type: "input", content: "launch reader" }, context)).wait(context);
+    await (await main.submit({ type: "input", content: "start reader" }, context)).wait(context);
     await until(async () => (await orchestration.listRunning()).length === 0);
     await main.waitForIdle(context);
     const reader = Object.values((await orchestrationHistory(harness)).workers).find(
       (worker) => worker.id !== target.id,
     )!;
     await main.commit(async (tx) => {
-      (await tx.doc(WorkerDoc, target.id)).isCron = targetCron;
-      (await tx.doc(WorkerDoc, reader.id)).isCron = callerCron;
+      (await tx.doc(WorkerDoc, target.id)).isCron = true;
+      (await tx.doc(WorkerDoc, reader.id)).isCron = true;
     }, context);
     faux.setResponses(
-      Array.from(
-        { length: 15 },
-        () => (request: { messages: readonly { role: string; content: unknown }[] }) => {
-          const last = request.messages.findLast((message) => message.role !== "system")!;
-          if (last.role === "user" && JSON.stringify(last.content).includes("reader"))
-            return call({ action, sessionId: String(target.id), prompt: "interference" });
-          return done();
-        },
-      ),
-    );
-    await (
-      await (await harness.conversation(reader.id, context))!.submit(
-        { type: "input", content: "reader" },
-        context,
-      )
-    ).wait(context);
-    await until(async () => (await orchestration.listRunning()).length === 0);
-    await main.waitForIdle(context);
-    const history = await orchestrationHistory(harness);
-    const messages = (await (await harness.conversation(reader.id, context))!.context(context))
-      .messages;
-    const result = messages.findLast(
-      (message) => message.role === "toolResult" && message.toolName === "subagent",
-    )!;
-    if (caller === "unrelated") {
-      expect(result.role === "toolResult" && result.isError).toBe(true);
-      expect(JSON.stringify(result.content)).toContain("coordination scope");
-      expect(history.workers[String(target.id)]).toEqual(target);
-    } else {
-      expect(JSON.stringify(result.content)).not.toContain("coordination scope");
-      expect(result.role === "toolResult" && !!result.isError).toBe(
-        action === "steer" || action === "queue",
-      );
-    }
-  },
-);
-
-test.each(
-  ["run", "resume"].flatMap((action) =>
-    [false, true].map((descendant) => ({ action, descendant })),
-  ),
-)(
-  "project cron $action stays in its workspace (descendant=$descendant)",
-  async ({ action, descendant }) => {
-    const { faux, open, orchestration } = await fixture(10_000, console.error, "test");
-    const { harness, main } = await open();
-    faux.setResponses([
-      call({ action: "run", prompt: "idle", workspaceId: "other" }),
-      done(),
-      done(),
-    ]);
-    await (await main.submit({ type: "input", content: "seed" }, context)).wait(context);
-    await until(async () => (await orchestration.listRunning()).length === 0);
-    await main.waitForIdle(context);
-    const target = Object.values((await orchestrationHistory(harness)).workers)[0]!;
-    faux.setResponses(
-      Array.from({ length: 30 }, () => (request) => {
+      Array.from({ length: 15 }, () => (request) => {
         const last = request.messages.findLast((message) => message.role !== "system")!;
-        const text = JSON.stringify(last.content);
-        if (last.role === "user" && text.includes("project cron"))
-          return descendant
-            ? call({ action: "run", prompt: "project child" })
-            : call({
-                action,
-                ...(action === "resume" ? { sessionId: String(target.id) } : {}),
-                prompt: "move",
-                workspaceId: "test",
-              });
-        if (last.role === "user" && text.includes("project child"))
-          return call({
-            action,
-            ...(action === "resume" ? { sessionId: String(target.id) } : {}),
-            prompt: "move",
-            workspaceId: "test",
-          });
+        if (last.role === "user" && JSON.stringify(last.content).includes("manage target"))
+          return call({ action, sessionId: String(target.id), prompt: "cross-workspace update" });
         return done();
       }),
     );
-    const job = await orchestration.addJob({
-      title: "Scheduled test task",
-      prompt: "project cron",
-      workspaceId: "other",
-      schedule: { kind: "at", in: "1h" },
-    });
-    await main.commit(async (tx) => {
-      (await tx.doc(OrchestrationDoc)).jobs[job.id]!.nextAt = Date.now() - 1;
-    }, context);
-    await orchestration.tick();
+    const conversation = (await harness.conversation(reader.id, context))!;
+    await (
+      await conversation.submit({ type: "input", content: "manage target" }, context)
+    ).wait(context);
     await until(async () => (await orchestration.listRunning()).length === 0);
-    await main.waitForIdle(context);
-    const workers = Object.values((await orchestrationHistory(harness)).workers);
-    const reader = workers.find(
-      (worker) => worker.prompt === (descendant ? "project child" : "project cron"),
-    )!;
-    const messages = (await (await harness.conversation(reader.id, context))!.context(context))
-      .messages;
-    const result = messages.findLast(
+    const result = (await conversation.context(context)).messages.findLast(
       (message) => message.role === "toolResult" && message.toolName === "subagent",
     )!;
-    expect(result.role === "toolResult" && result.isError).toBe(true);
-    expect(JSON.stringify(result.content)).toContain(
-      "Project workers delegate within their own workspace",
+    expect(JSON.stringify(result.content)).not.toContain("coordination scope");
+    expect(result.role === "toolResult" && !!result.isError).toBe(
+      action === "steer" || action === "queue",
     );
-    expect(workers.every((worker) => worker.workspaceId === "other")).toBe(true);
   },
 );
 
-test.each(["run", "resume"])(
-  "project %s cannot move work to the coordinator workspace",
-  async (action) => {
-    const { faux, open, orchestration } = await fixture(10_000, console.error, "test");
-    const { harness, main } = await open();
-    let readerId: string | undefined;
-    const responses = () =>
-      Array.from(
-        { length: 30 },
-        () => (request: { messages: readonly import("@earendil-works/pi-ai").Message[] }) => {
-          const last = request.messages.findLast((message) => message.role !== "system")!;
-          const text = JSON.stringify(last.content);
-          if (last.role === "user" && text.includes("launch"))
-            return call({ action: "run", prompt: "reader", workspaceId: "other" });
-          if (last.role === "user" && text.includes("reader"))
-            return call({
-              action,
-              ...(action === "resume" ? { sessionId: readerId! } : {}),
-              prompt: "cross workspace",
-              workspaceId: "test",
-            });
-          return done();
-        },
-      );
-    faux.setResponses(responses());
-    // For resume, target an idle peer in the reader's workspace.
-    if (action === "resume") {
-      faux.setResponses([
-        call({ action: "run", prompt: "idle", workspaceId: "other" }),
-        done(),
-        done(),
-      ]);
-      await (await main.submit({ type: "input", content: "seed" }, context)).wait(context);
-      await until(async () => (await orchestration.listRunning()).length === 0);
-      await main.waitForIdle(context);
-      readerId = String(Object.values((await orchestrationHistory(harness)).workers)[0]!.id);
-      faux.setResponses(responses());
-    }
-    await (await main.submit({ type: "input", content: "launch" }, context)).wait(context);
+test.each(["run", "resume"])("project cron can %s across workspaces", async (action) => {
+  const { faux, open, orchestration } = await fixture(10_000, console.error, "test");
+  const { harness, main } = await open();
+  const idleTarget = action === "resume";
+  if (idleTarget) {
+    faux.setResponses([
+      call({ action: "run", prompt: "idle target", workspaceId: "test" }),
+      done(),
+      done(),
+    ]);
+    await (await main.submit({ type: "input", content: "seed target" }, context)).wait(context);
     await until(async () => (await orchestration.listRunning()).length === 0);
     await main.waitForIdle(context);
-    const workers = Object.values((await orchestrationHistory(harness)).workers);
-    const reader = workers.find((worker) => worker.prompt === "reader")!;
-    const messages = (await (await harness.conversation(reader.id, context))!.context(context))
-      .messages;
-    const result = messages.findLast(
-      (message) => message.role === "toolResult" && message.toolName === "subagent",
-    )!;
-    expect(result.role === "toolResult" && result.isError).toBe(true);
-    expect(JSON.stringify(result.content)).toContain(
-      "Project workers delegate within their own workspace",
+  }
+  const existingTarget = idleTarget
+    ? String(Object.values((await orchestrationHistory(harness)).workers)[0]!.id)
+    : undefined;
+  faux.setResponses(
+    Array.from({ length: 40 }, () => (request) => {
+      const last = request.messages.findLast((message) => message.role !== "system")!;
+      const text = JSON.stringify(last.content);
+      if (last.role === "user" && text.includes("scheduled project task"))
+        return call({
+          action,
+          ...(action === "resume" ? { sessionId: existingTarget! } : {}),
+          prompt: "cross-workspace scheduled work",
+          workspaceId: "test",
+        });
+      return done();
+    }),
+  );
+  const job = await orchestration.addJob({
+    title: "Scheduled test task",
+    prompt: "scheduled project task",
+    workspaceId: "other",
+    schedule: { kind: "at", in: "1h" },
+  });
+  await main.commit(async (tx) => {
+    (await tx.doc(OrchestrationDoc)).jobs[job.id]!.nextAt = Date.now() - 1;
+  }, context);
+  await orchestration.tick();
+  await until(async () => (await orchestration.listRunning()).length === 0);
+  await main.waitForIdle(context);
+  const workers = Object.values((await orchestrationHistory(harness)).workers);
+  const cron = workers.find((worker) => worker.prompt === "scheduled project task")!;
+  const result = (
+    await (await harness.conversation(cron.id, context))!.context(context)
+  ).messages.findLast(
+    (message) => message.role === "toolResult" && message.toolName === "subagent",
+  )!;
+  expect(result.role === "toolResult" && !!result.isError).toBe(false);
+  if (action === "run") {
+    expect(workers.some((worker) => worker.prompt === "cross-workspace scheduled work")).toBe(true);
+    expect(
+      workers.find((worker) => worker.prompt === "cross-workspace scheduled work")!.workspaceId,
+    ).toBe("test");
+  } else {
+    expect(workers.find((worker) => String(worker.id) === existingTarget)!.workspaceId).toBe(
+      "test",
     );
-    expect(workers.every((worker) => worker.workspaceId === "other")).toBe(true);
-  },
-);
+  }
+});
+
+test("await remains limited to direct children", async () => {
+  const { faux, open, orchestration } = await fixture(10_000);
+  const { harness, main } = await open();
+  faux.setResponses([
+    call({ action: "run", prompt: "first reader", workspaceId: "other" }),
+    done(),
+    done(),
+  ]);
+  await (await main.submit({ type: "input", content: "launch first" }, context)).wait(context);
+  await until(async () => (await orchestration.listRunning()).length === 0);
+  await main.waitForIdle(context);
+  faux.setResponses([
+    call({ action: "run", prompt: "second reader", workspaceId: "test" }),
+    done(),
+    done(),
+  ]);
+  await (await main.submit({ type: "input", content: "launch second" }, context)).wait(context);
+  await until(async () => (await orchestration.listRunning()).length === 0);
+  await main.waitForIdle(context);
+  const workers = Object.values((await orchestrationHistory(harness)).workers);
+  const worker = workers.find((candidate) => candidate.prompt === "first reader")!;
+  const unrelated = workers.find((candidate) => candidate.prompt === "second reader")!;
+  faux.setResponses([call({ action: "await", sessionId: String(unrelated.id) }), done()]);
+  const conversation = (await harness.conversation(worker.id, context))!;
+  await (
+    await conversation.submit({ type: "input", content: "attempt invalid await" }, context)
+  ).wait(context);
+  await until(async () => (await orchestration.listRunning()).length === 0);
+  const messages = (await conversation.context(context)).messages;
+  const result = messages.findLast(
+    (message) => message.role === "toolResult" && message.toolName === "subagent",
+  )!;
+  expect(result.role === "toolResult" && result.isError).toBe(true);
+  expect(JSON.stringify(result.content)).toContain("Await requires a child of this session");
+});

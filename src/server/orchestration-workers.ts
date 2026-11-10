@@ -117,21 +117,12 @@ export function createWorkers(
     return true;
   }
 
-  async function coordinationScope(tx: Tx, callerId: ConversationId, assistantId?: string) {
+  async function coordinationScope(tx: Tx, callerId: ConversationId) {
     const state = await tx.doc(OrchestrationDoc);
-    const caller = await tx.doc(WorkerDoc, callerId);
     const scope = await workerScope(tx, callerId, state.mainId!);
     if (!scope) throw new Error("Subagent tools require main or an assigned worker");
-    const coordinator =
-      callerId === state.mainId ||
-      (assistantId !== undefined && caller.workspaceId === assistantId);
     return {
-      canDelegate: (workspaceId: string) => coordinator || workspaceId === caller.workspaceId,
-      visible: async (candidate: { id: ConversationId; workspaceId: string }) => {
-        const candidateScope = await workerScope(tx, candidate.id, state.mainId!);
-        if (!candidateScope) return false;
-        return coordinator || candidate.workspaceId === caller.workspaceId;
-      },
+      visible: (candidate: { id: ConversationId }) => workerScope(tx, candidate.id, state.mainId!),
     };
   }
 
@@ -301,7 +292,6 @@ export function createWorkers(
       const candidate = state?.workers[id] ?? (await api.snapshot(ArchivedWorker, id, ctx));
       if (candidate) seeds.set(id, candidate);
     }
-    const assistantWorkspaceId = await services.assistantWorkspaceId();
     const local = await api.commit(async (tx) => {
       const state = await tx.doc(OrchestrationDoc);
       const findWorker = async (id: string) => {
@@ -309,7 +299,7 @@ export function createWorkers(
         const seed = seeds.get(id);
         return state.workers[id] ?? (seed ? await tx.doc(ArchivedWorker, id, seed) : undefined);
       };
-      const { visible } = await coordinationScope(tx, api.conversationId, assistantWorkspaceId);
+      const { visible } = await coordinationScope(tx, api.conversationId);
       const summary = async (candidate: NonNullable<typeof state>["workers"][string]) => {
         const task = candidate.active === undefined ? undefined : await tx.task(candidate.active);
         return {
@@ -403,7 +393,7 @@ export function createWorkers(
   const workerTool = {
     name: "subagent",
     description:
-      "Run, await, queue, resume, steer or stop subagents. Remote instances: workspaces lists configured nodes, their workspaces (including isAssistant), available models with supported thinking levels, and defaultModel. Omit model to use the receiving main agent’s model. Pass nodeId to run remotely; returned remote Session IDs work with lifecycle actions without repeating nodeId. Remote workers use the receiving installation's models, tools and main-memory context, not the sender's history. Coordinator list includes remote mirrors. File artifacts are imported locally; sites and live browsers are not relayed. Send files with run, queue, resume or steer using files: [{path: 'local/path'}] or [{ref: 'file:...'}]. Selected files are immutable snapshots copied to the receiving installation; images are visible to its model. Maximum 32 files and 100 MiB total per message. Workers always run asynchronously: run, queue and resume return a Session ID immediately, without waiting for completion. Start workers with run, then use await to join their results. run creates a new session and rejects sessionId; await/queue/resume/steer/stop require sessionId. queue/resume/steer/stop use the same coordination scope as discovery; worker await joins a direct child. Project workers, including cron workers, delegate within their own workspace; main and assistant-workspace coordinators may delegate across workspaces. These are coordination guardrails, not a security boundary. list discovers subagents (stable sessionId, workspace, status), scanning up to limit conversations per page (default 50, max 100); pass nextCursor back as cursor even for empty pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. All assigned workers, including cron roots and descendants, can discover, inspect and explicitly manage ordinary and cron workers in their own workspace. Main and workers in the configured assistant workspace can do so across all workspaces. Cron runs and their queues remain distinct; cron ancestry does not restrict coordination. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
+      "Run, await, queue, resume, steer or stop subagents. Remote instances: workspaces lists configured nodes, their workspaces (including isAssistant), available models with supported thinking levels, and defaultModel. Omit model to use the receiving main agent’s model. Pass nodeId to run remotely; returned remote Session IDs work with lifecycle actions without repeating nodeId. Remote workers use the receiving installation's models, tools and main-memory context, not the sender's history. Coordinator list includes remote mirrors. File artifacts are imported locally; sites and live browsers are not relayed. Send files with run, queue, resume or steer using files: [{path: 'local/path'}] or [{ref: 'file:...'}]. Selected files are immutable snapshots copied to the receiving installation; images are visible to its model. Maximum 32 files and 100 MiB total per message. Workers always run asynchronously: run, queue and resume return a Session ID immediately, without waiting for completion. Start workers with run, then use await to join their results. run creates a new session and rejects sessionId; await/queue/resume/steer/stop require sessionId. queue/resume/steer/stop use the same coordination scope as discovery; worker await joins a direct child. Main and assigned workers, including cron workers, may delegate across local workspaces and connected installations. These are coordination guardrails, not a security boundary. list discovers subagents (stable sessionId, workspace, status), scanning up to limit conversations per page (default 50, max 100); pass nextCursor back as cursor even for empty pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. Main and all assigned workers, including cron roots and descendants, can discover, inspect and explicitly manage ordinary and cron workers across all workspaces. Cron runs and their queues remain distinct; cron ancestry does not restrict coordination. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
     replay: "safe" as const,
     parameters: Type.Object({
       action: Type.Union(
@@ -448,24 +438,14 @@ export function createWorkers(
     execute: async (args: WorkerCommand, api: WorkerCommandContext, ctx: Context) => {
       if (args.files !== undefined && !["run", "queue", "resume", "steer"].includes(args.action))
         throw new Error("files are supported only on run, queue, resume and steer");
-      const remoteCoordinator = async () => {
-        const state = await api.snapshot(OrchestrationDoc, ctx);
-        if (api.conversationId === state?.mainId) return true;
-        const caller = await api.snapshot(WorkerDoc, api.conversationId, ctx);
-        const assistant = await services.assistantWorkspaceId();
-        return assistant !== undefined && caller?.workspaceId === assistant;
-      };
+      await api.commit(async (tx) => {
+        await coordinationScope(tx, api.conversationId);
+      }, ctx);
       if (args.action === "workspaces") {
-        if (!(await remoteCoordinator()))
-          throw new Error(
-            "Remote workspace discovery is available only to the main session and workers in the configured assistant workspace",
-          );
         if (!services.remoteWorkers) return reply("[]");
         return reply(JSON.stringify(await services.remoteWorkers.workspaces(args.nodeId)));
       }
       if (args.nodeId || args.sessionId?.startsWith("remote:")) {
-        if (!(await remoteCoordinator()))
-          throw new Error("Remote delegation requires the assistant coordinator");
         if (api.remoteAssignment) throw new Error("Node commands cannot re-export remote workers");
         if (!services.remoteWorkers) throw new Error("Remote instances are not configured");
         return services.remoteWorkers.command(args, api, ctx);
@@ -568,8 +548,7 @@ export function createWorkers(
           args.action === "list" &&
           !api.remoteAssignment &&
           services.remoteWorkers &&
-          !args.cursor &&
-          (await remoteCoordinator())
+          !args.cursor
         ) {
           const result = JSON.parse(local.output[0]!.text) as { workers: unknown[] };
           result.workers.push(...services.remoteWorkers.list());
@@ -584,12 +563,11 @@ export function createWorkers(
         : undefined;
       if (args.action !== "run" && (!worker || !(await api.conversation(worker.id, ctx))))
         throw missingWorker(workerId!);
-      const assistantWorkspaceId = await services.assistantWorkspaceId();
       if (worker && !existingCall && args.action !== "await")
         await api.commit(async (tx) => {
           if (!(await tx.conversation(worker.id))) throw missingWorker(workerId!);
           const current = (await tx.doc(OrchestrationDoc)).workers[workerId!] ?? worker;
-          const scope = await coordinationScope(tx, api.conversationId, assistantWorkspaceId);
+          const scope = await coordinationScope(tx, api.conversationId);
           if (!(await scope.visible(current)))
             throw new Error("Subagent is outside this session's coordination scope");
         }, ctx);
@@ -757,11 +735,7 @@ export function createWorkers(
           if (args.sessionId && !(await tx.conversation(Number(args.sessionId) as ConversationId)))
             throw missingWorker(args.sessionId);
           if (prior) return { ...prior };
-          const scope = await coordinationScope(tx, api.conversationId, assistantWorkspaceId);
-          if (!scope.canDelegate(ws.id))
-            throw new Error(
-              "Project workers delegate within their own workspace; ask the assistant coordinator for cross-workspace work",
-            );
+          const scope = await coordinationScope(tx, api.conversationId);
           if (args.sessionId && !doc.workers[args.sessionId]) {
             doc.workers[args.sessionId] = {
               ...(await tx.doc(ArchivedWorker, args.sessionId, worker!)),

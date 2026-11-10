@@ -1552,6 +1552,8 @@ test.each([404, 503])(
         ),
         fauxAssistantMessage([fauxText("Remote final despite missing attachment")]),
       ]);
+      // A project worker has the same remote coordination access as main.
+      await mkdir(join(directory, "a", "project"));
       let started = false;
       let remoteStarted = false;
       let receivedImportFailure = false;
@@ -1563,7 +1565,7 @@ test.each([404, 503])(
               [
                 fauxToolCall("subagent", {
                   action: "run",
-                  workspaceId: "work",
+                  workspaceId: "project",
                   prompt: "Coordinate remote evidence",
                 }),
               ],

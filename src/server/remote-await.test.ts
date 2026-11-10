@@ -3,6 +3,9 @@ import { EventEmitter } from "node:events";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { expect, test, vi } from "vite-plus/test";
 import { RemoteWorkers } from "./remote-workers";
+import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
+import { OrchestrationDoc } from "./orchestration-state";
+import type { WorkerCommandContext } from "./orchestration-workers";
 
 type Status = { status: string; text?: string };
 const input = {
@@ -181,6 +184,86 @@ test("abort during status fetch cannot deliver its subsequent completion", async
   expect(state.submit).not.toHaveBeenCalled();
   expect(state.changes.listenerCount("catalog")).toBe(0);
 });
+
+test.each(
+  (["worker", "cron root"] as const).flatMap((caller) =>
+    (["running", "completed"] as const).map((status) => ({ caller, status })),
+  ),
+)(
+  "$caller may await only its own remote child when $status, before dispatch",
+  async ({ caller, status }) => {
+    const parentId = 2 as ConversationId;
+    const connection = vi.fn().mockReturnValue({ id: "mac" });
+    const nodeRequest = vi.fn().mockResolvedValue({
+      output: [
+        {
+          type: "text",
+          text: `${status === "running" ? "Awaiting subagent" : "Subagent finished"}. Session ID: 12`,
+        },
+      ],
+      details: { assignmentId: "34" },
+    });
+    const assignment = vi.fn().mockResolvedValue({ status: "completed", text: "child finished" });
+    const commit = vi.fn().mockResolvedValue(undefined);
+    const snapshot = vi
+      .fn()
+      .mockImplementation(async (doc) =>
+        doc === OrchestrationDoc ? { mainId: 1 } : { isSubagent: caller === "worker" },
+      );
+    const api = {
+      conversationId: parentId,
+      taskId: 7,
+      snapshot,
+      commit,
+      details: vi.fn(),
+    } as unknown as WorkerCommandContext;
+    const assignments = [
+      // Neither another parent's child nor this parent's same-ID child on a different peer qualifies.
+      { node: "mac", session: "12", parentId: 3 },
+      { node: "other-peer", session: "12", parentId },
+      { node: "mac", session: "13", parentId },
+    ];
+    const receiver = {
+      index: { assignments },
+      connection,
+      nodeRequest,
+      assignment,
+      mirrors: new Map(),
+      follow: vi.fn(),
+    } as unknown as RemoteWorkers;
+    const command = () =>
+      RemoteWorkers.prototype.command.call(
+        receiver,
+        { action: "await", sessionId: "remote:mac:12" },
+        api,
+        context,
+      );
+
+    await expect(command()).rejects.toThrow("Await requires a remote child of this session");
+    expect(connection).not.toHaveBeenCalled();
+    expect(nodeRequest).not.toHaveBeenCalled();
+    expect(assignment).not.toHaveBeenCalled();
+    expect(commit).not.toHaveBeenCalled();
+
+    assignments.push({ node: "mac", session: "12", parentId });
+    const result = await command();
+    expect(nodeRequest).toHaveBeenCalledExactlyOnceWith(
+      { id: "mac" },
+      "node.command",
+      { requestId: "tool:2:7", command: { action: "await", sessionId: "12" } },
+      {},
+    );
+    if (status === "running") {
+      expect(result).toMatchObject({ control: { terminate: true } });
+      expect(commit).toHaveBeenCalledTimes(1);
+      expect(assignment).not.toHaveBeenCalled();
+    } else {
+      expect(result).toMatchObject({ output: [{ text: "child finished" }] });
+      expect(assignment).toHaveBeenCalledExactlyOnceWith("mac", "34");
+      expect(commit).not.toHaveBeenCalled();
+    }
+  },
+);
 
 test("already aborted wait does not fetch or retain listeners", async () => {
   const state = fixture();

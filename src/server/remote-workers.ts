@@ -31,7 +31,7 @@ import { stateDirPath } from "./options";
 import { encodeRuntimeNotice } from "./runtime-notices";
 import { reportWithArtifacts } from "./artifact-forwarding";
 import type { AgentTurnArtifacts } from "./agent-turn-file-changes";
-import { WorkerDoc } from "./orchestration-state";
+import { OrchestrationDoc, WorkerDoc } from "./orchestration-state";
 import { storeSentFiles } from "./send-files";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 
@@ -580,6 +580,19 @@ export class RemoteWorkers {
         await this.write("assignments.json", this.index);
       });
     }
+    if (action === "await") {
+      const state = await api.snapshot(OrchestrationDoc, context);
+      if (
+        api.conversationId !== state?.mainId &&
+        !this.index.assignments.some(
+          (item) =>
+            item.node === node &&
+            item.session === parsed?.session &&
+            item.parentId === api.conversationId,
+        )
+      )
+        throw new Error("Await requires a remote child of this session");
+    }
     const result = await this.nodeRequest(
       this.connection(node),
       "node.command",
@@ -644,17 +657,6 @@ export class RemoteWorkers {
     if (args.action === "await") {
       const assignmentId = (result.details as { assignmentId: string }).assignmentId;
       if (text.startsWith("Awaiting")) {
-        const parent = await api.snapshot(WorkerDoc, api.conversationId, context);
-        if (
-          parent?.isSubagent &&
-          !this.index.assignments.some(
-            (item) =>
-              item.node === node &&
-              item.session === session &&
-              item.parentId === api.conversationId,
-          )
-        )
-          throw new Error("Await requires a remote child of this session");
         await api.commit(async (tx) => {
           const metadata = await tx.doc(WorkerDoc, api.conversationId);
           const key = `remote:${node}:${assignmentId}`;

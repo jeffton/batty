@@ -159,47 +159,51 @@ export function createSessionOperations(
       }),
     };
   });
-  add("main.submit", async (input, rpc) => {
-    if (
-      !["prompt", "steer"].includes(input.kind) ||
-      typeof input.text !== "string" ||
-      (input.clientMessageId !== undefined && typeof input.clientMessageId !== "string")
-    )
-      badInput("Invalid prompt");
-    if (input.correlationId && /^[a-f0-9-]{36}$/.test(input.correlationId))
-      services.logSubmission?.(input.correlationId);
-    const files = await promptFiles(input.files, rpc);
-    rpc.signal.throwIfAborted();
-    if (!input.text.trim() && !files.length) badInput("Missing message");
-    const attachments = await preparePromptFiles(
-      config.uploadsDir,
-      String(runtime.main.id),
-      files,
-      config.baseUrl,
-    );
-    const wasBusy = (await runtime.state("main", undefined, false)).isStreaming;
-    const content: UserMessage["content"] = [
-      { type: "text", text: [input.text, attachments.text].filter(Boolean).join("\n\n") },
-      ...attachments.images,
-    ];
-    await runtime.useDefaultModel();
-    rpc.signal.throwIfAborted();
-    const submission = await runtime.main.submit(
-      {
-        type: "input",
-        content,
-        requestId: input.clientMessageId,
-        whenBusy: input.kind === "steer" ? "steer" : "followUp",
-      },
-      context,
-    );
-    await retainInput(runtime.main, submission.id, content, input.clientMessageId);
-    return {
-      disposition: wasBusy ? ("queued" as const) : ("started" as const),
-      submissionId: String(submission.id),
-      sessionId: String(runtime.main.id),
-    };
-  });
+  add(
+    "main.submit",
+    async (input, rpc) => {
+      if (
+        !["prompt", "steer"].includes(input.kind) ||
+        typeof input.text !== "string" ||
+        (input.clientMessageId !== undefined && typeof input.clientMessageId !== "string")
+      )
+        badInput("Invalid prompt");
+      if (input.correlationId && /^[a-f0-9-]{36}$/.test(input.correlationId))
+        services.logSubmission?.(input.correlationId);
+      const files = await promptFiles(input.files, rpc);
+      rpc.signal.throwIfAborted();
+      if (!input.text.trim() && !files.length) badInput("Missing message");
+      const attachments = await preparePromptFiles(
+        config.uploadsDir,
+        String(runtime.main.id),
+        files,
+        config.baseUrl,
+      );
+      const wasBusy = (await runtime.state("main", undefined, false)).isStreaming;
+      const content: UserMessage["content"] = [
+        { type: "text", text: [input.text, attachments.text].filter(Boolean).join("\n\n") },
+        ...attachments.images,
+      ];
+      await runtime.useDefaultModel();
+      rpc.signal.throwIfAborted();
+      const submission = await runtime.main.submit(
+        {
+          type: "input",
+          content,
+          requestId: input.clientMessageId,
+          whenBusy: input.kind === "steer" ? "steer" : "followUp",
+        },
+        context,
+      );
+      await retainInput(runtime.main, submission.id, content, input.clientMessageId);
+      return {
+        disposition: wasBusy ? ("queued" as const) : ("started" as const),
+        submissionId: String(submission.id),
+        sessionId: String(runtime.main.id),
+      };
+    },
+    { body: true },
+  );
   add("main.stop", async () => {
     await runtime.tools.abortConversation(runtime.main.id);
     await runtime.main.abort(context);

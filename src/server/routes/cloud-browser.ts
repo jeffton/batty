@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { Check } from "typebox/value";
 import type { FastifyInstance } from "fastify";
 import websocket from "@fastify/websocket";
+import { WebSocketServer } from "ws";
+import type { IncomingMessage } from "node:http";
 import type { CloudBrowserControl, CloudBrowserTouch } from "@/shared/cloud-browser";
 import type { BrowserService } from "../browser-service";
 import { CloudBrowserSocketCommandSchema } from "../browser-schemas";
@@ -15,8 +17,27 @@ export async function registerCloudBrowserRoutes(
   browser: BrowserService,
   baseUrl: string,
 ): Promise<() => Promise<void>> {
-  if (!app.hasDecorator("websocketServer"))
+  const sharedServer = app.hasDecorator("websocketServer") ? app.websocketServer : undefined;
+  if (!sharedServer)
     await app.register(websocket, { options: { maxPayload: 2048, perMessageDeflate: false } });
+  // ws checks maxPayload while decoding frames, before assembling their payload.
+  // Keep browser commands at 2048 bytes even when RPC accepts larger JSON values.
+  const controls = sharedServer
+    ? new WebSocketServer({ noServer: true, maxPayload: 2048, perMessageDeflate: false })
+    : undefined;
+  const controlRequests = new WeakSet<IncomingMessage>();
+  if (sharedServer && controls) {
+    const handleUpgrade = sharedServer.handleUpgrade;
+    sharedServer.handleUpgrade = function (request, socket, head, callback) {
+      if (controlRequests.has(request)) controls.handleUpgrade(request, socket, head, callback);
+      else handleUpgrade.call(this, request, socket, head, callback);
+    };
+    app.addHook("preClose", async () => {
+      sharedServer.handleUpgrade = handleUpgrade;
+      for (const socket of controls.clients) socket.terminate();
+      await new Promise<void>((resolve) => controls.close(() => resolve()));
+    });
+  }
   const streams = new CloudBrowserStreams(browser);
   const prefix = "/api/cloud-browser/:browserId";
   const selectionError = (
@@ -39,6 +60,7 @@ export async function registerCloudBrowserRoutes(
           return reply.code(403).send({ error: "Same-origin browser control required." });
         // Ordinary onRequest auth runs before upgrade; expiry must also reject before upgrade.
         await browser.cloudTarget(request.params.browserId);
+        controlRequests.add(request.raw);
       },
     },
     (socket, request) => {

@@ -100,39 +100,46 @@ export function createNodeRpcHandler(
     await unpairPeer(remotes, grantId);
     return { ok: true };
   });
-  registry.streaming("node.command", async (input, call) => {
-    const body = input;
-    const command = body?.command;
-    if (
-      !command ||
-      typeof body.requestId !== "string" ||
-      !body.requestId.trim() ||
-      !["run", "resume", "queue", "steer", "stop", "list", "inspect", "await"].includes(
-        command.action,
-      ) ||
-      ("nodeId" in command && command.nodeId) ||
-      ("files" in command && command.files !== undefined) ||
-      command.sessionId?.startsWith("remote:")
-    )
-      throw new RpcError("BAD_INPUT", "Invalid node worker action or requestId");
-    let files;
-    if (body.files !== undefined) {
-      validateWorkerFileMetadata(body.files);
-      if (!["run", "queue", "resume", "steer"].includes(command.action) || !call.body)
-        throw new RpcError("BAD_INPUT", "Worker files require a supported action and binary body");
-      files = await receiveWorkerFileStreams(
-        { rootDir: runtime.config.sentFilesDir, baseUrl: runtime.config.baseUrl },
-        `node:${grantId}:${body.requestId}`,
-        body.files,
-        fileParts(body.files, call.body, call.signal),
-      );
-    } else if (call.body) throw new RpcError("BAD_INPUT", "Unexpected worker file body");
-    call.signal.throwIfAborted();
-    authorizeNode(remotes, connection);
-    return {
-      value: await runtime.orchestration.nodeCommand(grantId, body.requestId, command, files),
-    };
-  });
+  registry.streaming(
+    "node.command",
+    async (input, call) => {
+      const body = input;
+      const command = body?.command;
+      if (
+        !command ||
+        typeof body.requestId !== "string" ||
+        !body.requestId.trim() ||
+        !["run", "resume", "queue", "steer", "stop", "list", "inspect", "await"].includes(
+          command.action,
+        ) ||
+        ("nodeId" in command && command.nodeId) ||
+        ("files" in command && command.files !== undefined) ||
+        command.sessionId?.startsWith("remote:")
+      )
+        throw new RpcError("BAD_INPUT", "Invalid node worker action or requestId");
+      let files;
+      if (body.files !== undefined) {
+        validateWorkerFileMetadata(body.files);
+        if (!["run", "queue", "resume", "steer"].includes(command.action) || !call.body)
+          throw new RpcError(
+            "BAD_INPUT",
+            "Worker files require a supported action and binary body",
+          );
+        files = await receiveWorkerFileStreams(
+          { rootDir: runtime.config.sentFilesDir, baseUrl: runtime.config.baseUrl },
+          `node:${grantId}:${body.requestId}`,
+          body.files,
+          fileParts(body.files, call.body, call.signal),
+        );
+      } else if (call.body) throw new RpcError("BAD_INPUT", "Unexpected worker file body");
+      call.signal.throwIfAborted();
+      authorizeNode(remotes, connection);
+      return {
+        value: await runtime.orchestration.nodeCommand(grantId, body.requestId, command, files),
+      };
+    },
+    { body: true },
+  );
   registry.add("node.assignment", async (input) => {
     const { assignmentId } = input;
     if (!/^\d+$/.test(assignmentId)) throw new RpcError("BAD_INPUT", "Invalid assignment ID");

@@ -348,6 +348,8 @@ function delayedLink(handle: RpcHandler, holdEnds = false) {
       deliveries.push(...ends.splice(0));
     },
     async advance() {
+      // Socket writes are serialized asynchronously; let admitted writes reach the link.
+      await setImmediate();
       const current = deliveries;
       deliveries = [];
       for (const delivery of current) delivery();

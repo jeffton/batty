@@ -1,5 +1,5 @@
 import WebSocket from "ws";
-import { RpcChannel, RpcError } from "../shared/rpc";
+import { RPC_MAX_MESSAGE_BYTES, RpcChannel, RpcError } from "../shared/rpc";
 import type { NodeOutputs } from "../shared/node-api";
 import type { RemoteConnectionCredentials } from "./remote-access";
 import type { RemoteWorkers } from "./remote-workers";
@@ -178,7 +178,7 @@ export class ReverseConnections {
             "x-batty-instance-id": this.remotes.access.identity().instanceId,
           },
           handshakeTimeout: 30_000,
-          maxPayload: 0,
+          maxPayload: RPC_MAX_MESSAGE_BYTES,
           perMessageDeflate: false,
           followRedirects: false,
         });

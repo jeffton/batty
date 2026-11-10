@@ -1,7 +1,7 @@
 import websocket from "@fastify/websocket";
 import type { FastifyInstance } from "fastify";
 import type { Runtime } from "../runtime";
-import type { RpcHandler } from "../../shared/rpc";
+import { RPC_MAX_MESSAGE_BYTES, type RpcHandler } from "../../shared/rpc";
 import { registerOwnerSocket } from "../owner-socket";
 
 /** A browser and a paired node share framing, not authorization or operations. */
@@ -11,8 +11,8 @@ export async function registerReverseRemoteRoutes(
   ownerHandler?: RpcHandler,
 ) {
   await app.register(websocket, {
-    // Event values can include archive pages; only binary chunks have a frame-size bound.
-    options: { maxPayload: 0, perMessageDeflate: false },
+    // Match the HTTP JSON body limit; file streams remain independently chunked.
+    options: { maxPayload: RPC_MAX_MESSAGE_BYTES, perMessageDeflate: false },
   });
   const closeOwners = ownerHandler
     ? registerOwnerSocket(app, runtime.config, ownerHandler)

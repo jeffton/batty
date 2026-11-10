@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { RpcChannel, RpcError, type RpcHandler } from "../shared/rpc";
-import { verifyAuthToken } from "./auth";
+import { authTokenExpiresAt, onAuthTokenLogout, verifyAuthToken } from "./auth";
 
 type OwnerCredentials = { authSecret: string; cookieName: string };
 
@@ -23,7 +23,7 @@ export function registerOwnerSocket(
       },
     },
     (socket, request) => {
-      const token = request.cookies[credentials.cookieName];
+      const token = request.cookies[credentials.cookieName]!;
       const channel = new RpcChannel(socket, {
         handle: async (operation, input, context) => {
           if (!verifyAuthToken(credentials.authSecret, token))
@@ -32,7 +32,24 @@ export function registerOwnerSocket(
         },
       });
       channels.add(channel);
-      void channel.closed.then(() => channels.delete(channel));
+      const stopLogout = onAuthTokenLogout(credentials.authSecret, token, () => channel.close());
+      let expiryTimer: ReturnType<typeof setTimeout>;
+      const expire = () => {
+        const expiresAt = authTokenExpiresAt(credentials.authSecret, token);
+        if (expiresAt === undefined) {
+          channel.close();
+          return;
+        }
+        // Node timers cannot represent a delay beyond signed 32-bit milliseconds.
+        expiryTimer = setTimeout(expire, Math.min(expiresAt - Date.now(), 2 ** 31 - 1));
+        expiryTimer.unref();
+      };
+      expire();
+      void channel.closed.then(() => {
+        clearTimeout(expiryTimer);
+        stopLogout();
+        channels.delete(channel);
+      });
     },
   );
   return () => {

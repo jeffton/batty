@@ -100,6 +100,8 @@ test.each(["Chromium", "WebKit"])(
       await expect.poll(() => requests.length).toBe(1);
       // Keep real WebSocket streaming and browser state; advance only the handshake timer.
       await page.clock.fastForward(5000);
+      // Resume transport drain timers; only the stalled handshake is time-skipped.
+      await page.clock.resume();
       await expect
         .poll(() => page.locator("output").textContent(), { timeout: 10_000 })
         .toBe("online");

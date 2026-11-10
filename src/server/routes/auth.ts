@@ -1,6 +1,6 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/server";
-import { createAuthToken } from "../auth";
+import { createAuthToken, notifyAuthTokenLogout } from "../auth";
 import type { RouteContext } from "./context";
 
 export function requestOrigin(request: FastifyRequest): string {
@@ -130,7 +130,8 @@ export function registerAuthRoutes(context: RouteContext): void {
     },
   );
 
-  app.post(routePath("/api/logout"), async (_request, reply) => {
+  app.post(routePath("/api/logout"), async (request, reply) => {
+    notifyAuthTokenLogout(config.authSecret, request.cookies[config.cookieName]);
     reply.clearCookie(config.cookieName, { path: config.baseUrl });
     reply.send({ ok: true });
   });

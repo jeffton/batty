@@ -8,11 +8,11 @@ Browser app traffic and paired-node runtime traffic share `RpcChannel`: named op
 
 HTTP remains for bootstrap, authentication, pairing, static assets, sites, navigation and natural resource downloads. Cloud-browser video retains its specialized WebSocket. HTTP also serves CLI cron/remotes, health/version and service stop. Superseded owner REST, node HTTP/SSE, browser-control, MCP and memory controllers are removed. Tests exercise native operations or shared domain services rather than preserving obsolete routes.
 
-The reusable `src/shared/rpc/` library separates channel framing from lazy client connection lifecycle. Owner and node operation maps specify inputs, results and event types. Registrations and callers share those contracts; callers cannot select an unrelated result type. A small typed registration helper checks handler results. Validation and authorization remain explicit domain policy. Both boundaries share error normalization, subscription cleanup and sequential file-byte splitting. The shared transport handles correlated calls, cancellation, heartbeat and binary flow control: 64 KiB frames with 16 credits, not a file-size limit. Object events preserve session cursors without SSE framing. Disconnect fails volatile calls without replay. Durable jobs, mirrors, request IDs and recovery cursors remain above the transport.
+The reusable `src/shared/rpc/` library separates channel framing from lazy client connection lifecycle. Owner and node operation maps specify inputs, results and event types. Registrations and callers share those contracts; callers cannot select an unrelated result type. A small typed registration helper checks handler results. Validation and authorization remain explicit domain policy. Both boundaries share error normalization, subscription cleanup and sequential file-byte splitting. The shared transport handles correlated calls, cancellation, heartbeat and binary flow control: 64 KiB frames with 16 credits, not a file-size limit. Object events preserve session cursors without SSE framing. One socket-wide writer awaits actual send completion across all calls and lanes: Node uses `ws` callbacks; browsers check `bufferedAmount` only while a write is pending, because WebSocket has no drain event. Producers await that writer as well as stream credits. Disconnect fails volatile calls without replay. Durable jobs, mirrors, request IDs and recovery cursors remain above the transport.
 
 ## Authorization
 
-Shared framing does not mean shared permissions. Browser upgrades require same-origin owner authentication; operations recheck the cookie. Node connections reject browser origins and bind bearer grants to installation identity. Control/file/unpair operations wait for verified identity and recheck grants. File storage roots remain server-owned. Removal closes streams and revokes access.
+Shared framing does not mean shared permissions. Browser upgrades require same-origin owner authentication; operations recheck the cookie. Node connections reject browser origins and bind bearer grants to installation identity. Control/file/unpair operations wait for verified identity and recheck grants. File storage roots remain server-owned. Removal closes streams and revokes peer access. Owner channels close at their signed cookie expiry; logout closes every active channel using that cookie. Authentication remains stateless: a copied cookie can open another connection until expiry. This experiment does not introduce persistent session revocation.
 
 ## Complexity
 
@@ -20,12 +20,19 @@ Counts include all changed/new TS, Vue, JS, MJS, CSS and HTML files, exclude doc
 
 | Comparison        | Production                           | Tests/fixtures                         |
 | ----------------- | ------------------------------------ | -------------------------------------- |
-| Main `06eb679`    | +3,270 / −2,772 = **+498**, 48 files | +4,021 / −2,450 = **+1,571**, 61 files |
-| Tunnel `540d7fa`  | +3,129 / −3,029 = **+100**, 50 files | +3,593 / −3,336 = **+257**, 62 files   |
-| Native `728eeaf`  | +1,022 / −1,885 = **−863**, 37 files | +1,009 / −1,239 = **−230**, 41 files   |
-| Cleanup `3a8b922` | +864 / −626 = **+238**, 23 files     | +338 / −16 = **+322**, 8 files         |
+| Main `06eb679`    | +3,440 / −2,787 = **+653**, 51 files | +4,493 / −2,450 = **+2,043**, 63 files |
+| Tunnel `540d7fa`  | +3,300 / −3,045 = **+255**, 53 files | +4,065 / −3,336 = **+729**, 64 files   |
+| Native `728eeaf`  | +1,169 / −1,947 = **−778**, 40 files | +1,481 / −1,241 = **+240**, 43 files   |
+| Cleanup `3a8b922` | +1,108 / −715 = **+393**, 29 files   | +812 / −18 = **+794**, 13 files        |
+| Typed `c3ece2e`   | +279 / −124 = **+155**, 11 files     | +474 / −2 = **+472**, 5 files          |
 
-The native operation model is cleaner than HTTP/SSE tunneled over WebSocket: business operations and typed inputs replace URL/status/header plumbing. Production code is slightly larger than main and the tunnel attempt. Shared mechanics, explicit contracts and removal of duplicate controllers cut 863 net production lines from the first native rewrite. The typed-contract follow-up adds 238 net production lines over the cleanup baseline; operation maps replace duplicated caller annotations and catch mismatched inputs, outputs and events at compile time. Renaming files contributes to the gross additions/removals; net counts include every source file. We also own multiplexing, flow control and stream lifetime that HTTP supplied previously.
+The native operation model is cleaner than HTTP/SSE tunneled over WebSocket: business operations and typed inputs replace URL/status/header plumbing. Production code is slightly larger than main and the tunnel attempt. Shared mechanics, explicit contracts and removal of duplicate controllers cut 778 net production lines from the first native rewrite. Contracts and resource handling add 393 net production lines over the cleanup baseline; operation maps replace duplicated caller annotations and catch mismatched inputs, outputs and events at compile time. Renaming files contributes to the gross additions/removals; net counts include every source file. We also own multiplexing, flow control and stream lifetime that HTTP supplied previously.
+
+## Resource handling
+
+RPC WebSocket messages have the same **100 MiB** admission bound as the existing HTTP JSON API. This is a message bound, not a file-transfer quota: byte streams use 64 KiB chunks and a regression transfers more than 100 MiB. Cloud-browser commands retain their independent **2048-byte** WebSocket receiver limit, including fragmented messages. Receiver limits apply before full payload assembly.
+
+Operations explicitly opt into request bodies. Unexpected uploads fail before side effects; unused input streams fail and clean up call state. Legitimate early replies can keep an actively consumed upload alive. Cancellation skips queued commands, cancels producers and releases reader locks. Tests stall both Node and browser send paths across multiple streams.
 
 ## Dependency
 
@@ -33,11 +40,11 @@ Server `ws` is pinned at 8.22.1; `@fastify/websocket` and `@types/ws` already ex
 
 ## Validation
 
-- Final isolated Arch full suite: 220 files, 1,127 passed, two existing skips. The successful runner printed `ECONNREFUSED localhost:3000`; this diagnostic remains unresolved.
+- Final isolated Arch serial full suite: 222 files, 1,140 passed, two existing skips. The successful runner printed `ECONNREFUSED localhost:3000`; this diagnostic remains unresolved.
 - `pnpm check` passed with ten existing lint warnings.
 - Build, strict offline checks at 390/1100 pixels, packaged startup at `/` and `/batty`, and both deployment regression scripts passed.
 - Real WebSocket tests cover peer identity admission, malicious early controls, bidirectional files/jobs, corrupt/interrupted transfers, cancellation, reconnect, restart and revocation. Client tests cover idle sessions, stale authentication generations and upload cancellation.
-- Independent Sol reviews approved transport, owner and peer authorization, client lifecycle, native architecture, typed contracts and shared stream/error helpers. Compile-time regressions reject invalid owner/node inputs, results and events.
+- Independent Sol reviews approved transport, owner and peer authorization, client lifecycle, native architecture, typed contracts and shared stream/error helpers. Compile-time regressions reject invalid owner/node inputs, results and events. Independent security review approved the resource-handling fixes. The first parallel full-suite run exposed registration-test module mock leakage (fixed with isolation), frozen-clock transport timers (test clock resumed), and the existing WebKit browser-autofill flake; the final serial suite passed without skips added.
 
 ## Boundaries
 

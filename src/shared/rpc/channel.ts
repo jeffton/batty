@@ -7,11 +7,16 @@
  */
 export const RPC_CHUNK_BYTES = 64 * 1024;
 export const RPC_MAX_FRAME_BYTES = RPC_CHUNK_BYTES + 37;
+/** Same JSON admission bound as the HTTP API bodyLimit. Files use streamed frames. */
+export const RPC_MAX_MESSAGE_BYTES = 100 * 1024 * 1024;
 export const RPC_WINDOW_CHUNKS = 16;
 
 export interface ChannelSocket {
   binaryType: string;
-  send(data: string | Uint8Array<ArrayBuffer>): void;
+  readonly bufferedAmount?: number;
+  /** Node ws supplies on() and send callbacks; browser WebSocket has neither. */
+  readonly on?: unknown;
+  send(data: string | Uint8Array<ArrayBuffer>, callback?: (error?: Error) => void): void;
   close(code?: number, reason?: string): void;
   addEventListener(type: "message", listener: (event: { data: unknown }) => void): void;
   addEventListener(type: "close" | "error", listener: () => void): void;
@@ -92,6 +97,8 @@ function asError(value: unknown): Error {
 export class RpcChannel {
   private readonly calls = new Map<string, Call>();
   private ended = false;
+  private writing: Promise<void> = Promise.resolve();
+  private rejectWrite?: (error: Error) => void;
   private lastActivity = Date.now();
   private readonly heartbeat: ReturnType<typeof setInterval>;
   private finishClosed!: () => void;
@@ -109,7 +116,9 @@ export class RpcChannel {
         this.close(new RpcError("OFFLINE", "RPC heartbeat expired"));
       else {
         try {
-          this.send({ type: "ping" });
+          void this.send({ type: "ping" }).catch(() =>
+            this.close(new RpcError("OFFLINE", "RPC socket failed")),
+          );
         } catch {
           this.close(new RpcError("OFFLINE", "RPC socket failed"));
         }
@@ -119,9 +128,11 @@ export class RpcChannel {
     socket.addEventListener("message", (event) => {
       if (this.ended) return;
       try {
-        if (typeof event.data === "string")
+        if (typeof event.data === "string") {
+          if (new TextEncoder().encode(event.data).byteLength > RPC_MAX_MESSAGE_BYTES)
+            throw new Error("Oversized RPC message");
           this.receive(JSON.parse(event.data) as Frame, options.handle);
-        else if (event.data instanceof ArrayBuffer) this.receiveBytes(new Uint8Array(event.data));
+        } else if (event.data instanceof ArrayBuffer) this.receiveBytes(new Uint8Array(event.data));
         else throw new Error("Unsupported frame");
         this.lastActivity = Date.now();
       } catch {
@@ -157,7 +168,9 @@ export class RpcChannel {
       }
       try {
         if (options.body) entry.outgoing.input = this.outbound(options.body);
-        this.send({ type: "call", id, operation, input, body: !!options.body });
+        void this.send({ type: "call", id, operation, input, body: !!options.body }).catch(
+          (error: unknown) => this.fail(id, asError(error), "error"),
+        );
       } catch (error) {
         this.fail(id, asError(error), "error");
       }
@@ -167,6 +180,8 @@ export class RpcChannel {
   close(error: Error = new RpcError("OFFLINE", "RPC socket closed")) {
     if (this.ended) return;
     this.ended = true;
+    this.rejectWrite?.(error);
+    this.rejectWrite = undefined;
     clearInterval(this.heartbeat);
     for (const id of this.calls.keys()) this.dispose(id, error);
     this.socket.close();
@@ -181,9 +196,54 @@ export class RpcChannel {
     return { reader: stream.getReader(), credits: 0, reading: false, ended: false };
   }
 
-  private send(frame: Frame) {
-    if (this.ended) throw new RpcError("OFFLINE", "RPC socket is offline");
-    this.socket.send(JSON.stringify(frame));
+  private send(frame: Frame): Promise<void> {
+    const data = JSON.stringify(frame);
+    if (new TextEncoder().encode(data).byteLength > RPC_MAX_MESSAGE_BYTES)
+      return Promise.reject(
+        new RpcError(
+          "BAD_INPUT",
+          "RPC JSON message exceeds the 100 MiB API limit; use streaming for file data",
+        ),
+      );
+    return this.write(
+      data,
+      "id" in frame && frame.type !== "cancel" && frame.type !== "error"
+        ? () => this.calls.has(frame.id)
+        : undefined,
+    );
+  }
+
+  /** Serialize actual socket drain across all calls/lanes.
+   * Browser WebSocket has no drain event: bufferedAmount is checked only while
+   * a write is outstanding. This is not connection or application status polling.
+   */
+  private write(data: string | Uint8Array<ArrayBuffer>, active?: () => boolean): Promise<void> {
+    const write = this.writing.then(async () => {
+      if (active && !active()) return;
+      if (this.ended) throw new RpcError("OFFLINE", "RPC socket is offline");
+      if (typeof this.socket.on === "function") {
+        try {
+          await new Promise<void>((resolve, reject) => {
+            this.rejectWrite = reject;
+            this.socket.send(data, (error) => (error ? reject(error) : resolve()));
+          });
+        } finally {
+          this.rejectWrite = undefined;
+        }
+      } else {
+        this.socket.send(data);
+        while (this.socket.bufferedAmount && !this.ended)
+          await new Promise<void>((resolve) => setTimeout(resolve, 4));
+      }
+      if (this.ended) throw new RpcError("OFFLINE", "RPC socket is offline");
+    });
+    const drained = write.catch(() => {
+      const error = new RpcError("OFFLINE", "RPC socket write failed");
+      this.close(error);
+      throw error;
+    });
+    this.writing = drained.catch(() => {});
+    return drained;
   }
 
   private stream<T>(id: string, lane: Lane, entry: Call): ReadableStream<T> {
@@ -212,7 +272,9 @@ export class RpcChannel {
           if (count) {
             inbound.credits += count;
             try {
-              this.send({ type: "credit", id, lane, count });
+              void this.send({ type: "credit", id, lane, count }).catch((error: unknown) =>
+                this.close(asError(error)),
+              );
             } catch (error) {
               this.close(asError(error));
             }
@@ -227,7 +289,7 @@ export class RpcChannel {
   private receive(frame: Frame, handle?: RpcHandler) {
     if (!frame || typeof frame !== "object") throw new Error("Invalid frame");
     if (frame.type === "ping") {
-      this.send({ type: "pong" });
+      void this.send({ type: "pong" }).catch((error: unknown) => this.close(asError(error)));
       return;
     }
     if (frame.type === "pong") return;
@@ -257,9 +319,13 @@ export class RpcChannel {
             await Promise.all([reply.body?.cancel(), reply.events?.cancel()]);
             return;
           }
+          if (context.body && entry.incoming.input && !context.body.locked) {
+            await Promise.all([reply.body?.cancel(), reply.events?.cancel()]);
+            throw new RpcError("BAD_INPUT", "RPC handler did not consume its request body");
+          }
           if (reply.body) entry.outgoing.body = this.outbound(reply.body);
           if (reply.events) entry.outgoing.events = this.outbound(reply.events);
-          this.send({
+          await this.send({
             type: "result",
             id: frame.id,
             value: reply.value,
@@ -385,11 +451,11 @@ export class RpcChannel {
           const item = await outgoing.reader.read();
           if (!this.calls.has(id)) return;
           if (item.done) {
-            this.endOutgoing(id, lane, entry, outgoing);
+            await this.endOutgoing(id, lane, entry, outgoing);
             return;
           }
           outgoing.credits--;
-          this.send({ type: "event", id, value: item.value });
+          await this.send({ type: "event", id, value: item.value });
           continue;
         }
         let bytes = outgoing.rest;
@@ -397,7 +463,7 @@ export class RpcChannel {
           const chunk = await outgoing.reader.read();
           if (!this.calls.has(id)) return;
           if (chunk.done) {
-            this.endOutgoing(id, lane, entry, outgoing);
+            await this.endOutgoing(id, lane, entry, outgoing);
             return;
           }
           if (!(chunk.value instanceof Uint8Array)) throw new Error("RPC body requires bytes");
@@ -410,7 +476,7 @@ export class RpcChannel {
         frame.set(new TextEncoder().encode(id), 1);
         frame.set(part, 37);
         outgoing.credits--;
-        this.socket.send(frame);
+        await this.write(frame, () => this.calls.has(id));
       }
     } catch (error) {
       this.fail(id, asError(error), "error");
@@ -419,8 +485,8 @@ export class RpcChannel {
     }
   }
 
-  private endOutgoing(id: string, lane: Lane, entry: Call, outgoing: Outbound) {
-    this.send({ type: "end", id, lane });
+  private async endOutgoing(id: string, lane: Lane, entry: Call, outgoing: Outbound) {
+    await this.send({ type: "end", id, lane });
     outgoing.ended = true;
     outgoing.credits = 0;
     outgoing.reader.releaseLock();
@@ -431,7 +497,7 @@ export class RpcChannel {
     if (!this.calls.has(id)) return;
     try {
       if (!this.ended)
-        this.send({
+        void this.send({
           type,
           id,
           code:
@@ -443,7 +509,7 @@ export class RpcChannel {
               : type === "cancel"
                 ? "RPC call cancelled"
                 : "RPC operation failed",
-        });
+        }).catch(() => this.close(new RpcError("OFFLINE", "RPC socket failed")));
     } catch {
       this.close(new RpcError("OFFLINE", "RPC socket failed"));
     } finally {
@@ -462,7 +528,11 @@ export class RpcChannel {
     }
     for (const outgoing of Object.values(entry.outgoing)) {
       outgoing.rest = undefined;
-      if (!outgoing.ended) void outgoing.reader.cancel(error).catch(() => {});
+      if (!outgoing.ended)
+        void outgoing.reader
+          .cancel(error)
+          .catch(() => {})
+          .finally(() => outgoing.reader.releaseLock());
     }
     for (const incoming of Object.values(entry.incoming)) {
       incoming.queue.length = 0;

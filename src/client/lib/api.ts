@@ -60,7 +60,19 @@ function query<K extends keyof OwnerInputs>(
 async function authRequest<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response | undefined;
   try {
-    response = await fetch(withBaseUrl(path), { credentials: "include", ...init });
+    for (let attempt = 0; ; attempt += 1) {
+      response = await fetch(withBaseUrl(path), { credentials: "include", ...init });
+      if (![502, 503, 504].includes(response.status)) break;
+      // Only bootstrap is a safe background read. Never replay authentication
+      // or logout commands, even when the proxy reports an unavailable backend.
+      if (path !== "/api/bootstrap" || attempt >= 2)
+        throw new HttpError(
+          `HTTP ${response.status}: server temporarily unavailable`,
+          response.status,
+        );
+      response = undefined;
+      await waitForBootstrapRetry(init?.signal);
+    }
     const body = (await response.json()) as T & { error: string };
     if (!response.ok) throw new HttpError(body.error, response.status);
     return body;
@@ -72,6 +84,23 @@ async function authRequest<T>(path: string, init?: RequestInit): Promise<T> {
     if (error instanceof TypeError) throw new RpcError("OFFLINE", error.message);
     throw error;
   }
+}
+
+function waitForBootstrapRetry(signal?: AbortSignal | null): Promise<void> {
+  signal?.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const finish = () => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    };
+    const timer = setTimeout(finish, 5_000);
+    const abort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      reject(signal?.reason);
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+  });
 }
 
 export function getWorkspaces() {

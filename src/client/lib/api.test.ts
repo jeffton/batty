@@ -56,6 +56,119 @@ it("distinguishes fetch transport failures from HTTP auth and malformed response
   await expect(getBootstrap()).rejects.not.toBeInstanceOf(RpcError);
 });
 
+it.each([502, 503, 504])(
+  "waits out a proxy %s during bootstrap without parsing HTML",
+  async (status) => {
+    vi.useFakeTimers();
+    try {
+      const unavailable = new Response("<html>backend unavailable</html>", { status });
+      const read = vi.spyOn(unavailable, "json");
+      const http = vi
+        .fn()
+        .mockResolvedValueOnce(unavailable)
+        .mockResolvedValueOnce(new Response(JSON.stringify({ authenticated: true })));
+      vi.stubGlobal("fetch", http);
+      const pending = getBootstrap();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await expect(pending).resolves.toMatchObject({ authenticated: true });
+      expect(read).not.toHaveBeenCalled();
+      expect(http).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
+
+it("surfaces a persistent proxy failure and permits a later bootstrap", async () => {
+  vi.useFakeTimers();
+  try {
+    const http = vi
+      .fn()
+      .mockImplementation(async () => new Response("<html>Bad gateway</html>", { status: 502 }));
+    vi.stubGlobal("fetch", http);
+    const pending = expect(getBootstrap()).rejects.toMatchObject({
+      status: 502,
+      message: "HTTP 502: server temporarily unavailable",
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await pending;
+    expect(http).toHaveBeenCalledTimes(3);
+    http.mockResolvedValueOnce(new Response(JSON.stringify({ authenticated: true })));
+    await expect(getBootstrap()).resolves.toMatchObject({ authenticated: true });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it.each([new TypeError("Network lost"), new DOMException("Cancelled", "AbortError")])(
+  "preserves a retry fetch failure rather than reusing the previous proxy status: %s",
+  async (error) => {
+    vi.useFakeTimers();
+    try {
+      const http = vi
+        .fn()
+        .mockResolvedValueOnce(new Response("<html>Bad gateway</html>", { status: 502 }))
+        .mockRejectedValueOnce(error);
+      vi.stubGlobal("fetch", http);
+      const pending = expect(getBootstrap()).rejects.toMatchObject(
+        error instanceof TypeError ? { code: "OFFLINE", message: error.message } : error,
+      );
+      await vi.advanceTimersByTimeAsync(5_000);
+      await pending;
+      expect(http).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
+
+it("cancels bootstrap immediately while waiting for proxy recovery", async () => {
+  vi.useFakeTimers();
+  try {
+    const controller = new AbortController();
+    vi.spyOn(AbortSignal, "timeout").mockReturnValue(controller.signal);
+    const http = vi.fn(async () => new Response("<html>Bad gateway</html>", { status: 502 }));
+    vi.stubGlobal("fetch", http);
+    const reason = new DOMException("Timed out", "TimeoutError");
+    const pending = expect(getBootstrap()).rejects.toBe(reason);
+    await vi.advanceTimersByTimeAsync(1);
+    controller.abort(reason);
+    await pending;
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(http).toHaveBeenCalledOnce();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it.each([beginPasskeyLogin, logout])(
+  "does not replay commands on proxy HTML errors: %s",
+  async (command) => {
+    const http = vi.fn(
+      async () => new Response("<html>Service unavailable</html>", { status: 503 }),
+    );
+    vi.stubGlobal("fetch", http);
+    await expect(command()).rejects.toMatchObject({
+      status: 503,
+      message: "HTTP 503: server temporarily unavailable",
+    });
+    expect(http).toHaveBeenCalledOnce();
+  },
+);
+
+it("keeps malformed successful responses and real server failures visible", async () => {
+  const http = vi
+    .fn()
+    .mockResolvedValueOnce(new Response("<html>not the API</html>"))
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "Internal failure" }), { status: 500 }),
+    );
+  vi.stubGlobal("fetch", http);
+  await expect(getBootstrap()).rejects.toBeInstanceOf(SyntaxError);
+  await expect(getBootstrap()).rejects.toMatchObject({ status: 500, message: "Internal failure" });
+  expect(http).toHaveBeenCalledTimes(2);
+});
+
 it.each([200, 401])(
   "classifies interrupted HTTP response bodies without losing status %s",
   async (status) => {

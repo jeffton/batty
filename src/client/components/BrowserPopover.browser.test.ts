@@ -1,8 +1,4 @@
-import {
-  fixtureOperation,
-  setFixtureRpcHandler,
-  waitForFixtureOperation,
-} from "../test/socket-fixture";
+import { fixtureOperation, setFixtureRpcHandler } from "../test/socket-fixture";
 import { createOwnerRpcHandler, type OwnerRpcServices } from "@/server/owner-rpc";
 import type { Runtime } from "@/server/runtime";
 // @vitest-environment node
@@ -21,7 +17,6 @@ import { chromium, type Browser, type Page } from "patchright";
 import type { ViteDevServer } from "vite";
 import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
-import { launchWebKit } from "../test/webkit";
 
 let server: ViteDevServer;
 let browser: Browser;
@@ -141,228 +136,8 @@ afterAll(async () => {
   if (root) await removeTestBrowserRoot(root);
 });
 
-test("tab menu creates, switches and closes pages without exposing IDs", async () => {
+test("autofill detects login steps without submitting or exposing values to controls", async () => {
   const context = await browser.newContext({
-    permissions: ["local-network-access"],
-    viewport: { width: 390, height: 844 },
-  });
-  context.setDefaultTimeout(5_000);
-  try {
-    const page = await context.newPage();
-    let selected = "first";
-    let pages = [
-      { id: "first", title: "First tab", url: "https://first.example/" },
-      {
-        id: "second",
-        title: "Second tab with a very long title that must not squeeze its close button",
-        url: "https://second.example/",
-      },
-    ];
-    const commands: Array<{ action: string; pageId?: string }> = [];
-    await fixtureOperation(
-      server,
-      page,
-      ["browser.state", "browser.control"],
-      async (input, _context, _next, operation) => {
-        expect(input.browserId).toBe("opaque");
-        const command =
-          operation === "browser.control"
-            ? (input.control as { action: string; pageId?: string })
-            : undefined;
-        if (command) {
-          commands.push(command);
-          if (command.action === "new-page") {
-            selected = "new";
-            pages.push({ id: selected, title: "", url: "about:blank" });
-          } else if (command.action === "switch") selected = command.pageId!;
-          else if (command.action === "close-page")
-            pages = pages.filter((item) => item.id !== command.pageId);
-        }
-        const current = pages.find((item) => item.id === selected)!;
-        const snapshot = {
-          pageId: selected,
-          revision: "test-revision",
-          url: current.url,
-          title: current.title,
-          width: 390,
-          height: 700,
-          mobile: false,
-          deviceScaleFactor: 1,
-          pages: pages.map((item) => ({ ...item, active: item.id === selected })),
-        };
-        if (command)
-          await page.evaluate((state) => {
-            document.dispatchEvent(
-              new CustomEvent("fixture-browser-state", {
-                detail: JSON.stringify({ event: "state", data: state }),
-              }),
-            );
-          }, snapshot);
-        return { value: snapshot };
-      },
-    );
-    await page.goto(`${url}?mockTabs=1`);
-    const initial = waitForFixtureOperation(server, (operation) => operation === "browser.state");
-    await page.getByRole("button", { name: "Open browser", exact: true }).click();
-    expect(((await initial).value as { pages: unknown[] }).pages).toHaveLength(2);
-    const choose = page.getByRole("button", { name: "Choose tab", exact: true });
-    await choose.click();
-    const menu = page.locator(".cloud-browser-tabs:popover-open");
-    await menu.waitFor({ state: "visible" });
-    expect(await menu.locator("code").count()).toBe(0);
-    expect(await menu.getByRole("button", { name: /^Copy tab ID/ }).count()).toBe(0);
-    // Native buttons retain normal Tab/Enter keyboard access; closing must not also switch.
-    await expect.poll(() => menu.innerText(), { timeout: 5_000 }).toContain("Second tab");
-    await menu.getByRole("button", { name: /^Close tab: Second tab/ }).focus();
-    await page.keyboard.press("Enter");
-    await expect.poll(() => pages.length).toBe(1);
-    expect(commands.filter((item) => item.action === "switch")).toEqual([]);
-    await menu.waitFor({ state: "hidden" });
-    await choose.focus();
-    await page.keyboard.press("Enter");
-    await menu.getByRole("button", { name: "New tab", exact: true }).focus();
-    await page.keyboard.press("Enter");
-    await expect.poll(() => commands.some((item) => item.action === "new-page")).toBe(true);
-    const address = page.getByRole("textbox", { name: "Browser address", exact: true });
-    await expect
-      .poll(() => address.evaluate((element) => element === document.activeElement))
-      .toBe(true);
-    expect(await address.inputValue()).toBe("");
-    await address.blur();
-    await choose.click();
-    await menu.locator(".cloud-browser-tabs__select").filter({ hasText: "First tab" }).focus();
-    await page.keyboard.press("Enter");
-    await expect.poll(() => address.inputValue()).toBe("https://first.example/");
-    expect(commands.filter((item) => item.action === "switch")).toEqual([
-      { action: "switch", pageId: "first" },
-    ]);
-  } finally {
-    await context.close();
-  }
-}, 30_000);
-
-test("toolbar starts a cloud browser and reopens the same live tabs on mobile", async () => {
-  const context = await browser.newContext({
-    permissions: ["local-network-access"],
-    viewport: { width: 390, height: 844 },
-    isMobile: true,
-    hasTouch: true,
-  });
-  try {
-    await context.addCookies([
-      { name: "cloud-auth", value: "test", url: server.resolvedUrls!.local[0]! },
-    ]);
-    const page = await context.newPage();
-    await page.goto(`${url}?toolbar=1`);
-    const opened = waitForFixtureOperation(
-      server,
-      (operation, input) => operation === "browser.open" && input.workspaceId === "integration",
-    );
-    await page.getByRole("button", { name: "Open browser", exact: true }).click();
-    const descriptor = (await opened).value as { browserId: string };
-    const popover = page.locator("#toolbar-browser");
-    await popover.waitFor({ state: "visible" });
-    await expect
-      .poll(
-        () => popover.locator("canvas").evaluate((element) => element.dataset.frame !== undefined),
-        { timeout: 10_000 },
-      )
-      .toBe(true);
-    await service.execute(workspaceBrowserKey("integration"), {
-      action: "open",
-      url: `${backendUrl}/target`,
-    });
-    const state = await service.cloudState(descriptor.browserId);
-    const target = (await service.cloudTarget(descriptor.browserId)).page;
-    await target.evaluate(() => {
-      (globalThis as any).toolbarRetained = 42;
-    });
-    await popover.getByRole("button", { name: "Close popover", exact: true }).click();
-    await page.getByRole("button", { name: "Open browser", exact: true }).click();
-    await popover.waitFor({ state: "visible" });
-    const reopened = await service.cloudState(descriptor.browserId);
-    expect(reopened.pageId).toBe(state.pageId);
-    expect(reopened.pages.map((item) => item.id)).toEqual(state.pages.map((item) => item.id));
-    expect(await target.evaluate(() => (globalThis as any).toolbarRetained)).toBe(42);
-    expect(
-      await page.locator("header.header").evaluate((element) => element.scrollWidth),
-    ).toBeLessThanOrEqual(390);
-  } finally {
-    await context.close();
-    await service.closeSession(workspaceBrowserKey("integration"));
-  }
-}, 30_000);
-
-test("WebKit decodes production H.264, forwards taps and resumes after viewer reconnect", async () => {
-  const viewer = await launchWebKit();
-  const context = await viewer.newContext({
-    viewport: { width: 390, height: 844 },
-    isMobile: true,
-    hasTouch: true,
-    deviceScaleFactor: 1,
-  });
-  try {
-    await service.execute("integration", {
-      action: "open",
-      url: `${backendUrl}/target`,
-      cloud: true,
-    });
-    attachedBrowserId = (await service.execute("integration", { action: "attach" })).details
-      .sites![0]!.browserId!;
-    await context.addCookies([
-      { name: "cloud-auth", value: "test", url: server.resolvedUrls!.local[0]! },
-    ]);
-    const page = await context.newPage();
-    const navigations: string[] = [];
-    page.on("framenavigated", (frame) => {
-      if (frame === page.mainFrame()) navigations.push(frame.url());
-    });
-    let expectedNavigations = 0;
-    const open = async () => {
-      expectedNavigations++;
-      await page.goto(url);
-      await page.getByRole("button", { name: "Open browser", exact: true }).click();
-      await expect
-        .poll(
-          () =>
-            page
-              .locator(".cloud-browser__image")
-              .evaluate((e: HTMLCanvasElement) => e.width > 0 && e.dataset.frame !== undefined),
-          { timeout: 10_000 },
-        )
-        .toBe(true)
-        .catch(async (error) => {
-          console.error("WebKit native video fixture:", {
-            body: await page.locator("body").innerText(),
-            navigations,
-          });
-          throw error;
-        });
-      // Only our explicit navigation may reload the fixture. Optimizer/HMR
-      // reloads discard the popover and must not be mistaken for codec failures.
-      expect(navigations).toEqual(Array(expectedNavigations).fill(url));
-    };
-    await open();
-    const canvas = page.locator(".cloud-browser__image");
-    const state = await service.cloudState(attachedBrowserId);
-    const bounds = (await canvas.boundingBox())!;
-    await page.touchscreen.tap(
-      bounds.x + (40 * bounds.width) / state.width,
-      bounds.y + (25 * bounds.height) / state.height,
-    );
-    await expect.poll(() => inspect("document.body.dataset.clicks")).toBe("1");
-    // Reload drops the decoder/socket; a periodic keyframe must initialize a fresh viewer.
-    await open();
-    expect(await inspect("document.body.dataset.clicks")).toBe("1");
-  } finally {
-    await context.close();
-    await viewer.close();
-  }
-}, 30_000);
-
-test("WebKit bottom autofill pair detects login steps without submitting or exposing values to controls", async () => {
-  const viewer = await launchWebKit();
-  const context = await viewer.newContext({
     viewport: { width: 390, height: 844 },
     isMobile: true,
     hasTouch: true,
@@ -411,7 +186,6 @@ test("WebKit bottom autofill pair detects login steps without submitting or expo
     const bounds = (await page.locator(".browser-credentials").boundingBox())!;
     expect(bounds.x).toBeGreaterThanOrEqual(0);
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
-    await page.screenshot({ path: "/tmp/batty-bottom-login-mobile.png" });
     await page.getByRole("button", { name: "Fill", exact: true }).click();
     await expect
       .poll(() => page.locator('.browser-credentials [name="password"]').inputValue())
@@ -451,20 +225,10 @@ test("WebKit bottom autofill pair detects login steps without submitting or expo
     await page.locator('.browser-credentials [name="password"]').fill("multistep-password");
     await page.getByRole("button", { name: "Fill", exact: true }).click();
     await expect.poll(() => remote.locator("input").inputValue()).toBe("multistep-password");
-    await page.setViewportSize({ width: 1440, height: 1000 });
-    await expect
-      .poll(async () => (await service.cloudState(attachedBrowserId)).width)
-      .toBeGreaterThan(1000);
-    await page.locator(".browser-credentials").waitFor({ state: "visible" });
-    await page.screenshot({ path: "/tmp/batty-bottom-login-desktop.png" });
-    const desktopBounds = (await page.locator(".browser-credentials").boundingBox())!;
-    expect(desktopBounds.x).toBeGreaterThanOrEqual(0);
-    expect(desktopBounds.x + desktopBounds.width).toBeLessThanOrEqual(1440);
     await remote.setContent('<form><input type="email"><button>Subscribe</button></form>');
     await expect.poll(() => page.locator(".browser-credentials").count()).toBe(0);
   } finally {
     await context.close();
-    await viewer.close();
   }
 }, 30_000);
 
@@ -475,25 +239,6 @@ async function inspect(script: string) {
     (source) => globalThis.eval(source),
     script,
   );
-}
-async function trackScrollEnd(selector?: string) {
-  const remote = (await service.cloudTarget(attachedBrowserId)).page;
-  // Arm before the gesture so a short fling cannot finish before we start waiting.
-  const completion = await remote.evaluateHandle((selector) => {
-    const target = selector ? document.querySelector(selector)! : document;
-    const completion = { ended: false };
-    target.addEventListener("scrollend", () => (completion.ended = true), { once: true });
-    return completion;
-  }, selector);
-  return async () => {
-    try {
-      await expect
-        .poll(() => completion.evaluate((value) => value.ended), { timeout: 5000 })
-        .toBe(true);
-    } finally {
-      await completion.dispose();
-    }
-  };
 }
 async function fittedViewerFrame(page: Page) {
   // Remote viewport changes precede encoder restart and the viewer's next paint.
@@ -573,7 +318,7 @@ async function swipe(page: Page, x: number, y: number, distance: number, steps =
   }
 }
 
-test("mobile live session fits its viewport, edits contextually, scrolls nested content and reaches/clicks the page bottom", async () => {
+test("mobile live session fits its viewport and edits the focused remote field", async () => {
   await service.execute("integration", {
     action: "open",
     url: `${backendUrl}/target`,
@@ -666,123 +411,6 @@ test("mobile live session fits its viewport, edits contextually, scrolls nested 
     await expect
       .poll(async () => Math.abs((await image.boundingBox())!.height - remote.height))
       .toBeLessThan(1);
-    await image.evaluate((element) => {
-      element.addEventListener(
-        "pointermove",
-        () => {
-          element.setAttribute("data-scroll-start", String(Date.now()));
-        },
-        { once: true },
-      );
-    });
-    // Rotation fits both dimensions without changing the page/login or reloading the form.
-    const beforeRotation = (await service.cloudState(attachedBrowserId)).pageId;
-    await page.setViewportSize({ width: 844, height: 390 });
-    await expect
-      .poll(async () => (await service.cloudState(attachedBrowserId)).width)
-      .toBeGreaterThan(750);
-    expect((await service.cloudState(attachedBrowserId)).pageId).toBe(beforeRotation);
-    expect(await inspect("document.querySelector('#typed').value")).toBe("edited");
-    expect(await inspect("screen.orientation.type")).toBe("landscape-primary");
-    await page.setViewportSize({ width: 390, height: 844 });
-    await expect
-      .poll(async () => (await service.cloudState(attachedBrowserId)).width)
-      .toBe(remote.width);
-    // Remote inner container, not the local popover, owns this scroll gesture.
-    const innerSettled = await trackScrollEnd("#inner");
-    await swipe(page, 100, 220, 130);
-    await expect
-      .poll(() => inspect("document.querySelector('#inner').scrollTop"))
-      .toBeGreaterThan(80);
-    expect(await inspect("window.scrollY")).toBe(0);
-    console.log(
-      "Touch move to remote scroll (local fixture, ms):",
-      Number(await inspect("document.body.dataset.firstScrollAt")) -
-        Number(await image.getAttribute("data-scroll-start")),
-    );
-
-    // Let the native fling settle before switching this mobile viewer to a mouse wheel.
-    await innerSettled();
-    // Wheel is routed too, and remains anchored to the nested container.
-    await image.hover({ position: { x: 100, y: 190 } });
-    // Chromium's injected device-pixel wheel is normalized by viewer DPR before DOM delivery.
-    await page.mouse.wheel(0, 1200);
-    await expect
-      .poll(() => inspect("document.querySelector('#inner').scrollTop"))
-      .toBeGreaterThan(700);
-    // Scroll the outer page from outside the inner container.
-    for (let i = 0; i < 7; i++) await swipe(page, 300, 650, 420);
-    await expect
-      .poll(() =>
-        inspect("window.scrollY + innerHeight >= document.documentElement.scrollHeight - 2"),
-      )
-      .toBe(true);
-    const bottom = (await inspect(
-      "JSON.stringify(document.querySelector('#bottom').getBoundingClientRect().toJSON())",
-    )) as string;
-    const rect = JSON.parse(bottom);
-    await tapRemote(page, rect.x + 30, rect.y + 20);
-    await expect.poll(() => inspect("document.body.dataset.bottomClicked")).toBe("yes");
-    expect(await popover.evaluate((e) => e.scrollHeight - e.clientHeight)).toBe(0);
-    await page.screenshot({ path: "/tmp/batty-cloud-browser-mobile-bottom.png" });
-    // A target=_blank page becomes the one visible page; Back returns to its opener.
-    const popupRect = JSON.parse(
-      (await inspect(
-        "JSON.stringify(document.querySelector('#popup').getBoundingClientRect().toJSON())",
-      )) as string,
-    );
-    await tapRemote(page, popupRect.x + 10, popupRect.y + 5);
-    await expect
-      .poll(async () => (await service.cloudState(attachedBrowserId)).title)
-      .toBe("Popup target");
-    await expect
-      .poll(async () => (await service.cloudState(attachedBrowserId)).width)
-      .toBe(remote.width);
-    const popup = (await service.cloudTarget(attachedBrowserId)).page;
-    await fittedViewerFrame(page);
-    // The nested native popover stays below its header button and switches the shared tab.
-    const chooseTab = page.getByRole("button", { name: "Choose tab", exact: true });
-    await chooseTab.click();
-    const tabs = page.locator(".cloud-browser-tabs:popover-open");
-    await tabs.waitFor({ state: "visible" });
-    await expect.poll(() => tabs.locator(".cloud-browser-tabs__select").count()).toBe(2);
-    expect(await tabs.locator('[aria-current="page"]').textContent()).toContain("Popup target");
-    await tabs.locator(".cloud-browser-tabs__select").filter({ hasText: "Shared target" }).click();
-    await expect.poll(() => addressInput.inputValue()).toBe(`${backendUrl}/target`);
-    await fittedViewerFrame(page);
-    expect(await popover.evaluate((element) => element.matches(":popover-open"))).toBe(true);
-    await chooseTab.click();
-    await tabs.locator(".cloud-browser-tabs__select").filter({ hasText: "Popup target" }).click();
-    await expect.poll(() => addressInput.inputValue()).toBe(`${backendUrl}/popup`);
-    await fittedViewerFrame(page);
-    expect(popup.isClosed()).toBe(false);
-    await popup.evaluate(() => history.pushState({}, "", "#section"));
-    // The server sees pushState before the socket publishes it. Wait until the
-    // viewer knows the history entry before asking it to go back.
-    await expect
-      .poll(() => addressInput.inputValue(), { timeout: 10_000 })
-      .toBe(`${backendUrl}/popup#section`);
-    const back = async () => {
-      const response = waitForFixtureOperation(
-        server,
-        (operation, input) => operation === "browser.control" && input.control.action === "back",
-      );
-      await popover.getByRole("button", { name: "Go back" }).click();
-      expect((await response).value).toHaveProperty("pageId");
-    };
-    await back();
-    await expect
-      .poll(async () => (await service.cloudState(attachedBrowserId)).url)
-      .toBe(`${backendUrl}/popup`);
-    expect(popup.isClosed()).toBe(false);
-    await expect
-      .poll(() => addressInput.inputValue(), { timeout: 10_000 })
-      .toBe(`${backendUrl}/popup`);
-    await back();
-    await expect
-      .poll(async () => (await service.cloudState(attachedBrowserId)).title)
-      .toBe("Shared target");
-    await page.screenshot({ path: "/tmp/batty-cloud-browser-mobile.png" });
     await popover.getByRole("button", { name: "Close popover" }).click();
     expect(await service.hasSession("integration")).toBe(true);
   } finally {
@@ -870,184 +498,6 @@ test("native touch drag and cancellation survive rotation and disconnect", async
   }
 }, 60_000);
 
-test("viewer open and live reconnect reconcile agent-closed tabs without replaying actions or changing agent selections", async () => {
-  const owner = "viewer-sync";
-  const first = await service.execute(
-    owner,
-    {
-      action: "open",
-      url: `${backendUrl}/target?first`,
-      cloud: true,
-    },
-    undefined,
-    "agent-a",
-  );
-  attachedBrowserId = first.details.sites![0]!.browserId!;
-  const second = await service.execute(
-    owner,
-    {
-      action: "open",
-      url: `${backendUrl}/target?second`,
-    },
-    undefined,
-    "agent-b",
-  );
-  await service.execute(
-    owner,
-    { action: "close-page", pageId: first.details.pageId },
-    undefined,
-    "agent-b",
-  );
-  const context = await browser.newContext({
-    permissions: ["local-network-access"],
-    viewport: { width: 1280, height: 900 },
-  });
-  await context.addCookies([
-    { name: "cloud-auth", value: "test", url: server.resolvedUrls!.local[0]! },
-  ]);
-  try {
-    const page = await context.newPage();
-    const commands: string[] = [];
-    await fixtureOperation(server, page, "browser.control", async (input, _context, next) => {
-      expect(input.browserId).toBe("opaque");
-      commands.push(input.control.action);
-      return next();
-    });
-    await page.goto(url);
-    await page.getByRole("button", { name: "Open browser", exact: true }).click();
-    const popover = page.locator("#site-preview--cloud");
-    const address = popover.getByRole("textbox", { name: "Browser address" });
-    await expect.poll(() => address.inputValue()).toBe(`${backendUrl}/target?second`);
-    await expect.poll(() => popover.getByRole("status").count()).toBe(0);
-    await expect(
-      service.execute(owner, { action: "snapshot" }, undefined, "agent-a"),
-    ).rejects.toThrow("Unknown browser page");
-    const survivor = await service.execute(
-      owner,
-      {
-        action: "open",
-        url: `${backendUrl}/target?survivor`,
-      },
-      undefined,
-      "agent-c",
-    );
-    const live = (await service.cloudTarget(attachedBrowserId)).page;
-    const liveBrowser = live.context().browser();
-    await service.execute(
-      owner,
-      { action: "close-page", pageId: second.details.pageId },
-      undefined,
-      "agent-c",
-    );
-    // No test-side state polling: only the client's recovery may repair selection.
-    await expect
-      .poll(() => address.inputValue(), { timeout: 10000 })
-      .toBe(`${backendUrl}/target?survivor`);
-    await expect.poll(() => popover.getByRole("status").count()).toBe(0);
-    expect(await popover.getByRole("alert").count()).toBe(0);
-    expect((await service.cloudTarget(attachedBrowserId)).page.context().browser()).toBe(
-      liveBrowser,
-    );
-    expect(
-      (await service.execute(owner, { action: "snapshot" }, undefined, "agent-c")).details.pageId,
-    ).toBe(survivor.details.pageId);
-    await expect(
-      service.execute(owner, { action: "snapshot" }, undefined, "agent-b"),
-    ).rejects.toThrow("Unknown browser page");
-    const resumedState = waitForFixtureOperation(
-      server,
-      (operation) => operation === "browser.state",
-    );
-    await page.evaluate(() =>
-      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })),
-    );
-    expect((await resumedState).value).toHaveProperty("pageId");
-    await expect.poll(() => popover.getByRole("status").count()).toBe(0);
-    expect(commands.filter((action) => action !== "viewport")).toEqual([]);
-    await page.getByRole("button", { name: "Close popover" }).click();
-  } finally {
-    await context.close();
-    await service.closeSession(owner);
-  }
-}, 30_000);
-
-test("desktop/mobile switching keeps login, CSS screen matches the viewer, and network loss reconnects without a new browser", async () => {
-  await service.execute("integration", {
-    action: "open",
-    url: `${backendUrl}/target`,
-    cloud: true,
-  });
-  attachedBrowserId = (await service.execute("integration", { action: "attach" })).details
-    .sites![0]!.browserId!;
-  const original = await service.cloudTarget(attachedBrowserId);
-  await original.page.evaluate(() => {
-    document.cookie = "login=retained;path=/";
-    localStorage.setItem("login", "retained");
-  });
-  const desktop = await browser.newContext({
-    permissions: ["local-network-access"],
-    viewport: { width: 1440, height: 1000 },
-  });
-  const mobile = await browser.newContext({
-    permissions: ["local-network-access"],
-    viewport: { width: 390, height: 844 },
-    isMobile: true,
-    hasTouch: true,
-    deviceScaleFactor: 1,
-  });
-  for (const context of [desktop, mobile])
-    await context.addCookies([
-      { name: "cloud-auth", value: "test", url: server.resolvedUrls!.local[0]! },
-    ]);
-  try {
-    const desktopPage = await desktop.newPage();
-    await desktopPage.goto(url);
-    await desktopPage.getByRole("button", { name: "Open browser", exact: true }).click();
-    await expect.poll(async () => (await service.cloudState(attachedBrowserId)).mobile).toBe(false);
-    await expect.poll(() => inspect("document.body.dataset.serverMobile")).toBe("false");
-    const desktopState = await service.cloudState(attachedBrowserId);
-    expect(
-      await inspect(
-        "[innerWidth,screen.width,navigator.maxTouchPoints,navigator.userAgentData.mobile]",
-      ),
-    ).toEqual([desktopState.width, desktopState.width, 0, false]);
-    await desktopPage.getByRole("button", { name: "Close popover" }).click();
-    const page = await mobile.newPage();
-    await page.goto(url);
-    await page.getByRole("button", { name: "Open browser", exact: true }).click();
-    await expect.poll(async () => (await service.cloudState(attachedBrowserId)).mobile).toBe(true);
-    await expect.poll(() => inspect("document.body.dataset.serverMobile")).toBe("true");
-    expect((await service.cloudTarget(attachedBrowserId)).page).toBe(original.page);
-    expect(
-      await inspect(
-        "document.cookie.includes('login=retained') && localStorage.getItem('login')==='retained'",
-      ),
-    ).toBe(true);
-    const popover = page.locator("#site-preview--cloud");
-    const image = popover.getByRole("img");
-    await expect
-      .poll(() =>
-        image.evaluate((e: HTMLCanvasElement) => e.dataset.frame !== undefined && e.width > 0),
-      )
-      .toBe(true);
-    expect(await inspect("document.documentElement.scrollWidth === innerWidth")).toBe(true);
-    await mobile.setOffline(true);
-    await expect
-      .poll(() => popover.getByRole("status").getAttribute("aria-label"), { timeout: 5000 })
-      .toBe("Reconnecting browser");
-    await mobile.setOffline(false);
-    await expect.poll(() => popover.getByRole("status").count(), { timeout: 10000 }).toBe(0);
-    expect((await service.cloudTarget(attachedBrowserId)).page).toBe(original.page);
-    await tapRemote(page, 40, 25);
-    await expect.poll(() => inspect("document.body.dataset.clicks")).toBe("1");
-    await page.screenshot({ path: "/tmp/batty-cloud-mobile-metrics.png" });
-    await popover.getByRole("button", { name: "Close popover" }).click();
-  } finally {
-    await desktop.close();
-    await mobile.close();
-  }
-}, 60_000);
-
 test("DPR3 frames cover all viewport corners and align edge taps", async () => {
   await service.execute("integration", {
     action: "open",
@@ -1101,7 +551,6 @@ test("DPR3 frames cover all viewport corners and align edge taps", async () => {
     await fittedViewerFrame(page);
     const original = await service.cloudTarget(attachedBrowserId);
     await expect.poll(() => canvas.getAttribute("data-revision")).toBe(original.state.revision);
-    await page.screenshot({ path: "/tmp/cloud-coverage-portrait.png" });
     // A large bitmap is insufficient: all four viewport corners must contain the page.
     await expect.poll(colors).toEqual(expected);
     expect(

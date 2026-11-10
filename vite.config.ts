@@ -65,9 +65,10 @@ export default defineConfig({
     sourcemap: true,
   },
   test: {
-    // Four workers balance browser I/O waits against Chrome/Vite contention on
-    // the maintained four-core host. Six oversubscribes its browser processes.
-    maxWorkers: 4,
+    // Eight workers use the maintained eight-core host without the timeouts
+    // observed at twelve. CLI overrides support other development hosts.
+    maxWorkers: 8,
+    maxConcurrency: 2,
     execArgv: ["--no-experimental-webstorage"],
     projects: [
       {
@@ -122,10 +123,10 @@ export default defineConfig({
     },
   },
   lint: {
-    ignorePatterns: ["dist/**", "node_modules/**", ".batty/**", ".vite-plus/**"],
+    ignorePatterns: ["dist/**", "node_modules/**", ".batty/**", ".vite-plus/**", ".tmp/**"],
   },
   fmt: {
-    ignorePatterns: [".vite-plus/**", "docs/references/optchat-spec.md"],
+    ignorePatterns: [".vite-plus/**", ".tmp/**", "docs/references/optchat-spec.md"],
   },
   pack: {
     deps: { resolveDepSubpath: true },

@@ -1,6 +1,7 @@
 // @vitest-environment node
-import { expect, test, vi } from "vite-plus/test";
+import { expect, test } from "vite-plus/test";
 import fs from "node:fs/promises";
+import { watch } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { SshSocksProxy } from "./ssh-socks-proxy";
@@ -30,11 +31,20 @@ const timer = setInterval(() => {
     const proxy = new SshSocksProxy("test", executable);
     proxy.setPersistenceRoot(root);
     const controller = new AbortController();
+    const receipt = path.join(root, "ssh-proxy.json");
+    let receiptWritten!: () => void;
+    const published = new Promise<void>((resolve) => {
+      receiptWritten = resolve;
+    });
+    // Observe the atomic receipt rename instead of imposing a one-second
+    // polling deadline on a real child process under parallel test load.
+    const watcher = watch(root, (event, filename) => {
+      if (event === "rename" && filename === "ssh-proxy.json") receiptWritten();
+    });
     try {
       const first = proxy.ensureStarted(controller.signal);
       const rejected = expect(first).rejects.toThrow("First worker stopped");
-      const receipt = path.join(root, "ssh-proxy.json");
-      await vi.waitFor(async () => expect(await fs.stat(receipt)).toBeDefined());
+      await published;
       const second = proxy.ensureStarted();
       controller.abort(new Error("First worker stopped"));
       await rejected;
@@ -44,6 +54,7 @@ const timer = setInterval(() => {
       expect(await second).toMatch(/^socks5:\/\/127\.0\.0\.1:/);
       expect(await proxy.ensureStarted()).toBe(await second);
     } finally {
+      watcher.close();
       await proxy.dispose();
       await fs.rm(root, { recursive: true, force: true });
     }

@@ -173,12 +173,18 @@ test("same-origin installs keep caches, preview permissions, locks and controlle
       await page.evaluate((url) => fetch(url), appPath(base, "/assets/app.txt"));
     }
     const root = pages.get("/")!;
-    const names = await root.evaluate(() => caches.keys());
-    for (const base of installs) {
-      expect(names).toContain(`${namespace(base)}app-shell`);
-      expect(names).toContain(`${namespace(base)}static-assets`);
-      expect(names).toContain(`${namespace(base)}private-image-previews:same-user-and-epoch`);
-    }
+    // Fetch completion precedes the service worker's event.waitUntil cache writes.
+    await expect
+      .poll(() => root.evaluate(() => caches.keys()))
+      .toEqual(
+        expect.arrayContaining(
+          installs.flatMap((base) => [
+            `${namespace(base)}app-shell`,
+            `${namespace(base)}static-assets`,
+            `${namespace(base)}private-image-previews:same-user-and-epoch`,
+          ]),
+        ),
+      );
 
     // A lock held by one installation must not block a different installation's logout.
     await root.evaluate(

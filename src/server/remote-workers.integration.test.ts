@@ -9,7 +9,7 @@ import { artifactRefs } from "./artifact-forwarding";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Fastify from "fastify";
-import { expect, test, vi } from "vite-plus/test";
+import { afterAll, beforeAll, expect, test as serialTest, vi } from "vite-plus/test";
 import {
   fauxAssistantMessage,
   fauxProvider,
@@ -23,6 +23,13 @@ import type { RemoteWorkers } from "./remote-workers";
 import type { RemoteConnectionCredentials } from "./remote-access";
 import { RpcError } from "../shared/rpc/channel";
 import type { NodeInputs, NodeOperation } from "../shared/node-api";
+
+// Per-test runtimes use separate directories, ports and faux providers. Vitest bounds
+// these concurrent cases with maxConcurrency in vite.config.ts.
+const test = serialTest.concurrent;
+
+beforeAll(() => vi.stubEnv("PI_OFFLINE", "1"));
+afterAll(() => vi.unstubAllEnvs());
 
 async function nodeRequest<T>(
   connection: RemoteConnectionCredentials,
@@ -375,7 +382,6 @@ function filesIn(value: unknown): SentFileDescriptor[] {
 test.each(["/", "/batty/"])(
   "%s owner pairing works bidirectionally, never becomes a node bearer, and rejects replay or cross-binding",
   async (baseUrl) => {
-    vi.stubEnv("PI_OFFLINE", "1");
     const directory = await mkdtemp(join(tmpdir(), "batty-single-invitation-"));
     const windows = await openInstance(directory, "windows", 200, baseUrl);
     const mac = await openInstance(directory, "mac", 200, baseUrl);
@@ -575,7 +581,6 @@ test.each(["/", "/batty/"])(
       await mac.close();
       await windows.close();
       await rm(directory, { recursive: true, force: true });
-      vi.unstubAllEnvs();
     }
   },
   30_000,
@@ -584,7 +589,6 @@ test.each(["/", "/batty/"])(
 test.each(["creator", "adder"] as const)(
   "offline removal by %s revokes access without restarting a worker or repairing itself",
   async (removingSide) => {
-    vi.stubEnv("PI_OFFLINE", "1");
     const directory = await mkdtemp(join(tmpdir(), "batty-offline-unpair-"));
     const windows = await openInstance(directory, "windows");
     const mac = await openInstance(directory, "mac");
@@ -656,7 +660,6 @@ test.each(["creator", "adder"] as const)(
       await mac.close();
       await windows.close();
       await rm(directory, { recursive: true, force: true });
-      vi.unstubAllEnvs();
     }
   },
   30_000,
@@ -665,7 +668,6 @@ test.each(["creator", "adder"] as const)(
 test.each(["reverse-unpair", "control-loss"] as const)(
   "native paired catalog and session streams close on %s",
   async (interruption) => {
-    vi.stubEnv("PI_OFFLINE", "1");
     const directory = await mkdtemp(join(tmpdir(), "batty-paired-direct-streams-"));
     const windows = await openInstance(directory, "windows");
     const mac = await openInstance(directory, "mac");
@@ -743,17 +745,24 @@ test.each(["reverse-unpair", "control-loss"] as const)(
       for (const controller of controllers) controller.abort();
       for (const reader of readers) await reader.cancel().catch(() => {});
       await writeFile(join(mac.work, "release"), "release");
-      await mac.close();
-      await windows.close();
-      await rm(directory, { recursive: true, force: true });
-      vi.unstubAllEnvs();
+      // Stream cancellation does not stop the worker. Drain its completion and
+      // parent delivery before closing storage and deleting the fixture.
+      try {
+        await eventually(
+          async () => (await mac.runtime.orchestration.listRunning()).length === 0,
+          "stream fixture worker completion",
+        );
+        await mac.runtime.main.waitForIdle(context);
+      } finally {
+        await Promise.all([mac.close(), windows.close()]);
+        await rm(directory, { recursive: true, force: true });
+      }
     }
   },
   30_000,
 );
 
 test("native session admission rechecks paired access after asynchronous metadata lookup", async () => {
-  vi.stubEnv("PI_OFFLINE", "1");
   const directory = await mkdtemp(join(tmpdir(), "batty-paired-rpc-admission-"));
   const windows = await openInstance(directory, "windows");
   const mac = await openInstance(directory, "mac");
@@ -839,12 +848,10 @@ test("native session admission rechecks paired access after asynchronous metadat
     await mac.close();
     await windows.close();
     await rm(directory, { recursive: true, force: true });
-    vi.unstubAllEnvs();
   }
 }, 30_000);
 
 test("bidirectional peers discover independently started workers without claiming them in Tasks", async () => {
-  vi.stubEnv("PI_OFFLINE", "1");
   const directory = await mkdtemp(join(tmpdir(), "batty-peer-task-ownership-"));
   const instances: Awaited<ReturnType<typeof openInstance>>[] = [];
   try {
@@ -894,14 +901,12 @@ test("bidirectional peers discover independently started workers without claimin
       await instance.close();
     }
     await rm(directory, { recursive: true, force: true });
-    vi.unstubAllEnvs();
   }
 }, 45_000);
 
 test.each(["forward", "reverse"] as const)(
   "%s socket peers execute remote native tools, deliver progress to the initiating parent, and retain local history/files offline",
   async (transport) => {
-    vi.stubEnv("PI_OFFLINE", "1");
     const directory = await mkdtemp(join(tmpdir(), "batty-two-runtimes-"));
     let a: Awaited<ReturnType<typeof openInstance>> | undefined;
     let b: Awaited<ReturnType<typeof openInstance>> | undefined;
@@ -1111,7 +1116,6 @@ test.each(["forward", "reverse"] as const)(
       await a?.close();
       await b?.close();
       await rm(directory, { recursive: true, force: true });
-      vi.unstubAllEnvs();
     }
   },
   45_000,
@@ -1120,7 +1124,6 @@ test.each(["forward", "reverse"] as const)(
 test.each(["/", "/batty/"])(
   "%s reverse-only Mac without a self URL supports workers, inspect, await, stop and restart",
   async (baseUrl) => {
-    vi.stubEnv("PI_OFFLINE", "1");
     const directory = await mkdtemp(join(tmpdir(), "batty-reverse-only-"));
     let windows: Awaited<ReturnType<typeof openInstance>> | undefined;
     let mac: Awaited<ReturnType<typeof openInstance>> | undefined;
@@ -1243,14 +1246,12 @@ test.each(["/", "/batty/"])(
       await windows?.close();
       await mac?.close();
       await rm(directory, { recursive: true, force: true });
-      vi.unstubAllEnvs();
     }
   },
   30_000,
 );
 
 test("reverse pairing rejects impersonation and live grant revocation severs streams without queuing offline commands", async () => {
-  vi.stubEnv("PI_OFFLINE", "1");
   const directory = await mkdtemp(join(tmpdir(), "batty-reverse-revoke-"));
   let windows: Awaited<ReturnType<typeof openInstance>> | undefined;
   let mac: Awaited<ReturnType<typeof openInstance>> | undefined;
@@ -1412,12 +1413,10 @@ test("reverse pairing rejects impersonation and live grant revocation severs str
     await windows?.close();
     await mac?.close();
     await rm(directory, { recursive: true, force: true });
-    vi.unstubAllEnvs();
   }
 }, 30_000);
 
 test("pending remote await settles after connection removal persistence without another remote commit", async () => {
-  vi.stubEnv("PI_OFFLINE", "1");
   const directory = await mkdtemp(join(tmpdir(), "batty-remote-remove-await-"));
   let windows: Awaited<ReturnType<typeof openInstance>> | undefined;
   let mac: Awaited<ReturnType<typeof openInstance>> | undefined;
@@ -1519,7 +1518,6 @@ test("pending remote await settles after connection removal persistence without 
     await windows?.close();
     await mac?.close();
     await rm(directory, { recursive: true, force: true });
-    vi.unstubAllEnvs();
   }
 }, 30_000);
 
@@ -1527,7 +1525,6 @@ test("pending remote await settles after connection removal persistence without 
 test.each([404, 503])(
   "native file failure %i does not strand a coordinator's remote await or terminal mirror",
   async (status) => {
-    vi.stubEnv("PI_OFFLINE", "1");
     const directory = await mkdtemp(join(tmpdir(), "batty-remote-import-failure-"));
     let a: Awaited<ReturnType<typeof openInstance>> | undefined;
     let b: Awaited<ReturnType<typeof openInstance>> | undefined;
@@ -1675,14 +1672,12 @@ test.each([404, 503])(
       await a?.close();
       await b?.close();
       await rm(directory, { recursive: true, force: true });
-      vi.unstubAllEnvs();
     }
   },
   45_000,
 );
 
 test("node grants cannot access owner routes, revoke immediately, and reciprocal discovery never exports mirrors", async () => {
-  vi.stubEnv("PI_OFFLINE", "1");
   const directory = await mkdtemp(join(tmpdir(), "batty-remote-boundary-"));
   let a: Awaited<ReturnType<typeof openInstance>> | undefined;
   let b: Awaited<ReturnType<typeof openInstance>> | undefined;
@@ -1815,12 +1810,10 @@ test("node grants cannot access owner routes, revoke immediately, and reciprocal
   } finally {
     await Promise.all([a?.close(), b?.close()]);
     await rm(directory, { recursive: true, force: true });
-    vi.unstubAllEnvs();
   }
 }, 30_000);
 
 test("a local assigned worker awaits its remote child without completing its original parent assignment early", async () => {
-  vi.stubEnv("PI_OFFLINE", "1");
   const directory = await mkdtemp(join(tmpdir(), "batty-remote-nested-await-"));
   let a: Awaited<ReturnType<typeof openInstance>> | undefined;
   let b: Awaited<ReturnType<typeof openInstance>> | undefined;
@@ -1945,12 +1938,12 @@ test("a local assigned worker awaits its remote child without completing its ori
     if (b) await writeFile(join(b.work, "release"), "release");
     await Promise.all([a?.close(), b?.close()]);
     await rm(directory, { recursive: true, force: true });
-    vi.unstubAllEnvs();
   }
 }, 30_000);
 
-test("catalog skips historical worker streams and retires active streams until the worker resumes", async () => {
-  vi.stubEnv("PI_OFFLINE", "1");
+test("catalog skips historical worker streams and retires active streams until the worker resumes", async ({
+  expect,
+}) => {
   const directory = await mkdtemp(join(tmpdir(), "batty-remote-stream-lifecycle-"));
   let a: Awaited<ReturnType<typeof openInstance>> | undefined;
   let b: Awaited<ReturnType<typeof openInstance>> | undefined;
@@ -2133,12 +2126,10 @@ test("catalog skips historical worker streams and retires active streams until t
     }
     await Promise.all([a?.close(), b?.close()]);
     await rm(directory, { recursive: true, force: true });
-    vi.unstubAllEnvs();
   }
 }, 30_000);
 
 test("terminal metadata cannot retire a stream before its committed result cursor is mirrored", async () => {
-  vi.stubEnv("PI_OFFLINE", "1");
   const directory = await mkdtemp(join(tmpdir(), "batty-remote-terminal-cursor-"));
   let a: Awaited<ReturnType<typeof openInstance>> | undefined;
   let b: Awaited<ReturnType<typeof openInstance>> | undefined;
@@ -2276,122 +2267,123 @@ test("terminal metadata cannot retire a stream before its committed result curso
     if (b) await writeFile(join(b.work, "release"), "release");
     await Promise.all([a?.close(), b?.close()]);
     await rm(directory, { recursive: true, force: true });
-    vi.unstubAllEnvs();
   }
 }, 30_000);
 
-test("native binary commands verify admission, never use HTTP, deduplicate retries and recheck live grants", async () => {
-  vi.stubEnv("PI_OFFLINE", "1");
-  const directory = await mkdtemp(join(tmpdir(), "batty-native-input-replay-"));
-  const remote = await openInstance(directory, "receiver");
-  const sender = await openInstance(directory, "sender");
-  let restoreHttp = () => {};
-  try {
-    await connect(sender, remote);
-    const grant = sender.runtime.remotes.connection(remote.id);
-    const channel = sender.runtime.remotes.reverse.channel(grant);
-    const originalFetch = globalThis.fetch;
-    const http = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
-      const url = new URL(
-        typeof input === "string" ? input : input instanceof URL ? input : input.url,
-      );
-      if (url.pathname.startsWith("/api/node/"))
-        throw new Error("Native peer traffic attempted HTTP");
-      return originalFetch(input, init);
-    });
-    restoreHttp = () => http.mockRestore();
-    let calls = 0;
-    remote.faux.setResponses(
-      Array.from({ length: 10 }, () => () => {
-        calls++;
-        return fauxAssistantMessage([fauxText("input processed")]);
-      }),
-    );
-    const bytes = Buffer.from("durable input bytes");
-    const metadata = [
-      {
-        name: "evidence.txt",
-        size: bytes.length,
-        mimeType: "text/plain",
-        sha256: createHash("sha256").update(bytes).digest("hex"),
-      },
-    ];
-    const command = {
-      action: "run" as const,
-      prompt: "process transferred input",
-      workspaceId: "work",
-    };
-    const body = (value = bytes) =>
-      new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(value);
-          controller.close();
-        },
+// This case spies on global fetch; keep it outside the concurrent group.
+serialTest(
+  "native binary commands verify admission, never use HTTP, deduplicate retries and recheck live grants",
+  async () => {
+    const directory = await mkdtemp(join(tmpdir(), "batty-native-input-replay-"));
+    const remote = await openInstance(directory, "receiver");
+    const sender = await openInstance(directory, "sender");
+    let restoreHttp = () => {};
+    try {
+      await connect(sender, remote);
+      const grant = sender.runtime.remotes.connection(remote.id);
+      const channel = sender.runtime.remotes.reverse.channel(grant);
+      const originalFetch = globalThis.fetch;
+      const http = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+        const url = new URL(
+          typeof input === "string" ? input : input instanceof URL ? input : input.url,
+        );
+        if (url.pathname.startsWith("/api/node/"))
+          throw new Error("Native peer traffic attempted HTTP");
+        return originalFetch(input, init);
       });
-    const send = (requestId: string, files = metadata, value = bytes) =>
-      sender.runtime.remotes.requestNode(
-        grant,
-        "node.command",
-        { requestId, command, files },
-        { body: body(value) },
+      restoreHttp = () => http.mockRestore();
+      let calls = 0;
+      remote.faux.setResponses(
+        Array.from({ length: 10 }, () => () => {
+          calls++;
+          return fauxAssistantMessage([fauxText("input processed")]);
+        }),
       );
-    await expect(
-      send("attempt", [{ ...metadata[0]!, sha256: "0".repeat(64) }]),
-    ).rejects.toMatchObject({ code: "BAD_INPUT" });
-    await expect(send("missing", metadata, bytes.subarray(1))).rejects.toMatchObject({
-      code: "BAD_INPUT",
-    });
-    await expect(
-      send("extra", metadata, Buffer.concat([bytes, Buffer.from("extra")])),
-    ).rejects.toMatchObject({ code: "BAD_INPUT" });
-    expect(await remote.runtime.orchestration.listRunning()).toHaveLength(0);
-    expect(calls).toBe(0);
-    const receipt = (await send("attempt")).value;
-    await eventually(
-      async () => (await remote.runtime.orchestration.listRunning()).length === 0,
-      "single native imported assignment",
-    );
-    expect((await send("attempt")).value).toEqual(receipt);
-    expect(calls).toBe(1);
-    await expect(
-      sender.runtime.remotes.requestNode(
-        grant,
-        "node.command",
+      const bytes = Buffer.from("durable input bytes");
+      const metadata = [
         {
-          requestId: "attempt",
-          command: { ...command, prompt: "different assignment" },
-          files: metadata,
+          name: "evidence.txt",
+          size: bytes.length,
+          mimeType: "text/plain",
+          sha256: createHash("sha256").update(bytes).digest("hex"),
         },
-        { body: body() },
-      ),
-    ).rejects.toThrow("reused with different arguments");
-    await expect(
-      channel.call("node.command", {
-        requestId: "path-injection",
-        command: { ...command, files: [{ path: join(remote.work, "origin.txt") }] },
-      }),
-    ).rejects.toMatchObject({ code: "BAD_INPUT" });
-    await expect(channel.call("owner.settings", {})).rejects.toMatchObject({ code: "FORBIDDEN" });
-    await remote.runtime.remotes.access.revoke(grant.grantId!);
-    // Keep the authenticated socket alive: revocation is checked on every call,
-    // not merely during its opening handshake.
-    await expect(
-      channel.call("node.command", { requestId: "revoked", command }),
-    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
-    expect(calls).toBe(1);
-  } finally {
-    restoreHttp();
-    await sender.close();
-    await remote.close();
-    await rm(directory, { recursive: true, force: true });
-    vi.unstubAllEnvs();
-  }
-}, 30_000);
+      ];
+      const command = {
+        action: "run" as const,
+        prompt: "process transferred input",
+        workspaceId: "work",
+      };
+      const body = (value = bytes) =>
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(value);
+            controller.close();
+          },
+        });
+      const send = (requestId: string, files = metadata, value = bytes) =>
+        sender.runtime.remotes.requestNode(
+          grant,
+          "node.command",
+          { requestId, command, files },
+          { body: body(value) },
+        );
+      await expect(
+        send("attempt", [{ ...metadata[0]!, sha256: "0".repeat(64) }]),
+      ).rejects.toMatchObject({ code: "BAD_INPUT" });
+      await expect(send("missing", metadata, bytes.subarray(1))).rejects.toMatchObject({
+        code: "BAD_INPUT",
+      });
+      await expect(
+        send("extra", metadata, Buffer.concat([bytes, Buffer.from("extra")])),
+      ).rejects.toMatchObject({ code: "BAD_INPUT" });
+      expect(await remote.runtime.orchestration.listRunning()).toHaveLength(0);
+      expect(calls).toBe(0);
+      const receipt = (await send("attempt")).value;
+      await eventually(
+        async () => (await remote.runtime.orchestration.listRunning()).length === 0,
+        "single native imported assignment",
+      );
+      expect((await send("attempt")).value).toEqual(receipt);
+      expect(calls).toBe(1);
+      await expect(
+        sender.runtime.remotes.requestNode(
+          grant,
+          "node.command",
+          {
+            requestId: "attempt",
+            command: { ...command, prompt: "different assignment" },
+            files: metadata,
+          },
+          { body: body() },
+        ),
+      ).rejects.toThrow("reused with different arguments");
+      await expect(
+        channel.call("node.command", {
+          requestId: "path-injection",
+          command: { ...command, files: [{ path: join(remote.work, "origin.txt") }] },
+        }),
+      ).rejects.toMatchObject({ code: "BAD_INPUT" });
+      await expect(channel.call("owner.settings", {})).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await remote.runtime.remotes.access.revoke(grant.grantId!);
+      // Keep the authenticated socket alive: revocation is checked on every call,
+      // not merely during its opening handshake.
+      await expect(
+        channel.call("node.command", { requestId: "revoked", command }),
+      ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+      expect(calls).toBe(1);
+    } finally {
+      restoreHttp();
+      await sender.close();
+      await remote.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+  30_000,
+);
 
 test.each(["cancel", "revoke"] as const)(
   "native upload %s during transfer never admits a worker and cleans staging",
   async (interruption) => {
-    vi.stubEnv("PI_OFFLINE", "1");
     const directory = await mkdtemp(join(tmpdir(), "batty-native-upload-interrupt-"));
     const remote = await openInstance(directory, "receiver");
     const sender = await openInstance(directory, "sender");
@@ -2475,7 +2467,6 @@ test.each(["cancel", "revoke"] as const)(
       await sender.close();
       await remote.close();
       await rm(directory, { recursive: true, force: true });
-      vi.unstubAllEnvs();
     }
   },
   30_000,
@@ -2484,7 +2475,6 @@ test.each(["cancel", "revoke"] as const)(
 test.each(["forward", "reverse"] as const)(
   "%s socket run/queue/steer/resume carry selected paths and received refs, images, immutable queued bytes and locally mirrored input attachments",
   async (transport) => {
-    vi.stubEnv("PI_OFFLINE", "1");
     const directory = await mkdtemp(join(tmpdir(), "batty-input-files-"));
     let a: Awaited<ReturnType<typeof openInstance>> | undefined;
     let b: Awaited<ReturnType<typeof openInstance>> | undefined;
@@ -2688,7 +2678,6 @@ test.each(["forward", "reverse"] as const)(
       await a?.close();
       await b?.close();
       await rm(directory, { recursive: true, force: true });
-      vi.unstubAllEnvs();
     }
   },
   30_000,

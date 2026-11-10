@@ -485,20 +485,17 @@ test("cron and ordinary workers coordinate across workspaces and runs", async ()
     return result;
   };
   const all = [...first, ...second, ...third, ordinary];
-  for (const group of [first, second, third, [ordinary]]) {
-    for (const reader of group) {
-      const visible = all;
-      const result = await probe(reader, { action: "list", limit: 100 });
-      const listed = JSON.parse((result.content[0] as { text: string }).text).workers;
-      expect(listed.map((worker: { sessionId: string }) => worker.sessionId).sort()).toEqual(
-        visible.map((worker) => String(worker.id)).sort(),
-      );
-      for (const target of [...first, ...second, ...third, ordinary]) {
-        const inspected = await probe(reader, { action: "inspect", sessionId: String(target.id) });
-        expect(inspected.role === "toolResult" && !!inspected.isError).toBe(
-          !visible.includes(target),
-        );
-      }
+  // Cover each caller depth and target scope, not every worker × worker pair.
+  // Authorization is shared across instances of the same role/scope.
+  for (const reader of [...first, ordinary]) {
+    const result = await probe(reader, { action: "list", limit: 100 });
+    const listed = JSON.parse((result.content[0] as { text: string }).text).workers;
+    expect(listed.map((worker: { sessionId: string }) => worker.sessionId).sort()).toEqual(
+      all.map((worker) => String(worker.id)).sort(),
+    );
+    for (const target of [first[0]!, second[0]!, third[0]!, ordinary]) {
+      const inspected = await probe(reader, { action: "inspect", sessionId: String(target.id) });
+      expect(inspected.role === "toolResult" && !!inspected.isError).toBe(false);
     }
   }
   const grandchild = first.find((worker) => worker.prompt === "cron grandchild")!;

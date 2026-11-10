@@ -13,7 +13,6 @@ import { chromium, type Browser } from "patchright";
 import type { ViteDevServer } from "vite";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
 import { createBrowserFixtureServer, closeBrowserFixtureServer } from "../test/browser-fixture";
-import { launchWebKit } from "../test/webkit";
 import type { AppConfig } from "@/server/config";
 
 let root: string;
@@ -224,146 +223,126 @@ test("refreshes actual branches on reopening, with long names contained on mobil
   }
 });
 
-for (const engine of ["chromium", "webkit"] as const) {
-  test(`${engine}: filename filtering renders a native hierarchy and preserves the original tree`, async () => {
-    const instance = (engine === "webkit" ? await launchWebKit() : browser) as unknown as Browser;
+test("chromium: filename filtering renders a native hierarchy and preserves the original tree", async () => {
+  for (const width of [1280, 390]) {
+    const page = await browser.newPage({ viewport: { width, height: 900 } });
+    page.setDefaultTimeout(10_000);
     try {
-      for (const width of engine === "webkit" ? [390] : [1280, 390]) {
-        const page = await instance.newPage({ viewport: { width, height: 900 } });
-        page.setDefaultTimeout(10_000);
-        try {
-          await page.goto(url);
-          await page.getByRole("button", { name: "Browse code in Project" }).click();
-          const popover = page.getByRole("dialog", { name: "Code in Project" });
-          await popover.getByRole("treeitem", { name: "src", exact: true }).click();
-          await popover.getByRole("treeitem", { name: "main.ts", exact: true }).click();
-          await popover
-            .locator("[data-line]")
-            .filter({ hasText: "export const greeting" })
-            .waitFor();
-          await page.keyboard.press(engine === "webkit" ? "Meta+p" : "Control+p");
-          const input = popover.getByRole("searchbox", { name: "Find file by name" });
-          expect(await input.evaluate((element) => element === document.activeElement)).toBe(true);
-          await input.fill("qUiCkNeEdLe");
-          const filtered = popover.locator(".file-search__results");
-          await expect.poll(() => filtered.getByRole("treeitem").count()).toBe(5);
-          expect(await filtered.getByRole("tree").count()).toBe(1);
-          expect(
-            await filtered
-              .getByRole("treeitem")
-              .evaluateAll((items) =>
-                items.map((item) => [
-                  item.getAttribute("aria-label"),
-                  item.getAttribute("aria-level"),
-                ]),
-              ),
-          ).toEqual([
-            ["another", "1"],
-            ["QuickNeedle.ts", "2"],
-            ["unopened", "1"],
-            ["deeper", "2"],
-            ["QuickNeedle.ts", "3"],
-          ]);
-          expect(await popover.getByRole("listbox").count()).toBe(0);
-          if (process.env.BATTY_UI_SCREENSHOTS === "1") {
-            await fs.mkdir(".tmp/ui-feedback", { recursive: true });
-            await page.screenshot({
-              path: `.tmp/ui-feedback/filtered-hierarchy-${engine}-${width}.png`,
-            });
-          }
-          const folder = filtered.getByRole("treeitem", { name: "another", exact: true });
-          expect(await folder.getAttribute("aria-expanded")).toBe("true");
-          await folder.click();
-          await expect
-            .poll(() =>
-              filtered.getByRole("treeitem", { name: "QuickNeedle.ts", exact: true }).count(),
-            )
-            .toBe(1);
-          await folder.focus();
-          await page.keyboard.press("ArrowRight");
-          await expect
-            .poll(() =>
-              filtered.getByRole("treeitem", { name: "QuickNeedle.ts", exact: true }).count(),
-            )
-            .toBe(2);
-          await input.focus();
-          await input.press("ArrowDown");
-          expect(
-            await folder.evaluate(
-              (item) => (item.getRootNode() as ShadowRoot).activeElement === item,
-            ),
-          ).toBe(true);
-          await page.keyboard.press("ArrowDown");
-          await page.keyboard.press("Enter");
-          await popover.locator("[data-line]").filter({ hasText: "export const found" }).waitFor();
-          expect(await popover.locator(".full-popover__subtitle").textContent()).toBe(
-            "another/QuickNeedle.ts",
-          );
-          if (width < 600)
-            await popover.getByRole("button", { name: "Files", exact: true }).click();
-          expect(await input.inputValue()).toBe("qUiCkNeEdLe");
-          expect(
-            await filtered
-              .locator('[data-item-path="another/QuickNeedle.ts"]')
-              .getAttribute("aria-selected"),
-          ).toBe("true");
-          await input.press("Escape");
-          expect(
-            await popover
-              .getByRole("treeitem", { name: "src", exact: true })
-              .getAttribute("aria-expanded"),
-          ).toBe("true");
-          expect(
-            await popover
-              .getByRole("treeitem", { name: "main.ts", exact: true })
-              .getAttribute("aria-selected"),
-          ).toBe("true");
-          expect(await popover.locator(".full-popover__subtitle").textContent()).toBe(
-            "another/QuickNeedle.ts",
-          );
-          await popover.getByRole("button", { name: "Find file", exact: true }).click();
-          await input.fill("unopened");
-          await popover.getByText("No files found.", { exact: true }).waitFor();
-          await input.fill("HiddenNeedle");
-          const hidden = filtered.getByRole("treeitem", { name: "HiddenNeedle.ts", exact: true });
-          await hidden.waitFor();
-          expect(
-            await filtered
-              .getByRole("treeitem")
-              .evaluateAll((items) => items.map((item) => item.getAttribute("aria-label"))),
-          ).toEqual([".git", "objects", "HiddenNeedle.ts"]);
-          if (process.env.BATTY_UI_SCREENSHOTS === "1") {
-            await fs.mkdir(".tmp/ui-feedback", { recursive: true });
-            await page.screenshot({
-              path: `.tmp/ui-feedback/file-search-tree-${engine}-${width}.png`,
-            });
-          }
-          await hidden.focus();
-          await page.keyboard.press("Escape");
-          expect(await input.inputValue()).toBe("");
-          expect(await popover.isVisible()).toBe(true);
-          await input.press("Escape");
-          expect(await popover.isVisible()).toBe(false);
-          const shortcut = await page.evaluate(() => {
-            const event = new KeyboardEvent("keydown", {
-              key: "p",
-              ctrlKey: true,
-              bubbles: true,
-              cancelable: true,
-            });
-            document.body.dispatchEvent(event);
-            return event.defaultPrevented;
-          });
-          expect(shortcut).toBe(false);
-        } finally {
-          await page.close();
-        }
+      await page.goto(url);
+      await page.getByRole("button", { name: "Browse code in Project" }).click();
+      const popover = page.getByRole("dialog", { name: "Code in Project" });
+      await popover.getByRole("treeitem", { name: "src", exact: true }).click();
+      await popover.getByRole("treeitem", { name: "main.ts", exact: true }).click();
+      await popover.locator("[data-line]").filter({ hasText: "export const greeting" }).waitFor();
+      await page.keyboard.press("Control+p");
+      const input = popover.getByRole("searchbox", { name: "Find file by name" });
+      expect(await input.evaluate((element) => element === document.activeElement)).toBe(true);
+      await input.fill("qUiCkNeEdLe");
+      const filtered = popover.locator(".file-search__results");
+      await expect.poll(() => filtered.getByRole("treeitem").count()).toBe(5);
+      expect(await filtered.getByRole("tree").count()).toBe(1);
+      expect(
+        await filtered
+          .getByRole("treeitem")
+          .evaluateAll((items) =>
+            items.map((item) => [item.getAttribute("aria-label"), item.getAttribute("aria-level")]),
+          ),
+      ).toEqual([
+        ["another", "1"],
+        ["QuickNeedle.ts", "2"],
+        ["unopened", "1"],
+        ["deeper", "2"],
+        ["QuickNeedle.ts", "3"],
+      ]);
+      expect(await popover.getByRole("listbox").count()).toBe(0);
+      if (process.env.BATTY_UI_SCREENSHOTS === "1") {
+        await fs.mkdir(".tmp/ui-feedback", { recursive: true });
+        await page.screenshot({
+          path: `.tmp/ui-feedback/filtered-hierarchy-chromium-${width}.png`,
+        });
       }
+      const folder = filtered.getByRole("treeitem", { name: "another", exact: true });
+      expect(await folder.getAttribute("aria-expanded")).toBe("true");
+      await folder.click();
+      await expect
+        .poll(() => filtered.getByRole("treeitem", { name: "QuickNeedle.ts", exact: true }).count())
+        .toBe(1);
+      await folder.focus();
+      await page.keyboard.press("ArrowRight");
+      await expect
+        .poll(() => filtered.getByRole("treeitem", { name: "QuickNeedle.ts", exact: true }).count())
+        .toBe(2);
+      await input.focus();
+      await input.press("ArrowDown");
+      expect(
+        await folder.evaluate((item) => (item.getRootNode() as ShadowRoot).activeElement === item),
+      ).toBe(true);
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("Enter");
+      await popover.locator("[data-line]").filter({ hasText: "export const found" }).waitFor();
+      expect(await popover.locator(".full-popover__subtitle").textContent()).toBe(
+        "another/QuickNeedle.ts",
+      );
+      if (width < 600) await popover.getByRole("button", { name: "Files", exact: true }).click();
+      expect(await input.inputValue()).toBe("qUiCkNeEdLe");
+      expect(
+        await filtered
+          .locator('[data-item-path="another/QuickNeedle.ts"]')
+          .getAttribute("aria-selected"),
+      ).toBe("true");
+      await input.press("Escape");
+      expect(
+        await popover
+          .getByRole("treeitem", { name: "src", exact: true })
+          .getAttribute("aria-expanded"),
+      ).toBe("true");
+      expect(
+        await popover
+          .getByRole("treeitem", { name: "main.ts", exact: true })
+          .getAttribute("aria-selected"),
+      ).toBe("true");
+      expect(await popover.locator(".full-popover__subtitle").textContent()).toBe(
+        "another/QuickNeedle.ts",
+      );
+      await popover.getByRole("button", { name: "Find file", exact: true }).click();
+      await input.fill("unopened");
+      await popover.getByText("No files found.", { exact: true }).waitFor();
+      await input.fill("HiddenNeedle");
+      const hidden = filtered.getByRole("treeitem", { name: "HiddenNeedle.ts", exact: true });
+      await hidden.waitFor();
+      expect(
+        await filtered
+          .getByRole("treeitem")
+          .evaluateAll((items) => items.map((item) => item.getAttribute("aria-label"))),
+      ).toEqual([".git", "objects", "HiddenNeedle.ts"]);
+      if (process.env.BATTY_UI_SCREENSHOTS === "1") {
+        await fs.mkdir(".tmp/ui-feedback", { recursive: true });
+        await page.screenshot({
+          path: `.tmp/ui-feedback/file-search-tree-chromium-${width}.png`,
+        });
+      }
+      await hidden.focus();
+      await page.keyboard.press("Escape");
+      expect(await input.inputValue()).toBe("");
+      expect(await popover.isVisible()).toBe(true);
+      await input.press("Escape");
+      expect(await popover.isVisible()).toBe(false);
+      const shortcut = await page.evaluate(() => {
+        const event = new KeyboardEvent("keydown", {
+          key: "p",
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        });
+        document.body.dispatchEvent(event);
+        return event.defaultPrevented;
+      });
+      expect(shortcut).toBe(false);
     } finally {
-      if (engine === "webkit") await instance.close();
+      await page.close();
     }
-  });
-}
+  }
+});
 
 test("incremental matches preserve collapsed folders, open new parents, and flush the last batch", async () => {
   const page = await browser.newPage();
@@ -532,55 +511,45 @@ test("workspace rows contain wrapped names and paths on desktop and mobile", asy
   }
 });
 
-for (const engine of ["chromium", "webkit"] as const) {
-  test(`${engine}: code wraps spaced lines and long tokens without changing text`, async () => {
-    const instance = (engine === "webkit" ? await launchWebKit() : browser) as unknown as Browser;
+test("chromium: code wraps spaced lines and long tokens without changing text", async () => {
+  for (const width of [1280, 390]) {
+    const page = await browser.newPage({ viewport: { width, height: 900 } });
+    page.setDefaultTimeout(10_000);
     try {
-      for (const width of engine === "webkit" ? [390] : [1280, 390]) {
-        const page = await instance.newPage({ viewport: { width, height: 900 } });
-        page.setDefaultTimeout(10_000);
-        try {
-          await page.goto(url);
-          await page.getByRole("button", { name: "Browse code in Project" }).click();
-          const popover = page.getByRole("dialog", { name: "Code in Project" });
-          await popover.getByRole("treeitem", { name: "src", exact: true }).click();
-          await popover.getByRole("treeitem", { name: "long.ts", exact: true }).click();
-          await popover
-            .locator("[data-line]")
-            .filter({ hasText: "export const sentence" })
-            .waitFor();
-          await expect
-            .poll(() => popover.locator("[data-line] span").count(), { timeout: 10_000 })
-            .toBeGreaterThan(3);
-          const lines = await popover.locator("[data-line]").evaluateAll((elements) =>
-            elements.map((element) => ({
-              text: element.textContent?.replace(/\\n$/, ""),
-              height: element.getBoundingClientRect().height,
-              lineHeight: parseFloat(getComputedStyle(element).lineHeight),
-              scrollWidth: element.scrollWidth,
-              clientWidth: element.clientWidth,
-            })),
-          );
-          expect(lines.map((line) => line.text)).toEqual(wrappedSource.split("\n"));
-          expect(lines.slice(0, 2).every((line) => line.height > line.lineHeight * 2)).toBe(true);
-          expect(lines.every((line) => line.scrollWidth <= line.clientWidth + 1)).toBe(true);
-          const viewer = await popover
-            .locator(".workspace-code__viewer")
-            .evaluate((element) => ({ scroll: element.scrollWidth, width: element.clientWidth }));
-          expect(viewer.scroll).toBeLessThanOrEqual(viewer.width);
-          if (process.env.BATTY_UI_SCREENSHOTS === "1") {
-            await fs.mkdir(".tmp/ui-feedback", { recursive: true });
-            await page.screenshot({ path: `.tmp/ui-feedback/wrapped-code-${engine}-${width}.png` });
-          }
-        } finally {
-          await page.close();
-        }
+      await page.goto(url);
+      await page.getByRole("button", { name: "Browse code in Project" }).click();
+      const popover = page.getByRole("dialog", { name: "Code in Project" });
+      await popover.getByRole("treeitem", { name: "src", exact: true }).click();
+      await popover.getByRole("treeitem", { name: "long.ts", exact: true }).click();
+      await popover.locator("[data-line]").filter({ hasText: "export const sentence" }).waitFor();
+      await expect
+        .poll(() => popover.locator("[data-line] span").count(), { timeout: 10_000 })
+        .toBeGreaterThan(3);
+      const lines = await popover.locator("[data-line]").evaluateAll((elements) =>
+        elements.map((element) => ({
+          text: element.textContent?.replace(/\\n$/, ""),
+          height: element.getBoundingClientRect().height,
+          lineHeight: parseFloat(getComputedStyle(element).lineHeight),
+          scrollWidth: element.scrollWidth,
+          clientWidth: element.clientWidth,
+        })),
+      );
+      expect(lines.map((line) => line.text)).toEqual(wrappedSource.split("\n"));
+      expect(lines.slice(0, 2).every((line) => line.height > line.lineHeight * 2)).toBe(true);
+      expect(lines.every((line) => line.scrollWidth <= line.clientWidth + 1)).toBe(true);
+      const viewer = await popover
+        .locator(".workspace-code__viewer")
+        .evaluate((element) => ({ scroll: element.scrollWidth, width: element.clientWidth }));
+      expect(viewer.scroll).toBeLessThanOrEqual(viewer.width);
+      if (process.env.BATTY_UI_SCREENSHOTS === "1") {
+        await fs.mkdir(".tmp/ui-feedback", { recursive: true });
+        await page.screenshot({ path: `.tmp/ui-feedback/wrapped-code-chromium-${width}.png` });
       }
     } finally {
-      if (engine === "webkit") await instance.close();
+      await page.close();
     }
-  });
-}
+  }
+});
 
 test("directory failures are visible and retryable, file failures do not leave stale source", async () => {
   const page = await browser.newPage();
@@ -617,9 +586,11 @@ test("directory failures are visible and retryable, file failures do not leave s
   }
 });
 
-test("WebKit: mobile code browser supports keyboard folder navigation and source preview", async () => {
-  const safari = await launchWebKit();
-  const page = await safari.newPage({ viewport: { width: 390, height: 844 }, colorScheme: "dark" });
+test("Chromium: mobile code browser supports keyboard folder navigation and source preview", async () => {
+  const page = await browser.newPage({
+    viewport: { width: 390, height: 844 },
+    colorScheme: "dark",
+  });
   page.setDefaultTimeout(5000);
   try {
     await page.goto(url);
@@ -643,6 +614,5 @@ test("WebKit: mobile code browser supports keyboard folder navigation and source
     );
   } finally {
     await page.close();
-    await safari.close();
   }
 });

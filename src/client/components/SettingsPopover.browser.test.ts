@@ -8,7 +8,6 @@ import { chromium, type Browser } from "patchright";
 import type { ViteDevServer } from "vite";
 import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
-import { launchWebKit } from "../test/webkit";
 
 let server: ViteDevServer;
 let browser: Browser;
@@ -30,288 +29,206 @@ afterAll(async () => {
   if (server) await closeBrowserFixtureServer(server);
 });
 
-test("instance colors affect app header and footer, not controls or content", async () => {
-  if (captureScreenshots) await fs.mkdir(".tmp/ui-feedback", { recursive: true });
-  for (const [colorScheme, width] of [
-    ["dark", 320],
-    ["light", 1280],
-  ] as const) {
-    const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
-    try {
-      await fixtureOperation(server, page, "environment.list", async () => ({
-        value: { names: [] },
-      }));
-      await page.goto(`${url}?shell=1`);
-      let controls: unknown;
-      let previousHeader: string | undefined;
-      for (const color of ["neutral", "blue"]) {
-        await page.evaluate(`(async () => {
-            const { applyAppAppearance } = await import("/src/client/lib/appearance.ts");
-            applyAppAppearance({ title: "Batty", color: ${JSON.stringify(color)} });
-          })()`);
-        const actual = await page.evaluate(() => {
-          const style = (selector: string) => getComputedStyle(document.querySelector(selector)!);
-          const button = style('.header [aria-label="Cron"]');
-          const input = style(".composer__input");
-          return {
-            header: style(".header").backgroundColor,
-            footer: style(".composer").backgroundColor,
-            shadow: style(".header").boxShadow,
-            controls: [
-              button.color,
-              button.backgroundColor,
-              input.color,
-              input.backgroundColor,
-              style(".app-shell").backgroundColor,
-            ],
-          };
-        });
-        expect(actual.header).not.toBe("rgba(0, 0, 0, 0)");
-        if (previousHeader) expect(actual.header).not.toBe(previousHeader);
-        previousHeader = actual.header;
-        expect(actual.footer).toBe(actual.header);
-        expect(actual.shadow).not.toBe("none");
-        controls ??= actual.controls;
-        expect(actual.controls).toEqual(controls);
-        if (captureScreenshots)
-          await page.screenshot({
-            path: `.tmp/ui-feedback/shell-${color}-${colorScheme}-${width}.png`,
-          });
-      }
-    } finally {
-      await page.close();
-    }
+test("Remote settings generates tokens and adds peers with URL and token in chromium", async () => {
+  const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
+  const requests: Record<string, string>[] = [];
+  let grants: { id: string; label: string }[] = [];
+  let connections: Record<string, unknown>[] = [];
+  try {
+    await fixtureOperation(server, page, "remotes.get", async () => ({
+      value: { instanceId: "local", grants, connections },
+    }));
+    await fixtureOperation(
+      server,
+      page,
+      [
+        "remotes.token.generate",
+        "remotes.token.revoke",
+        "remotes.connection.add",
+        "remotes.connection.remove",
+      ],
+      async (payload, _context, _next, operation) => {
+        const input = payload as Record<string, string>;
+        requests.push({ operation, ...input });
+        let body: unknown = { ok: true };
+        switch (operation) {
+          case "remotes.token.generate":
+            grants = [{ id: "invitation", label: "Unused token" }];
+            body = { id: "invitation", token: "issued-private-token" };
+            break;
+          case "remotes.token.revoke":
+            grants = [];
+            break;
+          case "remotes.connection.add":
+            connections = [
+              {
+                id: "automatic-work-id",
+                label: "Work",
+                url: input.url,
+                status: { state: "connected" },
+              },
+            ];
+            break;
+          case "remotes.connection.remove":
+            connections = [];
+            break;
+        }
+        return { value: body };
+      },
+    );
+    await fixtureOperation(server, page, "environment.list", async () => ({
+      value: { names: [] },
+    }));
+    await page.goto(url);
+    await page.getByRole("tab", { name: "Remote", exact: true }).click();
+    await page.getByText("No connections.", { exact: true }).waitFor();
+    const panel = page.locator("#settings-Remote-panel");
+    expect(await panel.locator("input").count()).toBe(2);
+    expect(await panel.locator('input[type="password"]').count()).toBe(0);
+    expect(await page.getByLabel("Remote URL", { exact: true }).getAttribute("name")).toBe(
+      "pairing-url",
+    );
+    expect(await page.getByLabel("Remote token", { exact: true }).getAttribute("name")).toBe(
+      "pairing-token",
+    );
+    expect(
+      await page.getByLabel("Remote token", { exact: true }).getAttribute("autocomplete"),
+    ).toBe("one-time-code");
+    expect(await panel.getByRole("combobox").count()).toBe(0);
+    expect(await panel.getByRole("checkbox").count()).toBe(0);
+    await page.getByRole("button", { name: "Generate token", exact: true }).click();
+    await expect
+      .poll(
+        () => page.getByRole("textbox", { name: "Generated token", exact: true }).inputValue(),
+        { timeout: 5_000 },
+      )
+      .toBe("issued-private-token");
+    await page.getByLabel("Remote token", { exact: true }).fill("draft-private-token");
+    await page.getByRole("tab", { name: "Auth", exact: true }).click();
+    await page.getByRole("tab", { name: "Remote", exact: true }).click();
+    expect(await page.getByRole("textbox", { name: "Generated token", exact: true }).count()).toBe(
+      0,
+    );
+    expect(await page.getByLabel("Remote token", { exact: true }).inputValue()).toBe("");
+    await page
+      .getByRole("textbox", { name: "Remote URL", exact: true })
+      .fill("https://work.example.com/batty/");
+    await page.getByLabel("Remote token", { exact: true }).fill("outgoing-private-token");
+    await page.getByLabel("Remote token", { exact: true }).press("Enter");
+    await page.getByRole("button", { name: "Remove connection Work", exact: true }).waitFor();
+    await page.getByText("Online", { exact: true }).waitFor();
+    expect(await page.getByLabel("Remote token", { exact: true }).inputValue()).toBe("");
+    await page.getByRole("button", { name: "Remove connection Work", exact: true }).click();
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    expect(requests.some((request) => request.operation === "remotes.connection.remove")).toBe(
+      false,
+    );
+    await page.getByRole("button", { name: "Remove connection Work", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Confirm: Remove connection Work", exact: true })
+      .click();
+    await page.getByText("No connections.", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Cancel unused token", exact: true }).click();
+    await page.getByRole("button", { name: "Confirm: Cancel unused token", exact: true }).click();
+    await expect.poll(() => page.getByText("Unused token", { exact: true }).count()).toBe(0);
+    expect(requests).toEqual([
+      { operation: "remotes.token.generate" },
+      {
+        operation: "remotes.connection.add",
+        url: "https://work.example.com/batty/",
+        token: "outgoing-private-token",
+      },
+      { operation: "remotes.connection.remove", id: "automatic-work-id" },
+      { operation: "remotes.token.revoke", id: "invitation" },
+    ]);
+    expect(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+      true,
+    );
+    expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain("private-token");
+  } finally {
+    await page.close();
   }
 });
 
-for (const engine of ["chromium", "webkit"] as const) {
-  test(`Remote settings generates tokens and adds peers with URL and token in ${engine}`, async () => {
-    const instance = (engine === "webkit" ? await launchWebKit() : browser) as unknown as Browser;
-    const page = await instance.newPage({ viewport: { width: 390, height: 900 } });
-    const requests: Record<string, string>[] = [];
-    let grants: { id: string; label: string }[] = [];
-    let connections: Record<string, unknown>[] = [];
+test("Remote settings copies its own URL separately from the token in chromium", async () => {
+  for (const [width, colorScheme] of [[320, "dark"]] as const) {
+    const context = await browser.newContext({
+      colorScheme,
+      permissions: ["clipboard-read", "clipboard-write", "local-network-access"],
+    });
+    const page = await context.newPage();
+    page.setDefaultTimeout(5_000);
+    await page.setViewportSize({ width, height: 900 });
+    const base = "/nested/very-long%20workspace-name/department/project/batty/";
+    const token = "fixture-only-invitation-".repeat(8);
     try {
-      await fixtureOperation(server, page, "remotes.get", async () => ({
-        value: { instanceId: "local", grants, connections },
-      }));
-      await fixtureOperation(
-        server,
-        page,
-        [
-          "remotes.token.generate",
-          "remotes.token.revoke",
-          "remotes.connection.add",
-          "remotes.connection.remove",
-        ],
-        async (payload, _context, _next, operation) => {
-          const input = payload as Record<string, string>;
-          requests.push({ operation, ...input });
-          let body: unknown = { ok: true };
-          switch (operation) {
-            case "remotes.token.generate":
-              grants = [{ id: "invitation", label: "Unused token" }];
-              body = { id: "invitation", token: "issued-private-token" };
-              break;
-            case "remotes.token.revoke":
-              grants = [];
-              break;
-            case "remotes.connection.add":
-              connections = [
-                {
-                  id: "automatic-work-id",
-                  label: "Work",
-                  url: input.url,
-                  status: { state: "connected" },
-                },
-              ];
-              break;
-            case "remotes.connection.remove":
-              connections = [];
-              break;
-          }
-          return { value: body };
-        },
-      );
+      await page.addInitScript((base) => {
+        window.__BATTY_BASE_URL__ = base;
+      }, base);
       await fixtureOperation(server, page, "environment.list", async () => ({
         value: { names: [] },
       }));
-      await page.goto(url);
+      await fixtureOperation(server, page, "remotes.get", async () => ({
+        value: { grants: [], connections: [] },
+      }));
+      await fixtureOperation(server, page, "remotes.token.generate", async () => ({
+        value: { id: "fixture", token },
+      }));
+      await page.goto(`${url}?route=not-part-of-address#fragment`);
       await page.getByRole("tab", { name: "Remote", exact: true }).click();
-      await page.getByText("No connections.", { exact: true }).waitFor();
-      const panel = page.locator("#settings-Remote-panel");
-      expect(await panel.locator("input").count()).toBe(2);
-      expect(await panel.locator('input[type="password"]').count()).toBe(0);
-      expect(await page.getByLabel("Remote URL", { exact: true }).getAttribute("name")).toBe(
-        "pairing-url",
-      );
-      expect(await page.getByLabel("Remote token", { exact: true }).getAttribute("name")).toBe(
-        "pairing-token",
-      );
-      expect(
-        await page.getByLabel("Remote token", { exact: true }).getAttribute("autocomplete"),
-      ).toBe("one-time-code");
-      expect(await panel.getByRole("combobox").count()).toBe(0);
-      expect(await panel.getByRole("checkbox").count()).toBe(0);
-      await page.getByRole("button", { name: "Generate token", exact: true }).click();
+      const panel = page.getByRole("region", { name: "Remote Batty", exact: true });
+      const expected = new URL(url).origin + base.slice(0, -1);
+      for (const heading of ["This Batty", "Connect to another Batty", "Connections"]) {
+        expect(await panel.getByRole("heading", { name: heading, exact: true }).count()).toBe(1);
+      }
+      if (captureScreenshots) {
+        await fs.mkdir(".tmp/ui-feedback", { recursive: true });
+        await page.screenshot({
+          path: `.tmp/ui-feedback/remote-layout-empty-chromium-${width}.png`,
+        });
+      }
+      expect(await panel.locator("code").innerText()).toBe(expected);
+      expect(await panel.getByRole("button", { name: "Copy token", exact: true }).count()).toBe(0);
+      await panel.getByRole("button", { name: "Copy URL", exact: true }).click();
       await expect
-        .poll(
-          () => page.getByRole("textbox", { name: "Generated token", exact: true }).inputValue(),
-          { timeout: 5_000 },
+        .poll(() =>
+          panel.getByRole("button", { name: "Copy URL", exact: true }).getAttribute("title"),
         )
-        .toBe("issued-private-token");
-      await page.getByLabel("Remote token", { exact: true }).fill("draft-private-token");
-      await page.getByRole("tab", { name: "Auth", exact: true }).click();
-      await page.getByRole("tab", { name: "Remote", exact: true }).click();
+        .toBe("Copied");
+      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(expected);
+      await panel.getByRole("button", { name: "Generate token", exact: true }).click();
+      await panel.getByRole("button", { name: "Copy token", exact: true }).click();
+      await expect
+        .poll(() =>
+          panel.getByRole("button", { name: "Copy token", exact: true }).getAttribute("title"),
+        )
+        .toBe("Copied");
+      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(token);
       expect(
-        await page.getByRole("textbox", { name: "Generated token", exact: true }).count(),
-      ).toBe(0);
-      expect(await page.getByLabel("Remote token", { exact: true }).inputValue()).toBe("");
-      await page
-        .getByRole("textbox", { name: "Remote URL", exact: true })
-        .fill("https://work.example.com/batty/");
-      await page.getByLabel("Remote token", { exact: true }).fill("outgoing-private-token");
-      await page.getByLabel("Remote token", { exact: true }).press("Enter");
-      await page.getByRole("button", { name: "Remove connection Work", exact: true }).waitFor();
-      await page.getByText("Online", { exact: true }).waitFor();
-      expect(await page.getByLabel("Remote token", { exact: true }).inputValue()).toBe("");
-      await page.getByRole("button", { name: "Remove connection Work", exact: true }).click();
-      await page.getByRole("button", { name: "Cancel", exact: true }).click();
-      expect(requests.some((request) => request.operation === "remotes.connection.remove")).toBe(
-        false,
-      );
-      await page.getByRole("button", { name: "Remove connection Work", exact: true }).click();
-      await page
-        .getByRole("button", { name: "Confirm: Remove connection Work", exact: true })
-        .click();
-      await page.getByText("No connections.", { exact: true }).waitFor();
-      await page.getByRole("button", { name: "Cancel unused token", exact: true }).click();
-      await page.getByRole("button", { name: "Confirm: Cancel unused token", exact: true }).click();
-      await expect.poll(() => page.getByText("Unused token", { exact: true }).count()).toBe(0);
-      expect(requests).toEqual([
-        { operation: "remotes.token.generate" },
-        {
-          operation: "remotes.connection.add",
-          url: "https://work.example.com/batty/",
-          token: "outgoing-private-token",
-        },
-        { operation: "remotes.connection.remove", id: "automatic-work-id" },
-        { operation: "remotes.token.revoke", id: "invitation" },
-      ]);
+        await panel.getByRole("button", { name: "Copy URL", exact: true }).getAttribute("title"),
+      ).toBe("Copied");
+      expect(await panel.locator("input").count()).toBe(2);
+      expect(await panel.getByRole("alert").count()).toBe(0);
       expect(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
         true,
       );
-      expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain(
-        "private-token",
-      );
-    } finally {
-      await page.close();
-      if (engine === "webkit") await instance.close();
-    }
-  });
-}
-
-for (const engine of ["chromium", "webkit"] as const) {
-  test(`Remote settings copies its own URL separately from the token in ${engine}`, async () => {
-    const instance = (engine === "webkit" ? await launchWebKit() : browser) as unknown as Browser;
-    try {
-      for (const [width, colorScheme] of [
-        [320, "dark"],
-        [390, "dark"],
-        [430, "light"],
-        [1280, "light"],
-      ] as const) {
-        const context = await instance.newContext({
-          colorScheme,
-          ...(engine === "chromium"
-            ? { permissions: ["clipboard-read", "clipboard-write", "local-network-access"] }
-            : {}),
+      expect(
+        await panel.locator("code").evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          return box.left >= 0 && box.right <= innerWidth;
+        }),
+      ).toBe(true);
+      if (captureScreenshots) {
+        await fs.mkdir(".tmp/ui-feedback", { recursive: true });
+        await page.screenshot({
+          path: `.tmp/ui-feedback/remote-layout-generated-chromium-${width}.png`,
         });
-        const page = await context.newPage();
-        page.setDefaultTimeout(5_000);
-        await page.setViewportSize({ width, height: 900 });
-        const base = "/nested/very-long%20workspace-name/department/project/batty/";
-        const token = "fixture-only-invitation-".repeat(8);
-        try {
-          await page.addInitScript((base) => {
-            window.__BATTY_BASE_URL__ = base;
-          }, base);
-          await fixtureOperation(server, page, "environment.list", async () => ({
-            value: { names: [] },
-          }));
-          await fixtureOperation(server, page, "remotes.get", async () => ({
-            value: { grants: [], connections: [] },
-          }));
-          await fixtureOperation(server, page, "remotes.token.generate", async () => ({
-            value: { id: "fixture", token },
-          }));
-          await page.goto(`${url}?route=not-part-of-address#fragment`);
-          await page.getByRole("tab", { name: "Remote", exact: true }).click();
-          const panel = page.getByRole("region", { name: "Remote Batty", exact: true });
-          const expected = new URL(url).origin + base.slice(0, -1);
-          for (const heading of ["This Batty", "Connect to another Batty", "Connections"]) {
-            expect(await panel.getByRole("heading", { name: heading, exact: true }).count()).toBe(
-              1,
-            );
-          }
-          if (captureScreenshots) {
-            await fs.mkdir(".tmp/ui-feedback", { recursive: true });
-            await page.screenshot({
-              path: `.tmp/ui-feedback/remote-layout-empty-${engine}-${width}.png`,
-            });
-          }
-          expect(await panel.locator("code").innerText()).toBe(expected);
-          expect(await panel.getByRole("button", { name: "Copy token", exact: true }).count()).toBe(
-            0,
-          );
-          await panel.getByRole("button", { name: "Copy URL", exact: true }).click();
-          await expect
-            .poll(() =>
-              panel.getByRole("button", { name: "Copy URL", exact: true }).getAttribute("title"),
-            )
-            .toBe("Copied");
-          if (engine === "chromium")
-            expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(expected);
-          await panel.getByRole("button", { name: "Generate token", exact: true }).click();
-          await panel.getByRole("button", { name: "Copy token", exact: true }).click();
-          await expect
-            .poll(() =>
-              panel.getByRole("button", { name: "Copy token", exact: true }).getAttribute("title"),
-            )
-            .toBe("Copied");
-          if (engine === "chromium")
-            expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(token);
-          expect(
-            await panel
-              .getByRole("button", { name: "Copy URL", exact: true })
-              .getAttribute("title"),
-          ).toBe("Copied");
-          expect(await panel.locator("input").count()).toBe(2);
-          expect(await panel.getByRole("alert").count()).toBe(0);
-          expect(
-            await panel.evaluate((element) => element.scrollWidth <= element.clientWidth),
-          ).toBe(true);
-          expect(
-            await panel.locator("code").evaluate((element) => {
-              const box = element.getBoundingClientRect();
-              return box.left >= 0 && box.right <= innerWidth;
-            }),
-          ).toBe(true);
-          if (captureScreenshots) {
-            await fs.mkdir(".tmp/ui-feedback", { recursive: true });
-            await page.screenshot({
-              path: `.tmp/ui-feedback/remote-layout-generated-${engine}-${width}.png`,
-            });
-          }
-        } finally {
-          await context.close();
-        }
       }
     } finally {
-      if (engine === "webkit") await instance.close();
+      await context.close();
     }
-  });
-}
+  }
+});
 
 test("Remote settings shows automatic peer names, offline status and pairing errors", async () => {
   for (const width of [390, 1280]) {

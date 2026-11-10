@@ -1,6 +1,0 @@
-FROM mcr.microsoft.com/playwright:v1.64.1-noble@sha256:ee15712262f017b8157421b212b12099146645f44b1bc5c0514cbbe6a229b1d0
-WORKDIR /home/pwuser/webkit-server
-COPY --chown=pwuser:pwuser package.json package-lock.json ./
-USER pwuser
-RUN npm ci --ignore-scripts --no-audit --no-fund
-ENTRYPOINT ["node", "node_modules/playwright-core/cli.js", "run-server", "--host", "0.0.0.0", "--port", "3000"]

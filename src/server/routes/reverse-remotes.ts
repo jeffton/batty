@@ -4,16 +4,19 @@ import type { Runtime } from "../runtime";
 import { RPC_MAX_MESSAGE_BYTES, type RpcHandler } from "../../shared/rpc";
 import { registerOwnerSocket } from "../owner-socket";
 
+/** Install before authentication hooks so rejected upgrades are also tracked and closed. */
+export async function registerRpcSocketTransport(app: FastifyInstance) {
+  await app.register(websocket, {
+    options: { maxPayload: RPC_MAX_MESSAGE_BYTES, perMessageDeflate: false },
+  });
+}
+
 /** A browser and a paired node share framing, not authorization or operations. */
-export async function registerReverseRemoteRoutes(
+export function registerReverseRemoteRoutes(
   app: FastifyInstance,
   runtime: Runtime,
   ownerHandler?: RpcHandler,
 ) {
-  await app.register(websocket, {
-    // Match the HTTP JSON body limit; file streams remain independently chunked.
-    options: { maxPayload: RPC_MAX_MESSAGE_BYTES, perMessageDeflate: false },
-  });
   const closeOwners = ownerHandler
     ? registerOwnerSocket(app, runtime.config, ownerHandler)
     : undefined;

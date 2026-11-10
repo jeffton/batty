@@ -37,7 +37,7 @@ async function nodeRequest<T>(
 }
 import type { PairingClaim } from "./remote-access";
 import { authenticateNode, registerRemoteRoutes } from "./routes/remotes";
-import { registerReverseRemoteRoutes } from "./routes/reverse-remotes";
+import { registerReverseRemoteRoutes, registerRpcSocketTransport } from "./routes/reverse-remotes";
 import { resolveSentFile } from "./send-files";
 import type { SentFileDescriptor } from "../shared/types";
 
@@ -140,6 +140,7 @@ async function openInstance(directory: string, name: string, fileStatus = 200, b
       return handleNode(connection, operation, input, call);
     },
   );
+  await registerRpcSocketTransport(app);
   // Match main.ts's independent node bearer boundary, using a fixture-only owner header.
   app.addHook("onRequest", async (request, reply) => {
     if (request.url.startsWith("/api/node/")) {
@@ -149,7 +150,7 @@ async function openInstance(directory: string, name: string, fileStatus = 200, b
       return reply.code(401).send({ error: "Owner authentication required" });
   });
   registerRemoteRoutes(app, runtime);
-  await registerReverseRemoteRoutes(app, runtime);
+  registerReverseRemoteRoutes(app, runtime);
   const upgradedSockets = new Set<Duplex>();
   app.server.on("upgrade", (_request, socket) => {
     upgradedSockets.add(socket);

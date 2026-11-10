@@ -28,7 +28,7 @@ import {
   authenticateNode,
   executeRemoteOwnerOperation,
 } from "./routes/remotes";
-import { registerReverseRemoteRoutes } from "./routes/reverse-remotes";
+import { registerReverseRemoteRoutes, registerRpcSocketTransport } from "./routes/reverse-remotes";
 import { resolveSentFile } from "./send-files";
 import { WebPushService } from "./web-push";
 import { registerPushCompletions } from "./push-completions";
@@ -65,6 +65,7 @@ const app = fastify({
   bodyLimit: 100 * 1024 * 1024,
 });
 await app.register(cookie);
+await registerRpcSocketTransport(app);
 await app.register(multipart, { limits: { fileSize: 100 * 1024 * 1024 } });
 app.decorateRequest("auth", false);
 declare module "fastify" {
@@ -100,7 +101,7 @@ const routeContext = {
 };
 registerAuthRoutes(routeContext);
 registerRemoteRoutes(app, runtime);
-await registerReverseRemoteRoutes(app, runtime, (operation, input, rpc) =>
+registerReverseRemoteRoutes(app, runtime, (operation, input, rpc) =>
   ownerHandler(operation, input, rpc),
 );
 const reportBrowserError = createBrowserErrorReporter(

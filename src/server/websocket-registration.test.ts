@@ -1,5 +1,5 @@
 import { once } from "node:events";
-import type { Socket } from "node:net";
+import { connect as connectTcp, type Socket } from "node:net";
 import fastify from "fastify";
 import cookie from "@fastify/cookie";
 import WebSocket from "ws";
@@ -8,7 +8,7 @@ import { RPC_MAX_MESSAGE_BYTES, RpcChannel } from "../shared/rpc";
 import { createAuthToken } from "./auth";
 import type { BrowserService } from "./browser-service";
 import type { Runtime } from "./runtime";
-import { registerReverseRemoteRoutes } from "./routes/reverse-remotes";
+import { registerReverseRemoteRoutes, registerRpcSocketTransport } from "./routes/reverse-remotes";
 import { registerCloudBrowserRoutes } from "./routes/cloud-browser";
 
 vi.mock("./cloud-browser-stream", () => ({
@@ -27,10 +27,15 @@ afterEach(async () => {
 });
 
 async function fixture(shared: boolean) {
-  const app = fastify();
+  const app = fastify({ forceCloseConnections: true });
   await app.register(cookie);
   if (shared) {
-    await registerReverseRemoteRoutes(
+    await registerRpcSocketTransport(app);
+    app.addHook("onRequest", async (request, reply) => {
+      if (!request.cookies.session)
+        return reply.code(401).send({ error: "Authentication required" });
+    });
+    registerReverseRemoteRoutes(
       app,
       {
         config: { authSecret: "test-secret", cookieName: "session" },
@@ -64,7 +69,7 @@ async function fixture(shared: boolean) {
     await once(socket, "open");
     return socket;
   }
-  return { app, cloudScroll, connect };
+  return { app, origin, cloudScroll, connect };
 }
 
 it.each([false, true])(
@@ -121,4 +126,39 @@ it("rejects oversized RPC messages from their wire header before reading their p
   header.writeBigUInt64BE(BigInt(RPC_MAX_MESSAGE_BYTES + 1), 2);
   (socket as WebSocket & { _socket: Socket })._socket.write(header);
   expect((await closed)[0]).toBe(1009);
+});
+
+it("closes rejected upgrades before shutdown alongside an authenticated owner socket", async () => {
+  const { app, origin, connect } = await fixture(true);
+  const owner = await connect("/api/socket");
+  const channel = new RpcChannel(owner);
+  expect((await channel.call("echo", { alive: true })).value).toEqual({ alive: true });
+
+  // Keep the peer open like a reverse proxy: do not let the client hide a leaked
+  // rejected upgrade by closing its side of the connection after the 401.
+  const rejected = connectTcp(Number(new URL(origin).port), "127.0.0.1");
+  cleanups.push(async () => {
+    rejected.destroy();
+  });
+  await once(rejected, "connect");
+  const response = once(rejected, "data");
+  const rejectedClosed = once(rejected, "close");
+  rejected.write(
+    [
+      "GET /api/socket HTTP/1.1",
+      `Host: ${new URL(origin).host}`,
+      "Connection: Upgrade",
+      "Upgrade: websocket",
+      "Sec-WebSocket-Version: 13",
+      "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+      "",
+      "",
+    ].join("\r\n"),
+  );
+  expect((await response)[0].toString()).toContain("HTTP/1.1 401");
+  await rejectedClosed;
+
+  const ownerClosed = once(owner, "close");
+  await app.close();
+  await ownerClosed;
 });

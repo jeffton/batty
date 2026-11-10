@@ -11,6 +11,7 @@ import { sessionHistoryCursor } from "@/client/lib/session-stream";
 import { RpcError } from "@/shared/rpc";
 import { prependHistoryPage } from "@/client/lib/session-pagination";
 import { createSessionConnection } from "@/client/lib/session-connection";
+import { isConnectionError } from "@/client/lib/connection-errors";
 import { RECENT_SESSION_MESSAGE_WINDOW } from "@/shared/session-history";
 import type { CronRunLog, ServerEvent, SessionState } from "@/shared/types";
 
@@ -46,6 +47,7 @@ const displayedConnectionState = computed(() =>
 );
 let connection: ReturnType<typeof createSessionConnection> | undefined;
 let loadGeneration = 0;
+let streamError: string | undefined;
 
 function closeStream(): void {
   connection?.close();
@@ -75,18 +77,23 @@ function openStream(): void {
     onError: (error) => {
       loading.value = false;
       connectionState.value = "offline";
-      if (error !== undefined) handleSessionError(error);
+      if (error !== undefined && !isConnectionError(error)) {
+        handleSessionError(error);
+        streamError = errorMessage.value;
+      }
       return missing.value ? false : undefined;
     },
     onEvent: (event) => {
       applyEvent(event);
       if (event.type === "reset") {
         loading.value = false;
-        errorMessage.value = undefined;
+        if (errorMessage.value === streamError) errorMessage.value = undefined;
+        streamError = undefined;
         connectionState.value = "online";
       } else if (event.type === "error") {
         loading.value = false;
         errorMessage.value = event.message;
+        streamError = event.message;
       }
     },
   });
@@ -109,6 +116,7 @@ function ensureSessionLoaded(): void {
   loading.value = true;
   connectionState.value = "connecting";
   errorMessage.value = undefined;
+  streamError = undefined;
   missing.value = false;
   // session.watch supplies the initial snapshot and owns reconnect from the first
   // request. A failed one-shot read must not strand the popover before recovery starts.
@@ -246,6 +254,10 @@ onBeforeUnmount(() => {
       >
         <CircleAlert :size="18" />
         <span>{{ errorMessage }}</span>
+      </div>
+
+      <div v-else-if="!session" class="subagent-session-popover__empty" role="status">
+        <span>Offline — reconnecting…</span>
       </div>
 
       <SessionTranscriptView

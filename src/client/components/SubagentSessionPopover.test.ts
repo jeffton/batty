@@ -236,6 +236,7 @@ test("header stop follows active state, prevents duplicate requests and exposes 
     expect(stop.attributes("disabled")).toBeUndefined();
     await snapshot(false, 3);
     expect(wrapper.find('[aria-label="Stop subagent"]').exists()).toBe(false);
+    expect(wrapper.get('[role="alert"]').attributes("aria-label")).toBe("Stop failed");
     await snapshot(true, 4);
     sources[0]!.onerror!();
     await flushPromises();
@@ -492,9 +493,12 @@ test("server and network errors remain errors, not missing-session empty states"
   }
 });
 
-test("an initial read failure recovers without closing and reopening the popover", async () => {
+test.each([
+  new DOMException("signal timed out", "TimeoutError"),
+  new RpcError("OFFLINE", "RPC socket failed"),
+])("recovers initial transport failure %s without a red error or reopening", async (error) => {
   vi.useFakeTimers();
-  vi.mocked(rpcCall).mockRejectedValueOnce(new DOMException("signal timed out", "TimeoutError"));
+  vi.mocked(rpcCall).mockRejectedValueOnce(error);
   const sources: { onmessage?: (event: { data: string }) => void }[] = [];
   vi.stubGlobal(
     "SessionSubscription",
@@ -522,7 +526,8 @@ test("an initial read failure recovers without closing and reopening the popover
   try {
     wrapper.getComponent({ name: "FullPopover" }).vm.$emit("toggle", { newState: "open" });
     await flushPromises();
-    expect(wrapper.text()).toContain("signal timed out");
+    expect(wrapper.text()).not.toContain(error.message);
+    expect(wrapper.get('[role="status"]').text()).toBe("Offline — reconnecting…");
     await vi.advanceTimersByTimeAsync(2000);
     await flushPromises();
     expect(sources).toHaveLength(1);

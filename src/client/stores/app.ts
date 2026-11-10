@@ -1,4 +1,6 @@
 import { defineStore } from "pinia";
+import { isConnectionError } from "@/client/lib/connection-errors";
+import { RpcError } from "@/shared/rpc";
 import { blockAppReload, checkAppUpdate } from "@/client/lib/app-updates";
 import { primeAgentNotifications } from "@/client/lib/agent-notifications";
 import { syncPushSubscription, unregisterPushSubscription } from "@/client/lib/push-notifications";
@@ -37,6 +39,7 @@ let readingHistoryError: string | undefined;
 let uploads = 0;
 let pushSync: Promise<void> | undefined;
 let pushError: string | undefined;
+let pushSyncPending = false;
 let bootstrapping: Promise<void> | undefined;
 let checkingAuthentication: Promise<void> | undefined;
 let authenticationError: string | undefined;
@@ -66,6 +69,7 @@ export const useAppStore = defineStore("app", {
           if (!payload.authenticated) await this.bootstrap(payload);
         } catch (error) {
           if (epoch !== localStorage.getItem(CACHE_EPOCH_KEY) || !this.authenticated) return;
+          if (isConnectionError(error)) return;
           authenticationError = error instanceof Error ? error.message : String(error);
           this.lastError = authenticationError;
         }
@@ -180,7 +184,8 @@ export const useAppStore = defineStore("app", {
       } catch (error) {
         if (authEpoch !== localStorage.getItem(CACHE_EPOCH_KEY)) return;
         this.bootstrapFailed = true;
-        this.lastError = error instanceof Error ? error.message : String(error);
+        if (!(this.authenticated && this.activeSession && isConnectionError(error)))
+          this.lastError = error instanceof Error ? error.message : String(error);
         this.connectionState = "offline";
         if (this.authenticated && this.activeSession) {
           clearTimeout(reconnectTimer);
@@ -258,9 +263,9 @@ export const useAppStore = defineStore("app", {
           hasMore = page.hasMoreMessages;
         }
       } catch (error) {
-        // Only our lifecycle cancellation is expected. Timeouts, HTTP errors and
-        // unowned browser aborts remain visible and retain fetch diagnostics.
-        if (current()) {
+        // Owned cancellation is handled by current(); transport failures retry on
+        // reconnect/resume. HTTP, auth and unexpected aborts retain their banner.
+        if (current() && !isConnectionError(error)) {
           readingHistoryError = `Reading history: ${String(error)}`;
           this.lastError = readingHistoryError;
         }
@@ -342,6 +347,7 @@ export const useAppStore = defineStore("app", {
           if (event.type === "reset") {
             this.connectionState = "online";
             void this.populateReadingCache();
+            if (pushSyncPending) void this.syncNotifications(true);
           }
           if (!expandedHistory) this.activeSession = recentSessionWindow(this.activeSession);
         },
@@ -385,14 +391,22 @@ export const useAppStore = defineStore("app", {
         return;
       }
       const epoch = localStorage.getItem(CACHE_EPOCH_KEY);
+      pushSyncPending = true;
       pushSync = (async () => {
         try {
           await syncPushSubscription(false);
           if (epoch !== localStorage.getItem(CACHE_EPOCH_KEY)) return;
+          pushSyncPending = false;
           if (pushError && this.lastError === pushError) this.lastError = undefined;
           pushError = undefined;
         } catch (error) {
           if (epoch !== localStorage.getItem(CACHE_EPOCH_KEY)) return;
+          // The session connection already represents transport outages and reconnects.
+          // Retry this idempotent sync after its next snapshot, without a push banner.
+          if (error instanceof RpcError && error.code === "OFFLINE") return;
+          // A query deadline can expire on a healthy socket, without a reconnect
+          // to retry it. Keep that failure visible until a later successful sync.
+          pushSyncPending = false;
           pushError = `Push notifications: ${error instanceof Error ? error.message : String(error)}`;
           this.lastError = pushError;
         }

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 import { rpcCall, closeRpcTransport } from "./rpc";
+import { RpcError } from "@/shared/rpc";
 import {
   addRemoteConnection,
   beginPasskeyLogin,
@@ -39,6 +40,42 @@ it("cookie login, bootstrap and logout remain HTTP; domain calls use native RPC"
   await getRemoteSettings();
   expect(rpcCall).toHaveBeenCalledWith("remotes.get", {}, expect.any(Object));
 });
+it("distinguishes fetch transport failures from HTTP auth and malformed responses without replay", async () => {
+  const http = vi.fn().mockRejectedValueOnce(new TypeError("Load failed"));
+  vi.stubGlobal("fetch", http);
+  await expect(beginPasskeyLogin()).rejects.toMatchObject({
+    code: "OFFLINE",
+    message: "Load failed",
+  });
+  expect(http).toHaveBeenCalledOnce();
+  http.mockResolvedValueOnce(
+    new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 }),
+  );
+  await expect(getBootstrap()).rejects.toMatchObject({ status: 401, message: "Unauthorized" });
+  http.mockResolvedValueOnce(new Response("not json"));
+  await expect(getBootstrap()).rejects.not.toBeInstanceOf(RpcError);
+});
+
+it.each([200, 401])(
+  "classifies interrupted HTTP response bodies without losing status %s",
+  async (status) => {
+    const response = new Response(null, { status });
+    // Browser Fetch exposes interrupted body reads as TypeError; happy-dom wraps
+    // errored streams in its own EncodingError instead.
+    vi.spyOn(response, "json").mockRejectedValueOnce(new TypeError("Network connection lost"));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => response),
+    );
+    const expected =
+      status === 200
+        ? { code: "OFFLINE", message: "Network connection lost" }
+        : { status: 401, message: "HTTP 401" };
+    await expect(getBootstrap()).rejects.toMatchObject(expected);
+    expect(fetch).toHaveBeenCalledOnce();
+  },
+);
+
 it("successful registration resets captured identity, but rejected login leaves a live transport alone", async () => {
   vi.stubGlobal(
     "fetch",

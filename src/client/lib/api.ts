@@ -8,6 +8,7 @@ import type { SubscriptionProviderId } from "@/shared/provider-auth";
 import { withBaseUrl } from "./base-url";
 import { closeRpcTransport, rpcCall, type RpcCallOptions } from "./rpc";
 import type { OwnerInputs, OwnerOutputs } from "@/shared/owner-api";
+import { RpcError } from "@/shared/rpc";
 import type { AppAppearance } from "@/shared/appearance";
 import type { BootstrapPayload, McpSettingsResponse, SessionState } from "@/shared/types";
 import {
@@ -57,12 +58,20 @@ function query<K extends keyof OwnerInputs>(
   });
 }
 async function authRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(withBaseUrl(path), { credentials: "include", ...init });
-  if (!response.ok) {
-    const body = (await response.json()) as { error: string };
-    throw new HttpError(body.error, response.status);
+  let response: Response | undefined;
+  try {
+    response = await fetch(withBaseUrl(path), { credentials: "include", ...init });
+    const body = (await response.json()) as T & { error: string };
+    if (!response.ok) throw new HttpError(body.error, response.status);
+    return body;
+  } catch (error) {
+    // Preserve HTTP/auth status even if the error response body was interrupted.
+    if (response && !response.ok && !(error instanceof HttpError))
+      throw new HttpError(`HTTP ${response.status}`, response.status);
+    // Both fetch and response-body reads reject with TypeError on transport loss.
+    if (error instanceof TypeError) throw new RpcError("OFFLINE", error.message);
+    throw error;
   }
-  return response.json() as Promise<T>;
 }
 
 export function getWorkspaces() {

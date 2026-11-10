@@ -20,6 +20,7 @@ import App from "@/client/App.vue";
 import ChatHeader from "@/client/components/ChatHeader.vue";
 import ChatSessionPane from "@/client/components/ChatSessionPane.vue";
 import { useAppStore } from "./app";
+import { RpcError } from "@/shared/rpc";
 vi.mock("@/client/lib/main-cache", () => ({
   CacheSuspendedError: class CacheSuspendedError extends Error {},
   CACHE_DAY_MS: 86_400_000,
@@ -223,20 +224,63 @@ describe("push synchronization recovery", () => {
     expect(store.lastError).toBeUndefined();
   });
 
-  it("retains real failures and does not clear unrelated errors after successful sync", async () => {
+  it("resyncs after a reconnect snapshot without a banner for transport loss", async () => {
+    const error = new RpcError("OFFLINE", "RPC socket failed");
+    let stream!: { onmessage: (event: { data: string }) => void };
+    vi.stubGlobal(
+      "SessionSubscription",
+      class {
+        close() {}
+        constructor() {
+          stream = this as unknown as typeof stream;
+        }
+      },
+    );
     const sync = vi
       .spyOn(pushNotifications, "syncPushSubscription")
-      .mockRejectedValueOnce(new Error("HTTP 500"))
+      .mockRejectedValueOnce(error)
       .mockResolvedValue(true);
     const store = useAppStore();
     store.authenticated = true;
-    await store.syncNotifications();
-    expect(store.lastError).toBe("Push notifications: HTTP 500");
+    store.activeSession = state();
     store.lastError = "Message submission failed";
     await store.syncNotifications();
     expect(store.lastError).toBe("Message submission failed");
+    store.openStream();
+    const reset = () =>
+      stream.onmessage({
+        data: JSON.stringify({ type: "reset", state: state(), revision: 1 }),
+      });
+    reset();
+    await flushPromises();
+    expect(sync).toHaveBeenCalledTimes(2);
+    expect(store.lastError).toBe("Message submission failed");
+    reset();
+    await flushPromises();
     expect(sync).toHaveBeenCalledTimes(2);
   });
+
+  it.each([
+    new Error("HTTP 500"),
+    new RpcError("UNAUTHORIZED", "Sign in required"),
+    new DOMException("signal timed out", "TimeoutError"),
+  ])(
+    "retains real failure %s and does not clear unrelated errors after successful sync",
+    async (error) => {
+      const sync = vi
+        .spyOn(pushNotifications, "syncPushSubscription")
+        .mockRejectedValueOnce(error)
+        .mockResolvedValue(true);
+      const store = useAppStore();
+      store.authenticated = true;
+      await store.syncNotifications();
+      expect(store.lastError).toBe(`Push notifications: ${error.message}`);
+      store.lastError = "Message submission failed";
+      await store.syncNotifications();
+      expect(store.lastError).toBe("Message submission failed");
+      expect(sync).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it("coalesces concurrent recovery and ignores results from a replaced auth epoch", async () => {
     let reject!: (error: Error) => void;
@@ -457,6 +501,32 @@ describe("reading history lifecycle", () => {
     await store.populateReadingCache();
     expect(store.lastError).toBe("Unrelated failure");
   });
+
+  it.each([
+    new RpcError("OFFLINE", "RPC socket failed"),
+    new DOMException("signal timed out", "TimeoutError"),
+  ])(
+    "recovers background history from %s while keeping explicit read failures visible",
+    async (error) => {
+      const fetch = vi.spyOn(api, "getMainMessages").mockRejectedValueOnce(error);
+      const store = useAppStore();
+      store.authenticated = true;
+      store.activeSession = history();
+      await store.populateReadingCache();
+      expect(store.lastError).toBeUndefined();
+      fetch.mockResolvedValueOnce({
+        messages: [message("old")],
+        totalMessageCount: 2,
+        hasMoreMessages: false,
+      });
+      await store.populateReadingCache();
+      expect(fetch).toHaveBeenCalledTimes(2);
+      fetch.mockRejectedValueOnce(error);
+      store.connectionState = "online";
+      await store.loadOlderMessages();
+      expect(store.lastError).toBe(error.message);
+    },
+  );
 
   it("does not report owned cancellation or merge a response after the auth epoch changes", async () => {
     let reject!: (error: unknown) => void;
@@ -743,6 +813,45 @@ describe("stream recovery", () => {
 });
 
 describe("authentication recovery", () => {
+  it.each([
+    new RpcError("OFFLINE", "Network unavailable"),
+    new DOMException("signal timed out", "TimeoutError"),
+  ])(
+    "keeps background auth probe %s out of the banner but reports server failures",
+    async (error) => {
+      const store = useAppStore();
+      store.authenticated = true;
+      store.activeSession = state();
+      vi.mocked(api.getBootstrap).mockRejectedValueOnce(error);
+      await store.checkAuthentication();
+      expect(store.lastError).toBeUndefined();
+      vi.mocked(api.getBootstrap).mockRejectedValueOnce(new api.HttpError("Forbidden", 403));
+      await store.checkAuthentication();
+      expect(store.lastError).toBe("Forbidden");
+      await store.checkAuthentication();
+      expect(store.lastError).toBeUndefined();
+    },
+  );
+
+  it("keeps cached bootstrap offline without a background banner, but shows initial-load failures", async () => {
+    const store = useAppStore();
+    store.bootstrapped = true;
+    store.authenticated = true;
+    store.activeSession = state();
+    vi.mocked(api.getBootstrap).mockRejectedValueOnce(
+      new RpcError("OFFLINE", "Network unavailable"),
+    );
+    await store.bootstrap();
+    expect(store.connectionState).toBe("offline");
+    expect(store.lastError).toBeUndefined();
+    store.activeSession = undefined;
+    store.authenticated = false;
+    vi.mocked(api.getBootstrap).mockRejectedValueOnce(
+      new RpcError("OFFLINE", "Network unavailable"),
+    );
+    await store.bootstrap();
+    expect(store.lastError).toBe("Network unavailable");
+  });
   it("keeps the session-stream retry cadence when authentication works but the socket fails", async () => {
     vi.useFakeTimers();
     const streams: { onerror: () => void }[] = [];

@@ -202,6 +202,7 @@ export class RemoteWorkers {
               this.follow(mirror);
           }
           this.changes.emit("change");
+          this.changes.emit("tasks");
         },
       ).finally(() => {
         if (this.running.get(node) === controller) this.running.delete(node);
@@ -210,7 +211,11 @@ export class RemoteWorkers {
   }
   disconnect(node: string) {
     // Wake pending joins after the owner removes a configured peer.
-    queueMicrotask(() => this.changes.emit("catalog", node));
+    queueMicrotask(() => {
+      this.changes.emit("catalog", node);
+      this.changes.emit("change");
+      this.changes.emit("tasks");
+    });
     for (const [key, controller] of this.running)
       if (key === node || key.startsWith(`${node}:`)) {
         controller.abort();
@@ -238,6 +243,7 @@ export class RemoteWorkers {
         controller.signal,
         async (event) => {
           if (event.type === "error") throw new Error(String(event.message));
+          const taskSignature = this.taskSignature(mirror);
           const activity = JSON.stringify([
             mirror.state?.isStreaming,
             mirror.state?.canStopSubagent,
@@ -281,7 +287,8 @@ export class RemoteWorkers {
             activity !== JSON.stringify([mirror.state?.isStreaming, mirror.state?.canStopSubagent])
           )
             await this.persistMirror(mirror);
-          this.changes.emit("change");
+          this.changes.emit("change", remoteSessionId(mirror.node, mirror.session));
+          if (taskSignature !== this.taskSignature(mirror)) this.changes.emit("tasks");
           if (terminal) controller.abort();
         },
         mirror,
@@ -289,6 +296,14 @@ export class RemoteWorkers {
         if (this.running.get(key) === controller) this.running.delete(key);
       }),
     );
+  }
+  private taskSignature(mirror: Mirror) {
+    return JSON.stringify([
+      mirror.state?.model,
+      mirror.state?.thinkingLevel,
+      mirror.error,
+      mirror.syncedTerminal,
+    ]);
   }
   private launch(loop: Promise<void>) {
     this.loops.add(loop);
@@ -337,7 +352,8 @@ export class RemoteWorkers {
           await this.persistMirror(mirror);
         }
         console.error(`Remote ${node} stream`, error);
-        this.changes.emit("change");
+        this.changes.emit("change", mirror ? remoteSessionId(node, mirror.session) : undefined);
+        this.changes.emit("tasks");
         if (error instanceof RpcError && ["UNAUTHORIZED", "FORBIDDEN"].includes(error.code)) {
           this.changes.emit("catalog", node);
           break;

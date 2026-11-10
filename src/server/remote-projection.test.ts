@@ -2,7 +2,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "vite-plus/test";
+import { expect, test, vi } from "vite-plus/test";
 import { RemoteWorkers } from "./remote-workers";
 import { observeSession } from "./session-observer";
 import type { Runtime } from "./runtime";
@@ -195,6 +195,138 @@ test("offline mirrors preserve lifecycle status across reload and inspect uses o
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("remote follow separates session changes from task-list notifications", async () => {
+  const root = await mkdtemp(join(tmpdir(), "batty-mirror-notifications-"));
+  const directory = join(root, ".batty", "remote-mirrors");
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    join(directory, "work-123.json"),
+    JSON.stringify({
+      node: "work",
+      session: "123",
+      summary: { sessionId: "123", workspaceId: "work", status: "running" },
+      state: sourceState(1, "initial"),
+      messages: [],
+      syncedTerminal: true,
+    }),
+  );
+  await writeFile(
+    join(directory, "assignments.json"),
+    JSON.stringify({
+      origins: {},
+      assignments: [{ node: "work", session: "123", parentId: 1, requestId: "request" }],
+    }),
+  );
+  const runtime = {
+    config: { battyDir: root },
+    main: { id: 1 },
+    streamId: "local",
+    nextRevision: () => 1,
+  } as unknown as Runtime;
+  const remotes = await RemoteWorkers.open(runtime);
+  const controllers: ReadableStreamDefaultController<ServerEvent>[] = [];
+  const closedControllers = new WeakSet<ReadableStreamDefaultController<ServerEvent>>();
+  const closeStream = (controller: ReadableStreamDefaultController<ServerEvent>) => {
+    if (closedControllers.has(controller) || controller.desiredSize === null) return;
+    closedControllers.add(controller);
+    controller.close();
+  };
+  const changes: unknown[][] = [];
+  const taskNotifications: unknown[][] = [];
+  const logError = vi.spyOn(console, "error").mockImplementation(() => {});
+  const waitFor = async (condition: () => boolean) => {
+    for (let attempt = 0; attempt < 100 && !condition(); attempt++)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(
+      condition(),
+      `waitFor timed out; changes=${changes.length}, tasks=${taskNotifications.length}, streams=${controllers.length}`,
+    ).toBe(true);
+  };
+
+  try {
+    await remotes.access.addConnection({
+      id: "work",
+      label: "Work",
+      url: "https://remote.example/",
+      token: "test",
+    });
+    Object.defineProperty(remotes, "requestNode", {
+      configurable: true,
+      value: async (
+        _connection: unknown,
+        _operation: unknown,
+        _input: unknown,
+        options: { signal: AbortSignal },
+      ) => ({
+        value: null,
+        events: new ReadableStream<ServerEvent>({
+          start: (controller) => {
+            controllers.push(controller);
+            options.signal.addEventListener("abort", () => closeStream(controller), { once: true });
+          },
+          cancel: () => {
+            const controller = controllers.at(-1);
+            if (controller) closedControllers.add(controller);
+          },
+        }),
+      }),
+    });
+    remotes.changes.on("change", (...args) => changes.push(args));
+    remotes.changes.on("tasks", (...args) => taskNotifications.push(args));
+    (remotes as unknown as { follow(mirror: unknown): void }).follow({
+      node: "work",
+      session: "123",
+      summary: { sessionId: "123", workspaceId: "work", status: "running" },
+      state: sourceState(1, "initial"),
+      messages: [],
+      syncedTerminal: true,
+    });
+    await waitFor(() => controllers.length === 1);
+
+    controllers[0]!.enqueue({
+      type: "assistant",
+      assistant: { ...sourceState(2, "token").activeAssistant! },
+    });
+    controllers[0]!.enqueue({ type: "tools", tools: [] });
+    await waitFor(() => changes.length === 2);
+    expect(changes.map(([id]) => id)).toEqual(["remote:work:123", "remote:work:123"]);
+    expect(taskNotifications).toHaveLength(0);
+
+    controllers[0]!.enqueue({
+      type: "state",
+      state: { model: "provider/model-v2", thinkingLevel: "high" } as Extract<
+        ServerEvent,
+        { type: "state" }
+      >["state"],
+    });
+    await waitFor(() => taskNotifications.length === 1);
+    expect(taskNotifications).toHaveLength(1);
+
+    closeStream(controllers[0]!);
+    await waitFor(() => taskNotifications.length === 2);
+    await waitFor(() => controllers.length === 2);
+    controllers[1]!.enqueue({
+      type: "assistant",
+      assistant: { ...sourceState(3, "recovered").activeAssistant! },
+    });
+    await waitFor(() => taskNotifications.length === 3);
+    expect(changes.map(([id]) => id)).toEqual([
+      "remote:work:123",
+      "remote:work:123",
+      "remote:work:123",
+      "remote:work:123",
+      "remote:work:123",
+    ]);
+    remotes.disconnect("work");
+    await waitFor(() => taskNotifications.length === 4);
+    expect(changes.at(-1)).toEqual([]);
+  } finally {
+    logError.mockRestore();
+    await remotes.close();
+    await rm(root, { recursive: true, force: true });
+  }
+}, 15000);
 
 test("a synchronized terminal cursor overrides stale remote live fields in sessions and Tasks", async () => {
   const root = await mkdtemp(join(tmpdir(), "batty-mirror-terminal-"));

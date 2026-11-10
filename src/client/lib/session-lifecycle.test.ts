@@ -8,7 +8,11 @@ import { sessionHistoryCursor } from "./session-stream";
 import type { SessionState } from "@/shared/types";
 import { RpcError } from "@/shared/rpc";
 import type { OwnerSessionEvent } from "@/shared/owner-api";
-vi.mock("./rpc", () => ({ rpcCall: vi.fn(), closeRpcTransport: vi.fn() }));
+vi.mock("./rpc", () => ({
+  rpcCall: vi.fn(),
+  closeRpcTransport: vi.fn(),
+  isRpcTransportConnecting: () => false,
+}));
 const state = (ids: string[]): SessionState => ({
   id: "1",
   sessionId: "1",

@@ -126,7 +126,7 @@ test("remote task changes invalidate only when the task signature changes", asyn
     streamId: "test",
     main: { id: 1 },
     state: async () => ({ revision: 1, messages: [], hasMoreRecentMessages: false }),
-    remotes: { tasks: () => tasks, changes },
+    remotes: { tasks: vi.fn(() => tasks), changes },
     harness: { observeCommits: () => ({ detach: vi.fn() }), observeConversation },
     memory: { status: () => ({ pending: 0 }) },
   } as unknown as Runtime;
@@ -143,7 +143,11 @@ test("remote task changes invalidate only when the task signature changes", asyn
   const initialNotifications = emit.mock.calls.filter(([payload]) =>
     JSON.stringify(payload).includes('"type":"orchestration-changed"'),
   ).length;
-  changes.emit("change");
+  const taskReads = vi.mocked(runtime.remotes.tasks).mock.calls.length;
+  for (let index = 0; index < 100; index++) changes.emit("change", "remote:peer:2");
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  expect(runtime.remotes.tasks).toHaveBeenCalledTimes(taskReads);
+  changes.emit("tasks");
   await new Promise((resolve) => setTimeout(resolve, 5));
   expect(
     emit.mock.calls.filter(([payload]) =>
@@ -151,7 +155,7 @@ test("remote task changes invalidate only when the task signature changes", asyn
     ),
   ).toHaveLength(initialNotifications);
   tasks = [{ id: "remote-worker", status: "running" }];
-  changes.emit("change");
+  changes.emit("tasks");
   await new Promise((resolve) => setTimeout(resolve, 5));
   const notifications = emit.mock.calls
     .map(([payload]) => JSON.stringify(payload))
@@ -160,6 +164,7 @@ test("remote task changes invalidate only when the task signature changes", asyn
     expect.stringContaining('"type":"orchestration-changed","cron":false'),
   ]);
   close();
+  expect(changes.listenerCount("tasks")).toBe(0);
 });
 
 test("deferred progress streams without a stored commit and window rollover preserves paginated catch-up", async () => {

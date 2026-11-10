@@ -127,7 +127,8 @@ export function createSessionOperations(
                 state: (history, cursor) => runtime.state(sessionId, undefined, history, cursor),
                 subscribe: (changed) => {
                   let cursor = runtime.remotes.state(sessionId).historyCursor;
-                  const update = () => {
+                  const update = (changedSession?: string) => {
+                    if (changedSession !== undefined && changedSession !== sessionId) return;
                     const next = runtime.remotes.state(sessionId).historyCursor;
                     changed(next !== cursor);
                     cursor = next;

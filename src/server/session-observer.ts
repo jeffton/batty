@@ -161,7 +161,7 @@ export function observeSession(
     orchestrationDirty = true;
     schedule(false);
   };
-  if (notifyOrchestration) runtime.remotes.changes.on("change", remoteChanged);
+  if (notifyOrchestration) runtime.remotes.changes.on("tasks", remoteChanged);
   let memory = projection ? "" : JSON.stringify(runtime.memory.status());
   const memoryTimer = projection
     ? undefined
@@ -179,7 +179,7 @@ export function observeSession(
     signal.removeEventListener("abort", close);
     unsubscribe();
     detachConversation();
-    if (notifyOrchestration) runtime.remotes.changes.off("change", remoteChanged);
+    if (notifyOrchestration) runtime.remotes.changes.off("tasks", remoteChanged);
   }
   signal.addEventListener("abort", close, { once: true });
   if (signal.aborted) {

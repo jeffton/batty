@@ -2,7 +2,11 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vite-plus/test"
 
 vi.mock("@/client/lib/rpc", async () => {
   const { fixtureSessionCall } = await import("@/client/test/session-rpc");
-  return { rpcCall: vi.fn(fixtureSessionCall), closeRpcTransport: vi.fn() };
+  return {
+    rpcCall: vi.fn(fixtureSessionCall),
+    closeRpcTransport: vi.fn(),
+    isRpcTransportConnecting: () => false,
+  };
 });
 import { createPinia, setActivePinia } from "pinia";
 import { flushPromises, mount } from "@vue/test-utils";

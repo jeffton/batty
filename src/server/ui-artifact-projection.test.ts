@@ -163,7 +163,7 @@ test("worker inspect tool results omit repeated full-file snapshots but retain a
   expect(details.battyFileChanges[0]!.before.length).toBe(1_000_000);
 });
 
-test("HTTP/SSE image projection sanitizes already-attached remote history and active tool metadata", async () => {
+test("session event projection sanitizes already-attached remote history and active tool metadata", async () => {
   const messages = [
     {
       id: "1",

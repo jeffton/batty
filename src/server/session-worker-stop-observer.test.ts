@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { expect, test, vi } from "vite-plus/test";
-import { observeSession } from "./session-sse";
+import { observeSession } from "./session-observer";
 import { OrchestrationDoc } from "./orchestration-state";
 import type { Runtime } from "./runtime";
 import type { TranscriptImages } from "./transcript-images";

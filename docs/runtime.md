@@ -56,7 +56,7 @@ Settings use `/api/settings/mcp`; connection status and actions use `/api/mcp`. 
 
 ## Response attachments
 
-Files, sites, live browsers and explicitly forwarded artifacts attach to the next visible assistant response, including commentary while other work continues. They are consumed once, not repeated on a later final answer. Reload, paginated history and SSE replay derive the same attribution from immutable tool results; child report inventories require explicit `attach_artifacts` selection.
+Files, sites, live browsers and explicitly forwarded artifacts attach to the next visible assistant response, including commentary while other work continues. They are consumed once, not repeated on a later final answer. Reload, paginated history and session-event replay derive the same attribution from immutable tool results; child report inventories require explicit `attach_artifacts` selection.
 
 ## Browser lifecycle
 

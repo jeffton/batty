@@ -81,7 +81,7 @@ it("shows authoritative attempt loss after a reconnect snapshot", async () => {
   wrapper.unmount();
 });
 
-it("keeps a successful cancellation when SSE still has pending status", async () => {
+it("keeps a successful cancellation when the event stream still has pending status", async () => {
   const wrapper = await mountOAuthServer();
   const pending: McpAuthAttempt = {
     attemptId: "cancelled",
@@ -101,7 +101,7 @@ it("keeps a successful cancellation when SSE still has pending status", async ()
   expect(api.cancelMcpAuthAttempt).toHaveBeenCalledTimes(calls);
 });
 
-it("keeps manual completion errors until a new SSE status arrives", async () => {
+it("keeps manual completion errors until a new status event arrives", async () => {
   const wrapper = await mountOAuthServer();
   const pending: McpAuthAttempt = { attemptId: "manual", serverName: "remote", status: "pending" };
   authState.mcpAuthAttempts.manual = pending;

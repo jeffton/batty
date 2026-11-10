@@ -241,7 +241,7 @@ test("invisible-entry cursor survives empty deltas, metadata updates and cache s
   expect(sessionHistoryCursor(JSON.parse(JSON.stringify(updated)))).toBe("2000");
 });
 
-test("historical page never overwrites a changed session/boundary or newer SSE counts", () => {
+test("historical page never overwrites a changed session/boundary or newer session-event counts", () => {
   const requested = { ...state(["20", "21"]), hasMoreMessages: true, totalMessageCount: 100 };
   const page = {
     messages: state(["19", "20"]).messages,

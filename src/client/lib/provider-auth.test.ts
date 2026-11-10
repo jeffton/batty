@@ -25,7 +25,7 @@ it("uses completion received before the start response without requesting status
   scope.stop();
 });
 
-it("reconciles a missing reconnect snapshot once and lets SSE beat a late GET", async () => {
+it("reconciles a missing reconnect snapshot once and lets a session event beat a late GET", async () => {
   const scope = effectScope();
   const pending = Promise.withResolvers<{ attemptId: string; completed: boolean }>();
   vi.mocked(getProviderAuthAttemptStatus).mockReturnValueOnce(pending.promise);
@@ -41,7 +41,7 @@ it("reconciles a missing reconnect snapshot once and lets SSE beat a late GET", 
   scope.stop();
 });
 
-it("recovers from a transient reconciliation failure through later SSE", async () => {
+it("recovers from a transient reconciliation failure through a later session event", async () => {
   const scope = effectScope();
   vi.mocked(getProviderAuthAttemptStatus).mockRejectedValueOnce(new TypeError("Failed to fetch"));
   const completed = vi.fn(async () => {});

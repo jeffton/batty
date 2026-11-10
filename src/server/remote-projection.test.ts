@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vite-plus/test";
 import { RemoteWorkers } from "./remote-workers";
-import { observeSession } from "./session-sse";
+import { observeSession } from "./session-observer";
 import type { Runtime } from "./runtime";
 import type { WorkerCommandContext } from "./orchestration-workers";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";

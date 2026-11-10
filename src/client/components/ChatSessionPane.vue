@@ -28,7 +28,7 @@ const pendingIdlePromptSessionIds = new Set<string>();
 let promptRequestId = 0;
 let optimisticMessageId = 0;
 // In-flight submissions belong to this page only: interrupted uploads cannot
-// be resumed from filenames. Accepted queue entries are rendered from SSE.
+// be resumed from filenames. Accepted queue entries are rendered from session events.
 localStorage.removeItem(installationStorageKey("optimistic-messages"));
 const optimisticMessagesBySessionId = ref<Record<string, PendingOptimisticMessage[]>>({});
 const activeOptimisticMessages = computed(() => {
@@ -228,7 +228,7 @@ async function submitPrompt(text: string, files: File[]): Promise<void> {
   }
   try {
     const receipt = await store.submitPrompt(mode, text, files, clientMessageId);
-    // A started receipt can precede SSE publishing the transcript message.
+    // A started receipt can precede the session event carrying the transcript message.
     if (sessionId && optimisticId) {
       setOptimisticDisposition(sessionId, optimisticId, receipt.disposition === "started");
     }

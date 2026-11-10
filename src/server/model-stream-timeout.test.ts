@@ -125,7 +125,7 @@ test("upstream errors remain errors and release the idle timer", async () => {
   expect(vi.getTimerCount()).toBe(0);
 });
 
-test("installed Codex SSE adapter cancels a silent response body, not just its response headers", async () => {
+test("Pi AI's Codex SSE adapter cancels a silent response body, not just its response headers", async () => {
   vi.useFakeTimers();
   const cancel = vi.fn();
   const body = new ReadableStream<Uint8Array>({

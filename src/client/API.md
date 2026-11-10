@@ -1,62 +1,19 @@
 # Client API
 
-The authenticated root route contains one main chat. Workspace listings never select or replace this session.
+## Browser application
 
-## Main chat
+The authenticated browser API is a typed RPC channel on the same-origin WebSocket endpoint `/api/socket`. Its operation names, input/output contracts and event types are defined in `shared/owner-api.ts`. Calls carry operation names and domain values; streaming operations deliver typed event streams and optional binary bodies. The browser connection, reconnect and event delivery live in `client/lib/rpc.ts` and `client/lib/session-connection.ts`.
 
-- `GET /api/bootstrap`: existing `BootstrapPayload` auth/provider/settings/models fields. The client does not consume workspace snapshots or daily-session data.
-- `GET /api/workspaces`: `{ workspaces: WorkspaceInfo[] }`.
-- `GET /api/main`: `SessionState`, full latest message window.
-- Main `SessionState.memoryPreparation` carries `{ pending, totalLeaves, builtLeaves, error? }` in initial snapshots and SSE updates. Pending work displays “Preparing memory”; preparation errors appear on the memory task, not the prompt error. The memory task remains visible while failed, and clears after maintenance catches up. Prompt submission remains enabled. `isCompacting` describes workers’ native compaction only. `GET /api/memory/status` exposes the same OptChat status for diagnostics.
-- `GET /api/main/messages?before=<durable entry id>&limit=50`: `SessionMessagesPage`.
-- `GET /api/main/events`: SSE JSON `ServerEvent`. Full reset snapshots merge overlapping messages while preserving paginated history. Durable entry IDs need not be numeric.
-- `POST /api/main/prompt` and `POST /api/main/steer`: multipart `text`, `clientMessageId`, repeated `files`; return `{ disposition: 'started' | 'queued', submissionId, sessionId }`. Optimistic messages are removed after HTTP acceptance. On uncertain delivery, the restored draft retains its original `clientMessageId` for a deduplicated retry. State/queued `clientMessageId` mappings can confirm acceptance when an HTTP response is lost.
-- `POST /api/main/stop`: `{ ok: true }`.
-- `POST /api/main/queue/remove`: `{ kind, index }`, kind `steer` or `followUp`, index copied from the queued prompt's durable submission identifier; return `SessionState`.
+Main and worker transcripts use `session.get`, `session.messages` and the `session.watch` event stream. `session.watch` sends an initial snapshot, incremental session events and main-app status events, including build IDs, provider-auth attempts, MCP-auth attempts and provider-usage updates. Reconnects resume from the current session cursor; command operations are never replayed. `main.submit`, `main.stop` and `main.queue.remove` mutate the main session.
 
-## Workspace code browsing
+Workspace, model, memory, cron, provider, settings, environment, MCP, push, site, browser and auth operations use the same typed owner channel. See `shared/owner-api.ts` for the complete contract. Ordinary HTTP remains for bootstrap/authentication, static assets, public health/version checks, site resources and other natural HTTP resources; it is not the transcript event API.
 
-- `GET /api/workspaces/:id/files?path=`: read-only directory entries or text/binary file status, confined to the canonical workspace root.
-- `GET /api/workspaces/:id/file-search?name=`: authenticated NDJSON stream of `WorkspaceFileSearchEvent` (`match`, `done`, `error`). Case-insensitive substring matching uses file basenames, not parent paths or contents. The walk includes hidden folders, visits each canonical directory once, excludes external symlink targets and cancels on disconnect. Scan errors mark results incomplete.
+Cloud-browser viewing uses a dedicated authenticated WebSocket at `/api/cloud-browser/:browserId/socket` for state and binary video frames. Browser controls use the typed owner RPC operations. Details of the frame protocol and lifecycle are in `shared/cloud-browser.ts` and `docs/runtime.md`.
 
-The code browser’s Find file input and Ctrl/Cmd+P filter a native Pierre tree, including unopened folders. Matching files retain their parent hierarchy; folders expand and collapse normally. Arrow keys and Enter navigate and open files. Escape clears the filter before closing the browser, restoring the original tree’s expansion and selection.
+## Paired Batty instances
 
-## Installation status
+A paired node uses `/api/node/socket`, authenticated with its scoped bearer grant and bound to its installation identity. Its operation contracts are in `shared/node-api.ts`; shared call/event/byte-stream framing is in `shared/rpc/`. Owner and node sockets share transport code, not operation registries or permissions. Pairing and operational details are in `docs/remote-instances.md`.
 
-Main SSE replays `build`, `auth-attempts` and the latest `provider-usage` snapshot on connection. OAuth transitions arrive as `provider-auth-attempt` / `mcp-auth-attempt`; missing attempts are reconciled once after start/reconnect, not polled. Reconnect snapshots recover completion, failure and cancellation.
+## Provider and MCP transports
 
-Build IDs travel over SSE. The connection watchdog remains; blocked reloads are retried locally, and resume/online checks can query `/api/version`. Reload still verifies the online HTML build and respects drafts, uploads and focused inputs.
-
-Provider usage has one server-wide subscription timer while clients are connected. Requests share in-flight work and a one-minute account cache, including failures; additional clients cannot increase the provider fetch rate. SSE publishes changed snapshots, with common and model-specific windows. Disconnects retain the last received values. Provider failures remain visible alongside the last successful limits; an error-only indicator appears only when no successful limits are available.
-
-## Read-only worker sessions
-
-- `GET /api/sessions/:id`: `SessionState`.
-- `GET /api/sessions/:id/messages?before=&limit=`: `SessionMessagesPage`.
-- `GET /api/sessions/:id/events`: SSE `ServerEvent`.
-- `GET /api/sessions/:id/resources`: `SessionResourcesResponse` (used for the main session too).
-- `GET /api/sessions/:mainId/subagents`: `RunningSubagent[]`.
-- `GET /api/workspaces/:id/cron-jobs`: `CronJob[]`.
-- `GET /api/workspaces/:id/cron-run-logs`: `CronRunLog[]`, fetched when viewing Logs.
-- `GET /api/cron/running`: active `CronRunLog[]` across workspaces, without reading run history.
-
-The existing session SSE sends `orchestration-changed` on connection and durable orchestration changes. Clients refresh Running tasks from active-run endpoints, and refresh the selected Cron tab only while open. Remote task-list changes invalidate Running tasks without refreshing local cron history. Reconnecting refreshes both views; neither view polls.
-
-Tool details `subagent.sessionId`, nested codemode `calls[].subagent.sessionId`, and custom-message `data.subagent.sessionId` / `data.cron.sessionId` identify transcripts. Cron log entries expose `sessionId` when a transcript exists. Worker popovers have no composer. Their header offers Stop while the session is active; `POST /api/sessions/:sessionId/stop` aborts the worker’s current delivery chain and queued tail.
-
-## Shared cloud browser
-
-The `sites` attachment envelope contains a discriminated `SiteAttachmentDescriptor` union: `SiteDescriptor` (`kind: "site"`) or `BrowserDescriptor` (`kind: "browser"`, required `browserId`, `public: false`). A browser is rendered by `BrowserPopover` rather than a site iframe. Its opaque ID locates a browser instance; every API request still requires Batty authentication.
-
-The toolbar launcher is available when `settings.cloudBrowserAvailable` is true (Linux with Xvfb, xauth and FFmpeg). It reuses the selected workspace's browser, starting it if needed without navigating existing tabs or changing its route. The viewer header's tab picker changes only the viewer's selection. Rows show titles and URLs; internal tab IDs remain in browser-tool responses. The tool's `pages` response marks the viewer's selection with `viewerActive: true` and `(viewer)` in text. Agents can use that workspace-scoped `pageId` to target the same live tab without changing other clients' selections. All clients on that tab see its navigation and page changes; IDs grant no access.
-
-- `POST /api/cloud-browser/open`: `{workspaceId}`, returns `BrowserDescriptor`. Requires authentication, same origin and an existing workspace; unsupported hosts return 501.
-- `GET /api/cloud-browser/:browserId/state`: uncached `CloudBrowserState` (active page, viewport, revision, tabs and focused editable field). Reconciles a closed viewer selection to the first surviving tab and persists it; agent selections are unchanged.
-- `GET /api/cloud-browser/:browserId/socket`: authenticated, same-origin WebSocket. Text messages are `{event,data}` for state/errors and `scroll-drained`. Binary frames contain a 4-byte big-endian JSON-header length, `{frameId,pageId,revision,width,height,codec,key,streamId}`, then an Annex-B H.264 access unit. Width/height are CSS coordinates; encoded dimensions are even-rounded. `streamId` identifies an encoder lifetime. Decoders start on a keyframe and reset on a new stream/view; parameter sets accompany keyframes. Viewers ACK presented/discarded frame IDs. Four frames can be outstanding; the queue holds at most eight access units/2 MiB and drops a dependent GOP on overflow, waiting for a keyframe. There is no JPEG transport fallback. Scroll commands use CSS coordinates and `{action:"flush",requestId}` orders later HTTP controls after prior scrolling. Transient failures reconnect with backoff; 410 stays closed. This replaces the JPEG packet payload and the SSE `/events` endpoint. Native video requires a Linux host; incompatible existing headless processes return 426 without replacing the browser or login.
-- `POST /api/cloud-browser/:browserId/control`: allowlisted `CloudBrowserControl`; requires a matching `Origin`, returns state. `new-page` opens/selects a blank viewer tab; `switch` and `close-page` accept `pageId`. Closing an agent's selected tab leaves an explicit missing-tab error. Viewer control/stream errors include surviving `pages`; the client discards old pixels and pending commands, fetches authoritative state and reconnects automatically without replaying controls. Pointer/text/key commands require the displayed page and revision. `fill-focused` also requires the focused field ID and replaces its value, including empty strings. Contextual Enter includes the same field ID so changed focus rejects submission. Viewer input preserves the revision/capture; agent actions, navigation and viewport changes invalidate it. Busy/stale requests return 409; expired handles return 410. `viewport` requires `{width,height,mobile}` in viewer CSS pixels and accepts `deviceScaleFactor` (1–3, default 1); it applies device/screen metrics, touch, UA and client hints. Native capture supports at most 1365 CSS pixels in either dimension. A mobile/desktop mode change reloads the same page; size-only changes do not. Generic CDP/evaluation is unavailable.
-
-Types are in `shared/cloud-browser.ts`; new viewer controls must also be added to the server schema.
-
-## Existing settings/auth APIs
-
-Existing shapes are consumed for models, provider usage, passkey auth, logout, provider auth, appearance/default model, Brave Search, environment variables, AGENTS.md, MCP settings/auth/status, and site visibility. Exact routes and request bodies are in `lib/api.ts`. MCP settings and connections are global, shared by all workspaces.
+Model-provider streaming is handled by the installed Pi AI adapters; it is separate from Batty's browser and peer transports. The Codex adapter uses WebSocket automatically and can fall back to SSE with its HTTP provider API. MCP connections use stdio or Streamable HTTP.

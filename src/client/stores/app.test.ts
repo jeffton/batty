@@ -386,7 +386,7 @@ describe("reading history lifecycle", () => {
     expect(store.lastError).toBeUndefined();
   });
 
-  it("recovers through SSE reset and does not duplicate an in-flight history request", async () => {
+  it("recovers through a session reset event and does not duplicate an in-flight history request", async () => {
     let stream: { onmessage: (event: { data: string }) => void };
     vi.stubGlobal(
       "SessionSubscription",
@@ -488,7 +488,7 @@ describe("reading history lifecycle", () => {
 
 describe("main mutation snapshots", () => {
   it.each(mutations)(
-    "does not apply a stale %s HTTP response after SSE progressed",
+    "does not apply a stale %s RPC response after session events progressed",
     async (kind) => {
       const store = useAppStore();
       store.activeSession = state(5);
@@ -725,7 +725,7 @@ describe("stream recovery", () => {
     check.mockRestore();
     vi.useRealTimers();
   });
-  it("preserves a fresh SSE connection on pageshow and visibility resume", async () => {
+  it("preserves a fresh session socket on pageshow and visibility resume", async () => {
     const check = vi.spyOn(updates, "checkAppUpdate").mockResolvedValue();
     wrapper = mount(App, { global: { plugins: [pinia], stubs: { RouterView: true } } });
     await flushPromises();
@@ -739,7 +739,7 @@ describe("stream recovery", () => {
 });
 
 describe("authentication recovery", () => {
-  it("keeps the SSE retry cadence when authentication works but the stream endpoint fails", async () => {
+  it("keeps the session-stream retry cadence when authentication works but the socket fails", async () => {
     vi.useFakeTimers();
     const streams: { onerror: () => void }[] = [];
     vi.stubGlobal(
@@ -812,7 +812,7 @@ describe("authentication recovery", () => {
     }
   });
 
-  it("returns an expired login to the login screen after an SSE disconnect", async () => {
+  it("returns an expired login to the login screen after a session socket disconnect", async () => {
     vi.useFakeTimers();
     const streams: { onerror: () => void; close: ReturnType<typeof vi.fn> }[] = [];
     vi.stubGlobal(
@@ -835,7 +835,7 @@ describe("authentication recovery", () => {
       vi.mocked(cache.clearMainCache).mockClear();
       vi.mocked(api.getBootstrap).mockResolvedValueOnce({ ...bootstrap, authenticated: false });
 
-      // EventSource exposes the same error for an expired-cookie 401 and a dropped socket.
+      // A socket close does not distinguish an expired-cookie 401 from a dropped connection.
       streams[0]!.onerror();
       await flushPromises();
       expect(store.authenticated).toBe(false);
@@ -851,7 +851,7 @@ describe("authentication recovery", () => {
     }
   });
 
-  it("keeps the logged-in transcript when an SSE reconnect auth check has a network error", async () => {
+  it("keeps the logged-in transcript when a session reconnect auth check has a network error", async () => {
     let stream!: { onerror: () => void };
     vi.stubGlobal(
       "SessionSubscription",
@@ -1196,7 +1196,7 @@ describe("optimistic prompt reconciliation", () => {
     });
     await flushPromises();
     expect(pending()).toHaveLength(0);
-    // No local remove action: cancellation is an authoritative SSE update.
+    // No local remove action: cancellation arrives in an authoritative session event.
     store.activeSession = applyServerEvent(store.activeSession, {
       type: "state",
       state: state(3),
@@ -1212,7 +1212,7 @@ describe("optimistic prompt reconciliation", () => {
     expect(reloaded.pending()).toHaveLength(0);
   });
 
-  it("resolves a prompt queue lifecycle missed by SSE from the queued receipt snapshot", async () => {
+  it("resolves a prompt queue lifecycle missed by the event stream from the queued receipt snapshot", async () => {
     let resolve!: (value: Awaited<ReturnType<typeof api.submitMainPrompt>>) => void;
     vi.mocked(api.submitMainPrompt).mockReturnValueOnce(
       new Promise((done) => {
@@ -1342,7 +1342,7 @@ describe("optimistic prompt reconciliation", () => {
     expect(store.activeSession?.queuedPrompts).toHaveLength(0);
   });
 
-  it("reveals a busy submission if the server actually starts it before SSE arrives", async () => {
+  it("reveals a busy submission if the server actually starts it before the event arrives", async () => {
     vi.mocked(api.submitMainPrompt).mockResolvedValueOnce({
       disposition: "started",
       submissionId: "receipt",

@@ -11,7 +11,7 @@ import { registerPushCompletions } from "./push-completions";
 import type { WebPushService } from "./web-push";
 import { suppressAgentCompletionNotification } from "@/shared/agent-notification";
 
-test("committed replies notify without an SSE client, excluding tools, workers and NO_REPLY", async () => {
+test("committed replies notify without a session-event subscriber, excluding tools, workers and NO_REPLY", async () => {
   const directory = await mkdtemp(join(tmpdir(), "batty2-push-"));
   const models = createModels();
   const faux = fauxProvider({ models: [{ id: "test" }] });

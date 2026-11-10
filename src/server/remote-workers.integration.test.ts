@@ -754,7 +754,7 @@ test.each(["reverse-unpair", "control-loss"] as const)(
 
 test("native session admission rechecks paired access after asynchronous metadata lookup", async () => {
   vi.stubEnv("PI_OFFLINE", "1");
-  const directory = await mkdtemp(join(tmpdir(), "batty-paired-sse-admission-"));
+  const directory = await mkdtemp(join(tmpdir(), "batty-paired-rpc-admission-"));
   const windows = await openInstance(directory, "windows");
   const mac = await openInstance(directory, "mac");
   const entered = Promise.withResolvers<void>();
@@ -768,7 +768,7 @@ test("native session admission rechecks paired access after asynchronous metadat
       connection,
       "node.command",
       {
-        requestId: "sse-admission-worker",
+        requestId: "rpc-admission-worker",
         command: {
           action: "run",
           workspaceId: "work",

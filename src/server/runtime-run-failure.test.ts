@@ -39,7 +39,7 @@ test("session snapshots expose failed runs, suppress intentional stops and clear
     await main.commit(async (tx) => {
       delete (await tx.doc(LiveDoc, main.id)).runFailure;
     }, context);
-    // Explicit null survives JSON serialization and clears incremental SSE metadata.
+    // Explicit null survives JSON serialization and clears incremental session-event metadata.
     expect(
       JSON.parse(JSON.stringify(await runtime.state("main", undefined, false))).runFailure,
     ).toBeNull();

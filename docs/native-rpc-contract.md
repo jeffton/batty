@@ -1,6 +1,6 @@
 # Native RPC implementation contract
 
-Experimental branch only. Replace the HTTP/SSE tunnel, not the domain model.
+Historical implementation notes from the WebSocket migration. The architecture described here is now in `main`; the original goal was to replace the HTTP/SSE tunnel, not the domain model.
 
 Reusable mechanics live in `src/shared/rpc/`: `channel.ts` owns framing/streams and `client.ts` owns lazy, generation-safe connection lifecycle. The public entry point is `index.ts`:
 
@@ -39,4 +39,4 @@ Owner handler factory in `server/owner-rpc.ts` registers explicit named operatio
 
 Peer handler factory in `server/node-rpc.ts`: `createNodeRpcHandler(remotes,connection,services)` (exact services negotiated by peer owner). Operations: `node.identity`, `node.discovery`, `node.command`, `node.assignment`, `node.file`, `node.unpair`, subscriptions `node.catalog.watch`, `node.session.watch`. Bound peer credentials verified per operation outside payload. Peer owner updates reverse-connections and remote-workers; browser owner updates owner socket/main registration.
 
-Files: metadata in operation input/value, byte streams in body. Shared `splitByteStream` enforces manifest lengths for owner and peer uploads; metadata validation, storage and hashing remain domain-specific. Shared `rpcEvents<T>` owns pull-driven subscription lifecycle. Both operation boundaries use one domain-error translator into `RpcError`; transport frames share `RpcFailure` for calls and stream failures. No multipart on native path. Browser natural HTTP resource serving/bootstrap/auth remains HTTP. No deploy or production changes.
+Files: metadata in operation input/value, byte streams in body. Shared `splitByteStream` enforces manifest lengths for owner and peer uploads; metadata validation, storage and hashing remain domain-specific. Shared `rpcEvents<T>` owns pull-driven subscription lifecycle. Both operation boundaries use one domain-error translator into `RpcError`; transport frames share `RpcFailure` for calls and stream failures. No multipart on native path. Browser natural HTTP resource serving/bootstrap/auth remains HTTP. The implementation was later merged and deployed; the notes below preserve the design contract and migration decisions.

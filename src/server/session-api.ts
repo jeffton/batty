@@ -12,7 +12,7 @@ import { Runtime, context } from "./runtime";
 import { retainInput } from "./input-receipts";
 import { preparePromptFiles, type UploadedFile } from "./uploads";
 import { parseRemoteSession } from "./remote-workers";
-import { observeSession } from "./session-sse";
+import { observeSession } from "./session-observer";
 import { observeAppStatus } from "./app-status-stream";
 import { rpcEvents, splitByteStream } from "../shared/rpc";
 

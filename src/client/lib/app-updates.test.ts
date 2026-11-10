@@ -52,7 +52,7 @@ it("defers a changed build during drafts/uploads and focused input, then reloads
   unblock();
 });
 
-it("uses SSE build IDs without version requests and still verifies the online shell", async () => {
+it("uses session-watch build events without version requests and still verifies the online shell", async () => {
   const reload = responses();
   const { initializeBuild, blockAppReload, checkAppUpdate } = await import("./app-updates");
   initializeBuild("old");

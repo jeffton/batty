@@ -11,7 +11,7 @@ vi.mock("@/client/lib/api", () => ({
   getMain: vi.fn(),
 }));
 
-test("initial main snapshot shows preparation and SSE memory errors without polling", async () => {
+test("initial main snapshot shows preparation and session-event memory errors without polling", async () => {
   setActivePinia(createPinia());
   const store = useAppStore();
   store.activeSession = {

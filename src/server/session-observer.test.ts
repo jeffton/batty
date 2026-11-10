@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { EventEmitter } from "node:events";
 import { expect, test, vi } from "vite-plus/test";
-import { observeSession } from "./session-sse";
+import { observeSession } from "./session-observer";
 
 const conversationView = { entries: [], docs: {}, conversation: { id: 1 } };
 const observeConversation = async () => ({ value: conversationView, detach: vi.fn() });

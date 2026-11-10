@@ -9,7 +9,7 @@ import type { RemoteWorkers, RemoteWorkerSummary } from "./remote-workers";
 import { context } from "./runtime";
 import { listWorkspaces } from "./workspaces";
 import { DeliveryRecord } from "./orchestration-history";
-import { observeSession } from "./session-sse";
+import { observeSession } from "./session-observer";
 import { rpcEvents, splitByteStream } from "../shared/rpc";
 import type { TranscriptImages } from "./transcript-images";
 import { resolveSentFile } from "./send-files";

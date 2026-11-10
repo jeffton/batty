@@ -26,7 +26,7 @@ export function projectUiMetadata<T extends object>(metadata: T): T {
   return visible as T;
 }
 
-/** Also covers remote/already-projected history at the HTTP and SSE boundary. */
+/** Also covers remote/already-projected history at the HTTP and WebSocket event boundary. */
 export function projectUiMessage(message: UiMessage): UiMessage {
   if (message.role === "toolResult" && message.details)
     return { ...message, details: projectUiMetadata(message.details) };

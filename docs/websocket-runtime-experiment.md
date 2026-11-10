@@ -1,6 +1,6 @@
-# Native WebSocket runtime experiment
+# Native WebSocket runtime: design history
 
-Branch: `feature/websocket-runtime`. Main comparison baseline: `06eb679`. Superseded HTTP-tunnel attempt: `540d7fa`.
+This document preserves the design comparison from the `feature/websocket-runtime` experiment. The implementation was subsequently merged into `main` and deployed as `631d8a2`; it is the current browser and paired-node runtime. The comparison baseline was `06eb679`, and the superseded HTTP-tunnel attempt was `540d7fa`.
 
 ## Architecture
 
@@ -50,4 +50,4 @@ Server `ws` is pinned at 8.22.1; `@fastify/websocket` and `@types/ws` already ex
 
 Both peers must run this experimental implementation. Reverse proxies must support WebSocket upgrades; there is no transport fallback. Interrupted volatile operations are not retried. Unpair during an outage can leave an inert stale entry on the unreachable peer.
 
-Actual IIS and the work VPN are untested. No merge, deployment, production data change or work-machine change is part of this experiment.
+At the time of this report, actual IIS and the work VPN were untested. The experiment was later merged and deployed; the IIS/VPN limitation remains unless separately verified.

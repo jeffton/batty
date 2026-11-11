@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Pencil, Plus, RotateCw, LogIn, LogOut, X } from "@lucide/vue";
+import { Pencil, Plus, RotateCw, LogIn, LogOut, X, LoaderCircle } from "@lucide/vue";
 import { useAppStore } from "@/client/stores/app";
 import DeleteButton from "@/client/components/DeleteButton.vue";
 import McpServerEditor from "@/client/components/McpServerEditor.vue";
@@ -36,6 +36,9 @@ function toolsPopoverId(server: Server): string {
 }
 
 const loading = ref(false);
+const settingsLoaded = ref(false);
+const settingsError = ref("");
+const statusError = ref("");
 const saving = ref(false);
 const error = ref("");
 const selectedName = ref("");
@@ -66,7 +69,7 @@ function isEditing(server: Server): boolean {
 function connectionLabel(server: Server): string {
   if (server.config.enabled === false) return "Disabled";
   const state = serverStatus(server)?.state;
-  if (!state) return "Not connected";
+  if (!state) return loading.value ? "Loading status…" : "Status unavailable";
   if (state === "needs-auth") return "Sign-in required";
   return state.charAt(0).toUpperCase() + state.slice(1);
 }
@@ -107,31 +110,31 @@ async function load(): Promise<void> {
   const lifecycleAtStart = lifecycleGeneration;
   loading.value = true;
   error.value = "";
-  try {
-    const [nextSettings, nextStatus] = await Promise.all([getMcpSettings(), getMcpStatus()]);
-    if (
-      disposed ||
-      requestGeneration !== loadGeneration ||
-      lifecycleAtStart !== lifecycleGeneration
-    )
-      return;
-    settings.value = nextSettings;
-    status.value = nextStatus;
-  } catch (cause) {
-    if (
-      !disposed &&
-      requestGeneration === loadGeneration &&
-      lifecycleAtStart === lifecycleGeneration
-    )
-      error.value = cause instanceof Error ? cause.message : String(cause);
-  } finally {
-    if (
-      !disposed &&
-      requestGeneration === loadGeneration &&
-      lifecycleAtStart === lifecycleGeneration
-    )
-      loading.value = false;
-  }
+  settingsError.value = "";
+  statusError.value = "";
+  const current = () =>
+    !disposed && requestGeneration === loadGeneration && lifecycleAtStart === lifecycleGeneration;
+  await Promise.allSettled([
+    getMcpSettings().then(
+      (result) => {
+        if (!current()) return;
+        settings.value = result;
+        settingsLoaded.value = true;
+      },
+      (cause) => {
+        if (current()) settingsError.value = `Settings: ${String(cause)}`;
+      },
+    ),
+    getMcpStatus().then(
+      (result) => {
+        if (current()) status.value = result;
+      },
+      (cause) => {
+        if (current()) statusError.value = `Status: ${String(cause)}`;
+      },
+    ),
+  ]);
+  if (current()) loading.value = false;
 }
 
 function beginAdd(): void {
@@ -183,9 +186,10 @@ async function save(): Promise<void> {
     beginAdd();
     await load();
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : String(cause);
+    if (!disposed && requestGeneration === lifecycleGeneration)
+      error.value = cause instanceof Error ? cause.message : String(cause);
   } finally {
-    saving.value = false;
+    if (!disposed && requestGeneration === lifecycleGeneration) saving.value = false;
   }
 }
 
@@ -216,7 +220,8 @@ async function remove(server: Server): Promise<void> {
     invalidateStatus();
     await load();
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : String(cause);
+    if (!disposed && requestGeneration === lifecycleGeneration)
+      error.value = cause instanceof Error ? cause.message : String(cause);
   }
 }
 
@@ -294,7 +299,8 @@ async function login(server: Server): Promise<void> {
     callbackInput.value = "";
     await applyAttempt(store.mcpAuthAttempts[started.attemptId] ?? started);
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : String(cause);
+    if (!disposed && requestGeneration === lifecycleGeneration)
+      error.value = cause instanceof Error ? cause.message : String(cause);
   }
 }
 
@@ -368,8 +374,8 @@ watch(
 watch(
   () => props.active,
   (active, wasActive) => {
-    invalidateStatus();
-    settings.value = { servers: [], errors: [] };
+    loading.value = false;
+    saving.value = false;
     statusBusy.value = "";
     cancelEdit();
     lifecycleGeneration++;
@@ -393,7 +399,19 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="mcp-settings">
+  <section class="mcp-settings" :aria-busy="loading">
+    <div v-if="loading" class="mcp-settings__loading" role="status">
+      <LoaderCircle :size="16" class="mcp-settings__spinner" aria-hidden="true" />
+      Loading MCPs…
+    </div>
+    <div v-if="settingsError || statusError" role="alert" class="mcp-settings__error">
+      <div v-if="settingsError">{{ settingsError }}</div>
+      <div v-if="statusError">{{ statusError }}</div>
+      <button type="button" :disabled="loading" @click="load">Retry</button>
+    </div>
+    <div v-if="settingsLoaded && !loading && !settingsError && !visibleServers.length">
+      No MCP servers configured.
+    </div>
     <div class="mcp-settings__help">
       Servers are shared by all workspaces. Tools are available through code mode.
     </div>
@@ -458,7 +476,7 @@ onBeforeUnmount(() => {
           <button
             v-if="connectionActions(server).includes('reconnect')"
             type="button"
-            :disabled="Boolean(statusBusy)"
+            :disabled="loading || Boolean(statusBusy)"
             @click="reconnect(server)"
           >
             <RotateCw :size="13" /> Reconnect
@@ -466,7 +484,7 @@ onBeforeUnmount(() => {
           <button
             v-if="connectionActions(server).includes('login')"
             type="button"
-            :disabled="Boolean(statusBusy) || attempt?.status === 'pending'"
+            :disabled="loading || Boolean(statusBusy) || attempt?.status === 'pending'"
             @click="login(server)"
           >
             <LogIn :size="13" /> Sign in
@@ -474,7 +492,7 @@ onBeforeUnmount(() => {
           <button
             v-if="connectionActions(server).includes('logout')"
             type="button"
-            :disabled="Boolean(statusBusy)"
+            :disabled="loading || Boolean(statusBusy)"
             @click="logout(server)"
           >
             <LogOut :size="13" /> Sign out
@@ -566,6 +584,21 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
+}
+.mcp-settings__loading {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--color-text-subtle);
+  font-size: 0.78rem;
+}
+.mcp-settings__spinner {
+  animation: mcp-spin 1s linear infinite;
+}
+@keyframes mcp-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .mcp-settings__server-head,
 .mcp-settings__actions {

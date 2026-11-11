@@ -1,4 +1,4 @@
-minimumReleaseAge: 4320
+minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - "@earendil-works/pi-*"
   - "@earendil-works/chord"

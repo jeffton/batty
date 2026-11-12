@@ -141,7 +141,9 @@ defineExpose({ focus });
       />
     </label>
     <div v-show="!query" class="file-search__tree"><slot /></div>
-    <div v-if="query && loading" class="file-search__status" role="status">Searching…</div>
+    <div v-if="query && loading" class="file-search__status" role="status" aria-label="Searching">
+      <span class="spinner file-search__spinner" aria-hidden="true" />
+    </div>
     <div v-if="query && error" class="file-search__status file-search__error" role="alert">
       {{ error }}
     </div>
@@ -209,6 +211,12 @@ defineExpose({ focus });
   padding: 0.5rem 0.75rem;
   color: var(--color-text-subtle);
   font-size: 0.8rem;
+}
+.file-search__spinner {
+  display: block;
+  width: 1rem;
+  height: 1rem;
+  border-width: 2px;
 }
 .file-search__error {
   color: var(--color-error);

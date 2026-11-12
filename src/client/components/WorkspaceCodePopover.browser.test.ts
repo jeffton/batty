@@ -356,6 +356,9 @@ test("incremental matches preserve collapsed folders, open new parents, and flus
     const filtered = popover.locator(".file-search__results");
     const one = filtered.getByRole("treeitem", { name: "one", exact: true });
     await filtered.getByRole("treeitem", { name: "needle-stream.ts", exact: true }).waitFor();
+    const searching = popover.getByRole("status", { name: "Searching", exact: true });
+    expect(await searching.locator(".spinner").isVisible()).toBe(true);
+    expect(await searching.textContent()).toBe("");
     await one.click();
     expect(await one.getAttribute("aria-expanded")).toBe("false");
     incrementalSearch!.enqueue({ kind: "match", path: "one/needle-stream-two.ts" });
@@ -364,7 +367,7 @@ test("incremental matches preserve collapsed folders, open new parents, and flus
     incrementalSearch!.close();
     incrementalSearch = undefined;
     await filtered.getByRole("treeitem", { name: "two", exact: true }).waitFor();
-    await expect.poll(() => popover.getByText("Searching…", { exact: true }).count()).toBe(0);
+    await expect.poll(() => searching.count()).toBe(0);
     expect(await one.getAttribute("aria-expanded")).toBe("false");
     expect(
       await filtered

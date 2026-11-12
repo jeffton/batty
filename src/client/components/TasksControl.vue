@@ -30,7 +30,9 @@ const tasks = computed(() => {
               : props.memoryPending
                 ? "Preparing memory"
                 : "Compacting memory",
-            detail: "Memory",
+            detail: props.memoryPending
+              ? `${props.memoryPending.toLocaleString("en-US")} ${props.memoryPending === 1 ? "message" : "messages"} remaining`
+              : "Memory",
             error: props.memoryError,
             sessionId: undefined,
           },

@@ -38,6 +38,13 @@ test("initial main snapshot shows preparation and session-event memory errors wi
     expect(wrapper.get('button[aria-label="Running tasks"]').text()).toBe("1 task");
     expect(wrapper.find(".streaming-stop-control__status").exists()).toBe(false);
     expect(wrapper.text()).not.toContain("Compacting");
+    expect(wrapper.get(".tasks-popover__task").text()).toContain("8 messages remaining");
+    store.activeSession.memoryPreparation!.pending = 1;
+    await wrapper.vm.$nextTick();
+    expect(wrapper.get(".tasks-popover__task").text()).toContain("1 message remaining");
+    store.activeSession.memoryPreparation!.pending = 12;
+    await wrapper.vm.$nextTick();
+    expect(wrapper.get(".tasks-popover__task").text()).toContain("12 messages remaining");
     store.activeSession.memoryPreparation = {
       pending: 0,
       totalLeaves: 10,

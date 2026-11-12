@@ -20,6 +20,26 @@ const run = {
 } as CronRunLog;
 
 describe("compose tasks", () => {
+  it("shows the live backlog without inventing a percentage or compaction progress", async () => {
+    const wrapper = mount(TasksControl, {
+      props: { subagents: [], cronRuns: [], memoryPending: 1234, compacting: true },
+      global: {
+        stubs: { BasePopover: { template: "<div><slot /></div>" }, SubagentSessionPopover: true },
+      },
+    });
+    try {
+      expect(wrapper.get(".tasks-popover__task").text()).toContain("1,234 messages remaining");
+      expect(wrapper.find('[role="progressbar"]').exists()).toBe(false);
+      await wrapper.setProps({ memoryPending: 0 });
+      expect(wrapper.get(".tasks-popover__task").text()).toContain("Compacting memory");
+      expect(wrapper.text()).not.toContain("remaining");
+      await wrapper.setProps({ compacting: false });
+      expect(wrapper.find(".tasks-control").exists()).toBe(false);
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it("keeps an offline remote task visible without claiming live execution and recovers in place", async () => {
     const wrapper = mount(TasksControl, {
       props: {

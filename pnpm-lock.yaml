@@ -186,6 +186,9 @@ overrides:
 
 packageExtensionsChecksum: sha256-M8fihjQgjUsljbQKrXW3Z22E0XxmyzpUFOGKY0TXgrc=
 
+patchedDependencies:
+  '@earendil-works/pi-durable@1.5.0': 07ca8bc1d32957764f85e495b237def562abd473ea1aac77819a5f81499afa78
+
 importers:
 
   .:
@@ -207,7 +210,7 @@ importers:
         version: 1.5.0(@aws-sdk/credential-provider-node@3.972.85)(@smithy/signature-v4@5.7.4)(ws@8.22.1)
       '@earendil-works/pi-durable':
         specifier: 1.5.0
-        version: 1.5.0(@aws-sdk/credential-provider-node@3.972.85)(@smithy/signature-v4@5.7.4)(esbuild@0.28.2)(undici@8.12.3)(ws@8.22.1)
+        version: 1.5.0(patch_hash=07ca8bc1d32957764f85e495b237def562abd473ea1aac77819a5f81499afa78)(@aws-sdk/credential-provider-node@3.972.85)(@smithy/signature-v4@5.7.4)(esbuild@0.28.2)(undici@8.12.3)(ws@8.22.1)
       '@earendil-works/pi-mcp':
         specifier: 1.5.0
         version: 1.5.0
@@ -5805,7 +5808,7 @@ snapshots:
       - ws
       - zod
 
-  '@earendil-works/pi-durable@1.5.0(@aws-sdk/credential-provider-node@3.972.85)(@smithy/signature-v4@5.7.4)(esbuild@0.28.2)(undici@8.12.3)(ws@8.22.1)':
+  '@earendil-works/pi-durable@1.5.0(patch_hash=07ca8bc1d32957764f85e495b237def562abd473ea1aac77819a5f81499afa78)(@aws-sdk/credential-provider-node@3.972.85)(@smithy/signature-v4@5.7.4)(esbuild@0.28.2)(undici@8.12.3)(ws@8.22.1)':
     dependencies:
       '@earendil-works/chord': 1.5.0(esbuild@0.28.2)(ws@8.22.1)
       '@earendil-works/pi-ai': 1.5.0(@aws-sdk/credential-provider-node@3.972.85)(@smithy/signature-v4@5.7.4)(undici@8.12.3)(ws@8.22.1)

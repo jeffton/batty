@@ -9,6 +9,147 @@ import { indexRun } from "./orchestration-history";
 
 import { fixture, until } from "./orchestration-test-fixture.js";
 
+test.each([false, true])(
+  "active cron runs defer only their own job and coalesce without busy timers (multiple: %s)",
+  async (multiple) => {
+    const check = vi.fn(async () => true);
+    const state = await fixture(10000, console.error, undefined, check);
+    const { main } = await state.open();
+    const now = Date.now();
+    const deadline = now - 180_000;
+    const job = {
+      id: "heartbeat",
+      title: "Heartbeat",
+      workspaceId: "test",
+      prompt: "Check",
+      delivery: "direct" as const,
+      enabled: true,
+      schedule: multiple
+        ? {
+            kind: "multiple" as const,
+            triggers: [
+              { kind: "every" as const, every: "1m", everyMs: 60_000, nextAt: deadline },
+              { kind: "every" as const, every: "2m", everyMs: 120_000, nextAt: deadline },
+            ],
+          }
+        : { kind: "every" as const, every: "1m", everyMs: 60_000 },
+      nextAt: deadline,
+      createdAt: deadline - 60_000,
+      updatedAt: deadline - 60_000,
+    };
+    // A durable run whose task has not been materialized is still an active admission.
+    await main.commit(async (tx) => {
+      const doc = await tx.doc(OrchestrationDoc);
+      doc.runs["heartbeat:active"] = {
+        id: "heartbeat:active",
+        jobId: job.id,
+        workspaceId: "test",
+        scheduledAt: deadline - 60_000,
+        startedAt: deadline - 60_000,
+        taskId: 999999 as never,
+        sessionId: "999999",
+        status: "running",
+        job,
+      };
+    }, context);
+    const timeout = vi.spyOn(globalThis, "setTimeout");
+    try {
+      await state.orchestration.importJob(job);
+      expect(timeout.mock.calls.at(-1)?.[1]).toBe(60_000);
+    } finally {
+      timeout.mockRestore();
+    }
+    await Promise.all([state.orchestration.tick(), state.orchestration.tick()]);
+    expect(check).not.toHaveBeenCalled();
+    expect((await state.orchestration.getJob(job.id)).nextAt).toBe(deadline);
+    expect(await state.orchestration.listRunLogs()).toEqual([]);
+
+    state.faux.setResponses(
+      Array.from({ length: 2 }, () => fauxAssistantMessage([fauxText("done")])),
+    );
+    await state.orchestration.importJob({ ...job, id: "independent" });
+    await state.orchestration.tick();
+    await until(
+      async () => (await state.orchestration.listRunLogs("independent"))[0]?.status === "completed",
+    );
+    expect(await state.orchestration.listRunningCron(job.id)).toHaveLength(1);
+    expect((await state.orchestration.getJob(job.id)).nextAt).toBe(deadline);
+
+    await main.commit(async (tx) => {
+      delete (await tx.doc(OrchestrationDoc)).runs["heartbeat:active"];
+    }, context);
+    const resumedAt = now + 31_000;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(resumedAt);
+    try {
+      await Promise.all([state.orchestration.tick(), state.orchestration.tick()]);
+      await until(
+        async () => (await state.orchestration.listRunLogs(job.id))[0]?.status === "completed",
+      );
+      expect(await state.orchestration.listRunLogs(job.id)).toHaveLength(1);
+      expect((await state.orchestration.listRunLogs(job.id))[0]?.scheduledAt).toBe(deadline);
+      const next = (await state.orchestration.getJob(job.id)).nextAt!;
+      expect(next).toBeGreaterThan(resumedAt);
+      expect((next - deadline) % 60_000).toBe(0);
+    } finally {
+      clock.mockRestore();
+    }
+  },
+);
+
+test("a persisted terminal task is reconciled before admitting its pending recurrence", async () => {
+  const state = await fixture();
+  const { harness, main } = await state.open();
+  state.faux.setResponses(
+    Array.from({ length: 2 }, () => fauxAssistantMessage([fauxText("done")])),
+  );
+  const now = Date.now();
+  const job = await state.orchestration.importJob({
+    id: "terminal-heartbeat",
+    title: "Heartbeat",
+    workspaceId: "test",
+    prompt: "Check",
+    delivery: "direct",
+    enabled: true,
+    schedule: { kind: "every", every: "1m", everyMs: 60_000 },
+    nextAt: now - 240_000,
+    createdAt: now - 300_000,
+    updatedAt: now - 300_000,
+  });
+  await state.orchestration.tick();
+  await until(
+    async () => (await state.orchestration.listRunLogs(job.id))[0]?.status === "completed",
+  );
+  const completed = (await state.orchestration.listRunLogs(job.id))[0]!;
+  expect((await harness.getTask(completed.taskId, context))?.state).toMatchObject({
+    status: "terminal",
+    outcome: { status: "completed" },
+  });
+  const pendingAt = now - 180_000;
+  // Model an interrupted bookkeeping pass: the real persisted task has finished,
+  // but its active-run receipt and an overdue recurrence still need reconciliation.
+  await main.commit(async (tx) => {
+    const doc = await tx.doc(OrchestrationDoc);
+    doc.runs[completed.id] = { ...completed, status: "running" };
+    delete doc.runs[completed.id]!.finishedAt;
+    doc.jobs[job.id]!.nextAt = pendingAt;
+  }, context);
+
+  await state.orchestration.tick();
+  await until(
+    async () =>
+      (await state.orchestration.listRunLogs(job.id)).filter((run) => run.status === "completed")
+        .length === 2,
+  );
+  const runs = await state.orchestration.listRunLogs(job.id);
+  expect(runs.map((run) => run.scheduledAt).sort()).toEqual([job.nextAt, pendingAt].sort());
+  expect((await harness.snapshot(OrchestrationDoc, context))!.runs).not.toHaveProperty(
+    completed.id,
+  );
+  expect((await state.orchestration.getJob(job.id)).nextAt).toBeGreaterThan(now);
+  await state.orchestration.tick();
+  expect(await state.orchestration.listRunLogs(job.id)).toHaveLength(2);
+});
+
 test("offline cron preserves due deadlines across reopen and coalesces missed triggers on recovery", async () => {
   let online = false;
   const check = vi.fn(async () => online);

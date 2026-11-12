@@ -1507,6 +1507,13 @@ test("pending remote await settles after connection removal persistence without 
       await pendingJoin;
       expect(await transcript(local.runtime)).toContain(`Unknown remote instance: ${remote.id}`);
       expect(local.runtime.remotes.access.getConnection(remote.id)).toBeUndefined();
+      // Unpairing settles the coordinator's await, not the peer's independent worker.
+      // Finish its persistent shell before tearing down the fixture directory.
+      await writeFile(join(remote.work, "release"), "release");
+      await eventually(
+        async () => (await remote.runtime.orchestration.listRunning()).length === 0,
+        "original worker completes after connection removal",
+      );
     } finally {
       releaseRemoval();
       joinAbort.abort();

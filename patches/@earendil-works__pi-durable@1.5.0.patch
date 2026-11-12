@@ -1,0 +1,17 @@
+diff --git a/dist/harness/compaction.js b/dist/harness/compaction.js
+index e8eded74921ab86f7641bffb0a96e7371021fb55..03e996a98141ffb6fc32f65db83267d3edd6429c 100644
+--- a/dist/harness/compaction.js
++++ b/dist/harness/compaction.js
+@@ -225,8 +225,11 @@ export function selectCut(view, keepRecentTokens) {
+     let kept = 0;
+     let cut;
+     for (let index = contributions.length - 1; index >= start; index--) {
++        // Instructions and tool schemas are replayed as a baseline, not recent
++        // conversation work. They must not evict the task and its tool progress.
+         for (const message of contributions[index])
+-            kept += estimateMessageTokens(message);
++            if (message.role !== "system")
++                kept += estimateMessageTokens(message);
+         if (kept < keepRecentTokens)
+             continue;
+         cut = candidates.find((candidate) => candidate >= index) ?? candidates.at(-1);

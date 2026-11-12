@@ -117,8 +117,8 @@ export function createCronScheduler(
   const tick = async () => {
     if (closed) return;
     const now = Date.now();
-    await listRunningCron();
-    const jobs = await listJobs();
+    const running = new Set((await listRunningCron()).map((run) => run.jobId));
+    const jobs = (await listJobs()).filter((job) => !running.has(job.id));
     const due = jobs.some(
       (job) =>
         job.enabled &&
@@ -151,7 +151,7 @@ export function createCronScheduler(
           const current = doc.jobs[job.id];
           if (!current?.enabled || JSON.stringify(current) !== JSON.stringify(job)) return;
           const runId = `${job.id}:${job.nextAt}`;
-          if (doc.runs[runId]) return;
+          if (Object.values(doc.runs).some((run) => run.jobId === job.id)) return;
           const anchor = await tx.createTask(Anchor, null, {
             ownership: { kind: "conversation" },
             background: true,
@@ -226,8 +226,12 @@ export function createCronScheduler(
   const arm = async () => {
     if (timer) clearTimeout(timer);
     if (closed) return;
-    const due = (await listJobs())
-      .filter((j) => j.enabled && j.nextAt !== undefined)
+    const doc = await snapshot();
+    const running = new Set(Object.values(doc.runs).map((run) => run.jobId));
+    // Keep blocked deadlines pending for coalescing, but use the normal housekeeping
+    // interval instead of repeatedly arming a timer for an already overdue job.
+    const due = Object.values(doc.jobs)
+      .filter((j) => j.enabled && j.nextAt !== undefined && !running.has(j.id))
       .map((j) => Math.max(j.nextAt!, j.retryAt ?? 0));
     const delay = Math.max(
       1,

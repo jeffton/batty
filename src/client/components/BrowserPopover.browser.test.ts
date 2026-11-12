@@ -226,7 +226,7 @@ test("autofill detects login steps without submitting or exposing values to cont
     await page.getByRole("button", { name: "Fill", exact: true }).click();
     await expect.poll(() => remote.locator("input").inputValue()).toBe("multistep-password");
     await remote.setContent('<form><input type="email"><button>Subscribe</button></form>');
-    await expect.poll(() => page.locator(".browser-credentials").count()).toBe(0);
+    await page.locator(".browser-credentials").waitFor({ state: "detached", timeout: 10_000 });
   } finally {
     await context.close();
   }

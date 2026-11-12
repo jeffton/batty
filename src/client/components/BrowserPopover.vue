@@ -89,7 +89,14 @@ function resizeView(): void {
     height: `calc(${visual?.height ?? window.innerHeight}px - var(--safe-area-top) - var(--safe-area-bottom) - 1rem)`,
   };
 }
-async function fitViewport(): Promise<void> {
+let viewportFits = Promise.resolve();
+function fitViewport(): Promise<void> {
+  // Bootstrap, page changes and ResizeObserver can request the same fit while
+  // its control reply is pending. Remeasure after the previous fit completes.
+  viewportFits = viewportFits.then(resizeViewport);
+  return viewportFits;
+}
+async function resizeViewport(): Promise<void> {
   await nextTick();
   if (!ready.value) return;
   const rect = viewport.value?.getBoundingClientRect();

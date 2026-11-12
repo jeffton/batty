@@ -7,7 +7,7 @@ import net from "node:net";
 import { once } from "node:events";
 import fastify from "fastify";
 import vue from "@vitejs/plugin-vue";
-import { chromium } from "patchright";
+import { chromium, type Page } from "patchright";
 import { expect, test, vi } from "vite-plus/test";
 import {
   fauxProvider,
@@ -22,8 +22,27 @@ import { registerCloudBrowserRoutes } from "@/server/routes/cloud-browser";
 import { TranscriptImages } from "@/server/transcript-images";
 import { createOwnerRpcHandler, type OwnerRpcServices } from "@/server/owner-rpc";
 import { WebPushService } from "@/server/web-push";
-import { setFixtureRpcHandler, waitForFixtureOperation } from "../test/socket-fixture";
+import {
+  fixtureOperation,
+  setFixtureRpcHandler,
+  waitForFixtureOperation,
+} from "../test/socket-fixture";
 import { closeBrowserFixtureServer, createBrowserFixtureServer } from "../test/browser-fixture";
+
+async function waitForBrowserFrame(page: Page): Promise<void> {
+  // Native capture starts after viewport fitting. Observe the decoder's paint,
+  // not Vitest's one-second unit polling deadline, and surface stream failures.
+  await page.waitForFunction(
+    () => {
+      const error = document.querySelector(":popover-open .cloud-browser__error");
+      if (error) throw new Error(error.textContent!);
+      return document.querySelector<HTMLCanvasElement>(":popover-open .cloud-browser__image")
+        ?.dataset.frame;
+    },
+    undefined,
+    { timeout: 10_000 },
+  );
+}
 
 test("main browser tools render a live attachment through native events, reload and reopened durable history", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-native-browser-"));
@@ -157,7 +176,8 @@ test("main browser tools render a live attachment through native events, reload 
       expect(Math.abs(layout.cardRight - layout.contentRight)).toBeLessThan(1);
       expect(Math.abs(layout.buttonRight - layout.expectedButtonRight)).toBeLessThan(1);
       expect(layout.overflow).toBe(false);
-      await page.screenshot({ path: `/tmp/batty-browser-attachment-${width}.png` });
+      if (process.env.BATTY_UI_SCREENSHOTS === "1")
+        await page.screenshot({ path: `/tmp/batty-browser-attachment-${width}.png` });
     }
     await page.setViewportSize({ width: 390, height: 844 });
     const [attached] = await sites();
@@ -170,9 +190,28 @@ test("main browser tools render a live attachment through native events, reload 
       (operation, input) =>
         operation === "browser.state" && input.browserId === attached!.browserId,
     );
+    let viewportRequests = 0;
+    const firstViewport = Promise.withResolvers<void>();
+    const releaseViewport = Promise.withResolvers<void>();
+    await fixtureOperation(server, page, "browser.control", async (input, _context, next) => {
+      if (input.control.action === "viewport") {
+        viewportRequests++;
+        if (viewportRequests === 1) {
+          firstViewport.resolve();
+          await releaseViewport.promise;
+        }
+      }
+      return next();
+    });
     await buttons.click();
     expect((await stateReply).value).toMatchObject({ pageId: before.state.pageId });
-    await expect.poll(() => page.locator(".cloud-browser__image[data-frame]").count()).toBe(1);
+    await firstViewport.promise;
+    // Fire the debounced initial fit while bootstrap's viewport reply is pending.
+    // It must remeasure after that reply, not queue a redundant viewport command.
+    await page.waitForTimeout(150);
+    releaseViewport.resolve();
+    await waitForBrowserFrame(page);
+    expect(viewportRequests).toBe(1);
     expect((await service.cloudTarget(attached!.browserId!)).page).toBe(before.page);
     await page.getByRole("button", { name: "Close popover" }).click();
     await submit();
@@ -184,12 +223,13 @@ test("main browser tools render a live attachment through native events, reload 
     await page.reload();
     await expect.poll(() => buttons.count()).toBe(2);
     await buttons.last().click();
-    await expect.poll(() => page.locator(".cloud-browser__image[data-frame]").count()).toBe(1);
+    await waitForBrowserFrame(page);
     await page.getByRole("button", { name: "Close popover" }).click();
     const after = await service.cloudTarget(attached!.browserId!);
     expect(after.page).toBe(before.page);
     expect(await after.page.evaluate(() => document.cookie)).toContain("existing-login=retained");
-    await page.screenshot({ path: "/tmp/native-browser-attachment-main.png" });
+    if (process.env.BATTY_UI_SCREENSHOTS === "1")
+      await page.screenshot({ path: "/tmp/native-browser-attachment-main.png" });
     await page.close();
     await closeStreams();
     await backend.close();

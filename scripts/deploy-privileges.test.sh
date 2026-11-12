@@ -29,7 +29,10 @@ cat > "$fixture/bin/pnpm" <<'SCRIPT'
 #!/usr/bin/env bash
 [[ $(id -u) == 1001 ]] || exit 23
 case $1 in
-  install) mkdir -p node_modules; printf 'dependencies' > node_modules/fixture ;;
+  install)
+    [[ $(<patches/dependency.patch) == 'dependency patch' ]] || exit 25
+    mkdir -p node_modules; printf 'dependencies' > node_modules/fixture
+    ;;
   build) mkdir -p dist/client/assets; printf 'client' > dist/client/assets/client.js ;;
   *) exit 24 ;;
 esac
@@ -51,12 +54,15 @@ cat > "$fixture/repo/scripts/deploy-admin.sh" <<'SCRIPT'
 set -euo pipefail
 [[ $(id -u) == 0 && $2 == test123 ]]
 [[ -f $1/dist/client/assets/client.js && -f $1/node_modules/fixture ]]
+[[ $(<"$1/patches/dependency.patch") == 'dependency patch' ]]
 [[ $(<"$1/BUILD_ID") == test123 && $(<"$1/CLIENT_ASSETS.txt") == client.js ]]
 printf 'installed\n' > "$FIXTURE/result"
 SCRIPT
 for file in package.json pnpm-lock.yaml pnpm-workspace.yaml README.md; do
   printf 'fixture\n' > "$fixture/archive/$file"
 done
+mkdir -p "$fixture/archive/patches"
+printf 'dependency patch' > "$fixture/archive/patches/dependency.patch"
 chmod +x "$fixture/bin/"*
 FIXTURE="$fixture" PATH="$fixture/bin:$PATH" BATTY2_DEPLOY_MIN_FREE_KB=1 bash "$fixture/repo/scripts/deploy.sh"
 [[ $(<"$fixture/result") == installed ]]

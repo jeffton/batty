@@ -50,6 +50,7 @@ if (-not $ReleasePath) {
         $ReleasePath = Join-Path $AppRoot "releases\batty2-$buildId"
         New-Item -ItemType Directory $ReleasePath | Out-Null
         Copy-Tree (Join-Path $repo 'dist') (Join-Path $ReleasePath 'dist')
+        Copy-Tree (Join-Path $repo 'patches') (Join-Path $ReleasePath 'patches')
         foreach ($name in @('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'README.md')) {
             Copy-Item (Join-Path $repo $name) $ReleasePath
         }

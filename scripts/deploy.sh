@@ -29,7 +29,7 @@ git archive HEAD | tar -x -C "$build"
 )
 staged="$build/release"
 mkdir "$staged"
-cp -a "$build"/{dist,package.json,pnpm-lock.yaml,pnpm-workspace.yaml,README.md} "$staged/"
+cp -a "$build"/{dist,patches,package.json,pnpm-lock.yaml,pnpm-workspace.yaml,README.md} "$staged/"
 write_client_asset_manifest "$staged/dist/client/assets" "$staged/CLIENT_ASSETS.txt"
 printf '%s\n' "$revision" > "$staged/BUILD_ID"
 (cd "$staged" && pnpm install --prod --frozen-lockfile)

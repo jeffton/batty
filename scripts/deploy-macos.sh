@@ -28,7 +28,7 @@ git ls-files -z --cached --others --exclude-standard | tar --null -T - -cf - | t
 (cd "$build" && pnpm install --frozen-lockfile && BATTY_BUILD_ID="$revision" pnpm build)
 release="$install_root/releases/$revision.$(date +%s)"
 mkdir -p "$release/scripts"
-cp -R "$build"/{dist,package.json,pnpm-lock.yaml,pnpm-workspace.yaml,README.md} "$release/"
+cp -R "$build"/{dist,patches,package.json,pnpm-lock.yaml,pnpm-workspace.yaml,README.md} "$release/"
 cp "$build/scripts/"{activate-macos.sh,deploy-lib.sh} "$release/scripts/"
 printf '%s\n' "$revision" > "$release/BUILD_ID"
 write_client_asset_manifest "$release/dist/client/assets" "$release/CLIENT_ASSETS.txt"

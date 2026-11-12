@@ -30,7 +30,7 @@ import {
   type MemorySnapshot,
 } from "./memory-documents";
 import { SESSION_TAIL_BYTES, rolloverBoundary, sessionMessages } from "./session-tail";
-import { decodeRuntimeNotice } from "./runtime-notices";
+import { decodeRuntimeNotice, projectRuntimeNoticeContext } from "./runtime-notices";
 import { conversationPolicy } from "./conversation-policy";
 import { isMainMemoryView } from "./main-memory-policy";
 import { workerMemoryView } from "./memory-snapshot";
@@ -242,6 +242,7 @@ export function createMemoryRequests({
     ],
     hooks: [
       hook(CompactionTask, {
+        beforeContextEstimate: ({ view }) => ({ view: projectRuntimeNoticeContext(view) }),
         beforeCompact: async (_, api, context) => {
           if (
             !conversationPolicy(api.conversationId === main().id ? "assistant" : "worker")
@@ -268,6 +269,7 @@ export function createMemoryRequests({
         },
       }),
       hook(GenerationTask, {
+        beforeContextEstimate: ({ view }) => ({ view: projectRuntimeNoticeContext(view) }),
         beforeRequest: async ({ messages }, api, context) => {
           if (api.conversationId !== main().id) {
             let snapshot = await harness().snapshot(WorkerMemory, api.conversationId, context);

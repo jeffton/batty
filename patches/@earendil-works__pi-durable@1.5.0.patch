@@ -1,8 +1,22 @@
 diff --git a/dist/harness/compaction.js b/dist/harness/compaction.js
-index e8eded74921ab86f7641bffb0a96e7371021fb55..03e996a98141ffb6fc32f65db83267d3edd6429c 100644
+index e8eded74921ab86f7641bffb0a96e7371021fb55..ec2e7218d2d41b86f7557765c69f64365394e804 100644
 --- a/dist/harness/compaction.js
 +++ b/dist/harness/compaction.js
-@@ -225,8 +225,11 @@ export function selectCut(view, keepRecentTokens) {
+@@ -67,7 +67,12 @@ export const CompactionTask = defineTask({
+             if (ref === undefined || model === undefined)
+                 return failNoModel(runtime, ref, context);
+             const policy = compactionPolicy(settings, ref);
+-            const view = await runtime.context(conversationId, context);
++            let view = await runtime.context(conversationId, context);
++            await runtime.hooks.each("beforeContextEstimate", async (hook) => {
++                const projected = await hook({ view }, runtime, context);
++                if (projected !== undefined)
++                    view = projected.view;
++            });
+             const cut = selectCut(view, policy.keepRecentTokens);
+             if (cut === undefined)
+                 return complete(runtime, context);
+@@ -225,8 +230,11 @@ export function selectCut(view, keepRecentTokens) {
      let kept = 0;
      let cut;
      for (let index = contributions.length - 1; index >= start; index--) {
@@ -15,3 +29,55 @@ index e8eded74921ab86f7641bffb0a96e7371021fb55..03e996a98141ffb6fc32f65db83267d3
          if (kept < keepRecentTokens)
              continue;
          cut = candidates.find((candidate) => candidate >= index) ?? candidates.at(-1);
+diff --git a/dist/harness/generation.js b/dist/harness/generation.js
+index ac42dfe741b20726ab8eb3d8139b1296d664210d..9fe4479268f7c76085ec4668a9955309d84cb21c 100644
+--- a/dist/harness/generation.js
++++ b/dist/harness/generation.js
+@@ -63,7 +63,12 @@ export const GenerationTask = defineTask({
+                     return failModelError(runtime, compactionFailure(outcome), context);
+                 }
+             }
+-            const view = await runtime.context(conversationId, context);
++            let view = await runtime.context(conversationId, context);
++            await runtime.hooks.each("beforeContextEstimate", async (hook) => {
++                const projected = await hook({ view }, runtime, context);
++                if (projected !== undefined)
++                    view = projected.view;
++            });
+             // The model owes an answer only to a context ending in a user message or tool results; system messages say
+             // nothing it answers. Otherwise, as for a continue after an answer or in an empty conversation, end the run
+             // before any request.
+diff --git a/dist/harness/types.d.ts b/dist/harness/types.d.ts
+index eb64e474162b158a43563e6c68d8ffea8c18b74a..b9da36b02596263f6d2a777fc7d7dec2f67c8e61 100644
+--- a/dist/harness/types.d.ts
++++ b/dist/harness/types.d.ts
+@@ -888,6 +888,14 @@ export interface HookApi extends DocumentReader {
+ export type HookResult<T> = T | undefined | Promise<T | undefined>;
+ /** Hooks of the built-in generation task. */
+ export interface GenerationHooks {
++    /** Project model-visible context for threshold estimation and retained-range selection only.
++     * Entries and storage remain unchanged; preserve their correspondence with contributions.
++     */
++    beforeContextEstimate(request: {
++        readonly view: ContextView;
++    }, api: HookApi, context: Context): HookResult<{
++        readonly view: ContextView;
++    }>;
+     /** Before every request attempt, including recovery; the result is used for that request only. */
+     beforeRequest(request: {
+         readonly messages: readonly Message[];
+@@ -973,6 +981,14 @@ export interface ToolHooks {
+ }
+ /** Hooks of the built-in compaction task. */
+ export interface CompactionHooks {
++    /** Project model-visible context for threshold estimation and retained-range selection only.
++     * Entries and storage remain unchanged; preserve their correspondence with contributions.
++     */
++    beforeContextEstimate(request: {
++        readonly view: ContextView;
++    }, api: HookApi, context: Context): HookResult<{
++        readonly view: ContextView;
++    }>;
+     /**
+      * After range selection, before summarizing; the first decision wins. `entries` are the active entries the summary
+      * replaces, the head marker first, and `messages` their model context, the summarizer's source; `firstKept` is the

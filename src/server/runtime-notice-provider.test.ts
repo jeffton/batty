@@ -5,7 +5,15 @@ import { expect, test } from "vite-plus/test";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
-import { createRegistry, Harness, type EntryRecord } from "@earendil-works/pi-durable";
+import {
+  createRegistry,
+  defineExtension,
+  GenerationTask,
+  CompactionTask,
+  hook,
+  Harness,
+  type EntryRecord,
+} from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { artifactRefs, reportWithArtifacts } from "./artifact-forwarding";
 import { runtimeResultArtifacts } from "./runtime-result-artifacts";
@@ -13,6 +21,7 @@ import {
   decodeRuntimeNotice,
   encodeRuntimeNotice,
   projectRuntimeNoticeRequest,
+  projectRuntimeNoticeContext,
 } from "./runtime-notices";
 
 function report() {
@@ -48,6 +57,81 @@ test("new report projection keeps refs and images while durable attachment bodie
   const recovered = runtimeResultArtifacts([{ model: [message] } as unknown as EntryRecord]);
   expect(artifactRefs(recovered).map(({ ref }) => ref)).toContain(artifactRefs(artifacts)[0]!.ref);
   expect(recovered.fileChanges).toContainEqual(artifacts.fileChanges[0]);
+});
+
+test("repeated artifact reports do not trigger compaction but real model text does", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "batty-notice-estimate-"));
+  const models = createModels();
+  const faux = fauxProvider({ models: [{ id: "tiny", contextWindow: 4096, maxTokens: 1024 }] });
+  models.setProvider(faux.provider);
+  const streamSimple = models.streamSimple.bind(models);
+  models.streamSimple = (model, request, options) =>
+    streamSimple(model, projectRuntimeNoticeRequest(request), options);
+  let summaries = 0;
+  faux.setResponses(
+    Array.from({ length: 20 }, () => (request: Parameters<typeof models.streamSimple>[1]) => {
+      if (JSON.stringify(request.messages).includes("context summarization assistant")) summaries++;
+      return fauxAssistantMessage("Checkpoint done");
+    }),
+  );
+  const registry = createRegistry();
+  registry.install(
+    defineExtension({
+      name: "notice-estimation",
+      hooks: [
+        hook(GenerationTask, {
+          beforeContextEstimate: ({ view }) => ({ view: projectRuntimeNoticeContext(view) }),
+        }),
+        hook(CompactionTask, {
+          beforeContextEstimate: ({ view }) => ({ view: projectRuntimeNoticeContext(view) }),
+        }),
+      ],
+    }),
+  );
+  const storage = await openNodeSqliteStorage(join(directory, "runtime.sqlite"));
+  const harness = await Harness.open(
+    storage,
+    {
+      models,
+      registry,
+      settings: {
+        compaction: {
+          enabled: true,
+          reserveTokens: 1024,
+          keepRecentTokens: 2048,
+          backgroundTokens: 0,
+        },
+      },
+    },
+    context,
+  );
+  try {
+    const worker = await harness.createConversation(
+      { ownership: { kind: "ownerless" }, agent: { model: { provider: "faux", modelId: "tiny" } } },
+      context,
+    );
+    const { content, artifacts } = report();
+    for (let index = 0; index < 3; index++) {
+      const result = await (await worker.submit({ type: "input", content }, context)).wait(context);
+      expect(result.status).toBe("done");
+    }
+    expect(summaries).toBe(0);
+    await harness.waitForTask(await worker.compact(undefined, context), context);
+    expect(summaries).toBe(0);
+    expect((await worker.context(context)).head).toBeUndefined();
+    const stored = (await worker.entries({}, 100, undefined, context)).items;
+    const preserved = stored.filter((entry) => entry.model?.[0]?.content === content);
+    expect(preserved).toHaveLength(3);
+    expect(runtimeResultArtifacts(preserved).fileChanges).toContainEqual(artifacts.fileChanges[0]);
+    await (
+      await worker.submit({ type: "input", content: "Real work ".repeat(4000) }, context)
+    ).wait(context);
+    expect(summaries).toBeGreaterThan(0);
+    expect((await worker.context(context)).head?.kind).toBe("pi.compaction");
+  } finally {
+    await harness.close(context);
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("embedded historical reports project independently without treating a marker inside JSON as its end", () => {

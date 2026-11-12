@@ -1,5 +1,6 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { Context } from "@earendil-works/pi-ai";
+import type { Context, Message } from "@earendil-works/pi-ai";
+import type { ContextView } from "@earendil-works/pi-durable";
 
 export const BATTY_RUNTIME_NOTICE_CUSTOM_TYPE = "batty-runtime-notice";
 const NOTICE_OPEN = "<batty-runtime-notice>";
@@ -78,6 +79,25 @@ export function projectRuntimeNoticeRequest(request: Context): Context {
               ),
       };
     }),
+  };
+}
+
+/** Estimate the same notice text sent to the provider without changing durable artifacts. */
+export function projectRuntimeNoticeContext(view: ContextView): ContextView {
+  const projected = new Map<Message, Message>();
+  const project = (message: Message): Message => {
+    if (message.role !== "user") return message;
+    let result = projected.get(message);
+    if (!result) {
+      result = projectRuntimeNoticeRequest({ messages: [message] }).messages[0]!;
+      projected.set(message, result);
+    }
+    return result;
+  };
+  return {
+    ...view,
+    messages: view.messages.map(project),
+    contributions: view.contributions.map((messages) => messages.map(project)),
   };
 }
 

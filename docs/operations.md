@@ -138,6 +138,8 @@ Shared server fixtures register disposers with `test-cleanup.ts`; `test-setup.ts
 
 `pnpm test` runs all server/shared, component and Chromium browser tests. `pnpm test:unit` selects the non-browser groups; file paths and Vitest filters can be passed to either command. The runner prints elapsed wall time and sets Linux `TMPDIR` to `/var/tmp` unless explicitly configured, keeping browser profile moves on the `/var/lib` filesystem.
 
+Remote-worker integration fixtures use writable `/dev/shm` on Linux to avoid disk-flush latency while retaining real SQLite/WAL, files and close/reopen behavior. Container shared-memory capacity must accommodate concurrent fixtures. Other platforms use the OS temporary directory; disk-backed storage tests remain separate.
+
 ```sh
 pnpm test src/server/remote-await.test.ts  # Focused development feedback
 pnpm test:unit                           # Non-browser groups

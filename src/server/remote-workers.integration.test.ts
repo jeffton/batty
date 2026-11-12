@@ -27,6 +27,9 @@ import type { NodeInputs, NodeOperation } from "../shared/node-api";
 // Per-test runtimes use separate directories, ports and faux providers. Vitest bounds
 // these concurrent cases with maxConcurrency in vite.config.ts.
 const test = serialTest.concurrent;
+// This suite verifies protocol state and reopen behavior, not power-loss durability.
+// Keep real SQLite/WAL/files on Linux tmpfs to avoid thousands of disk fsyncs.
+const storageRoot = process.platform === "linux" ? "/dev/shm" : tmpdir();
 
 beforeAll(() => vi.stubEnv("PI_OFFLINE", "1"));
 afterAll(() => vi.unstubAllEnvs());
@@ -382,7 +385,7 @@ function filesIn(value: unknown): SentFileDescriptor[] {
 test.each(["/", "/batty/"])(
   "%s owner pairing works bidirectionally, never becomes a node bearer, and rejects replay or cross-binding",
   async (baseUrl) => {
-    const directory = await mkdtemp(join(tmpdir(), "batty-single-invitation-"));
+    const directory = await mkdtemp(join(storageRoot, "batty-single-invitation-"));
     const windows = await openInstance(directory, "windows", 200, baseUrl);
     const mac = await openInstance(directory, "mac", 200, baseUrl);
     const other = await openInstance(directory, "other");
@@ -589,7 +592,7 @@ test.each(["/", "/batty/"])(
 test.each(["creator", "adder"] as const)(
   "offline removal by %s revokes access without restarting a worker or repairing itself",
   async (removingSide) => {
-    const directory = await mkdtemp(join(tmpdir(), "batty-offline-unpair-"));
+    const directory = await mkdtemp(join(storageRoot, "batty-offline-unpair-"));
     const windows = await openInstance(directory, "windows");
     const mac = await openInstance(directory, "mac");
     try {
@@ -668,7 +671,7 @@ test.each(["creator", "adder"] as const)(
 test.each(["reverse-unpair", "control-loss"] as const)(
   "native paired catalog and session streams close on %s",
   async (interruption) => {
-    const directory = await mkdtemp(join(tmpdir(), "batty-paired-direct-streams-"));
+    const directory = await mkdtemp(join(storageRoot, "batty-paired-direct-streams-"));
     const windows = await openInstance(directory, "windows");
     const mac = await openInstance(directory, "mac");
     const readers: ReadableStreamDefaultReader<unknown>[] = [];
@@ -763,7 +766,7 @@ test.each(["reverse-unpair", "control-loss"] as const)(
 );
 
 test("native session admission rechecks paired access after asynchronous metadata lookup", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "batty-paired-rpc-admission-"));
+  const directory = await mkdtemp(join(storageRoot, "batty-paired-rpc-admission-"));
   const windows = await openInstance(directory, "windows");
   const mac = await openInstance(directory, "mac");
   const entered = Promise.withResolvers<void>();
@@ -852,7 +855,7 @@ test("native session admission rechecks paired access after asynchronous metadat
 }, 30_000);
 
 test("bidirectional peers discover independently started workers without claiming them in Tasks", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "batty-peer-task-ownership-"));
+  const directory = await mkdtemp(join(storageRoot, "batty-peer-task-ownership-"));
   const instances: Awaited<ReturnType<typeof openInstance>>[] = [];
   try {
     const a = await openInstance(directory, "a");
@@ -907,7 +910,7 @@ test("bidirectional peers discover independently started workers without claimin
 test.each(["forward", "reverse"] as const)(
   "%s socket peers execute remote native tools, deliver progress to the initiating parent, and retain local history/files offline",
   async (transport) => {
-    const directory = await mkdtemp(join(tmpdir(), "batty-two-runtimes-"));
+    const directory = await mkdtemp(join(storageRoot, "batty-two-runtimes-"));
     let a: Awaited<ReturnType<typeof openInstance>> | undefined;
     let b: Awaited<ReturnType<typeof openInstance>> | undefined;
     try {
@@ -1124,7 +1127,7 @@ test.each(["forward", "reverse"] as const)(
 test.each(["/", "/batty/"])(
   "%s reverse-only Mac without a self URL supports workers, inspect, await, stop and restart",
   async (baseUrl) => {
-    const directory = await mkdtemp(join(tmpdir(), "batty-reverse-only-"));
+    const directory = await mkdtemp(join(storageRoot, "batty-reverse-only-"));
     let windows: Awaited<ReturnType<typeof openInstance>> | undefined;
     let mac: Awaited<ReturnType<typeof openInstance>> | undefined;
     try {
@@ -1252,7 +1255,7 @@ test.each(["/", "/batty/"])(
 );
 
 test("reverse pairing rejects impersonation and live grant revocation severs streams without queuing offline commands", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "batty-reverse-revoke-"));
+  const directory = await mkdtemp(join(storageRoot, "batty-reverse-revoke-"));
   let windows: Awaited<ReturnType<typeof openInstance>> | undefined;
   let mac: Awaited<ReturnType<typeof openInstance>> | undefined;
   try {
@@ -1417,7 +1420,7 @@ test("reverse pairing rejects impersonation and live grant revocation severs str
 }, 30_000);
 
 test("pending remote await settles after connection removal persistence without another remote commit", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "batty-remote-remove-await-"));
+  const directory = await mkdtemp(join(storageRoot, "batty-remote-remove-await-"));
   let windows: Awaited<ReturnType<typeof openInstance>> | undefined;
   let mac: Awaited<ReturnType<typeof openInstance>> | undefined;
   try {
@@ -1532,7 +1535,7 @@ test("pending remote await settles after connection removal persistence without 
 test.each([404, 503])(
   "native file failure %i does not strand a coordinator's remote await or terminal mirror",
   async (status) => {
-    const directory = await mkdtemp(join(tmpdir(), "batty-remote-import-failure-"));
+    const directory = await mkdtemp(join(storageRoot, "batty-remote-import-failure-"));
     let a: Awaited<ReturnType<typeof openInstance>> | undefined;
     let b: Awaited<ReturnType<typeof openInstance>> | undefined;
     try {
@@ -1685,7 +1688,7 @@ test.each([404, 503])(
 );
 
 test("node grants cannot access owner routes, revoke immediately, and reciprocal discovery never exports mirrors", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "batty-remote-boundary-"));
+  const directory = await mkdtemp(join(storageRoot, "batty-remote-boundary-"));
   let a: Awaited<ReturnType<typeof openInstance>> | undefined;
   let b: Awaited<ReturnType<typeof openInstance>> | undefined;
   try {
@@ -1821,7 +1824,7 @@ test("node grants cannot access owner routes, revoke immediately, and reciprocal
 }, 30_000);
 
 test("a local assigned worker awaits its remote child without completing its original parent assignment early", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "batty-remote-nested-await-"));
+  const directory = await mkdtemp(join(storageRoot, "batty-remote-nested-await-"));
   let a: Awaited<ReturnType<typeof openInstance>> | undefined;
   let b: Awaited<ReturnType<typeof openInstance>> | undefined;
   try {
@@ -1951,7 +1954,7 @@ test("a local assigned worker awaits its remote child without completing its ori
 test("catalog skips historical worker streams and retires active streams until the worker resumes", async ({
   expect,
 }) => {
-  const directory = await mkdtemp(join(tmpdir(), "batty-remote-stream-lifecycle-"));
+  const directory = await mkdtemp(join(storageRoot, "batty-remote-stream-lifecycle-"));
   let a: Awaited<ReturnType<typeof openInstance>> | undefined;
   let b: Awaited<ReturnType<typeof openInstance>> | undefined;
   try {
@@ -2137,7 +2140,7 @@ test("catalog skips historical worker streams and retires active streams until t
 }, 30_000);
 
 test("terminal metadata cannot retire a stream before its committed result cursor is mirrored", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "batty-remote-terminal-cursor-"));
+  const directory = await mkdtemp(join(storageRoot, "batty-remote-terminal-cursor-"));
   let a: Awaited<ReturnType<typeof openInstance>> | undefined;
   let b: Awaited<ReturnType<typeof openInstance>> | undefined;
   let restoreState: (() => void) | undefined;
@@ -2281,7 +2284,7 @@ test("terminal metadata cannot retire a stream before its committed result curso
 serialTest(
   "native binary commands verify admission, never use HTTP, deduplicate retries and recheck live grants",
   async () => {
-    const directory = await mkdtemp(join(tmpdir(), "batty-native-input-replay-"));
+    const directory = await mkdtemp(join(storageRoot, "batty-native-input-replay-"));
     const remote = await openInstance(directory, "receiver");
     const sender = await openInstance(directory, "sender");
     let restoreHttp = () => {};
@@ -2391,7 +2394,7 @@ serialTest(
 test.each(["cancel", "revoke"] as const)(
   "native upload %s during transfer never admits a worker and cleans staging",
   async (interruption) => {
-    const directory = await mkdtemp(join(tmpdir(), "batty-native-upload-interrupt-"));
+    const directory = await mkdtemp(join(storageRoot, "batty-native-upload-interrupt-"));
     const remote = await openInstance(directory, "receiver");
     const sender = await openInstance(directory, "sender");
     try {
@@ -2482,7 +2485,7 @@ test.each(["cancel", "revoke"] as const)(
 test.each(["forward", "reverse"] as const)(
   "%s socket run/queue/steer/resume carry selected paths and received refs, images, immutable queued bytes and locally mirrored input attachments",
   async (transport) => {
-    const directory = await mkdtemp(join(tmpdir(), "batty-input-files-"));
+    const directory = await mkdtemp(join(storageRoot, "batty-input-files-"));
     let a: Awaited<ReturnType<typeof openInstance>> | undefined;
     let b: Awaited<ReturnType<typeof openInstance>> | undefined;
     try {

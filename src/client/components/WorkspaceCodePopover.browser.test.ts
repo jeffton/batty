@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 import os from "node:os";
 import path from "node:path";
 import vue from "@vitejs/plugin-vue";
-import { chromium, type Browser } from "patchright";
+import { chromium, type Browser, type BrowserContext } from "patchright";
 import type { ViteDevServer } from "vite";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
 import { createBrowserFixtureServer, closeBrowserFixtureServer } from "../test/browser-fixture";
@@ -18,6 +18,7 @@ import type { AppConfig } from "@/server/config";
 let root: string;
 let server: ViteDevServer;
 let browser: Browser;
+let context: BrowserContext;
 let url: string;
 let incrementalSearch: ReadableStreamDefaultController<unknown> | undefined;
 const wrappedSource = [
@@ -91,6 +92,8 @@ beforeAll(async () => {
   await server.listen();
   url = `${server.resolvedUrls!.local[0]}src/client/components/WorkspaceCodePopover.fixture.html`;
   browser = await chromium.launch({ headless: true });
+  // Share the browser's module cache, not app instances: every case still gets a fresh page.
+  context = await browser.newContext();
 }, 30_000);
 afterAll(async () => {
   await browser?.close();
@@ -98,12 +101,21 @@ afterAll(async () => {
   if (root) await fs.rm(root, { recursive: true, force: true });
 });
 
+async function newPage(
+  options: { viewport?: { width: number; height: number }; colorScheme?: "light" | "dark" } = {},
+) {
+  const page = await context.newPage();
+  if (options.viewport) await page.setViewportSize(options.viewport);
+  await page.emulateMedia({ colorScheme: options.colorScheme ?? "light" });
+  return page;
+}
+
 test("workspace row opens native code browser, lazily browses files and closes back to workspaces", async () => {
   for (const [width, colorScheme] of [
     [1280, "light"],
     [390, "dark"],
   ] as const) {
-    const page = await browser.newPage({ viewport: { width, height: 900 }, colorScheme });
+    const page = await newPage({ viewport: { width, height: 900 }, colorScheme });
     page.setDefaultTimeout(5000);
     const calls: string[] = [];
     const errors: string[] = [];
@@ -137,9 +149,7 @@ test("workspace row opens native code browser, lazily browses files and closes b
         .locator("[data-line]")
         .filter({ hasText: 'export const greeting = "Hej 🦾";' })
         .waitFor();
-      await expect
-        .poll(() => popover.locator("[data-line] span").count(), { timeout: 10_000 })
-        .toBeGreaterThan(1);
+      await popover.locator("[data-line] span").nth(1).waitFor();
       expect(await popover.getByRole("region", { name: "File preview" }).isVisible()).toBe(true);
       expect(await popover.locator("textarea, [contenteditable=true]").count()).toBe(0);
       if (process.env.BATTY_UI_SCREENSHOTS === "1") {
@@ -179,7 +189,7 @@ test("workspace row opens native code browser, lazily browses files and closes b
 test("refreshes actual branches on reopening, with long names contained on mobile", async () => {
   const branch = `feature/${"long-branch-name-".repeat(7)}`;
   const project = path.join(root, "workspaces/project");
-  const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
+  const page = await newPage({ viewport: { width: 390, height: 900 } });
   const setBranch = (name: string) =>
     promisify(execFile)("git", ["-C", project, "symbolic-ref", "HEAD", `refs/heads/${name}`]);
   try {
@@ -225,7 +235,7 @@ test("refreshes actual branches on reopening, with long names contained on mobil
 
 test("chromium: filename filtering renders a native hierarchy and preserves the original tree", async () => {
   for (const width of [1280, 390]) {
-    const page = await browser.newPage({ viewport: { width, height: 900 } });
+    const page = await newPage({ viewport: { width, height: 900 } });
     page.setDefaultTimeout(10_000);
     try {
       await page.goto(url);
@@ -239,7 +249,11 @@ test("chromium: filename filtering renders a native hierarchy and preserves the 
       expect(await input.evaluate((element) => element === document.activeElement)).toBe(true);
       await input.fill("qUiCkNeEdLe");
       const filtered = popover.locator(".file-search__results");
-      await expect.poll(() => filtered.getByRole("treeitem").count()).toBe(5);
+      await filtered
+        .getByRole("treeitem", { name: "QuickNeedle.ts", exact: true })
+        .nth(1)
+        .waitFor();
+      expect(await filtered.getByRole("treeitem").count()).toBe(5);
       expect(await filtered.getByRole("tree").count()).toBe(1);
       expect(
         await filtered
@@ -264,14 +278,22 @@ test("chromium: filename filtering renders a native hierarchy and preserves the 
       const folder = filtered.getByRole("treeitem", { name: "another", exact: true });
       expect(await folder.getAttribute("aria-expanded")).toBe("true");
       await folder.click();
-      await expect
-        .poll(() => filtered.getByRole("treeitem", { name: "QuickNeedle.ts", exact: true }).count())
-        .toBe(1);
+      await filtered
+        .getByRole("treeitem", { name: "QuickNeedle.ts", exact: true })
+        .nth(1)
+        .waitFor({ state: "hidden" });
+      expect(
+        await filtered.getByRole("treeitem", { name: "QuickNeedle.ts", exact: true }).count(),
+      ).toBe(1);
       await folder.focus();
       await page.keyboard.press("ArrowRight");
-      await expect
-        .poll(() => filtered.getByRole("treeitem", { name: "QuickNeedle.ts", exact: true }).count())
-        .toBe(2);
+      await filtered
+        .getByRole("treeitem", { name: "QuickNeedle.ts", exact: true })
+        .nth(1)
+        .waitFor();
+      expect(
+        await filtered.getByRole("treeitem", { name: "QuickNeedle.ts", exact: true }).count(),
+      ).toBe(2);
       await input.focus();
       await input.press("ArrowDown");
       expect(
@@ -345,7 +367,7 @@ test("chromium: filename filtering renders a native hierarchy and preserves the 
 });
 
 test("incremental matches preserve collapsed folders, open new parents, and flush the last batch", async () => {
-  const page = await browser.newPage();
+  const page = await newPage();
   page.setDefaultTimeout(10_000);
   try {
     await page.goto(url);
@@ -367,7 +389,7 @@ test("incremental matches preserve collapsed folders, open new parents, and flus
     incrementalSearch!.close();
     incrementalSearch = undefined;
     await filtered.getByRole("treeitem", { name: "two", exact: true }).waitFor();
-    await expect.poll(() => searching.count()).toBe(0);
+    await searching.waitFor({ state: "detached" });
     expect(await one.getAttribute("aria-expanded")).toBe("false");
     expect(
       await filtered
@@ -390,7 +412,7 @@ test("incremental matches preserve collapsed folders, open new parents, and flus
 });
 
 test("search errors and newer queries do not turn partial or stale results into successful matches", async () => {
-  const page = await browser.newPage();
+  const page = await newPage();
   page.setDefaultTimeout(10_000);
   try {
     await fixtureOperation(server, page, "workspace.search", async (input, _context, next) => {
@@ -468,7 +490,7 @@ test("search errors and newer queries do not turn partial or stale results into 
 
 test("workspace rows contain wrapped names and paths on desktop and mobile", async () => {
   for (const width of [1280, 390]) {
-    const page = await browser.newPage({ viewport: { width, height: 900 } });
+    const page = await newPage({ viewport: { width, height: 900 } });
     try {
       await page.goto(url);
       const list = page.locator("#tools-Workspaces-panel");
@@ -516,7 +538,7 @@ test("workspace rows contain wrapped names and paths on desktop and mobile", asy
 
 test("chromium: code wraps spaced lines and long tokens without changing text", async () => {
   for (const width of [1280, 390]) {
-    const page = await browser.newPage({ viewport: { width, height: 900 } });
+    const page = await newPage({ viewport: { width, height: 900 } });
     page.setDefaultTimeout(10_000);
     try {
       await page.goto(url);
@@ -525,9 +547,7 @@ test("chromium: code wraps spaced lines and long tokens without changing text", 
       await popover.getByRole("treeitem", { name: "src", exact: true }).click();
       await popover.getByRole("treeitem", { name: "long.ts", exact: true }).click();
       await popover.locator("[data-line]").filter({ hasText: "export const sentence" }).waitFor();
-      await expect
-        .poll(() => popover.locator("[data-line] span").count(), { timeout: 10_000 })
-        .toBeGreaterThan(3);
+      await popover.locator("[data-line] span").nth(3).waitFor();
       const lines = await popover.locator("[data-line]").evaluateAll((elements) =>
         elements.map((element) => ({
           text: element.textContent?.replace(/\\n$/, ""),
@@ -555,7 +575,7 @@ test("chromium: code wraps spaced lines and long tokens without changing text", 
 });
 
 test("directory failures are visible and retryable, file failures do not leave stale source", async () => {
-  const page = await browser.newPage();
+  const page = await newPage();
   page.setDefaultTimeout(5000);
   let fail = true;
   try {
@@ -590,7 +610,7 @@ test("directory failures are visible and retryable, file failures do not leave s
 });
 
 test("Chromium: mobile code browser supports keyboard folder navigation and source preview", async () => {
-  const page = await browser.newPage({
+  const page = await newPage({
     viewport: { width: 390, height: 844 },
     colorScheme: "dark",
   });
@@ -606,9 +626,7 @@ test("Chromium: mobile code browser supports keyboard folder navigation and sour
     await file.focus();
     await page.keyboard.press("Enter");
     await popover.locator("[data-line]").filter({ hasText: "export const greeting" }).waitFor();
-    await expect
-      .poll(() => popover.locator("[data-line] span").count(), { timeout: 10_000 })
-      .toBeGreaterThan(1);
+    await popover.locator("[data-line] span").nth(1).waitFor();
     await popover.getByRole("button", { name: "Files", exact: true }).click();
     expect(await file.isVisible()).toBe(true);
     await popover.getByRole("button", { name: "Close code browser" }).click();

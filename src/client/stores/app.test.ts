@@ -401,37 +401,43 @@ describe("reading history lifecycle", () => {
   });
 
   it("cancels on suspension, coalesces resume and ignores a late page from the cancelled request", async () => {
-    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
-    let resolve!: (page: Awaited<ReturnType<typeof api.getMainMessages>>) => void;
-    const fetch = vi.spyOn(api, "getMainMessages").mockReturnValueOnce(
-      new Promise((done) => {
-        resolve = done;
-      }),
-    );
-    vi.mocked(api.getMain).mockResolvedValue(history());
-    wrapper = mount(App, { global: { plugins: [pinia], stubs: { RouterView: true } } });
-    await flushPromises();
-    const store = useAppStore();
-    const signal = fetch.mock.calls[0]![0].signal!;
-    await store.populateReadingCache();
-    expect(fetch).toHaveBeenCalledOnce();
-    visibility.mockReturnValue("hidden");
-    document.dispatchEvent(new Event("visibilitychange"));
-    expect(signal.aborted).toBe(true);
-    fetch.mockResolvedValue({
-      messages: [message("old")],
-      totalMessageCount: 2,
-      hasMoreMessages: false,
-    });
-    visibility.mockReturnValue("visible");
-    document.dispatchEvent(new Event("visibilitychange"));
-    window.dispatchEvent(new Event("pageshow"));
-    await flushPromises();
-    expect(fetch).toHaveBeenCalledTimes(2);
-    resolve({ messages: [message("stale")], totalMessageCount: 99, hasMoreMessages: false });
-    await flushPromises();
-    expect(store.activeSession?.messages.map((message) => message.id)).toEqual(["new"]);
-    expect(store.lastError).toBeUndefined();
+    const checkForUpdates = vi.spyOn(updates, "checkAppUpdate").mockResolvedValue();
+    try {
+      const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+      let resolve!: (page: Awaited<ReturnType<typeof api.getMainMessages>>) => void;
+      const fetch = vi.spyOn(api, "getMainMessages").mockReturnValueOnce(
+        new Promise((done) => {
+          resolve = done;
+        }),
+      );
+      vi.mocked(api.getMain).mockResolvedValue(history());
+      wrapper = mount(App, { global: { plugins: [pinia], stubs: { RouterView: true } } });
+      await flushPromises();
+      const store = useAppStore();
+      const signal = fetch.mock.calls[0]![0].signal!;
+      await store.populateReadingCache();
+      expect(fetch).toHaveBeenCalledOnce();
+      visibility.mockReturnValue("hidden");
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(signal.aborted).toBe(true);
+      fetch.mockResolvedValue({
+        messages: [message("old")],
+        totalMessageCount: 2,
+        hasMoreMessages: false,
+      });
+      visibility.mockReturnValue("visible");
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("pageshow"));
+      await flushPromises();
+      expect(fetch).toHaveBeenCalledTimes(2);
+      resolve({ messages: [message("stale")], totalMessageCount: 99, hasMoreMessages: false });
+      await flushPromises();
+      expect(store.activeSession?.messages.map((message) => message.id)).toEqual(["new"]);
+      expect(store.lastError).toBeUndefined();
+      expect(checkForUpdates).toHaveBeenCalled();
+    } finally {
+      checkForUpdates.mockRestore();
+    }
   });
 
   it("recovers through a session reset event and does not duplicate an in-flight history request", async () => {

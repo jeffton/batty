@@ -77,7 +77,7 @@ test.each([false, true])(
   },
 );
 
-test("workers retain the complete pending background and original images across restart", async () => {
+test("workers retain addressable pending history across restart without inlining originals", async () => {
   const f = await fixture({ contextWindow: 16_000, maxTokens: 256 });
   const options = {
     compress: async () => {
@@ -139,13 +139,12 @@ test("workers retain the complete pending background and original images across 
         .filter((part) => part.type === "text")
         .map((part) => part.text)
         .join("\n");
-      expect(text).toContain(long);
-      for (let i = 0; i < 80; i++) expect(text).toContain(`Pending message ${i}`);
-      expect(text).toContain("Original tool result");
-      expect(text).toContain("Main messages 0–81 are not summarized yet");
-      expect(content.filter((part) => part.type === "image")).toEqual([image, image]);
-      expect(text).toContain("Original images for main message 0:");
-      expect(text).toContain("Original images for main message 81:");
+      expect(text).not.toContain(long);
+      expect(text).not.toContain("Pending message 79");
+      expect(text).not.toContain("Original tool result");
+      expect(text).toContain("Main messages 0–81 are awaiting tree preparation");
+      expect(text).toContain("memory_zoom(id, 1)");
+      expect(content.filter((part) => part.type === "image")).toEqual([]);
       return fauxAssistantMessage([fauxText("NO_REPLY")]);
     }),
   );
@@ -167,5 +166,5 @@ test("workers retain the complete pending background and original images across 
       state = await f.open(options);
     }
   }
-  expect(backgrounds[1]).toEqual(backgrounds[0]);
+  expect(backgrounds[1]).toMatchObject({ content: backgrounds[0]!.content });
 });

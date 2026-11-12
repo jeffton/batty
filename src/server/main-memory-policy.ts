@@ -11,7 +11,7 @@ export const MAIN_MEMORY_TOOLS = new Set([
 ]);
 
 export function isMainMemoryView(message: Message): boolean {
-  if (message.role !== "user" || message.timestamp !== 0) return false;
+  if (message.role !== "user") return false;
   const content =
     typeof message.content === "string"
       ? message.content
@@ -24,6 +24,7 @@ export function isMainMemoryView(message: Message): boolean {
     content.endsWith("\n</main-memory-background>")
   )
     return true;
+  if (message.timestamp !== 0) return false;
   return /^<chat>\n(?:\d+\+\d+\|[^\n]*(?:\n\d+\+\d+\|[^\n]*)*)?\n<\/chat>(?:\n<!-- batty-optchat:[^\n]+ -->)?$/.test(
     content,
   );

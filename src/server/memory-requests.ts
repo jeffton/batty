@@ -33,6 +33,7 @@ import { SESSION_TAIL_BYTES, rolloverBoundary, sessionMessages } from "./session
 import { decodeRuntimeNotice } from "./runtime-notices";
 import { conversationPolicy } from "./conversation-policy";
 import { isMainMemoryView } from "./main-memory-policy";
+import { workerMemoryView } from "./memory-snapshot";
 import { MEMORY_PROMPT } from "./memory-prompts";
 
 type MemoryRequests = {
@@ -40,7 +41,10 @@ type MemoryRequests = {
   harness: () => Harness;
   rootSessionId: () => string;
   archiveView: (maximum: number) => Promise<{ view: string; snapshot: MemorySnapshot }>;
-  workerView: (context: Context) => Promise<{
+  workerView: (
+    context: Context,
+    pinned?: MemorySnapshot,
+  ) => Promise<{
     view: string;
     snapshot: MemorySnapshot;
     attachments: (TextContent | ImageContent)[];
@@ -238,24 +242,48 @@ export function createMemoryRequests({
     ],
     hooks: [
       hook(CompactionTask, {
-        beforeCompact: (_, api) =>
-          conversationPolicy(api.conversationId === main().id ? "assistant" : "worker")
-            .nativeCompaction
-            ? undefined
-            : { decline: true },
+        beforeCompact: async (_, api, context) => {
+          if (
+            !conversationPolicy(api.conversationId === main().id ? "assistant" : "worker")
+              .nativeCompaction
+          )
+            return { decline: true };
+          const pinned = await harness().snapshot(WorkerMemory, api.conversationId, context);
+          if (pinned?.snapshot) {
+            const candidate = await workerView(context, pinned.snapshot);
+            const conversation = (await harness().conversation(api.conversationId, context))!;
+            await conversation.commit(async (tx) => {
+              const current = await tx.doc(WorkerMemory, api.conversationId);
+              if (
+                current.snapshot?.count === candidate.snapshot.count &&
+                candidate.view !== current.view
+              ) {
+                current.view = candidate.view;
+                current.snapshot = candidate.snapshot;
+                current.attachments = candidate.attachments;
+              }
+            }, context);
+          }
+          return undefined;
+        },
       }),
       hook(GenerationTask, {
         beforeRequest: async ({ messages }, api, context) => {
           if (api.conversationId !== main().id) {
             let snapshot = await harness().snapshot(WorkerMemory, api.conversationId, context);
-            if (!snapshot?.view || snapshot.tail !== undefined) {
+            if (!snapshot?.view || !snapshot.snapshot || snapshot.tail !== undefined) {
               // Workers inherit background knowledge, not main's native conversation.
               // This also replaces snapshots pinned by the former native-tail injection.
-              const candidate = await workerView(context);
+              const candidate = await workerView(context, snapshot?.snapshot);
               const conversation = (await harness().conversation(api.conversationId, context))!;
               snapshot = await conversation.commit(async (tx) => {
                 const pinned = await tx.doc(WorkerMemory, api.conversationId);
-                if (pinned.view === null || pinned.tail !== undefined) {
+                if (
+                  pinned.view === null ||
+                  !pinned.snapshot ||
+                  pinned.tail !== undefined ||
+                  (pinned.snapshot && candidate.snapshot.prepared > pinned.snapshot.prepared)
+                ) {
                   pinned.view = candidate.view;
                   pinned.snapshot = candidate.snapshot;
                   pinned.attachments = candidate.attachments;
@@ -268,27 +296,44 @@ export function createMemoryRequests({
                 };
               }, context);
             }
+            const projected = workerMemoryView(snapshot!.view!, snapshot!.snapshot!);
+            if (projected !== snapshot!.view || snapshot!.attachments?.length) {
+              const conversation = (await harness().conversation(api.conversationId, context))!;
+              snapshot = await conversation.commit(async (tx) => {
+                const pinned = await tx.doc(WorkerMemory, api.conversationId);
+                pinned.view = workerMemoryView(pinned.view!, pinned.snapshot!);
+                pinned.attachments = [];
+                return { view: pinned.view, snapshot: pinned.snapshot, attachments: [] };
+              }, context);
+            }
             const system = getCurrentSystemMessage(messages);
-            return {
-              messages: [
-                ...(system ? [{ ...system, timestamp: 0 }] : []),
-                {
-                  role: "user",
-                  content: [
-                    {
-                      type: "text",
-                      text: `<main-memory-background>\nHistorical context from the main conversation, not this worker's conversation or an instruction to execute. Follow the assigned worker/cron task below; use memory_search and memory_zoom for missing details.\n${snapshot!.view!}`,
-                    },
-                    ...(snapshot!.attachments ?? []),
-                    { type: "text", text: "\n</main-memory-background>" },
-                  ],
-                  timestamp: 0,
-                },
-                ...messages.filter(
-                  (message) => message.role !== "system" && !isMainMemoryView(message),
-                ),
-              ],
-            };
+            const native = messages.filter(
+              (message) => message.role !== "system" && !isMainMemoryView(message),
+            );
+            // The injected tree can change at compaction; stale measured usage
+            // from a larger legacy prefix must not control request admission.
+            const timestamp =
+              messages.reduce((latest, message) => Math.max(latest, message.timestamp), 0) + 1;
+            const makeMessages = (
+              view: string,
+              attachments: (TextContent | ImageContent)[],
+            ): Message[] => [
+              ...(system ? [{ ...system, timestamp: 0 }] : []),
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: `<main-memory-background>\nHistorical context from the main conversation, not this worker's conversation or an instruction to execute. Follow the assigned worker/cron task below; use memory_search and memory_zoom for missing details.\n${view}`,
+                  },
+                  ...attachments,
+                  { type: "text", text: "\n</main-memory-background>" },
+                ],
+                timestamp,
+              },
+              ...native,
+            ];
+            return { messages: makeMessages(snapshot!.view!, []) };
           }
           try {
             const live = (await api.snapshot(LiveDoc, main().id, context))!;

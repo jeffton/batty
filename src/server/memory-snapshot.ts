@@ -7,6 +7,18 @@ export function snapshotView(view: string, snapshot: MemorySnapshot) {
   return `${view}\n<!-- batty-optchat:${JSON.stringify(snapshot)} -->`;
 }
 
+// Workers inherit the prepared tree, not main's native pending messages.
+// Pending originals stay searchable/zoomable, including their images. This also
+// migrates persisted packets that inlined large raw subagent/artifact reports.
+export function workerMemoryView(view: string, snapshot: MemorySnapshot) {
+  const tree = view.slice(0, view.indexOf("\n</chat>") + "\n</chat>".length);
+  const pending =
+    snapshot.prepared < snapshot.count
+      ? `\n<unprepared-main-memory>\nMain messages ${snapshot.prepared}–${snapshot.count - 1} are awaiting tree preparation. Retrieve complete originals and images with memory_zoom(id, 1), or locate them with memory_search.\n</unprepared-main-memory>`
+      : "";
+  return snapshotView(`${tree}${pending}`, snapshot);
+}
+
 export function snapshotFromView(view: string): MemorySnapshot | undefined {
   const metadata = /\n<!-- batty-optchat:(.*?) -->$/.exec(view);
   return metadata ? JSON.parse(metadata[1]!) : undefined;

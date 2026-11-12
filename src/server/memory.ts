@@ -33,7 +33,7 @@ import {
 import { isMemoryNoise, stripNoiseClauses } from "./memory-noise";
 import { createMemoryCompressor, MemoryFatalError, NODE_BYTES } from "./memory-compression";
 import { createMemoryRequests } from "./memory-requests";
-import { snapshotView, captureMemorySnapshot } from "./memory-snapshot";
+import { snapshotView, captureMemorySnapshot, workerMemoryView } from "./memory-snapshot";
 import {
   Leaves,
   Generations,
@@ -723,11 +723,11 @@ export function createMemory(config: MemoryConfig, models: Models) {
     const leaf = await leafAt(id, context);
     return leaf.date;
   }
-  async function captureView(maximum: number, context: Context) {
+  async function captureView(maximum: number, context: Context, count = Number.MAX_SAFE_INTEGER) {
     await syncTo(maximum, context);
     return captureMemorySnapshot(
       {
-        count: index.count,
+        count: Math.min(index.count, count),
         prepared: index.viewCount,
         generation: overviewGeneration,
         parts: overviewParts,
@@ -755,34 +755,14 @@ export function createMemory(config: MemoryConfig, models: Models) {
     harness: () => harness,
     rootSessionId: () => rootSessionId,
     archiveView,
-    workerView: (context) =>
+    workerView: (context, pinned) =>
       exclusive(async () => {
-        const captured = await captureView(Number.MAX_SAFE_INTEGER, context);
-        const { count, prepared } = captured.snapshot;
-        const pending: string[] = [];
-        const attachments: (TextContent | ImageContent)[] = [];
-        // Bridge compression lag with complete projected originals, not a second
-        // native conversation. Reuse zoom's original-image lookup without inference.
-        for (let id = prepared; id < count; id++) {
-          const leaf = await leafAt(id, context);
-          pending.push(`${id}+1|[${leaf.date}] ${leaf.kind}: ${leaf.text}`);
-          const images = (await zoomOutput(id, 1, context, captured.snapshot)).filter(
-            (part) => part.type === "image",
-          );
-          if (images.length)
-            attachments.push(
-              { type: "text", text: `Original images for main message ${id}:` },
-              ...images,
-            );
-        }
-        const recent =
-          count > prepared
-            ? `\n<unprepared-main-memory>\nMain messages ${prepared}–${count - 1} are not summarized yet. These are complete original text projections, not summaries; original images follow the text. Use memory_search or memory_zoom(id, 1) to navigate originals.\n${pending.join("\n")}\n</unprepared-main-memory>`
-            : "";
+        // Upgrade compression without moving the worker's historical boundary.
+        const captured = await captureView(Number.MAX_SAFE_INTEGER, context, pinned?.count);
         return {
-          view: snapshotView(captured.view + recent, captured.snapshot),
+          view: workerMemoryView(captured.view, captured.snapshot),
           snapshot: captured.snapshot,
-          attachments,
+          attachments: [],
         };
       }),
     readyArchive: async (maximum, context) =>

@@ -82,8 +82,8 @@ export const VIEW_DOC = `The main-memory view: the chat between the assistant an
 <chat> tags, as one-line summaries of the archived prefix.
 In main, the recent session follows as ordinary original messages, including tool results
 and subagent reports; use this visible context before searching memory. Workers receive the
-prepared main-history tree plus complete unprepared text projections and original images as
-historical background; their own task and messages follow separately.
+prepared main-history tree as historical background, with pending message ranges addressable
+through memory_search and memory_zoom; their own task and messages follow separately.
 The memory_zoom and memory_search tools address this same main history:
 zoom opens tree nodes with UTC timestamps, and search finds original messages with timestamps.
 Each line is
@@ -109,8 +109,7 @@ boundaries. A neighbor may be a tool call or runtime note. Fetch neighbors
 when context is needed; automatic recall does not include them.
 memory_zoom(id, 1) gives the original UTC timestamp, uncompressed non-thought
 text projection and original images as image blocks. Prepared overview images use
-placeholders; pending worker background includes original image blocks, and explicit leaf
-zoom retrieves archived image data. Full
+placeholders; explicit leaf zoom retrieves original images, including pending history. Full
 message metadata and reasoning remain in the permanent archive. Codemode
 returns the zoom text to the script and forwards images to the model automatically. Zoom
 whenever a summary only mentions something you need, such as what your

@@ -23,6 +23,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { createMemory, MemoryIndexDoc } from "./memory";
 import { SessionMemory } from "./memory-documents";
 import { snapshotView } from "./memory-snapshot";
+import { isMainMemoryView } from "./main-memory-policy";
 import { createTools } from "./tools";
 import { createOrchestration, OrchestrationDoc, WorkerDoc } from "./orchestration";
 import { enableWorkerMemory } from "./orchestration-worker-config";
@@ -89,16 +90,9 @@ test("fresh project worker pins its overview across tools and later inputs while
     const views: string[] = [];
     faux.setResponses(
       Array.from({ length: 4 }, (_, i) => (request) => {
-        const task = request.messages.findIndex(
-          (message) =>
-            message.role === "user" &&
-            ["start", "continue", "new task"].includes(String(message.content)),
-        );
-        views.push(
-          JSON.stringify(
-            request.messages.slice(0, task).filter((message) => message.role !== "system"),
-          ),
-        );
+        const backgrounds = request.messages.filter(isMainMemoryView);
+        expect(backgrounds).toHaveLength(1);
+        views.push(JSON.stringify(backgrounds[0]!.content));
         return fauxAssistantMessage(i === 0 ? [fauxToolCall("advance", {})] : [fauxText("done")], {
           stopReason: i === 0 ? "toolUse" : "stop",
         });
@@ -427,6 +421,16 @@ test("automatic worker overview uses the built catalog without waiting for pendi
     faux.setResponses([
       (request) => {
         overview = JSON.stringify(request.messages);
+        return fauxAssistantMessage([fauxToolCall("memory_zoom", { id: 1, n: 1 })], {
+          stopReason: "toolUse",
+        });
+      },
+      (request) => {
+        const result = request.messages.findLast((message) => message.role === "toolResult");
+        expect(result).toMatchObject({ toolName: "memory_zoom", isError: false });
+        expect(result?.content).toEqual([
+          { type: "text", text: `1+0|[1970-01-01T00:00:00.002Z] user: ${"pending ".repeat(100)}` },
+        ]);
         return fauxAssistantMessage([fauxText("done")]);
       },
     ]);
@@ -440,9 +444,10 @@ test("automatic worker overview uses the built catalog without waiting for pendi
     ).toBe("done");
     expect(built).toContain("built decision");
     expect(overview).toContain("built decision");
-    expect(overview).toContain("pending pending");
-    expect(overview).toContain("pending ".repeat(100));
-    expect(overview).toContain("Main messages 1–1 are not summarized yet");
+    expect(overview).not.toContain("pending pending");
+    expect(overview).toContain("Main messages 1–1 are awaiting tree preparation");
+    expect(overview).toContain("memory_zoom(id, 1)");
+    expect(overview).toContain("memory_search");
     expect(overview).not.toContain("pending summary");
     expect(compressions).toBe(1);
     expect(await harness.snapshot(MemoryIndexDoc, main.id, context)).toEqual(before);

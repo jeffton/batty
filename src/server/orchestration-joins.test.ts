@@ -248,26 +248,24 @@ test.each([false, true])(
     const inner = Object.values((await orchestrationHistory(harness))!.workers).find(
       (w) => w.parentId === outer.id,
     )!;
+    const heading = `Subagent ${fail ? "failed" : "result"}. Session ID: ${inner.id}`;
     const result = messages.findLast(
       (m) =>
-        (m.role === "user" &&
-          Boolean(decodeRuntimeNotice(m.content)?.text.startsWith("Subagent result."))) ||
+        (m.role === "user" && Boolean(decodeRuntimeNotice(m.content)?.text.startsWith(heading))) ||
         (m.role === "toolResult" &&
           m.toolName === "subagent" &&
-          JSON.stringify(m.content).includes("Subagent result.")),
+          JSON.stringify(m.content).includes(heading)),
     )!;
-    expect(
+    const resultText =
       result.role === "user"
-        ? [{ type: "text", text: decodeRuntimeNotice(result.content)!.text }]
-        : result.content,
-    ).toEqual([
-      {
-        type: "text",
-        text: fail
-          ? `Subagent result. Session ID: ${inner.id}\n\nTask ${inner.id} failed: model_error`
-          : `Subagent result. Session ID: ${inner.id}\n\nnested synchronous answer`,
-      },
-    ]);
+        ? decodeRuntimeNotice(result.content)!.text
+        : result.role === "toolResult"
+          ? result.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("")
+          : "";
+    if (fail) {
+      expect(resultText).toContain(`${heading}\n\nTask ${inner.id} failed: model_error`);
+      expect(resultText).toContain("inner provider failure");
+    } else expect(resultText).toBe(`${heading}\n\nnested synchronous answer`);
     expect(
       messages.find((message) => message.role === "toolResult" && message.toolName === "subagent"),
     ).toMatchObject({

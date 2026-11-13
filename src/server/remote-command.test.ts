@@ -56,7 +56,7 @@ test("node run is durable and idempotent, rejects changed arguments, and remains
     orchestration.nodeCommand("node-a", "start-1", { ...args, prompt: "different work" }),
   ).rejects.toThrow("reused with different arguments");
   const listing = JSON.parse(
-    text(await orchestration.nodeCommand("node-a", "list-1", { action: "list" })),
+    text(await orchestration.nodeCommand("node-a", "list-1", { action: "list", status: "all" })),
   );
   expect(listing.workers).toContainEqual(
     expect.objectContaining({ sessionId: id, workspaceId: "other", status: "completed" }),
@@ -76,7 +76,9 @@ test("node run is durable and idempotent, rejects changed arguments, and remains
   expect((await main.context(context)).messages).toHaveLength(0);
 
   faux.setResponses([
-    fauxAssistantMessage([fauxToolCall("subagent", { action: "list" })], { stopReason: "toolUse" }),
+    fauxAssistantMessage([fauxToolCall("subagent", { action: "list", status: "all" })], {
+      stopReason: "toolUse",
+    }),
     fauxAssistantMessage([fauxText("local discovery complete")]),
   ]);
   await (

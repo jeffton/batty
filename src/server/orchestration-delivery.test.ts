@@ -17,6 +17,7 @@ import type { WebPushService } from "./web-push.js";
 import { suppressAgentCompletionNotification } from "../shared/agent-notification.js";
 
 import { cleanup, fixture, until } from "./orchestration-test-fixture.js";
+import { DeliveryRecord } from "./orchestration-history.js";
 
 // A cron's final report is a normal main turn.
 test("main can await a worker started from a completed cron report", async () => {
@@ -42,7 +43,7 @@ test("main can await a worker started from a completed cron report", async () =>
       ],
     }),
   );
-  const { harness, main } = await open();
+  const { main } = await open();
   await main.configure({ cwd: "/tmp" }, context);
   const call = (args: Record<string, string>) =>
     fauxAssistantMessage([fauxToolCall("subagent", args)], { stopReason: "toolUse" });
@@ -148,9 +149,14 @@ test.each([
       output === "error",
     );
     expect(run.job?.prompt).toBe("scheduled task");
-    expect((await harness.getTask(run.taskId, context))!.state.outcome?.status).toBe("completed");
-    if (output === "error") expect(run.output).toBe(`Task ${run.sessionId} failed: model_error`);
-    else expect(run.output).toBe(output);
+    const outcome = (await harness.getTask(run.taskId, context))!.state.outcome!;
+    expect(outcome.status).toBe(output === "error" ? "failed" : "completed");
+    expect(outcome.result).toBe(run.output);
+    if (output === "error") {
+      expect(run.output).toContain(`Task ${run.sessionId} failed: model_error`);
+      expect(run.output).toContain("cron provider failure NO_REPLY");
+      expect(outcome).toMatchObject({ error: { message: run.output } });
+    } else expect(run.output).toBe(output);
     const silent = output.trim() === "NO_REPLY";
     const entries = (await main.context(context)).entries.slice(before);
     const reports = entries.filter((entry) =>
@@ -175,6 +181,66 @@ test.each([
     expect(reportError).not.toHaveBeenCalled();
   },
 );
+
+test("failed cron retains artifacts and failure details across reopen without direct delivery", async () => {
+  const { faux, orchestration, open, registry } = await fixture();
+  const artifacts = {
+    sites: [{ id: "failed-run-site", name: "Partial result", url: "https://example.com/partial" }],
+  };
+  registry.install(
+    defineExtension({
+      name: "failed-run-artifacts",
+      tools: [
+        defineTool({
+          name: "partial_result",
+          description: "Attach partial results before a provider failure",
+          parameters: Type.Object({}),
+          execute: async () => ({ output: [fauxText("attached")], details: artifacts }),
+        }),
+      ],
+    }),
+  );
+  let { harness, main } = await open();
+  faux.setResponses([
+    fauxAssistantMessage([fauxToolCall("partial_result", {})], { stopReason: "toolUse" }),
+    () => {
+      throw new Error("provider rejected continuation");
+    },
+    fauxAssistantMessage([fauxText("failure received")]),
+  ]);
+  const job = await orchestration.addJob({
+    title: "Partial failure",
+    prompt: "produce a partial artifact",
+    delivery: "direct",
+    schedule: { kind: "at", in: "1h" },
+  });
+  await main.commit(async (tx) => {
+    (await tx.doc(OrchestrationDoc)).jobs[job.id]!.nextAt = Date.now() - 1;
+  }, context);
+  await orchestration.tick();
+  await until(async () => (await orchestration.listRunningCron()).length === 0);
+  await main.waitForIdle(context);
+  const run = (await orchestration.listRunLogs(job.id))[0]!;
+  expect(run.status).toBe("failed");
+  const receipt = await harness.snapshot(DeliveryRecord, String(run.taskId), context);
+  expect(receipt?.artifacts).toMatchObject(artifacts);
+  expect(receipt?.directDelivered).toBeUndefined();
+  const failure = (await main.context(context)).messages
+    .flatMap((message) => (message.role === "user" ? [decodeRuntimeNotice(message.content)] : []))
+    .find((notice) => notice?.kind === "cron")!;
+  expect(failure.text).toContain("provider rejected continuation");
+  expect(failure.data?.runtimeResultArtifacts).toMatchObject(artifacts);
+  await harness.close(context);
+  ({ harness, main } = await open());
+  expect((await harness.getTask(run.taskId, context))?.state.outcome).toMatchObject({
+    status: "failed",
+    result: run.output,
+    error: { message: run.output },
+  });
+  expect(
+    (await harness.snapshot(DeliveryRecord, String(run.taskId), context))?.artifacts,
+  ).toMatchObject(artifacts);
+});
 
 test("silent cron creates no report or steering while main is busy", async () => {
   const { faux, orchestration, open, registry } = await fixture();

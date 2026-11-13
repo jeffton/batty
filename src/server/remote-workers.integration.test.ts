@@ -653,7 +653,10 @@ test.each(["creator", "adder"] as const)(
         async () => (await mac.runtime.orchestration.listRunning()).length === 0,
         "original worker completes after unpair",
       );
-      const workers = await mac.runtime.orchestration.queryWorkers({ action: "list" });
+      const workers = await mac.runtime.orchestration.queryWorkers({
+        action: "list",
+        status: "all",
+      });
       expect(JSON.parse(workers.output[0]!.text).workers).toEqual([
         expect.objectContaining({ sessionId: session, status: "completed" }),
       ]);
@@ -1238,7 +1241,10 @@ test.each(["/", "/batty/"])(
         expect((await local.runtime.remotes.workspaces(remote.id))[0]!.defaultModel).toBe(
           "faux/model-b",
         );
-        const catalog = await reopened.runtime.orchestration.queryWorkers({ action: "list" });
+        const catalog = await reopened.runtime.orchestration.queryWorkers({
+          action: "list",
+          status: "all",
+        });
         expect(JSON.parse(catalog.output[0]!.text).workers).toHaveLength(1);
       } finally {
         controller.abort();
@@ -1990,7 +1996,7 @@ test("catalog skips historical worker streams and retires active streams until t
     const discovered = await remote.runtime.orchestration.nodeCommand(
       "fixture",
       "historical-list",
-      { action: "list" },
+      { action: "list", status: "all" },
     );
     const historical = JSON.parse((discovered.output as Array<{ text: string }>)[0]!.text)
       .workers as Array<{ sessionId: string; status: string }>;

@@ -65,6 +65,7 @@ export type WorkerCommand = {
   sessionId?: string;
   limit?: number;
   cursor?: string;
+  status?: "running" | "all";
   prompt?: string;
   model?: string;
   effort?: string;
@@ -228,7 +229,7 @@ export function createWorkers(
           ?.artifacts;
         const text =
           `Subagent ${settled.state.outcome.status === "completed" ? "result" : settled.state.outcome.status}. Session ID: ${task.input.workerId}\n\n${
-            settled.state.outcome.status === "completed"
+            typeof settled.state.outcome.result === "string"
               ? reportWithArtifacts(
                   reportWithAttachments(settled.state.outcome.result, artifacts?.sentFiles),
                   artifacts,
@@ -272,19 +273,23 @@ export function createWorkers(
   ) => {
     const state = await api.snapshot(OrchestrationDoc, ctx);
     if (args.action === "inspect" && !args.sessionId) throw new Error("inspect requires sessionId");
+    const cursor = args.cursor ? (JSON.parse(args.cursor) as Cursor) : undefined;
+    const history = args.status === "all";
     const page =
-      args.action === "list"
+      args.action === "list" && history
         ? await api.commit(
-            (tx) =>
-              tx.scanConversations(
-                {},
-                args.limit ?? 50,
-                args.cursor ? (JSON.parse(args.cursor) as Cursor) : undefined,
-              ),
+            (tx) => tx.scanConversations({ order: "descending" }, args.limit ?? 50, cursor),
             ctx,
           )
         : undefined;
-    const ids = page ? page.items.map((item) => String(item.id)) : [args.sessionId!];
+    const ids =
+      args.action !== "list"
+        ? [args.sessionId!]
+        : page
+          ? page.items.map((item) => String(item.id))
+          : Object.keys(state?.workers ?? {})
+              .filter((id) => cursor?.after === undefined || Number(id) < Number(cursor.after))
+              .sort((a, b) => Number(b) - Number(a));
     // Preload only archive seeds outside the transaction. Authorization,
     // workspace and output pointers are read together under the mutation line.
     const seeds = new Map<string, NonNullable<typeof state>["workers"][string]>();
@@ -305,6 +310,8 @@ export function createWorkers(
         return {
           sessionId: String(candidate.id),
           workspaceId: candidate.workspaceId,
+          parentId: String(candidate.parentId),
+          ...(candidate.active === undefined ? {} : { assignmentId: String(candidate.active) }),
           status:
             task?.state.status === "terminal"
               ? task.state.outcome.status
@@ -325,12 +332,26 @@ export function createWorkers(
         const workers = [];
         for (const id of ids) {
           const candidate = await findWorker(id);
-          if (candidate && (await visible(candidate))) workers.push(await summary(candidate));
+          if (
+            !candidate ||
+            (args.workspaceId !== undefined && candidate.workspaceId !== args.workspaceId) ||
+            !(await visible(candidate))
+          )
+            continue;
+          const item = await summary(candidate);
+          if (history || item.status === "running") workers.push(item);
+          if (!history && workers.length > (args.limit ?? 50)) break;
         }
+        const limit = args.limit ?? 50;
+        const next = history
+          ? page?.next
+          : workers.length > limit
+            ? { after: Number(workers[limit - 1]!.sessionId), order: "descending" }
+            : undefined;
         return reply(
           JSON.stringify({
-            workers,
-            ...(page?.next ? { nextCursor: JSON.stringify(page.next) } : {}),
+            workers: workers.slice(0, limit),
+            ...(next ? { nextCursor: JSON.stringify(next) } : {}),
           }),
         );
       }
@@ -344,14 +365,15 @@ export function createWorkers(
       const latest = metadata.latestReport;
       const resultAssignment =
         metadata.latestResultAssignment ??
-        (task?.state.status === "terminal" && task.state.outcome.status === "completed"
+        (task?.state.status === "terminal" &&
+        (task.state.outcome.status === "completed" || task.state.outcome.status === "failed")
           ? candidate.active
           : undefined);
       const completed =
         resultAssignment === undefined ? undefined : await tx.task(resultAssignment);
       const result =
         completed?.state.status === "terminal" &&
-        completed.state.outcome.status === "completed" &&
+        typeof completed.state.outcome.result === "string" &&
         (!latest || Number(resultAssignment) >= Number(latest.assignmentId))
           ? {
               kind: "result",
@@ -393,7 +415,7 @@ export function createWorkers(
   const workerTool = {
     name: "subagent",
     description:
-      "Run, await, queue, resume, steer or stop subagents. Remote instances: workspaces lists configured nodes, their workspaces (including isAssistant), available models with supported thinking levels, and defaultModel. Omit model to use the receiving main agent’s model. Pass nodeId to run remotely; returned remote Session IDs work with lifecycle actions without repeating nodeId. Remote workers use the receiving installation's models, tools and main-memory context, not the sender's history. Coordinator list includes remote mirrors. File artifacts are imported locally; sites and live browsers are not relayed. Send files with run, queue, resume or steer using files: [{path: 'local/path'}] or [{ref: 'file:...'}]. Selected files are immutable snapshots copied to the receiving installation; images are visible to its model. Maximum 32 files and 100 MiB total per message. Workers always run asynchronously: run, queue and resume return a Session ID immediately, without waiting for completion. Start workers with run, then use await to join their results. run creates a new session and rejects sessionId; await/queue/resume/steer/stop require sessionId. queue/resume/steer/stop use the same coordination scope as discovery; worker await joins a direct child. Main and assigned workers, including cron workers, may delegate across local workspaces and connected installations. These are coordination guardrails, not a security boundary. list discovers subagents (stable sessionId, workspace, status), scanning up to limit conversations per page (default 50, max 100); pass nextCursor back as cursor even for empty pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. Main and all assigned workers, including cron roots and descendants, can discover, inspect and explicitly manage ordinary and cron workers across all workspaces. Cron runs and their queues remain distinct; cron ancestry does not restrict coordination. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
+      "Run, await, queue, resume, steer or stop subagents. Remote instances: workspaces lists configured nodes, their workspaces (including isAssistant), available models with supported thinking levels, and defaultModel. Omit model to use the receiving main agent’s model. Pass nodeId to run remotely; returned remote Session IDs work with lifecycle actions without repeating nodeId. Remote workers use the receiving installation's models, tools and main-memory context, not the sender's history. Coordinator list includes remote mirrors. File artifacts are imported locally; sites and live browsers are not relayed. Send files with run, queue, resume or steer using files: [{path: 'local/path'}] or [{ref: 'file:...'}]. Selected files are immutable snapshots copied to the receiving installation; images are visible to its model. Maximum 32 files and 100 MiB total per message. Workers always run asynchronously: run, queue and resume return a Session ID immediately, without waiting for completion. Start workers with run, then use await to join their results. run creates a new session and rejects sessionId; await/queue/resume/steer/stop require sessionId. queue/resume/steer/stop use the same coordination scope as discovery; worker await joins a direct child. Main and assigned workers, including cron workers, may delegate across local workspaces and connected installations. These are coordination guardrails, not a security boundary. list defaults to running workers across workspaces; use status=all for history, newest sessions first. workspaceId filters list results. Results include stable sessionId, parentId, assignmentId, workspace and status. limit defaults to 50 (max 100); history scans up to limit conversations per page. Pass nextCursor back as cursor with the same filters, even for empty history pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. Main and all assigned workers, including cron roots and descendants, can discover, inspect and explicitly manage ordinary and cron workers across all workspaces. Cron runs and their queues remain distinct; cron ancestry does not restrict coordination. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
     replay: "safe" as const,
     parameters: Type.Object({
       action: Type.Union(
@@ -421,6 +443,12 @@ export function createWorkers(
       sessionId: Type.Optional(Type.String()),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
       cursor: Type.Optional(Type.String()),
+      status: Type.Optional(
+        Type.Union([Type.Literal("running"), Type.Literal("all")], {
+          description:
+            "list defaults to running workers; all includes paginated history, newest first.",
+        }),
+      ),
       files: Type.Optional(
         Type.Array(
           Type.Union([
@@ -551,7 +579,15 @@ export function createWorkers(
           !args.cursor
         ) {
           const result = JSON.parse(local.output[0]!.text) as { workers: unknown[] };
-          result.workers.push(...services.remoteWorkers.list());
+          result.workers.push(
+            ...services.remoteWorkers.list().filter((value) => {
+              const worker = value as { workspaceId: string; status: string };
+              return (
+                (args.status === "all" || worker.status === "running") &&
+                (args.workspaceId === undefined || worker.workspaceId === args.workspaceId)
+              );
+            }),
+          );
           return reply(JSON.stringify(result));
         }
         return local;
@@ -652,7 +688,7 @@ export function createWorkers(
         return {
           ...reply(
             `Subagent ${settled.state.outcome.status === "completed" ? "result" : settled.state.outcome.status}. Session ID: ${workerId}\n\n${
-              settled.state.outcome.status === "completed"
+              typeof settled.state.outcome.result === "string"
                 ? reportWithArtifacts(
                     reportWithAttachments(settled.state.outcome.result, artifacts?.sentFiles),
                     artifacts,

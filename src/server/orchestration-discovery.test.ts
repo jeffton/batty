@@ -9,8 +9,12 @@ import { fixture, until } from "./orchestration-test-fixture";
 import { orchestrationHistory } from "./orchestration-test-history";
 import { OrchestrationDoc, WorkerDoc } from "./orchestration-state";
 
+// These scope/history fixtures intentionally include terminal workers.
 const call = (args: Record<string, JsonValue>) =>
-  fauxAssistantMessage([fauxToolCall("subagent", args)], { stopReason: "toolUse" });
+  fauxAssistantMessage(
+    [fauxToolCall("subagent", args.action === "list" ? { status: "all", ...args } : args)],
+    { stopReason: "toolUse" },
+  );
 const done = () => fauxAssistantMessage([fauxText("ack")]);
 const artifacts = {
   sites: [
@@ -520,6 +524,150 @@ test("cron and ordinary workers coordinate across workspaces and runs", async ()
       .workers.map((worker: { sessionId: string }) => worker.sessionId)
       .sort(),
   ).toEqual(all.map((worker) => String(worker.id)).sort());
+});
+
+test("running discovery bypasses old conversations, filters workspace, and paginates separately from history", async () => {
+  const { faux, registry, orchestration, open } = await fixture();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let waiting = 0;
+  registry.install(
+    defineExtension({
+      name: "active-discovery-fixture",
+      tools: [
+        defineTool({
+          name: "hold-active-worker",
+          description: "Hold assignment",
+          parameters: Type.Object({}),
+          execute: async () => {
+            waiting++;
+            await gate;
+            return { output: [{ type: "text", text: "released" }] };
+          },
+        }),
+      ],
+    }),
+  );
+  const { main } = await open();
+  faux.setResponses(
+    Array.from({ length: 30 }, () => (request) => {
+      const last = request.messages.findLast((message) => message.role !== "system")!;
+      return last.role === "user" && JSON.stringify(last.content).includes("active worker")
+        ? fauxAssistantMessage([fauxToolCall("hold-active-worker", {})], { stopReason: "toolUse" })
+        : done();
+    }),
+  );
+  const list = async (args: Record<string, JsonValue> = {}) => {
+    const result = await orchestration.queryWorkers({ action: "list", ...args });
+    return JSON.parse(result.output[0]!.text) as {
+      workers: Array<{ sessionId: string; workspaceId: string; status: string }>;
+      nextCursor?: string;
+    };
+  };
+  try {
+    await orchestration.nodeCommand("discovery", "history", {
+      action: "run",
+      prompt: "historical worker",
+      workspaceId: "test",
+    });
+    await until(async () => (await orchestration.listRunning()).length === 0);
+    await main.commit(async (tx) => {
+      for (let i = 0; i < 110; i++)
+        await tx.createConversation({ ownership: { kind: "ownerless" } });
+    }, context);
+    for (const [i, workspaceId] of ["test", "other", "test"].entries())
+      await orchestration.nodeCommand("discovery", `active-${i}`, {
+        action: "run",
+        prompt: "active worker",
+        workspaceId,
+      });
+    await until(async () => waiting === 3);
+    const allActive = await list();
+    expect(allActive.workers).toHaveLength(3);
+    expect(allActive.workers.every((worker) => worker.status === "running")).toBe(true);
+    expect(allActive.nextCursor).toBeUndefined();
+    const ids = allActive.workers.map((worker) => worker.sessionId);
+    expect(ids).toEqual([...ids].sort((a, b) => Number(b) - Number(a)));
+    const filtered = await list({ workspaceId: "test" });
+    expect(filtered.workers).toHaveLength(2);
+    expect(filtered.workers.every((worker) => worker.workspaceId === "test")).toBe(true);
+    expect((await list({ workspaceId: "missing" })).workers).toEqual([]);
+    const paginated: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await list({ limit: 1, ...(cursor ? { cursor } : {}) });
+      paginated.push(...page.workers.map((worker) => worker.sessionId));
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(paginated).toEqual(ids);
+    const history: Array<{ sessionId: string; status: string }> = [];
+    let emptyHistoryPages = 0;
+    do {
+      const page = await list({ status: "all", limit: 20, ...(cursor ? { cursor } : {}) });
+      history.push(...page.workers);
+      if (!page.workers.length) emptyHistoryPages++;
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(history).toHaveLength(4);
+    expect(history.at(-1)!.status).toBe("completed");
+    expect(emptyHistoryPages).toBeGreaterThan(0);
+    const otherHistory = await list({ status: "all", workspaceId: "other", limit: 100 });
+    expect(otherHistory.workers).toEqual([
+      expect.objectContaining({ workspaceId: "other", status: "running" }),
+    ]);
+  } finally {
+    release();
+  }
+});
+
+test("coordinator discovery applies status and workspace filters to first-page remote mirrors", async () => {
+  const { faux, orchestration, open } = await fixture();
+  const { main } = await open();
+  const mirrors = [
+    { sessionId: "remote:peer:1", workspaceId: "test", status: "running" },
+    { sessionId: "remote:peer:2", workspaceId: "test", status: "completed" },
+    { sessionId: "remote:peer:3", workspaceId: "other", status: "running" },
+  ];
+  orchestration.setRemoteWorkers({
+    list: () => mirrors,
+    command: async () => {
+      throw new Error("Unexpected remote command");
+    },
+    join: async () => {
+      throw new Error("Unexpected remote join");
+    },
+    workspaces: async () => [],
+  });
+  await main.commit(async (tx) => {
+    await tx.createConversation({ ownership: { kind: "ownerless" } });
+  }, context);
+  const probe = async (args: Record<string, JsonValue>) => {
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("subagent", { action: "list", ...args })], {
+        stopReason: "toolUse",
+      }),
+      done(),
+    ]);
+    await (
+      await main.submit({ type: "input", content: "Discover remote mirrors" }, context)
+    ).wait(context);
+    const result = (await main.context(context)).messages.findLast(
+      (message) => message.role === "toolResult" && message.toolName === "subagent",
+    )!;
+    return JSON.parse((result.content[0] as { text: string }).text);
+  };
+  expect((await probe({})).workers).toEqual([mirrors[0], mirrors[2]]);
+  expect((await probe({ workspaceId: "test" })).workers).toEqual([mirrors[0]]);
+  expect((await probe({ status: "all", workspaceId: "test" })).workers).toEqual(
+    mirrors.slice(0, 2),
+  );
+  expect((await probe({ workspaceId: "missing" })).workers).toEqual([]);
+  const first = await probe({ status: "all", limit: 1 });
+  expect(first.workers).toEqual(mirrors);
+  expect(first.nextCursor).toBeDefined();
+  expect((await probe({ status: "all", limit: 1, cursor: first.nextCursor })).workers).toEqual([]);
 });
 
 test("inspect can read a worker across a concurrent workspace move", async () => {

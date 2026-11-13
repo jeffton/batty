@@ -64,6 +64,7 @@ async function catalog(remotes: RemoteWorkers) {
   do {
     const result = await remotes.runtime.orchestration.queryWorkers({
       action: "list",
+      status: "all",
       limit: 100,
       ...(cursor ? { cursor } : {}),
     });
@@ -150,8 +151,13 @@ export function createNodeRpcHandler(
     authorizeNode(remotes, connection);
     return {
       status: task.state.status === "terminal" ? task.state.outcome.status : "running",
-      ...(task.state.status === "terminal" && task.state.outcome.status === "completed"
-        ? { text: task.state.outcome.result }
+      ...(task.state.status === "terminal"
+        ? {
+            text:
+              task.state.outcome.status === "failed"
+                ? (task.state.outcome.result ?? task.state.outcome.error.message)
+                : task.state.outcome.result,
+          }
         : {}),
       artifacts: (await runtime.harness.snapshot(DeliveryRecord, assignmentId, context))?.artifacts,
     };

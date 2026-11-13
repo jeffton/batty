@@ -168,13 +168,16 @@ export function createDeliveryTask(services: OrchestrationServices) {
           if (submissionEnd(candidate) >= submissionEnd(settled)) settled = candidate;
         }
         let artifacts: AgentTurnArtifacts | undefined;
-        if (settled.status === "done" && settled.type === "input") {
+        if (settled.type === "input") {
           const child = (await services.harness.conversation(task.input.childId, ctx))!;
           const entries = [];
           let cursor;
           do {
             const page = await child.entries(
-              { minEntryId: original.entry, maxEntryId: settled.answer },
+              {
+                minEntryId: original.entry,
+                ...(settled.status === "done" ? { maxEntryId: settled.answer } : {}),
+              },
               200,
               cursor,
               ctx,
@@ -214,8 +217,11 @@ export function createDeliveryTask(services: OrchestrationServices) {
               send = !worker!.reported.includes(settled.answer);
               if (send) worker!.reported.push(settled.answer);
             }
-          } else
+          } else {
             text = `Task ${task.input.workerId} failed: ${settled.status === "unanswered" ? settled.reason : settled.status}`;
+            if (settled.status === "unanswered" && settled.detail !== undefined)
+              text += `\n${typeof settled.detail === "string" ? settled.detail : JSON.stringify(settled.detail)}`;
+          }
           return {
             status: "running",
             checkpoint: {
@@ -404,7 +410,12 @@ export function createDeliveryTask(services: OrchestrationServices) {
               },
             });
           }
-          return { status: "terminal", outcome: { status: "completed", result: text } };
+          return {
+            status: "terminal",
+            outcome: failed
+              ? { status: "failed", error: { message: text }, result: text }
+              : { status: "completed", result: text },
+          };
         }, ctx);
       },
     },

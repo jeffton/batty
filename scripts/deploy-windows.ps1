@@ -36,7 +36,13 @@ function Set-Current([string]$Target) {
 if (-not $ReleasePath) {
     Push-Location $repo
     try {
+        $deployScriptHash = (Get-FileHash $PSCommandPath -Algorithm SHA256).Hash
         Invoke-Native git @('pull', '--ff-only')
+        if ((Get-FileHash $PSCommandPath -Algorithm SHA256).Hash -ne $deployScriptHash) {
+            # PowerShell parsed this script before pulling; stage with the updated packaging logic.
+            & $PSCommandPath @PSBoundParameters
+            return
+        }
         if (-not $AllowDirty -and (git status --porcelain)) { throw 'Commit changes before deploying, or explicitly use -AllowDirty.' }
         & (Join-Path $PSScriptRoot 'setup-chrome.ps1')
         $revision = (git rev-parse --short HEAD).Trim()

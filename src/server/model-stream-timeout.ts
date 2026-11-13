@@ -1,5 +1,5 @@
 import type { Models } from "@earendil-works/pi-ai/models";
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 
 export const MODEL_STREAM_IDLE_TIMEOUT_MS = 300_000;
@@ -8,6 +8,7 @@ export const MODEL_STREAM_IDLE_TIMEOUT_MS = 300_000;
  * not total reasoning time, tool execution, or durable/offline waits. */
 export function withModelStreamTimeout(
   streamSimple: Models["streamSimple"],
+  prepareRequest?: (request: Context) => Promise<Context>,
 ): Models["streamSimple"] {
   return (model, context, options) => {
     const timeoutMs = options?.timeoutMs ?? MODEL_STREAM_IDLE_TIMEOUT_MS;
@@ -73,7 +74,9 @@ export function withModelStreamTimeout(
     options?.signal?.addEventListener("abort", onAbort, { once: true });
     progress();
     void (async () => {
-      const source = streamSimple(model, context, {
+      const prepared = prepareRequest ? await prepareRequest(context) : context;
+      if (settled) return;
+      const source = streamSimple(model, prepared, {
         ...options,
         signal: controller.signal,
         onProviderStreamEvent: (event, eventModel) => {

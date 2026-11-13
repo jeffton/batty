@@ -37,6 +37,7 @@ import { hydrateRuntimeResultArtifacts } from "./runtime-result-artifacts-histor
 import { responseArtifacts, mergeResponseArtifacts } from "./artifact-forwarding";
 import { queuedPromptDisplay } from "./queued-prompt-display";
 import { projectRuntimeNoticeRequest } from "./runtime-notices";
+import { projectProviderImages } from "./provider-images";
 import { createHistoryIndex } from "./history-index";
 import { createMemorySearch } from "./memory-search";
 import { conversationPolicy } from "./conversation-policy";
@@ -226,7 +227,9 @@ export class Runtime {
       ...(memory.extension.tools ?? []),
     ]);
     await memory.bind(harness, main, storage, await createMemorySearch(database));
-    const streamSimple = recoverNetwork(withModelStreamTimeout(models.streamSimple.bind(models)));
+    const streamSimple = recoverNetwork(
+      withModelStreamTimeout(models.streamSimple.bind(models), projectProviderImages),
+    );
     models.streamSimple = (model, request, options) => {
       const projected = projectRuntimeNoticeRequest(request);
       memory.validateRequest(projected, options);

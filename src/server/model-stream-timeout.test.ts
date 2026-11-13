@@ -116,6 +116,31 @@ test.each([false, true])(
   },
 );
 
+test.each(["abort", "timeout"])(
+  "%s during image preparation prevents late provider dispatch",
+  async (action) => {
+    vi.useFakeTimers();
+    let finish!: (request: { messages: [] }) => void;
+    const preparing = new Promise<{ messages: [] }>((resolve) => {
+      finish = resolve;
+    });
+    const provider = vi.fn();
+    const controller = new AbortController();
+    const stream = withModelStreamTimeout(provider, async () => preparing)(
+      model,
+      { messages: [] },
+      { timeoutMs: 1000, signal: controller.signal },
+    );
+    if (action === "abort") controller.abort(new Error("User stopped"));
+    else await vi.advanceTimersByTimeAsync(1000);
+    expect((await stream.result()).stopReason).toBe(action === "abort" ? "aborted" : "error");
+    finish({ messages: [] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(provider).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  },
+);
+
 test("upstream errors remain errors and release the idle timer", async () => {
   vi.useFakeTimers();
   const state = pending();

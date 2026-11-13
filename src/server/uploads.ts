@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import mime from "mime-types";
+import { prepareProviderImage } from "./provider-images";
 export interface UploadedFile {
   filename: string;
   mimetype?: string;
@@ -73,7 +74,7 @@ export async function preparePromptFiles(
     const url = uploadUrl(baseUrl, sessionId, batchId, storedName);
     if (mimeType.startsWith("image/")) {
       const data = file.data.toString("base64");
-      result.images.push({ type: "image", mimeType, data });
+      result.images.push(await prepareProviderImage({ type: "image", mimeType, data }));
       result.uploadedImages.push({ name, storedName, batchId, mimeType, size, data, url });
     }
     result.text += `<file name="${escapeXmlAttribute(name)}" mimeType="${escapeXmlAttribute(mimeType)}" size="${size}" path="${escapeXmlAttribute(filePath)}" url="${escapeXmlAttribute(url)}"></file>\n`;

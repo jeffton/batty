@@ -372,7 +372,7 @@ test("node stop aborts both active delivery and queued tail without running queu
   expect(
     text(await orchestration.nodeCommand("node-a", "stop", { action: "stop", sessionId: id })),
   ).toContain("Stopped");
-  await until(async () => (await orchestration.listRunning()).length === 0);
+  expect(await orchestration.listRunning()).toHaveLength(0);
   const history = await orchestrationHistory(harness);
   const assignments = Object.values(history.calls).filter((call) => call.workerId === id);
   expect(assignments).toHaveLength(2);
@@ -385,6 +385,69 @@ test("node stop aborts both active delivery and queued tail without running queu
   }
   expect(queuedRan).toBe(false);
   expect((await main.context(context)).messages).toHaveLength(0);
+});
+
+test("a worker can stop itself without joining its own delivery", async () => {
+  const { faux, orchestration, open, registry } = await fixture();
+  registry.install(
+    defineExtension({
+      name: "self-stop-identity",
+      tools: [
+        defineTool({
+          name: "worker_identity",
+          description: "Read this worker's session ID",
+          parameters: Type.Object({}),
+          execute: async (_, api) => ({
+            output: [{ type: "text", text: String(api.conversationId) }],
+          }),
+        }),
+      ],
+    }),
+  );
+  const { harness, main } = await open();
+  await main.configure(
+    { extensions: [registry.snapshot().extension("self-stop-identity")!, orchestration.extension] },
+    context,
+  );
+  let stopped = false;
+  faux.setResponses(
+    Array.from({ length: 20 }, () => (request) => {
+      const last = request.messages.findLast((message) => message.role !== "system")!;
+      if (last.role === "user")
+        return fauxAssistantMessage([fauxToolCall("worker_identity", {})], {
+          stopReason: "toolUse",
+        });
+      if (last.role === "toolResult" && last.toolName === "worker_identity") {
+        const id = last.content
+          .flatMap((part) => (part.type === "text" ? [part.text] : []))
+          .join("");
+        stopped = true;
+        return fauxAssistantMessage([fauxToolCall("subagent", { action: "stop", sessionId: id })], {
+          stopReason: "toolUse",
+        });
+      }
+      return fauxAssistantMessage([fauxText("must not continue")]);
+    }),
+  );
+  const id = sessionId(
+    await orchestration.nodeCommand("audit", "self-stop", {
+      action: "run",
+      prompt: "stop yourself",
+    }),
+  );
+  const assignment = (await orchestrationHistory(harness)).workers[id]!.active!;
+  await until(
+    async () => (await harness.getTask(assignment, context))!.state.status === "terminal",
+  );
+  expect(stopped).toBe(true);
+  expect((await harness.waitForTask(assignment, context)).state.outcome.status).toBe("aborted");
+  expect(
+    (await harness.snapshot(WorkerDoc, Number(id) as never, context))?.completion,
+  ).toBeUndefined();
+  const child = (await harness.conversation(Number(id) as never, context))!;
+  expect(JSON.stringify((await child.context(context)).messages)).not.toContain(
+    "must not continue",
+  );
 });
 
 test("node await stays independent of an active receiver cron", async () => {

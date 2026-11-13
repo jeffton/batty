@@ -151,8 +151,11 @@ export function createWorkers(
   async function applyStop(
     stop: NonNullable<Awaited<ReturnType<typeof captureStop>>>,
     ctx: Context,
+    waitForCompletion = true,
   ) {
     for (const target of [...stop.targets].reverse()) await services.harness.abortTask(target, ctx);
+    if (waitForCompletion)
+      for (const target of stop.targets) await services.harness.waitForTask(target, ctx);
   }
 
   async function stopWorker(workerId: string, ctx: Context) {
@@ -241,7 +244,13 @@ export function createWorkers(
           // A repeated await may already have returned the completed result.
           // Arbitrate that receipt and notification admission on the same line.
           const receipt = await tx.doc(DeliveryRecord, String(task.input.target), {});
-          if (!receipt.joinConsumed) {
+          const completion = (await tx.doc(WorkerDoc, task.input.parentId)).completion;
+          if (
+            !receipt.joinConsumed &&
+            completion &&
+            !completion.retiring &&
+            completion.waits[String(task.input.target)] === task.id
+          ) {
             const submission = await parent.submit(tx, {
               type: "input",
               content: encodeRuntimeNotice({
@@ -255,7 +264,6 @@ export function createWorkers(
               whenBusy: "steer",
               requestId: `batty-join:${task.id}`,
             });
-            const completion = (await tx.doc(WorkerDoc, task.input.parentId)).completion!;
             if (!completion.inputs.includes(submission)) completion.inputs.push(submission);
           }
           return { status: "terminal", outcome: { status: "completed", result: null } };
@@ -395,6 +403,9 @@ export function createWorkers(
         ...reply(
           JSON.stringify({
             ...status,
+            ...(task?.state.status === "terminal" && task.state.outcome.status === "faulted"
+              ? { error: task.state.outcome.error.message }
+              : {}),
             ...(result
               ? {
                   latest: {
@@ -415,7 +426,7 @@ export function createWorkers(
   const workerTool = {
     name: "subagent",
     description:
-      "Run, await, queue, resume, steer or stop subagents. Remote instances: workspaces lists configured nodes, their workspaces (including isAssistant), available models with supported thinking levels, and defaultModel. Omit model to use the receiving main agent’s model. Pass nodeId to run remotely; returned remote Session IDs work with lifecycle actions without repeating nodeId. Remote workers use the receiving installation's models, tools and main-memory context, not the sender's history. Coordinator list includes remote mirrors. File artifacts are imported locally; sites and live browsers are not relayed. Send files with run, queue, resume or steer using files: [{path: 'local/path'}] or [{ref: 'file:...'}]. Selected files are immutable snapshots copied to the receiving installation; images are visible to its model. Maximum 32 files and 100 MiB total per message. Workers always run asynchronously: run, queue and resume return a Session ID immediately, without waiting for completion. Start workers with run, then use await to join their results. run creates a new session and rejects sessionId; await/queue/resume/steer/stop require sessionId. queue/resume/steer/stop use the same coordination scope as discovery; worker await joins a direct child. Main and assigned workers, including cron workers, may delegate across local workspaces and connected installations. These are coordination guardrails, not a security boundary. list defaults to running workers across workspaces; use status=all for history, newest sessions first. workspaceId filters list results. Results include stable sessionId, parentId, assignmentId, workspace and status. limit defaults to 50 (max 100); history scans up to limit conversations per page. Pass nextCursor back as cursor with the same filters, even for empty history pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. Main and all assigned workers, including cron roots and descendants, can discover, inspect and explicitly manage ordinary and cron workers across all workspaces. Cron runs and their queues remain distinct; cron ancestry does not restrict coordination. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
+      "Run, await, queue, resume, steer or stop subagents. Remote instances: workspaces lists configured nodes, their workspaces (including isAssistant), available models with supported thinking levels, and defaultModel. Omit model to use the receiving main agent’s model. Pass nodeId to run remotely; returned remote Session IDs work with lifecycle actions without repeating nodeId. Remote workers use the receiving installation's models, tools and main-memory context, not the sender's history. Coordinator list includes remote mirrors. File artifacts are imported locally; sites and live browsers are not relayed. Send files with run, queue, resume or steer using files: [{path: 'local/path'}] or [{ref: 'file:...'}]. Selected files are immutable snapshots copied to the receiving installation; images are visible to its model. Maximum 32 files and 100 MiB total per message. Workers always run asynchronously: run, queue and resume return a Session ID immediately, without waiting for completion. Start workers with run, then use await to join their results. run creates a new session and rejects sessionId; await/queue/resume/steer/stop require sessionId. queue/resume/steer/stop use the same coordination scope as discovery; worker await joins a direct child. Main and assigned workers, including cron workers, may delegate across local workspaces and connected installations. These are coordination guardrails, not a security boundary. list defaults to running workers across workspaces; use status=all for history. Local pages come first, newest sessions first; remote pages follow grouped by node, newest sessions first within each node. workspaceId filters list results. Results include stable sessionId, parentId, assignmentId, workspace and status. limit defaults to 50 (max 100); history scans up to limit conversations per page. Pass nextCursor back as cursor with the same filters, even for empty history pages. inspect returns status and the latest explicit report or terminal result without waiting or transcript access. Main and all assigned workers, including cron roots and descendants, can discover, inspect and explicitly manage ordinary and cron workers across all workspaces. Cron runs and their queues remain distinct; cron ancestry does not restrict coordination. inspect artifacts can be forwarded with attach_artifacts. Both actions are read-only; they do not join or acknowledge results. Workers can report an explicit intermediate update to their actual parent with action=report and prompt, without ending their work; currently attached artifacts accompany the report. No sessionId is accepted for report. Commentary is not forwarded. Start a subagent, await it, then use its result. Start multiple helpers before awaiting to run them in parallel. Reuse the Session ID returned by this tool for await, queue, resume, steer or stop; never guess an ID or use a memory-entry ID.",
     replay: "safe" as const,
     parameters: Type.Object({
       action: Type.Union(
@@ -571,26 +582,59 @@ export function createWorkers(
       }
       const state = await api.snapshot(OrchestrationDoc, ctx);
       if (args.action === "list" || args.action === "inspect") {
-        const local = await queryWorkers(args, api, ctx);
-        if (
-          args.action === "list" &&
-          !api.remoteAssignment &&
-          services.remoteWorkers &&
-          !args.cursor
-        ) {
-          const result = JSON.parse(local.output[0]!.text) as { workers: unknown[] };
-          result.workers.push(
-            ...services.remoteWorkers.list().filter((value) => {
-              const worker = value as { workspaceId: string; status: string };
-              return (
-                (args.status === "all" || worker.status === "running") &&
-                (args.workspaceId === undefined || worker.workspaceId === args.workspaceId)
-              );
+        if (args.action !== "list" || api.remoteAssignment || !services.remoteWorkers)
+          return queryWorkers(args, api, ctx);
+        const cursor = args.cursor
+          ? (JSON.parse(args.cursor) as {
+              source: "local" | "remote";
+              local?: string;
+              after?: string;
+            })
+          : { source: "local" as const };
+        const limit = args.limit ?? 50;
+        const local =
+          cursor.source === "local"
+            ? (JSON.parse(
+                (await queryWorkers({ ...args, cursor: cursor.local }, api, ctx)).output[0]!.text,
+              ) as { workers: unknown[]; nextCursor?: string })
+            : { workers: [] as unknown[] };
+        if (local.nextCursor)
+          return reply(
+            JSON.stringify({
+              workers: local.workers,
+              nextCursor: JSON.stringify({ source: "local", local: local.nextCursor }),
             }),
           );
-          return reply(JSON.stringify(result));
-        }
-        return local;
+        const remoteOrder = (left: { sessionId: string }, right: { sessionId: string }) =>
+          right.sessionId.localeCompare(left.sessionId, "en", { numeric: true });
+        const remotes = (
+          services.remoteWorkers.list() as Array<{
+            sessionId: string;
+            workspaceId: string;
+            status: string;
+          }>
+        )
+          .filter(
+            (worker) =>
+              (args.status === "all" || worker.status === "running") &&
+              (args.workspaceId === undefined || worker.workspaceId === args.workspaceId) &&
+              (!cursor.after || remoteOrder(worker, { sessionId: cursor.after }) > 0),
+          )
+          .sort(remoteOrder);
+        const page = remotes.slice(0, limit - local.workers.length);
+        return reply(
+          JSON.stringify({
+            workers: [...local.workers, ...page],
+            ...(page.length < remotes.length
+              ? {
+                  nextCursor: JSON.stringify({
+                    source: "remote",
+                    ...(page.length ? { after: page.at(-1)!.sessionId } : {}),
+                  }),
+                }
+              : {}),
+          }),
+        );
       }
       const existingCall = (await api.snapshot(DeliveryRecord, String(api.taskId), ctx))?.call;
       const workerId = existingCall?.workerId ?? args.sessionId;
@@ -625,6 +669,8 @@ export function createWorkers(
           const doc = await tx.doc(OrchestrationDoc);
           const report = await tx.submissionByRequest(api.conversationId, `batty-report:${target}`);
           const metadata = await tx.doc(WorkerDoc, api.conversationId);
+          if (metadata.completion?.retiring)
+            throw new Error("Cannot await while the subagent assignment is stopping");
           const completion = (metadata.completion ??= {
             owner: doc.workers[String(api.conversationId)]!.active!,
             inputs: [...(await tx.doc(LiveDoc, api.conversationId)).run!.inputs],
@@ -713,8 +759,11 @@ export function createWorkers(
         // Capture the whole current delivery chain, not only its queued tail.
         // The memo keeps a replay from stopping later resumed work.
         const stop = await api.memo("batty.stop", (await captureStop(workerId!, ctx))!, ctx);
-        await applyStop(stop, ctx);
-        return reply(`Stopped. Session ID: ${workerId}`);
+        const stoppingSelf = worker!.id === api.conversationId;
+        // A worker cannot join its own delivery while that delivery is waiting
+        // for this tool round to exit. All targets are still marked for abort.
+        await applyStop(stop, ctx, !stoppingSelf);
+        return reply(`${stoppingSelf ? "Stopping" : "Stopped"}. Session ID: ${workerId}`);
       }
       if (!args.prompt?.trim()) throw new Error(`${args.action} requires prompt`);
       const files =
@@ -740,11 +789,18 @@ export function createWorkers(
           const requestId = `batty-steer:${api.taskId}`;
           if (await tx.submissionByRequest(worker!.id, requestId)) return;
           const completion = (await tx.doc(WorkerDoc, worker!.id)).completion;
+          if (
+            running &&
+            !completion &&
+            !(await tx.submissionByRequest(worker!.id, `batty-deliver:${worker!.active}`))
+          )
+            throw new Error("Cannot steer a preparing subagent; use queue");
           // Delivery remains nonterminal while reporting a closed assignment.
           // Check its open completion and admit steering on the same mutation line.
           if (
             !running ||
             !completion ||
+            completion.retiring ||
             (await tx.task(completion.owner))?.state.status === "terminal"
           )
             throw new Error("Cannot steer a finished subagent; use resume");

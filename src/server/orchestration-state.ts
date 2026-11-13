@@ -111,6 +111,7 @@ export const WorkerDoc = defineDoc<{
   };
   completion?: {
     owner: TaskId<string>;
+    retiring?: boolean;
     inputs: SubmissionId[];
     waits: Record<string, TaskId<null>>;
   };

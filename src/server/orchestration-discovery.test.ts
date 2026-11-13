@@ -622,7 +622,7 @@ test("running discovery bypasses old conversations, filters workspace, and pagin
   }
 });
 
-test("coordinator discovery applies status and workspace filters to first-page remote mirrors", async () => {
+test("coordinator discovery filters and paginates remote mirrors after local history", async () => {
   const { faux, orchestration, open } = await fixture();
   const { main } = await open();
   const mirrors = [
@@ -658,16 +658,25 @@ test("coordinator discovery applies status and workspace filters to first-page r
     )!;
     return JSON.parse((result.content[0] as { text: string }).text);
   };
-  expect((await probe({})).workers).toEqual([mirrors[0], mirrors[2]]);
+  expect((await probe({})).workers).toEqual([mirrors[2], mirrors[0]]);
   expect((await probe({ workspaceId: "test" })).workers).toEqual([mirrors[0]]);
-  expect((await probe({ status: "all", workspaceId: "test" })).workers).toEqual(
-    mirrors.slice(0, 2),
-  );
+  expect((await probe({ status: "all", workspaceId: "test" })).workers).toEqual([
+    mirrors[1],
+    mirrors[0],
+  ]);
   expect((await probe({ workspaceId: "missing" })).workers).toEqual([]);
   const first = await probe({ status: "all", limit: 1 });
-  expect(first.workers).toEqual(mirrors);
+  expect(first.workers).toEqual([]);
   expect(first.nextCursor).toBeDefined();
-  expect((await probe({ status: "all", limit: 1, cursor: first.nextCursor })).workers).toEqual([]);
+  const discovered = [];
+  let cursor = first.nextCursor;
+  do {
+    const page = await probe({ status: "all", limit: 1, cursor });
+    expect(page.workers.length).toBeLessThanOrEqual(1);
+    discovered.push(...page.workers);
+    cursor = page.nextCursor;
+  } while (cursor);
+  expect(discovered).toEqual([...mirrors].reverse());
 });
 
 test("inspect can read a worker across a concurrent workspace move", async () => {

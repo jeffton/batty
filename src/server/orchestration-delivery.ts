@@ -1,6 +1,6 @@
 import { encodeWorkerNotice } from "./worker-files.js";
 import { archiveWorker, removeCompletedOneShot } from "./orchestration-lifecycle.js";
-import type { JsonValue } from "@earendil-works/chord";
+import type { Context, JsonValue } from "@earendil-works/chord";
 
 import {
   AssistantEntry,
@@ -9,6 +9,11 @@ import {
   InboxDoc,
   configure,
   defineTask,
+  type PhaseHandler,
+  type TaskRuntime,
+  type ConversationId,
+  type TaskId,
+  type EntryId,
   type SubmissionId,
   type SettledSubmissionRecord,
 } from "@earendil-works/pi-durable";
@@ -70,6 +75,121 @@ type DeliveryState =
     };
 
 export function createDeliveryTask(services: OrchestrationServices) {
+  const collectArtifacts = async (
+    childId: ConversationId,
+    minEntryId: EntryId | undefined,
+    maxEntryId: EntryId | undefined,
+    ctx: Context,
+  ) => {
+    const child = (await services.harness.conversation(childId, ctx))!;
+    const entries = [];
+    let cursor;
+    do {
+      const page = await child.entries(
+        { minEntryId, ...(maxEntryId === undefined ? {} : { maxEntryId }) },
+        200,
+        cursor,
+        ctx,
+      );
+      entries.unshift(...[...page.items].reverse());
+      cursor = page.next;
+    } while (cursor);
+    return runtimeResultArtifacts(entries);
+  };
+  const retireAssignment = async (
+    childId: ConversationId,
+    owner: TaskId<string>,
+    runtime: TaskRuntime<DeliveryInput, DeliveryState, string, object>,
+    ctx: Context,
+  ) => {
+    let waits: TaskId<null>[] | undefined;
+    await runtime.commit(async (tx) => {
+      const completion = (await tx.doc(WorkerDoc, childId)).completion;
+      if (completion?.owner !== owner) return;
+      // Close admission on the same mutation line used by await and steering.
+      completion.retiring = true;
+      waits = Object.values(completion.waits);
+    }, ctx);
+    if (!waits) return;
+    // Stop only join watchers, not the child deliveries they observe.
+    for (const waiter of waits) {
+      await services.harness.abortTask(waiter, ctx);
+      await services.harness.waitForTask(waiter, ctx);
+    }
+    const withdraw = async () => {
+      let owned = false;
+      await runtime.commit(async (tx) => {
+        if ((await tx.doc(WorkerDoc, childId)).completion?.owner !== owner) return;
+        owned = true;
+        const inbox = await tx.doc(InboxDoc, childId);
+        for (const item of inbox.items)
+          tx.settleSubmission(item.id, { status: "unanswered", reason: "aborted" });
+        inbox.items = [];
+      }, ctx);
+      return owned;
+    };
+    if (!(await withdraw())) return;
+    const live = await runtime.snapshot(LiveDoc, childId, ctx);
+    if (live?.run) {
+      await services.harness.abortTask(live.run.taskId, ctx);
+      await services.harness.waitForTask(live.run.taskId, ctx);
+    }
+    await withdraw();
+    await runtime.commit(async (tx) => {
+      const metadata = await tx.doc(WorkerDoc, childId);
+      if (metadata.completion?.owner !== owner) return;
+      delete metadata.completion;
+      const doc = await tx.doc(OrchestrationDoc);
+      if (doc.joinParents) delete doc.joinParents[String(childId)];
+    }, ctx);
+  };
+  type DeliverPhase = PhaseHandler<
+    DeliveryInput,
+    Extract<DeliveryState, { phase: "deliver" }>,
+    DeliveryState,
+    string,
+    object
+  >;
+  const reportDeliveryFailure =
+    (deliver: DeliverPhase): DeliverPhase =>
+    async (task, runtime, ctx) => {
+      try {
+        await deliver(task, runtime, ctx);
+      } catch (error) {
+        ctx.abortSignal?.throwIfAborted();
+        try {
+          await retireAssignment(task.input.childId, task.id, runtime, ctx);
+          const original = await services.harness.commit(
+            (tx) => tx.submissionByRequest(task.input.childId, `batty-deliver:${task.id}`),
+            ctx,
+          );
+          const artifacts =
+            original?.entry === undefined
+              ? undefined
+              : await collectArtifacts(task.input.childId, original.entry, undefined, ctx);
+          await runtime.commit(
+            () => ({
+              status: "running",
+              checkpoint: {
+                phase: "report",
+                text: `Task ${task.input.workerId} failed during delivery: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
+                send: task.input.report,
+                failed: true,
+                ...(artifacts ? { artifacts } : {}),
+              },
+            }),
+            ctx,
+          );
+        } catch (reportError) {
+          ctx.abortSignal?.throwIfAborted();
+          throw new AggregateError(
+            [error, reportError],
+            `Delivery failed: ${String(error)}; failure reporting failed: ${String(reportError)}`,
+            { cause: error },
+          );
+        }
+      }
+    };
   const Delivery = defineTask<DeliveryInput, DeliveryState, string>({
     name: "batty.delivery",
     version: 1,
@@ -89,13 +209,23 @@ export function createDeliveryTask(services: OrchestrationServices) {
           ctx,
         );
       },
-      deliver: async (task, runtime, ctx) => {
+      deliver: reportDeliveryFailure(async (task, runtime, ctx) => {
         if (
           task.state.checkpoint.retryAt !== undefined &&
           task.state.checkpoint.retryAt > runtime.now()
         ) {
           await runtime.sleepUntil(task.state.checkpoint.retryAt, task.state.checkpoint, ctx);
           return;
+        }
+        // A delivery can fault after admitting its prompt while its generation
+        // keeps running. A later resume must retire that orphan, not inherit its
+        // completion or attribute the old generation to the new assignment.
+        const prior = (await runtime.snapshot(WorkerDoc, task.input.childId, ctx))?.completion;
+        if (prior && prior.owner !== task.id) {
+          const owner = await runtime.getTask(prior.owner, ctx);
+          if (owner?.state.status !== "terminal")
+            throw new Error(`Subagent assignment ${prior.owner} is still running`);
+          await retireAssignment(task.input.childId, prior.owner, runtime, ctx);
         }
         let submissionId: SubmissionId | undefined;
         let admitted = false;
@@ -110,11 +240,6 @@ export function createDeliveryTask(services: OrchestrationServices) {
           );
           admitted = existing !== undefined;
           const metadata = await tx.doc(WorkerDoc, task.input.childId);
-          metadata.completion ??= {
-            owner: task.id,
-            inputs: existing ? [existing.id] : [],
-            waits: {},
-          };
           if (!existing && task.input.change) {
             await configure(tx, task.input.childId, task.input.change);
             if (task.input.workspaceId) {
@@ -142,18 +267,25 @@ export function createDeliveryTask(services: OrchestrationServices) {
           }, ctx);
         }
         const child = (await runtime.conversation(task.input.childId, ctx))!;
-        submissionId = (
-          await child.submit(
-            {
-              type: "input",
-              content: await encodeWorkerNotice(deliveryNotice(task.input), task.input.files ?? []),
-              requestId: `batty-deliver:${task.id}`,
-              whenBusy: "followUp",
-            },
-            ctx,
-          )
-        ).id;
-        const original = await (await services.harness.submission(submissionId, ctx))!.wait(ctx);
+        const content = await encodeWorkerNotice(
+          deliveryNotice(task.input),
+          task.input.files ?? [],
+        );
+        await runtime.commit(async (tx) => {
+          // Open the assignment only when its original prompt is admitted. A
+          // steering request during preparation must never start a bare turn.
+          const metadata = await tx.doc(WorkerDoc, task.input.childId);
+          metadata.completion ??= { owner: task.id, inputs: [], waits: {} };
+          submissionId = await child.submit(tx, {
+            type: "input",
+            content,
+            requestId: `batty-deliver:${task.id}`,
+            whenBusy: "followUp",
+          });
+          if (!metadata.completion.inputs.includes(submissionId))
+            metadata.completion.inputs.push(submissionId);
+        }, ctx);
+        const original = await (await services.harness.submission(submissionId!, ctx))!.wait(ctx);
         let settled = original;
         // An await tool ends only the model turn, not this assignment. Join
         // receipts and every admitted continuation must settle before reporting.
@@ -168,25 +300,13 @@ export function createDeliveryTask(services: OrchestrationServices) {
           if (submissionEnd(candidate) >= submissionEnd(settled)) settled = candidate;
         }
         let artifacts: AgentTurnArtifacts | undefined;
-        if (settled.type === "input") {
-          const child = (await services.harness.conversation(task.input.childId, ctx))!;
-          const entries = [];
-          let cursor;
-          do {
-            const page = await child.entries(
-              {
-                minEntryId: original.entry,
-                ...(settled.status === "done" ? { maxEntryId: settled.answer } : {}),
-              },
-              200,
-              cursor,
-              ctx,
-            );
-            entries.unshift(...[...page.items].reverse());
-            cursor = page.next;
-          } while (cursor);
-          artifacts = runtimeResultArtifacts(entries);
-        }
+        if (settled.type === "input")
+          artifacts = await collectArtifacts(
+            task.input.childId,
+            original.entry,
+            settled.status === "done" ? settled.answer : undefined,
+            ctx,
+          );
         await runtime.commit(async (tx) => {
           const metadata = await tx.doc(WorkerDoc, task.input.childId);
           const live = await tx.doc(LiveDoc, task.input.childId);
@@ -233,7 +353,7 @@ export function createDeliveryTask(services: OrchestrationServices) {
             },
           };
         }, ctx);
-      },
+      }),
       report: async (task, runtime, ctx) => {
         const { text, send, failed, artifacts } = task.state.checkpoint;
         const state = await runtime.snapshot(OrchestrationDoc, ctx);
@@ -420,6 +540,7 @@ export function createDeliveryTask(services: OrchestrationServices) {
       },
     },
     abort: async (task, runtime, ctx) => {
+      await retireAssignment(task.input.childId, task.id, runtime, ctx);
       const record = await services.harness.commit(
         (tx) => tx.submissionByRequest(task.input.childId, `batty-deliver:${task.id}`),
         ctx,

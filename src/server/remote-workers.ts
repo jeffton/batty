@@ -41,6 +41,15 @@ export function parseRemoteSession(id: string) {
   return match ? { node: match[1]!, session: match[2]! } : undefined;
 }
 export type RemoteWorkerSummary = NodeWorkerSummary;
+
+function qualifiedWorker(node: string, worker: RemoteWorkerSummary) {
+  return {
+    ...worker,
+    sessionId: remoteSessionId(node, worker.sessionId),
+    ...(worker.parentId ? { parentId: remoteSessionId(node, worker.parentId) } : {}),
+    nodeId: node,
+  };
+}
 type Mirror = {
   node: string;
   session: string;
@@ -60,6 +69,8 @@ type Assignment = {
   grantId?: string;
 };
 type LocalIndex = { assignments: Assignment[]; origins: Record<string, string> };
+type NodeDiscovery = NodeOutputs["node.discovery"] & { nodeId: string; label: string };
+type NodeDiscoveryError = { nodeId: string; label: string; error: string };
 
 class PermanentFileImportError extends Error {}
 
@@ -398,25 +409,32 @@ export class RemoteWorkers {
     });
     if (result.isError) throw new Error(JSON.stringify(result.output));
   }
+  workspaces(node: string): Promise<NodeDiscovery[]>;
+  workspaces(node?: string): Promise<Array<NodeDiscovery | NodeDiscoveryError>>;
   async workspaces(node?: string) {
-    return Promise.all(
-      (node
-        ? [this.connection(node)]
-        : this.access.listConnections().map((item) => this.connection(item.id))
-      ).map(async (connection) => ({
-        nodeId: connection.id,
-        label: connection.label,
-        ...(await this.nodeRequest(connection, "node.discovery", {})),
-      })),
+    const discover = async (connection: RemoteConnectionCredentials) => ({
+      nodeId: connection.id,
+      label: connection.label,
+      ...(await this.nodeRequest(connection, "node.discovery", {})),
+    });
+    if (node) return [await discover(this.connection(node))];
+    const connections = this.access.listConnections().map((item) => this.connection(item.id));
+    const results = await Promise.allSettled(connections.map(discover));
+    return results.map((result, index) =>
+      result.status === "fulfilled"
+        ? result.value
+        : {
+            nodeId: connections[index]!.id,
+            label: connections[index]!.label,
+            error: String(result.reason),
+          },
     );
   }
   list() {
     return [...this.mirrors.values()]
       .filter((mirror) => this.access.getConnection(mirror.node))
       .map((mirror) => ({
-        ...mirror.summary,
-        sessionId: remoteSessionId(mirror.node, mirror.session),
-        nodeId: mirror.node,
+        ...qualifiedWorker(mirror.node, mirror.summary),
         connectionState:
           mirror.error && !mirror.syncedTerminal ? ("offline" as const) : ("online" as const),
         ...(mirror.error && !mirror.syncedTerminal ? { error: mirror.error } : {}),
@@ -540,9 +558,7 @@ export class RemoteWorkers {
             {
               type: "text" as const,
               text: JSON.stringify({
-                ...mirror.summary,
-                sessionId: remoteSessionId(node, mirror.session),
-                nodeId: node,
+                ...qualifiedWorker(node, mirror.summary),
                 connectionState: "offline",
                 error: mirror.error,
               }),
@@ -636,15 +652,18 @@ export class RemoteWorkers {
     if (args.action === "list" || args.action === "inspect") {
       const decoded = JSON.parse(text) as {
         sessionId?: string;
+        parentId?: string;
+        nodeId?: string;
         workers?: RemoteWorkerSummary[];
         latest?: { text: string };
       };
-      if (decoded.sessionId) decoded.sessionId = remoteSessionId(node, decoded.sessionId);
+      if (decoded.sessionId) {
+        decoded.sessionId = remoteSessionId(node, decoded.sessionId);
+        decoded.nodeId = node;
+      }
+      if (decoded.parentId) decoded.parentId = remoteSessionId(node, decoded.parentId);
       if (decoded.workers)
-        decoded.workers = decoded.workers.map((worker) => ({
-          ...worker,
-          sessionId: remoteSessionId(node, worker.sessionId),
-        }));
+        decoded.workers = decoded.workers.map((worker) => qualifiedWorker(node, worker));
       if (decoded.latest)
         decoded.latest.text = reportWithArtifacts(
           decoded.latest.text.split(

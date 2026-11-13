@@ -127,20 +127,30 @@ test("unit exit kills descendants before returning, even after arbitrary Node ex
   expect(() => process.kill(pid, 0)).toThrow();
 });
 
-test("worker IPC rejects injected transport fields, duplicate ids, extra terminals and oversized unterminated output", async () => {
-  for (const source of [
+test.each([
+  [
+    "injected transport fields",
     `process.stdout.write(JSON.stringify({type:'request',id:1,args:{connection:'api',url:'https://evil.example/'}})+'\\n'); setInterval(()=>{},1000);`,
+  ],
+  [
+    "duplicate ids",
     `const message=JSON.stringify({type:'request',id:1,args:{connection:'api'}})+'\\n';process.stdout.write(message+message);setInterval(()=>{},1000);`,
+  ],
+  [
+    "extra terminals",
     `process.stdout.write(JSON.stringify({type:'done',value:1})+'\\n'+JSON.stringify({type:'done',value:2})+'\\n');setInterval(()=>{},1000);`,
+  ],
+  [
+    "oversized unterminated output",
     `process.stdout.write('x'.repeat(5*1024*1024));setInterval(()=>{},1000);`,
-  ]) {
-    const root = await runtime(source);
-    const request = vi.fn(noRequest);
-    await expect(runSiteUnit(root, null, request, AbortSignal.timeout(15000))).rejects.toThrow(
-      /protocol|output limit/,
-    );
-    expect(request.mock.calls.length).toBeLessThanOrEqual(1);
-  }
+  ],
+])("worker IPC rejects %s", async (_name, source) => {
+  const root = await runtime(source);
+  const request = vi.fn(noRequest);
+  await expect(runSiteUnit(root, null, request, AbortSignal.timeout(15000))).rejects.toThrow(
+    /protocol|output limit/,
+  );
+  expect(request.mock.calls.length).toBeLessThanOrEqual(1);
 });
 
 test("immediate cancellation waits for transient unit registration and leaves no running unit", async () => {

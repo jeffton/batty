@@ -15,6 +15,7 @@ export type NodeCommandInput = {
 
 export type NodeWorkerSummary = {
   sessionId: string;
+  parentId?: string;
   workspaceId: string;
   status: string;
   startedAtMs?: number;

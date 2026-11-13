@@ -154,9 +154,11 @@ export function createNodeRpcHandler(
       ...(task.state.status === "terminal"
         ? {
             text:
-              task.state.outcome.status === "failed"
-                ? (task.state.outcome.result ?? task.state.outcome.error.message)
-                : task.state.outcome.result,
+              task.state.outcome.status === "faulted"
+                ? task.state.outcome.error.message
+                : task.state.outcome.status === "failed"
+                  ? (task.state.outcome.result ?? task.state.outcome.error.message)
+                  : task.state.outcome.result,
           }
         : {}),
       artifacts: (await runtime.harness.snapshot(DeliveryRecord, assignmentId, context))?.artifacts,

@@ -270,6 +270,7 @@ export function useBrowserTransport(
     state,
     availablePages,
     ready,
+    frameReady,
     error,
     connection,
     reconnecting,

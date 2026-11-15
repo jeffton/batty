@@ -52,6 +52,7 @@ const {
   state,
   availablePages,
   ready,
+  frameReady,
   error,
   reconnecting,
   ended,
@@ -64,7 +65,7 @@ const {
   onOnline,
   onOffline,
 } = browser;
-const { image, displayedFrame, hasFrame } = browser.frames;
+const { image, displayedFrame } = browser.frames;
 const {
   editor,
   text,
@@ -277,7 +278,7 @@ onBeforeUnmount(() => {
       </div>
       <div ref="viewport" class="cloud-browser__viewport">
         <canvas
-          v-show="hasFrame"
+          v-show="frameReady"
           ref="image"
           class="cloud-browser__image"
           :style="
@@ -297,14 +298,14 @@ onBeforeUnmount(() => {
           @contextmenu.prevent
         />
         <div
-          v-if="reconnecting || (!hasFrame && !ended && !error)"
+          v-if="reconnecting || (!frameReady && !ended && !error)"
           class="cloud-browser__connection"
           role="status"
           :aria-label="reconnecting ? 'Reconnecting browser' : 'Connecting browser'"
         >
           <span class="cloud-browser__spinner" aria-hidden="true" />
         </div>
-        <p v-if="!hasFrame && ended">Session unavailable</p>
+        <p v-if="!frameReady && ended">Session unavailable</p>
       </div>
       <BrowserCredentials
         v-if="credentialsVisible && state?.login"

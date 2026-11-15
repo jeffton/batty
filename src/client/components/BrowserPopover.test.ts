@@ -435,6 +435,38 @@ test("a timed-out scroll fence disconnects before a second control can bypass pe
   }
 });
 
+test("tab and navigation state never displays pixels from the previous view", async () => {
+  const wrapper = create();
+  try {
+    const events = await open(wrapper);
+    await frame(wrapper, events);
+    expect(wrapper.get("canvas").isVisible()).toBe(true);
+    for (const next of [
+      { ...state, pageId: "page-2", revision: "other-tab", url: "https://other.example" },
+      { ...state, pageId: "page-2", revision: "navigated", url: "https://other.example/next" },
+    ]) {
+      events.send("state", next);
+      await flushPromises();
+      expect((wrapper.get('input[placeholder="Address"]').element as HTMLInputElement).value).toBe(
+        next.url,
+      );
+      expect((wrapper.get("canvas").element as HTMLCanvasElement).style.display).toBe("none");
+      expect(wrapper.find('[role="status"]').exists()).toBe(true);
+      events.send("frame", {
+        pageId: next.pageId,
+        revision: next.revision,
+        width: 1280,
+        height: 800,
+      });
+      await flushPromises();
+      expect(wrapper.get("canvas").isVisible()).toBe(true);
+      expect(wrapper.get("canvas").attributes("data-revision")).toBe(next.revision);
+    }
+  } finally {
+    wrapper.unmount();
+  }
+});
+
 test("a new view discards the old decoder and ACKs its frames without painting stale pixels", async () => {
   const wrapper = create();
   try {

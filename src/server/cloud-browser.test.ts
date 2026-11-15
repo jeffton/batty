@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { expect, test, vi } from "vite-plus/test";
 import fs from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { removeTestBrowserRoot } from "./test-browser-cleanup";
 import os from "node:os";
 import path from "node:path";
@@ -63,6 +65,106 @@ async function fixture() {
     },
   };
 }
+
+test("native capture restores the viewer tab after an agent opens a different foreground tab", async () => {
+  const f = await fixture();
+  try {
+    const opened = await f.service.execute("shared", { action: "open", url: f.url, cloud: true });
+    const id = opened.details.sites![0]!.browserId;
+    const viewer = await f.service.cloudState(id);
+    await f.service.cloudVideoGeometry(id, viewer);
+    const { page: viewerPage } = await f.service.cloudTarget(id);
+    await viewerPage.evaluate(() => {
+      document.body.style.background = "rgb(255, 0, 0)";
+    });
+    const pixel = async () => {
+      const geometry = await f.service.cloudVideoGeometry(id, await f.service.cloudState(id));
+      const { stdout } = await promisify(execFile)(
+        "ffmpeg",
+        [
+          "-loglevel",
+          "error",
+          "-f",
+          "x11grab",
+          "-video_size",
+          `${geometry.width}x${geometry.height}`,
+          "-i",
+          `${geometry.display}+0,0`,
+          "-frames:v",
+          "1",
+          "-vf",
+          "crop=1:1:900:900",
+          "-f",
+          "rawvideo",
+          "-pix_fmt",
+          "rgb24",
+          "pipe:1",
+        ],
+        { env: { ...process.env, XAUTHORITY: geometry.authority }, encoding: "buffer" },
+      );
+      return [...stdout];
+    };
+    expect(await pixel()).toEqual([255, 0, 0]);
+
+    const worker = await f.service.execute(
+      "shared",
+      {
+        action: "open",
+        url: `${f.url}worker`,
+        newPage: true,
+      },
+      undefined,
+      "worker",
+    );
+    await f.service.execute(
+      "shared",
+      { action: "evaluate", script: 'document.body.style.background = "rgb(0, 0, 255)"' },
+      undefined,
+      "worker",
+    );
+    const next = await f.service.cloudState(id);
+    expect(next.pageId).toBe(viewer.pageId);
+    expect(next.url).toBe(viewer.url);
+    expect(next.pages.find((page) => page.id === worker.details.pageId)?.active).toBe(false);
+    // The native X11 encoder records the foreground window, not the Page in metadata.
+    await f.service.cloudVideoGeometry(id, next);
+    expect(await pixel()).toEqual([255, 0, 0]);
+
+    // A popup can open after the action's capture has already been configured.
+    // Its creation/closure must invalidate capture even without another tool call.
+    const workerPage = viewerPage
+      .context()
+      .pages()
+      .find((page) => page.url() === `${f.url}worker`)!;
+    const beforePopup = await f.service.cloudState(id);
+    const popupEvent = viewerPage.context().waitForEvent("page");
+    await workerPage.evaluate((url) => {
+      setTimeout(() => window.open(url), 50);
+    }, `${f.url}popup`);
+    const popup = await popupEvent;
+    await popup.waitForLoadState("domcontentloaded");
+    await popup.evaluate(() => {
+      document.body.style.background = "rgb(0, 0, 255)";
+    });
+    const afterPopup = await f.service.cloudCaptureTarget(id);
+    expect(afterPopup.state.pageId).toBe(viewer.pageId);
+    expect(afterPopup.state.revision).not.toBe(beforePopup.revision);
+    expect(await pixel()).toEqual([255, 0, 0]);
+    const agentPages = await f.service.execute("shared", { action: "pages" }, undefined, "worker");
+    expect(agentPages.text).toContain(`${popup.url()}`);
+    expect(
+      (agentPages.details.pages as Array<{ url: string; active: boolean }>).find(
+        (page) => page.active,
+      )?.url,
+    ).toBe(popup.url());
+    const beforeClose = (await f.service.cloudCaptureTarget(id)).state.revision;
+    await popup.close();
+    expect((await f.service.cloudCaptureTarget(id)).state.revision).not.toBe(beforeClose);
+    expect(await pixel()).toEqual([255, 0, 0]);
+  } finally {
+    await f.close();
+  }
+});
 
 test("oversized cloud viewports fit the display across attach, tool resize, API rotation and restore", async () => {
   const f = await fixture();

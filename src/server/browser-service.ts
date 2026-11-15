@@ -112,7 +112,6 @@ interface BrowserSession {
   cloudEnabled: boolean;
   pageEmulation: WeakMap<Page, CDPSession>;
   nativeWindowRevisions: Map<number, string>;
-  nativeCapturePage?: Page;
   pageViewports: WeakMap<Page, CloudBrowserViewport>;
   pageIdentityPromises: WeakMap<Page, Promise<void>>;
   pages: Map<string, Page>;
@@ -795,10 +794,9 @@ export class BrowserService {
         });
         session.nativeWindowRevisions.set(windowId, state.revision);
       }
-      if (session.nativeCapturePage !== page) {
-        await page.bringToFront();
-        session.nativeCapturePage = page;
-      }
+      // X11 captures the foreground window, not a CDP target. Agent tabs and
+      // popups can raise another window without changing the viewer selection.
+      await page.bringToFront();
       return { display: display.display, authority: display.authority, x: 0, y: 0, width, height };
     });
   }
@@ -1315,7 +1313,11 @@ export class BrowserService {
       navigations: new WeakMap(),
     };
     context.on("page", (page) => {
+      // Native foreground can change independently of logical client selections,
+      // including a popup created after its initiating action has completed.
+      session.cloudInteraction++;
       if (session.pages.size >= this.maxTabs) {
+        page.on("close", () => session.cloudInteraction++);
         session.rejectedPages.add(page);
         void page.close().catch(() => {});
         return;
@@ -1405,6 +1407,7 @@ export class BrowserService {
     page.on("frameattached", (frame) => this.registerFrame(session, frame));
     page.on("framedetached", (frame) => this.unregisterFrame(session, frame));
     page.on("close", () => {
+      session.cloudInteraction++;
       session.pages.delete(pageId);
       for (const [frameId, frame] of session.frames) {
         if (frame.page() === page) session.frames.delete(frameId);

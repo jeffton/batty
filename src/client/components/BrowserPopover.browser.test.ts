@@ -53,6 +53,10 @@ beforeAll(async () => {
       <a id="popup" target="_blank" href="/popup">Open popup</a>
     </body></html>`),
   );
+  backend.get<{ Params: { color: string } }>("/color/:color", (request, reply) =>
+    reply.type("text/html").send(`<!doctype html><title>${request.params.color}</title>
+      <style>html,body{margin:0;height:100%;background:${request.params.color}}</style>`),
+  );
   backend.get("/coverage", (_request, reply) =>
     reply.type("text/html").send(`<!doctype html>
     <meta name="viewport" content="width=device-width"><title>Full viewport coverage</title>
@@ -135,6 +139,95 @@ afterAll(async () => {
   if (server) await closeBrowserFixtureServer(server);
   if (root) await removeTestBrowserRoot(root);
 });
+
+test.each([390, 1100])(
+  "native pixels, address and selected tab stay aligned at %ipx",
+  async (width) => {
+    const owner = "native-alignment";
+    const context = await browser.newContext({
+      viewport: { width, height: 844 },
+      deviceScaleFactor: 1,
+    });
+    try {
+      await service.execute(owner, { action: "open", url: `${backendUrl}/color/red`, cloud: true });
+      attachedBrowserId = (await service.execute(owner, { action: "attach" })).details.sites![0]!
+        .browserId!;
+      await context.addCookies([
+        { name: "cloud-auth", value: "test", url: server.resolvedUrls!.local[0]! },
+      ]);
+      const page = await context.newPage();
+      await page.goto(url);
+      await page.getByRole("button", { name: "Open browser", exact: true }).click();
+      const canvas = page.locator("canvas");
+      const aligned = async (color: "red" | "blue") => {
+        await expect
+          .poll(
+            async () =>
+              (await canvas.getAttribute("data-revision")) ===
+              (await service.cloudState(attachedBrowserId)).revision,
+          )
+          .toBe(true);
+        const state = await service.cloudState(attachedBrowserId);
+        expect(await canvas.isVisible()).toBe(true);
+        expect(await page.getByRole("textbox", { name: "Browser address" }).inputValue()).toBe(
+          state.url,
+        );
+        await expect
+          .poll(() =>
+            canvas.evaluate((element: HTMLCanvasElement) => {
+              const pixel = element
+                .getContext("2d")!
+                .getImageData(element.width / 2, element.height / 2, 1, 1).data;
+              return pixel[0]! > 240 && pixel[2]! < 15
+                ? "red"
+                : pixel[2]! > 240 && pixel[0]! < 15
+                  ? "blue"
+                  : "other";
+            }),
+          )
+          .toBe(color);
+        await page.getByRole("button", { name: "Choose tab", exact: true }).click();
+        expect(
+          await page.locator('.cloud-browser-tabs__select[aria-current="page"]').textContent(),
+        ).toContain(color);
+        await page.getByRole("button", { name: "Choose tab", exact: true }).click();
+      };
+      await aligned("red");
+      const viewer = await service.cloudTarget(attachedBrowserId);
+      const opened = await service.execute(
+        owner,
+        { action: "open", url: `${backendUrl}/color/blue`, newPage: true },
+        undefined,
+        "worker",
+      );
+      await aligned("red");
+      const worker = viewer.page
+        .context()
+        .pages()
+        .find((candidate) => candidate.url().endsWith("/color/blue"))!;
+      const beforePopup = await service.cloudState(attachedBrowserId);
+      const popupEvent = viewer.page.context().waitForEvent("page");
+      await worker.evaluate(() => {
+        setTimeout(() => window.open("/color/blue"), 50);
+      });
+      const popup = await popupEvent;
+      await popup.waitForLoadState("domcontentloaded");
+      await expect
+        .poll(async () => (await service.cloudState(attachedBrowserId)).revision)
+        .not.toBe(beforePopup.revision);
+      await aligned("red");
+      await page.getByRole("button", { name: "Choose tab", exact: true }).click();
+      await page.locator(".cloud-browser-tabs__select").filter({ hasText: "blue" }).first().click();
+      await expect
+        .poll(async () => (await service.cloudState(attachedBrowserId)).pageId)
+        .toBe(opened.details.pageId);
+      await aligned("blue");
+    } finally {
+      await context.close();
+      await service.closeSession(owner);
+    }
+  },
+);
 
 test("autofill detects login steps without submitting or exposing values to controls", async () => {
   const context = await browser.newContext({

@@ -412,9 +412,6 @@ onBeforeUnmount(() => {
     <div v-if="settingsLoaded && !loading && !settingsError && !visibleServers.length">
       No MCP servers configured.
     </div>
-    <div class="mcp-settings__help">
-      Servers are shared by all workspaces. Tools are available through code mode.
-    </div>
     <div v-for="item in settings.errors" :key="item" class="mcp-settings__error">{{ item }}</div>
     <div v-for="item in status.errors" :key="item" class="mcp-settings__error">{{ item }}</div>
     <div v-if="error" class="mcp-settings__error" role="alert">{{ error }}</div>
@@ -698,10 +695,6 @@ onBeforeUnmount(() => {
 .mcp-settings__details span + span::before {
   content: "·";
   margin-right: 0.35rem;
-}
-.mcp-settings__help {
-  color: var(--color-text-subtle);
-  font-size: 0.78rem;
 }
 .mcp-settings__error {
   color: var(--color-error);

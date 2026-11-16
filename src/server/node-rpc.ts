@@ -6,7 +6,7 @@ import type { NodeInputs, NodeOutputs, NodeEvents } from "../shared/node-api";
 export type { NodeCommandInput } from "../shared/node-api";
 import type { RemoteConnectionCredentials } from "./remote-access";
 import type { RemoteWorkers, RemoteWorkerSummary } from "./remote-workers";
-import { context } from "./runtime";
+import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { listWorkspaces } from "./workspaces";
 import { DeliveryRecord } from "./orchestration-history";
 import { OrchestrationDoc } from "./orchestration-state";

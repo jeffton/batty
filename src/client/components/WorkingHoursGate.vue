@@ -1,0 +1,162 @@
+<script setup lang="ts">
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import {
+  isWithinWorkingHours,
+  workingHoursDateKey,
+  type WorkingHours,
+} from "@/shared/working-hours";
+
+const props = defineProps<{ schedule?: WorkingHours }>();
+const now = ref(new Date());
+const overrideDay = ref<string>();
+const heading = ref<HTMLHeadingElement>();
+const day = computed(() =>
+  props.schedule ? workingHoursDateKey(props.schedule, now.value) : undefined,
+);
+const blocked = computed(
+  () =>
+    !isWithinWorkingHours(props.schedule, now.value) &&
+    (overrideDay.value === undefined || overrideDay.value !== day.value),
+);
+let timer: ReturnType<typeof setTimeout> | undefined;
+
+function checkClock() {
+  now.value = new Date();
+  if (overrideDay.value !== day.value) overrideDay.value = undefined;
+  clearTimeout(timer);
+  // Every boundary is a local minute boundary, including midnight. Align rather
+  // than drifting from mount time; resume events cover suspended browser tabs.
+  timer = setTimeout(checkClock, 60_000 - (Date.now() % 60_000));
+}
+function override() {
+  checkClock();
+  overrideDay.value = day.value;
+}
+watch(
+  () => {
+    const schedule = props.schedule;
+    return schedule
+      ? JSON.stringify([
+          schedule.timeZone,
+          [...schedule.days].sort((a, b) => a - b),
+          schedule.start,
+          schedule.end,
+        ])
+      : undefined;
+  },
+  () => {
+    overrideDay.value = undefined;
+  },
+);
+watch(blocked, async (value) => {
+  if (value) {
+    await nextTick();
+    heading.value?.focus();
+  }
+});
+onMounted(() => {
+  checkClock();
+  document.addEventListener("visibilitychange", checkClock);
+  window.addEventListener("pageshow", checkClock);
+  window.addEventListener("focus", checkClock);
+});
+onUnmounted(() => {
+  clearTimeout(timer);
+  document.removeEventListener("visibilitychange", checkClock);
+  window.removeEventListener("pageshow", checkClock);
+  window.removeEventListener("focus", checkClock);
+});
+</script>
+
+<template>
+  <main v-if="blocked" class="working-hours-rest" aria-labelledby="working-hours-title">
+    <div class="working-hours-scene" aria-hidden="true">
+      <div class="working-hours-moon" />
+      <div class="working-hours-bat">ᵔᴥᵔ</div>
+      <span class="working-hours-zzz">z z z</span>
+    </div>
+    <h1 id="working-hours-title" ref="heading" tabindex="-1">Off the clock.</h1>
+    <p>Batty can wait.</p>
+    <button type="button" class="working-hours-override" @click="override">Open anyway</button>
+  </main>
+  <!-- Unmount the entire app, including its Teleports and global shortcuts. -->
+  <slot v-else />
+</template>
+
+<style scoped>
+.working-hours-rest {
+  min-height: 100dvh;
+  padding: max(2rem, env(safe-area-inset-top)) max(1.5rem, env(safe-area-inset-right))
+    max(2rem, env(safe-area-inset-bottom)) max(1.5rem, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--color-text);
+  background: var(--color-bg-app);
+}
+.working-hours-scene {
+  width: 10rem;
+  height: 8rem;
+  position: relative;
+  margin-bottom: 1.25rem;
+}
+.working-hours-moon {
+  position: absolute;
+  top: 0;
+  right: 1rem;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  background: #e8d9a3;
+  box-shadow: 0 0 3rem #e8d9a31c;
+}
+.working-hours-bat {
+  position: absolute;
+  bottom: 0;
+  left: 1rem;
+  width: 7rem;
+  padding: 1.2rem 0.5rem;
+  border-radius: 48% 48% 42% 42%;
+  background: #817796;
+  color: #211b30;
+  font-size: 2rem;
+  line-height: 1;
+  box-shadow:
+    -1.2rem 0.3rem 0 -0.5rem #6b627e,
+    1.2rem 0.3rem 0 -0.5rem #6b627e;
+}
+.working-hours-zzz {
+  position: absolute;
+  top: 2rem;
+  left: 0.5rem;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  letter-spacing: 0.2rem;
+  transform: rotate(-15deg);
+}
+.working-hours-rest h1 {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 600;
+  outline: none;
+}
+.working-hours-rest p {
+  margin: 0.5rem 0 2rem;
+  color: var(--color-text-muted);
+}
+.working-hours-override {
+  min-height: 44px;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid var(--color-border-soft);
+  border-radius: 999px;
+}
+.working-hours-override:focus-visible {
+  outline: 2px solid var(--color-text);
+  outline-offset: 4px;
+}
+</style>

@@ -36,6 +36,12 @@ for (const baseUrl of ["/", "/batty"]) {
         workspacesRoots: [workspaceRoot],
         assistantWorkspaceId: "assistant",
         webPushSubject: "mailto:smoke@example.invalid",
+        workingHours: {
+          timeZone: "Europe/Stockholm",
+          days: [1, 2, 3, 4, 5],
+          start: "08:00",
+          end: "16:00",
+        },
       }),
     );
     const reservation = net.createServer();
@@ -105,6 +111,15 @@ for (const baseUrl of ["/", "/batty"]) {
     ).toString("base64url");
     const signature = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
     const cookie = `batty2-auth=${payload}.${signature}`;
+    const bootstrap = await (await get("/api/bootstrap", { headers: { cookie } })).json();
+    assert.deepEqual(bootstrap.settings.workingHours, {
+      timeZone: "Europe/Stockholm",
+      days: [1, 2, 3, 4, 5],
+      start: "08:00",
+      end: "16:00",
+    });
+    // Working hours govern UI and push only; authenticated API/RPC work below
+    // remains available regardless of when this packaged-server check runs.
     await fs.writeFile(path.join(workspaceRoot, "assistant/source.ts"), "export const value = 42;");
     for (const route of removedRoutes)
       assert.equal((await get(route, { headers: { cookie } })).status, 404, route);

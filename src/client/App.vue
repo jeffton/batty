@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, watch } from "vue";
+import { onMounted, onUnmounted, ref, watch } from "vue";
+import WorkingHoursGate from "@/client/components/WorkingHoursGate.vue";
 import { useRouter } from "vue-router";
 import { useAppStore } from "@/client/stores/app";
 const store = useAppStore();
 const router = useRouter();
+// A cached bootstrap can render before the network config arrives. Keep the
+// entire routed UI unmounted until that first config request has settled.
+const configurationReady = ref(false);
 const online = () => {
   void store.checkForUpdates();
   void store.recoverConnection();
@@ -19,7 +23,9 @@ onMounted(() => {
   window.addEventListener("pagehide", store.pauseReadingCache);
   window.addEventListener("pageshow", online);
   document.addEventListener("visibilitychange", visible);
-  void store.bootstrap();
+  void store.bootstrap().finally(() => {
+    configurationReady.value = true;
+  });
 });
 onUnmounted(() => {
   window.removeEventListener("online", online);
@@ -40,7 +46,7 @@ watch(
 </script>
 <template>
   <div class="app-shell">
-    <div v-if="!store.bootstrapped" class="center-panel">
+    <div v-if="!store.bootstrapped || !configurationReady" class="center-panel">
       <template v-if="store.bootstrapFailed">
         <p role="alert">{{ store.lastError }}</p>
         <button type="button" @click="store.bootstrap()">Retry</button>
@@ -50,6 +56,8 @@ watch(
         <p>Booting Batty…</p></template
       >
     </div>
-    <RouterView v-else />
+    <WorkingHoursGate v-else :schedule="store.settings.workingHours">
+      <RouterView />
+    </WorkingHoursGate>
   </div>
 </template>

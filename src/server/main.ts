@@ -146,6 +146,7 @@ function settingsStatus() {
     defaultThinkingLevel: config.defaultThinkingLevel,
     appearance: { title: config.appTitle, color: config.appColor },
     pushTitle: config.pushTitle,
+    workingHours: config.workingHours,
   };
 }
 app.get("/healthz", async () => ({ ok: true, mainSessionId: String(runtime.main.id), buildId }));

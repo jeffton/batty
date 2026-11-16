@@ -31,6 +31,27 @@ Main chat submissions use the default model and thinking level selected in Setti
 
 `baseUrl` is a path prefix, not a hostname or public origin; `/` serves Batty at the root. The hostname and HTTPS origin come from hosting/proxy configuration and request headers.
 
+### Working hours
+
+Set optional global `workingHours` in `<data-root>/.batty/options.json`:
+
+```json
+{
+  "workingHours": {
+    "timeZone": "Europe/Stockholm",
+    "days": [1, 2, 3, 4, 5],
+    "start": "08:00",
+    "end": "16:00"
+  }
+}
+```
+
+Merge this field with the installation's other options. Restart the server after editing it, as with other startup configuration; clients receive it in bootstrap `settings.workingHours`. Omit the field to disable working hours. Invalid configuration fails visibly rather than disabling the schedule.
+
+Use an explicit IANA time zone, unique ISO weekdays (Monday `1` through Sunday `7`, at least one), and 24-hour `HH:mm` times. The start is inclusive and the end exclusive. Overnight windows belong to the start day: Friday `22:00`–`02:00` includes early Saturday. Equal start/end is invalid. Local wall-clock time follows the zone's daylight-saving changes; skipped times do not occur and repeated times are evaluated on each occurrence.
+
+Outside the window, the UI is blocked and push dispatch is suppressed for every workspace and completion channel. “Open anyway” restores UI access until reload or the next calendar day in the configured zone, whichever comes first; it does not enable push. The open UI follows schedule boundaries automatically. Suppressed pushes are discarded, not queued for reopening. API access, active agents and scheduled jobs continue. This is a focus aid, not an API authorization boundary. The schedule applies to the whole server installation, not individual users or workspaces.
+
 ### Multiple installations on one hostname
 
 Use separate data roots, listener ports and proxy routes with distinct `baseUrl` values, such as `/batty` and `/batty-safe`. Browser history caches, drafts, submission receipts, logout synchronization, update markers and service-worker caches are namespaced by the canonical base path, including `/`. Tabs within one installation share logout state; other installations remain independent. Update every installation to enable this isolation.

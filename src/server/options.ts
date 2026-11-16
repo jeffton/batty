@@ -1,3 +1,4 @@
+import { normalizeWorkingHours, type WorkingHours } from "@/shared/working-hours";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -23,6 +24,7 @@ export type DefaultThinkingLevel = (typeof DEFAULT_THINKING_LEVELS)[number];
 export const DEFAULT_BROWSER_MAX_TABS = 16;
 
 export interface StoredAppOptions {
+  workingHours?: WorkingHours;
   memoryModel?: string;
   memoryLanguage?: string;
   authSecret?: string;
@@ -46,6 +48,7 @@ export interface StoredAppOptions {
 export type AppBasePath = `/${string}`;
 
 export interface AppOptions {
+  workingHours?: WorkingHours;
   memoryModel: string;
   memoryLanguage: string;
   authSecret: string;
@@ -183,6 +186,7 @@ function normalizeStoredOptions(options: StoredAppOptions | undefined): AppOptio
         ? options.authSecret.trim()
         : createAuthSecret(),
     workspacesRoots,
+    workingHours: normalizeWorkingHours(options?.workingHours),
     pushTitle: options?.pushTitle ?? "Batty",
     webPushSubject:
       typeof options?.webPushSubject === "string" ? options.webPushSubject.trim() : "",

@@ -1,3 +1,4 @@
+import type { WorkingHours } from "@/shared/working-hours";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -11,6 +12,7 @@ import {
 } from "./options";
 
 export interface AppConfig {
+  workingHours?: WorkingHours;
   host: string;
   port: number;
   workspacesRoots: string[];
@@ -132,6 +134,7 @@ export async function loadConfig(battyDir: string): Promise<AppConfig> {
     webPushDir: path.join(stateDir, "web-push"),
     webPushSubject: options.webPushSubject,
     pushTitle: options.pushTitle,
+    workingHours: options.workingHours,
     braveSearchKey: options.braveSearchKey,
     browserTailscaleSshDestination: options.browserTailscaleSshDestination,
     browserMaxTabs: options.browserMaxTabs ?? DEFAULT_BROWSER_MAX_TABS,

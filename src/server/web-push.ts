@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { isWithinWorkingHours } from "@/shared/working-hours";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import * as webpush from "web-push";
@@ -219,6 +220,7 @@ export class WebPushService {
   }
 
   async notifyAgentCompleted(session: SessionState): Promise<void> {
+    if (!isWithinWorkingHours(this.config.workingHours, new Date())) return;
     if (suppressAgentCompletionNotification(session)) {
       console.info("Skipping web push notification for suppressed completion", {
         sessionId: session.sessionId,
@@ -246,6 +248,9 @@ export class WebPushService {
     const results = await Promise.allSettled(
       subscriptions.map(async (subscription) => {
         try {
+          // Recheck after subscription I/O and foreground probing, at actual dispatch.
+          // Suppressed notifications are discarded, not deferred until the next window.
+          if (!isWithinWorkingHours(this.config.workingHours, new Date())) return;
           // web-push uses https.request and rejects non-2xx responses without
           // following redirects. Regression tests cover this transport behavior.
           await webpush.sendNotification(

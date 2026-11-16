@@ -75,6 +75,8 @@ describe("WebPushService", () => {
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
@@ -183,6 +185,99 @@ describe("WebPushService", () => {
     await service.notifyAgentCompleted(createSession());
     expect(webPushMocks.sendNotification).toHaveBeenCalledTimes(2);
     disconnect();
+  });
+
+  it("discards outside-hours completions across channels and devices without replay", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const config = createConfig(tempDir);
+    config.workingHours = {
+      timeZone: "Europe/Stockholm",
+      days: [1, 2, 3, 4, 5],
+      start: "08:00",
+      end: "16:00",
+    };
+    const service = new WebPushService(config);
+    for (const endpoint of [
+      "https://fcm.googleapis.com/work",
+      "https://web.push.apple.com/phone",
+    ]) {
+      await service.upsertSubscription(subscription(endpoint));
+    }
+    vi.setSystemTime(new Date("2026-11-16T15:00:00Z"));
+    for (const state of [
+      { ...createSession(), workspaceId: "main" },
+      { ...createSession(), workspaceId: "other" },
+      { ...createSession(), isCronSession: true },
+    ])
+      await service.notifyAgentCompleted(state);
+    expect(webPushMocks.sendNotification).not.toHaveBeenCalled();
+    vi.setSystemTime(new Date("2026-11-17T07:00:00Z"));
+    await service.notifyAgentCompleted({ ...createSession(), sessionId: "next-window" });
+    expect(webPushMocks.sendNotification).toHaveBeenCalledTimes(2);
+    for (const call of webPushMocks.sendNotification.mock.calls) {
+      expect(JSON.parse(call[1]).data.sessionId).toBe("next-window");
+    }
+  });
+
+  it("rechecks the schedule after asynchronous foreground probing before dispatch", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-16T14:59:59Z"));
+    const config = createConfig(tempDir);
+    config.workingHours = {
+      timeZone: "Europe/Stockholm",
+      days: [1],
+      start: "08:00",
+      end: "16:00",
+    };
+    const service = new WebPushService(config);
+    await service.upsertSubscription(subscription("https://fcm.googleapis.com/deadline"));
+    vi.spyOn(service.foreground, "isVisible").mockImplementation(async () => {
+      vi.setSystemTime(new Date("2026-11-16T15:00:00Z"));
+      return false;
+    });
+    await service.notifyAgentCompleted(createSession());
+    expect(webPushMocks.sendNotification).not.toHaveBeenCalled();
+  });
+
+  it("rechecks each device when an earlier send crosses closing time", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-16T14:59:59Z"));
+    const config = createConfig(tempDir);
+    config.workingHours = {
+      timeZone: "Europe/Stockholm",
+      days: [1],
+      start: "08:00",
+      end: "16:00",
+    };
+    const service = new WebPushService(config);
+    await service.upsertSubscription(subscription("https://fcm.googleapis.com/first"));
+    await service.upsertSubscription(subscription("https://web.push.apple.com/second"));
+    webPushMocks.sendNotification.mockImplementationOnce(async () => {
+      vi.setSystemTime(new Date("2026-11-16T15:00:00Z"));
+    });
+    await service.notifyAgentCompleted(createSession());
+    expect(webPushMocks.sendNotification).toHaveBeenCalledOnce();
+    expect(webPushMocks.sendNotification.mock.calls[0]![0].endpoint).toBe(
+      "https://fcm.googleapis.com/first",
+    );
+  });
+
+  it("keeps dispatch failures visible inside working hours", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-16T10:00:00Z"));
+    const config = createConfig(tempDir);
+    config.workingHours = {
+      timeZone: "Europe/Stockholm",
+      days: [1],
+      start: "08:00",
+      end: "16:00",
+    };
+    const service = new WebPushService(config);
+    await service.upsertSubscription(subscription("https://fcm.googleapis.com/failure"));
+    webPushMocks.sendNotification.mockRejectedValueOnce(new Error("transport failure"));
+    await expect(service.notifyAgentCompleted(createSession())).rejects.toThrow(
+      "transport failure",
+    );
   });
 
   it("uses the live global push title across workspaces", async () => {

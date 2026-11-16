@@ -1,3 +1,4 @@
+import type { WorkingHours } from "./working-hours";
 import type { McpExposure, McpServerConfig } from "@earendil-works/pi-coding-agent";
 import type { AppAppearance } from "./appearance";
 
@@ -444,6 +445,7 @@ export interface ProviderAuthAttemptStatus {
 }
 
 export interface AppSettingsStatus {
+  workingHours?: WorkingHours;
   cloudBrowserAvailable?: boolean;
   memoryModel: string;
   memoryLanguage: string;

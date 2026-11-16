@@ -194,6 +194,7 @@ overrides:
 
 patchedDependencies:
   '@earendil-works/pi-durable@1.5.2': feb750b4278c663929e5ecb88c4a6908ccba784f7a65bd4018e96c8251fbef49
+  patchright-core@1.64.3: fa9f17340288e9c8c66cb9ab7843516eb096fd50e0a3638983d4c6e7abd26606
 
 importers:
 
@@ -8450,11 +8451,11 @@ snapshots:
 
   partial-json@0.1.7: {}
 
-  patchright-core@1.64.3: {}
+  patchright-core@1.64.3(patch_hash=fa9f17340288e9c8c66cb9ab7843516eb096fd50e0a3638983d4c6e7abd26606): {}
 
   patchright@1.64.3:
     dependencies:
-      patchright-core: 1.64.3
+      patchright-core: 1.64.3(patch_hash=fa9f17340288e9c8c66cb9ab7843516eb096fd50e0a3638983d4c6e7abd26606)
 
   path-browserify@1.0.1: {}
 

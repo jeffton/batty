@@ -41,3 +41,4 @@ peerDependencyRules:
     vite: "*"
 patchedDependencies:
   "@earendil-works/pi-durable@1.5.2": patches/@earendil-works__pi-durable@1.5.2.patch
+  patchright-core@1.64.3: patches/patchright-core@1.64.3.patch

@@ -1,0 +1,16 @@
+diff --git a/lib/coreBundle.js b/lib/coreBundle.js
+index 840b1d0a300292b3f2683130458c944a8209ff4c..481f7ea2a379753460740a3aebb2cfc6b85115c1 100644
+--- a/lib/coreBundle.js
++++ b/lib/coreBundle.js
+@@ -42070,6 +42070,11 @@ var init_crBrowser = __esm({
+       _onAttachedToTarget({ targetInfo, sessionId, waitingForDebugger }) {
+         if (targetInfo.type === "browser") return;
+         const session = this._session.createChildSession(sessionId);
++        if (targetInfo.type === "service_worker" && !targetInfo.browserContextId) {
++          session.detach().catch(() => {
++          });
++          return;
++        }
+         assert(targetInfo.browserContextId, "targetInfo: " + JSON.stringify(targetInfo, null, 2));
+         let context = this._contexts.get(targetInfo.browserContextId) || null;
+         if (!context) {

@@ -58,7 +58,7 @@ export const BrowserToolSchema = Type.Object(
     identity: Type.Optional(
       StringEnum(["auto", "desktop", "mobile"] as const, {
         description:
-          "Website browser identity on open/reload. Mobile sets Android Chrome UA and client hints without changing viewport, touch, cookies or login. Persists for this tab across viewer resizing and service restarts. Auto follows the viewer; omitted preserves the tab setting.",
+          "Website browser identity on open/reload. Desktop identifies as Chrome on macOS; mobile identifies as Android Chrome. Neither changes viewport, touch, cookies or login. Persists for this tab across viewer resizing and service restarts. Auto follows the viewer; omitted preserves the tab setting.",
       }),
     ),
     selector: Type.Optional(

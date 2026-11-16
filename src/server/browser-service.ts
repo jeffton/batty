@@ -157,10 +157,10 @@ function browserIdentity(version: string, mobile = false): BrowserIdentity {
     { brand: "Chromium", version: majorVersion },
   ];
   return {
-    platform: mobile ? "Linux armv8l" : "Linux x86_64",
+    platform: mobile ? "Linux armv8l" : "MacIntel",
     userAgent: mobile
       ? `Mozilla/5.0 (Linux; Android 13; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${majorVersion}.0.0.0 Mobile Safari/537.36`
-      : `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${majorVersion}.0.0.0 Safari/537.36`,
+      : `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${majorVersion}.0.0.0 Safari/537.36`,
     userAgentMetadata: {
       brands,
       fullVersionList: [
@@ -168,8 +168,9 @@ function browserIdentity(version: string, mobile = false): BrowserIdentity {
         { brand: "Google Chrome", version },
         { brand: "Chromium", version },
       ],
-      platform: mobile ? "Android" : "Linux",
-      platformVersion: mobile ? "13.0.0" : "",
+      platform: mobile ? "Android" : "macOS",
+      // Chrome freezes its macOS UA token at 10_15_7; UA-CH retains the OS version.
+      platformVersion: mobile ? "13.0.0" : "14.0.0",
       architecture: mobile ? "" : "x86",
       model: "",
       mobile,

@@ -12,13 +12,21 @@ async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "batty-browser-identity-"));
   const server = http.createServer((request, response) => {
     response.setHeader("Content-Type", "text/html");
+    response.setHeader(
+      "Accept-CH",
+      "Sec-CH-UA-Platform-Version, Sec-CH-UA-Arch, Sec-CH-UA-Bitness, Sec-CH-UA-Full-Version-List",
+    );
     response.end(`<!doctype html><meta name="viewport" content="width=device-width">
       <title>Identity</title><body><a href="/next">Next</a>
       <script>window.received=${JSON.stringify({
         ua: request.headers["user-agent"],
         mobile: request.headers["sec-ch-ua-mobile"],
         platform: request.headers["sec-ch-ua-platform"],
-      })}</script></body>`);
+        platformVersion: request.headers["sec-ch-ua-platform-version"],
+        architecture: request.headers["sec-ch-ua-arch"],
+        bitness: request.headers["sec-ch-ua-bitness"],
+        fullVersionList: request.headers["sec-ch-ua-full-version-list"],
+      })};window.sitePlatform=navigator.platform</script></body>`);
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -38,7 +46,7 @@ async function fixture() {
   };
 }
 
-const inspect = `({received:window.received,ua:navigator.userAgent,
+const inspect = `({received:window.received,sitePlatform:window.sitePlatform,ua:navigator.userAgent,platform:navigator.platform,
   mobile:navigator.userAgentData.mobile,touch:navigator.maxTouchPoints,width:innerWidth,
   timeOrigin:performance.timeOrigin,cookie:document.cookie,login:localStorage.getItem('login')})`;
 
@@ -50,6 +58,90 @@ async function state(service: BrowserService, pageId?: string) {
   });
   return JSON.parse(result.text.slice(result.text.indexOf("Evaluation result:\n") + 19));
 }
+
+test.each(["auto", "desktop"] as const)(
+  "%s desktop identity sends coherent macOS Chrome headers and JS values",
+  async (identity) => {
+    const f = await fixture();
+    try {
+      const opened = await f.service.execute("identity", {
+        action: "open",
+        url: f.url,
+        cloud: true,
+        identity,
+        viewport: { width: 900, height: 700 },
+      });
+      const id = opened.details.sites![0]!.browserId!;
+      const { page } = await f.service.cloudTarget(id);
+      const version = page.context().browser()!.version();
+      const major = version.split(".")[0];
+      expect(await state(f.service)).toMatchObject({
+        received: {
+          ua: `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`,
+          mobile: "?0",
+          platform: '"macOS"',
+        },
+        sitePlatform: "MacIntel",
+        mobile: false,
+        touch: 0,
+        width: 900,
+      });
+      expect(
+        await page.evaluate(
+          "navigator.userAgentData.getHighEntropyValues(['platformVersion', 'architecture', 'bitness', 'fullVersionList'])",
+        ),
+      ).toMatchObject({
+        platform: "macOS",
+        platformVersion: "14.0.0",
+        architecture: "x86",
+        bitness: "64",
+        mobile: false,
+        fullVersionList: expect.arrayContaining([
+          { brand: "Google Chrome", version },
+          { brand: "Chromium", version },
+        ]),
+      });
+      await f.service.execute("identity", { action: "click", selector: "text=Next" });
+      expect((await state(f.service)).received).toMatchObject({
+        platformVersion: '"14.0.0"',
+        architecture: '"x86"',
+        bitness: '"64"',
+        fullVersionList: expect.stringContaining(`v="${version}"`),
+      });
+      await f.service.cloudControl(id, {
+        action: "viewport",
+        width: 390,
+        height: 700,
+        mobile: true,
+      });
+      await f.service.execute("identity", { action: "reload" });
+      expect(await state(f.service)).toMatchObject({
+        received: {
+          platform: identity === "auto" ? '"Android"' : '"macOS"',
+          mobile: identity === "auto" ? "?1" : "?0",
+        },
+        touch: 1,
+        width: 390,
+      });
+      await f.service.cloudControl(id, {
+        action: "viewport",
+        width: 1100,
+        height: 700,
+        mobile: false,
+      });
+      await f.service.execute("identity", { action: "reload" });
+      expect(await state(f.service)).toMatchObject({
+        received: { platform: '"macOS"', mobile: "?0" },
+        sitePlatform: "MacIntel",
+        touch: 0,
+        width: 1100,
+      });
+    } finally {
+      await f.close();
+    }
+  },
+  30_000,
+);
 
 test("explicit mobile identity selects server HTML on the first request without changing layout or other tabs", async () => {
   const f = await fixture();
@@ -124,43 +216,56 @@ test("desktop and phone viewers resize a pinned identity without replacing the w
   }
 }, 30_000);
 
-test("pinned tab identity and login survive service reconnect independently of viewer mode", async () => {
-  const f = await fixture();
-  let service = f.service;
-  try {
-    const opened = await service.execute("identity", {
-      action: "open",
-      url: f.url,
-      cloud: true,
-      identity: "mobile",
-    });
-    const id = opened.details.sites![0]!.browserId!;
-    await service.cloudControl(id, { action: "viewport", width: 1100, height: 700, mobile: false });
-    await service.execute("identity", {
-      action: "evaluate",
-      script: "document.cookie='login=retained';localStorage.setItem('login','retained')",
-    });
-    const before = await state(service);
-    await service.dispose();
-    service = new BrowserService(undefined, 4, f.root);
-    const target = await service.cloudTarget(id);
-    expect(target.state.pageId).toBe(opened.details.pageId);
-    expect(target.state.mobile).toBe(false);
-    expect(await state(service, opened.details.pageId)).toMatchObject({
-      mobile: true,
-      touch: 0,
-      width: 1100,
-      timeOrigin: before.timeOrigin,
-      cookie: "login=retained",
-      login: "retained",
-    });
-    await service.cloudControl(id, { action: "navigate", url: f.url + "next" });
-    expect((await state(service, opened.details.pageId)).received.mobile).toBe("?1");
-    const pages = await service.execute("identity", { action: "pages" });
-    expect(pages.details.pages?.find((page) => page.id === opened.details.pageId)?.identity).toBe(
-      "mobile",
-    );
-  } finally {
-    await f.close(service);
-  }
-}, 30_000);
+test.each(["mobile", "desktop"] as const)(
+  "pinned %s identity and login survive service reconnect independently of viewer mode",
+  async (identity) => {
+    const f = await fixture();
+    let service = f.service;
+    try {
+      const opened = await service.execute("identity", {
+        action: "open",
+        url: f.url,
+        cloud: true,
+        identity,
+      });
+      const id = opened.details.sites![0]!.browserId!;
+      await service.cloudControl(id, {
+        action: "viewport",
+        width: 1100,
+        height: 700,
+        mobile: false,
+      });
+      await service.execute("identity", {
+        action: "evaluate",
+        script: "document.cookie='login=retained';localStorage.setItem('login','retained')",
+      });
+      const before = await state(service);
+      await service.dispose();
+      service = new BrowserService(undefined, 4, f.root);
+      const target = await service.cloudTarget(id);
+      expect(target.state.pageId).toBe(opened.details.pageId);
+      expect(target.state.mobile).toBe(false);
+      expect(await state(service, opened.details.pageId)).toMatchObject({
+        mobile: identity === "mobile",
+        sitePlatform: identity === "mobile" ? "Linux armv8l" : "MacIntel",
+        touch: 0,
+        width: 1100,
+        timeOrigin: before.timeOrigin,
+        cookie: "login=retained",
+        login: "retained",
+      });
+      await service.cloudControl(id, { action: "navigate", url: f.url + "next" });
+      expect((await state(service, opened.details.pageId)).received).toMatchObject({
+        mobile: identity === "mobile" ? "?1" : "?0",
+        platform: identity === "mobile" ? '"Android"' : '"macOS"',
+      });
+      const pages = await service.execute("identity", { action: "pages" });
+      expect(pages.details.pages?.find((page) => page.id === opened.details.pageId)?.identity).toBe(
+        identity,
+      );
+    } finally {
+      await f.close(service);
+    }
+  },
+  30_000,
+);

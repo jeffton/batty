@@ -95,6 +95,7 @@ export interface PersistentBrowserRegistry {
   cloudViewport?: CloudBrowserViewport;
   activePageId?: string;
   agentPages?: Record<string, string>;
+  pageIdentities?: Record<string, "desktop" | "mobile">;
   nextPageNumber: number;
   nextFrameNumber: number;
   pages: Record<string, string>;

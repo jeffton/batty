@@ -55,6 +55,12 @@ export const BrowserToolSchema = Type.Object(
           "Route this browser session through the configured Tailscale SSH destination. Set only on the initial open. Defaults to false.",
       }),
     ),
+    identity: Type.Optional(
+      StringEnum(["auto", "desktop", "mobile"] as const, {
+        description:
+          "Website browser identity on open/reload. Mobile sets Android Chrome UA and client hints without changing viewport, touch, cookies or login. Persists for this tab across viewer resizing and service restarts. Auto follows the viewer; omitted preserves the tab setting.",
+      }),
+    ),
     selector: Type.Optional(
       Type.String({ description: "Playwright locator selector for page element actions." }),
     ),
@@ -127,6 +133,7 @@ export const BrowserToolSchema = Type.Object(
 
 export type BrowserActionInput = Static<typeof BrowserToolSchema>;
 export type BrowserAction = BrowserActionInput["action"];
+export type BrowserIdentityMode = NonNullable<BrowserActionInput["identity"]>;
 
 const target = {
   pageId: Type.String({ minLength: 1, maxLength: 100 }),

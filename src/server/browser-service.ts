@@ -37,7 +37,7 @@ import {
 } from "@/shared/browser-geometry";
 import type { NativeCaptureGeometry } from "./native-browser-video";
 import type { BrowserProxy } from "./ssh-socks-proxy";
-import type { BrowserAction, BrowserActionInput } from "./browser-schemas";
+import type { BrowserAction, BrowserActionInput, BrowserIdentityMode } from "./browser-schemas";
 export type { BrowserAction, BrowserActionInput } from "./browser-schemas";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -56,6 +56,7 @@ interface BrowserPageDetails {
   url: string;
   title: string;
   active: boolean;
+  identity: BrowserIdentityMode;
 }
 
 interface BrowserFrameDetails {
@@ -107,7 +108,7 @@ interface BrowserSession {
   directory: string;
   context: BrowserContext;
   useTailscale: boolean;
-  identity: BrowserIdentity;
+  pageIdentities: WeakMap<Page, "desktop" | "mobile">;
   cloudViewport?: CloudBrowserViewport;
   cloudEnabled: boolean;
   pageEmulation: WeakMap<Page, CDPSession>;
@@ -276,6 +277,8 @@ export class BrowserService {
   ): Promise<BrowserActionResult> {
     signal?.throwIfAborted();
     if (this.disposed) throw new Error("Browser service is disposed");
+    if (input.identity && input.action !== "open" && input.action !== "reload")
+      throw new Error("Browser identity can only be set on open or reload.");
     if (input.action === "close") {
       await browserAbortable(
         this.withSessionLifecycle(sessionId, async () => {
@@ -1172,7 +1175,7 @@ export class BrowserService {
               await this.setViewport(session, page, command);
               // Server-selected mobile HTML needs a new request with the mobile UA.
               // Keep the existing page, cookies, storage and browser context.
-              if (modeChanged && /^https?:/.test(page.url()))
+              if (modeChanged && !session.pageIdentities.has(page) && /^https?:/.test(page.url()))
                 await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 });
               break;
             }
@@ -1281,7 +1284,6 @@ export class BrowserService {
       useTailscale === undefined ? undefined : { useTailscale, proxyServer, restoreTabs },
       signal,
     );
-    const identity = browserIdentity(browser.version());
     const context = browser.contexts()[0]!;
     const registry = await readBrowserJson<PersistentBrowserRegistry>(
       path.join(directory, "registry.json"),
@@ -1291,7 +1293,7 @@ export class BrowserService {
       directory,
       context,
       useTailscale: receipt.useTailscale,
-      identity,
+      pageIdentities: new WeakMap(),
       cloudViewport: registry?.cloudViewport,
       cloudEnabled: !!(await readBrowserJson(path.join(directory, "cloud.json"))),
       pageEmulation: new WeakMap(),
@@ -1328,7 +1330,13 @@ export class BrowserService {
       await browserAbortable(installWebAuthnPolicy(context), signal);
       for (const page of context.pages()) {
         const target = await browserAbortable(this.targetId(context, page), signal);
-        this.registerPage(session, page, false, registry?.pages[target]);
+        this.registerPage(
+          session,
+          page,
+          false,
+          registry?.pages[target],
+          registry?.pageIdentities?.[target],
+        );
         for (const frame of page.frames()) {
           const marker = await browserAbortable(
             frame.evaluate(() => (globalThis as any).__battyFrameId),
@@ -1377,6 +1385,7 @@ export class BrowserService {
     page: Page,
     activate: boolean,
     restoredId?: string,
+    restoredIdentity?: "desktop" | "mobile",
   ): string {
     const existingId = session.pageIds.get(page);
     if (existingId) {
@@ -1385,6 +1394,7 @@ export class BrowserService {
     }
 
     const pageId = restoredId ?? `page-${session.nextPageNumber++}`;
+    if (restoredIdentity) session.pageIdentities.set(page, restoredIdentity);
     const identityPromise = this.configureBrowserIdentity(session, page);
     void identityPromise.catch(() => {});
     session.pageIdentityPromises.set(page, identityPromise);
@@ -1497,7 +1507,7 @@ export class BrowserService {
         const viewport = page.viewportSize();
         if (viewport) await page.setViewportSize(fitCloudViewport(viewport));
       }
-      await connection.send("Emulation.setUserAgentOverride", session.identity);
+      await this.applyBrowserIdentity(session, page);
     }
   }
 
@@ -1519,16 +1529,22 @@ export class BrowserService {
     }
   }
 
+  private async applyBrowserIdentity(session: BrowserSession, page: Page): Promise<void> {
+    const mode = session.pageIdentities.get(page);
+    const mobile = mode ? mode === "mobile" : (session.pageViewports.get(page)?.mobile ?? false);
+    await session.pageEmulation
+      .get(page)!
+      .send("Emulation.setUserAgentOverride", browserIdentity(session.browser.version(), mobile));
+  }
+
   private async emulateViewport(
     session: BrowserSession,
     page: Page,
     viewport: CloudBrowserViewport,
   ): Promise<void> {
     const connection = session.pageEmulation.get(page)!;
-    await connection.send(
-      "Emulation.setUserAgentOverride",
-      browserIdentity(session.browser.version(), viewport.mobile),
-    );
+    session.pageViewports.set(page, { ...viewport });
+    await this.applyBrowserIdentity(session, page);
     await connection.send("Emulation.setDeviceMetricsOverride", {
       width: viewport.width,
       height: viewport.height,
@@ -1545,7 +1561,6 @@ export class BrowserService {
       enabled: viewport.mobile,
       maxTouchPoints: 1,
     });
-    session.pageViewports.set(page, { ...viewport });
   }
 
   private async configurePage(
@@ -1554,6 +1569,11 @@ export class BrowserService {
     input: BrowserActionInput,
   ): Promise<void> {
     await session.pageIdentityPromises.get(page);
+    if (input.identity) {
+      if (input.identity === "auto") session.pageIdentities.delete(page);
+      else session.pageIdentities.set(page, input.identity);
+      await this.applyBrowserIdentity(session, page);
+    }
     page.setDefaultTimeout(timeout(input));
     page.setDefaultNavigationTimeout(timeout(input));
   }
@@ -1699,6 +1719,7 @@ export class BrowserService {
         url: page.url(),
         title: await page.title(),
         active: id === selectedPageId,
+        identity: session.pageIdentities.get(page) ?? "auto",
       })),
     );
   }
@@ -1719,7 +1740,7 @@ export class BrowserService {
         : pages
             .map(
               (page) =>
-                `${page.id}${page.active ? " (active)" : ""}${page.viewerActive ? " (viewer)" : ""}\nTitle: ${page.title || "(untitled)"}\nURL: ${page.url}`,
+                `${page.id}${page.active ? " (active)" : ""}${page.viewerActive ? " (viewer)" : ""}\nTitle: ${page.title || "(untitled)"}\nURL: ${page.url}\nIdentity: ${page.identity}`,
             )
             .join("\n\n");
     return {
@@ -1841,11 +1862,14 @@ export class BrowserService {
 
   private async persistRegistry(session: BrowserSession): Promise<void> {
     const pages: Record<string, string> = {};
+    const pageIdentities: Record<string, "desktop" | "mobile"> = {};
     const frames: Record<string, string> = {};
     for (const [pageId, page] of session.pages) {
       if (page.isClosed()) continue;
       const target = await this.targetId(session.context, page);
       pages[target] = pageId;
+      const identity = session.pageIdentities.get(page);
+      if (identity) pageIdentities[target] = identity;
       for (const frame of page.frames()) {
         const id = this.registerFrame(session, frame);
         await frame.evaluate((id) => {
@@ -1858,6 +1882,7 @@ export class BrowserService {
       cloudViewport: session.cloudViewport,
       activePageId: session.activePageId,
       agentPages: Object.fromEntries(session.agentPages),
+      pageIdentities,
       nextPageNumber: session.nextPageNumber,
       nextFrameNumber: session.nextFrameNumber,
       pages,

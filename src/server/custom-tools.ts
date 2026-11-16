@@ -169,6 +169,7 @@ export function createBrowserTool({
       "Page actions return an accessibility snapshot. Use action=snapshot to inspect the page again.",
       "Use action=screenshot to capture the visible viewport, or set fullPage=true to capture the full scrollable page. The result includes a local PNG path that remains available after the browser session closes.",
       "Set viewport to control the browser width and height. Prefer setting it on open before the page loads.",
+      'For Amazon.se shopping, open a dedicated tab with identity="mobile" from the first request. This selects the working mobile website without needing the user to open a phone viewer. Identity is per-tab and survives desktop/mobile viewer resizing and service restarts; other tabs are unchanged. Set identity="auto" on open/reload to follow the viewer again. CAPTCHA, login and purchase approvals still apply; do not retry those as browser errors.',
       "Use action=evaluate with a JavaScript expression when direct page inspection or manipulation is more efficient.",
       "Large text outputs are truncated and written to a temp file; use the read tool on the reported path when you need the full snapshot.",
       "Use action=wait with a selector when a dynamic page needs time to render the next state.",

@@ -16,9 +16,7 @@ const webPushMocks = vi.hoisted(() => ({
   })),
 }));
 
-vi.mock("web-push", () => ({
-  default: webPushMocks,
-}));
+vi.mock("web-push", () => webPushMocks);
 
 function createConfig(webPushDir: string): AppConfig {
   return {

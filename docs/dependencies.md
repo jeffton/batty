@@ -1,3 +1,71 @@
+# Dependency review — 2026-11-16
+
+Checked all direct dependencies, devDependencies, catalogs, overrides and pnpm against npm at 09:00 UTC. Selection uses the 1,440-minute release age and existing exclusions. Registry evidence is recorded in `/var/tmp/batty-dependency-registry-20261116.json`.
+
+## Updates and migration
+
+| Package                            | Version                                           |
+| ---------------------------------- | ------------------------------------------------- |
+| Eight Pi/Chord packages            | 1.5.0 → 1.5.2                                     |
+| Multipart; static                  | 10.1.7 → 10.1.8; 10.1.10 → 10.1.11                |
+| Lucide; Trees                      | 1.70.0 → 1.73.0; 1.0.0-beta.6 → 1.0.0             |
+| WebAuthn server; Croner            | 14.0.3 → 14.1.0; 11.0.0 → 11.0.1                  |
+| DOMPurify; jsdom; Marked           | 3.4.17 → 3.4.18; 31.0.0 → 31.0.1; 18.1.3 → 18.2.0 |
+| TypeBox; unpdf; Vue Router         | 1.4.4 → 1.4.7; 2.1.0 → 2.2.1; 5.4.0 → 5.5.1       |
+| web-push; ws                       | 3.6.7 → 4.0.0; 8.22.1 → 8.23.0                    |
+| Vue plugin; test-utils             | 6.0.10 → 6.0.11; 2.5.1 → 2.6.0                    |
+| Vite Plus and aliased Vite catalog | 1.5.0 → 1.6.0                                     |
+| PostCSS; brace-expansion overrides | 8.5.32 → 8.5.33; 2.1.7 → 2.1.8; 5.0.12 → 5.0.13   |
+| pnpm                               | 12.18.0 → 12.21.0                                 |
+
+**Breaking Chord change:** 1.5.1 switches root exports to v2 and removes v1. Foundation type imports use `/context` and `/json`; Batty does not adopt the unrelated v2 query API. Durable fixes lost scheduler notifications and commit batching, and adds per-conversation compaction settings. Its storage schema, harness, transcript, queue and tool-event contracts remain compatible. Batty's existing projection/system-retention patch is rebased onto 1.5.2's compaction-policy call; neither fix is upstream. Provider changes improve Anthropic threads, retry/cancellation, context budgeting and strict-tool metadata. Existing real storage/restart, compaction/projection, cancellation and provider regressions cover these boundaries.
+
+**Breaking web-push change:** version 4 is native ESM with named exports only. Service, mock and transport-test imports follow that API. Real-package validation generates VAPID keys and encrypted requests without sending notifications; redirect-rejection coverage remains. Stored subscriptions and VAPID credentials are unchanged. Compatible external declarations remain necessary.
+
+**Breaking test-utils behavior:** mount props are shallow-reactive rather than artificially deeply reactive. Existing client tests pass without fixture or product changes. Trees stable preserves the vanilla API and fixes interaction behavior; its own optional React peers and theming 1.0.2 dependency replace both local workarounds. WebAuthn adds optional metadata support and stricter expected-origin/RPID validation; Batty's explicit verification configuration remains supported.
+
+Croner rejects malformed patterns rather than guessing their meaning; regressions cover this and valid day-of-month/day-of-week OR traversal. Its default DST rule is unchanged. unpdf updates bundled PDF.js to 6.5 and sequential high-level extraction; Batty's worker already processes pages sequentially. Vue Router's history, matching and scroll-restoration fixes retain Batty's standard router API. TypeBox inference/reference fixes require no schema conversion.
+
+Vite Plus crosses 1.5.1 and 1.6.0, bundling Vite 8.3.7, Rolldown 1.2.18, Vitest 5.1.0, tsdown 0.23.4, oxlint 1.93.0, tsgolint 7.0.2006 and oxfmt 0.78.0. Its native Vue formatter requires one template-format change. Existing catalog aliases, projects and pack configuration remain. pnpm 12.19–12.21 fix security, peer binding, overrides and frozen installation; the existing YAML lockfile format is retained.
+
+ws fixes Ping/Pong memory-exhaustion DoS; DOMPurify fixes template/clobbering/allow-list handling, multipart sanitizes temporary extensions, and brace-expansion bounds excessive expansion work. PostCSS parser fixes and the remaining rendering/parser/icon patches require no Batty API migration. Maintained-major overrides still prevent parent ranges selecting earlier versions; no other override removal is warranted.
+
+## Retained versions and holds
+
+Patchright **1.64.3** uses upstream Playwright **1.64.1**. Current Playwright **1.65.1** is age-eligible but selects incompatible browser revisions; retain the aligned pair. Fresh integrity-verified tarballs and provenance confirm Patchright's official build at `f14e043`; the existing manifests agree on Chromium **156.0.8078.4/r1248**, Firefox **157.0/r1555**, WebKit **27.2/r2370**. Playwright 1.65.1 selects Chromium r1255/WebKit r2388. No test-browser revision changes are needed.
+
+Chrome Stable installed and running is **157.0.8103.78** (Arch package `157.0.8103.78-1`), matching Google's package metadata. Official Stable notes document 83 security fixes. Running browser executable inodes match the installed executable; no Chrome update or detached-browser restart is required.
+
+Vue/compiler **3.5.45**, vue-tsc **3.3.14**, TypeScript **6.0.3** retained. Stable stock TS7 **7.0.2** still lacks vue-tsc's classic compiler hooks; the official integration requires the separate native bridge. The explicit TS6 hold remains. All six Workbox packages remain **7.4.1**.
+
+Other direct pins checked and retained: cookie 11.1.5, websocket 11.3.7, Source Sans 3 5.3.1, Readability 0.6.0, CSS anchor positioning 0.10.2, Pierre diffs 1.6.4, WebAuthn browser 14.0.0, Fastify 5.12.8, Highlight.js 11.12.0, mime-types 3.0.2, Pinia 4.1.0, persisted-state 4.7.1, Sharp 0.35.5, Turndown/GFM 7.2.5/1.0.2, Virtua 0.54.2; jsdom/Node/Turndown/web-push/ws types 30.0.0/26.6.6/5.0.6/3.6.4/8.18.2, Happy DOM 21.0.4, tsx 4.23.15 and PWA plugin 2.0.0. Overrides retained: fast-uri 3.1.9/4.2.3, Nano ID 3.3.20, serialize-javascript 7.1.4 and find-my-way 9.10.0. **find-my-way 9.10.1** is held until November 16, 09:24 UTC under the review cutoff.
+
+## Official sources
+
+All crossed releases, including intermediates, were reviewed:
+
+- Pi/Chord [1.5.0…1.5.2 source and changelogs](https://github.com/earendil-works/pi/compare/v1.5.0...v1.5.2).
+- [Multipart 10.1.8](https://github.com/fastify/fastify-multipart/releases/tag/v10.1.8), [static 10.1.11](https://github.com/fastify/fastify-static/releases/tag/v10.1.11), Lucide [1.71](https://github.com/lucide-icons/lucide/releases/tag/1.71.0), [1.72](https://github.com/lucide-icons/lucide/releases/tag/1.72.0), [1.73](https://github.com/lucide-icons/lucide/releases/tag/1.73.0).
+- [Trees changelog](https://github.com/pierrecomputer/pierre/blob/main/packages/trees/CHANGELOG.md), [WebAuthn 14.1](https://github.com/MasterKale/SimpleWebAuthn/releases/tag/v14.1.0), [Croner 11.0.1](https://github.com/Hexagon/croner/releases/tag/11.0.1).
+- [DOMPurify 3.4.18](https://github.com/cure53/DOMPurify/releases/tag/3.4.18), [jsdom 31.0.1](https://github.com/jsdom/jsdom/releases/tag/v31.0.1), [Marked 18.2](https://github.com/markedjs/marked/releases/tag/v18.2.0), [TypeBox 1.4 patches](https://github.com/sinclairzx81/typebox/blob/main/changelog/1.4.0.md).
+- unpdf [2.2.0](https://github.com/unjs/unpdf/releases/tag/v2.2.0), [2.2.1](https://github.com/unjs/unpdf/releases/tag/v2.2.1); router [5.5.0](https://github.com/vuejs/router/releases/tag/v5.5.0), [5.5.1](https://github.com/vuejs/router/releases/tag/v5.5.1); [web-push 4](https://github.com/web-push-libs/web-push/releases/tag/v4.0.0); ws [8.22.2](https://github.com/websockets/ws/releases/tag/8.22.2), [8.23.0](https://github.com/websockets/ws/releases/tag/8.23.0).
+- [Vue plugin changelog](https://github.com/vitejs/vite-plugin-vue/blob/plugin-vue@6.0.11/packages/plugin-vue/CHANGELOG.md), [test-utils tagged source](https://github.com/vuejs/test-utils/compare/v2.5.1...v2.6.0) and npm provenance (`9f2a994558af3d79e0139721ef1ce4f6da3465f7`).
+- Vite Plus [1.5.1](https://github.com/voidzero-dev/vite-plus/releases/tag/v1.5.1), [1.6](https://github.com/voidzero-dev/vite-plus/releases/tag/v1.6.0), including linked Vite 8.3.6/8.3.7, Rolldown 1.2.18 (includes crates-only 1.2.17), oxlint 1.92/1.93, oxfmt 0.77/0.78 and tsgolint 7.0.2006 notes.
+- pnpm [12.19](https://github.com/pnpm/pnpm/releases/tag/v12.19.0), [12.20](https://github.com/pnpm/pnpm/releases/tag/v12.20.0), [12.21](https://github.com/pnpm/pnpm/releases/tag/v12.21.0); [PostCSS 8.5.33](https://github.com/postcss/postcss/blob/8.5.33/CHANGELOG.md); brace-expansion security/source changes [2.1.8](https://github.com/juliangruber/brace-expansion/compare/v2.1.7...v2.1.8), [5.0.13](https://github.com/juliangruber/brace-expansion/compare/v5.0.12...v5.0.13).
+- [Patchright source/provenance](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/actions/runs/41527391957), Playwright [1.65](https://github.com/microsoft/playwright/releases/tag/v1.65.0), [1.65.1](https://github.com/microsoft/playwright/releases/tag/v1.65.1), [Chrome Stable/security notes](https://chromereleases.googleblog.com/2026/11/stable-channel-update-for-desktop_01744469280.html), [Vue native-bridge integration](https://github.com/vuejs/language-tools/pull/6129).
+
+## Validation
+
+Independent complete Sol review **APPROVE**; scoped Pi/patch review also approved. Source basis: `e1284486e090f52a280a932a6dbb8d343f36960c` plus the uncommitted dependency diff (tracked non-documentation diff SHA-256 `624fcda491e3cd937c1aaaf78bf974b7c70b616c8c0d13805339d17f44656c16`) and the new 1.5.2 patch.
+
+The complete parallel gate took **103.39 seconds**: `pnpm test` finished with **1,173 passed, 4 failed, 2 skipped**; both Linux deployment regression scripts passed (0.44/0.24 seconds). Production build passed, but the chained `node scripts/verify-startup.mjs` failed its health deadline under parallel load (31.57 seconds combined). `pnpm check` found only documentation formatting; formatting is corrected and the check passes with nine warnings.
+
+Failures were diagnosed by file rather than repeating the suite. BrowserPopover's two canvas-revision assertions and SessionTranscript/WorkspaceCodePopover's two fixture-load timeouts pass in focused runs; comparison against a clean frozen-install baseline also passes, and previous UI-release results document the canvas failures before these updates. No dependency-specific cause or justified source fix was established. Focused packaged startup passes for both base paths (9.7 seconds); `node scripts/verify-offline.mjs` passes desktop/mobile and expired-login checks. Frozen installation passes. Focused web-push/Croner tests pass (60 cases), client tests pass (325), and Pi migration/provider regressions pass (75). An initial broad unit run was killed with exit 137; its web-push mock failures were fixed and validated separately.
+
+The complete sequential sharded gate passes: **1,177 passed, 0 failed, 2 skipped**, covering all four test projects. Server/server-mocked ran in three shards; browser ran in four shards with two workers; client ran separately. Every invocation finished within 38 seconds. No assertions, deadlines or source behavior were changed to resolve the original failures. Independent diagnosis found fixture-load and frame-revision deadlines, with unchanged tests passing on both the updated tree and frozen-install baseline; no dependency-specific product defect was established.
+
+Production build, formatting/lint/typecheck (nine warnings), frozen installation, both Linux deployment regressions, packaged startup at `/` and `/batty`, and desktop/mobile offline plus expired-login checks pass when run separately. Fresh independent Sol review approves the complete dependency diff and 1.5.2 patch, including unchanged durable schema/data contracts. Final gate evidence: `/var/tmp/batty-deps-final/`; original failed parallel gate: `/var/tmp/batty-deps-gate/`; baseline diagnostics: `/var/tmp/batty-deps-*.log`.
+
 # Vue type checking — 2026-11-10
 
 `pnpm typecheck` runs `vue-tsc@3.3.14` with stock `typescript@6.0.3`; `pnpm check` runs formatting/lint and that checker once. It covers all 59 Vue SFCs, their templates and component props, plus the existing server/client TypeScript inputs. The generic `*.vue` shim is removed. Negative probes confirmed errors in SFC scripts, template expressions, imported component props and server TypeScript.

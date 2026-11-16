@@ -19,7 +19,7 @@ import {
   type ToolExecutionApi,
   type Harness,
 } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { withoutAbortSignal } from "@earendil-works/chord/context";
 import type { CodemodeSandbox } from "@earendil-works/pi-codemode";
 import type { AppConfig } from "./config";

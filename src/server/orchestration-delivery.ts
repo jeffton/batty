@@ -1,6 +1,7 @@
 import { encodeWorkerNotice } from "./worker-files.js";
 import { archiveWorker, removeCompletedOneShot } from "./orchestration-lifecycle.js";
-import type { Context, JsonValue } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
+import type { JsonValue } from "@earendil-works/chord/json";
 
 import {
   AssistantEntry,

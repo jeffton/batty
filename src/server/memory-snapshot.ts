@@ -1,4 +1,4 @@
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { MemorySnapshot } from "./memory-documents";
 import type { MemoryLeaf } from "./memory-projection";
 import { key, renderView, type Part } from "./memory-view";

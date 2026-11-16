@@ -1,6 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { createHash } from "node:crypto";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { Message, Models } from "@earendil-works/pi-ai";
 import { isRetryableAssistantError } from "@earendil-works/pi-ai/utils/retry";
 import type { MemoryConfig } from "./memory";

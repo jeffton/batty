@@ -6,7 +6,7 @@ import {
   type TaskId,
 } from "@earendil-works/pi-durable";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
-import type { JsonValue } from "@earendil-works/chord";
+import type { JsonValue } from "@earendil-works/chord/json";
 import type { WorkerInputFile } from "./worker-files";
 import type { WorkerCommand, WorkerCommandContext } from "./orchestration-workers";
 

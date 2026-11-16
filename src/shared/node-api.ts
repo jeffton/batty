@@ -1,4 +1,4 @@
-import type { JsonValue } from "@earendil-works/chord";
+import type { JsonValue } from "@earendil-works/chord/json";
 import type { WorkerCommand } from "../server/orchestration-workers";
 import type { WorkerFileMetadata } from "../server/worker-files";
 import type { AgentTurnArtifacts } from "../server/agent-turn-file-changes";

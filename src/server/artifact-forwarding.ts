@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { Type } from "typebox";
 import { defineTool, type Cursor, type EntryRecord } from "@earendil-works/pi-durable";
-import type { JsonValue } from "@earendil-works/chord";
+import type { JsonValue } from "@earendil-works/chord/json";
 import type { AgentTurnArtifacts } from "./agent-turn-file-changes";
 import { decodeRuntimeNotice } from "./runtime-notices";
 import { decodeSiteAttachmentDescriptor } from "./site-attachments";

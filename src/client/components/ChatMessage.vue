@@ -696,12 +696,7 @@ async function copyAssistantMarkdown(): Promise<void> {
   margin: 0.05rem 0 0.35rem;
   color: color-mix(in srgb, var(--color-text-subtle) 88%, var(--color-text));
   font-family:
-    "Source Sans 3",
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
+    "Source Sans 3", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 0.82rem;
   font-weight: 600;
   line-height: 1.1;

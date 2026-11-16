@@ -8,7 +8,7 @@ import type { SentFileDescriptor } from "../shared/types";
 import { storeSentFiles } from "./send-files";
 import { artifactRefs, artifactsFromModelMessages } from "./artifact-forwarding";
 import type { WorkerCommandContext } from "./orchestration-workers";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { UserMessage } from "@earendil-works/pi-ai";
 import { encodeRuntimeNotice, type RuntimeNotice } from "./runtime-notices";
 import {

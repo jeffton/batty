@@ -21,33 +21,23 @@ allowBuilds:
   koffi: false
   protobufjs: false
 catalog:
-  vite: npm:@voidzero-dev/vite-plus-core@1.5.0
-  vite-plus: 1.5.0
+  vite: npm:@voidzero-dev/vite-plus-core@1.6.0
+  vite-plus: 1.6.0
 overrides:
-  # Trees uses the shared color API; 1.0.2 accepts the Pierre theme 2 peer used by diffs.
-  "@pierre/trees>@pierre/theming": 1.0.2
   "@vue/compiler-sfc": 3.5.45
   "fast-uri@3": 3.1.9
   "fast-uri@4": 4.2.3
   "nanoid@3": 3.3.20
-  postcss: 8.5.32
+  postcss: 8.5.33
   serialize-javascript: 7.1.4
-  "brace-expansion@2": 2.1.7
-  "brace-expansion@5": 5.0.12
+  "brace-expansion@2": 2.1.8
+  "brace-expansion@5": 5.0.13
   "find-my-way@9": 9.10.0
   vite@*: "catalog:"
-# The vanilla Trees entry has no React dependency; only its /react wrapper does.
-packageExtensions:
-  "@pierre/trees@1.0.0-beta.6":
-    peerDependenciesMeta:
-      react:
-        optional: true
-      react-dom:
-        optional: true
 peerDependencyRules:
   allowAny:
     - vite
   allowedVersions:
     vite: "*"
 patchedDependencies:
-  "@earendil-works/pi-durable@1.5.0": patches/@earendil-works__pi-durable@1.5.0.patch
+  "@earendil-works/pi-durable@1.5.2": patches/@earendil-works__pi-durable@1.5.2.patch

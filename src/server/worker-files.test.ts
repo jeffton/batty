@@ -8,7 +8,7 @@ import { Type } from "typebox";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { defineExtension, defineTool, type ConversationId } from "@earendil-works/pi-durable";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
-import type { JsonValue } from "@earendil-works/chord";
+import type { JsonValue } from "@earendil-works/chord/json";
 import { fixture, until } from "./orchestration-test-fixture";
 import { artifactRefs } from "./artifact-forwarding";
 import { decodeRuntimeNotice } from "./runtime-notices";

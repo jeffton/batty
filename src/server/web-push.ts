@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import webpush from "web-push";
+import * as webpush from "web-push";
 import { PushForeground } from "./push-foreground";
 import {
   buildAgentCompletionNotificationContent,
@@ -135,7 +135,7 @@ function toStoredPushSubscription(
 
 function toWebPushSubscription(subscription: StoredPushSubscription): webpush.PushSubscription {
   return {
-    // Match validation's URL interpretation; web-push itself uses legacy url.parse.
+    // Use the same URL normalization as endpoint validation.
     endpoint: new URL(subscription.endpoint).href,
     expirationTime: subscription.expirationTime,
     keys: subscription.keys,

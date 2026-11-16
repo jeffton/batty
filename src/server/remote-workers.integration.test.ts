@@ -2514,7 +2514,7 @@ test.each(["forward", "reverse"] as const)(
       );
       await writeFile(source, "original sender bytes");
       await writeFile(image, png);
-      let next: Record<string, import("@earendil-works/chord").JsonValue> = {};
+      let next: Record<string, import("@earendil-works/chord/json").JsonValue> = {};
       let id: string | undefined;
       let parentSequence = 0;
       let pendingParent = "";

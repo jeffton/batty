@@ -5,7 +5,7 @@ import {
   type Cursor,
   type Harness,
 } from "@earendil-works/pi-durable";
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 
 // Refresh persisted allowlists before durable generations resume after startup.

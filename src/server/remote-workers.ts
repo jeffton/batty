@@ -8,7 +8,8 @@ import { createNodeRpcHandler, workerBody } from "./node-rpc";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import type { Context, JsonValue } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
+import type { JsonValue } from "@earendil-works/chord/json";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import type {
   SessionState,

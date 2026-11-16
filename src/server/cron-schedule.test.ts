@@ -81,6 +81,24 @@ test("a fixed-time cron runs only at the first occurrence of a repeated fall DST
   expect(nextAt(schedule, Date.parse("2026-10-25T01:00:00Z"))).toBe(followingDay);
 });
 
+test.each(["3* * * * *", "0 0 * * SUN6", "0 0 * JANFEB *"])(
+  "cron validation rejects malformed pattern %s rather than scheduling a guessed time",
+  (expression) => {
+    expect(() => normalizeSchedule({ kind: "cron", expression, timezone: "UTC" }, start)).toThrow();
+  },
+);
+
+test("cron day-of-week OR matching keeps valid runs beyond the month's last day", () => {
+  const before = Date.parse("2026-02-27T00:00:00Z");
+  const schedule = normalizeSchedule(
+    { kind: "cron", expression: "0 0 31 * SAT", timezone: "UTC" },
+    before,
+  );
+  const saturday = Date.parse("2026-02-28T00:00:00Z");
+  expect(nextAt(schedule, before)).toBe(saturday);
+  expect(advanceSchedule(schedule, saturday, saturday)).toBe(Date.parse("2026-03-07T00:00:00Z"));
+});
+
 test("an exhausted finite cron trigger roundtrips beside an active interval", () => {
   const before = Date.parse("2026-12-31T23:59:00Z");
   const after = Date.parse("2027-01-01T00:01:00Z");

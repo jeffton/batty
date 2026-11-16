@@ -6,7 +6,8 @@ import {
 } from "./worker-files.js";
 import { workerTools } from "./orchestration-worker-config.js";
 import { modelChange } from "./orchestration-worker-config.js";
-import type { Context, JsonValue } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
+import type { JsonValue } from "@earendil-works/chord/json";
 
 import { Type } from "typebox";
 import {

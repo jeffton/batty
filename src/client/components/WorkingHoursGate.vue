@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import sleepingLogo from "@/client/assets/logo-sleeping.png";
 import {
   isWithinWorkingHours,
   workingHoursDateKey,
@@ -72,12 +73,14 @@ onUnmounted(() => {
   <main v-if="blocked" class="working-hours-rest" aria-labelledby="working-hours-title">
     <div class="working-hours-scene" aria-hidden="true">
       <div class="working-hours-moon" />
-      <div class="working-hours-bat">ᵔᴥᵔ</div>
+      <img class="working-hours-logo" :src="sleepingLogo" alt="" width="512" height="512" />
       <span class="working-hours-zzz">z z z</span>
     </div>
     <h1 id="working-hours-title" ref="heading" tabindex="-1">Off the clock.</h1>
     <p>Batty can wait.</p>
-    <button type="button" class="working-hours-override" @click="override">Open anyway</button>
+    <button type="button" class="chrome-button working-hours-override" @click="override">
+      Open anyway
+    </button>
   </main>
   <!-- Unmount the entire app, including its Teleports and global shortcuts. -->
   <slot v-else />
@@ -97,40 +100,33 @@ onUnmounted(() => {
   background: var(--color-bg-app);
 }
 .working-hours-scene {
-  width: 10rem;
-  height: 8rem;
+  width: 11rem;
+  height: 10rem;
   position: relative;
   margin-bottom: 1.25rem;
 }
 .working-hours-moon {
   position: absolute;
   top: 0;
-  right: 1rem;
+  right: 0.25rem;
   width: 3rem;
   height: 3rem;
   border-radius: 50%;
   background: #e8d9a3;
   box-shadow: 0 0 3rem #e8d9a31c;
 }
-.working-hours-bat {
+.working-hours-logo {
   position: absolute;
   bottom: 0;
-  left: 1rem;
-  width: 7rem;
-  padding: 1.2rem 0.5rem;
-  border-radius: 48% 48% 42% 42%;
-  background: #817796;
-  color: #211b30;
-  font-size: 2rem;
-  line-height: 1;
-  box-shadow:
-    -1.2rem 0.3rem 0 -0.5rem #6b627e,
-    1.2rem 0.3rem 0 -0.5rem #6b627e;
+  left: 1.75rem;
+  width: 7.5rem;
+  height: 7.5rem;
+  transform: rotate(-6deg);
 }
 .working-hours-zzz {
   position: absolute;
-  top: 2rem;
-  left: 0.5rem;
+  top: 2.6rem;
+  left: 0;
   color: var(--color-text-muted);
   font-size: 0.8rem;
   letter-spacing: 0.2rem;
@@ -147,16 +143,12 @@ onUnmounted(() => {
   color: var(--color-text-muted);
 }
 .working-hours-override {
-  min-height: 44px;
-  padding: 0.5rem 1rem;
+  --chrome-button-ink: var(--color-text-muted);
+  --chrome-button-hover: var(--color-bg-panel);
+  --chrome-button-active: var(--color-bg-hover);
   font-size: 0.875rem;
-  color: var(--color-text-muted);
-  background: transparent;
-  border: 1px solid var(--color-border-soft);
-  border-radius: 999px;
 }
 .working-hours-override:focus-visible {
-  outline: 2px solid var(--color-text);
-  outline-offset: 4px;
+  outline-color: var(--color-text-muted);
 }
 </style>

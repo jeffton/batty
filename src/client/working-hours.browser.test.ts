@@ -86,7 +86,16 @@ for (const [name, viewport] of [
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       );
+      const logo = page.locator(".working-hours-logo");
+      await logo.evaluate((image: HTMLImageElement) => image.decode());
+      expect(await logo.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(512);
       await page.screenshot({ path: `/var/tmp/batty-working-hours-${name}.png` });
+      await page.emulateMedia({ colorScheme: "dark" });
+      await page.screenshot({ path: `/var/tmp/batty-working-hours-${name}-dark.png` });
+      if (name === "desktop") {
+        await page.getByRole("button", { name: "Open anyway" }).hover();
+        await page.screenshot({ path: "/var/tmp/batty-working-hours-desktop-dark-hover.png" });
+      }
       await page.getByRole("button", { name: "Open anyway" }).click();
       await page.getByRole("button", { name: "Sign in with passkey" }).waitFor();
       await page.reload();

@@ -1,6 +1,12 @@
 import { execFile, spawn, type SpawnOptions, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs/promises";
+import {
+  BROWSER_OWNER_SUPERVISOR,
+  browserOwnerOptions,
+  retainBrowserOwner,
+  spawnOwnedProcess,
+} from "./browser-owner";
 
 /** The control plane may administer the browser, but Chromium never inherits its UID or env. */
 export async function browserAdmin(command: string, args: string[]): Promise<string> {
@@ -17,11 +23,15 @@ export function spawnBrowserProcess(
   command: string,
   args: string[],
   options: SpawnOptions,
+  ephemeral = false,
 ): ChildProcess {
+  const owned =
+    process.platform === "linux" &&
+    (ephemeral || process.env.VITEST === "true" || process.env.BATTY_EPHEMERAL_BROWSER === "1");
   if (process.platform !== "linux" || process.getuid?.() === 0)
-    return spawn(command, args, options);
+    return owned ? spawnOwnedProcess(command, args, options) : spawn(command, args, options);
   // setsid gives the actual application its own process group, independently of sudo's monitor.
-  return spawn(
+  const child = spawn(
     "/usr/bin/sudo",
     [
       "-n",
@@ -31,13 +41,15 @@ export function spawnBrowserProcess(
       ...Object.entries(options.env ?? {})
         .filter((entry): entry is [string, string] => entry[1] !== undefined)
         .map(([key, value]) => `${key}=${value}`),
-      "/usr/bin/setsid",
-      "--wait",
+      ...(owned
+        ? [process.execPath, "-e", BROWSER_OWNER_SUPERVISOR]
+        : ["/usr/bin/setsid", "--wait"]),
       command,
       ...args,
     ],
-    options,
+    owned ? browserOwnerOptions(options) : options,
   );
+  return owned ? retainBrowserOwner(child) : child;
 }
 
 export async function browserSignal(pid: number, signal: NodeJS.Signals | 0): Promise<void> {

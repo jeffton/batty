@@ -4,7 +4,10 @@ import { fileURLToPath } from "node:url";
 
 // Linux profile fixtures move into /var/lib; /tmp may be a separate filesystem.
 const env = { ...process.env };
-if (process.platform === "linux") env.TMPDIR ??= "/var/tmp";
+if (process.platform === "linux") {
+  env.TMPDIR ??= "/var/tmp";
+  env.BATTY_EPHEMERAL_BROWSER = "1";
+}
 const started = performance.now();
 // Invoke the CLI's exported JS entrypoint so Windows preserves regex/path arguments.
 const child = spawn(

@@ -95,6 +95,7 @@ export async function launchHeadlessBrowser(
           env: isolatedBrowserEnvironment(isolation),
           stdio: ["ignore", log.fd, log.fd],
         },
+        true,
       );
       await new Promise<void>((resolve, reject) => {
         child!.once("spawn", resolve);

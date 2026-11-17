@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { removeBrowserIsolation } from "./browser-isolation";
+import { closePersistentBrowser } from "./browser-persistence";
 
 /** Remove only isolation profiles referenced by this stopped test fixture. */
 export async function removeTestBrowserRoot(root: string): Promise<void> {
@@ -12,6 +13,9 @@ export async function removeTestBrowserRoot(root: string): Promise<void> {
     }
   }
   await visit(root);
-  for (const directory of receipts) await removeBrowserIsolation(directory);
+  for (const directory of receipts) {
+    await closePersistentBrowser(directory);
+    await removeBrowserIsolation(directory);
+  }
   await fs.rm(root, { recursive: true, force: true });
 }

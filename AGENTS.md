@@ -2,6 +2,8 @@
 
 Pull changes before starting work. Preserve concurrent changes.
 
+For one-off Linux QA scripts that create temporary `BrowserService` profiles, run `BATTY_EPHEMERAL_BROWSER=1 node ...` (or `tsx ...`). This gives Chrome/Xvfb an owner-pipe supervisor that stops only their own process groups if the harness crashes or is killed. The test runner enables this automatically. Use `removeTestBrowserRoot()` after closing fixture services; never delete a live fixture\'s ownership receipts. Do not set this flag for production or browser-restart persistence tests spanning separate processes.
+
 During development, run tests relevant to the change (`pnpm test:unit` for non-browser groups, or pass file paths to `pnpm test`). Integrate concurrent work and address independent review findings before the final gate.
 
 Run the complete parallel gate once on the finished integrated source:

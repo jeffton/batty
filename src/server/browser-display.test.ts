@@ -29,12 +29,17 @@ function fakeDisplay() {
     exitCode: null as number | null,
     signalCode: null as string | null,
     stdout: new PassThrough(),
+    stdin: Object.assign(new PassThrough(), { unref: vi.fn() }),
     kill: vi.fn<(signal: string) => boolean>(() => {
       child.signalCode = "SIGTERM";
       queueMicrotask(() => child.emit("exit", null, "SIGTERM"));
       return true;
     }),
     unref: vi.fn(),
+  });
+  child.stdin.on("finish", () => {
+    child.signalCode = "SIGTERM";
+    queueMicrotask(() => child.emit("exit", null, "SIGTERM"));
   });
   vi.mocked(spawn).mockReturnValue(child as unknown as ReturnType<typeof spawn>);
   return child;
@@ -52,8 +57,9 @@ test("displayfd can arrive in chunks; success removes startup listeners and time
     display: ":123",
     authority: path.join(directory, "Xauthority"),
   });
-  expect(child.listenerCount("exit")).toBe(0);
-  expect(child.listenerCount("error")).toBe(0);
+  // The lifetime owner retains one exit listener to release its ownership pipe.
+  expect(child.listenerCount("exit")).toBe(1);
+  expect(child.listenerCount("error")).toBe(1);
   expect(vi.getTimerCount()).toBe(0);
 });
 
@@ -68,7 +74,8 @@ test("failed xauth after startup terminates Xvfb instead of leaking the display"
   const failed = expect(starting).rejects.toThrow("xauth failed");
   child.stdout.write("123\n");
   await failed;
-  expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+  expect(child.stdin.writableEnded).toBe(true);
+  expect(child.kill).not.toHaveBeenCalled();
 });
 
 test("Xvfb spawn errors clear the startup deadline without signalling a nonexistent process", async () => {

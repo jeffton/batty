@@ -1,8 +1,11 @@
 import type { ChildProcess } from "node:child_process";
+import { stopBrowserOwner } from "./browser-owner";
 
 /** Reap a child, escalating once; never wait indefinitely for a broken process. */
 export function stopBrowserChild(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null || !child.pid) return Promise.resolve();
+  const owned = stopBrowserOwner(child);
+  if (owned) return owned;
   return new Promise<void>((resolve, reject) => {
     const finish = (error?: Error) => {
       clearTimeout(escalate);

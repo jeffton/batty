@@ -323,7 +323,7 @@ export async function connectPersistentBrowser(
       await log.close();
     }
     child.unref();
-    let pid = process.getuid?.() === 0 || !isolation ? child.pid! : undefined;
+    let pid = !isolation ? child.pid! : undefined;
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
       signal?.throwIfAborted();

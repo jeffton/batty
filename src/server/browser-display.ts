@@ -117,10 +117,7 @@ export async function createBrowserDisplay(
     await allowBrowser();
     child.stdout!.destroy();
     child.unref();
-    const pid =
-      isolation && process.getuid?.() !== 0
-        ? await browserDescendantPid(child.pid!, "/usr/bin/Xvfb")
-        : child.pid!;
+    const pid = isolation ? await browserDescendantPid(child.pid!, "/usr/bin/Xvfb") : child.pid!;
     if (!pid) throw new Error("Private browser display process is missing");
     return { pid, display, authority };
   } catch (error) {

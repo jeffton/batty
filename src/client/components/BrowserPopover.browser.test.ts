@@ -165,6 +165,9 @@ test.each([390, 1100])(
             async () =>
               (await canvas.getAttribute("data-revision")) ===
               (await service.cloudState(attachedBrowserId)).revision,
+            // A new native capture must be encoded, streamed and decoded after
+            // tab changes; allow that pipeline to converge under suite load.
+            { timeout: 10_000 },
           )
           .toBe(true);
         const state = await service.cloudState(attachedBrowserId);

@@ -72,9 +72,11 @@ onUnmounted(() => {
 <template>
   <main v-if="blocked" class="working-hours-rest" aria-labelledby="working-hours-title">
     <div class="working-hours-scene" aria-hidden="true">
-      <div class="working-hours-moon" />
+      <svg class="working-hours-moon" viewBox="0 0 48 48">
+        <path d="M36 4a22 22 0 1 0 8 32A24 24 0 0 1 36 4Z" />
+      </svg>
       <img class="working-hours-logo" :src="sleepingLogo" alt="" width="512" height="512" />
-      <span class="working-hours-zzz">z z z</span>
+      <span class="working-hours-zzz"><span>z</span><span>z</span><span>z</span></span>
     </div>
     <h1 id="working-hours-title" ref="heading" tabindex="-1">Off the clock.</h1>
     <p>Batty can wait.</p>
@@ -111,9 +113,8 @@ onUnmounted(() => {
   right: 0.25rem;
   width: 3rem;
   height: 3rem;
-  border-radius: 50%;
-  background: #e8d9a3;
-  box-shadow: 0 0 3rem #e8d9a31c;
+  fill: #e8d9a3;
+  filter: drop-shadow(0 0 0.8rem #e8d9a31c);
 }
 .working-hours-logo {
   position: absolute;
@@ -125,12 +126,33 @@ onUnmounted(() => {
 }
 .working-hours-zzz {
   position: absolute;
-  top: 2.6rem;
+  top: 0.75rem;
   left: 0;
+  width: 2rem;
+  height: 3rem;
   color: var(--color-text-muted);
+}
+.working-hours-zzz span {
+  position: absolute;
+  line-height: 1;
+}
+.working-hours-zzz span:nth-child(1) {
+  top: 2.5rem;
+  left: 1.3rem;
+  font-size: 0.65rem;
+  transform: rotate(8deg);
+}
+.working-hours-zzz span:nth-child(2) {
+  top: 1.5rem;
+  left: 0.65rem;
   font-size: 0.8rem;
-  letter-spacing: 0.2rem;
-  transform: rotate(-15deg);
+  transform: rotate(-12deg);
+}
+.working-hours-zzz span:nth-child(3) {
+  top: 0.4rem;
+  left: 0.15rem;
+  font-size: 1rem;
+  transform: rotate(-5deg);
 }
 .working-hours-rest h1 {
   margin: 0;

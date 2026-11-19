@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Activity, CircleAlert, PanelRightOpen } from "@lucide/vue";
 import { computed, nextTick, ref, useId } from "vue";
-import BasePopover from "./BasePopover.vue";
+import ComposerCountPopover from "./ComposerCountPopover.vue";
 import SubagentSessionPopover from "./SubagentSessionPopover.vue";
 import type { CronRunLog, RunningSubagent } from "@/shared/types";
 
@@ -15,7 +15,7 @@ const props = defineProps<{
 const popoverId = `tasks-${useId()}`;
 const sessionPopoverId = (id: string) => `${popoverId}-session-${id}`;
 const tasksOpen = ref(false);
-const tasksPopover = ref<InstanceType<typeof BasePopover>>();
+const tasksPopover = ref<InstanceType<typeof ComposerCountPopover>>();
 const selectedTask = ref<{ id: string; sessionId?: string }>();
 const tasks = computed(() => {
   const runningCron = props.cronRuns.filter((run) => run.status === "running");
@@ -77,7 +77,7 @@ const sessionTasks = computed(() => {
 });
 async function openSession(task: { id: string; sessionId?: string }): Promise<void> {
   selectedTask.value = task;
-  tasksPopover.value!.hidePopover();
+  tasksPopover.value!.close();
   await nextTick();
   document.getElementById(sessionPopoverId(task.id))!.showPopover();
 }
@@ -89,67 +89,53 @@ function sessionToggle(taskId: string, event: Event): void {
 </script>
 
 <template>
-  <button
-    v-if="tasks.length || tasksOpen"
-    class="tasks-control composer-count-control chrome-button"
-    type="button"
-    :popovertarget="popoverId"
-    aria-label="Running tasks"
-    aria-haspopup="dialog"
-  >
-    <Activity :size="17" aria-hidden="true" />
-    <span class="composer-count-control__info">
-      <strong>{{ tasks.length }} {{ tasks.length === 1 ? "task" : "tasks" }}</strong>
-      <span class="composer-count-control__status">
-        <span v-if="hasRunningTasks" class="spinner tasks-control__spinner" aria-hidden="true" />
-        <CircleAlert
-          v-if="props.memoryError"
-          class="tasks-control__warning"
-          :class="{ 'tasks-control__warning--running': hasRunningTasks }"
-          aria-label="Memory error"
-        />
-      </span>
-    </span>
-  </button>
-  <BasePopover
+  <ComposerCountPopover
     ref="tasksPopover"
     :id="popoverId"
-    class="composer-list-popover"
-    floating
-    anchor-up
-    role="dialog"
-    aria-label="Running tasks"
+    label="Running tasks"
+    :count="tasks.length"
+    noun="task"
+    trigger-class="tasks-control"
+    :show-trigger="Boolean(tasks.length || tasksOpen)"
     @toggle="tasksOpen = ($event as ToggleEvent).newState === 'open'"
   >
+    <template #icon><Activity :size="17" aria-hidden="true" /></template>
+    <template #status>
+      <span v-if="hasRunningTasks" class="spinner tasks-control__spinner" aria-hidden="true" />
+      <CircleAlert
+        v-if="props.memoryError"
+        class="tasks-control__warning"
+        :class="{ 'tasks-control__warning--running': hasRunningTasks }"
+        aria-label="Memory error"
+      />
+    </template>
     <header class="composer-list-popover__header">Running tasks</header>
-    <div class="composer-list-popover__list">
-      <component
-        :is="task.sessionId ? 'button' : 'article'"
-        v-for="task in tasks"
-        :key="task.id"
-        class="tasks-popover__task"
-        :type="task.sessionId ? 'button' : undefined"
-        :popovertarget="task.sessionId ? sessionPopoverId(task.id) : undefined"
-        :aria-label="task.sessionId ? `Open task session: ${task.title}` : undefined"
-        @click.prevent="task.sessionId && openSession(task)"
-      >
-        <span class="tasks-popover__details">
-          <strong>{{ task.title }}</strong>
-          <span>{{ task.detail }}</span>
-          <span v-if="task.error" class="tasks-popover__error" role="alert">{{ task.error }}</span>
-        </span>
-        <PanelRightOpen
-          v-if="task.sessionId"
-          class="tasks-popover__open"
-          :size="16"
-          aria-hidden="true"
-        />
-        <CircleAlert v-else-if="task.error" :size="16" aria-hidden="true" />
-        <span v-else class="spinner" aria-hidden="true" />
-      </component>
-      <p v-if="!tasks.length" class="composer-list-popover__empty">No running tasks.</p>
-    </div>
-  </BasePopover>
+    <component
+      :is="task.sessionId ? 'button' : 'article'"
+      v-for="task in tasks"
+      :key="task.id"
+      class="tasks-popover__task"
+      :type="task.sessionId ? 'button' : undefined"
+      :popovertarget="task.sessionId ? sessionPopoverId(task.id) : undefined"
+      :aria-label="task.sessionId ? `Open task session: ${task.title}` : undefined"
+      @click.prevent="task.sessionId && openSession(task)"
+    >
+      <span class="tasks-popover__details">
+        <strong>{{ task.title }}</strong>
+        <span>{{ task.detail }}</span>
+        <span v-if="task.error" class="tasks-popover__error" role="alert">{{ task.error }}</span>
+      </span>
+      <PanelRightOpen
+        v-if="task.sessionId"
+        class="tasks-popover__open"
+        :size="16"
+        aria-hidden="true"
+      />
+      <CircleAlert v-else-if="task.error" :size="16" aria-hidden="true" />
+      <span v-else class="spinner" aria-hidden="true" />
+    </component>
+    <p v-if="!tasks.length" class="composer-list-popover__empty">No running tasks.</p>
+  </ComposerCountPopover>
   <template v-for="task in sessionTasks" :key="task.id">
     <SubagentSessionPopover
       v-if="task.sessionId"
@@ -161,82 +147,6 @@ function sessionToggle(taskId: string, event: Event): void {
     />
   </template>
 </template>
-
-<style>
-.composer-count-control {
-  min-width: 44px;
-  min-height: 44px;
-  flex-shrink: 1;
-  padding: 0 0.25rem;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-family: inherit;
-  font-size: 0.78rem;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.composer-count-control__info {
-  --button-icon-size: 0.7rem;
-  min-width: 0;
-  display: grid;
-  gap: 0.2rem;
-  text-align: left;
-  line-height: 1.05;
-}
-
-.composer-count-control__info strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.8rem;
-  color: var(--color-text-strong);
-}
-
-.composer-count-control__status {
-  position: relative;
-  height: 0.7rem;
-}
-
-.composer-list-popover {
-  display: none;
-}
-
-.composer-list-popover:popover-open {
-  display: flex;
-  flex-direction: column;
-  width: min(22rem, calc(100vw - 1rem));
-  --anchored-popover-max-height: 24rem;
-  max-height: 24rem;
-  overflow: hidden;
-  padding: 0;
-}
-
-.composer-list-popover__header {
-  position: relative;
-  z-index: 1;
-  flex-shrink: 0;
-  padding: 0.9rem 1rem 0.75rem;
-  border-bottom: 1px solid var(--color-chrome-border);
-  background: var(--color-bg-instance);
-  color: var(--color-text-strong);
-  font-size: 1rem;
-  font-weight: 700;
-}
-
-.composer-list-popover__list {
-  min-height: 0;
-  overflow-y: auto;
-  background: var(--color-bg-app);
-}
-
-.composer-list-popover__empty {
-  margin: 0;
-  padding: 0.5rem;
-  color: var(--color-text-subtle);
-}
-</style>
 
 <style scoped>
 .tasks-control__warning {

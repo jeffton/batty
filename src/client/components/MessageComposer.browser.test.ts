@@ -77,6 +77,101 @@ test("Chromium composer owns its labeled textarea without changing newline, comp
   }
 }, 30_000);
 
+test("keeps stream controls centered independently of the left and right compose actions", async () => {
+  for (const [name, width, hasTouch] of [
+    ["desktop", 1100, false],
+    ["mobile", 300, true],
+  ] as const) {
+    const context = (await browser.newContext({
+      viewport: { width, height: 570 },
+      hasTouch,
+    })) as unknown as import("playwright-core").BrowserContext;
+    try {
+      const page = await context.newPage();
+      page.setDefaultTimeout(5_000);
+      await page.goto(`${url}?drafts&tasks&streaming`);
+      const attach = page.getByRole("button", { name: "Add files" });
+      const tasks = page.getByRole("button", { name: "Running tasks" });
+      const drafts = page.getByRole("button", { name: /^Drafts:/ });
+      const send = page.getByRole("button", { name: "Send prompt" });
+      const stop = page.getByRole("button", { name: "Stop", exact: true });
+      const group = page.locator(".streaming-stop-control");
+      const input = page.getByRole("textbox", { name: "Chat message" });
+      await input.fill("Testing the composer toolbar");
+      await page.locator('input[type="file"]').setInputFiles({
+        name: `${"A very long attachment filename ".repeat(5)}.txt`,
+        mimeType: "text/plain",
+        buffer: Buffer.from("attachment content"),
+      });
+      await page.locator(".composer__chip").waitFor();
+      const geometry = async () => {
+        const [a, t, d, s, g] = await Promise.all([
+          attach.boundingBox(),
+          (await tasks.count()) ? tasks.boundingBox() : null,
+          drafts.boundingBox(),
+          send.boundingBox(),
+          (await group.count()) ? group.boundingBox() : null,
+        ]);
+        return { a: a!, t, d: d!, s: s!, g };
+      };
+      const active = await geometry();
+      expect(active.a.x + active.a.width).toBeCloseTo(active.t!.x, 0);
+      expect(active.d.x + active.d.width).toBeCloseTo(active.s.x, 0);
+      expect(active.g!.x).toBeGreaterThanOrEqual(active.t!.x + active.t!.width - 1);
+      expect(active.g!.x + active.g!.width).toBeLessThanOrEqual(active.d.x + 1);
+      expect(active.g!.x + active.g!.width / 2).toBeCloseTo(width / 2, 0);
+      expect(active.s.x + active.s.width).toBeGreaterThanOrEqual(width - 8);
+      expect(active.s.x + active.s.width).toBeLessThanOrEqual(width);
+      expect(
+        await page.locator(".composer__chip").evaluate((chip) => ({
+          inViewport: chip.getBoundingClientRect().right <= window.innerWidth,
+          truncated: chip.scrollWidth > chip.clientWidth,
+        })),
+      ).toEqual({ inViewport: true, truncated: hasTouch });
+      expect(await group.locator(".spinner").isVisible()).toBe(true);
+      expect(await stop.isEnabled()).toBe(true);
+      const capture = async (state: string) => {
+        if (process.env.BATTY_UI_SCREENSHOTS === "1")
+          await page.screenshot({ path: `.tmp/ui-feedback/batty-composer-${name}-${state}.png` });
+      };
+      await capture("streaming");
+
+      for (const [trigger, label] of [
+        [tasks, "Running tasks"],
+        [drafts, "Drafts"],
+      ] as const) {
+        if (hasTouch) await trigger.tap();
+        else await trigger.click();
+        const panel = page.getByRole("dialog", { name: label, exact: true });
+        await expect
+          .poll(async () => {
+            const [button, bounds] = await Promise.all([
+              trigger.boundingBox(),
+              panel.boundingBox(),
+            ]);
+            if (!button || !bounds) return null;
+            const expected = Math.max(8, Math.min(button.x, width - 8 - bounds.width));
+            return Math.abs(expected - bounds.x) < 1 && bounds.y + bounds.height < button.y;
+          })
+          .toBe(true);
+        await capture(label === "Drafts" ? "drafts" : "tasks");
+        await page.keyboard.press("Escape");
+        await panel.waitFor({ state: "hidden" });
+      }
+      await page.evaluate(() => window.dispatchEvent(new Event("fixture:finish-agent")));
+      await tasks.waitFor({ state: "hidden" });
+      expect(await geometry()).toEqual({ ...active, t: null });
+      await capture("streaming-no-tasks");
+      await page.evaluate(() => window.dispatchEvent(new Event("fixture:finish-main")));
+      await stop.waitFor({ state: "hidden" });
+      expect(await geometry()).toEqual({ ...active, t: null, g: null });
+      await capture("idle");
+    } finally {
+      await context.close();
+    }
+  }
+}, 30_000);
+
 test("drafts preserve conflicts, attachments and failed messages across reload and reconnect", async () => {
   const phone = (await browser.newContext({
     viewport: { width: 320, height: 568 },
@@ -232,14 +327,12 @@ test("drafts preserve conflicts, attachments and failed messages across reload a
     await second.goto(draftUrl);
     await second.getByRole("button", { name: "Drafts: 1 draft" }).waitFor();
     await open(second).click();
-    await checkPopoverAlignment(second, "trigger");
-    // Moving the toolbar to a smaller window flips to collision clamping,
-    // and a wider window restores the button alignment without reopening.
+    await checkPopoverAlignment(second, "clamped");
     const desktopViewport = second.viewportSize()!;
-    await second.setViewportSize({ width: 530, height: 640 });
+    await second.setViewportSize({ width: 390, height: 640 });
     await checkPopoverAlignment(second, "clamped");
     await second.setViewportSize(desktopViewport);
-    await checkPopoverAlignment(second, "trigger");
+    await checkPopoverAlignment(second, "clamped");
     await checkSavePlacement(second, true);
     expect(await save(second).isDisabled()).toBe(true);
     await capture(second, "popover-desktop");

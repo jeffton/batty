@@ -699,22 +699,19 @@ defineExpose({ clear, restore, journalSubmission, recoverSubmission });
         @keydown="onTextareaKeydown"
       />
 
-      <div
-        class="composer__actions-row"
-        :class="{ 'composer__actions-row--drafts': draftsEnabled }"
-      >
-        <button
-          class="composer__icon-button"
-          type="button"
-          aria-label="Add files"
-          title="Add files"
-          :disabled="attachmentDisabled || composeLocked"
-          @click="openFilePicker"
-        >
-          <Paperclip :size="18" />
-        </button>
+      <div class="composer__actions-row">
+        <div class="composer__left-actions">
+          <button
+            class="composer__icon-button"
+            type="button"
+            aria-label="Add files"
+            title="Add files"
+            :disabled="attachmentDisabled || composeLocked"
+            @click="openFilePicker"
+          >
+            <Paperclip :size="18" />
+          </button>
 
-        <div class="composer__tasks-slot">
           <TasksControl
             :subagents="props.subagents ?? []"
             :cron-runs="props.cronRuns ?? []"
@@ -724,49 +721,40 @@ defineExpose({ clear, restore, journalSubmission, recoverSubmission });
           />
         </div>
 
-        <DraftsControl
-          v-if="draftsEnabled"
-          ref="draftControl"
-          :drafts="drafts"
-          :busy="draftBusy"
-          :can-save="hasPayload && !props.disabled && !composeLocked && pendingFiles === 0"
-          :can-take="!props.disabled && !composeLocked && pendingFiles === 0"
-          :error="syncError"
-          @save="moveDraft()"
-          @open="recoverOldComposers"
-          @select="moveDraft"
-          @remove="removeDraft"
-        />
-
         <div class="composer__stop-slot">
           <StreamingStopControl
             v-if="props.streaming"
-            :class="[
-              'composer__stream-actions',
-              {
-                'composer__stream-actions--tasks':
-                  props.memoryPending ||
-                  props.memoryError ||
-                  props.compacting ||
-                  props.subagents?.length ||
-                  props.cronRuns?.length,
-              },
-            ]"
             :disabled="actionsDisabled"
             @stop="emit('stop')"
           />
         </div>
-        <button
-          class="composer__icon-button composer__send"
-          type="button"
-          aria-label="Send prompt"
-          title="Send prompt"
-          :disabled="!hasPayload || actionsDisabled || composeLocked || pendingFiles > 0"
-          @pointerdown="triggerActionEarly($event)"
-          @click="triggerActionClick()"
-        >
-          <SendHorizontal :size="18" />
-        </button>
+
+        <div class="composer__right-actions">
+          <DraftsControl
+            v-if="draftsEnabled"
+            ref="draftControl"
+            :drafts="drafts"
+            :busy="draftBusy"
+            :can-save="hasPayload && !props.disabled && !composeLocked && pendingFiles === 0"
+            :can-take="!props.disabled && !composeLocked && pendingFiles === 0"
+            :error="syncError"
+            @save="moveDraft()"
+            @open="recoverOldComposers"
+            @select="moveDraft"
+            @remove="removeDraft"
+          />
+          <button
+            class="composer__icon-button composer__send"
+            type="button"
+            aria-label="Send prompt"
+            title="Send prompt"
+            :disabled="!hasPayload || actionsDisabled || composeLocked || pendingFiles > 0"
+            @pointerdown="triggerActionEarly($event)"
+            @click="triggerActionClick()"
+          >
+            <SendHorizontal :size="18" />
+          </button>
+        </div>
       </div>
     </div>
 
@@ -801,6 +789,7 @@ defineExpose({ clear, restore, journalSubmission, recoverSubmission });
 
 .composer__inner {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.4rem;
 }
 
@@ -898,14 +887,25 @@ defineExpose({ clear, restore, journalSubmission, recoverSubmission });
 .composer__actions-row {
   min-width: 0;
   display: grid;
-  grid-template-columns: 44px minmax(44px, 6rem) 44px 44px;
+  grid-template-columns: minmax(0, 1fr) var(--composer-stop-width) minmax(0, 1fr);
+  --composer-stop-width: calc(var(--button-size) + 1rem + 0.3rem);
   align-items: center;
-  justify-content: space-between;
   padding: 0 calc(var(--safe-area-right) + 0.4rem) 0 calc(var(--safe-area-left) + 0.4rem);
 }
 
-.composer__actions-row--drafts {
-  grid-template-columns: 44px minmax(44px, 6rem) minmax(44px, max-content) 44px 44px;
+.composer__left-actions,
+.composer__right-actions {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.composer__right-actions {
+  justify-content: flex-end;
+}
+
+.composer__actions-row .composer__icon-button {
+  flex: 0 0 var(--button-size);
 }
 
 .composer__icon-button {
@@ -937,35 +937,14 @@ defineExpose({ clear, restore, journalSubmission, recoverSubmission });
   display: block;
 }
 
-.composer__tasks-slot {
-  width: 100%;
-  max-width: 6rem;
-  min-width: 0;
-}
-
-.composer__tasks-slot :deep(.composer-count-control) {
-  width: 100%;
-  overflow: hidden;
-}
-
 .composer__stop-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   min-height: 44px;
 }
 
 .composer__send {
   color: var(--color-accent-strong);
-}
-
-.composer__stream-actions {
-  position: relative;
-}
-
-.composer__stream-actions :deep(.streaming-stop-control__spinner) {
-  position: absolute;
-  right: calc(100% + 0.3rem);
-}
-
-.composer__stream-actions--tasks :deep(.streaming-stop-control__spinner) {
-  display: none;
 }
 </style>

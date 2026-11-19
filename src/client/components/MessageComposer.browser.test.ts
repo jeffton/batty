@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import Fastify, { type FastifyInstance } from "fastify";
 import multipart from "@fastify/multipart";
 import { registerDraftRoutes } from "../../server/routes/drafts";
+import { APP_COLOR_OPTIONS } from "../../shared/appearance";
 import vue from "@vitejs/plugin-vue";
 import { chromium, type Browser } from "patchright";
 import { type Page } from "playwright-core";
@@ -40,6 +41,57 @@ afterAll(async () => {
   if (server) await closeBrowserFixtureServer(server);
   await api?.close();
   if (draftRoot) await fs.rm(draftRoot, { recursive: true, force: true });
+});
+
+test("dark composer count labels stay readable on tinted toolbar backgrounds", async () => {
+  const page = (await browser.newPage({ colorScheme: "dark", reducedMotion: "reduce" })) as Page;
+  try {
+    await page.goto(`${url}?drafts&tasks&streaming`);
+    const buttons = [
+      page.getByRole("button", { name: "Running tasks" }),
+      page.getByRole("button", { name: /^Drafts:/ }),
+    ];
+    const contrast = (button: (typeof buttons)[number]) =>
+      button.evaluate((element) => {
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 1;
+        const context = canvas.getContext("2d", { willReadFrequently: true })!;
+        const paint = (color: string) => {
+          context.fillStyle = color;
+          context.fillRect(0, 0, 1, 1);
+        };
+        const luminance = () => {
+          const [r, g, b] = Array.from(context.getImageData(0, 0, 1, 1).data, (byte) => {
+            const channel = byte / 255;
+            return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+          });
+          return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+        };
+        paint(getComputedStyle(element.closest(".composer")!).backgroundColor);
+        paint(getComputedStyle(element).backgroundColor);
+        const background = luminance();
+        paint(getComputedStyle(element.querySelector(".composer-count-control__label")!).color);
+        return (luminance() + 0.05) / (background + 0.05);
+      });
+
+    for (const { id, dark } of APP_COLOR_OPTIONS) {
+      await page.evaluate((color) => {
+        document.documentElement.style.setProperty("--color-instance-dark", color);
+      }, dark);
+      for (const button of buttons) {
+        await page.mouse.move(1, 1);
+        expect(await contrast(button), `${id}: resting`).toBeGreaterThanOrEqual(4.5);
+        await button.hover();
+        expect(await contrast(button), `${id}: hovered`).toBeGreaterThanOrEqual(4.5);
+        await page.mouse.down();
+        expect(await contrast(button), `${id}: pressed`).toBeGreaterThanOrEqual(4.5);
+        await page.mouse.move(1, 1);
+        await page.mouse.up();
+      }
+    }
+  } finally {
+    await page.close();
+  }
 });
 
 test("Chromium composer owns its labeled textarea without changing newline, composition or send behavior", async () => {
@@ -137,6 +189,9 @@ test("keeps stream controls centered independently of the left and right compose
         ]);
         return { a: a!, t, d: d!, s: s!, g };
       };
+      const ink = (icon: typeof attach) =>
+        icon.evaluate((element) => getComputedStyle(element).stroke);
+      const attachmentInk = await ink(attach.locator("svg"));
       async function checkCounts(taskCount: string | undefined, draftCount: string) {
         for (const [button, label] of [
           [tasks, taskCount],
@@ -145,12 +200,20 @@ test("keeps stream controls centered independently of the left and right compose
           if (!label) continue;
           expect(await button.getAttribute("title")).toBe(label);
           expect(
-            await button.locator("strong").evaluate((element) => ({
+            await button.locator(".composer-count-control__label").evaluate((element) => ({
               text: (element as HTMLElement).innerText,
               fits: element.scrollWidth <= element.clientWidth,
+              color: getComputedStyle(element).color,
+              weight: getComputedStyle(element).fontWeight,
             })),
             `${name}: ${label}`,
-          ).toEqual({ text: name === "narrow" ? label.split(" ")[0] : label, fits: true });
+          ).toEqual({
+            text: name === "narrow" ? label.split(" ")[0] : label,
+            fits: true,
+            color: attachmentInk,
+            weight: "500",
+          });
+          expect(await ink(button.locator(":scope > svg"))).toBe(attachmentInk);
           const hit = (await button.boundingBox())!;
           expect(hit.width).toBeGreaterThanOrEqual(44);
           expect(hit.height).toBeGreaterThanOrEqual(44);
@@ -158,7 +221,9 @@ test("keeps stream controls centered independently of the left and right compose
           expect(
             await button.evaluate((element) => {
               const icon = element.querySelector("svg")!.getBoundingClientRect();
-              const label = element.querySelector("strong")!.getBoundingClientRect();
+              const label = element
+                .querySelector(".composer-count-control__label")!
+                .getBoundingClientRect();
               const bounds = element.getBoundingClientRect();
               return {
                 iconInset: icon.left - bounds.left,

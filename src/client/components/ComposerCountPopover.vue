@@ -34,7 +34,9 @@ defineExpose({ close: () => popover.value?.hidePopover() });
   >
     <slot name="icon" />
     <span class="composer-count-control__info">
-      <strong>{{ count }}<span class="composer-count-control__noun">{{ nounLabel }}</span></strong>
+      <span class="composer-count-control__label"
+        >{{ count }}<span class="composer-count-control__noun">{{ nounLabel }}</span></span
+      >
       <span class="composer-count-control__status"><slot name="status" /></span>
     </span>
   </button>
@@ -57,6 +59,7 @@ defineExpose({ close: () => popover.value?.hidePopover() });
 
 <style>
 .chrome-button.composer-count-control {
+  --chrome-button-ink: var(--color-text-muted);
   min-width: var(--button-size);
   min-height: var(--button-size);
   flex: 0 1 auto;
@@ -83,12 +86,19 @@ defineExpose({ close: () => popover.value?.hidePopover() });
   line-height: 1.05;
 }
 
-.composer-count-control__info strong {
+.composer-count-control__label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.8rem;
-  color: var(--color-text-strong);
+  font-weight: 500;
+}
+
+@media (prefers-color-scheme: dark) {
+  .composer-count-control__label {
+    /* Small text needs more contrast than icons on the tinted button states. */
+    color: color-mix(in oklch, currentColor, var(--color-text));
+  }
 }
 
 /* Keep the counts readable when two full labels and both send controls do not fit. */

@@ -32,7 +32,7 @@ beforeAll(async () => {
   });
   await server.listen();
   url = `${server.resolvedUrls!.local[0]}src/client/components/MessageComposer.fixture.html`;
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ignoreDefaultArgs: ["--hide-scrollbars"] });
 }, 30_000);
 
 afterAll(async () => {
@@ -93,7 +93,7 @@ test("drafts preserve conflicts, attachments and failed messages across reload a
     const list = (page: Page) => page.getByRole("dialog", { name: "Drafts" });
     const header = (page: Page) => list(page).locator("header");
     const save = (page: Page) => header(page).getByRole("button", { name: "Save to drafts" });
-    const checkSavePlacement = async (page: Page) => {
+    const checkSavePlacement = async (page: Page, hasDraft = false) => {
       const [title, button, box] = await Promise.all([
         header(page).getByText("Drafts", { exact: true }).boundingBox(),
         save(page).boundingBox(),
@@ -102,8 +102,32 @@ test("drafts preserve conflicts, attachments and failed messages across reload a
       expect(button!.width).toBe(44);
       expect(button!.height).toBe(44);
       expect(button!.x).toBeGreaterThan(title!.x + title!.width);
-      expect(box!.x + box!.width - button!.x - button!.width).toBeLessThan(8);
+      expect(box!.x + box!.width - button!.x - button!.width).toBeGreaterThanOrEqual(8);
+      expect(button!.y - box!.y).toBeGreaterThanOrEqual(5);
+      if (!hasDraft) return;
+      const deletion = list(page).getByRole("button", { name: /^Delete draft:/ });
+      expect(await deletion.getAttribute("title")).toBe("Delete draft");
+      const action = (await deletion.boundingBox())!;
+      const row = (await list(page).locator(".drafts-control__entry").boundingBox())!;
+      expect(action.width).toBe(44);
+      expect(action.height).toBe(44);
+      expect(action.x).toBeCloseTo(button!.x, 0);
+      expect(action.y - row.y).toBeGreaterThanOrEqual(5);
+      expect(row.y + row.height - action.y - action.height).toBeGreaterThanOrEqual(5);
     };
+    const checkAttachmentRadius = async (page: Page, filename: string) => {
+      const chip = page.getByRole("button", { name: `${filename} ×`, exact: true });
+      await chip.waitFor();
+      expect(await chip.evaluate((element) => getComputedStyle(element).borderRadius)).toBe(
+        await open(page).evaluate((element) => getComputedStyle(element).borderRadius),
+      );
+    };
+    const capture = async (page: Page, name: string) => {
+      if (process.env.BATTY_UI_SCREENSHOTS === "1") {
+        await page.screenshot({ path: `.tmp/ui-feedback/batty-drafts-${name}.png` });
+      }
+    };
+    const offlineDraft = `Offline original with a long draft preview ${"that stays on one line ".repeat(8)}\nSecond line`;
     await first.goto(draftUrl);
     await phone.setOffline(true);
     expect(
@@ -115,13 +139,14 @@ test("drafts preserve conflicts, attachments and failed messages across reload a
     await checkSavePlacement(first);
     await first.keyboard.press("Escape");
     await list(first).waitFor({ state: "hidden" });
-    await composer(first).fill("Offline original\nSecond line");
+    await composer(first).fill(offlineDraft);
     await first.locator('input[type="file"]').setInputFiles({
       name: 'a"b.txt',
       mimeType: "text/plain",
       buffer: Buffer.from("attachment bytes"),
     });
-    await first.getByRole("button", { name: 'a"b.txt ×' }).waitFor();
+    await checkAttachmentRadius(first, 'a"b.txt');
+    await capture(first, "attachment-mobile");
     await open(first).tap();
     await save(first).tap();
     await first.getByRole("button", { name: "Drafts: 1 draft" }).waitFor();
@@ -156,6 +181,16 @@ test("drafts preserve conflicts, attachments and failed messages across reload a
         });
     };
     await checkPopoverAlignment(first, "clamped");
+    await checkSavePlacement(first, true);
+    expect(
+      await list(first)
+        .locator("strong")
+        .evaluate((element) => {
+          const style = getComputedStyle(element);
+          return style.textOverflow === "ellipsis" && element.scrollWidth > element.clientWidth;
+        }),
+    ).toBe(true);
+    await capture(first, "popover-mobile");
     await first.setViewportSize({ width: 390, height: 640 });
     await checkPopoverAlignment(first, "clamped");
     await first.keyboard.press("Escape");
@@ -165,10 +200,10 @@ test("drafts preserve conflicts, attachments and failed messages across reload a
       .getByRole("button", { name: /^Offline original/ })
       .tap();
     await first.getByRole("button", { name: 'a"b.txt ×' }).waitFor();
-    expect(await composer(first).inputValue()).toBe("Offline original\nSecond line");
+    expect(await composer(first).inputValue()).toBe(offlineDraft);
     expect(await composer(first).evaluate((node) => document.activeElement === node)).toBe(true);
     await first.evaluate(() => window.dispatchEvent(new Event("fixture:restore")));
-    expect(await composer(first).inputValue()).toBe("Offline original\nSecond line");
+    expect(await composer(first).inputValue()).toBe(offlineDraft);
     await first.getByRole("button", { name: "Drafts: 2 drafts" }).waitFor();
 
     // Reload the document from the fixture host, but keep draft API traffic
@@ -177,7 +212,7 @@ test("drafts preserve conflicts, attachments and failed messages across reload a
     await phone.setOffline(false);
     await first.reload();
     await first.getByRole("button", { name: 'a"b.txt ×' }).waitFor();
-    expect(await composer(first).inputValue()).toBe("Offline original\nSecond line");
+    expect(await composer(first).inputValue()).toBe(offlineDraft);
     await open(first).tap();
     await list(first).getByRole("button", { name: "Delete draft: Unsaved new text" }).tap();
     await first.getByRole("button", { name: "Drafts: 1 draft" }).waitFor();
@@ -205,12 +240,14 @@ test("drafts preserve conflicts, attachments and failed messages across reload a
     await checkPopoverAlignment(second, "clamped");
     await second.setViewportSize(desktopViewport);
     await checkPopoverAlignment(second, "trigger");
-    await checkSavePlacement(second);
+    await checkSavePlacement(second, true);
     expect(await save(second).isDisabled()).toBe(true);
+    await capture(second, "popover-desktop");
     await list(second)
       .getByRole("button", { name: /^Failed prompt/ })
       .click();
-    await second.getByRole("button", { name: "failed.txt ×" }).waitFor();
+    await checkAttachmentRadius(second, "failed.txt");
+    await capture(second, "attachment-desktop");
     expect(await composer(second).inputValue()).toBe("Failed prompt");
     await expect.poll(async () => (await api.inject("/api/drafts")).json().drafts).toEqual([]);
     await open(second).focus();
@@ -233,6 +270,46 @@ test("drafts preserve conflicts, attachments and failed messages across reload a
     await phone.close();
   }
 }, 45_000);
+
+test("keeps Drafts action columns lined up with a classic scrollbar", async () => {
+  const page = (await browser.newPage({ viewport: { width: 760, height: 560 } })) as Page;
+  try {
+    await page.route("**/api/drafts**", (route) => route.abort());
+    await page.goto(`${url}?drafts`);
+    await page.addStyleTag({
+      content: ".composer-list-popover__list::-webkit-scrollbar { width: 15px; }",
+    });
+    const open = page.getByRole("button", { name: /^Drafts:/ });
+    const dialog = page.getByRole("dialog", { name: "Drafts" });
+    const save = dialog.getByRole("button", { name: "Save to drafts" });
+    for (let i = 1; i <= 8; i++) {
+      await page.getByRole("textbox", { name: "Chat message" }).fill(`Draft row ${i}`);
+      await open.click();
+      await save.click();
+      await expect
+        .poll(() => dialog.getByRole("button", { name: /^Delete draft:/ }).count())
+        .toBe(i);
+      if (i < 8) await page.keyboard.press("Escape");
+    }
+    const list = dialog.locator(".composer-list-popover__list");
+    await expect
+      .poll(() =>
+        list.evaluate((element) => (element as HTMLElement).offsetWidth - element.clientWidth),
+      )
+      .toBeGreaterThan(0);
+    const header = dialog.locator("header");
+    const top = (await header.boundingBox())!.y;
+    await list.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    expect((await header.boundingBox())!.y).toBeCloseTo(top, 0);
+    const action = dialog.getByRole("button", { name: "Delete draft: Draft row 1", exact: true });
+    expect((await action.boundingBox())!.x).toBeCloseTo((await save.boundingBox())!.x, 0);
+  } finally {
+    await page.close();
+  }
+}, 30_000);
 
 test("durably recovers an interrupted send and an abandoned composer without sharing live tab slots", async () => {
   const context =

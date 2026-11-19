@@ -47,20 +47,20 @@ defineExpose({ close: () => popover.value?.hidePopover() });
       aria-label="Drafts"
       @toggle="($event as ToggleEvent).newState === 'open' && emit('open')"
     >
-      <header class="composer-list-popover__header drafts-control__header">
-        <span>Drafts</span>
-        <button
-          type="button"
-          class="chrome-button drafts-control__save"
-          title="Save to drafts"
-          aria-label="Save to drafts"
-          :disabled="!props.canSave"
-          @click="emit('save')"
-        >
-          <FilePlus :size="17" aria-hidden="true" />
-        </button>
-      </header>
       <div class="composer-list-popover__list">
+        <header class="composer-list-popover__header drafts-control__header">
+          <span>Drafts</span>
+          <button
+            type="button"
+            class="chrome-button drafts-control__save"
+            title="Save to drafts"
+            aria-label="Save to drafts"
+            :disabled="!props.canSave"
+            @click="emit('save')"
+          >
+            <FilePlus :size="17" aria-hidden="true" />
+          </button>
+        </header>
         <p v-if="props.error" class="drafts-control__error" role="status">{{ props.error }}</p>
         <p v-if="!props.drafts.length" class="composer-list-popover__empty">No drafts.</p>
         <div v-for="draft in props.drafts" :key="draft.id" class="drafts-control__entry">
@@ -103,11 +103,21 @@ defineExpose({ close: () => popover.value?.hidePopover() });
   min-width: 0;
 }
 
-.drafts-control__header {
+.drafts-control__header,
+.drafts-control__entry {
   display: flex;
   align-items: center;
+  padding-block: 0.375rem;
+  padding-inline-end: 0.625rem;
+}
+
+/* The header shares the rows' scrollport so a classic scrollbar
+   takes the same horizontal space from both action columns. */
+.drafts-control__header {
+  position: sticky;
+  top: 0;
   justify-content: space-between;
-  padding: 0 0.25rem 0 1rem;
+  padding-inline-start: 1rem;
 }
 
 .drafts-control__save,
@@ -125,9 +135,6 @@ defineExpose({ close: () => popover.value?.hidePopover() });
 }
 
 .drafts-control__entry {
-  display: flex;
-  align-items: center;
-  padding-right: 0.25rem;
   border-top: 1px solid var(--color-border-soft);
 }
 
@@ -138,7 +145,7 @@ defineExpose({ close: () => popover.value?.hidePopover() });
   min-width: 0;
   flex: 1;
   gap: 0.75rem;
-  padding: 0.75rem 1rem;
+  padding: 0.5rem 0.625rem 0.5rem 1rem;
   text-align: left;
   color: var(--color-text);
   border: 0;
@@ -167,6 +174,10 @@ defineExpose({ close: () => popover.value?.hidePopover() });
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.composer-list-popover__empty {
+  padding-inline: 1rem;
 }
 
 .drafts-control__error {

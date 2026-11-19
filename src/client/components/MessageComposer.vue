@@ -840,7 +840,7 @@ defineExpose({ clear, restore, journalSubmission, recoverSubmission });
   color: inherit;
   font-size: 0.85rem;
   padding: 0.3rem 0.5rem;
-  border-radius: 999px;
+  border-radius: var(--chrome-control-radius);
   transition: background 80ms ease;
 }
 

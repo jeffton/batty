@@ -24,16 +24,6 @@ defineExpose({ close: () => popover.value?.hidePopover() });
   <div class="drafts-control">
     <button
       type="button"
-      class="chrome-button drafts-control__save"
-      title="Save to drafts"
-      aria-label="Save to drafts"
-      :disabled="!props.canSave"
-      @click="emit('save')"
-    >
-      <FilePlus :size="17" aria-hidden="true" />
-    </button>
-    <button
-      type="button"
       class="chrome-button composer-count-control"
       :popovertarget="id"
       :title="count"
@@ -45,6 +35,16 @@ defineExpose({ close: () => popover.value?.hidePopover() });
         <strong>{{ count }}</strong>
         <span class="composer-count-control__status" />
       </span>
+    </button>
+    <button
+      type="button"
+      class="chrome-button drafts-control__save"
+      title="Save to drafts"
+      aria-label="Save to drafts"
+      :disabled="!props.canSave"
+      @click="emit('save')"
+    >
+      <FilePlus :size="17" aria-hidden="true" />
     </button>
     <BasePopover
       :id="id"

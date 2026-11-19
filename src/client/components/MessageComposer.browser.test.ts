@@ -92,7 +92,16 @@ test("drafts preserve conflicts, attachments and failed messages across reload a
     const save = (page: Page) => page.getByRole("button", { name: "Save to drafts" });
     const open = (page: Page) => page.getByRole("button", { name: /^Drafts:/ });
     const list = (page: Page) => page.getByRole("dialog", { name: "Drafts" });
+    const checkButtonOrder = async (page: Page) => {
+      const [draftsButton, saveButton] = await Promise.all([
+        open(page).boundingBox(),
+        save(page).boundingBox(),
+      ]);
+      expect(draftsButton!.x + draftsButton!.width).toBeLessThanOrEqual(saveButton!.x);
+      expect(saveButton!.y).toBe(draftsButton!.y);
+    };
     await first.goto(draftUrl);
+    await checkButtonOrder(first);
     await phone.setOffline(true);
     await composer(first).fill("Offline original\nSecond line");
     await first.locator('input[type="file"]').setInputFiles({
@@ -101,6 +110,9 @@ test("drafts preserve conflicts, attachments and failed messages across reload a
       buffer: Buffer.from("attachment bytes"),
     });
     await first.getByRole("button", { name: 'a"b.txt ×' }).waitFor();
+    await open(first).focus();
+    await open(first).press("Tab");
+    expect(await save(first).evaluate((node) => document.activeElement === node)).toBe(true);
     await save(first).tap();
     await first.getByRole("button", { name: "Drafts: 1 draft" }).waitFor();
     expect(await composer(first).inputValue()).toBe("");
@@ -148,6 +160,7 @@ test("drafts preserve conflicts, attachments and failed messages across reload a
       .toEqual(["Failed prompt"]);
     await second.goto(draftUrl);
     await second.getByRole("button", { name: "Drafts: 1 draft" }).waitFor();
+    await checkButtonOrder(second);
     await open(second).click();
     await list(second)
       .getByRole("button", { name: /^Failed prompt/ })
